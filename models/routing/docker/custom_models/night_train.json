@@ -1,0 +1,16 @@
+// custom_models/night_train.json
+// Power systems: 25kV 50Hz AC, 15kV 16.7Hz AC, 3kV DC, 1.5kV DC + diesel fallback
+// Maximum speed: 200 km/h on all compatible track types
+// Use with: [rail.json, preferred_direction.json]
+
+{
+  "distance_influence": 0.2,
+  "speed": [
+    { "if": "gauge != 0 && gauge != 1435",
+      "multiply_by": "0.0" },
+    { "else_if": "railway_service == YARD || railway_service == SPUR",
+      "multiply_by": "0.0" },
+    { "else_if": "true",
+      "limit_to": "200" }
+  ]
+}

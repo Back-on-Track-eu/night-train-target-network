@@ -1,0 +1,19 @@
+services:
+  openrailrouting:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: openrailrouting
+    ports:
+      - "8989:8989"
+      - "8990:8990"
+    volumes:
+      - ./data:/app/data
+      - ./graph-cache:/app/graph-cache
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8989/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
