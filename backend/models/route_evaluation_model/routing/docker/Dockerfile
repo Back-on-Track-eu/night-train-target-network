@@ -16,7 +16,7 @@ WORKDIR /app
 COPY --from=builder /build/target/railway_routing-1.1.jar railway_routing.jar
 
 # Only copy OUR custom models — do NOT copy built-in models
-COPY custom_models/ /app/custom_models/
+COPY custom_models /app/custom_models/
 COPY config.yml /app/config.yml
 
 EXPOSE 8989 8990

@@ -2,6 +2,9 @@
 .venv/
 # uv.lock is intentionally committed for reproducible installs
 
+# credentials
+credentials/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -42,7 +45,8 @@ htmlcov/
 Thumbs.db
 
 # OSM source data — too large for git (~30 GB)
-models/routing/docker/data/
+backend/models/route_evaluation_model/routing/docker/data/
+backend/models/route_evaluation_model/routing/countries.geojson
 
 # Built routing graph — generated, not source (~5-10 GB)
-models/routing/docker/graph-cache/
+backend/models/route_evaluation_model/routing/docker/graph-cache/

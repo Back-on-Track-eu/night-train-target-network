@@ -1,8 +1,0 @@
-version = 1
-revision = 3
-requires-python = ">=3.12"
-
-[[package]]
-name = "bot-target-network-2032"
-version = "0.1.0"
-source = { virtual = "." }

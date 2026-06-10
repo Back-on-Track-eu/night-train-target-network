@@ -1,0 +1,12 @@
+[project]
+name = "night-train-target-network"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "gspread>=6.2.1",
+    "pyyaml>=6.0.3",
+    "requests>=2.34.2",
+    "shapely>=2.1.2",
+]
