@@ -13,12 +13,22 @@ FROM eclipse-temurin:21-jre
 
 WORKDIR /app
 
+# Install curl and unzip for graph cache download
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=builder /build/target/railway_routing-1.1.jar railway_routing.jar
 
 # Only copy OUR custom models — do NOT copy built-in models
 COPY custom_models /app/custom_models/
 COPY config.yml /app/config.yml
 
+# Startup script — downloads graph cache if not present, then starts server
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
 EXPOSE 8989 8990
 
-CMD ["java", "-Xmx8g", "-Xms1g", "-jar", "railway_routing.jar", "serve", "config.yml"]
+ENTRYPOINT ["/app/entrypoint.sh"]
