@@ -21,6 +21,13 @@ RUN uv sync --frozen --no-install-project
 # =============================================================================
 FROM python:3.12-slim AS runtime
 
+# git  — VSCode devcontainer source control
+# curl — used in healthchecks
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Copy venv from builder

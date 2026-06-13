@@ -8,10 +8,9 @@ You do not need Python or any other backend tooling — just Docker.
 ## Prerequisites
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running
-- Access to the `B-o-T_targetnetwork_DB` Google Spreadsheet
-- A Google service account JSON key file with read access to the spreadsheet
+- A Google service account JSON key file with read access to the `B-o-T_targetnetwork_DB` spreadsheet
 
-> **Don't have a service account yet?** See [Setting up Google credentials](#setting-up-google-credentials) below.
+> **Don't have a service account yet?** See [Setting up Google Credentials](#setting-up-google-credentials) below before continuing.
 
 ---
 
@@ -20,45 +19,41 @@ You do not need Python or any other backend tooling — just Docker.
 **1. Clone the repository**
 ```bash
 git clone https://github.com/Back-on-Track-eu/night-train-target-network.git
-cd night-train-target-network/backend/docker
+cd night-train-target-network
 ```
 
 **2. Create your `.env` file**
+
+Create `.devcontainer/.env` and set the path to your Google service account JSON file:
 ```bash
-cp .env.example .env
+echo "GOOGLE_APPLICATION_CREDENTIALS=/Users/yourname/keys/service_account.json" > .devcontainer/.env
 ```
 
-Open `.env` and set the path to your Google service account JSON:
+Or create the file manually with the following content:
 ```
-GOOGLE_APPLICATION_CREDENTIALS=C:/Users/yourname/keys/service_account.json
+GOOGLE_APPLICATION_CREDENTIALS=/Users/yourname/keys/service_account.json
 ```
 
-> Use forward slashes on all platforms, including Windows.
+> - Use the **absolute path** on your machine to the JSON file.
+> - Use **forward slashes** on all platforms, including Windows (`C:/Users/...` not `C:\Users\...`).
+> - The file must exist at that path before you start the containers.
 
 **3. Start the backend**
 ```bash
-docker-compose up -d
+docker compose -f .devcontainer/docker-compose.yml up --build
 ```
 
 This starts two services:
-- `openrailrouting` — the rail routing engine (port `8989`)
-- `night-train-api` — the Flask REST API (port `5000`)
+- **OpenRailRouting** — loads the European rail graph (~1–2 min on first run)
+- **API** — waits for OpenRailRouting to be healthy, then loads data from Google Sheets
 
-> **First startup takes 1–2 minutes** — OpenRailRouting loads the full European rail graph into memory. The API will not accept requests until routing is ready.
-
-**4. Load the data**
-
-Once both services are running, trigger the initial data load from Google Sheets:
-```bash
-curl -X POST http://localhost:5000/api/data/load
-```
-
-You should see:
+Watch the terminal for progress. When you see:
 ```json
 {"loaded": true, "loaded_at": "...", "message": "Data loaded successfully."}
 ```
+the backend is ready.
 
-**5. Verify everything works**
+**4. Verify everything works**
 ```bash
 curl http://localhost:5000/api/health
 curl http://localhost:5000/api/compositions
@@ -69,10 +64,24 @@ curl http://localhost:5000/api/compositions
 ## Stopping the backend
 
 ```bash
-docker-compose down
+docker compose -f .devcontainer/docker-compose.yml down
 ```
 
-> Always stop cleanly before shutting down your machine to avoid Docker startup issues next time.
+---
+
+## Rebuilding after changes to `.env`
+
+If you change `.devcontainer/.env` (e.g. new credentials path), bring the stack down and back up:
+```bash
+docker compose -f .devcontainer/docker-compose.yml down
+docker compose -f .devcontainer/docker-compose.yml up --build
+```
+
+---
+
+## VS Code Dev Container
+
+If you use VS Code with the Dev Containers extension, you can open the repo and choose **Reopen in Container** — it uses the same Docker setup automatically.
 
 ---
 
@@ -180,28 +189,42 @@ Base URL: `http://localhost:5000`
 
 ## Setting up Google Credentials
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Select or create a project
-3. Enable the **Google Sheets API**
-4. Go to **IAM & Admin → Service Accounts → Create Service Account**
-5. Give it a name (e.g. `night-train-dev`)
-6. On the service account page, go to **Keys → Add Key → Create new key → JSON**
-7. Save the downloaded JSON file somewhere safe (outside the repo)
-8. Share the `B-o-T_targetnetwork_DB` spreadsheet with the service account email (viewer access is sufficient)
-9. Set the path to the JSON file in your `.env` file
+You need a Google service account with read access to the spreadsheet. Do this once.
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/) and select or create a project.
+2. Enable the **Google Sheets API**: APIs & Services → Enable APIs → search "Google Sheets API" → Enable.
+3. Enable the **Google Drive API** the same way (needed to open the spreadsheet by ID).
+4. Go to **IAM & Admin → Service Accounts → Create Service Account**.
+   - Name it something like `night-train-dev`. No special roles needed.
+5. On the service account page, go to **Keys → Add Key → Create new key → JSON**.
+   - A JSON file downloads automatically. Save it somewhere outside the repository (e.g. `~/keys/`).
+6. Share the `B-o-T_targetnetwork_DB` spreadsheet with the service account email address (shown on the service account page). Viewer access is sufficient.
+7. Set the path to the JSON file in `.devcontainer/.env`:
+   ```
+   GOOGLE_APPLICATION_CREDENTIALS=/Users/yourname/keys/service_account.json
+   ```
 
 ---
 
 ## Troubleshooting
 
-**API returns `503 data_not_loaded`**  
-Call `POST /api/data/load` after startup.
+**Data load fails with `Expecting value: line 1 column 1`**  
+The credentials file is missing or not mounted. Check that:
+- `.devcontainer/.env` exists and `GOOGLE_APPLICATION_CREDENTIALS` points to a real file
+- The file exists at that exact path on your machine
+- You restarted the containers after creating or changing `.env`
 
-**`docker-compose up` fails with volume mount error**  
-Check that `GOOGLE_APPLICATION_CREDENTIALS` in your `.env` points to an existing file and uses forward slashes.
+**API returns `503 data_not_loaded`**  
+The startup data load failed silently. Check `GET /api/data/status` for the error message, then call `POST /api/data/load` manually.
+
+**`docker compose` fails with volume mount error**  
+The path in `GOOGLE_APPLICATION_CREDENTIALS` doesn't exist. Verify the path and use forward slashes.
 
 **OpenRailRouting takes a long time to start**  
-This is normal — it loads the full European rail graph (~1–2 min). The API container waits for it automatically.
+Normal — it loads the full European rail graph (~1–2 min). The API container waits for it automatically via a health check.
 
-**Docker Desktop shows "lingering processes"**  
-Always stop services with `docker-compose down` before shutting down. If stuck, restart Docker Desktop.
+**Container is stuck or in a bad state**  
+```bash
+docker compose -f .devcontainer/docker-compose.yml down
+docker compose -f .devcontainer/docker-compose.yml up --build
+```
