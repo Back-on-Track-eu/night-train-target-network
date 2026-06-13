@@ -21,11 +21,13 @@ RUN uv sync --frozen --no-install-project
 # =============================================================================
 FROM python:3.12-slim AS runtime
 
-# git  — VSCode devcontainer source control
-# curl — used in healthchecks
+# git           — VSCode devcontainer source control
+# curl          — used in healthchecks
+# openssh-client — git over SSH (keys are mounted from host)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
+    openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
