@@ -42,8 +42,6 @@ logger = logging.getLogger(__name__)
 
 
 def run(
-        # --- data loading ---
-        config_path: str,
         # --- route definition ---
         stop_inputs: list[tuple[str, str]],     # (stop_id, stop_type) pairs
         composition_id: str,
@@ -56,14 +54,15 @@ def run(
         avg_fare_couchette: float,
         avg_fare_sleeper: float,
         operating_days_year: int,
+        # --- data loading ---
+        loader: Optional[SheetDataLoader] = None,  # pass cached loader from API
+        config_path: Optional[str] = None,          # only needed if loader is None
 ) -> ModelResult:
     """
     Run the full night train model pipeline.
 
     Parameters
     ----------
-    config_path : str
-        Path to model_config.yaml.
     stop_inputs : list[tuple[str, str]]
         Ordered stop list as (stop_id, stop_type) pairs.
         stop_type: "boarding" | "alighting" | "both"
@@ -85,14 +84,24 @@ def run(
         Average ticket price for sleeper class in EUR.
     operating_days_year : int
         Number of operating days per year for annual margin calculation.
+    loader : SheetDataLoader, optional
+        Pre-loaded data loader. If provided, skips loading from Google Sheets.
+        Pass this from the API layer to avoid reloading on every request.
+    config_path : str, optional
+        Path to model_config.yaml. Only required if loader is None.
     """
 
     # =========================================================================
     # LOAD
     # =========================================================================
-    logger.info("Loading parameters from Google Sheets...")
-    loader = SheetDataLoader(config_path)
-    loader.load_all()
+    if loader is not None:
+        logger.info("Using pre-loaded data loader.")
+    else:
+        if config_path is None:
+            raise ValueError("Either 'loader' or 'config_path' must be provided.")
+        logger.info("Loading parameters from Google Sheets...")
+        loader = SheetDataLoader(config_path)
+        loader.load_all()
 
     composition  = loader.build_composition(composition_id)
     infra        = loader.build_all_infra()

@@ -37,6 +37,7 @@ from flask import Blueprint, jsonify, request
 import logging
 
 from api.dependencies import require_data
+from models.route_evaluation_model.run_model import run
 
 logger = logging.getLogger(__name__)
 bp = Blueprint("evaluate", __name__)
@@ -63,11 +64,12 @@ _VALID_STOP_TYPES = {"boarding", "alighting", "both"}
 @bp.post("")
 def evaluate():
     """
-    Run the full night train pipeline: load params → route → cost model.
-    Returns ModelResult + route geometry + schedule.
+    Run the full night train pipeline: route + cost model.
+    Reuses the cached SheetDataLoader from dependencies — no reload.
+    Returns ModelResult.
     """
-    # --- require loaded data ---
-    require_data()
+    # --- require loaded data, get cached loader ---
+    loader = require_data()
 
     # --- parse + validate request ---
     body = request.get_json(silent=True)
@@ -86,25 +88,8 @@ def evaluate():
 
     # --- run pipeline ---
     try:
-        import os
-        import sys
-        # Ensure the backend package root is importable
-        _here = os.path.dirname(os.path.abspath(__file__))
-        _backend = os.path.normpath(os.path.join(_here, "..", ".."))
-        if _backend not in sys.path:
-            sys.path.insert(0, _backend)
-
-        from models.route_evaluation_model.run_model import run
-
-        config_path = os.path.normpath(
-            os.path.join(
-                _here, "..", "..",
-                "models", "route_evaluation_model", "model_config.yml"
-            )
-        )
-
         result = run(
-            config_path           = config_path,
+            loader                = loader,
             stop_inputs           = stops_input,
             composition_id        = body["composition_id"],
             departure_time_h      = float(body["departure_time_h"]),
@@ -118,7 +103,6 @@ def evaluate():
         )
 
     except ValueError as e:
-        # Known domain errors (missing stops, bad composition, etc.)
         logger.warning("Evaluate failed (domain error): %s", e)
         return jsonify({"error": "domain_error", "message": str(e)}), 422
 
@@ -126,11 +110,6 @@ def evaluate():
         logger.exception("Evaluate failed (unexpected): %s", e)
         return jsonify({"error": "pipeline_error", "message": str(e)}), 500
 
-    # --- build route geometry for the frontend map ---
-    # (route_result is not directly on ModelResult; re-run routing is wasteful,
-    #  so we attach geometry via the run() return value's internal route data)
-    # For now we return what ModelResult.to_dict() provides; geometry will be
-    # added in a follow-up once we expose RouteResult from run().
     return jsonify({
         "result": result.to_dict(),
     }), 200
