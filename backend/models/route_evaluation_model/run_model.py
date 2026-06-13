@@ -119,7 +119,10 @@ def run(
         missing = [s for s, _ in stop_inputs if stop_params.get(s) is None]
         raise ValueError(f"Stops not found in sheet: {missing}")
 
-    router = RailRouter()
+    router = RailRouter(
+        base_url=os.environ.get("OPENRAILROUTING_URL", "http://localhost:8989")
+    )
+
     route_result = router.route(
         stops            = stops,
         composition      = composition,

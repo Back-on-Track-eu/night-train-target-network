@@ -1,9 +1,13 @@
-# uv
-.venv/
-# uv.lock is intentionally committed for reproducible installs
+# -----------------------------------------------------
+# General
+# -----------------------------------------------------
 
 # credentials
 credentials/
+
+# -----------------------------------------------------
+# BackEnd relevant
+# -----------------------------------------------------
 
 # Python
 __pycache__/
@@ -16,6 +20,10 @@ __pycache__/
 dist/
 build/
 .eggs/
+
+# uv
+backend/.venv/
+# uv.lock is intentionally committed for reproducible installs
 
 # Environment
 .env
@@ -50,3 +58,5 @@ backend/models/route_evaluation_model/routing/countries.geojson
 
 # Built routing graph — generated, not source (~5-10 GB)
 backend/models/route_evaluation_model/routing/docker/graph-cache/
+
+

@@ -1,0 +1,14 @@
+# Large data files — not needed in API image
+models/route_evaluation_model/routing/docker/data/
+models/route_evaluation_model/routing/docker/graph-cache/
+
+# Python
+.venv/
+__pycache__/
+**/*.pyc
+
+# Docker
+docker/
+
+# Credentials
+credentials/
