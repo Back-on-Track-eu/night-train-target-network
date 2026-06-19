@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
 set -e
 
-cd /workspace/backend
-pip install uv --quiet
-uv sync
-
-until curl -sf http://localhost:5000/api/health; do
+# Wait for the API to be healthy (max 60 attempts = ~2 minutes)
+echo "Waiting for API..."
+attempts=0
+until curl -sf http://localhost:5000/api/health > /dev/null; do
+  attempts=$((attempts + 1))
+  if [ $attempts -ge 60 ]; then
+    echo "API did not become healthy after 2 minutes. Aborting."
+    exit 1
+  fi
   sleep 2
 done
 
-curl -X POST http://localhost:5000/api/data/load
+echo "API is healthy. Loading data..."
+curl -sf -X POST http://localhost:5000/api/data/load
+echo "Data loaded."

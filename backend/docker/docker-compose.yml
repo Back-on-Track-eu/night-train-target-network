@@ -1,0 +1,51 @@
+# =============================================================================
+# Night Train — Backend Services
+# =============================================================================
+# Services:
+#   openrailrouting  — rail routing engine (GraphHopper fork)
+#   api              — Flask REST API
+#
+# Usage:
+#   cd backend/docker
+#   docker-compose up -d
+#
+# Prerequisites:
+#   Set GOOGLE_APPLICATION_CREDENTIALS in a .env file (see .env.example)
+
+services:
+
+  openrailrouting:
+    build:
+      context: ../models/route_evaluation_model/routing/docker
+      dockerfile: Dockerfile
+    container_name: openrailrouting
+    ports:
+      - "8989:8989"
+      - "8990:8990"
+    volumes:
+      - ../models/route_evaluation_model/routing/docker/data:/app/data
+      - ../models/route_evaluation_model/routing/docker/graph-cache:/app/graph-cache
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8989/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: night-train-api
+    ports:
+      - "5000:5000"
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/google_credentials
+      - OPENRAILROUTING_URL=http://openrailrouting:8989
+    volumes:
+      - ${GOOGLE_APPLICATION_CREDENTIALS}:/run/secrets/google_credentials:ro
+    depends_on:
+      openrailrouting:
+        condition: service_healthy
+    restart: unless-stopped
