@@ -1,0 +1,25 @@
+# Large data files — not needed in API image
+models/route_evaluation_model/routing/docker/data/
+models/route_evaluation_model/routing/docker/graph-cache/
+
+# Dev/test scripts — not needed at runtime
+models/scripts/
+
+# Python
+.venv/
+__pycache__/
+**/*.pyc
+**/__pycache__/
+.pytest_cache/
+.ruff_cache/
+
+# Git
+.git/
+.gitignore
+
+# Docs
+*.md
+DEVELOPMENT.md
+
+# Credentials
+credentials/

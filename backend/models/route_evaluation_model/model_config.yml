@@ -1,0 +1,95 @@
+google_sheets:
+  spreadsheet_id: "14fQ2Ee7KIEGtzNipZ1xt6i8p-K1mysPt3_txTGFEORA"
+
+  sheets:
+
+    compositions:
+      sheet_name: "c_compostions"
+      header_row: 2
+      key_column: "comp_id"
+      columns:
+        comp_id:                          { col: "A" }
+        comp_description:                 { col: "D" }
+        comp_weight_gross_t:              { col: "E" }
+        comp_hsr_allowed:                 { col: "F" }
+        comp_max_speed_kmh:               { col: "G" }
+        comp_company:                     { col: "J" }
+        comp_ebit_margin_per:             { col: "K" }
+        comp_energy_factor_weight:        { col: "N" }
+        comp_energy_factor_speed:         { col: "O" }
+        comp_energy_factor_terrain:       { col: "P" }
+        comp_pax_total:                   { col: "S" }
+        comp_seats_total:                 { col: "T" }
+        comp_couchettes_total:            { col: "U" }
+        comp_sleepers_total:              { col: "V" }
+        comp_seat_density:                { col: "W" }
+        comp_couchette_density:           { col: "X" }
+        comp_sleeper_density:             { col: "Y" }
+        comp_veh_min_boarding_time_h:     { col: "Z" }
+        comp_veh_min_alighting_time_h:    { col: "AA" }
+        comp_purchase_loco_eur:           { col: "AD" }
+        comp_purchase_coach_eur:          { col: "AE" }
+        comp_loco_avail_per:              { col: "AF" }
+        comp_coach_avail_per:             { col: "AG" }
+        comp_loco_amort_years:            { col: "AH" }
+        comp_coach_amort_years:           { col: "AI" }
+        comp_financing_quota_per:         { col: "AJ" }
+        comp_fix_overhead_quota_per:      { col: "AK" }
+        comp_cleaning_services_eur_day:   { col: "AL" }
+        comp_shunting_eur_day:            { col: "AM" }
+        comp_loco_maint_eur_km:           { col: "AP" }
+        comp_coach_maint_eur_km:          { col: "AQ" }
+        comp_driver_costs_eur_h:          { col: "AT" }
+        comp_crew_costs_eur_h:            { col: "AU" }
+        comp_driver_overhead_h:           { col: "AV" }
+        comp_crew_overhead_h:             { col: "AW" }
+        comp_svc_stockings_seat_per:      { col: "AZ" }
+        comp_svc_stockings_couchette_per: { col: "BA" }
+        comp_svc_stockings_sleeper_per:   { col: "BB" }
+        comp_var_overhead_per:            { col: "BC" }
+
+    infrastructure:
+      sheet_name: "c_infrastructure"
+      header_row: 2
+      key_column: "infra_country_code"
+      columns:
+        infra_country_name:           { col: "C" }
+        infra_country_code:           { col: "D" }
+        infra_tac_eur_train_km:       { col: "F" }
+        infra_parking_eur_day:        { col: "G" }
+        infra_energy_price_eur_kwh:   { col: "I" }
+        infra_terrain_category:       { col: "J" }
+        infra_terrain_score:          { col: "K" }
+        infra_hsr_allowed:            { col: "M" }
+        infra_min_boarding_time_h:    { col: "O" }
+        infra_min_alighting_time_h:   { col: "P" }
+        infra_buffer_quota_per:       { col: "Q" }
+
+    stops:
+      sheet_name: "c_stops"
+      header_row: 2
+      key_column: "stop_id"
+      columns:
+        stop_id:                    { col: "A" }
+        stop_name:                  { col: "B" }
+        stop_country_code:          { col: "C" }
+        stop_timezone:              { col: "D" }
+        stop_lat:                   { col: "E" }
+        stop_lon:                   { col: "F" }
+        stop_name_romanized:        { col: "H" }
+        stop_tariff_name:           { col: "M" }
+        stop_charge_eur:            { col: "N" }
+        stop_uic_code:              { col: "P" }
+
+    demand:
+      sheet_name: "demand"
+      header_row: 2
+      key_column: "demand_relation_id"
+      columns:
+        demand_relation_id:           { col: "A" }
+        demand_origin_stop_id:        { col: "D" }
+        demand_destination_stop_id:   { col: "E" }
+        demand_type:                  { col: "G" }
+        demand_seat_pax:              { col: "H" }
+        demand_couchette_pax:         { col: "I" }
+        demand_sleeper_pax:           { col: "J" }
