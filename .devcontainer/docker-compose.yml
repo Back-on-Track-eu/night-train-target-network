@@ -1,47 +1,25 @@
 name: bot_target_network
 
+# Extends the canonical backend service definitions and adds
+# VS Code devcontainer-specific configuration.
+# Frontend-specific services go here too.
+
+include:
+  - path: ../backend/docker/docker-compose.yml
+    env_file: .env
+
 services:
 
-  openrailrouting:
-    build:
-      context: ../backend/models/route_evaluation_model/routing/docker
-      dockerfile: Dockerfile
-    container_name: openrailrouting
-    ports:
-      - "8989:8989"
-      - "8990:8990"
-    volumes:
-      - ../backend/models/route_evaluation_model/routing/docker/data:/app/data
-      - ../backend/models/route_evaluation_model/routing/docker/graph-cache:/app/graph-cache
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8989/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 120s
-
   api:
-    build:
-      context: ../backend
-      dockerfile: ../backend/docker/Dockerfile
-    container_name: night-train-api
-    ports:
-      - "5000:5000"
-    environment:
-      - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/google_credentials
-      - OPENRAILROUTING_URL=http://openrailrouting:8989
+    # Override credentials mount with :? to fail loudly if variable is unset
     volumes:
       - ${GOOGLE_APPLICATION_CREDENTIALS:?Set GOOGLE_APPLICATION_CREDENTIALS in .env}:/run/secrets/google_credentials:ro
       - ..:/workspace:cached
       - ~/.ssh:/root/.ssh:ro
-    depends_on:
-      openrailrouting:
-        condition: service_healthy
+    # Healthcheck needed here so setup.sh can wait for the API to be ready
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
-    restart: unless-stopped
+      start_period: 60s

@@ -2,17 +2,36 @@
 # Night Train — Backend Services
 # =============================================================================
 # Services:
+#   postgres         — PostgreSQL database (test instance, seeded on startup)
 #   openrailrouting  — rail routing engine (GraphHopper fork)
-#   api              — Flask REST API
+#   api              — Flask REST API (seeds db then starts)
 #
 # Usage:
 #   cd backend/docker
 #   docker-compose up -d
 #
 # Prerequisites:
-#   Set GOOGLE_APPLICATION_CREDENTIALS in a .env file (see .env.example)
+#   Set GOOGLE_APPLICATION_CREDENTIALS and postgres vars in a .env file (see .env.example)
 
 services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: night_train_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   openrailrouting:
     build:
@@ -43,9 +62,19 @@ services:
     environment:
       - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/google_credentials
       - OPENRAILROUTING_URL=http://openrailrouting:8989
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
     volumes:
       - ${GOOGLE_APPLICATION_CREDENTIALS}:/run/secrets/google_credentials:ro
     depends_on:
+      postgres:
+        condition: service_healthy
       openrailrouting:
         condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  pgdata:
