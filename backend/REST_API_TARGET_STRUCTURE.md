@@ -29,30 +29,30 @@ Base URL: `http://localhost:5000`
 
 ### Scenarios
 
-| Method   | Endpoint             | Description                                                          |
-|----------|----------------------|----------------------------------------------------------------------|
-| `POST`   | `/api/scenario`      | tag with {user} no response body data (just success/error)           |
-| `GET`    | `/api/scenarios`     | list ALL user's saved scenarios (id, name, summary metrics)          |
-| `POST`   | `/api/scenarios`     | list filter saved scenarios (id, name, summary metrics) with limiter |
-| `GET`    | `/api/scenario/{id}` | full saved scenario (input + result), 404/403 if not owner           |
-| `PUT`    | `/api/scenario/{id}` | update name/input/result for an owned scenario                       |
+| Method | Endpoint             | Description                                                                                                  |
+|--------|----------------------|--------------------------------------------------------------------------------------------------------------|
+| `POST` | `/api/scenario`      | save scenario to database (always a new scenario, never update, then in scenarios table tag via 'is_current' |
+| `GET`  | `/api/scenarios`     | get a list of saved scenarios with limiter (only with tag 'is_current' (id, name, summary metrics)           |
+| `POST` | `/api/scenarios`     | get a filtered list of saved scenarios with limiter (10, 20, 50 etc. results)                                |
+| `GET`  | `/api/scenario/{id}` | load a scenario                                                                                              |
 
 
-### Trip Schedule Builder
+### Route Builder
 
-| Method | Endpoint                              | Description                                                                              |
-|--------|---------------------------------------|------------------------------------------------------------------------------------------|
-| `GET`  | `/api/tsbuilder/stops`                | Load relevant stop data with stop_id, name, country, lat/lon                             |
-| `POST` | `/api/tsbuilder/build-schedule`       | Post a stop list and composition and get a fully optimized route and timetable in return |
-| `GET`  | `/api/tsbuilder/get-existing-network` | ???? Receive the existing night train network ????                                       |
-| `GET`  | `/api/compositions/`                  | Load all compositions                                                                    |
+| Method | Endpoint                   | Description                                                                                              |
+|--------|----------------------------|----------------------------------------------------------------------------------------------------------|
+| `GET`  | `/api/params/stops`        | Load relevant stop data (stop list)                                                                      |
+| `GET`  | `/api/params/compositions` | Load relevant compositions data (compositions list)                                                      |
+| `POST` | `/api/route-builder/build` | Post a stop list, composition and departure time and get a fully optimized route and timetable in return |
+
+
 
 
 ### Evaluate
 
-| Method | Endpoint                            | Description                                                 |
-|--------|-------------------------------------|-------------------------------------------------------------|
-| `POST` | `/api/model/evaluate/{scenario_id}` | Run first cost evaluation                                   |
+| Method | Endpoint                  | Description             |
+|--------|---------------------------|-------------------------|
+| `POST` | `/api/cost-rev-calc/calc` | Run cost/rev evaluation |
 
 
 ### Error Responses

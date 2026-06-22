@@ -12,7 +12,7 @@ These serve the UI dropdowns, stop picker, and parameter display panel.
 from flask import Blueprint, jsonify
 import logging
 
-from api.dependencies import require_data
+from api.dependencies import get_loader
 
 logger = logging.getLogger(__name__)
 bp = Blueprint("params", __name__)
@@ -23,7 +23,7 @@ def get_compositions():
     """
     Return all available train compositions with full parameters.
     """
-    loader = require_data()
+    loader = get_loader()
     compositions = loader.build_all_compositions()
 
     result = []
@@ -104,10 +104,20 @@ def get_compositions():
                 "svc_stockings_sleeper_per":   c.svc_stockings_sleeper_per,
                 "var_overhead_per":            c.var_overhead_per,
             },
+
+            # --- coach classes (non-zero capacity only) ---
+            "classes": [
+                entry for entry in [
+                    {"class": "seat",      "capacity": c.seats_total}      if c.seats_total      > 0 else None,
+                    {"class": "couchette", "capacity": c.couchettes_total} if c.couchettes_total > 0 else None,
+                    {"class": "sleeper",   "capacity": c.sleepers_total}   if c.sleepers_total   > 0 else None,
+                ]
+                if entry is not None
+            ],
         })
 
     result.sort(key=lambda x: x["comp_id"])
-    return jsonify(result), 200
+    return jsonify({"compositions": result}), 200
 
 
 @bp.get("/stops")
@@ -116,24 +126,22 @@ def get_stops():
     Return all available stops with routing-relevant fields.
     Each entry has: stop_id, name, country_code, lat, lon, stop_charge_eur.
     """
-    loader = require_data()
+    loader = get_loader()
+    stop_collection = loader.build_all_stops()
 
-    all_rows = loader.all_rows("stops")
     stops = []
-    for stop_id, row in all_rows.items():
-        if stop_id == "_default":
-            continue
+    for stop_id, s in stop_collection.all().items():
         stops.append({
-            "stop_id":        stop_id,
-            "name":           row.get("stop_name", stop_id),
-            "country_code":   row.get("stop_country_code", ""),
-            "lat":            _safe_float(row.get("stop_lat")),
-            "lon":            _safe_float(row.get("stop_lon")),
-            "stop_charge_eur": _safe_float(row.get("stop_charge_eur")),
+            "stop_id":      s.stop_id,
+            "name":         s.stop_name or stop_id,
+            "country_code": s.stop_country_code,
+            "lat":          s.lat,
+            "lon":          s.lon,
+            # stop_charge_eur intentionally omitted — internal cost model field
         })
 
     stops.sort(key=lambda x: x["name"])
-    return jsonify(stops), 200
+    return jsonify({"stops": stops}), 200
 
 
 @bp.get("/infrastructure")
@@ -141,7 +149,7 @@ def get_infrastructure():
     """
     Return all country infrastructure parameters.
     """
-    loader = require_data()
+    loader = get_loader()
     infra = loader.build_all_infra()
 
     result = []
@@ -149,24 +157,17 @@ def get_infrastructure():
         if country_code == "_default":
             continue
         result.append({
-            "country_code":          ip.country_code,
-            "tac_eur_train_km":      ip.tac_eur_train_km,
-            "energy_price_eur_kwh":  ip.energy_price_eur_kwh,
-            "parking_eur_day":       ip.parking_eur_day,
-            "terrain_category":      ip.terrain_category,
-            "terrain_score":         ip.terrain_score,
-            "hsr_allowed":           ip.hsr_allowed,
-            "min_boarding_time_h":   ip.min_boarding_time_h,
-            "min_alighting_time_h":  ip.min_alighting_time_h,
-            "buffer_quota_per":      ip.buffer_quota_per,
+            "country_code":         ip.country_code,
+            "tac_eur_train_km":     ip.tac_eur_train_km,
+            "energy_price_eur_kwh": ip.energy_price_eur_kwh,
+            "parking_eur_day":      ip.parking_eur_day,
+            "terrain_category":     ip.terrain_category,
+            "terrain_score":        ip.terrain_score,
+            "hsr_allowed":          ip.hsr_allowed,
+            "min_boarding_time_h":  ip.min_boarding_time_h,
+            "min_alighting_time_h": ip.min_alighting_time_h,
+            "buffer_quota_per":     ip.buffer_quota_per,
         })
 
     result.sort(key=lambda x: x["country_code"])
     return jsonify(result), 200
-
-
-def _safe_float(value) -> float:
-    try:
-        return float(str(value).strip()) if value else 0.0
-    except (ValueError, TypeError):
-        return 0.0

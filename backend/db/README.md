@@ -1,17 +1,39 @@
-# Night Train Test Database — Setup Guide
+# Night Train — Database Layer
 
-This spins up a local Postgres instance with the three project schemas (`admin`, `input_params`, `proposals`), seeded with illustrative test data, plus two ways to browse it: pgAdmin and Mathesar.
+This folder contains everything database-related for the Night Train backend.
 
-## Prerequisites
+---
 
-- Docker Desktop installed and running
-- The project's `docker-compose.yml`, `Dockerfile`, `.env`, `seed_database.py`, `sql_loader.py`, and `sql/` folder (containing `create_admin_schema.sql`, `create_input_params_schema.sql`, `create_proposal_schema.sql`) all in the same directory
+## Structure
 
-## Starting the database
+```
+db/
+├── dev/                        # Dev/test database — not used in production
+│   ├── sql/                    # Schema DDL — source of truth for all environments
+│   │   ├── create_admin_schema.sql
+│   │   ├── create_input_params_schema.sql
+│   │   └── create_proposal_schema.sql
+│   ├── seed.py                 # Seeds the database with illustrative test data
+│   ├── sql_loader.py           # Loads .sql files from the sql/ folder
+│   ├── Dockerfile              # Builds the seeder image
+│   ├── docker-compose.yml      # Standalone stack: postgres + seeder + Mathesar
+│   └── .env.example            # Default credentials for local use
+└── README.md                   # This file
+```
 
-From that directory:
+---
 
-```powershell
+## For database architects — standalone stack
+
+The standalone stack in `db/dev/` lets you spin up postgres, seed it with
+illustrative test data, and inspect the full schema via Mathesar — independently
+of the backend API. Use this to understand the schema requirements before setting
+up the production database on Hetzner.
+
+**Quickstart:**
+```bash
+cd backend/db/dev
+cp .env.example .env        # default values work out of the box
 docker-compose up --build
 ```
 
@@ -21,16 +43,55 @@ This starts three services:
 - **seeder** — runs once, drops and recreates all three schemas, loads test data, then exits
 - **mathesar** — Mathesar's web UI, starts once Postgres is healthy
 
-On success, `seeder` exits with code 0 and prints row counts for every table. `postgres` and `mathesar` keep running afterward.
+On success, `seeder` exits with code 0 and prints row counts for every table.
+`postgres` and `mathesar` keep running afterward.
 
-To reset everything and start from a clean slate:
-
-```powershell
-docker-compose down -v
+**Resetting to a clean slate:**
+```bash
+docker-compose down -v      # -v removes the postgres volume
 docker-compose up --build
 ```
 
+---
+
+## For backend developers
+
+Backend developers do not use this stack directly. The database starts automatically
+as part of the main backend Docker stack — seeding runs via the API container's
+entrypoint before Flask starts.
+
+```bash
+cd backend/docker
+docker-compose up -d        # starts postgres, openrailrouting, and api
+```
+
+See `backend/DEVELOPMENT.md` for the full backend developer setup guide.
+
+---
+
+## The SQL schemas
+
+The files in `db/dev/sql/` are the **source of truth** for the database structure
+across all environments — dev, test, and production.
+
+When setting up the Hetzner production database, run these files once manually
+(without the seed data in `seed.py`). Migration tooling will be added here in a
+later phase.
+
+---
+
+## What `db/dev/` is NOT
+
+- `seed.py` is **not** run in production — it drops and recreates all schemas on
+  every run and contains illustrative placeholder values only.
+- The `docker-compose.yml` here is **not** the backend developer stack — it has no
+  API or routing engine.
+
+---
+
 ## Schema overview
+
+Three schemas are created: `admin`, `input_params`, and `proposals`.
 
 ### `admin`
 
@@ -58,7 +119,8 @@ docker-compose up --build
 
 ### `proposals`
 
-GTFS-compatible tables (`services` through `stop_times`) plus a project-specific `proposals` table for cost/revenue/climate evaluations.
+GTFS-compatible tables (`services` through `stop_times`) plus a project-specific
+`proposals` table for cost/revenue/climate evaluations.
 
 | Table | Description |
 |---|---|
@@ -71,9 +133,9 @@ GTFS-compatible tables (`services` through `stop_times`) plus a project-specific
 | `stop_times` | GTFS `stop_times.txt` — ordered stop sequence per trip. Times stored as `INTERVAL` to support GTFS overnight convention (values above `24:00:00`) |
 | `proposals` | Project-specific: one versioned row per saved cost/revenue/climate evaluation of a route. Carries a `parameter_snapshot` JSONB recording the exact model version, parameter row IDs, versions, sources, and column comments used — making every evaluation fully reproducible |
 
-## Connection details
+---
 
-Whichever tool you use to browse the data, the database itself is:
+## Connection details
 
 | | |
 |---|---|
@@ -84,7 +146,8 @@ Whichever tool you use to browse the data, the database itself is:
 
 ## Access via pgAdmin
 
-pgAdmin runs directly on your machine (not in Docker), so it reaches Postgres through the port Docker published to the host.
+pgAdmin runs directly on your machine (not in Docker), so it reaches Postgres
+through the port Docker published to the host.
 
 1. Download and install pgAdmin: https://www.pgadmin.org/download/pgadmin-4-windows/
 2. In pgAdmin, right-click **Servers** → **Register** → **Server...**
@@ -95,11 +158,13 @@ pgAdmin runs directly on your machine (not in Docker), so it reaches Postgres th
    - Maintenance database: `target_network_test_db`
    - Username: `bot_admin`
    - Password: from `.env`
-5. Save. The server should appear in the tree with `admin`, `input_params`, and `proposals` schemas underneath.
+5. Save. The server should appear in the tree with `admin`, `input_params`, and
+   `proposals` schemas underneath.
 
 ## Access via Mathesar
 
-Mathesar runs as a container on the same Docker network as Postgres, so it connects by service name rather than `localhost`.
+Mathesar runs as a container on the same Docker network as Postgres, so it connects
+by service name rather than `localhost`.
 
 1. With the stack running, open `http://localhost:8000/`
 2. First visit prompts you to create a Mathesar admin account
@@ -110,11 +175,15 @@ Mathesar runs as a container on the same Docker network as Postgres, so it conne
    - Username: `bot_admin`
    - Password: from `.env`
 
-Mathesar also manages its own separate internal database for its app state (accounts, saved connections) — that's unrelated to `target_network_test_db` and needs no configuration.
+Mathesar also manages its own separate internal database for its app state — that's
+unrelated to `target_network_test_db` and needs no configuration.
+
+---
 
 ## Verifying the parameter snapshot
 
-After seeding, the `proposals.proposals` table contains one demo evaluation of the Berlin–Wien route. To verify the snapshot was assembled correctly:
+After seeding, the `proposals.proposals` table contains one demo evaluation of the
+Berlin–Wien route. To verify the snapshot was assembled correctly:
 
 ```sql
 SELECT
@@ -127,4 +196,5 @@ SELECT
 FROM proposals.proposals;
 ```
 
-Expected result: `model_version = v1.0.0`, `infra_countries = {DE,AT}`, `coachtype_ids = {type2}`, `stop_ids = {DE_BERLIN_HBF, DE_DRESDEN_HBF, AT_WIEN_HBF}`.
+Expected result: `model_version = v1.0.0`, `infra_countries = {DE,AT}`,
+`coachtype_ids = {type2}`, `stop_ids = {DE_BERLIN_HBF, DE_DRESDEN_HBF, AT_WIEN_HBF}`.

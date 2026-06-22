@@ -53,10 +53,12 @@ htmlcov/
 Thumbs.db
 
 # OSM source data — too large for git (~30 GB)
-backend/models/route_evaluation_model/routing/docker/data/
-backend/models/route_evaluation_model/routing/countries.geojson
+backend/models/route/routing/docker/data/
+backend/models/route/routing/countries.geojson
 
 # Built routing graph — generated, not source (~5-10 GB)
-backend/models/route_evaluation_model/routing/docker/graph-cache/
+backend/models/route/routing/docker/graph-cache/
 
 
+
+project-snapshot.zip

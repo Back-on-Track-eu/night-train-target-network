@@ -1,5 +1,5 @@
 import logging
-from models.route_evaluation_model.data_loader_from_spreadsheet import SheetDataLoader
+from adapters.data_loader_from_spreadsheet import SheetDataLoader
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 

@@ -21,9 +21,6 @@ RUN uv sync --frozen --no-install-project
 # =============================================================================
 FROM python:3.12-slim AS runtime
 
-# git           — VSCode devcontainer source control
-# curl          — used in healthchecks
-# openssh-client — git over SSH (keys are mounted from host)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
@@ -38,10 +35,19 @@ COPY --from=builder /app/.venv /app/.venv
 # Copy application code
 COPY . .
 
+# Download countries.geojson — needed by rail_router.py for country border
+# detection. Gitignored (large static asset), so fetched at build time.
+RUN curl -fsSL \
+    "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson" \
+    -o models/route/routing/countries.geojson
+
 # Activate venv
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
 
 EXPOSE 5000
 
-CMD ["python", "main.py"]
+# entrypoint seeds the database then starts the API
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+CMD ["/entrypoint.sh"]

@@ -1,0 +1,32 @@
+# Large data files — not needed in API image
+models/route/routing/docker/data/
+models/route/routing/docker/graph-cache/
+
+# Standalone db stack — not needed in API image
+db/dev/Dockerfile
+db/dev/docker-compose.yml
+db/dev/.env.example
+
+# Google Sheets adapter — replaced by db adapter
+adapters/data_loader_from_spreadsheet.py
+
+# Dev/test scripts — not needed at runtime
+scripts/
+
+# Python
+.venv/
+__pycache__/
+**/*.pyc
+**/__pycache__/
+.pytest_cache/
+.ruff_cache/
+
+# Git
+.git/
+.gitignore
+
+# Docs
+*.md
+
+# Credentials
+credentials/

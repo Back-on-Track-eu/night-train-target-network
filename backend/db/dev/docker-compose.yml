@@ -1,4 +1,23 @@
+# =============================================================================
+# Night Train — Standalone Database Stack
+# =============================================================================
+# For database architects and schema inspection only.
+# Backend developers: use backend/docker/docker-compose.yml instead.
+#
+# This stack spins up postgres, seeds it with test data, and starts Mathesar
+# for visual schema inspection — independently of the rest of the backend.
+#
+# Usage:
+#   cd backend/db/dev
+#   cp .env.example .env        # already has default values, no changes needed
+#   docker-compose up -d
+#   open http://localhost:8000   # Mathesar UI
+#
+# The seeder runs once on startup and exits. Postgres persists via a volume.
+# To reset: docker-compose down -v && docker-compose up -d
+
 services:
+
   postgres:
     image: postgres:16-alpine
     container_name: night_train_postgres
@@ -26,7 +45,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      POSTGRES_HOST: postgres   # resolves via the Docker network, not localhost
+      POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -40,7 +59,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      SECRET_KEY: change-this-later   # fine for local testing; swap for a real random value if this stops being throwaway
+      SECRET_KEY: change-this-later
     ports:
       - "8000:8000"
     restart: unless-stopped

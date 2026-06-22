@@ -9,23 +9,20 @@ Start with:
 
 Endpoints
 ---------
-  GET  /api/health              — liveness check
-  GET  /api/data/status         — data loading state
-  POST /api/data/load           — load from Google Sheets (blocking)
-  POST /api/data/reload         — force reload (blocking)
-  GET  /api/compositions        — list available compositions
-  GET  /api/stops               — list available stops with coordinates
-  POST /api/evaluate            — run full pipeline, return ModelResult
+  GET  /api/health                — liveness check
+  GET  /api/params/stops          — stop list for stop picker
+  GET  /api/params/compositions   — composition list for composition picker
+  POST /api/route-builder/build   — build route + timetable (physics only)
+  POST /api/cost-rev-calc/calc    — cost and revenue evaluation
 """
 
 import logging
-import os
 
 from flask import Flask, jsonify
 from flask_cors import CORS
 
-from api.dependencies import DataNotLoadedError
-from api.routes import data, params, evaluate
+from api.dependencies import DataNotLoadedError, init
+from api import health, params, route_builder, cost_rev_calc
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,17 +33,13 @@ logger = logging.getLogger(__name__)
 
 def create_app() -> Flask:
     app = Flask(__name__)
-    CORS(app)  # allow requests from the frontend (localhost:5173 in dev)
+    CORS(app)
 
     # --- blueprints ---
-    app.register_blueprint(data.bp,     url_prefix="/api/data")
-    app.register_blueprint(params.bp,   url_prefix="/api")
-    app.register_blueprint(evaluate.bp, url_prefix="/api/evaluate")
-
-    # --- health check ---
-    @app.get("/api/health")
-    def health():
-        return jsonify({"status": "ok"}), 200
+    app.register_blueprint(health.bp,        url_prefix="/api")
+    app.register_blueprint(params.bp,        url_prefix="/api/params")
+    app.register_blueprint(route_builder.bp, url_prefix="/api/route-builder")
+    app.register_blueprint(cost_rev_calc.bp, url_prefix="/api/cost-rev-calc")
 
     # --- global error handlers ---
     @app.errorhandler(DataNotLoadedError)
@@ -73,5 +66,6 @@ def create_app() -> Flask:
 
 
 if __name__ == "__main__":
+    init()
     app = create_app()
     app.run(host="0.0.0.0", port=5000, debug=True)
