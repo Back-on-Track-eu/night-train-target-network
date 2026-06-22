@@ -36,7 +36,7 @@ Response body (JSON)
 from flask import Blueprint, jsonify, request
 import logging
 
-from api.dependencies import require_data
+from api.dependencies import get_loader
 from models.route_evaluation_model.run_model import run
 
 logger = logging.getLogger(__name__)
@@ -65,11 +65,11 @@ _VALID_STOP_TYPES = {"boarding", "alighting", "both"}
 def evaluate():
     """
     Run the full night train pipeline: route + cost model.
-    Reuses the cached SheetDataLoader from dependencies — no reload.
+    Reuses the cached DBDataLoader from dependencies — no reload.
     Returns ModelResult.
     """
     # --- require loaded data, get cached loader ---
-    loader = require_data()
+    loader = get_loader()
 
     # --- parse + validate request ---
     body = request.get_json(silent=True)

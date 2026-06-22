@@ -13,6 +13,4 @@ until curl -sf http://localhost:5000/api/health > /dev/null; do
   sleep 2
 done
 
-echo "API is healthy. Loading data..."
-curl -sf -X POST http://localhost:5000/api/data/load
-echo "Data loaded."
+echo "API is ready."
