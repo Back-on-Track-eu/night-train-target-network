@@ -1,0 +1,118 @@
+name: Backend Integration Tests
+
+on:
+  push:
+    branches: [main, backend-dev]
+    paths:
+      - 'backend/**'
+      - '.devcontainer/**'
+      - '.github/workflows/backend-tests.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.devcontainer/**'
+      - '.github/workflows/backend-tests.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      POSTGRES_HOST:     localhost
+      POSTGRES_PORT:     5432
+      POSTGRES_DB:       target_network_test_db
+      POSTGRES_USER:     bot_admin
+      POSTGRES_PASSWORD: devpassword
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ------------------------------------------------------------------
+      # Cache the OpenRailRouting graph — downloading 600MB on every run
+      # would be too slow. The cache key is tied to the properties.txt
+      # file which changes when the graph is rebuilt.
+      # ------------------------------------------------------------------
+      - name: Cache OpenRailRouting graph
+        id: cache-graph
+        uses: actions/cache@v4
+        with:
+          path: backend/models/route_evaluation_model/routing/docker/graph-cache
+          key: openrailrouting-graph-${{ hashFiles('backend/models/route_evaluation_model/routing/docker/config.yml') }}
+
+      - name: Download graph cache if not cached
+        if: steps.cache-graph.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p backend/models/route_evaluation_model/routing/docker/graph-cache
+          FILE_ID="1tWt1OX7mzPA7Ylo9KqmTK6YluRXEtt8z"
+          URL="https://drive.usercontent.google.com/download?id=${FILE_ID}&export=download&confirm=t"
+          curl -L "$URL" -o /tmp/graph-cache.zip
+          unzip -o /tmp/graph-cache.zip -d backend/models/route_evaluation_model/routing/docker/graph-cache
+          rm /tmp/graph-cache.zip
+
+      # ------------------------------------------------------------------
+      # Start the full backend stack
+      # ------------------------------------------------------------------
+      - name: Start Docker stack
+        run: |
+          cd backend/docker
+          cp .env.example .env
+          docker compose up -d --build
+        env:
+          POSTGRES_USER:     bot_admin
+          POSTGRES_PASSWORD: devpassword
+          POSTGRES_DB:       target_network_test_db
+          POSTGRES_PORT:     5432
+
+      - name: Wait for API to be healthy
+        run: |
+          echo "Waiting for API..."
+          attempts=0
+          until curl -sf http://localhost:5000/api/health > /dev/null; do
+            attempts=$((attempts + 1))
+            if [ $attempts -ge 60 ]; then
+              echo "API did not become healthy after 2 minutes"
+              docker compose -f backend/docker/docker-compose.yml logs
+              exit 1
+            fi
+            sleep 2
+          done
+          echo "API is healthy."
+
+      # ------------------------------------------------------------------
+      # Set up Python and run tests
+      # ------------------------------------------------------------------
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          uv sync --group dev
+
+      - name: Run integration tests
+        run: |
+          cd backend
+          uv run --group dev pytest tests/ -v --timeout=60
+        env:
+          POSTGRES_HOST:     localhost
+          POSTGRES_PORT:     5432
+          POSTGRES_DB:       target_network_test_db
+          POSTGRES_USER:     bot_admin
+          POSTGRES_PASSWORD: devpassword
+          API_BASE_URL:      http://localhost:5000
+
+      # ------------------------------------------------------------------
+      # Always print logs on failure for debugging
+      # ------------------------------------------------------------------
+      - name: Print Docker logs on failure
+        if: failure()
+        run: docker compose -f backend/docker/docker-compose.yml logs

@@ -1,13 +1,14 @@
 """
 run_model.py
 ============
-Night train model pipeline — load, route, calculate, assemble.
+Night train model pipeline — route, calculate, assemble.
 
 Single entry point: run() executes the full pipeline and returns a ModelResult.
+A DBDataLoader (or compatible loader) must be passed in from the API layer.
 
 Pipeline
 --------
-  LOAD   — load all parameter sheets from Google Sheets via SheetDataLoader
+  LOAD   — receive pre-loaded loader from caller
   ROUTE  — build Stop objects, call router, get RouteResult
   EXTRACT— pull scalar values from RouteResult and collections
   CALC   — revenue → cost → class allocation
@@ -18,7 +19,6 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Optional
 
 from models.params import (
     CompositionParams,
@@ -30,7 +30,6 @@ from models.route_evaluation_model.routing.rail_router import (
     Stop,
     RouteResult,
 )
-from models.route_evaluation_model.data_loader_from_spreadsheet import SheetDataLoader
 from models.route_evaluation_model.model import (
     RevenueBreakdown,
     CostBreakdown,
@@ -54,9 +53,8 @@ def run(
         avg_fare_couchette: float,
         avg_fare_sleeper: float,
         operating_days_year: int,
-        # --- data loading ---
-        loader: Optional[SheetDataLoader] = None,  # pass cached loader from API
-        config_path: Optional[str] = None,          # only needed if loader is None
+        # --- data loader (required) ---
+        loader,
 ) -> ModelResult:
     """
     Run the full night train model pipeline.
@@ -67,7 +65,7 @@ def run(
         Ordered stop list as (stop_id, stop_type) pairs.
         stop_type: "boarding" | "alighting" | "both"
     composition_id : str
-        Key into the c_compositions sheet (e.g. "NJ-3.1").
+        Key into the compositions table (e.g. "NJ-3.1").
     departure_time_h : float
         Departure time from first stop in decimal hours (e.g. 21.067 for 21:04).
     utilization_seat : float
@@ -84,25 +82,15 @@ def run(
         Average ticket price for sleeper class in EUR.
     operating_days_year : int
         Number of operating days per year for annual margin calculation.
-    loader : SheetDataLoader, optional
-        Pre-loaded data loader. If provided, skips loading from Google Sheets.
-        Pass this from the API layer to avoid reloading on every request.
-    config_path : str, optional
-        Path to model_config.yaml. Only required if loader is None.
+    loader : DBDataLoader
+        Pre-initialised data loader from dependencies.get_loader().
+        Must implement build_composition(), build_all_infra(),
+        and build_all_stop_params().
     """
 
     # =========================================================================
-    # LOAD
+    # LOAD — use the pre-initialised loader, no Google Sheets call
     # =========================================================================
-    if loader is not None:
-        logger.info("Using pre-loaded data loader.")
-    else:
-        if config_path is None:
-            raise ValueError("Either 'loader' or 'config_path' must be provided.")
-        logger.info("Loading parameters from Google Sheets...")
-        loader = SheetDataLoader(config_path)
-        loader.load_all()
-
     composition  = loader.build_composition(composition_id)
     infra        = loader.build_all_infra()
     stop_ids     = [stop_id for stop_id, _ in stop_inputs]
@@ -126,7 +114,7 @@ def run(
 
     if len(stops) != len(stop_inputs):
         missing = [s for s, _ in stop_inputs if stop_params.get(s) is None]
-        raise ValueError(f"Stops not found in sheet: {missing}")
+        raise ValueError(f"Stops not found in database: {missing}")
 
     router = RailRouter(
         base_url=os.environ.get("OPENRAILROUTING_URL", "http://localhost:8989")

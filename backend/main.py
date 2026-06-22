@@ -10,21 +10,19 @@ Start with:
 Endpoints
 ---------
   GET  /api/health              — liveness check
-  GET  /api/data/status         — data loading state
-  POST /api/data/load           — load from Google Sheets (blocking)
-  POST /api/data/reload         — force reload (blocking)
+  GET  /api/data/status         — database connection state
   GET  /api/compositions        — list available compositions
   GET  /api/stops               — list available stops with coordinates
+  GET  /api/infrastructure      — per-country infrastructure parameters
   POST /api/evaluate            — run full pipeline, return ModelResult
 """
 
 import logging
-import os
 
 from flask import Flask, jsonify
 from flask_cors import CORS
 
-from api.dependencies import DataNotLoadedError
+from api.dependencies import DataNotLoadedError, init
 from api.routes import data, params, evaluate
 
 logging.basicConfig(
@@ -36,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 def create_app() -> Flask:
     app = Flask(__name__)
-    CORS(app)  # allow requests from the frontend (localhost:5173 in dev)
+    CORS(app)
 
     # --- blueprints ---
     app.register_blueprint(data.bp,     url_prefix="/api/data")
@@ -73,5 +71,8 @@ def create_app() -> Flask:
 
 
 if __name__ == "__main__":
+    # Initialise database connection before serving requests
+    init()
+
     app = create_app()
     app.run(host="0.0.0.0", port=5000, debug=True)

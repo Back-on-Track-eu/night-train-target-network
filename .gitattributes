@@ -1,0 +1,27 @@
+# Force LF line endings for shell scripts — prevents Windows CRLF breaking bash execution in Docker
+*.sh text eol=lf
+
+# Python and config files — LF
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.sql text eol=lf
+*.txt text eol=lf
+
+# Windows-only files can keep CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary files — no line ending conversion
+*.pbf binary
+*.jar binary
+*.zip binary
+*.7z binary
+*.png binary
+*.jpg binary
+*.pyd binary
+*.dll binary
