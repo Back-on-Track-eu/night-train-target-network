@@ -18,10 +18,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-
 # =============================================================================
 # COMPOSITION
 # =============================================================================
+
 
 @dataclass
 class CompositionParams:
@@ -120,6 +120,7 @@ class CompositionCollection:
 # INFRASTRUCTURE
 # =============================================================================
 
+
 @dataclass
 class InfraParams:
     """
@@ -166,6 +167,7 @@ class InfraCollection:
             default = self._items.get("_default")
             if default is not None:
                 import logging
+
                 logging.getLogger(__name__).warning(
                     "No infra params for country '%s' — using _default values.",
                     country_code,
@@ -242,6 +244,7 @@ class StopCollection:
 # DEMAND
 # =============================================================================
 
+
 @dataclass
 class DemandParams:
     """
@@ -275,21 +278,23 @@ class DemandCollection:
         return self._items.get(relation_id) or self._items.get("_default")
 
     def find(
-            self,
-            origin_stop_id: str,
-            destination_stop_id: str,
+        self,
+        origin_stop_id: str,
+        destination_stop_id: str,
     ) -> Optional[DemandParams]:
         """Find a demand row by origin and destination stop ID."""
         for dp in self._items.values():
-            if (dp.origin_stop_id == origin_stop_id
-                    and dp.destination_stop_id == destination_stop_id):
+            if (
+                dp.origin_stop_id == origin_stop_id
+                and dp.destination_stop_id == destination_stop_id
+            ):
                 return dp
         return None
 
     def find_or_default(
-            self,
-            origin_stop_id: str,
-            destination_stop_id: str,
+        self,
+        origin_stop_id: str,
+        destination_stop_id: str,
     ) -> Optional[DemandParams]:
         """Find a demand row by OD pair, falling back to '_default'."""
         dp = self.find(origin_stop_id, destination_stop_id)

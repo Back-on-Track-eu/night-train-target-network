@@ -1,0 +1,18 @@
+{
+  "app": {
+    "title": "Night Train Network"
+  },
+  "dataStatus": {
+    "title": "Backend Connection",
+    "loadButton": "Load Data",
+    "status": {
+      "idle": "Not connected",
+      "loading": "Loading data from backend...",
+      "success": "Data loaded successfully",
+      "already_loaded": "Data already loaded on server",
+      "error": "Failed to load data"
+    },
+    "loadedAt": "Loaded at: {time}",
+    "response": "Server response"
+  }
+}

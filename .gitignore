@@ -52,6 +52,14 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+# -----------------------------------------------------
+# Frontend relevant
+# -----------------------------------------------------
+
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
 # OSM source data — too large for git (~30 GB)
 backend/models/route_evaluation_model/routing/docker/data/
 backend/models/route_evaluation_model/routing/countries.geojson
@@ -59,6 +67,5 @@ backend/models/route_evaluation_model/routing/countries.geojson
 # Built routing graph — generated, not source (~5-10 GB)
 backend/models/route_evaluation_model/routing/docker/graph-cache/
 
-
-
-project-snapshot.zip
+#Coding Agents
+.claude/

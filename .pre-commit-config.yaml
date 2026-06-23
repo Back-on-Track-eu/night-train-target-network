@@ -1,0 +1,22 @@
+# Pre-commit hooks for night-train-target-network
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+  # Python formatting (backend)
+  - repo: https://github.com/psf/black
+    rev: 25.1.0
+    hooks:
+      - id: black
+        language_version: python3.12
+        files: ^backend/
+
+  # JS/TS/Vue/JSON/CSS/Markdown formatting (frontend)
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v4.0.0-alpha.8
+    hooks:
+      - id: prettier
+        files: ^frontend/
+        types_or: [javascript, jsx, ts, tsx, vue, json, css, markdown]
+        additional_dependencies:
+          - prettier@3.5.3

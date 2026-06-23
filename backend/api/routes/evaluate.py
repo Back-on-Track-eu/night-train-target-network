@@ -46,16 +46,16 @@ bp = Blueprint("evaluate", __name__)
 # Required and optional fields with their types
 # ---------------------------------------------------------------------------
 _REQUIRED_FIELDS = {
-    "stops":                  list,
-    "composition_id":         str,
-    "departure_time_h":       (int, float),
-    "utilization_seat":       (int, float),
-    "utilization_couchette":  (int, float),
-    "utilization_sleeper":    (int, float),
-    "avg_fare_seat":          (int, float),
-    "avg_fare_couchette":     (int, float),
-    "avg_fare_sleeper":       (int, float),
-    "operating_days_year":    int,
+    "stops": list,
+    "composition_id": str,
+    "departure_time_h": (int, float),
+    "utilization_seat": (int, float),
+    "utilization_couchette": (int, float),
+    "utilization_sleeper": (int, float),
+    "avg_fare_seat": (int, float),
+    "avg_fare_couchette": (int, float),
+    "avg_fare_sleeper": (int, float),
+    "operating_days_year": int,
 }
 
 _VALID_STOP_TYPES = {"boarding", "alighting", "both"}
@@ -74,32 +74,32 @@ def evaluate():
     # --- parse + validate request ---
     body = request.get_json(silent=True)
     if not body:
-        return jsonify({"error": "bad_request", "message": "Request body must be JSON."}), 400
+        return (
+            jsonify({"error": "bad_request", "message": "Request body must be JSON."}),
+            400,
+        )
 
     errors = _validate(body)
     if errors:
         return jsonify({"error": "validation_error", "details": errors}), 400
 
     # --- extract inputs ---
-    stops_input = [
-        (s["stop_id"], s["stop_type"])
-        for s in body["stops"]
-    ]
+    stops_input = [(s["stop_id"], s["stop_type"]) for s in body["stops"]]
 
     # --- run pipeline ---
     try:
         result = run(
-            loader                = loader,
-            stop_inputs           = stops_input,
-            composition_id        = body["composition_id"],
-            departure_time_h      = float(body["departure_time_h"]),
-            utilization_seat      = float(body["utilization_seat"]),
-            utilization_couchette = float(body["utilization_couchette"]),
-            utilization_sleeper   = float(body["utilization_sleeper"]),
-            avg_fare_seat         = float(body["avg_fare_seat"]),
-            avg_fare_couchette    = float(body["avg_fare_couchette"]),
-            avg_fare_sleeper      = float(body["avg_fare_sleeper"]),
-            operating_days_year   = int(body["operating_days_year"]),
+            loader=loader,
+            stop_inputs=stops_input,
+            composition_id=body["composition_id"],
+            departure_time_h=float(body["departure_time_h"]),
+            utilization_seat=float(body["utilization_seat"]),
+            utilization_couchette=float(body["utilization_couchette"]),
+            utilization_sleeper=float(body["utilization_sleeper"]),
+            avg_fare_seat=float(body["avg_fare_seat"]),
+            avg_fare_couchette=float(body["avg_fare_couchette"]),
+            avg_fare_sleeper=float(body["avg_fare_sleeper"]),
+            operating_days_year=int(body["operating_days_year"]),
         )
 
     except ValueError as e:
@@ -110,14 +110,20 @@ def evaluate():
         logger.exception("Evaluate failed (unexpected): %s", e)
         return jsonify({"error": "pipeline_error", "message": str(e)}), 500
 
-    return jsonify({
-        "result": result.to_dict(),
-    }), 200
+    return (
+        jsonify(
+            {
+                "result": result.to_dict(),
+            }
+        ),
+        200,
+    )
 
 
 # ---------------------------------------------------------------------------
 # Validation helpers
 # ---------------------------------------------------------------------------
+
 
 def _validate(body: dict) -> list[str]:
     errors = []

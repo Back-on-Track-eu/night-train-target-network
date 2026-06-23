@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Singleton state
 # ---------------------------------------------------------------------------
-_loader = None
+_loader = None  # SheetDataLoader, created lazily on first load()
 _loaded: bool = False
 _loaded_at: Optional[datetime] = None
 _load_error: Optional[str] = None
@@ -35,17 +35,19 @@ _load_error: Optional[str] = None
 # Public interface
 # ---------------------------------------------------------------------------
 
+
 class DataNotLoadedError(Exception):
-    """Raised when an endpoint needs data that isn't available yet."""
+    """Raised when an endpoint needs data that hasn't been loaded yet."""
+
     pass
 
 
 def status() -> dict:
     """Return the current data loading status as a plain dict."""
     return {
-        "loaded":    _loaded,
+        "loaded": _loaded,
         "loaded_at": _loaded_at.isoformat() if _loaded_at else None,
-        "error":     _load_error,
+        "error": _load_error,
     }
 
 
@@ -56,7 +58,9 @@ def init() -> None:
     """
     global _loader, _loaded, _loaded_at, _load_error
 
-    from adapters.data_loader_from_db import DBDataLoader
+    from models.route_evaluation_model.data_loader_from_spreadsheet import (
+        SheetDataLoader,
+    )
 
     logger.info("Connecting to database...")
 
@@ -79,7 +83,5 @@ def get_loader():
     Raises DataNotLoadedError if init() has not completed successfully.
     """
     if not _loaded or _loader is None:
-        raise DataNotLoadedError(
-            "Database not available. Check the connection and restart the API."
-        )
+        raise DataNotLoadedError("Data not loaded. Call POST /api/data/load first.")
     return _loader
