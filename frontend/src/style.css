@@ -1,3 +1,34 @@
 @import 'tailwindcss';
 
 @layer tailwind-base, primevue, tailwind-utilities;
+
+@font-face {
+  font-family: 'Mark Pro';
+  src:
+    url('@/assets/fonts/MarkPro.woff2') format('woff2'),
+    url('@/assets/fonts/MarkPro.woff') format('woff');
+  font-weight: 400;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Mark Pro';
+  src:
+    url('@/assets/fonts/MarkPro-Bold.woff2') format('woff2'),
+    url('@/assets/fonts/MarkPro-Bold.woff') format('woff');
+  font-weight: 700;
+  font-style: normal;
+}
+
+@theme {
+  --font-sans: 'Mark Pro', ui-sans-serif, system-ui, sans-serif;
+
+  --color-sapphire: #1d1e33;
+  --color-sky-blue: #2271b3;
+  --color-greenish-grey: #f1f3f6;
+
+  --color-mint-green: #20603d;
+  --color-pure-green: #008f39;
+  --color-yellow-green: #92d051;
+  --color-sulphur-yellow: #eaf044;
+}
