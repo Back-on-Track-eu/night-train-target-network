@@ -1,0 +1,143 @@
+# =============================================================================
+# Target Network — BoT Hetzner production deployment (bot-server, Helsinki)
+# =============================================================================
+# House pattern: nothing publishes a public port. Public access = Caddy vhosts
+# on the shared nextcloud_nextcloud network (external, named caddy_net here).
+#
+# First-time setup on the server:
+#   cd /opt/targetnetwork/deploy/bot-server
+#   cp .env.example .env && vim .env   # fill all values (chmod 600)
+#   docker compose up -d --build
+#   docker restart nextcloud-caddy     # cert trick: LE needs Caddy restart for new vhosts
+#
+# Seeding (one-time after first boot — schemas created by initdb.d):
+#   docker exec night-train-api python db/dev/seed.py
+#   # Then open pgAdmin and replace demo values with real calibrated data.
+#
+# Updates (after rsync/git pull on the box):
+#   docker compose up -d --build api frontend
+#   # Do NOT restart db/routing unless necessary — routing re-loads the
+#   # rail graph (~2 min); db restart risks in-flight queries.
+#
+# GUARDRAILS: openrailrouting is a JVM. mem_limit + -Xmx cap it so it cannot
+# OOM Nextcloud/OnlyOffice on this shared box (graph loads at ~840 MiB).
+# =============================================================================
+name: targetnetwork
+
+services:
+
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: targetnetwork-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
+    volumes:
+      - tn_pgdata:/var/lib/postgresql/data
+      # Schema-only init on first boot (empty volume). Order matters:
+      # admin → input_params → proposals (proposals.user_id FK → admin.users)
+      - ../../backend/db/dev/sql/create_admin_schema.sql:/docker-entrypoint-initdb.d/01_admin.sql:ro
+      - ../../backend/db/dev/sql/create_input_params_schema.sql:/docker-entrypoint-initdb.d/02_input_params.sql:ro
+      - ../../backend/db/dev/sql/create_proposal_schema.sql:/docker-entrypoint-initdb.d/03_proposals.sql:ro
+      - ../../backend/db/dev/sql/create_ontd_schema.sql:/docker-entrypoint-initdb.d/04_ontd.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+    # No host port — reachable only by api and pgadmin on the stack network.
+
+  openrailrouting:
+    build:
+      context: ../../backend/models/route_evaluation_model/routing/docker
+      dockerfile: Dockerfile
+    container_name: targetnetwork-routing
+    environment:
+      - JAVA_TOOL_OPTIONS=-Xmx3g
+    mem_limit: 4g
+    memswap_limit: 4g
+    volumes:
+      - tn_graphcache:/app/graph-cache
+      - tn_osmdata:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8989/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 300s
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ../../backend
+      dockerfile: docker/Dockerfile
+    container_name: night-train-api
+    # Skip auto-seed in production — schemas are created by initdb.d above.
+    # Run seed.py manually once after first boot, then use pgAdmin for real data.
+    command: ["python", "main.py"]
+    environment:
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - OPENRAILROUTING_URL=http://openrailrouting:8989
+    ports:
+      - "127.0.0.1:5055:5000"
+    depends_on:
+      db:
+        condition: service_healthy
+      openrailrouting:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: targetnetwork-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:?set PGADMIN_DEFAULT_EMAIL in .env}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:?set PGADMIN_DEFAULT_PASSWORD in .env}
+      PGADMIN_CONFIG_SERVER_MODE: "True"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+    volumes:
+      - tn_pgadmin:/var/lib/pgadmin
+      - ./pgadmin-servers.json:/pgadmin4/servers.json:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - default
+      - caddy_net
+    restart: unless-stopped
+    # Caddy vhost: pgadmin.65.109.137.97.sslip.io → targetnetwork-pgadmin:80
+
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: Dockerfile
+    container_name: targetnetwork-frontend
+    networks:
+      - default
+      - caddy_net
+    restart: unless-stopped
+    # Vite dev server on port 5173. Caddy vhost: targetnetwork.65.109.137.97.sslip.io
+    # TODO before public launch: swap to multi-stage nginx build in frontend/Dockerfile.
+
+volumes:
+  tn_pgdata:
+  tn_graphcache:
+  tn_osmdata:
+  tn_pgadmin:
+
+networks:
+  caddy_net:
+    external: true
+    name: nextcloud_nextcloud

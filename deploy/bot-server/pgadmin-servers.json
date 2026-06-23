@@ -1,0 +1,14 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "Target Network DB",
+      "Group": "Back-on-Track",
+      "Host": "targetnetwork-db",
+      "Port": 5432,
+      "MaintenanceDB": "night_train_db",
+      "Username": "nighttrain",
+      "SSLMode": "prefer",
+      "Comment": "Production PostGIS DB — 4 schemas: admin / input_params / proposals / ontd (ONTD mirror). Password in vault.back-on-track.eu → TN collection."
+    }
+  }
+}
