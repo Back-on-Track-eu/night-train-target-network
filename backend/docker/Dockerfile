@@ -33,6 +33,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && echo "en_US.UTF-8 UTF-8" > /etc/locale.gen \
     && locale-gen \
     && update-locale LANG=en_US.UTF-8 \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 ENV LANG=en_US.UTF-8 \

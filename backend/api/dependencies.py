@@ -58,9 +58,7 @@ def init() -> None:
     """
     global _loader, _loaded, _loaded_at, _load_error
 
-    from models.route_evaluation_model.data_loader_from_spreadsheet import (
-        SheetDataLoader,
-    )
+    from adapters.data_loader_from_db import DBDataLoader
 
     logger.info("Connecting to database...")
 
