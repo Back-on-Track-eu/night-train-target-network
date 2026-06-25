@@ -6,7 +6,7 @@ name: bot_target_network
 
 include:
   - path: ../backend/docker/docker-compose.yml
-    env_file: .env
+    env_file: ../backend/docker/.env
 
 services:
 

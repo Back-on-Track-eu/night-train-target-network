@@ -1,6 +1,6 @@
 # Large data files — not needed in API image
-models/route_evaluation_model/routing/docker/data/
-models/route_evaluation_model/routing/docker/graph-cache/
+models/route/routing/docker/data/
+models/route/routing/docker/graph-cache/
 
 # Standalone db stack — not needed in API image
 db/dev/Dockerfile
@@ -11,7 +11,7 @@ db/dev/.env.example
 adapters/data_loader_from_spreadsheet.py
 
 # Dev/test scripts — not needed at runtime
-models/scripts/
+scripts/
 
 # Python
 .venv/

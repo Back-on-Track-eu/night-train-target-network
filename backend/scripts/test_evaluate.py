@@ -1,13 +1,13 @@
 """
 test_evaluate.py
 ================
-Test script for POST /api/evaluate.
+Test script for POST /api/evaluation.
 
 Pre-flight:
   1. Checks Flask API is reachable
   2. Loads data if not already loaded
   3. Checks OpenRailRouting is running; starts it if not
-  4. Runs the evaluate endpoint
+  4. Runs the evaluation endpoint
 
 Route: Wien Hbf → Salzburg Hbf → München Hbf → Paris Est
 Composition: NJ-5.1
@@ -120,12 +120,12 @@ def test_evaluate():
         "operating_days_year":   360,
     }
 
-    print("\nPOST /api/evaluate")
+    print("\nPOST /api/evaluation")
     print("Route: Wien Hbf → Salzburg Hbf → München Hbf → Paris Est")
     print("Composition: NJ-5.1")
     print("-" * 60)
 
-    response = requests.post(f"{API_BASE}/api/evaluate", json=payload)
+    response = requests.post(f"{API_BASE}/api/evaluation", json=payload)
     print(f"Status: {response.status_code}")
 
     if response.status_code == 200:
@@ -163,7 +163,7 @@ def test_evaluate():
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("  Night Train — evaluate endpoint test")
+    print("  Night Train — evaluation endpoint test")
     print("=" * 60)
 
     if not check_flask():

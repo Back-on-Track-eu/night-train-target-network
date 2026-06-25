@@ -81,3 +81,12 @@ def loader():
     _loader = DBDataLoader()
     yield _loader
     _loader.close()
+
+@pytest.fixture(autouse=True)
+def rollback_after_test(db_conn):
+    """Roll back any aborted transaction after each test to prevent cascade failures."""
+    yield
+    try:
+        db_conn.rollback()
+    except Exception:
+        pass

@@ -1,8 +1,8 @@
 # Night train target wetwork — Routing Infrastructure
 
 This folder contains the OpenRailRouting server used to calculate rail travel times
-and distances between stations. It runs as a Docker container and exposes a REST API
-on a local port 8989. With this setup, the limits on requesting routes do 
+and distances between stations. It runs as a Docker container and exposes a REST API on the host port configured in `backend/docker/.env`
+(`OPENRAILROUTING_HOST_PORT`, default 8989). With this setup, the limits on requesting routes do 
 only depend on the properties of your local machine but not on request limits of 
 https://routing.openrailrouting.org/maps/ and also routing setting can be adjusted individually.
 
@@ -26,9 +26,9 @@ No Java, Maven, or Node.js required — everything runs inside Docker.
 ## Folder Structure
 
 ```
-models/routing/docker/
+models/route/routing/docker/
 ├── Dockerfile                  # builds the routing server image
-├── docker-compose.yml          # defines the container configuration
+├── docker-compose.yml          # standalone routing-only stack (for graph import)
 ├── config.yml                  # GraphHopper / OpenRailRouting configuration
 ├── custom_models/
 │   └── night_train.json        # custom routing profile for night trains
@@ -67,7 +67,7 @@ models/routing/docker/data/europe-latest.osm.pbf
 Open PowerShell and navigate to the docker folder:
 
 ```powershell
-cd models\routing\docker
+cd backend\models\route\routing\docker
 docker compose build
 ```
 
@@ -138,8 +138,12 @@ Expected response contains:
 
 ## Day-to-Day Usage
 
+> **Note:** In normal development, the routing engine starts automatically as part
+> of the main backend stack (`backend/docker/docker-compose.yml`). Use the standalone
+> compose here only for graph import or isolated routing testing.
+
 ```powershell
-# Start the server
+# Start the server (standalone)
 docker compose up -d
 
 # Stop the server
@@ -244,7 +248,7 @@ curl -L -o data\europe-latest.osm.pbf `
 |---|---|---|
 | `docker: command not found` | Docker not on PATH | Restart PowerShell after installing Docker Desktop |
 | `Cannot connect to Docker daemon` | Docker Desktop not running | Open Docker Desktop, wait for "Engine running" |
-| `port 8989 already in use` | Another service on that port | Change port in `docker-compose.yml` |
+| `port 8989 already in use` | Another service on that port | Change `OPENRAILROUTING_HOST_PORT` in `backend/docker/.env` |
 | `No route found` | Station coordinates snap to non-rail | Check lat/lon are correct and near a rail station |
 | `OutOfMemoryError` during import | Not enough RAM | Close other applications, ensure 24 GB free |
 | Server starts but returns 503 | Graph still loading | Wait 30–60 seconds after `docker compose up` |

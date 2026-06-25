@@ -7,14 +7,21 @@ Start with:
     uv run python main.py            (development)
     uv run flask --app main run      (alternative)
 
-Endpoints
----------
-  GET  /api/health              — liveness check
-  GET  /api/data/status         — database connection state
-  GET  /api/compositions        — list available compositions
-  GET  /api/stops               — list available stops with coordinates
-  GET  /api/infrastructure      — per-country infrastructure parameters
-  POST /api/evaluate            — run full pipeline, return ModelResult
+Endpoints — see api/README.md for full documentation.
+
+  GET  /api/health
+  POST /api/auth/request-code        ⚠️  stub — not yet implemented
+  POST /api/auth/verify              ⚠️  stub — not yet implemented
+  POST /api/feedback                 ⚠️  stub — not yet implemented
+  POST /api/scenario                 ⚠️  stub — not yet implemented
+  GET  /api/scenarios                ⚠️  stub — not yet implemented
+  POST /api/scenarios                ⚠️  stub — not yet implemented
+  GET  /api/scenario/<id>            ⚠️  stub — not yet implemented
+  GET  /api/params/StopInfrastructures
+  GET  /api/params/compositions
+  GET  /api/params/TrackInfrastructures
+  POST /api/route/planOrUpdate
+  POST /api/evaluation/calc
 """
 
 import logging
@@ -23,7 +30,7 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 
 from api.dependencies import DataNotLoadedError, init
-from api.routes import data, params, evaluate
+from api import health, params, route, evaluation, auth, feedback, scenarios
 
 logging.basicConfig(
     level=logging.INFO,
@@ -37,14 +44,13 @@ def create_app() -> Flask:
     CORS(app)
 
     # --- blueprints ---
-    app.register_blueprint(data.bp,     url_prefix="/api/data")
-    app.register_blueprint(params.bp,   url_prefix="/api")
-    app.register_blueprint(evaluate.bp, url_prefix="/api/evaluate")
-
-    # --- health check ---
-    @app.get("/api/health")
-    def health():
-        return jsonify({"status": "ok"}), 200
+    app.register_blueprint(health.bp,      url_prefix="/api")
+    app.register_blueprint(params.bp,      url_prefix="/api/params")
+    app.register_blueprint(route.bp,       url_prefix="/api/route")
+    app.register_blueprint(evaluation.bp,  url_prefix="/api/evaluation")
+    app.register_blueprint(auth.bp,        url_prefix="/api/auth")
+    app.register_blueprint(feedback.bp,    url_prefix="/api")
+    app.register_blueprint(scenarios.bp,   url_prefix="/api")
 
     # --- global error handlers ---
     @app.errorhandler(DataNotLoadedError)
@@ -71,8 +77,6 @@ def create_app() -> Flask:
 
 
 if __name__ == "__main__":
-    # Initialise database connection before serving requests
     init()
-
     app = create_app()
     app.run(host="0.0.0.0", port=5000, debug=True)

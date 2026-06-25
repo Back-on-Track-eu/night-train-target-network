@@ -2,16 +2,16 @@
 # Night Train — Backend Services
 # =============================================================================
 # Services:
-#   postgres         — PostgreSQL database (test instance, seeded on startup)
+#   postgres         — PostgreSQL database (seeded on API startup)
 #   openrailrouting  — rail routing engine (GraphHopper fork)
 #   api              — Flask REST API (seeds db then starts)
 #
 # Usage:
 #   cd backend/docker
+#   cp .env.example .env
 #   docker-compose up -d
 #
-# Prerequisites:
-#   Set postgres vars in a .env file (see .env.example)
+# All configuration lives in .env — see .env.example for reference.
 
 services:
 
@@ -20,9 +20,9 @@ services:
     container_name: night_train_postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_USER:     ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_DB:       ${POSTGRES_DB}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
@@ -35,18 +35,18 @@ services:
 
   openrailrouting:
     build:
-      context: ../models/route_evaluation_model/routing/docker
+      context: ../models/route/routing/docker
       dockerfile: Dockerfile
+    image: docker-openrailrouting
     container_name: openrailrouting
     ports:
-      - "8989:8989"
-      - "8990:8990"
+      - "${OPENRAILROUTING_HOST_PORT:-8989}:${OPENRAILROUTING_CONTAINER_PORT:-8989}"
     volumes:
-      - ../models/route_evaluation_model/routing/docker/data:/app/data
-      - ../models/route_evaluation_model/routing/docker/graph-cache:/app/graph-cache
+      - ../models/route/routing/docker/data:/app/data
+      - ${GRAPH_CACHE_PATH}:/app/graph-cache
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8989/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:${OPENRAILROUTING_CONTAINER_PORT:-8989}/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -56,16 +56,16 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+    image: docker-api
     container_name: night-train-api
     ports:
       - "5000:5000"
+    env_file:
+      - .env
     environment:
-      - OPENRAILROUTING_URL=http://openrailrouting:8989
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_DB=${POSTGRES_DB}
+      # Override for inter-container networking — always use service name as host
+      POSTGRES_HOST:        postgres
+      OPENRAILROUTING_URL:  http://openrailrouting:${OPENRAILROUTING_CONTAINER_PORT:-8989}
     depends_on:
       postgres:
         condition: service_healthy

@@ -21,9 +21,6 @@ RUN uv sync --frozen --no-install-project
 # =============================================================================
 FROM python:3.12-slim AS runtime
 
-# git           — VSCode devcontainer source control
-# curl          — used in healthchecks and asset downloads
-# openssh-client — git over SSH (keys are mounted from host)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
@@ -40,9 +37,10 @@ COPY . .
 
 # Download countries.geojson — needed by rail_router.py for country border
 # detection. Gitignored (large static asset), so fetched at build time.
-RUN curl -fsSL \
-    "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson" \
-    -o models/route_evaluation_model/routing/countries.geojson
+# URL configured via NATURAL_EARTH_COUNTRIES_URL in .env.example.
+ARG NATURAL_EARTH_COUNTRIES_URL=https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson
+RUN curl -fsSL "$NATURAL_EARTH_COUNTRIES_URL" \
+    -o models/route/routing/countries.geojson
 
 # Activate venv
 ENV PATH="/app/.venv/bin:$PATH"
