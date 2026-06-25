@@ -10,7 +10,7 @@ Unit conventions
   Clock time: minutes from midnight of day 1 (_min)
               e.g. 21:00 = 1260, next-day 08:00 = 1920
   Energy   : kWh     (_kwh)
-  Cost     : EUR     (_eur)  — cost fields live in cost_rev_eval, NOT here
+  Cost     : EUR     (_eur)  — cost fields live in evaluation, NOT here
   Speed    : km/h    (_kmh)  — display/derived only, not stored
 
 Hierarchy
@@ -19,41 +19,34 @@ Hierarchy
   ├── trip_id: str                      (UUID, assigned by route_factory)
   ├── direction: int                    (0 = outbound, 1 = return)
   ├── departure_time_min: int
-  ├── params_snapshot: ParamsSnapshot
-  ├── composition: CompositionParams    (display fields only)
+  ├── model_versions: ModelVersions
+  ├── param_versions: ParamVersions
+  ├── composition: Composition
   ├── stop_times: list[StopTime]
   ├── path: TripPath
   │   ├── shape: dict                   (GeoJSON LineString)
-  │   ├── segments: list[TripSegment]
+  │   ├── segments: list[TripSegment]    (one per stop pair, physics from CountryLegs)
   │   │   └── country_legs: list[CountryLeg]
-  │   └── countries: list[CountrySegment]
+  │   └── countries: list[CountrySegment] (one per country, physics from CountryLegs)
   └── stats: TripStats
 
 Separation of concerns
 -----------------------
 Trip carries PHYSICS only — distances, times, energy in kWh.
 NO monetary values (TAC, energy cost, station charges, parking).
-All cost calculations live exclusively in models/cost_rev_eval/calc.py.
+All cost calculations live exclusively in models/evaluation/calc.py.
 
 Immutability contract
 ---------------------
 Trip is immutable after construction. The only permitted in-place mutation
 is set_departure_time(), which shifts all stop_times clock values by a delta
 with no external dependencies. All other changes require building a new Trip
-via route_factory and calling route.update_trip().
+via route_factory.
 
 Consistency invariant (enforced in __post_init__):
   len(path.segments) == len(stop_times) - 1
   path.segments[i].from_stop_id == stop_times[i].stop_id   for all i
   path.segments[i].to_stop_id   == stop_times[i+1].stop_id for all i
-
-Serialisation
--------------
-to_dict() converts internal units to display-friendly formats:
-  _min clock times → "HH:MM (+Nd)" strings  (arrival_time_fmt etc.)
-  _min durations   → decimal hours           (for API consumers)
-  _m distances     → km
-from_dict() expects the raw internal values (minutes, metres).
 """
 
 from __future__ import annotations
@@ -61,85 +54,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from models.params import CompositionParams
-
-
-# =============================================================================
-# UNIT CONVERSION HELPERS
-# =============================================================================
-
-def _min_to_hhmm(minutes: Optional[int]) -> Optional[str]:
-    """
-    Convert minutes-from-midnight to HH:MM string, handling overnight.
-    e.g. 1260 → "21:00", 1920 → "08:00 (+1d)"
-    """
-    if minutes is None:
-        return None
-    days  = minutes // 1440
-    h     = (minutes % 1440) // 60
-    m     = minutes % 60
-    day_s = f" (+{days}d)" if days > 0 else ""
-    return f"{h:02d}:{m:02d}{day_s}"
-
-
-def _min_to_h(minutes: Optional[int]) -> Optional[float]:
-    """Convert minutes to decimal hours. Returns None if input is None."""
-    if minutes is None:
-        return None
-    return minutes / 60.0
-
-
-def _m_to_km(metres: int) -> float:
-    """Convert metres to kilometres."""
-    return metres / 1000.0
-
-
-# =============================================================================
-# PARAMS SNAPSHOT
-# =============================================================================
-
-@dataclass
-class ParamsSnapshot:
-    """
-    Records the exact parameter versions and model versions used to build
-    this trip. Enables full reproducibility.
-
-    composition_version:   comp_version of the DB row used.
-    infra_generation:      table-generation counter at build time.
-                           Stand-in: MAX(infra_row_id) WHERE is_current.
-    stops_generation:      table-generation counter at build time.
-                           Stand-in: MAX(stop_row_id) WHERE is_current.
-    route_builder_version: ROUTE_BUILDER_VERSION at build time.
-    energy_calc_version:   ENERGY_CALC_VERSION at build time.
-    """
-
-    composition_id:         str
-    composition_version:    int
-    infra_generation:       int
-    stops_generation:       int
-    route_builder_version:  str
-    energy_calc_version:    str
-
-    def to_dict(self) -> dict:
-        return {
-            "composition_id":         self.composition_id,
-            "composition_version":    self.composition_version,
-            "infra_generation":       self.infra_generation,
-            "stops_generation":       self.stops_generation,
-            "route_builder_version":  self.route_builder_version,
-            "energy_calc_version":    self.energy_calc_version,
-        }
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "ParamsSnapshot":
-        return cls(
-            composition_id        = d["composition_id"],
-            composition_version   = d["composition_version"],
-            infra_generation      = d["infra_generation"],
-            stops_generation      = d["stops_generation"],
-            route_builder_version = d["route_builder_version"],
-            energy_calc_version   = d["energy_calc_version"],
-        )
+from models.utils import min_to_hhmm, min_to_h, m_to_km
+from models.params import Composition, ModelVersions, ParamVersions
 
 
 # =============================================================================
@@ -190,9 +106,9 @@ class StopTime:
             "arrival_time_min":   self.arrival_time_min,
             "departure_time_min": self.departure_time_min,
             "dwell_time_min":     self.dwell_time_min,
-            "arrival_time_fmt":   _min_to_hhmm(self.arrival_time_min),
-            "departure_time_fmt": _min_to_hhmm(self.departure_time_min),
-            "dwell_time_h":       _min_to_h(self.dwell_time_min),
+            "arrival_time_fmt":   min_to_hhmm(self.arrival_time_min),
+            "departure_time_fmt": min_to_hhmm(self.departure_time_min),
+            "dwell_time_h":       min_to_h(self.dwell_time_min),
         }
 
     @classmethod
@@ -220,10 +136,10 @@ class CountryLeg:
 
     Physics only — distance, time, speed, buffer, energy in kWh.
     NO cost fields. TAC, energy costs, station charges are computed
-    exclusively in models/cost_rev_eval/calc.py using these physics
-    values × infra cost params.
+    exclusively in models/evaluation/calc.py using these values
+    × infra cost params.
 
-    Constructed exclusively via _router_leg_to_country_leg() in route_factory.
+    Constructed exclusively via route_factory.
     """
 
     from_stop_id:      str
@@ -241,7 +157,7 @@ class CountryLeg:
 
     @property
     def distance_km(self) -> float:
-        return _m_to_km(self.distance_m)
+        return m_to_km(self.distance_m)
 
     @property
     def avg_speed_kmh(self) -> float:
@@ -286,8 +202,7 @@ class CountryLeg:
 class TripSegment:
     """
     One segment between two consecutive stops, potentially spanning
-    multiple countries. All aggregates derived from country_legs.
-    Physics only — no cost values.
+    multiple countries. Physics properties derived from country_legs.
     """
 
     from_stop_id:  str
@@ -301,7 +216,7 @@ class TripSegment:
 
     @property
     def distance_km(self) -> float:
-        return _m_to_km(self.distance_m)
+        return m_to_km(self.distance_m)
 
     @property
     def driving_time_min(self) -> int:
@@ -327,17 +242,17 @@ class TripSegment:
 
     def to_dict(self) -> dict:
         return {
-            "from_stop_id":    self.from_stop_id,
-            "to_stop_id":      self.to_stop_id,
-            "distance_m":      self.distance_m,
-            "distance_km":     self.distance_km,
+            "from_stop_id":     self.from_stop_id,
+            "to_stop_id":       self.to_stop_id,
+            "geometry":         self.geometry,
+            "distance_m":       self.distance_m,
+            "distance_km":      self.distance_km,
             "driving_time_min": self.driving_time_min,
-            "buffer_time_min": self.buffer_time_min,
-            "total_time_min":  self.total_time_min,
-            "avg_speed_kmh":   self.avg_speed_kmh,
-            "energy_kwh":      self.energy_kwh,
-            "geometry":        self.geometry,
-            "country_legs":    [cl.to_dict() for cl in self.country_legs],
+            "buffer_time_min":  self.buffer_time_min,
+            "total_time_min":   self.total_time_min,
+            "avg_speed_kmh":    self.avg_speed_kmh,
+            "energy_kwh":       self.energy_kwh,
+            "country_legs":     [cl.to_dict() for cl in self.country_legs],
         }
 
     @classmethod
@@ -358,7 +273,7 @@ class TripSegment:
 class CountrySegment:
     """
     Aggregated summary of all CountryLegs within one country across the
-    full trip. Physics only — no cost values.
+    full trip. Physics properties derived from country_legs.
     """
 
     country_code: str
@@ -370,7 +285,7 @@ class CountrySegment:
 
     @property
     def distance_km(self) -> float:
-        return _m_to_km(self.distance_m)
+        return m_to_km(self.distance_m)
 
     @property
     def driving_time_min(self) -> int:
@@ -456,11 +371,7 @@ class TripPath:
 @dataclass
 class TripStats:
     """
-    Aggregated physics scalars for one trip.
-    Physics only — NO monetary values.
-
-    The cost model (calc.py) uses these values × infra/composition cost
-    params to compute TAC, energy costs, station charges etc.
+    Aggregated physics scalars for one trip. Physics only — NO monetary values.
 
     total_time_min = total_driving_time_min + total buffer across all segments.
     total_energy_kwh = sum of energy_kwh across all country legs.
@@ -477,9 +388,9 @@ class TripStats:
             "total_driving_time_min": self.total_driving_time_min,
             "total_time_min":         self.total_time_min,
             "total_energy_kwh":       self.total_energy_kwh,
-            "total_distance_km":      _m_to_km(self.total_distance_m),
-            "total_driving_time_h":   _min_to_h(self.total_driving_time_min),
-            "total_time_h":           _min_to_h(self.total_time_min),
+            "total_distance_km":      m_to_km(self.total_distance_m),
+            "total_driving_time_h":   min_to_h(self.total_driving_time_min),
+            "total_time_h":           min_to_h(self.total_time_min),
         }
 
     @classmethod
@@ -507,6 +418,7 @@ class Trip:
     departure_time_min — minutes from midnight day 1 (e.g. 21:00 → 1260).
 
     Physics only — no monetary values anywhere in this object.
+    model_versions and param_versions capture what was used to build this trip.
 
     Consistency invariant (checked in __post_init__):
       len(path.segments) == len(stop_times) - 1
@@ -515,15 +427,20 @@ class Trip:
     """
 
     trip_id:            str
-    direction:          int                 # 0 = outbound, 1 = return
+    direction:          int             # 0 = outbound, 1 = return
     departure_time_min: int
-    params_snapshot:    ParamsSnapshot
-    composition:        CompositionParams
+    model_versions:     ModelVersions
+    param_versions:     ParamVersions
+    composition:        Composition
     stop_times:         list[StopTime]
     path:               TripPath
     stats:              TripStats
 
     def __post_init__(self) -> None:
+        pass  # validation deferred to _create() — do not instantiate directly
+
+    def _post_validate(self) -> None:
+        """Structural validation — called by _create() after construction."""
         if self.direction not in (0, 1):
             raise ValueError(
                 f"Trip '{self.trip_id}': direction must be 0 or 1, "
@@ -557,6 +474,37 @@ class Trip:
                     f"'{expected_to}'."
                 )
 
+    @classmethod
+    def _create(
+        cls,
+        trip_id:            str,
+        direction:          int,
+        departure_time_min: int,
+        model_versions:     "ModelVersions",
+        param_versions:     "ParamVersions",
+        composition:        "Composition",
+        stop_times:         list["StopTime"],
+        path:               "TripPath",
+        stats:              "TripStats",
+    ) -> "Trip":
+        """
+        Sole constructor for Trip — called exclusively by route_factory.
+        Never instantiate Trip directly.
+        """
+        trip = cls(
+            trip_id            = trip_id,
+            direction          = direction,
+            departure_time_min = departure_time_min,
+            model_versions     = model_versions,
+            param_versions     = param_versions,
+            composition        = composition,
+            stop_times         = stop_times,
+            path               = path,
+            stats              = stats,
+        )
+        trip._post_validate()
+        return trip
+
     def set_departure_time(self, departure_time_min: int) -> None:
         """
         Shift all stop clock times by delta. dwell_time_min unchanged.
@@ -570,16 +518,29 @@ class Trip:
         return {
             "trip_id":            self.trip_id,
             "direction_id":       self.direction,
-            "departure_time":     _min_to_hhmm(self.departure_time_min),
+            "departure_time":     min_to_hhmm(self.departure_time_min),
             "departure_time_min": self.departure_time_min,
-            "params_snapshot":    self.params_snapshot.to_dict(),
+            "model_versions":     self.model_versions.versions,
+            "param_versions":     {
+                k: {
+                    "value":       v.value,
+                    "version":     v.version,
+                    "source":      {
+                        "source_id":          v.source.source_id,
+                        "source_description": v.source.source_description,
+                        "source_url":         v.source.source_url,
+                        "source_date":        v.source.source_date,
+                    } if v.source else None,
+                    "description": v.description,
+                }
+                for k, v in self.param_versions.entries.items()
+            },
             "composition": {
                 "comp_id":          self.composition.comp_id,
                 "comp_description": self.composition.comp_description,
-                "operator_id":      self.composition.company,
-                "seats_total":      self.composition.seats_total,
-                "couchettes_total": self.composition.couchettes_total,
-                "sleepers_total":   self.composition.sleepers_total,
+                "operator_id":      self.composition.operator_id,
+                "places_by_class":  self.composition.places_by_class,
+                "density_by_class": self.composition.density_by_class,
             },
             "stop_times": [st.to_dict() for st in self.stop_times],
             "shape":      self.path.shape,
@@ -589,12 +550,56 @@ class Trip:
 
     @classmethod
     def from_dict(cls, d: dict) -> "Trip":
-        composition = CompositionParams.from_display_dict(d["composition"])
+        """
+        Reconstruct a Trip from its to_dict() representation.
+
+        composition is reconstructed with only display fields — cost fields
+        are sentinel zeros since evaluate_route() always reloads the full
+        Composition from the DB via loader.build_composition(comp_id).
+        """
+        comp_d = d["composition"]
+        composition = Composition(
+            comp_id               = comp_d["comp_id"],
+            comp_description      = comp_d.get("comp_description", ""),
+            operator_id           = comp_d.get("operator_id", ""),
+            driver_factor         = 0.0,
+            max_speed_kmh         = 0.0,
+            hsr_allowed           = False,
+            min_boarding_time_min = 0,
+            min_alighting_time_min= 0,
+            energy_factor_weight  = 0.0,
+            energy_factor_speed   = 0.0,
+            energy_factor_terrain = 0.0,
+            total_weight_t        = 0.0,
+            total_crew            = 0.0,
+            places_by_class       = comp_d.get("places_by_class", {}),
+            density_by_class      = comp_d.get("density_by_class", {}),
+            driver_costs_eur_h    = 0.0,
+            crew_costs_eur_h      = 0.0,
+            driver_overhead_min   = 0,
+            crew_overhead_min     = 0,
+            ebit_margin_per       = 0.0,
+            financing_quota_per   = 0.0,
+            shunting_eur_day      = 0.0,
+            var_overhead_per      = 0.0,
+            fix_overhead_quota_per= 0.0,
+            svc_stockings_eur_place = {},
+            purchase_loco_eur         = 0.0,
+            purchase_coach_eur        = 0.0,
+            loco_avail_per            = 0.0,
+            coach_avail_per           = 0.0,
+            loco_amort_years          = 0,
+            coach_amort_years         = 0,
+            cleaning_services_eur_day = 0.0,
+            loco_maint_eur_km         = 0.0,
+            coach_maint_eur_km        = 0.0,
+        )
         return cls(
             trip_id            = d["trip_id"],
             direction          = d["direction_id"],
             departure_time_min = d["departure_time_min"],
-            params_snapshot    = ParamsSnapshot.from_dict(d["params_snapshot"]),
+            model_versions     = ModelVersions(versions=d.get("model_versions", {})),
+            param_versions     = ParamVersions(),   # not reconstructed from dict
             composition        = composition,
             stop_times         = [StopTime.from_dict(st) for st in d["stop_times"]],
             path               = TripPath.from_dict(d["path"]),

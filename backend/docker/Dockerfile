@@ -37,8 +37,9 @@ COPY . .
 
 # Download countries.geojson — needed by rail_router.py for country border
 # detection. Gitignored (large static asset), so fetched at build time.
-RUN curl -fsSL \
-    "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson" \
+# URL configured via NATURAL_EARTH_COUNTRIES_URL in .env.example.
+ARG NATURAL_EARTH_COUNTRIES_URL=https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson
+RUN curl -fsSL "$NATURAL_EARTH_COUNTRIES_URL" \
     -o models/route/routing/countries.geojson
 
 # Activate venv

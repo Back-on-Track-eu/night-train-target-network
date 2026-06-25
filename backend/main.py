@@ -7,13 +7,21 @@ Start with:
     uv run python main.py            (development)
     uv run flask --app main run      (alternative)
 
-Endpoints
----------
-  GET  /api/health                — liveness check
-  GET  /api/params/stops          — stop list for stop picker
-  GET  /api/params/compositions   — composition list for composition picker
-  POST /api/route-builder/build   — build route + timetable (physics only)
-  POST /api/cost-rev-calc/calc    — cost and revenue evaluation
+Endpoints — see api/README.md for full documentation.
+
+  GET  /api/health
+  POST /api/auth/request-code        ⚠️  stub — not yet implemented
+  POST /api/auth/verify              ⚠️  stub — not yet implemented
+  POST /api/feedback                 ⚠️  stub — not yet implemented
+  POST /api/scenario                 ⚠️  stub — not yet implemented
+  GET  /api/scenarios                ⚠️  stub — not yet implemented
+  POST /api/scenarios                ⚠️  stub — not yet implemented
+  GET  /api/scenario/<id>            ⚠️  stub — not yet implemented
+  GET  /api/params/StopInfrastructures
+  GET  /api/params/compositions
+  GET  /api/params/TrackInfrastructures
+  POST /api/route/planOrUpdate
+  POST /api/evaluation/calc
 """
 
 import logging
@@ -22,7 +30,7 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 
 from api.dependencies import DataNotLoadedError, init
-from api import health, params, route_builder, cost_rev_calc
+from api import health, params, route, evaluation, auth, feedback, scenarios
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,10 +44,13 @@ def create_app() -> Flask:
     CORS(app)
 
     # --- blueprints ---
-    app.register_blueprint(health.bp,        url_prefix="/api")
-    app.register_blueprint(params.bp,        url_prefix="/api/params")
-    app.register_blueprint(route_builder.bp, url_prefix="/api/route-builder")
-    app.register_blueprint(cost_rev_calc.bp, url_prefix="/api/cost-rev-calc")
+    app.register_blueprint(health.bp,      url_prefix="/api")
+    app.register_blueprint(params.bp,      url_prefix="/api/params")
+    app.register_blueprint(route.bp,       url_prefix="/api/route")
+    app.register_blueprint(evaluation.bp,  url_prefix="/api/evaluation")
+    app.register_blueprint(auth.bp,        url_prefix="/api/auth")
+    app.register_blueprint(feedback.bp,    url_prefix="/api")
+    app.register_blueprint(scenarios.bp,   url_prefix="/api")
 
     # --- global error handlers ---
     @app.errorhandler(DataNotLoadedError)

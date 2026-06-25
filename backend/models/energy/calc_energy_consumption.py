@@ -26,7 +26,7 @@ Energy consumption calculation for night train trips.
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 Called exclusively from route_factory.py during Trip construction.
-Enriches each _CountryLeg in the router result with energy_kwh and
+Enriches each CountryLeg in the TripPath with energy_kwh and
 energy_kwh_per_km by mutating in-place.
 
 Unit conventions
@@ -38,9 +38,8 @@ Unit conventions
 from __future__ import annotations
 
 import logging
-from typing import Any
-
-from models.params import CompositionParams
+from models.params import Composition
+from models.route.trip import TripPath
 
 logger = logging.getLogger(__name__)
 
@@ -61,11 +60,11 @@ _DUMMY_KWH_PER_KM: float = 28.0
 # =============================================================================
 
 def calc_energy_consumption(
-        router_result: Any,             # _RouterResult — duck typed
-        composition:   CompositionParams,
+        trip_path:   TripPath,
+        composition: Composition,
 ) -> None:
     """
-    Enrich each _CountryLeg in router_result.segments with energy_kwh
+    Enrich each CountryLeg in trip_path.segments with energy_kwh
     and energy_kwh_per_km. Mutates in-place.
 
     !! DUMMY IMPLEMENTATION — see module docstring !!
@@ -77,12 +76,12 @@ def calc_energy_consumption(
 
     Parameters
     ----------
-    router_result : _RouterResult
-        Raw router output. _CountryLeg.energy_kwh is 0.0 on entry.
-        distance_m is in metres — converted to km internally.
-    composition : CompositionParams
+    trip_path : TripPath
+        TripPath returned by RailRouter.route(). CountryLeg.energy_kwh
+        is 0.0 on entry. distance_m in metres — converted to km internally.
+    composition : Composition
         Vehicle composition. Currently unused — reserved for the real
-        implementation which will use weight_gross_t and energy factors.
+        implementation which will use total_weight_t and energy factors.
 
     Called exclusively from route_factory.py.
     """
@@ -93,7 +92,7 @@ def calc_energy_consumption(
         _DUMMY_KWH_PER_KM,
     )
 
-    for segment in router_result.segments:
+    for segment in trip_path.segments:
         for cl in segment.country_legs:
             distance_km       = cl.distance_m / 1000.0
             energy_kwh        = _DUMMY_KWH_PER_KM * distance_km

@@ -64,8 +64,8 @@ CREATE TABLE proposals.shapes (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-COMMENT ON TABLE  proposals.shapes          IS 'Route geometry — one row per shape, stored as a GeoJSON LineString in JSONB rather than the GTFS per-point shapes.txt format. Consumed directly by Leaflet/MapLibre. On GTFS export, explode coordinates into one row per point.';
-COMMENT ON COLUMN proposals.shapes.shape_id  IS 'Unique shape identifier. Referenced by proposals.trips.';
+COMMENT ON TABLE  proposals.shapes           IS 'Route geometry — one row per shape, stored as a GeoJSON LineString in JSONB. Consumed directly by Leaflet/MapLibre. shape_id follows the proposal ID convention e.g. P1_V1_R1_D0_T1_SHAPE.';
+COMMENT ON COLUMN proposals.shapes.shape_id  IS 'Unique shape identifier. References proposals.trips.shape_id.';
 COMMENT ON COLUMN proposals.shapes.geometry  IS 'GeoJSON LineString: {"type":"LineString","coordinates":[[lon,lat],...]}. Unit: WGS-84 decimal degrees.';
 COMMENT ON COLUMN proposals.shapes.length_km IS 'Total route length derived from the geometry. Unit: km';
 
@@ -83,9 +83,9 @@ CREATE TABLE proposals.routes (
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-COMMENT ON TABLE  proposals.routes                IS 'GTFS routes.txt — one row per named night train line. route_type 105 = Sleeper Rail Service (GTFS extended HVT code).';
-COMMENT ON COLUMN proposals.routes.route_id         IS 'Unique route identifier (e.g. NJ-BER-VIE).';
-COMMENT ON COLUMN proposals.routes.agency_id        IS 'GTFS agency_id — nullable for now; populate on GTFS export from input_params.operators (operator_id maps to agency_id in agency.txt).';
+COMMENT ON TABLE  proposals.routes                IS 'GTFS routes.txt — one row per proposal version route. route_id follows convention P{proposal_id}_V{version}_R{route_index} e.g. P1_V1_R1. route_type 105 = Sleeper Rail Service (GTFS extended HVT code).';
+COMMENT ON COLUMN proposals.routes.route_id         IS 'GTFS route identifier. Convention: P{proposal_id}_V{version}_R{route_index} e.g. P1_V1_R1.';
+COMMENT ON COLUMN proposals.routes.agency_id        IS 'GTFS agency_id — nullable; populate on GTFS export from input_params.operators.';
 COMMENT ON COLUMN proposals.routes.route_short_name IS 'Short public name of the route (e.g. train number "NJ 470").';
 COMMENT ON COLUMN proposals.routes.route_long_name  IS 'Full descriptive name of the route (e.g. "Berlin Hbf - Vienna Hbf").';
 COMMENT ON COLUMN proposals.routes.route_desc       IS 'Optional free-text description of the route.';
@@ -96,24 +96,24 @@ COMMENT ON COLUMN proposals.routes.route_color      IS 'Hex color for map render
 -- trips
 -- ---------------------------------------------------------------
 CREATE TABLE proposals.trips (
-    trip_id         TEXT PRIMARY KEY,
-    route_id        TEXT NOT NULL REFERENCES proposals.routes(route_id) ON DELETE CASCADE,
-    service_id      TEXT NOT NULL REFERENCES proposals.services(service_id) ON DELETE CASCADE,
-    shape_id        TEXT REFERENCES proposals.shapes(shape_id) ON DELETE SET NULL,
-    trip_headsign   TEXT,
-    direction_id    SMALLINT CHECK (direction_id IN (0, 1)),
-    composition_id  TEXT NOT NULL,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+    trip_id                   TEXT PRIMARY KEY,
+    route_id                  TEXT NOT NULL REFERENCES proposals.routes(route_id) ON DELETE CASCADE,
+    service_id                TEXT NOT NULL REFERENCES proposals.services(service_id) ON DELETE CASCADE,
+    shape_id                  TEXT REFERENCES proposals.shapes(shape_id) ON DELETE SET NULL,
+    trip_headsign             TEXT,
+    direction_id              SMALLINT CHECK (direction_id IN (0, 1)),
+    composition_type_id       TEXT NOT NULL,
+    created_at                TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-COMMENT ON TABLE  proposals.trips                IS 'GTFS trips.txt — one scheduled run of a route. composition_id is a project extension (not GTFS) linking to the rolling stock used.';
-COMMENT ON COLUMN proposals.trips.trip_id        IS 'Unique trip identifier.';
-COMMENT ON COLUMN proposals.trips.route_id       IS 'References proposals.routes.';
-COMMENT ON COLUMN proposals.trips.service_id     IS 'References proposals.services — defines which days this trip runs.';
-COMMENT ON COLUMN proposals.trips.shape_id       IS 'References proposals.shapes — optional route geometry for map display.';
-COMMENT ON COLUMN proposals.trips.trip_headsign  IS 'Destination text shown to passengers (e.g. "Wien Hbf").';
-COMMENT ON COLUMN proposals.trips.direction_id   IS 'GTFS direction: 0 = outbound, 1 = inbound.';
-COMMENT ON COLUMN proposals.trips.composition_id IS 'Project extension: natural key of the rolling stock composition used (references input_params.compositions.comp_id). Not a hard FK — the versioned FK is on proposals.proposals.composition_row_id.';
+COMMENT ON TABLE  proposals.trips                        IS 'GTFS trips.txt — one scheduled run of a route per proposal version. trip_id convention: P{proposal_id}_V{version}_R{route_index}_D{direction}_T{trip_index} e.g. P1_V1_R1_D0_T1.';
+COMMENT ON COLUMN proposals.trips.trip_id                IS 'GTFS trip identifier. Convention: P{proposal_id}_V{version}_R{route_index}_D{direction}_T{trip_index}.';
+COMMENT ON COLUMN proposals.trips.route_id               IS 'References proposals.routes.';
+COMMENT ON COLUMN proposals.trips.service_id             IS 'References proposals.services — defines which days this trip runs.';
+COMMENT ON COLUMN proposals.trips.shape_id               IS 'References proposals.shapes — optional route geometry for map display.';
+COMMENT ON COLUMN proposals.trips.trip_headsign          IS 'Destination text shown to passengers (e.g. "Wien Hbf").';
+COMMENT ON COLUMN proposals.trips.direction_id           IS 'GTFS direction: 0 = outbound, 1 = inbound.';
+COMMENT ON COLUMN proposals.trips.composition_type_id    IS 'Natural key of the composition type used. Soft reference to input_params.composition_types.composition_type_id.';
 
 -- ---------------------------------------------------------------
 -- stop_times
@@ -122,18 +122,18 @@ CREATE TABLE proposals.stop_times (
     trip_id         TEXT NOT NULL REFERENCES proposals.trips(trip_id) ON DELETE CASCADE,
     stop_sequence   INTEGER NOT NULL,
     stop_id         TEXT NOT NULL,
-    arrival_time    INTERVAL NOT NULL,
-    departure_time  INTERVAL NOT NULL,
+    arrival_time    INTERVAL,
+    departure_time  INTERVAL,
     stop_headsign   TEXT,
     pickup_type     SMALLINT NOT NULL DEFAULT 0,
     drop_off_type   SMALLINT NOT NULL DEFAULT 0,
     PRIMARY KEY (trip_id, stop_sequence)
 );
 
-COMMENT ON TABLE  proposals.stop_times               IS 'GTFS stop_times.txt — ordered stop sequence per trip. Times stored as INTERVAL (not TIME) to support GTFS overnight convention where times exceed 24:00:00.';
+COMMENT ON TABLE  proposals.stop_times               IS 'GTFS stop_times.txt — ordered stop sequence per trip. Times stored as INTERVAL to support GTFS overnight convention where times exceed 24:00:00.';
 COMMENT ON COLUMN proposals.stop_times.trip_id        IS 'References proposals.trips.';
 COMMENT ON COLUMN proposals.stop_times.stop_sequence  IS 'Ordered position of this stop within the trip (1-based).';
-COMMENT ON COLUMN proposals.stop_times.stop_id        IS 'Soft reference to input_params.stops.stop_id — no hard FK since stops live in Google Sheets at this stage.';
+COMMENT ON COLUMN proposals.stop_times.stop_id        IS 'Soft reference to input_params.stop_infrastructures.stop_id.';
 COMMENT ON COLUMN proposals.stop_times.arrival_time   IS 'Scheduled arrival time as INTERVAL from service-day midnight. Values above 24:00:00 indicate next-day arrivals per GTFS convention. Unit: HH:MM:SS';
 COMMENT ON COLUMN proposals.stop_times.departure_time IS 'Scheduled departure time. Same INTERVAL convention as arrival_time. Unit: HH:MM:SS';
 COMMENT ON COLUMN proposals.stop_times.stop_headsign  IS 'Optional destination sign override for this specific stop.';
@@ -141,59 +141,60 @@ COMMENT ON COLUMN proposals.stop_times.pickup_type    IS 'GTFS pickup type: 0 = 
 COMMENT ON COLUMN proposals.stop_times.drop_off_type  IS 'GTFS drop-off type: 0 = regular, 1 = no drop-off, 2 = phone agency, 3 = coordinate with driver.';
 
 -- ---------------------------------------------------------------
--- proposals (not GTFS)
+-- proposals  (not GTFS — project-specific versioned evaluation table)
 -- ---------------------------------------------------------------
 CREATE TABLE proposals.proposals (
-    proposal_id              SERIAL PRIMARY KEY,
-    route_id                 TEXT NOT NULL REFERENCES proposals.routes(route_id) ON DELETE CASCADE,
-    version                  INTEGER NOT NULL,
-    is_current               BOOLEAN NOT NULL DEFAULT TRUE,
-    user_id                  INTEGER REFERENCES admin.users(user_id) ON DELETE SET NULL,
-    composition_row_id       INTEGER NOT NULL REFERENCES input_params.compositions(comp_row_id),
-    total_distance_km        NUMERIC(8, 2) NOT NULL,
-    total_driving_time_h     NUMERIC(6, 2) NOT NULL,
-    air_shift_flights        NUMERIC(10, 2),
-    air_shift_seats          NUMERIC(12, 2),
-    air_shift_seat_km        NUMERIC(14, 2),
-    co2_reduction_t_co2e     NUMERIC(10, 2),
-    subsidy_per_seat_km_eur  NUMERIC(8, 4),
-    subsidy_per_t_co2e_eur   NUMERIC(10, 2),
-    total_revenue_eur        NUMERIC(10, 2) NOT NULL,
-    total_cost_eur           NUMERIC(10, 2) NOT NULL,
-    margin_eur               NUMERIC(10, 2) NOT NULL,
-    margin_per               NUMERIC(6, 4) NOT NULL,
-    capacity_breakdown       JSONB NOT NULL,
-    revenue_breakdown        JSONB NOT NULL,
-    cost_breakdown           JSONB NOT NULL,
-    parameter_snapshot       JSONB,
-    created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (route_id, version)
+    proposal_id                SERIAL PRIMARY KEY,
+    proposal_version           INTEGER NOT NULL DEFAULT 1,
+    route_id                   TEXT NOT NULL REFERENCES proposals.routes(route_id) ON DELETE CASCADE,
+    is_current                 BOOLEAN NOT NULL DEFAULT TRUE,
+    user_id                    INTEGER REFERENCES admin.users(user_id) ON DELETE SET NULL,
+    composition_type_row_id    INTEGER NOT NULL REFERENCES input_params.composition_types(composition_type_row_id),
+    -- route physics (from RouteStats)
+    total_distance_km          NUMERIC(8, 2) NOT NULL,
+    total_driving_time_h       NUMERIC(6, 2) NOT NULL,
+    total_time_h               NUMERIC(6, 2) NOT NULL,
+    total_energy_kwh           NUMERIC(10, 2),
+    -- climate impact (future)
+    air_shift_flights          NUMERIC(10, 2),
+    air_shift_seats            NUMERIC(12, 2),
+    air_shift_seat_km          NUMERIC(14, 2),
+    co2_reduction_t_co2e       NUMERIC(10, 2),
+    subsidy_per_seat_km_eur    NUMERIC(8, 4),
+    subsidy_per_t_co2e_eur     NUMERIC(10, 2),
+    -- cost/revenue (from EvaluationResult)
+    total_revenue_eur          NUMERIC(10, 2),
+    total_cost_eur             NUMERIC(10, 2),
+    margin_eur                 NUMERIC(10, 2),
+    margin_per                 NUMERIC(6, 4),
+    -- JSONB breakdowns
+    capacity_breakdown         JSONB,
+    revenue_breakdown          JSONB,
+    cost_breakdown             JSONB,
+    -- parameter provenance (ParamVersions serialised)
+    parameter_snapshot         JSONB,
+    -- metadata
+    editor                     VARCHAR(100),
+    change_log                 TEXT,
+    created_at                 TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (proposal_id, proposal_version)
 );
 
-CREATE UNIQUE INDEX idx_proposals_one_current_per_route
-    ON proposals.proposals (route_id)
+CREATE UNIQUE INDEX idx_proposals_one_current_per_id
+    ON proposals.proposals (proposal_id)
     WHERE is_current;
 
-COMMENT ON TABLE  proposals.proposals                    IS 'Project-specific table: one versioned row per saved cost/revenue/climate evaluation of a route. Not part of GTFS. Uses a partial unique index to enforce exactly one is_current row per route_id.';
-COMMENT ON COLUMN proposals.proposals.proposal_id         IS 'Surrogate primary key.';
-COMMENT ON COLUMN proposals.proposals.route_id            IS 'References proposals.routes — the route this evaluation belongs to.';
-COMMENT ON COLUMN proposals.proposals.version             IS 'Monotonically increasing version number per route_id. Managed by save_proposal() in seed_database.py.';
-COMMENT ON COLUMN proposals.proposals.is_current          IS 'True for the latest version of this route. Enforced by partial unique index idx_proposals_one_current_per_route.';
-COMMENT ON COLUMN proposals.proposals.user_id             IS 'Cross-schema FK to admin.users — the user who saved this evaluation. Nullable (SET NULL on user deletion).';
-COMMENT ON COLUMN proposals.proposals.composition_row_id  IS 'Cross-schema FK to input_params.compositions(comp_row_id) — version-pinned snapshot of the composition active at evaluation time.';
-COMMENT ON COLUMN proposals.proposals.total_distance_km   IS 'Total route distance calculated by OpenRailRouting. Unit: km';
-COMMENT ON COLUMN proposals.proposals.total_driving_time_h IS 'Total scheduled driving time (sum of all legs, excluding dwell times). Unit: h';
-COMMENT ON COLUMN proposals.proposals.air_shift_flights   IS 'Estimated number of flight departures that could be replaced by this night train service. Nullable — not yet computed by model.py.';
-COMMENT ON COLUMN proposals.proposals.air_shift_seats     IS 'Estimated number of airline seats replaced per departure day. Nullable — not yet computed by model.py.';
-COMMENT ON COLUMN proposals.proposals.air_shift_seat_km   IS 'Distance-weighted airline seats replaced (seats × km). Nullable — not yet computed by model.py. Unit: seat-km';
-COMMENT ON COLUMN proposals.proposals.co2_reduction_t_co2e IS 'Estimated CO₂ reduction vs. replaced air travel. Nullable — not yet computed by model.py. Unit: t CO₂e';
-COMMENT ON COLUMN proposals.proposals.subsidy_per_seat_km_eur IS 'Public subsidy required per shifted seat-kilometre, if the route needs support. Nullable — not yet computed. Unit: €/seat-km';
-COMMENT ON COLUMN proposals.proposals.subsidy_per_t_co2e_eur  IS 'Public subsidy cost per tonne of CO₂ avoided. Nullable — not yet computed. Unit: €/t CO₂e';
-COMMENT ON COLUMN proposals.proposals.total_revenue_eur   IS 'Total ticket revenue for one trip at modelled utilisation. Unit: €';
-COMMENT ON COLUMN proposals.proposals.total_cost_eur      IS 'Total operating cost for one trip. Unit: €';
-COMMENT ON COLUMN proposals.proposals.margin_eur          IS 'Operating margin per trip (revenue − cost). Unit: €';
-COMMENT ON COLUMN proposals.proposals.margin_per          IS 'Operating margin as a share of revenue. Unit: ratio (e.g. 0.31 = 31%)';
-COMMENT ON COLUMN proposals.proposals.capacity_breakdown  IS 'JSONB: seat/couchette/sleeper capacity for this trip, e.g. {"seats":80,"couchettes":144,"sleepers":0}.';
-COMMENT ON COLUMN proposals.proposals.revenue_breakdown   IS 'JSONB: revenue split by class, matching RevenueBreakdown.to_dict() from model.py.';
-COMMENT ON COLUMN proposals.proposals.cost_breakdown      IS 'JSONB: cost split by category, matching CostBreakdown.to_dict() from model.py.';
-COMMENT ON COLUMN proposals.proposals.parameter_snapshot  IS 'JSONB: complete reproducibility record for this evaluation. Contains model_version, generated_at, and one entry per input parameter block (composition, operator, infrastructure per country, coachtypes, stops, operator_class_costs). Each entry records the row_id, version, source_id, source_description, source_date, and a params sub-object where every used column maps to {value, comment, source_id} — source_id resolved from column_sources override if present, otherwise the row-level source_id. Nullable on legacy rows seeded before snapshot assembly was implemented.';
+COMMENT ON TABLE  proposals.proposals                       IS 'One versioned row per saved evaluation of a night train proposal. proposal_id is stable across versions — proposal_version increments on every change. route_id encodes the version: P{proposal_id}_V{proposal_version}_R1.';
+COMMENT ON COLUMN proposals.proposals.proposal_id           IS 'Stable surrogate key across all versions of a proposal.';
+COMMENT ON COLUMN proposals.proposals.proposal_version      IS 'Monotonically increasing version counter. Increments on every change (reroute or schedule adjustment).';
+COMMENT ON COLUMN proposals.proposals.route_id              IS 'FK to proposals.routes. Encodes version: P{proposal_id}_V{proposal_version}_R1.';
+COMMENT ON COLUMN proposals.proposals.is_current            IS 'True for the latest version of this proposal. Enforced by partial unique index.';
+COMMENT ON COLUMN proposals.proposals.user_id               IS 'FK to admin.users — user who saved this version. Nullable (SET NULL on user deletion).';
+COMMENT ON COLUMN proposals.proposals.composition_type_row_id IS 'Version-pinned FK to input_params.composition_types — the composition active at evaluation time.';
+COMMENT ON COLUMN proposals.proposals.total_distance_km     IS 'Total route distance across all trips. Unit: km';
+COMMENT ON COLUMN proposals.proposals.total_driving_time_h  IS 'Total driving time across all trips. Unit: h';
+COMMENT ON COLUMN proposals.proposals.total_time_h          IS 'Total time including buffer across all trips. Unit: h';
+COMMENT ON COLUMN proposals.proposals.total_energy_kwh      IS 'Total energy consumed across all trips. Unit: kWh';
+COMMENT ON COLUMN proposals.proposals.parameter_snapshot    IS 'JSONB: ParamVersions serialised at evaluation time. One entry per parameter field keyed by table_short:entity_id:field_name. Each entry carries value, version, source, and description.';
+COMMENT ON COLUMN proposals.proposals.editor                IS 'User who created or last edited this version.';
+COMMENT ON COLUMN proposals.proposals.change_log            IS 'Free-text description of what changed in this version.';

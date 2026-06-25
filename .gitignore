@@ -59,6 +59,8 @@ backend/models/route/routing/countries.geojson
 # Built routing graph — generated, not source (~5-10 GB)
 backend/models/route/routing/docker/graph-cache/
 
-
-
+# Snapshot for sending to claude
 project-snapshot.zip
+
+# Personal notes
+notes/
