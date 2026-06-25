@@ -377,3 +377,21 @@ class TestModelVersions:
         result = _eval(api_base, route)
         assert "model_versions" in result
         assert len(result["model_versions"]) > 0
+
+    def test_git_sha_injected_in_ci(self):
+        """
+        GIT_SHA should be injected by CI — not 'unknown'.
+        This test is skipped locally but enforced in CI via GITHUB_SHA env var.
+        """
+        import os
+        if not os.environ.get("GITHUB_SHA"):
+            pytest.skip("Not running in CI — GIT_SHA injection not required locally")
+
+        from models.route.version    import GIT_SHA as ROUTE_SHA
+        from models.energy.version   import GIT_SHA as ENERGY_SHA
+        from models.evaluation.version import GIT_SHA as CALC_SHA
+
+        expected = os.environ["GITHUB_SHA"]
+        assert ROUTE_SHA  == expected, f"route/version.py GIT_SHA not injected: '{ROUTE_SHA}'"
+        assert ENERGY_SHA == expected, f"energy/version.py GIT_SHA not injected: '{ENERGY_SHA}'"
+        assert CALC_SHA   == expected, f"evaluation/version.py GIT_SHA not injected: '{CALC_SHA}'"

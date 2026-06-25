@@ -15,8 +15,111 @@ on:
       - '.github/workflows/backend-tests.yml'
 
 jobs:
-  test:
+
+  # ============================================================
+  # JOB 1 — Version bump enforcement
+  # Fails if a model file changed but its version constant did not.
+  # ============================================================
+  version-check:
+    name: Version bump check
     runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history needed for diff
+
+      - name: Check version bumps
+        run: |
+          # Fetch main so we can diff against it
+          git fetch origin main --depth=1 2>/dev/null || true
+
+          # Base ref: main on PRs, previous commit on push
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="origin/main"
+          else
+            BASE="${{ github.event.before }}"
+            # On first push or force push, event.before may be all zeros
+            if [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+              echo "First push — skipping version check."
+              exit 0
+            fi
+          fi
+
+          FAIL=0
+
+          check_version() {
+            local model_file="$1"
+            local version_file="$2"
+            local version_const="$3"
+
+            # Check if model file changed
+            if git diff --name-only "$BASE" HEAD -- "$model_file" | grep -q .; then
+              # Get old and new version constants
+              old_ver=$(git show "$BASE:$version_file" 2>/dev/null | grep "^${version_const}" | grep -oP '"\K[^"]+(?=")' | head -1)
+              new_ver=$(grep "^${version_const}" "$version_file" 2>/dev/null | grep -oP '"\K[^"]+(?=")' | head -1)
+
+              if [ "$old_ver" = "$new_ver" ]; then
+                echo "❌  VERSION NOT BUMPED: $model_file changed but $version_const stayed at '$new_ver'"
+                echo "    Please update $version_const in $version_file"
+                FAIL=1
+              else
+                echo "✓  $version_const bumped: $old_ver → $new_ver  ($model_file changed)"
+              fi
+            fi
+          }
+
+          # Route builder
+          check_version \
+            "backend/models/route/route_factory.py" \
+            "backend/models/route/version.py" \
+            "ROUTE_BUILDER_VERSION"
+
+          check_version \
+            "backend/models/route/trip.py" \
+            "backend/models/route/version.py" \
+            "ROUTE_BUILDER_VERSION"
+
+          check_version \
+            "backend/models/route/route.py" \
+            "backend/models/route/version.py" \
+            "ROUTE_BUILDER_VERSION"
+
+          check_version \
+            "backend/models/route/routing/rail_router.py" \
+            "backend/models/route/version.py" \
+            "ROUTE_BUILDER_VERSION"
+
+          # Energy model
+          check_version \
+            "backend/models/energy/calc_energy_consumption.py" \
+            "backend/models/energy/version.py" \
+            "ENERGY_CALC_VERSION"
+
+          # Cost/revenue evaluation
+          check_version \
+            "backend/models/evaluation/calc.py" \
+            "backend/models/evaluation/version.py" \
+            "CALC_VERSION"
+
+          if [ $FAIL -ne 0 ]; then
+            echo ""
+            echo "One or more model files were changed without bumping the version."
+            echo "Update the version constant and add a CHANGELOG entry before merging."
+            exit 1
+          fi
+
+          echo ""
+          echo "All version checks passed."
+
+  # ============================================================
+  # JOB 2 — Integration tests
+  # ============================================================
+  test:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    needs: version-check
     timeout-minutes: 30
 
     env:
@@ -32,9 +135,7 @@ jobs:
         uses: actions/checkout@v4
 
       # ------------------------------------------------------------------
-      # Cache the OpenRailRouting graph — downloading 600MB on every run
-      # would be too slow. Cache key is tied to config.yml which changes
-      # when the graph is rebuilt.
+      # Cache the OpenRailRouting graph
       # ------------------------------------------------------------------
       - name: Cache OpenRailRouting graph
         id: cache-graph
@@ -52,6 +153,21 @@ jobs:
           curl -L "$URL" -o /tmp/graph-cache.zip
           unzip -o /tmp/graph-cache.zip -d backend/models/route/routing/docker/graph-cache
           rm /tmp/graph-cache.zip
+
+      # ------------------------------------------------------------------
+      # Inject GIT_SHA into version files before building Docker image
+      # ------------------------------------------------------------------
+      - name: Inject GIT_SHA into version files
+        run: |
+          SHA="${{ github.sha }}"
+          echo "Injecting GIT_SHA=${SHA} into version files..."
+          for f in \
+            backend/models/route/version.py \
+            backend/models/energy/version.py \
+            backend/models/evaluation/version.py; do
+            sed -i "s/GIT_SHA: str = \"unknown\"/GIT_SHA: str = \"${SHA}\"/" "$f"
+            echo "  ✓ $f"
+          done
 
       # ------------------------------------------------------------------
       # Start the full backend stack
@@ -111,7 +227,7 @@ jobs:
           API_BASE_URL:      http://localhost:5000
 
       # ------------------------------------------------------------------
-      # Always print logs on failure for debugging
+      # Always print logs on failure
       # ------------------------------------------------------------------
       - name: Print Docker logs on failure
         if: failure()
