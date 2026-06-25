@@ -5,7 +5,7 @@ Domain parameter dataclasses for the Night Train model.
 
 These are the typed representations of rows from input_params.* DB tables.
 Populated exclusively by DBDataLoader (adapters/data_loader_from_db.py).
-Shared across models/route/, models/cost_rev_eval/, and models/energy/.
+Shared across models/route/, models/evaluation/, and models/energy/.
 
 DB table → domain class mapping
 --------------------------------
@@ -645,6 +645,13 @@ class TrackInfraCollection:
     def get(self, country_code: str) -> Optional[TrackInfrastructure]:
         return self._data.get(country_code)
 
+    def get_or_default(self, country_code: str) -> Optional[TrackInfrastructure]:
+        """Return country row if present, else the first available row as fallback."""
+        if country_code in self._data:
+            return self._data[country_code]
+        # fall back to first available (EU average default loaded by loader)
+        return next(iter(self._data.values()), None)
+
     def all(self) -> dict[str, TrackInfrastructure]:
         return self._data
 
@@ -683,7 +690,7 @@ class StopInfrastructure:
     for any stop with no charge value and logs a warning.
 
     stop_charge_eur is an internal cost model field — NOT exposed in API
-    responses. Used exclusively by models/cost_rev_eval/calc.py.
+    responses. Used exclusively by models/evaluation/calc.py.
 
     lat/lon share a single loc_src. stop_charge_eur has its own src field.
     Row-level version and source tracking is handled by ParamVersions on Trip.

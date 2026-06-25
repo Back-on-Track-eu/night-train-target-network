@@ -113,8 +113,10 @@ def _is_adjust(body: dict, existing_route: Route) -> bool:
     if new_stops is None and new_composition is None:
         return True   # only departure_time / stop_type_changes provided
 
-    existing_stop_ids   = [st.stop_id for st in existing_route.trips[0].stop_times]                           if existing_route.trips else []
-    existing_comp_id    = existing_route.trips[0].composition.comp_id                           if existing_route.trips else None
+    existing_stop_ids   = [st.stop_id for st in existing_route.all_trips()[0].stop_times] \
+                          if existing_route.all_trips() else []
+    existing_comp_id    = existing_route.all_trips()[0].composition.comp_id \
+                          if existing_route.all_trips() else None
 
     new_stop_ids = [s["stop_id"] for s in (new_stops or [])]
 
@@ -179,13 +181,13 @@ def plan_or_update():
             # use stops/composition from body if provided, else fall back to existing route
             stops_input    = body.get("stops") or [
                 {"stop_id": st.stop_id, "stop_type": st.stop_type}
-                for st in existing_route.trips[0].stop_times
+                for st in existing_route.all_trips()[0].stop_times
             ] if existing_route else body["stops"]
             comp_id        = body.get("composition_id") or (
-                existing_route.trips[0].composition.comp_id if existing_route else None
+                existing_route.all_trips()[0].composition.comp_id if existing_route else None
             )
             dep_min_plan   = dep_min or (
-                existing_route.trips[0].stop_times[0].departure_time_min
+                existing_route.all_trips()[0].stop_times[0].departure_time_min
                 if existing_route else None
             )
 

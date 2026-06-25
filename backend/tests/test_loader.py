@@ -150,19 +150,18 @@ def test_loader_composition_capacity_aggregation(loader, db_cur):
     comp, _ = loader.build_composition(COMP_ID)
 
     db_cur.execute("""
-        SELECT sc.service_class_main, SUM(ctc.coach_type_class_places) AS places
+        SELECT ctc.service_class_id, SUM(ctc.coach_type_class_places) AS places
         FROM input_params.composition_types ct
         JOIN input_params.composition_type_coaches cc ON cc.composition_type_row_id = ct.composition_type_row_id
         JOIN input_params.coach_type_classes ctc      ON ctc.coach_type_row_id = cc.coach_type_row_id
-        JOIN input_params.service_classes sc           ON sc.service_class_id = ctc.service_class_id
         WHERE ct.composition_type_id = %s AND ct.is_current = TRUE
-        GROUP BY sc.service_class_main
+        GROUP BY ctc.service_class_id
     """, (COMP_ID,))
-    rows = {row["service_class_main"]: int(row["places"]) for row in db_cur.fetchall()}
+    rows = {row["service_class_id"]: int(row["places"]) for row in db_cur.fetchall()}
 
-    for cls_main, expected_places in rows.items():
-        assert comp.places_by_class.get(cls_main, 0) == expected_places, \
-            f"places_by_class[{cls_main}] mismatch: loader={comp.places_by_class.get(cls_main)} db={expected_places}"
+    for svc_class_id, expected_places in rows.items():
+        assert comp.places_by_class.get(svc_class_id, 0) == expected_places, \
+            f"places_by_class[{svc_class_id}] mismatch: loader={comp.places_by_class.get(svc_class_id)} db={expected_places}"
 
 
 def test_loader_composition_weight_aggregation(loader, db_cur):

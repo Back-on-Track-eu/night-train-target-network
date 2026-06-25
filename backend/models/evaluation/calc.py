@@ -1098,9 +1098,11 @@ def compute_indicative_figures(
     )
 
     ref_stop_times = [
-        StopTime(stop_id="__REF_ORIGIN__", stop_type="boarding",
-                 arrival_time_min=None, departure_time_min=0,  dwell_time_min=0),
-        StopTime(stop_id="__REF_DEST__",   stop_type="alighting",
+        StopTime(stop_id="__REF_ORIGIN__", stop_name="Reference Origin",
+                 lat=0.0, lon=0.0, stop_type="boarding",
+                 arrival_time_min=None, departure_time_min=0, dwell_time_min=0),
+        StopTime(stop_id="__REF_DEST__",   stop_name="Reference Destination",
+                 lat=0.0, lon=0.0, stop_type="alighting",
                  arrival_time_min=driving_min + buffer_min, departure_time_min=None, dwell_time_min=0),
     ]
 
@@ -1120,7 +1122,6 @@ def compute_indicative_figures(
     ref_trip.composition = _RefTrip._Comp()
 
     # build demand from reference utilisation and fares
-    from models.params import _class_main_from_id_safe
     places_main = _places_by_class_main(composition)
     od_pairs = []
     for cls_main, places in places_main.items():
