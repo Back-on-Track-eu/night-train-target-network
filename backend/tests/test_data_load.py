@@ -44,7 +44,7 @@ EXPECTED_ROW_COUNTS = {
     "input_params.composition_type_coaches":      1,
     "input_params.composition_references":        1,
     "input_params.track_infrastructure_defaults": 1,
-    "input_params.track_infrastructures":         7,
+    "input_params.track_infrastructures":         8,  # 7 current + 1 old DE version
     "input_params.stop_infrastructure_defaults":  1,
     "input_params.stop_infrastructures":          8,
     "proposals.routes":                           1,
@@ -56,7 +56,7 @@ EXPECTED_SCHEMAS = {"admin", "input_params", "proposals"}
 
 REQUIRED_COLUMNS = {
     "input_params.stop_infrastructures":  ["stop_id", "stop_name", "country_code", "stop_lat", "stop_lon"],
-    "input_params.track_infrastructures": ["country_code", "track_tac_eur_train_km", "track_energy_price_eur_kwh"],
+    "input_params.track_infrastructures": ["country_code", "track_energy_price_eur_kwh"],  # tac/parking NULL for SE intentionally
     "input_params.composition_types":     ["composition_type_id", "composition_type_max_speed_kmh"],
     "input_params.coach_types":           ["coach_type_id"],
     "input_params.operators":             ["operator_id", "operator_driver_costs_eur_h"],
@@ -90,6 +90,7 @@ def test_table_row_count(db_cur, table, min_rows):
 
 @pytest.mark.parametrize("table,columns", REQUIRED_COLUMNS.items())
 def test_required_columns_not_null(db_cur, table, columns):
+    # Note: SE track_tac and parking are intentionally NULL — resolved from defaults
     """Required columns have no NULL values."""
     schema, tbl = table.split(".")
     for col in columns:

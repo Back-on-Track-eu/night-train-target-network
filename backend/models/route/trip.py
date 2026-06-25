@@ -525,6 +525,7 @@ class Trip:
                 k: {
                     "value":       v.value,
                     "version":     v.version,
+                    "is_default":  v.is_default,
                     "source":      {
                         "source_id":          v.source.source_id,
                         "source_description": v.source.source_description,

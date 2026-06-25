@@ -41,8 +41,12 @@ def hhmm_to_min(hhmm: str) -> int:
     """
     Parse HH:MM departure string to minutes from midnight.
 
+    Supports overnight times up to 47:59 (end of second operating day).
+    Night trains commonly depart at e.g. 25:30 (= 01:30 next day).
+
     e.g. "20:00" → 1200
          "08:30" → 510
+         "25:30" → 1530  (01:30 next day)
     Raises ValueError for invalid format.
     """
     parts = hhmm.strip().split(":")
@@ -52,8 +56,8 @@ def hhmm_to_min(hhmm: str) -> int:
         h, m = int(parts[0]), int(parts[1])
     except ValueError:
         raise ValueError(f"Invalid HH:MM string: '{hhmm}'")
-    if not (0 <= h <= 23 and 0 <= m <= 59):
-        raise ValueError(f"HH:MM out of range: '{hhmm}'")
+    if not (0 <= h <= 47 and 0 <= m <= 59):
+        raise ValueError(f"HH:MM out of range (must be 00:00-47:59): '{hhmm}'")
     return h * 60 + m
 
 

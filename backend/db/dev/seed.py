@@ -11,7 +11,7 @@ Run order:
      operator_class_costs → coach_types → coach_type_classes →
      track_infrastructure_defaults → track_infrastructures →
      stop_infrastructure_defaults → stop_infrastructures →
-     composition_types → composition_type_coaches
+     composition_types → composition_type_coaches → composition_references
   3. proposals
 """
 
@@ -115,41 +115,42 @@ COUNTRIES = [
 ]
 
 # ============================================================
-# service_classes  (density = 1 / places_per_compartment)
+# service_classes  (density = space consumption per place, Sleeper > Couchette > Seat)
+# seat=1/64, couchette=1/20, sleeper=1/12
 # ============================================================
 
 SERVICE_CLASSES = [
-    # Seat — 1 place = 1 space unit
-    {"service_class_id": "seat (reclining)",                          "service_class_main": "Seat",      "service_class_density": 1.0},
-    {"service_class_id": "seat (compartment)",                        "service_class_main": "Seat",      "service_class_density": 1.0},
-    {"service_class_id": "seat (large room)",                         "service_class_main": "Seat",      "service_class_density": 1.0},
-    {"service_class_id": "seat (spare)",                              "service_class_main": "Seat",      "service_class_density": 1.0},
-    {"service_class_id": "seat (playzone)",                           "service_class_main": "Seat",      "service_class_density": 1.0},
-    {"service_class_id": "seat PRM",                                  "service_class_main": "Seat",      "service_class_density": 1.0},
-    # Couchette — density = 1 / berths per compartment
-    {"service_class_id": "couchette (4-berth)",                       "service_class_main": "Couchette", "service_class_density": round(1/4, 6)},
-    {"service_class_id": "couchette (5-berth)",                       "service_class_main": "Couchette", "service_class_density": round(1/5, 6)},
-    {"service_class_id": "couchette (6-berth)",                       "service_class_main": "Couchette", "service_class_density": round(1/6, 6)},
-    {"service_class_id": "couchette (large room)",                    "service_class_main": "Couchette", "service_class_density": round(1/6, 6)},
-    {"service_class_id": "couchette PRM (2-berth)",                   "service_class_main": "Couchette", "service_class_density": round(1/2, 6)},
+    # Seat
+    {"service_class_id": "seat (reclining)",                          "service_class_main": "Seat",      "service_class_density": round(1/64, 6)},
+    {"service_class_id": "seat (compartment)",                        "service_class_main": "Seat",      "service_class_density": round(1/64, 6)},
+    {"service_class_id": "seat (large room)",                         "service_class_main": "Seat",      "service_class_density": round(1/64, 6)},
+    {"service_class_id": "seat (spare)",                              "service_class_main": "Seat",      "service_class_density": round(1/64, 6)},
+    {"service_class_id": "seat (playzone)",                           "service_class_main": "Seat",      "service_class_density": round(1/64, 6)},
+    {"service_class_id": "seat PRM",                                  "service_class_main": "Seat",      "service_class_density": round(1/64, 6)},
+    # Couchette
+    {"service_class_id": "couchette (4-berth)",                       "service_class_main": "Couchette", "service_class_density": round(1/20, 6)},
+    {"service_class_id": "couchette (5-berth)",                       "service_class_main": "Couchette", "service_class_density": round(1/20, 6)},
+    {"service_class_id": "couchette (6-berth)",                       "service_class_main": "Couchette", "service_class_density": round(1/20, 6)},
+    {"service_class_id": "couchette (large room)",                    "service_class_main": "Couchette", "service_class_density": round(1/20, 6)},
+    {"service_class_id": "couchette PRM (2-berth)",                   "service_class_main": "Couchette", "service_class_density": round(1/20, 6)},
     # Capsule
     {"service_class_id": "Capsule (1-bed) with seat",                 "service_class_main": "Capsule",   "service_class_density": 1.0},
     {"service_class_id": "Capsule (2-bed) with seats",                "service_class_main": "Capsule",   "service_class_density": round(1/2, 6)},
     {"service_class_id": "Capsule (double) with seats",               "service_class_main": "Capsule",   "service_class_density": round(1/2, 6)},
     {"service_class_id": "Capsule (3-bed) with seats",                "service_class_main": "Capsule",   "service_class_density": round(1/3, 6)},
     {"service_class_id": "Mini-Cabin (bed)",                          "service_class_main": "Capsule",   "service_class_density": 1.0},
-    # Sleeper — density = 1 / berths per compartment
-    {"service_class_id": "Sleeper (2-berth) with shower & WC",        "service_class_main": "Sleeper",   "service_class_density": round(1/2, 6)},
-    {"service_class_id": "Sleeper (2-berth) with shower option & WC", "service_class_main": "Sleeper",   "service_class_density": round(1/2, 6)},
-    {"service_class_id": "Sleeper (double) with shower & WC",         "service_class_main": "Sleeper",   "service_class_density": round(1/2, 6)},
-    {"service_class_id": "Sleeper (3-berth) with shower & WC",        "service_class_main": "Sleeper",   "service_class_density": round(1/3, 6)},
-    {"service_class_id": "Sleeper (2-berth) with basin",              "service_class_main": "Sleeper",   "service_class_density": round(1/2, 6)},
-    {"service_class_id": "Sleeper (3-berth) with basin",              "service_class_main": "Sleeper",   "service_class_density": round(1/3, 6)},
-    {"service_class_id": "Sleeper (4-berth) with basin",              "service_class_main": "Sleeper",   "service_class_density": round(1/4, 6)},
-    {"service_class_id": "Sleeper PRM (2-berth)",                     "service_class_main": "Sleeper",   "service_class_density": round(1/2, 6)},
-    {"service_class_id": "Sleeper PRM (double)",                      "service_class_main": "Sleeper",   "service_class_density": round(1/2, 6)},
-    {"service_class_id": "Sleeper PRM (single)",                      "service_class_main": "Sleeper",   "service_class_density": 1.0},
-    # Catering — no passenger places
+    # Sleeper
+    {"service_class_id": "Sleeper (2-berth) with shower & WC",        "service_class_main": "Sleeper",   "service_class_density": round(1/12, 6)},
+    {"service_class_id": "Sleeper (2-berth) with shower option & WC", "service_class_main": "Sleeper",   "service_class_density": round(1/12, 6)},
+    {"service_class_id": "Sleeper (double) with shower & WC",         "service_class_main": "Sleeper",   "service_class_density": round(1/12, 6)},
+    {"service_class_id": "Sleeper (3-berth) with shower & WC",        "service_class_main": "Sleeper",   "service_class_density": round(1/12, 6)},
+    {"service_class_id": "Sleeper (2-berth) with basin",              "service_class_main": "Sleeper",   "service_class_density": round(1/12, 6)},
+    {"service_class_id": "Sleeper (3-berth) with basin",              "service_class_main": "Sleeper",   "service_class_density": round(1/12, 6)},
+    {"service_class_id": "Sleeper (4-berth) with basin",              "service_class_main": "Sleeper",   "service_class_density": round(1/12, 6)},
+    {"service_class_id": "Sleeper PRM (2-berth)",                     "service_class_main": "Sleeper",   "service_class_density": round(1/12, 6)},
+    {"service_class_id": "Sleeper PRM (double)",                      "service_class_main": "Sleeper",   "service_class_density": round(1/12, 6)},
+    {"service_class_id": "Sleeper PRM (single)",                      "service_class_main": "Sleeper",   "service_class_density": round(1/12, 6)},
+    # Catering
     {"service_class_id": "Catering",                                  "service_class_main": "Catering",  "service_class_density": 0.0},
 ]
 
@@ -233,13 +234,18 @@ TRACK_INFRA_DEFAULTS = [
 ]
 
 TRACK_INFRASTRUCTURES = [
-    {"country_code": "DE", "track_tac_eur_train_km": 5.40, "track_parking_eur_day": 70.00, "track_energy_price_eur_kwh": 0.142, "track_terrain_category": "Flat",        "track_terrain_score": 1.0, "track_hsr_allowed": True, "track_min_boarding_time": "00:02:00", "track_min_alighting_time": "00:02:00", "track_buffer_quota_per": 0.10},
-    {"country_code": "AT", "track_tac_eur_train_km": 4.20, "track_parking_eur_day": 60.00, "track_energy_price_eur_kwh": 0.138, "track_terrain_category": "Hilly",       "track_terrain_score": 1.4, "track_hsr_allowed": True, "track_min_boarding_time": "00:02:00", "track_min_alighting_time": "00:02:00", "track_buffer_quota_per": 0.12},
-    {"country_code": "CH", "track_tac_eur_train_km": 6.80, "track_parking_eur_day": 85.00, "track_energy_price_eur_kwh": 0.165, "track_terrain_category": "Mountainous", "track_terrain_score": 1.8, "track_hsr_allowed": True, "track_min_boarding_time": "00:03:00", "track_min_alighting_time": "00:03:00", "track_buffer_quota_per": 0.15},
-    {"country_code": "FR", "track_tac_eur_train_km": 4.60, "track_parking_eur_day": 55.00, "track_energy_price_eur_kwh": 0.130, "track_terrain_category": "Flat",        "track_terrain_score": 1.0, "track_hsr_allowed": True, "track_min_boarding_time": "00:02:00", "track_min_alighting_time": "00:02:00", "track_buffer_quota_per": 0.10},
-    {"country_code": "BE", "track_tac_eur_train_km": 5.10, "track_parking_eur_day": 50.00, "track_energy_price_eur_kwh": 0.145, "track_terrain_category": "Flat",        "track_terrain_score": 1.0, "track_hsr_allowed": True, "track_min_boarding_time": "00:02:00", "track_min_alighting_time": "00:02:00", "track_buffer_quota_per": 0.10},
-    {"country_code": "DK", "track_tac_eur_train_km": 4.80, "track_parking_eur_day": 55.00, "track_energy_price_eur_kwh": 0.128, "track_terrain_category": "Flat",        "track_terrain_score": 1.0, "track_hsr_allowed": True, "track_min_boarding_time": "00:02:00", "track_min_alighting_time": "00:02:00", "track_buffer_quota_per": 0.10},
-    {"country_code": "SE", "track_tac_eur_train_km": 4.30, "track_parking_eur_day": 60.00, "track_energy_price_eur_kwh": 0.090, "track_terrain_category": "Hilly",       "track_terrain_score": 1.2, "track_hsr_allowed": True, "track_min_boarding_time": "00:02:00", "track_min_alighting_time": "00:02:00", "track_buffer_quota_per": 0.10},
+    # Full data countries
+    # DE has two versions — loader must only use is_current=True (version=2)
+    {"country_code": "DE", "track_infra_version": 2, "is_current": True, "track_tac_eur_train_km": 5.40, "track_parking_eur_day": 70.00, "track_energy_price_eur_kwh": 0.142, "track_terrain_category": "Flat",        "track_terrain_score": 1.0, "track_hsr_allowed": True, "track_min_boarding_time": "00:02:00", "track_min_alighting_time": "00:02:00", "track_buffer_quota_per": 0.10},
+    # Old DE row (version=1, is_current=False) — loader must ignore this
+    {"country_code": "DE", "track_infra_version": 1, "track_tac_eur_train_km": 3.10, "track_parking_eur_day": 50.00, "track_energy_price_eur_kwh": 0.120, "track_terrain_category": "Flat",        "track_terrain_score": 1.0, "track_hsr_allowed": True, "track_min_boarding_time": "00:02:00", "track_min_alighting_time": "00:02:00", "track_buffer_quota_per": 0.08, "is_current": False},
+    {"country_code": "AT", "track_infra_version": 2, "is_current": True, "track_tac_eur_train_km": 4.20, "track_parking_eur_day": 60.00, "track_energy_price_eur_kwh": 0.138, "track_terrain_category": "Hilly",       "track_terrain_score": 1.4, "track_hsr_allowed": True, "track_min_boarding_time": "00:02:00", "track_min_alighting_time": "00:02:00", "track_buffer_quota_per": 0.12},
+    {"country_code": "CH", "track_infra_version": 2, "is_current": True, "track_tac_eur_train_km": 6.80, "track_parking_eur_day": 85.00, "track_energy_price_eur_kwh": 0.165, "track_terrain_category": "Mountainous", "track_terrain_score": 1.8, "track_hsr_allowed": True, "track_min_boarding_time": "00:03:00", "track_min_alighting_time": "00:03:00", "track_buffer_quota_per": 0.15},
+    {"country_code": "FR", "track_infra_version": 2, "is_current": True, "track_tac_eur_train_km": 4.60, "track_parking_eur_day": 55.00, "track_energy_price_eur_kwh": 0.130, "track_terrain_category": "Flat",        "track_terrain_score": 1.0, "track_hsr_allowed": True, "track_min_boarding_time": "00:02:00", "track_min_alighting_time": "00:02:00", "track_buffer_quota_per": 0.10},
+    {"country_code": "BE", "track_infra_version": 2, "is_current": True, "track_tac_eur_train_km": 5.10, "track_parking_eur_day": 50.00, "track_energy_price_eur_kwh": 0.145, "track_terrain_category": "Flat",        "track_terrain_score": 1.0, "track_hsr_allowed": True, "track_min_boarding_time": "00:02:00", "track_min_alighting_time": "00:02:00", "track_buffer_quota_per": 0.10},
+    {"country_code": "DK", "track_infra_version": 2, "is_current": True, "track_tac_eur_train_km": 4.80, "track_parking_eur_day": 55.00, "track_energy_price_eur_kwh": 0.128, "track_terrain_category": "Flat",        "track_terrain_score": 1.0, "track_hsr_allowed": True, "track_min_boarding_time": "00:02:00", "track_min_alighting_time": "00:02:00", "track_buffer_quota_per": 0.10},
+    # SE has NULL tac and parking → will resolve from defaults (tests is_default=True)
+    {"country_code": "SE", "track_infra_version": 2, "is_current": True, "track_tac_eur_train_km": None, "track_parking_eur_day": None,  "track_energy_price_eur_kwh": 0.090, "track_terrain_category": "Hilly",       "track_terrain_score": 1.2, "track_hsr_allowed": True, "track_min_boarding_time": "00:02:00", "track_min_alighting_time": "00:02:00", "track_buffer_quota_per": 0.10},
 ]
 
 # ============================================================
@@ -252,6 +258,7 @@ STOP_INFRA_DEFAULTS = [
 ]
 
 STOP_INFRASTRUCTURES = [
+    # Stops with explicit stop_charge_eur
     {"stop_id": "DE_BERLIN_HBF",  "stop_name": "Berlin Hbf",          "country_code": "DE", "stop_timezone": "Europe/Berlin",     "stop_lat": 52.525, "stop_lon": 13.369, "stop_charge_eur": 9.80},
     {"stop_id": "DE_DRESDEN_HBF", "stop_name": "Dresden Hbf",         "country_code": "DE", "stop_timezone": "Europe/Berlin",     "stop_lat": 51.040, "stop_lon": 13.732, "stop_charge_eur": 6.50},
     {"stop_id": "AT_WIEN_HBF",    "stop_name": "Wien Hbf",            "country_code": "AT", "stop_timezone": "Europe/Vienna",     "stop_lat": 48.185, "stop_lon": 16.376, "stop_charge_eur": 11.00},
@@ -259,7 +266,8 @@ STOP_INFRASTRUCTURES = [
     {"stop_id": "FR_PARIS_EST",   "stop_name": "Paris Gare de l'Est", "country_code": "FR", "stop_timezone": "Europe/Paris",      "stop_lat": 48.877, "stop_lon": 2.359,  "stop_charge_eur": 13.20},
     {"stop_id": "BE_BRUSSELS_M",  "stop_name": "Bruxelles-Midi",      "country_code": "BE", "stop_timezone": "Europe/Brussels",   "stop_lat": 50.836, "stop_lon": 4.336,  "stop_charge_eur": 10.40},
     {"stop_id": "DK_COPENHAGEN",  "stop_name": "Koebenhavn H",        "country_code": "DK", "stop_timezone": "Europe/Copenhagen", "stop_lat": 55.673, "stop_lon": 12.565, "stop_charge_eur": 9.00},
-    {"stop_id": "SE_STOCKHOLM_C", "stop_name": "Stockholm C",         "country_code": "SE", "stop_timezone": "Europe/Stockholm",  "stop_lat": 59.330, "stop_lon": 18.058, "stop_charge_eur": 8.50},
+    # SE_STOCKHOLM has NULL stop_charge_eur → will resolve from global default (tests is_default=True)
+    {"stop_id": "SE_STOCKHOLM_C", "stop_name": "Stockholm C",         "country_code": "SE", "stop_timezone": "Europe/Stockholm",  "stop_lat": 59.330, "stop_lon": 18.058, "stop_charge_eur": None},
 ]
 
 # ============================================================
@@ -326,7 +334,7 @@ COMPOSITION_TYPE_COACHES_RAW = [
 ]
 
 # ============================================================
-# proposals (unchanged structure)
+# proposals
 # ============================================================
 
 SERVICES       = [{"service_id": "NJ-BER-VIE-DAILY"}]
@@ -346,7 +354,6 @@ STOP_TIMES     = [
 # ============================================================
 
 def seed_sources(cur, source_ids: dict) -> None:
-    """Inject source_id into all parameter rows after sources are seeded."""
     ill = source_ids[SRC_ILLUSTRATIVE]
     exc = source_ids[SRC_EXCEL]
     cur.execute("UPDATE input_params.track_infrastructure_defaults SET track_tac_src=%s, track_parking_src=%s, track_energy_price_src=%s, track_terrain_src=%s, track_hsr_src=%s, track_min_boarding_src=%s, track_min_alighting_src=%s, track_buffer_src=%s", (ill,)*8)
@@ -405,43 +412,37 @@ def seed_composition_type_coaches(cur):
         )
 
 
-# ============================================================
-# Main
-# ============================================================
-
 def seed_composition_references(cur):
-    """Seed reference trip profiles for indicative KPI computation."""
-    # look up the row_id for the current composition type
-    cur.execute("""
-        SELECT composition_type_row_id FROM input_params.composition_types
-        WHERE composition_type_id = 'STD-7.1' AND is_current = TRUE
-    """)
-    row = cur.fetchone()
-    if row is None:
-        print("  WARNING: STD-7.1 composition type not found — skipping references seed")
-        return
-    comp_row_id = row[0]
-
-    insert_rows(cur, "input_params.composition_references", [
-        dict(
-            composition_type_row_id   = comp_row_id,
-            composition_type_id       = "STD-7.1",
-            ref_distance_km           = 800,
-            ref_avg_speed_kmh         = 90.0,
-            ref_terrain_score         = 1.3,
-            ref_operating_days        = 360,
-            ref_utilization_seat      = 0.70,
-            ref_utilization_couchette = 0.65,
-            ref_utilization_sleeper   = 0.80,
-            ref_utilization_capsule   = 0.00,
-            ref_utilization_catering  = 0.00,
-            ref_avg_fare_seat         = 49.00,
-            ref_avg_fare_couchette    = 79.00,
-            ref_avg_fare_sleeper      = 129.00,
-            ref_avg_fare_capsule      = 0.00,
-            ref_avg_fare_catering     = 0.00,
-        ),
-    ])
+    """Seed reference trip profiles for STD-7.1 and STD-9.1."""
+    for comp_id in ("STD-7.1", "STD-9.1"):
+        cur.execute("""
+            SELECT composition_type_row_id FROM input_params.composition_types
+            WHERE composition_type_id = %s AND is_current = TRUE
+        """, (comp_id,))
+        row = cur.fetchone()
+        if row is None:
+            print(f"  WARNING: {comp_id} not found — skipping reference seed")
+            continue
+        insert_rows(cur, "input_params.composition_references", [
+            dict(
+                composition_type_row_id   = row[0],
+                composition_type_id       = comp_id,
+                ref_distance_km           = 800,
+                ref_avg_speed_kmh         = 90.0,
+                ref_terrain_score         = 1.3,
+                ref_operating_days        = 360,
+                ref_utilization_seat      = 0.70,
+                ref_utilization_couchette = 0.65,
+                ref_utilization_sleeper   = 0.80,
+                ref_utilization_capsule   = 0.00,
+                ref_utilization_catering  = 0.00,
+                ref_avg_fare_seat         = 49.00,
+                ref_avg_fare_couchette    = 79.00,
+                ref_avg_fare_sleeper      = 129.00,
+                ref_avg_fare_capsule      = 0.00,
+                ref_avg_fare_catering     = 0.00,
+            ),
+        ])
 
 
 def main():
@@ -506,9 +507,6 @@ def main():
     insert_rows(cur, "proposals.routes",         ROUTES)
     insert_rows(cur, "proposals.trips",          TRIPS)
     insert_rows(cur, "proposals.stop_times",     STOP_TIMES)
-    # Note: proposals.proposals not seeded — composition_type_row_id FK
-    # requires looking up the new composition_types table row ID.
-    # Demo proposal removed; add via API once the route builder is wired up.
 
     conn.commit()
 
@@ -523,7 +521,7 @@ def main():
         ("input_params", "coach_types"),
         ("input_params", "coach_type_classes"),
         ("input_params", "track_infrastructure_defaults"),
-        ("input_params", "track_infrastructures"),
+        ("input_params", "track_infrastructures"),  # 8 rows: 7 current + 1 old DE
         ("input_params", "stop_infrastructure_defaults"),
         ("input_params", "stop_infrastructures"),
         ("input_params", "composition_types"),

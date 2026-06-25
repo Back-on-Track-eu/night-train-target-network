@@ -36,7 +36,7 @@ ID convention
   version increments on every proposal change (reroute or schedule adjustment).
 
 NO cost calculations in this module — all monetary values computed
-exclusively in models/evaluation/calc.py.
+exclusively in models/cost_rev_eval/calc.py.
 """
 
 from __future__ import annotations
@@ -270,8 +270,8 @@ def _build_trip(
 
     # model versions
     model_versions = ModelVersions(versions={
-        ROUTE_BUILDER_VERSION[0]: ROUTE_BUILDER_VERSION[1],
-        ENERGY_CALC_VERSION[0]:   ENERGY_CALC_VERSION[1],
+        "route_builder": ROUTE_BUILDER_VERSION,
+        "energy_calc":   ENERGY_CALC_VERSION,
     })
 
     logger.info(
