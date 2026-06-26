@@ -1,18 +1,12 @@
 {
-  "app": {
-    "title": "Night Train Network"
-  },
-  "dataStatus": {
-    "title": "Backend Connection",
-    "loadButton": "Load Data",
-    "status": {
-      "idle": "Not connected",
-      "loading": "Loading data from backend...",
-      "success": "Data loaded successfully",
-      "already_loaded": "Data already loaded on server",
-      "error": "Failed to load data"
-    },
-    "loadedAt": "Loaded at: {time}",
-    "response": "Server response"
+  "proposal": {
+    "heading": "So, what's your dream night train route?",
+    "evaluate": "Evaluate",
+    "mapPlaceholder": "Map",
+    "trainCardPlaceholder": "Train info",
+    "searchPlaceholder": "Search stops…",
+    "loading": "Fetching data…",
+    "debugStopsPreview": "stops[0..1]",
+    "debugCompositionsPreview": "compositions[0..1]"
   }
 }

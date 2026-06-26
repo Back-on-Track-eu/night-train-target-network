@@ -71,7 +71,7 @@ frontend/
     │   └── locales/
     │       └── en.json      # English strings (add de.json etc. here)
     ├── stores/
-    │   └── dataStore.ts     # Pinia store: data load state + API call
+    │   └── store.ts     # Pinia store
     └── components/
         └── DataStatus.vue   # Connection test UI component
 ```

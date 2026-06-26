@@ -1,5 +1,9 @@
 @import 'tailwindcss';
 
+body {
+  background-color: #1d1e33;
+}
+
 @layer tailwind-base, primevue, tailwind-utilities;
 
 @font-face {
@@ -20,6 +24,8 @@
   --font-sans: 'Mark Pro', ui-sans-serif, system-ui, sans-serif;
 
   --color-sapphire: #1d1e33;
+  --color-sapphire-100: #23263d;
+  --color-sapphire-200: #2b2e4a;
   --color-sky-blue: #2271b3;
   --color-greenish-grey: #f1f3f6;
 
