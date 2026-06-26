@@ -1,12 +1,11 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { DataLoadResponse } from '@/types/api'
 
-export type LoadStatus = 'idle' | 'loading' | 'success' | 'already_loaded' | 'error'
+export type LoadStatus = 'idle' | 'loading' | 'success' | 'error'
 
 export const useDataStore = defineStore('data', () => {
   const status = ref<LoadStatus>('idle')
-  const data = ref<DataLoadResponse | null>(null)
+  const data = ref<Record<string, unknown> | null>(null)
   const errorMessage = ref<string | null>(null)
 
   async function loadData(): Promise<void> {
@@ -14,19 +13,13 @@ export const useDataStore = defineStore('data', () => {
     errorMessage.value = null
 
     try {
-      const response = await fetch('http://localhost:5000/api/data/load', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      })
+      const response = await fetch('http://localhost:5000/api/health')
 
-      const json: DataLoadResponse = await response.json()
+      const json = await response.json()
 
-      if (response.status === 409) {
-        status.value = 'already_loaded'
-        data.value = json
-      } else if (!response.ok) {
+      if (!response.ok) {
         status.value = 'error'
-        errorMessage.value = json.message ?? `HTTP ${response.status}`
+        errorMessage.value = `HTTP ${response.status}`
       } else {
         status.value = 'success'
         data.value = json

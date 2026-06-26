@@ -8,10 +8,10 @@ process. All route handlers call get_loader() to access it.
 
 State
 -----
-  _loader       : DBDataLoader instance (created at startup)
-  _loaded       : bool — True after successful DB connection
-  _loaded_at    : datetime | None — UTC timestamp of startup
-  _load_error   : str | None — error message if startup failed
+  _loader    : DBDataLoader instance (created at startup)
+  _loaded    : bool — True after successful DB connection
+  _loaded_at : datetime | None — UTC timestamp of startup
+  _load_error: str | None — error message if startup failed
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Singleton state
 # ---------------------------------------------------------------------------
-_loader = None  # SheetDataLoader, created lazily on first load()
+_loader = None
 _loaded: bool = False
 _loaded_at: Optional[datetime] = None
 _load_error: Optional[str] = None
@@ -37,18 +37,9 @@ _load_error: Optional[str] = None
 
 
 class DataNotLoadedError(Exception):
-    """Raised when an endpoint needs data that hasn't been loaded yet."""
+    """Raised when an endpoint needs the DB loader but it is not available."""
 
     pass
-
-
-def status() -> dict:
-    """Return the current data loading status as a plain dict."""
-    return {
-        "loaded": _loaded,
-        "loaded_at": _loaded_at.isoformat() if _loaded_at else None,
-        "error": _load_error,
-    }
 
 
 def init() -> None:
@@ -77,7 +68,7 @@ def init() -> None:
 
 def get_loader():
     """
-    Return the DBDataLoader.
+    Return the singleton DBDataLoader.
     Raises DataNotLoadedError if init() has not completed successfully.
     """
     if not _loaded or _loader is None:

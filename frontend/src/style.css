@@ -4,18 +4,14 @@
 
 @font-face {
   font-family: 'Mark Pro';
-  src:
-    url('@/assets/fonts/MarkPro.woff2') format('woff2'),
-    url('@/assets/fonts/MarkPro.woff') format('woff');
+  src: url('@/assets/fonts/Mark Pro.ttf') format('truetype');
   font-weight: 400;
   font-style: normal;
 }
 
 @font-face {
   font-family: 'Mark Pro';
-  src:
-    url('@/assets/fonts/MarkPro-Bold.woff2') format('woff2'),
-    url('@/assets/fonts/MarkPro-Bold.woff') format('woff');
+  src: url('@/assets/fonts/Mark Pro Bold.ttf') format('truetype');
   font-weight: 700;
   font-style: normal;
 }
