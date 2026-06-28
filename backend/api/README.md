@@ -19,28 +19,76 @@
 
 ---
 
-### Auth ⚠️ NOT YET IMPLEMENTED
-
-> These endpoints are stubbed and return `501 Not Implemented`.
-> Phase 5 will implement OTP/magic-link JWT auth.
+### Auth
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/auth/request-code` | Send OTP to email address |
-| `POST` | `/api/auth/verify` | Verify OTP and return JWT token |
+| `POST` | `/api/auth/request-code` | Register a new user or log in an existing one — sends OTP by email |
+| `POST` | `/api/auth/verify` | Verify OTP and return a JWT |
+| `POST` | `/api/auth/guest` | Create an anonymous guest session — no email required |
 
 **`POST /api/auth/request-code` — Request body**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `email` | string | ✓ | User email address |
+| `display_name` | string | ✓ for new accounts | Chosen public name — must be unique. Required when registering; ignored on subsequent logins |
+
+**Response** — always `200 {}` (no information leaked about whether the account exists).
+
+| Status | `error` key | Meaning |
+|--------|-------------|---------|
+| `200` | — | OTP sent (or silently skipped if email send failed and retries exhausted) |
+| `400` | `bad_request` | Missing/invalid fields or display_name already taken |
+| `502` | `email_failed` | OTP email could not be sent |
+
+---
 
 **`POST /api/auth/verify` — Request body**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `email` | string | ✓ | User email address |
-| `code` | string | ✓ | OTP code received by email |
+| `code` | string | ✓ | 6-digit OTP received by email |
+
+**Response**
+```json
+{"token": "...", "user_id": 42, "display_name": "railfan42", "is_guest": false}
+```
+
+| Status | `error` key | Meaning |
+|--------|-------------|---------|
+| `200` | — | JWT issued |
+| `400` | `bad_request` | Missing fields |
+| `401` | `invalid_code` | Wrong, expired, or already-used code |
+
+---
+
+**`POST /api/auth/guest` — No request body**
+
+**Response**
+```json
+{"token": "...", "user_id": 99, "display_name": "guest_a3f9k2", "is_guest": true}
+```
+
+Guest tokens expire after 30 days. Guest proposals can later be claimed by a registered user.
+
+| Status | `error` key | Meaning |
+|--------|-------------|---------|
+| `200` | — | Guest JWT issued |
+| `500` | `internal_error` | Could not generate a unique guest name |
+
+---
+
+**Using the JWT**
+
+Include the token in the `Authorization` header on all authenticated requests:
+```
+Authorization: Bearer <token>
+```
+
+Endpoints decorated with `@require_auth` return `401` if the token is missing or invalid.
+Endpoints decorated with `@optional_auth` work without a token but have richer behaviour when authenticated.
 
 ---
 
@@ -266,7 +314,7 @@ Stop object:
 | `calc_version` | string | Calc model version |
 | `calc_formulas` | object | `{key: {latex, description}}` — full formula registry |
 | `model_versions` | object | `{model_name: version}` — all model versions used |
-| `param_versions` | object | `{table:entity:field: {value, version, is_default, source, description}}` — full parameter provenance. `is_default=true` means the value was resolved from `track_infrastructure_defaults` or `stop_infrastructure_defaults`; source and version shown are from those tables |
+| `param_versions` | object | `{table:entity:field: {value, version, is_default, source, description}}` — full parameter provenance |
 | `operating_days_year` | int | Operating days used for annual normalisation |
 | `parking_eur` | float | Route-level parking cost per day |
 | `summary` | object | Route-level normalised matrix |
@@ -290,7 +338,15 @@ Each view contains the full cost/revenue breakdown with `calc_steps` (formula ke
 |--------|-------------|---------|
 | `400` | `bad_request` | Request body is not valid JSON |
 | `400` | `validation_error` | Invalid fields — see `details` array |
+| `401` | `unauthorized` | Missing or invalid JWT |
+| `401` | `invalid_code` | Wrong, expired, or already-used OTP |
 | `422` | `domain_error` | Valid request but pipeline failed (e.g. unknown stop, no route found) |
+| `429` | `rate_limited` | Too many requests — wait and retry |
 | `500` | `route_error` | Unexpected error in route builder |
 | `500` | `calc_error` | Unexpected error in evaluation |
+| `500` | `internal_error` | Unhandled exception |
 | `501` | `not_implemented` | Endpoint exists but is not yet implemented |
+| `502` | `email_failed` | OTP email could not be sent |
+| `503` | `data_not_loaded` | Database not available |
+
+All errors are logged to `admin.api_request_log`. 4xx and 5xx rows include the full request body as JSONB.

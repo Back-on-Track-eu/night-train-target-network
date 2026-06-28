@@ -176,6 +176,9 @@ jobs:
         run: |
           cd backend/docker
           cp .env.example .env
+          # Overwrite placeholder auth values with CI-safe test values
+          sed -i "s|JWT_SECRET=.*|JWT_SECRET=ci-test-secret-not-used-in-production-aabbccdd1122|" .env
+          sed -i "s|RESEND_API_KEY=.*|RESEND_API_KEY=re_ci_placeholder_not_used|" .env
           docker compose up -d --build
         env:
           POSTGRES_USER:     bot_admin

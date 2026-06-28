@@ -13,7 +13,10 @@ db/
 │   │   ├── create_admin_schema.sql
 │   │   ├── create_input_params_schema.sql
 │   │   └── create_proposal_schema.sql
-│   ├── seed.py                 # Seeds the database with illustrative test data
+│   ├── seed.py                 # Master seeder — runs all seeders in order
+│   ├── seed_admin.py           # Seeds admin schema (users, auth tokens)
+│   ├── seed_input_params.py    # Seeds input_params schema
+│   ├── seed_proposals.py       # Seeds proposals schema
 │   ├── sql_loader.py           # Loads .sql files from the sql/ folder
 │   ├── Dockerfile              # Builds the seeder image
 │   ├── docker-compose.yml      # Standalone stack: postgres + seeder + Mathesar
@@ -86,8 +89,10 @@ Three schemas: `admin`, `input_params`, `proposals`.
 
 | Table | Description |
 |---|---|
-| `users` | Platform users (email-based, placeholder for OTP/magic-link auth) |
+| `users` | Platform users — email-based registered accounts and anonymous guest accounts |
+| `auth_tokens` | Short-lived OTP tokens for magic-link login — one row per issued code, single-use |
 | `feedback` | User feedback submissions |
+| `api_request_log` | One row per API request — method, endpoint, status, duration. Request body (JSONB) stored on 4xx/5xx; error traceback column reserved for future use |
 
 ### `input_params`
 
