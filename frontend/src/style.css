@@ -33,4 +33,17 @@ body {
   --color-pure-green: #008f39;
   --color-yellow-green: #92d051;
   --color-sulphur-yellow: #eaf044;
+
+  /* Primary palette mirrored from the PrimeVue preset for use in Tailwind utilities */
+  --color-primary-50: var(--p-primary-50);
+  --color-primary-100: var(--p-primary-100);
+  --color-primary-200: var(--p-primary-200);
+  --color-primary-300: var(--p-primary-300);
+  --color-primary-400: var(--p-primary-400);
+  --color-primary-500: var(--p-primary-500);
+  --color-primary-600: var(--p-primary-600);
+  --color-primary-700: var(--p-primary-700);
+  --color-primary-800: var(--p-primary-800);
+  --color-primary-900: var(--p-primary-900);
+  --color-primary-950: var(--p-primary-950);
 }

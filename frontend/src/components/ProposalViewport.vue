@@ -67,7 +67,7 @@ function removeStop(index: number) {
 function onRowMouseDown(event: MouseEvent) {
   if ((event.target as HTMLElement).closest('[data-row-actions]')) return
   const row = (event.currentTarget as HTMLElement).closest('tr')
-  const handle = row?.querySelector('[data-pc-section="rowreordericon"]')
+  const handle = row?.querySelector('[data-pc-section="reorderableRowHandle"]')
   if (handle) {
     handle.dispatchEvent(
       new MouseEvent('mousedown', {
@@ -91,7 +91,7 @@ onMounted(() => {
     <div class="flex gap-6">
       <!-- Left panel -->
       <div class="flex w-2/5 flex-col gap-4">
-        <div class="px-4">
+        <div class="itinerary-table px-4">
           <!-- border-collapse (set in pt.table) removes default cell spacing so
                the timeline line segments in consecutive rows connect seamlessly. -->
           <DataTable
@@ -110,20 +110,23 @@ onMounted(() => {
               v-if="mode === 'edit'"
               row-reorder
               style="width: 2rem"
-              :pt="{ bodyCell: { class: 'reorder-col !p-0' } }"
+              :pt="{
+                bodyCell: { class: 'reorder-col !p-0' },
+                reorderableRowHandle: { style: { color: 'var(--p-primary-50)' } },
+              }"
             />
             <Column style="width: 2.5rem" :pt="{ bodyCell: { class: 'timeline-col !p-0' } }">
               <template #body="{ index }">
                 <div class="absolute inset-0 flex items-center justify-center">
                   <div
-                    class="absolute left-1/2 w-0.5 -translate-x-1/2 bg-white/30"
+                    class="absolute left-1/2 w-0.5 -translate-x-1/2 bg-primary-50/30"
                     :class="[
                       index === 0 ? 'top-1/2' : 'top-0',
                       index === itinerary.length - 1 ? 'bottom-1/2' : 'bottom-0',
                     ]"
                   />
                   <div
-                    class="relative z-10 rounded-full bg-white"
+                    class="relative z-10 rounded-full bg-primary-50"
                     :class="index === 0 || index === itinerary.length - 1 ? 'h-4 w-4' : 'h-3 w-3'"
                   />
                 </div>
@@ -132,12 +135,12 @@ onMounted(() => {
             <Column field="name">
               <template #body="{ data: stop, index }">
                 <div
-                  class="group flex cursor-default select-none items-center gap-2 rounded-lg px-3 py-2 transition-colors hover:bg-white/5"
+                  class="group flex cursor-default select-none items-center gap-2 rounded-lg px-3 py-2"
                   @mousedown="onRowMouseDown"
                 >
                   <span
                     :class="[
-                      'text-white leading-tight',
+                      'text-primary-50 leading-tight',
                       index === 0 || index === itinerary.length - 1
                         ? 'text-2xl font-bold'
                         : 'text-lg font-semibold',
@@ -146,11 +149,7 @@ onMounted(() => {
                     {{ stop.name }}
                   </span>
 
-                  <div
-                    v-if="mode === 'edit'"
-                    data-row-actions
-                    class="flex translate-x-[-8px] items-center opacity-0 transition-all duration-200 ease-out group-hover:translate-x-0 group-hover:opacity-100"
-                  >
+                  <div v-if="mode === 'edit'" data-row-actions class="flex items-center">
                     <!-- append-to="body" teleports the overlay out of the table so it
                          isn't clipped by the table's overflow / stacking context. -->
                     <Select
@@ -179,25 +178,26 @@ onMounted(() => {
                         listContainer: { class: '!max-h-80' },
                         list: { class: '!bg-transparent !p-1.5' },
                         option: {
-                          class: '!rounded-lg !px-4 !py-3 !text-base !text-white !cursor-pointer',
+                          class:
+                            '!rounded-lg !px-4 !py-3 !text-base !text-primary-50 !cursor-pointer',
                         },
-                        optionLabel: { class: '!text-white !text-base' },
-                        emptyMessage: { class: '!text-white !px-4 !py-3 !text-base' },
+                        optionLabel: { class: '!text-primary-50 !text-base' },
+                        emptyMessage: { class: '!text-primary-50 !px-4 !py-3 !text-base' },
                       }"
                       @update:model-value="(val: Stop) => onStopSelect(stop, val)"
                     >
                       <template #dropdownicon>
-                        <AppIcon :path="mdiPencil" :size="20" color="white" />
+                        <AppIcon :path="mdiPencil" :size="20" color="var(--p-primary-50)" />
                       </template>
                       <template #header>
                         <div
                           class="flex items-center gap-2.5 px-3 py-3"
-                          style="border-bottom: 1px solid white"
+                          style="border-bottom: 1px solid var(--p-primary-50)"
                         >
                           <AppIcon
                             :path="mdiMagnify"
                             :size="13"
-                            color="rgba(255, 255, 255, 0.7)"
+                            color="color-mix(in srgb, var(--p-primary-50) 70%, transparent)"
                             class="shrink-0"
                           />
                           <input
@@ -211,7 +211,7 @@ onMounted(() => {
                               border: none;
                               outline: none;
                               box-shadow: none;
-                              color: white;
+                              color: var(--p-primary-50);
                               font-size: 1rem;
                               padding: 0;
                               font-family: inherit;
@@ -222,7 +222,7 @@ onMounted(() => {
                     </Select>
 
                     <button
-                      class="flex cursor-pointer items-center justify-center text-white"
+                      class="flex cursor-pointer items-center justify-center text-primary-50 opacity-0 translate-x-[-8px] transition-all duration-200 ease-out group-hover:translate-x-0 group-hover:opacity-100"
                       @click.stop="removeStop(index)"
                     >
                       <AppIcon :path="mdiTrashCan" :size="20" />
@@ -236,8 +236,7 @@ onMounted(() => {
 
         <!-- Train card placeholder -->
         <div
-          class="flex h-32 items-center justify-center rounded-xl text-sm text-white/40"
-          style="background: rgba(255, 255, 255, 0.05)"
+          class="flex h-32 items-center justify-center rounded-xl bg-primary-50/5 text-sm text-primary-50/40"
         >
           {{ t('proposal.trainCardPlaceholder') }}
         </div>
@@ -245,16 +244,18 @@ onMounted(() => {
         <!-- JSON preview -->
         <div
           v-if="store.stopsStatus === 'success' || store.compositionsStatus === 'success'"
-          class="rounded-xl p-4 text-xs text-white/60"
-          style="background: rgba(255, 255, 255, 0.05)"
+          class="rounded-xl bg-primary-50/5 p-4 text-xs text-primary-50/60"
         >
-          <p v-if="store.stopsStatus === 'success'" class="mb-1 font-bold text-white/80">
+          <p v-if="store.stopsStatus === 'success'" class="mb-1 font-bold text-primary-50/80">
             {{ t('proposal.debugStopsPreview') }}
           </p>
           <pre v-if="store.stopsStatus === 'success'" class="mb-4 overflow-auto">{{
             JSON.stringify(store.stops.slice(0, 2), null, 2)
           }}</pre>
-          <p v-if="store.compositionsStatus === 'success'" class="mb-1 font-bold text-white/80">
+          <p
+            v-if="store.compositionsStatus === 'success'"
+            class="mb-1 font-bold text-primary-50/80"
+          >
             {{ t('proposal.debugCompositionsPreview') }}
           </p>
           <pre v-if="store.compositionsStatus === 'success'" class="overflow-auto">{{
@@ -264,7 +265,7 @@ onMounted(() => {
 
         <div
           v-if="store.stopsStatus === 'loading' || store.compositionsStatus === 'loading'"
-          class="text-xs text-white/40"
+          class="text-xs text-primary-50/40"
         >
           {{ t('proposal.loading') }}
         </div>
@@ -275,8 +276,8 @@ onMounted(() => {
 
       <!-- Right panel: map placeholder -->
       <div
-        class="flex flex-1 items-center justify-center rounded-xl text-sm text-white/40"
-        style="background: rgba(255, 255, 255, 0.05); min-height: 480px"
+        class="flex flex-1 items-center justify-center rounded-xl bg-primary-50/5 text-sm text-primary-50/40"
+        style="min-height: 480px"
       >
         {{ t('proposal.mapPlaceholder') }}
       </div>
@@ -285,7 +286,7 @@ onMounted(() => {
     <!-- Evaluate button (edit mode only) -->
     <div v-if="mode === 'edit'" class="flex justify-center">
       <button
-        class="flex items-center gap-2 rounded-full bg-white/10 px-6 py-2 text-sm text-white transition hover:bg-white/20"
+        class="flex items-center gap-2 rounded-full bg-primary-50/10 px-6 py-2 text-sm text-primary-50 transition hover:bg-primary-50/20"
       >
         {{ t('proposal.evaluate') }} <span>→</span>
       </button>
@@ -312,16 +313,14 @@ onMounted(() => {
 /* PrimeVue dims the dropdown trigger in its Aura theme; force full opacity so
    the chevron stays visible against our dark background at all times. */
 :deep(.p-select-dropdown) {
-  color: white !important;
+  color: var(--p-primary-50) !important;
   opacity: 1 !important;
 }
 /* Timeline column: must be position:relative so absolute children span full cell height */
 :deep(.timeline-col) {
   position: relative !important;
 }
-/* The drag handle lives in a sibling <td>, outside the Tailwind `group` div on
-   the name cell — group-hover: can't cross <td> boundaries. tr:hover is the
-   only selector that spans all cells of a row. */
+/* Drag handle: hover-only */
 :deep(.reorder-col > *) {
   opacity: 0;
   transition: opacity 0.2s ease;
@@ -329,38 +328,19 @@ onMounted(() => {
 :deep(tr:hover .reorder-col > *) {
   opacity: 1;
 }
-:deep([data-pc-section='rowreordericon']) {
-  font-family: 'Material Design Icons' !important;
-  color: white !important;
-  cursor: grab;
-}
-:deep([data-pc-section='rowreordericon'])::before {
-  content: '\F01DB' !important;
-}
 </style>
 
 <style>
-/* Not scoped: the Select overlay teleports to <body> via append-to="body", so it
-   lives outside this component's scoped CSS subtree and scoped styles can't reach it. */
-
+/* ── Select overlay (teleports to <body>) ── */
 /* ── Overlay shell ── */
 .itinerary-select-overlay {
-  background: #23263d !important;
-  border: 1px solid white !important;
-  /* Override PrimeVue Aura option-state CSS vars at source */
-  --p-select-option-color: white;
-  --p-select-option-focus-color: white;
-  --p-select-option-focus-background: #2b2e4a;
-  --p-select-option-selected-color: white;
-  --p-select-option-selected-background: #363a58;
-  --p-select-option-selected-focus-color: white;
-  --p-select-option-selected-focus-background: #3e4265;
+  border: 1px solid var(--p-primary-50) !important;
 }
 
 /* ── Scrollbar ── */
 .itinerary-select-overlay * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.5) transparent;
+  scrollbar-color: color-mix(in srgb, var(--p-primary-50) 50%, transparent) transparent;
 }
 .itinerary-select-overlay *::-webkit-scrollbar {
   width: 5px !important;
@@ -369,32 +349,22 @@ onMounted(() => {
   background: transparent !important;
 }
 .itinerary-select-overlay *::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.5) !important;
+  background: color-mix(in srgb, var(--p-primary-50) 50%, transparent) !important;
   border-radius: 99px !important;
 }
 .itinerary-select-overlay *::-webkit-scrollbar-button {
   display: none !important;
 }
 
-/* ── Option states ── */
-/* Base */
-.itinerary-select-overlay [data-pc-section='option'] {
-  color: white !important;
-}
-/* Hover only (specificity 0,3,0) */
+/* ── Option states (background fallbacks; colours come from definePreset tokens) ── */
 .itinerary-select-overlay [data-pc-section='option'][data-p-focused='true'] {
   background: #2b2e4a !important;
-  color: white !important;
 }
-/* Selected at rest (specificity 0,3,0) */
 .itinerary-select-overlay [data-pc-section='option'][data-p-selected='true'] {
   background: #363a58 !important;
-  color: white !important;
 }
-/* Selected + hovered (specificity 0,4,0 — beats both above) */
 .itinerary-select-overlay
   [data-pc-section='option'][data-p-selected='true'][data-p-focused='true'] {
   background: #41466e !important;
-  color: white !important;
 }
 </style>
