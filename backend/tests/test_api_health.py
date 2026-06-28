@@ -128,16 +128,111 @@ def test_params_compositions_indicative_figures(api_base):
 
 @pytest.mark.timeout(10)
 def test_stub_endpoints_return_501(api_base):
-    """Auth, feedback and scenario stubs return 501."""
-    stubs = [
-        ("POST", "/api/auth/request-code"),
-        ("POST", "/api/auth/verify"),
-        ("POST", "/api/feedback"),
+    """Feedback stub still returns 501."""
+    resp = requests.request("POST", f"{api_base}/api/feedback", json={}, timeout=5)
+    assert resp.status_code == 501, f"POST /api/feedback returned {resp.status_code}, expected 501"
+
+
+@pytest.mark.timeout(10)
+def test_scenario_endpoints_require_auth(api_base):
+    """Scenario endpoints require auth — return 401 without token."""
+    for method, path in [
         ("POST", "/api/scenario"),
         ("GET",  "/api/scenarios"),
         ("POST", "/api/scenarios"),
-    ]
-    for method, path in stubs:
+    ]:
         resp = requests.request(method, f"{api_base}{path}", json={}, timeout=5)
-        assert resp.status_code == 501, \
-            f"{method} {path} returned {resp.status_code}, expected 501"
+        assert resp.status_code == 401, \
+            f"{method} {path} returned {resp.status_code}, expected 401"
+
+@pytest.mark.timeout(10)
+def test_auth_endpoints_no_longer_stub(api_base):
+    """Auth endpoints are implemented — must not return 501."""
+    for method, path in [
+        ("POST", "/api/auth/request-code"),
+        ("POST", "/api/auth/verify"),
+        ("POST", "/api/auth/guest"),
+    ]:
+        resp = requests.request(method, f"{api_base}{path}", json={}, timeout=5)
+        assert resp.status_code != 501, \
+            f"{method} {path} still returning 501 — not yet implemented"
+
+# ---------------------------------------------------------------------------
+# Request logging tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.timeout(10)
+def test_request_log_records_successful_request(api_base, db_cur, db_conn):
+    """A successful GET /api/health produces a log row with status 200 and NULL request_body."""
+    resp = requests.get(f"{api_base}/api/health")
+    assert resp.status_code == 200
+
+    db_conn.commit()  # start a fresh snapshot so the API's insert is visible
+    db_cur.execute(
+        """
+        SELECT status_code, method, endpoint, duration_ms, request_body, error_log
+        FROM admin.api_request_log
+        WHERE endpoint = '/api/health'
+        ORDER BY ts DESC
+        LIMIT 1
+        """
+    )
+    row = db_cur.fetchone()
+
+    assert row is not None, "No log row found for GET /api/health"
+    assert row["status_code"] == 200
+    assert row["method"]      == "GET"
+    assert row["endpoint"]    == "/api/health"
+    assert row["duration_ms"] >= 0
+    assert row["request_body"] is None
+    assert row["error_log"]    is None
+
+
+@pytest.mark.timeout(10)
+def test_request_log_records_400_with_request_body(api_base, db_cur, db_conn):
+    """A 400 validation error logs the full request body and NULL error_log."""
+    bad_payload = {"stops": "not-a-list", "composition_id": 999}
+    resp = requests.post(f"{api_base}/api/route/planOrUpdate", json=bad_payload)
+    assert resp.status_code == 400
+
+    db_conn.commit()  # start a fresh snapshot so the API's insert is visible
+    db_cur.execute(
+        """
+        SELECT status_code, request_body, error_log
+        FROM admin.api_request_log
+        WHERE endpoint = '/api/route/planOrUpdate'
+        ORDER BY ts DESC
+        LIMIT 1
+        """
+    )
+    row = db_cur.fetchone()
+
+    assert row is not None, "No log row found for POST /api/route/planOrUpdate"
+    assert row["status_code"]  == 400
+    assert row["request_body"] is not None
+    assert row["request_body"]["stops"] == "not-a-list"
+    assert row["error_log"] is None
+
+
+@pytest.mark.timeout(10)
+def test_request_log_records_404(api_base, db_cur, db_conn):
+    """A 404 on an unknown endpoint produces a log row with NULL request_body."""
+    resp = requests.get(f"{api_base}/api/does-not-exist")
+    assert resp.status_code == 404
+
+    db_conn.commit()  # start a fresh snapshot so the API's insert is visible
+    db_cur.execute(
+        """
+        SELECT status_code, request_body, error_log
+        FROM admin.api_request_log
+        WHERE endpoint = '/api/does-not-exist'
+        ORDER BY ts DESC
+        LIMIT 1
+        """
+    )
+    row = db_cur.fetchone()
+
+    assert row is not None, "No log row found for 404 request"
+    assert row["status_code"]  == 404
+    assert row["request_body"] is None
+    assert row["error_log"]    is None
