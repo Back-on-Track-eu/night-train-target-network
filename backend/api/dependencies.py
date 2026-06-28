@@ -6,6 +6,9 @@ Singleton state for the Flask API.
 A DBDataLoader is created once at startup and held for the lifetime of the
 process. All route handlers call get_loader() to access it.
 
+Auth routes and other endpoints that need direct DB access call get_db()
+which yields a psycopg2 RealDictCursor inside an auto-committed transaction.
+
 State
 -----
   _loader    : DBDataLoader instance (created at startup)
@@ -17,8 +20,13 @@ State
 from __future__ import annotations
 
 import logging
+import os
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Optional
+
+import psycopg2
+import psycopg2.extras
 
 logger = logging.getLogger(__name__)
 
@@ -74,3 +82,50 @@ def get_loader():
             "Database not available. Check the connection and restart the API."
         )
     return _loader
+
+
+@contextmanager
+def get_db():
+    """
+    Yield a psycopg2 RealDictCursor for direct DB access.
+
+    Usage
+    -----
+        with get_db() as cur:
+            cur.execute("SELECT ...")
+            row = cur.fetchone()
+        # connection is committed and closed automatically
+
+    - Opens a fresh connection per call (auth operations are infrequent;
+      a connection pool can be added later if needed).
+    - Commits on clean exit, rolls back on exception.
+    - Always closes the connection.
+    - Raises psycopg2.Error on connection or query failure.
+    """
+    required = [
+        "POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_DB",
+        "POSTGRES_USER", "POSTGRES_PASSWORD",
+    ]
+    missing = [k for k in required if not os.environ.get(k)]
+    if missing:
+        raise RuntimeError(
+            f"Missing DB environment variable(s): {', '.join(missing)}. "
+            f"Check your .env file."
+        )
+
+    conn = psycopg2.connect(
+        host     = os.environ["POSTGRES_HOST"],
+        port     = int(os.environ["POSTGRES_PORT"]),
+        dbname   = os.environ["POSTGRES_DB"],
+        user     = os.environ["POSTGRES_USER"],
+        password = os.environ["POSTGRES_PASSWORD"],
+    )
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            yield cur
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()

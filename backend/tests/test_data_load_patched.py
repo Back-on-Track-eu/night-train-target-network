@@ -33,6 +33,7 @@ def rollback_on_error(db_conn):
 
 EXPECTED_ROW_COUNTS = {
     "admin.users":                                2,
+    "admin.auth_tokens":                           0,  # empty after seed — tokens are runtime-only
     "input_params.sources":                       2,
     "input_params.countries":                     1,
     "input_params.service_classes":               1,
@@ -173,3 +174,9 @@ def test_service_classes_exist(db_cur):
     """Service classes table is populated."""
     db_cur.execute("SELECT COUNT(*) AS n FROM input_params.service_classes")
     assert db_cur.fetchone()["n"] >= 1
+
+def test_users_have_display_name(db_cur):
+    """All seeded users have a non-empty display_name."""
+    db_cur.execute("SELECT user_id, display_name FROM admin.users")
+    for row in db_cur.fetchall():
+        assert row["display_name"], f"User {row['user_id']} has no display_name"
