@@ -115,6 +115,27 @@ Hooks are defined in `/.pre-commit-config.yaml` at the repo root. They mirror th
 
 ---
 
+## Icons
+
+Use the `AppIcon` component with path constants from `@mdi/js`:
+
+```vue
+<script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
+import { mdiMagnify } from '@mdi/js'
+</script>
+
+<template>
+  <AppIcon :path="mdiMagnify" :size="20" color="white" />
+</template>
+```
+
+Props: `path` (required), `size` (px, default `24`), `color` (default `currentColor`).
+
+Do **not** use `<i class="mdi mdi-*">` CSS font classes — `@mdi/js` is tree-shakeable and avoids loading the full icon font.
+
+---
+
 ## CSS Layer Architecture
 
 PrimeVue 4 and Tailwind v4 coexist via CSS cascade layers. The layer order is declared

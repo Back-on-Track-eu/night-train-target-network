@@ -70,7 +70,6 @@ backend/models/route/routing/docker/graph-cache/
 #Coding Agents
 .claude/
 
-
 # Snapshot for sending to claude
 project-snapshot.zip
 

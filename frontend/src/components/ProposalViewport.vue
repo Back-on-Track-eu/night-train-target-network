@@ -6,6 +6,8 @@ import type { Stop } from '@/types/api'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Select from 'primevue/select'
+import AppIcon from '@/components/AppIcon.vue'
+import { mdiMagnify, mdiPencil, mdiTrashCan } from '@mdi/js'
 
 defineProps<{ mode: 'edit' | 'display' }>()
 
@@ -185,16 +187,18 @@ onMounted(() => {
                       @update:model-value="(val: Stop) => onStopSelect(stop, val)"
                     >
                       <template #dropdownicon>
-                        <i class="pi pi-chevron-down text-xl" style="color: white" />
+                        <AppIcon :path="mdiPencil" :size="20" color="white" />
                       </template>
                       <template #header>
                         <div
                           class="flex items-center gap-2.5 px-3 py-3"
                           style="border-bottom: 1px solid white"
                         >
-                          <i
-                            class="pi pi-search shrink-0"
-                            style="font-size: 0.8rem; color: rgba(255, 255, 255, 0.7)"
+                          <AppIcon
+                            :path="mdiMagnify"
+                            :size="13"
+                            color="rgba(255, 255, 255, 0.7)"
+                            class="shrink-0"
                           />
                           <input
                             v-model="stop.filterQuery"
@@ -221,7 +225,7 @@ onMounted(() => {
                       class="flex cursor-pointer items-center justify-center text-white"
                       @click.stop="removeStop(index)"
                     >
-                      <i class="pi pi-times text-xl" />
+                      <AppIcon :path="mdiTrashCan" :size="20" />
                     </button>
                   </div>
                 </div>
@@ -324,6 +328,14 @@ onMounted(() => {
 }
 :deep(tr:hover .reorder-col > *) {
   opacity: 1;
+}
+:deep([data-pc-section='rowreordericon']) {
+  font-family: 'Material Design Icons' !important;
+  color: white !important;
+  cursor: grab;
+}
+:deep([data-pc-section='rowreordericon'])::before {
+  content: '\F01DB' !important;
 }
 </style>
 
