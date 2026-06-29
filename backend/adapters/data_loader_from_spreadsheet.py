@@ -29,10 +29,14 @@ import yaml
 import re
 
 from models.params import (
-    CompositionParams, CompositionCollection,
-    InfraParams, InfraCollection,
-    StopParams, StopCollection,
-    DemandParams, DemandCollection,
+    CompositionParams,
+    CompositionCollection,
+    InfraParams,
+    InfraCollection,
+    StopParams,
+    StopCollection,
+    DemandParams,
+    DemandCollection,
 )
 
 logger = logging.getLogger(__name__)
@@ -41,24 +45,25 @@ logger = logging.getLogger(__name__)
 # HELPERS
 # =============================================================================
 
+
 def _col_letter_to_index(col: str) -> int:
     """Convert Excel column letter(s) to 0-based index. 'A'->0, 'Z'->25, 'AA'->26."""
     col = col.strip().upper()
     result = 0
     for char in col:
-        result = result * 26 + (ord(char) - ord('A') + 1)
+        result = result * 26 + (ord(char) - ord("A") + 1)
     return result - 1
 
 
 def _parse_float(value: str, default: float = 0.0) -> float:
     try:
         # strip currency symbols, whitespace
-        cleaned = re.sub(r'[€%\s]', '', str(value))
+        cleaned = re.sub(r"[€%\s]", "", str(value))
         # remove all dots/commas that are thousands separators
         # a thousands separator is always followed by exactly 3 digits
-        cleaned = re.sub(r'[.,](?=\d{3}([.,]|$))', '', cleaned)
+        cleaned = re.sub(r"[.,](?=\d{3}([.,]|$))", "", cleaned)
         # replace remaining comma (decimal separator) with dot
-        cleaned = cleaned.replace(',', '.')
+        cleaned = cleaned.replace(",", ".")
         return float(cleaned)
     except (ValueError, TypeError):
         return default
@@ -113,6 +118,7 @@ def _parse_time_h(value: str) -> float:
 # SHEET DATA LOADER
 # =============================================================================
 
+
 class SheetDataLoader:
     """
     Single data access layer for the night train model.
@@ -164,10 +170,10 @@ class SheetDataLoader:
         """Load one sheet and cache as { key -> row_dict }."""
         import gspread
 
-        sheet_name   = sheet_cfg["sheet_name"]
-        header_row   = sheet_cfg.get("header_row", 1)
+        sheet_name = sheet_cfg["sheet_name"]
+        header_row = sheet_cfg.get("header_row", 1)
         key_col_name = sheet_cfg["key_column"]
-        col_map      = sheet_cfg["columns"]
+        col_map = sheet_cfg["columns"]
 
         try:
             ws = spreadsheet.worksheet(sheet_name)
@@ -239,7 +245,9 @@ class SheetDataLoader:
         self._require_loaded()
         row = self.get("infrastructure", country_code)
         if row is None:
-            logger.warning("Country '%s' not found in infrastructure sheet.", country_code)
+            logger.warning(
+                "Country '%s' not found in infrastructure sheet.", country_code
+            )
             return None
         return self._row_to_infra(country_code, row)
 
@@ -295,9 +303,7 @@ class SheetDataLoader:
             try:
                 result[country_code] = self._row_to_infra(country_code, row)
             except Exception as e:
-                logger.warning(
-                    "Skipping infrastructure row '%s': %s", country_code, e
-                )
+                logger.warning("Skipping infrastructure row '%s': %s", country_code, e)
         logger.info("Built infra params for %d countries.", len(result))
         return InfraCollection(result)
 
@@ -326,7 +332,6 @@ class SheetDataLoader:
         logger.info("Built %d demand rows.", len(result))
         return DemandCollection(result)
 
-
     # ------------------------------------------------------------------
     # PRIVATE ROW PARSERS — one per sheet
     # ------------------------------------------------------------------
@@ -334,59 +339,63 @@ class SheetDataLoader:
     @staticmethod
     def _row_to_composition(comp_id: str, row: dict) -> CompositionParams:
         return CompositionParams(
-            comp_id                      = comp_id,
-            comp_description             = row.get("comp_description", ""),
-            company                      = row.get("comp_company", ""),
-            weight_gross_t               = _parse_float(row["comp_weight_gross_t"]),
-            max_speed_kmh                = _parse_float(row["comp_max_speed_kmh"]),
-            hsr_allowed                  = _parse_bool(row["comp_hsr_allowed"]),
-            min_boarding_time_h          = _parse_time_h(row["comp_veh_min_boarding_time_h"]),
-            min_alighting_time_h         = _parse_time_h(row["comp_veh_min_alighting_time_h"]),
-            energy_factor_weight         = _parse_float(row["comp_energy_factor_weight"]),
-            energy_factor_speed          = _parse_float(row["comp_energy_factor_speed"]),
-            energy_factor_terrain        = _parse_float(row["comp_energy_factor_terrain"]),
-            seats_total                  = _parse_int(row["comp_seats_total"]),
-            couchettes_total             = _parse_int(row["comp_couchettes_total"]),
-            sleepers_total               = _parse_int(row["comp_sleepers_total"]),
-            seat_density                 = _parse_float(row["comp_seat_density"]),
-            couchette_density            = _parse_float(row["comp_couchette_density"]),
-            sleeper_density              = _parse_float(row["comp_sleeper_density"]),
-            ebit_margin_per              = _parse_pct(row["comp_ebit_margin_per"]),
-            purchase_loco_eur            = _parse_float(row["comp_purchase_loco_eur"]),
-            purchase_coach_eur           = _parse_float(row["comp_purchase_coach_eur"]),
-            loco_avail_per               = _parse_pct(row["comp_loco_avail_per"]),
-            coach_avail_per              = _parse_pct(row["comp_coach_avail_per"]),
-            loco_amort_years             = _parse_float(row["comp_loco_amort_years"]),
-            coach_amort_years            = _parse_float(row["comp_coach_amort_years"]),
-            financing_quota_per          = _parse_pct(row["comp_financing_quota_per"]),
-            fix_overhead_quota_per       = _parse_pct(row["comp_fix_overhead_quota_per"]),
-            cleaning_services_eur_day    = _parse_float(row["comp_cleaning_services_eur_day"]),
-            shunting_eur_day             = _parse_float(row["comp_shunting_eur_day"]),
-            loco_maint_eur_km            = _parse_float(row["comp_loco_maint_eur_km"]),
-            coach_maint_eur_km           = _parse_float(row["comp_coach_maint_eur_km"]),
-            driver_costs_eur_h           = _parse_float(row["comp_driver_costs_eur_h"]),
-            crew_costs_eur_h             = _parse_float(row["comp_crew_costs_eur_h"]),
-            driver_overhead_h            = _parse_time_h(row["comp_driver_overhead_h"]),
-            crew_overhead_h              = _parse_time_h(row["comp_crew_overhead_h"]),
-            svc_stockings_seat_per       = _parse_pct(row["comp_svc_stockings_seat_per"]),
-            svc_stockings_couchette_per  = _parse_pct(row["comp_svc_stockings_couchette_per"]),
-            svc_stockings_sleeper_per    = _parse_pct(row["comp_svc_stockings_sleeper_per"]),
-            var_overhead_per             = _parse_pct(row["comp_var_overhead_per"]),
+            comp_id=comp_id,
+            comp_description=row.get("comp_description", ""),
+            company=row.get("comp_company", ""),
+            weight_gross_t=_parse_float(row["comp_weight_gross_t"]),
+            max_speed_kmh=_parse_float(row["comp_max_speed_kmh"]),
+            hsr_allowed=_parse_bool(row["comp_hsr_allowed"]),
+            min_boarding_time_h=_parse_time_h(row["comp_veh_min_boarding_time_h"]),
+            min_alighting_time_h=_parse_time_h(row["comp_veh_min_alighting_time_h"]),
+            energy_factor_weight=_parse_float(row["comp_energy_factor_weight"]),
+            energy_factor_speed=_parse_float(row["comp_energy_factor_speed"]),
+            energy_factor_terrain=_parse_float(row["comp_energy_factor_terrain"]),
+            seats_total=_parse_int(row["comp_seats_total"]),
+            couchettes_total=_parse_int(row["comp_couchettes_total"]),
+            sleepers_total=_parse_int(row["comp_sleepers_total"]),
+            seat_density=_parse_float(row["comp_seat_density"]),
+            couchette_density=_parse_float(row["comp_couchette_density"]),
+            sleeper_density=_parse_float(row["comp_sleeper_density"]),
+            ebit_margin_per=_parse_pct(row["comp_ebit_margin_per"]),
+            purchase_loco_eur=_parse_float(row["comp_purchase_loco_eur"]),
+            purchase_coach_eur=_parse_float(row["comp_purchase_coach_eur"]),
+            loco_avail_per=_parse_pct(row["comp_loco_avail_per"]),
+            coach_avail_per=_parse_pct(row["comp_coach_avail_per"]),
+            loco_amort_years=_parse_float(row["comp_loco_amort_years"]),
+            coach_amort_years=_parse_float(row["comp_coach_amort_years"]),
+            financing_quota_per=_parse_pct(row["comp_financing_quota_per"]),
+            fix_overhead_quota_per=_parse_pct(row["comp_fix_overhead_quota_per"]),
+            cleaning_services_eur_day=_parse_float(
+                row["comp_cleaning_services_eur_day"]
+            ),
+            shunting_eur_day=_parse_float(row["comp_shunting_eur_day"]),
+            loco_maint_eur_km=_parse_float(row["comp_loco_maint_eur_km"]),
+            coach_maint_eur_km=_parse_float(row["comp_coach_maint_eur_km"]),
+            driver_costs_eur_h=_parse_float(row["comp_driver_costs_eur_h"]),
+            crew_costs_eur_h=_parse_float(row["comp_crew_costs_eur_h"]),
+            driver_overhead_h=_parse_time_h(row["comp_driver_overhead_h"]),
+            crew_overhead_h=_parse_time_h(row["comp_crew_overhead_h"]),
+            svc_stockings_seat_per=_parse_pct(row["comp_svc_stockings_seat_per"]),
+            svc_stockings_couchette_per=_parse_pct(
+                row["comp_svc_stockings_couchette_per"]
+            ),
+            svc_stockings_sleeper_per=_parse_pct(row["comp_svc_stockings_sleeper_per"]),
+            var_overhead_per=_parse_pct(row["comp_var_overhead_per"]),
         )
 
     @staticmethod
     def _row_to_infra(country_code: str, row: dict) -> InfraParams:
         return InfraParams(
-            country_code         = country_code,
-            tac_eur_train_km     = _parse_float(row["infra_tac_eur_train_km"]),
-            parking_eur_day      = _parse_float(row["infra_parking_eur_day"]),
-            energy_price_eur_kwh = _parse_float(row["infra_energy_price_eur_kwh"]),
-            terrain_score        = _parse_float(row["infra_terrain_score"]),
-            terrain_category     = row.get("infra_terrain_category", ""),
-            hsr_allowed          = _parse_bool(row["infra_hsr_allowed"]),
-            min_boarding_time_h  = _parse_time_h(row["infra_min_boarding_time_h"]),
-            min_alighting_time_h = _parse_time_h(row["infra_min_alighting_time_h"]),
-            buffer_quota_per     = _parse_pct(row["infra_buffer_quota_per"]),
+            country_code=country_code,
+            tac_eur_train_km=_parse_float(row["infra_tac_eur_train_km"]),
+            parking_eur_day=_parse_float(row["infra_parking_eur_day"]),
+            energy_price_eur_kwh=_parse_float(row["infra_energy_price_eur_kwh"]),
+            terrain_score=_parse_float(row["infra_terrain_score"]),
+            terrain_category=row.get("infra_terrain_category", ""),
+            hsr_allowed=_parse_bool(row["infra_hsr_allowed"]),
+            min_boarding_time_h=_parse_time_h(row["infra_min_boarding_time_h"]),
+            min_alighting_time_h=_parse_time_h(row["infra_min_alighting_time_h"]),
+            buffer_quota_per=_parse_pct(row["infra_buffer_quota_per"]),
         )
 
     @staticmethod
@@ -403,11 +412,11 @@ class SheetDataLoader:
     @staticmethod
     def _row_to_demand(relation_id: str, row: dict) -> DemandParams:
         return DemandParams(
-            relation_id          = relation_id,
-            origin_stop_id       = row.get("demand_origin_stop_id", ""),
-            destination_stop_id  = row.get("demand_destination_stop_id", ""),
-            demand_type          = row.get("demand_type", ""),
-            demand_seat_pax      = _parse_float(row.get("demand_seat_pax", "0")),
-            demand_couchette_pax = _parse_float(row.get("demand_couchette_pax", "0")),
-            demand_sleeper_pax   = _parse_float(row.get("demand_sleeper_pax", "0")),
+            relation_id=relation_id,
+            origin_stop_id=row.get("demand_origin_stop_id", ""),
+            destination_stop_id=row.get("demand_destination_stop_id", ""),
+            demand_type=row.get("demand_type", ""),
+            demand_seat_pax=_parse_float(row.get("demand_seat_pax", "0")),
+            demand_couchette_pax=_parse_float(row.get("demand_couchette_pax", "0")),
+            demand_sleeper_pax=_parse_float(row.get("demand_sleeper_pax", "0")),
         )

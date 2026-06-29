@@ -18,14 +18,33 @@ COPY pyproject.toml uv.lock ./
 # Install dependencies into /app/.venv
 RUN uv sync --frozen --no-install-project
 
+# Download countries.geojson here so the runtime stage doesn't need curl
+# URL configured via NATURAL_EARTH_COUNTRIES_URL in .env.example.
+ARG NATURAL_EARTH_COUNTRIES_URL=https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson
+RUN apt-get -o Acquire::ForceIPv4=true update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -fsSL "$NATURAL_EARTH_COUNTRIES_URL" -o /countries.geojson
+
 # =============================================================================
 FROM python:3.12-slim AS runtime
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
-    curl \
-    openssh-client \
+# Only libatomic1 and locales needed at runtime
+RUN apt-get -o Acquire::ForceIPv4=true update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        git \
+        curl \
+        openssh-client \
+        libatomic1 \
+        locales \
+    && echo "en_US.UTF-8 UTF-8" > /etc/locale.gen \
+    && locale-gen \
+    && update-locale LANG=en_US.UTF-8 \
     && rm -rf /var/lib/apt/lists/*
+
+ENV LANG=en_US.UTF-8 \
+    LANGUAGE=en_US:en \
+    LC_ALL=en_US.UTF-8
 
 WORKDIR /app
 
@@ -35,12 +54,8 @@ COPY --from=builder /app/.venv /app/.venv
 # Copy application code
 COPY . .
 
-# Download countries.geojson — needed by rail_router.py for country border
-# detection. Gitignored (large static asset), so fetched at build time.
-# URL configured via NATURAL_EARTH_COUNTRIES_URL in .env.example.
-ARG NATURAL_EARTH_COUNTRIES_URL=https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson
-RUN curl -fsSL "$NATURAL_EARTH_COUNTRIES_URL" \
-    -o models/route/routing/countries.geojson
+# Copy pre-downloaded geojson from builder
+COPY --from=builder /countries.geojson models/route/routing/countries.geojson
 
 # Activate venv
 ENV PATH="/app/.venv/bin:$PATH"

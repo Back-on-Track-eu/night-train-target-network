@@ -59,9 +59,10 @@ _DUMMY_KWH_PER_KM: float = 28.0
 # PUBLIC FUNCTION
 # =============================================================================
 
+
 def calc_energy_consumption(
-        trip_path:   TripPath,
-        composition: Composition,
+    trip_path: TripPath,
+    composition: Composition,
 ) -> None:
     """
     Enrich each CountryLeg in trip_path.segments with energy_kwh
@@ -94,9 +95,9 @@ def calc_energy_consumption(
 
     for segment in trip_path.segments:
         for cl in segment.country_legs:
-            distance_km       = cl.distance_m / 1000.0
-            energy_kwh        = _DUMMY_KWH_PER_KM * distance_km
+            distance_km = cl.distance_m / 1000.0
+            energy_kwh = _DUMMY_KWH_PER_KM * distance_km
             energy_kwh_per_km = _DUMMY_KWH_PER_KM if distance_km > 0 else 0.0
 
-            cl.energy_kwh        = energy_kwh
+            cl.energy_kwh = energy_kwh
             cl.energy_kwh_per_km = energy_kwh_per_km

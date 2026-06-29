@@ -16,4 +16,9 @@ bp = Blueprint("feedback", __name__)
 
 @bp.post("/feedback")
 def submit_feedback():
-    return jsonify({"error": "not_implemented", "message": "Feedback not yet implemented."}), 501
+    return (
+        jsonify(
+            {"error": "not_implemented", "message": "Feedback not yet implemented."}
+        ),
+        501,
+    )

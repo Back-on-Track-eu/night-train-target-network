@@ -51,10 +51,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-
 # =============================================================================
 # PARAMS SOURCE  (input_params.sources)
 # =============================================================================
+
 
 @dataclass
 class ParamsSource:
@@ -66,15 +66,16 @@ class ParamsSource:
     fields per parameter value (for TrackInfrastructure/StopInfrastructure).
     """
 
-    source_id:          int
+    source_id: int
     source_description: str
-    source_url:         Optional[str]   # URL to source document or dataset
-    source_date:        Optional[str]   # ISO date string (YYYY-MM-DD)
+    source_url: Optional[str]  # URL to source document or dataset
+    source_date: Optional[str]  # ISO date string (YYYY-MM-DD)
 
 
 # =============================================================================
 # MODEL VERSIONS
 # =============================================================================
+
 
 @dataclass
 class ModelVersions:
@@ -109,6 +110,7 @@ class ModelVersions:
 # PARAM VERSIONS
 # =============================================================================
 
+
 @dataclass
 class ParamVersionEntry:
     """
@@ -123,11 +125,11 @@ class ParamVersionEntry:
         "coach_type:type1:weight_gross_t"
     """
 
-    value:       object
-    version:     int
-    source:      Optional[ParamsSource] = field(default=None)
-    description: Optional[str]          = field(default=None)
-    is_default:  bool                   = field(default=False)
+    value: object
+    version: int
+    source: Optional[ParamsSource] = field(default=None)
+    description: Optional[str] = field(default=None)
+    is_default: bool = field(default=False)
     # is_default=True means this value was resolved from a default row
     # because the country/stop-specific value was NULL in the database.
 
@@ -154,20 +156,20 @@ class ParamVersions:
 
     def add(
         self,
-        key:         str,
-        value:       object,
-        version:     int,
-        source:      Optional[ParamsSource] = None,
-        description: Optional[str]          = None,
-        is_default:  bool                   = False,
+        key: str,
+        value: object,
+        version: int,
+        source: Optional[ParamsSource] = None,
+        description: Optional[str] = None,
+        is_default: bool = False,
     ) -> None:
         """Register one parameter field. Safe to call multiple times — last write wins."""
         self.entries[key] = ParamVersionEntry(
-            value       = value,
-            version     = version,
-            source      = source,
-            description = description,
-            is_default  = is_default,
+            value=value,
+            version=version,
+            source=source,
+            description=description,
+            is_default=is_default,
         )
 
     def get(self, key: str) -> ParamVersionEntry | None:
@@ -177,6 +179,7 @@ class ParamVersions:
 # =============================================================================
 # SERVICE CLASS  (input_params.service_classes)
 # =============================================================================
+
 
 @dataclass
 class ServiceClass:
@@ -192,14 +195,15 @@ class ServiceClass:
     share one compartment unit. Stored in DB on the classes table.
     """
 
-    class_id:   str     # e.g. "seat (reclining)", "couchette (6-berth)"
-    class_main: str     # e.g. "Seat", "Couchette", "Sleeper"
-    density:    float   # space units per place — stored in DB, not derived
+    class_id: str  # e.g. "seat (reclining)", "couchette (6-berth)"
+    class_main: str  # e.g. "Seat", "Couchette", "Sleeper"
+    density: float  # space units per place — stored in DB, not derived
 
 
 # =============================================================================
 # OPERATOR  (input_params.operators + input_params.operator_class_costs)
 # =============================================================================
+
 
 @dataclass
 class Operator:
@@ -216,23 +220,24 @@ class Operator:
     Row-level version and source tracking is handled by ParamVersions on Trip.
     """
 
-    operator_id:             str
-    operator_name:           str
-    driver_costs_eur_h:      float   # EUR per driver hour (rate, not duration)
-    crew_costs_eur_h:        float   # EUR per crew hour (rate, not duration)
-    driver_overhead_min:     int     # overhead time per driver per trip in minutes
-    crew_overhead_min:       int     # overhead time per crew member per trip in minutes
-    ebit_margin_per:         float
-    financing_quota_per:     float
-    shunting_eur_day:        float
-    var_overhead_per:        float
-    fix_overhead_quota_per:  float
-    svc_stockings_eur_place: dict[str, float]       # keyed by class_id
+    operator_id: str
+    operator_name: str
+    driver_costs_eur_h: float  # EUR per driver hour (rate, not duration)
+    crew_costs_eur_h: float  # EUR per crew hour (rate, not duration)
+    driver_overhead_min: int  # overhead time per driver per trip in minutes
+    crew_overhead_min: int  # overhead time per crew member per trip in minutes
+    ebit_margin_per: float
+    financing_quota_per: float
+    shunting_eur_day: float
+    var_overhead_per: float
+    fix_overhead_quota_per: float
+    svc_stockings_eur_place: dict[str, float]  # keyed by class_id
 
 
 # =============================================================================
 # COACH TYPE  (input_params.coachtypes + input_params.coachtype_classes)
 # =============================================================================
+
 
 @dataclass
 class CoachClassAssignment:
@@ -246,10 +251,10 @@ class CoachClassAssignment:
     density is denormalised from ServiceClass for convenient aggregation.
     """
 
-    class_id:   str    # FK → input_params.classes.class_id
-    class_main: str    # denormalised from input_params.classes
-    places:     int    # number of places of this class in the coach
-    density:    float  # denormalised from ServiceClass.density
+    class_id: str  # FK → input_params.classes.class_id
+    class_main: str  # denormalised from input_params.classes
+    places: int  # number of places of this class in the coach
+    density: float  # denormalised from ServiceClass.density
 
 
 @dataclass
@@ -267,13 +272,13 @@ class CoachType:
     Row-level version and source tracking is handled by ParamVersions on Trip.
     """
 
-    coachtype_id:   str
+    coachtype_id: str
     weight_gross_t: float
-    crew_factor:    float
-    bikes:          int
-    climatization:  bool
-    plugs:          bool
-    classes:        dict[str, CoachClassAssignment]  # keyed by class_id
+    crew_factor: float
+    bikes: int
+    climatization: bool
+    plugs: bool
+    classes: dict[str, CoachClassAssignment]  # keyed by class_id
 
     def places(self, class_id: str) -> int:
         """Places of a given class in this coach, or 0 if not present."""
@@ -288,6 +293,7 @@ class CoachType:
 # =============================================================================
 # COMPOSITION TYPE  (input_params.compositions + input_params.composition_coaches)
 # =============================================================================
+
 
 @dataclass
 class CompositionType:
@@ -304,33 +310,33 @@ class CompositionType:
     Row-level version and source tracking is handled by ParamVersions on Trip.
     """
 
-    comp_id:          str
+    comp_id: str
     comp_description: str
-    operator:         Operator
-    driver_factor:    float
-    max_speed_kmh:    float
-    hsr_allowed:      bool
-    coaches:          dict[int, CoachType]   # keyed by position
+    operator: Operator
+    driver_factor: float
+    max_speed_kmh: float
+    hsr_allowed: bool
+    coaches: dict[int, CoachType]  # keyed by position
 
     # energy regression coefficients
-    energy_factor_weight:  float
-    energy_factor_speed:   float
+    energy_factor_weight: float
+    energy_factor_speed: float
     energy_factor_terrain: float
 
     # vehicle-dependent minimum dwell times
-    min_boarding_time_min:  int
+    min_boarding_time_min: int
     min_alighting_time_min: int
 
     # composition-level cost params
-    purchase_loco_eur:         float
-    purchase_coach_eur:        float
-    loco_avail_per:            float
-    coach_avail_per:           float
-    loco_amort_years:          int
-    coach_amort_years:         int
+    purchase_loco_eur: float
+    purchase_coach_eur: float
+    loco_avail_per: float
+    coach_avail_per: float
+    loco_amort_years: int
+    coach_amort_years: int
     cleaning_services_eur_day: float
-    loco_maint_eur_km:         float
-    coach_maint_eur_km:        float
+    loco_maint_eur_km: float
+    coach_maint_eur_km: float
 
     # --- derived getters ---
 
@@ -364,11 +370,11 @@ class CompositionType:
         density = sum(places_i * density_i) / sum(places_i)
         """
         weighted: dict[str, float] = {}
-        totals:   dict[str, int]   = {}
+        totals: dict[str, int] = {}
         for coach in self.coaches.values():
             for class_id, a in coach.classes.items():
                 weighted[class_id] = weighted.get(class_id, 0.0) + a.places * a.density
-                totals[class_id]   = totals.get(class_id, 0) + a.places
+                totals[class_id] = totals.get(class_id, 0) + a.places
         return {cid: weighted[cid] / totals[cid] for cid in weighted if totals[cid] > 0}
 
     def density_by_main_class(self) -> dict[str, float]:
@@ -376,17 +382,20 @@ class CompositionType:
         Places-weighted average density per class_main across all coaches.
         """
         weighted: dict[str, float] = {}
-        totals:   dict[str, int]   = {}
+        totals: dict[str, int] = {}
         for coach in self.coaches.values():
             for a in coach.classes.values():
-                weighted[a.class_main] = weighted.get(a.class_main, 0.0) + a.places * a.density
-                totals[a.class_main]   = totals.get(a.class_main, 0) + a.places
+                weighted[a.class_main] = (
+                    weighted.get(a.class_main, 0.0) + a.places * a.density
+                )
+                totals[a.class_main] = totals.get(a.class_main, 0) + a.places
         return {cm: weighted[cm] / totals[cm] for cm in weighted if totals[cm] > 0}
 
 
 # =============================================================================
 # COMPOSITION  (fully resolved operational object)
 # =============================================================================
+
 
 @dataclass
 class Composition:
@@ -402,52 +411,52 @@ class Composition:
     """
 
     # identity
-    comp_id:          str
+    comp_id: str
     comp_description: str
-    operator_id:      str
+    operator_id: str
 
     # routing
-    driver_factor:          float
-    max_speed_kmh:          float
-    hsr_allowed:            bool
-    min_boarding_time_min:  int
+    driver_factor: float
+    max_speed_kmh: float
+    hsr_allowed: bool
+    min_boarding_time_min: int
     min_alighting_time_min: int
 
     # energy
-    energy_factor_weight:  float
-    energy_factor_speed:   float
+    energy_factor_weight: float
+    energy_factor_speed: float
     energy_factor_terrain: float
 
     # general train properties (derived from coaches)
     total_weight_t: float
-    total_crew:     float
+    total_crew: float
 
     # capacity (derived from coaches)
-    places_by_class:  dict[str, int]    # keyed by class_id
+    places_by_class: dict[str, int]  # keyed by class_id
     density_by_class: dict[str, float]  # keyed by class_id, places-weighted avg
 
     # operator cost
-    driver_costs_eur_h:      float
-    crew_costs_eur_h:        float
-    driver_overhead_min:     int
-    crew_overhead_min:       int
-    ebit_margin_per:         float
-    financing_quota_per:     float
-    shunting_eur_day:        float
-    var_overhead_per:        float
-    fix_overhead_quota_per:  float
+    driver_costs_eur_h: float
+    crew_costs_eur_h: float
+    driver_overhead_min: int
+    crew_overhead_min: int
+    ebit_margin_per: float
+    financing_quota_per: float
+    shunting_eur_day: float
+    var_overhead_per: float
+    fix_overhead_quota_per: float
     svc_stockings_eur_place: dict[str, float]  # keyed by class_id
 
     # composition cost
-    purchase_loco_eur:         float
-    purchase_coach_eur:        float
-    loco_avail_per:            float
-    coach_avail_per:           float
-    loco_amort_years:          int
-    coach_amort_years:         int
+    purchase_loco_eur: float
+    purchase_coach_eur: float
+    loco_avail_per: float
+    coach_avail_per: float
+    loco_amort_years: int
+    coach_amort_years: int
     cleaning_services_eur_day: float
-    loco_maint_eur_km:         float
-    coach_maint_eur_km:        float
+    loco_maint_eur_km: float
+    coach_maint_eur_km: float
 
     # indicative KPIs — computed at load time via compute_indicative_figures()
     # None if no composition_references row exists in the DB
@@ -460,47 +469,47 @@ class Composition:
         Called exclusively by DBDataLoader.build_composition().
         """
         return cls(
-            comp_id                = comp_type.comp_id,
-            comp_description       = comp_type.comp_description,
-            operator_id            = comp_type.operator.operator_id,
-            driver_factor          = comp_type.driver_factor,
-            max_speed_kmh          = comp_type.max_speed_kmh,
-            hsr_allowed            = comp_type.hsr_allowed,
-            min_boarding_time_min  = comp_type.min_boarding_time_min,
-            min_alighting_time_min = comp_type.min_alighting_time_min,
-            energy_factor_weight   = comp_type.energy_factor_weight,
-            energy_factor_speed    = comp_type.energy_factor_speed,
-            energy_factor_terrain  = comp_type.energy_factor_terrain,
-            total_weight_t         = comp_type.total_weight_t(),
-            total_crew             = comp_type.total_crew(),
-            places_by_class        = comp_type.places_by_class(),
-            density_by_class       = comp_type.density_by_class(),
-            driver_costs_eur_h     = comp_type.operator.driver_costs_eur_h,
-            crew_costs_eur_h       = comp_type.operator.crew_costs_eur_h,
-            driver_overhead_min    = comp_type.operator.driver_overhead_min,
-            crew_overhead_min      = comp_type.operator.crew_overhead_min,
-            ebit_margin_per        = comp_type.operator.ebit_margin_per,
-            financing_quota_per    = comp_type.operator.financing_quota_per,
-            shunting_eur_day       = comp_type.operator.shunting_eur_day,
-            var_overhead_per       = comp_type.operator.var_overhead_per,
-            fix_overhead_quota_per = comp_type.operator.fix_overhead_quota_per,
-            svc_stockings_eur_place= comp_type.operator.svc_stockings_eur_place,
-            purchase_loco_eur      = comp_type.purchase_loco_eur,
-            purchase_coach_eur     = comp_type.purchase_coach_eur,
-            loco_avail_per         = comp_type.loco_avail_per,
-            coach_avail_per        = comp_type.coach_avail_per,
-            loco_amort_years       = comp_type.loco_amort_years,
-            coach_amort_years      = comp_type.coach_amort_years,
-            cleaning_services_eur_day = comp_type.cleaning_services_eur_day,
-            loco_maint_eur_km      = comp_type.loco_maint_eur_km,
-            coach_maint_eur_km     = comp_type.coach_maint_eur_km,
+            comp_id=comp_type.comp_id,
+            comp_description=comp_type.comp_description,
+            operator_id=comp_type.operator.operator_id,
+            driver_factor=comp_type.driver_factor,
+            max_speed_kmh=comp_type.max_speed_kmh,
+            hsr_allowed=comp_type.hsr_allowed,
+            min_boarding_time_min=comp_type.min_boarding_time_min,
+            min_alighting_time_min=comp_type.min_alighting_time_min,
+            energy_factor_weight=comp_type.energy_factor_weight,
+            energy_factor_speed=comp_type.energy_factor_speed,
+            energy_factor_terrain=comp_type.energy_factor_terrain,
+            total_weight_t=comp_type.total_weight_t(),
+            total_crew=comp_type.total_crew(),
+            places_by_class=comp_type.places_by_class(),
+            density_by_class=comp_type.density_by_class(),
+            driver_costs_eur_h=comp_type.operator.driver_costs_eur_h,
+            crew_costs_eur_h=comp_type.operator.crew_costs_eur_h,
+            driver_overhead_min=comp_type.operator.driver_overhead_min,
+            crew_overhead_min=comp_type.operator.crew_overhead_min,
+            ebit_margin_per=comp_type.operator.ebit_margin_per,
+            financing_quota_per=comp_type.operator.financing_quota_per,
+            shunting_eur_day=comp_type.operator.shunting_eur_day,
+            var_overhead_per=comp_type.operator.var_overhead_per,
+            fix_overhead_quota_per=comp_type.operator.fix_overhead_quota_per,
+            svc_stockings_eur_place=comp_type.operator.svc_stockings_eur_place,
+            purchase_loco_eur=comp_type.purchase_loco_eur,
+            purchase_coach_eur=comp_type.purchase_coach_eur,
+            loco_avail_per=comp_type.loco_avail_per,
+            coach_avail_per=comp_type.coach_avail_per,
+            loco_amort_years=comp_type.loco_amort_years,
+            coach_amort_years=comp_type.coach_amort_years,
+            cleaning_services_eur_day=comp_type.cleaning_services_eur_day,
+            loco_maint_eur_km=comp_type.loco_maint_eur_km,
+            coach_maint_eur_km=comp_type.coach_maint_eur_km,
         )
-
 
 
 # =============================================================================
 # COMPOSITION REFERENCE  (input_params.composition_references)
 # =============================================================================
+
 
 @dataclass
 class CompositionReference:
@@ -514,17 +523,17 @@ class CompositionReference:
     evaluate_route().
     """
 
-    composition_type_id:      str
+    composition_type_id: str
 
     # reference trip physics
-    ref_distance_km:          float
-    ref_avg_speed_kmh:        float
-    ref_terrain_score:        float
-    ref_operating_days:       int
+    ref_distance_km: float
+    ref_avg_speed_kmh: float
+    ref_terrain_score: float
+    ref_operating_days: int
 
     # reference demand
     ref_utilization_by_class: dict[str, float]  # keyed by class_main
-    ref_avg_fare_by_class:    dict[str, float]  # keyed by class_main
+    ref_avg_fare_by_class: dict[str, float]  # keyed by class_main
 
 
 @dataclass
@@ -534,15 +543,17 @@ class IndicativeFigures:
     derived from compute_indicative_figures() in calc.py using a
     CompositionReference profile. Used for composition comparison only.
     """
-    cost_eur_per_seat_km:         float   # total cost ÷ available seat-km
-    cost_eur_per_place_km:        float   # total cost ÷ density-weighted place-km
-    subsidy_eur_per_pax_km:       float   # (cost - revenue) ÷ sold pax-km
-    breakeven_load_factor:        float   # load factor needed to break even
+
+    cost_eur_per_seat_km: float  # total cost ÷ available seat-km
+    cost_eur_per_place_km: float  # total cost ÷ density-weighted place-km
+    subsidy_eur_per_pax_km: float  # (cost - revenue) ÷ sold pax-km
+    breakeven_load_factor: float  # load factor needed to break even
 
 
 # =============================================================================
 # TRACK INFRASTRUCTURE DEFAULTS  (input_params.infrastructure_defaults)
 # =============================================================================
+
 
 @dataclass
 class DefaultTrackInfra:
@@ -556,35 +567,36 @@ class DefaultTrackInfra:
     Each value has a paired _src field for provenance.
     """
 
-    tac_eur_train_km:      float
-    tac_src:               Optional[ParamsSource]
+    tac_eur_train_km: float
+    tac_src: Optional[ParamsSource]
 
-    parking_eur_day:       float
-    parking_src:           Optional[ParamsSource]
+    parking_eur_day: float
+    parking_src: Optional[ParamsSource]
 
-    energy_price_eur_kwh:  float
-    energy_price_src:      Optional[ParamsSource]
+    energy_price_eur_kwh: float
+    energy_price_src: Optional[ParamsSource]
 
-    terrain_score:         float
-    terrain_category:      str
-    terrain_src:           Optional[ParamsSource]
+    terrain_score: float
+    terrain_category: str
+    terrain_src: Optional[ParamsSource]
 
-    hsr_allowed:           bool
-    hsr_src:               Optional[ParamsSource]
+    hsr_allowed: bool
+    hsr_src: Optional[ParamsSource]
 
     min_boarding_time_min: int
-    min_boarding_src:      Optional[ParamsSource]
+    min_boarding_src: Optional[ParamsSource]
 
     min_alighting_time_min: int
-    min_alighting_src:      Optional[ParamsSource]
+    min_alighting_src: Optional[ParamsSource]
 
-    buffer_quota_per:      float
-    buffer_src:            Optional[ParamsSource]
+    buffer_quota_per: float
+    buffer_src: Optional[ParamsSource]
 
 
 # =============================================================================
 # TRACK INFRASTRUCTURE  (input_params.infrastructure)
 # =============================================================================
+
 
 @dataclass
 class TrackInfrastructure:
@@ -599,32 +611,32 @@ class TrackInfrastructure:
     Row-level version and source tracking is handled by ParamVersions on Trip.
     """
 
-    country_code:           str
+    country_code: str
 
-    tac_eur_train_km:       float
-    tac_src:                Optional[ParamsSource]
+    tac_eur_train_km: float
+    tac_src: Optional[ParamsSource]
 
-    parking_eur_day:        float
-    parking_src:            Optional[ParamsSource]
+    parking_eur_day: float
+    parking_src: Optional[ParamsSource]
 
-    energy_price_eur_kwh:   float
-    energy_price_src:       Optional[ParamsSource]
+    energy_price_eur_kwh: float
+    energy_price_src: Optional[ParamsSource]
 
-    terrain_score:          float
-    terrain_category:       str
-    terrain_src:            Optional[ParamsSource]
+    terrain_score: float
+    terrain_category: str
+    terrain_src: Optional[ParamsSource]
 
-    hsr_allowed:            bool
-    hsr_src:                Optional[ParamsSource]
+    hsr_allowed: bool
+    hsr_src: Optional[ParamsSource]
 
-    min_boarding_time_min:  int
-    min_boarding_src:       Optional[ParamsSource]
+    min_boarding_time_min: int
+    min_boarding_src: Optional[ParamsSource]
 
     min_alighting_time_min: int
-    min_alighting_src:      Optional[ParamsSource]
+    min_alighting_src: Optional[ParamsSource]
 
-    buffer_quota_per:       float
-    buffer_src:             Optional[ParamsSource]
+    buffer_quota_per: float
+    buffer_src: Optional[ParamsSource]
 
 
 @dataclass
@@ -663,6 +675,7 @@ class TrackInfraCollection:
 # STOP INFRASTRUCTURE DEFAULTS  (input_params.stop_defaults)
 # =============================================================================
 
+
 @dataclass
 class DefaultStopInfra:
     """
@@ -680,6 +693,7 @@ class DefaultStopInfra:
 # STOP INFRASTRUCTURE  (input_params.stops)
 # =============================================================================
 
+
 @dataclass
 class StopInfrastructure:
     """
@@ -696,16 +710,16 @@ class StopInfrastructure:
     Row-level version and source tracking is handled by ParamVersions on Trip.
     """
 
-    stop_id:           str
-    stop_name:         str
+    stop_id: str
+    stop_name: str
     stop_country_code: str
 
-    lat:               float
-    lon:               float
-    loc_src:           Optional[ParamsSource]   # shared source for lat + lon
+    lat: float
+    lon: float
+    loc_src: Optional[ParamsSource]  # shared source for lat + lon
 
-    stop_charge_eur:   float                    # internal — not exposed in API
-    stop_charge_src:   Optional[ParamsSource]
+    stop_charge_eur: float  # internal — not exposed in API
+    stop_charge_src: Optional[ParamsSource]
 
 
 @dataclass

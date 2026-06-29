@@ -18,14 +18,15 @@ import subprocess
 import time
 import requests
 
-API_BASE       = "http://localhost:5000"
-ROUTING_URL    = "http://localhost:8989"
+API_BASE = "http://localhost:5000"
+ROUTING_URL = "http://localhost:8989"
 CONTAINER_NAME = "openrailrouting"
 
 
 # =============================================================================
 # PRE-FLIGHT CHECKS
 # =============================================================================
+
 
 def check_flask():
     print("[ ] Checking Flask API...")
@@ -36,7 +37,9 @@ def check_flask():
             return True
     except requests.ConnectionError:
         pass
-    print("[✗] Flask API not reachable at localhost:5000. Start it with: uv run python main.py")
+    print(
+        "[✗] Flask API not reachable at localhost:5000. Start it with: uv run python main.py"
+    )
     return False
 
 
@@ -73,8 +76,7 @@ def ensure_routing_running():
 
     print(f"[ ] OpenRailRouting not running — starting container '{CONTAINER_NAME}'...")
     result = subprocess.run(
-        ["docker", "start", CONTAINER_NAME],
-        capture_output=True, text=True
+        ["docker", "start", CONTAINER_NAME], capture_output=True, text=True
     )
 
     if result.returncode != 0:
@@ -101,23 +103,24 @@ def ensure_routing_running():
 # TEST
 # =============================================================================
 
+
 def test_evaluate():
     payload = {
         "stops": [
-            {"stop_id": "Wien Hbf",     "stop_type": "boarding"},
+            {"stop_id": "Wien Hbf", "stop_type": "boarding"},
             {"stop_id": "Salzburg Hbf", "stop_type": "both"},
-            {"stop_id": "München Hbf",  "stop_type": "both"},
-            {"stop_id": "Paris Est",    "stop_type": "alighting"},
+            {"stop_id": "München Hbf", "stop_type": "both"},
+            {"stop_id": "Paris Est", "stop_type": "alighting"},
         ],
-        "composition_id":        "NJ-5.1",
-        "departure_time_h":      21.0,
-        "utilization_seat":      0.7,
+        "composition_id": "NJ-5.1",
+        "departure_time_h": 21.0,
+        "utilization_seat": 0.7,
         "utilization_couchette": 0.6,
-        "utilization_sleeper":   0.5,
-        "avg_fare_seat":         49.0,
-        "avg_fare_couchette":    79.0,
-        "avg_fare_sleeper":      129.0,
-        "operating_days_year":   360,
+        "utilization_sleeper": 0.5,
+        "avg_fare_seat": 49.0,
+        "avg_fare_couchette": 79.0,
+        "avg_fare_sleeper": 129.0,
+        "operating_days_year": 360,
     }
 
     print("\nPOST /api/evaluation")

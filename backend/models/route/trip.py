@@ -57,10 +57,10 @@ from typing import Optional
 from models.utils import min_to_hhmm, min_to_h, m_to_km
 from models.params import Composition, ModelVersions, ParamVersions
 
-
 # =============================================================================
 # STOP TIME
 # =============================================================================
+
 
 @dataclass
 class StopTime:
@@ -72,62 +72,69 @@ class StopTime:
     set_departure_time().
     """
 
-    stop_id:            str
-    stop_name:          str
-    lat:                float
-    lon:                float
-    stop_type:          str                 # "boarding" | "alighting" | "both"
-    arrival_time_min:   Optional[int]       # None for origin
-    departure_time_min: Optional[int]       # None for destination
-    dwell_time_min:     Optional[int]       # None for terminal stops
+    stop_id: str
+    stop_name: str
+    lat: float
+    lon: float
+    stop_type: str  # "boarding" | "alighting" | "both"
+    arrival_time_min: Optional[int]  # None for origin
+    departure_time_min: Optional[int]  # None for destination
+    dwell_time_min: Optional[int]  # None for terminal stops
 
     def shift_time(self, delta_min: int) -> "StopTime":
         """Return a new StopTime with clock times shifted by delta_min."""
         return StopTime(
-            stop_id            = self.stop_id,
-            stop_name          = self.stop_name,
-            lat                = self.lat,
-            lon                = self.lon,
-            stop_type          = self.stop_type,
-            arrival_time_min   = (self.arrival_time_min + delta_min
-                                  if self.arrival_time_min is not None else None),
-            departure_time_min = (self.departure_time_min + delta_min
-                                  if self.departure_time_min is not None else None),
-            dwell_time_min     = self.dwell_time_min,
+            stop_id=self.stop_id,
+            stop_name=self.stop_name,
+            lat=self.lat,
+            lon=self.lon,
+            stop_type=self.stop_type,
+            arrival_time_min=(
+                self.arrival_time_min + delta_min
+                if self.arrival_time_min is not None
+                else None
+            ),
+            departure_time_min=(
+                self.departure_time_min + delta_min
+                if self.departure_time_min is not None
+                else None
+            ),
+            dwell_time_min=self.dwell_time_min,
         )
 
     def to_dict(self) -> dict:
         return {
-            "stop_id":            self.stop_id,
-            "stop_name":          self.stop_name,
-            "lat":                self.lat,
-            "lon":                self.lon,
-            "stop_type":          self.stop_type,
-            "arrival_time_min":   self.arrival_time_min,
+            "stop_id": self.stop_id,
+            "stop_name": self.stop_name,
+            "lat": self.lat,
+            "lon": self.lon,
+            "stop_type": self.stop_type,
+            "arrival_time_min": self.arrival_time_min,
             "departure_time_min": self.departure_time_min,
-            "dwell_time_min":     self.dwell_time_min,
-            "arrival_time_fmt":   min_to_hhmm(self.arrival_time_min),
+            "dwell_time_min": self.dwell_time_min,
+            "arrival_time_fmt": min_to_hhmm(self.arrival_time_min),
             "departure_time_fmt": min_to_hhmm(self.departure_time_min),
-            "dwell_time_h":       min_to_h(self.dwell_time_min),
+            "dwell_time_h": min_to_h(self.dwell_time_min),
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "StopTime":
         return cls(
-            stop_id            = d["stop_id"],
-            stop_name          = d["stop_name"],
-            lat                = d["lat"],
-            lon                = d["lon"],
-            stop_type          = d["stop_type"],
-            arrival_time_min   = d.get("arrival_time_min"),
-            departure_time_min = d.get("departure_time_min"),
-            dwell_time_min     = d.get("dwell_time_min"),
+            stop_id=d["stop_id"],
+            stop_name=d["stop_name"],
+            lat=d["lat"],
+            lon=d["lon"],
+            stop_type=d["stop_type"],
+            arrival_time_min=d.get("arrival_time_min"),
+            departure_time_min=d.get("departure_time_min"),
+            dwell_time_min=d.get("dwell_time_min"),
         )
 
 
 # =============================================================================
 # COUNTRY LEG  — physics only, no monetary values
 # =============================================================================
+
 
 @dataclass
 class CountryLeg:
@@ -142,13 +149,13 @@ class CountryLeg:
     Constructed exclusively via route_factory.
     """
 
-    from_stop_id:      str
-    to_stop_id:        str
-    country_code:      str      # ISO 3166-1 alpha-2
-    distance_m:        int
-    driving_time_min:  int      # pure engine time, no buffer
-    buffer_time_min:   int      # infra_buffer_quota_per × driving_time_min
-    energy_kwh:        float
+    from_stop_id: str
+    to_stop_id: str
+    country_code: str  # ISO 3166-1 alpha-2
+    distance_m: int
+    driving_time_min: int  # pure engine time, no buffer
+    buffer_time_min: int  # infra_buffer_quota_per × driving_time_min
+    energy_kwh: float
     energy_kwh_per_km: float
 
     @property
@@ -167,36 +174,37 @@ class CountryLeg:
 
     def to_dict(self) -> dict:
         return {
-            "from_stop_id":      self.from_stop_id,
-            "to_stop_id":        self.to_stop_id,
-            "country_code":      self.country_code,
-            "distance_m":        self.distance_m,
-            "distance_km":       self.distance_km,
-            "driving_time_min":  self.driving_time_min,
-            "buffer_time_min":   self.buffer_time_min,
-            "total_time_min":    self.total_time_min,
-            "avg_speed_kmh":     self.avg_speed_kmh,
-            "energy_kwh":        self.energy_kwh,
+            "from_stop_id": self.from_stop_id,
+            "to_stop_id": self.to_stop_id,
+            "country_code": self.country_code,
+            "distance_m": self.distance_m,
+            "distance_km": self.distance_km,
+            "driving_time_min": self.driving_time_min,
+            "buffer_time_min": self.buffer_time_min,
+            "total_time_min": self.total_time_min,
+            "avg_speed_kmh": self.avg_speed_kmh,
+            "energy_kwh": self.energy_kwh,
             "energy_kwh_per_km": self.energy_kwh_per_km,
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "CountryLeg":
         return cls(
-            from_stop_id      = d["from_stop_id"],
-            to_stop_id        = d["to_stop_id"],
-            country_code      = d["country_code"],
-            distance_m        = d["distance_m"],
-            driving_time_min  = d["driving_time_min"],
-            buffer_time_min   = d["buffer_time_min"],
-            energy_kwh        = d["energy_kwh"],
-            energy_kwh_per_km = d["energy_kwh_per_km"],
+            from_stop_id=d["from_stop_id"],
+            to_stop_id=d["to_stop_id"],
+            country_code=d["country_code"],
+            distance_m=d["distance_m"],
+            driving_time_min=d["driving_time_min"],
+            buffer_time_min=d["buffer_time_min"],
+            energy_kwh=d["energy_kwh"],
+            energy_kwh_per_km=d["energy_kwh_per_km"],
         )
 
 
 # =============================================================================
 # TRIP SEGMENT
 # =============================================================================
+
 
 @dataclass
 class TripSegment:
@@ -205,10 +213,10 @@ class TripSegment:
     multiple countries. Physics properties derived from country_legs.
     """
 
-    from_stop_id:  str
-    to_stop_id:    str
-    geometry:      list[list[float]]    # [[lon, lat], ...]
-    country_legs:  list[CountryLeg]
+    from_stop_id: str
+    to_stop_id: str
+    geometry: list[list[float]]  # [[lon, lat], ...]
+    country_legs: list[CountryLeg]
 
     @property
     def distance_m(self) -> int:
@@ -242,32 +250,33 @@ class TripSegment:
 
     def to_dict(self) -> dict:
         return {
-            "from_stop_id":     self.from_stop_id,
-            "to_stop_id":       self.to_stop_id,
-            "geometry":         self.geometry,
-            "distance_m":       self.distance_m,
-            "distance_km":      self.distance_km,
+            "from_stop_id": self.from_stop_id,
+            "to_stop_id": self.to_stop_id,
+            "geometry": self.geometry,
+            "distance_m": self.distance_m,
+            "distance_km": self.distance_km,
             "driving_time_min": self.driving_time_min,
-            "buffer_time_min":  self.buffer_time_min,
-            "total_time_min":   self.total_time_min,
-            "avg_speed_kmh":    self.avg_speed_kmh,
-            "energy_kwh":       self.energy_kwh,
-            "country_legs":     [cl.to_dict() for cl in self.country_legs],
+            "buffer_time_min": self.buffer_time_min,
+            "total_time_min": self.total_time_min,
+            "avg_speed_kmh": self.avg_speed_kmh,
+            "energy_kwh": self.energy_kwh,
+            "country_legs": [cl.to_dict() for cl in self.country_legs],
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "TripSegment":
         return cls(
-            from_stop_id = d["from_stop_id"],
-            to_stop_id   = d["to_stop_id"],
-            geometry     = d["geometry"],
-            country_legs = [CountryLeg.from_dict(cl) for cl in d["country_legs"]],
+            from_stop_id=d["from_stop_id"],
+            to_stop_id=d["to_stop_id"],
+            geometry=d["geometry"],
+            country_legs=[CountryLeg.from_dict(cl) for cl in d["country_legs"]],
         )
 
 
 # =============================================================================
 # COUNTRY SEGMENT
 # =============================================================================
+
 
 @dataclass
 class CountrySegment:
@@ -311,28 +320,29 @@ class CountrySegment:
 
     def to_dict(self) -> dict:
         return {
-            "country_code":     self.country_code,
-            "distance_m":       self.distance_m,
-            "distance_km":      self.distance_km,
+            "country_code": self.country_code,
+            "distance_m": self.distance_m,
+            "distance_km": self.distance_km,
             "driving_time_min": self.driving_time_min,
-            "buffer_time_min":  self.buffer_time_min,
-            "total_time_min":   self.total_time_min,
-            "avg_speed_kmh":    self.avg_speed_kmh,
-            "energy_kwh":       self.energy_kwh,
-            "country_legs":     [cl.to_dict() for cl in self.country_legs],
+            "buffer_time_min": self.buffer_time_min,
+            "total_time_min": self.total_time_min,
+            "avg_speed_kmh": self.avg_speed_kmh,
+            "energy_kwh": self.energy_kwh,
+            "country_legs": [cl.to_dict() for cl in self.country_legs],
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "CountrySegment":
         return cls(
-            country_code = d["country_code"],
-            country_legs = [CountryLeg.from_dict(cl) for cl in d["country_legs"]],
+            country_code=d["country_code"],
+            country_legs=[CountryLeg.from_dict(cl) for cl in d["country_legs"]],
         )
 
 
 # =============================================================================
 # TRIP PATH
 # =============================================================================
+
 
 @dataclass
 class TripPath:
@@ -344,29 +354,30 @@ class TripPath:
     countries — one CountrySegment per country traversed.
     """
 
-    shape:     dict
-    segments:  list[TripSegment]
+    shape: dict
+    segments: list[TripSegment]
     countries: list[CountrySegment]
 
     def to_dict(self) -> dict:
         return {
-            "shape":     self.shape,
-            "segments":  [s.to_dict() for s in self.segments],
+            "shape": self.shape,
+            "segments": [s.to_dict() for s in self.segments],
             "countries": [c.to_dict() for c in self.countries],
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "TripPath":
         return cls(
-            shape     = d["shape"],
-            segments  = [TripSegment.from_dict(s) for s in d["segments"]],
-            countries = [CountrySegment.from_dict(c) for c in d["countries"]],
+            shape=d["shape"],
+            segments=[TripSegment.from_dict(s) for s in d["segments"]],
+            countries=[CountrySegment.from_dict(c) for c in d["countries"]],
         )
 
 
 # =============================================================================
 # TRIP STATS  — physics only, no monetary values
 # =============================================================================
+
 
 @dataclass
 class TripStats:
@@ -377,35 +388,36 @@ class TripStats:
     total_energy_kwh = sum of energy_kwh across all country legs.
     """
 
-    total_distance_m:       int
+    total_distance_m: int
     total_driving_time_min: int
-    total_time_min:         int     # driving + buffer
-    total_energy_kwh:       float   # total energy consumed, no price applied
+    total_time_min: int  # driving + buffer
+    total_energy_kwh: float  # total energy consumed, no price applied
 
     def to_dict(self) -> dict:
         return {
-            "total_distance_m":       self.total_distance_m,
+            "total_distance_m": self.total_distance_m,
             "total_driving_time_min": self.total_driving_time_min,
-            "total_time_min":         self.total_time_min,
-            "total_energy_kwh":       self.total_energy_kwh,
-            "total_distance_km":      m_to_km(self.total_distance_m),
-            "total_driving_time_h":   min_to_h(self.total_driving_time_min),
-            "total_time_h":           min_to_h(self.total_time_min),
+            "total_time_min": self.total_time_min,
+            "total_energy_kwh": self.total_energy_kwh,
+            "total_distance_km": m_to_km(self.total_distance_m),
+            "total_driving_time_h": min_to_h(self.total_driving_time_min),
+            "total_time_h": min_to_h(self.total_time_min),
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "TripStats":
         return cls(
-            total_distance_m        = d["total_distance_m"],
-            total_driving_time_min  = d["total_driving_time_min"],
-            total_time_min          = d["total_time_min"],
-            total_energy_kwh        = d["total_energy_kwh"],
+            total_distance_m=d["total_distance_m"],
+            total_driving_time_min=d["total_driving_time_min"],
+            total_time_min=d["total_time_min"],
+            total_energy_kwh=d["total_energy_kwh"],
         )
 
 
 # =============================================================================
 # TRIP
 # =============================================================================
+
 
 @dataclass
 class Trip:
@@ -426,15 +438,15 @@ class Trip:
       path.segments[i].to_stop_id   == stop_times[i+1].stop_id
     """
 
-    trip_id:            str
-    direction:          int             # 0 = outbound, 1 = return
+    trip_id: str
+    direction: int  # 0 = outbound, 1 = return
     departure_time_min: int
-    model_versions:     ModelVersions
-    param_versions:     ParamVersions
-    composition:        Composition
-    stop_times:         list[StopTime]
-    path:               TripPath
-    stats:              TripStats
+    model_versions: ModelVersions
+    param_versions: ParamVersions
+    composition: Composition
+    stop_times: list[StopTime]
+    path: TripPath
+    stats: TripStats
 
     def __post_init__(self) -> None:
         pass  # validation deferred to _create() — do not instantiate directly
@@ -446,7 +458,7 @@ class Trip:
                 f"Trip '{self.trip_id}': direction must be 0 or 1, "
                 f"got {self.direction}."
             )
-        n_stops    = len(self.stop_times)
+        n_stops = len(self.stop_times)
         n_segments = len(self.path.segments)
         if n_stops < 2:
             raise ValueError(
@@ -460,7 +472,7 @@ class Trip:
             )
         for i, seg in enumerate(self.path.segments):
             expected_from = self.stop_times[i].stop_id
-            expected_to   = self.stop_times[i + 1].stop_id
+            expected_to = self.stop_times[i + 1].stop_id
             if seg.from_stop_id != expected_from:
                 raise ValueError(
                     f"Trip '{self.trip_id}': segment {i} from_stop_id "
@@ -477,30 +489,30 @@ class Trip:
     @classmethod
     def _create(
         cls,
-        trip_id:            str,
-        direction:          int,
+        trip_id: str,
+        direction: int,
         departure_time_min: int,
-        model_versions:     "ModelVersions",
-        param_versions:     "ParamVersions",
-        composition:        "Composition",
-        stop_times:         list["StopTime"],
-        path:               "TripPath",
-        stats:              "TripStats",
+        model_versions: "ModelVersions",
+        param_versions: "ParamVersions",
+        composition: "Composition",
+        stop_times: list["StopTime"],
+        path: "TripPath",
+        stats: "TripStats",
     ) -> "Trip":
         """
         Sole constructor for Trip — called exclusively by route_factory.
         Never instantiate Trip directly.
         """
         trip = cls(
-            trip_id            = trip_id,
-            direction          = direction,
-            departure_time_min = departure_time_min,
-            model_versions     = model_versions,
-            param_versions     = param_versions,
-            composition        = composition,
-            stop_times         = stop_times,
-            path               = path,
-            stats              = stats,
+            trip_id=trip_id,
+            direction=direction,
+            departure_time_min=departure_time_min,
+            model_versions=model_versions,
+            param_versions=param_versions,
+            composition=composition,
+            stop_times=stop_times,
+            path=path,
+            stats=stats,
         )
         trip._post_validate()
         return trip
@@ -510,43 +522,47 @@ class Trip:
         Shift all stop clock times by delta. dwell_time_min unchanged.
         path and stats unaffected — no re-routing needed.
         """
-        delta                   = departure_time_min - self.departure_time_min
+        delta = departure_time_min - self.departure_time_min
         self.departure_time_min = departure_time_min
-        self.stop_times         = [st.shift_time(delta) for st in self.stop_times]
+        self.stop_times = [st.shift_time(delta) for st in self.stop_times]
 
     def to_dict(self) -> dict:
         return {
-            "trip_id":            self.trip_id,
-            "direction_id":       self.direction,
-            "departure_time":     min_to_hhmm(self.departure_time_min),
+            "trip_id": self.trip_id,
+            "direction_id": self.direction,
+            "departure_time": min_to_hhmm(self.departure_time_min),
             "departure_time_min": self.departure_time_min,
-            "model_versions":     self.model_versions.versions,
-            "param_versions":     {
+            "model_versions": self.model_versions.versions,
+            "param_versions": {
                 k: {
-                    "value":       v.value,
-                    "version":     v.version,
-                    "is_default":  v.is_default,
-                    "source":      {
-                        "source_id":          v.source.source_id,
-                        "source_description": v.source.source_description,
-                        "source_url":         v.source.source_url,
-                        "source_date":        v.source.source_date,
-                    } if v.source else None,
+                    "value": v.value,
+                    "version": v.version,
+                    "is_default": v.is_default,
+                    "source": (
+                        {
+                            "source_id": v.source.source_id,
+                            "source_description": v.source.source_description,
+                            "source_url": v.source.source_url,
+                            "source_date": v.source.source_date,
+                        }
+                        if v.source
+                        else None
+                    ),
                     "description": v.description,
                 }
                 for k, v in self.param_versions.entries.items()
             },
             "composition": {
-                "comp_id":          self.composition.comp_id,
+                "comp_id": self.composition.comp_id,
                 "comp_description": self.composition.comp_description,
-                "operator_id":      self.composition.operator_id,
-                "places_by_class":  self.composition.places_by_class,
+                "operator_id": self.composition.operator_id,
+                "places_by_class": self.composition.places_by_class,
                 "density_by_class": self.composition.density_by_class,
             },
             "stop_times": [st.to_dict() for st in self.stop_times],
-            "shape":      self.path.shape,
-            "path":       self.path.to_dict(),
-            "stats":      self.stats.to_dict(),
+            "shape": self.path.shape,
+            "path": self.path.to_dict(),
+            "stats": self.stats.to_dict(),
         }
 
     @classmethod
@@ -560,49 +576,49 @@ class Trip:
         """
         comp_d = d["composition"]
         composition = Composition(
-            comp_id               = comp_d["comp_id"],
-            comp_description      = comp_d.get("comp_description", ""),
-            operator_id           = comp_d.get("operator_id", ""),
-            driver_factor         = 0.0,
-            max_speed_kmh         = 0.0,
-            hsr_allowed           = False,
-            min_boarding_time_min = 0,
-            min_alighting_time_min= 0,
-            energy_factor_weight  = 0.0,
-            energy_factor_speed   = 0.0,
-            energy_factor_terrain = 0.0,
-            total_weight_t        = 0.0,
-            total_crew            = 0.0,
-            places_by_class       = comp_d.get("places_by_class", {}),
-            density_by_class      = comp_d.get("density_by_class", {}),
-            driver_costs_eur_h    = 0.0,
-            crew_costs_eur_h      = 0.0,
-            driver_overhead_min   = 0,
-            crew_overhead_min     = 0,
-            ebit_margin_per       = 0.0,
-            financing_quota_per   = 0.0,
-            shunting_eur_day      = 0.0,
-            var_overhead_per      = 0.0,
-            fix_overhead_quota_per= 0.0,
-            svc_stockings_eur_place = {},
-            purchase_loco_eur         = 0.0,
-            purchase_coach_eur        = 0.0,
-            loco_avail_per            = 0.0,
-            coach_avail_per           = 0.0,
-            loco_amort_years          = 0,
-            coach_amort_years         = 0,
-            cleaning_services_eur_day = 0.0,
-            loco_maint_eur_km         = 0.0,
-            coach_maint_eur_km        = 0.0,
+            comp_id=comp_d["comp_id"],
+            comp_description=comp_d.get("comp_description", ""),
+            operator_id=comp_d.get("operator_id", ""),
+            driver_factor=0.0,
+            max_speed_kmh=0.0,
+            hsr_allowed=False,
+            min_boarding_time_min=0,
+            min_alighting_time_min=0,
+            energy_factor_weight=0.0,
+            energy_factor_speed=0.0,
+            energy_factor_terrain=0.0,
+            total_weight_t=0.0,
+            total_crew=0.0,
+            places_by_class=comp_d.get("places_by_class", {}),
+            density_by_class=comp_d.get("density_by_class", {}),
+            driver_costs_eur_h=0.0,
+            crew_costs_eur_h=0.0,
+            driver_overhead_min=0,
+            crew_overhead_min=0,
+            ebit_margin_per=0.0,
+            financing_quota_per=0.0,
+            shunting_eur_day=0.0,
+            var_overhead_per=0.0,
+            fix_overhead_quota_per=0.0,
+            svc_stockings_eur_place={},
+            purchase_loco_eur=0.0,
+            purchase_coach_eur=0.0,
+            loco_avail_per=0.0,
+            coach_avail_per=0.0,
+            loco_amort_years=0,
+            coach_amort_years=0,
+            cleaning_services_eur_day=0.0,
+            loco_maint_eur_km=0.0,
+            coach_maint_eur_km=0.0,
         )
         return cls(
-            trip_id            = d["trip_id"],
-            direction          = d["direction_id"],
-            departure_time_min = d["departure_time_min"],
-            model_versions     = ModelVersions(versions=d.get("model_versions", {})),
-            param_versions     = ParamVersions(),   # not reconstructed from dict
-            composition        = composition,
-            stop_times         = [StopTime.from_dict(st) for st in d["stop_times"]],
-            path               = TripPath.from_dict(d["path"]),
-            stats              = TripStats.from_dict(d["stats"]),
+            trip_id=d["trip_id"],
+            direction=d["direction_id"],
+            departure_time_min=d["departure_time_min"],
+            model_versions=ModelVersions(versions=d.get("model_versions", {})),
+            param_versions=ParamVersions(),  # not reconstructed from dict
+            composition=composition,
+            stop_times=[StopTime.from_dict(st) for st in d["stop_times"]],
+            path=TripPath.from_dict(d["path"]),
+            stats=TripStats.from_dict(d["stats"]),
         )

@@ -10,10 +10,50 @@ include:
 
 services:
 
+  openrailrouting:
+    build:
+      context: ../backend/models/route/routing/docker
+      dockerfile: Dockerfile
+    container_name: openrailrouting
+    ports:
+      - "8989:8989"
+      - "8990:8990"
+    volumes:
+      - ../backend/models/route/routing/docker/data:/app/data
+      - ../backend/models/route/routing/docker/graph-cache:/app/graph-cache
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8989/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  # Prevent the standalone api service (included from backend/docker/docker-compose.yml)
+  # from starting in the devcontainer — backend-api below replaces it.
   api:
+    profiles:
+      - standalone
+
+  backend-api:
+    build:
+      context: ../backend
+      dockerfile: docker/Dockerfile
+    container_name: backend-api
+    ports:
+      - "5000:5000"
+    env_file:
+      - ../backend/docker/.env
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/google_credentials
+      - OPENRAILROUTING_URL=http://openrailrouting:8989
+      - POSTGRES_HOST=postgres
     volumes:
       - ..:/workspace:cached
       - ~/.ssh:/root/.ssh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
     # Healthcheck needed here so setup.sh can wait for the API to be ready
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
@@ -21,3 +61,15 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: night-train-frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ../frontend:/app
+    restart: unless-stopped

@@ -44,21 +44,26 @@ def create_app() -> Flask:
     CORS(app)
 
     # --- blueprints ---
-    app.register_blueprint(health.bp,      url_prefix="/api")
-    app.register_blueprint(params.bp,      url_prefix="/api/params")
-    app.register_blueprint(route.bp,       url_prefix="/api/route")
-    app.register_blueprint(evaluation.bp,  url_prefix="/api/evaluation")
-    app.register_blueprint(auth.bp,        url_prefix="/api/auth")
-    app.register_blueprint(feedback.bp,    url_prefix="/api")
-    app.register_blueprint(scenarios.bp,   url_prefix="/api")
+    app.register_blueprint(health.bp, url_prefix="/api")
+    app.register_blueprint(params.bp, url_prefix="/api/params")
+    app.register_blueprint(route.bp, url_prefix="/api/route")
+    app.register_blueprint(evaluation.bp, url_prefix="/api/evaluation")
+    app.register_blueprint(auth.bp, url_prefix="/api/auth")
+    app.register_blueprint(feedback.bp, url_prefix="/api")
+    app.register_blueprint(scenarios.bp, url_prefix="/api")
 
     # --- global error handlers ---
     @app.errorhandler(DataNotLoadedError)
     def handle_data_not_loaded(e):
-        return jsonify({
-            "error":   "data_not_loaded",
-            "message": str(e),
-        }), 503
+        return (
+            jsonify(
+                {
+                    "error": "data_not_loaded",
+                    "message": str(e),
+                }
+            ),
+            503,
+        )
 
     @app.errorhandler(404)
     def handle_not_found(e):
@@ -71,7 +76,12 @@ def create_app() -> Flask:
     @app.errorhandler(500)
     def handle_internal_error(e):
         logger.exception("Unhandled error: %s", e)
-        return jsonify({"error": "internal_error", "message": "An unexpected error occurred."}), 500
+        return (
+            jsonify(
+                {"error": "internal_error", "message": "An unexpected error occurred."}
+            ),
+            500,
+        )
 
     return app
 

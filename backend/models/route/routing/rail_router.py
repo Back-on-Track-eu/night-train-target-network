@@ -42,9 +42,13 @@ import requests
 from models.params import Composition, TrackInfraCollection, StopInfrastructure
 from models.route.trip import CountryLeg, TripSegment, TripPath
 from models.utils import (
-    ms_to_min, m_to_km,
-    haversine_m, haversine_path_m, bbox_area,
-    ISO2_TO_ISO3, ISO3_TO_ISO2,
+    ms_to_min,
+    m_to_km,
+    haversine_m,
+    haversine_path_m,
+    bbox_area,
+    ISO2_TO_ISO3,
+    ISO3_TO_ISO2,
 )
 
 logger = logging.getLogger(__name__)
@@ -54,25 +58,27 @@ logger = logging.getLogger(__name__)
 # Public input type
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class Stop:
     """A named stop on the route. lat/lon in WGS-84 decimal degrees."""
-    stop_id:      str
-    name:         str
-    lat:          float
-    lon:          float
+
+    stop_id: str
+    name: str
+    lat: float
+    lon: float
     country_code: str = ""
-    stop_type:    str = "both"      # "boarding" | "alighting" | "both"
+    stop_type: str = "both"  # "boarding" | "alighting" | "both"
 
     @classmethod
     def from_infra(cls, infra: StopInfrastructure, stop_type: str = "both") -> "Stop":
         return cls(
-            stop_id      = infra.stop_id,
-            name         = infra.stop_name,
-            lat          = infra.lat,
-            lon          = infra.lon,
-            country_code = infra.stop_country_code,
-            stop_type    = stop_type,
+            stop_id=infra.stop_id,
+            name=infra.stop_name,
+            lat=infra.lat,
+            lon=infra.lon,
+            country_code=infra.stop_country_code,
+            stop_type=stop_type,
         )
 
 
@@ -80,10 +86,12 @@ class Stop:
 # Private snapped stop — internal only
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class _SnappedStop:
     """Input stop plus coordinate snapped to the rail network."""
-    stop:        Stop
+
+    stop: Stop
     snapped_lat: float
     snapped_lon: float
 
@@ -92,31 +100,36 @@ class _SnappedStop:
 # Country index
 # ---------------------------------------------------------------------------
 
-_COUNTRIES_PATH = Path(os.environ.get(
-    "COUNTRIES_GEOJSON_PATH",
-    str(Path(__file__).parent / "countries.geojson"),  # local dev fallback
-))
+_COUNTRIES_PATH = Path(
+    os.environ.get(
+        "COUNTRIES_GEOJSON_PATH",
+        str(Path(__file__).parent / "countries.geojson"),  # local dev fallback
+    )
+)
 
 
 class CountryIndex:
     def __init__(self, features: list[dict]) -> None:
         self._features = features
         from shapely.geometry import shape
+
         self._shapes = [
-            (f["properties"].get("ADM0_A3", ""), shape(f["geometry"]))
-            for f in features
+            (f["properties"].get("ADM0_A3", ""), shape(f["geometry"])) for f in features
         ]
         logger.info("CountryIndex: loaded %d country polygons.", len(self._shapes))
 
     @classmethod
     def load(cls, path: Path = _COUNTRIES_PATH) -> "CountryIndex":
         if not path.exists():
-            url = os.environ.get("NATURAL_EARTH_COUNTRIES_URL", "<see NATURAL_EARTH_COUNTRIES_URL in .env.example>")
+            url = os.environ.get(
+                "NATURAL_EARTH_COUNTRIES_URL",
+                "<see NATURAL_EARTH_COUNTRIES_URL in .env.example>",
+            )
             raise FileNotFoundError(
                 f"Country borders file not found at {path}.\n"
                 f"Download from: {url}\n"
                 f"In Docker this file is downloaded at build time via the Dockerfile.\n"
-                f"For local dev: wget -O {path} \"$NATURAL_EARTH_COUNTRIES_URL\""
+                f'For local dev: wget -O {path} "$NATURAL_EARTH_COUNTRIES_URL"'
             )
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
@@ -124,6 +137,7 @@ class CountryIndex:
 
     def lookup(self, lon: float, lat: float) -> str | None:
         from shapely.geometry import Point
+
         pt = Point(lon, lat)
         for iso3, shp in self._shapes:
             if shp.contains(pt):
@@ -147,8 +161,10 @@ class CountryIndex:
 # Router
 # ---------------------------------------------------------------------------
 
+
 class RailRoutingError(Exception):
     """Raised when the routing engine returns an error."""
+
     pass
 
 
@@ -163,14 +179,16 @@ class RailRouter:
     """
 
     ROUTE_ENDPOINT = "/route"
-    INFO_ENDPOINT  = "/info"
-    DETAILS        = ["leg_distance", "leg_time", "time"]
+    INFO_ENDPOINT = "/info"
+    DETAILS = ["leg_distance", "leg_time", "time"]
 
     def __init__(self) -> None:
-        self.base_url       = os.environ.get("OPENRAILROUTING_URL", "http://localhost:8989").rstrip("/")
-        self.profile        = os.environ.get("OPENRAILROUTING_PROFILE", "night_train")
-        self.timeout        = int(os.environ.get("OPENRAILROUTING_TIMEOUT", "30"))
-        self._session       = requests.Session()
+        self.base_url = os.environ.get(
+            "OPENRAILROUTING_URL", "http://localhost:8989"
+        ).rstrip("/")
+        self.profile = os.environ.get("OPENRAILROUTING_PROFILE", "night_train")
+        self.timeout = int(os.environ.get("OPENRAILROUTING_TIMEOUT", "30"))
+        self._session = requests.Session()
         self._country_index = CountryIndex.load()
 
     def check_server(self) -> dict:
@@ -182,9 +200,9 @@ class RailRouter:
 
     def route(
         self,
-        stops:       list[Stop],
+        stops: list[Stop],
         composition: Composition,
-        tracks:      TrackInfraCollection,
+        tracks: TrackInfraCollection,
     ) -> TripPath:
         """
         Route a trip and return a TripPath with physics-only data.
@@ -199,24 +217,27 @@ class RailRouter:
         if len(stops) < 2:
             raise ValueError("At least 2 stops are required.")
 
-        vehicle_max_speed_kmh  = int(composition.max_speed_kmh)
+        vehicle_max_speed_kmh = int(composition.max_speed_kmh)
         avoid_hsr = {
-            cc: not (composition.hsr_allowed and (tracks.get(cc).hsr_allowed if tracks.get(cc) else True))
+            cc: not (
+                composition.hsr_allowed
+                and (tracks.get(cc).hsr_allowed if tracks.get(cc) else True)
+            )
             for cc in [s.country_code for s in stops if s.country_code]
         }
         custom_model = self._build_custom_model(vehicle_max_speed_kmh, avoid_hsr)
 
         if custom_model:
-            snap_raw       = self._post_route(self._build_payload(stops, None, None))
+            snap_raw = self._post_route(self._build_payload(stops, None, None))
             snapped_coords = snap_raw["paths"][0]["snapped_waypoints"]["coordinates"]
-            snapped_input  = [
+            snapped_input = [
                 Stop(
-                    stop_id      = stops[i].stop_id,
-                    name         = stops[i].name,
-                    lat          = snapped_coords[i][1],
-                    lon          = snapped_coords[i][0],
-                    country_code = stops[i].country_code,
-                    stop_type    = stops[i].stop_type,
+                    stop_id=stops[i].stop_id,
+                    name=stops[i].name,
+                    lat=snapped_coords[i][1],
+                    lon=snapped_coords[i][0],
+                    country_code=stops[i].country_code,
+                    stop_type=stops[i].stop_type,
                 )
                 for i in range(len(stops))
             ]
@@ -230,7 +251,7 @@ class RailRouter:
 
     def _build_custom_model(
         self,
-        vehicle_max_speed_kmh:  int | None,
+        vehicle_max_speed_kmh: int | None,
         avoid_high_speed_lines: dict[str, bool] | None,
     ) -> dict | None:
         speed_rules, priority_rules, areas = [], [], {}
@@ -245,12 +266,16 @@ class RailRouter:
                 iso3 = ISO2_TO_ISO3.get(cc, cc)
                 ring = self._country_index.get_largest_polygon(iso3)
                 if ring is None:
-                    logger.warning("No polygon for '%s' — skipping HSR avoidance.", iso3)
+                    logger.warning(
+                        "No polygon for '%s' — skipping HSR avoidance.", iso3
+                    )
                     continue
                 closed_ring = ring if ring[0] == ring[-1] else ring + [ring[0]]
-                area_name   = f"hsr{iso3.lower()}"
+                area_name = f"hsr{iso3.lower()}"
                 areas[area_name] = {
-                    "type": "Feature", "id": area_name, "properties": {},
+                    "type": "Feature",
+                    "id": area_name,
+                    "properties": {},
                     "geometry": {"type": "Polygon", "coordinates": [closed_ring]},
                 }
                 priority_rules.append({"if": f"in_{area_name}", "multiply_by": "0.01"})
@@ -259,30 +284,34 @@ class RailRouter:
             return None
 
         cm: dict = {}
-        if speed_rules:    cm["speed"]    = speed_rules
-        if priority_rules: cm["priority"] = priority_rules
-        if areas:          cm["areas"]    = {
-            "type": "FeatureCollection", "features": list(areas.values())
-        }
+        if speed_rules:
+            cm["speed"] = speed_rules
+        if priority_rules:
+            cm["priority"] = priority_rules
+        if areas:
+            cm["areas"] = {
+                "type": "FeatureCollection",
+                "features": list(areas.values()),
+            }
         return cm
 
     def _build_payload(
         self,
-        stops:                  list[Stop],
-        vehicle_max_speed_kmh:  int | None,
+        stops: list[Stop],
+        vehicle_max_speed_kmh: int | None,
         avoid_high_speed_lines: dict[str, bool] | None,
     ) -> dict:
         payload: dict = {
-            "profile":        self.profile,
-            "points":         [[s.lon, s.lat] for s in stops],
+            "profile": self.profile,
+            "points": [[s.lon, s.lat] for s in stops],
             "points_encoded": False,
-            "instructions":   False,
-            "details":        self.DETAILS,
+            "instructions": False,
+            "details": self.DETAILS,
         }
         cm = self._build_custom_model(vehicle_max_speed_kmh, avoid_high_speed_lines)
         if cm:
             payload["custom_model"] = cm
-            payload["ch.disable"]   = True
+            payload["ch.disable"] = True
         return payload
 
     def _post_route(self, payload: dict) -> dict:
@@ -292,8 +321,10 @@ class RailRouter:
         try:
             resp.raise_for_status()
         except requests.HTTPError as exc:
-            try:    msg = resp.json().get("message", resp.text)
-            except: msg = resp.text
+            try:
+                msg = resp.json().get("message", resp.text)
+            except:
+                msg = resp.text
             raise RailRoutingError(
                 f"Routing engine HTTP {resp.status_code}: {msg}"
             ) from exc
@@ -304,51 +335,56 @@ class RailRouter:
 
     def _parse_response(
         self,
-        body:   dict,
-        stops:  list[Stop],
+        body: dict,
+        stops: list[Stop],
         tracks: TrackInfraCollection,
     ) -> TripPath:
-        path_data  = body["paths"][0]
-        shape      = path_data["points"]
-        coords     = shape["coordinates"]
+        path_data = body["paths"][0]
+        shape = path_data["points"]
+        coords = shape["coordinates"]
 
         snapped_coords = path_data["snapped_waypoints"]["coordinates"]
-        snapped_stops  = self._parse_snapped_stops(stops, snapped_coords)
+        snapped_stops = self._parse_snapped_stops(stops, snapped_coords)
 
-        details             = path_data.get("details", {})
+        details = path_data.get("details", {})
         leg_distance_detail = details.get("leg_distance", [])
-        leg_time_detail     = details.get("leg_time", [])
-        time_detail         = details.get("time", [])
+        leg_time_detail = details.get("leg_time", [])
+        time_detail = details.get("time", [])
 
         intervals = self._compute_country_intervals(coords, time_detail)
-        segments  = self._parse_segments(
-            snapped_stops, coords,
-            leg_distance_detail, leg_time_detail,
-            intervals, tracks,
+        segments = self._parse_segments(
+            snapped_stops,
+            coords,
+            leg_distance_detail,
+            leg_time_detail,
+            intervals,
+            tracks,
         )
 
         # build per-country aggregation
         from collections import defaultdict as _dd
+
         country_legs_by_cc: dict[str, list[CountryLeg]] = _dd(list)
         for seg in segments:
             for cl in seg.country_legs:
                 country_legs_by_cc[cl.country_code].append(cl)
 
         from models.route.trip import CountrySegment
+
         countries = [
             CountrySegment(country_code=cc, country_legs=legs)
             for cc, legs in country_legs_by_cc.items()
         ]
 
         return TripPath(
-            shape     = shape,
-            segments  = segments,
-            countries = countries,
+            shape=shape,
+            segments=segments,
+            countries=countries,
         )
 
     @staticmethod
     def _parse_snapped_stops(
-        stops:          list[Stop],
+        stops: list[Stop],
         snapped_coords: list,
     ) -> list[_SnappedStop]:
         result = []
@@ -363,77 +399,82 @@ class RailRouter:
 
     @staticmethod
     def _parse_segments(
-        snapped_stops:       list[_SnappedStop],
-        coords:              list[list[float]],
+        snapped_stops: list[_SnappedStop],
+        coords: list[list[float]],
         leg_distance_detail: list,
-        leg_time_detail:     list,
-        intervals:           list[tuple],
-        tracks:              TrackInfraCollection,
+        leg_time_detail: list,
+        intervals: list[tuple],
+        tracks: TrackInfraCollection,
     ) -> list[TripSegment]:
         segments = []
         for i in range(len(snapped_stops) - 1):
             if i < len(leg_distance_detail):
                 from_idx = leg_distance_detail[i][0]
-                to_idx   = leg_distance_detail[i][1]
+                to_idx = leg_distance_detail[i][1]
             else:
                 from_idx, to_idx = 0, len(coords) - 1
                 logger.warning("leg_distance detail missing for segment %d.", i)
 
-            leg_cc_dist:   dict[str, float] = defaultdict(float)
+            leg_cc_dist: dict[str, float] = defaultdict(float)
             leg_cc_dur_ms: dict[str, float] = defaultdict(float)
 
             for iv_from, iv_to, cc, dist_m, iv_ms in intervals:
                 overlap_from = max(iv_from, from_idx)
-                overlap_to   = min(iv_to, to_idx)
+                overlap_to = min(iv_to, to_idx)
                 if overlap_from >= overlap_to:
                     continue
-                span     = iv_to - iv_from
+                span = iv_to - iv_from
                 fraction = (overlap_to - overlap_from) / span if span > 0 else 1.0
-                leg_cc_dist[cc]   += dist_m * fraction
+                leg_cc_dist[cc] += dist_m * fraction
                 leg_cc_dur_ms[cc] += iv_ms * fraction
 
             country_legs: list[CountryLeg] = []
             for cc, dist_m_f in leg_cc_dist.items():
-                cl_dist_m    = round(dist_m_f)
+                cl_dist_m = round(dist_m_f)
                 cl_drive_min = ms_to_min(leg_cc_dur_ms[cc])
-                track        = tracks.get_or_default(cc)
-                buffer_min   = round(cl_drive_min * track.buffer_quota_per)
+                track = tracks.get_or_default(cc)
+                buffer_min = round(cl_drive_min * track.buffer_quota_per)
 
-                country_legs.append(CountryLeg(
-                    from_stop_id     = snapped_stops[i].stop.stop_id,
-                    to_stop_id       = snapped_stops[i + 1].stop.stop_id,
-                    country_code     = cc,
-                    distance_m       = cl_dist_m,
-                    driving_time_min = cl_drive_min,
-                    buffer_time_min  = buffer_min,
-                    energy_kwh       = 0.0,     # populated by calc_energy_consumption()
-                    energy_kwh_per_km= 0.0,     # populated by calc_energy_consumption()
-                ))
+                country_legs.append(
+                    CountryLeg(
+                        from_stop_id=snapped_stops[i].stop.stop_id,
+                        to_stop_id=snapped_stops[i + 1].stop.stop_id,
+                        country_code=cc,
+                        distance_m=cl_dist_m,
+                        driving_time_min=cl_drive_min,
+                        buffer_time_min=buffer_min,
+                        energy_kwh=0.0,  # populated by calc_energy_consumption()
+                        energy_kwh_per_km=0.0,  # populated by calc_energy_consumption()
+                    )
+                )
 
-            segments.append(TripSegment(
-                from_stop_id = snapped_stops[i].stop.stop_id,
-                to_stop_id   = snapped_stops[i + 1].stop.stop_id,
-                geometry     = coords[from_idx: to_idx + 1],
-                country_legs = country_legs,
-            ))
+            segments.append(
+                TripSegment(
+                    from_stop_id=snapped_stops[i].stop.stop_id,
+                    to_stop_id=snapped_stops[i + 1].stop.stop_id,
+                    geometry=coords[from_idx : to_idx + 1],
+                    country_legs=country_legs,
+                )
+            )
 
         return segments
 
     def _compute_country_intervals(
         self,
-        coords:      list[list[float]],
+        coords: list[list[float]],
         time_detail: list,
     ) -> list[tuple[int, int, str, float, int]]:
         """Single shapely pass → (from_idx, to_idx, cc, dist_m, dur_ms)."""
         intervals = []
         for entry in time_detail:
             from_idx, to_idx, iv_ms = entry[0], entry[1], entry[2]
-            segment = coords[from_idx: to_idx + 1]
-            dist_m  = haversine_path_m(segment)
+            segment = coords[from_idx : to_idx + 1]
+            dist_m = haversine_path_m(segment)
             mid_idx = (from_idx + to_idx) // 2
-            iso3    = self._country_index.lookup(
-                coords[mid_idx][0], coords[mid_idx][1]
-            ) or "UNK"
-            cc      = ISO3_TO_ISO2.get(iso3, iso3)
+            iso3 = (
+                self._country_index.lookup(coords[mid_idx][0], coords[mid_idx][1])
+                or "UNK"
+            )
+            cc = ISO3_TO_ISO2.get(iso3, iso3)
             intervals.append((from_idx, to_idx, cc, dist_m, iv_ms))
         return intervals

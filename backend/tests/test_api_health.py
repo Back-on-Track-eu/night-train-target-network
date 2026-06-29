@@ -14,7 +14,6 @@ import requests
 import pytest
 import os
 
-
 OPENRAILROUTING_PORT = os.environ.get("OPENRAILROUTING_HOST_PORT", "8989")
 
 
@@ -72,8 +71,9 @@ def test_params_stops_charge_is_field_object(api_base):
     assert resp.status_code == 200
     for stop in resp.json()["stops"]:
         charge = stop["stop_charge_eur"]
-        assert isinstance(charge, dict), \
-            f"stop '{stop['stop_id']}' stop_charge_eur is not a field object"
+        assert isinstance(
+            charge, dict
+        ), f"stop '{stop['stop_id']}' stop_charge_eur is not a field object"
         assert "value" in charge
         assert "is_default" in charge
         assert isinstance(charge["is_default"], bool)
@@ -85,14 +85,19 @@ def test_params_track_infra_fields_are_field_objects(api_base):
     resp = requests.get(f"{api_base}/api/params/TrackInfrastructures")
     assert resp.status_code == 200
     field_keys = {
-        "tac_eur_train_km", "energy_price_eur_kwh", "parking_eur_day",
-        "terrain_score", "hsr_allowed", "buffer_quota_per",
+        "tac_eur_train_km",
+        "energy_price_eur_kwh",
+        "parking_eur_day",
+        "terrain_score",
+        "hsr_allowed",
+        "buffer_quota_per",
     }
     for track in resp.json()["track_infrastructures"]:
         for key in field_keys:
-            assert isinstance(track[key], dict), \
-                f"country '{track['country_code']}' field '{key}' is not a field object"
-            assert "value"      in track[key]
+            assert isinstance(
+                track[key], dict
+            ), f"country '{track['country_code']}' field '{key}' is not a field object"
+            assert "value" in track[key]
             assert "is_default" in track[key]
 
 
@@ -102,8 +107,9 @@ def test_params_compositions_has_capacity(api_base):
     resp = requests.get(f"{api_base}/api/params/compositions")
     assert resp.status_code == 200
     for comp in resp.json()["compositions"]:
-        assert len(comp["capacity"]) > 0, \
-            f"Composition '{comp['comp_id']}' has empty capacity"
+        assert (
+            len(comp["capacity"]) > 0
+        ), f"Composition '{comp['comp_id']}' has empty capacity"
 
 
 @pytest.mark.timeout(10)
@@ -114,16 +120,18 @@ def test_params_compositions_indicative_figures(api_base):
     comps_with_indicative = [
         c for c in resp.json()["compositions"] if c.get("indicative") is not None
     ]
-    assert len(comps_with_indicative) >= 1, \
-        "Expected at least one composition with indicative figures"
+    assert (
+        len(comps_with_indicative) >= 1
+    ), "Expected at least one composition with indicative figures"
     for comp in comps_with_indicative:
         ind = comp["indicative"]
-        assert "cost_eur_per_seat_km"   in ind
-        assert "cost_eur_per_place_km"  in ind
+        assert "cost_eur_per_seat_km" in ind
+        assert "cost_eur_per_place_km" in ind
         assert "subsidy_eur_per_pax_km" in ind
-        assert "breakeven_load_factor"  in ind
-        assert ind["cost_eur_per_seat_km"] > 0, \
-            f"Composition '{comp['comp_id']}' indicative cost_eur_per_seat_km is zero"
+        assert "breakeven_load_factor" in ind
+        assert (
+            ind["cost_eur_per_seat_km"] > 0
+        ), f"Composition '{comp['comp_id']}' indicative cost_eur_per_seat_km is zero"
 
 
 @pytest.mark.timeout(10)
@@ -134,10 +142,11 @@ def test_stub_endpoints_return_501(api_base):
         ("POST", "/api/auth/verify"),
         ("POST", "/api/feedback"),
         ("POST", "/api/scenario"),
-        ("GET",  "/api/scenarios"),
+        ("GET", "/api/scenarios"),
         ("POST", "/api/scenarios"),
     ]
     for method, path in stubs:
         resp = requests.request(method, f"{api_base}{path}", json={}, timeout=5)
-        assert resp.status_code == 501, \
-            f"{method} {path} returned {resp.status_code}, expected 501"
+        assert (
+            resp.status_code == 501
+        ), f"{method} {path} returned {resp.status_code}, expected 501"

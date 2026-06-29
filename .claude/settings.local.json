@@ -1,17 +1,35 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git -C /Users/kahassel/bjarne_code/night-train-target-network status)",
+      "Bash(git *)",
       "Bash(docker compose *)",
-      "Bash(xxd /Users/kahassel/bjarne_code/night-train-target-network/.devcontainer/docker-compose.yml)",
-      "Bash(git --version)",
-      "Bash(apt-get update *)",
+      "Bash(npm *)",
+      "Bash(node *)",
+      "Bash(python *)",
+      "Bash(uv *)",
+      "Bash(apt-get update)",
       "Bash(apt-get install *)",
-      "Bash(uv --version)",
-      "Bash(env)",
-      "Read(//run/secrets/**)",
-      "Bash(git check-ignore *)",
-      "Bash(chmod +x *)"
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Read(./**)",
+      "Write(./**)",
+      "Bash(chmod +x *)",
+      "Bash(mkdir *)",
+      "Bash(touch *)",
+      "Bash(npm run *)",
+      "Bash(echo \"EXIT_CODE: $?\")",
+      "Skill(run)",
+      "Skill(run:*)",
+      "Bash(npx eslint *)",
+      "Bash(echo \"EXIT_CODE:$?\")"
+    ],
+    "deny": [
+      "Bash(rm *)",
+      "Bash(dd *)",
+      "Bash(sudo *)",
+      "Write(/etc/**)",
+      "Write(/usr/**)",
+      "Bash(*)"
     ]
   }
 }

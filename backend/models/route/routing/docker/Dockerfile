@@ -5,7 +5,9 @@ WORKDIR /build
 
 RUN git clone https://github.com/geofabrik/OpenRailRouting.git . && \
     git submodule init && \
-    git submodule update && \
+    git submodule update
+
+RUN --mount=type=cache,target=/root/.m2 \
     mvn clean install -DskipTests
 
 # Stage 2 — Lean runtime image
