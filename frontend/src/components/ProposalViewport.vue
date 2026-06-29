@@ -21,14 +21,9 @@ interface ItineraryStop {
   filterQuery: string
 }
 
-const itinerary = ref<ItineraryStop[]>([
-  { id: 1, name: 'Berlin', selectedStop: null, filterQuery: '' },
-  { id: 2, name: 'Frankfurt am Main', selectedStop: null, filterQuery: '' },
-  { id: 3, name: 'Strasbourg', selectedStop: null, filterQuery: '' },
-  { id: 4, name: 'Lyon', selectedStop: null, filterQuery: '' },
-  { id: 5, name: 'Montpellier', selectedStop: null, filterQuery: '' },
-  { id: 6, name: 'Barcelona', selectedStop: null, filterQuery: '' },
-])
+const itinerary = ref<ItineraryStop[]>([])
+
+let _nextId = 1
 
 // Plain array, not ref([]). Mutating a reactive ref inside a template-ref callback
 // re-triggers Vue's reactivity on every render → infinite loop inside DataTable.
@@ -80,8 +75,15 @@ function onRowMouseDown(event: MouseEvent) {
   }
 }
 
-onMounted(() => {
-  store.fetchStops()
+onMounted(async () => {
+  await store.fetchStops()
+  if (store.stops.length >= 2) {
+    const shuffled = [...store.stops].sort(() => Math.random() - 0.5)
+    itinerary.value = [
+      { id: _nextId++, name: shuffled[0].name, selectedStop: shuffled[0], filterQuery: '' },
+      { id: _nextId++, name: shuffled[1].name, selectedStop: shuffled[1], filterQuery: '' },
+    ]
+  }
   store.fetchCompositions()
 })
 </script>
@@ -221,12 +223,23 @@ onMounted(() => {
                       </template>
                     </Select>
 
-                    <button
-                      class="flex cursor-pointer items-center justify-center text-primary-50 opacity-0 translate-x-[-8px] transition-all duration-200 ease-out group-hover:translate-x-0 group-hover:opacity-100"
-                      @click.stop="removeStop(index)"
+                    <span
+                      class="inline-flex"
+                      :title="itinerary.length <= 2 ? t('proposal.minStopsTooltip') : undefined"
                     >
-                      <AppIcon :path="mdiTrashCan" :size="20" />
-                    </button>
+                      <button
+                        class="flex items-center justify-center text-primary-50 opacity-0 translate-x-[-8px] transition-all duration-200 ease-out group-hover:translate-x-0"
+                        :class="
+                          itinerary.length <= 2
+                            ? 'cursor-not-allowed pointer-events-none group-hover:opacity-30'
+                            : 'cursor-pointer group-hover:opacity-100'
+                        "
+                        :disabled="itinerary.length <= 2"
+                        @click.stop="removeStop(index)"
+                      >
+                        <AppIcon :path="mdiTrashCan" :size="20" />
+                      </button>
+                    </span>
                   </div>
                 </div>
               </template>

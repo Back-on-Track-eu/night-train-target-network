@@ -1,10 +1,11 @@
 {
   "proposal": {
-    "heading": "So, what's your dream night train route?",
+    "heading": "So, what's your \ndream night train route?",
     "evaluate": "Evaluate",
     "mapPlaceholder": "Map",
     "trainCardPlaceholder": "Train info",
     "searchPlaceholder": "Search stops…",
+    "minStopsTooltip": "Two stops per route minimum.",
     "loading": "Fetching data…",
     "debugStopsPreview": "stops[0..1]",
     "debugCompositionsPreview": "compositions[0..1]"
