@@ -7,6 +7,7 @@ import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import AppIcon from '@/components/AppIcon.vue'
 import StopSelect from '@/components/StopSelect.vue'
+import CompositionSelectCard from '@/components/CompositionSelectCard.vue'
 import { mdiPencil, mdiPlus, mdiTrashCan } from '@mdi/js'
 
 defineProps<{ mode: 'edit' | 'display' }>()
@@ -218,8 +219,13 @@ onMounted(async () => {
           </DataTable>
         </div>
 
-        <!-- Train card placeholder -->
+        <!-- Train card -->
+        <CompositionSelectCard
+          v-if="store.compositionsStatus === 'success' && store.compositions.length > 0"
+          :compositions="store.compositions"
+        />
         <div
+          v-else
           class="flex h-32 items-center justify-center rounded-xl bg-primary-50/5 text-sm text-primary-50/40"
         >
           {{ t('proposal.trainCardPlaceholder') }}
