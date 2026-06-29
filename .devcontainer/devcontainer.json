@@ -1,11 +1,11 @@
 {
   "name": "bot_target_network",
   "dockerComposeFile": "./docker-compose.yml",
-  "service": "api",
+  "service": "backend-api",
   "workspaceFolder": "/workspace",
   "shutdownAction": "stopCompose",
   "remoteUser": "root",
-  "forwardPorts": [5000, 8989],
+  "forwardPorts": [5000],
   "postCreateCommand": "bash .devcontainer/setup.sh",
   "customizations": {
     "vscode": {
