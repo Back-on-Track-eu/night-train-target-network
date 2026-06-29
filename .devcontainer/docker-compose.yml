@@ -1,22 +1,37 @@
 name: bot_target_network
 
-# Extends the canonical backend service definitions and adds
-# VS Code devcontainer-specific configuration.
-# Frontend-specific services go here too.
-
-include:
-  - path: ../backend/docker/docker-compose.yml
-    env_file: ../backend/docker/.env
+# Self-contained devcontainer stack for VS Code / frontend development.
+# Duplicates postgres and openrailrouting from backend/docker/docker-compose.yml
+# so we avoid include: merge validation issues. Keep in sync if base services change.
 
 services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: night_train_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB:       ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   openrailrouting:
     build:
       context: ../backend/models/route/routing/docker
       dockerfile: Dockerfile
+    image: docker-openrailrouting
     container_name: openrailrouting
     ports:
-      - "8989:8989"
+      - "${OPENRAILROUTING_HOST_PORT:-8989}:8989"
       - "8990:8990"
     volumes:
       - ../backend/models/route/routing/docker/data:/app/data
@@ -29,12 +44,6 @@ services:
       retries: 3
       start_period: 120s
 
-  # Prevent the standalone api service (included from backend/docker/docker-compose.yml)
-  # from starting in the devcontainer — backend-api below replaces it.
-  api:
-    profiles:
-      - standalone
-
   backend-api:
     build:
       context: ../backend
@@ -45,16 +54,16 @@ services:
     env_file:
       - ../backend/docker/.env
     environment:
-      - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/google_credentials
-      - OPENRAILROUTING_URL=http://openrailrouting:8989
-      - POSTGRES_HOST=postgres
+      POSTGRES_HOST: postgres
+      OPENRAILROUTING_URL: http://openrailrouting:8989
     volumes:
       - ..:/workspace:cached
       - ~/.ssh:/root/.ssh:ro
     depends_on:
       postgres:
         condition: service_healthy
-    # Healthcheck needed here so setup.sh can wait for the API to be ready
+      openrailrouting:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
       interval: 30s
@@ -72,4 +81,8 @@ services:
       - "5173:5173"
     volumes:
       - ../frontend:/app
+      - /app/node_modules
     restart: unless-stopped
+
+volumes:
+  pgdata:
