@@ -39,10 +39,11 @@ Infrastructure: Docker Compose at `.devcontainer/docker-compose.yml` with three 
 ### CSS / Styling
 
 - Tailwind CSS v4 (no `tailwind.config.js` — uses `@tailwindcss/vite` plugin)
-- PrimeVue 4 in styled mode with Aura theme preset (`@primeuix/themes/aura`)
+- PrimeVue 4 in styled mode with Lara theme preset (`@primeuix/themes/lara`)
 - CSS layer order declared in `frontend/src/style.css` and `frontend/src/main.ts` must stay in sync:
   `tailwind-base → primevue → tailwind-utilities`
 - Use PrimeVue design tokens (`text-primary-700`, `bg-surface-50`) for brand colours; Tailwind for layout/spacing
+- Icons: use `<AppIcon :path="mdiXxx" />` from `@/components/AppIcon.vue` with path constants imported from `@mdi/js` — never use `<i class="mdi mdi-*">` CSS font classes
 
 ---
 
@@ -85,7 +86,7 @@ npm run dev
 | `backend/tests/test_health.py` | Smoke tests that run in CI without Google credentials |
 | `frontend/src/main.ts` | App bootstrap — plugin registration order matters |
 | `frontend/src/style.css` | Tailwind v4 import + CSS layer order declaration |
-| `frontend/src/stores/dataStore.ts` | Pinia store — all API calls and load state |
+| `frontend/src/stores/store.ts` | Pinia store — currently containing everything but might have more in the future |
 | `frontend/src/i18n/index.ts` | i18n setup; add new locales here |
 | `frontend/src/i18n/locales/en.json` | English translation strings |
 | `.devcontainer/docker-compose.yml` | Three-service Docker setup |
@@ -106,7 +107,7 @@ npm run dev
 
 ### New Pinia store
 
-Follow the Composition API pattern in `frontend/src/stores/dataStore.ts`.
+Follow the Composition API pattern in `frontend/src/stores/store.ts`.
 Name the file `<name>Store.ts`.
 
 ---

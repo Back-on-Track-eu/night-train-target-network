@@ -6,21 +6,21 @@ name: bot_target_network
 
 include:
   - path: ../backend/docker/docker-compose.yml
-    env_file: .env
+    env_file: ../backend/docker/.env
 
 services:
 
   openrailrouting:
     build:
-      context: ../backend/models/route_evaluation_model/routing/docker
+      context: ../backend/models/route/routing/docker
       dockerfile: Dockerfile
     container_name: openrailrouting
     ports:
       - "8989:8989"
       - "8990:8990"
     volumes:
-      - ../backend/models/route_evaluation_model/routing/docker/data:/app/data
-      - ../backend/models/route_evaluation_model/routing/docker/graph-cache:/app/graph-cache
+      - ../backend/models/route/routing/docker/data:/app/data
+      - ../backend/models/route/routing/docker/graph-cache:/app/graph-cache
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8989/health"]
@@ -42,14 +42,12 @@ services:
     container_name: backend-api
     ports:
       - "5000:5000"
+    env_file:
+      - ../backend/docker/.env
     environment:
       - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/google_credentials
       - OPENRAILROUTING_URL=http://openrailrouting:8989
       - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_DB=${POSTGRES_DB}
     volumes:
       - ..:/workspace:cached
       - ~/.ssh:/root/.ssh:ro
@@ -62,7 +60,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 60s
     restart: unless-stopped
 
   frontend:
@@ -74,5 +72,4 @@ services:
       - "5173:5173"
     volumes:
       - ../frontend:/app
-      - /app/node_modules
     restart: unless-stopped

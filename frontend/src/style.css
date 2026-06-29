@@ -1,21 +1,21 @@
 @import 'tailwindcss';
 
+body {
+  background-color: #1d1e33;
+}
+
 @layer tailwind-base, primevue, tailwind-utilities;
 
 @font-face {
   font-family: 'Mark Pro';
-  src:
-    url('@/assets/fonts/MarkPro.woff2') format('woff2'),
-    url('@/assets/fonts/MarkPro.woff') format('woff');
+  src: url('@/assets/fonts/Mark Pro.ttf') format('truetype');
   font-weight: 400;
   font-style: normal;
 }
 
 @font-face {
   font-family: 'Mark Pro';
-  src:
-    url('@/assets/fonts/MarkPro-Bold.woff2') format('woff2'),
-    url('@/assets/fonts/MarkPro-Bold.woff') format('woff');
+  src: url('@/assets/fonts/Mark Pro Bold.ttf') format('truetype');
   font-weight: 700;
   font-style: normal;
 }
@@ -24,6 +24,8 @@
   --font-sans: 'Mark Pro', ui-sans-serif, system-ui, sans-serif;
 
   --color-sapphire: #1d1e33;
+  --color-sapphire-100: #23263d;
+  --color-sapphire-200: #2b2e4a;
   --color-sky-blue: #2271b3;
   --color-greenish-grey: #f1f3f6;
 
@@ -31,4 +33,17 @@
   --color-pure-green: #008f39;
   --color-yellow-green: #92d051;
   --color-sulphur-yellow: #eaf044;
+
+  /* Primary palette mirrored from the PrimeVue preset for use in Tailwind utilities */
+  --color-primary-50: var(--p-primary-50);
+  --color-primary-100: var(--p-primary-100);
+  --color-primary-200: var(--p-primary-200);
+  --color-primary-300: var(--p-primary-300);
+  --color-primary-400: var(--p-primary-400);
+  --color-primary-500: var(--p-primary-500);
+  --color-primary-600: var(--p-primary-600);
+  --color-primary-700: var(--p-primary-700);
+  --color-primary-800: var(--p-primary-800);
+  --color-primary-900: var(--p-primary-900);
+  --color-primary-950: var(--p-primary-950);
 }

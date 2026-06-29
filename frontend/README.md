@@ -12,7 +12,7 @@ Vue 3 SPA for the Night Train Target Network economic model.
 | Vite         | ^8.0            | Dev server + bundler                            |
 | TypeScript   | ^5.8 (strict)   | Type safety                                     |
 | Pinia        | ^2.3            | State management                                |
-| PrimeVue     | ^4.3            | UI component library (Aura theme)               |
+| PrimeVue     | ^4.3            | UI component library (Lara theme)               |
 | Tailwind CSS | v4              | Utility-first CSS (`@tailwindcss/vite` plugin)  |
 | vue-i18n     | ^11             | Internationalisation                            |
 | ESLint       | 9 (flat config) | Linting                                         |
@@ -71,7 +71,7 @@ frontend/
     │   └── locales/
     │       └── en.json      # English strings (add de.json etc. here)
     ├── stores/
-    │   └── dataStore.ts     # Pinia store: data load state + API call
+    │   └── store.ts     # Pinia store
     └── components/
         └── DataStatus.vue   # Connection test UI component
 ```
@@ -112,6 +112,27 @@ pre-commit run --all-files
 Hooks are defined in `/.pre-commit-config.yaml` at the repo root. They mirror the
 `prettier-check` and `black-check` CI jobs — if CI fails on formatting, run
 `npm run format` (frontend) or `black backend/` (backend) and recommit.
+
+---
+
+## Icons
+
+Use the `AppIcon` component with path constants from `@mdi/js`:
+
+```vue
+<script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
+import { mdiMagnify } from '@mdi/js'
+</script>
+
+<template>
+  <AppIcon :path="mdiMagnify" :size="20" color="white" />
+</template>
+```
+
+Props: `path` (required), `size` (px, default `24`), `color` (default `currentColor`).
+
+Do **not** use `<i class="mdi mdi-*">` CSS font classes — `@mdi/js` is tree-shakeable and avoids loading the full icon font.
 
 ---
 

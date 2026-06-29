@@ -1,10 +1,10 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import PrimeVue from 'primevue/config'
-import Aura from '@primeuix/themes/aura'
+import Lara from '@primeuix/themes/lara'
 import { definePreset } from '@primeuix/themes'
 
-const BotPreset = definePreset(Aura, {
+const BotPreset = definePreset(Lara, {
   semantic: {
     primary: {
       50: '#eef4fb',
@@ -20,8 +20,26 @@ const BotPreset = definePreset(Aura, {
       950: '#061529',
     },
   },
+  components: {
+    select: {
+      overlay: {
+        background: '#23263d',
+        borderColor: '{primary.50}',
+      },
+      option: {
+        color: '{primary.50}',
+        focusColor: '{primary.50}',
+        focusBackground: '#2b2e4a',
+        selectedColor: '{primary.50}',
+        selectedBackground: '#363a58',
+        selectedFocusColor: '{primary.50}',
+        selectedFocusBackground: '#3e4265',
+      },
+    },
+  },
 })
 import 'primeicons/primeicons.css'
+import '@mdi/font/css/materialdesignicons.css'
 import { i18n } from './i18n'
 import App from './App.vue'
 import './style.css'

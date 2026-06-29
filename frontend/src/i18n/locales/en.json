@@ -1,18 +1,15 @@
 {
-  "app": {
-    "title": "Night Train Network"
-  },
-  "dataStatus": {
-    "title": "Backend Connection",
-    "loadButton": "Load Data",
-    "status": {
-      "idle": "Not connected",
-      "loading": "Loading data from backend...",
-      "success": "Data loaded successfully",
-      "already_loaded": "Data already loaded on server",
-      "error": "Failed to load data"
-    },
-    "loadedAt": "Loaded at: {time}",
-    "response": "Server response"
+  "proposal": {
+    "heading": "So, what's your \ndream night train route?",
+    "evaluate": "Evaluate",
+    "mapPlaceholder": "Map",
+    "trainCardPlaceholder": "Train info",
+    "searchPlaceholder": "Search stops…",
+    "addStop": "Add Stop",
+    "noStopsFound": "No stops found",
+    "minStopsTooltip": "Two stops per route minimum.",
+    "loading": "Fetching data…",
+    "tripOutbound": "Outbound",
+    "tripReturn": "Return"
   }
 }

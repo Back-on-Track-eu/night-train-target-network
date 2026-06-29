@@ -15,7 +15,13 @@
       "Write(./**)",
       "Bash(chmod +x *)",
       "Bash(mkdir *)",
-      "Bash(touch *)"
+      "Bash(touch *)",
+      "Bash(npm run *)",
+      "Bash(echo \"EXIT_CODE: $?\")",
+      "Skill(run)",
+      "Skill(run:*)",
+      "Bash(npx eslint *)",
+      "Bash(echo \"EXIT_CODE:$?\")"
     ],
     "deny": [
       "Bash(rm *)",
