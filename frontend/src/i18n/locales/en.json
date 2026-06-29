@@ -8,8 +8,6 @@
     "addStop": "Add Stop",
     "noStopsFound": "No stops found",
     "minStopsTooltip": "Two stops per route minimum.",
-    "loading": "Fetching data…",
-    "debugStopsPreview": "stops[0..1]",
-    "debugCompositionsPreview": "compositions[0..1]"
+    "loading": "Fetching data…"
   }
 }

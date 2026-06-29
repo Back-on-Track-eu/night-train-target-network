@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useStore } from '@/stores/store'
 import type { Stop } from '@/types/api'
@@ -8,6 +8,7 @@ import Column from 'primevue/column'
 import AppIcon from '@/components/AppIcon.vue'
 import StopSelect from '@/components/StopSelect.vue'
 import CompositionSelectCard from '@/components/CompositionSelectCard.vue'
+import MapView from '@/components/MapView.vue'
 import { mdiPencil, mdiPlus, mdiTrashCan } from '@mdi/js'
 
 defineProps<{ mode: 'edit' | 'display' }>()
@@ -102,6 +103,12 @@ function onRowMouseDown(event: MouseEvent) {
     )
   }
 }
+
+const mapStops = computed(() =>
+  itinerary.value
+    .filter((s) => s.selectedStop !== null)
+    .map((s) => ({ lat: s.selectedStop!.lat, lon: s.selectedStop!.lon, name: s.name })),
+)
 
 onMounted(async () => {
   await store.fetchStops()
@@ -231,28 +238,6 @@ onMounted(async () => {
           {{ t('proposal.trainCardPlaceholder') }}
         </div>
 
-        <!-- JSON preview -->
-        <div
-          v-if="store.stopsStatus === 'success' || store.compositionsStatus === 'success'"
-          class="rounded-xl bg-primary-50/5 p-4 text-xs text-primary-50/60"
-        >
-          <p v-if="store.stopsStatus === 'success'" class="mb-1 font-bold text-primary-50/80">
-            {{ t('proposal.debugStopsPreview') }}
-          </p>
-          <pre v-if="store.stopsStatus === 'success'" class="mb-4 overflow-auto">{{
-            JSON.stringify(store.stops.slice(0, 2), null, 2)
-          }}</pre>
-          <p
-            v-if="store.compositionsStatus === 'success'"
-            class="mb-1 font-bold text-primary-50/80"
-          >
-            {{ t('proposal.debugCompositionsPreview') }}
-          </p>
-          <pre v-if="store.compositionsStatus === 'success'" class="overflow-auto">{{
-            JSON.stringify(store.compositions.slice(0, 2), null, 2)
-          }}</pre>
-        </div>
-
         <div
           v-if="store.stopsStatus === 'loading' || store.compositionsStatus === 'loading'"
           class="text-xs text-primary-50/40"
@@ -264,13 +249,8 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- Right panel: map placeholder -->
-      <div
-        class="flex flex-1 items-center justify-center rounded-xl bg-primary-50/5 text-sm text-primary-50/40"
-        style="min-height: 480px"
-      >
-        {{ t('proposal.mapPlaceholder') }}
-      </div>
+      <!-- Right panel: map -->
+      <MapView :stops="mapStops" class="flex-1 overflow-hidden rounded-xl" />
     </div>
 
     <!-- Evaluate button (edit mode only) -->

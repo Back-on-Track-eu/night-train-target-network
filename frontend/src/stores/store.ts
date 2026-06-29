@@ -27,6 +27,7 @@ export const useStore = defineStore('store', () => {
       } else {
         stops.value = json.stops
         stopsStatus.value = 'success'
+        console.log('[stops]', json.stops)
       }
     } catch (err) {
       stopsStatus.value = 'error'
@@ -46,6 +47,7 @@ export const useStore = defineStore('store', () => {
       } else {
         compositions.value = json.compositions
         compositionsStatus.value = 'success'
+        console.log('[compositions]', json.compositions)
       }
     } catch (err) {
       compositionsStatus.value = 'error'
