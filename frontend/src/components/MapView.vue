@@ -16,7 +16,10 @@ interface MarkerStop {
   name: string
 }
 
-const props = defineProps<{ stops: MarkerStop[] }>()
+const props = defineProps<{
+  stops: MarkerStop[]
+  shape?: { type: string; coordinates: [number, number][] } | null
+}>()
 
 const mapContainer = ref<HTMLDivElement | null>(null)
 let map: maplibregl.Map | null = null
@@ -58,14 +61,11 @@ function syncPolyline() {
   if (!map || !mapLoaded) return
   const source = map.getSource(ROUTE_SOURCE) as maplibregl.GeoJSONSource | undefined
   if (!source) return
-  source.setData({
-    type: 'Feature',
-    geometry: {
-      type: 'LineString',
-      coordinates: props.stops.map((s) => [s.lon, s.lat]),
-    },
-    properties: {},
-  })
+  const geometry = props.shape ?? {
+    type: 'LineString' as const,
+    coordinates: props.stops.map((s) => [s.lon, s.lat]),
+  }
+  source.setData({ type: 'Feature', geometry, properties: {} })
 }
 
 function fitToStops(animate: boolean) {
@@ -119,7 +119,7 @@ onMounted(() => {
 })
 
 watch(
-  () => props.stops,
+  () => [props.stops, props.shape],
   () => {
     syncMarkers()
     syncPolyline()

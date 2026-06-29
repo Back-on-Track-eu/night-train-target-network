@@ -5,16 +5,86 @@ import { useStore } from '@/stores/store'
 import type { Stop } from '@/types/api'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
+import Skeleton from 'primevue/skeleton'
 import AppIcon from '@/components/AppIcon.vue'
 import StopSelect from '@/components/StopSelect.vue'
 import CompositionSelectCard from '@/components/CompositionSelectCard.vue'
 import MapView from '@/components/MapView.vue'
 import { mdiPencil, mdiPlus, mdiTrashCan } from '@mdi/js'
 
-defineProps<{ mode: 'edit' | 'display' }>()
+const props = defineProps<{ mode: 'edit' | 'loading' | 'display' }>()
 
 const { t } = useI18n()
 const store = useStore()
+
+const BASE_URL = 'http://localhost:5000'
+
+const currentMode = ref<'edit' | 'loading' | 'display'>(props.mode)
+const selectedCompositionId = ref<string | null>(null)
+const evaluateError = ref<string | null>(null)
+
+interface StopTimeFmt {
+  stop_id: string
+  stop_name: string
+  lat: number
+  lon: number
+  arrival_time_fmt: string | null
+  departure_time_fmt: string | null
+}
+
+interface TripResult {
+  trip_id: string
+  direction_id: number
+  departure_time: string
+  stop_times: StopTimeFmt[]
+  shape: { type: string; coordinates: [number, number][] }
+}
+
+interface RouteResult {
+  route_id: string
+  trips: TripResult[]
+}
+
+const routeResult = ref<RouteResult | null>(null)
+const selectedTripId = ref<string | null>(null)
+
+const selectedTrip = computed(
+  () => routeResult.value?.trips.find((t) => t.trip_id === selectedTripId.value) ?? null,
+)
+
+async function evaluate() {
+  const validStops = itinerary.value.filter((s) => s.selectedStop !== null)
+  if (validStops.length < 2 || !selectedCompositionId.value) return
+  currentMode.value = 'loading'
+  evaluateError.value = null
+  try {
+    const response = await fetch(`${BASE_URL}/api/route/planOrUpdate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        proposal_id: 1,
+        proposal_version: 1,
+        stops: validStops.map((s) => ({ stop_id: s.selectedStop!.stop_id, stop_type: 'both' })),
+        composition_id: selectedCompositionId.value,
+      }),
+    })
+    const json = await response.json()
+    if (!response.ok) {
+      evaluateError.value = json.message ?? `HTTP ${response.status}`
+      currentMode.value = 'edit'
+    } else {
+      routeResult.value = json.route
+      selectedTripId.value =
+        json.route.trips.find((t: TripResult) => t.direction_id === 0)?.trip_id ??
+        json.route.trips[0]?.trip_id ??
+        null
+      currentMode.value = 'display'
+    }
+  } catch (err) {
+    evaluateError.value = err instanceof Error ? err.message : 'Unknown network error'
+    currentMode.value = 'edit'
+  }
+}
 
 interface ItineraryStop {
   id: number
@@ -120,11 +190,49 @@ function usedStopIdsExcluding(row: ItineraryStop): Set<string> {
   return ids
 }
 
-const mapStops = computed(() =>
-  itinerary.value
+interface ViewRow {
+  id: number
+  name: string
+  arrival: string | null
+  departure: string | null
+}
+
+const viewRows = computed((): ViewRow[] => {
+  if (currentMode.value === 'display' && selectedTrip.value) {
+    return selectedTrip.value.stop_times.map((st, i) => ({
+      id: i,
+      name: st.stop_name,
+      arrival: st.arrival_time_fmt,
+      departure: st.departure_time_fmt,
+    }))
+  }
+  return itinerary.value.map((s) => ({
+    id: s.id,
+    name: s.name,
+    arrival: null,
+    departure: null,
+  }))
+})
+
+const mapStops = computed(() => {
+  if (currentMode.value === 'display' && selectedTrip.value) {
+    return selectedTrip.value.stop_times.map((st) => ({
+      lat: st.lat,
+      lon: st.lon,
+      name: st.stop_name,
+    }))
+  }
+  return itinerary.value
     .filter((s) => s.selectedStop !== null)
-    .map((s) => ({ lat: s.selectedStop!.lat, lon: s.selectedStop!.lon, name: s.name })),
-)
+    .map((s) => ({ lat: s.selectedStop!.lat, lon: s.selectedStop!.lon, name: s.name }))
+})
+
+const mapShape = computed(() => {
+  if (currentMode.value === 'display' && selectedTrip.value) {
+    return selectedTrip.value.shape
+  }
+  return null
+})
 
 onMounted(async () => {
   await store.fetchStops()
@@ -143,13 +251,15 @@ onMounted(async () => {
   <div class="flex flex-col gap-6">
     <div class="flex gap-6">
       <!-- Left panel -->
-      <div class="flex w-2/5 flex-col justify-center gap-12">
-        <div class="itinerary-table px-8">
+      <div class="flex w-1/2 flex-col justify-center gap-12">
+        <div class="itinerary-table px-32">
+          <!-- Edit mode table -->
           <!-- border-collapse (set in pt.table) removes default cell spacing so
                the timeline line segments in consecutive rows connect seamlessly. -->
           <DataTable
+            v-if="currentMode === 'edit'"
             :value="itinerary"
-            :reorderable-rows="mode === 'edit'"
+            :reorderable-rows="true"
             data-key="id"
             :pt="{
               table: { class: 'w-full border-collapse' },
@@ -160,7 +270,6 @@ onMounted(async () => {
             @row-reorder="onRowReorder"
           >
             <Column
-              v-if="mode === 'edit'"
               row-reorder
               style="width: 2rem"
               :pt="{
@@ -202,7 +311,7 @@ onMounted(async () => {
                     {{ stop.name }}
                   </span>
 
-                  <div v-if="mode === 'edit'" data-row-actions class="flex items-center gap-2">
+                  <div data-row-actions class="flex items-center gap-2">
                     <StopSelect
                       :stops="store.stops"
                       :disabled-ids="usedStopIdsExcluding(stop)"
@@ -233,8 +342,82 @@ onMounted(async () => {
               </template>
             </Column>
           </DataTable>
-          <!-- Add Stop button — top-right, edit mode only -->
-          <div v-if="mode === 'edit'" class="flex justify-center">
+
+          <!-- Display / Loading mode table -->
+          <DataTable
+            v-else
+            :value="viewRows"
+            data-key="id"
+            :pt="{
+              table: { class: 'w-full border-collapse' },
+              thead: { class: 'hidden' },
+              row: { class: '!bg-transparent border-0' },
+              bodyCell: { class: '!bg-transparent border-0 !p-0' },
+            }"
+          >
+            <!-- Times column (replaces drag handle) -->
+            <Column style="width: 5rem" :pt="{ bodyCell: { class: '!p-0' } }">
+              <template #body="{ data: row, index }">
+                <div class="flex flex-col items-end gap-1 py-2 pr-3">
+                  <template v-if="currentMode === 'loading'">
+                    <Skeleton v-if="index > 0" width="3.5rem" height="10px" />
+                    <Skeleton v-if="index < viewRows.length - 1" width="3.5rem" height="10px" />
+                  </template>
+                  <template v-else>
+                    <span
+                      v-if="row.arrival"
+                      class="text-xs tabular-nums leading-none text-primary-50"
+                      >{{ row.arrival }}</span
+                    >
+                    <span
+                      v-if="row.departure"
+                      class="text-xs tabular-nums leading-none text-primary-50"
+                      >{{ row.departure }}</span
+                    >
+                  </template>
+                </div>
+              </template>
+            </Column>
+
+            <!-- Timeline dot -->
+            <Column style="width: 2.5rem" :pt="{ bodyCell: { class: 'timeline-col !p-0' } }">
+              <template #body="{ index }">
+                <div class="absolute inset-0 flex items-center justify-center">
+                  <div
+                    class="absolute left-1/2 w-0.5 -translate-x-1/2 bg-primary-50/30"
+                    :class="[
+                      index === 0 ? 'top-1/2' : 'top-0',
+                      index === viewRows.length - 1 ? 'bottom-1/2' : 'bottom-0',
+                    ]"
+                  />
+                  <div
+                    class="relative z-10 rounded-full bg-primary-50"
+                    :class="index === 0 || index === viewRows.length - 1 ? 'h-4 w-4' : 'h-3 w-3'"
+                  />
+                </div>
+              </template>
+            </Column>
+
+            <!-- Stop name -->
+            <Column>
+              <template #body="{ data: row, index }">
+                <div class="flex items-center px-3 py-2">
+                  <span
+                    :class="[
+                      'text-primary-50 leading-tight',
+                      index === 0 || index === viewRows.length - 1
+                        ? 'text-2xl font-bold'
+                        : 'text-lg font-semibold',
+                    ]"
+                    >{{ row.name }}</span
+                  >
+                </div>
+              </template>
+            </Column>
+          </DataTable>
+
+          <!-- Add Stop button (edit only) -->
+          <div v-if="currentMode === 'edit'" class="flex justify-end">
             <StopSelect :stops="store.stops" :disabled-ids="usedStopIds" @select="addStop">
               <button
                 class="flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1.5 text-sm text-primary-50 transition hover:bg-primary-50/10"
@@ -244,19 +427,45 @@ onMounted(async () => {
               </button>
             </StopSelect>
           </div>
+
+          <!-- Trip selector (display only) -->
+          <div
+            v-if="currentMode === 'display' && routeResult && routeResult.trips.length > 0"
+            class="flex justify-start"
+          >
+            <select
+              v-model="selectedTripId"
+              class="cursor-pointer appearance-none rounded-full border border-primary-50/20 bg-transparent px-3 py-1.5 text-sm text-primary-50 outline-none transition hover:bg-primary-50/10"
+            >
+              <option
+                v-for="trip in routeResult.trips"
+                :key="trip.trip_id"
+                :value="trip.trip_id"
+                class="bg-surface-900 text-surface-50"
+              >
+                {{
+                  trip.direction_id === 0 ? t('proposal.tripOutbound') : t('proposal.tripReturn')
+                }}
+                — {{ trip.departure_time }}
+              </option>
+            </select>
+          </div>
         </div>
 
-        <!-- Train card -->
-        <CompositionSelectCard
-          v-if="store.compositionsStatus === 'success' && store.compositions.length > 0"
-          :compositions="store.compositions"
-        />
-        <div
-          v-else
-          class="flex h-32 items-center justify-center rounded-xl bg-primary-50/5 text-sm text-primary-50/40"
-        >
-          {{ t('proposal.trainCardPlaceholder') }}
-        </div>
+        <!-- Composition card (edit only) -->
+        <template v-if="currentMode === 'edit'">
+          <CompositionSelectCard
+            v-if="store.compositionsStatus === 'success' && store.compositions.length > 0"
+            :compositions="store.compositions"
+            @select="(id) => (selectedCompositionId = id)"
+          />
+          <div
+            v-else
+            class="flex h-32 items-center justify-center rounded-xl bg-primary-50/5 text-sm text-primary-50/40"
+          >
+            {{ t('proposal.trainCardPlaceholder') }}
+          </div>
+        </template>
 
         <div
           v-if="store.stopsStatus === 'loading' || store.compositionsStatus === 'loading'"
@@ -268,18 +477,43 @@ onMounted(async () => {
           {{ store.stopsError ?? store.compositionsError }}
         </div>
 
-        <!-- Evaluate button (edit mode only) -->
-        <div v-if="mode === 'edit'" class="flex justify-center">
+        <!-- Evaluate button (edit + loading only) -->
+        <div v-if="currentMode !== 'display'" class="flex flex-col items-center gap-2">
           <button
-            class="flex items-center gap-2 rounded-full bg-primary-50/10 px-6 py-2 text-sm text-primary-50 transition hover:bg-primary-50/20"
+            :disabled="currentMode === 'loading'"
+            class="flex items-center gap-2 rounded-full bg-primary-50/10 px-6 py-2 text-md text-primary-50 transition"
+            :class="
+              currentMode === 'loading'
+                ? 'cursor-not-allowed opacity-40'
+                : 'cursor-pointer hover:bg-primary-50/20'
+            "
+            @click="evaluate"
           >
-            {{ t('proposal.evaluate') }} <span>→</span>
+            {{ t('proposal.evaluate') }}
+            <span v-if="currentMode !== 'loading'">→</span>
+            <span
+              v-else
+              class="h-4 w-4 animate-spin rounded-full border-2 border-primary-50/30 border-t-primary-50"
+            />
           </button>
+          <p v-if="evaluateError" class="text-xs text-red-400">{{ evaluateError }}</p>
         </div>
       </div>
 
-      <!-- Right panel: map -->
-      <MapView :stops="mapStops" class="flex-1 overflow-hidden rounded-xl" />
+      <!-- Right panel: map with loading overlay -->
+      <div class="relative flex-1 overflow-hidden rounded-xl">
+        <MapView :stops="mapStops" :shape="mapShape" class="w-full h-full" />
+        <Transition name="fade">
+          <div
+            v-if="currentMode === 'loading'"
+            class="absolute inset-0 flex items-center justify-center rounded-xl bg-black/20 backdrop-blur-sm"
+          >
+            <div
+              class="h-10 w-10 animate-spin rounded-full border-4 border-primary-50/30 border-t-primary-50"
+            />
+          </div>
+        </Transition>
+      </div>
     </div>
   </div>
 </template>
@@ -306,5 +540,13 @@ onMounted(async () => {
 }
 :deep(tr:hover .reorder-col > *) {
   opacity: 1;
+}
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>

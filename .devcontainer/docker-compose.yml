@@ -11,8 +11,6 @@ include:
 services:
 
   openrailrouting:
-    profiles:
-      - routing
     build:
       context: ../backend/models/route/routing/docker
       dockerfile: Dockerfile

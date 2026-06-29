@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type { Composition } from '@/types/api'
 import AppIcon from '@/components/AppIcon.vue'
 import {
@@ -13,6 +13,7 @@ import {
 } from '@mdi/js'
 
 const props = defineProps<{ compositions: Composition[] }>()
+const emit = defineEmits<{ select: [compId: string] }>()
 
 const currentIndex = ref(0)
 const direction = ref<'forward' | 'backward'>('forward')
@@ -47,10 +48,12 @@ const capacityStats = computed(() => {
 })
 
 const transitionName = computed(() => `slide-${direction.value}`)
+
+watch(current, (c) => emit('select', c.comp_id), { immediate: true })
 </script>
 
 <template>
-  <div class="overflow-hidden rounded-xl bg-primary-50/5 px-6 py-5">
+  <div class="overflow-hidden rounded-xl bg-primary-50/5 mx-16 py-5">
     <div class="flex flex-col items-center gap-4 text-center">
       <!-- Name row with inline arrows -->
       <div class="flex items-center gap-2">

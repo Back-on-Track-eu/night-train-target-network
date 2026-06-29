@@ -22,7 +22,6 @@
       "Skill(run:*)",
       "Bash(npx eslint *)",
       "Bash(echo \"EXIT_CODE:$?\")",
-      "Bash(tee /tmp/claude-0/-workspace/718e7e77-3a92-46b5-93b2-910336007cba/scratchpad/ci-output.txt)"
     ],
     "deny": [
       "Bash(rm *)",

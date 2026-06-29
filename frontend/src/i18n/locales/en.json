@@ -8,6 +8,8 @@
     "addStop": "Add Stop",
     "noStopsFound": "No stops found",
     "minStopsTooltip": "Two stops per route minimum.",
-    "loading": "Fetching data…"
+    "loading": "Fetching data…",
+    "tripOutbound": "Outbound",
+    "tripReturn": "Return"
   }
 }
