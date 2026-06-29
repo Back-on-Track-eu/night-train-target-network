@@ -11,22 +11,22 @@ import requests
 ROUTE_URL = "/api/route/planOrUpdate"
 
 VALID_STOPS_3 = [
-    {"stop_id": "DE_BERLIN_HBF",  "stop_type": "boarding"},
+    {"stop_id": "DE_BERLIN_HBF", "stop_type": "boarding"},
     {"stop_id": "DE_DRESDEN_HBF", "stop_type": "both"},
-    {"stop_id": "AT_WIEN_HBF",    "stop_type": "alighting"},
+    {"stop_id": "AT_WIEN_HBF", "stop_type": "alighting"},
 ]
 
 VALID_STOPS_2 = [
     {"stop_id": "DE_BERLIN_HBF", "stop_type": "boarding"},
-    {"stop_id": "AT_WIEN_HBF",   "stop_type": "alighting"},
+    {"stop_id": "AT_WIEN_HBF", "stop_type": "alighting"},
 ]
 
 BASE_REQUEST = {
-    "proposal_id":      1,
+    "proposal_id": 1,
     "proposal_version": 1,
-    "stops":            VALID_STOPS_3,
-    "composition_id":   "STD-7.1",
-    "departure_time":   "21:00",
+    "stops": VALID_STOPS_3,
+    "composition_id": "STD-7.1",
+    "departure_time": "21:00",
 }
 
 
@@ -38,6 +38,7 @@ def route(api_base):
 
 
 # --- Basic structure ---
+
 
 class TestRouteStructure:
 
@@ -62,13 +63,23 @@ class TestRouteStructure:
 
     def test_trip_has_required_fields(self, route):
         required = {
-            "trip_id", "direction_id", "departure_time", "departure_time_min",
-            "model_versions", "param_versions", "composition",
-            "stop_times", "shape", "path", "stats",
+            "trip_id",
+            "direction_id",
+            "departure_time",
+            "departure_time_min",
+            "model_versions",
+            "param_versions",
+            "composition",
+            "stop_times",
+            "shape",
+            "path",
+            "stats",
         }
         for trip in route["trips"]:
             missing = required - set(trip.keys())
-            assert missing == set(), f"Trip dir={trip['direction_id']} missing: {missing}"
+            assert (
+                missing == set()
+            ), f"Trip dir={trip['direction_id']} missing: {missing}"
 
     def test_outbound_departure_matches_request(self, route):
         outbound = next(t for t in route["trips"] if t["direction_id"] == 0)
@@ -81,9 +92,10 @@ class TestRouteStructure:
 
     def test_return_trip_stops_reversed(self, route):
         outbound = next(t for t in route["trips"] if t["direction_id"] == 0)
-        return_t  = next(t for t in route["trips"] if t["direction_id"] == 1)
-        assert [st["stop_id"] for st in return_t["stop_times"]] == \
-               list(reversed([st["stop_id"] for st in outbound["stop_times"]]))
+        return_t = next(t for t in route["trips"] if t["direction_id"] == 1)
+        assert [st["stop_id"] for st in return_t["stop_times"]] == list(
+            reversed([st["stop_id"] for st in outbound["stop_times"]])
+        )
 
     def test_stop_times_count(self, route):
         for trip in route["trips"]:
@@ -91,8 +103,11 @@ class TestRouteStructure:
 
     def test_stop_times_monotonically_increasing(self, route):
         for trip in route["trips"]:
-            times = [st["arrival_time_min"] for st in trip["stop_times"]
-                     if st["arrival_time_min"] is not None]
+            times = [
+                st["arrival_time_min"]
+                for st in trip["stop_times"]
+                if st["arrival_time_min"] is not None
+            ]
             assert times == sorted(times)
 
     def test_stats_distance_positive(self, route):
@@ -101,7 +116,10 @@ class TestRouteStructure:
 
     def test_stats_total_time_gte_driving_time(self, route):
         for trip in route["trips"]:
-            assert trip["stats"]["total_time_min"] >= trip["stats"]["total_driving_time_min"]
+            assert (
+                trip["stats"]["total_time_min"]
+                >= trip["stats"]["total_driving_time_min"]
+            )
 
     def test_no_monetary_values_in_stats(self, route):
         monetary = {"total_tac_eur", "total_energy_eur", "station_charges_eur"}
@@ -129,14 +147,15 @@ class TestRouteStructure:
 
 # --- Adjust vs plan ---
 
+
 class TestAdjustVsPlan:
 
     def test_departure_time_change_triggers_adjust(self, api_base, route):
         body = {
-            "proposal_id":      1,
+            "proposal_id": 1,
             "proposal_version": 2,
-            "route":            route,
-            "departure_time":   "22:00",
+            "route": route,
+            "departure_time": "22:00",
         }
         resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=30)
         assert resp.status_code == 200
@@ -144,10 +163,10 @@ class TestAdjustVsPlan:
 
     def test_adjust_preserves_distance(self, api_base, route):
         body = {
-            "proposal_id":      1,
+            "proposal_id": 1,
             "proposal_version": 2,
-            "route":            route,
-            "departure_time":   "22:00",
+            "route": route,
+            "departure_time": "22:00",
         }
         resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=30)
         assert resp.status_code == 200
@@ -157,10 +176,10 @@ class TestAdjustVsPlan:
 
     def test_adjusted_departure_time_updated(self, api_base, route):
         body = {
-            "proposal_id":      1,
+            "proposal_id": 1,
             "proposal_version": 2,
-            "route":            route,
-            "departure_time":   "22:30",
+            "route": route,
+            "departure_time": "22:30",
         }
         resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=30)
         assert resp.status_code == 200
@@ -170,10 +189,10 @@ class TestAdjustVsPlan:
 
     def test_stop_type_change_triggers_adjust(self, api_base, route):
         body = {
-            "proposal_id":        1,
-            "proposal_version":   2,
-            "route":              route,
-            "stop_type_changes":  {"DE_DRESDEN_HBF": "alighting"},
+            "proposal_id": 1,
+            "proposal_version": 2,
+            "route": route,
+            "stop_type_changes": {"DE_DRESDEN_HBF": "alighting"},
         }
         resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=30)
         assert resp.status_code == 200
@@ -181,16 +200,16 @@ class TestAdjustVsPlan:
 
     def test_new_stops_trigger_plan(self, api_base, route):
         body = {
-            "proposal_id":      1,
+            "proposal_id": 1,
             "proposal_version": 2,
-            "route":            route,
-            "stops":            [
+            "route": route,
+            "stops": [
                 {"stop_id": "DE_BERLIN_HBF", "stop_type": "boarding"},
                 {"stop_id": "CH_ZUERICH_HB", "stop_type": "both"},
-                {"stop_id": "AT_WIEN_HBF",   "stop_type": "alighting"},
+                {"stop_id": "AT_WIEN_HBF", "stop_type": "alighting"},
             ],
-            "composition_id":   "STD-7.1",
-            "departure_time":   "21:00",
+            "composition_id": "STD-7.1",
+            "departure_time": "21:00",
         }
         resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=60)
         assert resp.status_code == 200
@@ -198,11 +217,11 @@ class TestAdjustVsPlan:
 
     def test_composition_change_triggers_plan(self, api_base, route):
         body = {
-            "proposal_id":      1,
+            "proposal_id": 1,
             "proposal_version": 2,
-            "route":            route,
-            "composition_id":   "STD-9.1",
-            "departure_time":   "21:00",
+            "route": route,
+            "composition_id": "STD-9.1",
+            "departure_time": "21:00",
         }
         resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=60)
         assert resp.status_code == 200
@@ -216,23 +235,35 @@ class TestAdjustVsPlan:
 
 # --- Validation ---
 
+
 class TestRouteValidation:
 
     def test_single_stop_returns_400(self, api_base):
-        body = {**BASE_REQUEST, "stops": [{"stop_id": "DE_BERLIN_HBF", "stop_type": "boarding"}]}
+        body = {
+            **BASE_REQUEST,
+            "stops": [{"stop_id": "DE_BERLIN_HBF", "stop_type": "boarding"}],
+        }
         resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=10)
         assert resp.status_code == 400
 
     def test_missing_stops_and_route_returns_400(self, api_base):
-        body = {"proposal_id": 1, "proposal_version": 1, "composition_id": "STD-7.1", "departure_time": "21:00"}
+        body = {
+            "proposal_id": 1,
+            "proposal_version": 1,
+            "composition_id": "STD-7.1",
+            "departure_time": "21:00",
+        }
         resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=10)
         assert resp.status_code == 400
 
     def test_invalid_stop_type_returns_400(self, api_base):
-        body = {**BASE_REQUEST, "stops": [
-            {"stop_id": "DE_BERLIN_HBF", "stop_type": "WRONG"},
-            {"stop_id": "AT_WIEN_HBF",   "stop_type": "alighting"},
-        ]}
+        body = {
+            **BASE_REQUEST,
+            "stops": [
+                {"stop_id": "DE_BERLIN_HBF", "stop_type": "WRONG"},
+                {"stop_id": "AT_WIEN_HBF", "stop_type": "alighting"},
+            ],
+        }
         resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=10)
         assert resp.status_code == 400
 
@@ -252,7 +283,9 @@ class TestRouteValidation:
         body = {**BASE_REQUEST, "departure_time": "25:30"}
         resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=60)
         assert resp.status_code == 200
-        outbound = next(t for t in resp.json()["route"]["trips"] if t["direction_id"] == 0)
+        outbound = next(
+            t for t in resp.json()["route"]["trips"] if t["direction_id"] == 0
+        )
         assert outbound["departure_time_min"] == 25 * 60 + 30  # 1530
 
     def test_departure_time_48h_rejected(self, api_base):
@@ -267,6 +300,10 @@ class TestRouteValidation:
         assert resp.status_code == 422
 
     def test_empty_body_returns_400(self, api_base):
-        resp = requests.post(f"{api_base}{ROUTE_URL}", data="not-json",
-                             headers={"Content-Type": "application/json"}, timeout=10)
+        resp = requests.post(
+            f"{api_base}{ROUTE_URL}",
+            data="not-json",
+            headers={"Content-Type": "application/json"},
+            timeout=10,
+        )
         assert resp.status_code == 400

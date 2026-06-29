@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "black==25.1",
     "jupyterlab>=4.6.0",
     "pandas>=3.0.3",
     "pytest>=8.0",

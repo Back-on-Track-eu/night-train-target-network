@@ -15,10 +15,10 @@ from __future__ import annotations
 import math
 from typing import Optional
 
-
 # =============================================================================
 # UNIT CONVERSIONS
 # =============================================================================
+
 
 def min_to_hhmm(minutes: Optional[int]) -> Optional[str]:
     """
@@ -30,9 +30,9 @@ def min_to_hhmm(minutes: Optional[int]) -> Optional[str]:
     """
     if minutes is None:
         return None
-    days  = minutes // 1440
-    h     = (minutes % 1440) // 60
-    m     = minutes % 60
+    days = minutes // 1440
+    h = (minutes % 1440) // 60
+    m = minutes % 60
     day_s = f" (+{days}d)" if days > 0 else ""
     return f"{h:02d}:{m:02d}{day_s}"
 
@@ -98,8 +98,8 @@ _EARTH_RADIUS_M = 6_371_000.0
 def haversine_m(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
     """Great-circle distance in metres between two WGS-84 points."""
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    dphi       = math.radians(lat2 - lat1)
-    dlambda    = math.radians(lon2 - lon1)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
     a = (
         math.sin(dphi / 2) ** 2
         + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
@@ -112,8 +112,10 @@ def haversine_path_m(coords: list[list[float]]) -> float:
     total = 0.0
     for i in range(len(coords) - 1):
         total += haversine_m(
-            coords[i][0], coords[i][1],
-            coords[i + 1][0], coords[i + 1][1],
+            coords[i][0],
+            coords[i][1],
+            coords[i + 1][0],
+            coords[i + 1][1],
         )
     return total
 
@@ -130,14 +132,38 @@ def bbox_area(ring: list) -> float:
 # =============================================================================
 
 ISO3_TO_ISO2: dict[str, str] = {
-    "AUT": "AT", "BEL": "BE", "BGR": "BG", "HRV": "HR",
-    "CZE": "CZ", "DNK": "DK", "FIN": "FI", "FRA": "FR",
-    "DEU": "DE", "GRC": "GR", "HUN": "HU", "IRL": "IE",
-    "ITA": "IT", "LUX": "LU", "NLD": "NL", "NOR": "NO",
-    "POL": "PL", "PRT": "PT", "ROU": "RO", "SVK": "SK",
-    "SVN": "SI", "ESP": "ES", "SWE": "SE", "CHE": "CH",
-    "GBR": "GB", "SRB": "RS", "MKD": "MK", "MNE": "ME",
-    "BIH": "BA", "ALB": "AL", "UKR": "UA", "TUR": "TR",
+    "AUT": "AT",
+    "BEL": "BE",
+    "BGR": "BG",
+    "HRV": "HR",
+    "CZE": "CZ",
+    "DNK": "DK",
+    "FIN": "FI",
+    "FRA": "FR",
+    "DEU": "DE",
+    "GRC": "GR",
+    "HUN": "HU",
+    "IRL": "IE",
+    "ITA": "IT",
+    "LUX": "LU",
+    "NLD": "NL",
+    "NOR": "NO",
+    "POL": "PL",
+    "PRT": "PT",
+    "ROU": "RO",
+    "SVK": "SK",
+    "SVN": "SI",
+    "ESP": "ES",
+    "SWE": "SE",
+    "CHE": "CH",
+    "GBR": "GB",
+    "SRB": "RS",
+    "MKD": "MK",
+    "MNE": "ME",
+    "BIH": "BA",
+    "ALB": "AL",
+    "UKR": "UA",
+    "TUR": "TR",
 }
 
 ISO2_TO_ISO3: dict[str, str] = {v: k for k, v in ISO3_TO_ISO2.items()}

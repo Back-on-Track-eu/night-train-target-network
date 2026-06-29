@@ -68,8 +68,13 @@ def _validate(body: dict) -> list[str]:
                         f"Must be one of: {sorted(_VALID_CLASS_MAINS)}."
                     )
                 if not isinstance(od.get("places_sold"), int) or od["places_sold"] < 0:
-                    errors.append(f"{prefix}.places_sold must be a non-negative integer.")
-                if not isinstance(od.get("avg_price"), (int, float)) or od["avg_price"] < 0:
+                    errors.append(
+                        f"{prefix}.places_sold must be a non-negative integer."
+                    )
+                if (
+                    not isinstance(od.get("avg_price"), (int, float))
+                    or od["avg_price"] < 0
+                ):
                     errors.append(f"{prefix}.avg_price must be a non-negative number.")
 
     return errors
@@ -81,11 +86,11 @@ def _parse_demand(demand_body: dict) -> RouteDemand:
     for trip_id, trip_d in demand_body.items():
         od_pairs = [
             ODDemand(
-                origin_stop_id      = od["origin_stop_id"],
-                destination_stop_id = od["destination_stop_id"],
-                class_main          = od["class_main"],
-                places_sold         = int(od["places_sold"]),
-                avg_price           = float(od["avg_price"]),
+                origin_stop_id=od["origin_stop_id"],
+                destination_stop_id=od["destination_stop_id"],
+                class_main=od["class_main"],
+                places_sold=int(od["places_sold"]),
+                avg_price=float(od["avg_price"]),
             )
             for od in trip_d.get("od_pairs", [])
         ]
@@ -116,21 +121,24 @@ def calc():
 
     body = request.get_json(silent=True)
     if not body:
-        return jsonify({"error": "bad_request", "message": "Request body must be JSON."}), 400
+        return (
+            jsonify({"error": "bad_request", "message": "Request body must be JSON."}),
+            400,
+        )
 
     errors = _validate(body)
     if errors:
         return jsonify({"error": "validation_error", "details": errors}), 400
 
     try:
-        route        = Route.from_dict(body["route"])
+        route = Route.from_dict(body["route"])
         route_demand = _parse_demand(body["route_demand"])
 
         result = evaluate_route(
-            route               = route,
-            route_demand        = route_demand,
-            operating_days_year = int(body["operating_days_year"]),
-            loader              = loader,
+            route=route,
+            route_demand=route_demand,
+            operating_days_year=int(body["operating_days_year"]),
+            loader=loader,
         )
 
     except ValueError as e:
@@ -140,7 +148,12 @@ def calc():
         logger.exception("evaluation/calc failed (unexpected): %s", e)
         return jsonify({"error": "calc_error", "message": str(e)}), 500
 
-    return jsonify({
-        "calc_version": CALC_VERSION,
-        "result":       result.to_dict(),
-    }), 200
+    return (
+        jsonify(
+            {
+                "calc_version": CALC_VERSION,
+                "result": result.to_dict(),
+            }
+        ),
+        200,
+    )

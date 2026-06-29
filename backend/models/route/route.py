@@ -33,10 +33,10 @@ from typing import Optional
 from models.route.trip import Trip
 from models.utils import m_to_km, min_to_h
 
-
 # =============================================================================
 # ROUTE STATS
 # =============================================================================
+
 
 @dataclass
 class RouteStats:
@@ -46,11 +46,11 @@ class RouteStats:
     Physics only — no monetary values.
     """
 
-    total_trips:            int
-    total_distance_m:       int
+    total_trips: int
+    total_distance_m: int
     total_driving_time_min: int
-    total_time_min:         int
-    total_energy_kwh:       float
+    total_time_min: int
+    total_energy_kwh: float
 
     @property
     def total_distance_km(self) -> float:
@@ -66,20 +66,21 @@ class RouteStats:
 
     def to_dict(self) -> dict:
         return {
-            "total_trips":            self.total_trips,
-            "total_distance_m":       self.total_distance_m,
-            "total_distance_km":      self.total_distance_km,
+            "total_trips": self.total_trips,
+            "total_distance_m": self.total_distance_m,
+            "total_distance_km": self.total_distance_km,
             "total_driving_time_min": self.total_driving_time_min,
-            "total_driving_time_h":   self.total_driving_time_h,
-            "total_time_min":         self.total_time_min,
-            "total_time_h":           self.total_time_h,
-            "total_energy_kwh":       self.total_energy_kwh,
+            "total_driving_time_h": self.total_driving_time_h,
+            "total_time_min": self.total_time_min,
+            "total_time_h": self.total_time_h,
+            "total_energy_kwh": self.total_energy_kwh,
         }
 
 
 # =============================================================================
 # PARKING LOCATION
 # =============================================================================
+
 
 @dataclass
 class ParkingLocation:
@@ -89,29 +90,30 @@ class ParkingLocation:
     unique parking locations.
     """
 
-    stop_id:      str
-    stop_name:    str
-    country_code: str   # ISO 3166-1 alpha-2
+    stop_id: str
+    stop_name: str
+    country_code: str  # ISO 3166-1 alpha-2
 
     def to_dict(self) -> dict:
         return {
-            "stop_id":      self.stop_id,
-            "stop_name":    self.stop_name,
+            "stop_id": self.stop_id,
+            "stop_name": self.stop_name,
             "country_code": self.country_code,
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "ParkingLocation":
         return cls(
-            stop_id      = d["stop_id"],
-            stop_name    = d["stop_name"],
-            country_code = d["country_code"],
+            stop_id=d["stop_id"],
+            stop_name=d["stop_name"],
+            country_code=d["country_code"],
         )
 
 
 # =============================================================================
 # ROUTE
 # =============================================================================
+
 
 class Route:
     """
@@ -129,14 +131,14 @@ class Route:
 
     def __init__(
         self,
-        route_id:          str,
+        route_id: str,
         parking_locations: list[ParkingLocation],
-        trips:             dict[str, Trip],
+        trips: dict[str, Trip],
     ) -> None:
-        self._route_id          = route_id
+        self._route_id = route_id
         self._parking_locations = parking_locations
-        self._trips:            dict[str, Trip] = {}
-        self._stats:            RouteStats = RouteStats(0, 0, 0, 0, 0.0)
+        self._trips: dict[str, Trip] = {}
+        self._stats: RouteStats = RouteStats(0, 0, 0, 0, 0.0)
         # add trips via add_trip() to enforce operator consistency
         for trip in trips.values():
             self.add_trip(trip)
@@ -145,11 +147,11 @@ class Route:
         """Recompute RouteStats from all current trips. Called on add/remove."""
         trips = list(self._trips.values())
         self._stats = RouteStats(
-            total_trips            = len(trips),
-            total_distance_m       = sum(t.stats.total_distance_m for t in trips),
-            total_driving_time_min = sum(t.stats.total_driving_time_min for t in trips),
-            total_time_min         = sum(t.stats.total_time_min for t in trips),
-            total_energy_kwh       = sum(t.stats.total_energy_kwh for t in trips),
+            total_trips=len(trips),
+            total_distance_m=sum(t.stats.total_distance_m for t in trips),
+            total_driving_time_min=sum(t.stats.total_driving_time_min for t in trips),
+            total_time_min=sum(t.stats.total_time_min for t in trips),
+            total_energy_kwh=sum(t.stats.total_energy_kwh for t in trips),
         )
 
     @property
@@ -159,18 +161,18 @@ class Route:
     @classmethod
     def _create(
         cls,
-        route_id:          str,
+        route_id: str,
         parking_locations: list["ParkingLocation"],
-        trips:             dict[str, "Trip"] | None = None,
+        trips: dict[str, "Trip"] | None = None,
     ) -> "Route":
         """
         Sole constructor for Route — called exclusively by route_factory.
         Never instantiate Route directly.
         """
         return cls(
-            route_id          = route_id,
-            parking_locations = parking_locations,
-            trips             = trips or {},
+            route_id=route_id,
+            parking_locations=parking_locations,
+            trips=trips or {},
         )
 
     # ------------------------------------------------------------------
@@ -276,18 +278,19 @@ class Route:
 
     def to_dict(self) -> dict:
         return {
-            "route_id":          self._route_id,
+            "route_id": self._route_id,
             "parking_locations": [p.to_dict() for p in self._parking_locations],
-            "trips":             [t.to_dict() for t in self._trips.values()],
-            "stats":             self._stats.to_dict(),
+            "trips": [t.to_dict() for t in self._trips.values()],
+            "stats": self._stats.to_dict(),
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "Route":
         trips = {t["trip_id"]: Trip.from_dict(t) for t in d["trips"]}
         return cls(
-            route_id          = d["route_id"],
-            parking_locations = [ParkingLocation.from_dict(p)
-                                  for p in d.get("parking_locations", [])],
-            trips             = trips,
+            route_id=d["route_id"],
+            parking_locations=[
+                ParkingLocation.from_dict(p) for p in d.get("parking_locations", [])
+            ],
+            trips=trips,
         )

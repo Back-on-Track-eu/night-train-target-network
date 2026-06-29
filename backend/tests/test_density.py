@@ -23,12 +23,12 @@ import pytest
 import requests
 
 ROUTE_URL = "/api/route/planOrUpdate"
-EVAL_URL  = "/api/evaluation/calc"
-REL_TOL   = 1e-3
+EVAL_URL = "/api/evaluation/calc"
+REL_TOL = 1e-3
 
 STOPS = [
     {"stop_id": "DE_BERLIN_HBF", "stop_type": "boarding"},
-    {"stop_id": "AT_WIEN_HBF",   "stop_type": "alighting"},
+    {"stop_id": "AT_WIEN_HBF", "stop_type": "alighting"},
 ]
 
 # STD-7.1: 160 seats (density=1/64), 144 couchettes (density=1/20), 48 sleepers (density=1/12)
@@ -36,11 +36,17 @@ STOPS = [
 
 
 def _build(api_base, comp_id="STD-7.1", proposal_id=400):
-    resp = requests.post(f"{api_base}{ROUTE_URL}", json={
-        "proposal_id": proposal_id, "proposal_version": 1,
-        "stops": STOPS, "composition_id": comp_id,
-        "departure_time": "21:00",
-    }, timeout=60)
+    resp = requests.post(
+        f"{api_base}{ROUTE_URL}",
+        json={
+            "proposal_id": proposal_id,
+            "proposal_version": 1,
+            "stops": STOPS,
+            "composition_id": comp_id,
+            "departure_time": "21:00",
+        },
+        timeout=60,
+    )
     assert resp.status_code == 200, resp.text[:300]
     return resp.json()["route"]
 
@@ -48,11 +54,15 @@ def _build(api_base, comp_id="STD-7.1", proposal_id=400):
 def _eval_route(api_base, route, od_pairs, operating_days=360):
     trip_ids = [t["trip_id"] for t in route["trips"]]
     demand = {"od_pairs": od_pairs}
-    resp = requests.post(f"{api_base}{EVAL_URL}", json={
-        "route":               route,
-        "route_demand":        {tid: demand for tid in trip_ids},
-        "operating_days_year": operating_days,
-    }, timeout=30)
+    resp = requests.post(
+        f"{api_base}{EVAL_URL}",
+        json={
+            "route": route,
+            "route_demand": {tid: demand for tid in trip_ids},
+            "operating_days_year": operating_days,
+        },
+        timeout=30,
+    )
     assert resp.status_code == 200, resp.text[:300]
     return resp.json()["result"]
 
@@ -65,60 +75,103 @@ def route(api_base):
 @pytest.fixture(scope="module")
 def result_mixed_demand(api_base, route):
     """Demand across all three classes."""
-    return _eval_route(api_base, route, [
-        {"origin_stop_id": "DE_BERLIN_HBF", "destination_stop_id": "AT_WIEN_HBF",
-         "class_main": "Seat",      "places_sold": 80,  "avg_price": 49.0},
-        {"origin_stop_id": "DE_BERLIN_HBF", "destination_stop_id": "AT_WIEN_HBF",
-         "class_main": "Couchette", "places_sold": 60,  "avg_price": 89.0},
-        {"origin_stop_id": "DE_BERLIN_HBF", "destination_stop_id": "AT_WIEN_HBF",
-         "class_main": "Sleeper",   "places_sold": 20,  "avg_price": 129.0},
-    ])
+    return _eval_route(
+        api_base,
+        route,
+        [
+            {
+                "origin_stop_id": "DE_BERLIN_HBF",
+                "destination_stop_id": "AT_WIEN_HBF",
+                "class_main": "Seat",
+                "places_sold": 80,
+                "avg_price": 49.0,
+            },
+            {
+                "origin_stop_id": "DE_BERLIN_HBF",
+                "destination_stop_id": "AT_WIEN_HBF",
+                "class_main": "Couchette",
+                "places_sold": 60,
+                "avg_price": 89.0,
+            },
+            {
+                "origin_stop_id": "DE_BERLIN_HBF",
+                "destination_stop_id": "AT_WIEN_HBF",
+                "class_main": "Sleeper",
+                "places_sold": 20,
+                "avg_price": 129.0,
+            },
+        ],
+    )
 
 
 # ---------------------------------------------------------------------------
 # Normalised view existence
 # ---------------------------------------------------------------------------
 
+
 class TestNormalisedViewsExist:
 
     def test_all_ten_views_present_in_summary(self, result_mixed_demand):
         expected = {
-            "per_day", "per_year", "per_trip", "per_trip_km",
-            "per_available_place_km", "per_sold_place_km",
-            "per_available_place_of_class", "per_sold_place_of_class",
-            "per_available_place_km_of_class", "per_sold_place_km_of_class",
+            "per_day",
+            "per_year",
+            "per_trip",
+            "per_trip_km",
+            "per_available_place_km",
+            "per_sold_place_km",
+            "per_available_place_of_class",
+            "per_sold_place_of_class",
+            "per_available_place_km_of_class",
+            "per_sold_place_km_of_class",
         }
         missing = expected - set(result_mixed_demand["summary"].keys())
         assert missing == set(), f"Missing views: {missing}"
 
     def test_per_class_views_have_seat_couchette_sleeper(self, result_mixed_demand):
-        for view in ["per_available_place_of_class", "per_sold_place_of_class",
-                     "per_available_place_km_of_class", "per_sold_place_km_of_class"]:
+        for view in [
+            "per_available_place_of_class",
+            "per_sold_place_of_class",
+            "per_available_place_km_of_class",
+            "per_sold_place_km_of_class",
+        ]:
             classes = set(result_mixed_demand["summary"][view].keys())
             # At least the classes with demand should appear
             for cls in ["Seat", "Couchette", "Sleeper"]:
-                assert cls in classes or len(classes) > 0, \
-                    f"Class '{cls}' missing from {view}"
+                assert (
+                    cls in classes or len(classes) > 0
+                ), f"Class '{cls}' missing from {view}"
 
 
 # ---------------------------------------------------------------------------
 # Available vs sold distinction
 # ---------------------------------------------------------------------------
 
+
 class TestAvailableVsSold:
 
-    def test_available_place_km_larger_than_sold_when_partial_load(self,
-                                                                    api_base, route):
+    def test_available_place_km_larger_than_sold_when_partial_load(
+        self, api_base, route
+    ):
         """With partial load, available > sold → per_sold > per_available (higher cost/sold unit)."""
-        result = _eval_route(api_base, route, [
-            {"origin_stop_id": "DE_BERLIN_HBF", "destination_stop_id": "AT_WIEN_HBF",
-             "class_main": "Seat", "places_sold": 40, "avg_price": 49.0},
-        ])
+        result = _eval_route(
+            api_base,
+            route,
+            [
+                {
+                    "origin_stop_id": "DE_BERLIN_HBF",
+                    "destination_stop_id": "AT_WIEN_HBF",
+                    "class_main": "Seat",
+                    "places_sold": 40,
+                    "avg_price": 49.0,
+                },
+            ],
+        )
         avail = result["summary"]["per_available_place_km"]["cost"]["total"]
-        sold  = result["summary"]["per_sold_place_km"]["cost"]["total"]
+        sold = result["summary"]["per_sold_place_km"]["cost"]["total"]
         # With 40/160 seats sold: sold divisor < available divisor → cost/sold > cost/available
-        assert sold > avail, \
-            f"per_sold_place_km cost ({sold:.4f}) should exceed per_available ({avail:.4f}) at partial load"
+        assert (
+            sold > avail
+        ), f"per_sold_place_km cost ({sold:.4f}) should exceed per_available ({avail:.4f}) at partial load"
 
     def test_available_leq_sold_at_full_load(self, api_base, route):
         """
@@ -129,43 +182,95 @@ class TestAvailableVsSold:
         At full load they converge. This test verifies convergence trend.
         """
         # Partial load: 40/160 seats
-        partial = _eval_route(api_base, route, [
-            {"origin_stop_id": "DE_BERLIN_HBF", "destination_stop_id": "AT_WIEN_HBF",
-             "class_main": "Seat", "places_sold": 40, "avg_price": 49.0},
-        ])
+        partial = _eval_route(
+            api_base,
+            route,
+            [
+                {
+                    "origin_stop_id": "DE_BERLIN_HBF",
+                    "destination_stop_id": "AT_WIEN_HBF",
+                    "class_main": "Seat",
+                    "places_sold": 40,
+                    "avg_price": 49.0,
+                },
+            ],
+        )
         # Full load: 160/160 seats
-        full = _eval_route(api_base, route, [
-            {"origin_stop_id": "DE_BERLIN_HBF", "destination_stop_id": "AT_WIEN_HBF",
-             "class_main": "Seat", "places_sold": 160, "avg_price": 49.0},
-        ])
+        full = _eval_route(
+            api_base,
+            route,
+            [
+                {
+                    "origin_stop_id": "DE_BERLIN_HBF",
+                    "destination_stop_id": "AT_WIEN_HBF",
+                    "class_main": "Seat",
+                    "places_sold": 160,
+                    "avg_price": 49.0,
+                },
+            ],
+        )
 
-        partial_sold = partial["summary"]["per_sold_place_of_class"].get("Seat", {}).get("cost", {}).get("total", 0)
-        partial_avail = partial["summary"]["per_available_place_of_class"].get("Seat", {}).get("cost", {}).get("total", 0)
+        partial_sold = (
+            partial["summary"]["per_sold_place_of_class"]
+            .get("Seat", {})
+            .get("cost", {})
+            .get("total", 0)
+        )
+        partial_avail = (
+            partial["summary"]["per_available_place_of_class"]
+            .get("Seat", {})
+            .get("cost", {})
+            .get("total", 0)
+        )
 
-        full_sold = full["summary"]["per_sold_place_of_class"].get("Seat", {}).get("cost", {}).get("total", 0)
-        full_avail = full["summary"]["per_available_place_of_class"].get("Seat", {}).get("cost", {}).get("total", 0)
+        full_sold = (
+            full["summary"]["per_sold_place_of_class"]
+            .get("Seat", {})
+            .get("cost", {})
+            .get("total", 0)
+        )
+        full_avail = (
+            full["summary"]["per_available_place_of_class"]
+            .get("Seat", {})
+            .get("cost", {})
+            .get("total", 0)
+        )
 
         # At partial load: sold cost > available cost (fewer sold, higher cost per sold)
-        assert partial_sold > partial_avail, \
-            f"Partial load: per_sold ({partial_sold:.4f}) should exceed per_available ({partial_avail:.4f})"
+        assert (
+            partial_sold > partial_avail
+        ), f"Partial load: per_sold ({partial_sold:.4f}) should exceed per_available ({partial_avail:.4f})"
 
         # At full load: gap between sold and available should be smaller than at partial load
         partial_gap = partial_sold - partial_avail
-        full_gap    = full_sold    - full_avail
-        assert full_gap <= partial_gap, \
-            f"Full load gap ({full_gap:.4f}) should be <= partial load gap ({partial_gap:.4f})"
+        full_gap = full_sold - full_avail
+        assert (
+            full_gap <= partial_gap
+        ), f"Full load gap ({full_gap:.4f}) should be <= partial load gap ({partial_gap:.4f})"
 
-    def test_per_sold_worse_margin_than_per_available_at_partial_load(self,
-                                                                       api_base, route):
+    def test_per_sold_worse_margin_than_per_available_at_partial_load(
+        self, api_base, route
+    ):
         """Partial load: margin/sold-place-km is worse than margin/available-place-km."""
-        result = _eval_route(api_base, route, [
-            {"origin_stop_id": "DE_BERLIN_HBF", "destination_stop_id": "AT_WIEN_HBF",
-             "class_main": "Couchette", "places_sold": 30, "avg_price": 89.0},
-        ])
+        result = _eval_route(
+            api_base,
+            route,
+            [
+                {
+                    "origin_stop_id": "DE_BERLIN_HBF",
+                    "destination_stop_id": "AT_WIEN_HBF",
+                    "class_main": "Couchette",
+                    "places_sold": 30,
+                    "avg_price": 89.0,
+                },
+            ],
+        )
         avail_margin = result["summary"]["per_available_place_km"]["margin"]
-        sold_margin  = result["summary"]["per_sold_place_km"]["margin"]
+        sold_margin = result["summary"]["per_sold_place_km"]["margin"]
         # Both should exist; sold margin per place-km is lower (more cost per sold unit)
-        assert avail_margin != sold_margin or True  # just verify both exist and are numbers
+        assert (
+            avail_margin != sold_margin or True
+        )  # just verify both exist and are numbers
         assert isinstance(avail_margin, (int, float))
         assert isinstance(sold_margin, (int, float))
 
@@ -173,6 +278,7 @@ class TestAvailableVsSold:
 # ---------------------------------------------------------------------------
 # Density weighting correctness
 # ---------------------------------------------------------------------------
+
 
 class TestDensityWeighting:
 
@@ -186,21 +292,49 @@ class TestDensityWeighting:
         should differ from ["Seat"] cost since densities differ.
         """
         route = _build(api_base, proposal_id=410)
-        result = _eval_route(api_base, route, [
-            {"origin_stop_id": "DE_BERLIN_HBF", "destination_stop_id": "AT_WIEN_HBF",
-             "class_main": "Seat", "places_sold": 80, "avg_price": 49.0},
-            {"origin_stop_id": "DE_BERLIN_HBF", "destination_stop_id": "AT_WIEN_HBF",
-             "class_main": "Couchette", "places_sold": 60, "avg_price": 89.0},
-        ])
-        seat_cost     = result["summary"]["per_available_place_km_of_class"].get("Seat", {}).get("cost", {}).get("total")
-        couchette_cost = result["summary"]["per_available_place_km_of_class"].get("Couchette", {}).get("cost", {}).get("total")
+        result = _eval_route(
+            api_base,
+            route,
+            [
+                {
+                    "origin_stop_id": "DE_BERLIN_HBF",
+                    "destination_stop_id": "AT_WIEN_HBF",
+                    "class_main": "Seat",
+                    "places_sold": 80,
+                    "avg_price": 49.0,
+                },
+                {
+                    "origin_stop_id": "DE_BERLIN_HBF",
+                    "destination_stop_id": "AT_WIEN_HBF",
+                    "class_main": "Couchette",
+                    "places_sold": 60,
+                    "avg_price": 89.0,
+                },
+            ],
+        )
+        seat_cost = (
+            result["summary"]["per_available_place_km_of_class"]
+            .get("Seat", {})
+            .get("cost", {})
+            .get("total")
+        )
+        couchette_cost = (
+            result["summary"]["per_available_place_km_of_class"]
+            .get("Couchette", {})
+            .get("cost", {})
+            .get("total")
+        )
         if seat_cost and couchette_cost:
             # Couchette density (1/20=0.05) > Seat density (1/64≈0.016)
             # So couchette divisor per place is larger → per_place_km cost LOWER for couchette
             # BUT total allocation to couchette may be higher due to more space units
             # Just verify both values are positive and different
-            assert couchette_cost > 0 and seat_cost > 0,                 "Both class costs should be positive"
-            assert couchette_cost != seat_cost,                 "Couchette and Seat per-place-km costs should differ due to different densities"
+            assert (
+                couchette_cost > 0 and seat_cost > 0
+            ), "Both class costs should be positive"
+            assert (
+                couchette_cost != seat_cost
+            ), "Couchette and Seat per-place-km costs should differ due to different densities"
 
     def test_per_available_place_km_divisor_uses_density(self, api_base):
         """
@@ -210,10 +344,19 @@ class TestDensityWeighting:
         per_available_place_km_cost × (208×2×dist) ≈ per_day_cost.
         """
         route = _build(api_base, proposal_id=411)
-        result = _eval_route(api_base, route, [
-            {"origin_stop_id": "DE_BERLIN_HBF", "destination_stop_id": "AT_WIEN_HBF",
-             "class_main": "Seat", "places_sold": 50, "avg_price": 49.0},
-        ])
+        result = _eval_route(
+            api_base,
+            route,
+            [
+                {
+                    "origin_stop_id": "DE_BERLIN_HBF",
+                    "destination_stop_id": "AT_WIEN_HBF",
+                    "class_main": "Seat",
+                    "places_sold": 50,
+                    "avg_price": 49.0,
+                },
+            ],
+        )
         # Get distance from route
         total_dist_km = sum(
             t["stats"]["total_distance_m"] / 1000 for t in route["trips"]
@@ -222,21 +365,23 @@ class TestDensityWeighting:
         # Density-weighted space units for STD-7.1 per trip:
         # seats=160×(1/64)=2.5, couchettes=144×(1/20)=7.2, sleepers=48×(1/12)=4.0 → 13.7
         n_trips = len(route["trips"])
-        space_units_per_trip = 160*(1/64) + 144*(1/20) + 48*(1/12)  # = 13.7
+        space_units_per_trip = 160 * (1 / 64) + 144 * (1 / 20) + 48 * (1 / 12)  # = 13.7
         density_place_km = space_units_per_trip * (total_dist_km / n_trips) * n_trips
 
         per_plkm_cost = result["summary"]["per_available_place_km"]["cost"]["total"]
-        per_day_cost  = result["summary"]["per_day"]["cost"]["total"]
+        per_day_cost = result["summary"]["per_day"]["cost"]["total"]
 
         reconstructed = per_plkm_cost * density_place_km
-        assert reconstructed == pytest.approx(per_day_cost, rel=0.05), \
-            f"per_available_place_km × density_place_km ({reconstructed:.0f}) " \
+        assert reconstructed == pytest.approx(per_day_cost, rel=0.05), (
+            f"per_available_place_km × density_place_km ({reconstructed:.0f}) "
             f"should ≈ per_day ({per_day_cost:.0f})"
+        )
 
 
 # ---------------------------------------------------------------------------
 # Zero demand edge cases
 # ---------------------------------------------------------------------------
+
 
 class TestZeroDemandEdgeCases:
 
@@ -261,17 +406,30 @@ class TestZeroDemandEdgeCases:
         route = _build(api_base, proposal_id=422)
         result = _eval_route(api_base, route, [])
         avail_cost = result["summary"]["per_available_place_km"]["cost"]["total"]
-        assert avail_cost > 0, "per_available_place_km cost should be positive even with zero demand"
+        assert (
+            avail_cost > 0
+        ), "per_available_place_km cost should be positive even with zero demand"
 
     def test_per_class_views_handle_missing_class(self, api_base):
         """If a class has zero demand, its per_sold_place_of_class should be zero."""
         route = _build(api_base, proposal_id=423)
         # Only Seat demand — Couchette sold = 0
-        result = _eval_route(api_base, route, [
-            {"origin_stop_id": "DE_BERLIN_HBF", "destination_stop_id": "AT_WIEN_HBF",
-             "class_main": "Seat", "places_sold": 30, "avg_price": 49.0},
-        ])
-        couchette_sold = result["summary"]["per_sold_place_of_class"].get("Couchette", {})
+        result = _eval_route(
+            api_base,
+            route,
+            [
+                {
+                    "origin_stop_id": "DE_BERLIN_HBF",
+                    "destination_stop_id": "AT_WIEN_HBF",
+                    "class_main": "Seat",
+                    "places_sold": 30,
+                    "avg_price": 49.0,
+                },
+            ],
+        )
+        couchette_sold = result["summary"]["per_sold_place_of_class"].get(
+            "Couchette", {}
+        )
         if couchette_sold:
             assert couchette_sold.get("revenue", {}).get("total", 0) == 0.0
 
@@ -280,11 +438,12 @@ class TestZeroDemandEdgeCases:
 # Class-level normalisation consistency
 # ---------------------------------------------------------------------------
 
+
 class TestClassLevelConsistency:
 
-    def test_per_available_place_km_of_class_times_capacity_equals_per_day(self,
-                                                                             api_base, route,
-                                                                             result_mixed_demand):
+    def test_per_available_place_km_of_class_times_capacity_equals_per_day(
+        self, api_base, route, result_mixed_demand
+    ):
         """
         per_available_place_km_of_class["Seat"] × (seat_places × dist_km)
         should ≈ per_day (for cost at least within total allocation).
@@ -296,25 +455,32 @@ class TestClassLevelConsistency:
         n_trips = len(route["trips"])
         dist_per_trip = total_dist_km / n_trips
 
-        seat_cost_per_plkm = result_mixed_demand["summary"]["per_available_place_km_of_class"].get(
-            "Seat", {}
-        ).get("cost", {}).get("total", 0)
+        seat_cost_per_plkm = (
+            result_mixed_demand["summary"]["per_available_place_km_of_class"]
+            .get("Seat", {})
+            .get("cost", {})
+            .get("total", 0)
+        )
 
         # 160 seats × (1/64) × dist_per_trip × n_trips
-        seat_divisor = 160 * (1/64) * dist_per_trip * n_trips
+        seat_divisor = 160 * (1 / 64) * dist_per_trip * n_trips
 
         if seat_cost_per_plkm > 0:
             reconstructed = seat_cost_per_plkm * seat_divisor
             per_day_cost = result_mixed_demand["summary"]["per_day"]["cost"]["total"]
             # reconstructed will be a fraction of total (Seat allocation only)
-            assert 0 < reconstructed <= per_day_cost * 1.1, \
-                f"Seat per_place_km reconstruction {reconstructed:.0f} unreasonable vs total {per_day_cost:.0f}"
+            assert (
+                0 < reconstructed <= per_day_cost * 1.1
+            ), f"Seat per_place_km reconstruction {reconstructed:.0f} unreasonable vs total {per_day_cost:.0f}"
 
     def test_margin_identity_holds_in_all_class_views(self, result_mixed_demand):
         """margin = revenue - cost must hold in per_available_place_of_class views."""
-        for cls, bd in result_mixed_demand["summary"]["per_available_place_of_class"].items():
-            rev  = bd["revenue"]["total"]
+        for cls, bd in result_mixed_demand["summary"][
+            "per_available_place_of_class"
+        ].items():
+            rev = bd["revenue"]["total"]
             cost = bd["cost"]["total"]
             margin = bd["margin"]
-            assert margin == pytest.approx(rev - cost, rel=REL_TOL), \
-                f"Margin identity failed for class '{cls}' in per_available_place_of_class"
+            assert margin == pytest.approx(
+                rev - cost, rel=REL_TOL
+            ), f"Margin identity failed for class '{cls}' in per_available_place_of_class"
