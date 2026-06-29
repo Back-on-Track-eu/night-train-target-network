@@ -212,12 +212,12 @@ jobs:
       - name: Install dependencies
         run: |
           cd backend
-          uv sync --group dev
+          uv sync --extra dev
 
       - name: Run integration tests
         run: |
           cd backend
-          uv run --group dev pytest tests/ -v --timeout=60
+          uv run --extra dev pytest tests/ -v --timeout=60
         env:
           POSTGRES_HOST:     localhost
           POSTGRES_PORT:     5432
