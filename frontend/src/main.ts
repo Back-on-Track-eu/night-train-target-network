@@ -1,10 +1,10 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import PrimeVue from 'primevue/config'
-import Aura from '@primeuix/themes/aura'
+import Lara from '@primeuix/themes/lara'
 import { definePreset } from '@primeuix/themes'
 
-const BotPreset = definePreset(Aura, {
+const BotPreset = definePreset(Lara, {
   semantic: {
     primary: {
       50: '#eef4fb',

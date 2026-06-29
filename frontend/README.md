@@ -12,7 +12,7 @@ Vue 3 SPA for the Night Train Target Network economic model.
 | Vite         | ^8.0            | Dev server + bundler                            |
 | TypeScript   | ^5.8 (strict)   | Type safety                                     |
 | Pinia        | ^2.3            | State management                                |
-| PrimeVue     | ^4.3            | UI component library (Aura theme)               |
+| PrimeVue     | ^4.3            | UI component library (Lara theme)               |
 | Tailwind CSS | v4              | Utility-first CSS (`@tailwindcss/vite` plugin)  |
 | vue-i18n     | ^11             | Internationalisation                            |
 | ESLint       | 9 (flat config) | Linting                                         |

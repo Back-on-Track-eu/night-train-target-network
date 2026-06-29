@@ -6,6 +6,7 @@ import type { Stop } from '@/types/api'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Skeleton from 'primevue/skeleton'
+import Select from 'primevue/select'
 import AppIcon from '@/components/AppIcon.vue'
 import StopSelect from '@/components/StopSelect.vue'
 import CompositionSelectCard from '@/components/CompositionSelectCard.vue'
@@ -50,6 +51,17 @@ const selectedTripId = ref<string | null>(null)
 
 const selectedTrip = computed(
   () => routeResult.value?.trips.find((t) => t.trip_id === selectedTripId.value) ?? null,
+)
+
+const tripOptions = computed(
+  () =>
+    routeResult.value?.trips.map((trip) => ({
+      tripId: trip.trip_id,
+      label:
+        trip.stop_times.length >= 2
+          ? `${trip.stop_times[0].stop_name} → ${trip.stop_times[trip.stop_times.length - 1].stop_name}`
+          : trip.trip_id,
+    })) ?? [],
 )
 
 async function evaluate() {
@@ -267,6 +279,7 @@ onMounted(async () => {
               row: { class: '!bg-transparent border-0' },
               bodyCell: { class: '!bg-transparent border-0 !p-0' },
             }"
+            class="mb-8"
             @row-reorder="onRowReorder"
           >
             <Column
@@ -354,6 +367,7 @@ onMounted(async () => {
               row: { class: '!bg-transparent border-0' },
               bodyCell: { class: '!bg-transparent border-0 !p-0' },
             }"
+            class="mb-4"
           >
             <!-- Times column (replaces drag handle) -->
             <Column style="width: 5rem" :pt="{ bodyCell: { class: '!p-0' } }">
@@ -433,39 +447,45 @@ onMounted(async () => {
             v-if="currentMode === 'display' && routeResult && routeResult.trips.length > 0"
             class="flex justify-start"
           >
-            <select
+            <Select
               v-model="selectedTripId"
-              class="cursor-pointer appearance-none rounded-full border border-primary-50/20 bg-transparent px-3 py-1.5 text-sm text-primary-50 outline-none transition hover:bg-primary-50/10"
-            >
-              <option
-                v-for="trip in routeResult.trips"
-                :key="trip.trip_id"
-                :value="trip.trip_id"
-                class="bg-surface-900 text-surface-50"
-              >
-                {{
-                  trip.direction_id === 0 ? t('proposal.tripOutbound') : t('proposal.tripReturn')
-                }}
-                — {{ trip.departure_time }}
-              </option>
-            </select>
+              :options="tripOptions"
+              option-value="tripId"
+              option-label="label"
+              :unstyled="true"
+              :pt="{
+                root: {
+                  class:
+                    'flex cursor-pointer items-center rounded-full border border-primary-50/20 bg-transparent transition hover:bg-primary-50/10',
+                },
+                label: { class: 'px-3 py-1.5 text-sm text-primary-50 leading-none' },
+                dropdown: { class: 'flex items-center pr-3 text-primary-50/60' },
+                overlay: {
+                  class:
+                    'z-50 mt-1 overflow-hidden rounded-xl border border-primary-50/20 bg-sapphire-100 shadow-xl',
+                },
+                listContainer: { class: 'overflow-auto' },
+                option: {
+                  class:
+                    'cursor-pointer px-4 py-2 text-sm text-primary-50 transition hover:bg-primary-50/10',
+                },
+              }"
+            />
           </div>
         </div>
 
         <!-- Composition card (edit only) -->
-        <template v-if="currentMode === 'edit'">
-          <CompositionSelectCard
-            v-if="store.compositionsStatus === 'success' && store.compositions.length > 0"
-            :compositions="store.compositions"
-            @select="(id) => (selectedCompositionId = id)"
-          />
-          <div
-            v-else
-            class="flex h-32 items-center justify-center rounded-xl bg-primary-50/5 text-sm text-primary-50/40"
-          >
-            {{ t('proposal.trainCardPlaceholder') }}
-          </div>
-        </template>
+        <CompositionSelectCard
+          v-if="store.compositionsStatus === 'success' && store.compositions.length > 0"
+          :compositions="store.compositions"
+          @select="(id) => (selectedCompositionId = id)"
+        />
+        <div
+          v-else
+          class="flex h-32 items-center justify-center rounded-xl bg-primary-50/5 text-sm text-primary-50/40"
+        >
+          {{ t('proposal.trainCardPlaceholder') }}
+        </div>
 
         <div
           v-if="store.stopsStatus === 'loading' || store.compositionsStatus === 'loading'"

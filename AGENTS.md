@@ -39,7 +39,7 @@ Infrastructure: Docker Compose at `.devcontainer/docker-compose.yml` with three 
 ### CSS / Styling
 
 - Tailwind CSS v4 (no `tailwind.config.js` — uses `@tailwindcss/vite` plugin)
-- PrimeVue 4 in styled mode with Aura theme preset (`@primeuix/themes/aura`)
+- PrimeVue 4 in styled mode with Lara theme preset (`@primeuix/themes/lara`)
 - CSS layer order declared in `frontend/src/style.css` and `frontend/src/main.ts` must stay in sync:
   `tailwind-base → primevue → tailwind-utilities`
 - Use PrimeVue design tokens (`text-primary-700`, `bg-surface-50`) for brand colours; Tailwind for layout/spacing

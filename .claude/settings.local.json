@@ -21,7 +21,7 @@
       "Skill(run)",
       "Skill(run:*)",
       "Bash(npx eslint *)",
-      "Bash(echo \"EXIT_CODE:$?\")",
+      "Bash(echo \"EXIT_CODE:$?\")"
     ],
     "deny": [
       "Bash(rm *)",

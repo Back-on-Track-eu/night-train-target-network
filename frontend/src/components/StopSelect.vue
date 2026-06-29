@@ -74,7 +74,6 @@ function onShow() {
         v-model="filterQuery"
         type="text"
         :placeholder="t('proposal.searchPlaceholder')"
-        @keydown.enter.prevent="onEnter"
         style="
           flex: 1;
           background: transparent;
@@ -86,6 +85,7 @@ function onShow() {
           padding: 0;
           font-family: inherit;
         "
+        @keydown.enter.prevent="onEnter"
       />
     </div>
     <div

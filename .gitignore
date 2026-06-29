@@ -72,5 +72,3 @@ backend/models/route/routing/docker/graph-cache/
 
 # Snapshot for sending to claude
 project-snapshot.zip
-
-# Personal notes
