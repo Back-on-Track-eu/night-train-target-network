@@ -6,7 +6,7 @@ import { mdiMagnify } from '@mdi/js'
 import { useI18n } from 'vue-i18n'
 import type { Stop } from '@/types/api'
 
-const props = defineProps<{ stops: Stop[] }>()
+const props = defineProps<{ stops: Stop[]; disabledIds?: Set<string> }>()
 const emit = defineEmits<{ select: [stop: Stop] }>()
 
 const { t } = useI18n()
@@ -25,15 +25,21 @@ function open(event: MouseEvent) {
   popoverRef.value?.show(event)
 }
 
+function isDisabled(stop: Stop): boolean {
+  return props.disabledIds?.has(stop.stop_id) ?? false
+}
+
 function pick(stop: Stop) {
+  if (isDisabled(stop)) return
   emit('select', stop)
   filterQuery.value = ''
   popoverRef.value?.hide()
 }
 
 function onEnter() {
-  if (!filtered.value.length) return
-  pick(filtered.value[0])
+  const first = filtered.value.find((s) => !isDisabled(s))
+  if (!first) return
+  pick(first)
 }
 
 function onShow() {
@@ -96,7 +102,13 @@ function onShow() {
       <button
         v-for="stop in filtered"
         :key="stop.stop_id"
-        class="block w-full cursor-pointer rounded-lg px-4 py-3 text-left text-base text-primary-50 transition-colors hover:bg-[#2b2e4a]"
+        class="block w-full rounded-lg px-4 py-3 text-left text-base transition-colors"
+        :class="
+          isDisabled(stop)
+            ? 'cursor-not-allowed text-primary-50/30'
+            : 'cursor-pointer text-primary-50 hover:bg-[#2b2e4a]'
+        "
+        :disabled="isDisabled(stop)"
         @click="pick(stop)"
       >
         {{ stop.name }}

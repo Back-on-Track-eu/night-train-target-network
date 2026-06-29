@@ -31,6 +31,7 @@ function onRowReorder(event: { value: ItineraryStop[] }) {
 }
 
 function onStopSelect(stop: ItineraryStop, selected: Stop) {
+  if (isDuplicate(selected.stop_id, stop)) return
   stop.name = selected.name
   stop.selectedStop = selected
 }
@@ -75,7 +76,12 @@ function optimalInsertIndex(stop: Stop): number {
   return bestIndex
 }
 
+function isDuplicate(stopId: string, excludeRow?: ItineraryStop): boolean {
+  return itinerary.value.some((s) => s !== excludeRow && s.selectedStop?.stop_id === stopId)
+}
+
 function addStop(stop: Stop) {
+  if (isDuplicate(stop.stop_id)) return
   const index = optimalInsertIndex(stop)
   itinerary.value.splice(index, 0, {
     id: _nextId++,
@@ -104,6 +110,16 @@ function onRowMouseDown(event: MouseEvent) {
   }
 }
 
+const usedStopIds = computed(
+  () => new Set(itinerary.value.map((s) => s.selectedStop?.stop_id).filter(Boolean) as string[]),
+)
+
+function usedStopIdsExcluding(row: ItineraryStop): Set<string> {
+  const ids = new Set(usedStopIds.value)
+  if (row.selectedStop) ids.delete(row.selectedStop.stop_id)
+  return ids
+}
+
 const mapStops = computed(() =>
   itinerary.value
     .filter((s) => s.selectedStop !== null)
@@ -127,19 +143,8 @@ onMounted(async () => {
   <div class="flex flex-col gap-6">
     <div class="flex gap-6">
       <!-- Left panel -->
-      <div class="flex w-2/5 flex-col gap-4">
-        <div class="itinerary-table px-4">
-          <!-- Add Stop button — top-right, edit mode only -->
-          <div v-if="mode === 'edit'" class="flex justify-end">
-            <StopSelect :stops="store.stops" @select="addStop">
-              <button
-                class="flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1.5 text-sm text-primary-50 transition hover:bg-primary-50/10"
-              >
-                <AppIcon :path="mdiPlus" :size="16" />
-                {{ t('proposal.addStop') }}
-              </button>
-            </StopSelect>
-          </div>
+      <div class="flex w-2/5 flex-col justify-center gap-12">
+        <div class="itinerary-table px-8">
           <!-- border-collapse (set in pt.table) removes default cell spacing so
                the timeline line segments in consecutive rows connect seamlessly. -->
           <DataTable
@@ -197,8 +202,12 @@ onMounted(async () => {
                     {{ stop.name }}
                   </span>
 
-                  <div v-if="mode === 'edit'" data-row-actions class="flex items-center">
-                    <StopSelect :stops="store.stops" @select="(s) => onStopSelect(stop, s)">
+                  <div v-if="mode === 'edit'" data-row-actions class="flex items-center gap-2">
+                    <StopSelect
+                      :stops="store.stops"
+                      :disabled-ids="usedStopIdsExcluding(stop)"
+                      @select="(s) => onStopSelect(stop, s)"
+                    >
                       <AppIcon :path="mdiPencil" :size="20" color="var(--p-primary-50)" />
                     </StopSelect>
 
@@ -224,6 +233,17 @@ onMounted(async () => {
               </template>
             </Column>
           </DataTable>
+          <!-- Add Stop button — top-right, edit mode only -->
+          <div v-if="mode === 'edit'" class="flex justify-center">
+            <StopSelect :stops="store.stops" :disabled-ids="usedStopIds" @select="addStop">
+              <button
+                class="flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1.5 text-sm text-primary-50 transition hover:bg-primary-50/10"
+              >
+                <AppIcon :path="mdiPlus" :size="16" />
+                {{ t('proposal.addStop') }}
+              </button>
+            </StopSelect>
+          </div>
         </div>
 
         <!-- Train card -->
@@ -247,19 +267,19 @@ onMounted(async () => {
         <div v-if="store.stopsError || store.compositionsError" class="text-xs text-red-400">
           {{ store.stopsError ?? store.compositionsError }}
         </div>
+
+        <!-- Evaluate button (edit mode only) -->
+        <div v-if="mode === 'edit'" class="flex justify-center">
+          <button
+            class="flex items-center gap-2 rounded-full bg-primary-50/10 px-6 py-2 text-sm text-primary-50 transition hover:bg-primary-50/20"
+          >
+            {{ t('proposal.evaluate') }} <span>→</span>
+          </button>
+        </div>
       </div>
 
       <!-- Right panel: map -->
       <MapView :stops="mapStops" class="flex-1 overflow-hidden rounded-xl" />
-    </div>
-
-    <!-- Evaluate button (edit mode only) -->
-    <div v-if="mode === 'edit'" class="flex justify-center">
-      <button
-        class="flex items-center gap-2 rounded-full bg-primary-50/10 px-6 py-2 text-sm text-primary-50 transition hover:bg-primary-50/20"
-      >
-        {{ t('proposal.evaluate') }} <span>→</span>
-      </button>
     </div>
   </div>
 </template>
