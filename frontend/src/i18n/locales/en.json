@@ -5,6 +5,8 @@
     "mapPlaceholder": "Map",
     "trainCardPlaceholder": "Train info",
     "searchPlaceholder": "Search stops…",
+    "addStop": "Add Stop",
+    "noStopsFound": "No stops found",
     "minStopsTooltip": "Two stops per route minimum.",
     "loading": "Fetching data…",
     "debugStopsPreview": "stops[0..1]",

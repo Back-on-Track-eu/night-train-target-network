@@ -5,9 +5,9 @@ import { useStore } from '@/stores/store'
 import type { Stop } from '@/types/api'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
-import Select from 'primevue/select'
 import AppIcon from '@/components/AppIcon.vue'
-import { mdiMagnify, mdiPencil, mdiTrashCan } from '@mdi/js'
+import StopSelect from '@/components/StopSelect.vue'
+import { mdiPencil, mdiPlus, mdiTrashCan } from '@mdi/js'
 
 defineProps<{ mode: 'edit' | 'display' }>()
 
@@ -18,16 +18,11 @@ interface ItineraryStop {
   id: number
   name: string
   selectedStop: Stop | null
-  filterQuery: string
 }
 
 const itinerary = ref<ItineraryStop[]>([])
 
 let _nextId = 1
-
-// Plain array, not ref([]). Mutating a reactive ref inside a template-ref callback
-// re-triggers Vue's reactivity on every render → infinite loop inside DataTable.
-const selectRefs: Array<InstanceType<typeof Select> | null> = []
 
 function onRowReorder(event: { value: ItineraryStop[] }) {
   itinerary.value = event.value
@@ -36,23 +31,55 @@ function onRowReorder(event: { value: ItineraryStop[] }) {
 function onStopSelect(stop: ItineraryStop, selected: Stop) {
   stop.name = selected.name
   stop.selectedStop = selected
-  stop.filterQuery = ''
-}
-
-// We own the search input (no PrimeVue `filter` prop), so we re-derive the same
-// filter expression here rather than reading PrimeVue's internal filtered list.
-function onSearchEnter(stop: ItineraryStop, index: number) {
-  const filtered = store.stops.filter(
-    (s) => !stop.filterQuery || s.name.toLowerCase().includes(stop.filterQuery.toLowerCase()),
-  )
-  if (!filtered.length) return
-  onStopSelect(stop, filtered[0])
-  selectRefs[index]?.hide()
 }
 
 function removeStop(index: number) {
   itinerary.value.splice(index, 1)
-  selectRefs.splice(index, 1)
+}
+
+function dist(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
+  const dLat = a.lat - b.lat
+  const dLon = a.lon - b.lon
+  return Math.sqrt(dLat * dLat + dLon * dLon)
+}
+
+function optimalInsertIndex(stop: Stop): number {
+  const items = itinerary.value
+  const n = items.length
+  if (n === 0) return 0
+
+  const coords = (item: ItineraryStop) => item.selectedStop ?? { lat: 0, lon: 0 }
+
+  let bestIndex = n
+  let bestExtra = Infinity
+
+  for (let i = 0; i <= n; i++) {
+    let extra: number
+    if (i === 0) {
+      extra = dist(stop, coords(items[0]))
+    } else if (i === n) {
+      extra = dist(coords(items[n - 1]), stop)
+    } else {
+      const prev = coords(items[i - 1])
+      const next = coords(items[i])
+      extra = dist(prev, stop) + dist(stop, next) - dist(prev, next)
+    }
+    if (extra < bestExtra) {
+      bestExtra = extra
+      bestIndex = i
+    }
+  }
+
+  return bestIndex
+}
+
+function addStop(stop: Stop) {
+  const index = optimalInsertIndex(stop)
+  itinerary.value.splice(index, 0, {
+    id: _nextId++,
+    name: stop.name,
+    selectedStop: stop,
+  })
 }
 
 // PrimeVue's row-reorder only activates when the user mousedowns its own hidden
@@ -80,8 +107,8 @@ onMounted(async () => {
   if (store.stops.length >= 2) {
     const shuffled = [...store.stops].sort(() => Math.random() - 0.5)
     itinerary.value = [
-      { id: _nextId++, name: shuffled[0].name, selectedStop: shuffled[0], filterQuery: '' },
-      { id: _nextId++, name: shuffled[1].name, selectedStop: shuffled[1], filterQuery: '' },
+      { id: _nextId++, name: shuffled[0].name, selectedStop: shuffled[0] },
+      { id: _nextId++, name: shuffled[1].name, selectedStop: shuffled[1] },
     ]
   }
   store.fetchCompositions()
@@ -94,6 +121,17 @@ onMounted(async () => {
       <!-- Left panel -->
       <div class="flex w-2/5 flex-col gap-4">
         <div class="itinerary-table px-4">
+          <!-- Add Stop button — top-right, edit mode only -->
+          <div v-if="mode === 'edit'" class="flex justify-end">
+            <StopSelect :stops="store.stops" @select="addStop">
+              <button
+                class="flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1.5 text-sm text-primary-50 transition hover:bg-primary-50/10"
+              >
+                <AppIcon :path="mdiPlus" :size="16" />
+                {{ t('proposal.addStop') }}
+              </button>
+            </StopSelect>
+          </div>
           <!-- border-collapse (set in pt.table) removes default cell spacing so
                the timeline line segments in consecutive rows connect seamlessly. -->
           <DataTable
@@ -152,76 +190,9 @@ onMounted(async () => {
                   </span>
 
                   <div v-if="mode === 'edit'" data-row-actions class="flex items-center">
-                    <!-- append-to="body" teleports the overlay out of the table so it
-                         isn't clipped by the table's overflow / stacking context. -->
-                    <Select
-                      :ref="
-                        (el: any) => {
-                          selectRefs[index] = el
-                        }
-                      "
-                      v-model="stop.selectedStop"
-                      :options="
-                        store.stops.filter(
-                          (s) =>
-                            !stop.filterQuery ||
-                            s.name.toLowerCase().includes(stop.filterQuery.toLowerCase()),
-                        )
-                      "
-                      option-label="name"
-                      append-to="body"
-                      :pt="{
-                        root: { class: '!bg-transparent !border-0 !shadow-none !outline-none' },
-                        label: { class: '!hidden' },
-                        dropdown: { class: '!bg-transparent !border-0 !shadow-none !outline-none' },
-                        overlay: {
-                          class: 'itinerary-select-overlay !rounded-xl !shadow-2xl min-w-[260px]',
-                        },
-                        listContainer: { class: '!max-h-80' },
-                        list: { class: '!bg-transparent !p-1.5' },
-                        option: {
-                          class:
-                            '!rounded-lg !px-4 !py-3 !text-base !text-primary-50 !cursor-pointer',
-                        },
-                        optionLabel: { class: '!text-primary-50 !text-base' },
-                        emptyMessage: { class: '!text-primary-50 !px-4 !py-3 !text-base' },
-                      }"
-                      @update:model-value="(val: Stop) => onStopSelect(stop, val)"
-                    >
-                      <template #dropdownicon>
-                        <AppIcon :path="mdiPencil" :size="20" color="var(--p-primary-50)" />
-                      </template>
-                      <template #header>
-                        <div
-                          class="flex items-center gap-2.5 px-3 py-3"
-                          style="border-bottom: 1px solid var(--p-primary-50)"
-                        >
-                          <AppIcon
-                            :path="mdiMagnify"
-                            :size="13"
-                            color="color-mix(in srgb, var(--p-primary-50) 70%, transparent)"
-                            class="shrink-0"
-                          />
-                          <input
-                            v-model="stop.filterQuery"
-                            type="text"
-                            :placeholder="t('proposal.searchPlaceholder')"
-                            @keydown.enter.prevent="onSearchEnter(stop, index)"
-                            style="
-                              flex: 1;
-                              background: transparent;
-                              border: none;
-                              outline: none;
-                              box-shadow: none;
-                              color: var(--p-primary-50);
-                              font-size: 1rem;
-                              padding: 0;
-                              font-family: inherit;
-                            "
-                          />
-                        </div>
-                      </template>
-                    </Select>
+                    <StopSelect :stops="store.stops" @select="(s) => onStopSelect(stop, s)">
+                      <AppIcon :path="mdiPencil" :size="20" color="var(--p-primary-50)" />
+                    </StopSelect>
 
                     <span
                       class="inline-flex"
@@ -318,17 +289,6 @@ onMounted(async () => {
   font-size: inherit !important;
   user-select: none;
 }
-:deep(.p-select) {
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-}
-/* PrimeVue dims the dropdown trigger in its Aura theme; force full opacity so
-   the chevron stays visible against our dark background at all times. */
-:deep(.p-select-dropdown) {
-  color: var(--p-primary-50) !important;
-  opacity: 1 !important;
-}
 /* Timeline column: must be position:relative so absolute children span full cell height */
 :deep(.timeline-col) {
   position: relative !important;
@@ -340,44 +300,5 @@ onMounted(async () => {
 }
 :deep(tr:hover .reorder-col > *) {
   opacity: 1;
-}
-</style>
-
-<style>
-/* ── Select overlay (teleports to <body>) ── */
-/* ── Overlay shell ── */
-.itinerary-select-overlay {
-  border: 1px solid var(--p-primary-50) !important;
-}
-
-/* ── Scrollbar ── */
-.itinerary-select-overlay * {
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--p-primary-50) 50%, transparent) transparent;
-}
-.itinerary-select-overlay *::-webkit-scrollbar {
-  width: 5px !important;
-}
-.itinerary-select-overlay *::-webkit-scrollbar-track {
-  background: transparent !important;
-}
-.itinerary-select-overlay *::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--p-primary-50) 50%, transparent) !important;
-  border-radius: 99px !important;
-}
-.itinerary-select-overlay *::-webkit-scrollbar-button {
-  display: none !important;
-}
-
-/* ── Option states (background fallbacks; colours come from definePreset tokens) ── */
-.itinerary-select-overlay [data-pc-section='option'][data-p-focused='true'] {
-  background: #2b2e4a !important;
-}
-.itinerary-select-overlay [data-pc-section='option'][data-p-selected='true'] {
-  background: #363a58 !important;
-}
-.itinerary-select-overlay
-  [data-pc-section='option'][data-p-selected='true'][data-p-focused='true'] {
-  background: #41466e !important;
 }
 </style>
