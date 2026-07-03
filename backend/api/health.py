@@ -21,7 +21,7 @@ def health():
 @bp.get("/data/status")
 def data_status():
     """Returns whether the DB data loader has successfully initialised."""
-    from api.dependencies import _loaded, _loaded_at, _load_error
+    from api.helpers.dependencies import _loaded, _loaded_at, _load_error
 
     body = {"loaded": _loaded}
     if _loaded_at is not None:

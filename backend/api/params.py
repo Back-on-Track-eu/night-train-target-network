@@ -12,7 +12,7 @@ import logging
 
 from flask import Blueprint, jsonify
 
-from api.dependencies import get_loader
+from api.helpers.dependencies import get_loader
 from models.utils import min_to_h
 
 logger = logging.getLogger(__name__)

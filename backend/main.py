@@ -29,7 +29,7 @@ import logging
 from flask import Flask, jsonify
 from flask_cors import CORS
 
-from api.dependencies import DataNotLoadedError, init
+from api.helpers.dependencies import DataNotLoadedError, init
 from api import health, params, route, evaluation, auth, feedback, scenarios
 
 logging.basicConfig(
