@@ -61,11 +61,9 @@ from models.params import (
 
 logger = logging.getLogger(__name__)
 
-
 # =============================================================================
 # TYPE CONVERSION HELPERS
 # =============================================================================
-
 
 def _f(value) -> float:
     """Cast Decimal/None to float. Raises if None — use _f_or_none for optional fields."""
@@ -73,11 +71,9 @@ def _f(value) -> float:
         raise ValueError("Expected float value but got None.")
     return float(value)
 
-
 def _f_or_none(value) -> float | None:
     """Cast Decimal to float, or return None."""
     return float(value) if value is not None else None
-
 
 def _i(value) -> int:
     """Cast Decimal/None to int. Raises if None."""
@@ -85,11 +81,9 @@ def _i(value) -> int:
         raise ValueError("Expected int value but got None.")
     return int(value)
 
-
 def _i_or_none(value) -> int | None:
     """Cast Decimal to int, or return None."""
     return int(value) if value is not None else None
-
 
 def _b(value) -> bool:
     """Cast to bool. Raises if None."""
@@ -97,11 +91,9 @@ def _b(value) -> bool:
         raise ValueError("Expected bool value but got None.")
     return bool(value)
 
-
 def _b_or_none(value) -> bool | None:
     """Return bool or None."""
     return bool(value) if value is not None else None
-
 
 def _interval_to_min(value) -> int:
     """
@@ -114,7 +106,6 @@ def _interval_to_min(value) -> int:
         return round(value.total_seconds() / 60)
     return round(float(value) * 60)
 
-
 def _interval_to_min_or_none(value) -> int | None:
     """Convert INTERVAL to minutes, or return None."""
     if value is None:
@@ -123,7 +114,6 @@ def _interval_to_min_or_none(value) -> int | None:
         return round(value.total_seconds() / 60)
     return round(float(value) * 60)
 
-
 def _src(
     row, source_id_field: str, sources: dict[int, ParamsSource]
 ) -> ParamsSource | None:
@@ -131,11 +121,9 @@ def _src(
     sid = row.get(source_id_field)
     return sources.get(sid) if sid is not None else None
 
-
 # =============================================================================
 # DB DATA LOADER
 # =============================================================================
-
 
 class DBDataLoader:
     """
@@ -292,9 +280,9 @@ class DBDataLoader:
             crew_overhead_min=_interval_to_min(row["operator_crew_overhead_h"]),
             ebit_margin_per=_f(row["operator_ebit_margin_per"]),
             financing_quota_per=_f(row["operator_financing_quota_per"]),
-            shunting_eur_day=_f(row["operator_shunting_eur_per_event"]),
             var_overhead_per=_f(row["operator_var_overhead_per"]),
             fix_overhead_quota_per=_f(row["operator_fix_overhead_quota_per"]),
+            loco_full_service_lease_eur_h=_f(row["operator_loco_lease_eur_h"]),
             svc_stockings_eur_place={
                 sr["service_class_id"]: _f(sr["operator_class_svc_stockings_eur_place"])
                 for sr in stocking_rows
@@ -428,13 +416,13 @@ class DBDataLoader:
         op_fields = {
             "driver_costs_eur_h": operator.driver_costs_eur_h,
             "crew_costs_eur_h": operator.crew_costs_eur_h,
-            "driver_overhead_min": operator.driver_overhead_min,
-            "crew_overhead_min": operator.crew_overhead_min,
+            "driver_overhead_h": operator.driver_overhead_min,
+            "crew_overhead_h": operator.crew_overhead_min,
             "ebit_margin_per": operator.ebit_margin_per,
             "financing_quota_per": operator.financing_quota_per,
-            "shunting_eur_day": operator.shunting_eur_day,
             "var_overhead_per": operator.var_overhead_per,
             "fix_overhead_quota_per": operator.fix_overhead_quota_per,
+            "loco_lease_eur_h": operator.loco_full_service_lease_eur_h,
         }
         for field_name, field_val in op_fields.items():
             param_versions.add(
@@ -464,14 +452,10 @@ class DBDataLoader:
             min_alighting_time_min=_interval_to_min(
                 comp_row["composition_type_min_alighting_time"]
             ),
-            purchase_loco_eur=_f(comp_row["composition_type_purchase_loco_eur"]),
             purchase_coach_eur=_f(comp_row["composition_type_purchase_coach_eur"]),
-            loco_avail_per=_f(comp_row["composition_type_loco_avail_per"]),
             coach_avail_per=_f(comp_row["composition_type_coach_avail_per"]),
-            loco_amort_years=_i(comp_row["composition_type_loco_amort_years"]),
             coach_amort_years=_i(comp_row["composition_type_coach_amort_years"]),
             cleaning_services_eur_day=_f(comp_row["composition_type_cleaning_eur_day"]),
-            loco_maint_eur_km=_f(comp_row["composition_type_loco_maint_eur_km"]),
             coach_maint_eur_km=_f(comp_row["composition_type_coach_maint_eur_km"]),
         )
 
@@ -490,14 +474,10 @@ class DBDataLoader:
             "energy_factor_terrain": comp_type.energy_factor_terrain,
             "min_boarding_time_min": comp_type.min_boarding_time_min,
             "min_alighting_time_min": comp_type.min_alighting_time_min,
-            "purchase_loco_eur": comp_type.purchase_loco_eur,
             "purchase_coach_eur": comp_type.purchase_coach_eur,
-            "loco_avail_per": comp_type.loco_avail_per,
             "coach_avail_per": comp_type.coach_avail_per,
-            "loco_amort_years": comp_type.loco_amort_years,
             "coach_amort_years": comp_type.coach_amort_years,
             "cleaning_services_eur_day": comp_type.cleaning_services_eur_day,
-            "loco_maint_eur_km": comp_type.loco_maint_eur_km,
             "coach_maint_eur_km": comp_type.coach_maint_eur_km,
         }
         for field_name, field_val in comp_fields.items():
@@ -645,6 +625,8 @@ class DBDataLoader:
             tac_src=_src(default_row, "track_tac_src", sources),
             parking_eur_day=_f(default_row["track_parking_eur_day"]),
             parking_src=_src(default_row, "track_parking_src", sources),
+            shunting_eur_event=_f(default_row["track_shunting_eur_event"]),
+            shunting_src=_src(default_row, "track_shunting_src", sources),
             energy_price_eur_kwh=_f(default_row["track_energy_price_eur_kwh"]),
             energy_price_src=_src(default_row, "track_energy_price_src", sources),
             terrain_score=_f(default_row["track_terrain_score"]),
@@ -755,6 +737,11 @@ class DBDataLoader:
             _f_or_none(row["track_parking_eur_day"]),
             default.parking_eur_day,
         )
+        shunting_val, shunting_def = resolve(
+            "shunting_eur_event",
+            _f_or_none(row["track_shunting_eur_event"]),
+            default.shunting_eur_event,
+        )
         energy_val, energy_def = resolve(
             "energy_price_eur_kwh",
             _f_or_none(row["track_energy_price_eur_kwh"]),
@@ -793,6 +780,7 @@ class DBDataLoader:
         self._track_defaults[country_code] = {
             "tac_eur_train_km": tac_def,
             "parking_eur_day": parking_def,
+            "shunting_eur_event": shunting_def,
             "energy_price_eur_kwh": energy_def,
             "terrain_score": terrain_def,
             "terrain_category": terr_cat_def,
@@ -810,6 +798,9 @@ class DBDataLoader:
             parking_eur_day=parking_val,
             parking_src=field_src("track_parking_src")
             or (default.parking_src if parking_def else None),
+            shunting_eur_event=shunting_val,
+            shunting_src=field_src("track_shunting_src")
+            or (default.shunting_src if shunting_def else None),
             energy_price_eur_kwh=energy_val,
             energy_price_src=field_src("track_energy_price_src")
             or (default.energy_price_src if energy_def else None),

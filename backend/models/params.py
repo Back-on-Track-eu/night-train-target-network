@@ -55,7 +55,6 @@ from typing import Optional
 # PARAMS SOURCE  (input_params.sources)
 # =============================================================================
 
-
 @dataclass
 class ParamsSource:
     """
@@ -71,20 +70,18 @@ class ParamsSource:
     source_url: Optional[str]  # URL to source document or dataset
     source_date: Optional[str]  # ISO date string (YYYY-MM-DD)
 
-
 # =============================================================================
 # MODEL VERSIONS
 # =============================================================================
-
 
 @dataclass
 class ModelVersions:
     """
     Records which version of each model was used in a computation.
 
-    Stored on Trip (after route building) and EvaluationResult (after cost/rev
-    calculation). New models register themselves by adding a key — no
-    structural change needed.
+    Carried in RouteProvenance, returned alongside Route by route_factory
+    (not stored on Trip). New models register themselves by adding a key —
+    no structural change needed.
 
     Example:
         {
@@ -105,11 +102,9 @@ class ModelVersions:
         """Register a model version."""
         self.versions[model_name] = version
 
-
 # =============================================================================
 # PARAM VERSIONS
 # =============================================================================
-
 
 @dataclass
 class ParamVersionEntry:
@@ -133,16 +128,16 @@ class ParamVersionEntry:
     # is_default=True means this value was resolved from a default row
     # because the country/stop-specific value was NULL in the database.
 
-
 @dataclass
 class ParamVersions:
     """
     Captures which version of each parameter row was used in a computation,
     together with full source provenance.
 
-    Populated on the fly by the loader and route factory. Stored on Trip
-    alongside ModelVersions so the frontend receives full parameter provenance
-    in one jsonifiable structure.
+    Populated on the fly by the loader and route factory. Carried in
+    RouteProvenance alongside ModelVersions (not stored on Trip), returned
+    by route_factory so the caller has full parameter provenance to persist
+    alongside the route.
 
     Keys follow the pattern "table_short:entity_id", e.g.:
         "track_infra:DE"            → TrackInfrastructure for Germany
@@ -175,11 +170,9 @@ class ParamVersions:
     def get(self, key: str) -> ParamVersionEntry | None:
         return self.entries.get(key)
 
-
 # =============================================================================
 # SERVICE CLASS  (input_params.service_classes)
 # =============================================================================
-
 
 @dataclass
 class ServiceClass:
@@ -199,11 +192,9 @@ class ServiceClass:
     class_main: str  # e.g. "Seat", "Couchette", "Sleeper"
     density: float  # space units per place — stored in DB, not derived
 
-
 # =============================================================================
 # OPERATOR  (input_params.operators + input_params.operator_class_costs)
 # =============================================================================
-
 
 @dataclass
 class Operator:
@@ -217,7 +208,7 @@ class Operator:
     svc_stockings_eur_place: variable cost of onboard services and stockings
     per available place per trip, keyed by class_id.
 
-    Row-level version and source tracking is handled by ParamVersions on Trip.
+    Row-level version and source tracking is handled by ParamVersions in RouteProvenance.
     """
 
     operator_id: str
@@ -228,16 +219,19 @@ class Operator:
     crew_overhead_min: int  # overhead time per crew member per trip in minutes
     ebit_margin_per: float
     financing_quota_per: float
-    shunting_eur_day: float
     var_overhead_per: float
     fix_overhead_quota_per: float
     svc_stockings_eur_place: dict[str, float]  # keyed by class_id
 
+    # locomotive — utilization-based full-service lease (capital, maintenance,
+    # insurance bundled into the rate). Billed per hour the loco is coupled
+    # to a working train, i.e. segment total_time_min (driving + buffer).
+    # Energy, TAC, and driver/crew costs are NOT included — billed separately.
+    loco_full_service_lease_eur_h: float
 
 # =============================================================================
 # COACH TYPE  (input_params.coachtypes + input_params.coachtype_classes)
 # =============================================================================
-
 
 @dataclass
 class CoachClassAssignment:
@@ -256,7 +250,6 @@ class CoachClassAssignment:
     places: int  # number of places of this class in the coach
     density: float  # denormalised from ServiceClass.density
 
-
 @dataclass
 class CoachType:
     """
@@ -269,7 +262,7 @@ class CoachType:
     crew_factor: fractional cabin crew assigned per trip
                  (e.g. 0.5 = one crew member covers two coaches of this type)
 
-    Row-level version and source tracking is handled by ParamVersions on Trip.
+    Row-level version and source tracking is handled by ParamVersions in RouteProvenance.
     """
 
     coachtype_id: str
@@ -289,11 +282,9 @@ class CoachType:
         """Total places across all classes in this coach."""
         return sum(a.places for a in self.classes.values())
 
-
 # =============================================================================
 # COMPOSITION TYPE  (input_params.compositions + input_params.composition_coaches)
 # =============================================================================
-
 
 @dataclass
 class CompositionType:
@@ -307,7 +298,7 @@ class CompositionType:
     operator: the operating company for this composition type.
     driver_factor: number of drivers required per trip (e.g. 1 or 2).
 
-    Row-level version and source tracking is handled by ParamVersions on Trip.
+    Row-level version and source tracking is handled by ParamVersions in RouteProvenance.
     """
 
     comp_id: str
@@ -327,15 +318,12 @@ class CompositionType:
     min_boarding_time_min: int
     min_alighting_time_min: int
 
-    # composition-level cost params
-    purchase_loco_eur: float
+    # composition-level cost params — locomotives are full-service leased
+    # (see Operator.loco_full_service_lease_eur_h), not purchased
     purchase_coach_eur: float
-    loco_avail_per: float
     coach_avail_per: float
-    loco_amort_years: int
     coach_amort_years: int
     cleaning_services_eur_day: float
-    loco_maint_eur_km: float
     coach_maint_eur_km: float
 
     # --- derived getters ---
@@ -391,11 +379,9 @@ class CompositionType:
                 totals[a.class_main] = totals.get(a.class_main, 0) + a.places
         return {cm: weighted[cm] / totals[cm] for cm in weighted if totals[cm] > 0}
 
-
 # =============================================================================
 # COMPOSITION  (fully resolved operational object)
 # =============================================================================
-
 
 @dataclass
 class Composition:
@@ -442,20 +428,16 @@ class Composition:
     crew_overhead_min: int
     ebit_margin_per: float
     financing_quota_per: float
-    shunting_eur_day: float
     var_overhead_per: float
     fix_overhead_quota_per: float
     svc_stockings_eur_place: dict[str, float]  # keyed by class_id
+    loco_full_service_lease_eur_h: float  # billed on route-level deduplicated loco operating time
 
-    # composition cost
-    purchase_loco_eur: float
+    # composition cost — locomotives are full-service leased, not purchased
     purchase_coach_eur: float
-    loco_avail_per: float
     coach_avail_per: float
-    loco_amort_years: int
     coach_amort_years: int
     cleaning_services_eur_day: float
-    loco_maint_eur_km: float
     coach_maint_eur_km: float
 
     # indicative KPIs — computed at load time via compute_indicative_figures()
@@ -490,26 +472,20 @@ class Composition:
             crew_overhead_min=comp_type.operator.crew_overhead_min,
             ebit_margin_per=comp_type.operator.ebit_margin_per,
             financing_quota_per=comp_type.operator.financing_quota_per,
-            shunting_eur_day=comp_type.operator.shunting_eur_day,
             var_overhead_per=comp_type.operator.var_overhead_per,
             fix_overhead_quota_per=comp_type.operator.fix_overhead_quota_per,
             svc_stockings_eur_place=comp_type.operator.svc_stockings_eur_place,
-            purchase_loco_eur=comp_type.purchase_loco_eur,
+            loco_full_service_lease_eur_h=comp_type.operator.loco_full_service_lease_eur_h,
             purchase_coach_eur=comp_type.purchase_coach_eur,
-            loco_avail_per=comp_type.loco_avail_per,
             coach_avail_per=comp_type.coach_avail_per,
-            loco_amort_years=comp_type.loco_amort_years,
             coach_amort_years=comp_type.coach_amort_years,
             cleaning_services_eur_day=comp_type.cleaning_services_eur_day,
-            loco_maint_eur_km=comp_type.loco_maint_eur_km,
             coach_maint_eur_km=comp_type.coach_maint_eur_km,
         )
-
 
 # =============================================================================
 # COMPOSITION REFERENCE  (input_params.composition_references)
 # =============================================================================
-
 
 @dataclass
 class CompositionReference:
@@ -535,7 +511,6 @@ class CompositionReference:
     ref_utilization_by_class: dict[str, float]  # keyed by class_main
     ref_avg_fare_by_class: dict[str, float]  # keyed by class_main
 
-
 @dataclass
 class IndicativeFigures:
     """
@@ -549,11 +524,9 @@ class IndicativeFigures:
     subsidy_eur_per_pax_km: float  # (cost - revenue) ÷ sold pax-km
     breakeven_load_factor: float  # load factor needed to break even
 
-
 # =============================================================================
 # TRACK INFRASTRUCTURE DEFAULTS  (input_params.infrastructure_defaults)
 # =============================================================================
-
 
 @dataclass
 class DefaultTrackInfra:
@@ -570,8 +543,11 @@ class DefaultTrackInfra:
     tac_eur_train_km: float
     tac_src: Optional[ParamsSource]
 
-    parking_eur_day: float
+    parking_eur_day: float      # €/operating-day per parking event
     parking_src: Optional[ParamsSource]
+
+    shunting_eur_event: float   # €/event per shunting movement
+    shunting_src: Optional[ParamsSource]
 
     energy_price_eur_kwh: float
     energy_price_src: Optional[ParamsSource]
@@ -592,11 +568,9 @@ class DefaultTrackInfra:
     buffer_quota_per: float
     buffer_src: Optional[ParamsSource]
 
-
 # =============================================================================
 # TRACK INFRASTRUCTURE  (input_params.infrastructure)
 # =============================================================================
-
 
 @dataclass
 class TrackInfrastructure:
@@ -608,7 +582,7 @@ class TrackInfrastructure:
     None DB fields and logs a warning per substitution.
 
     Each parameter value has a paired _src field for field-level provenance.
-    Row-level version and source tracking is handled by ParamVersions on Trip.
+    Row-level version and source tracking is handled by ParamVersions in RouteProvenance.
     """
 
     country_code: str
@@ -616,8 +590,11 @@ class TrackInfrastructure:
     tac_eur_train_km: float
     tac_src: Optional[ParamsSource]
 
-    parking_eur_day: float
+    parking_eur_day: float      # €/operating-day per parking event
     parking_src: Optional[ParamsSource]
+
+    shunting_eur_event: float   # €/event per shunting movement
+    shunting_src: Optional[ParamsSource]
 
     energy_price_eur_kwh: float
     energy_price_src: Optional[ParamsSource]
@@ -637,7 +614,6 @@ class TrackInfrastructure:
 
     buffer_quota_per: float
     buffer_src: Optional[ParamsSource]
-
 
 @dataclass
 class TrackInfraCollection:
@@ -670,11 +646,9 @@ class TrackInfraCollection:
     def __len__(self) -> int:
         return len(self._data)
 
-
 # =============================================================================
 # STOP INFRASTRUCTURE DEFAULTS  (input_params.stop_defaults)
 # =============================================================================
-
 
 @dataclass
 class DefaultStopInfra:
@@ -688,11 +662,9 @@ class DefaultStopInfra:
     stop_charge_eur: float
     stop_charge_src: Optional[ParamsSource]
 
-
 # =============================================================================
 # STOP INFRASTRUCTURE  (input_params.stops)
 # =============================================================================
-
 
 @dataclass
 class StopInfrastructure:
@@ -707,7 +679,7 @@ class StopInfrastructure:
     responses. Used exclusively by models/evaluation/calc.py.
 
     lat/lon share a single loc_src. stop_charge_eur has its own src field.
-    Row-level version and source tracking is handled by ParamVersions on Trip.
+    Row-level version and source tracking is handled by ParamVersions in RouteProvenance.
     """
 
     stop_id: str
@@ -720,7 +692,6 @@ class StopInfrastructure:
 
     stop_charge_eur: float  # internal — not exposed in API
     stop_charge_src: Optional[ParamsSource]
-
 
 @dataclass
 class StopInfraCollection:
@@ -754,3 +725,42 @@ class StopInfraCollection:
 
     def __len__(self) -> int:
         return len(self._data)
+
+# =============================================================================
+# OD PAIR  (persistent demand input — lives on Route)
+# =============================================================================
+
+@dataclass
+class ODPair:
+    """
+    Demand for one origin-destination pair on one specific trip.
+
+    Persistent domain object stored alongside the Route. Lives on Route
+    (not Trip) so that Y-shaped routes can express demand correctly: a
+    Berlin→Copenhagen OD pair that spans both the Berlin→Oslo and
+    Berlin→Stockholm trips is represented as two ODPair objects, each
+    referencing its own trip_id with its own places_sold.
+
+    The demand split across trips for shared legs is a user input —
+    the model does not derive it.
+
+    class_main: top-level accommodation category from ServiceClass
+    (e.g. "Seat", "Couchette", "Sleeper"). One ODPair per class per
+    OD pair per trip — if a single OD pair carries both Couchette and
+    Sleeper demand, that is two ODPair objects.
+
+    places_sold: annual total tickets sold for this OD pair / class / trip.
+    Operators think and plan in annual figures — per-trip demand is derived
+    by dividing by operating_days_per_year from the relevant TripPair's
+    Schedule.
+
+    avg_price: average ticket price across all tickets sold for this
+    OD pair, class, and trip. EUR.
+    """
+
+    origin_stop_id: str
+    destination_stop_id: str
+    class_main: str          # "Seat" | "Couchette" | "Sleeper" | "Capsule" | "Catering"
+    trip_id: str             # references Trip.trip_id within the same Route
+    places_sold: int         # annual tickets sold for this OD pair / class / trip
+    avg_price: float         # EUR — average fare across all sold tickets

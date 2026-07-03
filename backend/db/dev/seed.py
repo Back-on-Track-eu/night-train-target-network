@@ -33,7 +33,6 @@ DB_NAME = os.environ["POSTGRES_DB"]
 DB_USER = os.environ["POSTGRES_USER"]
 DB_PASSWORD = os.environ["POSTGRES_PASSWORD"]
 
-
 class _PgEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, Decimal):
@@ -45,10 +44,8 @@ class _PgEncoder(json.JSONEncoder):
             return f"{h:02d}:{m:02d}:{s:02d}"
         return super().default(obj)
 
-
 def _dumps(obj) -> str:
     return json.dumps(obj, cls=_PgEncoder)
-
 
 def insert_rows(cur, table: str, rows: list[dict]) -> None:
     if not rows:
@@ -64,7 +61,6 @@ def insert_rows(cur, table: str, rows: list[dict]) -> None:
             for c in columns
         ]
         cur.execute(sql, values)
-
 
 # ============================================================
 # admin
@@ -95,11 +91,9 @@ SOURCES = [
 SRC_EXCEL = "B-o-T_targetnetwork_DB_v2.xlsx — illustrative placeholder values"
 SRC_ILLUSTRATIVE = "Illustrative / internal estimate"
 
-
 def fetch_source_ids(cur) -> dict[str, int]:
     cur.execute("SELECT source_id, source_description FROM input_params.sources")
     return {desc: sid for sid, desc in cur.fetchall()}
-
 
 # ============================================================
 # countries
@@ -277,9 +271,13 @@ OPERATORS = [
         "operator_crew_overhead_h": "01:00:00",
         "operator_ebit_margin_per": 0.03,
         "operator_financing_quota_per": 0.04,
-        "operator_shunting_eur_per_event": 575.932,
         "operator_var_overhead_per": 0.10,
         "operator_fix_overhead_quota_per": 0.15,
+        # Full-service locomotive lease — utilization-based, bundles
+        # capital, maintenance, and insurance. Illustrative rate based on
+        # European full-service lease providers (ELP, Railpool, Alpha
+        # Trains), billed per loco operating hour.
+        "operator_loco_lease_eur_h": 145.00,
     },
 ]
 
@@ -359,6 +357,8 @@ TRACK_INFRA_DEFAULTS = [
         "track_infra_default_key": "_default",
         "track_tac_eur_train_km": 4.50,
         "track_parking_eur_day": 65.00,
+        "track_shunting_eur_event": 575.00,
+            "track_shunting_eur_event": 575.00,
         "track_energy_price_eur_kwh": 0.150,
         "track_terrain_category": "Flat",
         "track_terrain_score": 1.0,
@@ -378,6 +378,7 @@ TRACK_INFRASTRUCTURES = [
         "is_current": True,
         "track_tac_eur_train_km": 5.40,
         "track_parking_eur_day": 70.00,
+            "track_shunting_eur_event": 575.00,
         "track_energy_price_eur_kwh": 0.142,
         "track_terrain_category": "Flat",
         "track_terrain_score": 1.0,
@@ -392,6 +393,7 @@ TRACK_INFRASTRUCTURES = [
         "track_infra_version": 1,
         "track_tac_eur_train_km": 3.10,
         "track_parking_eur_day": 50.00,
+            "track_shunting_eur_event": 575.00,
         "track_energy_price_eur_kwh": 0.120,
         "track_terrain_category": "Flat",
         "track_terrain_score": 1.0,
@@ -407,6 +409,7 @@ TRACK_INFRASTRUCTURES = [
         "is_current": True,
         "track_tac_eur_train_km": 4.20,
         "track_parking_eur_day": 60.00,
+            "track_shunting_eur_event": 575.00,
         "track_energy_price_eur_kwh": 0.138,
         "track_terrain_category": "Hilly",
         "track_terrain_score": 1.4,
@@ -421,6 +424,7 @@ TRACK_INFRASTRUCTURES = [
         "is_current": True,
         "track_tac_eur_train_km": 6.80,
         "track_parking_eur_day": 85.00,
+            "track_shunting_eur_event": 575.00,
         "track_energy_price_eur_kwh": 0.165,
         "track_terrain_category": "Mountainous",
         "track_terrain_score": 1.8,
@@ -435,6 +439,7 @@ TRACK_INFRASTRUCTURES = [
         "is_current": True,
         "track_tac_eur_train_km": 4.60,
         "track_parking_eur_day": 55.00,
+            "track_shunting_eur_event": 575.00,
         "track_energy_price_eur_kwh": 0.130,
         "track_terrain_category": "Flat",
         "track_terrain_score": 1.0,
@@ -449,6 +454,7 @@ TRACK_INFRASTRUCTURES = [
         "is_current": True,
         "track_tac_eur_train_km": 5.10,
         "track_parking_eur_day": 50.00,
+            "track_shunting_eur_event": 575.00,
         "track_energy_price_eur_kwh": 0.145,
         "track_terrain_category": "Flat",
         "track_terrain_score": 1.0,
@@ -463,6 +469,7 @@ TRACK_INFRASTRUCTURES = [
         "is_current": True,
         "track_tac_eur_train_km": 4.80,
         "track_parking_eur_day": 55.00,
+            "track_shunting_eur_event": 575.00,
         "track_energy_price_eur_kwh": 0.128,
         "track_terrain_category": "Flat",
         "track_terrain_score": 1.0,
@@ -478,6 +485,7 @@ TRACK_INFRASTRUCTURES = [
         "is_current": True,
         "track_tac_eur_train_km": None,
         "track_parking_eur_day": None,
+            "track_shunting_eur_event": None,
         "track_energy_price_eur_kwh": 0.090,
         "track_terrain_category": "Hilly",
         "track_terrain_score": 1.2,
@@ -587,14 +595,10 @@ STD_COMP_DEFAULTS = dict(
     composition_type_energy_factor_terrain=0.034545,
     composition_type_min_boarding_time="00:02:00",
     composition_type_min_alighting_time="00:02:00",
-    composition_type_purchase_loco_eur=24500000.00,
     composition_type_purchase_coach_eur=20000000.00,
-    composition_type_loco_avail_per=0.85,
     composition_type_coach_avail_per=0.80,
-    composition_type_loco_amort_years=25,
     composition_type_coach_amort_years=30,
     composition_type_cleaning_eur_day=1753.584,
-    composition_type_loco_maint_eur_km=2.86533333,
     composition_type_coach_maint_eur_km=2.86533333,
     composition_type_driver_factor=1.0,
 )
@@ -612,7 +616,6 @@ COMPOSITION_TYPES_VARYING = [
     ("STD-13.1", "Standard 13 coach composition"),
 ]
 
-
 def build_composition_types() -> list[dict]:
     return [
         {
@@ -622,7 +625,6 @@ def build_composition_types() -> list[dict]:
         }
         for comp_id, description in COMPOSITION_TYPES_VARYING
     ]
-
 
 COMPOSITION_TYPE_COACHES_RAW = [
     ("STD-3.1", 1, "type2"),
@@ -769,7 +771,6 @@ STOP_TIMES = [
 # FK-resolving seed helpers
 # ============================================================
 
-
 def seed_sources(cur, source_ids: dict) -> None:
     ill = source_ids[SRC_ILLUSTRATIVE]
     exc = source_ids[SRC_EXCEL]
@@ -805,7 +806,6 @@ def seed_sources(cur, source_ids: dict) -> None:
         "UPDATE input_params.composition_types             SET source_id=%s", (exc,)
     )
 
-
 def seed_operator_class_costs(cur):
     for operator_id, service_class_id, eur_place in OPERATOR_CLASS_COSTS_RAW:
         cur.execute(
@@ -814,7 +814,6 @@ def seed_operator_class_costs(cur):
                VALUES (%s, %s, %s)""",
             (operator_id, service_class_id, eur_place),
         )
-
 
 def seed_coach_type_classes(cur):
     for coach_type_id, service_class_id, places in COACH_TYPE_CLASSES_RAW:
@@ -829,7 +828,6 @@ def seed_coach_type_classes(cur):
                VALUES (%s, %s, %s)""",
             (coach_type_row_id, service_class_id, places),
         )
-
 
 def seed_composition_type_coaches(cur):
     for comp_id, position, coach_type_id in COMPOSITION_TYPE_COACHES_RAW:
@@ -849,7 +847,6 @@ def seed_composition_type_coaches(cur):
                VALUES (%s, %s, %s)""",
             (composition_type_row_id, position, coach_type_row_id),
         )
-
 
 def seed_composition_references(cur):
     """Seed reference trip profiles for STD-7.1 and STD-9.1."""
@@ -889,7 +886,6 @@ def seed_composition_references(cur):
                 ),
             ],
         )
-
 
 def main():
     conn = psycopg2.connect(
@@ -987,7 +983,6 @@ def main():
 
     cur.close()
     conn.close()
-
 
 if __name__ == "__main__":
     main()

@@ -54,9 +54,9 @@ CREATE TABLE input_params.operators (
     operator_crew_overhead_h        INTERVAL      NOT NULL,
     operator_ebit_margin_per        NUMERIC(5,4)  NOT NULL,
     operator_financing_quota_per    NUMERIC(5,4)  NOT NULL,
-    operator_shunting_eur_per_event NUMERIC(10,3) NOT NULL,
     operator_var_overhead_per       NUMERIC(5,4)  NOT NULL,
     operator_fix_overhead_quota_per NUMERIC(5,4)  NOT NULL,
+    operator_loco_lease_eur_h       NUMERIC(10,3) NOT NULL,
     source_id                       INTEGER       REFERENCES input_params.sources(source_id),
     editor                          VARCHAR(100),
     change_log                      TEXT
@@ -69,9 +69,9 @@ COMMENT ON COLUMN input_params.operators.operator_driver_overhead_h      IS 'Fix
 COMMENT ON COLUMN input_params.operators.operator_crew_overhead_h        IS 'Fixed overhead hours added per trip for crew cost calculation. Unit: h/trip';
 COMMENT ON COLUMN input_params.operators.operator_ebit_margin_per        IS 'Required EBIT margin as a share of revenue. Unit: %';
 COMMENT ON COLUMN input_params.operators.operator_financing_quota_per    IS 'Annual financing cost as a share of total capital employed. Unit: %/year';
-COMMENT ON COLUMN input_params.operators.operator_shunting_eur_per_event IS 'Cost per shunting event. Unit: €/event';
 COMMENT ON COLUMN input_params.operators.operator_var_overhead_per       IS 'Variable overhead as a share of total ticket revenue. Unit: %';
 COMMENT ON COLUMN input_params.operators.operator_fix_overhead_quota_per IS 'Fixed overhead as a share of all other railway operation costs. Unit: %';
+COMMENT ON COLUMN input_params.operators.operator_loco_lease_eur_h       IS 'Full-service locomotive lease rate, utilization-based — bundles capital, maintenance, and insurance. Billed per loco operating hour (driving + buffer + dwell). Unit: €/h';
 COMMENT ON COLUMN input_params.operators.source_id                       IS 'Source for all values in this row.';
 COMMENT ON COLUMN input_params.operators.editor                          IS 'User who created or last edited this row.';
 COMMENT ON COLUMN input_params.operators.change_log                      IS 'Free-text description of changes made in this version.';
@@ -157,14 +157,10 @@ CREATE TABLE input_params.composition_types (
     composition_type_energy_factor_terrain NUMERIC(10,6) NOT NULL,
     composition_type_min_boarding_time   INTERVAL      NOT NULL,
     composition_type_min_alighting_time  INTERVAL      NOT NULL,
-    composition_type_purchase_loco_eur   NUMERIC(12,2) NOT NULL,
     composition_type_purchase_coach_eur  NUMERIC(12,2) NOT NULL,
-    composition_type_loco_avail_per      NUMERIC(5,4)  NOT NULL,
     composition_type_coach_avail_per     NUMERIC(5,4)  NOT NULL,
-    composition_type_loco_amort_years    INTEGER       NOT NULL,
     composition_type_coach_amort_years   INTEGER       NOT NULL,
     composition_type_cleaning_eur_day    NUMERIC(10,3) NOT NULL,
-    composition_type_loco_maint_eur_km   NUMERIC(10,8) NOT NULL,
     composition_type_coach_maint_eur_km  NUMERIC(10,8) NOT NULL,
     composition_type_driver_factor       NUMERIC(4,2)  NOT NULL DEFAULT 1,
     source_id                            INTEGER       REFERENCES input_params.sources(source_id),
@@ -178,7 +174,7 @@ CREATE TABLE input_params.composition_types (
 CREATE UNIQUE INDEX idx_composition_types_one_current
     ON input_params.composition_types (composition_type_id) WHERE is_current;
 
-COMMENT ON TABLE  input_params.composition_types IS 'Train composition blueprints: operational and cost parameters. Capacity derived from composition_type_coaches → coach_type_classes.';
+COMMENT ON TABLE  input_params.composition_types IS 'Train composition blueprints: operational and cost parameters. Capacity derived from composition_type_coaches → coach_type_classes. Locomotives are not purchased — see operators.operator_loco_lease_eur_h for full-service lease cost.';
 COMMENT ON COLUMN input_params.composition_types.composition_type_id          IS 'Unique composition identifier (e.g. STD-3.1).';
 COMMENT ON COLUMN input_params.composition_types.composition_type_operator_id IS 'Operating company. Links to operators for operator cost parameters.';
 COMMENT ON COLUMN input_params.composition_types.composition_type_hsr_allowed IS 'Whether this composition may use high-speed rail infrastructure.';
@@ -188,14 +184,10 @@ COMMENT ON COLUMN input_params.composition_types.composition_type_energy_factor_
 COMMENT ON COLUMN input_params.composition_types.composition_type_energy_factor_terrain IS 'Energy regression coefficient for terrain profile.';
 COMMENT ON COLUMN input_params.composition_types.composition_type_min_boarding_time  IS 'Vehicle-dependent minimum dwell time at boarding stops. Unit: h';
 COMMENT ON COLUMN input_params.composition_types.composition_type_min_alighting_time IS 'Vehicle-dependent minimum dwell time at alighting stops. Unit: h';
-COMMENT ON COLUMN input_params.composition_types.composition_type_purchase_loco_eur  IS 'Total purchase cost for all locomotives. Unit: €';
 COMMENT ON COLUMN input_params.composition_types.composition_type_purchase_coach_eur IS 'Total purchase cost for all coaches. Unit: €';
-COMMENT ON COLUMN input_params.composition_types.composition_type_loco_avail_per     IS 'Share of calendar days locomotive fleet is available. Unit: %';
 COMMENT ON COLUMN input_params.composition_types.composition_type_coach_avail_per    IS 'Share of calendar days coach fleet is available. Unit: %';
-COMMENT ON COLUMN input_params.composition_types.composition_type_loco_amort_years   IS 'Locomotive amortisation period. Unit: years';
 COMMENT ON COLUMN input_params.composition_types.composition_type_coach_amort_years  IS 'Coach amortisation period. Unit: years';
 COMMENT ON COLUMN input_params.composition_types.composition_type_cleaning_eur_day   IS 'Daily cleaning and service preparation cost. Unit: €/day';
-COMMENT ON COLUMN input_params.composition_types.composition_type_loco_maint_eur_km  IS 'Variable locomotive maintenance cost per km. Unit: €/km';
 COMMENT ON COLUMN input_params.composition_types.composition_type_coach_maint_eur_km IS 'Variable coach maintenance cost per km. Unit: €/km';
 COMMENT ON COLUMN input_params.composition_types.composition_type_driver_factor      IS 'Number of drivers required per trip (e.g. 1 or 2).';
 COMMENT ON COLUMN input_params.composition_types.source_id                           IS 'Source for all values in this row.';
@@ -264,6 +256,8 @@ CREATE TABLE input_params.track_infrastructure_defaults (
     track_tac_src                INTEGER      REFERENCES input_params.sources(source_id),
     track_parking_eur_day        NUMERIC(8,2) NOT NULL,
     track_parking_src            INTEGER      REFERENCES input_params.sources(source_id),
+    track_shunting_eur_event     NUMERIC(8,2) NOT NULL,
+    track_shunting_src           INTEGER      REFERENCES input_params.sources(source_id),
     track_energy_price_eur_kwh   NUMERIC(6,3) NOT NULL,
     track_energy_price_src       INTEGER      REFERENCES input_params.sources(source_id),
     track_terrain_category       VARCHAR(20)  NOT NULL CHECK (track_terrain_category IN ('Flat','Hilly','Mountainous')),
@@ -299,6 +293,8 @@ CREATE TABLE input_params.track_infrastructures (
     track_tac_src                INTEGER      REFERENCES input_params.sources(source_id),
     track_parking_eur_day        NUMERIC(8,2),
     track_parking_src            INTEGER      REFERENCES input_params.sources(source_id),
+    track_shunting_eur_event     NUMERIC(8,2),
+    track_shunting_src           INTEGER      REFERENCES input_params.sources(source_id),
     track_energy_price_eur_kwh   NUMERIC(6,3),
     track_energy_price_src       INTEGER      REFERENCES input_params.sources(source_id),
     track_terrain_category       VARCHAR(20)  CHECK (track_terrain_category IN ('Flat','Hilly','Mountainous')),
@@ -326,6 +322,7 @@ COMMENT ON TABLE  input_params.track_infrastructures IS 'Country-level track inf
 COMMENT ON COLUMN input_params.track_infrastructures.country_code             IS 'ISO 3166-1 alpha-2 country code. FK to countries table.';
 COMMENT ON COLUMN input_params.track_infrastructures.track_tac_eur_train_km   IS 'Track access charge per train-km. Unit: €/train-km';
 COMMENT ON COLUMN input_params.track_infrastructures.track_parking_eur_day    IS 'Overnight stabling cost per day. Unit: €/day';
+COMMENT ON COLUMN input_params.track_infrastructures.track_shunting_eur_event IS 'Shunting cost per event at this country''s yards. Unit: €/event';
 COMMENT ON COLUMN input_params.track_infrastructures.track_energy_price_eur_kwh IS 'Traction electricity price. Unit: €/kWh';
 COMMENT ON COLUMN input_params.track_infrastructures.track_terrain_category   IS 'Qualitative terrain classification: Flat / Hilly / Mountainous.';
 COMMENT ON COLUMN input_params.track_infrastructures.track_terrain_score      IS 'Numerical terrain difficulty score (1–100). Unit: 1–100';
