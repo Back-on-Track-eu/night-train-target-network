@@ -21,9 +21,12 @@ import logging
 
 from flask import Blueprint, jsonify, request
 
-from api.dependencies import get_loader
+from api.helpers.dependencies import get_loader
+from api.helpers.serialize import route_to_dict, route_from_dict
 from models.route.route import Route
-from models.route.route_factory import plan_route, adjust_route
+from models.route.route_factory import plan_route, adjust_route, TripPairInput
+from models.route.route import Schedule, SeasonalSchedule, Season, Frequency
+from models.route.trip import StopType
 from models.route.routing.rail_router import RailRouter
 from models.route.version import ROUTE_BUILDER_VERSION
 from models.utils import hhmm_to_min
@@ -32,7 +35,6 @@ logger = logging.getLogger(__name__)
 bp = Blueprint("route", __name__)
 
 _VALID_STOP_TYPES = {"boarding", "alighting", "both"}
-
 
 def _validate(body: dict) -> list[str]:
     errors = []
@@ -81,7 +83,11 @@ def _validate(body: dict) -> list[str]:
     if existing is not None and not isinstance(existing, dict):
         errors.append("'route' must be an object (Route.to_dict() output) if provided.")
 
-    stop_type_changes = body.get("stop_type_changes")
+    _stc_raw = body.get("stop_type_changes")
+    stop_type_changes = (
+        {sid: StopType(stype) for sid, stype in _stc_raw.items()}
+        if _stc_raw else None
+    )
     if stop_type_changes is not None:
         if not isinstance(stop_type_changes, dict):
             errors.append("'stop_type_changes' must be an object {stop_id: stop_type}.")
@@ -102,12 +108,10 @@ def _validate(body: dict) -> list[str]:
 
     return errors
 
-
 def _is_adjust(body: dict, existing_route: Route) -> bool:
     """
-    Return True if only departure_time or stop_type_changes differ from
-    the existing route — i.e. no rerouting is needed.
-    Returns False (full plan) if stops or composition changed.
+    Return True if only departure_time or stop_type_changes differ —
+    no rerouting needed. False if stops or composition changed.
     """
     new_stops = body.get("stops")
     new_composition = body.get("composition_id")
@@ -115,24 +119,16 @@ def _is_adjust(body: dict, existing_route: Route) -> bool:
     if new_stops is None and new_composition is None:
         return True  # only departure_time / stop_type_changes provided
 
-    existing_stop_ids = (
-        [st.stop_id for st in existing_route.all_trips()[0].stop_times]
-        if existing_route.all_trips()
-        else []
-    )
+    first_trip = existing_route.trips[0] if existing_route.trips else None
+    existing_stop_ids = [s.stop_id for s in first_trip.stops] if first_trip else []
     existing_comp_id = (
-        existing_route.all_trips()[0].composition.comp_id
-        if existing_route.all_trips()
-        else None
+        existing_route.trip_pairs[0].composition.comp_id
+        if existing_route.trip_pairs else None
     )
 
-    new_stop_ids = [s["stop_id"] for s in (new_stops or [])]
-
-    stops_changed = bool(new_stops) and new_stop_ids != existing_stop_ids
+    stops_changed = bool(new_stops) and [s["stop_id"] for s in new_stops] != existing_stop_ids
     comp_changed = bool(new_composition) and new_composition != existing_comp_id
-
     return not stops_changed and not comp_changed
-
 
 @bp.post("/planOrUpdate")
 def plan_or_update():
@@ -166,7 +162,7 @@ def plan_or_update():
     if errors:
         return jsonify({"error": "validation_error", "details": errors}), 400
 
-    existing_route = Route.from_dict(body["route"]) if body.get("route") else None
+    existing_route = route_from_dict(body["route"], loader) if body.get("route") else None
     use_adjust = existing_route is not None and _is_adjust(body, existing_route)
     dep_min = (
         hhmm_to_min(body["departure_time"]) if body.get("departure_time") else None
@@ -194,33 +190,34 @@ def plan_or_update():
                 body["proposal_version"],
             )
             # use stops/composition from body if provided, else fall back to existing route
-            stops_input = (
-                body.get("stops")
-                or [
-                    {"stop_id": st.stop_id, "stop_type": st.stop_type}
-                    for st in existing_route.all_trips()[0].stop_times
-                ]
-                if existing_route
-                else body["stops"]
+            first_trip = existing_route.trips[0] if existing_route and existing_route.trips else None
+            stops_input = body.get("stops") or (
+                [{"stop_id": s.stop_id, "stop_type": s.stop_type.value} for s in first_trip.stops]
+                if first_trip else body["stops"]
             )
             comp_id = body.get("composition_id") or (
-                existing_route.all_trips()[0].composition.comp_id
-                if existing_route
-                else None
+                existing_route.trip_pairs[0].composition.comp_id if existing_route and existing_route.trip_pairs else None
             )
             dep_min_plan = dep_min or (
-                existing_route.all_trips()[0].stop_times[0].departure_time_min
-                if existing_route
-                else 1260  # quick dev fix to get routing running: 21:00 as default departure time
+                first_trip.stops[0].departure_time_min if first_trip else 1260
             )
 
             router = RailRouter()
-            route = plan_route(
+            schedule = Schedule(seasonal_schedules=[
+                SeasonalSchedule(season=Season.SUMMER, frequency=Frequency.DAILY),
+                SeasonalSchedule(season=Season.WINTER, frequency=Frequency.DAILY),
+            ])
+            route, _ = plan_route(
                 proposal_id=body["proposal_id"],
                 proposal_version=body["proposal_version"],
-                stop_inputs=[(s["stop_id"], s["stop_type"]) for s in stops_input],
-                composition_id=comp_id,
-                departure_time_min=dep_min_plan,
+                schedule=schedule,
+                trip_pair_inputs=[
+                    TripPairInput(
+                        stop_inputs=[(s["stop_id"], StopType(s["stop_type"])) for s in stops_input],
+                        composition_id=comp_id,
+                        departure_time_min=dep_min_plan,
+                    )
+                ],
                 loader=loader,
                 router=router,
             )
@@ -237,7 +234,7 @@ def plan_or_update():
             {
                 "route_builder_version": ROUTE_BUILDER_VERSION,
                 "action_taken": "adjust" if use_adjust else "plan",
-                "route": route.to_dict(),
+                "route": route_to_dict(route),
             }
         ),
         200,
