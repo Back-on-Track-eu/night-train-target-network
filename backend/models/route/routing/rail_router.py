@@ -7,25 +7,29 @@ Unit conventions (internal)
 ----------------------------
   Distance : metres  (_m)   — GraphHopper native
   Duration : minutes (_min) — converted from GraphHopper milliseconds on parse
-  Speed    : km/h    (_kmh) — derived display value only
 
 Responsibilities
 ----------------
 - HTTP communication with GraphHopper (two-pass routing for custom models).
 - Country attribution of route geometry via shapely point-in-polygon.
-- Physics per country leg: distance_m, driving_time_min, buffer_time_min.
-- Constructs and returns a TripPath directly.
+- Physics per segment: distance_m, driving_time_min, buffer_time_min,
+  country_distance_shares, country_time_shares.
 
 NOT responsible for:
-- Energy consumption     (→ models/energy/calc_energy_consumption.py)
-- TAC / energy costs     (→ models/evaluation/calc.py)
-- Schedule / clock times (→ models/route/route_factory.py)
+- Stop timetable data  (→ models/route/route_factory.py — Stop is built there)
+- Energy consumption   (→ models/energy/calc_energy_consumption.py)
+- TAC / energy costs   (→ models/evaluation/calc.py)
+
+route() returns list[RoutedLeg] — bare segment physics with no Stop
+attached. route_factory._build_stops() pairs each RoutedLeg with the
+Stop objects it builds, producing the final list[Segment].
 
 Public surface
 --------------
-  RailRouter.route(stops, composition, tracks) → TripPath
+  RailRouter.route(stops, composition, tracks) → list[RoutedLeg]
   RailRoutingError
-  Stop  (input type — public)
+  RoutedLeg  (output type — public)
+  StopInput  (input type — public; wraps StopInfrastructure + StopType)
 """
 
 from __future__ import annotations
@@ -40,11 +44,9 @@ from pathlib import Path
 import requests
 
 from models.params import Composition, TrackInfraCollection, StopInfrastructure
-from models.route.trip import CountryLeg, TripSegment, TripPath
+from models.route.trip import StopType
 from models.utils import (
     ms_to_min,
-    m_to_km,
-    haversine_m,
     haversine_path_m,
     bbox_area,
     ISO2_TO_ISO3,
@@ -60,40 +62,43 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class Stop:
-    """A named stop on the route. lat/lon in WGS-84 decimal degrees."""
+class StopInput:
+    """A stop plus its routing context for one trip. Wraps the canonical
+    StopInfrastructure — no field duplication."""
 
-    stop_id: str
-    name: str
-    lat: float
-    lon: float
-    country_code: str = ""
-    stop_type: str = "both"  # "boarding" | "alighting" | "both"
-
-    @classmethod
-    def from_infra(cls, infra: StopInfrastructure, stop_type: str = "both") -> "Stop":
-        return cls(
-            stop_id=infra.stop_id,
-            name=infra.stop_name,
-            lat=infra.lat,
-            lon=infra.lon,
-            country_code=infra.stop_country_code,
-            stop_type=stop_type,
-        )
+    stop: StopInfrastructure
+    stop_type: StopType
 
 
 # ---------------------------------------------------------------------------
-# Private snapped stop — internal only
+# Public output type
 # ---------------------------------------------------------------------------
 
 
 @dataclass
-class _SnappedStop:
-    """Input stop plus coordinate snapped to the rail network."""
+class RoutedLeg:
+    """
+    Bare physics for one segment between two consecutive stops — no Stop
+    objects attached. route_factory._build_stops() pairs each RoutedLeg
+    with Stop objects to produce the final trip.Segment.
 
-    stop: Stop
-    snapped_lat: float
-    snapped_lon: float
+    country_distance_shares and country_time_shares sum to 1.0 each.
+    energy_kwh is 0.0 on return — enriched in-place by
+    calc_energy_consumption() before route_factory builds Stops.
+    """
+
+    geometry: list[list[float]]               # [[lon, lat], ...]
+    distance_m: int
+    driving_time_min: int
+    buffer_time_min: int
+    energy_kwh: float                          # 0.0 until energy model runs
+    country_distance_shares: dict[str, float]  # {country_code: share}, sums to 1.0
+    country_time_shares: dict[str, float]      # {country_code: share}, sums to 1.0
+
+    @property
+    def total_time_min(self) -> int:
+        """Driving + buffer time — matches Segment.total_time_min."""
+        return self.driving_time_min + self.buffer_time_min
 
 
 # ---------------------------------------------------------------------------
@@ -172,10 +177,10 @@ class RailRouter:
     """
     Wraps the OpenRailRouting (GraphHopper) instance.
 
-    route() returns a TripPath with physics-only data (no energy values,
-    no costs, no clock times). route_factory.py handles all enrichment.
-    energy_kwh on all CountryLegs will be 0.0 on return — populated by
-    calc_energy_consumption() in route_factory before trip construction.
+    route() returns list[RoutedLeg] with physics-only data (no Stop
+    objects, no energy values, no costs, no clock times). energy_kwh
+    on all RoutedLegs is 0.0 on return — populated by
+    calc_energy_consumption() in route_factory before Stop construction.
     """
 
     ROUTE_ENDPOINT = "/route"
@@ -200,18 +205,18 @@ class RailRouter:
 
     def route(
         self,
-        stops: list[Stop],
+        stops: list[StopInput],
         composition: Composition,
         tracks: TrackInfraCollection,
-    ) -> TripPath:
+    ) -> list[RoutedLeg]:
         """
-        Route a trip and return a TripPath with physics-only data.
+        Route a trip and return bare segment physics.
 
         Two-pass routing is used when a custom model is needed:
           pass 1 — CH routing to snap stops to the rail network
           pass 2 — custom model routing with snapped coordinates
 
-        energy_kwh on all CountryLegs is 0.0 on return — populated by
+        energy_kwh on all RoutedLegs is 0.0 on return — populated by
         calc_energy_consumption() in route_factory.
         """
         if len(stops) < 2:
@@ -223,26 +228,18 @@ class RailRouter:
                 composition.hsr_allowed
                 and (tracks.get(cc).hsr_allowed if tracks.get(cc) else True)
             )
-            for cc in [s.country_code for s in stops if s.country_code]
+            for cc in {s.stop.stop_country_code for s in stops if s.stop.stop_country_code}
         }
         custom_model = self._build_custom_model(vehicle_max_speed_kmh, avoid_hsr)
 
         if custom_model:
             snap_raw = self._post_route(self._build_payload(stops, None, None))
             snapped_coords = snap_raw["paths"][0]["snapped_waypoints"]["coordinates"]
-            snapped_input = [
-                Stop(
-                    stop_id=stops[i].stop_id,
-                    name=stops[i].name,
-                    lat=snapped_coords[i][1],
-                    lon=snapped_coords[i][0],
-                    country_code=stops[i].country_code,
-                    stop_type=stops[i].stop_type,
-                )
-                for i in range(len(stops))
-            ]
             raw = self._post_route(
-                self._build_payload(snapped_input, vehicle_max_speed_kmh, avoid_hsr)
+                self._build_payload(
+                    stops, vehicle_max_speed_kmh, avoid_hsr,
+                    override_coords=snapped_coords,
+                )
             )
         else:
             raw = self._post_route(self._build_payload(stops, None, None))
@@ -297,13 +294,23 @@ class RailRouter:
 
     def _build_payload(
         self,
-        stops: list[Stop],
+        stops: list[StopInput],
         vehicle_max_speed_kmh: int | None,
         avoid_high_speed_lines: dict[str, bool] | None,
+        override_coords: list[list[float]] | None = None,
     ) -> dict:
+        """
+        override_coords: snapped [lon, lat] pairs from pass 1, used in place
+        of the original stop coordinates for pass 2 of two-pass routing.
+        """
+        points = (
+            override_coords
+            if override_coords is not None
+            else [[s.stop.lon, s.stop.lat] for s in stops]
+        )
         payload: dict = {
             "profile": self.profile,
-            "points": [[s.lon, s.lat] for s in stops],
+            "points": points,
             "points_encoded": False,
             "instructions": False,
             "details": self.DETAILS,
@@ -336,78 +343,38 @@ class RailRouter:
     def _parse_response(
         self,
         body: dict,
-        stops: list[Stop],
+        stops: list[StopInput],
         tracks: TrackInfraCollection,
-    ) -> TripPath:
+    ) -> list[RoutedLeg]:
         path_data = body["paths"][0]
-        shape = path_data["points"]
-        coords = shape["coordinates"]
-
-        snapped_coords = path_data["snapped_waypoints"]["coordinates"]
-        snapped_stops = self._parse_snapped_stops(stops, snapped_coords)
+        coords = path_data["points"]["coordinates"]
 
         details = path_data.get("details", {})
         leg_distance_detail = details.get("leg_distance", [])
-        leg_time_detail = details.get("leg_time", [])
         time_detail = details.get("time", [])
 
         intervals = self._compute_country_intervals(coords, time_detail)
-        segments = self._parse_segments(
-            snapped_stops,
-            coords,
-            leg_distance_detail,
-            leg_time_detail,
-            intervals,
-            tracks,
-        )
-
-        # build per-country aggregation
-        from collections import defaultdict as _dd
-
-        country_legs_by_cc: dict[str, list[CountryLeg]] = _dd(list)
-        for seg in segments:
-            for cl in seg.country_legs:
-                country_legs_by_cc[cl.country_code].append(cl)
-
-        from models.route.trip import CountrySegment
-
-        countries = [
-            CountrySegment(country_code=cc, country_legs=legs)
-            for cc, legs in country_legs_by_cc.items()
-        ]
-
-        return TripPath(
-            shape=shape,
-            segments=segments,
-            countries=countries,
-        )
+        return self._parse_legs(len(stops), coords, leg_distance_detail, intervals, tracks)
 
     @staticmethod
-    def _parse_snapped_stops(
-        stops: list[Stop],
-        snapped_coords: list,
-    ) -> list[_SnappedStop]:
-        result = []
-        for i, stop in enumerate(stops):
-            if i < len(snapped_coords):
-                lon, lat = snapped_coords[i][0], snapped_coords[i][1]
-            else:
-                lon, lat = stop.lon, stop.lat
-                logger.warning("No snapped coordinate for stop '%s'.", stop.name)
-            result.append(_SnappedStop(stop=stop, snapped_lat=lat, snapped_lon=lon))
-        return result
-
-    @staticmethod
-    def _parse_segments(
-        snapped_stops: list[_SnappedStop],
+    def _parse_legs(
+        n_stops: int,
         coords: list[list[float]],
         leg_distance_detail: list,
-        leg_time_detail: list,
         intervals: list[tuple],
         tracks: TrackInfraCollection,
-    ) -> list[TripSegment]:
-        segments = []
-        for i in range(len(snapped_stops) - 1):
+    ) -> list[RoutedLeg]:
+        """
+        Build one RoutedLeg per consecutive stop pair.
+
+        For each leg, intervals overlapping the leg's coordinate range are
+        apportioned by overlap fraction, summed per country, then converted
+        to country_distance_shares / country_time_shares (each summing to 1.0)
+        alongside the leg's total distance_m / driving_time_min / buffer_time_min.
+        """
+        legs: list[RoutedLeg] = []
+
+        for i in range(n_stops - 1):
             if i < len(leg_distance_detail):
                 from_idx = leg_distance_detail[i][0]
                 to_idx = leg_distance_detail[i][1]
@@ -428,36 +395,35 @@ class RailRouter:
                 leg_cc_dist[cc] += dist_m * fraction
                 leg_cc_dur_ms[cc] += iv_ms * fraction
 
-            country_legs: list[CountryLeg] = []
+            total_dist_m = sum(leg_cc_dist.values())
+            total_dur_ms = sum(leg_cc_dur_ms.values())
+
+            country_distance_shares: dict[str, float] = {}
+            country_time_shares: dict[str, float] = {}
+            total_buffer_min = 0
+
             for cc, dist_m_f in leg_cc_dist.items():
-                cl_dist_m = round(dist_m_f)
-                cl_drive_min = ms_to_min(leg_cc_dur_ms[cc])
+                country_distance_shares[cc] = (
+                    dist_m_f / total_dist_m if total_dist_m > 0 else 0.0
+                )
+                country_time_shares[cc] = (
+                    leg_cc_dur_ms[cc] / total_dur_ms if total_dur_ms > 0 else 0.0
+                )
+                cc_drive_min = ms_to_min(leg_cc_dur_ms[cc])
                 track = tracks.get_or_default(cc)
-                buffer_min = round(cl_drive_min * track.buffer_quota_per)
+                total_buffer_min += round(cc_drive_min * track.buffer_quota_per)
 
-                country_legs.append(
-                    CountryLeg(
-                        from_stop_id=snapped_stops[i].stop.stop_id,
-                        to_stop_id=snapped_stops[i + 1].stop.stop_id,
-                        country_code=cc,
-                        distance_m=cl_dist_m,
-                        driving_time_min=cl_drive_min,
-                        buffer_time_min=buffer_min,
-                        energy_kwh=0.0,  # populated by calc_energy_consumption()
-                        energy_kwh_per_km=0.0,  # populated by calc_energy_consumption()
-                    )
-                )
+            legs.append(RoutedLeg(
+                geometry=coords[from_idx : to_idx + 1],
+                distance_m=round(total_dist_m),
+                driving_time_min=ms_to_min(total_dur_ms),
+                buffer_time_min=total_buffer_min,
+                energy_kwh=0.0,  # populated by calc_energy_consumption()
+                country_distance_shares=country_distance_shares,
+                country_time_shares=country_time_shares,
+            ))
 
-            segments.append(
-                TripSegment(
-                    from_stop_id=snapped_stops[i].stop.stop_id,
-                    to_stop_id=snapped_stops[i + 1].stop.stop_id,
-                    geometry=coords[from_idx : to_idx + 1],
-                    country_legs=country_legs,
-                )
-            )
-
-        return segments
+        return legs
 
     def _compute_country_intervals(
         self,
