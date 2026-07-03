@@ -1,59 +1,112 @@
-# -----------------------------------------------------
-# General
-# -----------------------------------------------------
-# credentials
-credentials/
-# -----------------------------------------------------
-# BackEnd relevant
-# -----------------------------------------------------
+# =============================================================================
+# Night Train Target Network — .gitignore
+# =============================================================================
+
+# -----------------------------------------------------------------------------
 # Python
+# -----------------------------------------------------------------------------
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
-*.so
-*.egg
 *.egg-info/
+*.egg
+.eggs/
 dist/
 build/
-.eggs/
+.Python
+pip-wheel-metadata/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
 # uv
-backend/.venv/
-# uv.lock is intentionally committed for reproducible installs
-# Environment
-.env
-.env.*
-!.env.example
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-.nox/
-# Type checking
+.uv/
+uv.lock
+
+# MyPy / type checkers
 .mypy_cache/
 .dmypy.json
+dmypy.json
 .pytype/
-.pyre/
-# IDEs
-.idea/
-.vscode/
-*.iml
-# OS
+
+# Pytest
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# -----------------------------------------------------------------------------
+# Node / Frontend
+# -----------------------------------------------------------------------------
+node_modules/
+dist/
+.parcel-cache/
+
+# -----------------------------------------------------------------------------
+# Docker / Infrastructure
+# -----------------------------------------------------------------------------
+# Env files with secrets — never commit
+backend/docker/.env
+backend/db/dev/.env
+.devcontainer/.env
+
+# OpenRailRouting — large data and generated graph cache
+backend/models/route/routing/docker/data/
+backend/models/route/routing/docker/graph-cache/
+
+# Postgres data volume (if mounted locally)
+pgdata/
+
+# -----------------------------------------------------------------------------
+# Claude / AI tooling
+# -----------------------------------------------------------------------------
+# Claude snapshot tool output — too large for git
+project-snapshot.zip
+.claude/export-temp/
+
+# -----------------------------------------------------------------------------
+# Notes / personal files
+# -----------------------------------------------------------------------------
+notes/
+
+# Generated at runtime by Docker entrypoint
+backend/models/route/routing/countries.geojson
+
+# Scratch files
+git_status.txt
+test_output.txt
+
+# Credentials
+credentials/
+
+# -----------------------------------------------------------------------------
+# OS / Editor
+# -----------------------------------------------------------------------------
 .DS_Store
 Thumbs.db
-# -----------------------------------------------------
-# Frontend relevant
-# -----------------------------------------------------
-frontend/node_modules/
-frontend/dist/
-frontend/.vite/
-# OSM source data — too large for git (~30 GB)
-backend/models/route/routing/docker/data/
-backend/models/route/routing/countries.geojson
-# Built routing graph — generated, not source (~5-10 GB)
-backend/models/route/routing/docker/graph-cache/
-#Coding Agents
-.claude/
-# Snapshot for sending to claude
-project-snapshot.zip
+desktop.ini
+
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# PyCharm
+.idea/
+*.iml
+
+# -----------------------------------------------------------------------------
+# Misc
+# -----------------------------------------------------------------------------
+*.log
+*.tmp
+*.bak
+*.orig
