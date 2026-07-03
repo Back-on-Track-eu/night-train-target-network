@@ -4,25 +4,27 @@ This folder contains the domain model for evaluating night train route economics
 
 ---
 
-## Architecture
+## Structure
 
 ```
 models/
 ├── params.py                        # Shared parameter dataclasses (loaded from DB)
-├── utils.py                         # Shared unit conversion and geography utilities
+├── utils.py                         # Shared unit conversion utilities
 ├── route/
-│   ├── trip.py                      # Trip, TripPath, TripSegment, CountryLeg, StopTime
-│   ├── route.py                     # Route, ParkingLocation, RouteStats
-│   ├── route_factory.py             # plan_route() and adjust_route() sole constructors
+│   ├── trip.py                      # Stop, Segment, Trip — physics domain objects
+│   ├── route.py                     # Route, TripPair, Parking, Shunting, ODPair, Schedule
+│   ├── route_factory.py             # plan_route(), adjust_route(), distribute_demand()
 │   └── routing/
 │       ├── rail_router.py           # OpenRailRouting (GraphHopper) wrapper
 │       └── docker/                  # Self-hosted routing engine Docker setup
 ├── energy/
-│   ├── calc_energy_consumption.py   # Per-country-leg energy model
+│   ├── calc_energy_consumption.py   # Per-segment energy model
 │   └── version.py                   # ENERGY_CALC_VERSION
-└── cost_rev_eval/
-    ├── calc.py                      # Cost/revenue evaluation
-    └── version.py                   # CALC_VERSION
+└── evaluation/
+    ├── calc.py                      # Cost/revenue evaluation → EvaluationResult
+    ├── views.py                     # Breakdown aggregation, allocation, normalisation
+    ├── version.py                   # CALC_VERSION
+    └── README.md                    # Evaluation layer documentation
 ```
 
 ---
@@ -30,22 +32,27 @@ models/
 ## Pipeline
 
 ```
-plan_route(proposal_id, proposal_version, stop_inputs, composition_id, departure_time_min, loader, router)
-  |
-  +-- loader.build_composition()      -> Composition + ParamVersions
-  +-- loader.build_all_tracks()       -> TrackInfraCollection + ParamVersions
-  +-- loader.build_all_stops()        -> StopInfraCollection + ParamVersions
-  |
-  +-- rail_router.route(stops, composition, tracks)   -> TripPath (energy_kwh = 0.0)
-  +-- calc_energy_consumption(trip_path, composition) -> enriches CountryLeg.energy_kwh
-  +-- _compute_stop_times(stops, trip_path, ...)      -> list[StopTime]
-  |
-  +-- Trip._create(...) x 2 (outbound + return)
-        +-- Route._create(...)                        -> Route
+plan_route(proposal_id, proposal_version, schedule, trip_pair_inputs, loader, router)
+  │
+  ├── loader.build_composition()      → Composition
+  ├── loader.build_all_tracks()       → TrackInfraCollection
+  ├── loader.build_all_stops()        → StopInfraCollection
+  │
+  ├── rail_router.route(stops, composition, tracks)   → list[RoutedLeg]
+  ├── calc_energy_consumption(legs, composition)       → enriches RoutedLeg.energy_kwh
+  ├── _build_trip(legs, stops, ...)                   → Trip (outbound)
+  ├── _build_trip(legs, stops, ...)                   → Trip (return)
+  │
+  └── Route._create(schedule, trip_pairs, parkings, shuntings)  → Route
+
+distribute_demand(route, utilization_per, fare_per_km_by_class)  → Route (with od_pairs)
+
+evaluate_route(route, tracks, stop_infra)  → EvaluationResult   [calc.py]
+
+build_breakdown*(route, result)            → Breakdown matrices  [views.py]
 ```
 
-For schedule-only changes (departure time, stop types), use `adjust_route()` instead.
-It copies the existing TripPath without rerouting.
+For schedule-only changes (departure time, stop types), use `adjust_route()`.
 
 ---
 
@@ -53,33 +60,70 @@ It copies the existing TripPath without rerouting.
 
 | Layer | Responsibility |
 |---|---|
-| `route_factory.py` | Sole constructor for Trip and Route — orchestrates the full pipeline |
-| `rail_router.py` | HTTP communication with routing engine, country attribution, buffer computation -> TripPath |
-| `calc_energy_consumption.py` | Energy model — enriches CountryLeg.energy_kwh in-place |
-| `calc.py` | All monetary values — TAC, energy cost, station charges, staff, amortisation, margin |
-| `trip.py` | Physics domain object — distances, times, energy. No monetary values |
-| `route.py` | Route container — two trips (outbound + return), RouteStats, operator invariant |
-| `params.py` | Immutable parameter dataclasses loaded from DB. ParamVersions records field-level provenance |
+| `route_factory.py` | Sole constructor for `Trip`, `TripPair`, `Route` — orchestrates the full plan/adjust pipeline |
+| `rail_router.py` | HTTP calls to routing engine, country attribution, buffer computation → `RoutedLeg` |
+| `calc_energy_consumption.py` | Energy model — enriches `RoutedLeg.energy_kwh` |
+| `calc.py` | All monetary values — produces flat `EvaluationResult` with one cost object per event |
+| `views.py` | Aggregation, allocation, and normalisation — produces `Breakdown` matrices |
+| `trip.py` | Physics domain objects: `Stop`, `Segment`, `Trip`. No monetary values |
+| `route.py` | Route container: `Route`, `TripPair`, `Parking`, `Shunting`, `ODPair`, `Schedule` |
+| `params.py` | Immutable parameter dataclasses loaded from DB |
 
-**Strict boundary:** Trip and Route carry physics only. All EUR values live exclusively in calc.py.
+**Strict boundary:** `Trip` and `Route` carry physics only. All EUR values live
+exclusively in `calc.py`. All serialization lives in `api/helpers/serialize.py`.
+
+---
+
+## Key domain objects
+
+### Trip and Route
+
+`Stop` — one stop call on a trip. `country_code` from `StopInfrastructure`.
+`stop_type` is `BOARDING`, `ALIGHTING`, or `BOTH` — controls which OD pairs
+are valid and whether station charges apply.
+
+`Segment` — one leg between two consecutive stops. Carries physics:
+`distance_m`, `driving_time_min`, `buffer_time_min`, `energy_kwh`,
+`country_distance_shares`, `country_time_shares`.
+
+`TripPair` — outbound + return trip sharing one `Composition`. Carries `od_pairs`
+(demand for this pair) and `composition` (cost parameters).
+
+`Route` — container for trip pairs, schedule, parkings, and shuntings.
+`Route.countries` derives all countries from segment shares and stop locations.
+`Route.shuntings` lists one `Shunting` per trip terminal (no deduplication).
+`Route.parkings` lists one `Parking` per unique terminal stop (deduplicated).
+
+### Parking and Shunting
+
+`Parking` — overnight stabling. One per unique terminal stop across all trips.
+Has `trip_ids` listing which trips park there. Cost rate from `TrackInfrastructure.parking_eur_day`.
+
+`Shunting` — coupling/uncoupling movement. One per trip terminal, not deduplicated.
+Has `trip_id`. Cost rate from `TrackInfrastructure.shunting_eur_event`.
+
+### ODPair
+
+`ODPair` — annual demand for one origin→destination×class combination on one trip.
+Lives on `TripPair.od_pairs`. `places_sold` is annual (per-trip demand = `places_sold / operating_days`).
+Valid OD pairs have a `BOARDING`/`BOTH` origin and `ALIGHTING`/`BOTH` destination.
 
 ---
 
 ## ID convention
 
-GTFS-compatible string IDs derived from the proposal:
+GTFS-compatible string IDs:
 
 ```
 route_id : P{proposal_id}_V{proposal_version}_R1
-trip_id  : P{proposal_id}_V{proposal_version}_R1_D{direction}_T{trip_index}
+trip_id  : P{proposal_id}_V{proposal_version}_R1_D{direction}_T{index}
 
-e.g. P1_V1_R1       -- route for proposal 1, version 1
-     P1_V1_R1_D0_T1 -- outbound trip
-     P1_V1_R1_D1_T1 -- return trip
+e.g. P1_V1_R1       — route for proposal 1, version 1
+     P1_V1_R1_D0_T1 — outbound trip
+     P1_V1_R1_D1_T1 — return trip
 ```
 
-proposal_version increments on every change. plan_route() produces a fresh route;
-adjust_route() copies an existing route with new IDs for the new version.
+`proposal_id` is stable across versions. `proposal_version` increments on every change.
 
 ---
 
@@ -92,37 +136,23 @@ adjust_route() copies an existing route with new IDs for the new version.
 | Clock time | minutes from midnight day 1 | `_min` |
 | Energy | kWh | `_kwh` |
 | Cost | EUR | `_eur` |
-| Speed | km/h | `_kmh` (derived only) |
-
-Conversions between units live in `models/utils.py`.
-
----
-
-## Parameter provenance
-
-Every Trip carries `model_versions: ModelVersions` and `param_versions: ParamVersions`.
-
-ParamVersions records one entry per parameter field used in the computation, keyed
-by `"table_short:entity_id:field_name"` e.g. `"track_infra:DE:tac_eur_train_km"`.
-Each entry carries the DB row version, source, and column description from the DB —
-enabling full reproducibility and transparent frontend display.
+| Share / rate | dimensionless | `_per` |
 
 ---
 
 ## Energy model
 
-Energy consumption is estimated per country leg:
+Energy consumption is estimated per segment using a regression model:
 
 ```
-energy_kwh = total_weight_t x distance_km x (
-    energy_factor_weight
-    + energy_factor_speed  x avg_speed_kmh^2
-    + energy_factor_terrain x terrain_score
+energy_kwh = total_weight_t × distance_km × (
+    factor_weight
+    + factor_speed   × avg_speed_kmh²
+    + factor_terrain × terrain_score
 )
 ```
 
-Energy factor coefficients are stored on CompositionType in the DB.
-Terrain score comes from TrackInfrastructure per country.
-
-Note: The energy regression coefficients require calibration against real
-consumption data (Deutsche Bahn Trassenfinder). Calibration is deferred.
+Coefficients are stored on `CompositionType`. Terrain score comes from
+`TrackInfrastructure` per country. **Currently using a flat 28.0 kWh/km
+dummy factor** — calibration against Deutsche Bahn Trassenfinder data is pending.
+See `models/energy/README.md` for calibration guidance.

@@ -65,7 +65,7 @@ Wait until all three containers (`night_train_postgres`, `openrailrouting`, `nig
 
 ```powershell
 Invoke-RestMethod -Uri http://localhost:5000/api/health
-Invoke-RestMethod -Uri http://localhost:5000/api/params/stops
+Invoke-RestMethod -Uri http://localhost:5000/api/params/StopInfrastructures
 Invoke-RestMethod -Uri http://localhost:5000/api/params/compositions
 ```
 
@@ -150,7 +150,8 @@ night-train-target-network/
 │   │   └── .env.example    ← single source of truth for all env vars
 │   ├── db/dev/             # Standalone DB stack (schema inspection)
 │   ├── api/                # Flask API blueprints
-│   ├── models/             # Domain model, routing, energy, cost/rev
+│   │   └── helpers/        # serialize.py and dependencies.py
+│   ├── models/             # Domain model, routing, energy, evaluation
 │   ├── adapters/           # DB data loader
 │   ├── tests/              # Integration tests
 │   ├── main.py

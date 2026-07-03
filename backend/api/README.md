@@ -29,19 +29,6 @@
 | `POST` | `/api/auth/request-code` | Send OTP to email address |
 | `POST` | `/api/auth/verify` | Verify OTP and return JWT token |
 
-**`POST /api/auth/request-code` — Request body**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `email` | string | ✓ | User email address |
-
-**`POST /api/auth/verify` — Request body**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `email` | string | ✓ | User email address |
-| `code` | string | ✓ | OTP code received by email |
-
 ---
 
 ### Feedback ⚠️ NOT YET IMPLEMENTED
@@ -52,14 +39,6 @@
 |--------|----------|-------------|
 | `POST` | `/api/feedback` | Submit feedback on a model parameter |
 
-**`POST /api/feedback` — Request body**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `param_key` | string | ✓ | Parameter key e.g. `"track_infra:DE:tac_eur_train_km"` |
-| `message` | string | ✓ | Feedback text |
-| `attachment` | object | — | Optional data attachment |
-
 ---
 
 ### Scenarios ⚠️ NOT YET IMPLEMENTED
@@ -68,25 +47,9 @@
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/scenario` | Save a new scenario (always inserts, never updates) |
-| `GET` | `/api/scenarios` | List current scenarios (id, name, summary metrics) |
-| `POST` | `/api/scenarios` | Filtered list of scenarios with pagination |
-| `GET` | `/api/scenario/<id>` | Load a saved scenario by ID |
-
-**`POST /api/scenario` — Request body**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | string | ✓ | Scenario name |
-| `route` | object | ✓ | `Route.to_dict()` output |
-| `evaluation` | object | ✓ | `EvaluationResult.to_dict()` output |
-
-**`POST /api/scenarios` — Request body (filtered list)**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `limit` | int | — | Max results: 10, 20, or 50. Default 10 |
-| `offset` | int | — | Pagination offset. Default 0 |
+| `POST` | `/api/scenario` | Save a new scenario |
+| `GET` | `/api/scenarios` | List scenarios |
+| `GET` | `/api/scenario/<id>` | Load a scenario by ID |
 
 ---
 
@@ -100,81 +63,16 @@
 
 No request body — all are read-only GET endpoints.
 
-**`GET /api/params/StopInfrastructures` — Response fields (per stop)**
+Parameter fields (e.g. `tac_eur_train_km`, `parking_eur_day`) are returned as
+field objects with provenance:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `stop_id` | string | Unique stop identifier |
-| `name` | string | Display name |
-| `country_code` | string | ISO 3166-1 alpha-2 |
-| `lat` | float | WGS-84 latitude |
-| `lon` | float | WGS-84 longitude |
-| `stop_charge_eur` | field object | Station access charge — may be resolved from country/global default, see field object structure below |
-
-Parameter field object structure — used for `stop_charge_eur` and all track infrastructure fields. Identity/location fields (`stop_id`, `name`, `country_code`, `lat`, `lon`) are always plain values and never defaulted:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `value` | number | The resolved parameter value |
-| `is_default` | bool | `true` if this value was resolved from `track_infrastructure_defaults` or `stop_infrastructure_defaults` because the country/stop-specific value was NULL |
-| `version` | int | DB row version of the source — from the country/stop row if `is_default=false`, from the defaults table if `is_default=true` |
-| `source.source_id` | string | Data source identifier |
-| `source.source_description` | string | Human-readable source description |
-| `source.source_url` | string | URL to source document |
+| `value` | number | Resolved parameter value |
+| `is_default` | bool | `true` if resolved from the defaults table |
+| `version` | int | DB row version of the source row |
+| `source` | object | `{source_id, source_description, source_url}` |
 | `description` | string | Column description from DB |
-
-**`GET /api/params/compositions` — Response fields (per composition)**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `comp_id` | string | Unique composition identifier |
-| `description` | string | Human-readable description |
-| `operator_id` | string | Operating company ID |
-| `routing.total_weight_t` | float | Gross train weight in tonnes |
-| `routing.max_speed_kmh` | float | Maximum operational speed |
-| `routing.hsr_allowed` | bool | Whether HSR infrastructure may be used |
-| `routing.min_boarding_time_min` | int | Minimum dwell time at boarding stops (min) |
-| `routing.min_alighting_time_min` | int | Minimum dwell time at alighting stops (min) |
-| `routing.driver_factor` | float | Number of drivers required |
-| `energy.factor_weight` | float | Energy regression: weight-distance coefficient |
-| `energy.factor_speed` | float | Energy regression: speed-squared coefficient |
-| `energy.factor_terrain` | float | Energy regression: terrain score coefficient |
-| `capacity` | object | `{class_main: {places, density}}` per service class |
-| `ebit_margin_per` | float | Required EBIT margin as share of revenue |
-| `fixed_costs.*` | float | Amortisation, financing, cleaning, overhead (EUR/day) |
-| `variable_km.*` | float | Maintenance rates (EUR/km) |
-| `variable_hour.*` | float | Staff rates (EUR/h) and overhead hours |
-| `variable_ticket.*` | object | Service stockings per place by class, var overhead rate |
-| `indicative` | object or null | Pre-computed indicative KPIs from a reference trip — see below. `null` if no reference row exists |
-
-**Indicative KPIs** (computed at load time using the same model as `/api/evaluation/calc`, based on a reference trip stored in `input_params.composition_references`):
-
-| Field | Unit | Description |
-|-------|------|-------------|
-| `cost_eur_per_seat_km` | €/seat-km | Total cost per available seat-km on reference trip |
-| `cost_eur_per_place_km` | €/place-km | Total cost per density-weighted place-km on reference trip |
-| `subsidy_eur_per_pax_km` | €/pax-km | Estimated subsidy needed per sold passenger-km at reference load |
-| `breakeven_load_factor` | 0.0–1.0 | Load factor needed to break even at reference fares |
-
-**`GET /api/params/TrackInfrastructures` — Response fields (per country)**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `country_code` | string | ISO 3166-1 alpha-2 |
-| `tac_eur_train_km` | field object | Track access charge (EUR/train-km) |
-| `energy_price_eur_kwh` | field object | Traction electricity price (EUR/kWh) |
-| `parking_eur_day` | field object | Overnight stabling fee (EUR/day) |
-| `terrain_category` | field object | Flat / Hilly / Mountainous |
-| `terrain_score` | field object | Numerical terrain difficulty (energy model input) |
-| `hsr_allowed` | field object | Whether HSR infrastructure may be used |
-| `min_boarding_time_min` | field object | Infrastructure minimum boarding dwell (min) |
-| `min_alighting_time_min` | field object | Infrastructure minimum alighting dwell (min) |
-| `buffer_quota_per` | field object | Schedule buffer quota (share of driving time) |
-
-Each field is a parameter field object — see structure in `StopInfrastructures` section above.
-When `is_default=true`, the value, source, and version shown come from `track_infrastructure_defaults`
-(for track fields) or `stop_infrastructure_defaults` (for stop charges) — not from the country/stop row.
-The frontend can display this as e.g. "EU average default" with the defaults table's source and version.
 
 ---
 
@@ -195,26 +93,25 @@ The backend automatically derives whether a full reroute is needed:
 |-------|------|----------|-------------|
 | `proposal_id` | int | ✓ | Proposal ID (stable across versions) |
 | `proposal_version` | int | ✓ | Version counter — increment on every change |
-| `stops` | array | ✓ for new route | Ordered stop list — see stop object below |
-| `composition_id` | string | ✓ for new route | Composition key from `/api/params/compositions` |
-| `departure_time` | string | — | Departure time `HH:MM` (supports `00:00`–`47:59` for overnight). Omit to keep existing |
-| `route` | object | — | `Route.to_dict()` output from a previous call. Required for adjust; optional for plan with geometry change |
+| `stops` | array | ✓ for new route | Ordered stop list `[{stop_id, stop_type}, ...]` |
+| `composition_id` | string | ✓ for new route | From `/api/params/compositions` |
+| `departure_time` | string | — | `HH:MM`, supports `00:00`–`47:59`. Omit to keep existing |
+| `route` | object | — | Route JSON from a previous call. Required for adjust |
 | `stop_type_changes` | object | — | `{stop_id: stop_type}` — update stop types without rerouting |
 
-Stop object:
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `stop_id` | string | ✓ | Stop key from `/api/params/StopInfrastructures` |
-| `stop_type` | string | ✓ | `"boarding"`, `"alighting"`, or `"both"` |
+Stop types: `"boarding"`, `"alighting"`, `"both"`.
 
 **Response**
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `route_builder_version` | string | Route model version |
-| `action_taken` | string | `"plan"` or `"adjust"` — what the backend decided to do |
-| `route` | object | Full `Route` object — pass this to `/api/evaluation/calc` |
+| `action_taken` | string | `"plan"` or `"adjust"` |
+| `route` | object | Route JSON — pass this to `/api/evaluation/calc` |
+
+The route JSON embeds all physics (segments, geometry, timetable, country shares)
+but no monetary values or demand. Demand (`od_pairs`) must be added before calling
+the evaluation endpoint.
 
 ---
 
@@ -228,23 +125,34 @@ Stop object:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `route` | object | ✓ | `Route.to_dict()` output from `/api/route/planOrUpdate` |
-| `route_demand` | object | ✓ | OD-pair demand — see structure below |
-| `operating_days_year` | int | ✓ | Operating days per year (1–366) |
+| `route` | object | ✓ | Route JSON from `/api/route/planOrUpdate` with `od_pairs` populated |
 
-`route_demand` structure — keyed by `trip_id`:
+Demand is embedded in the route JSON under `trip_pairs[].od_pairs`:
+
 ```json
 {
-  "P1_V1_R1_D0_T1": {
-    "od_pairs": [
+  "route": {
+    "route_id": "P1_V1_R1",
+    "schedule": { ... },
+    "trip_pairs": [
       {
-        "origin_stop_id":      "AT_WIEN_HBF",
-        "destination_stop_id": "DE_HAMBURG_HBF",
-        "class_main":          "Couchette",
-        "places_sold":         40,
-        "avg_price":           89.0
+        "composition_id": "STD-7.1",
+        "od_pairs": [
+          {
+            "origin_stop_id":      "AT_WIEN_HBF",
+            "destination_stop_id": "DE_BERLIN_HBF",
+            "class_main":          "Couchette",
+            "trip_id":             "P1_V1_R1_D0_T1",
+            "places_sold":         40,
+            "avg_price":           89.0
+          }
+        ],
+        "outbound": { ... },
+        "return_trip": { ... }
       }
-    ]
+    ],
+    "parkings": [ ... ],
+    "shuntings": [ ... ]
   }
 }
 ```
@@ -253,34 +161,78 @@ Stop object:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `origin_stop_id` | string | ✓ | Origin stop — must match a stop in the route |
-| `destination_stop_id` | string | ✓ | Destination stop — must match a stop in the route |
+| `origin_stop_id` | string | ✓ | Must be a boarding or both-type stop in the trip |
+| `destination_stop_id` | string | ✓ | Must be an alighting or both-type stop in the trip |
 | `class_main` | string | ✓ | `"Seat"`, `"Couchette"`, `"Sleeper"`, `"Capsule"`, or `"Catering"` |
-| `places_sold` | int | ✓ | Number of places sold for this OD pair (≥ 0) |
+| `trip_id` | string | ✓ | Trip this OD pair belongs to (outbound or return) |
+| `places_sold` | int | ✓ | Annual tickets sold for this OD pair (≥ 0) |
 | `avg_price` | float | ✓ | Average ticket price in EUR (≥ 0) |
 
 **Response**
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `calc_version` | string | Calc model version |
-| `calc_formulas` | object | `{key: {latex, description}}` — full formula registry |
-| `model_versions` | object | `{model_name: version}` — all model versions used |
-| `param_versions` | object | `{table:entity:field: {value, version, is_default, source, description}}` — full parameter provenance. `is_default=true` means the value was resolved from `track_infrastructure_defaults` or `stop_infrastructure_defaults`; source and version shown are from those tables |
-| `operating_days_year` | int | Operating days used for annual normalisation |
-| `parking_eur` | float | Route-level parking cost per day |
-| `summary` | object | Route-level normalised matrix |
-| `by_trip` | array | Per-trip normalised matrices |
-| `by_country` | object | Per-country normalised matrices (infrastructure costs only) |
-| `by_od` | array | Per-OD-pair normalised matrices |
+```json
+{
+  "calc_version": "...",
+  "result": {
+    "route_id": "P1_V1_R1",
+    "views": {
+      "route":                      { <normalised breakdown> },
+      "per_trip_pair":              { "<pair_key>": { <normalised breakdown> }, "all": { ... } },
+      "per_trip_pair_per_country":  { "<pair_key>": { "<country_code>": { <normalised breakdown> }, "all": { ... } }, "all": { ... } },
+      "per_trip_pair_per_od":       { "<pair_key>": { "<od_key>": { <normalised breakdown> }, "all": { ... } }, "all": { ... } },
+      "per_trip_per_stop":          { "<trip_id>": { "<stop_id>": { <normalised breakdown> }, "all": { ... } }, "all": { ... } }
+    }
+  }
+}
+```
 
-Each normalised matrix contains 10 views:
-`per_day`, `per_year`, `per_trip`, `per_trip_km`,
-`per_available_place_km`, `per_sold_place_km`,
-`per_available_place_of_class`, `per_sold_place_of_class`,
-`per_available_place_km_of_class`, `per_sold_place_km_of_class`
+Each normalised breakdown contains five views:
 
-Each view contains the full cost/revenue breakdown with `calc_steps` (formula key + actual input values + result).
+| Key | Unit | Description |
+|-----|------|-------------|
+| `per_year` | €/year | Annual totals |
+| `per_operating_day` | €/operating-day | Per day the service runs |
+| `per_trip_km` | €/km | Per km of total trip distance (both directions) |
+| `per_available_place_km` | €/available-place-km | Per capacity × distance |
+| `per_sold_place_km` | €/sold-place-km | Per actual passenger × distance |
+
+Each view is a nested cost/revenue/margin breakdown:
+
+```json
+{
+  "cost": {
+    "operator": {
+      "variable": {
+        "driver_eur": 0.0, "crew_eur": 0.0, "coach_maintenance_eur": 0.0,
+        "loco_eur": 0.0, "svc_stockings_eur": 0.0, "var_overhead_eur": 0.0,
+        "total_eur": 0.0
+      },
+      "fixed": {
+        "coach_amortisation_eur": 0.0, "financing_eur": 0.0,
+        "fix_overhead_eur": 0.0, "cleaning_eur": 0.0, "shunting_eur": 0.0,
+        "total_eur": 0.0
+      },
+      "total_eur": 0.0
+    },
+    "infrastructure": {
+      "tac_eur": 0.0, "energy_eur": 0.0,
+      "station_charge_eur": 0.0, "parking_eur": 0.0,
+      "total_eur": 0.0
+    },
+    "total_eur": 0.0
+  },
+  "revenue": { "ticket_revenue_eur": 0.0, "total_eur": 0.0 },
+  "margin":  { "ebit_margin_eur": 0.0, "total_eur": 0.0 },
+  "total_cost_eur": 0.0,
+  "total_revenue_eur": 0.0,
+  "net_eur": 0.0
+}
+```
+
+`od_key` format: `"{origin_stop_id}__{destination_stop_id}__{class_main}"`
+
+See `models/evaluation/README.md` for full documentation of the evaluation model,
+cost allocation rules, and view semantics.
 
 ---
 
@@ -289,8 +241,9 @@ Each view contains the full cost/revenue breakdown with `calc_steps` (formula ke
 | Status | `error` key | Meaning |
 |--------|-------------|---------|
 | `400` | `bad_request` | Request body is not valid JSON |
-| `400` | `validation_error` | Invalid fields — see `details` array |
+| `400` | `validation_error` | Invalid or missing fields — see `details` array |
 | `422` | `domain_error` | Valid request but pipeline failed (e.g. unknown stop, no route found) |
 | `500` | `route_error` | Unexpected error in route builder |
 | `500` | `calc_error` | Unexpected error in evaluation |
+| `503` | `infrastructure_error` | DB unreachable or unknown composition ID |
 | `501` | `not_implemented` | Endpoint exists but is not yet implemented |
