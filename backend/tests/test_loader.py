@@ -54,14 +54,10 @@ SCHEMA_COLUMNS = _parse_schema_columns()
         ("input_params.composition_types", "composition_type_energy_factor_weight"),
         ("input_params.composition_types", "composition_type_energy_factor_speed"),
         ("input_params.composition_types", "composition_type_energy_factor_terrain"),
-        ("input_params.composition_types", "composition_type_purchase_loco_eur"),
         ("input_params.composition_types", "composition_type_purchase_coach_eur"),
-        ("input_params.composition_types", "composition_type_loco_avail_per"),
         ("input_params.composition_types", "composition_type_coach_avail_per"),
-        ("input_params.composition_types", "composition_type_loco_amort_years"),
         ("input_params.composition_types", "composition_type_coach_amort_years"),
         ("input_params.composition_types", "composition_type_cleaning_eur_day"),
-        ("input_params.composition_types", "composition_type_loco_maint_eur_km"),
         ("input_params.composition_types", "composition_type_coach_maint_eur_km"),
         # operators
         ("input_params.operators", "operator_id"),
@@ -71,7 +67,6 @@ SCHEMA_COLUMNS = _parse_schema_columns()
         ("input_params.operators", "operator_crew_overhead_h"),
         ("input_params.operators", "operator_ebit_margin_per"),
         ("input_params.operators", "operator_financing_quota_per"),
-        ("input_params.operators", "operator_shunting_eur_per_event"),
         ("input_params.operators", "operator_var_overhead_per"),
         ("input_params.operators", "operator_fix_overhead_quota_per"),
         # coach_types
@@ -129,7 +124,7 @@ COUNTRY = "DE"
 STOP_ID = "DE_BERLIN_HBF"
 
 
-def test_loader_composition_fields_match_db(loader, db_cur):
+def test_loader_composition_fields_match_db(loader, db_cur, base_scenario):
     """Composition built by loader matches raw DB values for key fields."""
     comp, _ = loader.build_composition(COMP_ID)
 
@@ -139,9 +134,10 @@ def test_loader_composition_fields_match_db(loader, db_cur):
                op.operator_ebit_margin_per, op.operator_financing_quota_per
         FROM input_params.composition_types ct
         JOIN input_params.operators op ON op.operator_id = ct.composition_type_operator_id
-        WHERE ct.composition_type_id = %s AND ct.is_current = TRUE
+            AND op.operator_version = %s
+        WHERE ct.composition_type_id = %s AND ct.composition_type_version = %s
     """,
-        (COMP_ID,),
+        (base_scenario["operators_version"], COMP_ID, base_scenario["composition_types_version"]),
     )
     row = db_cur.fetchone()
     assert row is not None, f"No DB row found for composition '{COMP_ID}'"
@@ -159,7 +155,7 @@ def test_loader_composition_fields_match_db(loader, db_cur):
     )
 
 
-def test_loader_composition_capacity_aggregation(loader, db_cur):
+def test_loader_composition_capacity_aggregation(loader, db_cur, base_scenario):
     """places_by_class from loader matches direct DB aggregation."""
     comp, _ = loader.build_composition(COMP_ID)
 
@@ -169,10 +165,10 @@ def test_loader_composition_capacity_aggregation(loader, db_cur):
         FROM input_params.composition_types ct
         JOIN input_params.composition_type_coaches cc ON cc.composition_type_row_id = ct.composition_type_row_id
         JOIN input_params.coach_type_classes ctc      ON ctc.coach_type_row_id = cc.coach_type_row_id
-        WHERE ct.composition_type_id = %s AND ct.is_current = TRUE
+        WHERE ct.composition_type_id = %s AND ct.composition_type_version = %s
         GROUP BY ctc.service_class_id
     """,
-        (COMP_ID,),
+        (COMP_ID, base_scenario["composition_types_version"]),
     )
     rows = {row["service_class_id"]: int(row["places"]) for row in db_cur.fetchall()}
 
@@ -182,7 +178,7 @@ def test_loader_composition_capacity_aggregation(loader, db_cur):
         ), f"places_by_class[{svc_class_id}] mismatch: loader={comp.places_by_class.get(svc_class_id)} db={expected_places}"
 
 
-def test_loader_composition_weight_aggregation(loader, db_cur):
+def test_loader_composition_weight_aggregation(loader, db_cur, base_scenario):
     """total_weight_t from loader matches SUM of coach weights from DB."""
     comp, _ = loader.build_composition(COMP_ID)
 
@@ -192,15 +188,15 @@ def test_loader_composition_weight_aggregation(loader, db_cur):
         FROM input_params.composition_types c
         JOIN input_params.composition_type_coaches cc ON cc.composition_type_row_id = c.composition_type_row_id
         JOIN input_params.coach_types ct              ON ct.coach_type_row_id = cc.coach_type_row_id
-        WHERE c.composition_type_id = %s AND c.is_current = TRUE
+        WHERE c.composition_type_id = %s AND c.composition_type_version = %s
     """,
-        (COMP_ID,),
+        (COMP_ID, base_scenario["composition_types_version"]),
     )
     row = db_cur.fetchone()
     assert comp.total_weight_t == pytest.approx(float(row["weight"]), rel=1e-4)
 
 
-def test_loader_track_infra_fields_match_db(loader, db_cur):
+def test_loader_track_infra_fields_match_db(loader, db_cur, base_scenario):
     """TrackInfrastructure from loader matches raw DB values."""
     tracks, pv = loader.build_all_tracks()
     assert COUNTRY in tracks.all(), f"Country {COUNTRY} not in tracks collection"
@@ -209,9 +205,9 @@ def test_loader_track_infra_fields_match_db(loader, db_cur):
     db_cur.execute(
         """
         SELECT * FROM input_params.track_infrastructures
-        WHERE country_code = %s AND is_current = TRUE
+        WHERE country_code = %s AND track_infra_version = %s
     """,
-        (COUNTRY,),
+        (COUNTRY, base_scenario["track_infrastructures_version"]),
     )
     row = db_cur.fetchone()
     assert row is not None
@@ -232,7 +228,7 @@ def test_loader_track_infra_fields_match_db(loader, db_cur):
     assert entry.is_default is False
 
 
-def test_loader_stop_fields_match_db(loader, db_cur):
+def test_loader_stop_fields_match_db(loader, db_cur, base_scenario):
     """StopInfrastructure from loader matches raw DB values."""
     stops, pv = loader.build_all_stops()
     assert STOP_ID in stops.all(), f"Stop {STOP_ID} not in stops collection"
@@ -241,9 +237,9 @@ def test_loader_stop_fields_match_db(loader, db_cur):
     db_cur.execute(
         """
         SELECT * FROM input_params.stop_infrastructures
-        WHERE stop_id = %s AND is_current = TRUE
+        WHERE stop_id = %s AND stop_infra_version = %s
     """,
-        (STOP_ID,),
+        (STOP_ID, base_scenario["stop_infrastructures_version"]),
     )
     row = db_cur.fetchone()
     assert row is not None
@@ -261,15 +257,16 @@ def test_loader_all_compositions_load(loader):
     assert len(comps) >= 1, f"Expected at least 1 composition, got {len(comps)}"
 
 
-def test_loader_track_infra_default_resolves(loader, db_cur):
+def test_loader_track_infra_default_resolves(loader, db_cur, base_scenario):
     """A country with NULL fields gets values from track_infrastructure_defaults."""
     # Find a country that has at least one NULL field
     db_cur.execute(
         """
         SELECT country_code FROM input_params.track_infrastructures
-        WHERE is_current = TRUE AND track_tac_eur_train_km IS NULL
+        WHERE track_infra_version = %s AND track_tac_eur_train_km IS NULL
         LIMIT 1
-    """
+    """,
+        (base_scenario["track_infrastructures_version"],),
     )
     row = db_cur.fetchone()
     if row is None:

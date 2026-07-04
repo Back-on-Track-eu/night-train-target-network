@@ -19,7 +19,7 @@ Response shape:
 import pytest
 import requests
 
-ROUTE_URL = "/api/route/planOrUpdate"
+ROUTE_URL = "/api/route/plan"
 EVAL_URL = "/api/evaluation/calc"
 REL_TOL = 1e-3
 
@@ -36,7 +36,6 @@ def _build_route(api_base, stops, comp_id="STD-7.1", proposal_id=100):
             "proposal_version": 1,
             "stops": stops,
             "composition_id": comp_id,
-            "departure_time": "21:00",
         },
         timeout=60,
     )
@@ -67,14 +66,14 @@ def _route_bd(result: dict, normalisation: str = "per_year") -> dict:
 # ---------------------------------------------------------------------------
 
 STOPS_3 = [
-    {"stop_id": "DE_BERLIN_HBF", "stop_type": "boarding"},
-    {"stop_id": "DE_DRESDEN_HBF", "stop_type": "both"},
-    {"stop_id": "AT_WIEN_HBF", "stop_type": "alighting"},
+    "DE_BERLIN_HBF",
+    "DE_DRESDEN_HBF",
+    "AT_WIEN_HBF",
 ]
 
 STOPS_2 = [
-    {"stop_id": "DE_BERLIN_HBF", "stop_type": "boarding"},
-    {"stop_id": "AT_WIEN_HBF", "stop_type": "alighting"},
+    "DE_BERLIN_HBF",
+    "AT_WIEN_HBF",
 ]
 
 SIMPLE_OD = [
