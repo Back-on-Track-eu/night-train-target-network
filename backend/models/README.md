@@ -14,6 +14,7 @@ models/
 │   ├── trip.py                      # Stop, Segment, Trip — physics domain objects
 │   ├── route.py                     # Route, TripPair, Parking, Shunting, ODPair, Schedule
 │   ├── route_factory.py             # plan_route(), adjust_route(), distribute_demand()
+│   ├── timetable.py                 # Pluggable timetable_mode / schedule_mode / auto_stop_addition strategies
 │   └── routing/
 │       ├── rail_router.py           # OpenRailRouting (GraphHopper) wrapper
 │       └── docker/                  # Self-hosted routing engine Docker setup
@@ -32,16 +33,24 @@ models/
 ## Pipeline
 
 ```
-plan_route(proposal_id, proposal_version, schedule, trip_pair_inputs, loader, router)
+plan_route(trip_pair_inputs, loader, router, schedule_mode, proposal_id, proposal_version, scenario_id)
   │
   ├── loader.build_composition()      → Composition
   ├── loader.build_all_tracks()       → TrackInfraCollection
   ├── loader.build_all_stops()        → StopInfraCollection
   │
-  ├── rail_router.route(stops, composition, tracks)   → list[RoutedLeg]
-  ├── calc_energy_consumption(legs, composition)       → enriches RoutedLeg.energy_kwh
-  ├── _build_trip(legs, stops, ...)                   → Trip (outbound)
-  ├── _build_trip(legs, stops, ...)                   → Trip (return)
+  │  per TripPair, per direction (_build_trip()):
+  ├── rail_router.route(stops, composition, tracks, routing_mode)  → list[RoutedLeg]
+  ├── timetable.apply_auto_stop_addition(routed_legs)             → stop_ids (no-op today;
+  │     if it ever changes the list, re-routes before continuing)
+  ├── _check_country_coverage(routed_legs, tracks)                 → raises ValueError if any
+  │     transited country has no row in track_infrastructures at all
+  ├── timetable.schedule_and_classify(routed_legs, timetable_mode) → stop_inputs, departure_time_min
+  ├── calc_energy_consumption(legs, composition)                   → enriches RoutedLeg.energy_kwh
+  ├── timetable.build_final_timetable()                            → exact per-stop arrival/departure
+  ├── _build_trip_stops_and_legs(...)                              → list[Segment]
+  ├── Trip._create(...)                                            → Trip (outbound)
+  ├── Trip._create(...)                                            → Trip (return)
   │
   └── Route._create(schedule, trip_pairs, parkings, shuntings)  → Route
 
@@ -52,7 +61,11 @@ evaluate_route(route, tracks, stop_infra)  → EvaluationResult   [calc.py]
 build_breakdown*(route, result)            → Breakdown matrices  [views.py]
 ```
 
-For schedule-only changes (departure time, stop types), use `adjust_route()`.
+`timetable_mode`, `schedule_mode`, and `auto_stop_addition` are pluggable
+strategies living in `timetable.py`, not `route_factory.py` — see that
+module's docstring. For schedule-only changes on an already-built Route
+(departure time, stop types), `adjust_route()` still exists but isn't
+currently reachable from the API — see `api/README.md`.
 
 ---
 
@@ -124,6 +137,14 @@ e.g. P1_V1_R1       — route for proposal 1, version 1
 ```
 
 `proposal_id` is stable across versions. `proposal_version` increments on every change.
+
+`route_factory.py` itself only ever sees concrete ints for both — a brand new
+proposal (not yet saved, no real DB id) is resolved at the API boundary
+(`api/route.py`) before `plan_route()` is called: a random placeholder
+`proposal_id` above one billion is assigned and `proposal_version` is forced
+to `1`. This is a stand-in for a future scenarios/proposals module that will
+properly own draft-vs-saved handling; `route_factory.py` doesn't need to know
+"not saved yet" is even a possible state.
 
 ---
 

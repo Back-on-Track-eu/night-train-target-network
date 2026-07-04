@@ -80,38 +80,163 @@ field objects with provenance:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/route/planOrUpdate` | Plan a new route or adjust an existing one |
+| `POST` | `/api/route/plan` | Plan a route — stateless, always a full build (no in-place adjust) |
 
-**`POST /api/route/planOrUpdate` — Request body**
-
-The backend automatically derives whether a full reroute is needed:
-- No `route` in body → **plan** (new route)
-- `route` in body, same stops and composition → **adjust** (schedule/stop-type change only)
-- `route` in body, stops or composition changed → **plan** (full reroute)
+**`POST /api/route/plan` — Request body**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `proposal_id` | int | ✓ | Proposal ID (stable across versions) |
-| `proposal_version` | int | ✓ | Version counter — increment on every change |
-| `stops` | array | ✓ for new route | Ordered stop list `[{stop_id, stop_type}, ...]` |
-| `composition_id` | string | ✓ for new route | From `/api/params/compositions` |
-| `departure_time` | string | — | `HH:MM`, supports `00:00`–`47:59`. Omit to keep existing |
-| `route` | object | — | Route JSON from a previous call. Required for adjust |
-| `stop_type_changes` | object | — | `{stop_id: stop_type}` — update stop types without rerouting |
+| `proposal_id` | int | — | Only set when replanning an already-saved proposal. Omit for a brand new proposal — a random placeholder id above one billion is assigned automatically and `proposal_version` is forced to `1` |
+| `proposal_version` | int | — | See `proposal_id`. Ignored if `proposal_id` is omitted |
+| `scenario_id` | int | — | Pins which version of every parameter table to use. Omit for the current live base scenario |
+| `stops` | array of string | ✓ | Ordered list of stop IDs, min 2 — plain strings, e.g. `["DE_BERLIN_HBF", "AT_WIEN_HBF"]`. No per-stop type or time; both are derived automatically, see `timetable_mode` |
+| `composition_id` | string | ✓ | From `/api/params/compositions` |
+| `routing_mode` | string | — | Default `"fullRouting"` — see **Mode switches** below |
+| `timetable_mode` | string | — | Default `"simpleAutomatic"` — see **Mode switches** below |
+| `schedule_mode` | string | — | Default `"alwaysDaily"` — see **Mode switches** below |
+| `auto_stop_addition` | bool | — | Default `false` — see **Mode switches** below |
 
-Stop types: `"boarding"`, `"alighting"`, `"both"`.
+**Example request**
+```json
+{
+  "proposal_id": null,
+  "proposal_version": null,
+  "scenario_id": null,
+  "stops": ["DE_BERLIN_HBF", "DE_DRESDEN_HBF", "AT_WIEN_HBF"],
+  "composition_id": "STD-7.1",
+  "routing_mode": "fullRouting",
+  "timetable_mode": "simpleAutomatic",
+  "schedule_mode": "alwaysDaily",
+  "auto_stop_addition": false
+}
+```
+
+**Mode switches**
+
+`routing_mode` — controls how much routing complexity is applied:
+
+| Value | Description |
+|---|---|
+| `"fullRouting"` (default) | HSR avoidance and speed cap derived automatically from the composition's `hsr_allowed`/`max_speed_kmh` and each transited country's `hsr_allowed` flag. Two-pass routing (snap pass, then custom-model pass) when avoidance actually applies. |
+| `"simpleRouting"` | Bypasses all of that — single-pass, no speed cap, no HSR avoidance. Cheap and fast, but not representative of real physics. Intended for quick manual sanity checks only. |
+
+`timetable_mode` — controls how departure time and boarding/alighting are derived:
+
+| Value | Description |
+|---|---|
+| `"simpleAutomatic"` (default, only value) | Routes once, then mirrors the resulting trip duration around a fixed 02:30 constant to get the departure time: everything before 02:30 is a boarding stop, everything at/after is alighting. First stop is always boarding and last is always alighting regardless of clock time — they're termini by position, not by the mirror rule. Outbound and return are scheduled independently, so their departure times can differ (e.g. asymmetric HSR avoidance changes duration). |
+
+`schedule_mode` — controls the route's seasonal operating frequency:
+
+| Value | Description |
+|---|---|
+| `"alwaysDaily"` (default, only value) | Daily frequency in both seasons, regardless of actual demand. Reserved: a future demand-aware strategy can be added without changing this request shape. |
+
+`auto_stop_addition` — whether to propose additional stops along the routed path:
+
+| Value | Description |
+|---|---|
+| `false` (default) | No-op. |
+| `true` | Accepted and validated, but not yet implemented — currently still a no-op. Reserved for a future implementation that looks along the routed path for stops worth adding beyond what was supplied. |
 
 **Response**
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `route_builder_version` | string | Route model version |
-| `action_taken` | string | `"plan"` or `"adjust"` |
-| `route` | object | Route JSON — pass this to `/api/evaluation/calc` |
+```json
+{
+  "route_builder_version": "1.0.0",
+  "request": { "...": "the request body above, echoed back unchanged" },
+  "route": {
+    "route_id": "P1573795219_V1_R1",
+    "scenario_id": 1,
+    "schedule": {
+      "seasonal_schedules": [
+        { "season": "summer", "frequency": "daily" },
+        { "season": "winter", "frequency": "daily" }
+      ]
+    },
+    "trip_pairs": [
+      {
+        "composition_id": "STD-7.1",
+        "composition": { "...": "physics-relevant Composition fields, see below" },
+        "od_pairs": [],
+        "outbound": { "trip_id": "P..._D0_T1", "direction": 0, "segments": [ "...Segment, see below..." ] },
+        "return_trip": { "trip_id": "P..._D1_T1", "direction": 1, "segments": [ "..." ] }
+      }
+    ],
+    "parkings": [
+      { "stop_id": "...", "stop_name": "...", "country_code": "...", "trip_ids": ["..."] }
+    ],
+    "shuntings": [
+      { "stop_id": "...", "stop_name": "...", "country_code": "...", "trip_id": "..." }
+    ],
+    "track_infrastructure": [
+      { "...": "one entry per country the route actually touches, see below" }
+    ],
+    "geometries": [
+      { "id": "P..._D0_T1_L0", "coords": [[13.366, 52.523, "..."]] }
+    ]
+  }
+}
+```
 
-The route JSON embeds all physics (segments, geometry, timetable, country shares)
-but no monetary values or demand. Demand (`od_pairs`) must be added before calling
-the evaluation endpoint.
+`od_pairs` is always empty from this endpoint — demand is a separate step
+(`distribute_demand()`), not part of planning. `route_id`/`trip_id` follow
+`P{proposal_id}_V{version}_R1[_D{direction}_T{pair_index}]`.
+
+**`route.trip_pairs[].composition`** — physics-relevant subset of the composition
+used, not the full object (cost fields like `driver_costs_eur_h` are deliberately
+excluded — see `/api/evaluation/calc` for those):
+
+| Field | Description |
+|---|---|
+| `comp_id`, `comp_description`, `operator_id` | Identity |
+| `max_speed_kmh`, `hsr_allowed` | Routing inputs |
+| `min_boarding_time_min`, `min_alighting_time_min` | Dwell time inputs |
+| `energy_factor_weight`, `energy_factor_speed`, `energy_factor_terrain` | Energy model inputs |
+| `total_weight_t`, `total_crew` | Physical properties |
+| `places_by_class`, `density_by_class` | Capacity, keyed by service class |
+
+**`segments[]`** (on `outbound`/`return_trip`) — one entry per leg between two consecutive stops:
+
+| Field | Type | Description |
+|---|---|---|
+| `from_stop`, `to_stop` | object | `Stop`, see below |
+| `geometry_id` | string | References an entry in `route.geometries` — see below |
+| `distance_m` | int | Leg distance |
+| `driving_time_min`, `buffer_time_min` | int | Leg duration components |
+| `energy_kwh` | float | Currently a flat 28.0 kWh/km dummy factor — not calibrated yet |
+| `country_distance_shares`, `country_time_shares` | object | `{country_code: share}`, each sums to 1.0. Includes transit-only countries the leg crosses without stopping |
+
+**`Stop`** (embedded in every `from_stop`/`to_stop`):
+
+| Field | Type | Description |
+|---|---|---|
+| `stop_id`, `stop_name`, `country_code`, `lat`, `lon` | | Identity/location |
+| `stop_type` | string | `"boarding"`, `"alighting"`, or `"both"` — see `timetable_mode` above |
+| `arrival_time_min` | int or null | `null` only at the first stop of a trip |
+| `departure_time_min` | int or null | `null` only at the last stop of a trip |
+
+**`route.track_infrastructure[]`** — one entry per country the route's stops
+and transited legs actually touch (not every country in the DB), physics-relevant
+subset of `TrackInfrastructure` (cost fields like `tac_eur_train_km` excluded):
+
+| Field | Type | Description |
+|---|---|---|
+| `country_code` | string | |
+| `defaulted_fields` | array of string | Which of the fields below came from the EU-average default rather than this country's own seeded data. Empty if all real. A route through a country with **no row at all** in `track_infrastructures` is rejected outright with a `422 domain_error` — see **Error responses** — so `defaulted_fields` only ever reflects individual missing columns on an existing row, never a whole missing country |
+| `hsr_allowed` | bool | |
+| `min_boarding_time_min`, `min_alighting_time_min` | int | |
+| `terrain_score`, `terrain_category` | float, string | |
+| `buffer_quota_per` | float | |
+
+**`route.geometries[]`** — every segment's full coordinate polyline, pulled out of
+`segments[]` into one flat list rather than embedded inline (same total data,
+easier to scan the rest of the route without wading through coordinate arrays):
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Matches a `segments[].geometry_id` |
+| `coords` | array | `[[lon, lat], ...]` |
 
 ---
 
@@ -125,7 +250,7 @@ the evaluation endpoint.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `route` | object | ✓ | Route JSON from `/api/route/planOrUpdate` with `od_pairs` populated |
+| `route` | object | ✓ | Route JSON from `/api/route/plan` with `od_pairs` populated |
 
 Demand is embedded in the route JSON under `trip_pairs[].od_pairs`:
 
@@ -242,7 +367,7 @@ cost allocation rules, and view semantics.
 |--------|-------------|---------|
 | `400` | `bad_request` | Request body is not valid JSON |
 | `400` | `validation_error` | Invalid or missing fields — see `details` array |
-| `422` | `domain_error` | Valid request but pipeline failed (e.g. unknown stop, no route found) |
+| `422` | `domain_error` | Valid request but pipeline failed (e.g. unknown stop, no route found, route passes through a country with no row in `track_infrastructures` at all) |
 | `500` | `route_error` | Unexpected error in route builder |
 | `500` | `calc_error` | Unexpected error in evaluation |
 | `503` | `infrastructure_error` | DB unreachable or unknown composition ID |
