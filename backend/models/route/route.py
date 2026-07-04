@@ -146,8 +146,11 @@ class TripPair:
 
     @property
     def countries(self) -> set[str]:
-        """All countries this route passes through — from segment distance
-        shares, stop country codes, and parking locations."""
+        """All countries this pair's two trips pass through — from segment
+        distance shares and stop country codes. Unlike Route.countries,
+        there's no parking locations here — parkings are a Route-level
+        concept (a formation may park at a stop neither trip in this pair
+        actually visits), not something a single TripPair owns."""
         result: set[str] = set()
         for trip in self.trips:
             for segment in trip.segments:
@@ -155,8 +158,6 @@ class TripPair:
             for stop in trip.stops:
                 if stop.country_code:
                     result.add(stop.country_code)
-        for pl in self._parkings:
-            result.add(pl.country_code)
         return result
 
     @property

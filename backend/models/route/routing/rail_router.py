@@ -21,12 +21,12 @@ NOT responsible for:
 - TAC / energy costs   (→ models/evaluation/calc.py)
 
 route() returns list[RoutedLeg] — bare segment physics with no Stop
-attached. route_factory._build_stops() pairs each RoutedLeg with the
+attached. route_factory._build_trip_stops_and_legs() pairs each RoutedLeg with the
 Stop objects it builds, producing the final list[Segment].
 
 Public surface
 --------------
-  RailRouter.route(stops, composition, tracks) → list[RoutedLeg]
+  RailRouter.route(stops, composition, tracks, routing_mode) → list[RoutedLeg]
   RailRoutingError
   RoutedLeg  (output type — public)
   StopInput  (input type — public; wraps StopInfrastructure + StopType)
@@ -79,7 +79,7 @@ class StopInput:
 class RoutedLeg:
     """
     Bare physics for one segment between two consecutive stops — no Stop
-    objects attached. route_factory._build_stops() pairs each RoutedLeg
+    objects attached. route_factory._build_trip_stops_and_legs() pairs each RoutedLeg
     with Stop objects to produce the final trip.Segment.
 
     country_distance_shares and country_time_shares sum to 1.0 each.
@@ -208,9 +208,19 @@ class RailRouter:
         stops: list[StopInput],
         composition: Composition,
         tracks: TrackInfraCollection,
+        routing_mode: str = "fullRouting",
     ) -> list[RoutedLeg]:
         """
         Route a trip and return bare segment physics.
+
+        routing_mode:
+          "fullRouting"   — today's behaviour: HSR avoidance and speed cap
+                             derived automatically from composition/track
+                             flags, two-pass routing when a custom model
+                             is needed.
+          "simpleRouting" — bypass all of that: single-pass, no speed cap,
+                             no HSR avoidance. Cheap/fast, for quick manual
+                             checks — not representative of real physics.
 
         Two-pass routing is used when a custom model is needed:
           pass 1 — CH routing to snap stops to the rail network
@@ -221,6 +231,10 @@ class RailRouter:
         """
         if len(stops) < 2:
             raise ValueError("At least 2 stops are required.")
+
+        if routing_mode == "simpleRouting":
+            raw = self._post_route(self._build_payload(stops, None, None))
+            return self._parse_response(raw, stops, tracks)
 
         vehicle_max_speed_kmh = int(composition.max_speed_kmh)
         avoid_hsr = {

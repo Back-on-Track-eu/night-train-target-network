@@ -20,7 +20,7 @@ Endpoints — see api/README.md for full documentation.
   GET  /api/params/StopInfrastructures
   GET  /api/params/compositions
   GET  /api/params/TrackInfrastructures
-  POST /api/route/planOrUpdate
+  POST /api/route/plan
   POST /api/evaluation/calc
 """
 
@@ -51,6 +51,9 @@ def create_app() -> Flask:
     app.register_blueprint(auth.bp, url_prefix="/api/auth")
     app.register_blueprint(feedback.bp, url_prefix="/api")
     app.register_blueprint(scenarios.bp, url_prefix="/api")
+
+    # --- settings ---
+    app.json.sort_keys = False
 
     # --- global error handlers ---
     @app.errorhandler(DataNotLoadedError)
