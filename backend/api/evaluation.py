@@ -3,7 +3,7 @@ evaluation.py
 =============
 POST /api/evaluation/calc
 
-Accepts a pre-built Route JSON (from POST /api/route/planOrUpdate) and
+Accepts a pre-built Route JSON (from POST /api/route/plan) and
 returns the full cost/revenue evaluation with all Breakdown views and
 normalisations.
 
@@ -51,7 +51,12 @@ def calc():
     Run cost/revenue evaluation for a Route.
 
     Request body:
-      { "route": <route_to_dict() output from POST /api/route/planOrUpdate> }
+      {
+        "route": <route_to_dict() output from POST /api/route/plan>,
+        "scenario_id": <optional int — overrides the route's own embedded
+                        scenario_id; omit to cost the route under the same
+                        scenario it was planned with>
+      }
 
     Response:
       { "calc_version": "...", "result": { "route_id": "...", "views": {...} } }
@@ -65,14 +70,30 @@ def calc():
     if errors:
         logger.warning("evaluation/calc [1/5] validation failed — %s", errors)
         return jsonify({"error": "validation_error", "details": errors}), 400
-    route = route_from_dict(body["route"], loader)
+
+    scenario_override = body.get("scenario_id")
+    if scenario_override is not None and not isinstance(scenario_override, int):
+        return (
+            jsonify({
+                "error": "validation_error",
+                "details": ["'scenario_id' must be an integer if provided."],
+            }),
+            400,
+        )
+
+    try:
+        route = route_from_dict(body["route"], loader, scenario_id=scenario_override)
+    except ValueError as e:
+        logger.warning("evaluation/calc [1/5] scenario resolution failed: %s", e)
+        return jsonify({"error": "validation_error", "details": [str(e)]}), 400
     logger.info("evaluation/calc [1/5] route %s deserialized (%.3fs)",
                 route.route_id, time.monotonic() - t_start)
 
-    # Step 2 — load infrastructure
+    # Step 2 — load infrastructure, same scenario the route was reconstructed under
+    resolved_scenario_id = scenario_override if scenario_override is not None else body["route"].get("scenario_id")
     try:
-        tracks, _ = loader.build_all_tracks()
-        stop_infra, _ = loader.build_all_stops()
+        tracks, _ = loader.build_all_tracks(resolved_scenario_id)
+        stop_infra, _ = loader.build_all_stops(resolved_scenario_id)
     except Exception as e:
         logger.exception("evaluation/calc [2/5] infrastructure load failed: %s", e)
         return jsonify({"error": "infrastructure_error", "message": str(e)}), 503

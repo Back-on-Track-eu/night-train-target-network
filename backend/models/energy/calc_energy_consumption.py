@@ -8,7 +8,7 @@ terrain. Real model: energy_kwh = weight_t × km × (f_weight + f_speed ×
 avg_speed_kmh² + f_terrain × terrain_score), calibrated against DB
 Trassenfinder data (see trassenfinder_collector.py, calibrate_energy.py).
 
-Called from route_factory.py between RailRouter.route() and _build_stops().
+Called from route_factory.py between RailRouter.route() and _build_trip_stops_and_legs().
 Mutates RoutedLeg.energy_kwh in-place.
 """
 
