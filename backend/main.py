@@ -40,6 +40,8 @@ logger = logging.getLogger(__name__)
 
 
 def create_app() -> Flask:
+    init()
+
     app = Flask(__name__)
     CORS(app)
 
@@ -90,6 +92,5 @@ def create_app() -> Flask:
 
 
 if __name__ == "__main__":
-    init()
     app = create_app()
     app.run(host="0.0.0.0", port=5000, debug=True)
