@@ -12,7 +12,22 @@ Run order:
      track_infrastructure_defaults → track_infrastructures →
      stop_infrastructure_defaults → stop_infrastructures →
      composition_types → composition_type_coaches → composition_references
-  3. proposals
+  3. scenario: scenarios (base scenario pinning the version numbers seeded
+     above, plus one illustrative what-if scenario)
+  4. proposals
+
+Versioning note
+---------------
+The eight versioned input_params tables (operators, coach_types,
+composition_types, composition_references, track_infrastructures,
+track_infrastructure_defaults, stop_infrastructures,
+stop_infrastructure_defaults) carry no is_current flag — "current" is
+entirely a scenario.scenarios concept now (see create_scenario_schema.sql).
+A version bump is a FULL-TABLE SNAPSHOT: editing one row duplicates every
+other row of that table forward into the new version number. The
+TRACK_INFRASTRUCTURES fixture below deliberately seeds two full
+generations (version 1 and version 2, all 7 countries in each) to
+demonstrate and test this.
 """
 
 import os
@@ -102,11 +117,39 @@ def fetch_source_ids(cur) -> dict[str, int]:
 COUNTRIES = [
     {"country_code": "DE", "country_name": "Germany"},
     {"country_code": "AT", "country_name": "Austria"},
-    {"country_code": "CH", "country_name": "Switzerland"},
+    {"country_code": "CH", "country_name": "Switzerland"},  # not an EU member — kept for existing CH routes
     {"country_code": "FR", "country_name": "France"},
     {"country_code": "BE", "country_name": "Belgium"},
     {"country_code": "DK", "country_name": "Denmark"},
     {"country_code": "SE", "country_name": "Sweden"},
+    # Remaining EU27 members — added so _check_country_coverage() in
+    # route_factory.py doesn't reject a route for merely transiting one of
+    # these, even though none has real track_infrastructures figures yet
+    # (see _TRACK_INFRA_V2_ROWS below: every field but country_code is None,
+    # so TrackInfraCollection resolves every one of them from the EU-average
+    # default — is_default stays False since a real row exists, but expect
+    # a "using EU default" warning logged per field per country).
+    {"country_code": "BG", "country_name": "Bulgaria"},
+    {"country_code": "HR", "country_name": "Croatia"},
+    {"country_code": "CY", "country_name": "Cyprus"},
+    {"country_code": "CZ", "country_name": "Czechia"},
+    {"country_code": "EE", "country_name": "Estonia"},
+    {"country_code": "FI", "country_name": "Finland"},
+    {"country_code": "GR", "country_name": "Greece"},
+    {"country_code": "HU", "country_name": "Hungary"},
+    {"country_code": "IE", "country_name": "Ireland"},
+    {"country_code": "IT", "country_name": "Italy"},
+    {"country_code": "LV", "country_name": "Latvia"},
+    {"country_code": "LT", "country_name": "Lithuania"},
+    {"country_code": "LU", "country_name": "Luxembourg"},
+    {"country_code": "MT", "country_name": "Malta"},
+    {"country_code": "NL", "country_name": "Netherlands"},
+    {"country_code": "PL", "country_name": "Poland"},
+    {"country_code": "PT", "country_name": "Portugal"},
+    {"country_code": "RO", "country_name": "Romania"},
+    {"country_code": "SK", "country_name": "Slovakia"},
+    {"country_code": "SI", "country_name": "Slovenia"},
+    {"country_code": "ES", "country_name": "Spain"},
 ]
 
 # ============================================================
@@ -369,16 +412,19 @@ TRACK_INFRA_DEFAULTS = [
     },
 ]
 
-TRACK_INFRASTRUCTURES = [
-    # Full data countries
-    # DE has two versions — loader must only use is_current=True (version=2)
+# Two full-table snapshots to exercise/demonstrate full-snapshot versioning:
+# version 1 is the original data (DE at old, lower rates); version 2 is the
+# current data (DE corrected upward, every other country duplicated forward
+# unchanged). A scenario pins one version NUMBER for the whole table, never
+# a per-country flag — see create_scenario_schema.sql.
+
+_TRACK_INFRA_V2_ROWS = [
     {
         "country_code": "DE",
         "track_infra_version": 2,
-        "is_current": True,
         "track_tac_eur_train_km": 5.40,
         "track_parking_eur_day": 70.00,
-            "track_shunting_eur_event": 575.00,
+        "track_shunting_eur_event": 575.00,
         "track_energy_price_eur_kwh": 0.142,
         "track_terrain_category": "Flat",
         "track_terrain_score": 1.0,
@@ -387,29 +433,12 @@ TRACK_INFRASTRUCTURES = [
         "track_min_alighting_time": "00:02:00",
         "track_buffer_quota_per": 0.10,
     },
-    # Old DE row (version=1, is_current=False) — loader must ignore this
-    {
-        "country_code": "DE",
-        "track_infra_version": 1,
-        "track_tac_eur_train_km": 3.10,
-        "track_parking_eur_day": 50.00,
-            "track_shunting_eur_event": 575.00,
-        "track_energy_price_eur_kwh": 0.120,
-        "track_terrain_category": "Flat",
-        "track_terrain_score": 1.0,
-        "track_hsr_allowed": True,
-        "track_min_boarding_time": "00:02:00",
-        "track_min_alighting_time": "00:02:00",
-        "track_buffer_quota_per": 0.08,
-        "is_current": False,
-    },
     {
         "country_code": "AT",
         "track_infra_version": 2,
-        "is_current": True,
         "track_tac_eur_train_km": 4.20,
         "track_parking_eur_day": 60.00,
-            "track_shunting_eur_event": 575.00,
+        "track_shunting_eur_event": 575.00,
         "track_energy_price_eur_kwh": 0.138,
         "track_terrain_category": "Hilly",
         "track_terrain_score": 1.4,
@@ -421,10 +450,9 @@ TRACK_INFRASTRUCTURES = [
     {
         "country_code": "CH",
         "track_infra_version": 2,
-        "is_current": True,
         "track_tac_eur_train_km": 6.80,
         "track_parking_eur_day": 85.00,
-            "track_shunting_eur_event": 575.00,
+        "track_shunting_eur_event": 575.00,
         "track_energy_price_eur_kwh": 0.165,
         "track_terrain_category": "Mountainous",
         "track_terrain_score": 1.8,
@@ -436,10 +464,9 @@ TRACK_INFRASTRUCTURES = [
     {
         "country_code": "FR",
         "track_infra_version": 2,
-        "is_current": True,
         "track_tac_eur_train_km": 4.60,
         "track_parking_eur_day": 55.00,
-            "track_shunting_eur_event": 575.00,
+        "track_shunting_eur_event": 575.00,
         "track_energy_price_eur_kwh": 0.130,
         "track_terrain_category": "Flat",
         "track_terrain_score": 1.0,
@@ -451,10 +478,9 @@ TRACK_INFRASTRUCTURES = [
     {
         "country_code": "BE",
         "track_infra_version": 2,
-        "is_current": True,
         "track_tac_eur_train_km": 5.10,
         "track_parking_eur_day": 50.00,
-            "track_shunting_eur_event": 575.00,
+        "track_shunting_eur_event": 575.00,
         "track_energy_price_eur_kwh": 0.145,
         "track_terrain_category": "Flat",
         "track_terrain_score": 1.0,
@@ -466,10 +492,9 @@ TRACK_INFRASTRUCTURES = [
     {
         "country_code": "DK",
         "track_infra_version": 2,
-        "is_current": True,
         "track_tac_eur_train_km": 4.80,
         "track_parking_eur_day": 55.00,
-            "track_shunting_eur_event": 575.00,
+        "track_shunting_eur_event": 575.00,
         "track_energy_price_eur_kwh": 0.128,
         "track_terrain_category": "Flat",
         "track_terrain_score": 1.0,
@@ -482,10 +507,9 @@ TRACK_INFRASTRUCTURES = [
     {
         "country_code": "SE",
         "track_infra_version": 2,
-        "is_current": True,
         "track_tac_eur_train_km": None,
         "track_parking_eur_day": None,
-            "track_shunting_eur_event": None,
+        "track_shunting_eur_event": None,
         "track_energy_price_eur_kwh": 0.090,
         "track_terrain_category": "Hilly",
         "track_terrain_score": 1.2,
@@ -494,7 +518,328 @@ TRACK_INFRASTRUCTURES = [
         "track_min_alighting_time": "00:02:00",
         "track_buffer_quota_per": 0.10,
     },
+    # Remaining EU27 members — every field None, resolved entirely from the
+    # EU-average default (track_infrastructure_defaults). Real figures TBD;
+    # this just gives each a real row so _check_country_coverage() in
+    # route_factory.py doesn't reject a route for merely transiting one of
+    # these (is_default stays False — a row exists — but every field will
+    # log a "using EU default" warning the first time it's resolved).
+    {
+        "country_code": "BG",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "HR",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "CY",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "CZ",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "EE",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "FI",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "GR",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "HU",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "IE",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "IT",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "LV",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "LT",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "LU",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "MT",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "NL",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "PL",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "PT",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "RO",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "SK",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "SI",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "ES",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
 ]
+
+# Version 1 = the same full snapshot, except DE still carries its original,
+# lower (pre-correction) rates. Every other country is duplicated forward
+# unchanged — exactly the full-table-snapshot invariant in practice.
+_TRACK_INFRA_V1_OVERRIDES = {
+    "DE": {
+        "track_tac_eur_train_km": 3.10,
+        "track_parking_eur_day": 50.00,
+        "track_buffer_quota_per": 0.08,
+    },
+}
+
+def _build_track_infrastructures_v1() -> list[dict]:
+    rows = []
+    for row in _TRACK_INFRA_V2_ROWS:
+        v1_row = {**row, "track_infra_version": 1}
+        v1_row.update(_TRACK_INFRA_V1_OVERRIDES.get(row["country_code"], {}))
+        rows.append(v1_row)
+    return rows
+
+TRACK_INFRASTRUCTURES = _build_track_infrastructures_v1() + _TRACK_INFRA_V2_ROWS
 
 # ============================================================
 # stop infrastructure
@@ -809,16 +1154,23 @@ def seed_sources(cur, source_ids: dict) -> None:
 def seed_operator_class_costs(cur):
     for operator_id, service_class_id, eur_place in OPERATOR_CLASS_COSTS_RAW:
         cur.execute(
+            "SELECT operator_row_id FROM input_params.operators WHERE operator_id=%s "
+            "ORDER BY operator_version DESC LIMIT 1",
+            (operator_id,),
+        )
+        operator_row_id = cur.fetchone()[0]
+        cur.execute(
             """INSERT INTO input_params.operator_class_costs
-               (operator_id, service_class_id, operator_class_svc_stockings_eur_place)
+               (operator_row_id, service_class_id, operator_class_svc_stockings_eur_place)
                VALUES (%s, %s, %s)""",
-            (operator_id, service_class_id, eur_place),
+            (operator_row_id, service_class_id, eur_place),
         )
 
 def seed_coach_type_classes(cur):
     for coach_type_id, service_class_id, places in COACH_TYPE_CLASSES_RAW:
         cur.execute(
-            "SELECT coach_type_row_id FROM input_params.coach_types WHERE coach_type_id=%s AND is_current",
+            "SELECT coach_type_row_id FROM input_params.coach_types WHERE coach_type_id=%s "
+            "ORDER BY coach_type_version DESC LIMIT 1",
             (coach_type_id,),
         )
         coach_type_row_id = cur.fetchone()[0]
@@ -832,12 +1184,14 @@ def seed_coach_type_classes(cur):
 def seed_composition_type_coaches(cur):
     for comp_id, position, coach_type_id in COMPOSITION_TYPE_COACHES_RAW:
         cur.execute(
-            "SELECT composition_type_row_id FROM input_params.composition_types WHERE composition_type_id=%s AND is_current",
+            "SELECT composition_type_row_id FROM input_params.composition_types WHERE composition_type_id=%s "
+            "ORDER BY composition_type_version DESC LIMIT 1",
             (comp_id,),
         )
         composition_type_row_id = cur.fetchone()[0]
         cur.execute(
-            "SELECT coach_type_row_id FROM input_params.coach_types WHERE coach_type_id=%s AND is_current",
+            "SELECT coach_type_row_id FROM input_params.coach_types WHERE coach_type_id=%s "
+            "ORDER BY coach_type_version DESC LIMIT 1",
             (coach_type_id,),
         )
         coach_type_row_id = cur.fetchone()[0]
@@ -854,7 +1208,8 @@ def seed_composition_references(cur):
         cur.execute(
             """
             SELECT composition_type_row_id FROM input_params.composition_types
-            WHERE composition_type_id = %s AND is_current = TRUE
+            WHERE composition_type_id = %s
+            ORDER BY composition_type_version DESC LIMIT 1
         """,
             (comp_id,),
         )
@@ -887,6 +1242,56 @@ def seed_composition_references(cur):
             ],
         )
 
+# ============================================================
+# scenario
+# ============================================================
+# Base scenario pins the exact version numbers seeded above for every
+# table — every scenario row is a complete, self-contained pin, no
+# NULLs, so it stays reproducible even after the base moves on.
+# The what-if scenario is a genuinely separate lineage (its own
+# scenario_key): it copies every pointer forward from the base at the
+# moment it was created, then overrides only track_infrastructures_version.
+
+BASE_SCENARIO = {
+    "scenario_key": "base",
+    "scenario_name": "2026 base",
+    "description": "Illustrative baseline parameter set — all tables at their current seeded version.",
+    "change_log": "Initial seed.",
+    "editor": "david",
+    "is_current_base": True,
+    "is_current_scenario": True,
+    "operators_version": 1,
+    "coach_types_version": 1,
+    "composition_types_version": 1,
+    "composition_references_version": 1,
+    "track_infrastructures_version": 2,
+    "track_infrastructure_defaults_version": 1,
+    "stop_infrastructures_version": 1,
+    "stop_infrastructure_defaults_version": 1,
+}
+
+WHATIF_SCENARIO = {
+    "scenario_key": "whatif-de-track-infra",
+    "scenario_name": "What-if: DE track infra pre-correction",
+    "description": "Demonstrates a what-if lineage: copied forward from '2026 base' at "
+    "creation time, then only track_infrastructures_version overridden "
+    "(to version 1, DE's original lower rates). Every other pointer is an "
+    "explicit copy, not an inherited NULL, so this scenario stays "
+    "reproducible even after the base moves on.",
+    "change_log": "Forked from 'base' scenario_key, pinned track_infrastructures to version 1.",
+    "editor": "david",
+    "is_current_base": False,
+    "is_current_scenario": True,
+    "operators_version": BASE_SCENARIO["operators_version"],
+    "coach_types_version": BASE_SCENARIO["coach_types_version"],
+    "composition_types_version": BASE_SCENARIO["composition_types_version"],
+    "composition_references_version": BASE_SCENARIO["composition_references_version"],
+    "track_infrastructures_version": 1,
+    "track_infrastructure_defaults_version": BASE_SCENARIO["track_infrastructure_defaults_version"],
+    "stop_infrastructures_version": BASE_SCENARIO["stop_infrastructures_version"],
+    "stop_infrastructure_defaults_version": BASE_SCENARIO["stop_infrastructure_defaults_version"],
+}
+
 def main():
     conn = psycopg2.connect(
         host=DB_HOST,
@@ -901,6 +1306,7 @@ def main():
     print("Creating schemas...")
     cur.execute(load_sql("create_admin_schema.sql"))
     cur.execute(load_sql("create_input_params_schema.sql"))
+    cur.execute(load_sql("create_scenario_schema.sql"))
     cur.execute(load_sql("create_proposal_schema.sql"))
 
     print("Seeding admin.users...")
@@ -944,6 +1350,9 @@ def main():
     print("Injecting source IDs...")
     seed_sources(cur, source_ids)
 
+    print("Seeding scenario.scenarios...")
+    insert_rows(cur, "scenario.scenarios", [BASE_SCENARIO, WHATIF_SCENARIO])
+
     print("Seeding proposals...")
     insert_rows(cur, "proposals.services", SERVICES)
     insert_rows(cur, "proposals.calendar", CALENDAR)
@@ -966,12 +1375,13 @@ def main():
         ("input_params", "coach_types"),
         ("input_params", "coach_type_classes"),
         ("input_params", "track_infrastructure_defaults"),
-        ("input_params", "track_infrastructures"),  # 8 rows: 7 current + 1 old DE
+        ("input_params", "track_infrastructures"),  # 14 rows: 2 full snapshots x 7 countries
         ("input_params", "stop_infrastructure_defaults"),
         ("input_params", "stop_infrastructures"),
         ("input_params", "composition_types"),
         ("input_params", "composition_type_coaches"),
         ("input_params", "composition_references"),
+        ("scenario", "scenarios"),
         ("proposals", "routes"),
         ("proposals", "trips"),
         ("proposals", "stop_times"),
