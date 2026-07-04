@@ -48,8 +48,11 @@ Collections
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # PARAMS SOURCE  (input_params.sources)
@@ -572,6 +575,18 @@ class DefaultTrackInfra:
 # TRACK INFRASTRUCTURE  (input_params.infrastructure)
 # =============================================================================
 
+TRACK_INFRA_FIELD_NAMES = (
+    "tac_eur_train_km", "parking_eur_day", "shunting_eur_event", "energy_price_eur_kwh",
+    "terrain_score", "terrain_category", "hsr_allowed",
+    "min_boarding_time_min", "min_alighting_time_min", "buffer_quota_per",
+)
+"""Canonical value-field names on TrackInfrastructure (excludes country_code,
+is_default, field_is_default, and the *_src fields themselves). Shared by
+DBDataLoader (keys of its per-field is_default tracking) and
+TrackInfraCollection.get_or_default() (marks all of them True when
+synthesizing a whole missing row) — single source of truth so the two
+never drift apart."""
+
 @dataclass
 class TrackInfrastructure:
     """
@@ -583,9 +598,20 @@ class TrackInfrastructure:
 
     Each parameter value has a paired _src field for field-level provenance.
     Row-level version and source tracking is handled by ParamVersions in RouteProvenance.
+
+    field_is_default: {field_name: was_this_field_defaulted} — how a caller
+    finds out which specific fields came from the EU-average template
+    rather than this country's own data (e.g. SE's tac_eur_train_km/
+    parking_eur_day in the dev seed). There's no equivalent whole-row flag:
+    route_factory._check_country_coverage() rejects a route outright if a
+    country has no row in track_infrastructures at all, so by the time a
+    TrackInfrastructure exists here a real row is guaranteed — only
+    individual fields within it can be defaulted.
     """
 
     country_code: str
+    field_is_default: dict[str, bool]
+    """{field_name: was_this_field_defaulted} — see class docstring."""
 
     tac_eur_train_km: float
     tac_src: Optional[ParamsSource]
@@ -621,24 +647,56 @@ class TrackInfraCollection:
     Dict-backed collection of TrackInfrastructure keyed by country_code.
 
     All rows are fully resolved by the loader — no None fields.
-    get_or_default() returns the country row if present, otherwise None.
-    Callers that need a guaranteed result should handle the None case.
+    get_or_default() returns the country row if present, otherwise a row
+    synthesized entirely from the EU-average default template
+    (track_infrastructure_defaults) and labeled with the requested
+    country_code — never another country's real row. This is the same
+    default template build_all_tracks() already uses to fill individual
+    None fields on a row that does exist; this just applies it to the
+    whole row when the country has no row in track_infrastructures at all
+    (e.g. a transit-only country a route crosses without ever stopping
+    there — not necessarily one of the countries seeded in the DB).
     """
 
     _data: dict[str, TrackInfrastructure]
+    _default: DefaultTrackInfra
 
-    def __init__(self, data: dict[str, TrackInfrastructure]) -> None:
+    def __init__(self, data: dict[str, TrackInfrastructure], default: DefaultTrackInfra) -> None:
         self._data = data
+        self._default = default
+        self._warned_missing: set[str] = set()
 
     def get(self, country_code: str) -> Optional[TrackInfrastructure]:
         return self._data.get(country_code)
 
-    def get_or_default(self, country_code: str) -> Optional[TrackInfrastructure]:
-        """Return country row if present, else the first available row as fallback."""
+    def get_or_default(self, country_code: str) -> TrackInfrastructure:
+        """Return country row if present, else synthesize one from the
+        EU-average default template, labeled with the requested
+        country_code. Logs a warning once per missing country_code (not
+        once per call — this can be called once per segment per country,
+        so per-call logging would spam)."""
         if country_code in self._data:
             return self._data[country_code]
-        # fall back to first available (EU average default loaded by loader)
-        return next(iter(self._data.values()), None)
+        if country_code not in self._warned_missing:
+            logger.warning(
+                "TrackInfrastructure[%s]: no row in track_infrastructures — using EU-average default for every field.",
+                country_code,
+            )
+            self._warned_missing.add(country_code)
+        d = self._default
+        return TrackInfrastructure(
+            country_code=country_code,
+            field_is_default={f: True for f in TRACK_INFRA_FIELD_NAMES},
+            tac_eur_train_km=d.tac_eur_train_km, tac_src=d.tac_src,
+            parking_eur_day=d.parking_eur_day, parking_src=d.parking_src,
+            shunting_eur_event=d.shunting_eur_event, shunting_src=d.shunting_src,
+            energy_price_eur_kwh=d.energy_price_eur_kwh, energy_price_src=d.energy_price_src,
+            terrain_score=d.terrain_score, terrain_category=d.terrain_category, terrain_src=d.terrain_src,
+            hsr_allowed=d.hsr_allowed, hsr_src=d.hsr_src,
+            min_boarding_time_min=d.min_boarding_time_min, min_boarding_src=d.min_boarding_src,
+            min_alighting_time_min=d.min_alighting_time_min, min_alighting_src=d.min_alighting_src,
+            buffer_quota_per=d.buffer_quota_per, buffer_src=d.buffer_src,
+        )
 
     def all(self) -> dict[str, TrackInfrastructure]:
         return self._data

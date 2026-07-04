@@ -461,7 +461,7 @@ def _calc_parking_costs(route: Route, tracks: TrackInfraCollection) -> list[Park
             stop_id=p.stop_id,
             trip_ids=p.trip_ids,
             country_code=p.country_code,
-            parking_eur=track.parking_eur_day if track else 0.0,  # €/operating-day
+            parking_eur=track.parking_eur_day,  # €/operating-day
         ))
     return costs
 
@@ -474,7 +474,7 @@ def _calc_shunting_costs(route: Route, tracks: TrackInfraCollection) -> list[Shu
             stop_id=s.stop_id,
             trip_id=s.trip_id,
             country_code=s.country_code,
-            shunting_eur=track.shunting_eur_event if track else 0.0,  # €/event
+            shunting_eur=track.shunting_eur_event,  # €/event
         ))
     return costs
 
