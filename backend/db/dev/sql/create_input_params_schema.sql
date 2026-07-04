@@ -46,7 +46,8 @@ COMMENT ON COLUMN input_params.service_classes.service_class_density IS 'Space u
 -- operators
 -- ---------------------------------------------------------------
 CREATE TABLE input_params.operators (
-    operator_id                     VARCHAR(50)   PRIMARY KEY,
+    operator_row_id                 SERIAL        PRIMARY KEY,
+    operator_id                     VARCHAR(50)   NOT NULL,
     operator_name                   VARCHAR(200)  NOT NULL,
     operator_driver_costs_eur_h     NUMERIC(8,2)  NOT NULL,
     operator_crew_costs_eur_h       NUMERIC(8,2)  NOT NULL,
@@ -58,11 +59,12 @@ CREATE TABLE input_params.operators (
     operator_fix_overhead_quota_per NUMERIC(5,4)  NOT NULL,
     operator_loco_lease_eur_h       NUMERIC(10,3) NOT NULL,
     source_id                       INTEGER       REFERENCES input_params.sources(source_id),
-    editor                          VARCHAR(100),
-    change_log                      TEXT
+    change_log                      TEXT,
+    operator_version                INTEGER       NOT NULL DEFAULT 1,
+    UNIQUE (operator_id, operator_version)
 );
 
-COMMENT ON TABLE  input_params.operators IS 'Train operating company — bears operational costs.';
+COMMENT ON TABLE  input_params.operators IS 'Train operating company — bears operational costs. Row-versioned: operator_id is a natural key referenced (as a soft reference, not an enforced FK) from coach_types and composition_types, resolved per-scenario at load time via scenario.scenarios.operators_version. Version bumps are full-table snapshots — see scenario.scenarios for the versioning contract.';
 COMMENT ON COLUMN input_params.operators.operator_driver_costs_eur_h     IS 'Driver staff cost per billable hour. Billable hours = driving time + operator_driver_overhead_h. Unit: €/h';
 COMMENT ON COLUMN input_params.operators.operator_crew_costs_eur_h       IS 'Cabin crew cost per billable hour. Unit: €/h';
 COMMENT ON COLUMN input_params.operators.operator_driver_overhead_h      IS 'Fixed overhead hours added per trip for driver cost calculation. Unit: h/trip';
@@ -73,18 +75,18 @@ COMMENT ON COLUMN input_params.operators.operator_var_overhead_per       IS 'Var
 COMMENT ON COLUMN input_params.operators.operator_fix_overhead_quota_per IS 'Fixed overhead as a share of all other railway operation costs. Unit: %';
 COMMENT ON COLUMN input_params.operators.operator_loco_lease_eur_h       IS 'Full-service locomotive lease rate, utilization-based — bundles capital, maintenance, and insurance. Billed per loco operating hour (driving + buffer + dwell). Unit: €/h';
 COMMENT ON COLUMN input_params.operators.source_id                       IS 'Source for all values in this row.';
-COMMENT ON COLUMN input_params.operators.editor                          IS 'User who created or last edited this row.';
 COMMENT ON COLUMN input_params.operators.change_log                      IS 'Free-text description of changes made in this version.';
+COMMENT ON COLUMN input_params.operators.operator_version                IS 'Per-table full-snapshot version number. Resolved via scenario.scenarios.operators_version — never inferred.';
 
 -- ---------------------------------------------------------------
 -- operator_class_costs
 -- ---------------------------------------------------------------
 CREATE TABLE input_params.operator_class_costs (
-    operator_id                            VARCHAR(50)  NOT NULL REFERENCES input_params.operators(operator_id),
+    operator_row_id                        INTEGER      NOT NULL REFERENCES input_params.operators(operator_row_id) ON DELETE CASCADE,
     service_class_id                       VARCHAR(100) NOT NULL REFERENCES input_params.service_classes(service_class_id),
     operator_class_svc_stockings_eur_place NUMERIC(8,4) NOT NULL,
     source_id                              INTEGER      REFERENCES input_params.sources(source_id),
-    PRIMARY KEY (operator_id, service_class_id)
+    PRIMARY KEY (operator_row_id, service_class_id)
 );
 
 COMMENT ON TABLE  input_params.operator_class_costs IS 'Variable cost of onboard services and stockings per operator and accommodation class.';
@@ -97,7 +99,7 @@ COMMENT ON COLUMN input_params.operator_class_costs.source_id IS 'Source for all
 CREATE TABLE input_params.coach_types (
     coach_type_row_id      SERIAL       PRIMARY KEY,
     coach_type_id          VARCHAR(50)  NOT NULL,
-    coach_type_operator_id VARCHAR(50)  REFERENCES input_params.operators(operator_id),
+    coach_type_operator_id VARCHAR(50),
     coach_type_weight_gross_t NUMERIC(8,3),
     coach_type_bikes          INTEGER   NOT NULL DEFAULT 0,
     coach_type_climatization  BOOLEAN   NOT NULL DEFAULT FALSE,
@@ -105,27 +107,22 @@ CREATE TABLE input_params.coach_types (
     coach_type_crew_factor    NUMERIC(4,2) NOT NULL DEFAULT 0,
     coach_type_remarks        TEXT,
     source_id                 INTEGER   REFERENCES input_params.sources(source_id),
-    editor                    VARCHAR(100),
     change_log                TEXT,
     coach_type_version        INTEGER   NOT NULL DEFAULT 1,
-    created_at                TIMESTAMPTZ NOT NULL DEFAULT now(),
-    is_current                BOOLEAN   NOT NULL DEFAULT TRUE,
     UNIQUE (coach_type_id, coach_type_version)
 );
-CREATE UNIQUE INDEX idx_coach_types_one_current
-    ON input_params.coach_types (coach_type_id) WHERE is_current;
 
-COMMENT ON TABLE  input_params.coach_types IS 'Individual railcar/coach types. Capacity is derived from coach_type_classes, not stored here.';
+COMMENT ON TABLE  input_params.coach_types IS 'Individual railcar/coach types. Capacity is derived from coach_type_classes, not stored here. Version bumps are full-table snapshots, resolved via scenario.scenarios.coach_types_version — see scenario.scenarios for the versioning contract.';
 COMMENT ON COLUMN input_params.coach_types.coach_type_id             IS 'Unique coach type identifier (e.g. WLABmz, Bcmz, type1).';
-COMMENT ON COLUMN input_params.coach_types.coach_type_operator_id    IS 'Operating company this coach type belongs to. Nullable for generic/shared types.';
+COMMENT ON COLUMN input_params.coach_types.coach_type_operator_id    IS 'Operating company this coach type belongs to. Soft reference to input_params.operators.operator_id (not an enforced FK, since operators is itself row-versioned) — resolved per-scenario at load time. Nullable for generic/shared types.';
 COMMENT ON COLUMN input_params.coach_types.coach_type_weight_gross_t IS 'Gross weight of a single coach of this type. Unit: t';
 COMMENT ON COLUMN input_params.coach_types.coach_type_bikes          IS 'Number of bicycle spaces in this coach type.';
 COMMENT ON COLUMN input_params.coach_types.coach_type_climatization  IS 'Whether this coach type has air conditioning.';
 COMMENT ON COLUMN input_params.coach_types.coach_type_plugs          IS 'Whether this coach type has passenger power sockets.';
 COMMENT ON COLUMN input_params.coach_types.coach_type_crew_factor    IS 'Fractional cabin crew per trip (e.g. 0.5 = one crew covers two coaches).';
 COMMENT ON COLUMN input_params.coach_types.source_id                 IS 'Source for all values in this row.';
-COMMENT ON COLUMN input_params.coach_types.editor                    IS 'User who created or last edited this row.';
 COMMENT ON COLUMN input_params.coach_types.change_log                IS 'Free-text description of changes made in this version.';
+COMMENT ON COLUMN input_params.coach_types.coach_type_version        IS 'Per-table full-snapshot version number. Resolved via scenario.scenarios.coach_types_version — never inferred.';
 
 -- ---------------------------------------------------------------
 -- coach_type_classes
@@ -149,7 +146,7 @@ CREATE TABLE input_params.composition_types (
     composition_type_row_id              SERIAL        PRIMARY KEY,
     composition_type_id                  VARCHAR(50)   NOT NULL,
     composition_type_description         VARCHAR(200)  NOT NULL,
-    composition_type_operator_id         VARCHAR(50)   NOT NULL REFERENCES input_params.operators(operator_id),
+    composition_type_operator_id         VARCHAR(50)   NOT NULL,
     composition_type_hsr_allowed         BOOLEAN       NOT NULL,
     composition_type_max_speed_kmh       NUMERIC(6,2)  NOT NULL,
     composition_type_energy_factor_weight  NUMERIC(10,6) NOT NULL,
@@ -164,19 +161,14 @@ CREATE TABLE input_params.composition_types (
     composition_type_coach_maint_eur_km  NUMERIC(10,8) NOT NULL,
     composition_type_driver_factor       NUMERIC(4,2)  NOT NULL DEFAULT 1,
     source_id                            INTEGER       REFERENCES input_params.sources(source_id),
-    editor                               VARCHAR(100),
     change_log                           TEXT,
     composition_type_version             INTEGER       NOT NULL DEFAULT 1,
-    created_at                           TIMESTAMPTZ   NOT NULL DEFAULT now(),
-    is_current                           BOOLEAN       NOT NULL DEFAULT TRUE,
     UNIQUE (composition_type_id, composition_type_version)
 );
-CREATE UNIQUE INDEX idx_composition_types_one_current
-    ON input_params.composition_types (composition_type_id) WHERE is_current;
 
-COMMENT ON TABLE  input_params.composition_types IS 'Train composition blueprints: operational and cost parameters. Capacity derived from composition_type_coaches → coach_type_classes. Locomotives are not purchased — see operators.operator_loco_lease_eur_h for full-service lease cost.';
+COMMENT ON TABLE  input_params.composition_types IS 'Train composition blueprints: operational and cost parameters. Capacity derived from composition_type_coaches → coach_type_classes. Locomotives are not purchased — see operators.operator_loco_lease_eur_h for full-service lease cost. Version bumps are full-table snapshots, resolved via scenario.scenarios.composition_types_version — see scenario.scenarios for the versioning contract.';
 COMMENT ON COLUMN input_params.composition_types.composition_type_id          IS 'Unique composition identifier (e.g. STD-3.1).';
-COMMENT ON COLUMN input_params.composition_types.composition_type_operator_id IS 'Operating company. Links to operators for operator cost parameters.';
+COMMENT ON COLUMN input_params.composition_types.composition_type_operator_id IS 'Operating company. Soft reference to input_params.operators.operator_id (not an enforced FK, since operators is itself row-versioned) — resolved per-scenario at load time.';
 COMMENT ON COLUMN input_params.composition_types.composition_type_hsr_allowed IS 'Whether this composition may use high-speed rail infrastructure.';
 COMMENT ON COLUMN input_params.composition_types.composition_type_max_speed_kmh IS 'Maximum operational speed. Unit: km/h';
 COMMENT ON COLUMN input_params.composition_types.composition_type_energy_factor_weight  IS 'Energy regression coefficient for tonne-kilometre term. Unit: kWh/(t·km)';
@@ -191,8 +183,8 @@ COMMENT ON COLUMN input_params.composition_types.composition_type_cleaning_eur_d
 COMMENT ON COLUMN input_params.composition_types.composition_type_coach_maint_eur_km IS 'Variable coach maintenance cost per km. Unit: €/km';
 COMMENT ON COLUMN input_params.composition_types.composition_type_driver_factor      IS 'Number of drivers required per trip (e.g. 1 or 2).';
 COMMENT ON COLUMN input_params.composition_types.source_id                           IS 'Source for all values in this row.';
-COMMENT ON COLUMN input_params.composition_types.editor                              IS 'User who created or last edited this row.';
 COMMENT ON COLUMN input_params.composition_types.change_log                          IS 'Free-text description of changes made in this version.';
+COMMENT ON COLUMN input_params.composition_types.composition_type_version            IS 'Per-table full-snapshot version number. Resolved via scenario.scenarios.composition_types_version — never inferred.';
 
 -- ---------------------------------------------------------------
 -- composition_type_coaches
@@ -232,19 +224,14 @@ CREATE TABLE IF NOT EXISTS input_params.composition_references (
     ref_avg_fare_capsule      NUMERIC(8,2)    NOT NULL DEFAULT 99.00,
     ref_avg_fare_catering     NUMERIC(8,2)    NOT NULL DEFAULT 0.00,
     version                   INTEGER         NOT NULL DEFAULT 1,
-    is_current                BOOLEAN         NOT NULL DEFAULT TRUE,
-    editor                    TEXT,
     change_log                TEXT,
-    source_id                 INTEGER         REFERENCES input_params.sources(source_id),
-    created_at                TIMESTAMPTZ     NOT NULL DEFAULT NOW()
+    source_id                 INTEGER         REFERENCES input_params.sources(source_id)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_composition_references_current
-    ON input_params.composition_references(composition_type_row_id)
-    WHERE is_current = TRUE;
-
 COMMENT ON TABLE input_params.composition_references IS
-    'Reference trip profile per composition for indicative KPI computation.';
+    'Reference trip profile per composition for indicative KPI computation. Version bumps are full-table snapshots, resolved via scenario.scenarios.composition_references_version — see scenario.scenarios for the versioning contract.';
+COMMENT ON COLUMN input_params.composition_references.version IS 'Per-table full-snapshot version number. Resolved via scenario.scenarios.composition_references_version — never inferred.';
+COMMENT ON COLUMN input_params.composition_references.change_log IS 'Free-text description of changes made in this version.';
 
 -- ---------------------------------------------------------------
 -- track_infrastructure_defaults
@@ -271,17 +258,14 @@ CREATE TABLE input_params.track_infrastructure_defaults (
     track_min_alighting_src      INTEGER      REFERENCES input_params.sources(source_id),
     track_buffer_quota_per       NUMERIC(5,3) NOT NULL,
     track_buffer_src             INTEGER      REFERENCES input_params.sources(source_id),
-    editor                       VARCHAR(100),
     change_log                   TEXT,
     track_infra_default_version  INTEGER      NOT NULL DEFAULT 1,
-    created_at                   TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    is_current                   BOOLEAN      NOT NULL DEFAULT TRUE,
     UNIQUE (track_infra_default_key, track_infra_default_version)
 );
-CREATE UNIQUE INDEX idx_track_infra_defaults_one_current
-    ON input_params.track_infrastructure_defaults (track_infra_default_key) WHERE is_current;
 
-COMMENT ON TABLE  input_params.track_infrastructure_defaults IS 'EU-average fallback track infrastructure parameters applied when a country field is NULL.';
+COMMENT ON TABLE  input_params.track_infrastructure_defaults IS 'EU-average fallback track infrastructure parameters applied when a country field is NULL. Version bumps are full-table snapshots, resolved via scenario.scenarios.track_infrastructure_defaults_version — see scenario.scenarios for the versioning contract.';
+COMMENT ON COLUMN input_params.track_infrastructure_defaults.change_log              IS 'Free-text description of changes made in this version.';
+COMMENT ON COLUMN input_params.track_infrastructure_defaults.track_infra_default_version IS 'Per-table full-snapshot version number. Resolved via scenario.scenarios.track_infrastructure_defaults_version — never inferred.';
 
 -- ---------------------------------------------------------------
 -- track_infrastructures
@@ -308,17 +292,12 @@ CREATE TABLE input_params.track_infrastructures (
     track_min_alighting_src      INTEGER      REFERENCES input_params.sources(source_id),
     track_buffer_quota_per       NUMERIC(5,3),
     track_buffer_src             INTEGER      REFERENCES input_params.sources(source_id),
-    editor                       VARCHAR(100),
     change_log                   TEXT,
     track_infra_version          INTEGER      NOT NULL DEFAULT 1,
-    created_at                   TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    is_current                   BOOLEAN      NOT NULL DEFAULT TRUE,
     UNIQUE (country_code, track_infra_version)
 );
-CREATE UNIQUE INDEX idx_track_infrastructures_one_current
-    ON input_params.track_infrastructures (country_code) WHERE is_current;
 
-COMMENT ON TABLE  input_params.track_infrastructures IS 'Country-level track infrastructure parameters. NULL fields are resolved against track_infrastructure_defaults by the loader.';
+COMMENT ON TABLE  input_params.track_infrastructures IS 'Country-level track infrastructure parameters. NULL fields are resolved against track_infrastructure_defaults by the loader. Version bumps are full-table snapshots — every country''s row is duplicated forward on any single-country edit — resolved via scenario.scenarios.track_infrastructures_version. See scenario.scenarios for the versioning contract.';
 COMMENT ON COLUMN input_params.track_infrastructures.country_code             IS 'ISO 3166-1 alpha-2 country code. FK to countries table.';
 COMMENT ON COLUMN input_params.track_infrastructures.track_tac_eur_train_km   IS 'Track access charge per train-km. Unit: €/train-km';
 COMMENT ON COLUMN input_params.track_infrastructures.track_parking_eur_day    IS 'Overnight stabling cost per day. Unit: €/day';
@@ -330,8 +309,8 @@ COMMENT ON COLUMN input_params.track_infrastructures.track_hsr_allowed        IS
 COMMENT ON COLUMN input_params.track_infrastructures.track_min_boarding_time  IS 'Infrastructure-dependent minimum dwell time at boarding stops. Unit: h';
 COMMENT ON COLUMN input_params.track_infrastructures.track_min_alighting_time IS 'Infrastructure-dependent minimum dwell time at alighting stops. Unit: h';
 COMMENT ON COLUMN input_params.track_infrastructures.track_buffer_quota_per   IS 'Schedule buffer as fraction of driving time. Unit: %';
-COMMENT ON COLUMN input_params.track_infrastructures.editor                   IS 'User who created or last edited this row.';
 COMMENT ON COLUMN input_params.track_infrastructures.change_log               IS 'Free-text description of changes made in this version.';
+COMMENT ON COLUMN input_params.track_infrastructures.track_infra_version      IS 'Per-table full-snapshot version number. Resolved via scenario.scenarios.track_infrastructures_version — never inferred.';
 
 -- ---------------------------------------------------------------
 -- stop_infrastructure_defaults
@@ -341,20 +320,17 @@ CREATE TABLE input_params.stop_infrastructure_defaults (
     country_code               CHAR(2)     REFERENCES input_params.countries(country_code),
     stop_charge_eur            NUMERIC(10,2) NOT NULL,
     stop_charge_src            INTEGER      REFERENCES input_params.sources(source_id),
-    editor                     VARCHAR(100),
     change_log                 TEXT,
     stop_infra_default_version INTEGER      NOT NULL DEFAULT 1,
-    created_at                 TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    is_current                 BOOLEAN      NOT NULL DEFAULT TRUE,
     UNIQUE (country_code, stop_infra_default_version)
 );
-CREATE UNIQUE INDEX idx_stop_infra_defaults_one_current
-    ON input_params.stop_infrastructure_defaults (country_code) WHERE is_current;
 
-COMMENT ON TABLE  input_params.stop_infrastructure_defaults IS 'Fallback stop access charge per country (country_code NULL = global default).';
+COMMENT ON TABLE  input_params.stop_infrastructure_defaults IS 'Fallback stop access charge per country (country_code NULL = global default). Version bumps are full-table snapshots, resolved via scenario.scenarios.stop_infrastructure_defaults_version — see scenario.scenarios for the versioning contract.';
 COMMENT ON COLUMN input_params.stop_infrastructure_defaults.country_code   IS 'Country this default applies to. NULL = global fallback.';
 COMMENT ON COLUMN input_params.stop_infrastructure_defaults.stop_charge_eur IS 'Fallback station access charge per stop. Unit: €/stop';
 COMMENT ON COLUMN input_params.stop_infrastructure_defaults.stop_charge_src IS 'Source for stop_charge_eur.';
+COMMENT ON COLUMN input_params.stop_infrastructure_defaults.change_log     IS 'Free-text description of changes made in this version.';
+COMMENT ON COLUMN input_params.stop_infrastructure_defaults.stop_infra_default_version IS 'Per-table full-snapshot version number. Resolved via scenario.scenarios.stop_infrastructure_defaults_version — never inferred.';
 
 -- ---------------------------------------------------------------
 -- stop_infrastructures
@@ -370,17 +346,12 @@ CREATE TABLE input_params.stop_infrastructures (
     stop_loc_src       INTEGER      REFERENCES input_params.sources(source_id),
     stop_charge_eur    NUMERIC(10,2),
     stop_charge_src    INTEGER      REFERENCES input_params.sources(source_id),
-    editor             VARCHAR(100),
     change_log         TEXT,
     stop_infra_version INTEGER      NOT NULL DEFAULT 1,
-    created_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    is_current         BOOLEAN      NOT NULL DEFAULT TRUE,
     UNIQUE (stop_id, stop_infra_version)
 );
-CREATE UNIQUE INDEX idx_stop_infrastructures_one_current
-    ON input_params.stop_infrastructures (stop_id) WHERE is_current;
 
-COMMENT ON TABLE  input_params.stop_infrastructures IS 'Night train stopping points. stop_charge_eur NULL is resolved against stop_infrastructure_defaults by the loader.';
+COMMENT ON TABLE  input_params.stop_infrastructures IS 'Night train stopping points. stop_charge_eur NULL is resolved against stop_infrastructure_defaults by the loader. Version bumps are full-table snapshots — every stop''s row is duplicated forward on any single-stop edit — resolved via scenario.scenarios.stop_infrastructures_version. See scenario.scenarios for the versioning contract.';
 COMMENT ON COLUMN input_params.stop_infrastructures.stop_id         IS 'Unique stop identifier.';
 COMMENT ON COLUMN input_params.stop_infrastructures.stop_name       IS 'Official station name.';
 COMMENT ON COLUMN input_params.stop_infrastructures.country_code    IS 'ISO 3166-1 alpha-2 country code. FK to countries.';
@@ -390,5 +361,5 @@ COMMENT ON COLUMN input_params.stop_infrastructures.stop_lon        IS 'Longitud
 COMMENT ON COLUMN input_params.stop_infrastructures.stop_loc_src    IS 'Source for lat/lon coordinates.';
 COMMENT ON COLUMN input_params.stop_infrastructures.stop_charge_eur IS 'Station access charge per stop. NULL = use country or global default. Unit: €/stop';
 COMMENT ON COLUMN input_params.stop_infrastructures.stop_charge_src IS 'Source for stop_charge_eur.';
-COMMENT ON COLUMN input_params.stop_infrastructures.editor          IS 'User who created or last edited this row.';
 COMMENT ON COLUMN input_params.stop_infrastructures.change_log      IS 'Free-text description of changes made in this version.';
+COMMENT ON COLUMN input_params.stop_infrastructures.stop_infra_version IS 'Per-table full-snapshot version number. Resolved via scenario.scenarios.stop_infrastructures_version — never inferred.';

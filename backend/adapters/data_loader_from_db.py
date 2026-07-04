@@ -176,6 +176,74 @@ class DBDataLoader:
             self._conn.close()
 
     # ------------------------------------------------------------------
+    # SCENARIO RESOLUTION
+    # ------------------------------------------------------------------
+
+    def resolve_scenario_id(self, scenario_id: int | None) -> int:
+        """
+        Resolve None → the concrete scenario_id of the current is_current_base
+        scenario. Callers building a multi-step pipeline (route_factory,
+        API endpoints) should call this ONCE at the top and pass the
+        concrete id to every subsequent loader call — resolving None
+        independently on each call risks two calls disagreeing if
+        is_current_base moves mid-request, and the concrete id is what
+        needs to be stored in RouteProvenance for reproducibility.
+        """
+        if scenario_id is not None:
+            return scenario_id
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT scenario_id FROM scenario.scenarios WHERE is_current_base = TRUE"
+            )
+            row = cur.fetchone()
+        if row is None:
+            raise ValueError(
+                "No scenario has is_current_base = TRUE — database is not "
+                "correctly seeded."
+            )
+        return row["scenario_id"]
+
+    def _resolve_scenario_versions(self, scenario_id: int | None) -> dict[str, int]:
+        """
+        Resolve a scenario_id (or None → the live is_current_base scenario)
+        to its eight per-table version pointers.
+
+        Every column on scenario.scenarios is NOT NULL, so this is always a
+        single direct row fetch — no inheritance/fallback logic needed.
+        Returned dict keys match the *_version column names minus the
+        "_version" suffix, e.g. {"operators": 1, "track_infrastructures": 2, ...}.
+        """
+        with self._cursor() as cur:
+            if scenario_id is None:
+                cur.execute(
+                    "SELECT * FROM scenario.scenarios WHERE is_current_base = TRUE"
+                )
+            else:
+                cur.execute(
+                    "SELECT * FROM scenario.scenarios WHERE scenario_id = %s",
+                    (scenario_id,),
+                )
+            row = cur.fetchone()
+        if row is None:
+            if scenario_id is None:
+                raise ValueError(
+                    "No scenario has is_current_base = TRUE — database is not "
+                    "correctly seeded."
+                )
+            raise ValueError(f"Scenario '{scenario_id}' not found.")
+
+        return {
+            "operators": row["operators_version"],
+            "coach_types": row["coach_types_version"],
+            "composition_types": row["composition_types_version"],
+            "composition_references": row["composition_references_version"],
+            "track_infrastructures": row["track_infrastructures_version"],
+            "track_infrastructure_defaults": row["track_infrastructure_defaults_version"],
+            "stop_infrastructures": row["stop_infrastructures_version"],
+            "stop_infrastructure_defaults": row["stop_infrastructure_defaults_version"],
+        }
+
+    # ------------------------------------------------------------------
     # SOURCES
     # ------------------------------------------------------------------
 
@@ -246,28 +314,32 @@ class DBDataLoader:
     def _load_operator(
         self,
         operator_id: str,
+        operators_version: int,
         sources: dict[int, ParamsSource],
     ) -> Operator:
-        """Load one Operator with its class stocking costs."""
+        """Load one Operator (at a specific scenario-pinned version) with its class stocking costs."""
         with self._cursor() as cur:
             cur.execute(
                 """
                 SELECT * FROM input_params.operators
-                WHERE operator_id = %s
+                WHERE operator_id = %s AND operator_version = %s
             """,
-                (operator_id,),
+                (operator_id, operators_version),
             )
             row = cur.fetchone()
             if row is None:
-                raise ValueError(f"Operator '{operator_id}' not found.")
+                raise ValueError(
+                    f"Operator '{operator_id}' not found at version {operators_version}."
+                )
+            operator_row_id = row["operator_row_id"]
 
             cur.execute(
                 """
                 SELECT occ.service_class_id, occ.operator_class_svc_stockings_eur_place
                 FROM input_params.operator_class_costs occ
-                WHERE occ.operator_id = %s
+                WHERE occ.operator_row_id = %s
             """,
-                (operator_id,),
+                (operator_row_id,),
             )
             stocking_rows = cur.fetchall()
 
@@ -293,33 +365,43 @@ class DBDataLoader:
     # COMPOSITIONS
     # ------------------------------------------------------------------
 
-    def build_composition(self, comp_id: str) -> tuple[Composition, ParamVersions]:
+    def build_composition(
+        self, comp_id: str, scenario_id: int | None = None
+    ) -> tuple[Composition, ParamVersions]:
         """
-        Build a fully resolved Composition for a single composition ID.
+        Build a fully resolved Composition for a single composition ID, pinned
+        to a scenario's versions (or the live is_current_base scenario if
+        scenario_id is None).
 
         Returns (Composition, ParamVersions) — the caller should merge
         param_versions into the route-level ParamVersions.
         """
+        versions = self._resolve_scenario_versions(scenario_id)
         sources = self._load_sources()
         service_classes = self._load_service_classes()
         param_versions = ParamVersions()
 
         with self._cursor() as cur:
-            # --- core composition row ---
+            # --- core composition row, at the pinned version ---
             cur.execute(
                 """
                 SELECT * FROM input_params.composition_types
-                WHERE composition_type_id = %s AND is_current = TRUE
+                WHERE composition_type_id = %s AND composition_type_version = %s
             """,
-                (comp_id,),
+                (comp_id, versions["composition_types"]),
             )
             comp_row = cur.fetchone()
             if comp_row is None:
-                raise ValueError(f"Composition '{comp_id}' not found in database.")
+                raise ValueError(
+                    f"Composition '{comp_id}' not found at version "
+                    f"{versions['composition_types']}."
+                )
 
             comp_row_id = comp_row["composition_type_row_id"]
 
-            # --- coaches: ordered by position ---
+            # --- coaches: ordered by position (coach_type_row_id is already
+            #     version-pinned via composition_type_coaches, itself scoped
+            #     to this composition_type_row_id) ---
             cur.execute(
                 """
                 SELECT
@@ -406,13 +488,13 @@ class DBDataLoader:
                 )
 
         operator = self._load_operator(
-            comp_row["composition_type_operator_id"], sources
+            comp_row["composition_type_operator_id"], versions["operators"], sources
         )
 
         # register operator fields in param_versions
         op_descriptions = self._load_column_comments("input_params", "operators")
         op_src = _src(comp_row, "source_id", sources)
-        op_version = 1  # operators table has no versioning
+        op_version = versions["operators"]
         op_fields = {
             "driver_costs_eur_h": operator.driver_costs_eur_h,
             "crew_costs_eur_h": operator.crew_costs_eur_h,
@@ -491,33 +573,40 @@ class DBDataLoader:
 
         return Composition.from_type(comp_type), param_versions
 
-    def build_all_compositions(self) -> tuple[dict[str, Composition], ParamVersions]:
+    def build_all_compositions(
+        self, scenario_id: int | None = None
+    ) -> tuple[dict[str, Composition], ParamVersions]:
         """
-        Return all current compositions as (dict keyed by comp_id, merged ParamVersions).
-        Loads composition_references and computes four indicative KPIs per composition
-        using compute_indicative_figures() from calc.py — same model as evaluate_route().
+        Return all compositions at a scenario's pinned versions (dict keyed
+        by comp_id, merged ParamVersions). Loads composition_references and
+        computes four indicative KPIs per composition using
+        compute_indicative_figures() from calc.py — same model as evaluate_route().
         """
+        versions = self._resolve_scenario_versions(scenario_id)
+
         with self._cursor() as cur:
             cur.execute(
                 """
                 SELECT composition_type_id, composition_type_row_id
                 FROM input_params.composition_types
-                WHERE is_current = TRUE
-            """
+                WHERE composition_type_version = %s
+            """,
+                (versions["composition_types"],),
             )
             rows = cur.fetchall()
 
             cur.execute(
                 """
                 SELECT * FROM input_params.composition_references
-                WHERE is_current = TRUE
-            """
+                WHERE version = %s
+            """,
+                (versions["composition_references"],),
             )
             ref_rows = {r["composition_type_row_id"]: r for r in cur.fetchall()}
 
-        # load tracks + stops once for all indicative calculations
-        tracks, _ = self.build_all_tracks()
-        stop_infra, _ = self.build_all_stops()
+        # load tracks + stops once for all indicative calculations, same scenario
+        tracks, _ = self.build_all_tracks(scenario_id)
+        stop_infra, _ = self.build_all_stops(scenario_id)
 
         result: dict[str, Composition] = {}
         merged_versions = ParamVersions()
@@ -526,7 +615,7 @@ class DBDataLoader:
             comp_id = row["composition_type_id"]
             comp_row_id = row["composition_type_row_id"]
             try:
-                comp, versions = self.build_composition(comp_id)
+                comp, comp_versions = self.build_composition(comp_id, scenario_id)
 
                 # compute indicative figures if reference exists
                 ref_row = ref_rows.get(comp_row_id)
@@ -571,7 +660,7 @@ class DBDataLoader:
                     comp.indicative = None
 
                 result[comp_id] = comp
-                merged_versions.entries.update(versions.entries)
+                merged_versions.entries.update(comp_versions.entries)
             except Exception as e:
                 logger.warning("Skipping composition '%s': %s", comp_id, e)
                 self._conn.rollback()
@@ -587,31 +676,37 @@ class DBDataLoader:
     # TRACK INFRASTRUCTURE
     # ------------------------------------------------------------------
 
-    def build_all_tracks(self) -> tuple[TrackInfraCollection, ParamVersions]:
+    def build_all_tracks(
+        self, scenario_id: int | None = None
+    ) -> tuple[TrackInfraCollection, ParamVersions]:
         """
-        Return all current track infrastructure rows as (TrackInfraCollection, ParamVersions).
+        Return track infrastructure at a scenario's pinned version as
+        (TrackInfraCollection, ParamVersions).
 
         Any None field in a country row is substituted with the EU-average
         default from track_infrastructure_defaults. A WARNING is logged per
         substitution.
         """
+        versions = self._resolve_scenario_versions(scenario_id)
         sources = self._load_sources()
 
         with self._cursor() as cur:
             cur.execute(
                 """
                 SELECT * FROM input_params.track_infrastructures
-                WHERE is_current = TRUE
-            """
+                WHERE track_infra_version = %s
+            """,
+                (versions["track_infrastructures"],),
             )
             rows = cur.fetchall()
 
             cur.execute(
                 """
                 SELECT * FROM input_params.track_infrastructure_defaults
-                WHERE is_current = TRUE
+                WHERE track_infra_default_version = %s
                 LIMIT 1
-            """
+            """,
+                (versions["track_infrastructure_defaults"],),
             )
             default_row = cur.fetchone()
 
@@ -694,7 +789,7 @@ class DBDataLoader:
                 logger.warning("Skipping track infrastructure row '%s': %s", cc, e)
 
         logger.info("Built track infrastructure for %d countries.", len(result))
-        return TrackInfraCollection(result), param_versions
+        return TrackInfraCollection(result, default), param_versions
 
     def _row_to_track(
         self,
@@ -792,6 +887,7 @@ class DBDataLoader:
 
         return TrackInfrastructure(
             country_code=country_code,
+            field_is_default=self._track_defaults[country_code],
             tac_eur_train_km=tac_val,
             tac_src=field_src("track_tac_src")
             or (default.tac_src if tac_def else None),
@@ -826,31 +922,36 @@ class DBDataLoader:
     # STOP INFRASTRUCTURE
     # ------------------------------------------------------------------
 
-    def build_all_stops(self) -> tuple[StopInfraCollection, ParamVersions]:
+    def build_all_stops(
+        self, scenario_id: int | None = None
+    ) -> tuple[StopInfraCollection, ParamVersions]:
         """
-        Return all current stops as (StopInfraCollection, ParamVersions).
+        Return stops at a scenario's pinned version as (StopInfraCollection, ParamVersions).
 
         If a stop has no stop_charge_eur, the country default from
         stop_infrastructure_defaults is used. If no country default exists,
         the global default (country_code IS NULL) is used.
         A WARNING is logged per substitution.
         """
+        versions = self._resolve_scenario_versions(scenario_id)
         sources = self._load_sources()
 
         with self._cursor() as cur:
             cur.execute(
                 """
                 SELECT * FROM input_params.stop_infrastructures
-                WHERE is_current = TRUE
-            """
+                WHERE stop_infra_version = %s
+            """,
+                (versions["stop_infrastructures"],),
             )
             stop_rows = cur.fetchall()
 
             cur.execute(
                 """
                 SELECT * FROM input_params.stop_infrastructure_defaults
-                WHERE is_current = TRUE
-            """
+                WHERE stop_infra_default_version = %s
+            """,
+                (versions["stop_infrastructure_defaults"],),
             )
             default_rows = cur.fetchall()
 
