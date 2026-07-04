@@ -10,7 +10,7 @@ Read-only parameter endpoints.
 
 import logging
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 
 from api.helpers.dependencies import get_loader
 from models.utils import min_to_h
@@ -24,9 +24,14 @@ def get_stop_infrastructures():
     """
     Return all available stops with routing-relevant fields and parameter provenance.
     Fields resolved from a default row are marked with is_default=True.
+
+    Query params:
+      scenario_id : int (optional) — pins parameter versions; omit for the
+                    live is_current_base scenario.
     """
     loader = get_loader()
-    stop_infra, param_versions = loader.build_all_stops()
+    scenario_id = request.args.get("scenario_id", type=int)
+    stop_infra, param_versions = loader.build_all_stops(scenario_id)
 
     def _field(stop_id, field_name, value):
         entry = param_versions.get(f"stop_infra:{stop_id}:{field_name}")
@@ -70,9 +75,14 @@ def get_compositions():
     Return all available composition types with full parameters.
     Capacity and density expressed per service class.
     Staff overhead converted to hours for display.
+
+    Query params:
+      scenario_id : int (optional) — pins parameter versions; omit for the
+                    live is_current_base scenario.
     """
     loader = get_loader()
-    compositions, _ = loader.build_all_compositions()
+    scenario_id = request.args.get("scenario_id", type=int)
+    compositions, _ = loader.build_all_compositions(scenario_id)
 
     result = []
     for comp_id, c in compositions.items():
@@ -110,20 +120,16 @@ def get_compositions():
                 "ebit_margin_per": c.ebit_margin_per,
                 # --- fixed costs per operating day ---
                 "fixed_costs": {
-                    "purchase_loco_eur": c.purchase_loco_eur,
+                    "loco_full_service_lease_eur_h": c.loco_full_service_lease_eur_h,
                     "purchase_coach_eur": c.purchase_coach_eur,
-                    "loco_avail_per": c.loco_avail_per,
                     "coach_avail_per": c.coach_avail_per,
-                    "loco_amort_years": c.loco_amort_years,
                     "coach_amort_years": c.coach_amort_years,
                     "financing_quota_per": c.financing_quota_per,
                     "fix_overhead_quota_per": c.fix_overhead_quota_per,
                     "cleaning_services_eur_day": c.cleaning_services_eur_day,
-                    "shunting_eur_day": c.shunting_eur_day,
                 },
                 # --- variable costs per km ---
                 "variable_km": {
-                    "loco_maint_eur_km": c.loco_maint_eur_km,
                     "coach_maint_eur_km": c.coach_maint_eur_km,
                 },
                 # --- variable costs per hour ---
@@ -162,9 +168,14 @@ def get_track_infrastructures():
     Return all country track infrastructure parameters with per-field provenance.
     Fields resolved from the EU-average default row are marked with is_default=True,
     and the default row's source/version is shown instead of the country row's.
+
+    Query params:
+      scenario_id : int (optional) — pins parameter versions; omit for the
+                    live is_current_base scenario.
     """
     loader = get_loader()
-    tracks, param_versions = loader.build_all_tracks()
+    scenario_id = request.args.get("scenario_id", type=int)
+    tracks, param_versions = loader.build_all_tracks(scenario_id)
 
     def _field(cc, field_name, value):
         entry = param_versions.get(f"track_infra:{cc}:{field_name}")
