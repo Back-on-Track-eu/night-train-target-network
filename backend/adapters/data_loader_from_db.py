@@ -11,6 +11,7 @@ Typical usage
     composition  = loader.build_composition("STD-7.1")
     tracks       = loader.build_all_tracks()
     stops        = loader.build_all_stops()
+    geometries   = loader.get_country_geometries()
 
 Default value resolution
 ------------------------
@@ -28,10 +29,16 @@ New domain model mapping
   build_all_compositions()→ dict[str, Composition]
   build_all_tracks()      → TrackInfraCollection
   build_all_stops()       → StopInfraCollection
+  get_country_geometries()→ list[tuple[str, dict]]  (country_code, GeoJSON geometry)
+                             — plain data, not a domain object; callers
+                             (e.g. rail_router.CountryIndex) build their own
+                             representation from it. input_params.countries
+                             is static reference data, not scenario-versioned.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from datetime import timedelta
@@ -316,8 +323,17 @@ class DBDataLoader:
         operator_id: str,
         operators_version: int,
         sources: dict[int, ParamsSource],
-    ) -> Operator:
-        """Load one Operator (at a specific scenario-pinned version) with its class stocking costs."""
+    ) -> tuple[Operator, ParamsSource | None, dict[str, ParamsSource | None]]:
+        """
+        Load one Operator (at a specific scenario-pinned version) with its class
+        stocking costs.
+
+        Returns (Operator, operator_src, class_cost_sources) — operator_src is
+        the source for the operator row itself; class_cost_sources maps
+        class_id -> source for that class's operator_class_costs row. Returned
+        rather than resolved from the composition row, since the operator row
+        has its own source_id, distinct from the composition's.
+        """
         with self._cursor() as cur:
             cur.execute(
                 """
@@ -335,7 +351,7 @@ class DBDataLoader:
 
             cur.execute(
                 """
-                SELECT occ.service_class_id, occ.operator_class_svc_stockings_eur_place
+                SELECT occ.service_class_id, occ.operator_class_svc_stockings_eur_place, occ.source_id
                 FROM input_params.operator_class_costs occ
                 WHERE occ.operator_row_id = %s
             """,
@@ -343,7 +359,7 @@ class DBDataLoader:
             )
             stocking_rows = cur.fetchall()
 
-        return Operator(
+        operator = Operator(
             operator_id=row["operator_id"],
             operator_name=row["operator_name"],
             driver_costs_eur_h=_f(row["operator_driver_costs_eur_h"]),
@@ -360,6 +376,11 @@ class DBDataLoader:
                 for sr in stocking_rows
             },
         )
+        operator_src = _src(row, "source_id", sources)
+        class_cost_sources = {
+            sr["service_class_id"]: _src(sr, "source_id", sources) for sr in stocking_rows
+        }
+        return operator, operator_src, class_cost_sources
 
     # ------------------------------------------------------------------
     # COMPOSITIONS
@@ -466,6 +487,7 @@ class DBDataLoader:
                 climatization=_b(cr["coach_type_climatization"]),
                 plugs=_b(cr["coach_type_plugs"]),
                 classes=classes_by_position.get(pos, {}),
+                remarks=cr["coach_type_remarks"],
             )
             # register coach_type fields in param_versions
             ct_descriptions = self._load_column_comments("input_params", "coach_types")
@@ -487,13 +509,13 @@ class DBDataLoader:
                     description=ct_descriptions.get(f"coach_type_{field_name}"),
                 )
 
-        operator = self._load_operator(
+        operator, op_src, class_cost_sources = self._load_operator(
             comp_row["composition_type_operator_id"], versions["operators"], sources
         )
 
-        # register operator fields in param_versions
+        # register operator fields in param_versions — op_src comes from the
+        # operator's own row (see _load_operator), not the composition's
         op_descriptions = self._load_column_comments("input_params", "operators")
-        op_src = _src(comp_row, "source_id", sources)
         op_version = versions["operators"]
         op_fields = {
             "driver_costs_eur_h": operator.driver_costs_eur_h,
@@ -513,6 +535,22 @@ class DBDataLoader:
                 version=op_version,
                 source=op_src,
                 description=op_descriptions.get(f"operator_{field_name}"),
+            )
+
+        # register operator_class_costs sources — one row per class, tied to
+        # the operator row (no separate version column of its own)
+        occ_descriptions = self._load_column_comments(
+            "input_params", "operator_class_costs"
+        )
+        for class_id, svc_cost in operator.svc_stockings_eur_place.items():
+            param_versions.add(
+                key=f"operator_class_cost:{operator.operator_id}:{class_id}",
+                value=svc_cost,
+                version=op_version,
+                source=class_cost_sources.get(class_id),
+                description=occ_descriptions.get(
+                    "operator_class_svc_stockings_eur_place"
+                ),
             )
 
         comp_type = CompositionType(
@@ -647,6 +685,7 @@ class DBDataLoader:
                         comp.indicative = compute_indicative_figures(
                             comp, ref, tracks, stop_infra
                         )
+                        comp.indicative.reference = ref
                     except Exception as e:
                         logger.warning(
                             "Indicative figures failed for '%s': %s", comp_id, e
@@ -1057,3 +1096,36 @@ class DBDataLoader:
             stop_charge_eur=charge,
             stop_charge_src=charge_src,
         )
+
+    # ------------------------------------------------------------------
+    # COUNTRY GEOMETRIES
+    # ------------------------------------------------------------------
+
+    def get_country_geometries(self) -> list[tuple[str, dict]]:
+        """
+        Return (country_code, GeoJSON geometry) pairs for every country that
+        has a border polygon seeded — country_code is ISO 3166-1 alpha-2,
+        matching every other country_code in the codebase.
+
+        input_params.countries is static reference data, not one of the
+        eight scenario-versioned tables, so there's no scenario_id/version
+        to resolve here — this is always the current (only) generation.
+
+        Returns plain (str, dict) pairs rather than a domain object: this
+        is a data-access method, not a domain-model builder, so it doesn't
+        construct rail_router.CountryIndex itself (routing-specific — would
+        pull a routing-layer import into the data-access layer). Callers
+        build whatever representation they need from the raw geometry.
+        """
+        with self._cursor() as cur:
+            cur.execute(
+                """
+                SELECT country_code, ST_AsGeoJSON(country_geom) AS geom
+                FROM input_params.countries
+                WHERE country_geom IS NOT NULL
+                """
+            )
+            rows = cur.fetchall()
+        result = [(row["country_code"], json.loads(row["geom"])) for row in rows]
+        logger.info("Loaded %d country geometries.", len(result))
+        return result
