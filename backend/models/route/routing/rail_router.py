@@ -34,24 +34,16 @@ Public surface
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 from collections import defaultdict
 from dataclasses import dataclass
-from pathlib import Path
 
 import requests
 
 from models.params import Composition, TrackInfraCollection, StopInfrastructure
 from models.route.trip import StopType
-from models.utils import (
-    ms_to_min,
-    haversine_path_m,
-    bbox_area,
-    ISO2_TO_ISO3,
-    ISO3_TO_ISO2,
-)
+from models.utils import ms_to_min, haversine_path_m, bbox_area
 
 logger = logging.getLogger(__name__)
 
@@ -105,55 +97,44 @@ class RoutedLeg:
 # Country index
 # ---------------------------------------------------------------------------
 
-_COUNTRIES_PATH = Path(
-    os.environ.get(
-        "COUNTRIES_GEOJSON_PATH",
-        str(Path(__file__).parent / "countries.geojson"),  # local dev fallback
-    )
-)
-
 
 class CountryIndex:
-    def __init__(self, features: list[dict]) -> None:
-        self._features = features
+    """
+    Country border lookup used for HSR-avoidance areas and point-in-polygon
+    country attribution of route geometry.
+
+    Built once from DBDataLoader.get_country_geometries() — see
+    api/helpers/dependencies.py — and injected into RailRouter rather than
+    read from disk. input_params.countries is static reference data (not
+    scenario-versioned), so this is a startup-time singleton like the
+    DBDataLoader itself, not rebuilt per request.
+
+    Keyed natively in ISO 3166-1 alpha-2 (country_code), matching every
+    other country code in the codebase — no ISO3 conversion needed, unlike
+    the old geojson-file version which was keyed by Natural Earth's
+    ADM0_A3 (ISO3).
+    """
+
+    def __init__(self, country_geometries: list[tuple[str, dict]]) -> None:
         from shapely.geometry import shape
 
-        self._shapes = [
-            (f["properties"].get("ADM0_A3", ""), shape(f["geometry"])) for f in features
-        ]
+        self._geometries = country_geometries
+        self._shapes = [(cc, shape(geom)) for cc, geom in country_geometries]
         logger.info("CountryIndex: loaded %d country polygons.", len(self._shapes))
-
-    @classmethod
-    def load(cls, path: Path = _COUNTRIES_PATH) -> "CountryIndex":
-        if not path.exists():
-            url = os.environ.get(
-                "NATURAL_EARTH_COUNTRIES_URL",
-                "<see NATURAL_EARTH_COUNTRIES_URL in .env.example>",
-            )
-            raise FileNotFoundError(
-                f"Country borders file not found at {path}.\n"
-                f"Download from: {url}\n"
-                f"In Docker this file is downloaded at build time via the Dockerfile.\n"
-                f'For local dev: wget -O {path} "$NATURAL_EARTH_COUNTRIES_URL"'
-            )
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-        return cls(data["features"])
 
     def lookup(self, lon: float, lat: float) -> str | None:
         from shapely.geometry import Point
 
         pt = Point(lon, lat)
-        for iso3, shp in self._shapes:
+        for cc, shp in self._shapes:
             if shp.contains(pt):
-                return iso3
+                return cc
         return None
 
-    def get_largest_polygon(self, iso3: str) -> list | None:
-        for feature in self._features:
-            if feature["properties"].get("ADM0_A3") != iso3:
+    def get_largest_polygon(self, country_code: str) -> list | None:
+        for cc, geom in self._geometries:
+            if cc != country_code:
                 continue
-            geom = feature["geometry"]
             if geom["type"] == "Polygon":
                 return geom["coordinates"][0]
             elif geom["type"] == "MultiPolygon":
@@ -187,14 +168,14 @@ class RailRouter:
     INFO_ENDPOINT = "/info"
     DETAILS = ["leg_distance", "leg_time", "time"]
 
-    def __init__(self) -> None:
+    def __init__(self, country_index: CountryIndex) -> None:
         self.base_url = os.environ.get(
             "OPENRAILROUTING_URL", "http://localhost:8989"
         ).rstrip("/")
         self.profile = os.environ.get("OPENRAILROUTING_PROFILE", "night_train")
         self.timeout = int(os.environ.get("OPENRAILROUTING_TIMEOUT", "30"))
         self._session = requests.Session()
-        self._country_index = CountryIndex.load()
+        self._country_index = country_index
 
     def check_server(self) -> dict:
         resp = self._session.get(
@@ -274,15 +255,14 @@ class RailRouter:
             for cc, avoid in avoid_high_speed_lines.items():
                 if not avoid:
                     continue
-                iso3 = ISO2_TO_ISO3.get(cc, cc)
-                ring = self._country_index.get_largest_polygon(iso3)
+                ring = self._country_index.get_largest_polygon(cc)
                 if ring is None:
                     logger.warning(
-                        "No polygon for '%s' — skipping HSR avoidance.", iso3
+                        "No polygon for '%s' — skipping HSR avoidance.", cc
                     )
                     continue
                 closed_ring = ring if ring[0] == ring[-1] else ring + [ring[0]]
-                area_name = f"hsr{iso3.lower()}"
+                area_name = f"hsr{cc.lower()}"
                 areas[area_name] = {
                     "type": "Feature",
                     "id": area_name,
@@ -451,10 +431,9 @@ class RailRouter:
             segment = coords[from_idx : to_idx + 1]
             dist_m = haversine_path_m(segment)
             mid_idx = (from_idx + to_idx) // 2
-            iso3 = (
+            cc = (
                 self._country_index.lookup(coords[mid_idx][0], coords[mid_idx][1])
                 or "UNK"
             )
-            cc = ISO3_TO_ISO2.get(iso3, iso3)
             intervals.append((from_idx, to_idx, cc, dist_m, iv_ms))
         return intervals

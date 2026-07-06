@@ -26,7 +26,7 @@ import random
 
 from flask import Blueprint, jsonify, request
 
-from api.helpers.dependencies import get_loader
+from api.helpers.dependencies import get_loader, get_country_index
 from api.helpers.serialize import route_to_dict
 from models.route.route_factory import plan_route, TripPairInput
 from models.route.timetable import VALID_TIMETABLE_MODES, VALID_SCHEDULE_MODES
@@ -143,7 +143,7 @@ def plan():
         return jsonify({"error": "validation_error", "details": errors}), 400
 
     loader = get_loader()
-    router = RailRouter()
+    router = RailRouter(get_country_index())
 
     # All defaulting/resolution happens here, once, at the API boundary —
     # everything below this point (TripPairInput, plan_route, and everything
