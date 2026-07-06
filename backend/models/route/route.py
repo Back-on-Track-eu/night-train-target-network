@@ -150,7 +150,15 @@ class TripPair:
         distance shares and stop country codes. Unlike Route.countries,
         there's no parking locations here — parkings are a Route-level
         concept (a formation may park at a stop neither trip in this pair
-        actually visits), not something a single TripPair owns."""
+        actually visits), not something a single TripPair owns.
+
+        "UNK" (RailRouter's sentinel for a leg whose midpoint falls in open
+        water — ferry crossings, straits — see
+        route_factory._check_country_coverage()) is excluded: it's not a
+        real country, has no track_infrastructures row, and callers that
+        look up per-country data (e.g. route_serialize.py's
+        TrackInfraCollection.get()) would otherwise get None back for it.
+        """
         result: set[str] = set()
         for trip in self.trips:
             for segment in trip.segments:
@@ -158,6 +166,7 @@ class TripPair:
             for stop in trip.stops:
                 if stop.country_code:
                     result.add(stop.country_code)
+        result.discard("UNK")
         return result
 
     @property
@@ -278,7 +287,11 @@ class Route:
     @property
     def countries(self) -> set[str]:
         """All countries this route passes through — from segment distance
-        shares, stop country codes, and parking locations."""
+        shares, stop country codes, and parking locations.
+
+        "UNK" (open-water/ferry sentinel — see TripPair.countries) is
+        excluded for the same reason: it's not a real country and has no
+        track_infrastructures row for callers to look up."""
         result: set[str] = set()
         for trip in self.trips:
             for segment in trip.segments:
@@ -288,6 +301,7 @@ class Route:
                     result.add(stop.country_code)
         for pl in self._parkings:
             result.add(pl.country_code)
+        result.discard("UNK")
         return result
 
     @property

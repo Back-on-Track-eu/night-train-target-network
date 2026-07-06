@@ -46,6 +46,123 @@ interface RouteResult {
   trips: TripResult[]
 }
 
+// --- Shapes returned by POST /api/route/plan, before adapting into the
+//     RouteResult/TripResult/StopTimeFmt shape the rest of this component
+//     already renders against. Kept minimal — only the fields used below. ---
+interface BackendStop {
+  stop_id: string
+  stop_name: string
+  lat: number
+  lon: number
+  arrival_time_min: number | null
+  departure_time_min: number | null
+}
+
+interface BackendSegment {
+  from_stop: BackendStop
+  to_stop: BackendStop
+  geometry_id: string
+}
+
+interface BackendTripSide {
+  trip_id: string
+  direction: number
+  segments: BackendSegment[]
+}
+
+interface BackendTripPair {
+  outbound: BackendTripSide
+  return_trip: BackendTripSide
+}
+
+interface BackendGeometry {
+  id: string
+  coords: number[][]
+}
+
+interface BackendRoute {
+  route_id: string
+  trip_pairs: BackendTripPair[]
+  geometries: BackendGeometry[]
+}
+
+// Minutes-since-midnight (as returned by the API) -> "HH:MM" for display.
+// Wraps values outside 0-1439 (the mirror-around-02:30 timetable can produce
+// them) into a valid clock time rather than rendering "25:10".
+function formatMinutes(min: number | null): string | null {
+  if (min === null || min === undefined) return null
+  const wrapped = ((min % 1440) + 1440) % 1440
+  const h = Math.floor(wrapped / 60)
+  const m = wrapped % 60
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+}
+
+function toStopTimeFmt(stop: BackendStop): StopTimeFmt {
+  return {
+    stop_id: stop.stop_id,
+    stop_name: stop.stop_name,
+    lat: stop.lat,
+    lon: stop.lon,
+    arrival_time_fmt: formatMinutes(stop.arrival_time_min),
+    departure_time_fmt: formatMinutes(stop.departure_time_min),
+  }
+}
+
+// segments[] holds one from_stop/to_stop pair per leg — walk them into the
+// flat per-stop list the template expects (first leg's from_stop, then every
+// leg's to_stop).
+function buildStopTimes(segments: BackendSegment[]): StopTimeFmt[] {
+  if (segments.length === 0) return []
+  return [
+    toStopTimeFmt(segments[0].from_stop),
+    ...segments.map((seg) => toStopTimeFmt(seg.to_stop)),
+  ]
+}
+
+// Geometry lives at route level now (route.geometries[]), referenced by
+// segments[].geometry_id — stitch the referenced polylines back into one
+// LineString per trip, in leg order.
+function buildShape(
+  segments: BackendSegment[],
+  geometryById: Map<string, BackendGeometry>,
+): { type: string; coordinates: [number, number][] } {
+  const coordinates: [number, number][] = []
+  for (const seg of segments) {
+    const geom = geometryById.get(seg.geometry_id)
+    if (!geom) continue
+    for (const point of geom.coords) {
+      coordinates.push([point[0], point[1]])
+    }
+  }
+  return { type: 'LineString', coordinates }
+}
+
+function toTripResult(
+  side: BackendTripSide,
+  geometryById: Map<string, BackendGeometry>,
+): TripResult {
+  const stopTimes = buildStopTimes(side.segments)
+  return {
+    trip_id: side.trip_id,
+    direction_id: side.direction,
+    departure_time: stopTimes[0]?.departure_time_fmt ?? '',
+    stop_times: stopTimes,
+    shape: buildShape(side.segments, geometryById),
+  }
+}
+
+// Adapts a POST /api/route/plan "route" object (trip_pairs[] of
+// outbound/return_trip, each with segments[], plus a flat geometries[]) into
+// the RouteResult shape this component was already built around.
+function adaptRoute(backendRoute: BackendRoute): RouteResult {
+  const geometryById = new Map(backendRoute.geometries.map((g) => [g.id, g]))
+  const trips: TripResult[] = backendRoute.trip_pairs.flatMap((pair) => [
+    toTripResult(pair.outbound, geometryById),
+    toTripResult(pair.return_trip, geometryById),
+  ])
+  return { route_id: backendRoute.route_id, trips }
+}
+
 const routeResult = ref<RouteResult | null>(null)
 const selectedTripId = ref<string | null>(null)
 
@@ -70,13 +187,15 @@ async function evaluate() {
   currentMode.value = 'loading'
   evaluateError.value = null
   try {
-    const response = await fetch(`${BASE_URL}/api/route/planOrUpdate`, {
+    const response = await fetch(`${BASE_URL}/api/route/plan`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        proposal_id: 1,
-        proposal_version: 1,
-        stops: validStops.map((s) => ({ stop_id: s.selectedStop!.stop_id, stop_type: 'both' })),
+        // proposal_id/proposal_version omitted — this is always a brand new
+        // plan from this screen, and the API mints its own draft id/version
+        // when they're absent. Per-stop stop_type is gone too: boarding/
+        // alighting is now derived automatically from the timetable.
+        stops: validStops.map((s) => s.selectedStop!.stop_id),
         composition_id: selectedCompositionId.value,
       }),
     })
@@ -85,10 +204,10 @@ async function evaluate() {
       evaluateError.value = json.message ?? `HTTP ${response.status}`
       currentMode.value = 'edit'
     } else {
-      routeResult.value = json.route
+      routeResult.value = adaptRoute(json.route)
       selectedTripId.value =
-        json.route.trips.find((t: TripResult) => t.direction_id === 0)?.trip_id ??
-        json.route.trips[0]?.trip_id ??
+        routeResult.value.trips.find((t) => t.direction_id === 0)?.trip_id ??
+        routeResult.value.trips[0]?.trip_id ??
         null
       currentMode.value = 'display'
     }
