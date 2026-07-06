@@ -29,9 +29,19 @@ from dataclasses import dataclass
 # VERSION
 # =============================================================================
 
-CALC_VERSION: str = "1.0.0"
+CALC_VERSION: str = "1.2.0"
 
 GIT_SHA: str = "unknown"  # injected by CI
+
+# Short, plain-English summary of what this model computes — embedded as-is
+# in the "models" section of POST /api/evaluation/calc's response, alongside
+# CALC_VERSION and CALC_FORMULAS.
+CALC_MODEL_DESCRIPTION: str = (
+    "Cost/revenue evaluation model: computes fixed and variable operator costs, "
+    "third-party infrastructure charges, and OD-pair ticket revenue for a "
+    "fully-built Route, then aggregates and normalises the result into "
+    "route / trip-pair / country / OD-pair / stop views."
+)
 
 CHANGELOG: dict = {
     "1.0.0": {
@@ -43,6 +53,70 @@ CHANGELOG: dict = {
         "CalcStep and CalcFormula for full calculation transparency. "
         "Revenue and allocation generic over service_class_main. "
         "Country breakdown infrastructure-only, clearly scoped.",
+    },
+    "1.1.0": {
+        "date": "2026-07-06",
+        "author": "david",
+        "changes": "EUR values in every Breakdown (leaves and total_eur/net_eur) now "
+        "rounded to exactly 2 decimal places in views.py, before serialization. "
+        "Response body restructured: added 'models' (version + description + "
+        "formulas for route_builder, energy, and evaluation) and 'input' (the "
+        "posted route JSON plus every track/stop/composition parameter actually "
+        "used, each with description + source). 'views' restructured: each view "
+        "(route, per_trip_pair, per_trip_pair_per_country, per_trip_pair_per_od, "
+        "per_trip_per_stop) is now {description, normalisations, data} — "
+        "normalisation documentation (one description + processing_sequence per "
+        "normalisation) lives inline per view rather than in a separate top-level "
+        "'views_meta'. Every filtered data point under 'data' now also carries a "
+        "'filter' dict, one entry per filter dimension keyed by dimension name "
+        "(e.g. {'trip_pair': 'Berlin Hbf \u2194 Wien Hbf', 'country': 'AT'}) — \u2194 for "
+        "trip pairs (always both directions), \u2192 for OD pairs and single trips "
+        "(genuinely one-way; single-trip labels also carry an explicit "
+        "'(outbound)'/'(return)' tag). CALC_FORMULAS rewritten from scratch, keyed "
+        "exactly to breakdown_to_dict() field names (driver_eur, tac_eur, "
+        "total_cost_eur, etc.) instead of the old free-form step names "
+        "(driver_cost, track_access_charge, ...) — api/helpers/"
+        "evaluation_serialize.py now filters CALC_FORMULAS/ENERGY_FORMULAS/"
+        "ROUTE_FORMULAS down to only keys present in EVALUATION_OUTPUT_FIELDS, so "
+        "'models.evaluation.formulas' shows exactly (and only) the fields that "
+        "actually appear under 'views', letting the frontend map one to the "
+        "other by key. Several formulas describing unimplemented or superseded "
+        "behavior removed (loco_amortisation, loco_maintenance, "
+        "passengers_per_class, revenue_per_class, space_units_per_class, "
+        "cost_allocated_per_class, cost_per_place, the old per_trip/per_place_* "
+        "normalisation names); loco_eur, ticket_revenue_eur, total_eur, "
+        "total_cost_eur, total_revenue_eur, and net_eur added to match actual "
+        "calc.py behavior and actual output fields. Frontend consumers must "
+        "update to the new response shape (see TestCalcFormulas in "
+        "tests/test_versioning.py, still skipped pending a route+eval test "
+        "fixture — skip reasons there describe this exact gap).",
+    },
+    "1.2.0": {
+        "date": "2026-07-06",
+        "author": "david",
+        "changes": "Composition.places_by_class / density_by_class / "
+        "svc_stockings_eur_place now aggregated up to class_main (Seat, "
+        "Couchette, Sleeper, Capsule, Catering) instead of the more granular "
+        "class_id (e.g. 'seat (reclining)', 'couchette (6-berth)') — see "
+        "models/params.py: Composition.from_type(), "
+        "CompositionType.weighted_avg_by_main_class(). Model approach: classes "
+        "within one class_main are assumed served at the same cost factor, so "
+        "the class_main figure is the places-weighted average of the "
+        "underlying class_id values actually present in a composition's coach "
+        "mix — not a max, not an unweighted average. This changes computed "
+        "svc_stockings_eur (and any class-keyed density/place-km figure "
+        "derived from it) whenever a composition mixes multiple class_ids "
+        "under one class_main with different per-place service costs — "
+        "previously only an exact class_id match against ODPair.class_main "
+        "produced a non-zero cost/density lookup in calc.py, which in practice "
+        "meant OD pairs had to target class_id, contradicting ODPair's own "
+        "docstring (always documented class_main as a top-level category). "
+        "BREAKING for consumers of GET /api/params/compositions and POST "
+        "/api/route/plan too, not just this endpoint: their 'capacity' / "
+        "'places_by_class' / 'density_by_class' output is keyed by class_main "
+        "now, losing the previous class_id-level granularity — needs frontend "
+        "coordination (see project notes on auditing Bjarne's frontend before "
+        "Phase 4/5) since it's a real API contract change, not additive.",
     },
 }
 
@@ -68,164 +142,144 @@ class CalcFormula:
 
 CALC_FORMULAS: dict[str, CalcFormula] = {
     # ------------------------------------------------------------------
-    # REVENUE
+    # Every key below matches, verbatim, a field name in breakdown_to_dict()
+    # output (models/evaluation views under the "views" section) — see
+    # api/helpers/evaluation_serialize.py: EVALUATION_OUTPUT_FIELDS.
+    # Formulas for internal-only concepts (per-class allocation, capacity-
+    # based demand modelling, old normalisation names) were removed here
+    # since they don't correspond to any field actually output under
+    # "views" — see views_meta in the response for normalisation
+    # descriptions instead.
     # ------------------------------------------------------------------
-    "passengers_per_class": CalcFormula(
-        latex=r"n_{pax,c} = \text{places}_c \times u_c",
-        description="Passengers per class: capacity multiplied by utilisation rate.",
+    # OPERATOR — VARIABLE
+    # ------------------------------------------------------------------
+    "driver_eur": CalcFormula(
+        latex=r"C_{driver} = c_{driver/h} \times \left( \sum_{seg} t_{drive,h} \cdot f_{driver} "
+        r"+ \sum_{stop} t_{dwell,h} \cdot f_{driver} \right)",
+        description="Driver cost: hourly driver rate multiplied by driver-factor-weighted "
+        "driving time (all segments) plus dwell time (all stop calls) in scope.",
     ),
-    "revenue_per_class": CalcFormula(
-        latex=r"R_c = n_{pax,c} \times \bar{f}_c",
-        description="Revenue per class: passengers multiplied by average fare.",
+    "crew_eur": CalcFormula(
+        latex=r"C_{crew} = c_{crew/h} \times \left( \sum_{seg} t_{drive,h} \cdot n_{crew} "
+        r"+ \sum_{stop} t_{dwell,h} \cdot n_{crew} \right)",
+        description="Cabin crew cost: hourly crew rate multiplied by crew-count-weighted "
+        "driving time (all segments) plus dwell time (all stop calls) in scope.",
     ),
-    "total_revenue": CalcFormula(
-        latex=r"R = \sum_c R_c",
-        description="Total revenue: sum of revenue across all accommodation classes.",
+    "coach_maintenance_eur": CalcFormula(
+        latex=r"C_{coach,maint} = \sum_{seg} c_{coach,maint/km} \times d_{km,seg}",
+        description="Variable coach maintenance: per-km maintenance rate multiplied by "
+        "segment distance, summed across all segments in scope. Locomotive maintenance "
+        "is bundled into loco_eur (full-service lease), not charged separately here.",
+    ),
+    "loco_eur": CalcFormula(
+        latex=r"C_{loco} = c_{loco,lease/h} \times \frac{t_{loco,propulsion,min}}{60}",
+        description="Locomotive full-service lease cost: hourly lease rate multiplied by "
+        "locomotive propulsion minutes, deduplicated route-wide (see Route.loco_propulsion_min) "
+        "so a locomotive shared across trip pairs is billed once, not once per pair.",
+    ),
+    "svc_stockings_eur": CalcFormula(
+        latex=r"C_{svc} = \sum_{od} c_{svc,class(od)/place} \times n_{places\_sold,od}",
+        description="Onboard service and stockings cost: per-place service cost for the "
+        "OD pair's class, multiplied by places sold, summed across all OD pairs in scope.",
+    ),
+    "var_overhead_eur": CalcFormula(
+        latex=r"C_{var,oh} = \sum_{od} R_{od} \times q_{var,oh}",
+        description="Variable overhead: each OD pair's ticket revenue multiplied by the "
+        "operator's variable overhead quota, summed across all OD pairs in scope.",
     ),
     # ------------------------------------------------------------------
-    # COST — FIXED / DAY
+    # OPERATOR — FIXED
     # ------------------------------------------------------------------
-    "loco_amortisation": CalcFormula(
-        latex=r"C_{loco,amort} = \frac{C_{loco,purchase}}{d_{loco,avail} \times T_{loco,amort}}",
-        description="Daily locomotive amortisation: purchase cost divided by available days over amortisation period.",
+    "coach_amortisation_eur": CalcFormula(
+        latex=r"C_{coach,amort} = \frac{C_{coach,purchase}}{T_{coach,amort}} \times n",
+        description="Annual coach amortisation: purchase cost divided by amortisation "
+        "period in years, multiplied by the number of coaches required for this "
+        "composition's fleet (already availability-adjusted).",
     ),
-    "coach_amortisation": CalcFormula(
-        latex=r"C_{coach,amort} = \frac{C_{coach,purchase}}{d_{coach,avail} \times T_{coach,amort}}",
-        description="Daily coach amortisation: purchase cost divided by available days over amortisation period.",
+    "financing_eur": CalcFormula(
+        latex=r"C_{fin} = C_{coach,purchase} \times q_{fin} \times n",
+        description="Annual financing cost: coach purchase cost multiplied by the "
+        "operator's financing quota and the number of coaches required.",
     ),
-    "financing": CalcFormula(
-        latex=r"C_{fin} = \frac{(C_{loco,purchase} + C_{coach,purchase}) \times q_{fin}}{365}",
-        description="Daily financing cost: total capital multiplied by annual financing quota, spread over 365 days.",
+    "fix_overhead_eur": CalcFormula(
+        latex=r"C_{fix,oh} = C_{coach,amort} \times q_{fix,oh}",
+        description="Fixed overhead: applied as a share of this composition's own "
+        "annual coach amortisation cost.",
     ),
-    "fix_overhead": CalcFormula(
-        latex=r"C_{fix,oh} = C_{op,base} \times q_{fix,oh}",
-        description="Fixed overhead: applied as a share of the operating cost base (maintenance + staff).",
+    "cleaning_eur": CalcFormula(
+        latex=r"C_{clean} = c_{clean/day} \times n \times d_{op}",
+        description="Cleaning and service preparation cost: daily cleaning rate per "
+        "coach multiplied by coach count and operating days per year.",
     ),
-    "cleaning": CalcFormula(
-        latex=r"C_{clean} = c_{clean/day}",
-        description="Daily cleaning and service preparation cost — fixed per operating day.",
+    "shunting_eur": CalcFormula(
+        latex=r"C_{shunt} = c_{shunt/event} \times n_{events}",
+        description="Shunting cost: per-event rate multiplied by the number of "
+        "shunting events for this trip (currently 2 per trip — a placeholder rule, "
+        "see Route.shunting_count).",
     ),
-    "shunting": CalcFormula(
-        latex=r"C_{shunt} = c_{shunt/event}",
-        description="Shunting cost per trip event at origin and destination.",
+    # ------------------------------------------------------------------
+    # INFRASTRUCTURE
+    # ------------------------------------------------------------------
+    "tac_eur": CalcFormula(
+        latex=r"C_{TAC} = \sum_{seg} \sum_{l \in seg} d_{km,l} \times p_{TAC,country(l)}",
+        description="Track access charge: distance multiplied by the country's TAC "
+        "rate, summed over every country leg of every segment in scope.",
     ),
-    "parking": CalcFormula(
+    "energy_eur": CalcFormula(
+        latex=r"C_{energy} = \sum_{seg} \sum_{l \in seg} E_{kWh,l} \times p_{energy,country(l)}",
+        description="Traction energy cost: energy consumed (from the energy model — "
+        "see 'models.energy' — carried on the route input) multiplied by the "
+        "country's electricity price, summed over every country leg of every "
+        "segment in scope.",
+    ),
+    "station_charge_eur": CalcFormula(
+        latex=r"C_{station} = \sum_{stop} c_{stop,charge}",
+        description="Station access charge: sum of the per-call station charge for "
+        "every stop call on the trips in scope.",
+    ),
+    "parking_eur": CalcFormula(
         latex=r"C_{park} = \sum_{l \in \text{endpoints}} p_{park,country(l)}",
-        description="Overnight stabling cost: sum of parking_eur_day for each unique endpoint country.",
+        description="Overnight stabling cost: sum of the daily parking rate for each "
+        "unique overnight parking location in scope.",
     ),
     # ------------------------------------------------------------------
-    # COST — VARIABLE / KM
+    # REVENUE / MARGIN
     # ------------------------------------------------------------------
-    "loco_maintenance": CalcFormula(
-        latex=r"C_{loco,maint} = c_{loco,maint/km} \times d_{km}",
-        description="Variable locomotive maintenance: per-km rate multiplied by trip distance.",
+    "ticket_revenue_eur": CalcFormula(
+        latex=r"R = \sum_{od} n_{places\_sold,od} \times \bar{f}_{od}",
+        description="Ticket revenue: annual places sold multiplied by average fare, "
+        "summed across all OD pairs in scope. places_sold and avg_price are "
+        "user-supplied route inputs, not derived from a utilisation/capacity model.",
     ),
-    "coach_maintenance": CalcFormula(
-        latex=r"C_{coach,maint} = c_{coach,maint/km} \times d_{km}",
-        description="Variable coach maintenance: per-km rate multiplied by trip distance.",
-    ),
-    # ------------------------------------------------------------------
-    # COST — VARIABLE / HOUR
-    # ------------------------------------------------------------------
-    "driver_cost": CalcFormula(
-        latex=r"C_{driver} = c_{driver/h} \times (t_{drive,h} + t_{driver,oh,h})",
-        description="Driver staff cost: hourly rate multiplied by driving time plus fixed overhead hours.",
-    ),
-    "crew_cost": CalcFormula(
-        latex=r"C_{crew} = c_{crew/h} \times (t_{drive,h} + t_{crew,oh,h})",
-        description="Cabin crew cost: hourly rate multiplied by driving time plus fixed overhead hours.",
+    "ebit_margin_eur": CalcFormula(
+        latex=r"C_{EBIT} = \sum_{od} R_{od} \times q_{EBIT}",
+        description="EBIT margin target: each OD pair's ticket revenue multiplied by "
+        "the operator's required EBIT margin quota, summed across all OD pairs in "
+        "scope. A deduction from the net result, not a cost paid to any third party.",
     ),
     # ------------------------------------------------------------------
-    # COST — VARIABLE / TICKET
+    # AGGREGATES (appear at multiple nesting levels / at the top level)
     # ------------------------------------------------------------------
-    "svc_stockings_per_class": CalcFormula(
-        latex=r"C_{svc,c} = c_{svc,c/place} \times \text{places}_c",
-        description="Service and stockings per class: cost per available place multiplied by capacity.",
+    "total_eur": CalcFormula(
+        latex=r"x_{total} = \sum_i x_i",
+        description="Sum of the sibling fields in this branch of the breakdown tree — "
+        "e.g. cost.operator.variable.total_eur sums driver_eur through var_overhead_eur; "
+        "cost.total_eur sums operator.total_eur and infrastructure.total_eur. Same "
+        "formula at every nesting level where 'total_eur' appears.",
     ),
-    "var_overhead": CalcFormula(
-        latex=r"C_{var,oh} = R \times q_{var,oh}",
-        description="Variable overhead: applied as a share of total revenue (covers customer service, payments).",
+    "total_cost_eur": CalcFormula(
+        latex=r"C_{total} = C_{operator} + C_{infrastructure}",
+        description="Total annual cost: sum of all operator costs (variable + fixed) "
+        "and all infrastructure costs.",
     ),
-    # ------------------------------------------------------------------
-    # COST — INFRASTRUCTURE
-    # ------------------------------------------------------------------
-    "track_access_charge": CalcFormula(
-        latex=r"C_{TAC} = \sum_{l \in \text{legs}} d_{km,l} \times p_{TAC,country(l)}",
-        description="Track access charge: sum over all country legs of distance multiplied by country TAC rate.",
+    "total_revenue_eur": CalcFormula(
+        latex=r"R_{total} = R_{ticket}",
+        description="Total annual revenue — currently ticket revenue is the only "
+        "revenue line.",
     ),
-    "energy_cost": CalcFormula(
-        latex=r"C_{energy} = \sum_{l \in \text{legs}} E_{kWh,l} \times p_{energy,country(l)}",
-        description="Traction energy cost: sum over all country legs of energy consumed multiplied by country electricity price.",
-    ),
-    "station_charges": CalcFormula(
-        latex=r"C_{station} = \sum_{s \in \text{stops}} c_{stop,s}",
-        description="Station access charges: sum of stop_charge_eur for all stops on the trip.",
-    ),
-    # ------------------------------------------------------------------
-    # COST — EBIT
-    # ------------------------------------------------------------------
-    "ebit_margin": CalcFormula(
-        latex=r"C_{EBIT} = R \times q_{EBIT}",
-        description="EBIT margin target: deducted as a cost — required return on revenue.",
-    ),
-    # ------------------------------------------------------------------
-    # ALLOCATION
-    # ------------------------------------------------------------------
-    "space_units_per_class": CalcFormula(
-        latex=r"S_c = \text{places}_c \times \rho_c",
-        description="Space units per class: capacity multiplied by density factor (1/berths-per-compartment).",
-    ),
-    "cost_allocated_per_class": CalcFormula(
-        latex=r"C_{alloc,c} = C_{total} \times \frac{S_c}{\sum_c S_c}",
-        description="Cost allocated to class: total cost weighted by that class's share of total space units.",
-    ),
-    "cost_per_place": CalcFormula(
-        latex=r"c_{place,c} = \frac{C_{alloc,c}}{\text{places}_c}",
-        description="Cost per available place in class: allocated cost divided by number of places.",
-    ),
-    # ------------------------------------------------------------------
-    # NORMALISED VIEWS
-    # ------------------------------------------------------------------
-    "per_trip": CalcFormula(
-        latex=r"x_{/trip} = \frac{x}{N_{trips}}",
-        description="Per-trip average: divide by total number of trips in the route.",
-    ),
-    "per_trip_km": CalcFormula(
-        latex=r"x_{/trip\text{-}km} = \frac{x}{d_{km,total}}",
-        description="Per trip-km: divide by total route distance across all trips.",
-    ),
-    "per_place_km_avg": CalcFormula(
-        latex=r"x_{/place\text{-}km} = \frac{x}{\sum_c \text{places}_c \times \rho_c \times d_{km}}",
-        description="Per density-weighted place-km average: divide by total space-units × distance.",
-    ),
-    "per_place_of_class": CalcFormula(
-        latex=r"x_{/place,c} = \frac{x}{\text{places}_c}",
-        description="Per place of class: divide by number of available places in that accommodation class.",
-    ),
-    "per_place_km_of_class": CalcFormula(
-        latex=r"x_{/place\text{-}km,c} = \frac{x}{\text{places}_c \times d_{km}}",
-        description="Per place-km of class: divide by places in class multiplied by trip distance.",
+    "net_eur": CalcFormula(
+        latex=r"N = R_{total} - C_{total} - C_{EBIT}",
+        description="Net annual result: total revenue minus total cost minus the "
+        "EBIT margin carve-out.",
     ),
 }
-
-
-# TODO: Add GitHub Actions version bump check to .github/workflows/backend-tests.yml
-# Rule: if any file under backend/models/energy/ changes (except version.py itself),
-# ENERGY_CALC_VERSION must differ from the value on main branch.
-# Suggested step:
-#
-#   - name: Check energy model version bump
-#     run: |
-#       CHANGED=$(git diff origin/main --name-only \
-#         | grep "^backend/models/energy/" \
-#         | grep -v "version.py")
-#       if [ -n "$CHANGED" ]; then
-#         MAIN_VER=$(git show origin/main:backend/models/energy/version.py \
-#           | grep ENERGY_CALC_VERSION | cut -d'"' -f2)
-#         CUR_VER=$(grep ENERGY_CALC_VERSION backend/models/energy/version.py \
-#           | cut -d'"' -f2)
-#         if [ "$MAIN_VER" = "$CUR_VER" ]; then
-#           echo "ERROR: models/energy/ changed but ENERGY_CALC_VERSION not bumped ($CUR_VER)"
-#           exit 1
-#         fi
-#       fi

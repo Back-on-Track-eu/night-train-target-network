@@ -13,10 +13,9 @@ Pipeline for plan_route() per TripPair, per direction (in _build_trip())
    doing anything else with the result — a changed stop list invalidates
    the first routed_legs.
 5. _check_country_coverage() — every country the (possibly re-routed) legs
-   actually pass through must have a real row in track_infrastructures,
-   or this raises ValueError. Deliberately stricter than
-   TrackInfraCollection.get_or_default()'s own fallback — see that
-   function's docstring.
+   actually pass through must have a row in input_params.track_infrastructures
+   (any field may be None and fall back to the EU-average default), or this
+   raises ValueError. See that function's docstring.
 6. schedule_and_classify() (models/route/timetable.py) — timetable_mode
    strategy: derives departure time + boarding/alighting per stop from the
    legs. Does no routing of its own.
@@ -40,6 +39,23 @@ ID convention
   route_id : P{proposal_id}_V{version}_R1
   trip_id  : P{proposal_id}_V{version}_R1_D{direction}_T{pair_index}
 
+  TODO (David, 2026-07-06, future — not scheduled): considering swapping
+  the D/T order to trip_id = P{proposal_id}_V{version}_R1_T{pair_index}_D{direction},
+  and introducing a distinct trip-PAIR id (as opposed to the current
+  per-trip id) of the form P{proposal_id}_V{version}_R1_T{pair_index} — i.e.
+  drop the trailing _D{direction} entirely for anything that means "the
+  pair", not "one direction of the pair". Motivation: api/helpers/
+  evaluation_serialize.py's "views" section currently keys per_trip_pair /
+  per_trip_pair_per_country / per_trip_pair_per_od by the outbound trip's
+  full trip_id (e.g. "P123_V1_R1_D0_T1") standing in for the whole pair,
+  which is a borrowed/overloaded key, not a real pair identifier. This is
+  a real ID-format change, not a rename: trip_id is threaded through
+  Segment/StopCost/SegmentCost/ODPair.trip_id, the route_to_dict()/
+  route_from_dict() JSON schema, and every test fixture that hardcodes IDs
+  — needs its own scoped pass across route_factory.py (_route_id/_trip_id
+  below), models/route/route.py, api/helpers/route_serialize.py, and
+  tests/ once actually scheduled. Not started here.
+
   proposal_id/version are always concrete ints by the time they reach here
   — for a brand new proposal (no DB row yet), api/route.py assigns a random
   placeholder proposal_id above one billion (Postgres SERIAL for
@@ -57,7 +73,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from models.params import ModelVersions, ParamVersions, ODPair, TrackInfraCollection, StopInfraCollection, Composition
+from models.params import ModelVersions, ParamVersions, ODPair, TrackInfraCollection, StopInfraCollection, Composition, CompositionCollection
 from models.route.trip import Stop, StopType, Segment, Trip
 from models.route.route import Route, TripPair, Parking, Shunting, Schedule
 from models.route.routing.rail_router import RailRouter, StopInput, RoutedLeg
@@ -106,6 +122,12 @@ class TripPairInput:
 # =============================================================================
 # ID GENERATION
 # =============================================================================
+
+# TODO (future, not scheduled): D{direction}_T{pair_index} may become
+# T{pair_index}_D{direction} with a separate trip-pair id
+# (P{proposal_id}_V{version}_R1_T{pair_index}, no _D suffix) introduced
+# alongside it — see the module docstring's "ID convention" section above
+# for the motivation and full blast radius before starting this.
 
 def _route_id(proposal_id: int, version: int) -> str:
     return f"P{proposal_id}_V{version}_R1"
@@ -234,10 +256,15 @@ def _to_router_stops(stop_ids: list[str], stop_infra: StopInfraCollection) -> li
     return router_stops
 
 def _check_country_coverage(routed_legs: list[RoutedLeg], tracks: TrackInfraCollection) -> None:
-    """Every country a route's legs pass through must have a real row in
-    track_infrastructures — no silent EU-average substitution for an
-    entire country. Raises ValueError naming whatever's missing, surfaced
-    by api/route.py as a 422 domain_error.
+    """Every country a route's legs pass through must have a row in
+    input_params.track_infrastructures — no silent EU-average substitution
+    for a country that was never seeded at all. Raises ValueError naming
+    whatever's missing, surfaced by api/route.py as a 422 domain_error.
+
+    Individual fields on that row being None (and therefore resolved from
+    track_infrastructure_defaults) is fine and expected — that's exactly
+    what the defaults table is for. Only a country with no row whatsoever
+    fails this check.
 
     "UNK" is exempt — it's RailRouter's sentinel for a leg segment whose
     midpoint doesn't fall inside any known country polygon at all (open
@@ -246,17 +273,17 @@ def _check_country_coverage(routed_legs: list[RoutedLeg], tracks: TrackInfraColl
     no DB row that could ever exist for it, so it's not something seeding
     can fix, and it's not what this check exists to catch.
 
-    This is deliberately stricter than TrackInfraCollection.get_or_default(),
-    which stays a general-purpose fallback for other callers (e.g. a
-    country seeded in input_params.countries but temporarily missing a
-    couple of fields) — this check exists so a country with NO row at all
-    fails loudly here, once seed data is expected to cover it, rather than
-    quietly producing a route built on defaulted infrastructure."""
+    DBDataLoader.build_all_tracks() synthesizes a full EU-average row for
+    any country in input_params.countries with no track_infrastructures
+    row at all, so tracks.get(cc) is never None here for a legitimate
+    country — a country with no real row is instead recognized via
+    TrackInfrastructure.has_row=False."""
     missing = {
         cc
         for leg in routed_legs
         for cc in leg.country_distance_shares
-        if cc != "UNK" and tracks.get(cc) is None
+        if cc != "UNK"
+        and ((track := tracks.get(cc)) is None or not track.has_row)
     }
     if missing:
         countries = ", ".join(sorted(missing))
@@ -311,18 +338,47 @@ def _build_trip(
 # TRIP PAIR BUILDER
 # =============================================================================
 
+def _composition_param_versions(
+    composition: Composition, compositions: CompositionCollection
+) -> ParamVersions:
+    """
+    Filter compositions.param_versions (which covers the WHOLE eagerly-
+    loaded catalog) down to just the entries relevant to one composition —
+    its own fields, its operator's, and its coach types' — so a route's
+    provenance doesn't carry every other composition in the catalog along
+    with it.
+    """
+    prefixes = [
+        f"composition_type:{composition.comp_id}:",
+        f"composition_reference:{composition.comp_id}:",
+        f"operator:{composition.operator_id}:",
+        f"operator_class_cost:{composition.operator_id}:",
+    ] + [f"coach_type:{coach.coachtype_id}:" for coach in composition.coaches.values()]
+    filtered = ParamVersions()
+    filtered.entries = {
+        key: entry
+        for key, entry in compositions.param_versions.entries.items()
+        if any(key.startswith(p) for p in prefixes)
+    }
+    return filtered
+
 def _build_trip_pair(
     proposal_id: int, proposal_version: int, pair_index: int,
     pair_input: TripPairInput, loader, router: RailRouter, scenario_id: int,
+    compositions: CompositionCollection,
 ) -> tuple[TripPair, ParamVersions, TrackInfraCollection]:
-    composition, comp_versions = loader.build_composition(pair_input.composition_id, scenario_id)
-    tracks, track_versions = loader.build_all_tracks(scenario_id)
-    stop_infra, stop_versions = loader.build_all_stops(scenario_id)
+    composition = compositions.get(pair_input.composition_id)
+    if composition is None:
+        raise ValueError(f"Composition '{pair_input.composition_id}' not found.")
+    tracks = loader.build_all_tracks(scenario_id)
+    stop_infra = loader.build_all_stops(scenario_id)
 
     param_versions = ParamVersions()
-    param_versions.entries.update(comp_versions.entries)
-    param_versions.entries.update(track_versions.entries)
-    param_versions.entries.update(stop_versions.entries)
+    param_versions.entries.update(
+        _composition_param_versions(composition, compositions).entries
+    )
+    param_versions.entries.update(tracks.param_versions.entries)
+    param_versions.entries.update(stop_infra.param_versions.entries)
 
     # Each direction routes (and may re-route, if auto_stop_addition changes
     # its stop list) and schedules independently — outbound and return can
@@ -391,11 +447,17 @@ def plan_route(
     merged_param_versions = ParamVersions()
     tracks_used: TrackInfraCollection | None = None
 
+    # Built once for the whole route, not once per trip pair — a Y-shaped
+    # route with several compositions would otherwise reload the entire
+    # catalog per pair. include_indicative=False since route building
+    # never touches Composition.indicative (see build_all_compositions()).
+    compositions = loader.build_all_compositions(scenario_id, include_indicative=False)
+
     for i, pair_input in enumerate(trip_pair_inputs, start=1):
         pair, param_versions, tracks = _build_trip_pair(
             proposal_id, proposal_version, pair_index=i,
             pair_input=pair_input, loader=loader, router=router,
-            scenario_id=scenario_id,
+            scenario_id=scenario_id, compositions=compositions,
         )
         trip_pairs.append(pair)
         merged_param_versions.entries.update(param_versions.entries)
@@ -406,7 +468,7 @@ def plan_route(
         "energy_calc": ENERGY_CALC_VERSION,
     })
 
-    stop_infra, _ = loader.build_all_stops(scenario_id)
+    stop_infra = loader.build_all_stops(scenario_id)
     parking = _parkings(
         [t for pair in trip_pairs for t in pair.trips], stop_infra,
     )
@@ -458,13 +520,13 @@ def adjust_route(
     # time change (dwell times, buffer times etc. are re-derived either
     # way). The old condition here only loaded tracks for stop_type_changes,
     # leaving a departure-time-only adjust to hit _build_trip_stops_and_legs() with
-    # tracks=None → AttributeError on tracks.get_or_default().
+    # tracks=None → AttributeError on tracks.get().
     rebuilding_segments = stop_type_changes or departure_time_min is not None
     if rebuilding_segments and tracks is None and loader is not None:
-        tracks, _ = loader.build_all_tracks(existing_provenance.scenario_id)
-        stop_infra, _ = loader.build_all_stops(existing_provenance.scenario_id)
+        tracks = loader.build_all_tracks(existing_provenance.scenario_id)
+        stop_infra = loader.build_all_stops(existing_provenance.scenario_id)
     else:
-        stop_infra = loader.build_all_stops(existing_provenance.scenario_id)[0] if loader else None
+        stop_infra = loader.build_all_stops(existing_provenance.scenario_id) if loader else None
 
     new_pairs: list[TripPair] = []
 
