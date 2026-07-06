@@ -1,17 +1,25 @@
 DROP SCHEMA IF EXISTS input_params CASCADE;
 CREATE SCHEMA input_params;
 
+-- PostGIS is database-wide (not schema-scoped) — created here since
+-- input_params.countries.country_geom is its first consumer.
+CREATE EXTENSION IF NOT EXISTS postgis;
+
 -- ---------------------------------------------------------------
 -- countries
 -- ---------------------------------------------------------------
 CREATE TABLE input_params.countries (
     country_code CHAR(2)      PRIMARY KEY,
-    country_name VARCHAR(100) NOT NULL
+    country_name VARCHAR(100) NOT NULL,
+    country_geom geometry(MultiPolygon, 4326)
 );
 
 COMMENT ON TABLE  input_params.countries              IS 'Country reference table. country_code is ISO 3166-1 alpha-2.';
 COMMENT ON COLUMN input_params.countries.country_code IS 'ISO 3166-1 alpha-2 country code. Primary key.';
 COMMENT ON COLUMN input_params.countries.country_name IS 'Full English country name.';
+COMMENT ON COLUMN input_params.countries.country_geom IS 'Country border polygon (SRID 4326), seeded from Natural Earth admin-0 countries geojson. Nullable — countries without a matched source feature keep this NULL.';
+
+CREATE INDEX idx_countries_geom ON input_params.countries USING GIST (country_geom);
 
 -- ---------------------------------------------------------------
 -- sources
