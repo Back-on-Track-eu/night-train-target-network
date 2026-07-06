@@ -51,7 +51,12 @@ $IncludeExtensions = @(
     ".dockerignore",
     ".gitattributes",
     "*.cfg",
-    "*.ini"
+    "*.ini",
+    "*.ts",
+    "*.tsx",
+    "*.vue",
+    "*.css",
+    "*.html"
 )
 
 # =============================================================================
