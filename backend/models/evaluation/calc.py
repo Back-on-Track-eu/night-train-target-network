@@ -63,6 +63,8 @@ class StopCost:
     stop_id: str
     country_code: str           # from Stop.country_code — ISO 3166-1 alpha-2
     station_charge_eur: float   # €/trip
+    dwell_driver_hours: float   # person-hours/trip — dwell_h × composition.driver_factor
+    dwell_crew_hours: float     # person-hours/trip — dwell_h × composition.total_crew
     dwell_driver_eur: float     # €/trip
     dwell_crew_eur: float       # €/trip
 
@@ -91,6 +93,8 @@ class SegmentCost:
     country_time_shares: dict[str, float]       # fraction of driving time per country, sums to 1.0
 
     coach_maintenance_eur: float    # €/segment  (loco maintenance is in RouteCost.loco_eur — full-service lease)
+    driver_hours: float             # person-hours/segment — driving_h × composition.driver_factor
+    crew_hours: float                # person-hours/segment — driving_h × composition.total_crew
     driver_eur: float               # €/segment  (driving time only — dwell is in StopCost)
     crew_eur: float                 # €/segment  (driving time only — dwell is in StopCost)
     tac_eur: float                  # €/segment
@@ -346,17 +350,27 @@ class EvaluationResult:
 # =============================================================================
 
 def _calc_stop_cost(trip_id: str, stop: Stop, stop_infra: StopInfraCollection, composition: Composition) -> StopCost:
+    # TODO: composition.driver_overhead_min / composition.crew_overhead_min
+    # (per-trip overhead per Operator docstring: "Billable hours = driving
+    # time + operator_driver_overhead_h") are loaded but not applied anywhere
+    # in this file yet — driver/crew billable hours currently only reflect
+    # dwell + driving time, not the per-trip overhead on top. Same class of
+    # gap as the driver_factor/total_crew fix above; deferred for now.
     sp = stop_infra.get(stop.stop_id)
     station_charge_eur = sp.stop_charge_eur if sp else 0.0
     country_code = stop.country_code
     dwell_h = stop.dwell_time_min / 60.0 if stop.dwell_time_min is not None else 0.0
-    dwell_driver_eur = dwell_h * composition.driver_costs_eur_h
-    dwell_crew_eur = dwell_h * composition.crew_costs_eur_h
+    dwell_driver_hours = dwell_h * composition.driver_factor
+    dwell_crew_hours = dwell_h * composition.total_crew
+    dwell_driver_eur = dwell_driver_hours * composition.driver_costs_eur_h
+    dwell_crew_eur = dwell_crew_hours * composition.crew_costs_eur_h
     return StopCost(
         trip_id=trip_id,
         stop_id=stop.stop_id,
         country_code=country_code,
         station_charge_eur=station_charge_eur,
+        dwell_driver_hours=dwell_driver_hours,
+        dwell_crew_hours=dwell_crew_hours,
         dwell_driver_eur=dwell_driver_eur,
         dwell_crew_eur=dwell_crew_eur,
     )
@@ -372,13 +386,15 @@ def _calc_segment_cost(
     driving_h = segment.driving_time_min / 60.0
 
     coach_maintenance_eur = composition.coach_maint_eur_km * distance_km
-    driver_eur = composition.driver_costs_eur_h * driving_h
-    crew_eur = composition.crew_costs_eur_h * driving_h
+    driver_hours = driving_h * composition.driver_factor
+    crew_hours = driving_h * composition.total_crew
+    driver_eur = composition.driver_costs_eur_h * driver_hours
+    crew_eur = composition.crew_costs_eur_h * crew_hours
 
     tac_eur = 0.0
     energy_eur = 0.0
     for cc, dist_share in segment.country_distance_shares.items():
-        track = tracks.get_or_default(cc)
+        track = tracks.get(cc)
         if track is None:
             continue
         tac_eur += distance_km * dist_share * track.tac_eur_train_km
@@ -394,6 +410,8 @@ def _calc_segment_cost(
         country_distance_shares=segment.country_distance_shares,
         country_time_shares=segment.country_time_shares,
         coach_maintenance_eur=coach_maintenance_eur,
+        driver_hours=driver_hours,
+        crew_hours=crew_hours,
         driver_eur=driver_eur,
         crew_eur=crew_eur,
         tac_eur=tac_eur,
@@ -456,7 +474,7 @@ def _calc_parking_costs(route: Route, tracks: TrackInfraCollection) -> list[Park
     """One ParkingCost per Parking — mirrors route.parkings."""
     costs = []
     for p in route.parkings:
-        track = tracks.get_or_default(p.country_code)
+        track = tracks.get(p.country_code)
         costs.append(ParkingCost(
             stop_id=p.stop_id,
             trip_ids=p.trip_ids,
@@ -469,7 +487,7 @@ def _calc_shunting_costs(route: Route, tracks: TrackInfraCollection) -> list[Shu
     """One ShuntingCost per Shunting — mirrors route.shuntings."""
     costs = []
     for s in route.shuntings:
-        track = tracks.get_or_default(s.country_code)
+        track = tracks.get(s.country_code)
         costs.append(ShuntingCost(
             stop_id=s.stop_id,
             trip_id=s.trip_id,

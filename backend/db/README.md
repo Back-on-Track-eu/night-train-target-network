@@ -98,10 +98,10 @@ Three schemas: `admin`, `input_params`, `proposals`.
 | `service_classes` | Accommodation class taxonomy (Seat, Couchette, Sleeper, Capsule, Catering) with density |
 | `operators` | Train operating companies — driver/crew rates, overhead quotas, shunting costs |
 | `operator_class_costs` | Service & stockings cost per place, per operator per service class |
-| `coach_types` | Individual railcar types with physical attributes and crew factor, versioned |
+| `coach_types` | Individual railcar types with physical attributes and crew factor. Not versioned — a changed spec means a new coach_type_id |
 | `coach_type_classes` | Places per service class within a coach type |
-| `composition_types` | Train formation blueprints: operational and cost parameters, versioned |
-| `composition_type_coaches` | Ordered coach slots per composition type (version-pinned) |
+| `composition_types` | Train formation blueprints: operational and cost parameters. Not versioned — a changed setting means a new composition_type_id |
+| `composition_type_coaches` | Ordered coach slots per composition type |
 | `track_infrastructure_defaults` | EU-average fallback track parameters, versioned |
 | `track_infrastructures` | Country-level track parameters (TAC, energy price, terrain etc.), versioned, with per-field `_src` columns |
 | `stop_infrastructure_defaults` | Fallback station access charge per country (NULL = global), versioned |

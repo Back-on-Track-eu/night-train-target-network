@@ -67,12 +67,10 @@ CREATE TABLE input_params.operators (
     operator_fix_overhead_quota_per NUMERIC(5,4)  NOT NULL,
     operator_loco_lease_eur_h       NUMERIC(10,3) NOT NULL,
     source_id                       INTEGER       REFERENCES input_params.sources(source_id),
-    change_log                      TEXT,
-    operator_version                INTEGER       NOT NULL DEFAULT 1,
-    UNIQUE (operator_id, operator_version)
+    UNIQUE (operator_id)
 );
 
-COMMENT ON TABLE  input_params.operators IS 'Train operating company — bears operational costs. Row-versioned: operator_id is a natural key referenced (as a soft reference, not an enforced FK) from coach_types and composition_types, resolved per-scenario at load time via scenario.scenarios.operators_version. Version bumps are full-table snapshots — see scenario.scenarios for the versioning contract.';
+COMMENT ON TABLE  input_params.operators IS 'Train operating company — bears operational costs. Not versioned: operator_id is a natural key referenced (as a soft reference, not an enforced FK) from coach_types and composition_types. Changing rates means adding a new operator_id, never editing a row in place — see coach_types/composition_types for the same catalog-not-history model.';
 COMMENT ON COLUMN input_params.operators.operator_driver_costs_eur_h     IS 'Driver staff cost per billable hour. Billable hours = driving time + operator_driver_overhead_h. Unit: €/h';
 COMMENT ON COLUMN input_params.operators.operator_crew_costs_eur_h       IS 'Cabin crew cost per billable hour. Unit: €/h';
 COMMENT ON COLUMN input_params.operators.operator_driver_overhead_h      IS 'Fixed overhead hours added per trip for driver cost calculation. Unit: h/trip';
@@ -83,8 +81,6 @@ COMMENT ON COLUMN input_params.operators.operator_var_overhead_per       IS 'Var
 COMMENT ON COLUMN input_params.operators.operator_fix_overhead_quota_per IS 'Fixed overhead as a share of all other railway operation costs. Unit: %';
 COMMENT ON COLUMN input_params.operators.operator_loco_lease_eur_h       IS 'Full-service locomotive lease rate, utilization-based — bundles capital, maintenance, and insurance. Billed per loco operating hour (driving + buffer + dwell). Unit: €/h';
 COMMENT ON COLUMN input_params.operators.source_id                       IS 'Source for all values in this row.';
-COMMENT ON COLUMN input_params.operators.change_log                      IS 'Free-text description of changes made in this version.';
-COMMENT ON COLUMN input_params.operators.operator_version                IS 'Per-table full-snapshot version number. Resolved via scenario.scenarios.operators_version — never inferred.';
 
 -- ---------------------------------------------------------------
 -- operator_class_costs
@@ -115,22 +111,18 @@ CREATE TABLE input_params.coach_types (
     coach_type_crew_factor    NUMERIC(4,2) NOT NULL DEFAULT 0,
     coach_type_remarks        TEXT,
     source_id                 INTEGER   REFERENCES input_params.sources(source_id),
-    change_log                TEXT,
-    coach_type_version        INTEGER   NOT NULL DEFAULT 1,
-    UNIQUE (coach_type_id, coach_type_version)
+    UNIQUE (coach_type_id)
 );
 
-COMMENT ON TABLE  input_params.coach_types IS 'Individual railcar/coach types. Capacity is derived from coach_type_classes, not stored here. Version bumps are full-table snapshots, resolved via scenario.scenarios.coach_types_version — see scenario.scenarios for the versioning contract.';
+COMMENT ON TABLE  input_params.coach_types IS 'Individual railcar/coach types. Capacity is derived from coach_type_classes, not stored here. Not versioned: coach_type_id is a permanent natural key — a changed spec means a new coach_type_id, never editing a row in place.';
 COMMENT ON COLUMN input_params.coach_types.coach_type_id             IS 'Unique coach type identifier (e.g. WLABmz, Bcmz, type1).';
-COMMENT ON COLUMN input_params.coach_types.coach_type_operator_id    IS 'Operating company this coach type belongs to. Soft reference to input_params.operators.operator_id (not an enforced FK, since operators is itself row-versioned) — resolved per-scenario at load time. Nullable for generic/shared types.';
+COMMENT ON COLUMN input_params.coach_types.coach_type_operator_id    IS 'Operating company this coach type belongs to. Soft reference to input_params.operators.operator_id (not an enforced FK). Nullable for generic/shared types.';
 COMMENT ON COLUMN input_params.coach_types.coach_type_weight_gross_t IS 'Gross weight of a single coach of this type. Unit: t';
 COMMENT ON COLUMN input_params.coach_types.coach_type_bikes          IS 'Number of bicycle spaces in this coach type.';
 COMMENT ON COLUMN input_params.coach_types.coach_type_climatization  IS 'Whether this coach type has air conditioning.';
 COMMENT ON COLUMN input_params.coach_types.coach_type_plugs          IS 'Whether this coach type has passenger power sockets.';
 COMMENT ON COLUMN input_params.coach_types.coach_type_crew_factor    IS 'Fractional cabin crew per trip (e.g. 0.5 = one crew covers two coaches).';
 COMMENT ON COLUMN input_params.coach_types.source_id                 IS 'Source for all values in this row.';
-COMMENT ON COLUMN input_params.coach_types.change_log                IS 'Free-text description of changes made in this version.';
-COMMENT ON COLUMN input_params.coach_types.coach_type_version        IS 'Per-table full-snapshot version number. Resolved via scenario.scenarios.coach_types_version — never inferred.';
 
 -- ---------------------------------------------------------------
 -- coach_type_classes
@@ -169,14 +161,12 @@ CREATE TABLE input_params.composition_types (
     composition_type_coach_maint_eur_km  NUMERIC(10,8) NOT NULL,
     composition_type_driver_factor       NUMERIC(4,2)  NOT NULL DEFAULT 1,
     source_id                            INTEGER       REFERENCES input_params.sources(source_id),
-    change_log                           TEXT,
-    composition_type_version             INTEGER       NOT NULL DEFAULT 1,
-    UNIQUE (composition_type_id, composition_type_version)
+    UNIQUE (composition_type_id)
 );
 
-COMMENT ON TABLE  input_params.composition_types IS 'Train composition blueprints: operational and cost parameters. Capacity derived from composition_type_coaches → coach_type_classes. Locomotives are not purchased — see operators.operator_loco_lease_eur_h for full-service lease cost. Version bumps are full-table snapshots, resolved via scenario.scenarios.composition_types_version — see scenario.scenarios for the versioning contract.';
+COMMENT ON TABLE  input_params.composition_types IS 'Train composition blueprints: operational and cost parameters. Capacity derived from composition_type_coaches → coach_type_classes. Locomotives are not purchased — see operators.operator_loco_lease_eur_h for full-service lease cost. Not versioned: composition_type_id is a permanent natural key — new settings mean a new composition_type_id, never editing a row in place.';
 COMMENT ON COLUMN input_params.composition_types.composition_type_id          IS 'Unique composition identifier (e.g. STD-3.1).';
-COMMENT ON COLUMN input_params.composition_types.composition_type_operator_id IS 'Operating company. Soft reference to input_params.operators.operator_id (not an enforced FK, since operators is itself row-versioned) — resolved per-scenario at load time.';
+COMMENT ON COLUMN input_params.composition_types.composition_type_operator_id IS 'Operating company. Soft reference to input_params.operators.operator_id (not an enforced FK).';
 COMMENT ON COLUMN input_params.composition_types.composition_type_hsr_allowed IS 'Whether this composition may use high-speed rail infrastructure.';
 COMMENT ON COLUMN input_params.composition_types.composition_type_max_speed_kmh IS 'Maximum operational speed. Unit: km/h';
 COMMENT ON COLUMN input_params.composition_types.composition_type_energy_factor_weight  IS 'Energy regression coefficient for tonne-kilometre term. Unit: kWh/(t·km)';
@@ -191,8 +181,6 @@ COMMENT ON COLUMN input_params.composition_types.composition_type_cleaning_eur_d
 COMMENT ON COLUMN input_params.composition_types.composition_type_coach_maint_eur_km IS 'Variable coach maintenance cost per km. Unit: €/km';
 COMMENT ON COLUMN input_params.composition_types.composition_type_driver_factor      IS 'Number of drivers required per trip (e.g. 1 or 2).';
 COMMENT ON COLUMN input_params.composition_types.source_id                           IS 'Source for all values in this row.';
-COMMENT ON COLUMN input_params.composition_types.change_log                          IS 'Free-text description of changes made in this version.';
-COMMENT ON COLUMN input_params.composition_types.composition_type_version            IS 'Per-table full-snapshot version number. Resolved via scenario.scenarios.composition_types_version — never inferred.';
 
 -- ---------------------------------------------------------------
 -- composition_type_coaches
@@ -204,14 +192,16 @@ CREATE TABLE input_params.composition_type_coaches (
     PRIMARY KEY (composition_type_row_id, position)
 );
 
-COMMENT ON TABLE  input_params.composition_type_coaches          IS 'Ordered coach slots per composition type. coach_type_row_id is version-pinned.';
+COMMENT ON TABLE  input_params.composition_type_coaches          IS 'Ordered coach slots per composition type.';
 COMMENT ON COLUMN input_params.composition_type_coaches.position IS 'Position of the coach in the composition (1 = first coach behind the locomotive).';
 
 -- ---------------------------------------------------------------
 -- composition_references
 -- Reference trip profile per composition — used to compute
 -- indicative KPIs at load time via compute_indicative_figures()
--- in calc.py. One current row per composition_type_id.
+-- in models/compositions/calc_indicative_figures.py (currently a
+-- placeholder — see that module). One current row per
+-- composition_type_id.
 -- ---------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS input_params.composition_references (
     composition_reference_id  SERIAL          PRIMARY KEY,
@@ -231,15 +221,27 @@ CREATE TABLE IF NOT EXISTS input_params.composition_references (
     ref_avg_fare_sleeper      NUMERIC(8,2)    NOT NULL DEFAULT 129.00,
     ref_avg_fare_capsule      NUMERIC(8,2)    NOT NULL DEFAULT 99.00,
     ref_avg_fare_catering     NUMERIC(8,2)    NOT NULL DEFAULT 0.00,
-    version                   INTEGER         NOT NULL DEFAULT 1,
-    change_log                TEXT,
-    source_id                 INTEGER         REFERENCES input_params.sources(source_id)
+    source_id                 INTEGER         REFERENCES input_params.sources(source_id),
+    UNIQUE (composition_type_row_id)
 );
 
 COMMENT ON TABLE input_params.composition_references IS
-    'Reference trip profile per composition for indicative KPI computation. Version bumps are full-table snapshots, resolved via scenario.scenarios.composition_references_version — see scenario.scenarios for the versioning contract.';
-COMMENT ON COLUMN input_params.composition_references.version IS 'Per-table full-snapshot version number. Resolved via scenario.scenarios.composition_references_version — never inferred.';
-COMMENT ON COLUMN input_params.composition_references.change_log IS 'Free-text description of changes made in this version.';
+    'Reference trip profile per composition for indicative KPI computation. Not versioned, same as composition_types: exactly one row per composition_type_row_id, enforced by UNIQUE — a changed reference profile means a new composition_type_id (and a new row here to match), never editing in place.';
+COMMENT ON COLUMN input_params.composition_references.ref_distance_km           IS 'Reference trip one-way distance used to compute indicative KPIs. Unit: km';
+COMMENT ON COLUMN input_params.composition_references.ref_avg_speed_kmh         IS 'Reference trip average speed. Unit: km/h';
+COMMENT ON COLUMN input_params.composition_references.ref_terrain_score         IS 'Reference trip average terrain difficulty score (same scale as TrackInfrastructure.terrain_score).';
+COMMENT ON COLUMN input_params.composition_references.ref_operating_days        IS 'Reference trip operating days per year. Unit: days/year';
+COMMENT ON COLUMN input_params.composition_references.ref_utilization_seat      IS 'Reference load factor (share of places sold) for the Seat class. Unit: %';
+COMMENT ON COLUMN input_params.composition_references.ref_utilization_couchette IS 'Reference load factor (share of places sold) for the Couchette class. Unit: %';
+COMMENT ON COLUMN input_params.composition_references.ref_utilization_sleeper   IS 'Reference load factor (share of places sold) for the Sleeper class. Unit: %';
+COMMENT ON COLUMN input_params.composition_references.ref_utilization_capsule   IS 'Reference load factor (share of places sold) for the Capsule class. Unit: %';
+COMMENT ON COLUMN input_params.composition_references.ref_utilization_catering  IS 'Reference load factor (share of places sold) for the Catering class. Unit: %';
+COMMENT ON COLUMN input_params.composition_references.ref_avg_fare_seat         IS 'Reference average fare per sold place for the Seat class. Unit: €';
+COMMENT ON COLUMN input_params.composition_references.ref_avg_fare_couchette    IS 'Reference average fare per sold place for the Couchette class. Unit: €';
+COMMENT ON COLUMN input_params.composition_references.ref_avg_fare_sleeper      IS 'Reference average fare per sold place for the Sleeper class. Unit: €';
+COMMENT ON COLUMN input_params.composition_references.ref_avg_fare_capsule      IS 'Reference average fare per sold place for the Capsule class. Unit: €';
+COMMENT ON COLUMN input_params.composition_references.ref_avg_fare_catering     IS 'Reference average fare per sold place for the Catering class. Unit: €';
+COMMENT ON COLUMN input_params.composition_references.source_id                 IS 'Source for all values in this row.';
 
 -- ---------------------------------------------------------------
 -- track_infrastructure_defaults

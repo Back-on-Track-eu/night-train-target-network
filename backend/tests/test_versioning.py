@@ -32,7 +32,7 @@ class TestVersionIsolation:
         snapshot only reachable via a scenario that pins it explicitly).
         Loader with no scenario_id must resolve to the base and return tac=5.40.
         """
-        tracks, _ = loader.build_all_tracks()
+        tracks = loader.build_all_tracks()
         de = tracks.get("DE")
         assert de is not None
         assert de.tac_eur_train_km == pytest.approx(
@@ -41,7 +41,7 @@ class TestVersionIsolation:
 
     def test_old_version_not_loaded(self, loader):
         """Old DE row has tac=3.10 — must never appear in loaded data."""
-        tracks, _ = loader.build_all_tracks()
+        tracks = loader.build_all_tracks()
         de = tracks.get("DE")
         assert de is not None
         assert de.tac_eur_train_km != pytest.approx(
@@ -100,7 +100,7 @@ class TestVersionIsolation:
 
     def test_param_version_number_matches_db(self, loader, db_cur, base_scenario):
         """param_versions version field should match the DB row version."""
-        tracks, pv = loader.build_all_tracks()
+        tracks = loader.build_all_tracks()
 
         db_cur.execute(
             """
@@ -112,7 +112,7 @@ class TestVersionIsolation:
         db_version = db_cur.fetchone()["track_infra_version"]
 
         de_tac_key = "track_infra:DE:tac_eur_train_km"
-        entry = pv.get(de_tac_key)
+        entry = tracks.param_versions.get(de_tac_key)
         assert entry is not None, f"No param_versions entry for {de_tac_key}"
         assert (
             entry.version == db_version
@@ -128,8 +128,8 @@ class TestParamVersionsStructure:
 
     def test_param_versions_key_format(self, loader):
         """Keys must follow 'table_short:entity_id:field_name' format."""
-        tracks, pv = loader.build_all_tracks()
-        for key in pv.entries:
+        tracks = loader.build_all_tracks()
+        for key in tracks.param_versions.entries:
             parts = key.split(":")
             assert (
                 len(parts) == 3
@@ -137,29 +137,39 @@ class TestParamVersionsStructure:
 
     def test_param_versions_has_value(self, loader):
         """Every entry has a non-None value."""
-        tracks, pv = loader.build_all_tracks()
-        for key, entry in pv.entries.items():
+        tracks = loader.build_all_tracks()
+        for key, entry in tracks.param_versions.entries.items():
             assert entry.value is not None, f"param_versions['{key}'].value is None"
 
     def test_param_versions_has_version_int(self, loader):
         """Every entry has a positive integer version."""
-        tracks, pv = loader.build_all_tracks()
-        for key, entry in pv.entries.items():
+        tracks = loader.build_all_tracks()
+        for key, entry in tracks.param_versions.entries.items():
             assert (
                 isinstance(entry.version, int) and entry.version > 0
             ), f"param_versions['{key}'].version = {entry.version!r}"
 
-    def test_param_versions_has_description(self, loader):
-        """Every entry should have a description (from DB column comment)."""
-        tracks, pv = loader.build_all_tracks()
-        # At least some entries should have descriptions
-        with_desc = [k for k, v in pv.entries.items() if v.description]
-        assert len(with_desc) > 0, "No param_versions entries have descriptions"
+    def test_track_infra_descriptions_populated(self, loader):
+        """
+        Every TRACK_INFRA_FIELD_NAMES field should have a description (from
+        DB column comment) on TrackInfraCollection.descriptions.
+
+        Description provenance moved off individual param_versions entries
+        for TrackInfrastructure (and StopInfrastructure) — a field's
+        description is identical for every country/stop, so it's captured
+        once per collection instead (see TrackInfraDescriptions /
+        StopInfraDescriptions). This replaces the old
+        test_param_versions_has_description, which checked entry.description
+        on param_versions directly — no longer populated there.
+        """
+        tracks = loader.build_all_tracks()
+        with_desc = [f for f, d in tracks.descriptions.fields.items() if d]
+        assert len(with_desc) > 0, "No track_infra field descriptions found"
 
     def test_param_versions_source_when_not_default(self, loader):
         """Non-default entries should have a source object."""
-        tracks, pv = loader.build_all_tracks()
-        de_tac = pv.get("track_infra:DE:tac_eur_train_km")
+        tracks = loader.build_all_tracks()
+        de_tac = tracks.param_versions.get("track_infra:DE:tac_eur_train_km")
         if de_tac and not de_tac.is_default:
             assert (
                 de_tac.source is not None
@@ -170,15 +180,15 @@ class TestParamVersionsStructure:
 
     def test_is_default_false_for_explicit_values(self, loader):
         """DE tac is explicitly set — is_default must be False."""
-        tracks, pv = loader.build_all_tracks()
-        de_tac = pv.get("track_infra:DE:tac_eur_train_km")
+        tracks = loader.build_all_tracks()
+        de_tac = tracks.param_versions.get("track_infra:DE:tac_eur_train_km")
         assert de_tac is not None
         assert de_tac.is_default is False
 
     def test_is_default_true_for_null_values(self, loader):
         """SE tac is NULL in DB — is_default must be True."""
-        tracks, pv = loader.build_all_tracks()
-        se_tac = pv.get("track_infra:SE:tac_eur_train_km")
+        tracks = loader.build_all_tracks()
+        se_tac = tracks.param_versions.get("track_infra:SE:tac_eur_train_km")
         assert se_tac is not None, "No SE tac entry in param_versions"
         assert (
             se_tac.is_default is True
@@ -186,8 +196,8 @@ class TestParamVersionsStructure:
 
     def test_default_value_matches_defaults_table(self, loader, db_cur, base_scenario):
         """SE tac value should equal the default table value."""
-        tracks, pv = loader.build_all_tracks()
-        se_tac = pv.get("track_infra:SE:tac_eur_train_km")
+        tracks = loader.build_all_tracks()
+        se_tac = tracks.param_versions.get("track_infra:SE:tac_eur_train_km")
         assert se_tac is not None
 
         db_cur.execute(
@@ -213,18 +223,18 @@ class TestStopDefaultValues:
 
     def test_se_stop_charge_is_default(self, loader):
         """SE_STOCKHOLM_C has NULL stop_charge — should use global default."""
-        stops, pv = loader.build_all_stops()
+        stops = loader.build_all_stops()
         se_stop = stops.get("SE_STOCKHOLM_C")
         assert se_stop is not None
 
-        se_charge = pv.get("stop_infra:SE_STOCKHOLM_C:stop_charge_eur")
+        se_charge = stops.param_versions.get("stop_infra:SE_STOCKHOLM_C:stop_charge_eur")
         assert se_charge is not None
         assert se_charge.is_default is True, f"SE stop charge should be is_default=True"
 
     def test_se_stop_charge_value_matches_global_default(self, loader, db_cur, base_scenario):
         """SE_STOCKHOLM_C charge should equal global default (11.28)."""
-        stops, pv = loader.build_all_stops()
-        se_charge = pv.get("stop_infra:SE_STOCKHOLM_C:stop_charge_eur")
+        stops = loader.build_all_stops()
+        se_charge = stops.param_versions.get("stop_infra:SE_STOCKHOLM_C:stop_charge_eur")
         assert se_charge is not None
 
         db_cur.execute(
@@ -239,8 +249,8 @@ class TestStopDefaultValues:
 
     def test_berlin_stop_charge_is_not_default(self, loader):
         """Berlin has explicit stop_charge — is_default must be False."""
-        stops, pv = loader.build_all_stops()
-        berlin_charge = pv.get("stop_infra:DE_BERLIN_HBF:stop_charge_eur")
+        stops = loader.build_all_stops()
+        berlin_charge = stops.param_versions.get("stop_infra:DE_BERLIN_HBF:stop_charge_eur")
         assert berlin_charge is not None
         assert berlin_charge.is_default is False
 

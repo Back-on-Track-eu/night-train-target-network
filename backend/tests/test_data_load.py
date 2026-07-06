@@ -118,19 +118,17 @@ def test_required_columns_not_null(db_cur, table, columns):
         assert nulls == 0, f"{table}.{col} has {nulls} NULL values"
 
 
-def test_composition_types_have_coaches(db_cur, base_scenario):
-    """Every composition type at the base scenario's pinned version has at least one coach assigned."""
+def test_composition_types_have_coaches(db_cur):
+    """Every composition type has at least one coach assigned."""
     db_cur.execute(
         """
         SELECT ct.composition_type_id
         FROM input_params.composition_types ct
         LEFT JOIN input_params.composition_type_coaches cc
             ON cc.composition_type_row_id = ct.composition_type_row_id
-        WHERE ct.composition_type_version = %s
         GROUP BY ct.composition_type_id
         HAVING COUNT(cc.position) = 0
-    """,
-        (base_scenario["composition_types_version"],),
+    """
     )
     orphans = [row["composition_type_id"] for row in db_cur.fetchall()]
     assert orphans == [], f"Composition types with no coaches: {orphans}"
@@ -194,16 +192,14 @@ def test_stop_infrastructure_defaults_has_global(db_cur, base_scenario):
     assert db_cur.fetchone()["n"] >= 1, "No global stop infrastructure default found"
 
 
-def test_composition_references_exist(db_cur, base_scenario):
-    """At least one composition reference row exists at the pinned version."""
+def test_composition_references_exist(db_cur):
+    """At least one composition reference row exists."""
     db_cur.execute(
         """
         SELECT COUNT(*) AS n FROM input_params.composition_references
-        WHERE version = %s
-    """,
-        (base_scenario["composition_references_version"],),
+    """
     )
-    assert db_cur.fetchone()["n"] >= 1, "No composition_references row found at pinned version"
+    assert db_cur.fetchone()["n"] >= 1, "No composition_references row found"
 
 
 def test_service_classes_exist(db_cur):

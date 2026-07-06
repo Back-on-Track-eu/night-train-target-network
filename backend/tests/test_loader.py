@@ -126,7 +126,7 @@ STOP_ID = "DE_BERLIN_HBF"
 
 def test_loader_composition_fields_match_db(loader, db_cur, base_scenario):
     """Composition built by loader matches raw DB values for key fields."""
-    comp, _ = loader.build_composition(COMP_ID)
+    comp = loader.build_all_compositions().get(COMP_ID)
 
     db_cur.execute(
         """
@@ -134,10 +134,9 @@ def test_loader_composition_fields_match_db(loader, db_cur, base_scenario):
                op.operator_ebit_margin_per, op.operator_financing_quota_per
         FROM input_params.composition_types ct
         JOIN input_params.operators op ON op.operator_id = ct.composition_type_operator_id
-            AND op.operator_version = %s
-        WHERE ct.composition_type_id = %s AND ct.composition_type_version = %s
+        WHERE ct.composition_type_id = %s
     """,
-        (base_scenario["operators_version"], COMP_ID, base_scenario["composition_types_version"]),
+        (COMP_ID,),
     )
     row = db_cur.fetchone()
     assert row is not None, f"No DB row found for composition '{COMP_ID}'"
@@ -157,7 +156,7 @@ def test_loader_composition_fields_match_db(loader, db_cur, base_scenario):
 
 def test_loader_composition_capacity_aggregation(loader, db_cur, base_scenario):
     """places_by_class from loader matches direct DB aggregation."""
-    comp, _ = loader.build_composition(COMP_ID)
+    comp = loader.build_all_compositions().get(COMP_ID)
 
     db_cur.execute(
         """
@@ -165,10 +164,10 @@ def test_loader_composition_capacity_aggregation(loader, db_cur, base_scenario):
         FROM input_params.composition_types ct
         JOIN input_params.composition_type_coaches cc ON cc.composition_type_row_id = ct.composition_type_row_id
         JOIN input_params.coach_type_classes ctc      ON ctc.coach_type_row_id = cc.coach_type_row_id
-        WHERE ct.composition_type_id = %s AND ct.composition_type_version = %s
+        WHERE ct.composition_type_id = %s
         GROUP BY ctc.service_class_id
     """,
-        (COMP_ID, base_scenario["composition_types_version"]),
+        (COMP_ID,),
     )
     rows = {row["service_class_id"]: int(row["places"]) for row in db_cur.fetchall()}
 
@@ -180,7 +179,7 @@ def test_loader_composition_capacity_aggregation(loader, db_cur, base_scenario):
 
 def test_loader_composition_weight_aggregation(loader, db_cur, base_scenario):
     """total_weight_t from loader matches SUM of coach weights from DB."""
-    comp, _ = loader.build_composition(COMP_ID)
+    comp = loader.build_all_compositions().get(COMP_ID)
 
     db_cur.execute(
         """
@@ -188,9 +187,9 @@ def test_loader_composition_weight_aggregation(loader, db_cur, base_scenario):
         FROM input_params.composition_types c
         JOIN input_params.composition_type_coaches cc ON cc.composition_type_row_id = c.composition_type_row_id
         JOIN input_params.coach_types ct              ON ct.coach_type_row_id = cc.coach_type_row_id
-        WHERE c.composition_type_id = %s AND c.composition_type_version = %s
+        WHERE c.composition_type_id = %s
     """,
-        (COMP_ID, base_scenario["composition_types_version"]),
+        (COMP_ID,),
     )
     row = db_cur.fetchone()
     assert comp.total_weight_t == pytest.approx(float(row["weight"]), rel=1e-4)
@@ -198,7 +197,7 @@ def test_loader_composition_weight_aggregation(loader, db_cur, base_scenario):
 
 def test_loader_track_infra_fields_match_db(loader, db_cur, base_scenario):
     """TrackInfrastructure from loader matches raw DB values."""
-    tracks, pv = loader.build_all_tracks()
+    tracks = loader.build_all_tracks()
     assert COUNTRY in tracks.all(), f"Country {COUNTRY} not in tracks collection"
     t = tracks.get(COUNTRY)
 
@@ -223,14 +222,14 @@ def test_loader_track_infra_fields_match_db(loader, db_cur, base_scenario):
     assert t.terrain_category == row["track_terrain_category"]
 
     # verify is_default=False for a country with explicit data
-    entry = pv.get(f"track_infra:{COUNTRY}:tac_eur_train_km")
+    entry = tracks.param_versions.get(f"track_infra:{COUNTRY}:tac_eur_train_km")
     assert entry is not None
     assert entry.is_default is False
 
 
 def test_loader_stop_fields_match_db(loader, db_cur, base_scenario):
     """StopInfrastructure from loader matches raw DB values."""
-    stops, pv = loader.build_all_stops()
+    stops = loader.build_all_stops()
     assert STOP_ID in stops.all(), f"Stop {STOP_ID} not in stops collection"
     s = stops.get(STOP_ID)
 
@@ -253,7 +252,7 @@ def test_loader_stop_fields_match_db(loader, db_cur, base_scenario):
 
 def test_loader_all_compositions_load(loader):
     """All current compositions load without errors."""
-    comps, _ = loader.build_all_compositions()
+    comps = loader.build_all_compositions()
     assert len(comps) >= 1, f"Expected at least 1 composition, got {len(comps)}"
 
 
@@ -272,11 +271,11 @@ def test_loader_track_infra_default_resolves(loader, db_cur, base_scenario):
     if row is None:
         pytest.skip("No country with NULL tac_eur_train_km in test data")
 
-    tracks, pv = loader.build_all_tracks()
+    tracks = loader.build_all_tracks()
     cc = row["country_code"]
     assert tracks.get(cc) is not None
 
-    entry = pv.get(f"track_infra:{cc}:tac_eur_train_km")
+    entry = tracks.param_versions.get(f"track_infra:{cc}:tac_eur_train_km")
     assert entry is not None
     assert (
         entry.is_default is True
@@ -284,19 +283,26 @@ def test_loader_track_infra_default_resolves(loader, db_cur, base_scenario):
 
 
 def test_loader_composition_has_indicative_figures(loader):
-    """Composition with a reference row has indicative figures."""
-    comps, _ = loader.build_all_compositions()
-    with_indicative = [c for c in comps.values() if c.indicative is not None]
+    """
+    Composition with a reference row has indicative figures.
+
+    compute_indicative_figures() is currently a placeholder (see
+    models/compositions/calc_indicative_figures.py) — it returns the same
+    flat, hand-picked figures for every composition rather than a real
+    calculation, but they're non-zero so this can assert real presence.
+    """
+    comps = loader.build_all_compositions()
+    with_indicative = [c for c in comps.all().values() if c.indicative is not None]
     assert (
         len(with_indicative) >= 1
     ), "Expected at least one composition with indicative figures"
     ind = with_indicative[0].indicative
-    assert ind.cost_eur_per_seat_km > 0
-    assert ind.cost_eur_per_place_km > 0
-    assert 0.0 <= ind.breakeven_load_factor <= 1.0
+    assert ind.cost_eur_per_train_km > 0
+    assert len(ind.cost_eur_per_place_km_by_class) > 0
+    assert all(v > 0 for v in ind.cost_eur_per_place_km_by_class.values())
 
 
 def test_loader_all_stops_load(loader):
     """All current stops load without errors."""
-    stops, _ = loader.build_all_stops()
+    stops = loader.build_all_stops()
     assert len(stops.all()) >= 1, f"Expected at least 1 stop, got {len(stops.all())}"

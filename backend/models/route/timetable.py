@@ -196,7 +196,7 @@ def dwell_min(
     for whichever of boarding/alighting/both applies. 0 for a stop type
     that's neither (shouldn't occur for an intermediate stop, but falls
     back safely rather than raising)."""
-    track = tracks.get_or_default(country_code)
+    track = tracks.get(country_code)
     candidates: list[int] = []
     if stop_type in (StopType.BOARDING, StopType.BOTH):
         candidates += [composition.min_boarding_time_min, track.min_boarding_time_min]

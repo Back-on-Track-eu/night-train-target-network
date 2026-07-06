@@ -21,6 +21,8 @@ models/
 ├── energy/
 │   ├── calc_energy_consumption.py   # Per-segment energy model
 │   └── version.py                   # ENERGY_CALC_VERSION
+├── compositions/
+│   └── calc_indicative_figures.py   # compute_indicative_figures() — PLACEHOLDER, returns dummy figures
 └── evaluation/
     ├── calc.py                      # Cost/revenue evaluation → EvaluationResult
     ├── views.py                     # Breakdown aggregation, allocation, normalisation
@@ -35,7 +37,7 @@ models/
 ```
 plan_route(trip_pair_inputs, loader, router, schedule_mode, proposal_id, proposal_version, scenario_id)
   │
-  ├── loader.build_composition()      → Composition
+  ├── loader.build_all_compositions()  → CompositionCollection (per composition_id: .get())
   ├── loader.build_all_tracks()       → TrackInfraCollection
   ├── loader.build_all_stops()        → StopInfraCollection
   │
@@ -44,7 +46,8 @@ plan_route(trip_pair_inputs, loader, router, schedule_mode, proposal_id, proposa
   ├── timetable.apply_auto_stop_addition(routed_legs)             → stop_ids (no-op today;
   │     if it ever changes the list, re-routes before continuing)
   ├── _check_country_coverage(routed_legs, tracks)                 → raises ValueError if any
-  │     transited country has no row in track_infrastructures at all
+  │     transited country has no row at all in input_params.track_infrastructures
+  │     (defaulted fields on an existing row are fine)
   ├── timetable.schedule_and_classify(routed_legs, timetable_mode) → stop_inputs, departure_time_min
   ├── calc_energy_consumption(legs, composition)                   → enriches RoutedLeg.energy_kwh
   ├── timetable.build_final_timetable()                            → exact per-stop arrival/departure

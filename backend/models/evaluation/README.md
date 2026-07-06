@@ -175,7 +175,7 @@ POST /api/evaluation/calc
   │
   ├── [1/5] Validate body + route_from_dict(body["route"], loader)
   │          serialize.py: deserializes Route JSON → Route domain object
-  │          loader.build_composition() reloads cost params from DB
+  │          loader.build_all_compositions() reloads cost params from DB
   │
   ├── [2/5] loader.build_all_tracks() + loader.build_all_stops()
   │

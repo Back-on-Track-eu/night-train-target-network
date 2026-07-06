@@ -404,7 +404,9 @@ class RailRouter:
                     leg_cc_dur_ms[cc] / total_dur_ms if total_dur_ms > 0 else 0.0
                 )
                 cc_drive_min = ms_to_min(leg_cc_dur_ms[cc])
-                track = tracks.get_or_default(cc)
+                track = tracks.get(cc)
+                if track is None:
+                    continue  # "UNK" (open water/ferry) — no country, no buffer time
                 total_buffer_min += round(cc_drive_min * track.buffer_quota_per)
 
             legs.append(RoutedLeg(

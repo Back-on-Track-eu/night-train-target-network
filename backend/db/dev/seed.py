@@ -13,21 +13,27 @@ Run order:
      stop_infrastructure_defaults → stop_infrastructures →
      composition_types → composition_type_coaches → composition_references
   3. scenario: scenarios (base scenario pinning the version numbers seeded
-     above, plus one illustrative what-if scenario)
+     for the four infrastructure tables, plus one illustrative what-if
+     scenario)
   4. proposals
 
 Versioning note
 ---------------
-The eight versioned input_params tables (operators, coach_types,
-composition_types, composition_references, track_infrastructures,
+Only the four infrastructure input_params tables (track_infrastructures,
 track_infrastructure_defaults, stop_infrastructures,
-stop_infrastructure_defaults) carry no is_current flag — "current" is
-entirely a scenario.scenarios concept now (see create_scenario_schema.sql).
-A version bump is a FULL-TABLE SNAPSHOT: editing one row duplicates every
+stop_infrastructure_defaults) are versioned — "current" is entirely a
+scenario.scenarios concept for these (see create_scenario_schema.sql). A
+version bump is a FULL-TABLE SNAPSHOT: editing one row duplicates every
 other row of that table forward into the new version number. The
 TRACK_INFRASTRUCTURES fixture below deliberately seeds two full
 generations (version 1 and version 2, all 7 countries in each) to
 demonstrate and test this.
+
+operators, coach_types, composition_types, and composition_references are
+NOT versioned — they're a catalog you add to, not history you edit. Each
+row's natural id (operator_id, coach_type_id, composition_type_id) is
+permanent; changing a value means seeding a new id, never editing a row
+in place. See create_input_params_schema.sql for the rationale.
 """
 
 import os
@@ -1221,8 +1227,7 @@ def seed_sources(cur, source_ids: dict) -> None:
 def seed_operator_class_costs(cur):
     for operator_id, service_class_id, eur_place in OPERATOR_CLASS_COSTS_RAW:
         cur.execute(
-            "SELECT operator_row_id FROM input_params.operators WHERE operator_id=%s "
-            "ORDER BY operator_version DESC LIMIT 1",
+            "SELECT operator_row_id FROM input_params.operators WHERE operator_id=%s",
             (operator_id,),
         )
         operator_row_id = cur.fetchone()[0]
@@ -1236,8 +1241,7 @@ def seed_operator_class_costs(cur):
 def seed_coach_type_classes(cur):
     for coach_type_id, service_class_id, places in COACH_TYPE_CLASSES_RAW:
         cur.execute(
-            "SELECT coach_type_row_id FROM input_params.coach_types WHERE coach_type_id=%s "
-            "ORDER BY coach_type_version DESC LIMIT 1",
+            "SELECT coach_type_row_id FROM input_params.coach_types WHERE coach_type_id=%s",
             (coach_type_id,),
         )
         coach_type_row_id = cur.fetchone()[0]
@@ -1251,14 +1255,12 @@ def seed_coach_type_classes(cur):
 def seed_composition_type_coaches(cur):
     for comp_id, position, coach_type_id in COMPOSITION_TYPE_COACHES_RAW:
         cur.execute(
-            "SELECT composition_type_row_id FROM input_params.composition_types WHERE composition_type_id=%s "
-            "ORDER BY composition_type_version DESC LIMIT 1",
+            "SELECT composition_type_row_id FROM input_params.composition_types WHERE composition_type_id=%s",
             (comp_id,),
         )
         composition_type_row_id = cur.fetchone()[0]
         cur.execute(
-            "SELECT coach_type_row_id FROM input_params.coach_types WHERE coach_type_id=%s "
-            "ORDER BY coach_type_version DESC LIMIT 1",
+            "SELECT coach_type_row_id FROM input_params.coach_types WHERE coach_type_id=%s",
             (coach_type_id,),
         )
         coach_type_row_id = cur.fetchone()[0]
@@ -1270,13 +1272,38 @@ def seed_composition_type_coaches(cur):
         )
 
 def seed_composition_references(cur):
-    """Seed reference trip profiles for STD-7.1 and STD-9.1."""
-    for comp_id in ("STD-7.1", "STD-9.1"):
+    """
+    Seed a reference trip profile for every composition in
+    COMPOSITION_TYPES_VARYING, so none come back with indicative=null.
+
+    Same illustrative reference profile reused for all compositions for
+    now — compute_indicative_figures() is itself still a flat placeholder
+    (see models/compositions/calc_indicative_figures.py), so per-
+    composition differentiation here wouldn't be reflected in the
+    indicative KPIs yet anyway. Revisit alongside the real compositions
+    cost model.
+    """
+    reference_profile = dict(
+        ref_distance_km=800,
+        ref_avg_speed_kmh=90.0,
+        ref_terrain_score=1.3,
+        ref_operating_days=360,
+        ref_utilization_seat=0.70,
+        ref_utilization_couchette=0.65,
+        ref_utilization_sleeper=0.80,
+        ref_utilization_capsule=0.00,
+        ref_utilization_catering=0.00,
+        ref_avg_fare_seat=49.00,
+        ref_avg_fare_couchette=79.00,
+        ref_avg_fare_sleeper=129.00,
+        ref_avg_fare_capsule=0.00,
+        ref_avg_fare_catering=0.00,
+    )
+    for comp_id, _description in COMPOSITION_TYPES_VARYING:
         cur.execute(
             """
             SELECT composition_type_row_id FROM input_params.composition_types
             WHERE composition_type_id = %s
-            ORDER BY composition_type_version DESC LIMIT 1
         """,
             (comp_id,),
         )
@@ -1291,20 +1318,7 @@ def seed_composition_references(cur):
                 dict(
                     composition_type_row_id=row[0],
                     composition_type_id=comp_id,
-                    ref_distance_km=800,
-                    ref_avg_speed_kmh=90.0,
-                    ref_terrain_score=1.3,
-                    ref_operating_days=360,
-                    ref_utilization_seat=0.70,
-                    ref_utilization_couchette=0.65,
-                    ref_utilization_sleeper=0.80,
-                    ref_utilization_capsule=0.00,
-                    ref_utilization_catering=0.00,
-                    ref_avg_fare_seat=49.00,
-                    ref_avg_fare_couchette=79.00,
-                    ref_avg_fare_sleeper=129.00,
-                    ref_avg_fare_capsule=0.00,
-                    ref_avg_fare_catering=0.00,
+                    **reference_profile,
                 ),
             ],
         )
@@ -1312,9 +1326,12 @@ def seed_composition_references(cur):
 # ============================================================
 # scenario
 # ============================================================
-# Base scenario pins the exact version numbers seeded above for every
-# table — every scenario row is a complete, self-contained pin, no
-# NULLs, so it stays reproducible even after the base moves on.
+# Base scenario pins the exact version numbers seeded above for each of
+# the four infrastructure tables — every scenario row is a complete,
+# self-contained pin, no NULLs, so it stays reproducible even after the
+# base moves on. Compositions/coach types/operators/composition
+# references aren't part of a scenario at all — see
+# create_scenario_schema.sql.
 # The what-if scenario is a genuinely separate lineage (its own
 # scenario_key): it copies every pointer forward from the base at the
 # moment it was created, then overrides only track_infrastructures_version.
@@ -1327,10 +1344,6 @@ BASE_SCENARIO = {
     "editor": "david",
     "is_current_base": True,
     "is_current_scenario": True,
-    "operators_version": 1,
-    "coach_types_version": 1,
-    "composition_types_version": 1,
-    "composition_references_version": 1,
     "track_infrastructures_version": 2,
     "track_infrastructure_defaults_version": 1,
     "stop_infrastructures_version": 1,
@@ -1349,10 +1362,6 @@ WHATIF_SCENARIO = {
     "editor": "david",
     "is_current_base": False,
     "is_current_scenario": True,
-    "operators_version": BASE_SCENARIO["operators_version"],
-    "coach_types_version": BASE_SCENARIO["coach_types_version"],
-    "composition_types_version": BASE_SCENARIO["composition_types_version"],
-    "composition_references_version": BASE_SCENARIO["composition_references_version"],
     "track_infrastructures_version": 1,
     "track_infrastructure_defaults_version": BASE_SCENARIO["track_infrastructure_defaults_version"],
     "stop_infrastructures_version": BASE_SCENARIO["stop_infrastructures_version"],

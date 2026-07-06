@@ -114,7 +114,14 @@ def test_params_compositions_has_capacity(api_base):
 
 @pytest.mark.timeout(10)
 def test_params_compositions_indicative_figures(api_base):
-    """Compositions with a reference row include indicative figures."""
+    """
+    Compositions with a reference row include indicative figures.
+
+    compute_indicative_figures() is currently a placeholder (see
+    models/compositions/calc_indicative_figures.py) — it returns the same
+    flat, hand-picked figures for every composition rather than a real
+    calculation, but they're non-zero so this can assert real presence.
+    """
     resp = requests.get(f"{api_base}/api/params/compositions")
     assert resp.status_code == 200
     comps_with_indicative = [
@@ -124,14 +131,12 @@ def test_params_compositions_indicative_figures(api_base):
         len(comps_with_indicative) >= 1
     ), "Expected at least one composition with indicative figures"
     for comp in comps_with_indicative:
-        ind = comp["indicative"]
-        assert "cost_eur_per_seat_km" in ind
-        assert "cost_eur_per_place_km" in ind
-        assert "subsidy_eur_per_pax_km" in ind
-        assert "breakeven_load_factor" in ind
-        assert (
-            ind["cost_eur_per_seat_km"] > 0
-        ), f"Composition '{comp['comp_id']}' indicative cost_eur_per_seat_km is zero"
+        kpis = comp["indicative"]["kpis"]
+        assert kpis["cost_eur_per_train_km"] > 0
+        assert len(kpis["cost_eur_per_place_km_by_class"]) > 0
+        assert all(
+            v > 0 for v in kpis["cost_eur_per_place_km_by_class"].values()
+        ), f"Composition '{comp['comp_id']}' has a non-positive cost_eur_per_place_km_by_class entry"
 
 
 @pytest.mark.timeout(10)
