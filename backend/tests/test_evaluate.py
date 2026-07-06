@@ -52,14 +52,19 @@ def _inject_demand(route: dict, od_pairs_per_trip: list[dict]) -> dict:
     return route
 
 def _eval(api_base, route: dict) -> dict:
-    """Call the evaluation endpoint and return result dict."""
+    """Call the evaluation endpoint and return the response body.
+    Note: as of CALC_VERSION 1.1.0 the response is flat (route_id, views,
+    etc. are top-level) — there is no "result" wrapper any more."""
     resp = requests.post(f"{api_base}{EVAL_URL}", json={"route": route}, timeout=30)
     assert resp.status_code == 200, resp.text[:300]
-    return resp.json()["result"]
+    return resp.json()
 
 def _route_bd(result: dict, normalisation: str = "per_year") -> dict:
-    """Shortcut to route-level breakdown at a given normalisation."""
-    return result["views"]["route"][normalisation]
+    """Shortcut to route-level breakdown at a given normalisation.
+    As of CALC_VERSION 1.1.0, views.route nests data under "data"
+    (alongside "description"/"normalisations", merged in from the former
+    top-level "views_meta")."""
+    return result["views"]["route"]["data"][normalisation]
 
 # ---------------------------------------------------------------------------
 # Shared stop lists and OD pair sets
@@ -181,7 +186,7 @@ class TestResponseStructure:
         assert "per_trip_per_stop" in views
 
     def test_route_view_has_all_normalisations(self, result_simple):
-        route_view = result_simple["views"]["route"]
+        route_view = result_simple["views"]["route"]["data"]
         for norm in ("per_year", "per_operating_day", "per_trip_km",
                      "per_available_place_km", "per_sold_place_km"):
             assert norm in route_view, f"missing normalisation: {norm}"
@@ -207,10 +212,10 @@ class TestResponseStructure:
         assert "fixed" in op
 
     def test_per_trip_pair_has_all_key(self, result_simple):
-        assert "all" in result_simple["views"]["per_trip_pair"]
+        assert "all" in result_simple["views"]["per_trip_pair"]["data"]
 
     def test_per_trip_pair_per_country_nested_structure(self, result_simple):
-        country_matrix = result_simple["views"]["per_trip_pair_per_country"]
+        country_matrix = result_simple["views"]["per_trip_pair_per_country"]["data"]
         assert "all" in country_matrix
         assert "all" in country_matrix["all"]
 
@@ -373,34 +378,34 @@ class TestCountryMatrix:
 
     def test_all_all_matches_route_view(self, result_simple):
         """("all", "all") in country matrix should equal route-level breakdown."""
-        country_all = result_simple["views"]["per_trip_pair_per_country"]["all"]["all"]["per_year"]
+        country_all = result_simple["views"]["per_trip_pair_per_country"]["data"]["all"]["all"]["values"]["per_year"]
         route_all = _route_bd(result_simple)
         assert country_all["total_cost_eur"] == pytest.approx(
             route_all["total_cost_eur"], rel=REL_TOL
         )
 
     def test_country_cells_have_all_normalisations(self, result_simple):
-        matrix = result_simple["views"]["per_trip_pair_per_country"]
+        matrix = result_simple["views"]["per_trip_pair_per_country"]["data"]
         for pair_key, countries in matrix.items():
             for country_key, cell in countries.items():
                 for norm in ("per_year", "per_operating_day", "per_trip_km"):
-                    assert norm in cell, (
+                    assert norm in cell["values"], (
                         f"({pair_key}, {country_key}) missing normalisation '{norm}'"
                     )
 
     def test_de_appears_in_country_matrix(self, result_simple):
         """Berlin→Wien route must cross Germany."""
-        matrix = result_simple["views"]["per_trip_pair_per_country"]
+        matrix = result_simple["views"]["per_trip_pair_per_country"]["data"]
         all_countries = {cc for countries in matrix.values() for cc in countries}
         assert "DE" in all_countries
 
     def test_tac_positive_for_countries_with_track(self, result_simple):
-        matrix = result_simple["views"]["per_trip_pair_per_country"]
+        matrix = result_simple["views"]["per_trip_pair_per_country"]["data"]
         for pair_key, countries in matrix.items():
             for cc, cell in countries.items():
                 if cc == "all":
                     continue
-                tac = cell["per_year"]["cost"]["infrastructure"]["tac_eur"]
+                tac = cell["values"]["per_year"]["cost"]["infrastructure"]["tac_eur"]
                 assert tac >= 0, f"Negative TAC for country {cc}"
 
 # ---------------------------------------------------------------------------
@@ -410,38 +415,38 @@ class TestCountryMatrix:
 class TestODMatrix:
 
     def test_od_matrix_has_all_all(self, result_simple):
-        assert "all" in result_simple["views"]["per_trip_pair_per_od"]
-        assert "all" in result_simple["views"]["per_trip_pair_per_od"]["all"]
+        assert "all" in result_simple["views"]["per_trip_pair_per_od"]["data"]
+        assert "all" in result_simple["views"]["per_trip_pair_per_od"]["data"]["all"]
 
     def test_od_cells_have_all_normalisations(self, result_simple):
-        matrix = result_simple["views"]["per_trip_pair_per_od"]
+        matrix = result_simple["views"]["per_trip_pair_per_od"]["data"]
         for pair_key, ods in matrix.items():
             for od_key, cell in ods.items():
                 for norm in ("per_year", "per_operating_day"):
-                    assert norm in cell, (
+                    assert norm in cell["values"], (
                         f"({pair_key}, {od_key}) missing '{norm}'"
                     )
 
     def test_od_revenue_positive_when_demand_set(self, result_simple):
-        matrix = result_simple["views"]["per_trip_pair_per_od"]
+        matrix = result_simple["views"]["per_trip_pair_per_od"]["data"]
         for pair_key, ods in matrix.items():
             for od_key, cell in ods.items():
                 if od_key == "all":
                     continue
-                rev = cell["per_year"]["total_revenue_eur"]
+                rev = cell["values"]["per_year"]["total_revenue_eur"]
                 assert rev > 0, f"Expected revenue > 0 for OD ({pair_key}, {od_key})"
 
     def test_full_od_has_more_revenue_than_partial(self, result_multi_od):
         """BER→VIE (longer) has more revenue than BER→DRE (shorter)."""
-        matrix = result_multi_od["views"]["per_trip_pair_per_od"]
+        matrix = result_multi_od["views"]["per_trip_pair_per_od"]["data"]
         full_key = "DE_BERLIN_HBF__AT_WIEN_HBF__Seat"
         partial_key = "DE_BERLIN_HBF__DE_DRESDEN_HBF__Seat"
         # Find in "all" pair
         all_ods = matrix.get("all", {})
         if full_key in all_ods and partial_key in all_ods:
             assert (
-                all_ods[full_key]["per_year"]["total_revenue_eur"]
-                > all_ods[partial_key]["per_year"]["total_revenue_eur"]
+                all_ods[full_key]["values"]["per_year"]["total_revenue_eur"]
+                > all_ods[partial_key]["values"]["per_year"]["total_revenue_eur"]
             )
 
 # ---------------------------------------------------------------------------
@@ -451,22 +456,22 @@ class TestODMatrix:
 class TestStopMatrix:
 
     def test_stop_matrix_has_all_all(self, result_simple):
-        assert "all" in result_simple["views"]["per_trip_per_stop"]
-        assert "all" in result_simple["views"]["per_trip_per_stop"]["all"]
+        assert "all" in result_simple["views"]["per_trip_per_stop"]["data"]
+        assert "all" in result_simple["views"]["per_trip_per_stop"]["data"]["all"]
 
     def test_stop_cells_have_normalisations(self, result_simple):
-        matrix = result_simple["views"]["per_trip_per_stop"]
+        matrix = result_simple["views"]["per_trip_per_stop"]["data"]
         for trip_key, stops in matrix.items():
             for stop_key, cell in stops.items():
-                assert "per_year" in cell
+                assert "per_year" in cell["values"]
 
     def test_terminal_stop_has_station_charge(self, result_simple):
         """Origin stop should have non-zero station charge."""
-        matrix = result_simple["views"]["per_trip_per_stop"]
+        matrix = result_simple["views"]["per_trip_per_stop"]["data"]
         all_stops = matrix.get("all", {})
         berlin_key = "DE_BERLIN_HBF"
         if berlin_key in all_stops:
-            station_charge = all_stops[berlin_key]["per_year"]["cost"]["infrastructure"]["station_charge_eur"]
+            station_charge = all_stops[berlin_key]["values"]["per_year"]["cost"]["infrastructure"]["station_charge_eur"]
             assert station_charge > 0
 
 # ---------------------------------------------------------------------------

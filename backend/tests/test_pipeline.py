@@ -67,7 +67,8 @@ def eval_result(api_base, route):
         timeout=30,
     )
     assert resp.status_code == 200, f"Eval failed: {resp.text[:300]}"
-    return resp.json()["result"]
+    # As of CALC_VERSION 1.1.0 the response is flat — no "result" wrapper.
+    return resp.json()
 
 
 def test_pipeline_route_returns_200(api_base):
@@ -108,11 +109,12 @@ def test_pipeline_result_has_metadata(eval_result):
 
 
 def test_pipeline_revenue_positive(eval_result):
-    assert eval_result["views"]["route"]["per_year"]["total_revenue_eur"] > 0
+    # As of CALC_VERSION 1.1.0, views.route nests data under "data".
+    assert eval_result["views"]["route"]["data"]["per_year"]["total_revenue_eur"] > 0
 
 
 def test_pipeline_cost_positive(eval_result):
-    assert eval_result["views"]["route"]["per_year"]["total_cost_eur"] > 0
+    assert eval_result["views"]["route"]["data"]["per_year"]["total_cost_eur"] > 0
 
 
 def test_pipeline_has_two_trips(route):
@@ -124,7 +126,7 @@ def test_pipeline_country_breakdown_infrastructure_only(eval_result):
     (No 'scope' field exists in the actual response to assert against —
     the original test's specific claim couldn't be verified against real
     serialized output, so this checks structural presence instead.)"""
-    country_views = eval_result["views"]["per_trip_pair_per_country"]
+    country_views = eval_result["views"]["per_trip_pair_per_country"]["data"]
     assert len(country_views) > 0
     for pair_key, countries in country_views.items():
         assert len(countries) > 0

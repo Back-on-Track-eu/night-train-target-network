@@ -27,7 +27,7 @@ import random
 from flask import Blueprint, jsonify, request
 
 from api.helpers.dependencies import get_loader, get_country_index
-from api.helpers.serialize import route_to_dict
+from api.helpers.route_serialize import route_to_dict
 from models.route.route_factory import plan_route, TripPairInput
 from models.route.timetable import VALID_TIMETABLE_MODES, VALID_SCHEDULE_MODES
 from models.route.routing.rail_router import RailRouter

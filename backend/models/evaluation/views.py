@@ -53,8 +53,8 @@ class OperatorVariableCost:
 
     @property
     def total_eur(self) -> float:
-        return (self.driver_eur + self.crew_eur + self.coach_maintenance_eur
-                + self.loco_eur + self.svc_stockings_eur + self.var_overhead_eur)
+        return round(self.driver_eur + self.crew_eur + self.coach_maintenance_eur
+                     + self.loco_eur + self.svc_stockings_eur + self.var_overhead_eur, 2)
 
     def __iadd__(self, other: OperatorVariableCost) -> OperatorVariableCost:
         self.driver_eur += other.driver_eur
@@ -76,8 +76,8 @@ class OperatorFixedCost:
 
     @property
     def total_eur(self) -> float:
-        return (self.coach_amortisation_eur + self.financing_eur
-                + self.fix_overhead_eur + self.cleaning_eur + self.shunting_eur)
+        return round(self.coach_amortisation_eur + self.financing_eur
+                     + self.fix_overhead_eur + self.cleaning_eur + self.shunting_eur, 2)
 
     def __iadd__(self, other: OperatorFixedCost) -> OperatorFixedCost:
         self.coach_amortisation_eur += other.coach_amortisation_eur
@@ -94,7 +94,7 @@ class OperatorCost:
 
     @property
     def total_eur(self) -> float:
-        return self.variable.total_eur + self.fixed.total_eur
+        return round(self.variable.total_eur + self.fixed.total_eur, 2)
 
     def __iadd__(self, other: OperatorCost) -> OperatorCost:
         self.variable += other.variable
@@ -111,7 +111,7 @@ class InfrastructureCost:
 
     @property
     def total_eur(self) -> float:
-        return self.tac_eur + self.energy_eur + self.station_charge_eur + self.parking_eur
+        return round(self.tac_eur + self.energy_eur + self.station_charge_eur + self.parking_eur, 2)
 
     def __iadd__(self, other: InfrastructureCost) -> InfrastructureCost:
         self.tac_eur += other.tac_eur
@@ -127,7 +127,7 @@ class CostBreakdown:
 
     @property
     def total_eur(self) -> float:
-        return self.operator.total_eur + self.infrastructure.total_eur
+        return round(self.operator.total_eur + self.infrastructure.total_eur, 2)
 
     def __iadd__(self, other: CostBreakdown) -> CostBreakdown:
         self.operator += other.operator
@@ -140,7 +140,7 @@ class RevenueBreakdown:
 
     @property
     def total_eur(self) -> float:
-        return self.ticket_revenue_eur
+        return round(self.ticket_revenue_eur, 2)
 
     def __iadd__(self, other: RevenueBreakdown) -> RevenueBreakdown:
         self.ticket_revenue_eur += other.ticket_revenue_eur
@@ -153,7 +153,7 @@ class MarginBreakdown:
 
     @property
     def total_eur(self) -> float:
-        return self.ebit_margin_eur
+        return round(self.ebit_margin_eur, 2)
 
     def __iadd__(self, other: MarginBreakdown) -> MarginBreakdown:
         self.ebit_margin_eur += other.ebit_margin_eur
@@ -171,15 +171,15 @@ class Breakdown:
 
     @property
     def total_cost_eur(self) -> float:
-        return self.cost.total_eur
+        return round(self.cost.total_eur, 2)
 
     @property
     def total_revenue_eur(self) -> float:
-        return self.revenue.total_eur
+        return round(self.revenue.total_eur, 2)
 
     @property
     def net_eur(self) -> float:
-        return self.total_revenue_eur - self.total_cost_eur - self.margin.total_eur
+        return round(self.total_revenue_eur - self.total_cost_eur - self.margin.total_eur, 2)
 
     def __iadd__(self, other: Breakdown) -> Breakdown:
         self.cost += other.cost
@@ -198,6 +198,34 @@ def _ann_op_day(value: float, operating_days: int) -> float:
 def _ann_trip(value: float, operating_days: int) -> float:
     """€/segment or €/trip-cycle → €/year (one cycle per operating day)."""
     return value * operating_days
+
+def _round_breakdown(b: Breakdown) -> Breakdown:
+    """
+    Round every EUR leaf of a Breakdown to 2 decimal places, returning a new
+    Breakdown. Applied at the end of every builder and normaliser in this
+    file so serialize.py never needs its own number formatting — by the
+    time a Breakdown reaches breakdown_to_dict(), every value (leaves and
+    the total_eur/net_eur properties above) is already exactly 2dp.
+    """
+    r = Breakdown()
+    r.cost.operator.variable.driver_eur = round(b.cost.operator.variable.driver_eur, 2)
+    r.cost.operator.variable.crew_eur = round(b.cost.operator.variable.crew_eur, 2)
+    r.cost.operator.variable.coach_maintenance_eur = round(b.cost.operator.variable.coach_maintenance_eur, 2)
+    r.cost.operator.variable.loco_eur = round(b.cost.operator.variable.loco_eur, 2)
+    r.cost.operator.variable.svc_stockings_eur = round(b.cost.operator.variable.svc_stockings_eur, 2)
+    r.cost.operator.variable.var_overhead_eur = round(b.cost.operator.variable.var_overhead_eur, 2)
+    r.cost.operator.fixed.coach_amortisation_eur = round(b.cost.operator.fixed.coach_amortisation_eur, 2)
+    r.cost.operator.fixed.financing_eur = round(b.cost.operator.fixed.financing_eur, 2)
+    r.cost.operator.fixed.fix_overhead_eur = round(b.cost.operator.fixed.fix_overhead_eur, 2)
+    r.cost.operator.fixed.cleaning_eur = round(b.cost.operator.fixed.cleaning_eur, 2)
+    r.cost.operator.fixed.shunting_eur = round(b.cost.operator.fixed.shunting_eur, 2)
+    r.cost.infrastructure.tac_eur = round(b.cost.infrastructure.tac_eur, 2)
+    r.cost.infrastructure.energy_eur = round(b.cost.infrastructure.energy_eur, 2)
+    r.cost.infrastructure.station_charge_eur = round(b.cost.infrastructure.station_charge_eur, 2)
+    r.cost.infrastructure.parking_eur = round(b.cost.infrastructure.parking_eur, 2)
+    r.revenue.ticket_revenue_eur = round(b.revenue.ticket_revenue_eur, 2)
+    r.margin.ebit_margin_eur = round(b.margin.ebit_margin_eur, 2)
+    return r
 
 # =============================================================================
 # PRE-COMPUTATION
@@ -283,7 +311,7 @@ def build_breakdown(
             continue
         b.margin.ebit_margin_eur += m.ebit_margin_eur
 
-    return b
+    return _round_breakdown(b)
 
 def build_breakdown_per_trip_pair(
     route: Route,
@@ -439,7 +467,7 @@ def build_breakdown_per_trip_pair_per_country(
         matrix[("all", country)] = b_all
 
     matrix[("all", "all")] = build_breakdown(route, result)
-    return matrix
+    return {k: _round_breakdown(v) for k, v in matrix.items()}
 
 # =============================================================================
 # LAYER 2B — PER TRIP PAIR × OD PAIR
@@ -658,7 +686,7 @@ def build_breakdown_per_trip_pair_per_od(
 
     # ("all", "all")
     matrix[("all", "all")] = build_breakdown(route, result)
-    return matrix
+    return {k: _round_breakdown(v) for k, v in matrix.items()}
 
 # =============================================================================
 # LAYER 2C — PER TRIP × STOP
@@ -846,7 +874,7 @@ def build_breakdown_per_trip_per_stop(
 
     # ("all", "all")
     matrix[("all", "all")] = build_breakdown(route, result)
-    return matrix
+    return {k: _round_breakdown(v) for k, v in matrix.items()}
 
 # =============================================================================
 # LAYER 3 — NORMALISERS
@@ -884,7 +912,7 @@ def normalise(breakdown: Breakdown, denominator: float) -> Breakdown:
     b.revenue.ticket_revenue_eur = breakdown.revenue.ticket_revenue_eur / denominator
     b.margin.ebit_margin_eur = breakdown.margin.ebit_margin_eur / denominator
 
-    return b
+    return _round_breakdown(b)
 
 def normalise_per_operating_day(
     breakdown: Breakdown,
@@ -981,3 +1009,90 @@ def normalise_per_sold_place_km(
                     if start_idx <= i < end_idx
                 )
     return normalise(breakdown, sold_place_km)
+
+# =============================================================================
+# VIEW METADATA — for the API's "views_meta" section
+# =============================================================================
+#
+# Documents, once per view × normalisation combination, what filter/scope
+# stage(s) produced that number and what it was divided by. Consumed by
+# api/evaluation.py to build a single "views_meta" block in the response —
+# not repeated per data point, since the same 25 descriptions apply
+# identically to every pair/country/OD/stop key in "views".
+
+_VIEW_FILTER_STAGES: dict[str, list[str]] = {
+    "route": ["all trip pairs", "all segments/stops/OD pairs"],
+    "per_trip_pair": ["one trip pair (outbound + return), or 'all' for the whole route"],
+    "per_trip_pair_per_country": [
+        "one trip pair (outbound + return), or 'all'",
+        "one country, via distance/time/place-km allocation share, or 'all'",
+    ],
+    "per_trip_pair_per_od": [
+        "one trip pair (outbound + return), or 'all'",
+        "one OD pair (origin, destination, class), via place-km/place-hours/revenue "
+        "allocation share, or 'all'",
+    ],
+    "per_trip_per_stop": [
+        "one trip (outbound or return), or 'all'",
+        "one stop call, via place-km/route-share allocation, or 'all'",
+    ],
+}
+
+_VIEW_DESCRIPTIONS: dict[str, str] = {
+    "route": "Whole-route annual totals — every trip pair, segment, stop and OD pair "
+             "rolled into one figure.",
+    "per_trip_pair": "Annual totals filtered to a single trip pair, or the whole route "
+                      "under key 'all'.",
+    "per_trip_pair_per_country": "Matrix of annual totals by trip pair x country. Cost "
+                                  "types are allocated to countries by distance share, "
+                                  "time share, or OD place-km share depending on the "
+                                  "cost — see build_breakdown_per_trip_pair_per_country().",
+    "per_trip_pair_per_od": "Matrix of annual totals by trip pair x OD pair (origin, "
+                             "destination, class). Cost types are allocated by place-km, "
+                             "place-hours, or revenue share depending on the cost — see "
+                             "build_breakdown_per_trip_pair_per_od().",
+    "per_trip_per_stop": "Matrix of annual totals by trip x individual stop call — "
+                          "station charge and dwell driver/crew cost, plus a route-share "
+                          "allocation of fixed/infrastructure costs.",
+}
+
+# (description, extra processing_sequence stage) per normalisation — appended
+# after a view's own filter stages to form the full sequence for that cell.
+_NORMALISATION_STAGES: dict[str, tuple[str, list[str]]] = {
+    "per_year": (
+        "Raw annual figure — no further division.",
+        [],
+    ),
+    "per_operating_day": (
+        "Divided by operating days per year.",
+        ["÷ operating_days_per_year"],
+    ),
+    "per_trip_km": (
+        "Divided by total trip distance in scope.",
+        ["÷ total trip distance (km)"],
+    ),
+    "per_available_place_km": (
+        "Divided by total available place-km in scope (capacity x distance, "
+        "independent of demand).",
+        ["÷ total available place-km"],
+    ),
+    "per_sold_place_km": (
+        "Divided by total sold place-km in scope (tickets sold x distance, "
+        "unweighted by class density).",
+        ["÷ total sold place-km"],
+    ),
+}
+
+VIEW_META: dict[str, dict] = {
+    view: {
+        "description": _VIEW_DESCRIPTIONS[view],
+        "normalisations": {
+            norm: {
+                "description": norm_description,
+                "processing_sequence": _VIEW_FILTER_STAGES[view] + extra_stage,
+            }
+            for norm, (norm_description, extra_stage) in _NORMALISATION_STAGES.items()
+        },
+    }
+    for view in _VIEW_DESCRIPTIONS
+}

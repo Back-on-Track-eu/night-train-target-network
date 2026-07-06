@@ -3,16 +3,16 @@ evaluation.py
 =============
 POST /api/evaluation/calc
 
-Accepts a pre-built Route JSON (from POST /api/route/plan) and
-returns the full cost/revenue evaluation with all Breakdown views and
-normalisations.
+Accepts a pre-built Route JSON (from POST /api/route/plan) and returns the
+full cost/revenue evaluation: model documentation, the exact input used,
+view documentation, and all Breakdown views and normalisations.
 
 Pipeline steps — each logged individually:
-  1. Validate + deserialize Route JSON
+  1. Validate + deserialize Route JSON (also loads CompositionCollection)
   2. Load track + stop infrastructure from DB
   3. Evaluate: calc.evaluate_route → EvaluationResult
   4. Build views: all Breakdown matrices
-  5. Serialize → response
+  5. Serialize → response (models, input, views_meta, views)
 """
 
 import logging
@@ -21,11 +21,11 @@ import time
 from flask import Blueprint, jsonify, request
 
 from api.helpers.dependencies import get_loader
-from api.helpers.serialize import (
-    validate_route_dict,
-    route_from_dict,
-    matrix_to_dict,
-    normalise_all_to_dict,
+from api.helpers.route_serialize import validate_route_dict, route_from_dict
+from api.helpers.evaluation_serialize import (
+    views_to_dict,
+    models_to_dict,
+    input_to_dict,
 )
 from models.evaluation.calc import evaluate_route
 from models.evaluation.views import (
@@ -59,7 +59,20 @@ def calc():
       }
 
     Response:
-      { "calc_version": "...", "result": { "route_id": "...", "views": {...} } }
+      {
+        "calc_version": "...",
+        "route_id": "...",
+        "models": {"route_builder": {...}, "energy": {...}, "evaluation": {...}},
+        "input": {"route": {...}, "parameters": {...}},
+        "views": {
+          "route": {"description": "...", "normalisations": {...}, "data": {...}},
+          "per_trip_pair": {"description": "...", "normalisations": {...},
+                             "data": {"all": {"filter": {...}, "values": {...}}, ...}},
+          "per_trip_pair_per_country": {...},
+          "per_trip_pair_per_od": {...},
+          "per_trip_per_stop": {...},
+        },
+      }
     """
     loader = get_loader()
     t_start = time.monotonic()
@@ -82,7 +95,7 @@ def calc():
         )
 
     try:
-        route = route_from_dict(body["route"], loader, scenario_id=scenario_override)
+        route, compositions = route_from_dict(body["route"], loader, scenario_id=scenario_override)
     except ValueError as e:
         logger.warning("evaluation/calc [1/5] scenario resolution failed: %s", e)
         return jsonify({"error": "validation_error", "details": [str(e)]}), 400
@@ -92,8 +105,8 @@ def calc():
     # Step 2 — load infrastructure, same scenario the route was reconstructed under
     resolved_scenario_id = scenario_override if scenario_override is not None else body["route"].get("scenario_id")
     try:
-        tracks, _ = loader.build_all_tracks(resolved_scenario_id)
-        stop_infra, _ = loader.build_all_stops(resolved_scenario_id)
+        tracks = loader.build_all_tracks(resolved_scenario_id)
+        stop_infra = loader.build_all_stops(resolved_scenario_id)
     except Exception as e:
         logger.exception("evaluation/calc [2/5] infrastructure load failed: %s", e)
         return jsonify({"error": "infrastructure_error", "message": str(e)}), 503
@@ -130,20 +143,26 @@ def calc():
     try:
         trip_pair_by_key = {p.outbound.trip_id: p for p in route.trip_pairs}
 
-        pair_views: dict[str, dict] = {
-            pair_key: normalise_all_to_dict(bd, route, trip_pair_by_key.get(pair_key))
-            for pair_key, bd in bd_per_pair.items()
-        }
-
         response_body = {
+            "calc_version": CALC_VERSION,
             "route_id": route.route_id,
-            "views": {
-                "route": normalise_all_to_dict(bd_all, route),
-                "per_trip_pair": pair_views,
-                "per_trip_pair_per_country": matrix_to_dict(matrix_country, route, trip_pair_by_key),
-                "per_trip_pair_per_od": matrix_to_dict(matrix_od, route, trip_pair_by_key),
-                "per_trip_per_stop": matrix_to_dict(matrix_stop, route, trip_pair_by_key),
-            },
+            # Static documentation — version, description, LaTeX + plain-English
+            # formulas for every model that contributed to this evaluation.
+            "models": models_to_dict(),
+            # Exactly what went in: the route as posted, plus every track/stop/
+            # composition parameter actually used to cost it (each already
+            # carrying its own description + source — see params_serialize.py).
+            "input": input_to_dict(body["route"], tracks, stop_infra, compositions),
+            # Description + normalisation docs + data together per view (no
+            # separate "views_meta" to cross-reference), each filtered data
+            # point carrying a human-readable "filter" dict (one entry per
+            # dimension, keyed by dimension name) alongside its "values" —
+            # e.g. {"trip_pair": "Muenchen Hbf <-> Wien Hbf",
+            #       "od_pair": "Muenchen Hbf -> Wien Hbf (seat (reclining))"}.
+            "views": views_to_dict(
+                bd_all, bd_per_pair, matrix_country, matrix_od, matrix_stop,
+                route, trip_pair_by_key,
+            ),
         }
     except Exception as e:
         logger.exception("evaluation/calc [5/5] serialization failed: %s", e)
@@ -152,4 +171,4 @@ def calc():
     logger.info("evaluation/calc [5/5] done route %s (%.3fs total)",
                 route.route_id, time.monotonic() - t_start)
 
-    return jsonify({"calc_version": CALC_VERSION, "result": response_body}), 200
+    return jsonify(response_body), 200

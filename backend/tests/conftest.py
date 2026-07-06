@@ -89,9 +89,10 @@ def loader():
 def base_scenario(db_cur):
     """
     The live is_current_base scenario row — gives tests the concrete
-    per-table version numbers to filter on now that the eight versioned
-    input_params tables carry no is_current flag of their own (see
-    scenario.scenarios in create_scenario_schema.sql).
+    per-table version numbers to filter on for the four versioned
+    infrastructure tables (compositions/operators/coach types aren't
+    scenario-versioned — see scenario.scenarios in
+    create_scenario_schema.sql).
     """
     db_cur.execute("SELECT * FROM scenario.scenarios WHERE is_current_base = TRUE")
     row = db_cur.fetchone()
@@ -112,7 +113,7 @@ def rollback_after_test(db_conn):
 # ---------------------------------------------------------------------------
 # Trip-pairs → flat trips helper
 # ---------------------------------------------------------------------------
-# route_to_dict() (see api/helpers/serialize.py) exposes trip_pairs, not a
+# route_to_dict() (see api/helpers/route_serialize.py) exposes trip_pairs, not a
 # flat "trips" list — each trip in outbound/return_trip only carries
 # {trip_id, direction, segments}. This helper flattens trip_pairs and
 # derives everything that IS reconstructible from segments data (stop

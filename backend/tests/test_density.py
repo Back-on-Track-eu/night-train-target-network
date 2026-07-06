@@ -66,14 +66,16 @@ def _eval_route(api_base, route, od_pairs, operating_days=360):
         timeout=30,
     )
     assert resp.status_code == 200, resp.text[:300]
-    return resp.json()["result"]
+    # As of CALC_VERSION 1.1.0 the response is flat — no "result" wrapper.
+    return resp.json()
 
 
 def _route_bd(result: dict, normalisation: str = "per_year") -> dict:
     """Shortcut to route-level breakdown at a given normalisation.
-    result["views"]["route"] is confirmed real structure (see test_evaluate.py).
-    There is no per-class breakdown anywhere in the API — see skipped tests below."""
-    return result["views"]["route"][normalisation]
+    As of CALC_VERSION 1.1.0, views.route nests data under "data" (see
+    test_evaluate.py). There is no per-class breakdown anywhere in the
+    API — see skipped tests below."""
+    return result["views"]["route"]["data"][normalisation]
 
 
 @pytest.fixture(scope="module")
@@ -269,7 +271,7 @@ class TestZeroDemandEdgeCases:
         """With zero demand, all normalised views should still be present."""
         route = _build(api_base, proposal_id=420)
         result = _eval_route(api_base, route, [])
-        views = result["views"]["route"]
+        views = result["views"]["route"]["data"]
         assert "per_available_place_km" in views
         assert "per_sold_place_km" in views
 
