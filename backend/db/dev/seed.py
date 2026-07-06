@@ -152,6 +152,73 @@ COUNTRIES = [
     {"country_code": "ES", "country_name": "Spain"},
 ]
 
+# Natural Earth's ADM0_A3 (ISO 3166-1 alpha-3) for exactly the countries
+# seeded above. Kept local and minimal — this is a one-off seed-time
+# matching key, not a general country-code utility. It isn't importable
+# from elsewhere in the codebase anyway: seed.py also runs standalone in
+# the db/dev seeder image, which has no models/ package (see
+# backend/db/dev/Dockerfile).
+_COUNTRY_CODE_TO_ADM0_A3 = {
+    "DE": "DEU", "AT": "AUT", "CH": "CHE", "FR": "FRA", "BE": "BEL",
+    "DK": "DNK", "SE": "SWE", "BG": "BGR", "HR": "HRV", "CY": "CYP",
+    "CZ": "CZE", "EE": "EST", "FI": "FIN", "GR": "GRC", "HU": "HUN",
+    "IE": "IRL", "IT": "ITA", "LV": "LVA", "LT": "LTU", "LU": "LUX",
+    "MT": "MLT", "NL": "NLD", "PL": "POL", "PT": "PRT", "RO": "ROU",
+    "SK": "SVK", "SI": "SVN", "ES": "ESP",
+}
+
+def _load_natural_earth_features() -> dict[str, dict] | None:
+    """
+    Read the Natural Earth admin-0 countries geojson — the same file
+    rail_router.py used to read directly before country borders moved into
+    PostGIS — and index its features by ADM0_A3.
+
+    Returns None (with a warning) if the file isn't present, e.g. when
+    running seed.py outside the Docker images that download it at build
+    time. country_geom is a nullable column, so this degrades gracefully
+    to an ungeocoded seed rather than failing the whole run.
+    """
+    path = os.environ.get("COUNTRIES_GEOJSON_PATH")
+    if not path or not os.path.exists(path):
+        print(
+            f"  WARNING: countries geojson not found at "
+            f"COUNTRIES_GEOJSON_PATH={path!r} — skipping country_geom, "
+            f"all countries will be seeded with NULL geometry."
+        )
+        return None
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    return {f["properties"].get("ADM0_A3"): f["geometry"] for f in data["features"]}
+
+def seed_country_geometries(cur) -> None:
+    """
+    Populate input_params.countries.country_geom for every seeded country
+    that has a matching Natural Earth feature. Runs as UPDATEs after
+    COUNTRIES has been inserted, since ST_GeomFromGeoJSON() isn't something
+    insert_rows()'s plain-value INSERT can express.
+    """
+    features = _load_natural_earth_features()
+    if features is None:
+        return
+    matched, missing = 0, []
+    for cc, adm0_a3 in _COUNTRY_CODE_TO_ADM0_A3.items():
+        geometry = features.get(adm0_a3)
+        if geometry is None:
+            missing.append(cc)
+            continue
+        cur.execute(
+            """
+            UPDATE input_params.countries
+            SET country_geom = ST_SetSRID(ST_Multi(ST_GeomFromGeoJSON(%s)), 4326)
+            WHERE country_code = %s
+            """,
+            (_dumps(geometry), cc),
+        )
+        matched += 1
+    print(f"  Matched {matched}/{len(_COUNTRY_CODE_TO_ADM0_A3)} country geometries.")
+    if missing:
+        print(f"  WARNING: no Natural Earth feature found for: {', '.join(missing)}")
+
 # ============================================================
 # service_classes  (density = space consumption per place, Sleeper > Couchette > Seat)
 # seat=1/64, couchette=1/20, sleeper=1/12
@@ -1318,6 +1385,7 @@ def main():
 
     print("Seeding input_params.countries...")
     insert_rows(cur, "input_params.countries", COUNTRIES)
+    seed_country_geometries(cur)
 
     print("Seeding input_params.service_classes...")
     insert_rows(cur, "input_params.service_classes", SERVICE_CLASSES)
@@ -1390,6 +1458,11 @@ def main():
     ]:
         cur.execute(f"SELECT COUNT(*) FROM {schema}.{table}")
         print(f"  {schema}.{table}: {cur.fetchone()[0]} rows")
+
+    cur.execute(
+        "SELECT COUNT(*) FROM input_params.countries WHERE country_geom IS NOT NULL"
+    )
+    print(f"  input_params.countries: {cur.fetchone()[0]} rows have country_geom")
 
     cur.close()
     conn.close()
