@@ -21,6 +21,7 @@ import pytest
 # Static checks — SQL schema vs loader expectations
 # =============================================================================
 
+
 def _parse_schema_columns() -> dict[str, set[str]]:
     """Parse CREATE TABLE blocks in db/dev/sql/*.sql into {table: {columns}}."""
     sql_dir = os.path.join(
@@ -114,12 +115,12 @@ LOADER_READ_COLUMNS = [
 def test_column_exists_in_schema(table, column):
     """Every column the loader reads exists in the SQL schema files."""
     table_lower = table.lower()
-    assert table_lower in SCHEMA_COLUMNS, (
-        f"Table {table} not found in schema files. Found: {sorted(SCHEMA_COLUMNS)}"
-    )
-    assert column in SCHEMA_COLUMNS[table_lower], (
-        f"Column {table}.{column} not found in schema"
-    )
+    assert (
+        table_lower in SCHEMA_COLUMNS
+    ), f"Table {table} not found in schema files. Found: {sorted(SCHEMA_COLUMNS)}"
+    assert (
+        column in SCHEMA_COLUMNS[table_lower]
+    ), f"Column {table}.{column} not found in schema"
 
 
 # =============================================================================
@@ -232,8 +233,10 @@ def test_composition_density_matches_db(loader, db_cur):
         "SELECT DISTINCT service_class_main, service_class_density "
         "FROM input_params.service_classes"
     )
-    densities = {r["service_class_main"]: float(r["service_class_density"])
-                 for r in db_cur.fetchall()}
+    densities = {
+        r["service_class_main"]: float(r["service_class_density"])
+        for r in db_cur.fetchall()
+    }
 
     for class_main, places in comp.places_by_class.items():
         if places <= 0:

@@ -78,15 +78,18 @@ logger = logging.getLogger(__name__)
 # TYPE CONVERSION HELPERS
 # =============================================================================
 
+
 def _f(value) -> float:
     """Cast Decimal/None to float. Raises if None — use _f_or_none for optional fields."""
     if value is None:
         raise ValueError("Expected float value but got None.")
     return float(value)
 
+
 def _f_or_none(value) -> float | None:
     """Cast Decimal to float, or return None."""
     return float(value) if value is not None else None
+
 
 def _i(value) -> int:
     """Cast Decimal/None to int. Raises if None."""
@@ -94,9 +97,11 @@ def _i(value) -> int:
         raise ValueError("Expected int value but got None.")
     return int(value)
 
+
 def _i_or_none(value) -> int | None:
     """Cast Decimal to int, or return None."""
     return int(value) if value is not None else None
+
 
 def _b(value) -> bool:
     """Cast to bool. Raises if None."""
@@ -104,9 +109,11 @@ def _b(value) -> bool:
         raise ValueError("Expected bool value but got None.")
     return bool(value)
 
+
 def _b_or_none(value) -> bool | None:
     """Return bool or None."""
     return bool(value) if value is not None else None
+
 
 def _interval_to_min(value) -> int:
     """
@@ -119,6 +126,7 @@ def _interval_to_min(value) -> int:
         return round(value.total_seconds() / 60)
     return round(float(value) * 60)
 
+
 def _interval_to_min_or_none(value) -> int | None:
     """Convert INTERVAL to minutes, or return None."""
     if value is None:
@@ -127,6 +135,7 @@ def _interval_to_min_or_none(value) -> int | None:
         return round(value.total_seconds() / 60)
     return round(float(value) * 60)
 
+
 def _src(
     row, source_id_field: str, sources: dict[int, ParamsSource]
 ) -> ParamsSource | None:
@@ -134,9 +143,11 @@ def _src(
     sid = row.get(source_id_field)
     return sources.get(sid) if sid is not None else None
 
+
 # =============================================================================
 # DB DATA LOADER
 # =============================================================================
+
 
 class DBDataLoader:
     """
@@ -248,7 +259,9 @@ class DBDataLoader:
 
         return {
             "track_infrastructures": row["track_infrastructures_version"],
-            "track_infrastructure_defaults": row["track_infrastructure_defaults_version"],
+            "track_infrastructure_defaults": row[
+                "track_infrastructure_defaults_version"
+            ],
             "stop_infrastructures": row["stop_infrastructures_version"],
             "stop_infrastructure_defaults": row["stop_infrastructure_defaults_version"],
         }
@@ -391,7 +404,9 @@ class DBDataLoader:
                 fix_overhead_quota_per=_f(row["operator_fix_overhead_quota_per"]),
                 loco_full_service_lease_eur_h=_f(row["operator_loco_lease_eur_h"]),
                 svc_stockings_eur_place={
-                    sr["service_class_id"]: _f(sr["operator_class_svc_stockings_eur_place"])
+                    sr["service_class_id"]: _f(
+                        sr["operator_class_svc_stockings_eur_place"]
+                    )
                     for sr in stocking_rows
                 },
             )
@@ -469,7 +484,8 @@ class DBDataLoader:
                 logger.warning(
                     "ServiceClass '%s' not found — skipping class assignment "
                     "for coach_type_row_id %s.",
-                    cr["service_class_id"], cr["coach_type_row_id"],
+                    cr["service_class_id"],
+                    cr["coach_type_row_id"],
                 )
                 continue
             classes_by_coach_row.setdefault(cr["coach_type_row_id"], {})[
@@ -644,12 +660,10 @@ class DBDataLoader:
                 },
                 "equipment": {
                     "has_bikes": (
-                        "True if ANY coach in the composition has bicycle "
-                        "spaces."
+                        "True if ANY coach in the composition has bicycle " "spaces."
                     ),
                     "has_climatization": (
-                        "True if ANY coach in the composition has air "
-                        "conditioning."
+                        "True if ANY coach in the composition has air " "conditioning."
                     ),
                     "has_plugs": (
                         "True if ANY coach in the composition has passenger "
@@ -686,24 +700,14 @@ class DBDataLoader:
                 "driver_costs_eur_h": operator_columns.get(
                     "operator_driver_costs_eur_h"
                 ),
-                "crew_costs_eur_h": operator_columns.get(
-                    "operator_crew_costs_eur_h"
-                ),
-                "driver_overhead_h": operator_columns.get(
-                    "operator_driver_overhead_h"
-                ),
-                "crew_overhead_h": operator_columns.get(
-                    "operator_crew_overhead_h"
-                ),
-                "ebit_margin_per": operator_columns.get(
-                    "operator_ebit_margin_per"
-                ),
+                "crew_costs_eur_h": operator_columns.get("operator_crew_costs_eur_h"),
+                "driver_overhead_h": operator_columns.get("operator_driver_overhead_h"),
+                "crew_overhead_h": operator_columns.get("operator_crew_overhead_h"),
+                "ebit_margin_per": operator_columns.get("operator_ebit_margin_per"),
                 "financing_quota_per": operator_columns.get(
                     "operator_financing_quota_per"
                 ),
-                "var_overhead_per": operator_columns.get(
-                    "operator_var_overhead_per"
-                ),
+                "var_overhead_per": operator_columns.get("operator_var_overhead_per"),
                 "fix_overhead_quota_per": operator_columns.get(
                     "operator_fix_overhead_quota_per"
                 ),
@@ -820,7 +824,9 @@ class DBDataLoader:
                     max_speed_kmh=_f(row["composition_type_max_speed_kmh"]),
                     hsr_allowed=_b(row["composition_type_hsr_allowed"]),
                     coaches=coaches_by_comp_row.get(comp_row_id, {}),
-                    energy_factor_weight=_f(row["composition_type_energy_factor_weight"]),
+                    energy_factor_weight=_f(
+                        row["composition_type_energy_factor_weight"]
+                    ),
                     energy_factor_speed=_f(row["composition_type_energy_factor_speed"]),
                     energy_factor_terrain=_f(
                         row["composition_type_energy_factor_terrain"]
@@ -897,12 +903,22 @@ class DBDataLoader:
                         "ref_terrain_score": ref.ref_terrain_score,
                         "ref_operating_days": ref.ref_operating_days,
                         "ref_utilization_seat": ref.ref_utilization_by_class["Seat"],
-                        "ref_utilization_couchette": ref.ref_utilization_by_class["Couchette"],
-                        "ref_utilization_sleeper": ref.ref_utilization_by_class["Sleeper"],
-                        "ref_utilization_capsule": ref.ref_utilization_by_class["Capsule"],
-                        "ref_utilization_catering": ref.ref_utilization_by_class["Catering"],
+                        "ref_utilization_couchette": ref.ref_utilization_by_class[
+                            "Couchette"
+                        ],
+                        "ref_utilization_sleeper": ref.ref_utilization_by_class[
+                            "Sleeper"
+                        ],
+                        "ref_utilization_capsule": ref.ref_utilization_by_class[
+                            "Capsule"
+                        ],
+                        "ref_utilization_catering": ref.ref_utilization_by_class[
+                            "Catering"
+                        ],
                         "ref_avg_fare_seat": ref.ref_avg_fare_by_class["Seat"],
-                        "ref_avg_fare_couchette": ref.ref_avg_fare_by_class["Couchette"],
+                        "ref_avg_fare_couchette": ref.ref_avg_fare_by_class[
+                            "Couchette"
+                        ],
                         "ref_avg_fare_sleeper": ref.ref_avg_fare_by_class["Sleeper"],
                         "ref_avg_fare_capsule": ref.ref_avg_fare_by_class["Capsule"],
                         "ref_avg_fare_catering": ref.ref_avg_fare_by_class["Catering"],
@@ -954,9 +970,7 @@ class DBDataLoader:
     # TRACK INFRASTRUCTURE
     # ------------------------------------------------------------------
 
-    def build_all_tracks(
-        self, scenario_id: int | None = None
-    ) -> TrackInfraCollection:
+    def build_all_tracks(self, scenario_id: int | None = None) -> TrackInfraCollection:
         """
         Return track infrastructure at a scenario's pinned version as a
         TrackInfraCollection. Source/version/is_default provenance for
@@ -1086,8 +1100,12 @@ class DBDataLoader:
         result: dict[str, TrackInfrastructure] = {}
         param_versions = ParamVersions()
 
-        def register(cc: str, track: TrackInfrastructure, version: int,
-                      field_sources: dict[str, Optional[ParamsSource]]) -> None:
+        def register(
+            cc: str,
+            track: TrackInfrastructure,
+            version: int,
+            field_sources: dict[str, Optional[ParamsSource]],
+        ) -> None:
             """Register one ParamVersions entry per track field — source,
             version, and is_default only; description lives once on
             `descriptions` above, not duplicated per country/field here.
@@ -1143,12 +1161,18 @@ class DBDataLoader:
                 buffer_quota_per=default.buffer_quota_per,
             )
             result[cc] = track
-            register(cc, track, versions["track_infrastructure_defaults"], default_field_sources)
+            register(
+                cc,
+                track,
+                versions["track_infrastructure_defaults"],
+                default_field_sources,
+            )
             synthesized += 1
 
         logger.info(
             "Built track infrastructure for %d countries (%d synthesized entirely from defaults).",
-            len(result), synthesized,
+            len(result),
+            synthesized,
         )
         return TrackInfraCollection(result, param_versions, default, descriptions)
 
@@ -1296,9 +1320,7 @@ class DBDataLoader:
     # STOP INFRASTRUCTURE
     # ------------------------------------------------------------------
 
-    def build_all_stops(
-        self, scenario_id: int | None = None
-    ) -> StopInfraCollection:
+    def build_all_stops(self, scenario_id: int | None = None) -> StopInfraCollection:
         """
         Return stops at a scenario's pinned version as a StopInfraCollection.
         Source/version/is_default provenance for every stop field lives on
@@ -1395,9 +1417,17 @@ class DBDataLoader:
                 stop_fields = {
                     "lat": (stop.lat, loc_src, False),
                     "lon": (stop.lon, loc_src, False),
-                    "stop_charge_eur": (stop.stop_charge_eur, charge_src, charge_is_default),
+                    "stop_charge_eur": (
+                        stop.stop_charge_eur,
+                        charge_src,
+                        charge_is_default,
+                    ),
                 }
-                for field_name, (field_val, field_src, is_default) in stop_fields.items():
+                for field_name, (
+                    field_val,
+                    field_src,
+                    is_default,
+                ) in stop_fields.items():
                     param_versions.add(
                         key=f"stop_infra:{stop_id_key}:{field_name}",
                         value=field_val,
@@ -1417,7 +1447,9 @@ class DBDataLoader:
         default: DefaultStopInfra,
         sources: dict[int, ParamsSource],
         has_country_default: bool,
-    ) -> tuple[StopInfrastructure, Optional[ParamsSource], Optional[ParamsSource], bool]:
+    ) -> tuple[
+        StopInfrastructure, Optional[ParamsSource], Optional[ParamsSource], bool
+    ]:
         """
         Map one stop DB row to a StopInfrastructure.
         Substitutes None stop_charge_eur with the country or global default

@@ -40,10 +40,12 @@ from models.evaluation.version import CALC_VERSION
 logger = logging.getLogger(__name__)
 bp = Blueprint("evaluation", __name__)
 
+
 def _validate_body(body: dict) -> list[str]:
     if not isinstance(body.get("route"), dict):
         return ["'route' must be an object (route_to_dict() output)."]
     return validate_route_dict(body["route"])
+
 
 @bp.post("/calc")
 def calc():
@@ -87,23 +89,34 @@ def calc():
     scenario_override = body.get("scenario_id")
     if scenario_override is not None and not isinstance(scenario_override, int):
         return (
-            jsonify({
-                "error": "validation_error",
-                "details": ["'scenario_id' must be an integer if provided."],
-            }),
+            jsonify(
+                {
+                    "error": "validation_error",
+                    "details": ["'scenario_id' must be an integer if provided."],
+                }
+            ),
             400,
         )
 
     try:
-        route, compositions = route_from_dict(body["route"], loader, scenario_id=scenario_override)
+        route, compositions = route_from_dict(
+            body["route"], loader, scenario_id=scenario_override
+        )
     except ValueError as e:
         logger.warning("evaluation/calc [1/5] scenario resolution failed: %s", e)
         return jsonify({"error": "validation_error", "details": [str(e)]}), 400
-    logger.info("evaluation/calc [1/5] route %s deserialized (%.3fs)",
-                route.route_id, time.monotonic() - t_start)
+    logger.info(
+        "evaluation/calc [1/5] route %s deserialized (%.3fs)",
+        route.route_id,
+        time.monotonic() - t_start,
+    )
 
     # Step 2 — load infrastructure, same scenario the route was reconstructed under
-    resolved_scenario_id = scenario_override if scenario_override is not None else body["route"].get("scenario_id")
+    resolved_scenario_id = (
+        scenario_override
+        if scenario_override is not None
+        else body["route"].get("scenario_id")
+    )
     try:
         tracks = loader.build_all_tracks(resolved_scenario_id)
         stop_infra = loader.build_all_stops(resolved_scenario_id)
@@ -111,7 +124,10 @@ def calc():
         logger.exception("evaluation/calc [2/5] infrastructure load failed: %s", e)
         return jsonify({"error": "infrastructure_error", "message": str(e)}), 503
 
-    logger.info("evaluation/calc [2/5] infrastructure loaded (%.3fs)", time.monotonic() - t_start)
+    logger.info(
+        "evaluation/calc [2/5] infrastructure loaded (%.3fs)",
+        time.monotonic() - t_start,
+    )
 
     # Step 3 — evaluate
     try:
@@ -123,8 +139,11 @@ def calc():
         logger.exception("evaluation/calc [3/5] evaluation failed: %s", e)
         return jsonify({"error": "calc_error", "message": str(e)}), 500
 
-    logger.info("evaluation/calc [3/5] evaluated route %s (%.3fs)",
-                route.route_id, time.monotonic() - t_start)
+    logger.info(
+        "evaluation/calc [3/5] evaluated route %s (%.3fs)",
+        route.route_id,
+        time.monotonic() - t_start,
+    )
 
     # Step 4 — build views
     try:
@@ -160,15 +179,23 @@ def calc():
             # e.g. {"trip_pair": "Muenchen Hbf <-> Wien Hbf",
             #       "od_pair": "Muenchen Hbf -> Wien Hbf (seat (reclining))"}.
             "views": views_to_dict(
-                bd_all, bd_per_pair, matrix_country, matrix_od, matrix_stop,
-                route, trip_pair_by_key,
+                bd_all,
+                bd_per_pair,
+                matrix_country,
+                matrix_od,
+                matrix_stop,
+                route,
+                trip_pair_by_key,
             ),
         }
     except Exception as e:
         logger.exception("evaluation/calc [5/5] serialization failed: %s", e)
         return jsonify({"error": "serialization_error", "message": str(e)}), 500
 
-    logger.info("evaluation/calc [5/5] done route %s (%.3fs total)",
-                route.route_id, time.monotonic() - t_start)
+    logger.info(
+        "evaluation/calc [5/5] done route %s (%.3fs total)",
+        route.route_id,
+        time.monotonic() - t_start,
+    )
 
     return jsonify(response_body), 200

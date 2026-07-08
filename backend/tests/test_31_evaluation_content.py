@@ -43,11 +43,14 @@ REL_TOL = 1e-3  # EUR leaves are rounded to 2dp — 0.1% covers that comfortably
 # pin cross-endpoint consistency (params rates in == evaluation costs out)
 # =============================================================================
 
+
 @pytest.fixture(scope="module")
 def track_rates(api_base):
     """{country_code: {'tac': €/train-km, 'energy_price': €/kWh}} from
     GET /api/params/TrackInfrastructures (base scenario)."""
-    body = requests.get(f"{api_base}/api/params/TrackInfrastructures", timeout=15).json()
+    body = requests.get(
+        f"{api_base}/api/params/TrackInfrastructures", timeout=15
+    ).json()
     return {
         t["country_code"]: {
             "tac": t["tac_eur_train_km"]["value"],
@@ -68,8 +71,10 @@ def stop_charges(api_base):
 def maint_rates(api_base):
     """{comp_id: coach_maint_eur_km} from GET /api/params/compositions."""
     body = requests.get(f"{api_base}/api/params/compositions", timeout=15).json()
-    return {c["comp_id"]: c["variable_km"]["coach_maint_eur_km"]
-            for c in body["compositions"]}
+    return {
+        c["comp_id"]: c["variable_km"]["coach_maint_eur_km"]
+        for c in body["compositions"]
+    }
 
 
 @pytest.fixture(scope="module")
@@ -82,6 +87,7 @@ def eval_zero(api_base, route_berlin_wien):
 # Cost components vs manual recomputation
 # =============================================================================
 
+
 class TestCostRecomputation:
 
     def test_tac_matches_manual_calculation(self, eval_standard, track_rates):
@@ -90,11 +96,14 @@ class TestCostRecomputation:
         costed, result = eval_standard
         days = operating_days(costed)
 
-        expected = sum(
-            km * track_rates[cc]["tac"]
-            for trip in all_trips(costed)
-            for cc, km in country_km(trip).items()
-        ) * days
+        expected = (
+            sum(
+                km * track_rates[cc]["tac"]
+                for trip in all_trips(costed)
+                for cc, km in country_km(trip).items()
+            )
+            * days
+        )
 
         actual = route_bd(result)["cost"]["infrastructure"]["tac_eur"]
         assert actual == pytest.approx(expected, rel=REL_TOL)
@@ -105,32 +114,42 @@ class TestCostRecomputation:
         costed, result = eval_standard
         days = operating_days(costed)
 
-        expected = sum(
-            seg["energy_kwh"] * share * track_rates[cc]["energy_price"]
-            for trip in all_trips(costed)
-            for seg in trip["segments"]
-            for cc, share in seg["country_distance_shares"].items()
-        ) * days
+        expected = (
+            sum(
+                seg["energy_kwh"] * share * track_rates[cc]["energy_price"]
+                for trip in all_trips(costed)
+                for seg in trip["segments"]
+                for cc, share in seg["country_distance_shares"].items()
+            )
+            * days
+        )
 
         actual = route_bd(result)["cost"]["infrastructure"]["energy_eur"]
         assert actual == pytest.approx(expected, rel=REL_TOL)
 
-    def test_station_charge_matches_manual_calculation(self, eval_standard, stop_charges):
+    def test_station_charge_matches_manual_calculation(
+        self, eval_standard, stop_charges
+    ):
         """Annual station charges equal Σ stop charge per stop call (every
         trip pays every stop it calls at once), annualised."""
         costed, result = eval_standard
         days = operating_days(costed)
 
-        expected = sum(
-            stop_charges[st["stop_id"]]
-            for trip in all_trips(costed)
-            for st in stop_times(trip)
-        ) * days
+        expected = (
+            sum(
+                stop_charges[st["stop_id"]]
+                for trip in all_trips(costed)
+                for st in stop_times(trip)
+            )
+            * days
+        )
 
         actual = route_bd(result)["cost"]["infrastructure"]["station_charge_eur"]
         assert actual == pytest.approx(expected, rel=REL_TOL)
 
-    def test_coach_maintenance_matches_manual_calculation(self, eval_standard, maint_rates):
+    def test_coach_maintenance_matches_manual_calculation(
+        self, eval_standard, maint_rates
+    ):
         """Annual coach maintenance equals maint rate × total km across all
         trips, annualised."""
         costed, result = eval_standard
@@ -140,7 +159,9 @@ class TestCostRecomputation:
         total_km = sum(trip_distance_km(t) for t in all_trips(costed))
         expected = maint_rates[comp_id] * total_km * days
 
-        actual = route_bd(result)["cost"]["operator"]["variable"]["coach_maintenance_eur"]
+        actual = route_bd(result)["cost"]["operator"]["variable"][
+            "coach_maintenance_eur"
+        ]
         assert actual == pytest.approx(expected, rel=REL_TOL)
 
     def test_revenue_matches_manual_calculation(self, eval_standard):
@@ -152,12 +173,15 @@ class TestCostRecomputation:
             for tp in costed["trip_pairs"]
             for od in tp["od_pairs"]
         )
-        assert route_bd(result)["total_revenue_eur"] == pytest.approx(expected, rel=REL_TOL)
+        assert route_bd(result)["total_revenue_eur"] == pytest.approx(
+            expected, rel=REL_TOL
+        )
 
 
 # =============================================================================
 # Breakdown tree identities
 # =============================================================================
+
 
 class TestBreakdownIdentities:
 
@@ -165,7 +189,9 @@ class TestBreakdownIdentities:
         _, result = eval_standard
         bd = route_bd(result)
         assert bd["net_eur"] == pytest.approx(
-            bd["total_revenue_eur"] - bd["total_cost_eur"] - bd["margin"]["ebit_margin_eur"],
+            bd["total_revenue_eur"]
+            - bd["total_cost_eur"]
+            - bd["margin"]["ebit_margin_eur"],
             rel=REL_TOL,
         )
 
@@ -173,7 +199,8 @@ class TestBreakdownIdentities:
         _, result = eval_standard
         cost = route_bd(result)["cost"]
         assert cost["total_eur"] == pytest.approx(
-            cost["operator"]["total_eur"] + cost["infrastructure"]["total_eur"], rel=REL_TOL
+            cost["operator"]["total_eur"] + cost["infrastructure"]["total_eur"],
+            rel=REL_TOL,
         )
 
     def test_operator_total_equals_variable_plus_fixed(self, eval_standard):
@@ -186,33 +213,55 @@ class TestBreakdownIdentities:
     def test_variable_total_equals_sum_of_leaves(self, eval_standard):
         _, result = eval_standard
         v = route_bd(result)["cost"]["operator"]["variable"]
-        leaf_sum = (v["driver_eur"] + v["crew_eur"] + v["coach_maintenance_eur"]
-                    + v["loco_eur"] + v["svc_stockings_eur"] + v["var_overhead_eur"])
+        leaf_sum = (
+            v["driver_eur"]
+            + v["crew_eur"]
+            + v["coach_maintenance_eur"]
+            + v["loco_eur"]
+            + v["svc_stockings_eur"]
+            + v["var_overhead_eur"]
+        )
         assert v["total_eur"] == pytest.approx(leaf_sum, rel=REL_TOL)
 
     def test_fixed_total_equals_sum_of_leaves(self, eval_standard):
         _, result = eval_standard
         f = route_bd(result)["cost"]["operator"]["fixed"]
-        leaf_sum = (f["coach_amortisation_eur"] + f["financing_eur"]
-                    + f["fix_overhead_eur"] + f["cleaning_eur"] + f["shunting_eur"])
+        leaf_sum = (
+            f["coach_amortisation_eur"]
+            + f["financing_eur"]
+            + f["fix_overhead_eur"]
+            + f["cleaning_eur"]
+            + f["shunting_eur"]
+        )
         assert f["total_eur"] == pytest.approx(leaf_sum, rel=REL_TOL)
 
     def test_infrastructure_total_equals_sum_of_leaves(self, eval_standard):
         _, result = eval_standard
         infra = route_bd(result)["cost"]["infrastructure"]
-        leaf_sum = (infra["tac_eur"] + infra["energy_eur"]
-                    + infra["station_charge_eur"] + infra["parking_eur"])
+        leaf_sum = (
+            infra["tac_eur"]
+            + infra["energy_eur"]
+            + infra["station_charge_eur"]
+            + infra["parking_eur"]
+        )
         assert infra["total_eur"] == pytest.approx(leaf_sum, rel=REL_TOL)
 
     def test_net_identity_holds_in_all_normalisations(self, eval_standard):
         """Normalisation divides every leaf by the same denominator — the net
         identity must survive it in every view."""
         _, result = eval_standard
-        for norm in ("per_year", "per_operating_day", "per_trip_km",
-                     "per_available_place_km", "per_sold_place_km"):
+        for norm in (
+            "per_year",
+            "per_operating_day",
+            "per_trip_km",
+            "per_available_place_km",
+            "per_sold_place_km",
+        ):
             bd = route_bd(result, norm)
             assert bd["net_eur"] == pytest.approx(
-                bd["total_revenue_eur"] - bd["total_cost_eur"] - bd["margin"]["ebit_margin_eur"],
+                bd["total_revenue_eur"]
+                - bd["total_cost_eur"]
+                - bd["margin"]["ebit_margin_eur"],
                 rel=REL_TOL,
             ), f"net identity failed in normalisation '{norm}'"
 
@@ -220,6 +269,7 @@ class TestBreakdownIdentities:
 # =============================================================================
 # Normalisation divisors — recomputed exactly
 # =============================================================================
+
 
 class TestNormalisationDivisors:
 
@@ -279,15 +329,22 @@ class TestNormalisationDivisors:
 # Demand behaviour
 # =============================================================================
 
+
 class TestDemandBehaviour:
 
     @staticmethod
     def _single_od(route, places, price):
         trip_id = route["trip_pairs"][0]["outbound"]["trip_id"]
-        return [{"origin_stop_id": "DE_BERLIN_HBF",
-                 "destination_stop_id": "AT_WIEN_HBF",
-                 "class_main": "Seat", "trip_id": trip_id,
-                 "places_sold": places, "avg_price": price}]
+        return [
+            {
+                "origin_stop_id": "DE_BERLIN_HBF",
+                "destination_stop_id": "AT_WIEN_HBF",
+                "class_main": "Seat",
+                "trip_id": trip_id,
+                "places_sold": places,
+                "avg_price": price,
+            }
+        ]
 
     def test_zero_demand_gives_zero_revenue_but_positive_cost(self, eval_zero):
         """No demand → zero revenue; running the train still costs money."""
@@ -310,10 +367,18 @@ class TestDemandBehaviour:
     def test_fare_scales_revenue_linearly(self, api_base, route_berlin_wien):
         """Revenue is linear in avg_price: tripling the fare triples revenue
         exactly (places held constant)."""
-        cheap = evaluate(api_base, inject_demand(
-            route_berlin_wien, self._single_od(route_berlin_wien, 30, 33.0)))
-        pricey = evaluate(api_base, inject_demand(
-            route_berlin_wien, self._single_od(route_berlin_wien, 30, 99.0)))
+        cheap = evaluate(
+            api_base,
+            inject_demand(
+                route_berlin_wien, self._single_od(route_berlin_wien, 30, 33.0)
+            ),
+        )
+        pricey = evaluate(
+            api_base,
+            inject_demand(
+                route_berlin_wien, self._single_od(route_berlin_wien, 30, 99.0)
+            ),
+        )
         assert route_bd(pricey)["total_revenue_eur"] == pytest.approx(
             route_bd(cheap)["total_revenue_eur"] * 3.0, rel=REL_TOL
         )
@@ -322,6 +387,7 @@ class TestDemandBehaviour:
 # =============================================================================
 # Matrix views — consistency with the route view
 # =============================================================================
+
 
 class TestMatrixConsistency:
 
@@ -360,8 +426,10 @@ class TestMatrixConsistency:
         (origin__destination__class), each with positive annual revenue."""
         _, result = eval_standard
         all_ods = result["views"]["per_trip_pair_per_od"]["data"]["all"]
-        for key in ("DE_BERLIN_HBF__AT_WIEN_HBF__Couchette",
-                    "AT_WIEN_HBF__DE_BERLIN_HBF__Couchette"):
+        for key in (
+            "DE_BERLIN_HBF__AT_WIEN_HBF__Couchette",
+            "AT_WIEN_HBF__DE_BERLIN_HBF__Couchette",
+        ):
             assert key in all_ods, f"OD key missing: {key}"
             assert all_ods[key]["values"]["per_year"]["total_revenue_eur"] > 0
 
@@ -370,7 +438,9 @@ class TestMatrixConsistency:
         _, result = eval_standard
         all_stops = result["views"]["per_trip_per_stop"]["data"]["all"]
         berlin = all_stops["DE_BERLIN_HBF"]
-        charge = berlin["values"]["per_year"]["cost"]["infrastructure"]["station_charge_eur"]
+        charge = berlin["values"]["per_year"]["cost"]["infrastructure"][
+            "station_charge_eur"
+        ]
         assert charge > 0
 
 
@@ -378,16 +448,22 @@ class TestMatrixConsistency:
 # Scenario override
 # =============================================================================
 
+
 class TestScenarioOverride:
 
-    def test_whatif_override_lowers_tac(self, api_base, route_berlin_wien, whatif_scenario):
+    def test_whatif_override_lowers_tac(
+        self, api_base, route_berlin_wien, whatif_scenario
+    ):
         """Costing the SAME base-planned route under the what-if scenario
         (track infra v1: DE tac 3.10 instead of 5.40) yields strictly lower
         TAC — the override actually swaps the parameter version, and only
         for the table the scenario re-pins."""
         base = evaluate(api_base, inject_demand(route_berlin_wien, []))
-        whatif = evaluate(api_base, inject_demand(route_berlin_wien, []),
-                          scenario_id=whatif_scenario["scenario_id"])
+        whatif = evaluate(
+            api_base,
+            inject_demand(route_berlin_wien, []),
+            scenario_id=whatif_scenario["scenario_id"],
+        )
 
         tac_base = route_bd(base)["cost"]["infrastructure"]["tac_eur"]
         tac_whatif = route_bd(whatif)["cost"]["infrastructure"]["tac_eur"]

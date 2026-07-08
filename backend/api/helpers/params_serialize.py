@@ -30,7 +30,10 @@ from models.utils import min_to_h
 # SHARED
 # =============================================================================
 
-def _register_source(sources_map: dict[int, dict], source: ParamsSource | None) -> int | None:
+
+def _register_source(
+    sources_map: dict[int, dict], source: ParamsSource | None
+) -> int | None:
     """
     Register a ParamsSource into a shared {source_id: dict} map (mutated in
     place) and return its source_id, or None if there's no source. Callers
@@ -49,9 +52,11 @@ def _register_source(sources_map: dict[int, dict], source: ParamsSource | None) 
         }
     return source.source_id
 
+
 # =============================================================================
 # STOP INFRASTRUCTURE — serialize
 # =============================================================================
+
 
 def stop_infra_to_dict(stop_infra: StopInfraCollection) -> dict:
     """
@@ -86,7 +91,9 @@ def stop_infra_to_dict(stop_infra: StopInfraCollection) -> dict:
             {
                 "stop_charge_eur": {
                     "value": float(global_default.stop_charge_eur),
-                    "source_id": _register_source(sources_map, global_default.stop_charge_src),
+                    "source_id": _register_source(
+                        sources_map, global_default.stop_charge_src
+                    ),
                 }
             }
             if global_default
@@ -130,6 +137,7 @@ def stop_infra_to_dict(stop_infra: StopInfraCollection) -> dict:
         "stops": stops,
     }
 
+
 # =============================================================================
 # TRACK INFRASTRUCTURE — serialize
 # =============================================================================
@@ -150,6 +158,7 @@ _TRACK_FIELD_CASTS: dict[str, type] = {
     "min_alighting_time_min": int,
     "buffer_quota_per": float,
 }
+
 
 def track_infra_to_dict(track_infra: TrackInfraCollection) -> dict:
     """
@@ -215,9 +224,11 @@ def track_infra_to_dict(track_infra: TrackInfraCollection) -> dict:
         "track_infrastructures": track_infrastructures,
     }
 
+
 # =============================================================================
 # COMPOSITIONS — serialize
 # =============================================================================
+
 
 def composition_collection_to_dict(compositions: CompositionCollection) -> dict:
     """

@@ -73,20 +73,35 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from models.params import ModelVersions, ParamVersions, ODPair, TrackInfraCollection, StopInfraCollection, Composition, CompositionCollection
+from models.params import (
+    ModelVersions,
+    ParamVersions,
+    ODPair,
+    TrackInfraCollection,
+    StopInfraCollection,
+    Composition,
+    CompositionCollection,
+)
 from models.route.trip import Stop, StopType, Segment, Trip
 from models.route.route import Route, TripPair, Parking, Shunting, Schedule
 from models.route.routing.rail_router import RailRouter, StopInput, RoutedLeg
-from models.route.timetable import schedule_and_classify, apply_auto_stop_addition, build_schedule, build_final_timetable
+from models.route.timetable import (
+    schedule_and_classify,
+    apply_auto_stop_addition,
+    build_schedule,
+    build_final_timetable,
+)
 from models.energy.calc_energy_consumption import calc_energy_consumption
 from models.route.version import ROUTE_BUILDER_VERSION
 from models.energy.version import ENERGY_CALC_VERSION
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class RouteProvenance:
     """What was used to build a Route — returned alongside it, not stored on it."""
+
     model_versions: ModelVersions
     param_versions: ParamVersions
     scenario_id: int
@@ -103,6 +118,7 @@ class RouteProvenance:
     track_infrastructure block — Route itself never stores it (physics-only,
     per the project's separation-of-concerns rule)."""
 
+
 @dataclass
 class TripPairInput:
     """One outbound + return cycle to build. Schedule lives on Route — all
@@ -112,12 +128,14 @@ class TripPairInput:
     concern (see api/route.py), not something route_factory.py or its
     callers should need to know about. Every field must be explicitly
     supplied by the caller."""
+
     stop_ids: list[str]  # outbound order; return is reversed. Boarding/alighting
-                          # is derived automatically per timetable_mode, not supplied here.
+    # is derived automatically per timetable_mode, not supplied here.
     composition_id: str
     timetable_mode: str
     routing_mode: str
     auto_stop_addition: bool
+
 
 # =============================================================================
 # ID GENERATION
@@ -129,15 +147,19 @@ class TripPairInput:
 # alongside it — see the module docstring's "ID convention" section above
 # for the motivation and full blast radius before starting this.
 
+
 def _route_id(proposal_id: int, version: int) -> str:
     return f"P{proposal_id}_V{version}_R1"
+
 
 def _trip_id(proposal_id: int, version: int, direction: int, pair_index: int) -> str:
     return f"P{proposal_id}_V{version}_R1_D{direction}_T{pair_index}"
 
+
 # =============================================================================
 # TRIP STOPS & LEGS
 # =============================================================================
+
 
 def _build_trip_stops_and_legs(
     stop_inputs: list[tuple[str, StopType]],
@@ -166,22 +188,32 @@ def _build_trip_stops_and_legs(
     timetable = build_final_timetable(
         stop_types=stop_types,
         country_codes=[sp.stop_country_code for sp in stop_physicals],
-        routed_legs=routed_legs, composition=composition, tracks=tracks,
+        routed_legs=routed_legs,
+        composition=composition,
+        tracks=tracks,
         departure_time_min=departure_time_min,
     )
 
     stops = [
         Stop(
-            stop_id=sp.stop_id, stop_name=sp.stop_name, country_code=sp.stop_country_code,
-            lat=sp.lat, lon=sp.lon, stop_type=stop_type,
-            arrival_time_min=arrival_min, departure_time_min=departure_min,
+            stop_id=sp.stop_id,
+            stop_name=sp.stop_name,
+            country_code=sp.stop_country_code,
+            lat=sp.lat,
+            lon=sp.lon,
+            stop_type=stop_type,
+            arrival_time_min=arrival_min,
+            departure_time_min=departure_min,
         )
-        for sp, stop_type, (arrival_min, departure_min) in zip(stop_physicals, stop_types, timetable)
+        for sp, stop_type, (arrival_min, departure_min) in zip(
+            stop_physicals, stop_types, timetable
+        )
     ]
 
     return [
         Segment(
-            from_stop=stops[i], to_stop=stops[i + 1],
+            from_stop=stops[i],
+            to_stop=stops[i + 1],
             geometry=routed_legs[i].geometry,
             distance_m=routed_legs[i].distance_m,
             driving_time_min=routed_legs[i].driving_time_min,
@@ -193,9 +225,11 @@ def _build_trip_stops_and_legs(
         for i in range(len(routed_legs))
     ]
 
+
 # =============================================================================
 # PARKING LOCATIONS
 # =============================================================================
+
 
 def _parkings(trips: list[Trip], stop_infra: StopInfraCollection) -> list[Parking]:
     """One Parking per unique terminal stop across all trips — deduplicated
@@ -209,7 +243,9 @@ def _parkings(trips: list[Trip], stop_infra: StopInfraCollection) -> list[Parkin
             if stop.stop_id not in by_stop:
                 sp = stop_infra.get(stop.stop_id)
                 if sp is None:
-                    logger.warning("Stop '%s' not found — parking skipped.", stop.stop_id)
+                    logger.warning(
+                        "Stop '%s' not found — parking skipped.", stop.stop_id
+                    )
                     continue
                 by_stop[stop.stop_id] = Parking(
                     stop_id=sp.stop_id,
@@ -221,6 +257,7 @@ def _parkings(trips: list[Trip], stop_infra: StopInfraCollection) -> list[Parkin
                 by_stop[stop.stop_id].trip_ids.append(trip.trip_id)
     return list(by_stop.values())
 
+
 def _shuntings(trips: list[Trip]) -> list[Shunting]:
     """One Shunting per trip terminal — no deduplication. Each coupling/
     uncoupling is a separate event even if trips share a stop.
@@ -230,32 +267,40 @@ def _shuntings(trips: list[Trip]) -> list[Shunting]:
     for trip in trips:
         if trip.stops:
             for stop in (trip.stops[0], trip.stops[-1]):
-                result.append(Shunting(
-                    stop_id=stop.stop_id,
-                    stop_name=stop.stop_name,
-                    country_code=stop.country_code,
-                    trip_id=trip.trip_id,
-                ))
+                result.append(
+                    Shunting(
+                        stop_id=stop.stop_id,
+                        stop_name=stop.stop_name,
+                        country_code=stop.country_code,
+                        trip_id=trip.trip_id,
+                    )
+                )
     return result
+
 
 # =============================================================================
 # TRIP BUILDER
 # =============================================================================
 
-def _to_router_stops(stop_ids: list[str], stop_infra: StopInfraCollection) -> list[StopInput]:
+
+def _to_router_stops(
+    stop_ids: list[str], stop_infra: StopInfraCollection
+) -> list[StopInput]:
     """Builds StopInput objects for a routing call. stop_type is always a
     placeholder (route() ignores it — see RailRouter.route() docstring);
     real StopType classification happens afterwards, in schedule_and_classify()."""
     router_stops = [
-        StopInput(stop=stop_infra.get(sid), stop_type=StopType.BOTH)
-        for sid in stop_ids
+        StopInput(stop=stop_infra.get(sid), stop_type=StopType.BOTH) for sid in stop_ids
     ]
     for rs, sid in zip(router_stops, stop_ids):
         if rs.stop is None:
             raise ValueError(f"Stop '{sid}' not found in database.")
     return router_stops
 
-def _check_country_coverage(routed_legs: list[RoutedLeg], tracks: TrackInfraCollection) -> None:
+
+def _check_country_coverage(
+    routed_legs: list[RoutedLeg], tracks: TrackInfraCollection
+) -> None:
     """Every country a route's legs pass through must have a row in
     input_params.track_infrastructures — no silent EU-average substitution
     for a country that was never seeded at all. Raises ValueError naming
@@ -282,8 +327,7 @@ def _check_country_coverage(routed_legs: list[RoutedLeg], tracks: TrackInfraColl
         cc
         for leg in routed_legs
         for cc in leg.country_distance_shares
-        if cc != "UNK"
-        and ((track := tracks.get(cc)) is None or not track.has_row)
+        if cc != "UNK" and ((track := tracks.get(cc)) is None or not track.has_row)
     }
     if missing:
         countries = ", ".join(sorted(missing))
@@ -294,17 +338,28 @@ def _check_country_coverage(routed_legs: list[RoutedLeg], tracks: TrackInfraColl
             f"to the EU-average default) before a route through it can be evaluated."
         )
 
+
 def _build_trip(
-    proposal_id: int, proposal_version: int, direction: int, pair_index: int,
-    stop_ids: list[str], composition: Composition,
-    tracks: TrackInfraCollection, stop_infra: StopInfraCollection,
-    router: RailRouter, timetable_mode: str, routing_mode: str, auto_stop_addition: bool,
+    proposal_id: int,
+    proposal_version: int,
+    direction: int,
+    pair_index: int,
+    stop_ids: list[str],
+    composition: Composition,
+    tracks: TrackInfraCollection,
+    stop_infra: StopInfraCollection,
+    router: RailRouter,
+    timetable_mode: str,
+    routing_mode: str,
+    auto_stop_addition: bool,
 ) -> Trip:
     tid = _trip_id(proposal_id, proposal_version, direction, pair_index)
 
     routed_legs = router.route(
-        stops=_to_router_stops(stop_ids, stop_infra), composition=composition,
-        tracks=tracks, routing_mode=routing_mode,
+        stops=_to_router_stops(stop_ids, stop_infra),
+        composition=composition,
+        tracks=tracks,
+        routing_mode=routing_mode,
     )
 
     new_stop_ids = apply_auto_stop_addition(auto_stop_addition, stop_ids, routed_legs)
@@ -312,31 +367,43 @@ def _build_trip(
         # Stop list changed — the old routed_legs no longer match it, route again.
         stop_ids = new_stop_ids
         routed_legs = router.route(
-            stops=_to_router_stops(stop_ids, stop_infra), composition=composition,
-            tracks=tracks, routing_mode=routing_mode,
+            stops=_to_router_stops(stop_ids, stop_infra),
+            composition=composition,
+            tracks=tracks,
+            routing_mode=routing_mode,
         )
 
     _check_country_coverage(routed_legs, tracks)
 
     stop_inputs, departure_time_min = schedule_and_classify(
-        timetable_mode=timetable_mode, stop_ids=stop_ids,
-        composition=composition, routed_legs=routed_legs,
+        timetable_mode=timetable_mode,
+        stop_ids=stop_ids,
+        composition=composition,
+        routed_legs=routed_legs,
     )
 
     calc_energy_consumption(routed_legs, composition)
 
     segments = _build_trip_stops_and_legs(
-        stop_inputs=stop_inputs, routed_legs=routed_legs, composition=composition,
-        tracks=tracks, stop_infra=stop_infra, departure_time_min=departure_time_min,
+        stop_inputs=stop_inputs,
+        routed_legs=routed_legs,
+        composition=composition,
+        tracks=tracks,
+        stop_infra=stop_infra,
+        departure_time_min=departure_time_min,
     )
 
     trip = Trip._create(trip_id=tid, direction=direction, segments=segments)
-    logger.info("_build_trip: id=%s %dm %.0fmin", tid, trip.distance_m, trip.total_time_min)
+    logger.info(
+        "_build_trip: id=%s %dm %.0fmin", tid, trip.distance_m, trip.total_time_min
+    )
     return trip
+
 
 # =============================================================================
 # TRIP PAIR BUILDER
 # =============================================================================
+
 
 def _composition_param_versions(
     composition: Composition, compositions: CompositionCollection
@@ -362,9 +429,15 @@ def _composition_param_versions(
     }
     return filtered
 
+
 def _build_trip_pair(
-    proposal_id: int, proposal_version: int, pair_index: int,
-    pair_input: TripPairInput, loader, router: RailRouter, scenario_id: int,
+    proposal_id: int,
+    proposal_version: int,
+    pair_index: int,
+    pair_input: TripPairInput,
+    loader,
+    router: RailRouter,
+    scenario_id: int,
     compositions: CompositionCollection,
 ) -> tuple[TripPair, ParamVersions, TrackInfraCollection]:
     composition = compositions.get(pair_input.composition_id)
@@ -386,36 +459,55 @@ def _build_trip_pair(
     # so their departure times are allowed to deviate rather than being
     # forced to share one value.
     outbound = _build_trip(
-        proposal_id, proposal_version, direction=0, pair_index=pair_index,
-        stop_ids=pair_input.stop_ids, composition=composition,
-        tracks=tracks, stop_infra=stop_infra, router=router,
-        timetable_mode=pair_input.timetable_mode, routing_mode=pair_input.routing_mode,
+        proposal_id,
+        proposal_version,
+        direction=0,
+        pair_index=pair_index,
+        stop_ids=pair_input.stop_ids,
+        composition=composition,
+        tracks=tracks,
+        stop_infra=stop_infra,
+        router=router,
+        timetable_mode=pair_input.timetable_mode,
+        routing_mode=pair_input.routing_mode,
         auto_stop_addition=pair_input.auto_stop_addition,
     )
     return_trip = _build_trip(
-        proposal_id, proposal_version, direction=1, pair_index=pair_index,
-        stop_ids=list(reversed(pair_input.stop_ids)), composition=composition,
-        tracks=tracks, stop_infra=stop_infra, router=router,
-        timetable_mode=pair_input.timetable_mode, routing_mode=pair_input.routing_mode,
+        proposal_id,
+        proposal_version,
+        direction=1,
+        pair_index=pair_index,
+        stop_ids=list(reversed(pair_input.stop_ids)),
+        composition=composition,
+        tracks=tracks,
+        stop_infra=stop_infra,
+        router=router,
+        timetable_mode=pair_input.timetable_mode,
+        routing_mode=pair_input.routing_mode,
         auto_stop_addition=pair_input.auto_stop_addition,
     )
 
     pair = TripPair(
-        outbound=outbound, return_trip=return_trip,
+        outbound=outbound,
+        return_trip=return_trip,
         composition=composition,
-        od_pairs=[],   # populated later by distribute_demand()
+        od_pairs=[],  # populated later by distribute_demand()
     )
     return pair, param_versions, tracks
+
 
 # =============================================================================
 # PLAN ROUTE — full routing pipeline
 # =============================================================================
 
+
 def plan_route(
     trip_pair_inputs: list[TripPairInput],
-    loader, router: RailRouter,
+    loader,
+    router: RailRouter,
     schedule_mode: str,
-    proposal_id: int, proposal_version: int,
+    proposal_id: int,
+    proposal_version: int,
     scenario_id: int,
 ) -> tuple[Route, RouteProvenance]:
     """
@@ -440,7 +532,9 @@ def plan_route(
     rid = _route_id(proposal_id, proposal_version)
     logger.info(
         "plan_route: id=%s pairs=%d scenario_id=%d",
-        rid, len(trip_pair_inputs), scenario_id,
+        rid,
+        len(trip_pair_inputs),
+        scenario_id,
     )
 
     trip_pairs: list[TripPair] = []
@@ -455,26 +549,38 @@ def plan_route(
 
     for i, pair_input in enumerate(trip_pair_inputs, start=1):
         pair, param_versions, tracks = _build_trip_pair(
-            proposal_id, proposal_version, pair_index=i,
-            pair_input=pair_input, loader=loader, router=router,
-            scenario_id=scenario_id, compositions=compositions,
+            proposal_id,
+            proposal_version,
+            pair_index=i,
+            pair_input=pair_input,
+            loader=loader,
+            router=router,
+            scenario_id=scenario_id,
+            compositions=compositions,
         )
         trip_pairs.append(pair)
         merged_param_versions.entries.update(param_versions.entries)
-        tracks_used = tracks  # identical across pairs (same scenario_id) — last write wins
+        tracks_used = (
+            tracks  # identical across pairs (same scenario_id) — last write wins
+        )
 
-    model_versions = ModelVersions(versions={
-        "route_builder": ROUTE_BUILDER_VERSION,
-        "energy_calc": ENERGY_CALC_VERSION,
-    })
+    model_versions = ModelVersions(
+        versions={
+            "route_builder": ROUTE_BUILDER_VERSION,
+            "energy_calc": ENERGY_CALC_VERSION,
+        }
+    )
 
     stop_infra = loader.build_all_stops(scenario_id)
     parking = _parkings(
-        [t for pair in trip_pairs for t in pair.trips], stop_infra,
+        [t for pair in trip_pairs for t in pair.trips],
+        stop_infra,
     )
 
     route = Route._create(
-        route_id=rid, schedule=schedule, trip_pairs=trip_pairs,
+        route_id=rid,
+        schedule=schedule,
+        trip_pairs=trip_pairs,
         parkings=parking,
         shuntings=_shuntings([t for pair in trip_pairs for t in pair.trips]),
     )
@@ -487,18 +593,23 @@ def plan_route(
         tracks=tracks_used,
     )
 
+
 # =============================================================================
 # ADJUST ROUTE — schedule changes only, no rerouting
 # =============================================================================
 
+
 def adjust_route(
-    existing_route: Route, existing_provenance: RouteProvenance,
-    proposal_id: int, proposal_version: int,
+    existing_route: Route,
+    existing_provenance: RouteProvenance,
+    proposal_id: int,
+    proposal_version: int,
     schedule: Schedule | None = None,
     departure_time_min: int | None = None,
     stop_type_changes: dict[str, StopType] | None = None,
     od_pairs: list[ODPair] | None = None,
-    loader=None, tracks: TrackInfraCollection | None = None,
+    loader=None,
+    tracks: TrackInfraCollection | None = None,
 ) -> tuple[Route, RouteProvenance]:
     """
     Create a new Route version with schedule or timetable changes — no
@@ -512,7 +623,9 @@ def adjust_route(
     rid = _route_id(proposal_id, proposal_version)
     logger.info(
         "adjust_route: id=%s from=%s scenario_id=%d",
-        rid, existing_route.route_id, existing_provenance.scenario_id,
+        rid,
+        existing_route.route_id,
+        existing_provenance.scenario_id,
     )
 
     # _build_trip_stops_and_legs() below always needs tracks whenever segments are being
@@ -526,7 +639,9 @@ def adjust_route(
         tracks = loader.build_all_tracks(existing_provenance.scenario_id)
         stop_infra = loader.build_all_stops(existing_provenance.scenario_id)
     else:
-        stop_infra = loader.build_all_stops(existing_provenance.scenario_id) if loader else None
+        stop_infra = (
+            loader.build_all_stops(existing_provenance.scenario_id) if loader else None
+        )
 
     new_pairs: list[TripPair] = []
 
@@ -534,19 +649,33 @@ def adjust_route(
         new_trips: dict[int, Trip] = {}
 
         for existing_trip in pair.trips:
-            new_dep = departure_time_min if departure_time_min is not None \
+            new_dep = (
+                departure_time_min
+                if departure_time_min is not None
                 else existing_trip.departure_time_min
-            new_tid = _trip_id(proposal_id, proposal_version, existing_trip.direction, pair_index)
+            )
+            new_tid = _trip_id(
+                proposal_id, proposal_version, existing_trip.direction, pair_index
+            )
 
             if stop_type_changes or departure_time_min is not None:
                 stop_inputs = [
-                    (s.stop_id, stop_type_changes.get(s.stop_id, s.stop_type) if stop_type_changes else s.stop_type)
+                    (
+                        s.stop_id,
+                        (
+                            stop_type_changes.get(s.stop_id, s.stop_type)
+                            if stop_type_changes
+                            else s.stop_type
+                        ),
+                    )
                     for s in existing_trip.stops
                 ]
                 routed_legs = [
                     RoutedLeg(
-                        geometry=seg.geometry, distance_m=seg.distance_m,
-                        driving_time_min=seg.driving_time_min, buffer_time_min=seg.buffer_time_min,
+                        geometry=seg.geometry,
+                        distance_m=seg.distance_m,
+                        driving_time_min=seg.driving_time_min,
+                        buffer_time_min=seg.buffer_time_min,
                         energy_kwh=seg.energy_kwh,
                         country_distance_shares=seg.country_distance_shares,
                         country_time_shares=seg.country_time_shares,
@@ -554,26 +683,39 @@ def adjust_route(
                     for seg in existing_trip.segments
                 ]
                 new_segments = _build_trip_stops_and_legs(
-                    stop_inputs=stop_inputs, routed_legs=routed_legs,
-                    composition=pair.composition, tracks=tracks,
-                    stop_infra=stop_infra, departure_time_min=new_dep,
+                    stop_inputs=stop_inputs,
+                    routed_legs=routed_legs,
+                    composition=pair.composition,
+                    tracks=tracks,
+                    stop_infra=stop_infra,
+                    departure_time_min=new_dep,
                 )
             else:
                 new_segments = existing_trip.segments
 
             new_trips[existing_trip.direction] = Trip._create(
-                trip_id=new_tid, direction=existing_trip.direction, segments=new_segments,
+                trip_id=new_tid,
+                direction=existing_trip.direction,
+                segments=new_segments,
             )
 
-        new_pairs.append(TripPair(
-            outbound=new_trips[0], return_trip=new_trips[1],
-            composition=pair.composition,
-            od_pairs=pair.od_pairs,   # carry over existing demand
-        ))
+        new_pairs.append(
+            TripPair(
+                outbound=new_trips[0],
+                return_trip=new_trips[1],
+                composition=pair.composition,
+                od_pairs=pair.od_pairs,  # carry over existing demand
+            )
+        )
 
-    parking = _parkings(
-        [t for pair in new_pairs for t in pair.trips], stop_infra,
-    ) if stop_infra else existing_route.parkings
+    parking = (
+        _parkings(
+            [t for pair in new_pairs for t in pair.trips],
+            stop_infra,
+        )
+        if stop_infra
+        else existing_route.parkings
+    )
 
     route = Route._create(
         route_id=rid,
@@ -586,9 +728,11 @@ def adjust_route(
     logger.info("adjust_route done: id=%s pairs=%d", rid, len(route.trip_pairs))
     return route, existing_provenance
 
+
 # =============================================================================
 # DEMAND DISTRIBUTION
 # =============================================================================
+
 
 def distribute_demand(
     route: Route,
@@ -671,14 +815,16 @@ def distribute_demand(
                     distance_km = cumulative_km[dest_idx] - cumulative_km[origin_idx]
                     avg_price = fare_per_km * distance_km
 
-                    od_pairs.append(ODPair(
-                        origin_stop_id=origin.stop_id,
-                        destination_stop_id=destination.stop_id,
-                        class_main=class_main,
-                        trip_id=trip.trip_id,
-                        places_sold=places_per_od,
-                        avg_price=avg_price,
-                    ))
+                    od_pairs.append(
+                        ODPair(
+                            origin_stop_id=origin.stop_id,
+                            destination_stop_id=destination.stop_id,
+                            class_main=class_main,
+                            trip_id=trip.trip_id,
+                            places_sold=places_per_od,
+                            avg_price=avg_price,
+                        )
+                    )
 
         # TripPair isn't frozen — plain reassignment replaces any od_pairs
         # the pair may already have (e.g. from a prior distribute_demand() call).

@@ -41,6 +41,7 @@ def plan_response(api_base):
 # Response structure
 # =============================================================================
 
+
 class TestResponseStructure:
 
     def test_top_level_keys(self, plan_response):
@@ -55,8 +56,14 @@ class TestResponseStructure:
         """The route dict carries the full route_to_dict() layout, including
         the newer parkings/shuntings/track_infrastructure/geometries sections."""
         assert set(plan_response["route"]) >= {
-            "route_id", "scenario_id", "schedule", "trip_pairs",
-            "parkings", "shuntings", "track_infrastructure", "geometries",
+            "route_id",
+            "scenario_id",
+            "schedule",
+            "trip_pairs",
+            "parkings",
+            "shuntings",
+            "track_infrastructure",
+            "geometries",
         }
 
     def test_one_trip_pair_with_both_directions(self, plan_response):
@@ -86,9 +93,17 @@ class TestResponseStructure:
     def test_segments_carry_physics_fields(self, plan_response):
         """Every segment carries distance/time/buffer/energy and the
         per-country distance/time shares."""
-        required = {"from_stop", "to_stop", "geometry_id", "distance_m",
-                    "driving_time_min", "buffer_time_min", "energy_kwh",
-                    "country_distance_shares", "country_time_shares"}
+        required = {
+            "from_stop",
+            "to_stop",
+            "geometry_id",
+            "distance_m",
+            "driving_time_min",
+            "buffer_time_min",
+            "energy_kwh",
+            "country_distance_shares",
+            "country_time_shares",
+        }
         for trip in all_trips(plan_response["route"]):
             for seg in trip["segments"]:
                 missing = required - set(seg)
@@ -98,6 +113,7 @@ class TestResponseStructure:
     def test_no_monetary_values_anywhere(self, plan_response):
         """route/plan is physics-only: no *_eur / *cost* keys anywhere in the
         route dict except the endpoint's own key names (none exist today)."""
+
         def monetary_keys(node, path=""):
             found = []
             if isinstance(node, dict):
@@ -148,14 +164,20 @@ class TestResponseStructure:
         entries = plan_response["route"]["track_infrastructure"]
         assert len(entries) > 0
         for entry in entries:
-            assert {"country_code", "defaulted_fields", "hsr_allowed",
-                    "terrain_score", "buffer_quota_per"} <= set(entry)
+            assert {
+                "country_code",
+                "defaulted_fields",
+                "hsr_allowed",
+                "terrain_score",
+                "buffer_quota_per",
+            } <= set(entry)
             assert isinstance(entry["defaulted_fields"], list)
 
 
 # =============================================================================
 # Automatic scheduling contract (timetable_mode='simpleAutomatic')
 # =============================================================================
+
 
 class TestAutomaticScheduling:
 
@@ -189,8 +211,11 @@ class TestAutomaticScheduling:
     def test_stop_times_monotonically_increasing(self, plan_response):
         """Arrival times increase strictly along every trip."""
         for trip in all_trips(plan_response["route"]):
-            arrivals = [s["arrival_time_min"] for s in stop_times(trip)
-                        if s["arrival_time_min"] is not None]
+            arrivals = [
+                s["arrival_time_min"]
+                for s in stop_times(trip)
+                if s["arrival_time_min"] is not None
+            ]
             assert arrivals == sorted(arrivals)
 
     def test_schedule_is_daily_both_seasons(self, plan_response):
@@ -205,15 +230,18 @@ class TestAutomaticScheduling:
 # Mode switches
 # =============================================================================
 
+
 class TestModeSwitches:
 
     def test_explicit_default_values_accepted(self, api_base):
         """Spelling out every default mode explicitly is accepted."""
-        body = {**BASE_REQUEST,
-                "routing_mode": "fullRouting",
-                "timetable_mode": "simpleAutomatic",
-                "schedule_mode": "alwaysDaily",
-                "auto_stop_addition": False}
+        body = {
+            **BASE_REQUEST,
+            "routing_mode": "fullRouting",
+            "timetable_mode": "simpleAutomatic",
+            "schedule_mode": "alwaysDaily",
+            "auto_stop_addition": False,
+        }
         resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=90)
         assert resp.status_code == 200
 
@@ -225,7 +253,9 @@ class TestModeSwitches:
         assert resp.status_code == 200
         assert len(resp.json()["route"]["trip_pairs"]) == 1
 
-    @pytest.mark.parametrize("field", ["routing_mode", "timetable_mode", "schedule_mode"])
+    @pytest.mark.parametrize(
+        "field", ["routing_mode", "timetable_mode", "schedule_mode"]
+    )
     def test_invalid_mode_returns_400(self, api_base, field):
         """An unknown value for any mode switch is rejected at validation."""
         body = {**BASE_REQUEST, field: "not-a-real-mode"}
@@ -250,6 +280,7 @@ class TestModeSwitches:
 # =============================================================================
 # Proposal / scenario handling
 # =============================================================================
+
 
 class TestProposalAndScenario:
 
@@ -286,41 +317,66 @@ class TestProposalAndScenario:
 # Validation
 # =============================================================================
 
+
 class TestValidation:
 
     def test_single_stop_returns_400(self, api_base):
         body = {**BASE_REQUEST, "stops": ["DE_BERLIN_HBF"]}
-        assert requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=10).status_code == 400
+        assert (
+            requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=10).status_code
+            == 400
+        )
 
     def test_missing_stops_returns_400(self, api_base):
         body = {"composition_id": "STD-7.1"}
-        assert requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=10).status_code == 400
+        assert (
+            requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=10).status_code
+            == 400
+        )
 
     def test_missing_composition_id_returns_400(self, api_base):
         body = {"stops": STOPS_BERLIN_DRESDEN_WIEN}
-        assert requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=10).status_code == 400
+        assert (
+            requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=10).status_code
+            == 400
+        )
 
     def test_old_style_stop_objects_rejected(self, api_base):
         """Regression guard: the pre-redesign {stop_id, stop_type} object
         format must NOT be silently accepted — stops are plain ID strings."""
-        body = {**BASE_REQUEST,
-                "stops": [{"stop_id": "DE_BERLIN_HBF", "stop_type": "boarding"},
-                          {"stop_id": "AT_WIEN_HBF", "stop_type": "alighting"}]}
-        assert requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=10).status_code == 400
+        body = {
+            **BASE_REQUEST,
+            "stops": [
+                {"stop_id": "DE_BERLIN_HBF", "stop_type": "boarding"},
+                {"stop_id": "AT_WIEN_HBF", "stop_type": "alighting"},
+            ],
+        }
+        assert (
+            requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=10).status_code
+            == 400
+        )
 
     def test_scenario_id_wrong_type_returns_400(self, api_base):
         body = {**BASE_REQUEST, "scenario_id": "not-an-int"}
-        assert requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=10).status_code == 400
+        assert (
+            requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=10).status_code
+            == 400
+        )
 
     def test_unknown_composition_returns_422(self, api_base):
         """A syntactically valid but unknown composition_id is a domain error
         (422), not a validation error (400)."""
         body = {**BASE_REQUEST, "composition_id": "DOES-NOT-EXIST"}
-        assert requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=30).status_code == 422
+        assert (
+            requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=30).status_code
+            == 422
+        )
 
     def test_non_json_body_returns_400(self, api_base):
         resp = requests.post(
-            f"{api_base}{ROUTE_URL}", data="not-json",
-            headers={"Content-Type": "application/json"}, timeout=10,
+            f"{api_base}{ROUTE_URL}",
+            data="not-json",
+            headers={"Content-Type": "application/json"},
+            timeout=10,
         )
         assert resp.status_code == 400

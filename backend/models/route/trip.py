@@ -13,10 +13,12 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
+
 class StopType(Enum):
-    BOARDING  = "boarding"
+    BOARDING = "boarding"
     ALIGHTING = "alighting"
-    BOTH      = "both"
+    BOTH = "both"
+
 
 @dataclass
 class Stop:
@@ -30,7 +32,7 @@ class Stop:
 
     stop_id: str
     stop_name: str
-    country_code: str           # ISO 3166-1 alpha-2
+    country_code: str  # ISO 3166-1 alpha-2
     lat: float
     lon: float
     stop_type: StopType
@@ -42,6 +44,7 @@ class Stop:
         if self.arrival_time_min is None or self.departure_time_min is None:
             return None
         return self.departure_time_min - self.arrival_time_min
+
 
 @dataclass
 class Segment:
@@ -58,7 +61,7 @@ class Segment:
 
     from_stop: Stop
     to_stop: Stop
-    geometry: list[list[float]]                # [[lon, lat], ...]
+    geometry: list[list[float]]  # [[lon, lat], ...]
     distance_m: int
     driving_time_min: int
     buffer_time_min: int
@@ -69,6 +72,7 @@ class Segment:
     @property
     def total_time_min(self) -> int:
         return self.driving_time_min + self.buffer_time_min
+
 
 @dataclass
 class Trip:

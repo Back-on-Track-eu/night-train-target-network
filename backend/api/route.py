@@ -41,6 +41,7 @@ _VALID_ROUTING_MODES = {"simpleRouting", "fullRouting"}
 _DRAFT_PROPOSAL_ID_MIN = 1_000_000_000
 _DRAFT_PROPOSAL_ID_MAX = 2_147_483_647  # postgres int4 max — proposals.proposals.proposal_id is SERIAL (int4)
 
+
 def _draft_proposal_id() -> int:
     """
     Placeholder proposal_id for a route that hasn't been saved as a proposal
@@ -53,12 +54,15 @@ def _draft_proposal_id() -> int:
     """
     return random.randint(_DRAFT_PROPOSAL_ID_MIN, _DRAFT_PROPOSAL_ID_MAX)
 
+
 def _validate(body: dict) -> list[str]:
     errors = []
 
     if body.get("proposal_id") is not None and not isinstance(body["proposal_id"], int):
         errors.append("'proposal_id' must be an integer if provided.")
-    if body.get("proposal_version") is not None and not isinstance(body["proposal_version"], int):
+    if body.get("proposal_version") is not None and not isinstance(
+        body["proposal_version"], int
+    ):
         errors.append("'proposal_version' must be an integer if provided.")
     if body.get("scenario_id") is not None and not isinstance(body["scenario_id"], int):
         errors.append("'scenario_id' must be an integer if provided.")
@@ -76,20 +80,29 @@ def _validate(body: dict) -> list[str]:
 
     timetable_mode = body.get("timetable_mode", "simpleAutomatic")
     if timetable_mode not in VALID_TIMETABLE_MODES:
-        errors.append(f"'timetable_mode' = '{timetable_mode}' is invalid. Must be one of: {sorted(VALID_TIMETABLE_MODES)}.")
+        errors.append(
+            f"'timetable_mode' = '{timetable_mode}' is invalid. Must be one of: {sorted(VALID_TIMETABLE_MODES)}."
+        )
 
     schedule_mode = body.get("schedule_mode", "alwaysDaily")
     if schedule_mode not in VALID_SCHEDULE_MODES:
-        errors.append(f"'schedule_mode' = '{schedule_mode}' is invalid. Must be one of: {sorted(VALID_SCHEDULE_MODES)}.")
+        errors.append(
+            f"'schedule_mode' = '{schedule_mode}' is invalid. Must be one of: {sorted(VALID_SCHEDULE_MODES)}."
+        )
 
     routing_mode = body.get("routing_mode", "fullRouting")
     if routing_mode not in _VALID_ROUTING_MODES:
-        errors.append(f"'routing_mode' = '{routing_mode}' is invalid. Must be one of: {sorted(_VALID_ROUTING_MODES)}.")
+        errors.append(
+            f"'routing_mode' = '{routing_mode}' is invalid. Must be one of: {sorted(_VALID_ROUTING_MODES)}."
+        )
 
-    if body.get("auto_stop_addition") is not None and not isinstance(body["auto_stop_addition"], bool):
+    if body.get("auto_stop_addition") is not None and not isinstance(
+        body["auto_stop_addition"], bool
+    ):
         errors.append("'auto_stop_addition' must be a boolean if provided.")
 
     return errors
+
 
 @bp.post("/plan")
 def plan():
@@ -172,7 +185,9 @@ def plan():
 
         logger.info(
             "plan: proposal_id=%s version=%s stops=%d",
-            proposal_id, proposal_version, len(body["stops"]),
+            proposal_id,
+            proposal_version,
+            len(body["stops"]),
         )
         route, provenance = plan_route(
             proposal_id=proposal_id,
@@ -204,7 +219,9 @@ def plan():
             {
                 "route_builder_version": ROUTE_BUILDER_VERSION,
                 "request": body,
-                "route": route_to_dict(route, provenance.scenario_id, provenance.tracks),
+                "route": route_to_dict(
+                    route, provenance.scenario_id, provenance.tracks
+                ),
             }
         ),
         200,

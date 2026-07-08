@@ -20,25 +20,42 @@ import requests
 
 from tests.helpers import EVAL_URL, inject_demand, route_bd
 
-NORMALISATIONS = ("per_year", "per_operating_day", "per_trip_km",
-                  "per_available_place_km", "per_sold_place_km")
+NORMALISATIONS = (
+    "per_year",
+    "per_operating_day",
+    "per_trip_km",
+    "per_available_place_km",
+    "per_sold_place_km",
+)
 
 # Every leaf field breakdown_to_dict() emits — the evaluation model must
 # document a formula for each (models.evaluation.formulas is filtered to
 # exactly the fields present under "views").
 BREAKDOWN_LEAF_FIELDS = {
-    "driver_eur", "crew_eur", "coach_maintenance_eur", "loco_eur",
-    "svc_stockings_eur", "var_overhead_eur",
-    "coach_amortisation_eur", "financing_eur", "fix_overhead_eur",
-    "cleaning_eur", "shunting_eur",
-    "tac_eur", "energy_eur", "station_charge_eur", "parking_eur",
-    "ticket_revenue_eur", "ebit_margin_eur",
+    "driver_eur",
+    "crew_eur",
+    "coach_maintenance_eur",
+    "loco_eur",
+    "svc_stockings_eur",
+    "var_overhead_eur",
+    "coach_amortisation_eur",
+    "financing_eur",
+    "fix_overhead_eur",
+    "cleaning_eur",
+    "shunting_eur",
+    "tac_eur",
+    "energy_eur",
+    "station_charge_eur",
+    "parking_eur",
+    "ticket_revenue_eur",
+    "ebit_margin_eur",
 }
 
 
 # =============================================================================
 # Response structure
 # =============================================================================
+
 
 class TestResponseStructure:
 
@@ -61,8 +78,11 @@ class TestResponseStructure:
         """All five view dimensions are present."""
         _, result = eval_standard
         assert set(result["views"]) == {
-            "route", "per_trip_pair", "per_trip_pair_per_country",
-            "per_trip_pair_per_od", "per_trip_per_stop",
+            "route",
+            "per_trip_pair",
+            "per_trip_pair_per_country",
+            "per_trip_pair_per_od",
+            "per_trip_per_stop",
         }
 
     def test_every_view_carries_description_and_normalisation_docs(self, eval_standard):
@@ -83,8 +103,14 @@ class TestResponseStructure:
         margin tree plus the summary totals."""
         _, result = eval_standard
         bd = route_bd(result)
-        assert {"cost", "revenue", "margin",
-                "total_cost_eur", "total_revenue_eur", "net_eur"} <= set(bd)
+        assert {
+            "cost",
+            "revenue",
+            "margin",
+            "total_cost_eur",
+            "total_revenue_eur",
+            "net_eur",
+        } <= set(bd)
         assert {"operator", "infrastructure", "total_eur"} <= set(bd["cost"])
         assert {"variable", "fixed", "total_eur"} <= set(bd["cost"]["operator"])
 
@@ -92,22 +118,27 @@ class TestResponseStructure:
         """Every matrix view has the 'all' aggregation key, and every data
         point carries a human-readable 'filter' dict beside its 'values'."""
         _, result = eval_standard
-        for view_name in ("per_trip_pair", "per_trip_pair_per_country",
-                          "per_trip_pair_per_od", "per_trip_per_stop"):
+        for view_name in (
+            "per_trip_pair",
+            "per_trip_pair_per_country",
+            "per_trip_pair_per_od",
+            "per_trip_per_stop",
+        ):
             data = result["views"][view_name]["data"]
             assert "all" in data, f"{view_name}: no 'all' key"
             for key, cell in data.items():
                 # per_trip_pair is one level deep; the others two levels.
                 cells = [cell] if "values" in cell else list(cell.values())
                 for c in cells:
-                    assert "filter" in c and "values" in c, (
-                        f"{view_name}[{key}]: missing filter/values"
-                    )
+                    assert (
+                        "filter" in c and "values" in c
+                    ), f"{view_name}[{key}]: missing filter/values"
 
 
 # =============================================================================
 # "models" documentation section
 # =============================================================================
+
 
 class TestModelsSection:
 
@@ -117,7 +148,9 @@ class TestModelsSection:
         _, result = eval_standard
         assert set(result["models"]) == {"route_builder", "energy", "evaluation"}
         for name, model in result["models"].items():
-            assert re.fullmatch(r"\d+\.\d+\.\d+", model["version"]), f"{name}: bad version"
+            assert re.fullmatch(
+                r"\d+\.\d+\.\d+", model["version"]
+            ), f"{name}: bad version"
             assert model["description"], f"{name}: empty description"
             assert isinstance(model["formulas"], dict)
 
@@ -138,14 +171,15 @@ class TestModelsSection:
         for key, f in result["models"]["evaluation"]["formulas"].items():
             assert f["latex"], f"{key}: empty latex"
             assert f["description"], f"{key}: empty description"
-            assert "\\" in f["latex"] or any(op in f["latex"] for op in "=+-×"), (
-                f"{key}: latex does not look like a formula: {f['latex']!r}"
-            )
+            assert "\\" in f["latex"] or any(
+                op in f["latex"] for op in "=+-×"
+            ), f"{key}: latex does not look like a formula: {f['latex']!r}"
 
 
 # =============================================================================
 # "input" documentation section
 # =============================================================================
+
 
 class TestInputSection:
 
@@ -160,8 +194,11 @@ class TestInputSection:
         the route, in the same shape as the /api/params/* endpoints."""
         _, result = eval_standard
         params = result["input"]["parameters"]
-        assert set(params) == {"track_infrastructures", "stop_infrastructures",
-                               "compositions"}
+        assert set(params) == {
+            "track_infrastructures",
+            "stop_infrastructures",
+            "compositions",
+        }
         assert params["track_infrastructures"]["count"] > 0
         assert params["stop_infrastructures"]["count"] > 0
         assert params["compositions"]["count"] > 0
@@ -171,6 +208,7 @@ class TestInputSection:
 # Validation
 # =============================================================================
 
+
 class TestValidation:
 
     def test_missing_route_returns_400(self, api_base):
@@ -179,21 +217,30 @@ class TestValidation:
 
     def test_non_json_body_returns_400(self, api_base):
         resp = requests.post(
-            f"{api_base}{EVAL_URL}", data="not json",
-            headers={"Content-Type": "application/json"}, timeout=10,
+            f"{api_base}{EVAL_URL}",
+            data="not json",
+            headers={"Content-Type": "application/json"},
+            timeout=10,
         )
         assert resp.status_code == 400
 
     def test_empty_trip_pairs_returns_400(self, api_base):
         resp = requests.post(
             f"{api_base}{EVAL_URL}",
-            json={"route": {"route_id": "test", "schedule": {"seasonal_schedules": []},
-                            "trip_pairs": []}},
+            json={
+                "route": {
+                    "route_id": "test",
+                    "schedule": {"seasonal_schedules": []},
+                    "trip_pairs": [],
+                }
+            },
             timeout=10,
         )
         assert resp.status_code == 400
 
-    def test_scenario_override_wrong_type_returns_400(self, api_base, route_berlin_wien):
+    def test_scenario_override_wrong_type_returns_400(
+        self, api_base, route_berlin_wien
+    ):
         resp = requests.post(
             f"{api_base}{EVAL_URL}",
             json={"route": route_berlin_wien, "scenario_id": "not-an-int"},

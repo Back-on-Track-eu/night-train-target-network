@@ -30,21 +30,42 @@ from __future__ import annotations
 from models.route.route import Route, TripPair
 from models.evaluation.views import (
     Breakdown,
-    normalise_per_operating_day, normalise_per_trip_km,
-    normalise_per_available_place_km, normalise_per_sold_place_km,
+    normalise_per_operating_day,
+    normalise_per_trip_km,
+    normalise_per_available_place_km,
+    normalise_per_sold_place_km,
     VIEW_META,
 )
-from models.evaluation.version import CALC_VERSION, CALC_MODEL_DESCRIPTION, CALC_FORMULAS
-from models.energy.version import ENERGY_CALC_VERSION, ENERGY_MODEL_DESCRIPTION, ENERGY_FORMULAS
-from models.route.version import ROUTE_BUILDER_VERSION, ROUTE_BUILDER_DESCRIPTION, ROUTE_FORMULAS
-from models.params import StopInfraCollection, TrackInfraCollection, CompositionCollection
+from models.evaluation.version import (
+    CALC_VERSION,
+    CALC_MODEL_DESCRIPTION,
+    CALC_FORMULAS,
+)
+from models.energy.version import (
+    ENERGY_CALC_VERSION,
+    ENERGY_MODEL_DESCRIPTION,
+    ENERGY_FORMULAS,
+)
+from models.route.version import (
+    ROUTE_BUILDER_VERSION,
+    ROUTE_BUILDER_DESCRIPTION,
+    ROUTE_FORMULAS,
+)
+from models.params import (
+    StopInfraCollection,
+    TrackInfraCollection,
+    CompositionCollection,
+)
 from api.helpers.params_serialize import (
-    stop_infra_to_dict, track_infra_to_dict, composition_collection_to_dict,
+    stop_infra_to_dict,
+    track_infra_to_dict,
+    composition_collection_to_dict,
 )
 
 # =============================================================================
 # BREAKDOWN — serialize
 # =============================================================================
+
 
 def breakdown_to_dict(b: Breakdown) -> dict:
     """Serialize a Breakdown tree to a nested JSON-compatible dict.
@@ -93,6 +114,7 @@ def breakdown_to_dict(b: Breakdown) -> dict:
         "net_eur": b.net_eur,
     }
 
+
 def normalise_all_to_dict(
     breakdown: Breakdown,
     route: Route,
@@ -103,29 +125,41 @@ def normalise_all_to_dict(
     since the result is always destined for JSON output."""
     return {
         "per_year": breakdown_to_dict(breakdown),
-        "per_operating_day": breakdown_to_dict(normalise_per_operating_day(breakdown, route)),
-        "per_trip_km": breakdown_to_dict(normalise_per_trip_km(breakdown, route, trip_pair)),
-        "per_available_place_km": breakdown_to_dict(normalise_per_available_place_km(breakdown, route, trip_pair)),
-        "per_sold_place_km": breakdown_to_dict(normalise_per_sold_place_km(breakdown, route, trip_pair)),
+        "per_operating_day": breakdown_to_dict(
+            normalise_per_operating_day(breakdown, route)
+        ),
+        "per_trip_km": breakdown_to_dict(
+            normalise_per_trip_km(breakdown, route, trip_pair)
+        ),
+        "per_available_place_km": breakdown_to_dict(
+            normalise_per_available_place_km(breakdown, route, trip_pair)
+        ),
+        "per_sold_place_km": breakdown_to_dict(
+            normalise_per_sold_place_km(breakdown, route, trip_pair)
+        ),
     }
+
 
 # =============================================================================
 # VIEWS — human-readable filter labels
 # =============================================================================
 
-def _label_context(route: Route) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+
+def _label_context(
+    route: Route,
+) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
     """Precompute, once per request:
-      stop_names  — stop_id → stop_name
-      trip_labels — trip_id → 'Origin → Destination (outbound|return)', for a
-                    SINGLE direction. Covers every trip in every pair —
-                    outbound AND return_trip — since
-                    build_breakdown_per_trip_per_stop() keys its matrix by
-                    whichever direction a stop call actually happened on.
-      pair_labels — outbound trip_id → 'Origin ↔ Destination', for a whole
-                    TRIP PAIR (outbound + return together). Deliberately a
-                    different arrow (↔, not →) from trip_labels — a trip
-                    pair view covers both directions, and a one-way arrow
-                    there would misrepresent it as outbound-only.
+    stop_names  — stop_id → stop_name
+    trip_labels — trip_id → 'Origin → Destination (outbound|return)', for a
+                  SINGLE direction. Covers every trip in every pair —
+                  outbound AND return_trip — since
+                  build_breakdown_per_trip_per_stop() keys its matrix by
+                  whichever direction a stop call actually happened on.
+    pair_labels — outbound trip_id → 'Origin ↔ Destination', for a whole
+                  TRIP PAIR (outbound + return together). Deliberately a
+                  different arrow (↔, not →) from trip_labels — a trip
+                  pair view covers both directions, and a one-way arrow
+                  there would misrepresent it as outbound-only.
     """
     stop_names: dict[str, str] = {}
     trip_labels: dict[str, str] = {}
@@ -147,18 +181,23 @@ def _label_context(route: Route) -> tuple[dict[str, str], dict[str, str], dict[s
             )
     return stop_names, trip_labels, pair_labels
 
+
 def _pair_value(pair_labels: dict[str, str], pair_key: str) -> str:
     """pair_key is always an outbound trip_id (or 'all')."""
     return "all" if pair_key == "all" else pair_labels.get(pair_key, pair_key)
 
+
 def _trip_value(trip_labels: dict[str, str], trip_key: str) -> str:
     return "all" if trip_key == "all" else trip_labels.get(trip_key, trip_key)
+
 
 def _country_value(country_key: str) -> str:
     return "all" if country_key == "all" else country_key
 
+
 def _stop_value(stop_names: dict[str, str], stop_key: str) -> str:
     return "all" if stop_key == "all" else stop_names.get(stop_key, stop_key)
+
 
 def _od_value(stop_names: dict[str, str], od_key: str) -> str:
     """od_key is 'origin_stop_id__destination_stop_id__class_main' (see
@@ -175,11 +214,13 @@ def _od_value(stop_names: dict[str, str], od_key: str) -> str:
     destination = stop_names.get(destination_id, destination_id)
     return f"{origin} \u2192 {destination} ({class_main})"
 
+
 # =============================================================================
 # VIEWS — per-view builders (views_meta merged in, one description +
 # normalisations block per view, plus a "filter" label per data point for
 # every view with a dimension to filter on)
 # =============================================================================
+
 
 def _route_view_to_dict(bd_all: Breakdown, route: Route) -> dict:
     """The whole-route view has nothing to filter by — a single Breakdown,
@@ -190,6 +231,7 @@ def _route_view_to_dict(bd_all: Breakdown, route: Route) -> dict:
         "normalisations": meta["normalisations"],
         "data": normalise_all_to_dict(bd_all, route),
     }
+
 
 def _per_trip_pair_view_to_dict(
     bd_per_pair: dict[str, Breakdown],
@@ -205,7 +247,12 @@ def _per_trip_pair_view_to_dict(
         }
         for pair_key, bd in bd_per_pair.items()
     }
-    return {"description": meta["description"], "normalisations": meta["normalisations"], "data": data}
+    return {
+        "description": meta["description"],
+        "normalisations": meta["normalisations"],
+        "data": data,
+    }
+
 
 def _per_trip_pair_per_country_view_to_dict(
     matrix: dict[tuple[str, str], Breakdown],
@@ -225,7 +272,12 @@ def _per_trip_pair_per_country_view_to_dict(
             "filter": filter_dict,
             "values": normalise_all_to_dict(b, route, trip_pair),
         }
-    return {"description": meta["description"], "normalisations": meta["normalisations"], "data": data}
+    return {
+        "description": meta["description"],
+        "normalisations": meta["normalisations"],
+        "data": data,
+    }
+
 
 def _per_trip_pair_per_od_view_to_dict(
     matrix: dict[tuple[str, str], Breakdown],
@@ -245,7 +297,12 @@ def _per_trip_pair_per_od_view_to_dict(
             "filter": filter_dict,
             "values": normalise_all_to_dict(b, route, trip_pair),
         }
-    return {"description": meta["description"], "normalisations": meta["normalisations"], "data": data}
+    return {
+        "description": meta["description"],
+        "normalisations": meta["normalisations"],
+        "data": data,
+    }
+
 
 def _per_trip_per_stop_view_to_dict(
     matrix: dict[tuple[str, str], Breakdown],
@@ -273,7 +330,12 @@ def _per_trip_per_stop_view_to_dict(
             "filter": filter_dict,
             "values": normalise_all_to_dict(b, route, trip_pair),
         }
-    return {"description": meta["description"], "normalisations": meta["normalisations"], "data": data}
+    return {
+        "description": meta["description"],
+        "normalisations": meta["normalisations"],
+        "data": data,
+    }
+
 
 def views_to_dict(
     bd_all: Breakdown,
@@ -297,11 +359,20 @@ def views_to_dict(
     (\u2192 for the OD pair itself — a ticket is genuinely one-way)."""
     return {
         "route": _route_view_to_dict(bd_all, route),
-        "per_trip_pair": _per_trip_pair_view_to_dict(bd_per_pair, route, trip_pair_by_key),
-        "per_trip_pair_per_country": _per_trip_pair_per_country_view_to_dict(matrix_country, route, trip_pair_by_key),
-        "per_trip_pair_per_od": _per_trip_pair_per_od_view_to_dict(matrix_od, route, trip_pair_by_key),
-        "per_trip_per_stop": _per_trip_per_stop_view_to_dict(matrix_stop, route, trip_pair_by_key),
+        "per_trip_pair": _per_trip_pair_view_to_dict(
+            bd_per_pair, route, trip_pair_by_key
+        ),
+        "per_trip_pair_per_country": _per_trip_pair_per_country_view_to_dict(
+            matrix_country, route, trip_pair_by_key
+        ),
+        "per_trip_pair_per_od": _per_trip_pair_per_od_view_to_dict(
+            matrix_od, route, trip_pair_by_key
+        ),
+        "per_trip_per_stop": _per_trip_per_stop_view_to_dict(
+            matrix_stop, route, trip_pair_by_key
+        ),
     }
+
 
 # =============================================================================
 # MODELS — version + description + formulas for every model in the pipeline
@@ -318,15 +389,32 @@ def views_to_dict(
 # none of those keys are ever expected to appear here, so route_builder and
 # energy naturally end up with an empty "formulas" dict below; only their
 # version + description are shown.
-EVALUATION_OUTPUT_FIELDS: frozenset[str] = frozenset({
-    "driver_eur", "crew_eur", "coach_maintenance_eur", "loco_eur",
-    "svc_stockings_eur", "var_overhead_eur",
-    "coach_amortisation_eur", "financing_eur", "fix_overhead_eur",
-    "cleaning_eur", "shunting_eur",
-    "tac_eur", "energy_eur", "station_charge_eur", "parking_eur",
-    "ticket_revenue_eur", "ebit_margin_eur",
-    "total_eur", "total_cost_eur", "total_revenue_eur", "net_eur",
-})
+EVALUATION_OUTPUT_FIELDS: frozenset[str] = frozenset(
+    {
+        "driver_eur",
+        "crew_eur",
+        "coach_maintenance_eur",
+        "loco_eur",
+        "svc_stockings_eur",
+        "var_overhead_eur",
+        "coach_amortisation_eur",
+        "financing_eur",
+        "fix_overhead_eur",
+        "cleaning_eur",
+        "shunting_eur",
+        "tac_eur",
+        "energy_eur",
+        "station_charge_eur",
+        "parking_eur",
+        "ticket_revenue_eur",
+        "ebit_margin_eur",
+        "total_eur",
+        "total_cost_eur",
+        "total_revenue_eur",
+        "net_eur",
+    }
+)
+
 
 def _formulas_to_dict(formulas: dict) -> dict:
     """CalcFormula/EnergyFormula/RouteFormula registry → plain dict, filtered
@@ -337,6 +425,7 @@ def _formulas_to_dict(formulas: dict) -> dict:
         for key, f in formulas.items()
         if key in EVALUATION_OUTPUT_FIELDS
     }
+
 
 def models_to_dict() -> dict:
     """Version + description + formula registry for every model that
@@ -362,9 +451,11 @@ def models_to_dict() -> dict:
         },
     }
 
+
 # =============================================================================
 # INPUT — the posted route plus every parameter actually used to cost it
 # =============================================================================
+
 
 def input_to_dict(
     route_dict: dict,

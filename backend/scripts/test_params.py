@@ -150,7 +150,9 @@ if __name__ == "__main__":
     scenario_id_arg = int(sys.argv[2]) if len(sys.argv) == 3 else None
 
     if endpoint_arg != "all" and endpoint_arg not in ENDPOINTS:
-        print(f"Unknown endpoint '{endpoint_arg}'. Choose from: stops, compositions, tracks, all")
+        print(
+            f"Unknown endpoint '{endpoint_arg}'. Choose from: stops, compositions, tracks, all"
+        )
         sys.exit(1)
 
     print("=" * 60)

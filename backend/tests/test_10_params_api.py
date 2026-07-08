@@ -19,9 +19,15 @@ import requests
 # Field names every track infrastructure entry must expose as field objects —
 # mirrors TRACK_INFRA_FIELD_NAMES / params_serialize._TRACK_FIELD_CASTS.
 TRACK_FIELD_NAMES = (
-    "tac_eur_train_km", "parking_eur_day", "shunting_eur_event",
-    "energy_price_eur_kwh", "terrain_score", "terrain_category",
-    "hsr_allowed", "min_boarding_time_min", "min_alighting_time_min",
+    "tac_eur_train_km",
+    "parking_eur_day",
+    "shunting_eur_event",
+    "energy_price_eur_kwh",
+    "terrain_score",
+    "terrain_category",
+    "hsr_allowed",
+    "min_boarding_time_min",
+    "min_alighting_time_min",
     "buffer_quota_per",
 )
 
@@ -51,12 +57,18 @@ def compositions_body(api_base):
 # StopInfrastructures
 # =============================================================================
 
+
 class TestStopInfrastructures:
 
     def test_response_layout(self, stops_body):
         """Top level carries descriptions, sources, default_stops, count, stops."""
-        assert set(stops_body) >= {"descriptions", "sources", "default_stops",
-                                   "count", "stops"}
+        assert set(stops_body) >= {
+            "descriptions",
+            "sources",
+            "default_stops",
+            "count",
+            "stops",
+        }
         assert stops_body["count"] == len(stops_body["stops"])
 
     def test_stops_have_required_fields(self, stops_body):
@@ -92,8 +104,11 @@ class TestStopInfrastructures:
     def test_source_ids_resolve(self, stops_body):
         """Every source_id referenced by a stop field resolves to an entry in
         the top-level sources map."""
-        source_ids = set(map(int, stops_body["sources"].keys())) \
-            if stops_body["sources"] else set()
+        source_ids = (
+            set(map(int, stops_body["sources"].keys()))
+            if stops_body["sources"]
+            else set()
+        )
         for stop in stops_body["stops"]:
             sid = stop["stop_charge_eur"]["source_id"]
             if sid is not None:
@@ -104,13 +119,19 @@ class TestStopInfrastructures:
 # TrackInfrastructures
 # =============================================================================
 
+
 class TestTrackInfrastructures:
 
     def test_response_layout(self, tracks_body):
         """Top level carries descriptions, sources, default_track_infra,
         count, track_infrastructures."""
-        assert set(tracks_body) >= {"descriptions", "sources", "default_track_infra",
-                                    "count", "track_infrastructures"}
+        assert set(tracks_body) >= {
+            "descriptions",
+            "sources",
+            "default_track_infra",
+            "count",
+            "track_infrastructures",
+        }
         assert tracks_body["count"] == len(tracks_body["track_infrastructures"])
 
     def test_every_field_is_field_object(self, tracks_body):
@@ -119,9 +140,9 @@ class TestTrackInfrastructures:
         dropping out of the response (as shunting_eur_event once did)."""
         for track in tracks_body["track_infrastructures"]:
             for field in TRACK_FIELD_NAMES:
-                assert isinstance(track.get(field), dict), (
-                    f"{track['country_code']}.{field} is not a field object"
-                )
+                assert isinstance(
+                    track.get(field), dict
+                ), f"{track['country_code']}.{field} is not a field object"
                 assert {"value", "is_default"} <= set(track[field])
 
     def test_default_row_covers_all_fields(self, tracks_body):
@@ -141,15 +162,21 @@ class TestTrackInfrastructures:
     def test_scenario_id_pins_parameter_version(self, api_base, whatif_scenario):
         """?scenario_id=<what-if> returns DE's v1 snapshot values (tac=3.10),
         while the default request returns the base's v2 (tac=5.40)."""
-        base = requests.get(f"{api_base}/api/params/TrackInfrastructures", timeout=15).json()
+        base = requests.get(
+            f"{api_base}/api/params/TrackInfrastructures", timeout=15
+        ).json()
         whatif = requests.get(
             f"{api_base}/api/params/TrackInfrastructures",
             params={"scenario_id": whatif_scenario["scenario_id"]},
             timeout=15,
         ).json()
 
-        de_base = next(t for t in base["track_infrastructures"] if t["country_code"] == "DE")
-        de_whatif = next(t for t in whatif["track_infrastructures"] if t["country_code"] == "DE")
+        de_base = next(
+            t for t in base["track_infrastructures"] if t["country_code"] == "DE"
+        )
+        de_whatif = next(
+            t for t in whatif["track_infrastructures"] if t["country_code"] == "DE"
+        )
         assert de_base["tac_eur_train_km"]["value"] == pytest.approx(5.40, rel=1e-3)
         assert de_whatif["tac_eur_train_km"]["value"] == pytest.approx(3.10, rel=1e-3)
 
@@ -158,20 +185,35 @@ class TestTrackInfrastructures:
 # compositions
 # =============================================================================
 
+
 class TestCompositions:
 
     def test_response_layout(self, compositions_body):
         """Top level carries descriptions, sources, count, compositions,
         operators (the restructured shape)."""
-        assert set(compositions_body) >= {"descriptions", "sources", "count",
-                                          "compositions", "operators"}
+        assert set(compositions_body) >= {
+            "descriptions",
+            "sources",
+            "count",
+            "compositions",
+            "operators",
+        }
         assert compositions_body["count"] == len(compositions_body["compositions"])
 
     def test_composition_sections_present(self, compositions_body):
         """Every composition carries the grouped sub-sections of the
         restructured response."""
-        sections = {"routing", "staff", "energy", "capacity", "equipment",
-                    "coaches", "fixed_costs", "variable_km", "source_ids"}
+        sections = {
+            "routing",
+            "staff",
+            "energy",
+            "capacity",
+            "equipment",
+            "coaches",
+            "fixed_costs",
+            "variable_km",
+            "source_ids",
+        }
         for comp in compositions_body["compositions"]:
             missing = sections - set(comp)
             assert missing == set(), f"{comp['comp_id']} missing sections: {missing}"
@@ -192,9 +234,9 @@ class TestCompositions:
             coaches = comp["coaches"]
             assert coaches["count"] == len(coaches["list"])
             positions = [c["position"] for c in coaches["list"]]
-            assert len(positions) == len(set(positions)), (
-                f"{comp['comp_id']}: duplicate coach positions"
-            )
+            assert len(positions) == len(
+                set(positions)
+            ), f"{comp['comp_id']}: duplicate coach positions"
 
     def test_operators_referenced_by_compositions(self, compositions_body):
         """Every composition's operator_id resolves to an entry in the
@@ -209,8 +251,11 @@ class TestCompositions:
     def test_indicative_kpis_present(self, compositions_body):
         """At least one composition carries indicative KPIs (placeholder
         figures today — see calc_indicative_figures.py — but non-zero)."""
-        with_ind = [c for c in compositions_body["compositions"]
-                    if c.get("indicative") is not None]
+        with_ind = [
+            c
+            for c in compositions_body["compositions"]
+            if c.get("indicative") is not None
+        ]
         assert len(with_ind) >= 1
         for comp in with_ind:
             kpis = comp["indicative"]["kpis"]

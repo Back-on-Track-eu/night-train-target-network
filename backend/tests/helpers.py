@@ -26,8 +26,14 @@ _WEEKS_PER_SEASON = 26
 # HTTP wrappers
 # =============================================================================
 
-def build_route(api_base: str, stops: list[str], composition_id: str = "STD-7.1",
-                timeout: int = 90, **extra) -> dict:
+
+def build_route(
+    api_base: str,
+    stops: list[str],
+    composition_id: str = "STD-7.1",
+    timeout: int = 90,
+    **extra,
+) -> dict:
     """POST /api/route/plan with the given stops/composition (plus any extra
     request fields, e.g. scenario_id or routing_mode) and return the route dict.
     Asserts 200 — callers testing error paths post directly instead."""
@@ -37,8 +43,9 @@ def build_route(api_base: str, stops: list[str], composition_id: str = "STD-7.1"
     return resp.json()["route"]
 
 
-def evaluate(api_base: str, route: dict, scenario_id: int | None = None,
-             timeout: int = 60) -> dict:
+def evaluate(
+    api_base: str, route: dict, scenario_id: int | None = None, timeout: int = 60
+) -> dict:
     """POST /api/evaluation/calc for a route dict (optionally overriding the
     scenario) and return the full response body. Asserts 200."""
     body: dict = {"route": route}
@@ -53,15 +60,20 @@ def evaluate(api_base: str, route: dict, scenario_id: int | None = None,
 # Route JSON navigation
 # =============================================================================
 
+
 def all_trips(route: dict) -> list[dict]:
     """Every trip (outbound + return of every trip pair), each enriched with
     its pair's composition_id/composition for convenience."""
     trips = []
     for pair in route["trip_pairs"]:
         for trip in (pair["outbound"], pair["return_trip"]):
-            trips.append({**trip,
-                          "composition_id": pair["composition_id"],
-                          "composition": pair["composition"]})
+            trips.append(
+                {
+                    **trip,
+                    "composition_id": pair["composition_id"],
+                    "composition": pair["composition"],
+                }
+            )
     return trips
 
 
@@ -136,6 +148,7 @@ def operating_days(route: dict) -> int:
 # Demand construction (od_pairs)
 # =============================================================================
 
+
 def inject_demand(route: dict, od_pairs: list[dict]) -> dict:
     """Return a copy of the route with od_pairs set on every trip pair.
     Demand travels into evaluation/calc entirely inside the route JSON —
@@ -157,8 +170,9 @@ def replicated_od(route: dict, template: list[dict]) -> list[dict]:
     return ods
 
 
-def directional_od(route: dict, class_main: str, places_sold: int,
-                   avg_price: float) -> list[dict]:
+def directional_od(
+    route: dict, class_main: str, places_sold: int, avg_price: float
+) -> list[dict]:
     """One full-route OD per trip, oriented in that trip's own travel
     direction (first stop → last stop). Gives every trip a well-defined,
     non-zero sold place-km — used where normalisation divisors are recomputed
@@ -166,20 +180,23 @@ def directional_od(route: dict, class_main: str, places_sold: int,
     ods = []
     for trip in all_trips(route):
         stops = stop_times(trip)
-        ods.append({
-            "origin_stop_id": stops[0]["stop_id"],
-            "destination_stop_id": stops[-1]["stop_id"],
-            "class_main": class_main,
-            "trip_id": trip["trip_id"],
-            "places_sold": places_sold,
-            "avg_price": avg_price,
-        })
+        ods.append(
+            {
+                "origin_stop_id": stops[0]["stop_id"],
+                "destination_stop_id": stops[-1]["stop_id"],
+                "class_main": class_main,
+                "trip_id": trip["trip_id"],
+                "places_sold": places_sold,
+                "avg_price": avg_price,
+            }
+        )
     return ods
 
 
 # =============================================================================
 # Evaluation JSON navigation
 # =============================================================================
+
 
 def route_bd(result: dict, normalisation: str = "per_year") -> dict:
     """Route-level breakdown of an evaluation result at one normalisation."""

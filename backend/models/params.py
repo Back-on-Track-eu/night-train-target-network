@@ -70,6 +70,7 @@ logger = logging.getLogger(__name__)
 # PARAMS SOURCE  (input_params.sources)
 # =============================================================================
 
+
 @dataclass
 class ParamsSource:
     """
@@ -85,9 +86,11 @@ class ParamsSource:
     source_url: Optional[str]  # URL to source document or dataset
     source_date: Optional[str]  # ISO date string (YYYY-MM-DD)
 
+
 # =============================================================================
 # MODEL VERSIONS
 # =============================================================================
+
 
 @dataclass
 class ModelVersions:
@@ -117,9 +120,11 @@ class ModelVersions:
         """Register a model version."""
         self.versions[model_name] = version
 
+
 # =============================================================================
 # PARAM VERSIONS
 # =============================================================================
+
 
 @dataclass
 class ParamVersionEntry:
@@ -148,6 +153,7 @@ class ParamVersionEntry:
     # because the country/stop-specific value was NULL in the database.
     # Always False for unversioned catalog tables — they have no default
     # fallback concept.
+
 
 @dataclass
 class ParamVersions:
@@ -193,9 +199,11 @@ class ParamVersions:
     def get(self, key: str) -> ParamVersionEntry | None:
         return self.entries.get(key)
 
+
 # =============================================================================
 # SERVICE CLASS  (input_params.service_classes)
 # =============================================================================
+
 
 @dataclass
 class ServiceClass:
@@ -215,9 +223,11 @@ class ServiceClass:
     class_main: str  # e.g. "Seat", "Couchette", "Sleeper"
     density: float  # space units per place — stored in DB, not derived
 
+
 # =============================================================================
 # OPERATOR  (input_params.operators + input_params.operator_class_costs)
 # =============================================================================
+
 
 @dataclass
 class Operator:
@@ -257,9 +267,11 @@ class Operator:
     # Energy, TAC, and driver/crew costs are NOT included — billed separately.
     loco_full_service_lease_eur_h: float
 
+
 # =============================================================================
 # COACH TYPE  (input_params.coachtypes + input_params.coachtype_classes)
 # =============================================================================
+
 
 @dataclass
 class CoachClassAssignment:
@@ -277,6 +289,7 @@ class CoachClassAssignment:
     class_main: str  # denormalised from input_params.classes
     places: int  # number of places of this class in the coach
     density: float  # denormalised from ServiceClass.density
+
 
 @dataclass
 class CoachType:
@@ -304,7 +317,9 @@ class CoachType:
     climatization: bool
     plugs: bool
     classes: dict[str, CoachClassAssignment]  # keyed by class_id
-    remarks: Optional[str] = None  # free-text description, e.g. "STD seat coach — 80 reclining seats"
+    remarks: Optional[str] = (
+        None  # free-text description, e.g. "STD seat coach — 80 reclining seats"
+    )
 
     def places(self, class_id: str) -> int:
         """Places of a given class in this coach, or 0 if not present."""
@@ -315,9 +330,11 @@ class CoachType:
         """Total places across all classes in this coach."""
         return sum(a.places for a in self.classes.values())
 
+
 # =============================================================================
 # COMPOSITION TYPE  (input_params.compositions + input_params.composition_coaches)
 # =============================================================================
+
 
 @dataclass
 class CompositionType:
@@ -415,7 +432,9 @@ class CompositionType:
                 totals[a.class_main] = totals.get(a.class_main, 0) + a.places
         return {cm: weighted[cm] / totals[cm] for cm in weighted if totals[cm] > 0}
 
-    def weighted_avg_by_main_class(self, per_class_id_values: dict[str, float]) -> dict[str, float]:
+    def weighted_avg_by_main_class(
+        self, per_class_id_values: dict[str, float]
+    ) -> dict[str, float]:
         """
         Places-weighted average of an arbitrary per-class_id value (e.g.
         Operator.svc_stockings_eur_place), aggregated up to class_main —
@@ -440,13 +459,17 @@ class CompositionType:
         for coach in self.coaches.values():
             for class_id, a in coach.classes.items():
                 value = per_class_id_values.get(class_id, 0.0)
-                weighted[a.class_main] = weighted.get(a.class_main, 0.0) + a.places * value
+                weighted[a.class_main] = (
+                    weighted.get(a.class_main, 0.0) + a.places * value
+                )
                 totals[a.class_main] = totals.get(a.class_main, 0) + a.places
         return {cm: weighted[cm] / totals[cm] for cm in weighted if totals[cm] > 0}
+
 
 # =============================================================================
 # COMPOSITION  (fully resolved operational object)
 # =============================================================================
+
 
 @dataclass
 class Composition:
@@ -511,8 +534,12 @@ class Composition:
     financing_quota_per: float
     var_overhead_per: float
     fix_overhead_quota_per: float
-    svc_stockings_eur_place: dict[str, float]  # keyed by class_main (weighted_avg_by_main_class()) — Operator's own copy above stays class_id-keyed
-    loco_full_service_lease_eur_h: float  # billed on route-level deduplicated loco operating time
+    svc_stockings_eur_place: dict[
+        str, float
+    ]  # keyed by class_main (weighted_avg_by_main_class()) — Operator's own copy above stays class_id-keyed
+    loco_full_service_lease_eur_h: (
+        float  # billed on route-level deduplicated loco operating time
+    )
 
     # composition cost — locomotives are full-service leased, not purchased
     purchase_coach_eur: float
@@ -582,6 +609,7 @@ class Composition:
             cleaning_services_eur_day=comp_type.cleaning_services_eur_day,
             coach_maint_eur_km=comp_type.coach_maint_eur_km,
         )
+
 
 @dataclass
 class CompositionCollection:
@@ -655,9 +683,11 @@ class CompositionCollection:
     def __len__(self) -> int:
         return len(self._data)
 
+
 # =============================================================================
 # COMPOSITION REFERENCE  (input_params.composition_references)
 # =============================================================================
+
 
 @dataclass
 class CompositionReference:
@@ -688,6 +718,7 @@ class CompositionReference:
     ref_utilization_by_class: dict[str, float]  # keyed by class_main
     ref_avg_fare_by_class: dict[str, float]  # keyed by class_main
 
+
 @dataclass
 class IndicativeFigures:
     """
@@ -717,9 +748,11 @@ class IndicativeFigures:
     # alongside so API consumers can see the assumptions, not just the result
     reference: Optional[CompositionReference] = field(default=None)
 
+
 # =============================================================================
 # TRACK INFRASTRUCTURE DEFAULTS  (input_params.infrastructure_defaults)
 # =============================================================================
+
 
 @dataclass
 class DefaultTrackInfra:
@@ -737,10 +770,10 @@ class DefaultTrackInfra:
     tac_eur_train_km: float
     tac_src: Optional[ParamsSource]
 
-    parking_eur_day: float      # €/operating-day per parking event
+    parking_eur_day: float  # €/operating-day per parking event
     parking_src: Optional[ParamsSource]
 
-    shunting_eur_event: float   # €/event per shunting movement
+    shunting_eur_event: float  # €/event per shunting movement
     shunting_src: Optional[ParamsSource]
 
     energy_price_eur_kwh: float
@@ -773,14 +806,22 @@ class DefaultTrackInfra:
         """
         return getattr(self, _TRACK_DEFAULT_SRC_ATTRS[field_name])
 
+
 # =============================================================================
 # TRACK INFRASTRUCTURE  (input_params.infrastructure)
 # =============================================================================
 
 TRACK_INFRA_FIELD_NAMES = (
-    "tac_eur_train_km", "parking_eur_day", "shunting_eur_event", "energy_price_eur_kwh",
-    "terrain_score", "terrain_category", "hsr_allowed",
-    "min_boarding_time_min", "min_alighting_time_min", "buffer_quota_per",
+    "tac_eur_train_km",
+    "parking_eur_day",
+    "shunting_eur_event",
+    "energy_price_eur_kwh",
+    "terrain_score",
+    "terrain_category",
+    "hsr_allowed",
+    "min_boarding_time_min",
+    "min_alighting_time_min",
+    "buffer_quota_per",
 )
 """Canonical value-field names on TrackInfrastructure (excludes country_code
 and field_is_default). Shared by DBDataLoader for both per-field is_default
@@ -803,6 +844,7 @@ _TRACK_DEFAULT_SRC_ATTRS = {
 """Maps each TRACK_INFRA_FIELD_NAMES entry to its source attribute on
 DefaultTrackInfra — see DefaultTrackInfra.source_for()."""
 
+
 @dataclass
 class TrackInfraDescriptions:
     """
@@ -823,6 +865,7 @@ class TrackInfraDescriptions:
     fields: dict[str, Optional[str]]
     # Keyed by TRACK_INFRA_FIELD_NAMES, already resolved to the right
     # underlying column comment — not the raw column names.
+
 
 @dataclass
 class TrackInfrastructure:
@@ -865,8 +908,8 @@ class TrackInfrastructure:
     this country — see class docstring."""
 
     tac_eur_train_km: float
-    parking_eur_day: float      # €/operating-day per parking event
-    shunting_eur_event: float   # €/event per shunting movement
+    parking_eur_day: float  # €/operating-day per parking event
+    shunting_eur_event: float  # €/event per shunting movement
     energy_price_eur_kwh: float
     terrain_score: float
     terrain_category: str
@@ -874,6 +917,7 @@ class TrackInfrastructure:
     min_boarding_time_min: int
     min_alighting_time_min: int
     buffer_quota_per: float
+
 
 @dataclass
 class TrackInfraCollection:
@@ -935,9 +979,11 @@ class TrackInfraCollection:
     def __len__(self) -> int:
         return len(self._data)
 
+
 # =============================================================================
 # STOP INFRASTRUCTURE DEFAULTS  (input_params.stop_defaults)
 # =============================================================================
+
 
 @dataclass
 class DefaultStopInfra:
@@ -952,9 +998,11 @@ class DefaultStopInfra:
     stop_charge_eur: float
     stop_charge_src: Optional[ParamsSource]
 
+
 # =============================================================================
 # STOP INFRASTRUCTURE DESCRIPTIONS  (pg_catalog COMMENT ON TABLE/COLUMN)
 # =============================================================================
+
 
 @dataclass
 class StopInfraDescriptions:
@@ -977,9 +1025,11 @@ class StopInfraDescriptions:
     # response ("lat", "lon", "stop_charge_eur") — already resolved to
     # the right underlying column comment, not the raw column names.
 
+
 # =============================================================================
 # STOP INFRASTRUCTURE  (input_params.stops)
 # =============================================================================
+
 
 @dataclass
 class StopInfrastructure:
@@ -1009,6 +1059,7 @@ class StopInfrastructure:
     lon: float
 
     stop_charge_eur: float
+
 
 @dataclass
 class StopInfraCollection:
@@ -1077,9 +1128,11 @@ class StopInfraCollection:
     def __len__(self) -> int:
         return len(self._data)
 
+
 # =============================================================================
 # OD PAIR  (persistent demand input — lives on Route)
 # =============================================================================
+
 
 @dataclass
 class ODPair:
@@ -1114,7 +1167,7 @@ class ODPair:
 
     origin_stop_id: str
     destination_stop_id: str
-    class_main: str          # "Seat" | "Couchette" | "Sleeper" | "Capsule" | "Catering"
-    trip_id: str             # references Trip.trip_id within the same Route
-    places_sold: int         # annual tickets sold for this OD pair / class / trip
-    avg_price: float         # EUR — average fare across all sold tickets
+    class_main: str  # "Seat" | "Couchette" | "Sleeper" | "Capsule" | "Catering"
+    trip_id: str  # references Trip.trip_id within the same Route
+    places_sold: int  # annual tickets sold for this OD pair / class / trip
+    avg_price: float  # EUR — average fare across all sold tickets

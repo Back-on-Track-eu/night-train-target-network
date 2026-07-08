@@ -54,6 +54,7 @@ DB_NAME = os.environ["POSTGRES_DB"]
 DB_USER = os.environ["POSTGRES_USER"]
 DB_PASSWORD = os.environ["POSTGRES_PASSWORD"]
 
+
 class _PgEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, Decimal):
@@ -65,8 +66,10 @@ class _PgEncoder(json.JSONEncoder):
             return f"{h:02d}:{m:02d}:{s:02d}"
         return super().default(obj)
 
+
 def _dumps(obj) -> str:
     return json.dumps(obj, cls=_PgEncoder)
+
 
 def insert_rows(cur, table: str, rows: list[dict]) -> None:
     if not rows:
@@ -82,6 +85,7 @@ def insert_rows(cur, table: str, rows: list[dict]) -> None:
             for c in columns
         ]
         cur.execute(sql, values)
+
 
 # ============================================================
 # admin
@@ -112,9 +116,11 @@ SOURCES = [
 SRC_EXCEL = "B-o-T_targetnetwork_DB_v2.xlsx — illustrative placeholder values"
 SRC_ILLUSTRATIVE = "Illustrative / internal estimate"
 
+
 def fetch_source_ids(cur) -> dict[str, int]:
     cur.execute("SELECT source_id, source_description FROM input_params.sources")
     return {desc: sid for sid, desc in cur.fetchall()}
+
 
 # ============================================================
 # countries
@@ -123,7 +129,10 @@ def fetch_source_ids(cur) -> dict[str, int]:
 COUNTRIES = [
     {"country_code": "DE", "country_name": "Germany"},
     {"country_code": "AT", "country_name": "Austria"},
-    {"country_code": "CH", "country_name": "Switzerland"},  # not an EU member — kept for existing CH routes
+    {
+        "country_code": "CH",
+        "country_name": "Switzerland",
+    },  # not an EU member — kept for existing CH routes
     {"country_code": "FR", "country_name": "France"},
     {"country_code": "BE", "country_name": "Belgium"},
     {"country_code": "DK", "country_name": "Denmark"},
@@ -165,13 +174,36 @@ COUNTRIES = [
 # the db/dev seeder image, which has no models/ package (see
 # backend/db/dev/Dockerfile).
 _COUNTRY_CODE_TO_ADM0_A3 = {
-    "DE": "DEU", "AT": "AUT", "CH": "CHE", "FR": "FRA", "BE": "BEL",
-    "DK": "DNK", "SE": "SWE", "BG": "BGR", "HR": "HRV", "CY": "CYP",
-    "CZ": "CZE", "EE": "EST", "FI": "FIN", "GR": "GRC", "HU": "HUN",
-    "IE": "IRL", "IT": "ITA", "LV": "LVA", "LT": "LTU", "LU": "LUX",
-    "MT": "MLT", "NL": "NLD", "PL": "POL", "PT": "PRT", "RO": "ROU",
-    "SK": "SVK", "SI": "SVN", "ES": "ESP",
+    "DE": "DEU",
+    "AT": "AUT",
+    "CH": "CHE",
+    "FR": "FRA",
+    "BE": "BEL",
+    "DK": "DNK",
+    "SE": "SWE",
+    "BG": "BGR",
+    "HR": "HRV",
+    "CY": "CYP",
+    "CZ": "CZE",
+    "EE": "EST",
+    "FI": "FIN",
+    "GR": "GRC",
+    "HU": "HUN",
+    "IE": "IRL",
+    "IT": "ITA",
+    "LV": "LVA",
+    "LT": "LTU",
+    "LU": "LUX",
+    "MT": "MLT",
+    "NL": "NLD",
+    "PL": "POL",
+    "PT": "PRT",
+    "RO": "ROU",
+    "SK": "SVK",
+    "SI": "SVN",
+    "ES": "ESP",
 }
+
 
 def _load_natural_earth_features() -> dict[str, dict] | None:
     """
@@ -195,6 +227,7 @@ def _load_natural_earth_features() -> dict[str, dict] | None:
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
     return {f["properties"].get("ADM0_A3"): f["geometry"] for f in data["features"]}
+
 
 def seed_country_geometries(cur) -> None:
     """
@@ -224,6 +257,7 @@ def seed_country_geometries(cur) -> None:
     print(f"  Matched {matched}/{len(_COUNTRY_CODE_TO_ADM0_A3)} country geometries.")
     if missing:
         print(f"  WARNING: no Natural Earth feature found for: {', '.join(missing)}")
+
 
 # ============================================================
 # service_classes  (density = space consumption per place, Sleeper > Couchette > Seat)
@@ -474,7 +508,7 @@ TRACK_INFRA_DEFAULTS = [
         "track_tac_eur_train_km": 4.50,
         "track_parking_eur_day": 65.00,
         "track_shunting_eur_event": 575.00,
-            "track_shunting_eur_event": 575.00,
+        "track_shunting_eur_event": 575.00,
         "track_energy_price_eur_kwh": 0.150,
         "track_terrain_category": "Flat",
         "track_terrain_score": 1.0,
@@ -904,6 +938,7 @@ _TRACK_INFRA_V1_OVERRIDES = {
     },
 }
 
+
 def _build_track_infrastructures_v1() -> list[dict]:
     rows = []
     for row in _TRACK_INFRA_V2_ROWS:
@@ -911,6 +946,7 @@ def _build_track_infrastructures_v1() -> list[dict]:
         v1_row.update(_TRACK_INFRA_V1_OVERRIDES.get(row["country_code"], {}))
         rows.append(v1_row)
     return rows
+
 
 TRACK_INFRASTRUCTURES = _build_track_infrastructures_v1() + _TRACK_INFRA_V2_ROWS
 
@@ -1034,6 +1070,7 @@ COMPOSITION_TYPES_VARYING = [
     ("STD-13.1", "Standard 13 coach composition"),
 ]
 
+
 def build_composition_types() -> list[dict]:
     return [
         {
@@ -1043,6 +1080,7 @@ def build_composition_types() -> list[dict]:
         }
         for comp_id, description in COMPOSITION_TYPES_VARYING
     ]
+
 
 COMPOSITION_TYPE_COACHES_RAW = [
     ("STD-3.1", 1, "type2"),
@@ -1189,6 +1227,7 @@ STOP_TIMES = [
 # FK-resolving seed helpers
 # ============================================================
 
+
 def seed_sources(cur, source_ids: dict) -> None:
     ill = source_ids[SRC_ILLUSTRATIVE]
     exc = source_ids[SRC_EXCEL]
@@ -1224,6 +1263,7 @@ def seed_sources(cur, source_ids: dict) -> None:
         "UPDATE input_params.composition_types             SET source_id=%s", (exc,)
     )
 
+
 def seed_operator_class_costs(cur):
     for operator_id, service_class_id, eur_place in OPERATOR_CLASS_COSTS_RAW:
         cur.execute(
@@ -1238,6 +1278,7 @@ def seed_operator_class_costs(cur):
             (operator_row_id, service_class_id, eur_place),
         )
 
+
 def seed_coach_type_classes(cur):
     for coach_type_id, service_class_id, places in COACH_TYPE_CLASSES_RAW:
         cur.execute(
@@ -1251,6 +1292,7 @@ def seed_coach_type_classes(cur):
                VALUES (%s, %s, %s)""",
             (coach_type_row_id, service_class_id, places),
         )
+
 
 def seed_composition_type_coaches(cur):
     for comp_id, position, coach_type_id in COMPOSITION_TYPE_COACHES_RAW:
@@ -1270,6 +1312,7 @@ def seed_composition_type_coaches(cur):
                VALUES (%s, %s, %s)""",
             (composition_type_row_id, position, coach_type_row_id),
         )
+
 
 def seed_composition_references(cur):
     """
@@ -1323,6 +1366,7 @@ def seed_composition_references(cur):
             ],
         )
 
+
 # ============================================================
 # scenario
 # ============================================================
@@ -1363,10 +1407,15 @@ WHATIF_SCENARIO = {
     "is_current_base": False,
     "is_current_scenario": True,
     "track_infrastructures_version": 1,
-    "track_infrastructure_defaults_version": BASE_SCENARIO["track_infrastructure_defaults_version"],
+    "track_infrastructure_defaults_version": BASE_SCENARIO[
+        "track_infrastructure_defaults_version"
+    ],
     "stop_infrastructures_version": BASE_SCENARIO["stop_infrastructures_version"],
-    "stop_infrastructure_defaults_version": BASE_SCENARIO["stop_infrastructure_defaults_version"],
+    "stop_infrastructure_defaults_version": BASE_SCENARIO[
+        "stop_infrastructure_defaults_version"
+    ],
 }
+
 
 def main():
     conn = psycopg2.connect(
@@ -1452,7 +1501,10 @@ def main():
         ("input_params", "coach_types"),
         ("input_params", "coach_type_classes"),
         ("input_params", "track_infrastructure_defaults"),
-        ("input_params", "track_infrastructures"),  # 14 rows: 2 full snapshots x 7 countries
+        (
+            "input_params",
+            "track_infrastructures",
+        ),  # 14 rows: 2 full snapshots x 7 countries
         ("input_params", "stop_infrastructure_defaults"),
         ("input_params", "stop_infrastructures"),
         ("input_params", "composition_types"),
@@ -1475,6 +1527,7 @@ def main():
 
     cur.close()
     conn.close()
+
 
 if __name__ == "__main__":
     main()

@@ -41,9 +41,11 @@ DAYS_PER_OPERATING_WEEK = {"DAILY": 7, "THREE_PER_WEEK": 3}
 # SCHEDULE
 # =============================================================================
 
+
 class Season(Enum):
     SUMMER = "summer"
     WINTER = "winter"
+
 
 class Frequency(Enum):
     DAILY = "daily"
@@ -53,11 +55,14 @@ class Frequency(Enum):
     def days_per_week(self) -> int:
         return DAYS_PER_OPERATING_WEEK[self.name]
 
+
 @dataclass
 class SeasonalSchedule:
     """Operating frequency for one season."""
+
     season: Season
     frequency: Frequency
+
 
 @dataclass
 class Schedule:
@@ -74,35 +79,45 @@ class Schedule:
 
     @property
     def operating_days_per_year(self) -> int:
-        return sum(s.frequency.days_per_week * WEEKS_PER_SEASON for s in self.seasonal_schedules)
+        return sum(
+            s.frequency.days_per_week * WEEKS_PER_SEASON
+            for s in self.seasonal_schedules
+        )
+
 
 # =============================================================================
 # PARKING
 # =============================================================================
+
 
 @dataclass
 class Shunting:
     """One shunting event at a trip terminal. One per trip end/start,
     so a round trip produces 4 shuntings (2 per trip, no deduplication).
     trip_id identifies which trip this shunting belongs to."""
+
     stop_id: str
     stop_name: str
     country_code: str
     trip_id: str
+
 
 @dataclass
 class Parking:
     """One overnight parking location — deduplicated by stop_id.
     trip_ids lists all trips whose formation parks here (typically
     both outbound and return of a trip pair)."""
+
     stop_id: str
     stop_name: str
     country_code: str
     trip_ids: list[str]
 
+
 # =============================================================================
 # TRIP PAIR
 # =============================================================================
+
 
 @dataclass
 class TripPair:
@@ -194,9 +209,11 @@ class TripPair:
         TODO (Y/X-shape): shared terminals may need fewer events."""
         return len(self.trips) * 2
 
+
 # =============================================================================
 # ROUTE
 # =============================================================================
+
 
 class Route:
     """
@@ -272,7 +289,11 @@ class Route:
     def get_trip_pair(self, trip_id: str) -> TripPair | None:
         """Find the TripPair containing the given trip_id (either direction)."""
         return next(
-            (p for p in self._trip_pairs if trip_id in (p.outbound.trip_id, p.return_trip.trip_id)),
+            (
+                p
+                for p in self._trip_pairs
+                if trip_id in (p.outbound.trip_id, p.return_trip.trip_id)
+            ),
             None,
         )
 

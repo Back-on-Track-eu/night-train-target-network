@@ -81,6 +81,6 @@ def test_stub_endpoints_return_501(api_base):
     ]
     for method, path in stubs:
         resp = requests.request(method, f"{api_base}{path}", json={}, timeout=5)
-        assert resp.status_code == 501, (
-            f"{method} {path} returned {resp.status_code}, expected 501"
-        )
+        assert (
+            resp.status_code == 501
+        ), f"{method} {path} returned {resp.status_code}, expected 501"

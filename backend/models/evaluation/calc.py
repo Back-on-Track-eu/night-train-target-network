@@ -46,6 +46,7 @@ from models.route.trip import Segment, Stop
 # RESULT OBJECTS
 # =============================================================================
 
+
 @dataclass
 class StopCost:
     """Cost attributable to one stop call: station charge + dwell driver/crew cost.
@@ -59,18 +60,19 @@ class StopCost:
     All fields: €/trip (one train call to this stop).
     """
 
-    trip_id: str                # which trip made this stop call
+    trip_id: str  # which trip made this stop call
     stop_id: str
-    country_code: str           # from Stop.country_code — ISO 3166-1 alpha-2
-    station_charge_eur: float   # €/trip
-    dwell_driver_hours: float   # person-hours/trip — dwell_h × composition.driver_factor
-    dwell_crew_hours: float     # person-hours/trip — dwell_h × composition.total_crew
-    dwell_driver_eur: float     # €/trip
-    dwell_crew_eur: float       # €/trip
+    country_code: str  # from Stop.country_code — ISO 3166-1 alpha-2
+    station_charge_eur: float  # €/trip
+    dwell_driver_hours: float  # person-hours/trip — dwell_h × composition.driver_factor
+    dwell_crew_hours: float  # person-hours/trip — dwell_h × composition.total_crew
+    dwell_driver_eur: float  # €/trip
+    dwell_crew_eur: float  # €/trip
 
     @property
-    def total_eur(self) -> float:   # €/trip
+    def total_eur(self) -> float:  # €/trip
         return self.station_charge_eur + self.dwell_driver_eur + self.dwell_crew_eur
+
 
 @dataclass
 class SegmentCost:
@@ -87,18 +89,22 @@ class SegmentCost:
     segment_index: int
     from_stop_id: str
     to_stop_id: str
-    distance_m: int                         # metres
-    driving_time_min: int                   # driving only, excludes dwell
-    country_distance_shares: dict[str, float]   # fraction of distance per country, sums to 1.0
-    country_time_shares: dict[str, float]       # fraction of driving time per country, sums to 1.0
+    distance_m: int  # metres
+    driving_time_min: int  # driving only, excludes dwell
+    country_distance_shares: dict[
+        str, float
+    ]  # fraction of distance per country, sums to 1.0
+    country_time_shares: dict[
+        str, float
+    ]  # fraction of driving time per country, sums to 1.0
 
-    coach_maintenance_eur: float    # €/segment  (loco maintenance is in RouteCost.loco_eur — full-service lease)
-    driver_hours: float             # person-hours/segment — driving_h × composition.driver_factor
-    crew_hours: float                # person-hours/segment — driving_h × composition.total_crew
-    driver_eur: float               # €/segment  (driving time only — dwell is in StopCost)
-    crew_eur: float                 # €/segment  (driving time only — dwell is in StopCost)
-    tac_eur: float                  # €/segment
-    energy_eur: float               # €/segment
+    coach_maintenance_eur: float  # €/segment  (loco maintenance is in RouteCost.loco_eur — full-service lease)
+    driver_hours: float  # person-hours/segment — driving_h × composition.driver_factor
+    crew_hours: float  # person-hours/segment — driving_h × composition.total_crew
+    driver_eur: float  # €/segment  (driving time only — dwell is in StopCost)
+    crew_eur: float  # €/segment  (driving time only — dwell is in StopCost)
+    tac_eur: float  # €/segment
+    energy_eur: float  # €/segment
 
     @property
     def variable_km_eur(self) -> float:
@@ -115,6 +121,7 @@ class SegmentCost:
     @property
     def total_eur(self) -> float:
         return self.variable_km_eur + self.variable_hour_eur + self.infrastructure_eur
+
 
 @dataclass
 class CompositionFleetCost:
@@ -137,11 +144,13 @@ class CompositionFleetCost:
     """
 
     comp_id: str
-    coaches_required: float  # this route's share of the fleet — see TripPair.composition_count
-    coach_amortisation_eur: float   # €/year
-    financing_eur: float            # €/year
-    fix_overhead_eur: float         # €/year
-    cleaning_eur: float             # €/operating-day
+    coaches_required: (
+        float  # this route's share of the fleet — see TripPair.composition_count
+    )
+    coach_amortisation_eur: float  # €/year
+    financing_eur: float  # €/year
+    fix_overhead_eur: float  # €/year
+    cleaning_eur: float  # €/operating-day
 
     @property
     def total_eur(self) -> float:
@@ -151,6 +160,7 @@ class CompositionFleetCost:
             + self.fix_overhead_eur
             + self.cleaning_eur
         )
+
 
 @dataclass
 class ShuntingCost:
@@ -166,11 +176,12 @@ class ShuntingCost:
 
     route_id: str
     shunting_count: int
-    shunting_eur_event: float       # €/event
+    shunting_eur_event: float  # €/event
 
     @property
-    def total_eur(self) -> float:   # €/trip-cycle
+    def total_eur(self) -> float:  # €/trip-cycle
         return self.shunting_count * self.shunting_eur_event
+
 
 @dataclass
 class ParkingCost:
@@ -179,9 +190,10 @@ class ParkingCost:
     parking_eur: €/operating-day (track_parking_eur_day from TrackInfrastructure)."""
 
     stop_id: str
-    trip_ids: list[str]         # trips whose formation parks here
+    trip_ids: list[str]  # trips whose formation parks here
     country_code: str
-    parking_eur: float          # €/operating-day
+    parking_eur: float  # €/operating-day
+
 
 @dataclass
 class ShuntingCost:
@@ -190,9 +202,10 @@ class ShuntingCost:
     shunting_eur: €/event (track_shunting_eur_event from TrackInfrastructure)."""
 
     stop_id: str
-    trip_id: str                # which trip this shunting belongs to
+    trip_id: str  # which trip this shunting belongs to
     country_code: str
-    shunting_eur: float         # €/event
+    shunting_eur: float  # €/event
+
 
 @dataclass
 class RouteCost:
@@ -205,11 +218,12 @@ class RouteCost:
     """
 
     route_id: str
-    loco_eur: float                 # €/trip-cycle
+    loco_eur: float  # €/trip-cycle
 
     @property
     def total_eur(self) -> float:
         return self.loco_eur
+
 
 @dataclass
 class ODPairRevenue:
@@ -221,8 +235,9 @@ class ODPairRevenue:
     origin_stop_id: str
     destination_stop_id: str
     class_main: str
-    places_sold: int            # annual tickets sold
-    revenue_eur: float          # €/year  (places_sold × avg_price)
+    places_sold: int  # annual tickets sold
+    revenue_eur: float  # €/year  (places_sold × avg_price)
+
 
 @dataclass
 class ODPairCost:
@@ -238,12 +253,13 @@ class ODPairCost:
     origin_stop_id: str
     destination_stop_id: str
     class_main: str
-    svc_stockings_eur: float    # €/year  (svc_stockings_eur_place × places_sold)
-    var_overhead_eur: float     # €/year  (var_overhead_per × revenue_eur)
+    svc_stockings_eur: float  # €/year  (svc_stockings_eur_place × places_sold)
+    var_overhead_eur: float  # €/year  (var_overhead_per × revenue_eur)
 
     @property
-    def total_eur(self) -> float:   # €/year
+    def total_eur(self) -> float:  # €/year
         return self.svc_stockings_eur + self.var_overhead_eur
+
 
 @dataclass
 class ODPairMargin:
@@ -258,37 +274,42 @@ class ODPairMargin:
     origin_stop_id: str
     destination_stop_id: str
     class_main: str
-    ebit_margin_eur: float      # €/year  (ebit_margin_per × revenue_eur)
+    ebit_margin_eur: float  # €/year  (ebit_margin_per × revenue_eur)
+
 
 # =============================================================================
 # SEGMENT PASSENGER LOAD
 # =============================================================================
 
+
 @dataclass
 class ODSegmentLoad:
     """One OD pair's contribution to one segment — place-km and place-hours,
     unweighted and density-weighted, total and per country. Annual figures."""
+
     od_trip_id: str
     origin_stop_id: str
     destination_stop_id: str
     class_main: str
-    places_sold: int                            # annual
-    density: float                              # space factor from Composition.density_by_class
+    places_sold: int  # annual
+    density: float  # space factor from Composition.density_by_class
 
-    place_km: float                             # places_sold × distance_km
-    place_hours: float                          # places_sold × driving_h
-    weighted_place_km: float                    # × density
-    weighted_place_hours: float                 # × density
+    place_km: float  # places_sold × distance_km
+    place_hours: float  # places_sold × driving_h
+    weighted_place_km: float  # × density
+    weighted_place_hours: float  # × density
 
     place_km_by_country: dict[str, float]
     place_hours_by_country: dict[str, float]
     weighted_place_km_by_country: dict[str, float]
     weighted_place_hours_by_country: dict[str, float]
 
+
 @dataclass
 class SegmentPassengerLoad:
     """All OD pairs riding one segment, with totals and per-country sums.
     Key: (trip_id, segment_index)."""
+
     trip_id: str
     segment_index: int
     distance_km: float
@@ -323,7 +344,10 @@ class SegmentPassengerLoad:
         return sum(l.weighted_place_km_by_country.get(cc, 0.0) for l in self.od_loads)
 
     def total_weighted_place_hours_for_country(self, cc: str) -> float:
-        return sum(l.weighted_place_hours_by_country.get(cc, 0.0) for l in self.od_loads)
+        return sum(
+            l.weighted_place_hours_by_country.get(cc, 0.0) for l in self.od_loads
+        )
+
 
 @dataclass
 class EvaluationResult:
@@ -345,11 +369,15 @@ class EvaluationResult:
     od_pair_margins: list[ODPairMargin]
     segment_passenger_loads: dict[tuple[str, int], "SegmentPassengerLoad"]
 
+
 # =============================================================================
 # SEGMENT COST
 # =============================================================================
 
-def _calc_stop_cost(trip_id: str, stop: Stop, stop_infra: StopInfraCollection, composition: Composition) -> StopCost:
+
+def _calc_stop_cost(
+    trip_id: str, stop: Stop, stop_infra: StopInfraCollection, composition: Composition
+) -> StopCost:
     # TODO: composition.driver_overhead_min / composition.crew_overhead_min
     # (per-trip overhead per Operator docstring: "Billable hours = driving
     # time + operator_driver_overhead_h") are loaded but not applied anywhere
@@ -374,6 +402,7 @@ def _calc_stop_cost(trip_id: str, stop: Stop, stop_infra: StopInfraCollection, c
         dwell_driver_eur=dwell_driver_eur,
         dwell_crew_eur=dwell_crew_eur,
     )
+
 
 def _calc_segment_cost(
     trip_id: str,
@@ -418,9 +447,11 @@ def _calc_segment_cost(
         energy_eur=energy_eur,
     )
 
+
 # =============================================================================
 # COMPOSITION FLEET COST (route level, grouped by comp_id)
 # =============================================================================
+
 
 def _calc_composition_fleet_costs(route: Route) -> list[CompositionFleetCost]:
     """
@@ -433,15 +464,14 @@ def _calc_composition_fleet_costs(route: Route) -> list[CompositionFleetCost]:
     directly and must NOT divide by coach_avail_per again.
     """
     compositions: dict[str, Composition] = {
-        pair.composition.comp_id: pair.composition
-        for pair in route.trip_pairs
+        pair.composition.comp_id: pair.composition for pair in route.trip_pairs
     }
     coach_totals = route.composition_counts
 
     results = []
     for comp_id, n in coach_totals.items():
         c = compositions[comp_id]
-        coach_amortisation_eur = (                      # €/year
+        coach_amortisation_eur = (  # €/year
             c.purchase_coach_eur / c.coach_amort_years * n
             if c.coach_amort_years > 0
             else 0.0
@@ -449,56 +479,74 @@ def _calc_composition_fleet_costs(route: Route) -> list[CompositionFleetCost]:
         financing_eur = c.purchase_coach_eur * c.financing_quota_per * n  # €/year
         fix_overhead_eur = coach_amortisation_eur * c.fix_overhead_quota_per  # €/year
 
-        results.append(CompositionFleetCost(
-            comp_id=comp_id,
-            coaches_required=n,
-            coach_amortisation_eur=coach_amortisation_eur,
-            financing_eur=financing_eur,
-            fix_overhead_eur=fix_overhead_eur,
-            cleaning_eur=c.cleaning_services_eur_day * n,   # €/operating-day
-        ))
+        results.append(
+            CompositionFleetCost(
+                comp_id=comp_id,
+                coaches_required=n,
+                coach_amortisation_eur=coach_amortisation_eur,
+                financing_eur=financing_eur,
+                fix_overhead_eur=fix_overhead_eur,
+                cleaning_eur=c.cleaning_services_eur_day * n,  # €/operating-day
+            )
+        )
     return results
+
 
 # =============================================================================
 # ROUTE COST
 # =============================================================================
 
+
 def _calc_route_cost(route: Route, tracks: TrackInfraCollection) -> RouteCost:
     """Loco lease only — parking and shunting are computed per-event
     in _calc_parking_costs and _calc_shunting_costs."""
     composition = route.trip_pairs[0].composition
-    loco_eur = composition.loco_full_service_lease_eur_h * route.loco_propulsion_min / 60.0
+    loco_eur = (
+        composition.loco_full_service_lease_eur_h * route.loco_propulsion_min / 60.0
+    )
     return RouteCost(route_id=route.route_id, loco_eur=loco_eur)
 
-def _calc_parking_costs(route: Route, tracks: TrackInfraCollection) -> list[ParkingCost]:
+
+def _calc_parking_costs(
+    route: Route, tracks: TrackInfraCollection
+) -> list[ParkingCost]:
     """One ParkingCost per Parking — mirrors route.parkings."""
     costs = []
     for p in route.parkings:
         track = tracks.get(p.country_code)
-        costs.append(ParkingCost(
-            stop_id=p.stop_id,
-            trip_ids=p.trip_ids,
-            country_code=p.country_code,
-            parking_eur=track.parking_eur_day,  # €/operating-day
-        ))
+        costs.append(
+            ParkingCost(
+                stop_id=p.stop_id,
+                trip_ids=p.trip_ids,
+                country_code=p.country_code,
+                parking_eur=track.parking_eur_day,  # €/operating-day
+            )
+        )
     return costs
 
-def _calc_shunting_costs(route: Route, tracks: TrackInfraCollection) -> list[ShuntingCost]:
+
+def _calc_shunting_costs(
+    route: Route, tracks: TrackInfraCollection
+) -> list[ShuntingCost]:
     """One ShuntingCost per Shunting — mirrors route.shuntings."""
     costs = []
     for s in route.shuntings:
         track = tracks.get(s.country_code)
-        costs.append(ShuntingCost(
-            stop_id=s.stop_id,
-            trip_id=s.trip_id,
-            country_code=s.country_code,
-            shunting_eur=track.shunting_eur_event,  # €/event
-        ))
+        costs.append(
+            ShuntingCost(
+                stop_id=s.stop_id,
+                trip_id=s.trip_id,
+                country_code=s.country_code,
+                shunting_eur=track.shunting_eur_event,  # €/event
+            )
+        )
     return costs
+
 
 # =============================================================================
 # OD PAIR REVENUE
 # =============================================================================
+
 
 def _calc_od_pair_results(
     route: Route,
@@ -526,35 +574,43 @@ def _calc_od_pair_results(
             var_overhead_eur = revenue_eur * composition.var_overhead_per
             ebit_margin_eur = revenue_eur * composition.ebit_margin_per
 
-            revenues.append(ODPairRevenue(
-                trip_id=od.trip_id,
-                origin_stop_id=od.origin_stop_id,
-                destination_stop_id=od.destination_stop_id,
-                class_main=od.class_main,
-                places_sold=od.places_sold,
-                revenue_eur=revenue_eur,
-            ))
-            costs.append(ODPairCost(
-                trip_id=od.trip_id,
-                origin_stop_id=od.origin_stop_id,
-                destination_stop_id=od.destination_stop_id,
-                class_main=od.class_main,
-                svc_stockings_eur=svc_stockings_eur,
-                var_overhead_eur=var_overhead_eur,
-            ))
-            margins.append(ODPairMargin(
-                trip_id=od.trip_id,
-                origin_stop_id=od.origin_stop_id,
-                destination_stop_id=od.destination_stop_id,
-                class_main=od.class_main,
-                ebit_margin_eur=ebit_margin_eur,
-            ))
+            revenues.append(
+                ODPairRevenue(
+                    trip_id=od.trip_id,
+                    origin_stop_id=od.origin_stop_id,
+                    destination_stop_id=od.destination_stop_id,
+                    class_main=od.class_main,
+                    places_sold=od.places_sold,
+                    revenue_eur=revenue_eur,
+                )
+            )
+            costs.append(
+                ODPairCost(
+                    trip_id=od.trip_id,
+                    origin_stop_id=od.origin_stop_id,
+                    destination_stop_id=od.destination_stop_id,
+                    class_main=od.class_main,
+                    svc_stockings_eur=svc_stockings_eur,
+                    var_overhead_eur=var_overhead_eur,
+                )
+            )
+            margins.append(
+                ODPairMargin(
+                    trip_id=od.trip_id,
+                    origin_stop_id=od.origin_stop_id,
+                    destination_stop_id=od.destination_stop_id,
+                    class_main=od.class_main,
+                    ebit_margin_eur=ebit_margin_eur,
+                )
+            )
 
     return revenues, costs, margins
+
 
 # =============================================================================
 # PUBLIC ENTRY POINT
 # =============================================================================
+
 
 def compute_segment_passenger_loads(
     route: Route,
@@ -593,9 +649,16 @@ def compute_segment_passenger_loads(
                 for od in pair.od_pairs:
                     if od.trip_id != trip.trip_id:
                         continue
-                    if od.origin_stop_id not in trip_stop_idx or od.destination_stop_id not in trip_stop_idx:
+                    if (
+                        od.origin_stop_id not in trip_stop_idx
+                        or od.destination_stop_id not in trip_stop_idx
+                    ):
                         continue
-                    if not (trip_stop_idx[od.origin_stop_id] <= seg_idx < trip_stop_idx[od.destination_stop_id]):
+                    if not (
+                        trip_stop_idx[od.origin_stop_id]
+                        <= seg_idx
+                        < trip_stop_idx[od.destination_stop_id]
+                    ):
                         continue
 
                     density = density_by_class.get(od.class_main, 0.0)
@@ -605,22 +668,36 @@ def compute_segment_passenger_loads(
                     w_km = place_km * density
                     w_hours = place_hours * density
 
-                    od_loads.append(ODSegmentLoad(
-                        od_trip_id=od.trip_id,
-                        origin_stop_id=od.origin_stop_id,
-                        destination_stop_id=od.destination_stop_id,
-                        class_main=od.class_main,
-                        places_sold=p,
-                        density=density,
-                        place_km=place_km,
-                        place_hours=place_hours,
-                        weighted_place_km=w_km,
-                        weighted_place_hours=w_hours,
-                        place_km_by_country={cc: place_km * s for cc, s in sc.country_distance_shares.items()},
-                        place_hours_by_country={cc: place_hours * s for cc, s in sc.country_time_shares.items()},
-                        weighted_place_km_by_country={cc: w_km * s for cc, s in sc.country_distance_shares.items()},
-                        weighted_place_hours_by_country={cc: w_hours * s for cc, s in sc.country_time_shares.items()},
-                    ))
+                    od_loads.append(
+                        ODSegmentLoad(
+                            od_trip_id=od.trip_id,
+                            origin_stop_id=od.origin_stop_id,
+                            destination_stop_id=od.destination_stop_id,
+                            class_main=od.class_main,
+                            places_sold=p,
+                            density=density,
+                            place_km=place_km,
+                            place_hours=place_hours,
+                            weighted_place_km=w_km,
+                            weighted_place_hours=w_hours,
+                            place_km_by_country={
+                                cc: place_km * s
+                                for cc, s in sc.country_distance_shares.items()
+                            },
+                            place_hours_by_country={
+                                cc: place_hours * s
+                                for cc, s in sc.country_time_shares.items()
+                            },
+                            weighted_place_km_by_country={
+                                cc: w_km * s
+                                for cc, s in sc.country_distance_shares.items()
+                            },
+                            weighted_place_hours_by_country={
+                                cc: w_hours * s
+                                for cc, s in sc.country_time_shares.items()
+                            },
+                        )
+                    )
 
                 loads[(trip.trip_id, seg_idx)] = SegmentPassengerLoad(
                     trip_id=trip.trip_id,
@@ -633,6 +710,7 @@ def compute_segment_passenger_loads(
                 )
 
     return loads
+
 
 def evaluate_route(
     route: Route,
@@ -650,13 +728,15 @@ def evaluate_route(
     for pair in route.trip_pairs:
         for trip in pair.trips:
             for i, segment in enumerate(trip.segments):
-                segment_costs.append(_calc_segment_cost(
-                    trip_id=trip.trip_id,
-                    segment_index=i,
-                    segment=segment,
-                    composition=pair.composition,
-                    tracks=tracks,
-                ))
+                segment_costs.append(
+                    _calc_segment_cost(
+                        trip_id=trip.trip_id,
+                        segment_index=i,
+                        segment=segment,
+                        composition=pair.composition,
+                        tracks=tracks,
+                    )
+                )
 
             # Deduplicated by (trip_id, stop_id): each stop is touched by
             # two segments within one trip (as to_stop of segment N and
@@ -670,7 +750,9 @@ def evaluate_route(
                 if key in seen_stop_ids:
                     continue
                 seen_stop_ids.add(key)
-                stop_costs.append(_calc_stop_cost(trip.trip_id, stop, stop_infra, pair.composition))
+                stop_costs.append(
+                    _calc_stop_cost(trip.trip_id, stop, stop_infra, pair.composition)
+                )
 
     od_pair_revenues, od_pair_costs, od_pair_margins = _calc_od_pair_results(route)
 

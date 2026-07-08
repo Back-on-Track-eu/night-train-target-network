@@ -60,8 +60,11 @@ timetable_mode='simpleAutomatic' schedules are mirrored around."""
 # timetable_mode STRATEGIES
 # =============================================================================
 
+
 def _simple_automatic(
-    stop_ids: list[str], composition: Composition, routed_legs: list[RoutedLeg],
+    stop_ids: list[str],
+    composition: Composition,
+    routed_legs: list[RoutedLeg],
 ) -> tuple[list[tuple[str, StopType]], int]:
     """
     Derive departure time and per-stop boarding/alighting from already-routed
@@ -96,7 +99,9 @@ def _simple_automatic(
     n = len(stop_ids)
     pure_leg_times = [leg.total_time_min for leg in routed_legs]
 
-    min_dwell = min(composition.min_boarding_time_min, composition.min_alighting_time_min)
+    min_dwell = min(
+        composition.min_boarding_time_min, composition.min_alighting_time_min
+    )
     approx_dwell_total = min_dwell * max(n - 2, 0)  # only intermediate stops get dwell
     total_duration = sum(pure_leg_times) + approx_dwell_total
 
@@ -106,12 +111,15 @@ def _simple_automatic(
     provisional_clock = departure_time_min
     for i in range(1, n - 1):
         provisional_clock += pure_leg_times[i - 1]
-        stop_types.append(StopType.BOARDING if provisional_clock < MIRROR_MIN else StopType.ALIGHTING)
+        stop_types.append(
+            StopType.BOARDING if provisional_clock < MIRROR_MIN else StopType.ALIGHTING
+        )
     if n > 1:
         stop_types.append(StopType.ALIGHTING)  # last stop: always alighting
 
     stop_inputs = list(zip(stop_ids, stop_types))
     return stop_inputs, departure_time_min
+
 
 _TIMETABLE_MODE_STRATEGIES = {
     "simpleAutomatic": _simple_automatic,
@@ -120,27 +128,37 @@ _TIMETABLE_MODE_STRATEGIES = {
 VALID_TIMETABLE_MODES = frozenset(_TIMETABLE_MODE_STRATEGIES)
 """Public — api/route.py validates against this instead of hardcoding the list."""
 
+
 def schedule_and_classify(
-    timetable_mode: str, stop_ids: list[str],
-    composition: Composition, routed_legs: list[RoutedLeg],
+    timetable_mode: str,
+    stop_ids: list[str],
+    composition: Composition,
+    routed_legs: list[RoutedLeg],
 ) -> tuple[list[tuple[str, StopType]], int]:
     """Dispatches to the named timetable_mode strategy. Raises ValueError if unknown."""
     strategy = _TIMETABLE_MODE_STRATEGIES.get(timetable_mode)
     if strategy is None:
-        raise ValueError(f"Unknown timetable_mode '{timetable_mode}'. Supported: {sorted(_TIMETABLE_MODE_STRATEGIES)}.")
+        raise ValueError(
+            f"Unknown timetable_mode '{timetable_mode}'. Supported: {sorted(_TIMETABLE_MODE_STRATEGIES)}."
+        )
     return strategy(stop_ids=stop_ids, composition=composition, routed_legs=routed_legs)
+
 
 # =============================================================================
 # schedule_mode STRATEGIES
 # =============================================================================
 
+
 def _always_daily() -> Schedule:
     """schedule_mode='alwaysDaily': daily frequency in both seasons,
     regardless of actual demand."""
-    return Schedule(seasonal_schedules=[
-        SeasonalSchedule(season=Season.SUMMER, frequency=Frequency.DAILY),
-        SeasonalSchedule(season=Season.WINTER, frequency=Frequency.DAILY),
-    ])
+    return Schedule(
+        seasonal_schedules=[
+            SeasonalSchedule(season=Season.SUMMER, frequency=Frequency.DAILY),
+            SeasonalSchedule(season=Season.WINTER, frequency=Frequency.DAILY),
+        ]
+    )
+
 
 _SCHEDULE_MODE_STRATEGIES = {
     "alwaysDaily": _always_daily,
@@ -149,21 +167,28 @@ _SCHEDULE_MODE_STRATEGIES = {
 VALID_SCHEDULE_MODES = frozenset(_SCHEDULE_MODE_STRATEGIES)
 """Public — api/route.py validates against this instead of hardcoding the list."""
 
+
 def build_schedule(schedule_mode: str) -> Schedule:
     """Dispatches to the named schedule_mode strategy. Raises ValueError if unknown.
     Reserved for a future demand-aware strategy that sets frequency based on
     actual demand instead of always assuming daily."""
     strategy = _SCHEDULE_MODE_STRATEGIES.get(schedule_mode)
     if strategy is None:
-        raise ValueError(f"Unknown schedule_mode '{schedule_mode}'. Supported: {sorted(_SCHEDULE_MODE_STRATEGIES)}.")
+        raise ValueError(
+            f"Unknown schedule_mode '{schedule_mode}'. Supported: {sorted(_SCHEDULE_MODE_STRATEGIES)}."
+        )
     return strategy()
+
 
 # =============================================================================
 # auto_stop_addition STRATEGIES
 # =============================================================================
 
+
 def apply_auto_stop_addition(
-    enabled: bool, stop_ids: list[str], routed_legs: list[RoutedLeg],
+    enabled: bool,
+    stop_ids: list[str],
+    routed_legs: list[RoutedLeg],
 ) -> list[str]:
     """
     Whether to propose additional worthwhile stops along the route beyond
@@ -182,15 +207,22 @@ def apply_auto_stop_addition(
     testing that nothing was actually added yet.
     """
     if enabled:
-        logger.info("apply_auto_stop_addition: enabled=True requested but not yet implemented — no-op.")
+        logger.info(
+            "apply_auto_stop_addition: enabled=True requested but not yet implemented — no-op."
+        )
     return stop_ids
+
 
 # =============================================================================
 # FINAL TIMETABLE — exact, dwell-inclusive arrival/departure per stop
 # =============================================================================
 
+
 def dwell_min(
-    stop_type: StopType, country_code: str, composition: Composition, tracks: TrackInfraCollection,
+    stop_type: StopType,
+    country_code: str,
+    composition: Composition,
+    tracks: TrackInfraCollection,
 ) -> int:
     """Dwell at one intermediate stop: max of composition/track minimums
     for whichever of boarding/alighting/both applies. 0 for a stop type
@@ -204,9 +236,14 @@ def dwell_min(
         candidates += [composition.min_alighting_time_min, track.min_alighting_time_min]
     return max(candidates) if candidates else 0
 
+
 def build_final_timetable(
-    stop_types: list[StopType], country_codes: list[str], routed_legs: list[RoutedLeg],
-    composition: Composition, tracks: TrackInfraCollection, departure_time_min: int,
+    stop_types: list[StopType],
+    country_codes: list[str],
+    routed_legs: list[RoutedLeg],
+    composition: Composition,
+    tracks: TrackInfraCollection,
+    departure_time_min: int,
 ) -> list[tuple[int | None, int | None]]:
     """
     Exact, dwell-inclusive (arrival_min, departure_min) per stop, given a
@@ -227,8 +264,14 @@ def build_final_timetable(
         is_first, is_last = i == 0, i == n - 1
 
         arrival_min = None if is_first else clock_min
-        this_dwell = 0 if is_first or is_last else dwell_min(stop_type, country_code, composition, tracks)
-        departure_min = None if is_last else (clock_min if is_first else arrival_min + this_dwell)
+        this_dwell = (
+            0
+            if is_first or is_last
+            else dwell_min(stop_type, country_code, composition, tracks)
+        )
+        departure_min = (
+            None if is_last else (clock_min if is_first else arrival_min + this_dwell)
+        )
 
         if not is_last:
             clock_min = departure_min + routed_legs[i].total_time_min

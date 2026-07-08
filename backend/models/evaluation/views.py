@@ -33,17 +33,22 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from models.route.route import Route, TripPair
 from models.evaluation.calc import (
-    EvaluationResult, SegmentPassengerLoad, ODSegmentLoad,
-    ParkingCost, ShuntingCost
+    EvaluationResult,
+    SegmentPassengerLoad,
+    ODSegmentLoad,
+    ParkingCost,
+    ShuntingCost,
 )
 
 # =============================================================================
 # BREAKDOWN TREE
 # =============================================================================
 
+
 @dataclass
 class OperatorVariableCost:
     """Costs scaling with usage — hours, km, tickets sold."""
+
     driver_eur: float = 0.0
     crew_eur: float = 0.0
     coach_maintenance_eur: float = 0.0
@@ -53,8 +58,15 @@ class OperatorVariableCost:
 
     @property
     def total_eur(self) -> float:
-        return round(self.driver_eur + self.crew_eur + self.coach_maintenance_eur
-                     + self.loco_eur + self.svc_stockings_eur + self.var_overhead_eur, 2)
+        return round(
+            self.driver_eur
+            + self.crew_eur
+            + self.coach_maintenance_eur
+            + self.loco_eur
+            + self.svc_stockings_eur
+            + self.var_overhead_eur,
+            2,
+        )
 
     def __iadd__(self, other: OperatorVariableCost) -> OperatorVariableCost:
         self.driver_eur += other.driver_eur
@@ -65,9 +77,11 @@ class OperatorVariableCost:
         self.var_overhead_eur += other.var_overhead_eur
         return self
 
+
 @dataclass
 class OperatorFixedCost:
     """Costs independent of how much the train runs."""
+
     coach_amortisation_eur: float = 0.0
     financing_eur: float = 0.0
     fix_overhead_eur: float = 0.0
@@ -76,8 +90,14 @@ class OperatorFixedCost:
 
     @property
     def total_eur(self) -> float:
-        return round(self.coach_amortisation_eur + self.financing_eur
-                     + self.fix_overhead_eur + self.cleaning_eur + self.shunting_eur, 2)
+        return round(
+            self.coach_amortisation_eur
+            + self.financing_eur
+            + self.fix_overhead_eur
+            + self.cleaning_eur
+            + self.shunting_eur,
+            2,
+        )
 
     def __iadd__(self, other: OperatorFixedCost) -> OperatorFixedCost:
         self.coach_amortisation_eur += other.coach_amortisation_eur
@@ -86,6 +106,7 @@ class OperatorFixedCost:
         self.cleaning_eur += other.cleaning_eur
         self.shunting_eur += other.shunting_eur
         return self
+
 
 @dataclass
 class OperatorCost:
@@ -101,9 +122,11 @@ class OperatorCost:
         self.fixed += other.fixed
         return self
 
+
 @dataclass
 class InfrastructureCost:
     """Costs paid to third-party network and station operators."""
+
     tac_eur: float = 0.0
     energy_eur: float = 0.0
     station_charge_eur: float = 0.0
@@ -111,7 +134,10 @@ class InfrastructureCost:
 
     @property
     def total_eur(self) -> float:
-        return round(self.tac_eur + self.energy_eur + self.station_charge_eur + self.parking_eur, 2)
+        return round(
+            self.tac_eur + self.energy_eur + self.station_charge_eur + self.parking_eur,
+            2,
+        )
 
     def __iadd__(self, other: InfrastructureCost) -> InfrastructureCost:
         self.tac_eur += other.tac_eur
@@ -119,6 +145,7 @@ class InfrastructureCost:
         self.station_charge_eur += other.station_charge_eur
         self.parking_eur += other.parking_eur
         return self
+
 
 @dataclass
 class CostBreakdown:
@@ -134,6 +161,7 @@ class CostBreakdown:
         self.infrastructure += other.infrastructure
         return self
 
+
 @dataclass
 class RevenueBreakdown:
     ticket_revenue_eur: float = 0.0
@@ -146,9 +174,11 @@ class RevenueBreakdown:
         self.ticket_revenue_eur += other.ticket_revenue_eur
         return self
 
+
 @dataclass
 class MarginBreakdown:
     """Target EBIT carve-out — neither cost nor revenue."""
+
     ebit_margin_eur: float = 0.0
 
     @property
@@ -159,12 +189,14 @@ class MarginBreakdown:
         self.ebit_margin_eur += other.ebit_margin_eur
         return self
 
+
 @dataclass
 class Breakdown:
     """
     Annual receipt for one scope. All leaves are €/year.
     Supports += to accumulate across scopes.
     """
+
     cost: CostBreakdown = field(default_factory=CostBreakdown)
     revenue: RevenueBreakdown = field(default_factory=RevenueBreakdown)
     margin: MarginBreakdown = field(default_factory=MarginBreakdown)
@@ -179,7 +211,9 @@ class Breakdown:
 
     @property
     def net_eur(self) -> float:
-        return round(self.total_revenue_eur - self.total_cost_eur - self.margin.total_eur, 2)
+        return round(
+            self.total_revenue_eur - self.total_cost_eur - self.margin.total_eur, 2
+        )
 
     def __iadd__(self, other: Breakdown) -> Breakdown:
         self.cost += other.cost
@@ -187,17 +221,21 @@ class Breakdown:
         self.margin += other.margin
         return self
 
+
 # =============================================================================
 # CONVERSION HELPERS
 # =============================================================================
+
 
 def _ann_op_day(value: float, operating_days: int) -> float:
     """€/operating-day → €/year."""
     return value * operating_days
 
+
 def _ann_trip(value: float, operating_days: int) -> float:
     """€/segment or €/trip-cycle → €/year (one cycle per operating day)."""
     return value * operating_days
+
 
 def _round_breakdown(b: Breakdown) -> Breakdown:
     """
@@ -210,22 +248,35 @@ def _round_breakdown(b: Breakdown) -> Breakdown:
     r = Breakdown()
     r.cost.operator.variable.driver_eur = round(b.cost.operator.variable.driver_eur, 2)
     r.cost.operator.variable.crew_eur = round(b.cost.operator.variable.crew_eur, 2)
-    r.cost.operator.variable.coach_maintenance_eur = round(b.cost.operator.variable.coach_maintenance_eur, 2)
+    r.cost.operator.variable.coach_maintenance_eur = round(
+        b.cost.operator.variable.coach_maintenance_eur, 2
+    )
     r.cost.operator.variable.loco_eur = round(b.cost.operator.variable.loco_eur, 2)
-    r.cost.operator.variable.svc_stockings_eur = round(b.cost.operator.variable.svc_stockings_eur, 2)
-    r.cost.operator.variable.var_overhead_eur = round(b.cost.operator.variable.var_overhead_eur, 2)
-    r.cost.operator.fixed.coach_amortisation_eur = round(b.cost.operator.fixed.coach_amortisation_eur, 2)
+    r.cost.operator.variable.svc_stockings_eur = round(
+        b.cost.operator.variable.svc_stockings_eur, 2
+    )
+    r.cost.operator.variable.var_overhead_eur = round(
+        b.cost.operator.variable.var_overhead_eur, 2
+    )
+    r.cost.operator.fixed.coach_amortisation_eur = round(
+        b.cost.operator.fixed.coach_amortisation_eur, 2
+    )
     r.cost.operator.fixed.financing_eur = round(b.cost.operator.fixed.financing_eur, 2)
-    r.cost.operator.fixed.fix_overhead_eur = round(b.cost.operator.fixed.fix_overhead_eur, 2)
+    r.cost.operator.fixed.fix_overhead_eur = round(
+        b.cost.operator.fixed.fix_overhead_eur, 2
+    )
     r.cost.operator.fixed.cleaning_eur = round(b.cost.operator.fixed.cleaning_eur, 2)
     r.cost.operator.fixed.shunting_eur = round(b.cost.operator.fixed.shunting_eur, 2)
     r.cost.infrastructure.tac_eur = round(b.cost.infrastructure.tac_eur, 2)
     r.cost.infrastructure.energy_eur = round(b.cost.infrastructure.energy_eur, 2)
-    r.cost.infrastructure.station_charge_eur = round(b.cost.infrastructure.station_charge_eur, 2)
+    r.cost.infrastructure.station_charge_eur = round(
+        b.cost.infrastructure.station_charge_eur, 2
+    )
     r.cost.infrastructure.parking_eur = round(b.cost.infrastructure.parking_eur, 2)
     r.revenue.ticket_revenue_eur = round(b.revenue.ticket_revenue_eur, 2)
     r.margin.ebit_margin_eur = round(b.margin.ebit_margin_eur, 2)
     return r
+
 
 # =============================================================================
 # PRE-COMPUTATION
@@ -234,6 +285,7 @@ def _round_breakdown(b: Breakdown) -> Breakdown:
 # =============================================================================
 # LAYER 1 — WHOLE ROUTE / PER TRIP PAIR
 # =============================================================================
+
 
 def build_breakdown(
     route: Route,
@@ -251,7 +303,8 @@ def build_breakdown(
     operating_days = route.schedule.operating_days_per_year
     trip_ids = (
         {trip_pair.outbound.trip_id, trip_pair.return_trip.trip_id}
-        if trip_pair is not None else None
+        if trip_pair is not None
+        else None
     )
 
     for sc in result.segment_costs:
@@ -259,28 +312,48 @@ def build_breakdown(
             continue
         b.cost.operator.variable.driver_eur += _ann_trip(sc.driver_eur, operating_days)
         b.cost.operator.variable.crew_eur += _ann_trip(sc.crew_eur, operating_days)
-        b.cost.operator.variable.coach_maintenance_eur += _ann_trip(sc.coach_maintenance_eur, operating_days)
+        b.cost.operator.variable.coach_maintenance_eur += _ann_trip(
+            sc.coach_maintenance_eur, operating_days
+        )
         b.cost.infrastructure.tac_eur += _ann_trip(sc.tac_eur, operating_days)
         b.cost.infrastructure.energy_eur += _ann_trip(sc.energy_eur, operating_days)
 
     for stc in result.stop_costs:
         if trip_ids is not None and stc.trip_id not in trip_ids:
             continue
-        b.cost.infrastructure.station_charge_eur += _ann_trip(stc.station_charge_eur, operating_days)
-        b.cost.operator.variable.driver_eur += _ann_trip(stc.dwell_driver_eur, operating_days)
-        b.cost.operator.variable.crew_eur += _ann_trip(stc.dwell_crew_eur, operating_days)
+        b.cost.infrastructure.station_charge_eur += _ann_trip(
+            stc.station_charge_eur, operating_days
+        )
+        b.cost.operator.variable.driver_eur += _ann_trip(
+            stc.dwell_driver_eur, operating_days
+        )
+        b.cost.operator.variable.crew_eur += _ann_trip(
+            stc.dwell_crew_eur, operating_days
+        )
 
     for fc in result.composition_fleet_costs:
         if trip_pair is not None and fc.comp_id != trip_pair.composition.comp_id:
             continue
-        b.cost.operator.fixed.coach_amortisation_eur += fc.coach_amortisation_eur  # already €/year
-        b.cost.operator.fixed.financing_eur += fc.financing_eur                    # already €/year
-        b.cost.operator.fixed.fix_overhead_eur += fc.fix_overhead_eur              # already €/year
-        b.cost.operator.fixed.cleaning_eur += _ann_op_day(fc.cleaning_eur, operating_days)
+        b.cost.operator.fixed.coach_amortisation_eur += (
+            fc.coach_amortisation_eur
+        )  # already €/year
+        b.cost.operator.fixed.financing_eur += fc.financing_eur  # already €/year
+        b.cost.operator.fixed.fix_overhead_eur += fc.fix_overhead_eur  # already €/year
+        b.cost.operator.fixed.cleaning_eur += _ann_op_day(
+            fc.cleaning_eur, operating_days
+        )
 
-    composition = trip_pair.composition if trip_pair is not None else route.trip_pairs[0].composition
+    composition = (
+        trip_pair.composition
+        if trip_pair is not None
+        else route.trip_pairs[0].composition
+    )
 
-    loco_min = trip_pair.loco_propulsion_min if trip_pair is not None else route.loco_propulsion_min
+    loco_min = (
+        trip_pair.loco_propulsion_min
+        if trip_pair is not None
+        else route.loco_propulsion_min
+    )
     b.cost.operator.variable.loco_eur = _ann_trip(
         composition.loco_full_service_lease_eur_h * loco_min / 60.0, operating_days
     )
@@ -293,7 +366,9 @@ def build_breakdown(
 
     if trip_pair is None:
         for pc in result.parking_costs:
-            b.cost.infrastructure.parking_eur += _ann_op_day(pc.parking_eur, operating_days)
+            b.cost.infrastructure.parking_eur += _ann_op_day(
+                pc.parking_eur, operating_days
+            )
 
     for r in result.od_pair_revenues:
         if trip_ids is not None and r.trip_id not in trip_ids:
@@ -313,21 +388,26 @@ def build_breakdown(
 
     return _round_breakdown(b)
 
+
 def build_breakdown_per_trip_pair(
     route: Route,
     result: EvaluationResult,
 ) -> dict[str, Breakdown]:
     """
-dict keyed by outbound trip_id, plus "all" for the whole route.
+    dict keyed by outbound trip_id, plus "all" for the whole route.
     """
     result_dict: dict[str, Breakdown] = {"all": build_breakdown(route, result)}
     for pair in route.trip_pairs:
-        result_dict[pair.outbound.trip_id] = build_breakdown(route, result, trip_pair=pair)
+        result_dict[pair.outbound.trip_id] = build_breakdown(
+            route, result, trip_pair=pair
+        )
     return result_dict
+
 
 # =============================================================================
 # LAYER 2A — PER TRIP PAIR × COUNTRY
 # =============================================================================
+
 
 def build_breakdown_per_trip_pair_per_country(
     route: Route,
@@ -368,7 +448,9 @@ def build_breakdown_per_trip_pair_per_country(
         pair_total_h = sum(sl.driving_time_min / 60.0 for sl in pair_loads)
 
         # Shunting locations for this pair — filter route's stored list by pair's stop ids
-        pair_shunting_costs = [sc for sc in result.shunting_costs if sc.trip_id in trip_ids]
+        pair_shunting_costs = [
+            sc for sc in result.shunting_costs if sc.trip_id in trip_ids
+        ]
 
         # Pre-aggregate OD weighted place-km per country from segment passenger loads.
         # Weighted by class density so Sleeper/Couchette carry higher share than Seat.
@@ -376,8 +458,15 @@ def build_breakdown_per_trip_pair_per_country(
         od_total_pkm: dict[tuple, float] = {}
         for sl in pair_loads:
             for ol in sl.od_loads:
-                od_key = (ol.od_trip_id, ol.origin_stop_id, ol.destination_stop_id, ol.class_main)
-                od_total_pkm[od_key] = od_total_pkm.get(od_key, 0.0) + ol.weighted_place_km
+                od_key = (
+                    ol.od_trip_id,
+                    ol.origin_stop_id,
+                    ol.destination_stop_id,
+                    ol.class_main,
+                )
+                od_total_pkm[od_key] = (
+                    od_total_pkm.get(od_key, 0.0) + ol.weighted_place_km
+                )
                 cc_map = od_country_pkm.setdefault(od_key, {})
                 for cc, v in ol.weighted_place_km_by_country.items():
                     cc_map[cc] = cc_map.get(cc, 0.0) + v
@@ -386,8 +475,14 @@ def build_breakdown_per_trip_pair_per_country(
             b = Breakdown()
 
             # Country totals for fixed cost share denominators
-            country_km = sum(sl.distance_km * sl.country_distance_shares.get(country, 0.0) for sl in pair_loads)
-            country_h = sum(sl.driving_time_min / 60.0 * sl.country_time_shares.get(country, 0.0) for sl in pair_loads)
+            country_km = sum(
+                sl.distance_km * sl.country_distance_shares.get(country, 0.0)
+                for sl in pair_loads
+            )
+            country_h = sum(
+                sl.driving_time_min / 60.0 * sl.country_time_shares.get(country, 0.0)
+                for sl in pair_loads
+            )
             d_share = country_km / pair_total_km if pair_total_km > 0 else 0.0
             t_share = country_h / pair_total_h if pair_total_h > 0 else 0.0
 
@@ -399,50 +494,85 @@ def build_breakdown_per_trip_pair_per_country(
                     continue
                 t = sl.country_time_shares.get(country, 0.0)
                 d = sl.country_distance_shares.get(country, 0.0)
-                b.cost.operator.variable.driver_eur += _ann_trip(sc.driver_eur * t, operating_days)
-                b.cost.operator.variable.crew_eur += _ann_trip(sc.crew_eur * t, operating_days)
-                b.cost.operator.variable.coach_maintenance_eur += _ann_trip(sc.coach_maintenance_eur * d, operating_days)
-                b.cost.infrastructure.tac_eur += _ann_trip(sc.tac_eur * d, operating_days)
-                b.cost.infrastructure.energy_eur += _ann_trip(sc.energy_eur * d, operating_days)
+                b.cost.operator.variable.driver_eur += _ann_trip(
+                    sc.driver_eur * t, operating_days
+                )
+                b.cost.operator.variable.crew_eur += _ann_trip(
+                    sc.crew_eur * t, operating_days
+                )
+                b.cost.operator.variable.coach_maintenance_eur += _ann_trip(
+                    sc.coach_maintenance_eur * d, operating_days
+                )
+                b.cost.infrastructure.tac_eur += _ann_trip(
+                    sc.tac_eur * d, operating_days
+                )
+                b.cost.infrastructure.energy_eur += _ann_trip(
+                    sc.energy_eur * d, operating_days
+                )
 
             # Stop costs — 100% to stop's country
             for stc in result.stop_costs:
                 if stc.trip_id not in trip_ids or stc.country_code != country:
                     continue
-                b.cost.infrastructure.station_charge_eur += _ann_trip(stc.station_charge_eur, operating_days)
-                b.cost.operator.variable.driver_eur += _ann_trip(stc.dwell_driver_eur, operating_days)
-                b.cost.operator.variable.crew_eur += _ann_trip(stc.dwell_crew_eur, operating_days)
+                b.cost.infrastructure.station_charge_eur += _ann_trip(
+                    stc.station_charge_eur, operating_days
+                )
+                b.cost.operator.variable.driver_eur += _ann_trip(
+                    stc.dwell_driver_eur, operating_days
+                )
+                b.cost.operator.variable.crew_eur += _ann_trip(
+                    stc.dwell_crew_eur, operating_days
+                )
 
             # Fixed fleet costs — split by country distance/time share
             for fc in result.composition_fleet_costs:
                 if fc.comp_id != composition.comp_id:
                     continue
-                b.cost.operator.fixed.coach_amortisation_eur += fc.coach_amortisation_eur * d_share
+                b.cost.operator.fixed.coach_amortisation_eur += (
+                    fc.coach_amortisation_eur * d_share
+                )
                 b.cost.operator.fixed.financing_eur += fc.financing_eur * d_share
                 b.cost.operator.fixed.fix_overhead_eur += fc.fix_overhead_eur * d_share
-                b.cost.operator.fixed.cleaning_eur += _ann_op_day(fc.cleaning_eur, operating_days) * t_share
+                b.cost.operator.fixed.cleaning_eur += (
+                    _ann_op_day(fc.cleaning_eur, operating_days) * t_share
+                )
 
             # Loco — time-based
-            loco_eur = composition.loco_full_service_lease_eur_h * pair.loco_propulsion_min / 60.0
-            b.cost.operator.variable.loco_eur = _ann_trip(loco_eur * t_share, operating_days)
+            loco_eur = (
+                composition.loco_full_service_lease_eur_h
+                * pair.loco_propulsion_min
+                / 60.0
+            )
+            b.cost.operator.variable.loco_eur = _ann_trip(
+                loco_eur * t_share, operating_days
+            )
 
             # Shunting — sum ShuntingCost for events in this country
             b.cost.operator.fixed.shunting_eur = sum(
                 _ann_trip(sc.shunting_eur, operating_days)
-                for sc in pair_shunting_costs if sc.country_code == country
+                for sc in pair_shunting_costs
+                if sc.country_code == country
             )
 
             # Parking — sum ParkingCost for locations in this country
             b.cost.infrastructure.parking_eur = sum(
                 _ann_op_day(pc.parking_eur, operating_days)
-                for pc in result.parking_costs if pc.country_code == country
+                for pc in result.parking_costs
+                if pc.country_code == country
             )
 
             # OD-based: revenue, margin, svc_stockings, var_overhead
-            for od_r, od_c, od_m in zip(result.od_pair_revenues, result.od_pair_costs, result.od_pair_margins):
+            for od_r, od_c, od_m in zip(
+                result.od_pair_revenues, result.od_pair_costs, result.od_pair_margins
+            ):
                 if od_r.trip_id not in trip_ids:
                     continue
-                od_key = (od_r.trip_id, od_r.origin_stop_id, od_r.destination_stop_id, od_r.class_main)
+                od_key = (
+                    od_r.trip_id,
+                    od_r.origin_stop_id,
+                    od_r.destination_stop_id,
+                    od_r.class_main,
+                )
                 total_pkm = od_total_pkm.get(od_key, 0.0)
                 if total_pkm == 0:
                     continue
@@ -450,8 +580,12 @@ def build_breakdown_per_trip_pair_per_country(
                 if od_share == 0.0:
                     continue
                 b.revenue.ticket_revenue_eur += od_r.revenue_eur * od_share
-                b.cost.operator.variable.svc_stockings_eur += od_c.svc_stockings_eur * od_share
-                b.cost.operator.variable.var_overhead_eur += od_c.var_overhead_eur * od_share
+                b.cost.operator.variable.svc_stockings_eur += (
+                    od_c.svc_stockings_eur * od_share
+                )
+                b.cost.operator.variable.var_overhead_eur += (
+                    od_c.var_overhead_eur * od_share
+                )
                 b.margin.ebit_margin_eur += od_m.ebit_margin_eur * od_share
 
             matrix[(pair_key, country)] = b
@@ -469,9 +603,11 @@ def build_breakdown_per_trip_pair_per_country(
     matrix[("all", "all")] = build_breakdown(route, result)
     return {k: _round_breakdown(v) for k, v in matrix.items()}
 
+
 # =============================================================================
 # LAYER 2B — PER TRIP PAIR × OD PAIR
 # =============================================================================
+
 
 def build_breakdown_per_trip_pair_per_od(
     route: Route,
@@ -528,13 +664,27 @@ def build_breakdown_per_trip_pair_per_od(
 
         # Pre-compute per-OD totals across all segments (keyed by (trip_id, od_key))
         # We compute internally per trip_id then aggregate into od_key for output
-        od_place_km: dict[tuple, float] = {}     # (trip_id, od_key) → total weighted_place_km
-        od_place_hours: dict[tuple, float] = {}  # (trip_id, od_key) → total weighted_place_hours
-        od_distance_km: dict[tuple, float] = {}  # (trip_id, od_key) → sum of segment distances
+        od_place_km: dict[tuple, float] = (
+            {}
+        )  # (trip_id, od_key) → total weighted_place_km
+        od_place_hours: dict[tuple, float] = (
+            {}
+        )  # (trip_id, od_key) → total weighted_place_hours
+        od_distance_km: dict[tuple, float] = (
+            {}
+        )  # (trip_id, od_key) → sum of segment distances
 
         for sl in pair_loads:
             for ol in sl.od_loads:
-                k = (ol.od_trip_id, od_key(ol.od_trip_id, ol.origin_stop_id, ol.destination_stop_id, ol.class_main))
+                k = (
+                    ol.od_trip_id,
+                    od_key(
+                        ol.od_trip_id,
+                        ol.origin_stop_id,
+                        ol.destination_stop_id,
+                        ol.class_main,
+                    ),
+                )
                 od_place_km[k] = od_place_km.get(k, 0.0) + ol.weighted_place_km
                 od_place_hours[k] = od_place_hours.get(k, 0.0) + ol.weighted_place_hours
                 od_distance_km[k] = od_distance_km.get(k, 0.0) + sl.distance_km
@@ -544,7 +694,12 @@ def build_breakdown_per_trip_pair_per_od(
         for r in result.od_pair_revenues:
             if r.trip_id not in trip_ids:
                 continue
-            k = (r.trip_id, od_key(r.trip_id, r.origin_stop_id, r.destination_stop_id, r.class_main))
+            k = (
+                r.trip_id,
+                od_key(
+                    r.trip_id, r.origin_stop_id, r.destination_stop_id, r.class_main
+                ),
+            )
             od_revenue[k] = od_revenue.get(k, 0.0) + r.revenue_eur
         total_trip_revenue = sum(od_revenue.values())
 
@@ -555,11 +710,17 @@ def build_breakdown_per_trip_pair_per_od(
         }
 
         # Parking — revenue-proportional share across OD pairs
-        parking_total = sum(_ann_op_day(pc.parking_eur, operating_days) for pc in result.parking_costs)
+        parking_total = sum(
+            _ann_op_day(pc.parking_eur, operating_days) for pc in result.parking_costs
+        )
 
         # Shunting (pair-level, revenue-proportional)
-        pair_shunting_costs = [sc for sc in result.shunting_costs if sc.trip_id in trip_ids]
-        shunting_total = sum(_ann_trip(sc.shunting_eur, operating_days) for sc in pair_shunting_costs)
+        pair_shunting_costs = [
+            sc for sc in result.shunting_costs if sc.trip_id in trip_ids
+        ]
+        shunting_total = sum(
+            _ann_trip(sc.shunting_eur, operating_days) for sc in pair_shunting_costs
+        )
 
         # Segment-level variable costs — O(1) lookup via sc_by_key
         sc_by_key = {(sc.trip_id, sc.segment_index): sc for sc in result.segment_costs}
@@ -571,17 +732,39 @@ def build_breakdown_per_trip_pair_per_od(
             seg_total_pkm = sl.total_weighted_place_km
             seg_total_ph = sl.total_weighted_place_hours
             for ol in sl.od_loads:
-                k = (ol.od_trip_id, od_key(ol.od_trip_id, ol.origin_stop_id, ol.destination_stop_id, ol.class_main))
+                k = (
+                    ol.od_trip_id,
+                    od_key(
+                        ol.od_trip_id,
+                        ol.origin_stop_id,
+                        ol.destination_stop_id,
+                        ol.class_main,
+                    ),
+                )
                 if k not in internal:
                     internal[k] = Breakdown()
                 b = internal[k]
-                pkm_share = ol.weighted_place_km / seg_total_pkm if seg_total_pkm > 0 else 0.0
-                ph_share = ol.weighted_place_hours / seg_total_ph if seg_total_ph > 0 else 0.0
-                b.cost.operator.variable.coach_maintenance_eur += _ann_trip(sc.coach_maintenance_eur * pkm_share, operating_days)
-                b.cost.operator.variable.driver_eur += _ann_trip(sc.driver_eur * ph_share, operating_days)
-                b.cost.operator.variable.crew_eur += _ann_trip(sc.crew_eur * ph_share, operating_days)
-                b.cost.infrastructure.tac_eur += _ann_trip(sc.tac_eur * pkm_share, operating_days)
-                b.cost.infrastructure.energy_eur += _ann_trip(sc.energy_eur * pkm_share, operating_days)
+                pkm_share = (
+                    ol.weighted_place_km / seg_total_pkm if seg_total_pkm > 0 else 0.0
+                )
+                ph_share = (
+                    ol.weighted_place_hours / seg_total_ph if seg_total_ph > 0 else 0.0
+                )
+                b.cost.operator.variable.coach_maintenance_eur += _ann_trip(
+                    sc.coach_maintenance_eur * pkm_share, operating_days
+                )
+                b.cost.operator.variable.driver_eur += _ann_trip(
+                    sc.driver_eur * ph_share, operating_days
+                )
+                b.cost.operator.variable.crew_eur += _ann_trip(
+                    sc.crew_eur * ph_share, operating_days
+                )
+                b.cost.infrastructure.tac_eur += _ann_trip(
+                    sc.tac_eur * pkm_share, operating_days
+                )
+                b.cost.infrastructure.energy_eur += _ann_trip(
+                    sc.energy_eur * pkm_share, operating_days
+                )
 
         # Fixed fleet + loco + dwell crew + station charge + shunting + parking
         for (trip_id, odk), b in internal.items():
@@ -593,21 +776,35 @@ def build_breakdown_per_trip_pair_per_od(
             for fc in result.composition_fleet_costs:
                 if fc.comp_id != composition.comp_id:
                     continue
-                b.cost.operator.fixed.coach_amortisation_eur += fc.coach_amortisation_eur * dist_share
+                b.cost.operator.fixed.coach_amortisation_eur += (
+                    fc.coach_amortisation_eur * dist_share
+                )
                 b.cost.operator.fixed.financing_eur += fc.financing_eur * dist_share
-                b.cost.operator.fixed.fix_overhead_eur += fc.fix_overhead_eur * dist_share
+                b.cost.operator.fixed.fix_overhead_eur += (
+                    fc.fix_overhead_eur * dist_share
+                )
 
             # Loco + cleaning — time share
             # od time share = od_place_hours / total_place_hours_on_pair
-            total_pair_ph = sum(od_place_hours.get(kk, 0.0) for kk in od_place_hours if kk[0] == trip_id)
+            total_pair_ph = sum(
+                od_place_hours.get(kk, 0.0) for kk in od_place_hours if kk[0] == trip_id
+            )
             od_ph = od_place_hours.get(k, 0.0)
             ph_share_pair = od_ph / total_pair_ph if total_pair_ph > 0 else 0.0
-            loco_eur = composition.loco_full_service_lease_eur_h * pair.loco_propulsion_min / 60.0
-            b.cost.operator.variable.loco_eur += _ann_trip(loco_eur * ph_share_pair, operating_days)
+            loco_eur = (
+                composition.loco_full_service_lease_eur_h
+                * pair.loco_propulsion_min
+                / 60.0
+            )
+            b.cost.operator.variable.loco_eur += _ann_trip(
+                loco_eur * ph_share_pair, operating_days
+            )
             for fc in result.composition_fleet_costs:
                 if fc.comp_id != composition.comp_id:
                     continue
-                b.cost.operator.fixed.cleaning_eur += _ann_op_day(fc.cleaning_eur, operating_days) * ph_share_pair
+                b.cost.operator.fixed.cleaning_eur += (
+                    _ann_op_day(fc.cleaning_eur, operating_days) * ph_share_pair
+                )
 
             # Revenue share for shunting + parking
             rev = od_revenue.get(k, 0.0)
@@ -629,7 +826,9 @@ def build_breakdown_per_trip_pair_per_od(
             for od in pair.od_pairs:
                 if od.trip_id != stc.trip_id:
                     continue
-                odk = od_key(od.trip_id, od.origin_stop_id, od.destination_stop_id, od.class_main)
+                odk = od_key(
+                    od.trip_id, od.origin_stop_id, od.destination_stop_id, od.class_main
+                )
                 k = (od.trip_id, odk)
                 origin_idx = trip_stop_idx.get(od.origin_stop_id)
                 dest_idx = trip_stop_idx.get(od.destination_stop_id)
@@ -645,15 +844,28 @@ def build_breakdown_per_trip_pair_per_od(
                     continue
                 share = places / total_places_at_stop
                 b = internal[k]
-                b.cost.infrastructure.station_charge_eur += _ann_trip(stc.station_charge_eur * share, operating_days)
-                b.cost.operator.variable.driver_eur += _ann_trip(stc.dwell_driver_eur * share, operating_days)
-                b.cost.operator.variable.crew_eur += _ann_trip(stc.dwell_crew_eur * share, operating_days)
+                b.cost.infrastructure.station_charge_eur += _ann_trip(
+                    stc.station_charge_eur * share, operating_days
+                )
+                b.cost.operator.variable.driver_eur += _ann_trip(
+                    stc.dwell_driver_eur * share, operating_days
+                )
+                b.cost.operator.variable.crew_eur += _ann_trip(
+                    stc.dwell_crew_eur * share, operating_days
+                )
 
         # OD pair revenue / cost / margin — direct from result
-        for od_r, od_c, od_m in zip(result.od_pair_revenues, result.od_pair_costs, result.od_pair_margins):
+        for od_r, od_c, od_m in zip(
+            result.od_pair_revenues, result.od_pair_costs, result.od_pair_margins
+        ):
             if od_r.trip_id not in trip_ids:
                 continue
-            odk = od_key(od_r.trip_id, od_r.origin_stop_id, od_r.destination_stop_id, od_r.class_main)
+            odk = od_key(
+                od_r.trip_id,
+                od_r.origin_stop_id,
+                od_r.destination_stop_id,
+                od_r.class_main,
+            )
             k = (od_r.trip_id, odk)
             if k not in internal:
                 internal[k] = Breakdown()
@@ -688,9 +900,11 @@ def build_breakdown_per_trip_pair_per_od(
     matrix[("all", "all")] = build_breakdown(route, result)
     return {k: _round_breakdown(v) for k, v in matrix.items()}
 
+
 # =============================================================================
 # LAYER 2C — PER TRIP × STOP
 # =============================================================================
+
 
 def build_breakdown_per_trip_per_stop(
     route: Route,
@@ -724,8 +938,7 @@ def build_breakdown_per_trip_per_stop(
 
     # Total route weighted place-km — denominator for fixed cost allocation
     route_total_weighted_pkm = sum(
-        sl.total_weighted_place_km
-        for sl in segment_loads.values()
+        sl.total_weighted_place_km for sl in segment_loads.values()
     )
 
     # StopCost lookup by (trip_id, stop_id)
@@ -739,7 +952,12 @@ def build_breakdown_per_trip_per_stop(
     od_weighted_pkm: dict[tuple, float] = {}
     for sl in segment_loads.values():
         for ol in sl.od_loads:
-            k = (ol.od_trip_id, ol.origin_stop_id, ol.destination_stop_id, ol.class_main)
+            k = (
+                ol.od_trip_id,
+                ol.origin_stop_id,
+                ol.destination_stop_id,
+                ol.class_main,
+            )
             od_weighted_pkm[k] = od_weighted_pkm.get(k, 0.0) + ol.weighted_place_km
 
     # Revenue lookup by (trip_id, origin, destination, class_main)
@@ -757,17 +975,27 @@ def build_breakdown_per_trip_per_stop(
     }
 
     # Fleet / loco / shunting / parking totals (route-level, for fixed cost share)
-    fleet_amort = sum(fc.coach_amortisation_eur for fc in result.composition_fleet_costs)
+    fleet_amort = sum(
+        fc.coach_amortisation_eur for fc in result.composition_fleet_costs
+    )
     fleet_fin = sum(fc.financing_eur for fc in result.composition_fleet_costs)
     fleet_fix = sum(fc.fix_overhead_eur for fc in result.composition_fleet_costs)
-    fleet_clean = sum(_ann_op_day(fc.cleaning_eur, operating_days) for fc in result.composition_fleet_costs)
+    fleet_clean = sum(
+        _ann_op_day(fc.cleaning_eur, operating_days)
+        for fc in result.composition_fleet_costs
+    )
     loco_total = _ann_trip(
         route.trip_pairs[0].composition.loco_full_service_lease_eur_h
-        * route.loco_propulsion_min / 60.0,
+        * route.loco_propulsion_min
+        / 60.0,
         operating_days,
     )
-    shunting_total = sum(_ann_trip(sc.shunting_eur, operating_days) for sc in result.shunting_costs)
-    parking_total = sum(_ann_op_day(pc.parking_eur, operating_days) for pc in result.parking_costs)
+    shunting_total = sum(
+        _ann_trip(sc.shunting_eur, operating_days) for sc in result.shunting_costs
+    )
+    parking_total = sum(
+        _ann_op_day(pc.parking_eur, operating_days) for pc in result.parking_costs
+    )
 
     matrix: dict[tuple[str, str], Breakdown] = {}
 
@@ -786,29 +1014,50 @@ def build_breakdown_per_trip_per_stop(
                 # Direct stop costs
                 stc = stc_by_key.get((trip_id, stop_id))
                 if stc is not None:
-                    b.cost.infrastructure.station_charge_eur += _ann_trip(stc.station_charge_eur, operating_days)
-                    b.cost.operator.variable.driver_eur += _ann_trip(stc.dwell_driver_eur, operating_days)
-                    b.cost.operator.variable.crew_eur += _ann_trip(stc.dwell_crew_eur, operating_days)
+                    b.cost.infrastructure.station_charge_eur += _ann_trip(
+                        stc.station_charge_eur, operating_days
+                    )
+                    b.cost.operator.variable.driver_eur += _ann_trip(
+                        stc.dwell_driver_eur, operating_days
+                    )
+                    b.cost.operator.variable.crew_eur += _ann_trip(
+                        stc.dwell_crew_eur, operating_days
+                    )
 
                 # Boarding + alighting OD pairs at this stop
                 stop_i = stop_idx[stop_id]
                 boarding_alighting_ods = [
-                    od for od in pair.od_pairs
+                    od
+                    for od in pair.od_pairs
                     if od.trip_id == trip_id
-                    and (od.origin_stop_id == stop_id or od.destination_stop_id == stop_id)
+                    and (
+                        od.origin_stop_id == stop_id
+                        or od.destination_stop_id == stop_id
+                    )
                 ]
 
                 # Half the OD pair's weighted place-km assigned to origin, half to destination.
                 # This ensures sum of route_share across all stops equals 1.0 exactly.
                 stop_weighted_pkm = sum(
                     od_weighted_pkm.get(
-                        (od.trip_id, od.origin_stop_id, od.destination_stop_id, od.class_main), 0.0
-                    ) / 2.0
+                        (
+                            od.trip_id,
+                            od.origin_stop_id,
+                            od.destination_stop_id,
+                            od.class_main,
+                        ),
+                        0.0,
+                    )
+                    / 2.0
                     for od in boarding_alighting_ods
                 )
 
                 # Share of route total — denominator for all fixed costs
-                route_share = stop_weighted_pkm / route_total_weighted_pkm if route_total_weighted_pkm > 0 else 0.0
+                route_share = (
+                    stop_weighted_pkm / route_total_weighted_pkm
+                    if route_total_weighted_pkm > 0
+                    else 0.0
+                )
 
                 # Segment costs — sum over segments where this stop is the from_stop or to_stop,
                 # weighted by boarding/alighting OD pair share
@@ -822,18 +1071,34 @@ def build_breakdown_per_trip_per_stop(
                         continue
                     seg_total_wpkm = sl.total_weighted_place_km
                     seg_stop_wpkm = sum(
-                        ol.weighted_place_km / 2.0 for ol in sl.od_loads
-                        if ol.origin_stop_id == stop_id or ol.destination_stop_id == stop_id
+                        ol.weighted_place_km / 2.0
+                        for ol in sl.od_loads
+                        if ol.origin_stop_id == stop_id
+                        or ol.destination_stop_id == stop_id
                     )
-                    seg_share = seg_stop_wpkm / seg_total_wpkm if seg_total_wpkm > 0 else 0.0
-                    b.cost.operator.variable.coach_maintenance_eur += _ann_trip(sc.coach_maintenance_eur * seg_share, operating_days)
-                    b.cost.operator.variable.driver_eur += _ann_trip(sc.driver_eur * seg_share, operating_days)
-                    b.cost.operator.variable.crew_eur += _ann_trip(sc.crew_eur * seg_share, operating_days)
-                    b.cost.infrastructure.tac_eur += _ann_trip(sc.tac_eur * seg_share, operating_days)
-                    b.cost.infrastructure.energy_eur += _ann_trip(sc.energy_eur * seg_share, operating_days)
+                    seg_share = (
+                        seg_stop_wpkm / seg_total_wpkm if seg_total_wpkm > 0 else 0.0
+                    )
+                    b.cost.operator.variable.coach_maintenance_eur += _ann_trip(
+                        sc.coach_maintenance_eur * seg_share, operating_days
+                    )
+                    b.cost.operator.variable.driver_eur += _ann_trip(
+                        sc.driver_eur * seg_share, operating_days
+                    )
+                    b.cost.operator.variable.crew_eur += _ann_trip(
+                        sc.crew_eur * seg_share, operating_days
+                    )
+                    b.cost.infrastructure.tac_eur += _ann_trip(
+                        sc.tac_eur * seg_share, operating_days
+                    )
+                    b.cost.infrastructure.energy_eur += _ann_trip(
+                        sc.energy_eur * seg_share, operating_days
+                    )
 
                 # Fixed costs — route share
-                b.cost.operator.fixed.coach_amortisation_eur += fleet_amort * route_share
+                b.cost.operator.fixed.coach_amortisation_eur += (
+                    fleet_amort * route_share
+                )
                 b.cost.operator.fixed.financing_eur += fleet_fin * route_share
                 b.cost.operator.fixed.fix_overhead_eur += fleet_fix * route_share
                 b.cost.operator.fixed.cleaning_eur += fleet_clean * route_share
@@ -843,11 +1108,18 @@ def build_breakdown_per_trip_per_stop(
 
                 # Revenue / cost / margin — direct from boarding+alighting OD pairs
                 for od in boarding_alighting_ods:
-                    k = (od.trip_id, od.origin_stop_id, od.destination_stop_id, od.class_main)
+                    k = (
+                        od.trip_id,
+                        od.origin_stop_id,
+                        od.destination_stop_id,
+                        od.class_main,
+                    )
                     if r := rev_by_key.get(k):
                         b.revenue.ticket_revenue_eur += r.revenue_eur
                     if c := cost_by_key.get(k):
-                        b.cost.operator.variable.svc_stockings_eur += c.svc_stockings_eur
+                        b.cost.operator.variable.svc_stockings_eur += (
+                            c.svc_stockings_eur
+                        )
                         b.cost.operator.variable.var_overhead_eur += c.var_overhead_eur
                     if m := margin_by_key.get(k):
                         b.margin.ebit_margin_eur += m.ebit_margin_eur
@@ -876,9 +1148,11 @@ def build_breakdown_per_trip_per_stop(
     matrix[("all", "all")] = build_breakdown(route, result)
     return {k: _round_breakdown(v) for k, v in matrix.items()}
 
+
 # =============================================================================
 # LAYER 3 — NORMALISERS
 # =============================================================================
+
 
 def normalise(breakdown: Breakdown, denominator: float) -> Breakdown:
     """
@@ -891,28 +1165,57 @@ def normalise(breakdown: Breakdown, denominator: float) -> Breakdown:
 
     b = Breakdown()
 
-    b.cost.operator.variable.driver_eur = breakdown.cost.operator.variable.driver_eur / denominator
-    b.cost.operator.variable.crew_eur = breakdown.cost.operator.variable.crew_eur / denominator
-    b.cost.operator.variable.coach_maintenance_eur = breakdown.cost.operator.variable.coach_maintenance_eur / denominator
-    b.cost.operator.variable.loco_eur = breakdown.cost.operator.variable.loco_eur / denominator
-    b.cost.operator.variable.svc_stockings_eur = breakdown.cost.operator.variable.svc_stockings_eur / denominator
-    b.cost.operator.variable.var_overhead_eur = breakdown.cost.operator.variable.var_overhead_eur / denominator
+    b.cost.operator.variable.driver_eur = (
+        breakdown.cost.operator.variable.driver_eur / denominator
+    )
+    b.cost.operator.variable.crew_eur = (
+        breakdown.cost.operator.variable.crew_eur / denominator
+    )
+    b.cost.operator.variable.coach_maintenance_eur = (
+        breakdown.cost.operator.variable.coach_maintenance_eur / denominator
+    )
+    b.cost.operator.variable.loco_eur = (
+        breakdown.cost.operator.variable.loco_eur / denominator
+    )
+    b.cost.operator.variable.svc_stockings_eur = (
+        breakdown.cost.operator.variable.svc_stockings_eur / denominator
+    )
+    b.cost.operator.variable.var_overhead_eur = (
+        breakdown.cost.operator.variable.var_overhead_eur / denominator
+    )
 
-    b.cost.operator.fixed.coach_amortisation_eur = breakdown.cost.operator.fixed.coach_amortisation_eur / denominator
-    b.cost.operator.fixed.financing_eur = breakdown.cost.operator.fixed.financing_eur / denominator
-    b.cost.operator.fixed.fix_overhead_eur = breakdown.cost.operator.fixed.fix_overhead_eur / denominator
-    b.cost.operator.fixed.cleaning_eur = breakdown.cost.operator.fixed.cleaning_eur / denominator
-    b.cost.operator.fixed.shunting_eur = breakdown.cost.operator.fixed.shunting_eur / denominator
+    b.cost.operator.fixed.coach_amortisation_eur = (
+        breakdown.cost.operator.fixed.coach_amortisation_eur / denominator
+    )
+    b.cost.operator.fixed.financing_eur = (
+        breakdown.cost.operator.fixed.financing_eur / denominator
+    )
+    b.cost.operator.fixed.fix_overhead_eur = (
+        breakdown.cost.operator.fixed.fix_overhead_eur / denominator
+    )
+    b.cost.operator.fixed.cleaning_eur = (
+        breakdown.cost.operator.fixed.cleaning_eur / denominator
+    )
+    b.cost.operator.fixed.shunting_eur = (
+        breakdown.cost.operator.fixed.shunting_eur / denominator
+    )
 
     b.cost.infrastructure.tac_eur = breakdown.cost.infrastructure.tac_eur / denominator
-    b.cost.infrastructure.energy_eur = breakdown.cost.infrastructure.energy_eur / denominator
-    b.cost.infrastructure.station_charge_eur = breakdown.cost.infrastructure.station_charge_eur / denominator
-    b.cost.infrastructure.parking_eur = breakdown.cost.infrastructure.parking_eur / denominator
+    b.cost.infrastructure.energy_eur = (
+        breakdown.cost.infrastructure.energy_eur / denominator
+    )
+    b.cost.infrastructure.station_charge_eur = (
+        breakdown.cost.infrastructure.station_charge_eur / denominator
+    )
+    b.cost.infrastructure.parking_eur = (
+        breakdown.cost.infrastructure.parking_eur / denominator
+    )
 
     b.revenue.ticket_revenue_eur = breakdown.revenue.ticket_revenue_eur / denominator
     b.margin.ebit_margin_eur = breakdown.margin.ebit_margin_eur / denominator
 
     return _round_breakdown(b)
+
 
 def normalise_per_operating_day(
     breakdown: Breakdown,
@@ -924,6 +1227,7 @@ def normalise_per_operating_day(
     applied in build_breakdown.
     """
     return normalise(breakdown, float(route.schedule.operating_days_per_year))
+
 
 def normalise_per_trip_km(
     breakdown: Breakdown,
@@ -945,12 +1249,9 @@ def normalise_per_trip_km(
         if trip_pair is None
         else list(trip_pair.trips)
     )
-    trip_km = sum(
-        seg.distance_m / 1000.0
-        for trip in trips
-        for seg in trip.segments
-    )
+    trip_km = sum(seg.distance_m / 1000.0 for trip in trips for seg in trip.segments)
     return normalise(breakdown, trip_km)
+
 
 def normalise_per_available_place_km(
     breakdown: Breakdown,
@@ -976,6 +1277,7 @@ def normalise_per_available_place_km(
     )
     return normalise(breakdown, available_place_km)
 
+
 def normalise_per_sold_place_km(
     breakdown: Breakdown,
     route: Route,
@@ -999,7 +1301,10 @@ def normalise_per_sold_place_km(
             for od in pair.od_pairs:
                 if od.trip_id != trip.trip_id:
                     continue
-                if od.origin_stop_id not in stop_ids or od.destination_stop_id not in stop_ids:
+                if (
+                    od.origin_stop_id not in stop_ids
+                    or od.destination_stop_id not in stop_ids
+                ):
                     continue
                 start_idx = stop_ids.index(od.origin_stop_id)
                 end_idx = stop_ids.index(od.destination_stop_id)
@@ -1009,6 +1314,7 @@ def normalise_per_sold_place_km(
                     if start_idx <= i < end_idx
                 )
     return normalise(breakdown, sold_place_km)
+
 
 # =============================================================================
 # VIEW METADATA — for the API's "views_meta" section
@@ -1022,7 +1328,9 @@ def normalise_per_sold_place_km(
 
 _VIEW_FILTER_STAGES: dict[str, list[str]] = {
     "route": ["all trip pairs", "all segments/stops/OD pairs"],
-    "per_trip_pair": ["one trip pair (outbound + return), or 'all' for the whole route"],
+    "per_trip_pair": [
+        "one trip pair (outbound + return), or 'all' for the whole route"
+    ],
     "per_trip_pair_per_country": [
         "one trip pair (outbound + return), or 'all'",
         "one country, via distance/time/place-km allocation share, or 'all'",
@@ -1040,20 +1348,20 @@ _VIEW_FILTER_STAGES: dict[str, list[str]] = {
 
 _VIEW_DESCRIPTIONS: dict[str, str] = {
     "route": "Whole-route annual totals — every trip pair, segment, stop and OD pair "
-             "rolled into one figure.",
+    "rolled into one figure.",
     "per_trip_pair": "Annual totals filtered to a single trip pair, or the whole route "
-                      "under key 'all'.",
+    "under key 'all'.",
     "per_trip_pair_per_country": "Matrix of annual totals by trip pair x country. Cost "
-                                  "types are allocated to countries by distance share, "
-                                  "time share, or OD place-km share depending on the "
-                                  "cost — see build_breakdown_per_trip_pair_per_country().",
+    "types are allocated to countries by distance share, "
+    "time share, or OD place-km share depending on the "
+    "cost — see build_breakdown_per_trip_pair_per_country().",
     "per_trip_pair_per_od": "Matrix of annual totals by trip pair x OD pair (origin, "
-                             "destination, class). Cost types are allocated by place-km, "
-                             "place-hours, or revenue share depending on the cost — see "
-                             "build_breakdown_per_trip_pair_per_od().",
+    "destination, class). Cost types are allocated by place-km, "
+    "place-hours, or revenue share depending on the cost — see "
+    "build_breakdown_per_trip_pair_per_od().",
     "per_trip_per_stop": "Matrix of annual totals by trip x individual stop call — "
-                          "station charge and dwell driver/crew cost, plus a route-share "
-                          "allocation of fixed/infrastructure costs.",
+    "station charge and dwell driver/crew cost, plus a route-share "
+    "allocation of fixed/infrastructure costs.",
 }
 
 # (description, extra processing_sequence stage) per normalisation — appended

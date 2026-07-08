@@ -52,11 +52,16 @@ EXPECTED_ROW_COUNTS = {
 # beyond the original 7 null everything but country_code — see seed.py).
 REQUIRED_COLUMNS = {
     "input_params.stop_infrastructures": [
-        "stop_id", "stop_name", "country_code", "stop_lat", "stop_lon",
+        "stop_id",
+        "stop_name",
+        "country_code",
+        "stop_lat",
+        "stop_lon",
     ],
     "input_params.track_infrastructures": ["country_code"],
     "input_params.composition_types": [
-        "composition_type_id", "composition_type_max_speed_kmh",
+        "composition_type_id",
+        "composition_type_max_speed_kmh",
     ],
     "input_params.coach_types": ["coach_type_id"],
     "input_params.operators": ["operator_id", "operator_driver_costs_eur_h"],
@@ -66,6 +71,7 @@ REQUIRED_COLUMNS = {
 # =============================================================================
 # Schemas and row counts
 # =============================================================================
+
 
 def test_schemas_exist(db_cur):
     """All four project schemas exist in the database."""
@@ -101,6 +107,7 @@ def test_required_columns_not_null(db_cur, table, columns):
 # =============================================================================
 # Structural integrity
 # =============================================================================
+
 
 def test_composition_types_have_coaches(db_cur):
     """Every composition type has at least one coach assigned — a composition
@@ -201,6 +208,7 @@ def test_country_geometries_seeded(db_cur):
 # Scenario seed consistency
 # =============================================================================
 
+
 def test_exactly_one_current_base_scenario(db_cur):
     """Exactly one scenario carries is_current_base = TRUE — the partial
     unique index enforces at most one; the seed must supply exactly one."""
@@ -221,6 +229,6 @@ def test_whatif_scenario_pins_track_infra_v1(whatif_scenario, base_scenario):
         "stop_infrastructures_version",
         "stop_infrastructure_defaults_version",
     ):
-        assert whatif_scenario[col] == base_scenario[col], (
-            f"what-if {col} should copy base"
-        )
+        assert (
+            whatif_scenario[col] == base_scenario[col]
+        ), f"what-if {col} should copy base"

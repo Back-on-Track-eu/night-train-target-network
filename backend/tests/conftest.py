@@ -23,7 +23,13 @@ import psycopg2.extras
 import pytest
 import requests
 
-from tests.helpers import ROUTE_URL, build_route, directional_od, evaluate, inject_demand
+from tests.helpers import (
+    ROUTE_URL,
+    build_route,
+    directional_od,
+    evaluate,
+    inject_demand,
+)
 
 # =============================================================================
 # Configuration — from environment, with local-stack defaults
@@ -51,6 +57,7 @@ DEFAULT_COMPOSITION = "STD-7.1"
 # =============================================================================
 # Infrastructure fixtures — API base, DB connection, loader, scenarios
 # =============================================================================
+
 
 @pytest.fixture(scope="session")
 def api_base():
@@ -119,7 +126,9 @@ def base_scenario(db_cur):
     version numbers tests filter on for the four scenario-versioned tables."""
     db_cur.execute("SELECT * FROM scenario.scenarios WHERE is_current_base = TRUE")
     row = db_cur.fetchone()
-    assert row is not None, "No scenario has is_current_base = TRUE — seed data missing."
+    assert (
+        row is not None
+    ), "No scenario has is_current_base = TRUE — seed data missing."
     return row
 
 
@@ -133,7 +142,9 @@ def whatif_scenario(db_cur):
         "WHERE scenario_key = 'whatif-de-track-infra' AND is_current_scenario = TRUE"
     )
     row = db_cur.fetchone()
-    assert row is not None, "What-if scenario missing — see db/dev/seed.py: WHATIF_SCENARIO."
+    assert (
+        row is not None
+    ), "What-if scenario missing — see db/dev/seed.py: WHATIF_SCENARIO."
     return row
 
 
@@ -141,25 +152,41 @@ def whatif_scenario(db_cur):
 # Shared route fixtures — built once per session, read-only for tests
 # =============================================================================
 
+
 @pytest.fixture(scope="session")
 def route_berlin_wien(api_base):
     """2-stop, 2-country route: Berlin → Wien (DE, AT), STD-7.1."""
-    return build_route(api_base, STOPS_BERLIN_WIEN, DEFAULT_COMPOSITION,
-                       proposal_id=1, proposal_version=1)
+    return build_route(
+        api_base,
+        STOPS_BERLIN_WIEN,
+        DEFAULT_COMPOSITION,
+        proposal_id=1,
+        proposal_version=1,
+    )
 
 
 @pytest.fixture(scope="session")
 def route_berlin_dresden_wien(api_base):
     """3-stop route with one intermediate stop: Berlin → Dresden → Wien."""
-    return build_route(api_base, STOPS_BERLIN_DRESDEN_WIEN, DEFAULT_COMPOSITION,
-                       proposal_id=2, proposal_version=1)
+    return build_route(
+        api_base,
+        STOPS_BERLIN_DRESDEN_WIEN,
+        DEFAULT_COMPOSITION,
+        proposal_id=2,
+        proposal_version=1,
+    )
 
 
 @pytest.fixture(scope="session")
 def route_berlin_zuerich_wien(api_base):
     """3-country route via Zürich: DE → CH → AT (plus transit countries)."""
-    return build_route(api_base, STOPS_BERLIN_ZUERICH_WIEN, DEFAULT_COMPOSITION,
-                       proposal_id=3, proposal_version=1)
+    return build_route(
+        api_base,
+        STOPS_BERLIN_ZUERICH_WIEN,
+        DEFAULT_COMPOSITION,
+        proposal_id=3,
+        proposal_version=1,
+    )
 
 
 @pytest.fixture(scope="session")
@@ -174,8 +201,12 @@ def route_copenhagen_stockholm(api_base):
     route to build, check the API/OpenRailRouting container logs: the endpoint
     returning 500 (rather than a clean 'no route') on an unroutable pair is
     itself worth investigating."""
-    body = {"stops": STOPS_COPENHAGEN_STOCKHOLM, "composition_id": DEFAULT_COMPOSITION,
-            "proposal_id": 4, "proposal_version": 1}
+    body = {
+        "stops": STOPS_COPENHAGEN_STOCKHOLM,
+        "composition_id": DEFAULT_COMPOSITION,
+        "proposal_id": 4,
+        "proposal_version": 1,
+    }
     resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=90)
     if resp.status_code != 200:
         pytest.skip(

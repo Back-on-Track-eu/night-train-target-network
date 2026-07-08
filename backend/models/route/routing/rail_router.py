@@ -79,13 +79,13 @@ class RoutedLeg:
     calc_energy_consumption() before route_factory builds Stops.
     """
 
-    geometry: list[list[float]]               # [[lon, lat], ...]
+    geometry: list[list[float]]  # [[lon, lat], ...]
     distance_m: int
     driving_time_min: int
     buffer_time_min: int
-    energy_kwh: float                          # 0.0 until energy model runs
+    energy_kwh: float  # 0.0 until energy model runs
     country_distance_shares: dict[str, float]  # {country_code: share}, sums to 1.0
-    country_time_shares: dict[str, float]      # {country_code: share}, sums to 1.0
+    country_time_shares: dict[str, float]  # {country_code: share}, sums to 1.0
 
     @property
     def total_time_min(self) -> int:
@@ -223,7 +223,9 @@ class RailRouter:
                 composition.hsr_allowed
                 and (tracks.get(cc).hsr_allowed if tracks.get(cc) else True)
             )
-            for cc in {s.stop.stop_country_code for s in stops if s.stop.stop_country_code}
+            for cc in {
+                s.stop.stop_country_code for s in stops if s.stop.stop_country_code
+            }
         }
         custom_model = self._build_custom_model(vehicle_max_speed_kmh, avoid_hsr)
 
@@ -232,7 +234,9 @@ class RailRouter:
             snapped_coords = snap_raw["paths"][0]["snapped_waypoints"]["coordinates"]
             raw = self._post_route(
                 self._build_payload(
-                    stops, vehicle_max_speed_kmh, avoid_hsr,
+                    stops,
+                    vehicle_max_speed_kmh,
+                    avoid_hsr,
                     override_coords=snapped_coords,
                 )
             )
@@ -257,9 +261,7 @@ class RailRouter:
                     continue
                 ring = self._country_index.get_largest_polygon(cc)
                 if ring is None:
-                    logger.warning(
-                        "No polygon for '%s' — skipping HSR avoidance.", cc
-                    )
+                    logger.warning("No polygon for '%s' — skipping HSR avoidance.", cc)
                     continue
                 closed_ring = ring if ring[0] == ring[-1] else ring + [ring[0]]
                 area_name = f"hsr{cc.lower()}"
@@ -348,7 +350,9 @@ class RailRouter:
         time_detail = details.get("time", [])
 
         intervals = self._compute_country_intervals(coords, time_detail)
-        return self._parse_legs(len(stops), coords, leg_distance_detail, intervals, tracks)
+        return self._parse_legs(
+            len(stops), coords, leg_distance_detail, intervals, tracks
+        )
 
     @staticmethod
     def _parse_legs(
@@ -409,15 +413,17 @@ class RailRouter:
                     continue  # "UNK" (open water/ferry) — no country, no buffer time
                 total_buffer_min += round(cc_drive_min * track.buffer_quota_per)
 
-            legs.append(RoutedLeg(
-                geometry=coords[from_idx : to_idx + 1],
-                distance_m=round(total_dist_m),
-                driving_time_min=ms_to_min(total_dur_ms),
-                buffer_time_min=total_buffer_min,
-                energy_kwh=0.0,  # populated by calc_energy_consumption()
-                country_distance_shares=country_distance_shares,
-                country_time_shares=country_time_shares,
-            ))
+            legs.append(
+                RoutedLeg(
+                    geometry=coords[from_idx : to_idx + 1],
+                    distance_m=round(total_dist_m),
+                    driving_time_min=ms_to_min(total_dur_ms),
+                    buffer_time_min=total_buffer_min,
+                    energy_kwh=0.0,  # populated by calc_energy_consumption()
+                    country_distance_shares=country_distance_shares,
+                    country_time_shares=country_time_shares,
+                )
+            )
 
         return legs
 

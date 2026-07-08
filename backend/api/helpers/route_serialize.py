@@ -24,8 +24,15 @@ Public interface:
 from __future__ import annotations
 
 from models.route.route import (
-    Route, TripPair, Schedule, SeasonalSchedule, Season, Frequency,
-    Parking, Shunting, ODPair,
+    Route,
+    TripPair,
+    Schedule,
+    SeasonalSchedule,
+    Season,
+    Frequency,
+    Parking,
+    Shunting,
+    ODPair,
 )
 from models.route.trip import Stop, StopType, Segment, Trip
 from models.params import Composition, TrackInfraCollection, CompositionCollection
@@ -34,6 +41,7 @@ from models.params import Composition, TrackInfraCollection, CompositionCollecti
 # ROUTE — validate
 # =============================================================================
 
+
 def validate_route_dict(data: dict) -> list[str]:
     """Structural validation of a route_to_dict() payload before deserialization.
     Returns a list of error messages, empty if valid."""
@@ -41,7 +49,9 @@ def validate_route_dict(data: dict) -> list[str]:
     if not isinstance(data.get("route_id"), str):
         errors.append("route.route_id must be a string.")
     schedule = data.get("schedule")
-    if not isinstance(schedule, dict) or not isinstance(schedule.get("seasonal_schedules"), list):
+    if not isinstance(schedule, dict) or not isinstance(
+        schedule.get("seasonal_schedules"), list
+    ):
         errors.append("route.schedule.seasonal_schedules must be a list.")
     trip_pairs = data.get("trip_pairs")
     if not isinstance(trip_pairs, list) or len(trip_pairs) == 0:
@@ -61,9 +71,11 @@ def validate_route_dict(data: dict) -> list[str]:
         errors.append("route.geometries must be a list if present.")
     return errors
 
+
 # =============================================================================
 # ROUTE — serialize
 # =============================================================================
+
 
 def _stop_to_dict(stop: Stop) -> dict:
     return {
@@ -76,6 +88,7 @@ def _stop_to_dict(stop: Stop) -> dict:
         "arrival_time_min": stop.arrival_time_min,
         "departure_time_min": stop.departure_time_min,
     }
+
 
 def _segment_to_dict(seg: Segment, geometry_id: str) -> dict:
     """geometry_id: caller-assigned reference into route['geometries'] —
@@ -91,6 +104,7 @@ def _segment_to_dict(seg: Segment, geometry_id: str) -> dict:
         "country_distance_shares": seg.country_distance_shares,
         "country_time_shares": seg.country_time_shares,
     }
+
 
 def _trip_to_dict(trip: Trip, geometries: list[dict]) -> dict:
     """geometries: shared collector this trip's segments append {id, coords}
@@ -108,6 +122,7 @@ def _trip_to_dict(trip: Trip, geometries: list[dict]) -> dict:
         "direction": trip.direction,
         "segments": segments,
     }
+
 
 def _composition_to_dict(comp: Composition) -> dict:
     """Physics-relevant subset of Composition — NOT the full object.
@@ -135,14 +150,20 @@ def _composition_to_dict(comp: Composition) -> dict:
         "density_by_class": comp.density_by_class,
     }
 
+
 _EXPOSED_TRACK_FIELDS = (
-    "hsr_allowed", "min_boarding_time_min", "min_alighting_time_min",
-    "terrain_score", "terrain_category", "buffer_quota_per",
+    "hsr_allowed",
+    "min_boarding_time_min",
+    "min_alighting_time_min",
+    "terrain_score",
+    "terrain_category",
+    "buffer_quota_per",
 )
 """Which TrackInfrastructure fields _track_to_dict() actually shows — used
 to filter defaulted_fields down to fields the caller can actually see
 (no point flagging tac_eur_train_km as defaulted when tac_eur_train_km
 itself isn't even in the response)."""
+
 
 def _track_to_dict(track) -> dict:
     """Physics-relevant subset of TrackInfrastructure — NOT the full object.
@@ -172,6 +193,7 @@ def _track_to_dict(track) -> dict:
         "terrain_category": track.terrain_category,
         "buffer_quota_per": track.buffer_quota_per,
     }
+
 
 def route_to_dict(route: Route, scenario_id: int, tracks: TrackInfraCollection) -> dict:
     """Serialize a Route to a JSON-compatible dict.
@@ -255,15 +277,16 @@ def route_to_dict(route: Route, scenario_id: int, tracks: TrackInfraCollection) 
         # None, since DBDataLoader.build_all_tracks() builds one entry per
         # country in input_params.countries — see TrackInfraCollection.
         "track_infrastructure": [
-            _track_to_dict(tracks.get(cc))
-            for cc in sorted(route.countries)
+            _track_to_dict(tracks.get(cc)) for cc in sorted(route.countries)
         ],
         "geometries": geometries,  # last — keeps the bulky coordinate data out of the way when scanning the rest of route
     }
 
+
 # =============================================================================
 # ROUTE — deserialize
 # =============================================================================
+
 
 def _stop_from_dict(d: dict) -> Stop:
     return Stop(
@@ -276,6 +299,7 @@ def _stop_from_dict(d: dict) -> Stop:
         arrival_time_min=d.get("arrival_time_min"),
         departure_time_min=d.get("departure_time_min"),
     )
+
 
 def _segment_from_dict(d: dict, geometries_by_id: dict[str, list]) -> Segment:
     """geometries_by_id: {geometry_id: coords} built once in route_from_dict()
@@ -300,12 +324,14 @@ def _segment_from_dict(d: dict, geometries_by_id: dict[str, list]) -> Segment:
         country_time_shares=d["country_time_shares"],
     )
 
+
 def _trip_from_dict(d: dict, geometries_by_id: dict[str, list]) -> Trip:
     return Trip(
         trip_id=d["trip_id"],
         direction=int(d["direction"]),
         segments=[_segment_from_dict(s, geometries_by_id) for s in d["segments"]],
     )
+
 
 def route_from_dict(
     data: dict, loader, scenario_id: int | None = None
@@ -330,7 +356,9 @@ def route_from_dict(
     composition/operator parameters an evaluation was costed with, without
     a second DB round-trip.
     """
-    resolved_scenario_id = scenario_id if scenario_id is not None else data.get("scenario_id")
+    resolved_scenario_id = (
+        scenario_id if scenario_id is not None else data.get("scenario_id")
+    )
     if resolved_scenario_id is None:
         raise ValueError(
             "route_from_dict: no scenario_id provided and none embedded in "
@@ -371,12 +399,14 @@ def route_from_dict(
             )
             for od in tp.get("od_pairs", [])
         ]
-        trip_pairs.append(TripPair(
-            outbound=_trip_from_dict(tp["outbound"], geometries_by_id),
-            return_trip=_trip_from_dict(tp["return_trip"], geometries_by_id),
-            composition=composition,
-            od_pairs=od_pairs,
-        ))
+        trip_pairs.append(
+            TripPair(
+                outbound=_trip_from_dict(tp["outbound"], geometries_by_id),
+                return_trip=_trip_from_dict(tp["return_trip"], geometries_by_id),
+                composition=composition,
+                od_pairs=od_pairs,
+            )
+        )
 
     parkings = [
         Parking(

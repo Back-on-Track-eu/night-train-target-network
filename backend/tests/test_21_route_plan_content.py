@@ -39,6 +39,7 @@ DUMMY_KWH_PER_KM = 28.0
 # Country attribution
 # =============================================================================
 
+
 class TestCountryAttribution:
 
     def test_shares_sum_to_one_per_segment(self, route_berlin_zuerich_wien):
@@ -46,8 +47,12 @@ class TestCountryAttribution:
         on every segment — the allocation basis for TAC/energy costing."""
         for trip in all_trips(route_berlin_zuerich_wien):
             for seg in trip["segments"]:
-                assert sum(seg["country_distance_shares"].values()) == pytest.approx(1.0, abs=1e-3)
-                assert sum(seg["country_time_shares"].values()) == pytest.approx(1.0, abs=1e-3)
+                assert sum(seg["country_distance_shares"].values()) == pytest.approx(
+                    1.0, abs=1e-3
+                )
+                assert sum(seg["country_time_shares"].values()) == pytest.approx(
+                    1.0, abs=1e-3
+                )
 
     def test_berlin_wien_crosses_de_and_at(self, route_berlin_wien):
         """Berlin → Wien touches at least DE and AT."""
@@ -66,15 +71,18 @@ class TestCountryAttribution:
             attributed = sum(country_km(trip).values())
             assert attributed == pytest.approx(trip_distance_km(trip), rel=1e-3)
 
-    def test_track_infrastructure_matches_traversed_countries(self, route_berlin_zuerich_wien):
+    def test_track_infrastructure_matches_traversed_countries(
+        self, route_berlin_zuerich_wien
+    ):
         """route['track_infrastructure'] lists every country the segments
         touch (incl. transit-only), and nothing beyond segment + stop
         countries — mirrors Route.countries exactly."""
         route = route_berlin_zuerich_wien
         listed = {t["country_code"] for t in route["track_infrastructure"]}
         traversed = route_countries(route)
-        stop_countries = {st["country_code"]
-                          for trip in all_trips(route) for st in stop_times(trip)}
+        stop_countries = {
+            st["country_code"] for trip in all_trips(route) for st in stop_times(trip)
+        }
         assert traversed <= listed
         assert listed <= traversed | stop_countries
 
@@ -82,6 +90,7 @@ class TestCountryAttribution:
 # =============================================================================
 # Route geometry sanity
 # =============================================================================
+
 
 class TestRouteGeometry:
 
@@ -92,7 +101,9 @@ class TestRouteGeometry:
         ret_km = trip_distance_km(trip_by_direction(route_berlin_wien, 1))
         assert out_km == pytest.approx(ret_km, rel=0.05)
 
-    def test_detour_not_shorter_than_direct(self, route_berlin_wien, route_berlin_zuerich_wien):
+    def test_detour_not_shorter_than_direct(
+        self, route_berlin_wien, route_berlin_zuerich_wien
+    ):
         """Berlin → Wien via Zürich cannot be shorter than the direct routing
         — a violation would mean the direct route wasn't actually optimised."""
         direct_km = trip_distance_km(trip_by_direction(route_berlin_wien, 0))
@@ -104,8 +115,13 @@ class TestRouteGeometry:
         (both STD, hsr_allowed=True) → identical route distance."""
         distances = {}
         for i, comp_id in enumerate(("STD-3.1", "STD-7.1")):
-            route = build_route(api_base, STOPS_BERLIN_WIEN, comp_id,
-                                proposal_id=21, proposal_version=i + 1)
+            route = build_route(
+                api_base,
+                STOPS_BERLIN_WIEN,
+                comp_id,
+                proposal_id=21,
+                proposal_version=i + 1,
+            )
             distances[comp_id] = trip_distance_km(trip_by_direction(route, 0))
         assert distances["STD-3.1"] == distances["STD-7.1"]
 
@@ -114,9 +130,12 @@ class TestRouteGeometry:
 # Timetable math
 # =============================================================================
 
+
 class TestTimetableMath:
 
-    def test_arrival_equals_departure_plus_driving_plus_buffer(self, route_berlin_dresden_wien):
+    def test_arrival_equals_departure_plus_driving_plus_buffer(
+        self, route_berlin_dresden_wien
+    ):
         """For every segment: to_stop.arrival = from_stop.departure +
         driving_time + buffer_time — the exact build_final_timetable() math."""
         for trip in all_trips(route_berlin_dresden_wien):
@@ -130,7 +149,9 @@ class TestTimetableMath:
         departure strictly after arrival. The exact minimum depends on which
         boarding/alighting minimum applies, so only positivity is asserted."""
         for trip in all_trips(route_berlin_dresden_wien):
-            dresden = next(s for s in stop_times(trip) if s["stop_id"] == "DE_DRESDEN_HBF")
+            dresden = next(
+                s for s in stop_times(trip) if s["stop_id"] == "DE_DRESDEN_HBF"
+            )
             assert dresden["dwell_time_min"] is not None
             assert dresden["dwell_time_min"] >= 1
 
@@ -145,28 +166,40 @@ class TestTimetableMath:
 # Track infrastructure defaulting as seen by route/plan
 # =============================================================================
 
+
 class TestTrackInfraDefaulting:
 
     def test_se_route_lists_dk_and_se(self, route_copenhagen_stockholm):
         """Copenhagen → Stockholm lists both DK and SE track infra entries."""
-        countries = {t["country_code"]
-                     for t in route_copenhagen_stockholm["track_infrastructure"]}
+        countries = {
+            t["country_code"]
+            for t in route_copenhagen_stockholm["track_infrastructure"]
+        }
         assert {"DK", "SE"} <= countries
 
-    def test_defaulted_fields_only_contain_exposed_fields(self, route_copenhagen_stockholm):
+    def test_defaulted_fields_only_contain_exposed_fields(
+        self, route_copenhagen_stockholm
+    ):
         """defaulted_fields entries are restricted to the physics fields the
         response actually shows — never a cost field like tac_eur_train_km."""
-        exposed = {"hsr_allowed", "min_boarding_time_min", "min_alighting_time_min",
-                   "terrain_score", "terrain_category", "buffer_quota_per"}
+        exposed = {
+            "hsr_allowed",
+            "min_boarding_time_min",
+            "min_alighting_time_min",
+            "terrain_score",
+            "terrain_category",
+            "buffer_quota_per",
+        }
         for entry in route_copenhagen_stockholm["track_infrastructure"]:
-            assert set(entry["defaulted_fields"]) <= exposed, (
-                f"{entry['country_code']}: unexpected defaulted field"
-            )
+            assert (
+                set(entry["defaulted_fields"]) <= exposed
+            ), f"{entry['country_code']}: unexpected defaulted field"
 
 
 # =============================================================================
 # Energy model (current dummy implementation)
 # =============================================================================
+
 
 class TestEnergyModel:
     """Pins the DUMMY flat-factor model (28 kWh/km, ignoring weight/speed/
@@ -186,8 +219,13 @@ class TestEnergyModel:
         different compositions → identical total energy."""
         energies = {}
         for i, comp_id in enumerate(("STD-3.1", "STD-13.1")):
-            route = build_route(api_base, STOPS_BERLIN_WIEN, comp_id,
-                                proposal_id=22, proposal_version=i + 1)
+            route = build_route(
+                api_base,
+                STOPS_BERLIN_WIEN,
+                comp_id,
+                proposal_id=22,
+                proposal_version=i + 1,
+            )
             energies[comp_id] = sum(trip_energy_kwh(t) for t in all_trips(route))
         assert energies["STD-3.1"] == pytest.approx(energies["STD-13.1"], rel=1e-6)
 
@@ -195,6 +233,7 @@ class TestEnergyModel:
 # =============================================================================
 # Parkings and shuntings
 # =============================================================================
+
 
 class TestParkingsAndShuntings:
 
@@ -207,13 +246,16 @@ class TestParkingsAndShuntings:
     def test_shuntings_at_trip_terminals(self, route_berlin_wien):
         """Every shunting sits at a terminal stop of the trip it belongs to."""
         terminals_by_trip = {
-            trip["trip_id"]: {stop_times(trip)[0]["stop_id"], stop_times(trip)[-1]["stop_id"]}
+            trip["trip_id"]: {
+                stop_times(trip)[0]["stop_id"],
+                stop_times(trip)[-1]["stop_id"],
+            }
             for trip in all_trips(route_berlin_wien)
         }
         for s in route_berlin_wien["shuntings"]:
-            assert s["stop_id"] in terminals_by_trip[s["trip_id"]], (
-                f"Shunting at non-terminal stop {s['stop_id']} for {s['trip_id']}"
-            )
+            assert (
+                s["stop_id"] in terminals_by_trip[s["trip_id"]]
+            ), f"Shunting at non-terminal stop {s['stop_id']} for {s['trip_id']}"
 
     def test_parkings_deduplicated_by_stop(self, route_berlin_wien):
         """Parkings exist and are deduplicated by stop_id, each listing the
