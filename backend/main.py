@@ -13,10 +13,10 @@ Endpoints — see api/README.md for full documentation.
   POST /api/auth/request-code        ⚠️  stub — not yet implemented
   POST /api/auth/verify              ⚠️  stub — not yet implemented
   POST /api/feedback                 ⚠️  stub — not yet implemented
-  POST /api/scenario                 ⚠️  stub — not yet implemented
-  GET  /api/scenarios                ⚠️  stub — not yet implemented
-  POST /api/scenarios                ⚠️  stub — not yet implemented
-  GET  /api/scenario/<id>            ⚠️  stub — not yet implemented
+  POST /api/proposal
+  GET  /api/proposals
+  POST /api/proposals
+  GET  /api/proposal/<id>
   GET  /api/params/StopInfrastructures
   GET  /api/params/compositions
   GET  /api/params/TrackInfrastructures
@@ -30,7 +30,7 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 
 from api.helpers.dependencies import DataNotLoadedError, init
-from api import health, params, route, evaluation, auth, feedback, scenarios
+from api import health, params, route, evaluation, auth, feedback, proposals
 
 logging.basicConfig(
     level=logging.INFO,
@@ -52,7 +52,7 @@ def create_app() -> Flask:
     app.register_blueprint(evaluation.bp, url_prefix="/api/evaluation")
     app.register_blueprint(auth.bp, url_prefix="/api/auth")
     app.register_blueprint(feedback.bp, url_prefix="/api")
-    app.register_blueprint(scenarios.bp, url_prefix="/api")
+    app.register_blueprint(proposals.bp, url_prefix="/api")
 
     # --- settings ---
     app.json.sort_keys = False

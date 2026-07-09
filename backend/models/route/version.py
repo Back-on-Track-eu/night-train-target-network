@@ -19,7 +19,7 @@ from dataclasses import dataclass
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "1.0.0"
+ROUTE_BUILDER_VERSION: str = "0.9.2"
 
 GIT_SHA: str = "unknown"  # injected by CI
 

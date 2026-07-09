@@ -25,7 +25,7 @@ from dataclasses import dataclass
 # VERSION
 # =============================================================================
 
-ENERGY_CALC_VERSION: str = "1.0.0"
+ENERGY_CALC_VERSION: str = "0.9.0"
 
 GIT_SHA: str = "unknown"  # injected by CI
 

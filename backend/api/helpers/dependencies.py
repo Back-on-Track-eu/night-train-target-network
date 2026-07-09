@@ -12,10 +12,16 @@ data, not one of the scenario-versioned tables, so there's no need to
 re-query it per request. Route handlers call get_country_index() to access
 it.
 
+A ProposalRepository (write path for saved proposals) is created alongside
+them — it holds its own connection to the same database, keeping
+DBDataLoader strictly read-only. Route handlers call
+get_proposal_repository() to access it.
+
 State
 -----
   _loader        : DBDataLoader instance (created at startup)
   _country_index : CountryIndex instance (built at startup from the loader)
+  _proposal_repo : ProposalRepository instance (created at startup)
   _loaded        : bool — True after successful DB connection
   _loaded_at     : datetime | None — UTC timestamp of startup
   _load_error    : str | None — error message if startup failed
@@ -34,6 +40,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 _loader = None
 _country_index = None
+_proposal_repo = None
 _loaded: bool = False
 _loaded_at: Optional[datetime] = None
 _load_error: Optional[str] = None
@@ -55,9 +62,10 @@ def init() -> None:
     Initialise the DBDataLoader and CountryIndex at startup.
     Called once from main.py before the Flask app starts serving requests.
     """
-    global _loader, _country_index, _loaded, _loaded_at, _load_error
+    global _loader, _country_index, _proposal_repo, _loaded, _loaded_at, _load_error
 
     from adapters.data_loader_from_db import DBDataLoader
+    from adapters.proposal_repository import ProposalRepository
     from models.route.routing.rail_router import CountryIndex
 
     logger.info("Connecting to database...")
@@ -65,6 +73,7 @@ def init() -> None:
     try:
         _loader = DBDataLoader()
         _country_index = CountryIndex(_loader.get_country_geometries())
+        _proposal_repo = ProposalRepository()
         _loaded = True
         _loaded_at = datetime.now(timezone.utc)
         _load_error = None
@@ -94,3 +103,13 @@ def get_country_index():
     if not _loaded or _country_index is None:
         raise DataNotLoadedError("Data not loaded. Call POST /api/data/load first.")
     return _country_index
+
+
+def get_proposal_repository():
+    """
+    Return the singleton ProposalRepository.
+    Raises DataNotLoadedError if init() has not completed successfully.
+    """
+    if not _loaded or _proposal_repo is None:
+        raise DataNotLoadedError("Data not loaded. Call POST /api/data/load first.")
+    return _proposal_repo
