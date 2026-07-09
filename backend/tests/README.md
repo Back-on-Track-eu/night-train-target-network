@@ -24,6 +24,7 @@ built on top of it:
 | `test_20`–`test_21` | `POST /api/route/plan` (contract, then content logic) |
 | `test_30`–`test_31` | `POST /api/evaluation/calc` (contract, then content logic) |
 | `test_40` | End-to-end pipeline smoke |
+| `test_50` | Proposals API — save/list/load |
 
 Shared code:
 
@@ -56,7 +57,7 @@ Shared code:
 | Test | Purpose | Input | Expected |
 |---|---|---|---|
 | `test_schemas_exist` | All 4 project schemas created | `information_schema.schemata` | `admin`, `input_params`, `scenario`, `proposals` |
-| `test_table_row_count` (parametrized ×19) | Every seeded table populated | `COUNT(*)` per table | count ≥ per-table minimum (e.g. `track_infrastructures` ≥ 56 = 2 snapshots × 28 countries) |
+| `test_table_row_count` (parametrized ×20) | Every seeded table populated | `COUNT(*)` per table | count ≥ per-table minimum (e.g. `track_infrastructures` ≥ 56 = 2 snapshots × 28 countries) |
 | `test_required_columns_not_null` (parametrized ×5) | Non-nullable columns intact | `COUNT(*) WHERE col IS NULL` | 0 NULLs |
 | `test_composition_types_have_coaches` | No zero-capacity compositions | JOIN composition_types↔coaches | every composition has ≥ 1 coach |
 | `test_coach_type_classes_have_places` | Positive place counts | coach_type_classes | no row with places ≤ 0 |
@@ -241,6 +242,47 @@ Standard input: `eval_standard` (3-stop route, directional demand 40 Couchette
 | `test_pipeline_completes_with_two_trips` | Plan step produced a costable route | shared 3-stop route | 2 trips |
 | `test_pipeline_produces_all_views` | Cost step consumed the plan output | plan → demand → evaluate | all 5 views present |
 | `test_pipeline_revenue_and_cost_positive` | Both ledger sides populated | pipeline result | revenue > 0, cost > 0 |
+
+---
+
+## test_50_proposals_api.py — Proposals API
+
+Reuses the shared session route fixtures (no extra OpenRailRouting calls).
+A module-scoped autouse fixture purges saved proposals before and after
+this file and lifts the `proposal_id` sequence above the fixture
+placeholder range (100-999, see `conftest.py`'s range-convention comment)
+so a sequence-assigned ID can never collide with one embedded in a shared
+route fixture.
+
+| Test | Purpose | Input | Expected |
+|---|---|---|---|
+| `test_save_new_proposal_created` | Unknown/draft proposal_id creates | shared route, save | `action=created`, version 1, sequence-assigned id |
+| `test_save_rewrites_all_draft_ids` | Every ID in the stored route carries the real prefix | saved route, reload | no trace of the draft prefix anywhere in the JSON |
+| `test_save_own_proposal_creates_new_version` | Re-saving your own proposal appends a version | save, reload, re-save | `action=versioned`, version 2, `is_current` flips, v1 row kept |
+| `test_save_foreign_proposal_branches` | Saving someone else's proposal duplicates it | David saves, Bjarne re-saves | `action=branched`, new proposal_id, original untouched |
+| `test_save_writes_gtfs_decomposition` | Save decomposes into GTFS tables | saved route | routes/trips/stop_times/shapes/calendar rows correct |
+| `test_gtfs_shape_length_matches_route_physics` | GTFS and JSONB describe the same route | saved route | summed shape length ≈ summed segment distance |
+| `test_save_with_evaluation_stores_and_rewrites_it` | Evaluation snapshot persisted and ID-rewritten | `eval_standard`, save with `evaluation` | GET returns it with the real `route_id`, no draft prefix anywhere |
+| `test_save_with_mismatched_evaluation_is_rejected` | `evaluation.route_id` must match `route.route_id` | evaluation for a different route | `400 validation_error` |
+| `test_save_without_evaluation_leaves_financial_fields_null` | No evaluation → `evaluation_body` NULL | saved route, no `evaluation` | GET's `evaluation` is `null` |
+| `test_save_without_user_id_is_rejected` | Validation | no `user_id` | `400 validation_error` |
+| `test_save_with_unknown_user_is_rejected` | Domain check | nonexistent `user_id` | `422 domain_error` |
+| `test_save_with_unconventional_route_id_is_rejected` | Validation | non-`P{id}_V{v}_R1` route_id | `400 validation_error` |
+| `test_get_proposal_round_trips_plan_response` | GET matches the plan-response shape | saved with `route_builder_version`/`request` | both echoed back verbatim |
+| `test_get_unknown_proposal_returns_404` | Domain check | nonexistent proposal_id | `404 not_found` |
+| `test_seeded_example_proposal_is_queryable` | The DB-init-time seed proposal is a real, queryable proposal | `GET /api/proposal/1` | Berlin–Dresden–Wien, both directions, no evaluation |
+| `test_list_returns_current_summaries` | List shape and current-only filtering | two proposals, one re-saved, plus the permanent seed proposal | `total=3`, only current versions, metrics populated |
+| `test_filtered_list_by_country_stop_and_user` | Filters narrow correctly | country/stop/user filters | country/stop isolate Zürich; user (David) returns 2 — his save plus the seed proposal |
+| `test_list_sorting_and_pagination` | Sort + limit/offset | `total_distance_km` sort, `limit=1` | ascending order, `total=3` (2 from this fixture + the seed proposal) |
+| `test_list_sort_by_margin_is_null_safe` | Financial sort tolerates unsaved evaluations | none of the 3 listed proposals (including the seed) has one | sort doesn't raise, `margin_eur` is `null` for all three |
+| `test_list_rejects_unknown_sort_key` | Validation | `sort.by="unknown_field"` | `400 validation_error` |
+
+Note: `db/dev/seed.py` seeds one permanent example proposal (`proposal_id=1`,
+the natural first-insert outcome on a fresh DB — collision-free now that
+`conftest.py`'s route fixtures use draft placeholders 100+, not 1-4) that
+this module's cleanup fixture deliberately never purges — see
+`_purge_saved_proposals()`'s docstring. Any test asserting an exact
+`total`/count on an unfiltered or David-owned list accounts for it.
 
 ---
 

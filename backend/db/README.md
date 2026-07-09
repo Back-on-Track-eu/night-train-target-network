@@ -86,7 +86,7 @@ Three schemas: `admin`, `input_params`, `proposals`.
 
 | Table | Description |
 |---|---|
-| `users` | Platform users (email-based, placeholder for OTP/magic-link auth) |
+| `users` | Platform users — `user_id` identity, `user_name` display name, `email` login identity (placeholder for OTP/magic-link auth) |
 | `feedback` | User feedback submissions |
 
 ### `input_params`
@@ -109,8 +109,41 @@ Three schemas: `admin`, `input_params`, `proposals`.
 
 ### `proposals`
 
-GTFS-compatible tables plus a project-specific `proposals` evaluation table.
-All GTFS IDs follow the convention `P{proposal_id}_V{version}_R1[_D{dir}_T{idx}]`.
+GTFS-compatible tables plus a thin project-specific `proposals` version
+container. All GTFS IDs follow the convention
+`P{proposal_id}_V{version}_R1[_D{dir}_T{idx}]`.
+
+The route — and, if the saver included one, its evaluation — is stored
+twice on every save: once verbatim as JSON (`route_body` and, if
+present, `evaluation_body` — same names the API's `POST /api/proposal`
+request and `GET /api/proposal/<id>` response use, see `api/README.md`),
+once decomposed into the GTFS tables below (the route only — evaluation
+results have no GTFS equivalent). These two columns are `JSON`,
+deliberately not `JSONB` — `JSONB`'s decomposed binary storage does not
+preserve original key order (confirmed empirically: a value round-tripped
+through `JSONB` comes back with keys in a different order than it went
+in), which defeats the point of a column that exists specifically to
+hand back the exact bytes originally posted to `/api/route/plan` and
+`/api/evaluation/calc`. `JSON` (the text-based type) preserves an exact
+copy of the input, key order included. The tradeoff: `JSONB`-only
+operators (`-`, `#-`, `@>`, `<@`, `?`, `?|`, `?&`, `||`) and GIN indexing
+aren't available directly on these two columns — queries needing them
+cast explicitly with `::jsonb` (see `list_current()` in
+`adapters/proposal_repository.py`), a read-only cast with no effect on
+what's stored. Neither column is trimmed before storing, so
+`evaluation_body`'s `input.route` ends up holding a full second copy of
+the same route already in `route_body.route` — a deliberate simplicity
+tradeoff (see the schema comments in `create_proposal_schema.sql`), not
+an oversight: the API layer
+(`api/helpers/proposal_serialize.py:validate_route_evaluation_sync`)
+rejects a save with `400 validation_error` if the two copies don't
+describe the exact same route, so this table can never hold two
+disagreeing versions of one proposal's route. `evaluation_body` is a
+point-in-time snapshot of a `POST /api/evaluation/calc` response — not
+re-derived — so it can drift from a fresh call if parameters change
+later, the same tradeoff scenario pinning already makes elsewhere. List
+summaries read `total_revenue_eur`/`total_cost_eur`/`net_eur` out of
+`evaluation_body -> views -> route -> data -> per_year`.
 
 | Table | Description |
 |---|---|
@@ -121,7 +154,25 @@ All GTFS IDs follow the convention `P{proposal_id}_V{version}_R1[_D{dir}_T{idx}]
 | `routes` | GTFS routes.txt — one row per proposal version route |
 | `trips` | GTFS trips.txt — one scheduled run per proposal version |
 | `stop_times` | GTFS stop_times.txt — ordered stop sequence per trip (times as INTERVAL) |
-| `proposals` | Project-specific versioned evaluation table. `proposal_id` is stable across versions; `proposal_version` increments on every change. `parameter_snapshot` JSONB records the exact ParamVersions used |
+| `proposals` | Version container. `proposal_id` is stable across versions; `proposal_version` increments on every save (append-only, never updated in place); `is_current` flags the latest version per `proposal_id`. `route_body` JSON holds the exact `POST /api/route/plan` response the version was saved from, key order preserved; `evaluation_body` JSON (nullable) holds the `POST /api/evaluation/calc` response, if one was saved, same guarantee |
+
+**Seed data.** `db/dev/seed.py` seeds exactly one proposal (`proposal_id=1`
+— the natural first-insert outcome on a fresh DB, no reservation needed —
+Berlin Hbf → Dresden Hbf → Wien Hbf, owned by David) — saved through
+`adapters.proposal_repository.ProposalRepository.save()`, the same code
+path a live `POST /api/proposal` uses, so the seeded GTFS rows and the
+`proposals.proposals` row that owns them are structurally identical to a
+real save rather than a hand-maintained parallel representation. This
+keeps the "every GTFS row is linked to a real proposal" invariant true
+with no exception, including at seed time. It's saved without an
+evaluation, so its financial fields are null until someone evaluates and
+re-saves it. `proposal_id=1` is collision-free because
+`tests/conftest.py`'s route-fixture draft placeholders live at `100`+
+(see that file's range-convention comment) and
+`tests/test_50_proposals_api.py`'s own sequence floor is `1000`+. Every
+saved proposal's GTFS service, seeded or live, is pinned to the project's
+target 2032 timetable year (`ProposalRepository._SERVICE_START`/
+`_SERVICE_END`).
 
 ---
 

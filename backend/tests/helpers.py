@@ -16,6 +16,8 @@ import requests
 
 ROUTE_URL = "/api/route/plan"
 EVAL_URL = "/api/evaluation/calc"
+PROPOSAL_URL = "/api/proposal"
+PROPOSALS_URL = "/api/proposals"
 
 # Mirrors models/route/route.py: DAYS_PER_OPERATING_WEEK / WEEKS_PER_SEASON.
 _DAYS_PER_WEEK = {"daily": 7, "three_per_week": 3}
@@ -53,6 +55,42 @@ def evaluate(
         body["scenario_id"] = scenario_id
     resp = requests.post(f"{api_base}{EVAL_URL}", json=body, timeout=timeout)
     assert resp.status_code == 200, f"evaluation/calc failed: {resp.text[:300]}"
+    return resp.json()
+
+
+def save_proposal(
+    api_base: str,
+    route: dict,
+    user_id: int,
+    timeout: int = 30,
+    evaluation: dict | None = None,
+    route_builder_version: str = "test",
+    request: dict | None = None,
+    **extra,
+) -> dict:
+    """POST /api/proposal for a route dict as the given user. Wraps `route`
+    into a route_body envelope ({route_builder_version, request,
+    route} — route_builder_version/request default to test-only placeholder
+    values unless overridden) since the endpoint now requires the whole
+    POST /api/route/plan response, not just its route section. `evaluation`,
+    if given, is passed through as evaluation_body verbatim — build it
+    via evaluate(route) first so its input.route matches `route` (the
+    endpoint rejects a mismatch). Any other kwargs (e.g. change_log) go at
+    the top level of the save body. Asserts 201 — callers testing error
+    paths post directly instead."""
+    body = {
+        "user_id": user_id,
+        "route_body": {
+            "route_builder_version": route_builder_version,
+            "request": request if request is not None else {},
+            "route": route,
+        },
+        **extra,
+    }
+    if evaluation is not None:
+        body["evaluation_body"] = evaluation
+    resp = requests.post(f"{api_base}{PROPOSAL_URL}", json=body, timeout=timeout)
+    assert resp.status_code == 201, f"proposal save failed: {resp.text[:300]}"
     return resp.json()
 
 

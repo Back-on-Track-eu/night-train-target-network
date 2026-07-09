@@ -2,24 +2,47 @@
 
 **V.901.3** — Base URL: `http://localhost:5000`
 
+## Table of Contents
+
+- [Health](#health)
+- [Auth](#auth) ⚠️ not yet implemented
+- [Feedback](#feedback) ⚠️ not yet implemented
+- [Proposals](#proposals)
+  - [`POST /api/proposal`](#post-proposal) — save a proposal
+  - [`GET` / `POST /api/proposals`](#list-proposals) — list proposals
+  - [`GET /api/proposal/<id>`](#get-proposal) — load a proposal
+- [Input Parameters](#input-parameters)
+- [Route](#route)
+  - [`POST /api/route/plan`](#route-plan) — plan a route
+- [Evaluation](#evaluation)
+  - [`POST /api/evaluation/calc`](#evaluation-calc) — cost/revenue evaluation
+- [Error responses](#error-responses)
+
 ---
 
-## Endpoints
+<a id="health"></a>
 
-### Health
+## Health
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/health` | Liveness check — returns 200 if API process is running |
+
+<details>
+<summary>Request &amp; response details</summary>
 
 **Response**
 ```json
 {"status": "ok"}
 ```
 
+</details>
+
 ---
 
-### Auth ⚠️ NOT YET IMPLEMENTED
+<a id="auth"></a>
+
+## Auth ⚠️ NOT YET IMPLEMENTED
 
 > These endpoints are stubbed and return `501 Not Implemented`.
 > Phase 5 will implement OTP/magic-link JWT auth.
@@ -31,7 +54,9 @@
 
 ---
 
-### Feedback ⚠️ NOT YET IMPLEMENTED
+<a id="feedback"></a>
+
+## Feedback ⚠️ NOT YET IMPLEMENTED
 
 > Stubbed — returns `501 Not Implemented`.
 
@@ -41,25 +66,215 @@
 
 ---
 
-### Scenarios ⚠️ NOT YET IMPLEMENTED
+<a id="proposals"></a>
 
-> Stubbed — returns `501 Not Implemented`.
+## Proposals
+
+Save, list, and load night train proposals. No auth yet — requests carry
+`user_id` directly. Every user can see and load every proposal; a save
+either creates a new proposal, adds a version to one you own, or branches
+a new proposal from one you don't (see below).
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/scenario` | Save a new scenario |
-| `GET` | `/api/scenarios` | List scenarios |
-| `GET` | `/api/scenario/<id>` | Load a scenario by ID |
+| `POST` | `/api/proposal` | Save a proposal (create / new version / branch) |
+| `GET` | `/api/proposals` | List current proposal versions |
+| `POST` | `/api/proposals` | Filtered/sorted/paginated list |
+| `GET` | `/api/proposal/<id>` | Load the current version of a proposal |
+
+The route — and, if included, its evaluation — are stored twice: verbatim
+as JSONB (for an exact, cheap round-trip back to the frontend) and, for
+the route, decomposed into GTFS tables
+(`proposals.routes`/`trips`/`stop_times`/`shapes`/`services`/`calendar`,
+for future export/interop). This duplication is deliberate for now — see
+`db/README.md`. Only fully daily schedules (`schedule_mode: "alwaysDaily"`,
+the only mode `/api/route/plan` currently supports) can be saved; a
+non-daily frequency fails with `422 domain_error`.
+
+**Save posts whole API responses, not hand-picked fields.** `POST
+/api/proposal` takes the *entire* `POST /api/route/plan` response
+(`route_builder_version` + `request` + `route`, all three) as
+`route_body`, and, optionally, the *entire* `POST
+/api/evaluation/calc` response (`calc_version` + `route_id` + `models` +
+`input` + `views`, all five) as `evaluation_body`. Nothing is
+stripped or trimmed before storing — that's why `evaluation_body`
+ends up containing a second copy of the route under `input.route`, next
+to the one already in `route_body.route`. The server validates
+both are structurally complete (every section present, not a partial
+object) and, if both are given, that `evaluation_body` genuinely
+describes the same route as `route_body` — exact deep equality
+of `evaluation_body.input.route` against `route_body.route`,
+not just a `route_id` match. A save is rejected with `400
+validation_error` if either check fails.
+
+<a id="post-proposal"></a>
+
+### `POST /api/proposal`
+
+**Save semantics** — the posted `route_body.route`'s own
+`route_id` (`P{proposal_id}_V{version}_R1`) decides the outcome; rows are
+always appended, never updated in place:
+
+| Condition | Action | Result |
+|-----------|--------|--------|
+| `proposal_id` is a draft placeholder (≥1e9, from `/api/route/plan`) or unknown | `created` | New `proposal_id` (from the sequence), version 1 |
+| `proposal_id` exists and `user_id` owns the current version | `versioned` | Same `proposal_id`, version + 1, `is_current` flipped |
+| `proposal_id` exists and belongs to a different `user_id` | `branched` | New `proposal_id`, version 1 |
+
+All IDs inside the posted route (`route_id`, trip IDs, geometry IDs, and
+every trip reference in `od_pairs`/`shuntings`/`parkings`) share the prefix
+`P{proposal_id}_V{version}_` and are rewritten together to the real
+`proposal_id`/version — in both `route_body.route` and, if given,
+`evaluation_body` (which embeds the same IDs under `input.route` and
+as dict keys in several of its `views`). Use the `route_id` returned in
+the response from here on, not the one you posted.
+
+<details>
+<summary>Request &amp; response details</summary>
+
+**Request body**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `user_id` | int | ✅ | `admin.users` identity of the saver — must already exist |
+| `route_body` | object | ✅ | The **entire** `POST /api/route/plan` response — `{route_builder_version, request, route}`, not just `route` |
+| `change_log` | string | — | What changed in this version |
+| `evaluation_body` | object | — | The **entire** `POST /api/evaluation/calc` response — `{calc_version, route_id, models, input, views}`. Must describe the exact same route as `route_body.route` (see above) — stored as a point-in-time snapshot, not re-derived |
+
+The frontend can spread the `POST /api/route/plan` response straight into
+`route_body`, and the `POST /api/evaluation/calc` response
+straight into `evaluation_body` if one was run — no field-picking on
+either side. A proposal can be saved without `evaluation_body` — its
+financial fields are simply null everywhere until a version with one is
+saved.
+
+**Response `201`**
+```json
+{
+  "action": "created",
+  "proposal": {
+    "proposal_id": 5,
+    "proposal_version": 1,
+    "is_current": true,
+    "user_id": 1,
+    "user_name": "David",
+    "change_log": "initial save",
+    "created_at": "2026-07-08T12:00:00+00:00"
+  },
+  "route_id": "P5_V1_R1"
+}
+```
+
+</details>
+
+<a id="list-proposals"></a>
+
+### `GET` / `POST /api/proposals`
+
+`GET` returns every current proposal as a summary, newest first. `POST`
+accepts filters/sort/pagination.
+
+<details>
+<summary>Request &amp; response details</summary>
+
+**Request body** (`POST` only, all fields optional)
+```json
+{
+  "filter": {
+    "user_ids": [1],
+    "countries": ["CH"],
+    "stop_ids": ["CH_ZUERICH_HB"]
+  },
+  "sort": [{"by": "total_distance_km", "dir": "asc"}],
+  "limit": 50,
+  "offset": 0
+}
+```
+`sort.by` is one of `created_at`, `total_distance_km`, `total_time_h`,
+`total_revenue_eur`, `total_cost_eur`, `margin_eur`. The last three read
+from the saved evaluation snapshot (`views.route.data.per_year` — see
+`db/README.md`); proposals saved without one report `null` financial
+fields and sort as if they were `0` on a financial key, rather than being
+excluded. `countries` includes transit-only countries (derived from
+segment-level `country_distance_shares`, same as the route response).
+
+**Response**
+```json
+{
+  "total": 12,
+  "proposals": [
+    {
+      "proposal_id": 5, "proposal_version": 2, "is_current": true,
+      "user_id": 1, "user_name": "David", "change_log": "...",
+      "created_at": "2026-07-08T12:00:00+00:00",
+      "name": "Berlin Hbf – Wien Hbf",
+      "total_distance_km": 683.4, "total_driving_time_h": 8.3,
+      "total_time_h": 9.0, "countries": ["AT", "DE"],
+      "stops": [{"stop_id": "DE_BERLIN_HBF", "stop_name": "Berlin Hbf"}, "..."],
+      "total_revenue_eur": 45000.0, "total_cost_eur": 32000.0,
+      "margin_eur": 13000.0, "margin_per": 0.2889
+    }
+  ]
+}
+```
+`total_revenue_eur`/`total_cost_eur`/`margin_eur`/`margin_per` are `null`
+for any proposal saved without an evaluation. `margin_eur` is the bottom
+line after cost, revenue, and the EBIT margin target (`net_eur` in the
+evaluation response), not the raw EBIT target itself.
+
+</details>
+
+<a id="get-proposal"></a>
+
+### `GET /api/proposal/<id>`
+
+Always the current version (no history endpoint yet).
+
+<details>
+<summary>Request &amp; response details</summary>
+
+No request body. Returns the two stored envelopes directly — the exact
+payloads originally posted to `POST /api/route/plan` and `POST
+/api/evaluation/calc` (after draft-ID rewriting), unchanged:
+```json
+{
+  "proposal": { "proposal_id": 5, "proposal_version": 1, "...": "..." },
+  "route_body": {
+    "route_builder_version": "...",
+    "request": { "...": "..." },
+    "route": { "route_id": "P5_V1_R1", "...": "..." }
+  },
+  "evaluation_body": {
+    "calc_version": "...",
+    "route_id": "P5_V1_R1",
+    "models": { "...": "..." },
+    "input": { "route": { "...": "same content as route_body.route" }, "parameters": { "...": "..." } },
+    "views": { "...": "..." }
+  }
+}
+```
+`evaluation_body` is `null` if the proposal was saved without one.
+`404 not_found` if the `proposal_id` doesn't exist.
+
+</details>
+
+No delete endpoint — proposals are removed manually in the database if
+ever needed.
 
 ---
 
-### Input Parameters
+<a id="input-parameters"></a>
+
+## Input Parameters
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/params/StopInfrastructures` | All stops with id, name, country, coordinates |
 | `GET` | `/api/params/compositions` | All composition types with full parameters |
 | `GET` | `/api/params/TrackInfrastructures` | All country track infrastructure parameters |
+
+<details>
+<summary>Request &amp; response details</summary>
 
 No request body — all are read-only GET endpoints.
 
@@ -74,15 +289,26 @@ field objects with provenance:
 | `source` | object | `{source_id, source_description, source_url}` |
 | `description` | string | Column description from DB |
 
+</details>
+
 ---
 
-### Route
+<a id="route"></a>
+
+## Route
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/api/route/plan` | Plan a route — stateless, always a full build (no in-place adjust) |
 
-**`POST /api/route/plan` — Request body**
+<a id="route-plan"></a>
+
+### `POST /api/route/plan`
+
+<details>
+<summary>Request &amp; response details</summary>
+
+**Request body**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -185,7 +411,7 @@ field objects with provenance:
 
 **`route.trip_pairs[].composition`** — physics-relevant subset of the composition
 used, not the full object (cost fields like `driver_costs_eur_h` are deliberately
-excluded — see `/api/evaluation/calc` for those):
+excluded — see [Evaluation](#evaluation) for those):
 
 | Field | Description |
 |---|---|
@@ -223,7 +449,7 @@ subset of `TrackInfrastructure` (cost fields like `tac_eur_train_km` excluded):
 | Field | Type | Description |
 |---|---|---|
 | `country_code` | string | |
-| `defaulted_fields` | array of string | Which of the fields below came from the EU-average default rather than this country's own seeded data. Empty if all real. A route through a country with **no row at all** in `track_infrastructures` is rejected outright with a `422 domain_error` — see **Error responses** — so `defaulted_fields` only ever reflects individual missing columns on an existing row, never a whole missing country |
+| `defaulted_fields` | array of string | Which of the fields below came from the EU-average default rather than this country's own seeded data. Empty if all real. A route through a country with **no row at all** in `track_infrastructures` is rejected outright with a `422 domain_error` — see [Error responses](#error-responses) — so `defaulted_fields` only ever reflects individual missing columns on an existing row, never a whole missing country |
 | `hsr_allowed` | bool | |
 | `min_boarding_time_min`, `min_alighting_time_min` | int | |
 | `terrain_score`, `terrain_category` | float, string | |
@@ -238,19 +464,31 @@ easier to scan the rest of the route without wading through coordinate arrays):
 | `id` | string | Matches a `segments[].geometry_id` |
 | `coords` | array | `[[lon, lat], ...]` |
 
+</details>
+
 ---
 
-### Evaluation
+<a id="evaluation"></a>
+
+## Evaluation
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/api/evaluation/calc` | Run full cost and revenue evaluation |
 
-**`POST /api/evaluation/calc` — Request body**
+<a id="evaluation-calc"></a>
+
+### `POST /api/evaluation/calc`
+
+<details>
+<summary>Request &amp; response details</summary>
+
+**Request body**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `route` | object | ✓ | Route JSON from `/api/route/plan` with `od_pairs` populated |
+| `route` | object | ✓ | Route JSON from `/api/route/plan`, `od_pairs` populated if you want revenue (a route with empty `od_pairs` still evaluates — cost only, zero revenue) |
+| `scenario_id` | int | — | Overrides the route's own embedded `scenario_id` for this evaluation. Omit to cost the route under the same scenario it was planned with |
 
 Demand is embedded in the route JSON under `trip_pairs[].od_pairs`:
 
@@ -295,21 +533,36 @@ Demand is embedded in the route JSON under `trip_pairs[].od_pairs`:
 
 **Response**
 
+All top-level keys, no wrapper object:
+
 ```json
 {
   "calc_version": "...",
-  "result": {
-    "route_id": "P1_V1_R1",
-    "views": {
-      "route":                      { <normalised breakdown> },
-      "per_trip_pair":              { "<pair_key>": { <normalised breakdown> }, "all": { ... } },
-      "per_trip_pair_per_country":  { "<pair_key>": { "<country_code>": { <normalised breakdown> }, "all": { ... } }, "all": { ... } },
-      "per_trip_pair_per_od":       { "<pair_key>": { "<od_key>": { <normalised breakdown> }, "all": { ... } }, "all": { ... } },
-      "per_trip_per_stop":          { "<trip_id>": { "<stop_id>": { <normalised breakdown> }, "all": { ... } }, "all": { ... } }
-    }
+  "route_id": "P1_V1_R1",
+  "models": {
+    "route_builder": {"version": "...", "description": "...", "formulas": {"...": "..."}},
+    "energy":         {"version": "...", "description": "...", "formulas": {"...": "..."}},
+    "evaluation":      {"version": "...", "description": "...", "formulas": {"...": "..."}}
+  },
+  "input": {
+    "route": { "...": "the posted route, verbatim" },
+    "parameters": { "...": "every track/stop/composition parameter actually used, same shape as /api/params/*" }
+  },
+  "views": {
+    "route":                     {"description": "...", "normalisations": {"...": "..."}, "data": { "<normalised breakdown>": "see below" }},
+    "per_trip_pair":              {"description": "...", "normalisations": {"...": "..."}, "data": {"<pair_key>": {"filter": {"...": "..."}, "values": { "<normalised breakdown>": "see below" }}, "all": { "...": "..." }}},
+    "per_trip_pair_per_country":  {"description": "...", "normalisations": {"...": "..."}, "data": {"<pair_key>": {"<country_code>": {"filter": {"...": "..."}, "values": {"...": "..."}}}, "all": { "...": "..." }}},
+    "per_trip_pair_per_od":       {"description": "...", "normalisations": {"...": "..."}, "data": {"<pair_key>": {"<od_key>": {"filter": {"...": "..."}, "values": {"...": "..."}}}, "all": { "...": "..." }}},
+    "per_trip_per_stop":          {"description": "...", "normalisations": {"...": "..."}, "data": {"<trip_id>": {"<stop_id>": {"filter": {"...": "..."}, "values": {"...": "..."}}}, "all": { "...": "..." }}}
   }
 }
 ```
+
+`views.route.data` holds the normalised breakdown directly (no filter
+dimension — it's the whole-route aggregate). The other four views nest a
+`{filter, values}` pair per key, where `values` holds the same normalised
+breakdown shape, plus an `"all"` entry aggregating across that view's
+dimension.
 
 Each normalised breakdown contains five views:
 
@@ -321,7 +574,7 @@ Each normalised breakdown contains five views:
 | `per_available_place_km` | €/available-place-km | Per capacity × distance |
 | `per_sold_place_km` | €/sold-place-km | Per actual passenger × distance |
 
-Each view is a nested cost/revenue/margin breakdown:
+Each of those five is itself a nested cost/revenue/margin breakdown:
 
 ```json
 {
@@ -354,12 +607,21 @@ Each view is a nested cost/revenue/margin breakdown:
 }
 ```
 
+`net_eur` = `total_revenue_eur` − `total_cost_eur` − `margin.total_eur` —
+the actual bottom line after the EBIT margin target is deducted. This is
+the field `proposals.proposals`' list/sort endpoints read as `margin_eur`
+(see [Proposals](#proposals)).
+
 `od_key` format: `"{origin_stop_id}__{destination_stop_id}__{class_main}"`
 
 See `models/evaluation/README.md` for full documentation of the evaluation model,
 cost allocation rules, and view semantics.
 
+</details>
+
 ---
+
+<a id="error-responses"></a>
 
 ## Error responses
 

@@ -67,17 +67,13 @@ def test_wrong_method_returns_json_405(api_base):
 
 @pytest.mark.timeout(10)
 def test_stub_endpoints_return_501(api_base):
-    """Every Phase 4/5 stub (auth, feedback, scenarios) returns 501
+    """Every Phase 4/5 stub (auth, feedback) returns 501
     Not Implemented — a stub silently returning 200 or 404 would mislead
     the frontend about what exists."""
     stubs = [
         ("POST", "/api/auth/request-code"),
         ("POST", "/api/auth/verify"),
         ("POST", "/api/feedback"),
-        ("POST", "/api/scenario"),
-        ("GET", "/api/scenarios"),
-        ("POST", "/api/scenarios"),
-        ("GET", "/api/scenario/1"),
     ]
     for method, path in stubs:
         resp = requests.request(method, f"{api_base}{path}", json={}, timeout=5)

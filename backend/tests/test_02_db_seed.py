@@ -41,9 +41,10 @@ EXPECTED_ROW_COUNTS = {
     "input_params.stop_infrastructure_defaults": 1,
     "input_params.stop_infrastructures": 8,
     "scenario.scenarios": 2,  # base + whatif-de-track-infra
+    "proposals.proposals": 1,  # one real saved example proposal — see seed_example_proposal()
     "proposals.routes": 1,
-    "proposals.trips": 1,
-    "proposals.stop_times": 3,
+    "proposals.trips": 2,  # both directions of the one seeded proposal
+    "proposals.stop_times": 6,  # 3 stops x 2 directions
 }
 
 # Columns that must never be NULL. Every other track_infrastructures column

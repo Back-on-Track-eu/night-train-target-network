@@ -153,6 +153,11 @@ def whatif_scenario(db_cur):
 # =============================================================================
 
 
+# proposal_id range convention (avoids collisions between real saved data
+# and test fixtures across the whole suite):
+#   1-99     seed_example_proposal() in db/dev/seed.py (currently just id=1)
+#   100-999  draft placeholders for THIS file's session-scoped route fixtures
+#   1000+    tests/test_50_proposals_api.py's own dynamically-saved proposals
 @pytest.fixture(scope="session")
 def route_berlin_wien(api_base):
     """2-stop, 2-country route: Berlin → Wien (DE, AT), STD-7.1."""
@@ -160,7 +165,7 @@ def route_berlin_wien(api_base):
         api_base,
         STOPS_BERLIN_WIEN,
         DEFAULT_COMPOSITION,
-        proposal_id=1,
+        proposal_id=101,
         proposal_version=1,
     )
 
@@ -172,7 +177,7 @@ def route_berlin_dresden_wien(api_base):
         api_base,
         STOPS_BERLIN_DRESDEN_WIEN,
         DEFAULT_COMPOSITION,
-        proposal_id=2,
+        proposal_id=102,
         proposal_version=1,
     )
 
@@ -184,7 +189,7 @@ def route_berlin_zuerich_wien(api_base):
         api_base,
         STOPS_BERLIN_ZUERICH_WIEN,
         DEFAULT_COMPOSITION,
-        proposal_id=3,
+        proposal_id=103,
         proposal_version=1,
     )
 
@@ -204,7 +209,7 @@ def route_copenhagen_stockholm(api_base):
     body = {
         "stops": STOPS_COPENHAGEN_STOCKHOLM,
         "composition_id": DEFAULT_COMPOSITION,
-        "proposal_id": 4,
+        "proposal_id": 104,
         "proposal_version": 1,
     }
     resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=90)
