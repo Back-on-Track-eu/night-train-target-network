@@ -92,8 +92,8 @@ def insert_rows(cur, table: str, rows: list[dict]) -> None:
 # ============================================================
 
 USERS = [
-    {"email": "david@backontrack.eu"},
-    {"email": "bjarne@backontrack.eu"},
+    {"user_name": "David", "email": "david@backontrack.eu"},
+    {"user_name": "Bjarne", "email": "bjarne@backontrack.eu"},
 ]
 
 # ============================================================
@@ -1150,78 +1150,17 @@ COMPOSITION_TYPE_COACHES_RAW = [
 # ============================================================
 # proposals
 # ============================================================
-
-SERVICES = [{"service_id": "NJ-BER-VIE-DAILY"}]
-CALENDAR = [
-    {
-        "service_id": "NJ-BER-VIE-DAILY",
-        "monday": True,
-        "tuesday": True,
-        "wednesday": True,
-        "thursday": True,
-        "friday": True,
-        "saturday": True,
-        "sunday": True,
-        "start_date": "2026-12-13",
-        "end_date": "2027-12-11",
-    }
-]
-CALENDAR_DATES = [
-    {"service_id": "NJ-BER-VIE-DAILY", "date": "2026-12-24", "exception_type": 2}
-]
-SHAPES = [
-    {
-        "shape_id": "NJ-BER-VIE-SHAPE",
-        "geometry": {
-            "type": "LineString",
-            "coordinates": [[13.369, 52.525], [13.732, 51.040], [16.376, 48.185]],
-        },
-        "length_km": 683.4,
-    }
-]
-ROUTES = [
-    {
-        "route_id": "NJ-BER-VIE",
-        "agency_id": None,
-        "route_short_name": "NJ 470",
-        "route_long_name": "Berlin Hbf - Vienna Hbf",
-        "route_type": 105,
-    }
-]
-TRIPS = [
-    {
-        "trip_id": "NJ-BER-VIE-OUTBOUND",
-        "route_id": "NJ-BER-VIE",
-        "service_id": "NJ-BER-VIE-DAILY",
-        "shape_id": "NJ-BER-VIE-SHAPE",
-        "trip_headsign": "Wien Hbf",
-        "direction_id": 0,
-        "composition_type_id": "STD-3.1",
-    }
-]
-STOP_TIMES = [
-    {
-        "trip_id": "NJ-BER-VIE-OUTBOUND",
-        "stop_sequence": 1,
-        "stop_id": "DE_BERLIN_HBF",
-        "arrival_time": "21:04:00",
-        "departure_time": "21:04:00",
-    },
-    {
-        "trip_id": "NJ-BER-VIE-OUTBOUND",
-        "stop_sequence": 2,
-        "stop_id": "DE_DRESDEN_HBF",
-        "arrival_time": "22:47:00",
-        "departure_time": "22:52:00",
-    },
-    {
-        "trip_id": "NJ-BER-VIE-OUTBOUND",
-        "stop_sequence": 3,
-        "stop_id": "AT_WIEN_HBF",
-        "arrival_time": "30:30:00",
-        "departure_time": "30:30:00",
-    },
-]
+#
+# No hand-written GTFS rows here. Every backend/db/README.md-documented
+# invariant says GTFS rows are always linked to a proposals.proposals row
+# by the P{proposal_id}_V{version}_R1 ID convention — a hand-seeded GTFS
+# demo route with its own ad-hoc IDs (as this block used to be) violated
+# that silently. seed_example_proposal(), called at the end of main(),
+# builds one real proposal (Berlin Hbf -> Dresden Hbf -> Wien Hbf) and
+# saves it through adapters.proposal_repository.ProposalRepository — the
+# exact same code path a live POST /api/proposal uses — so the seeded
+# example and a real save are structurally identical by construction,
+# not by two independently maintained representations.
 
 # ============================================================
 # FK-resolving seed helpers
@@ -1417,6 +1356,344 @@ WHATIF_SCENARIO = {
 }
 
 
+# ============================================================
+# Example proposal — seeded via the real save code path
+# ============================================================
+
+# Physics-only field subsets mirroring api/helpers/route_serialize.py's
+# _composition_to_dict() / _track_to_dict() — kept intentionally separate
+# (rather than importing those underscore-prefixed helpers across a
+# module boundary) but sourced from the SAME live domain objects
+# (Composition / TrackInfrastructure), never hand-typed numbers. If the
+# route_serialize.py field lists change, mirror the change here too.
+_EXPOSED_TRACK_FIELDS = (
+    "hsr_allowed",
+    "min_boarding_time_min",
+    "min_alighting_time_min",
+    "terrain_score",
+    "terrain_category",
+    "buffer_quota_per",
+)
+
+
+def _composition_physics_dict(comp) -> dict:
+    return {
+        "comp_id": comp.comp_id,
+        "comp_description": comp.comp_description,
+        "operator_id": comp.operator_id,
+        "max_speed_kmh": comp.max_speed_kmh,
+        "hsr_allowed": comp.hsr_allowed,
+        "min_boarding_time_min": comp.min_boarding_time_min,
+        "min_alighting_time_min": comp.min_alighting_time_min,
+        "energy_factor_weight": comp.energy_factor_weight,
+        "energy_factor_speed": comp.energy_factor_speed,
+        "energy_factor_terrain": comp.energy_factor_terrain,
+        "total_weight_t": comp.total_weight_t,
+        "total_crew": comp.total_crew,
+        "places_by_class": comp.places_by_class,
+        "density_by_class": comp.density_by_class,
+    }
+
+
+def _track_physics_dict(track) -> dict:
+    return {
+        "country_code": track.country_code,
+        "defaulted_fields": [
+            f for f in _EXPOSED_TRACK_FIELDS if track.field_is_default.get(f)
+        ],
+        "hsr_allowed": track.hsr_allowed,
+        "min_boarding_time_min": track.min_boarding_time_min,
+        "min_alighting_time_min": track.min_alighting_time_min,
+        "terrain_score": track.terrain_score,
+        "terrain_category": track.terrain_category,
+        "buffer_quota_per": track.buffer_quota_per,
+    }
+
+
+def _example_trip(
+    trip_id: str,
+    direction: int,
+    stops: list[tuple[str, str, str, float, float]],
+    times_min: list[tuple[int | None, int | None]],
+    stop_types: list[str],
+    segment_physics: list[tuple[int, int, int, float, dict, dict]],
+    segment_geometries: list[list[list[float]]],
+    geometries_out: list[dict],
+) -> dict:
+    """One direction of the example trip pair. stops/times_min/stop_types
+    are parallel lists over stop positions (n stops); segment_physics/
+    segment_geometries are parallel lists over segments (n - 1). Segment
+    distance/time/energy figures are illustrative hand-picked values —
+    this script has no OpenRailRouting connection to derive them from,
+    same as the demo route this replaces."""
+    segments = []
+    for i in range(len(stops) - 1):
+        from_id, from_name, from_cc, from_lat, from_lon = stops[i]
+        to_id, to_name, to_cc, to_lat, to_lon = stops[i + 1]
+        distance_m, driving_min, buffer_min, energy_kwh, dist_shares, time_shares = (
+            segment_physics[i]
+        )
+        geometry_id = f"{trip_id}_L{i}"
+        geometries_out.append({"id": geometry_id, "coords": segment_geometries[i]})
+        segments.append(
+            {
+                "from_stop": {
+                    "stop_id": from_id,
+                    "stop_name": from_name,
+                    "country_code": from_cc,
+                    "lat": from_lat,
+                    "lon": from_lon,
+                    "stop_type": stop_types[i],
+                    "arrival_time_min": times_min[i][0],
+                    "departure_time_min": times_min[i][1],
+                },
+                "to_stop": {
+                    "stop_id": to_id,
+                    "stop_name": to_name,
+                    "country_code": to_cc,
+                    "lat": to_lat,
+                    "lon": to_lon,
+                    "stop_type": stop_types[i + 1],
+                    "arrival_time_min": times_min[i + 1][0],
+                    "departure_time_min": times_min[i + 1][1],
+                },
+                "geometry_id": geometry_id,
+                "distance_m": distance_m,
+                "driving_time_min": driving_min,
+                "buffer_time_min": buffer_min,
+                "energy_kwh": energy_kwh,
+                "country_distance_shares": dist_shares,
+                "country_time_shares": time_shares,
+            }
+        )
+    return {"trip_id": trip_id, "direction": direction, "segments": segments}
+
+
+def _build_example_route(scenario_id: int, composition, tracks) -> dict:
+    """Berlin Hbf -> Dresden Hbf -> Wien Hbf, STD-7.1, no demand (od_pairs
+    empty — financial fields on this proposal are null until someone
+    evaluates and re-saves it, same as any proposal saved without an
+    evaluation). Draft route_id follows the real >=1e9 placeholder
+    convention /api/route/plan uses, so ProposalRepository.save() exercises
+    the exact same ID-rewrite path a live save does. On a fresh DB this
+    naturally becomes proposal_id=1 (first-ever insert) — see
+    _SEED_PROPOSAL_ID's comment for why that's collision-free."""
+    draft_prefix = "P1234567890_V1_R1"
+    composition_dict = _composition_physics_dict(composition)
+
+    berlin = ("DE_BERLIN_HBF", "Berlin Hbf", "DE", 52.525, 13.369)
+    dresden = ("DE_DRESDEN_HBF", "Dresden Hbf", "DE", 51.040, 13.732)
+    wien = ("AT_WIEN_HBF", "Wien Hbf", "AT", 48.185, 16.376)
+
+    # Berlin -> Dresden: fully within DE. Dresden -> Wien: illustrative
+    # DE/AT split (doesn't model the real Berlin-Dresden-Wien routing
+    # through Czechia — same simplification the demo route this replaces
+    # made).
+    outbound_physics = [
+        (165300, 95, 8, 850.0, {"DE": 1.0}, {"DE": 1.0}),
+        (518100, 430, 28, 2650.0, {"DE": 0.3, "AT": 0.7}, {"DE": 0.3, "AT": 0.7}),
+    ]
+    return_physics = [
+        (518100, 430, 28, 2650.0, {"AT": 0.7, "DE": 0.3}, {"AT": 0.7, "DE": 0.3}),
+        (165300, 95, 8, 850.0, {"DE": 1.0}, {"DE": 1.0}),
+    ]
+    outbound_geometries = [
+        [[13.369, 52.525], [13.732, 51.040]],
+        [[13.732, 51.040], [16.376, 48.185]],
+    ]
+    return_geometries = [
+        [[16.376, 48.185], [13.732, 51.040]],
+        [[13.732, 51.040], [13.369, 52.525]],
+    ]
+
+    geometries: list[dict] = []
+    outbound = _example_trip(
+        trip_id=f"{draft_prefix}_D0_T1",
+        direction=0,
+        stops=[berlin, dresden, wien],
+        times_min=[(None, 1264), (1367, 1372), (1830, None)],
+        stop_types=["boarding", "both", "alighting"],
+        segment_physics=outbound_physics,
+        segment_geometries=outbound_geometries,
+        geometries_out=geometries,
+    )
+    return_trip = _example_trip(
+        trip_id=f"{draft_prefix}_D1_T1",
+        direction=1,
+        stops=[wien, dresden, berlin],
+        times_min=[(None, 1200), (1658, 1663), (1766, None)],
+        stop_types=["boarding", "both", "alighting"],
+        segment_physics=return_physics,
+        segment_geometries=return_geometries,
+        geometries_out=geometries,
+    )
+
+    return {
+        "route_id": draft_prefix,
+        "scenario_id": scenario_id,
+        "schedule": {
+            "seasonal_schedules": [
+                {"season": "summer", "frequency": "daily"},
+                {"season": "winter", "frequency": "daily"},
+            ]
+        },
+        "trip_pairs": [
+            {
+                "composition_id": composition.comp_id,
+                "composition": composition_dict,
+                "od_pairs": [],
+                "outbound": outbound,
+                "return_trip": return_trip,
+            }
+        ],
+        "parkings": [
+            {
+                "stop_id": "AT_WIEN_HBF",
+                "stop_name": "Wien Hbf",
+                "country_code": "AT",
+                "trip_ids": [f"{draft_prefix}_D0_T1"],
+            },
+            {
+                "stop_id": "DE_BERLIN_HBF",
+                "stop_name": "Berlin Hbf",
+                "country_code": "DE",
+                "trip_ids": [f"{draft_prefix}_D1_T1"],
+            },
+        ],
+        "shuntings": [
+            {
+                "stop_id": "DE_BERLIN_HBF",
+                "stop_name": "Berlin Hbf",
+                "country_code": "DE",
+                "trip_id": f"{draft_prefix}_D0_T1",
+            },
+            {
+                "stop_id": "AT_WIEN_HBF",
+                "stop_name": "Wien Hbf",
+                "country_code": "AT",
+                "trip_id": f"{draft_prefix}_D0_T1",
+            },
+            {
+                "stop_id": "AT_WIEN_HBF",
+                "stop_name": "Wien Hbf",
+                "country_code": "AT",
+                "trip_id": f"{draft_prefix}_D1_T1",
+            },
+            {
+                "stop_id": "DE_BERLIN_HBF",
+                "stop_name": "Berlin Hbf",
+                "country_code": "DE",
+                "trip_id": f"{draft_prefix}_D1_T1",
+            },
+        ],
+        "track_infrastructure": [
+            _track_physics_dict(tracks.get(cc)) for cc in ("AT", "DE")
+        ],
+        "geometries": geometries,
+    }
+
+
+# The seeded example lands on proposal_id=1 naturally — the first-ever
+# INSERT into proposals.proposals on a fresh DB, no reservation needed.
+# This is collision-free because tests/conftest.py's session route
+# fixtures use draft proposal_id placeholders 100+ (see the range
+# convention documented there), not 1-4 as they once did. Documentation
+# only below (not read anywhere in this file) — kept in sync with the
+# same-named constant in tests/test_50_proposals_api.py, which does use
+# it, to make the shared convention explicit in both places.
+_SEED_PROPOSAL_ID = 1
+
+
+def seed_example_proposal(cur, conn) -> None:
+    """
+    Seeds one real, saved proposal (Berlin Hbf -> Dresden Hbf -> Wien Hbf)
+    through the exact same code path a live POST /api/proposal uses —
+    ProposalRepository.save() — so the demo GTFS rows and the
+    proposals.proposals row that owns them are structurally identical to
+    a real save, not a hand-maintained parallel representation. Must run
+    after conn.commit() so the users/scenario/composition/track rows it
+    reads are visible to the separate connections ProposalRepository and
+    DBDataLoader open.
+
+    Best-effort: an illustrative example isn't load-bearing the way
+    input_params/admin data is. A failure here is logged and swallowed
+    rather than aborting the rest of seeding.
+    """
+    try:
+        import sys
+        from pathlib import Path
+
+        # db/dev/seed.py -> backend/ is two levels up. Only the standalone
+        # Mathesar dev stack (db/dev/docker-compose.yml) lacks this
+        # entirely — its own Dockerfile copies just seed.py/sql_loader.py/
+        # sql/, not the rest of the backend tree — so the import below is
+        # expected to fail there and is caught below.
+        backend_root = Path(__file__).resolve().parents[2]
+        if str(backend_root) not in sys.path:
+            sys.path.insert(0, str(backend_root))
+
+        from adapters.proposal_repository import ProposalRepository
+        from adapters.data_loader_from_db import DBDataLoader
+    except ImportError:
+        print(
+            "Seeding example proposal... skipped (adapters/ not present in "
+            "this image — expected on the standalone db/dev docker-compose "
+            "stack, which only ships seed.py itself, not the rest of the "
+            "backend tree)."
+        )
+        return
+
+    print("Seeding example proposal...")
+    try:
+        cur.execute(
+            "SELECT scenario_id FROM scenario.scenarios WHERE is_current_base = TRUE"
+        )
+        scenario_id = cur.fetchone()[0]
+        cur.execute(
+            "SELECT user_id FROM admin.users WHERE email = %s",
+            ("david@backontrack.eu",),
+        )
+        user_id = cur.fetchone()[0]
+
+        loader = DBDataLoader()
+        try:
+            composition = loader.build_all_compositions(scenario_id).get("STD-7.1")
+            tracks = loader.build_all_tracks(scenario_id)
+        finally:
+            loader.close()
+
+        route = _build_example_route(scenario_id, composition, tracks)
+        route_body = {
+            "route_builder_version": "seed",
+            # The conceptual request that would have produced this route —
+            # save() now requires the whole POST /api/route/plan response,
+            # not just its route section, so this can't be omitted/None.
+            "request": {
+                "stops": ["DE_BERLIN_HBF", "DE_DRESDEN_HBF", "AT_WIEN_HBF"],
+                "composition_id": "STD-7.1",
+                "routing_mode": "fullRouting",
+                "timetable_mode": "simpleAutomatic",
+                "schedule_mode": "alwaysDaily",
+                "auto_stop_addition": False,
+            },
+            "route": route,
+        }
+
+        repo = ProposalRepository()
+        try:
+            repo.save(
+                route_body=route_body,
+                user_id=user_id,
+                change_log="Seed data — illustrative example proposal.",
+                evaluation_body=None,
+            )
+        finally:
+            repo.close()
+    except Exception as e:
+        print(f"  WARNING: example proposal seed failed, skipping: {e}")
+        conn.rollback()
+
+
 def main():
     conn = psycopg2.connect(
         host=DB_HOST,
@@ -1479,16 +1756,12 @@ def main():
     print("Seeding scenario.scenarios...")
     insert_rows(cur, "scenario.scenarios", [BASE_SCENARIO, WHATIF_SCENARIO])
 
-    print("Seeding proposals...")
-    insert_rows(cur, "proposals.services", SERVICES)
-    insert_rows(cur, "proposals.calendar", CALENDAR)
-    insert_rows(cur, "proposals.calendar_dates", CALENDAR_DATES)
-    insert_rows(cur, "proposals.shapes", SHAPES)
-    insert_rows(cur, "proposals.routes", ROUTES)
-    insert_rows(cur, "proposals.trips", TRIPS)
-    insert_rows(cur, "proposals.stop_times", STOP_TIMES)
-
     conn.commit()
+
+    # Must run after commit — it opens its own connections (via
+    # ProposalRepository/DBDataLoader) and needs the users/scenario rows
+    # above to already be visible to them.
+    seed_example_proposal(cur, conn)
 
     print("\nDone. Row counts:")
     for schema, table in [
@@ -1511,6 +1784,7 @@ def main():
         ("input_params", "composition_type_coaches"),
         ("input_params", "composition_references"),
         ("scenario", "scenarios"),
+        ("proposals", "proposals"),
         ("proposals", "routes"),
         ("proposals", "trips"),
         ("proposals", "stop_times"),

@@ -141,60 +141,76 @@ COMMENT ON COLUMN proposals.stop_times.pickup_type    IS 'GTFS pickup type: 0 = 
 COMMENT ON COLUMN proposals.stop_times.drop_off_type  IS 'GTFS drop-off type: 0 = regular, 1 = no drop-off, 2 = phone agency, 3 = coordinate with driver.';
 
 -- ---------------------------------------------------------------
--- proposals  (not GTFS — project-specific versioned evaluation table)
+-- proposals  (not GTFS — project-specific version container)
+--
+-- Refit 2026-07-08: the former wide evaluation table (denormalised
+-- metrics, JSONB breakdowns, parameter snapshot) is reduced to a thin
+-- version container around two JSON columns. route_body is the
+-- exact POST /api/route/plan response the proposal was saved from
+-- ({route_builder_version, request, route}); evaluation_body, if the
+-- saver included one, is the exact POST /api/evaluation/calc response
+-- ({calc_version, route_id, models, input, views}). Neither is trimmed
+-- before storing, so evaluation_body.input.route ends up holding a
+-- second, full copy of the same route already in route_body.route —
+-- a deliberate simplicity tradeoff (2026-07-09), not an oversight. The
+-- API layer (api/helpers/proposal_serialize.py:
+-- validate_route_evaluation_sync) rejects a save with 400
+-- validation_error if the two copies don't describe the exact same
+-- route, so this table can never end up holding two disagreeing
+-- versions of one proposal's route. The route is additionally
+-- decomposed into the GTFS tables above; three representations written
+-- on every save (JSON x2, GTFS) is a deliberate "for now" — the JSON
+-- guarantees an exact, cheap round-trip back to the frontend (GET
+-- /api/proposal/<id> returns both columns truly verbatim, byte for
+-- byte, key order included — see next paragraph), the GTFS side keeps
+-- export/interop viable, and neither blocks a later consolidation.
+--
+-- route_body/evaluation_body are JSON, deliberately NOT JSONB (2026-07-
+-- 09 fix). JSONB is a decomposed binary format: per PostgreSQL's own
+-- documentation, storing a value as JSONB does not preserve the
+-- original key order or insignificant whitespace — object keys come
+-- back in an implementation-defined order on read, not the order the
+-- application wrote them in. Since these two columns exist specifically
+-- to let GET /api/proposal/<id> hand back the exact bytes originally
+-- POSTed to /api/route/plan and /api/evaluation/calc, that reordering
+-- defeats the column's whole purpose. JSON (the older, text-based type)
+-- stores an exact copy of the input text and so preserves key order
+-- exactly. The tradeoff: JSONB-only operators (-, #-, @>, <@, ?, ?|,
+-- ?&, ||) and GIN indexing aren't available directly on a JSON column;
+-- ->, ->>, #>, #>> still work on both types. Where this schema's own
+-- queries need a JSONB-only operator (see adapters/proposal_repository.
+-- py's list_current(), which uses - to strip bulky keys before
+-- returning a list summary), they cast explicitly with ::jsonb at query
+-- time — a normal, cheap, read-only cast that has no effect on what's
+-- stored.
+--
+-- Versioning contract (same append-only discipline as
+-- scenario.scenarios): rows are never updated in place. Saving changes
+-- to your own proposal inserts a new row with the same proposal_id and
+-- proposal_version + 1, flipping is_current. Saving changes to someone
+-- else's proposal inserts a brand-new proposal_id at version 1.
 -- ---------------------------------------------------------------
 CREATE TABLE proposals.proposals (
-    proposal_id                SERIAL PRIMARY KEY,
-    proposal_version           INTEGER NOT NULL DEFAULT 1,
-    route_id                   TEXT NOT NULL REFERENCES proposals.routes(route_id) ON DELETE CASCADE,
-    is_current                 BOOLEAN NOT NULL DEFAULT TRUE,
-    user_id                    INTEGER REFERENCES admin.users(user_id) ON DELETE SET NULL,
-    composition_type_row_id    INTEGER NOT NULL REFERENCES input_params.composition_types(composition_type_row_id),
-    -- route physics (from RouteStats)
-    total_distance_km          NUMERIC(8, 2) NOT NULL,
-    total_driving_time_h       NUMERIC(6, 2) NOT NULL,
-    total_time_h               NUMERIC(6, 2) NOT NULL,
-    total_energy_kwh           NUMERIC(10, 2),
-    -- climate impact (future)
-    air_shift_flights          NUMERIC(10, 2),
-    air_shift_seats            NUMERIC(12, 2),
-    air_shift_seat_km          NUMERIC(14, 2),
-    co2_reduction_t_co2e       NUMERIC(10, 2),
-    subsidy_per_seat_km_eur    NUMERIC(8, 4),
-    subsidy_per_t_co2e_eur     NUMERIC(10, 2),
-    -- cost/revenue (from EvaluationResult)
-    total_revenue_eur          NUMERIC(10, 2),
-    total_cost_eur             NUMERIC(10, 2),
-    margin_eur                 NUMERIC(10, 2),
-    margin_per                 NUMERIC(6, 4),
-    -- JSONB breakdowns
-    capacity_breakdown         JSONB,
-    revenue_breakdown          JSONB,
-    cost_breakdown             JSONB,
-    -- parameter provenance (ParamVersions serialised)
-    parameter_snapshot         JSONB,
-    -- metadata
-    editor                     VARCHAR(100),
-    change_log                 TEXT,
-    created_at                 TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (proposal_id, proposal_version)
+    proposal_id       SERIAL,
+    proposal_version  INTEGER NOT NULL DEFAULT 1,
+    is_current        BOOLEAN NOT NULL DEFAULT TRUE,
+    user_id           INTEGER REFERENCES admin.users(user_id) ON DELETE SET NULL,
+    route_body        JSON NOT NULL,
+    evaluation_body   JSON,
+    change_log        TEXT,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (proposal_id, proposal_version)
 );
 
 CREATE UNIQUE INDEX idx_proposals_one_current_per_id
     ON proposals.proposals (proposal_id)
     WHERE is_current;
 
-COMMENT ON TABLE  proposals.proposals                       IS 'One versioned row per saved evaluation of a night train proposal. proposal_id is stable across versions — proposal_version increments on every change. route_id encodes the version: P{proposal_id}_V{proposal_version}_R1.';
-COMMENT ON COLUMN proposals.proposals.proposal_id           IS 'Stable surrogate key across all versions of a proposal.';
-COMMENT ON COLUMN proposals.proposals.proposal_version      IS 'Monotonically increasing version counter. Increments on every change (reroute or schedule adjustment).';
-COMMENT ON COLUMN proposals.proposals.route_id              IS 'FK to proposals.routes. Encodes version: P{proposal_id}_V{proposal_version}_R1.';
-COMMENT ON COLUMN proposals.proposals.is_current            IS 'True for the latest version of this proposal. Enforced by partial unique index.';
-COMMENT ON COLUMN proposals.proposals.user_id               IS 'FK to admin.users — user who saved this version. Nullable (SET NULL on user deletion).';
-COMMENT ON COLUMN proposals.proposals.composition_type_row_id IS 'Version-pinned FK to input_params.composition_types — the composition active at evaluation time.';
-COMMENT ON COLUMN proposals.proposals.total_distance_km     IS 'Total route distance across all trips. Unit: km';
-COMMENT ON COLUMN proposals.proposals.total_driving_time_h  IS 'Total driving time across all trips. Unit: h';
-COMMENT ON COLUMN proposals.proposals.total_time_h          IS 'Total time including buffer across all trips. Unit: h';
-COMMENT ON COLUMN proposals.proposals.total_energy_kwh      IS 'Total energy consumed across all trips. Unit: kWh';
-COMMENT ON COLUMN proposals.proposals.parameter_snapshot    IS 'JSONB: ParamVersions serialised at evaluation time. One entry per parameter field keyed by table_short:entity_id:field_name. Each entry carries value, version, source, and description.';
-COMMENT ON COLUMN proposals.proposals.editor                IS 'User who created or last edited this version.';
-COMMENT ON COLUMN proposals.proposals.change_log            IS 'Free-text description of what changed in this version.';
+COMMENT ON TABLE  proposals.proposals                   IS 'One row per saved version of a night train proposal. proposal_id is stable across versions; proposal_version increments on every save by the owner (append-only — rows are never updated). All GTFS rows of a version are linked by ID convention P{proposal_id}_V{proposal_version}_R1, not by FK.';
+COMMENT ON COLUMN proposals.proposals.proposal_id       IS 'Stable surrogate key across all versions of a proposal. Assigned from the sequence for new/branched proposals, reused for new versions.';
+COMMENT ON COLUMN proposals.proposals.proposal_version  IS 'Monotonically increasing version counter within a proposal_id.';
+COMMENT ON COLUMN proposals.proposals.is_current        IS 'True for the latest version of this proposal_id. Enforced by partial unique index.';
+COMMENT ON COLUMN proposals.proposals.user_id           IS 'FK to admin.users — user who saved this version. Owner of the current version decides overwrite-vs-branch on the next save. Nullable (SET NULL on user deletion).';
+COMMENT ON COLUMN proposals.proposals.route_body        IS 'JSON (not JSONB — see column type note above): the exact, whole POST /api/route/plan response this version was saved from ({route_builder_version, request, route}, all three sections — the API rejects a save whose route_body is missing any of them), with all draft IDs already rewritten to the real proposal_id/proposal_version. Same name in the API request/response bodies (POST /api/proposal request field, GET /api/proposal/<id> response field) — GET returns this column verbatim, key order included.';
+COMMENT ON COLUMN proposals.proposals.evaluation_body   IS 'JSON (not JSONB — see column type note above): the exact, whole POST /api/evaluation/calc response for this version, if the saver included one (optional — a proposal can be saved without demand/evaluation). Untrimmed, so input.route is a full second copy of route_body.route — see the table comment above. Same draft-ID rewrite applied as route_body, and will still drift from a fresh /api/evaluation/calc call if parameters change later (a snapshot, not re-derived — mirrors how scenario pinning already works elsewhere). List summaries read total_revenue_eur/total_cost_eur/net_eur out of views.route.data.per_year here. Same name in the API request/response bodies, same as route_body — GET returns this column verbatim (null if absent), key order included.';
+COMMENT ON COLUMN proposals.proposals.change_log        IS 'Free-text description of what changed in this version.';
