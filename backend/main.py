@@ -12,7 +12,8 @@ Endpoints — see api/README.md for full documentation.
   GET  /api/health
   POST /api/auth/request-code        ⚠️  stub — not yet implemented
   POST /api/auth/verify              ⚠️  stub — not yet implemented
-  POST /api/feedback                 ⚠️  stub — not yet implemented
+  POST /api/feedback
+  GET  /api/feedback/categories
   POST /api/proposal
   GET  /api/proposals
   POST /api/proposals
