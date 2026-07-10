@@ -155,7 +155,7 @@ night-train-target-network/
 │   │   └── .env.example    ← single source of truth for all env vars
 │   ├── db/dev/             # Standalone DB stack (schema inspection)
 │   ├── api/                # Flask API blueprints
-│   │   └── helpers/        # serialize.py and dependencies.py
+│   │   └── helpers/        # *_serialize.py (per domain) and dependencies.py
 │   ├── models/             # Domain model, routing, energy, evaluation
 │   ├── adapters/           # DB data loader
 │   ├── tests/              # Integration tests
