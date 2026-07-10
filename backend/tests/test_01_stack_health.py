@@ -9,7 +9,7 @@ Covers:
   - DB loader initialisation (GET /api/data/status)
   - OpenRailRouting reachability (its own /health, on the host port)
   - Global error handling contract (JSON 404/405 bodies)
-  - Phase 4/5 stub endpoints all returning 501
+  - Phase 5 stub endpoints (auth) returning 501
 """
 
 import os
@@ -67,13 +67,13 @@ def test_wrong_method_returns_json_405(api_base):
 
 @pytest.mark.timeout(10)
 def test_stub_endpoints_return_501(api_base):
-    """Every Phase 4/5 stub (auth, feedback) returns 501
-    Not Implemented — a stub silently returning 200 or 404 would mislead
-    the frontend about what exists."""
+    """Every remaining Phase 5 stub (auth) returns 501 Not Implemented — a
+    stub silently returning 200 or 404 would mislead the frontend about
+    what exists. Feedback (Phase 4) is no longer in this list — it's a
+    real endpoint now, covered by test_60_feedback_api.py instead."""
     stubs = [
         ("POST", "/api/auth/request-code"),
         ("POST", "/api/auth/verify"),
-        ("POST", "/api/feedback"),
     ]
     for method, path in stubs:
         resp = requests.request(method, f"{api_base}{path}", json={}, timeout=5)

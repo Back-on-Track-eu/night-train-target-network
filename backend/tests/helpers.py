@@ -18,6 +18,8 @@ ROUTE_URL = "/api/route/plan"
 EVAL_URL = "/api/evaluation/calc"
 PROPOSAL_URL = "/api/proposal"
 PROPOSALS_URL = "/api/proposals"
+FEEDBACK_URL = "/api/feedback"
+FEEDBACK_CATEGORIES_URL = "/api/feedback/categories"
 
 # Mirrors models/route/route.py: DAYS_PER_OPERATING_WEEK / WEEKS_PER_SEASON.
 _DAYS_PER_WEEK = {"daily": 7, "three_per_week": 3}
