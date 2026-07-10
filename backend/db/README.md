@@ -87,7 +87,7 @@ Three schemas: `admin`, `input_params`, `proposals`.
 | Table | Description |
 |---|---|
 | `users` | Platform users — `user_id` identity, `user_name` display name, `email` login identity (placeholder for OTP/magic-link auth) |
-| `feedback` | User feedback submissions |
+| `feedback` | User feedback submissions — `user_id` (logged-in) or `email` (anonymous) identifies the author, `category`/`sub_category` are free text, `notified_at` is set once the notification mail to the working group succeeds |
 
 ### `input_params`
 

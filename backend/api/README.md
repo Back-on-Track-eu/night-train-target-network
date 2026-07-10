@@ -1,12 +1,14 @@
 # Night Train — Backend API Reference
 
-**V.901.3** — Base URL: `http://localhost:5000`
+**V.901.5** — Base URL: `http://localhost:5000`
 
 ## Table of Contents
 
 - [Health](#health)
 - [Auth](#auth) ⚠️ not yet implemented
-- [Feedback](#feedback) ⚠️ not yet implemented
+- [Feedback](#feedback)
+  - [`POST /api/feedback`](#post-feedback) — submit feedback
+  - [`GET /api/feedback/categories`](#feedback-categories) — suggested category/sub_category values
 - [Proposals](#proposals)
   - [`POST /api/proposal`](#post-proposal) — save a proposal
   - [`GET` / `POST /api/proposals`](#list-proposals) — list proposals
@@ -56,13 +58,140 @@
 
 <a id="feedback"></a>
 
-## Feedback ⚠️ NOT YET IMPLEMENTED
+## Feedback
 
-> Stubbed — returns `501 Not Implemented`.
+No auth yet — a submission identifies its author either by `user_id`
+(logged-in) or `email` (anonymous). Every submission is mailed to
+`targetnetwork-wg@back-on-track.eu` and stored in `admin.feedback`
+either way; mail delivery never blocks storage (see
+`adapters/mailer.py`).
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/feedback` | Submit feedback on a model parameter |
+| `POST` | `/api/feedback` | Submit feedback |
+| `GET` | `/api/feedback/categories` | Suggested category/sub_category values for the form |
+
+<a id="post-feedback"></a>
+
+### `POST /api/feedback`
+
+<details>
+<summary>Request &amp; response details</summary>
+
+**Request body**
+```json
+{
+  "user_id": 1,
+  "email": null,
+  "subject": "TAC rate for DE looks stale",
+  "category": "Infrastructure",
+  "sub_category": "tac_eur_train_km",
+  "message": "The current DE track access charge doesn't match the 2026 tariff sheet."
+}
+```
+- `user_id` (int) — required unless `email` is given. Must exist in `admin.users`; returns `422 domain_error` otherwise.
+- `email` (str) — required unless `user_id` is given. Used as the mail `Reply-To` and, for anonymous submissions, stored on the row.
+- `subject` (str, required, max 200 chars)
+- `category` (str, required) — free text; see `GET /api/feedback/categories` for suggested values, not a closed enum.
+- `sub_category` (str, required) — free text; same rationale as `category`.
+- `message` (str, required) — the feedback text.
+
+**Response (201)**
+```json
+{
+  "feedback_id": 42,
+  "created_at": "2026-07-10T14:32:00+00:00",
+  "email_sent": true
+}
+```
+`email_sent` reflects only whether the notification mail succeeded — the
+feedback row is stored regardless (SMTP misconfiguration or an outage
+never loses a submission).
+
+**Errors:** `400 bad_request` (missing body) · `400 validation_error`
+(missing/invalid field — see `details`) · `422 domain_error` (`user_id`
+doesn't exist) · `500 feedback_error` (storage failed).
+
+</details>
+
+<a id="feedback-categories"></a>
+
+### `GET /api/feedback/categories`
+
+<details>
+<summary>Request &amp; response details</summary>
+
+Suggested values for the feedback form's category/sub_category fields —
+not a validation source, `POST /api/feedback` accepts any non-empty
+string for both. Nine categories, four with a `sub_categories` list
+derived live from the model's own definitions rather than hand-copied:
+
+| Category | sub_categories source |
+|---|---|
+| `Infrastructure` | Live — `TrackInfrastructures` + `StopInfrastructures` fields (same collections `GET /api/params/*` serves) |
+| `Compositions` | Live — composition/operator/coach fields (`CompositionCollection`) |
+| `Evaluation — calculation method` | Live — every leaf of the evaluation model's cost/revenue/margin breakdown (`models/evaluation/views.py:Breakdown`) |
+| `Evaluation — results / view` | Live — the five output views `POST /api/evaluation/calc` produces (`models/evaluation/views.py:VIEW_META`) |
+| `Route or timetable` | Static — no single schema object maps cleanly onto "route concepts" |
+| `General functionality` | Static |
+| `Bug report` / `Feature request` / `Other` | None — free text |
+
+`Infrastructure` feedback (a rate looks wrong) is deliberately distinct
+from `Evaluation — calculation method` feedback (the rate is *applied*
+wrong, e.g. to the wrong distance).
+
+**Query params**
+| Param | Type | Description |
+|---|---|---|
+| `scenario_id` | int (optional) | Pins the parameter versions the `Infrastructure`/`Compositions` lists are built from; omit for the live `is_current_base` scenario. No effect on the other categories. |
+
+**Response (200)**
+```json
+{
+  "categories": [
+    {
+      "category": "Infrastructure",
+      "sub_categories": [
+        {"parameter": "tac_eur_train_km", "description": "...", "group": "TrackInfrastructures"},
+        {"parameter": "stop_charge_eur", "description": "...", "group": "StopInfrastructures"}
+      ]
+    },
+    {
+      "category": "Compositions",
+      "sub_categories": [
+        {"parameter": "routing.max_speed_kmh", "description": "...", "group": "Compositions"}
+      ]
+    },
+    {
+      "category": "Evaluation — calculation method",
+      "sub_categories": [
+        {"parameter": "cost.operator.variable.driver_eur", "description": "Costs scaling with usage — hours, km, tickets sold.", "group": "cost"},
+        {"parameter": "revenue.ticket_revenue_eur", "description": null, "group": "revenue"},
+        {"parameter": "margin.ebit_margin_eur", "description": "Target EBIT carve-out — neither cost nor revenue.", "group": "margin"}
+      ]
+    },
+    {
+      "category": "Evaluation — results / view",
+      "sub_categories": [
+        {"parameter": "route", "description": "Whole-route annual totals...", "group": null},
+        {"parameter": "per_trip_pair", "description": "...", "group": null}
+      ]
+    },
+    {
+      "category": "Route or timetable",
+      "sub_categories": [
+        {"parameter": "Stops / stations", "description": null, "group": null}
+      ]
+    },
+    {"category": "General functionality", "sub_categories": [{"parameter": "Usability / UX", "description": null, "group": null}]},
+    {"category": "Bug report", "sub_categories": []},
+    {"category": "Feature request", "sub_categories": []},
+    {"category": "Other", "sub_categories": []}
+  ]
+}
+```
+
+</details>
 
 ---
 

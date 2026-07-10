@@ -65,6 +65,15 @@ backend/models/route/routing/docker/graph-cache/
 pgdata/
 
 # -----------------------------------------------------------------------------
+# Testing/ Test scripts
+# -----------------------------------------------------------------------------
+
+# Generated scratch output from backend/scripts/*.py manual test scripts
+# (e.g. feedback_categories_output.json) — input fixtures like
+# tc_1_evaluation_input.json don't end in "_output.json" so stay tracked.
+backend/scripts/data/*_output.json
+
+# -----------------------------------------------------------------------------
 # Claude / AI tooling
 # -----------------------------------------------------------------------------
 # Claude snapshot tool output — too large for git

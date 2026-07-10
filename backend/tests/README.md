@@ -25,6 +25,7 @@ built on top of it:
 | `test_30`–`test_31` | `POST /api/evaluation/calc` (contract, then content logic) |
 | `test_40` | End-to-end pipeline smoke |
 | `test_50` | Proposals API — save/list/load |
+| `test_60` | Feedback API — submit/categories |
 
 Shared code:
 
@@ -50,7 +51,7 @@ Shared code:
 | `test_openrailrouting_health` | Routing engine reachable | `GET :8989/health` (host port) | 200 |
 | `test_unknown_endpoint_returns_json_404` | Global JSON error handler | `GET /api/does-not-exist` | 404 with `error=not_found` JSON body |
 | `test_wrong_method_returns_json_405` | Global JSON error handler | `GET /api/route/plan` | 405 with `error=method_not_allowed` JSON body |
-| `test_stub_endpoints_return_501` | Phase 4/5 stubs are honest | auth / feedback / scenario endpoints | every stub returns 501 |
+| `test_stub_endpoints_return_501` | Remaining stubs are honest | auth endpoints | every stub returns 501 |
 
 ## test_02_db_seed.py — Database seeding
 
@@ -285,6 +286,32 @@ this module's cleanup fixture deliberately never purges — see
 `total`/count on an unfiltered or David-owned list accounts for it.
 
 ---
+
+---
+
+## test_60_feedback_api.py — Feedback API
+
+A module-scoped autouse fixture purges rows tagged with the
+`TEST_FEEDBACK_60_` subject prefix before and after this file. Whether
+SMTP is configured varies by environment (see `adapters/mailer.py`'s
+graceful-degradation behaviour) — the storage tests check
+`email_sent`/`notified_at` agree with each other rather than assuming a
+fixed value, so this file passes the same way whether or not SMTP_* is set.
+
+| Test | Purpose | Input | Expected |
+|---|---|---|---|
+| `test_feedback_requires_identity` | Validation | no `user_id`/`email` | `400 validation_error` |
+| `test_feedback_rejects_invalid_email` | Validation | malformed `email` | `400 validation_error` |
+| `test_feedback_requires_subject_category_message` | Validation | missing required fields | `400 validation_error`, one detail per field |
+| `test_feedback_unknown_user_id_is_domain_error` | Domain check | nonexistent `user_id` | `422 domain_error` |
+| `test_feedback_anonymous_submission_is_stored` | Email-identified submission persists correctly | `email`, no `user_id` | `201`, row has `user_id=NULL`, `email` set, `notified_at` matches `email_sent` |
+| `test_feedback_logged_in_submission_is_stored` | user_id-identified submission persists correctly | seeded `user_id` | `201`, row has `user_id` set, `email=NULL` |
+| `test_feedback_categories_lists_all_categories` | All nine categories present, nothing extra | — | exact set match |
+| `test_feedback_categories_infrastructure_is_dynamic` | Sub-category list is derived live, not hardcoded | — | known TrackInfrastructures/StopInfrastructures fields present |
+| `test_feedback_categories_compositions_is_dynamic` | Sub-category list is derived live, not hardcoded | — | non-empty, correctly grouped |
+| `test_feedback_categories_calc_method_is_dynamic` | Sub-category list is derived from the Breakdown dataclass tree | — | known cost/revenue/margin leaves present, three groups |
+| `test_feedback_categories_eval_view_is_dynamic` | Sub-category list matches the five evaluation views exactly | — | exact set match |
+| `test_feedback_categories_static_lists_present` | Static categories have content; free-text ones don't | — | Route/General non-empty, Bug/Feature/Other empty |
 
 ## Dropped from the previous suite (and why)
 
