@@ -86,7 +86,9 @@ currently reachable from the API — see `api/README.md`.
 | `params.py` | Immutable parameter dataclasses loaded from DB |
 
 **Strict boundary:** `Trip` and `Route` carry physics only. All EUR values live
-exclusively in `calc.py`. All serialization lives in `api/helpers/serialize.py`.
+exclusively in `calc.py`. All serialization lives in `api/helpers/` — split by
+domain into `route_serialize.py`, `evaluation_serialize.py`, `params_serialize.py`,
+`proposal_serialize.py`, and `feedback_serialize.py`.
 
 ---
 

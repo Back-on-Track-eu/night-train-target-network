@@ -165,7 +165,9 @@ divided by the denominator. The source `Breakdown` is unchanged.
 ## API integration
 
 The evaluation pipeline is called by `POST /api/evaluation/calc` in `api/evaluation.py`.
-Serialization and deserialization are handled exclusively by `api/helpers/serialize.py`.
+Serialization and deserialization are handled exclusively by
+`api/helpers/route_serialize.py` (route in/out) and
+`api/helpers/evaluation_serialize.py` (breakdown/views out, `models`/`input` docs).
 Domain objects have no `to_dict()` or `from_dict()` methods.
 
 ### Request flow
@@ -174,7 +176,7 @@ Domain objects have no `to_dict()` or `from_dict()` methods.
 POST /api/evaluation/calc
   │
   ├── [1/5] Validate body + route_from_dict(body["route"], loader)
-  │          serialize.py: deserializes Route JSON → Route domain object
+  │          route_serialize.py: deserializes Route JSON → Route domain object
   │          loader.build_all_compositions() reloads cost params from DB
   │
   ├── [2/5] loader.build_all_tracks() + loader.build_all_stops()
@@ -186,7 +188,7 @@ POST /api/evaluation/calc
   │          views.py: aggregation, allocation, normalisation
   │
   └── [5/5] normalise_all_to_dict + matrix_to_dict → JSON response
-             serialize.py: converts Breakdown tree to nested dict
+             evaluation_serialize.py: converts Breakdown tree to nested dict
              all 5 normalisations included per cell
 ```
 
@@ -195,6 +197,15 @@ POST /api/evaluation/calc
 ```json
 {
   "calc_version": "...",
+  "models": {
+    "route_builder": {"version": "...", "description": "...", "formulas": {"...": "..."}},
+    "energy":         {"version": "...", "description": "...", "formulas": {"...": "..."}},
+    "evaluation":      {"version": "...", "description": "...", "formulas": {"...": "..."}}
+  },
+  "input": {
+    "route": { "...": "the posted route, verbatim" },
+    "parameters": { "...": "every track/stop/composition parameter actually used, same shape as /api/params/*" }
+  },
   "result": {
     "route_id": "P1_V1_R1",
     "views": {
@@ -235,6 +246,12 @@ POST /api/evaluation/calc
   }
 }
 ```
+
+`models` and `input` are built once per request from static version/formula
+registries and the posted route/parameters — see
+`api/helpers/evaluation_serialize.py:models_to_dict()`. Full field-level
+documentation of this response lives in `api/README.md`; this section only
+covers the `result.views` shape produced by `views.py`.
 
 Each `<Breakdown dict>` has this structure:
 

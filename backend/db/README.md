@@ -12,9 +12,12 @@ db/
 │   ├── sql/                    # Schema DDL — source of truth for all environments
 │   │   ├── create_admin_schema.sql
 │   │   ├── create_input_params_schema.sql
-│   │   └── create_proposal_schema.sql
-│   ├── seed.py                 # Seeds the database with illustrative test data
+│   │   ├── create_scenario_schema.sql
+│   │   ├── create_proposal_schema.sql
+│   │   └── create_ontd_schema.sql     # separate/optional — see "ontd schema" below
+│   ├── seed.py                 # Seeds admin/input_params/scenario/proposals with illustrative test data
 │   ├── sql_loader.py           # Loads .sql files from the sql/ folder
+│   ├── ontd_loader.py          # Separate script: loads the ontd schema from the ONTD GitHub snapshot
 │   ├── Dockerfile              # Builds the seeder image
 │   ├── docker-compose.yml      # Standalone stack: postgres + seeder + Mathesar
 │   └── .env.example            # Default credentials for local use (POSTGRES_* only)
@@ -39,7 +42,7 @@ docker-compose up --build
 This starts three services:
 
 - **postgres** — PostgreSQL 16, seeded data persisted in the `pgdata` volume
-- **seeder** — runs once, drops and recreates all three schemas, loads test data, then exits
+- **seeder** — runs once, drops and recreates all four core schemas, loads test data, then exits
 - **mathesar** — web UI for schema inspection, starts once Postgres is healthy
 
 On success, `seeder` exits with code 0 and prints row counts for every table.
@@ -80,7 +83,8 @@ When setting up the production database, run these files once manually
 
 ## Schema overview
 
-Three schemas: `admin`, `input_params`, `proposals`.
+Four core schemas, all created and seeded by `seed.py`: `admin`, `input_params`,
+`scenario`, `proposals`. A fifth, `ontd`, exists separately — see below.
 
 ### `admin`
 
@@ -106,6 +110,26 @@ Three schemas: `admin`, `input_params`, `proposals`.
 | `track_infrastructures` | Country-level track parameters (TAC, energy price, terrain etc.), versioned, with per-field `_src` columns |
 | `stop_infrastructure_defaults` | Fallback station access charge per country (NULL = global), versioned |
 | `stop_infrastructures` | Night train stopping points with coordinates and charges, versioned |
+
+### `scenario`
+
+| Table | Description |
+|---|---|
+| `scenarios` | Container pinning one version of each of the four versioned `input_params` infrastructure tables (`track_infrastructures`, `track_infrastructure_defaults`, `stop_infrastructures`, `stop_infrastructure_defaults`). Every read of infrastructure data goes through a scenario — there's no other notion of "current" for those four tables. Exactly one row has `is_current_base = TRUE` (the live default used when an API call omits `scenario_id`); exactly one row per `scenario_key` has `is_current_scenario = TRUE` (the head of that what-if lineage). `scenario_id` is a surrogate key that changes on every edit; `scenario_key` (e.g. `"base"`, `"whatif-de-track-infra"`) is the stable identifier for one lineage. Compositions, coach types, operators, and composition references are catalogs, not scenario-versioned — see `input_params` above. |
+
+A version bump on any of the four pinned tables is a **full-table snapshot**,
+never a per-row diff: editing one stop's charge duplicates every other row of
+`stop_infrastructures` forward into the new version too, so resolution is
+always an exact match (never "highest version ≤ N") and a version number is
+never reinterpreted differently depending on which scenario is asking. This
+is what makes two scenarios branching off the same table in incompatible
+directions safe, and what makes re-evaluating a scenario next year return
+the same numbers even if the base has since moved on — nothing on a
+`scenarios` row is resolved at read time. `seed.py` seeds two scenarios: the
+`"base"` lineage pinning the freshly-seeded version of every table, and a
+`"whatif-de-track-infra"` lineage forked from it to exercise scenario-scoped
+reads in tests. See `create_scenario_schema.sql` for the full column-level
+rationale.
 
 ### `proposals`
 
@@ -173,6 +197,28 @@ re-saves it. `proposal_id=1` is collision-free because
 saved proposal's GTFS service, seeded or live, is pinned to the project's
 target 2032 timetable year (`ProposalRepository._SERVICE_START`/
 `_SERVICE_END`).
+
+---
+
+## The `ontd` schema (separate, optional)
+
+`ontd` mirrors the [Open Night Train Database](https://github.com/Back-on-Track-eu)
+— a community-maintained Google Sheet of real-world night train agencies,
+stops, and trips (source of truth: the Sheet, owned by Juri Maier). It is
+**not** created or seeded by `seed.py` — it's a separate concern, loaded on
+demand with:
+
+```bash
+python db/dev/ontd_loader.py                  # fetch the latest snapshot from GitHub
+python db/dev/ontd_loader.py --local /path     # load from a local data/latest/ export
+```
+
+`ontd_loader.py` is idempotent (`TRUNCATE ... CASCADE`s all `ontd` tables
+before each load) and never touches `admin`/`input_params`/`scenario`/`proposals`.
+`ontd.stops.stop_id`/`stop_uic_code` are aligned with `input_params.stops.stop_id`
+by convention (agreed Giovanni ↔ David, 2026-06-22), but there's no FK between
+the schemas — `ontd` is reference data for comparison/import tooling, not a
+live dependency of the API.
 
 ---
 
