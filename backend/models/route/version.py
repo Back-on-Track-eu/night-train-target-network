@@ -10,8 +10,6 @@ Bump ROUTE_BUILDER_VERSION when any change affects the Trip output:
 
 ROUTE_FORMULAS documents the key calculations in the route builder
 with LaTeX and plain-English descriptions.
-
-TODO: GIT_SHA injected at build time by CI — see .github/workflows/backend-tests.yml
 """
 
 from __future__ import annotations
@@ -21,9 +19,19 @@ from dataclasses import dataclass
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "1.0.0"
+ROUTE_BUILDER_VERSION: str = "0.9.2"
 
 GIT_SHA: str = "unknown"  # injected by CI
+
+# Short, plain-English summary of what this model computes — embedded as-is
+# in the "models" section of POST /api/evaluation/calc's response, alongside
+# ROUTE_BUILDER_VERSION and ROUTE_FORMULAS.
+ROUTE_BUILDER_DESCRIPTION: str = (
+    "Route/timetable builder: turns a list of stops, a composition, and "
+    "routing/timetable/schedule mode selections into a full Route — trip "
+    "pairs, segments with buffer time, dwell times, and a mirrored "
+    "outbound/return schedule around 02:30."
+)
 
 CHANGELOG: dict = {
     "1.0.0": {

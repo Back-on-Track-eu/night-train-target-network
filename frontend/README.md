@@ -73,7 +73,11 @@ frontend/
     ├── stores/
     │   └── store.ts     # Pinia store
     └── components/
-        └── DataStatus.vue   # Connection test UI component
+        ├── AppIcon.vue               # Tree-shakeable @mdi/js icon wrapper
+        ├── CompositionSelectCard.vue # Composition picker card
+        ├── MapView.vue               # MapLibre route/stop map
+        ├── ProposalViewport.vue      # Proposal build/evaluate workspace
+        └── StopSelect.vue            # Stop search/select control
 ```
 
 ---

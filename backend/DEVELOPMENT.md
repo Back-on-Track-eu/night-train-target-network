@@ -65,7 +65,7 @@ Wait until all three containers (`night_train_postgres`, `openrailrouting`, `nig
 
 ```powershell
 Invoke-RestMethod -Uri http://localhost:5000/api/health
-Invoke-RestMethod -Uri http://localhost:5000/api/params/stops
+Invoke-RestMethod -Uri http://localhost:5000/api/params/StopInfrastructures
 Invoke-RestMethod -Uri http://localhost:5000/api/params/compositions
 ```
 
@@ -75,10 +75,15 @@ Invoke-RestMethod -Uri http://localhost:5000/api/params/compositions
 
 From `backend/`:
 ```bash
-uv run --group dev pytest tests/ -v
+uv run --extra dev pytest tests/ -v
 ```
 
 Tests require the full Docker stack to be running (`postgres` + `openrailrouting` + `api`).
+
+The suite is organised by layer (stack health → DB seed → loader → versioning →
+params API → route/plan → evaluation/calc → pipeline). See `tests/README.md`
+for a complete list of every test file and test, with purpose, input, and
+expected outcome.
 
 ---
 
@@ -150,7 +155,8 @@ night-train-target-network/
 │   │   └── .env.example    ← single source of truth for all env vars
 │   ├── db/dev/             # Standalone DB stack (schema inspection)
 │   ├── api/                # Flask API blueprints
-│   ├── models/             # Domain model, routing, energy, cost/rev
+│   │   └── helpers/        # *_serialize.py (per domain) and dependencies.py
+│   ├── models/             # Domain model, routing, energy, evaluation
 │   ├── adapters/           # DB data loader
 │   ├── tests/              # Integration tests
 │   ├── main.py

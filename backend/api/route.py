@@ -3,158 +3,147 @@ route.py
 ========
 Route planning endpoint.
 
-  POST /api/route/planOrUpdate
+  POST /api/route/plan
 
-Accepts a stop list, composition ID, departure time, and proposal context.
+Accepts a stop list, composition ID, and proposal context (optional).
 Returns a fully built Route with both trips (outbound + return),
 including geometry, timetable, and physics stats.
 
-The backend automatically derives whether to plan or adjust:
-  - No 'route' in body                          → plan  (new route)
-  - 'route' in body, stops/composition unchanged → adjust (departure time / stop type change only)
-  - 'route' in body, stops or composition changed → plan  (full reroute)
+Stateless: always a full plan/reroute, never an in-place adjust — that
+mode was dropped (route_factory.adjust_route() still exists for a future
+save/versioning flow, just no longer reachable from this endpoint).
+
+Boarding/alighting classification and departure time are now automatic
+(see timetable_mode) — the caller supplies a plain list of stop IDs, not
+per-stop stop_type/time. Seasonal frequency is likewise automatic (see
+schedule_mode).
 
 NO monetary values in the response — use POST /api/evaluation/calc for that.
 """
 
 import logging
+import random
 
 from flask import Blueprint, jsonify, request
 
-from api.dependencies import get_loader
-from models.route.route import Route
-from models.route.route_factory import plan_route, adjust_route
+from api.helpers.dependencies import get_loader, get_country_index
+from api.helpers.route_serialize import route_to_dict
+from models.route.route_factory import plan_route, TripPairInput
+from models.route.timetable import VALID_TIMETABLE_MODES, VALID_SCHEDULE_MODES
 from models.route.routing.rail_router import RailRouter
 from models.route.version import ROUTE_BUILDER_VERSION
-from models.utils import hhmm_to_min
 
 logger = logging.getLogger(__name__)
 bp = Blueprint("route", __name__)
 
-_VALID_STOP_TYPES = {"boarding", "alighting", "both"}
+_VALID_ROUTING_MODES = {"simpleRouting", "fullRouting"}
+
+_DRAFT_PROPOSAL_ID_MIN = 1_000_000_000
+_DRAFT_PROPOSAL_ID_MAX = 2_147_483_647  # postgres int4 max — proposals.proposals.proposal_id is SERIAL (int4)
+
+
+def _draft_proposal_id() -> int:
+    """
+    Placeholder proposal_id for a route that hasn't been saved as a proposal
+    yet. proposals.proposals.proposal_id is a SERIAL starting at 1, so a
+    random value above one billion won't realistically collide with a real
+    one. This is a stand-in for a future scenarios/proposals module that
+    will properly own draft-vs-saved handling (and hand back whatever id it
+    thinks is appropriate) — api/route.py is just the simplest place to put
+    this until that module exists.
+    """
+    return random.randint(_DRAFT_PROPOSAL_ID_MIN, _DRAFT_PROPOSAL_ID_MAX)
 
 
 def _validate(body: dict) -> list[str]:
     errors = []
 
-    if not isinstance(body.get("proposal_id"), int):
-        errors.append("'proposal_id' must be an integer.")
-    if not isinstance(body.get("proposal_version"), int):
-        errors.append("'proposal_version' must be an integer.")
-
-    # stops required unless an existing route is provided
-    stops = body.get("stops")
-    if stops is not None:
-        if not isinstance(stops, list):
-            errors.append("'stops' must be a list.")
-        elif len(stops) < 2:
-            errors.append("'stops' must contain at least 2 entries.")
-        else:
-            for i, s in enumerate(stops):
-                if not isinstance(s, dict):
-                    errors.append(f"stops[{i}] must be an object.")
-                    continue
-                if not isinstance(s.get("stop_id"), str):
-                    errors.append(f"stops[{i}].stop_id must be a string.")
-                if s.get("stop_type") not in _VALID_STOP_TYPES:
-                    errors.append(
-                        f"stops[{i}].stop_type '{s.get('stop_type')}' is invalid. "
-                        f"Must be one of: {sorted(_VALID_STOP_TYPES)}."
-                    )
-
-    if body.get("composition_id") is not None and not isinstance(
-        body["composition_id"], str
+    if body.get("proposal_id") is not None and not isinstance(body["proposal_id"], int):
+        errors.append("'proposal_id' must be an integer if provided.")
+    if body.get("proposal_version") is not None and not isinstance(
+        body["proposal_version"], int
     ):
+        errors.append("'proposal_version' must be an integer if provided.")
+    if body.get("scenario_id") is not None and not isinstance(body["scenario_id"], int):
+        errors.append("'scenario_id' must be an integer if provided.")
+
+    stops = body.get("stops")
+    if not isinstance(stops, list):
+        errors.append("'stops' must be a list of stop_id strings.")
+    elif len(stops) < 2:
+        errors.append("'stops' must contain at least 2 entries.")
+    elif not all(isinstance(s, str) for s in stops):
+        errors.append("'stops' must be a list of stop_id strings.")
+
+    if not isinstance(body.get("composition_id"), str):
         errors.append("'composition_id' must be a string.")
 
-    dep = body.get("departure_time")
-    if dep is not None:
-        if not isinstance(dep, str):
-            errors.append("'departure_time' must be a string in HH:MM format.")
-        else:
-            try:
-                hhmm_to_min(dep)
-            except ValueError as e:
-                errors.append(str(e))
-
-    existing = body.get("route")
-    if existing is not None and not isinstance(existing, dict):
-        errors.append("'route' must be an object (Route.to_dict() output) if provided.")
-
-    stop_type_changes = body.get("stop_type_changes")
-    if stop_type_changes is not None:
-        if not isinstance(stop_type_changes, dict):
-            errors.append("'stop_type_changes' must be an object {stop_id: stop_type}.")
-        else:
-            for sid, stype in stop_type_changes.items():
-                if stype not in _VALID_STOP_TYPES:
-                    errors.append(
-                        f"stop_type_changes['{sid}'] = '{stype}' is invalid. "
-                        f"Must be one of: {sorted(_VALID_STOP_TYPES)}."
-                    )
-
-    # must have either stops+composition_id or an existing route
-    if existing is None and (stops is None or body.get("composition_id") is None):
+    timetable_mode = body.get("timetable_mode", "simpleAutomatic")
+    if timetable_mode not in VALID_TIMETABLE_MODES:
         errors.append(
-            "Provide either 'stops' + 'composition_id' (new route) "
-            "or 'route' (update existing route)."
+            f"'timetable_mode' = '{timetable_mode}' is invalid. Must be one of: {sorted(VALID_TIMETABLE_MODES)}."
         )
+
+    schedule_mode = body.get("schedule_mode", "alwaysDaily")
+    if schedule_mode not in VALID_SCHEDULE_MODES:
+        errors.append(
+            f"'schedule_mode' = '{schedule_mode}' is invalid. Must be one of: {sorted(VALID_SCHEDULE_MODES)}."
+        )
+
+    routing_mode = body.get("routing_mode", "fullRouting")
+    if routing_mode not in _VALID_ROUTING_MODES:
+        errors.append(
+            f"'routing_mode' = '{routing_mode}' is invalid. Must be one of: {sorted(_VALID_ROUTING_MODES)}."
+        )
+
+    if body.get("auto_stop_addition") is not None and not isinstance(
+        body["auto_stop_addition"], bool
+    ):
+        errors.append("'auto_stop_addition' must be a boolean if provided.")
 
     return errors
 
 
-def _is_adjust(body: dict, existing_route: Route) -> bool:
+@bp.post("/plan")
+def plan():
     """
-    Return True if only departure_time or stop_type_changes differ from
-    the existing route — i.e. no rerouting is needed.
-    Returns False (full plan) if stops or composition changed.
-    """
-    new_stops = body.get("stops")
-    new_composition = body.get("composition_id")
-
-    if new_stops is None and new_composition is None:
-        return True  # only departure_time / stop_type_changes provided
-
-    existing_stop_ids = (
-        [st.stop_id for st in existing_route.all_trips()[0].stop_times]
-        if existing_route.all_trips()
-        else []
-    )
-    existing_comp_id = (
-        existing_route.all_trips()[0].composition.comp_id
-        if existing_route.all_trips()
-        else None
-    )
-
-    new_stop_ids = [s["stop_id"] for s in (new_stops or [])]
-
-    stops_changed = bool(new_stops) and new_stop_ids != existing_stop_ids
-    comp_changed = bool(new_composition) and new_composition != existing_comp_id
-
-    return not stops_changed and not comp_changed
-
-
-@bp.post("/planOrUpdate")
-def plan_or_update():
-    """
-    Plan a new route or adjust an existing one.
-
-    The backend derives automatically whether a full reroute is needed:
-      - No 'route' in body                           → plan (new route)
-      - 'route' in body, stops/composition unchanged  → adjust (schedule only)
-      - 'route' in body, stops or composition changed → plan (full reroute)
+    Plan a new route (always a full build — no in-place adjust here).
 
     Request body:
-      proposal_id       : int   (required)
-      proposal_version  : int   (required)
-      stops             : [{stop_id, stop_type}, ...]  (required for plan)
-      composition_id    : str   (required for plan)
-      departure_time    : "HH:MM"  (optional — keep existing if omitted)
-      route             : Route.to_dict() output  (required for adjust, optional for plan)
-      stop_type_changes : {stop_id: stop_type}  (optional — adjust specific stops)
+      proposal_id       : int   (optional — only set when replanning stops/
+                                  composition of an already-saved proposal;
+                                  omit for a brand new proposal. If omitted,
+                                  a random placeholder id above one billion
+                                  is assigned and proposal_version is forced
+                                  to 1 — this is a stand-in until proposals
+                                  are actually saved, not a real DB id.)
+      proposal_version  : int   (optional — see proposal_id; ignored if
+                                  proposal_id is omitted)
+      scenario_id       : int   (optional — pins parameter versions; None = live base scenario)
+      stops             : [stop_id, ...]  (required, min 2 — plain stop IDs,
+                                  no stop_type; boarding/alighting is derived
+                                  automatically, see timetable_mode)
+      composition_id    : str   (required)
+      timetable_mode    : "simpleAutomatic"  (optional, default "simpleAutomatic" — only
+                                  supported value for now. Departure time and per-stop
+                                  boarding/alighting are derived by mirroring the trip
+                                  duration around a fixed 02:30 constant: everything
+                                  before 02:30 is a boarding stop, everything after is
+                                  alighting. First/last stop are always boarding/alighting
+                                  regardless of clock time.)
+      schedule_mode     : "alwaysDaily"  (optional, default "alwaysDaily" — only supported
+                                  value for now. Daily frequency in both seasons regardless
+                                  of demand; a future demand-aware strategy can be added
+                                  without changing this request shape.)
+      routing_mode      : "simpleRouting" | "fullRouting"  (optional, default "fullRouting".
+                                  "fullRouting" derives HSR avoidance/speed cap automatically
+                                  from composition + track flags. "simpleRouting" skips all
+                                  of that for a cheap single-pass route — not representative
+                                  of real physics.)
+      auto_stop_addition : bool (optional, default false — accepted but currently a no-op;
+                                  reserved for automatically proposing extra stops along
+                                  the route in a future iteration.)
     """
-    loader = get_loader()
-
     body = request.get_json(silent=True)
     if not body:
         return (
@@ -166,78 +155,73 @@ def plan_or_update():
     if errors:
         return jsonify({"error": "validation_error", "details": errors}), 400
 
-    existing_route = Route.from_dict(body["route"]) if body.get("route") else None
-    use_adjust = existing_route is not None and _is_adjust(body, existing_route)
-    dep_min = (
-        hhmm_to_min(body["departure_time"]) if body.get("departure_time") else None
-    )
+    loader = get_loader()
+    router = RailRouter(get_country_index())
+
+    # All defaulting/resolution happens here, once, at the API boundary —
+    # everything below this point (TripPairInput, plan_route, and everything
+    # they call) receives fully-resolved values and has no defaults or
+    # None-handling of its own to fall back on.
+    proposal_id = body.get("proposal_id")
+    proposal_version = body.get("proposal_version")
+    if proposal_id is None:
+        # Brand new proposal — no DB row, no real id yet. Mint a placeholder
+        # so route_factory.py never has to know "not saved yet" is even a
+        # possible state. Any proposal_version supplied alongside a missing
+        # proposal_id is meaningless (there's nothing to version) and is
+        # ignored in favour of 1.
+        proposal_id = _draft_proposal_id()
+        proposal_version = 1
+    timetable_mode = body.get("timetable_mode", "simpleAutomatic")
+    schedule_mode = body.get("schedule_mode", "alwaysDaily")
+    routing_mode = body.get("routing_mode", "fullRouting")
+    auto_stop_addition = body.get("auto_stop_addition", False)
 
     try:
-        if use_adjust:
-            logger.info(
-                "planOrUpdate: adjust route %s → version %d",
-                existing_route.route_id,
-                body["proposal_version"],
-            )
-            route = adjust_route(
-                existing_route=existing_route,
-                proposal_id=body["proposal_id"],
-                proposal_version=body["proposal_version"],
-                departure_time_min=dep_min,
-                stop_type_changes=body.get("stop_type_changes"),
-                loader=loader,
-            )
-        else:
-            logger.info(
-                "planOrUpdate: plan route proposal_id=%d version=%d",
-                body["proposal_id"],
-                body["proposal_version"],
-            )
-            # use stops/composition from body if provided, else fall back to existing route
-            stops_input = (
-                body.get("stops")
-                or [
-                    {"stop_id": st.stop_id, "stop_type": st.stop_type}
-                    for st in existing_route.all_trips()[0].stop_times
-                ]
-                if existing_route
-                else body["stops"]
-            )
-            comp_id = body.get("composition_id") or (
-                existing_route.all_trips()[0].composition.comp_id
-                if existing_route
-                else None
-            )
-            dep_min_plan = dep_min or (
-                existing_route.all_trips()[0].stop_times[0].departure_time_min
-                if existing_route
-                else 1260  # quick dev fix to get routing running: 21:00 as default departure time
-            )
+        # Inside the try block: resolve_scenario_id() raises ValueError if
+        # the DB has no is_current_base scenario seeded, which should map
+        # to the same 422 domain_error response as any other domain failure.
+        scenario_id = loader.resolve_scenario_id(body.get("scenario_id"))
 
-            router = RailRouter()
-            route = plan_route(
-                proposal_id=body["proposal_id"],
-                proposal_version=body["proposal_version"],
-                stop_inputs=[(s["stop_id"], s["stop_type"]) for s in stops_input],
-                composition_id=comp_id,
-                departure_time_min=dep_min_plan,
-                loader=loader,
-                router=router,
-            )
+        logger.info(
+            "plan: proposal_id=%s version=%s stops=%d",
+            proposal_id,
+            proposal_version,
+            len(body["stops"]),
+        )
+        route, provenance = plan_route(
+            proposal_id=proposal_id,
+            proposal_version=proposal_version,
+            schedule_mode=schedule_mode,
+            trip_pair_inputs=[
+                TripPairInput(
+                    stop_ids=body["stops"],
+                    composition_id=body["composition_id"],
+                    timetable_mode=timetable_mode,
+                    routing_mode=routing_mode,
+                    auto_stop_addition=auto_stop_addition,
+                )
+            ],
+            loader=loader,
+            router=router,
+            scenario_id=scenario_id,
+        )
 
     except ValueError as e:
-        logger.warning("planOrUpdate failed (domain error): %s", e)
+        logger.warning("plan failed (domain error): %s", e)
         return jsonify({"error": "domain_error", "message": str(e)}), 422
     except Exception as e:
-        logger.exception("planOrUpdate failed (unexpected): %s", e)
+        logger.exception("plan failed (unexpected): %s", e)
         return jsonify({"error": "route_error", "message": str(e)}), 500
 
     return (
         jsonify(
             {
                 "route_builder_version": ROUTE_BUILDER_VERSION,
-                "action_taken": "adjust" if use_adjust else "plan",
-                "route": route.to_dict(),
+                "request": body,
+                "route": route_to_dict(
+                    route, provenance.scenario_id, provenance.tracks
+                ),
             }
         ),
         200,

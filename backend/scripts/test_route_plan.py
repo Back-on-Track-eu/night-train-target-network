@@ -1,20 +1,27 @@
 """
-test_evaluate.py
-================
-Test script for POST /api/evaluation.
+test_route_plan.py
+===================
+Manual test script for POST /api/route/plan.
+
+Usage:
+    python scripts/test_route_plan.py <path/to/request.json>
+
+Reads the request body from the given JSON file, POSTs it to
+/api/route/plan, and writes the response (pretty-printed) to a sibling
+file named <request>_output.json — e.g. tc_1_route_input.json produces
+tc_1_route_input_output.json alongside it. The request file itself is
+left untouched.
 
 Pre-flight:
   1. Checks Flask API is reachable
   2. Loads data if not already loaded
   3. Checks OpenRailRouting is running; starts it if not
-  4. Runs the evaluation endpoint
-
-Route: Wien Hbf → Salzburg Hbf → München Hbf → Paris Est
-Composition: NJ-5.1
 """
 
 import json
+import os
 import subprocess
+import sys
 import time
 import requests
 
@@ -104,60 +111,44 @@ def ensure_routing_running():
 # =============================================================================
 
 
-def test_evaluate():
-    payload = {
-        "stops": [
-            {"stop_id": "Wien Hbf", "stop_type": "boarding"},
-            {"stop_id": "Salzburg Hbf", "stop_type": "both"},
-            {"stop_id": "München Hbf", "stop_type": "both"},
-            {"stop_id": "Paris Est", "stop_type": "alighting"},
-        ],
-        "composition_id": "NJ-5.1",
-        "departure_time_h": 21.0,
-        "utilization_seat": 0.7,
-        "utilization_couchette": 0.6,
-        "utilization_sleeper": 0.5,
-        "avg_fare_seat": 49.0,
-        "avg_fare_couchette": 79.0,
-        "avg_fare_sleeper": 129.0,
-        "operating_days_year": 360,
-    }
+def test_route_plan(path: str):
+    with open(path, "r", encoding="utf-8") as f:
+        request_body = json.load(f)
 
-    print("\nPOST /api/evaluation")
-    print("Route: Wien Hbf → Salzburg Hbf → München Hbf → Paris Est")
-    print("Composition: NJ-5.1")
+    base, _ = os.path.splitext(path)
+    output_path = f"{base}_output.json"
+
+    print(f"\nPOST /api/route/plan")
+    print(f"Request: {path}")
     print("-" * 60)
 
-    response = requests.post(f"{API_BASE}/api/evaluation", json=payload)
+    response = requests.post(f"{API_BASE}/api/route/plan", json=request_body)
     print(f"Status: {response.status_code}")
 
+    try:
+        response_body = response.json()
+    except requests.exceptions.JSONDecodeError:
+        # Not a JSON body at all — most likely a raw Flask/Werkzeug error page,
+        # meaning the exception happened outside api/route.py's own try/except.
+        # Check the Flask server's own terminal for the actual traceback.
+        print("\nNon-JSON response body (raw Flask error page?) — check the Flask")
+        print("server's terminal for the actual traceback. Raw response body:\n")
+        print(response.text)
+        sys.exit(1)
+
     if response.status_code == 200:
-        data = response.json()
-        r = data["result"]
+        route = response_body["route"]
         print(f"\n--- ROUTE ---")
-        print(f"  Distance:      {r['total_distance_km']:,.1f} km")
-        print(f"  Driving time:  {r['total_driving_time_h']:.2f} h")
-        print(f"  Total time:    {r['total_time_h']:.2f} h")
-        print(f"\n--- REVENUE ---")
-        print(f"  Seats:         {r['revenue']['revenue_seat']:,.0f} €")
-        print(f"  Couchettes:    {r['revenue']['revenue_couchette']:,.0f} €")
-        print(f"  Sleepers:      {r['revenue']['revenue_sleeper']:,.0f} €")
-        print(f"  TOTAL:         {r['revenue']['total']:,.0f} €")
-        print(f"\n--- COSTS ---")
-        print(f"  Fixed/day:     {r['cost']['fixed_day_total']:,.0f} €")
-        print(f"  Variable/km:   {r['cost']['variable_km_total']:,.0f} €")
-        print(f"  Variable/h:    {r['cost']['variable_hour_total']:,.0f} €")
-        print(f"  Variable/tkt:  {r['cost']['variable_ticket_total']:,.0f} €")
-        print(f"  Infra:         {r['cost']['infra_total']:,.0f} €")
-        print(f"  EBIT target:   {r['cost']['ebit_margin']:,.0f} €")
-        print(f"  TOTAL:         {r['cost']['total']:,.0f} €")
-        print(f"\n--- RESULT ---")
-        print(f"  Margin/trip:   {r['margin']:,.0f} €  ({r['margin_pct']:.1%})")
-        print(f"  Margin/year:   {r['annual_margin']:,.0f} €")
-        print(f"  Cost/seat-km:  {r['cost_per_seat_km']:.4f} €")
+        print(f"  route_id:     {route['route_id']}")
+        print(f"  scenario_id:  {route['scenario_id']}")
+        print(f"  trip_pairs:   {len(route['trip_pairs'])}")
     else:
         print(f"\nError response:")
-        print(json.dumps(response.json(), indent=2))
+        print(json.dumps(response_body, indent=2))
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(response_body, f, indent=2, ensure_ascii=False)
+    print(f"\nResponse written to {output_path}")
 
 
 # =============================================================================
@@ -165,15 +156,19 @@ def test_evaluate():
 # =============================================================================
 
 if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        print("Usage: python scripts/test_route_plan.py <path/to/request.json>")
+        sys.exit(1)
+
     print("=" * 60)
-    print("  Night Train — evaluation endpoint test")
+    print("  Night Train — route/plan endpoint test")
     print("=" * 60)
 
     if not check_flask():
-        exit(1)
+        sys.exit(1)
     if not ensure_data_loaded():
-        exit(1)
+        sys.exit(1)
     if not ensure_routing_running():
-        exit(1)
+        sys.exit(1)
 
-    test_evaluate()
+    test_route_plan(sys.argv[1])

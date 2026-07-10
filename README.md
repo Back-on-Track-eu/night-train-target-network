@@ -31,6 +31,58 @@ Each submitted route is scored on:
 
 This repo hosts the technical side of the project — backend and frontend. Data for is stored in a postgres database on our server of back-on-track.
 
+## Running the app locally
+
+The easiest way to get the frontend (and the backend API it talks to) running
+on your machine — no Python setup required.
+
+**Prerequisites**
+
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) — installed and running
+- [Git](https://git-scm.com/downloads)
+
+**1. Clone the repository**
+
+```bash
+git clone https://github.com/Back-on-Track-eu/night-train-target-network.git
+cd night-train-target-network
+```
+
+**2. Create your `.env` file**
+
+One shared `.env` configures the whole backend. The defaults work out of the box:
+
+```bash
+cp backend/docker/.env.example backend/docker/.env
+```
+
+**3. Start everything**
+
+```bash
+docker compose -f .devcontainer/docker-compose.yml up --build
+```
+
+This builds and starts four containers: the Postgres/PostGIS database, the
+OpenRailRouting engine, the Flask backend API, and the Vue frontend. First run
+takes a few minutes (routing graph + image builds); subsequent runs are fast.
+
+**4. Open the app**
+
+- Frontend: [http://localhost:5173](http://localhost:5173)
+- Backend API health check: [http://localhost:5000/api/health](http://localhost:5000/api/health)
+
+**Stopping it**
+
+```bash
+docker compose -f .devcontainer/docker-compose.yml down
+```
+
+Add `-v` to also wipe the database volume for a clean slate.
+
+Working on the frontend day-to-day (VS Code, hot reload, troubleshooting)? See
+`.devcontainer/DEVELOPMENT.md`. Working on the backend instead? See
+`backend/DEVELOPMENT.md`.
+
 ## Contributing
 
 Contributions of any kind — code, data, route ideas, documentation — are very welcome!

@@ -12,7 +12,28 @@ Run order:
      track_infrastructure_defaults → track_infrastructures →
      stop_infrastructure_defaults → stop_infrastructures →
      composition_types → composition_type_coaches → composition_references
-  3. proposals
+  3. scenario: scenarios (base scenario pinning the version numbers seeded
+     for the four infrastructure tables, plus one illustrative what-if
+     scenario)
+  4. proposals
+
+Versioning note
+---------------
+Only the four infrastructure input_params tables (track_infrastructures,
+track_infrastructure_defaults, stop_infrastructures,
+stop_infrastructure_defaults) are versioned — "current" is entirely a
+scenario.scenarios concept for these (see create_scenario_schema.sql). A
+version bump is a FULL-TABLE SNAPSHOT: editing one row duplicates every
+other row of that table forward into the new version number. The
+TRACK_INFRASTRUCTURES fixture below deliberately seeds two full
+generations (version 1 and version 2, all 7 countries in each) to
+demonstrate and test this.
+
+operators, coach_types, composition_types, and composition_references are
+NOT versioned — they're a catalog you add to, not history you edit. Each
+row's natural id (operator_id, coach_type_id, composition_type_id) is
+permanent; changing a value means seeding a new id, never editing a row
+in place. See create_input_params_schema.sql for the rationale.
 """
 
 import os
@@ -71,8 +92,8 @@ def insert_rows(cur, table: str, rows: list[dict]) -> None:
 # ============================================================
 
 USERS = [
-    {"email": "david@backontrack.eu"},
-    {"email": "bjarne@backontrack.eu"},
+    {"user_name": "David", "email": "david@backontrack.eu"},
+    {"user_name": "Bjarne", "email": "bjarne@backontrack.eu"},
 ]
 
 # ============================================================
@@ -108,12 +129,135 @@ def fetch_source_ids(cur) -> dict[str, int]:
 COUNTRIES = [
     {"country_code": "DE", "country_name": "Germany"},
     {"country_code": "AT", "country_name": "Austria"},
-    {"country_code": "CH", "country_name": "Switzerland"},
+    {
+        "country_code": "CH",
+        "country_name": "Switzerland",
+    },  # not an EU member — kept for existing CH routes
     {"country_code": "FR", "country_name": "France"},
     {"country_code": "BE", "country_name": "Belgium"},
     {"country_code": "DK", "country_name": "Denmark"},
     {"country_code": "SE", "country_name": "Sweden"},
+    # Remaining EU27 members — added so _check_country_coverage() in
+    # route_factory.py doesn't reject a route for merely transiting one of
+    # these, even though none has real track_infrastructures figures yet
+    # (see _TRACK_INFRA_V2_ROWS below: every field but country_code is None,
+    # so TrackInfraCollection resolves every one of them from the EU-average
+    # default — is_default stays False since a real row exists, but expect
+    # a "using EU default" warning logged per field per country).
+    {"country_code": "BG", "country_name": "Bulgaria"},
+    {"country_code": "HR", "country_name": "Croatia"},
+    {"country_code": "CY", "country_name": "Cyprus"},
+    {"country_code": "CZ", "country_name": "Czechia"},
+    {"country_code": "EE", "country_name": "Estonia"},
+    {"country_code": "FI", "country_name": "Finland"},
+    {"country_code": "GR", "country_name": "Greece"},
+    {"country_code": "HU", "country_name": "Hungary"},
+    {"country_code": "IE", "country_name": "Ireland"},
+    {"country_code": "IT", "country_name": "Italy"},
+    {"country_code": "LV", "country_name": "Latvia"},
+    {"country_code": "LT", "country_name": "Lithuania"},
+    {"country_code": "LU", "country_name": "Luxembourg"},
+    {"country_code": "MT", "country_name": "Malta"},
+    {"country_code": "NL", "country_name": "Netherlands"},
+    {"country_code": "PL", "country_name": "Poland"},
+    {"country_code": "PT", "country_name": "Portugal"},
+    {"country_code": "RO", "country_name": "Romania"},
+    {"country_code": "SK", "country_name": "Slovakia"},
+    {"country_code": "SI", "country_name": "Slovenia"},
+    {"country_code": "ES", "country_name": "Spain"},
 ]
+
+# Natural Earth's ADM0_A3 (ISO 3166-1 alpha-3) for exactly the countries
+# seeded above. Kept local and minimal — this is a one-off seed-time
+# matching key, not a general country-code utility. It isn't importable
+# from elsewhere in the codebase anyway: seed.py also runs standalone in
+# the db/dev seeder image, which has no models/ package (see
+# backend/db/dev/Dockerfile).
+_COUNTRY_CODE_TO_ADM0_A3 = {
+    "DE": "DEU",
+    "AT": "AUT",
+    "CH": "CHE",
+    "FR": "FRA",
+    "BE": "BEL",
+    "DK": "DNK",
+    "SE": "SWE",
+    "BG": "BGR",
+    "HR": "HRV",
+    "CY": "CYP",
+    "CZ": "CZE",
+    "EE": "EST",
+    "FI": "FIN",
+    "GR": "GRC",
+    "HU": "HUN",
+    "IE": "IRL",
+    "IT": "ITA",
+    "LV": "LVA",
+    "LT": "LTU",
+    "LU": "LUX",
+    "MT": "MLT",
+    "NL": "NLD",
+    "PL": "POL",
+    "PT": "PRT",
+    "RO": "ROU",
+    "SK": "SVK",
+    "SI": "SVN",
+    "ES": "ESP",
+}
+
+
+def _load_natural_earth_features() -> dict[str, dict] | None:
+    """
+    Read the Natural Earth admin-0 countries geojson — the same file
+    rail_router.py used to read directly before country borders moved into
+    PostGIS — and index its features by ADM0_A3.
+
+    Returns None (with a warning) if the file isn't present, e.g. when
+    running seed.py outside the Docker images that download it at build
+    time. country_geom is a nullable column, so this degrades gracefully
+    to an ungeocoded seed rather than failing the whole run.
+    """
+    path = os.environ.get("COUNTRIES_GEOJSON_PATH")
+    if not path or not os.path.exists(path):
+        print(
+            f"  WARNING: countries geojson not found at "
+            f"COUNTRIES_GEOJSON_PATH={path!r} — skipping country_geom, "
+            f"all countries will be seeded with NULL geometry."
+        )
+        return None
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    return {f["properties"].get("ADM0_A3"): f["geometry"] for f in data["features"]}
+
+
+def seed_country_geometries(cur) -> None:
+    """
+    Populate input_params.countries.country_geom for every seeded country
+    that has a matching Natural Earth feature. Runs as UPDATEs after
+    COUNTRIES has been inserted, since ST_GeomFromGeoJSON() isn't something
+    insert_rows()'s plain-value INSERT can express.
+    """
+    features = _load_natural_earth_features()
+    if features is None:
+        return
+    matched, missing = 0, []
+    for cc, adm0_a3 in _COUNTRY_CODE_TO_ADM0_A3.items():
+        geometry = features.get(adm0_a3)
+        if geometry is None:
+            missing.append(cc)
+            continue
+        cur.execute(
+            """
+            UPDATE input_params.countries
+            SET country_geom = ST_SetSRID(ST_Multi(ST_GeomFromGeoJSON(%s)), 4326)
+            WHERE country_code = %s
+            """,
+            (_dumps(geometry), cc),
+        )
+        matched += 1
+    print(f"  Matched {matched}/{len(_COUNTRY_CODE_TO_ADM0_A3)} country geometries.")
+    if missing:
+        print(f"  WARNING: no Natural Earth feature found for: {', '.join(missing)}")
+
 
 # ============================================================
 # service_classes  (density = space consumption per place, Sleeper > Couchette > Seat)
@@ -277,9 +421,13 @@ OPERATORS = [
         "operator_crew_overhead_h": "01:00:00",
         "operator_ebit_margin_per": 0.03,
         "operator_financing_quota_per": 0.04,
-        "operator_shunting_eur_per_event": 575.932,
         "operator_var_overhead_per": 0.10,
         "operator_fix_overhead_quota_per": 0.15,
+        # Full-service locomotive lease — utilization-based, bundles
+        # capital, maintenance, and insurance. Illustrative rate based on
+        # European full-service lease providers (ELP, Railpool, Alpha
+        # Trains), billed per loco operating hour.
+        "operator_loco_lease_eur_h": 145.00,
     },
 ]
 
@@ -359,6 +507,8 @@ TRACK_INFRA_DEFAULTS = [
         "track_infra_default_key": "_default",
         "track_tac_eur_train_km": 4.50,
         "track_parking_eur_day": 65.00,
+        "track_shunting_eur_event": 575.00,
+        "track_shunting_eur_event": 575.00,
         "track_energy_price_eur_kwh": 0.150,
         "track_terrain_category": "Flat",
         "track_terrain_score": 1.0,
@@ -369,15 +519,19 @@ TRACK_INFRA_DEFAULTS = [
     },
 ]
 
-TRACK_INFRASTRUCTURES = [
-    # Full data countries
-    # DE has two versions — loader must only use is_current=True (version=2)
+# Two full-table snapshots to exercise/demonstrate full-snapshot versioning:
+# version 1 is the original data (DE at old, lower rates); version 2 is the
+# current data (DE corrected upward, every other country duplicated forward
+# unchanged). A scenario pins one version NUMBER for the whole table, never
+# a per-country flag — see create_scenario_schema.sql.
+
+_TRACK_INFRA_V2_ROWS = [
     {
         "country_code": "DE",
         "track_infra_version": 2,
-        "is_current": True,
         "track_tac_eur_train_km": 5.40,
         "track_parking_eur_day": 70.00,
+        "track_shunting_eur_event": 575.00,
         "track_energy_price_eur_kwh": 0.142,
         "track_terrain_category": "Flat",
         "track_terrain_score": 1.0,
@@ -386,27 +540,12 @@ TRACK_INFRASTRUCTURES = [
         "track_min_alighting_time": "00:02:00",
         "track_buffer_quota_per": 0.10,
     },
-    # Old DE row (version=1, is_current=False) — loader must ignore this
-    {
-        "country_code": "DE",
-        "track_infra_version": 1,
-        "track_tac_eur_train_km": 3.10,
-        "track_parking_eur_day": 50.00,
-        "track_energy_price_eur_kwh": 0.120,
-        "track_terrain_category": "Flat",
-        "track_terrain_score": 1.0,
-        "track_hsr_allowed": True,
-        "track_min_boarding_time": "00:02:00",
-        "track_min_alighting_time": "00:02:00",
-        "track_buffer_quota_per": 0.08,
-        "is_current": False,
-    },
     {
         "country_code": "AT",
         "track_infra_version": 2,
-        "is_current": True,
         "track_tac_eur_train_km": 4.20,
         "track_parking_eur_day": 60.00,
+        "track_shunting_eur_event": 575.00,
         "track_energy_price_eur_kwh": 0.138,
         "track_terrain_category": "Hilly",
         "track_terrain_score": 1.4,
@@ -418,9 +557,9 @@ TRACK_INFRASTRUCTURES = [
     {
         "country_code": "CH",
         "track_infra_version": 2,
-        "is_current": True,
         "track_tac_eur_train_km": 6.80,
         "track_parking_eur_day": 85.00,
+        "track_shunting_eur_event": 575.00,
         "track_energy_price_eur_kwh": 0.165,
         "track_terrain_category": "Mountainous",
         "track_terrain_score": 1.8,
@@ -432,9 +571,9 @@ TRACK_INFRASTRUCTURES = [
     {
         "country_code": "FR",
         "track_infra_version": 2,
-        "is_current": True,
         "track_tac_eur_train_km": 4.60,
         "track_parking_eur_day": 55.00,
+        "track_shunting_eur_event": 575.00,
         "track_energy_price_eur_kwh": 0.130,
         "track_terrain_category": "Flat",
         "track_terrain_score": 1.0,
@@ -446,9 +585,9 @@ TRACK_INFRASTRUCTURES = [
     {
         "country_code": "BE",
         "track_infra_version": 2,
-        "is_current": True,
         "track_tac_eur_train_km": 5.10,
         "track_parking_eur_day": 50.00,
+        "track_shunting_eur_event": 575.00,
         "track_energy_price_eur_kwh": 0.145,
         "track_terrain_category": "Flat",
         "track_terrain_score": 1.0,
@@ -460,9 +599,9 @@ TRACK_INFRASTRUCTURES = [
     {
         "country_code": "DK",
         "track_infra_version": 2,
-        "is_current": True,
         "track_tac_eur_train_km": 4.80,
         "track_parking_eur_day": 55.00,
+        "track_shunting_eur_event": 575.00,
         "track_energy_price_eur_kwh": 0.128,
         "track_terrain_category": "Flat",
         "track_terrain_score": 1.0,
@@ -475,9 +614,9 @@ TRACK_INFRASTRUCTURES = [
     {
         "country_code": "SE",
         "track_infra_version": 2,
-        "is_current": True,
         "track_tac_eur_train_km": None,
         "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
         "track_energy_price_eur_kwh": 0.090,
         "track_terrain_category": "Hilly",
         "track_terrain_score": 1.2,
@@ -486,7 +625,330 @@ TRACK_INFRASTRUCTURES = [
         "track_min_alighting_time": "00:02:00",
         "track_buffer_quota_per": 0.10,
     },
+    # Remaining EU27 members — every field None, resolved entirely from the
+    # EU-average default (track_infrastructure_defaults). Real figures TBD;
+    # this just gives each a real row so _check_country_coverage() in
+    # route_factory.py doesn't reject a route for merely transiting one of
+    # these (is_default stays False — a row exists — but every field will
+    # log a "using EU default" warning the first time it's resolved).
+    {
+        "country_code": "BG",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "HR",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "CY",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "CZ",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "EE",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "FI",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "GR",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "HU",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "IE",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "IT",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "LV",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "LT",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "LU",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "MT",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "NL",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "PL",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "PT",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "RO",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "SK",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "SI",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
+    {
+        "country_code": "ES",
+        "track_infra_version": 2,
+        "track_tac_eur_train_km": None,
+        "track_parking_eur_day": None,
+        "track_shunting_eur_event": None,
+        "track_energy_price_eur_kwh": None,
+        "track_terrain_category": None,
+        "track_terrain_score": None,
+        "track_hsr_allowed": None,
+        "track_min_boarding_time": None,
+        "track_min_alighting_time": None,
+        "track_buffer_quota_per": None,
+    },
 ]
+
+# Version 1 = the same full snapshot, except DE still carries its original,
+# lower (pre-correction) rates. Every other country is duplicated forward
+# unchanged — exactly the full-table-snapshot invariant in practice.
+_TRACK_INFRA_V1_OVERRIDES = {
+    "DE": {
+        "track_tac_eur_train_km": 3.10,
+        "track_parking_eur_day": 50.00,
+        "track_buffer_quota_per": 0.08,
+    },
+}
+
+
+def _build_track_infrastructures_v1() -> list[dict]:
+    rows = []
+    for row in _TRACK_INFRA_V2_ROWS:
+        v1_row = {**row, "track_infra_version": 1}
+        v1_row.update(_TRACK_INFRA_V1_OVERRIDES.get(row["country_code"], {}))
+        rows.append(v1_row)
+    return rows
+
+
+TRACK_INFRASTRUCTURES = _build_track_infrastructures_v1() + _TRACK_INFRA_V2_ROWS
 
 # ============================================================
 # stop infrastructure
@@ -587,14 +1049,10 @@ STD_COMP_DEFAULTS = dict(
     composition_type_energy_factor_terrain=0.034545,
     composition_type_min_boarding_time="00:02:00",
     composition_type_min_alighting_time="00:02:00",
-    composition_type_purchase_loco_eur=24500000.00,
     composition_type_purchase_coach_eur=20000000.00,
-    composition_type_loco_avail_per=0.85,
     composition_type_coach_avail_per=0.80,
-    composition_type_loco_amort_years=25,
     composition_type_coach_amort_years=30,
     composition_type_cleaning_eur_day=1753.584,
-    composition_type_loco_maint_eur_km=2.86533333,
     composition_type_coach_maint_eur_km=2.86533333,
     composition_type_driver_factor=1.0,
 )
@@ -692,78 +1150,17 @@ COMPOSITION_TYPE_COACHES_RAW = [
 # ============================================================
 # proposals
 # ============================================================
-
-SERVICES = [{"service_id": "NJ-BER-VIE-DAILY"}]
-CALENDAR = [
-    {
-        "service_id": "NJ-BER-VIE-DAILY",
-        "monday": True,
-        "tuesday": True,
-        "wednesday": True,
-        "thursday": True,
-        "friday": True,
-        "saturday": True,
-        "sunday": True,
-        "start_date": "2026-12-13",
-        "end_date": "2027-12-11",
-    }
-]
-CALENDAR_DATES = [
-    {"service_id": "NJ-BER-VIE-DAILY", "date": "2026-12-24", "exception_type": 2}
-]
-SHAPES = [
-    {
-        "shape_id": "NJ-BER-VIE-SHAPE",
-        "geometry": {
-            "type": "LineString",
-            "coordinates": [[13.369, 52.525], [13.732, 51.040], [16.376, 48.185]],
-        },
-        "length_km": 683.4,
-    }
-]
-ROUTES = [
-    {
-        "route_id": "NJ-BER-VIE",
-        "agency_id": None,
-        "route_short_name": "NJ 470",
-        "route_long_name": "Berlin Hbf - Vienna Hbf",
-        "route_type": 105,
-    }
-]
-TRIPS = [
-    {
-        "trip_id": "NJ-BER-VIE-OUTBOUND",
-        "route_id": "NJ-BER-VIE",
-        "service_id": "NJ-BER-VIE-DAILY",
-        "shape_id": "NJ-BER-VIE-SHAPE",
-        "trip_headsign": "Wien Hbf",
-        "direction_id": 0,
-        "composition_type_id": "STD-3.1",
-    }
-]
-STOP_TIMES = [
-    {
-        "trip_id": "NJ-BER-VIE-OUTBOUND",
-        "stop_sequence": 1,
-        "stop_id": "DE_BERLIN_HBF",
-        "arrival_time": "21:04:00",
-        "departure_time": "21:04:00",
-    },
-    {
-        "trip_id": "NJ-BER-VIE-OUTBOUND",
-        "stop_sequence": 2,
-        "stop_id": "DE_DRESDEN_HBF",
-        "arrival_time": "22:47:00",
-        "departure_time": "22:52:00",
-    },
-    {
-        "trip_id": "NJ-BER-VIE-OUTBOUND",
-        "stop_sequence": 3,
-        "stop_id": "AT_WIEN_HBF",
-        "arrival_time": "30:30:00",
-        "departure_time": "30:30:00",
-    },
-]
+#
+# No hand-written GTFS rows here. Every backend/db/README.md-documented
+# invariant says GTFS rows are always linked to a proposals.proposals row
+# by the P{proposal_id}_V{version}_R1 ID convention — a hand-seeded GTFS
+# demo route with its own ad-hoc IDs (as this block used to be) violated
+# that silently. seed_example_proposal(), called at the end of main(),
+# builds one real proposal (Berlin Hbf -> Dresden Hbf -> Wien Hbf) and
+# saves it through adapters.proposal_repository.ProposalRepository — the
+# exact same code path a live POST /api/proposal uses — so the seeded
+# example and a real save are structurally identical by construction,
+# not by two independently maintained representations.
 
 # ============================================================
 # FK-resolving seed helpers
@@ -809,17 +1206,22 @@ def seed_sources(cur, source_ids: dict) -> None:
 def seed_operator_class_costs(cur):
     for operator_id, service_class_id, eur_place in OPERATOR_CLASS_COSTS_RAW:
         cur.execute(
+            "SELECT operator_row_id FROM input_params.operators WHERE operator_id=%s",
+            (operator_id,),
+        )
+        operator_row_id = cur.fetchone()[0]
+        cur.execute(
             """INSERT INTO input_params.operator_class_costs
-               (operator_id, service_class_id, operator_class_svc_stockings_eur_place)
+               (operator_row_id, service_class_id, operator_class_svc_stockings_eur_place)
                VALUES (%s, %s, %s)""",
-            (operator_id, service_class_id, eur_place),
+            (operator_row_id, service_class_id, eur_place),
         )
 
 
 def seed_coach_type_classes(cur):
     for coach_type_id, service_class_id, places in COACH_TYPE_CLASSES_RAW:
         cur.execute(
-            "SELECT coach_type_row_id FROM input_params.coach_types WHERE coach_type_id=%s AND is_current",
+            "SELECT coach_type_row_id FROM input_params.coach_types WHERE coach_type_id=%s",
             (coach_type_id,),
         )
         coach_type_row_id = cur.fetchone()[0]
@@ -834,12 +1236,12 @@ def seed_coach_type_classes(cur):
 def seed_composition_type_coaches(cur):
     for comp_id, position, coach_type_id in COMPOSITION_TYPE_COACHES_RAW:
         cur.execute(
-            "SELECT composition_type_row_id FROM input_params.composition_types WHERE composition_type_id=%s AND is_current",
+            "SELECT composition_type_row_id FROM input_params.composition_types WHERE composition_type_id=%s",
             (comp_id,),
         )
         composition_type_row_id = cur.fetchone()[0]
         cur.execute(
-            "SELECT coach_type_row_id FROM input_params.coach_types WHERE coach_type_id=%s AND is_current",
+            "SELECT coach_type_row_id FROM input_params.coach_types WHERE coach_type_id=%s",
             (coach_type_id,),
         )
         coach_type_row_id = cur.fetchone()[0]
@@ -852,12 +1254,38 @@ def seed_composition_type_coaches(cur):
 
 
 def seed_composition_references(cur):
-    """Seed reference trip profiles for STD-7.1 and STD-9.1."""
-    for comp_id in ("STD-7.1", "STD-9.1"):
+    """
+    Seed a reference trip profile for every composition in
+    COMPOSITION_TYPES_VARYING, so none come back with indicative=null.
+
+    Same illustrative reference profile reused for all compositions for
+    now — compute_indicative_figures() is itself still a flat placeholder
+    (see models/compositions/calc_indicative_figures.py), so per-
+    composition differentiation here wouldn't be reflected in the
+    indicative KPIs yet anyway. Revisit alongside the real compositions
+    cost model.
+    """
+    reference_profile = dict(
+        ref_distance_km=800,
+        ref_avg_speed_kmh=90.0,
+        ref_terrain_score=1.3,
+        ref_operating_days=360,
+        ref_utilization_seat=0.70,
+        ref_utilization_couchette=0.65,
+        ref_utilization_sleeper=0.80,
+        ref_utilization_capsule=0.00,
+        ref_utilization_catering=0.00,
+        ref_avg_fare_seat=49.00,
+        ref_avg_fare_couchette=79.00,
+        ref_avg_fare_sleeper=129.00,
+        ref_avg_fare_capsule=0.00,
+        ref_avg_fare_catering=0.00,
+    )
+    for comp_id, _description in COMPOSITION_TYPES_VARYING:
         cur.execute(
             """
             SELECT composition_type_row_id FROM input_params.composition_types
-            WHERE composition_type_id = %s AND is_current = TRUE
+            WHERE composition_type_id = %s
         """,
             (comp_id,),
         )
@@ -872,23 +1300,398 @@ def seed_composition_references(cur):
                 dict(
                     composition_type_row_id=row[0],
                     composition_type_id=comp_id,
-                    ref_distance_km=800,
-                    ref_avg_speed_kmh=90.0,
-                    ref_terrain_score=1.3,
-                    ref_operating_days=360,
-                    ref_utilization_seat=0.70,
-                    ref_utilization_couchette=0.65,
-                    ref_utilization_sleeper=0.80,
-                    ref_utilization_capsule=0.00,
-                    ref_utilization_catering=0.00,
-                    ref_avg_fare_seat=49.00,
-                    ref_avg_fare_couchette=79.00,
-                    ref_avg_fare_sleeper=129.00,
-                    ref_avg_fare_capsule=0.00,
-                    ref_avg_fare_catering=0.00,
+                    **reference_profile,
                 ),
             ],
         )
+
+
+# ============================================================
+# scenario
+# ============================================================
+# Base scenario pins the exact version numbers seeded above for each of
+# the four infrastructure tables — every scenario row is a complete,
+# self-contained pin, no NULLs, so it stays reproducible even after the
+# base moves on. Compositions/coach types/operators/composition
+# references aren't part of a scenario at all — see
+# create_scenario_schema.sql.
+# The what-if scenario is a genuinely separate lineage (its own
+# scenario_key): it copies every pointer forward from the base at the
+# moment it was created, then overrides only track_infrastructures_version.
+
+BASE_SCENARIO = {
+    "scenario_key": "base",
+    "scenario_name": "2026 base",
+    "description": "Illustrative baseline parameter set — all tables at their current seeded version.",
+    "change_log": "Initial seed.",
+    "editor": "david",
+    "is_current_base": True,
+    "is_current_scenario": True,
+    "track_infrastructures_version": 2,
+    "track_infrastructure_defaults_version": 1,
+    "stop_infrastructures_version": 1,
+    "stop_infrastructure_defaults_version": 1,
+}
+
+WHATIF_SCENARIO = {
+    "scenario_key": "whatif-de-track-infra",
+    "scenario_name": "What-if: DE track infra pre-correction",
+    "description": "Demonstrates a what-if lineage: copied forward from '2026 base' at "
+    "creation time, then only track_infrastructures_version overridden "
+    "(to version 1, DE's original lower rates). Every other pointer is an "
+    "explicit copy, not an inherited NULL, so this scenario stays "
+    "reproducible even after the base moves on.",
+    "change_log": "Forked from 'base' scenario_key, pinned track_infrastructures to version 1.",
+    "editor": "david",
+    "is_current_base": False,
+    "is_current_scenario": True,
+    "track_infrastructures_version": 1,
+    "track_infrastructure_defaults_version": BASE_SCENARIO[
+        "track_infrastructure_defaults_version"
+    ],
+    "stop_infrastructures_version": BASE_SCENARIO["stop_infrastructures_version"],
+    "stop_infrastructure_defaults_version": BASE_SCENARIO[
+        "stop_infrastructure_defaults_version"
+    ],
+}
+
+
+# ============================================================
+# Example proposal — seeded via the real save code path
+# ============================================================
+
+# Physics-only field subsets mirroring api/helpers/route_serialize.py's
+# _composition_to_dict() / _track_to_dict() — kept intentionally separate
+# (rather than importing those underscore-prefixed helpers across a
+# module boundary) but sourced from the SAME live domain objects
+# (Composition / TrackInfrastructure), never hand-typed numbers. If the
+# route_serialize.py field lists change, mirror the change here too.
+_EXPOSED_TRACK_FIELDS = (
+    "hsr_allowed",
+    "min_boarding_time_min",
+    "min_alighting_time_min",
+    "terrain_score",
+    "terrain_category",
+    "buffer_quota_per",
+)
+
+
+def _composition_physics_dict(comp) -> dict:
+    return {
+        "comp_id": comp.comp_id,
+        "comp_description": comp.comp_description,
+        "operator_id": comp.operator_id,
+        "max_speed_kmh": comp.max_speed_kmh,
+        "hsr_allowed": comp.hsr_allowed,
+        "min_boarding_time_min": comp.min_boarding_time_min,
+        "min_alighting_time_min": comp.min_alighting_time_min,
+        "energy_factor_weight": comp.energy_factor_weight,
+        "energy_factor_speed": comp.energy_factor_speed,
+        "energy_factor_terrain": comp.energy_factor_terrain,
+        "total_weight_t": comp.total_weight_t,
+        "total_crew": comp.total_crew,
+        "places_by_class": comp.places_by_class,
+        "density_by_class": comp.density_by_class,
+    }
+
+
+def _track_physics_dict(track) -> dict:
+    return {
+        "country_code": track.country_code,
+        "defaulted_fields": [
+            f for f in _EXPOSED_TRACK_FIELDS if track.field_is_default.get(f)
+        ],
+        "hsr_allowed": track.hsr_allowed,
+        "min_boarding_time_min": track.min_boarding_time_min,
+        "min_alighting_time_min": track.min_alighting_time_min,
+        "terrain_score": track.terrain_score,
+        "terrain_category": track.terrain_category,
+        "buffer_quota_per": track.buffer_quota_per,
+    }
+
+
+def _example_trip(
+    trip_id: str,
+    direction: int,
+    stops: list[tuple[str, str, str, float, float]],
+    times_min: list[tuple[int | None, int | None]],
+    stop_types: list[str],
+    segment_physics: list[tuple[int, int, int, float, dict, dict]],
+    segment_geometries: list[list[list[float]]],
+    geometries_out: list[dict],
+) -> dict:
+    """One direction of the example trip pair. stops/times_min/stop_types
+    are parallel lists over stop positions (n stops); segment_physics/
+    segment_geometries are parallel lists over segments (n - 1). Segment
+    distance/time/energy figures are illustrative hand-picked values —
+    this script has no OpenRailRouting connection to derive them from,
+    same as the demo route this replaces."""
+    segments = []
+    for i in range(len(stops) - 1):
+        from_id, from_name, from_cc, from_lat, from_lon = stops[i]
+        to_id, to_name, to_cc, to_lat, to_lon = stops[i + 1]
+        distance_m, driving_min, buffer_min, energy_kwh, dist_shares, time_shares = (
+            segment_physics[i]
+        )
+        geometry_id = f"{trip_id}_L{i}"
+        geometries_out.append({"id": geometry_id, "coords": segment_geometries[i]})
+        segments.append(
+            {
+                "from_stop": {
+                    "stop_id": from_id,
+                    "stop_name": from_name,
+                    "country_code": from_cc,
+                    "lat": from_lat,
+                    "lon": from_lon,
+                    "stop_type": stop_types[i],
+                    "arrival_time_min": times_min[i][0],
+                    "departure_time_min": times_min[i][1],
+                },
+                "to_stop": {
+                    "stop_id": to_id,
+                    "stop_name": to_name,
+                    "country_code": to_cc,
+                    "lat": to_lat,
+                    "lon": to_lon,
+                    "stop_type": stop_types[i + 1],
+                    "arrival_time_min": times_min[i + 1][0],
+                    "departure_time_min": times_min[i + 1][1],
+                },
+                "geometry_id": geometry_id,
+                "distance_m": distance_m,
+                "driving_time_min": driving_min,
+                "buffer_time_min": buffer_min,
+                "energy_kwh": energy_kwh,
+                "country_distance_shares": dist_shares,
+                "country_time_shares": time_shares,
+            }
+        )
+    return {"trip_id": trip_id, "direction": direction, "segments": segments}
+
+
+def _build_example_route(scenario_id: int, composition, tracks) -> dict:
+    """Berlin Hbf -> Dresden Hbf -> Wien Hbf, STD-7.1, no demand (od_pairs
+    empty — financial fields on this proposal are null until someone
+    evaluates and re-saves it, same as any proposal saved without an
+    evaluation). Draft route_id follows the real >=1e9 placeholder
+    convention /api/route/plan uses, so ProposalRepository.save() exercises
+    the exact same ID-rewrite path a live save does. On a fresh DB this
+    naturally becomes proposal_id=1 (first-ever insert) — see
+    _SEED_PROPOSAL_ID's comment for why that's collision-free."""
+    draft_prefix = "P1234567890_V1_R1"
+    composition_dict = _composition_physics_dict(composition)
+
+    berlin = ("DE_BERLIN_HBF", "Berlin Hbf", "DE", 52.525, 13.369)
+    dresden = ("DE_DRESDEN_HBF", "Dresden Hbf", "DE", 51.040, 13.732)
+    wien = ("AT_WIEN_HBF", "Wien Hbf", "AT", 48.185, 16.376)
+
+    # Berlin -> Dresden: fully within DE. Dresden -> Wien: illustrative
+    # DE/AT split (doesn't model the real Berlin-Dresden-Wien routing
+    # through Czechia — same simplification the demo route this replaces
+    # made).
+    outbound_physics = [
+        (165300, 95, 8, 850.0, {"DE": 1.0}, {"DE": 1.0}),
+        (518100, 430, 28, 2650.0, {"DE": 0.3, "AT": 0.7}, {"DE": 0.3, "AT": 0.7}),
+    ]
+    return_physics = [
+        (518100, 430, 28, 2650.0, {"AT": 0.7, "DE": 0.3}, {"AT": 0.7, "DE": 0.3}),
+        (165300, 95, 8, 850.0, {"DE": 1.0}, {"DE": 1.0}),
+    ]
+    outbound_geometries = [
+        [[13.369, 52.525], [13.732, 51.040]],
+        [[13.732, 51.040], [16.376, 48.185]],
+    ]
+    return_geometries = [
+        [[16.376, 48.185], [13.732, 51.040]],
+        [[13.732, 51.040], [13.369, 52.525]],
+    ]
+
+    geometries: list[dict] = []
+    outbound = _example_trip(
+        trip_id=f"{draft_prefix}_D0_T1",
+        direction=0,
+        stops=[berlin, dresden, wien],
+        times_min=[(None, 1264), (1367, 1372), (1830, None)],
+        stop_types=["boarding", "both", "alighting"],
+        segment_physics=outbound_physics,
+        segment_geometries=outbound_geometries,
+        geometries_out=geometries,
+    )
+    return_trip = _example_trip(
+        trip_id=f"{draft_prefix}_D1_T1",
+        direction=1,
+        stops=[wien, dresden, berlin],
+        times_min=[(None, 1200), (1658, 1663), (1766, None)],
+        stop_types=["boarding", "both", "alighting"],
+        segment_physics=return_physics,
+        segment_geometries=return_geometries,
+        geometries_out=geometries,
+    )
+
+    return {
+        "route_id": draft_prefix,
+        "scenario_id": scenario_id,
+        "schedule": {
+            "seasonal_schedules": [
+                {"season": "summer", "frequency": "daily"},
+                {"season": "winter", "frequency": "daily"},
+            ]
+        },
+        "trip_pairs": [
+            {
+                "composition_id": composition.comp_id,
+                "composition": composition_dict,
+                "od_pairs": [],
+                "outbound": outbound,
+                "return_trip": return_trip,
+            }
+        ],
+        "parkings": [
+            {
+                "stop_id": "AT_WIEN_HBF",
+                "stop_name": "Wien Hbf",
+                "country_code": "AT",
+                "trip_ids": [f"{draft_prefix}_D0_T1"],
+            },
+            {
+                "stop_id": "DE_BERLIN_HBF",
+                "stop_name": "Berlin Hbf",
+                "country_code": "DE",
+                "trip_ids": [f"{draft_prefix}_D1_T1"],
+            },
+        ],
+        "shuntings": [
+            {
+                "stop_id": "DE_BERLIN_HBF",
+                "stop_name": "Berlin Hbf",
+                "country_code": "DE",
+                "trip_id": f"{draft_prefix}_D0_T1",
+            },
+            {
+                "stop_id": "AT_WIEN_HBF",
+                "stop_name": "Wien Hbf",
+                "country_code": "AT",
+                "trip_id": f"{draft_prefix}_D0_T1",
+            },
+            {
+                "stop_id": "AT_WIEN_HBF",
+                "stop_name": "Wien Hbf",
+                "country_code": "AT",
+                "trip_id": f"{draft_prefix}_D1_T1",
+            },
+            {
+                "stop_id": "DE_BERLIN_HBF",
+                "stop_name": "Berlin Hbf",
+                "country_code": "DE",
+                "trip_id": f"{draft_prefix}_D1_T1",
+            },
+        ],
+        "track_infrastructure": [
+            _track_physics_dict(tracks.get(cc)) for cc in ("AT", "DE")
+        ],
+        "geometries": geometries,
+    }
+
+
+# The seeded example lands on proposal_id=1 naturally — the first-ever
+# INSERT into proposals.proposals on a fresh DB, no reservation needed.
+# This is collision-free because tests/conftest.py's session route
+# fixtures use draft proposal_id placeholders 100+ (see the range
+# convention documented there), not 1-4 as they once did. Documentation
+# only below (not read anywhere in this file) — kept in sync with the
+# same-named constant in tests/test_50_proposals_api.py, which does use
+# it, to make the shared convention explicit in both places.
+_SEED_PROPOSAL_ID = 1
+
+
+def seed_example_proposal(cur, conn) -> None:
+    """
+    Seeds one real, saved proposal (Berlin Hbf -> Dresden Hbf -> Wien Hbf)
+    through the exact same code path a live POST /api/proposal uses —
+    ProposalRepository.save() — so the demo GTFS rows and the
+    proposals.proposals row that owns them are structurally identical to
+    a real save, not a hand-maintained parallel representation. Must run
+    after conn.commit() so the users/scenario/composition/track rows it
+    reads are visible to the separate connections ProposalRepository and
+    DBDataLoader open.
+
+    Best-effort: an illustrative example isn't load-bearing the way
+    input_params/admin data is. A failure here is logged and swallowed
+    rather than aborting the rest of seeding.
+    """
+    try:
+        import sys
+        from pathlib import Path
+
+        # db/dev/seed.py -> backend/ is two levels up. Only the standalone
+        # Mathesar dev stack (db/dev/docker-compose.yml) lacks this
+        # entirely — its own Dockerfile copies just seed.py/sql_loader.py/
+        # sql/, not the rest of the backend tree — so the import below is
+        # expected to fail there and is caught below.
+        backend_root = Path(__file__).resolve().parents[2]
+        if str(backend_root) not in sys.path:
+            sys.path.insert(0, str(backend_root))
+
+        from adapters.proposal_repository import ProposalRepository
+        from adapters.data_loader_from_db import DBDataLoader
+    except ImportError:
+        print(
+            "Seeding example proposal... skipped (adapters/ not present in "
+            "this image — expected on the standalone db/dev docker-compose "
+            "stack, which only ships seed.py itself, not the rest of the "
+            "backend tree)."
+        )
+        return
+
+    print("Seeding example proposal...")
+    try:
+        cur.execute(
+            "SELECT scenario_id FROM scenario.scenarios WHERE is_current_base = TRUE"
+        )
+        scenario_id = cur.fetchone()[0]
+        cur.execute(
+            "SELECT user_id FROM admin.users WHERE email = %s",
+            ("david@backontrack.eu",),
+        )
+        user_id = cur.fetchone()[0]
+
+        loader = DBDataLoader()
+        try:
+            composition = loader.build_all_compositions(scenario_id).get("STD-7.1")
+            tracks = loader.build_all_tracks(scenario_id)
+        finally:
+            loader.close()
+
+        route = _build_example_route(scenario_id, composition, tracks)
+        route_body = {
+            "route_builder_version": "seed",
+            # The conceptual request that would have produced this route —
+            # save() now requires the whole POST /api/route/plan response,
+            # not just its route section, so this can't be omitted/None.
+            "request": {
+                "stops": ["DE_BERLIN_HBF", "DE_DRESDEN_HBF", "AT_WIEN_HBF"],
+                "composition_id": "STD-7.1",
+                "routing_mode": "fullRouting",
+                "timetable_mode": "simpleAutomatic",
+                "schedule_mode": "alwaysDaily",
+                "auto_stop_addition": False,
+            },
+            "route": route,
+        }
+
+        repo = ProposalRepository()
+        try:
+            repo.save(
+                route_body=route_body,
+                user_id=user_id,
+                change_log="Seed data — illustrative example proposal.",
+                evaluation_body=None,
+            )
+        finally:
+            repo.close()
+    except Exception as e:
+        print(f"  WARNING: example proposal seed failed, skipping: {e}")
+        conn.rollback()
 
 
 def main():
@@ -905,6 +1708,7 @@ def main():
     print("Creating schemas...")
     cur.execute(load_sql("create_admin_schema.sql"))
     cur.execute(load_sql("create_input_params_schema.sql"))
+    cur.execute(load_sql("create_scenario_schema.sql"))
     cur.execute(load_sql("create_proposal_schema.sql"))
 
     print("Seeding admin.users...")
@@ -916,6 +1720,7 @@ def main():
 
     print("Seeding input_params.countries...")
     insert_rows(cur, "input_params.countries", COUNTRIES)
+    seed_country_geometries(cur)
 
     print("Seeding input_params.service_classes...")
     insert_rows(cur, "input_params.service_classes", SERVICE_CLASSES)
@@ -948,16 +1753,15 @@ def main():
     print("Injecting source IDs...")
     seed_sources(cur, source_ids)
 
-    print("Seeding proposals...")
-    insert_rows(cur, "proposals.services", SERVICES)
-    insert_rows(cur, "proposals.calendar", CALENDAR)
-    insert_rows(cur, "proposals.calendar_dates", CALENDAR_DATES)
-    insert_rows(cur, "proposals.shapes", SHAPES)
-    insert_rows(cur, "proposals.routes", ROUTES)
-    insert_rows(cur, "proposals.trips", TRIPS)
-    insert_rows(cur, "proposals.stop_times", STOP_TIMES)
+    print("Seeding scenario.scenarios...")
+    insert_rows(cur, "scenario.scenarios", [BASE_SCENARIO, WHATIF_SCENARIO])
 
     conn.commit()
+
+    # Must run after commit — it opens its own connections (via
+    # ProposalRepository/DBDataLoader) and needs the users/scenario rows
+    # above to already be visible to them.
+    seed_example_proposal(cur, conn)
 
     print("\nDone. Row counts:")
     for schema, table in [
@@ -970,12 +1774,17 @@ def main():
         ("input_params", "coach_types"),
         ("input_params", "coach_type_classes"),
         ("input_params", "track_infrastructure_defaults"),
-        ("input_params", "track_infrastructures"),  # 8 rows: 7 current + 1 old DE
+        (
+            "input_params",
+            "track_infrastructures",
+        ),  # 14 rows: 2 full snapshots x 7 countries
         ("input_params", "stop_infrastructure_defaults"),
         ("input_params", "stop_infrastructures"),
         ("input_params", "composition_types"),
         ("input_params", "composition_type_coaches"),
         ("input_params", "composition_references"),
+        ("scenario", "scenarios"),
+        ("proposals", "proposals"),
         ("proposals", "routes"),
         ("proposals", "trips"),
         ("proposals", "stop_times"),
@@ -984,6 +1793,11 @@ def main():
     ]:
         cur.execute(f"SELECT COUNT(*) FROM {schema}.{table}")
         print(f"  {schema}.{table}: {cur.fetchone()[0]} rows")
+
+    cur.execute(
+        "SELECT COUNT(*) FROM input_params.countries WHERE country_geom IS NOT NULL"
+    )
+    print(f"  input_params.countries: {cur.fetchone()[0]} rows have country_geom")
 
     cur.close()
     conn.close()
