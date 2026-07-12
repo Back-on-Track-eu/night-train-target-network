@@ -118,6 +118,12 @@ in `backend/api/README.md`; the endpoints below are current as of this guide:
 | `GET` | `/api/params/TrackInfrastructures` | Country-level track parameters, versioned |
 | `GET` | `/api/params/compositions` | All composition types with full cost/physics parameters |
 
+### Scenarios
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/scenarios` | All scenarios, grouped by current status |
+
 ### Route planning
 
 | Method | Endpoint | Description |

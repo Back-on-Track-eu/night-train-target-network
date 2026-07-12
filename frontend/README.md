@@ -2,6 +2,13 @@
 
 Vue 3 SPA for the Night Train Target Network economic model.
 
+**Related documentation:** backend API this SPA consumes —
+[`../backend/api/README.md`](../backend/api/README.md) · what each evaluation
+view displays and which filter selection maps to which view —
+[`../backend/models/evaluation/README.md`](../backend/models/evaluation/README.md#views-explained-for-display)
+· dev-container setup — [`../.devcontainer/DEVELOPMENT.md`](../.devcontainer/DEVELOPMENT.md)
+· conventions — [`../AGENTS.md`](../AGENTS.md)
+
 ---
 
 ## Tech Stack

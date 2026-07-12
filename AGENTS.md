@@ -33,7 +33,8 @@ files describing the same three backend services, kept manually in sync:
 - Domain objects in `models/` carry **no serialization methods** — all
   `to_dict`/`from_dict` logic lives exclusively in `api/helpers/*_serialize.py`,
   split by domain (`route_serialize.py`, `evaluation_serialize.py`,
-  `params_serialize.py`, `proposal_serialize.py`, `feedback_serialize.py`)
+  `params_serialize.py`, `proposal_serialize.py`, `feedback_serialize.py`,
+  `scenario_serialize.py`)
 - No dict-shaping or SQL in blueprint files (`api/*.py`) — blueprints are
   thin delegation only
 - Meaningful but sparse comments; longer explanations go in module
@@ -122,7 +123,7 @@ running — these are integration tests against a live stack, not mocks. See
 | ---- | ------- |
 | `backend/main.py` | Flask app factory, blueprint registration, global JSON error handlers — endpoint list is in its module docstring |
 | `backend/api/helpers/dependencies.py` | Singleton state: `DBDataLoader`, `CountryIndex`, `ProposalRepository`, `FeedbackRepository`, all built once at startup; `get_loader()` etc. for route handlers |
-| `backend/api/*.py` | One blueprint file per domain: `health.py`, `params.py`, `route.py`, `evaluation.py`, `auth.py`, `feedback.py`, `proposals.py` |
+| `backend/api/*.py` | One blueprint file per domain: `health.py`, `params.py`, `route.py`, `evaluation.py`, `auth.py`, `feedback.py`, `proposals.py`, `scenarios.py` |
 | `backend/api/helpers/*_serialize.py` | All `to_dict`/`from_dict` logic, split by domain — see Python conventions above |
 | `backend/models/` | Domain layer (routing, energy, evaluation) — no serialization, no monetary values outside `models/evaluation/calc.py`. See `backend/models/README.md` |
 | `backend/db/dev/sql/` | Schema DDL, source of truth for all environments. See `backend/db/README.md` |
@@ -160,6 +161,7 @@ GET  /api/proposal/<id>
 GET  /api/params/StopInfrastructures
 GET  /api/params/compositions
 GET  /api/params/TrackInfrastructures
+GET  /api/scenarios
 POST /api/route/plan
 POST /api/evaluation/calc
 ```
@@ -174,7 +176,7 @@ Full request/response documentation: `backend/api/README.md`.
 
 1. Add the route to the relevant existing blueprint file in `backend/api/`
    (`health.py`, `params.py`, `route.py`, `evaluation.py`, `auth.py`,
-   `feedback.py`, `proposals.py`) or create a new blueprint file
+   `feedback.py`, `proposals.py`, `scenarios.py`) or create a new blueprint file
 2. Register the blueprint in `backend/main.py` if it is a new file
 3. Add serialization logic to the matching `api/helpers/*_serialize.py` file
    — never inline dict-shaping in the blueprint
