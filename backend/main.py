@@ -21,6 +21,7 @@ Endpoints — see api/README.md for full documentation.
   GET  /api/params/StopInfrastructures
   GET  /api/params/compositions
   GET  /api/params/TrackInfrastructures
+  GET  /api/scenarios
   POST /api/route/plan
   POST /api/evaluation/calc
 """
@@ -31,7 +32,7 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 
 from api.helpers.dependencies import DataNotLoadedError, init
-from api import health, params, route, evaluation, auth, feedback, proposals
+from api import health, params, route, evaluation, auth, feedback, proposals, scenarios
 
 logging.basicConfig(
     level=logging.INFO,
@@ -54,6 +55,7 @@ def create_app() -> Flask:
     app.register_blueprint(auth.bp, url_prefix="/api/auth")
     app.register_blueprint(feedback.bp, url_prefix="/api")
     app.register_blueprint(proposals.bp, url_prefix="/api")
+    app.register_blueprint(scenarios.bp, url_prefix="/api")
 
     # --- settings ---
     app.json.sort_keys = False

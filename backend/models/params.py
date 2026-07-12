@@ -1171,3 +1171,43 @@ class ODPair:
     trip_id: str  # references Trip.trip_id within the same Route
     places_sold: int  # annual tickets sold for this OD pair / class / trip
     avg_price: float  # EUR — average fare across all sold tickets
+
+
+# =============================================================================
+# SCENARIO  (scenario.scenarios)
+# =============================================================================
+
+
+@dataclass
+class Scenario:
+    """
+    One row of scenario.scenarios — a container pinning one version of
+    each versioned infrastructure table. See
+    db/dev/sql/create_scenario_schema.sql for the full versioning
+    contract; summarized here for the fields this object carries:
+
+    is_current_base: TRUE for exactly one row in the whole table — the
+    live default scenario used whenever an API call omits scenario_id.
+
+    is_current_scenario: TRUE for exactly one row per scenario_key — the
+    head of that what-if lineage. Older versions of the same lineage
+    carry the same scenario_key with is_current_scenario=False.
+
+    Populated exclusively by DBDataLoader.list_all_scenarios(). Read-only
+    — scenario rows are written directly in SQL/notebooks for now, not
+    through the API.
+    """
+
+    scenario_id: int
+    scenario_key: str
+    scenario_name: str
+    description: Optional[str]
+    change_log: Optional[str]
+    editor: Optional[str]
+    created_at: str  # ISO datetime string
+    is_current_base: bool
+    is_current_scenario: bool
+    track_infrastructures_version: int
+    track_infrastructure_defaults_version: int
+    stop_infrastructures_version: int
+    stop_infrastructure_defaults_version: int

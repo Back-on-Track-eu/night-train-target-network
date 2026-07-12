@@ -13,6 +13,7 @@ Typical usage
     tracks       = loader.build_all_tracks()
     stops        = loader.build_all_stops()
     geometries   = loader.get_country_geometries()
+    scenarios    = loader.list_all_scenarios()
 
 Default value resolution
 ------------------------
@@ -36,6 +37,7 @@ New domain model mapping
                              (e.g. rail_router.CountryIndex) build their own
                              representation from it. input_params.countries
                              is static reference data, not scenario-versioned.
+  list_all_scenarios()    → list[Scenario]  (every scenario.scenarios row)
 """
 
 from __future__ import annotations
@@ -70,6 +72,7 @@ from models.params import (
     StopInfrastructure,
     StopInfraCollection,
     StopInfraDescriptions,
+    Scenario,
 )
 
 logger = logging.getLogger(__name__)
@@ -265,6 +268,44 @@ class DBDataLoader:
             "stop_infrastructures": row["stop_infrastructures_version"],
             "stop_infrastructure_defaults": row["stop_infrastructure_defaults_version"],
         }
+
+    def list_all_scenarios(self) -> list[Scenario]:
+        """
+        Return every row of scenario.scenarios as Scenario objects, ordered
+        by scenario_key then newest-first within each key. Grouping by
+        is_current_base / is_current_scenario (e.g. for GET /api/scenarios)
+        is a display concern and happens in
+        api/helpers/scenario_serialize.py, not here.
+        """
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT * FROM scenario.scenarios "
+                "ORDER BY scenario_key, created_at DESC"
+            )
+            rows = cur.fetchall()
+
+        return [
+            Scenario(
+                scenario_id=row["scenario_id"],
+                scenario_key=row["scenario_key"],
+                scenario_name=row["scenario_name"],
+                description=row["description"],
+                change_log=row["change_log"],
+                editor=row["editor"],
+                created_at=row["created_at"].isoformat(),
+                is_current_base=row["is_current_base"],
+                is_current_scenario=row["is_current_scenario"],
+                track_infrastructures_version=row["track_infrastructures_version"],
+                track_infrastructure_defaults_version=row[
+                    "track_infrastructure_defaults_version"
+                ],
+                stop_infrastructures_version=row["stop_infrastructures_version"],
+                stop_infrastructure_defaults_version=row[
+                    "stop_infrastructure_defaults_version"
+                ],
+            )
+            for row in rows
+        ]
 
     # ------------------------------------------------------------------
     # SOURCES
