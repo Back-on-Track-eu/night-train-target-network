@@ -30,6 +30,9 @@ Public surface
   RailRoutingError
   RoutedLeg  (output type — public)
   StopInput  (input type — public; wraps StopInfrastructure + StopType)
+  build_router_stops(stop_ids, stop_infra) → list[StopInput]  (shared stop_id
+    → StopInput conversion — used by route_factory.py and timetable.py's
+    auto_stop_addition trial re-routes)
 """
 
 from __future__ import annotations
@@ -41,7 +44,12 @@ from dataclasses import dataclass
 
 import requests
 
-from models.params import Composition, TrackInfraCollection, StopInfrastructure
+from models.params import (
+    Composition,
+    TrackInfraCollection,
+    StopInfrastructure,
+    StopInfraCollection,
+)
 from models.route.trip import StopType
 from models.utils import ms_to_min, haversine_path_m, bbox_area
 
@@ -60,6 +68,28 @@ class StopInput:
 
     stop: StopInfrastructure
     stop_type: StopType
+
+
+def build_router_stops(
+    stop_ids: list[str], stop_infra: StopInfraCollection
+) -> list[StopInput]:
+    """
+    Resolves a plain stop_id list into StopInput objects for RailRouter.route().
+    stop_type is always a placeholder (route() ignores it — see route()'s
+    docstring); real StopType classification happens afterwards, via
+    route_factory._build_trip()'s timetable_mode switch.
+
+    Single call site for this conversion — route_factory.py (initial routing,
+    adjust_route()) and timetable.py (auto_stop_addition's trial re-routes)
+    both use this rather than each building StopInput lists themselves.
+    """
+    router_stops = [
+        StopInput(stop=stop_infra.get(sid), stop_type=StopType.BOTH) for sid in stop_ids
+    ]
+    for rs, sid in zip(router_stops, stop_ids):
+        if rs.stop is None:
+            raise ValueError(f"Stop '{sid}' not found in database.")
+    return router_stops
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +198,13 @@ class RailRouter:
     INFO_ENDPOINT = "/info"
     DETAILS = ["leg_distance", "leg_time", "time"]
 
+    # requests.Session defaults to a connection pool of 10 — fine for the
+    # normal one-call-per-trip case, but auto_stop_addition can fire dozens
+    # of mini-reroutes concurrently (see timetable.py's
+    # apply_auto_stop_addition()). A too-small pool doesn't error, it just
+    # silently serializes calls beyond the limit, defeating the concurrency.
+    _CONNECTION_POOL_SIZE = 64
+
     def __init__(self, country_index: CountryIndex) -> None:
         self.base_url = os.environ.get(
             "OPENRAILROUTING_URL", "http://localhost:8989"
@@ -175,6 +212,12 @@ class RailRouter:
         self.profile = os.environ.get("OPENRAILROUTING_PROFILE", "night_train")
         self.timeout = int(os.environ.get("OPENRAILROUTING_TIMEOUT", "30"))
         self._session = requests.Session()
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=self._CONNECTION_POOL_SIZE,
+            pool_maxsize=self._CONNECTION_POOL_SIZE,
+        )
+        self._session.mount("http://", adapter)
+        self._session.mount("https://", adapter)
         self._country_index = country_index
 
     def check_server(self) -> dict:

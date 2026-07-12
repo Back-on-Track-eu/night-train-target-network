@@ -449,7 +449,7 @@ field objects with provenance:
 | `routing_mode` | string | — | Default `"fullRouting"` — see **Mode switches** below |
 | `timetable_mode` | string | — | Default `"simpleAutomatic"` — see **Mode switches** below |
 | `schedule_mode` | string | — | Default `"alwaysDaily"` — see **Mode switches** below |
-| `auto_stop_addition` | bool | — | Default `false` — see **Mode switches** below |
+| `auto_stop_addition` | bool | — | Default `true` — see **Mode switches** below |
 
 **Example request**
 ```json
@@ -462,7 +462,7 @@ field objects with provenance:
   "routing_mode": "fullRouting",
   "timetable_mode": "simpleAutomatic",
   "schedule_mode": "alwaysDaily",
-  "auto_stop_addition": false
+  "auto_stop_addition": true
 }
 ```
 
@@ -491,14 +491,14 @@ field objects with provenance:
 
 | Value | Description |
 |---|---|
-| `false` (default) | No-op. |
-| `true` | Accepted and validated, but not yet implemented — currently still a no-op. Reserved for a future implementation that looks along the routed path for stops worth adding beyond what was supplied. |
+| `true` (default) | Looks for stops from the full stop catalog that sit close to the routed path (on the line or nearby), and greedily adds any that fit within a fixed detour time budget — cheapest detour first, stopping at the first candidate that would exceed the budget. Added stops come back with `auto_added: true` on their `Stop` in the response (see below) so the frontend can render them differently. Buffer distance and max detour % are fixed constants in `models/route/timetable.py` (`AUTO_STOP_BUFFER_M`, `AUTO_STOP_MAX_DETOUR_PER`), not request fields. The search only runs once per `TripPair`, against the outbound direction — the return trip always adds the same stops (reversed), rather than running its own independent search against its own budget; each direction still gets its own real routed physics for the shared stop list. |
+| `false` | Returns exactly the caller's own stop list, unmodified. |
 
 **Response**
 
 ```json
 {
-  "route_builder_version": "0.9.2",
+  "route_builder_version": "0.9.3",
   "request": { "...": "the request body above, echoed back unchanged" },
   "route": {
     "route_id": "P1573795219_V1_R1",
@@ -570,6 +570,7 @@ excluded — see [Evaluation](#evaluation) for those):
 | `stop_type` | string | `"boarding"`, `"alighting"`, or `"both"` — see `timetable_mode` above |
 | `arrival_time_min` | int or null | `null` only at the first stop of a trip |
 | `departure_time_min` | int or null | `null` only at the last stop of a trip |
+| `auto_added` | bool | `true` if `auto_stop_addition` inserted this stop — always `false` for stops the caller supplied directly |
 
 **`route.track_infrastructure[]`** — one entry per country the route's stops
 and transited legs actually touch (not every country in the DB), physics-relevant

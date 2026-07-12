@@ -240,7 +240,7 @@ class TestModeSwitches:
             "routing_mode": "fullRouting",
             "timetable_mode": "simpleAutomatic",
             "schedule_mode": "alwaysDaily",
-            "auto_stop_addition": False,
+            "auto_stop_addition": True,
         }
         resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=90)
         assert resp.status_code == 200
@@ -262,14 +262,53 @@ class TestModeSwitches:
         resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=10)
         assert resp.status_code == 400
 
-    def test_auto_stop_addition_true_is_noop(self, api_base):
-        """auto_stop_addition=True is accepted but currently a no-op — the
-        stop list must come back unchanged."""
-        body = {**BASE_REQUEST, "auto_stop_addition": True}
+    def test_auto_stop_addition_default_true_with_no_nearby_candidates_is_noop(
+        self, plan_response
+    ):
+        """auto_stop_addition defaults to true and is implemented (see
+        models/route/timetable.py), but the seed catalog only has 8 stops
+        total and every one besides this request's own is far from the
+        Berlin-Dresden-Wien corridor — none falls within AUTO_STOP_BUFFER_M
+        of the routed path. So the module fixture's stop list (built with
+        no auto_stop_addition field at all, i.e. the true default) still
+        comes back unchanged — a real 'no candidates found' outcome, not a
+        skipped/disabled one. This can't tell 'no candidates existed' apart
+        from 'a real candidate was found and correctly rejected' — see
+        tests/README.md's Suggested seed-data additions for what closing
+        that gap needs.
+        """
+        outbound = plan_response["route"]["trip_pairs"][0]["outbound"]
+        assert [s["stop_id"] for s in stop_times(outbound)] == STOPS_BERLIN_DRESDEN_WIEN
+
+    def test_auto_stop_addition_false_returns_exact_caller_list(self, api_base):
+        """Explicit opt-out: auto_stop_addition=false skips the algorithm
+        entirely and returns exactly the caller's own stop list."""
+        body = {**BASE_REQUEST, "auto_stop_addition": False}
         resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=90)
         assert resp.status_code == 200
         outbound = resp.json()["route"]["trip_pairs"][0]["outbound"]
         assert [s["stop_id"] for s in stop_times(outbound)] == STOPS_BERLIN_DRESDEN_WIEN
+
+    def test_auto_added_field_present_and_false_with_default_request(
+        self, plan_response
+    ):
+        """Every Stop carries auto_added, false for every stop on the module
+        fixture's default request (auto_stop_addition omitted → true, but no
+        candidates exist near this corridor in the seed catalog — see the
+        noop test above)."""
+        outbound = plan_response["route"]["trip_pairs"][0]["outbound"]
+        for stop in stop_times(outbound):
+            assert stop["auto_added"] is False
+
+    def test_auto_added_field_false_when_disabled(self, api_base):
+        """With auto_stop_addition explicitly false, every stop is the
+        caller's own — auto_added is false throughout."""
+        body = {**BASE_REQUEST, "auto_stop_addition": False}
+        resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=90)
+        assert resp.status_code == 200
+        outbound = resp.json()["route"]["trip_pairs"][0]["outbound"]
+        for stop in stop_times(outbound):
+            assert stop["auto_added"] is False
 
     def test_auto_stop_addition_wrong_type_returns_400(self, api_base):
         body = {**BASE_REQUEST, "auto_stop_addition": "yes"}

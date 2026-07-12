@@ -154,7 +154,10 @@ all modes defaulted.
 | `TestModeSwitches::test_explicit_default_values_accepted` | Explicit defaults valid | all modes spelled out | 200 |
 | `TestModeSwitches::test_simple_routing_mode_accepted` | Alternative routing mode | `routing_mode=simpleRouting` | 200, full route |
 | `TestModeSwitches::test_invalid_mode_returns_400` (×3) | Mode validation | bad routing/timetable/schedule mode | 400 each |
-| `TestModeSwitches::test_auto_stop_addition_true_is_noop` | Documented no-op | `auto_stop_addition=true` | 200, stop list unchanged |
+| `TestModeSwitches::test_auto_stop_addition_default_true_with_no_nearby_candidates_is_noop` | auto_stop_addition defaults to true and is implemented, but no seeded stop is near this corridor | default request (field omitted) | 200, stop list unchanged (no candidates found) |
+| `TestModeSwitches::test_auto_stop_addition_false_returns_exact_caller_list` | Explicit opt-out | `auto_stop_addition=false` | 200, stop list unchanged |
+| `TestModeSwitches::test_auto_added_field_present_and_false_with_default_request` | `Stop.auto_added` contract | default request (field omitted) | every stop `auto_added=false` |
+| `TestModeSwitches::test_auto_added_field_false_when_disabled` | `Stop.auto_added` contract | `auto_stop_addition=false` | every stop `auto_added=false` |
 | `TestModeSwitches::test_auto_stop_addition_wrong_type_returns_400` | Type validation | `auto_stop_addition="yes"` | 400 |
 | `TestProposalAndScenario::test_omitted_proposal_id_gets_draft_placeholder` | Draft placeholder rule | no proposal_id | route_id `P{>1e9}_V1_R1` |
 | `TestProposalAndScenario::test_explicit_proposal_id_used_in_route_id` | Explicit id rule | proposal_id=42, version=7 | route_id `P42_V7_R1` |
@@ -352,6 +355,22 @@ fixed value, so this file passes the same way whether or not SMTP_* is set.
 4. **A what-if scenario re-pinning `stop_infrastructures`** — currently only
    track infra has a second snapshot; a stop-side one would cover the other
    half of the override matrix.
+5. **A stop within `AUTO_STOP_BUFFER_M` (3km, see `models/route/timetable.py`)
+   of an existing corridor** — e.g. a small real station a km or two off the
+   Berlin-Dresden or Dresden-Wien leg. All 58 currently-seeded stops are
+   already used deliberately as endpoints/via-points of the existing route
+   fixtures or sit nowhere near another corridor, so
+   `auto_stop_addition=true` has no real candidate to find today —
+   `test_20::TestModeSwitches`'s auto_stop_addition tests can only pin "no
+   candidates found" (a real, correct, but incomplete outcome), not the
+   actual insertion/budget-check/`auto_added=true` path. Picking real
+   coordinates that land within the routing engine's actual path needs the
+   live stack to verify against — not something to guess at blind. Once
+   available, also worth pinning: outbound and return trips of the same
+   pair carry the *same* `auto_added` stops (reversed) — the search only
+   runs once, from outbound, and return reuses its result rather than
+   running its own independent search (see `_build_trip_pair()`'s comment
+   in `route_factory.py` for why).
 
 ## Conventions
 

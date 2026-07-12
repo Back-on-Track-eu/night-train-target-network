@@ -140,9 +140,17 @@ def plan():
                                   from composition + track flags. "simpleRouting" skips all
                                   of that for a cheap single-pass route — not representative
                                   of real physics.)
-      auto_stop_addition : bool (optional, default false — accepted but currently a no-op;
-                                  reserved for automatically proposing extra stops along
-                                  the route in a future iteration.)
+      auto_stop_addition : bool (optional, default true — when true, looks for stops
+                                  from the full stop catalog that sit close to the routed
+                                  path and greedily adds any that fit within the detour
+                                  time budget (cheapest detour first). Added stops are
+                                  marked auto_added=true on their Stop in the response so
+                                  the frontend can render them differently. See
+                                  AUTO_STOP_BUFFER_M / AUTO_STOP_MAX_DETOUR_PER in
+                                  models/route/timetable.py for the current threshold
+                                  values — both are fixed constants, not request fields.
+                                  Set explicitly to false to get exactly the caller's own
+                                  stop list back, unmodified.)
     """
     body = request.get_json(silent=True)
     if not body:
@@ -175,7 +183,7 @@ def plan():
     timetable_mode = body.get("timetable_mode", "simpleAutomatic")
     schedule_mode = body.get("schedule_mode", "alwaysDaily")
     routing_mode = body.get("routing_mode", "fullRouting")
-    auto_stop_addition = body.get("auto_stop_addition", False)
+    auto_stop_addition = body.get("auto_stop_addition", True)
 
     try:
         # Inside the try block: resolve_scenario_id() raises ValueError if

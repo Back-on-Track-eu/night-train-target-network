@@ -3,22 +3,34 @@ route_factory.py
 ================
 Sole entry point for constructing Trip, TripPair, and Route domain objects.
 
-Pipeline for plan_route() per TripPair, per direction (in _build_trip())
--------------------------------------------------------------------------
+Pipeline for plan_route() per TripPair (_build_trip_pair()), per direction (_build_trip())
+-------------------------------------------------------------------------------------------
 1. Load composition + ParamVersions from DB.
 2. Load tracks + stops + ParamVersions from DB.
 3. RailRouter.route() — routes the stop list as given.
-4. apply_auto_stop_addition() (models/route/timetable.py) — no-op for now.
-   If it ever changes the stop list, route again with the new list before
-   doing anything else with the result — a changed stop list invalidates
-   the first routed_legs.
+4. auto_stop_addition switch (this module, _build_trip()) — if the request's
+   auto_stop_addition is true, calls apply_auto_stop_addition() (models/
+   route/timetable.py) to look for catalog stops close to the routed path
+   and greedily add any that fit within the detour time budget, re-routing
+   internally as needed; if false, this step is skipped entirely. Either
+   way the routed_legs used from here on match the (possibly extended)
+   stop list, so no separate re-route call is ever needed here. This full
+   search-and-cost pass only ever runs for the OUTBOUND direction —
+   _build_trip_pair() reuses its result (reversed) for return via
+   _build_trip()'s known_auto_added_stop_ids, rather than re-running the
+   whole candidate search for what is, physically, the same corridor
+   reversed. See _build_trip_pair()'s comment for the accepted trade-off
+   (return no longer gets an independent detour-budget check) and why
+   (measured: this search-and-cost pass, not routing itself, is the
+   dominant cost of planning a route through a dense catalog).
 5. _check_country_coverage() — every country the (possibly re-routed) legs
    actually pass through must have a row in input_params.track_infrastructures
    (any field may be None and fall back to the EU-average default), or this
    raises ValueError. See that function's docstring.
-6. schedule_and_classify() (models/route/timetable.py) — timetable_mode
-   strategy: derives departure time + boarding/alighting per stop from the
-   legs. Does no routing of its own.
+6. timetable_mode switch (this module, _build_trip()) — picks which named
+   timetable_mode function (models/route/timetable.py) to call for this
+   direction's departure time + boarding/alighting classification. Does no
+   routing of its own.
 7. calc_energy_consumption() enriches RoutedLeg.energy_kwh in-place.
 8. _build_trip_stops_and_legs() (DB lookups + assembly) delegates exact
    timing to timetable.build_final_timetable(), pairs the result with
@@ -27,9 +39,15 @@ Pipeline for plan_route() per TripPair, per direction (in _build_trip())
 10. TripPair._create() bundles both trips with their shared composition and schedule.
 11. Route._create() assembles all TripPairs.
 
-timetable_mode / schedule_mode / auto_stop_addition are pluggable strategies
-living in models/route/timetable.py, not here — route_factory.py only
-orchestrates, so a new strategy can be added there without touching this pipeline.
+timetable_mode / schedule_mode / auto_stop_addition each have their switch
+(which named behaviour runs, based on the request field) here in
+route_factory.py — at whichever level owns the relevant context: per-trip
+in _build_trip() for timetable_mode, per-TripPair in _build_trip_pair()
+for auto_stop_addition (decided once from outbound, reused for return —
+see above), per-route in plan_route() for schedule_mode (shared across
+every TripPair, decided once). models/route/timetable.py holds one
+function per named behaviour and never branches on the mode/flag itself —
+see that module's docstring.
 
 Returns (Route, RouteProvenance) — provenance is not stored on Trip/Route,
 caller persists it alongside route_id when writing a proposal result.
@@ -84,12 +102,14 @@ from models.params import (
 )
 from models.route.trip import Stop, StopType, Segment, Trip
 from models.route.route import Route, TripPair, Parking, Shunting, Schedule
-from models.route.routing.rail_router import RailRouter, StopInput, RoutedLeg
+from models.route.routing.rail_router import RailRouter, RoutedLeg, build_router_stops
 from models.route.timetable import (
-    schedule_and_classify,
+    simple_automatic_timetable,
+    always_daily_schedule,
     apply_auto_stop_addition,
-    build_schedule,
     build_final_timetable,
+    VALID_TIMETABLE_MODES,
+    VALID_SCHEDULE_MODES,
 )
 from models.energy.calc_energy_consumption import calc_energy_consumption
 from models.route.version import ROUTE_BUILDER_VERSION
@@ -168,6 +188,7 @@ def _build_trip_stops_and_legs(
     tracks: TrackInfraCollection,
     stop_infra: StopInfraCollection,
     departure_time_min: int,
+    auto_added_stop_ids: frozenset[str] = frozenset(),
 ) -> list[Segment]:
     """
     DB lookups + object assembly only — no timing math here, that's
@@ -176,6 +197,12 @@ def _build_trip_stops_and_legs(
     build_final_timetable(), then builds Stop objects and pairs consecutive
     stops into Segments — each Stop is shared by reference between the two
     segments touching it.
+
+    auto_added_stop_ids: stop_ids that auto_stop_addition inserted beyond
+    what the caller originally supplied — stamped onto the matching Stop's
+    auto_added field. Empty by default; adjust_route() passes through
+    whichever stops were already flagged on the trip it's rebuilding from,
+    so the marker survives schedule-only adjustments.
     """
     stop_physicals = []
     for stop_id, _ in stop_inputs:
@@ -204,6 +231,7 @@ def _build_trip_stops_and_legs(
             stop_type=stop_type,
             arrival_time_min=arrival_min,
             departure_time_min=departure_min,
+            auto_added=sp.stop_id in auto_added_stop_ids,
         )
         for sp, stop_type, (arrival_min, departure_min) in zip(
             stop_physicals, stop_types, timetable
@@ -283,21 +311,6 @@ def _shuntings(trips: list[Trip]) -> list[Shunting]:
 # =============================================================================
 
 
-def _to_router_stops(
-    stop_ids: list[str], stop_infra: StopInfraCollection
-) -> list[StopInput]:
-    """Builds StopInput objects for a routing call. stop_type is always a
-    placeholder (route() ignores it — see RailRouter.route() docstring);
-    real StopType classification happens afterwards, in schedule_and_classify()."""
-    router_stops = [
-        StopInput(stop=stop_infra.get(sid), stop_type=StopType.BOTH) for sid in stop_ids
-    ]
-    for rs, sid in zip(router_stops, stop_ids):
-        if rs.stop is None:
-            raise ValueError(f"Stop '{sid}' not found in database.")
-    return router_stops
-
-
 def _check_country_coverage(
     routed_legs: list[RoutedLeg], tracks: TrackInfraCollection
 ) -> None:
@@ -352,35 +365,67 @@ def _build_trip(
     timetable_mode: str,
     routing_mode: str,
     auto_stop_addition: bool,
+    known_auto_added_stop_ids: frozenset[str] | None = None,
 ) -> Trip:
+    """
+    known_auto_added_stop_ids: when given, skips running
+    apply_auto_stop_addition() entirely regardless of auto_stop_addition —
+    stop_ids is trusted as already final (auto_stop_addition's addition
+    decision was already made elsewhere, e.g. by the outbound direction of
+    this same TripPair; see _build_trip_pair()), and this set is used
+    as-is to mark which of those stops get Stop.auto_added=True. The
+    routing call below still always happens for whichever direction this
+    is — reusing a decision about WHICH stops to add never skips getting
+    THIS direction's own real physics for its own (possibly asymmetric)
+    path, only the expensive candidate-search-and-cost pass that decided
+    the stop list in the first place.
+    """
     tid = _trip_id(proposal_id, proposal_version, direction, pair_index)
 
     routed_legs = router.route(
-        stops=_to_router_stops(stop_ids, stop_infra),
+        stops=build_router_stops(stop_ids, stop_infra),
         composition=composition,
         tracks=tracks,
         routing_mode=routing_mode,
     )
 
-    new_stop_ids = apply_auto_stop_addition(auto_stop_addition, stop_ids, routed_legs)
-    if new_stop_ids != stop_ids:
-        # Stop list changed — the old routed_legs no longer match it, route again.
-        stop_ids = new_stop_ids
-        routed_legs = router.route(
-            stops=_to_router_stops(stop_ids, stop_infra),
-            composition=composition,
-            tracks=tracks,
-            routing_mode=routing_mode,
-        )
+    # auto_stop_addition SWITCH — whether to run candidate search at all.
+    # apply_auto_stop_addition() itself has no enabled/disabled notion; it
+    # always returns routed_legs matching whatever stop_ids it's handed
+    # back (unchanged when skipped here), so no separate re-route is ever
+    # needed after this block regardless of which branch ran.
+    if known_auto_added_stop_ids is not None:
+        auto_added_stop_ids = known_auto_added_stop_ids
+    else:
+        original_stop_ids = stop_ids
+        if auto_stop_addition:
+            stop_ids, routed_legs = apply_auto_stop_addition(
+                stop_ids,
+                routed_legs,
+                composition=composition,
+                tracks=tracks,
+                stop_infra=stop_infra,
+                router=router,
+                routing_mode=routing_mode,
+            )
+        auto_added_stop_ids = frozenset(stop_ids) - frozenset(original_stop_ids)
 
     _check_country_coverage(routed_legs, tracks)
 
-    stop_inputs, departure_time_min = schedule_and_classify(
-        timetable_mode=timetable_mode,
-        stop_ids=stop_ids,
-        composition=composition,
-        routed_legs=routed_legs,
-    )
+    # timetable_mode SWITCH — which named strategy computes departure time
+    # + boarding/alighting for this direction. VALID_TIMETABLE_MODES is the
+    # same set api/route.py validates the request against, so an unknown
+    # mode can only reach here if that validation was bypassed.
+    if timetable_mode == "simpleAutomatic":
+        stop_inputs, departure_time_min = simple_automatic_timetable(
+            stop_ids=stop_ids,
+            composition=composition,
+            routed_legs=routed_legs,
+        )
+    else:
+        raise ValueError(
+            f"Unknown timetable_mode '{timetable_mode}'. Supported: {sorted(VALID_TIMETABLE_MODES)}."
+        )
 
     calc_energy_consumption(routed_legs, composition)
 
@@ -391,6 +436,7 @@ def _build_trip(
         tracks=tracks,
         stop_infra=stop_infra,
         departure_time_min=departure_time_min,
+        auto_added_stop_ids=auto_added_stop_ids,
     )
 
     trip = Trip._create(trip_id=tid, direction=direction, segments=segments)
@@ -453,11 +499,26 @@ def _build_trip_pair(
     param_versions.entries.update(tracks.param_versions.entries)
     param_versions.entries.update(stop_infra.param_versions.entries)
 
-    # Each direction routes (and may re-route, if auto_stop_addition changes
-    # its stop list) and schedules independently — outbound and return can
-    # legitimately have different durations (e.g. asymmetric HSR avoidance),
-    # so their departure times are allowed to deviate rather than being
-    # forced to share one value.
+    # Each direction still gets its own real routing call and schedule —
+    # outbound and return can legitimately have different durations (e.g.
+    # asymmetric HSR avoidance), so their departure times are allowed to
+    # deviate rather than being forced to share one value.
+    #
+    # auto_stop_addition is the one exception: it is decided ONCE, from
+    # outbound, not re-run independently for return. Candidate search +
+    # per-candidate costing means one real RailRouter.route() call per
+    # nearby candidate — for a long corridor with many candidates nearby,
+    # that's the dominant cost of planning a route (measured: ~14s per
+    # direction on a Stockholm-Roma request with 9 candidates found,
+    # against <1s for routing itself), and outbound/return cover the same
+    # physical corridor reversed, so running that full search twice is
+    # mostly redundant work for the same answer. Accepted trade-off: return
+    # no longer gets its own independent detour-budget check against its
+    # own baseline trip time, only outbound's — see
+    # _build_trip()'s known_auto_added_stop_ids docstring. Return still
+    # gets a real routing call for its own (possibly asymmetric) physical
+    # path over the shared final stop list; only the search-and-cost pass
+    # that decided which stops to add is shared, not the routing itself.
     outbound = _build_trip(
         proposal_id,
         proposal_version,
@@ -472,12 +533,16 @@ def _build_trip_pair(
         routing_mode=pair_input.routing_mode,
         auto_stop_addition=pair_input.auto_stop_addition,
     )
+
+    final_outbound_stop_ids = [s.stop_id for s in outbound.stops]
+    auto_added_stop_ids = frozenset(s.stop_id for s in outbound.stops if s.auto_added)
+
     return_trip = _build_trip(
         proposal_id,
         proposal_version,
         direction=1,
         pair_index=pair_index,
-        stop_ids=list(reversed(pair_input.stop_ids)),
+        stop_ids=list(reversed(final_outbound_stop_ids)),
         composition=composition,
         tracks=tracks,
         stop_infra=stop_infra,
@@ -485,6 +550,7 @@ def _build_trip_pair(
         timetable_mode=pair_input.timetable_mode,
         routing_mode=pair_input.routing_mode,
         auto_stop_addition=pair_input.auto_stop_addition,
+        known_auto_added_stop_ids=auto_added_stop_ids,
     )
 
     pair = TripPair(
@@ -522,13 +588,24 @@ def plan_route(
     once at the API boundary before this is called. See the ID convention
     note at the top of this module.
 
-    schedule_mode: dispatched via timetable.build_schedule() — see that
-    module for the pluggable strategy (currently only "alwaysDaily").
+    schedule_mode: this function's switch — which named schedule_mode
+    function (models/route/timetable.py) to call. Decided once here, at
+    route level, since Schedule is shared across every TripPair rather
+    than being a per-trip concern (currently only "alwaysDaily").
 
     scenario_id: stored as-is in RouteProvenance so the Route stays
     reproducible even if the live base scenario later moves on.
     """
-    schedule = build_schedule(schedule_mode)
+    # schedule_mode SWITCH — which named strategy builds this route's
+    # Schedule. VALID_SCHEDULE_MODES is the same set api/route.py validates
+    # the request against, so an unknown mode can only reach here if that
+    # validation was bypassed.
+    if schedule_mode == "alwaysDaily":
+        schedule = always_daily_schedule()
+    else:
+        raise ValueError(
+            f"Unknown schedule_mode '{schedule_mode}'. Supported: {sorted(VALID_SCHEDULE_MODES)}."
+        )
     rid = _route_id(proposal_id, proposal_version)
     logger.info(
         "plan_route: id=%s pairs=%d scenario_id=%d",
@@ -682,6 +759,12 @@ def adjust_route(
                     )
                     for seg in existing_trip.segments
                 ]
+                # No rerouting happens here, so which stops were originally
+                # auto-added doesn't change — carry the marker forward
+                # rather than silently losing it on a schedule-only adjust.
+                auto_added_stop_ids = frozenset(
+                    s.stop_id for s in existing_trip.stops if s.auto_added
+                )
                 new_segments = _build_trip_stops_and_legs(
                     stop_inputs=stop_inputs,
                     routed_legs=routed_legs,
@@ -689,6 +772,7 @@ def adjust_route(
                     tracks=tracks,
                     stop_infra=stop_infra,
                     departure_time_min=new_dep,
+                    auto_added_stop_ids=auto_added_stop_ids,
                 )
             else:
                 new_segments = existing_trip.segments
