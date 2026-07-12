@@ -2,16 +2,16 @@
 import { onMounted, ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useStore } from '@/stores/store'
-import type { Stop } from '@/types/api'
+import type { EvaluationResponse, MapScope, Stop } from '@/types/api'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Skeleton from 'primevue/skeleton'
-import Select from 'primevue/select'
 import AppIcon from '@/components/AppIcon.vue'
 import StopSelect from '@/components/StopSelect.vue'
 import CompositionSelectCard from '@/components/CompositionSelectCard.vue'
+import EvaluationPanel from '@/components/EvaluationPanel.vue'
 import MapView from '@/components/MapView.vue'
-import { mdiPencil, mdiPlus, mdiTrashCan } from '@mdi/js'
+import { mdiPencil, mdiPlus, mdiSwapVertical, mdiTrashCan } from '@mdi/js'
 
 const props = defineProps<{ mode: 'edit' | 'loading' | 'display' }>()
 
@@ -24,9 +24,20 @@ const currentMode = ref<'edit' | 'loading' | 'display'>(props.mode)
 const selectedCompositionId = ref<string | null>(null)
 const evaluateError = ref<string | null>(null)
 
+// Raw route as returned by /api/route/plan (before adaptRoute()). The cost/
+// revenue endpoint needs this un-adapted object, so we keep it around.
+const rawRoute = ref<BackendRoute | null>(null)
+// Result of POST /api/evaluation/calc — rendered by EvaluationPanel.
+const calcResult = ref<EvaluationResponse | null>(null)
+const calcError = ref<string | null>(null)
+// Which part of the route the evaluation panel is currently scoped to — drives
+// the map's highlight/dim. 'all' = whole route.
+const evalScope = ref<MapScope>({ kind: 'all' })
+
 interface StopTimeFmt {
   stop_id: string
   stop_name: string
+  country_code: string
   lat: number
   lon: number
   arrival_time_fmt: string | null
@@ -52,6 +63,7 @@ interface RouteResult {
 interface BackendStop {
   stop_id: string
   stop_name: string
+  country_code: string
   lat: number
   lon: number
   arrival_time_min: number | null
@@ -62,6 +74,7 @@ interface BackendSegment {
   from_stop: BackendStop
   to_stop: BackendStop
   geometry_id: string
+  country_distance_shares: Record<string, number>
 }
 
 interface BackendTripSide {
@@ -101,6 +114,7 @@ function toStopTimeFmt(stop: BackendStop): StopTimeFmt {
   return {
     stop_id: stop.stop_id,
     stop_name: stop.stop_name,
+    country_code: stop.country_code,
     lat: stop.lat,
     lon: stop.lon,
     arrival_time_fmt: formatMinutes(stop.arrival_time_min),
@@ -170,16 +184,29 @@ const selectedTrip = computed(
   () => routeResult.value?.trips.find((t) => t.trip_id === selectedTripId.value) ?? null,
 )
 
-const tripOptions = computed(
-  () =>
-    routeResult.value?.trips.map((trip) => ({
-      tripId: trip.trip_id,
-      label:
-        trip.stop_times.length >= 2
-          ? `${trip.stop_times[0].stop_name} → ${trip.stop_times[trip.stop_times.length - 1].stop_name}`
-          : trip.trip_id,
-    })) ?? [],
-)
+// Direction toggle (display): swap between the two trips of the shown pair.
+function swapDirection() {
+  const trips = routeResult.value?.trips ?? []
+  const other = trips.find((t) => t.trip_id !== selectedTripId.value)
+  if (other) selectedTripId.value = other.trip_id
+}
+
+// Ordered stops (outbound direction) backing the route-section slider.
+const sectionStops = computed(() => {
+  const trips = routeResult.value?.trips ?? []
+  const outbound = trips.find((t) => t.direction_id === 0) ?? trips[0]
+  return outbound?.stop_times.map((s) => ({ stop_id: s.stop_id, name: s.stop_name })) ?? []
+})
+
+// In display mode, lock the composition card to the one used for the routing —
+// a single-element list hides the card's navigation (arrows/dots).
+const compositionCards = computed(() => {
+  if (currentMode.value === 'display' && selectedCompositionId.value) {
+    const sel = store.compositions.filter((c) => c.comp_id === selectedCompositionId.value)
+    if (sel.length > 0) return sel
+  }
+  return store.compositions
+})
 
 async function evaluate() {
   const validStops = itinerary.value.filter((s) => s.selectedStop !== null)
@@ -204,16 +231,46 @@ async function evaluate() {
       evaluateError.value = json.message ?? `HTTP ${response.status}`
       currentMode.value = 'edit'
     } else {
+      rawRoute.value = json.route
       routeResult.value = adaptRoute(json.route)
       selectedTripId.value =
         routeResult.value.trips.find((t) => t.direction_id === 0)?.trip_id ??
         routeResult.value.trips[0]?.trip_id ??
         null
       currentMode.value = 'display'
+      // Fire-and-forget — let cost/revenue results fill in underneath without
+      // blocking the route/map render.
+      runCalc()
     }
   } catch (err) {
     evaluateError.value = err instanceof Error ? err.message : 'Unknown network error'
     currentMode.value = 'edit'
+  }
+}
+
+// Cost/revenue evaluation for the completed routing. Posts the raw route to
+// the backend calc endpoint (single source of truth — see plan). For now we
+// just log the JSON and dump it into a panel under the viewport.
+async function runCalc() {
+  if (!rawRoute.value) return
+  calcError.value = null
+  calcResult.value = null
+  try {
+    const res = await fetch(`${BASE_URL}/api/evaluation/calc`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // scenario_id omitted — the route JSON carries its own.
+      body: JSON.stringify({ route: rawRoute.value }),
+    })
+    const json = await res.json()
+    if (!res.ok) {
+      calcError.value = json.message ?? json.error ?? `HTTP ${res.status}`
+    } else {
+      calcResult.value = json as EvaluationResponse
+      console.log('[calc] /api/evaluation/calc result:', json)
+    }
+  } catch (err) {
+    calcError.value = err instanceof Error ? err.message : 'Unknown network error'
   }
 }
 
@@ -347,15 +404,40 @@ const viewRows = computed((): ViewRow[] => {
 
 const mapStops = computed(() => {
   if (currentMode.value === 'display' && selectedTrip.value) {
-    return selectedTrip.value.stop_times.map((st) => ({
+    const sts = selectedTrip.value.stop_times
+    const scope = evalScope.value
+    let odLo = -1
+    let odHi = -1
+    if (scope.kind === 'od') {
+      const oi = sts.findIndex((s) => s.stop_id === scope.originStopId)
+      const di = sts.findIndex((s) => s.stop_id === scope.destinationStopId)
+      if (oi >= 0 && di >= 0) {
+        odLo = Math.min(oi, di)
+        odHi = Math.max(oi, di)
+      }
+    }
+    return sts.map((st, i) => ({
       lat: st.lat,
       lon: st.lon,
       name: st.stop_name,
+      highlighted:
+        scope.kind === 'country'
+          ? st.country_code === scope.country
+          : scope.kind === 'stop'
+            ? st.stop_id === scope.stopId
+            : scope.kind === 'od'
+              ? odLo >= 0 && i >= odLo && i <= odHi
+              : true,
     }))
   }
   return itinerary.value
     .filter((s) => s.selectedStop !== null)
-    .map((s) => ({ lat: s.selectedStop!.lat, lon: s.selectedStop!.lon, name: s.name }))
+    .map((s) => ({
+      lat: s.selectedStop!.lat,
+      lon: s.selectedStop!.lon,
+      name: s.name,
+      highlighted: true,
+    }))
 })
 
 const mapShape = computed(() => {
@@ -363,6 +445,131 @@ const mapShape = computed(() => {
     return selectedTrip.value.shape
   }
   return null
+})
+
+function onScopeChange(scope: MapScope) {
+  evalScope.value = scope
+}
+
+// Great-circle distance (km) between two [lon, lat] points.
+function haversineKm(a: [number, number], b: [number, number]): number {
+  const R = 6371
+  const toRad = (d: number) => (d * Math.PI) / 180
+  const dLat = toRad(b[1] - a[1])
+  const dLon = toRad(b[0] - a[0])
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(a[1])) * Math.cos(toRad(b[1])) * Math.sin(dLon / 2) ** 2
+  return 2 * R * Math.asin(Math.sqrt(h))
+}
+
+// Split a polyline into [before, after] at a fraction (0..1) of its length,
+// interpolating the split point — used to cut a cross-border segment at the
+// national border so each country's part can be highlighted independently.
+function splitLineAtFraction(
+  coords: [number, number][],
+  fraction: number,
+): [[number, number][], [number, number][]] {
+  if (coords.length < 2 || fraction <= 0) return [[], coords]
+  if (fraction >= 1) return [coords, []]
+  const dists = coords.slice(1).map((c, i) => haversineKm(coords[i], c))
+  const total = dists.reduce((s, d) => s + d, 0)
+  const target = total * fraction
+  let acc = 0
+  for (let i = 1; i < coords.length; i++) {
+    const d = dists[i - 1]
+    if (acc + d >= target) {
+      const t = d === 0 ? 0 : (target - acc) / d
+      const p: [number, number] = [
+        coords[i - 1][0] + (coords[i][0] - coords[i - 1][0]) * t,
+        coords[i - 1][1] + (coords[i][1] - coords[i - 1][1]) * t,
+      ]
+      return [
+        [...coords.slice(0, i), p],
+        [p, ...coords.slice(i)],
+      ]
+    }
+    acc += d
+  }
+  return [coords, []]
+}
+
+interface MapSegment {
+  coordinates: [number, number][]
+  highlighted: boolean
+}
+
+// Per-segment geometry for the displayed trip, each flagged highlighted/dimmed
+// according to the evaluation panel's current scope. Null outside display mode
+// (MapView then falls back to the plain shape).
+const mapSegments = computed<MapSegment[] | null>(() => {
+  const rr = rawRoute.value
+  const tripId = selectedTripId.value
+  if (currentMode.value !== 'display' || !rr || !tripId) return null
+
+  let trip: BackendTripSide | null = null
+  for (const pair of rr.trip_pairs) {
+    if (pair.outbound.trip_id === tripId) trip = pair.outbound
+    else if (pair.return_trip.trip_id === tripId) trip = pair.return_trip
+    if (trip) break
+  }
+  if (!trip) return null
+
+  const geoById = new Map<string, [number, number][]>(
+    rr.geometries.map((g): [string, [number, number][]] => [g.id, g.coords as [number, number][]]),
+  )
+  const scope = evalScope.value
+
+  // Ordered stop_ids along the trip: seg[i].from == stop[i], seg[i].to == stop[i+1].
+  const stopIds = trip.segments.length
+    ? [trip.segments[0].from_stop.stop_id, ...trip.segments.map((s) => s.to_stop.stop_id)]
+    : []
+  let odRange: [number, number] | null = null
+  if (scope.kind === 'od') {
+    const oi = stopIds.indexOf(scope.originStopId)
+    const di = stopIds.indexOf(scope.destinationStopId)
+    if (oi !== -1 && di !== -1) odRange = [Math.min(oi, di), Math.max(oi, di)]
+  }
+
+  const out: MapSegment[] = []
+  trip.segments.forEach((seg, i) => {
+    const coords = geoById.get(seg.geometry_id) ?? []
+    if (scope.kind === 'country') {
+      const fromC = seg.from_stop.country_code
+      const toC = seg.to_stop.country_code
+      const countries = Object.keys(seg.country_distance_shares)
+      // Only a clean two-country border crossing is split precisely; single- or
+      // multi-transit segments fall back to whole-segment membership.
+      if (
+        fromC !== toC &&
+        countries.length === 2 &&
+        countries.includes(fromC) &&
+        countries.includes(toC)
+      ) {
+        const [before, after] = splitLineAtFraction(coords, seg.country_distance_shares[fromC] ?? 0)
+        out.push({ coordinates: before, highlighted: fromC === scope.country })
+        out.push({ coordinates: after, highlighted: toC === scope.country })
+      } else {
+        const inScope =
+          fromC === scope.country || toC === scope.country || countries.includes(scope.country)
+        out.push({ coordinates: coords, highlighted: inScope })
+      }
+      return
+    }
+    let highlighted: boolean
+    if (scope.kind === 'stop')
+      highlighted = false // whole line dims; only the marker stays lit
+    else if (scope.kind === 'od') highlighted = odRange ? i >= odRange[0] && i < odRange[1] : true
+    else highlighted = true
+    out.push({ coordinates: coords, highlighted })
+  })
+
+  // Safety: a country/OD scope that matched nothing shouldn't grey the whole
+  // route (by-stop dims deliberately, so it's exempt).
+  if (scope.kind !== 'stop' && !out.some((s) => s.highlighted)) {
+    return out.map((s) => ({ ...s, highlighted: true }))
+  }
+  return out
 })
 
 onMounted(async () => {
@@ -561,42 +768,24 @@ onMounted(async () => {
             </StopSelect>
           </div>
 
-          <!-- Trip selector (display only) -->
+          <!-- Direction toggle (display only) -->
           <div
-            v-if="currentMode === 'display' && routeResult && routeResult.trips.length > 0"
+            v-if="currentMode === 'display' && routeResult && routeResult.trips.length > 1"
             class="flex justify-start"
           >
-            <Select
-              v-model="selectedTripId"
-              :options="tripOptions"
-              option-value="tripId"
-              option-label="label"
-              :unstyled="true"
-              :pt="{
-                root: {
-                  class:
-                    'flex cursor-pointer items-center rounded-full border border-primary-50/20 bg-transparent transition hover:bg-primary-50/10',
-                },
-                label: { class: 'px-3 py-1.5 text-sm text-primary-50 leading-none' },
-                dropdown: { class: 'flex items-center pr-3 text-primary-50/60' },
-                overlay: {
-                  class:
-                    'z-50 mt-1 overflow-hidden rounded-xl border border-primary-50/20 bg-sapphire-100 shadow-xl',
-                },
-                listContainer: { class: 'overflow-auto' },
-                option: {
-                  class:
-                    'cursor-pointer px-4 py-2 text-sm text-primary-50 transition hover:bg-primary-50/10',
-                },
-              }"
-            />
+            <button
+              class="flex cursor-pointer items-center gap-1.5 rounded-full border border-primary-50/20 px-3 py-1.5 text-sm leading-none text-primary-50 transition hover:bg-primary-50/10"
+              @click="swapDirection"
+            >
+              <AppIcon :path="mdiSwapVertical" :size="16" />
+            </button>
           </div>
         </div>
 
-        <!-- Composition card (edit only) -->
+        <!-- Composition card — switchable in edit, locked to the used one in display -->
         <CompositionSelectCard
           v-if="store.compositionsStatus === 'success' && store.compositions.length > 0"
-          :compositions="store.compositions"
+          :compositions="compositionCards"
           @select="(id) => (selectedCompositionId = id)"
         />
         <div
@@ -641,7 +830,12 @@ onMounted(async () => {
 
       <!-- Right panel: map with loading overlay -->
       <div class="relative flex-1 overflow-hidden rounded-xl">
-        <MapView :stops="mapStops" :shape="mapShape" class="w-full h-full" />
+        <MapView
+          :stops="mapStops"
+          :shape="mapShape"
+          :segments="mapSegments"
+          class="w-full h-full"
+        />
         <Transition name="fade">
           <div
             v-if="currentMode === 'loading'"
@@ -652,6 +846,22 @@ onMounted(async () => {
             />
           </div>
         </Transition>
+      </div>
+    </div>
+
+    <!-- Cost/revenue results (display mode) -->
+    <div v-if="currentMode === 'display'" class="w-full">
+      <div v-if="calcError" class="rounded-xl bg-primary-50/5 p-4 text-sm text-red-400">
+        {{ calcError }}
+      </div>
+      <EvaluationPanel
+        v-else-if="calcResult"
+        :result="calcResult"
+        :stops="sectionStops"
+        @scope-change="onScopeChange"
+      />
+      <div v-else class="rounded-xl bg-primary-50/5 p-4 text-sm text-primary-50/60">
+        {{ t('proposal.evaluation.calculating') }}
       </div>
     </div>
   </div>
