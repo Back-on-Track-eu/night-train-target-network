@@ -11,7 +11,7 @@ import StopSelect from '@/components/StopSelect.vue'
 import CompositionSelectCard from '@/components/CompositionSelectCard.vue'
 import EvaluationPanel from '@/components/EvaluationPanel.vue'
 import MapView from '@/components/MapView.vue'
-import { mdiPencil, mdiPlus, mdiSwapVertical, mdiTrashCan } from '@mdi/js'
+import { mdiClose, mdiPencil, mdiPlus, mdiSwapVertical, mdiTrashCan } from '@mdi/js'
 
 const props = defineProps<{ mode: 'edit' | 'loading' | 'display' }>()
 
@@ -184,11 +184,19 @@ const selectedTrip = computed(
   () => routeResult.value?.trips.find((t) => t.trip_id === selectedTripId.value) ?? null,
 )
 
-// Direction toggle (display): swap between the two trips of the shown pair.
+// Direction toggle: reverse the stop order, and — when a routing is live
+// (display, or a clean re-edit) — also swap to the other precomputed trip so
+// the timetable and evaluation follow along. Because a pure reversal isn't
+// "dirty", the computed view stays put; without a live routing (fresh build or
+// an already-dirty edit) it's just a reorder of what's being assembled.
 function swapDirection() {
-  const trips = routeResult.value?.trips ?? []
-  const other = trips.find((t) => t.trip_id !== selectedTripId.value)
-  if (other) selectedTripId.value = other.trip_id
+  const live = showComputedView.value
+  itinerary.value = [...itinerary.value].reverse()
+  if (live) {
+    const trips = routeResult.value?.trips ?? []
+    const other = trips.find((t) => t.trip_id !== selectedTripId.value)
+    if (other) selectedTripId.value = other.trip_id
+  }
 }
 
 // Ordered stops (outbound direction) backing the route-section slider.
@@ -232,11 +240,17 @@ async function evaluate() {
       currentMode.value = 'edit'
     } else {
       rawRoute.value = json.route
-      routeResult.value = adaptRoute(json.route)
+      const route = adaptRoute(json.route)
+      routeResult.value = route
       selectedTripId.value =
-        routeResult.value.trips.find((t) => t.direction_id === 0)?.trip_id ??
-        routeResult.value.trips[0]?.trip_id ??
-        null
+        route.trips.find((t) => t.direction_id === 0)?.trip_id ?? route.trips[0]?.trip_id ?? null
+      // Rebuild the itinerary from the planned route so the builder reflects
+      // what's actually on the map — the router may have inserted intermediate
+      // stops that are now part of the route. Commit that as the clean state so
+      // the builder isn't "dirty" and Cancel Edit can restore exactly this.
+      itinerary.value = itineraryFromRoute(route)
+      committedItinerary.value = itinerary.value.map((s) => ({ ...s }))
+      committedCompId.value = selectedCompositionId.value
       currentMode.value = 'display'
       // Fire-and-forget — let cost/revenue results fill in underneath without
       // blocking the route/map render.
@@ -283,6 +297,131 @@ interface ItineraryStop {
 const itinerary = ref<ItineraryStop[]>([])
 
 let _nextId = 1
+
+// Snapshot of the itinerary + composition as they were at the last successful
+// evaluation. Used to (a) detect whether the builder has diverged from what the
+// displayed routing was computed for ("dirty"), and (b) restore that state when
+// the user cancels an edit. Null until the first evaluation.
+const committedItinerary = ref<ItineraryStop[] | null>(null)
+const committedCompId = ref<string | null>(null)
+
+// Ordered stop ids of the current itinerary — the basis for the dirty check.
+const currentStopIds = computed(() =>
+  itinerary.value.filter((s) => s.selectedStop).map((s) => s.selectedStop!.stop_id),
+)
+
+// The builder is "dirty" once it diverges from the last evaluated state: a
+// different composition, or a different set/order of stops. Fresh (never
+// evaluated) is not dirty — there's nothing to diverge from yet. A pure
+// reversal is NOT dirty: both directions of the route are already computed, so
+// swapping direction is a free view change, not a re-sequencing.
+const isDirty = computed(() => {
+  if (!committedItinerary.value) return false
+  if (selectedCompositionId.value !== committedCompId.value) return true
+  const committedIds = committedItinerary.value
+    .filter((s) => s.selectedStop)
+    .map((s) => s.selectedStop!.stop_id)
+  const cur = currentStopIds.value
+  if (cur.length !== committedIds.length) return true
+  const sameForward = cur.every((id, i) => id === committedIds[i])
+  const sameReverse = cur.every((id, i) => id === committedIds[committedIds.length - 1 - i])
+  return !sameForward && !sameReverse
+})
+
+// True when the rich computed view (times, exact map routing, evaluation) is in
+// force: display mode, and re-edit mode up until the first change. Making a
+// change (dirty) drops us back to the plain builder view even though we stay in
+// edit mode.
+const showComputedView = computed(
+  () =>
+    currentMode.value === 'display' ||
+    (currentMode.value === 'edit' && routeResult.value !== null && !isDirty.value),
+)
+
+// Swap button is shown wherever there's a direction to flip: a multi-trip
+// route in display, or two or more stops while editing.
+const showSwap = computed(() => {
+  if (currentMode.value === 'display') return (routeResult.value?.trips.length ?? 0) > 1
+  if (currentMode.value === 'edit') return itinerary.value.length >= 2
+  return false
+})
+
+// Cancel is only meaningful once there's a committed state to fall back to.
+const showCancelEdit = computed(
+  () => currentMode.value === 'edit' && committedItinerary.value !== null,
+)
+
+// Evaluate is shown while there's something worth (re)computing: a fresh build,
+// or a dirty re-edit. It doubles as the loading spinner.
+const showEvaluate = computed(
+  () =>
+    currentMode.value === 'loading' ||
+    (currentMode.value === 'edit' && (committedItinerary.value === null || isDirty.value)),
+)
+
+// The evaluation results section is shown whenever a routing has been computed,
+// i.e. in display and re-edit. It's greyed while dirty (stale results).
+const showEvaluationSection = computed(
+  () => currentMode.value !== 'loading' && routeResult.value !== null,
+)
+
+// Shared pill styling for the itinerary controls (Add Stop / Edit / Swap /
+// Cancel), matching the direction-swap button.
+const pillClass =
+  'flex cursor-pointer items-center gap-1.5 rounded-full border border-primary-50/20 px-3 py-1.5 text-sm leading-none text-primary-50 transition hover:bg-primary-50/10'
+
+// Build itinerary rows from a planned route's outbound stops, so re-editing
+// starts from the actual route (router-inserted stops included), not the
+// original input. Each stop is matched back to the loaded stop list to recover
+// its full record, with a synthesised fallback if it isn't there.
+function itineraryFromRoute(rr: RouteResult): ItineraryStop[] {
+  const outbound = rr.trips.find((t) => t.direction_id === 0) ?? rr.trips[0]
+  const byId = new Map(store.stops.map((s) => [s.stop_id, s]))
+  return (outbound?.stop_times ?? []).map((st) => ({
+    id: _nextId++,
+    name: st.stop_name,
+    selectedStop: byId.get(st.stop_id) ?? {
+      stop_id: st.stop_id,
+      name: st.stop_name,
+      country_code: st.country_code,
+      lat: st.lat,
+      lon: st.lon,
+      stop_charge_eur: { value: 0, is_default: true },
+    },
+  }))
+}
+
+// Computed times for an itinerary row, looked up from the selected trip by stop
+// id — used to keep the timetable labels beside the (still editable) stops in a
+// clean re-edit. Null when there's no computed routing to read from.
+function rowTimes(
+  stop: ItineraryStop,
+): { arrival: string | null; departure: string | null } | null {
+  const id = stop.selectedStop?.stop_id
+  if (!id || !selectedTrip.value) return null
+  const st = selectedTrip.value.stop_times.find((s) => s.stop_id === id)
+  return st ? { arrival: st.arrival_time_fmt, departure: st.departure_time_fmt } : null
+}
+
+// Enter re-edit from display: stay on the computed view, just surface the
+// editing affordances (Add Stop / drag / delete / composition / Cancel).
+function startEdit() {
+  currentMode.value = 'edit'
+}
+
+// Discard edits and return to the last evaluated state — including the outbound
+// direction, so the restored itinerary order and the shown trip stay in sync.
+function cancelEdit() {
+  if (committedItinerary.value) {
+    itinerary.value = committedItinerary.value.map((s) => ({ ...s }))
+    selectedCompositionId.value = committedCompId.value
+  }
+  selectedTripId.value =
+    routeResult.value?.trips.find((t) => t.direction_id === 0)?.trip_id ??
+    routeResult.value?.trips[0]?.trip_id ??
+    selectedTripId.value
+  currentMode.value = 'display'
+}
 
 function onRowReorder(event: { value: ItineraryStop[] }) {
   itinerary.value = event.value
@@ -386,7 +525,7 @@ interface ViewRow {
 }
 
 const viewRows = computed((): ViewRow[] => {
-  if (currentMode.value === 'display' && selectedTrip.value) {
+  if (showComputedView.value && selectedTrip.value) {
     return selectedTrip.value.stop_times.map((st, i) => ({
       id: i,
       name: st.stop_name,
@@ -403,7 +542,7 @@ const viewRows = computed((): ViewRow[] => {
 })
 
 const mapStops = computed(() => {
-  if (currentMode.value === 'display' && selectedTrip.value) {
+  if (showComputedView.value && selectedTrip.value) {
     const sts = selectedTrip.value.stop_times
     const scope = evalScope.value
     let odLo = -1
@@ -441,7 +580,7 @@ const mapStops = computed(() => {
 })
 
 const mapShape = computed(() => {
-  if (currentMode.value === 'display' && selectedTrip.value) {
+  if (showComputedView.value && selectedTrip.value) {
     return selectedTrip.value.shape
   }
   return null
@@ -505,7 +644,7 @@ interface MapSegment {
 const mapSegments = computed<MapSegment[] | null>(() => {
   const rr = rawRoute.value
   const tripId = selectedTripId.value
-  if (currentMode.value !== 'display' || !rr || !tripId) return null
+  if (!showComputedView.value || !rr || !tripId) return null
 
   let trip: BackendTripSide | null = null
   for (const pair of rr.trip_pairs) {
@@ -608,6 +747,28 @@ onMounted(async () => {
             class="mb-8"
             @row-reorder="onRowReorder"
           >
+            <!-- Times: only while the computed routing still applies (clean
+                 re-edit); disappears the moment the builder goes dirty. -->
+            <Column
+              v-if="showComputedView"
+              style="width: 5rem"
+              :pt="{ bodyCell: { class: '!p-0' } }"
+            >
+              <template #body="{ data: stop }">
+                <div class="flex flex-col items-end gap-1 py-2 pr-3">
+                  <span
+                    v-if="rowTimes(stop)?.arrival"
+                    class="text-xs tabular-nums leading-none text-primary-50"
+                    >{{ rowTimes(stop)?.arrival }}</span
+                  >
+                  <span
+                    v-if="rowTimes(stop)?.departure"
+                    class="text-xs tabular-nums leading-none text-primary-50"
+                    >{{ rowTimes(stop)?.departure }}</span
+                  >
+                </div>
+              </template>
+            </Column>
             <Column
               row-reorder
               style="width: 2rem"
@@ -756,28 +917,39 @@ onMounted(async () => {
             </Column>
           </DataTable>
 
-          <!-- Add Stop button (edit only) -->
-          <div v-if="currentMode === 'edit'" class="flex justify-end">
-            <StopSelect :stops="store.stops" :disabled-ids="usedStopIds" @select="addStop">
-              <button
-                class="flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1.5 text-sm text-primary-50 transition hover:bg-primary-50/10"
+          <!-- Itinerary controls: Add Stop / Edit + Swap on the left, Cancel
+               Edit on the right. -->
+          <div v-if="currentMode !== 'loading'" class="flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+              <!-- Add Stop (edit + re-edit) -->
+              <StopSelect
+                v-if="currentMode === 'edit'"
+                :stops="store.stops"
+                :disabled-ids="usedStopIds"
+                @select="addStop"
               >
-                <AppIcon :path="mdiPlus" :size="16" />
-                {{ t('proposal.addStop') }}
-              </button>
-            </StopSelect>
-          </div>
+                <button :class="pillClass">
+                  <AppIcon :path="mdiPlus" :size="16" />
+                  {{ t('proposal.addStop') }}
+                </button>
+              </StopSelect>
 
-          <!-- Direction toggle (display only) -->
-          <div
-            v-if="currentMode === 'display' && routeResult && routeResult.trips.length > 1"
-            class="flex justify-start"
-          >
-            <button
-              class="flex cursor-pointer items-center gap-1.5 rounded-full border border-primary-50/20 px-3 py-1.5 text-sm leading-none text-primary-50 transition hover:bg-primary-50/10"
-              @click="swapDirection"
-            >
-              <AppIcon :path="mdiSwapVertical" :size="16" />
+              <!-- Edit (display) -->
+              <button v-if="currentMode === 'display'" :class="pillClass" @click="startEdit">
+                <AppIcon :path="mdiPencil" :size="16" />
+                {{ t('proposal.edit') }}
+              </button>
+
+              <!-- Swap direction (both modes) -->
+              <button v-if="showSwap" :class="pillClass" @click="swapDirection">
+                <AppIcon :path="mdiSwapVertical" :size="16" />
+              </button>
+            </div>
+
+            <!-- Cancel Edit (re-edit) -->
+            <button v-if="showCancelEdit" :class="pillClass" @click="cancelEdit">
+              <AppIcon :path="mdiClose" :size="16" />
+              {{ t('proposal.cancelEdit') }}
             </button>
           </div>
         </div>
@@ -786,6 +958,7 @@ onMounted(async () => {
         <CompositionSelectCard
           v-if="store.compositionsStatus === 'success' && store.compositions.length > 0"
           :compositions="compositionCards"
+          :selected-id="selectedCompositionId"
           @select="(id) => (selectedCompositionId = id)"
         />
         <div
@@ -805,8 +978,8 @@ onMounted(async () => {
           {{ store.stopsError ?? store.compositionsError }}
         </div>
 
-        <!-- Evaluate button (edit + loading only) -->
-        <div v-if="currentMode !== 'display'" class="flex flex-col items-center gap-2">
+        <!-- Evaluate button (fresh build, dirty re-edit, or loading) -->
+        <div v-if="showEvaluate" class="flex flex-col items-center gap-2">
           <button
             :disabled="currentMode === 'loading'"
             class="flex items-center gap-2 rounded-full bg-primary-50/10 px-6 py-2 text-md text-primary-50 transition"
@@ -849,8 +1022,13 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- Cost/revenue results (display mode) -->
-    <div v-if="currentMode === 'display'" class="w-full">
+    <!-- Cost/revenue results (display + re-edit). Greyed out while the builder
+         is dirty, since the figures no longer match the current itinerary. -->
+    <div
+      v-if="showEvaluationSection"
+      class="w-full transition-opacity duration-200"
+      :class="isDirty ? 'pointer-events-none opacity-40' : ''"
+    >
       <div v-if="calcError" class="rounded-xl bg-primary-50/5 p-4 text-sm text-red-400">
         {{ calcError }}
       </div>

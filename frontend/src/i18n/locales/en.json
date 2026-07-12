@@ -2,6 +2,8 @@
   "proposal": {
     "heading": "So, what's your \ndream night train route?",
     "evaluate": "Evaluate",
+    "edit": "Edit",
+    "cancelEdit": "Cancel Edit",
     "mapPlaceholder": "Map",
     "trainCardPlaceholder": "Train info",
     "searchPlaceholder": "Search stops…",
