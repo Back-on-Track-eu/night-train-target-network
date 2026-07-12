@@ -1,0 +1,47 @@
+{
+  "total_count": 2,
+  "current_base": {
+    "count": 1,
+    "scenarios": [
+      {
+        "scenario_id": 1,
+        "scenario_key": "base",
+        "scenario_name": "2026 base",
+        "description": "Illustrative baseline parameter set — all tables at their current seeded version.",
+        "change_log": "Initial seed.",
+        "editor": "david",
+        "created_at": "2026-07-12T15:48:34.756118+00:00",
+        "is_current_base": true,
+        "is_current_scenario": true,
+        "track_infrastructures_version": 2,
+        "track_infrastructure_defaults_version": 1,
+        "stop_infrastructures_version": 1,
+        "stop_infrastructure_defaults_version": 1
+      }
+    ]
+  },
+  "current_scenarios": {
+    "count": 1,
+    "scenarios": [
+      {
+        "scenario_id": 2,
+        "scenario_key": "whatif-de-track-infra",
+        "scenario_name": "What-if: DE track infra pre-correction",
+        "description": "Demonstrates a what-if lineage: copied forward from '2026 base' at creation time, then only track_infrastructures_version overridden (to version 1, DE's original lower rates). Every other pointer is an explicit copy, not an inherited NULL, so this scenario stays reproducible even after the base moves on.",
+        "change_log": "Forked from 'base' scenario_key, pinned track_infrastructures to version 1.",
+        "editor": "david",
+        "created_at": "2026-07-12T15:48:34.756118+00:00",
+        "is_current_base": false,
+        "is_current_scenario": true,
+        "track_infrastructures_version": 1,
+        "track_infrastructure_defaults_version": 1,
+        "stop_infrastructures_version": 1,
+        "stop_infrastructure_defaults_version": 1
+      }
+    ]
+  },
+  "historical_scenarios": {
+    "count": 0,
+    "scenarios": []
+  }
+}

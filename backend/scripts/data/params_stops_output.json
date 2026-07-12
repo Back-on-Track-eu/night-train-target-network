@@ -1,0 +1,784 @@
+{
+  "descriptions": {
+    "table": "Night train stopping points. stop_charge_eur NULL is resolved against stop_infrastructure_defaults by the loader. Version bumps are full-table snapshots — every stop's row is duplicated forward on any single-stop edit — resolved via scenario.scenarios.stop_infrastructures_version. See scenario.scenarios for the versioning contract.",
+    "fields": {
+      "lat": "Latitude in WGS-84 decimal degrees. Unit: °",
+      "lon": "Longitude in WGS-84 decimal degrees. Unit: °",
+      "stop_charge_eur": "Station access charge per stop. NULL = use country or global default. Unit: €/stop"
+    }
+  },
+  "sources": {
+    "2": {
+      "source_id": 2,
+      "source_description": "Illustrative / internal estimate",
+      "source_url": null,
+      "source_date": null
+    }
+  },
+  "default_stops": {
+    "global": {
+      "stop_charge_eur": {
+        "value": 11.28,
+        "source_id": 2
+      }
+    },
+    "by_country": {}
+  },
+  "count": 58,
+  "stops": [
+    {
+      "stop_id": "DK_AALBORG",
+      "name": "Aalborg",
+      "country_code": "DK",
+      "lat": 57.049,
+      "lon": 9.922,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "DK_AARHUS_H",
+      "name": "Aarhus H",
+      "country_code": "DK",
+      "lat": 56.15,
+      "lon": 10.205,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "NL_AMSTERDAM_CENTRAAL",
+      "name": "Amsterdam Centraal",
+      "country_code": "NL",
+      "lat": 52.379,
+      "lon": 4.9,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "BE_ANTWERPEN_CENTRAAL",
+      "name": "Antwerpen Centraal",
+      "country_code": "BE",
+      "lat": 51.217,
+      "lon": 4.421,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "CH_BASEL_SBB",
+      "name": "Basel SBB",
+      "country_code": "CH",
+      "lat": 47.548,
+      "lon": 7.59,
+      "stop_charge_eur": {
+        "value": 73.86,
+        "is_default": false,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "DE_BERLIN_HBF",
+      "name": "Berlin Hbf",
+      "country_code": "DE",
+      "lat": 52.525,
+      "lon": 13.369,
+      "stop_charge_eur": {
+        "value": 9.8,
+        "is_default": false,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "CH_BERN",
+      "name": "Bern",
+      "country_code": "CH",
+      "lat": 46.948,
+      "lon": 7.436,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "FR_BORDEAUX_SAINT_JEAN",
+      "name": "Bordeaux Saint-Jean",
+      "country_code": "FR",
+      "lat": 44.826,
+      "lon": -0.556,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "CZ_BRNO_HLN",
+      "name": "Brno hl.n.",
+      "country_code": "CZ",
+      "lat": 49.191,
+      "lon": 16.613,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "BE_BRUSSELS_M",
+      "name": "Bruxelles-Midi",
+      "country_code": "BE",
+      "lat": 50.836,
+      "lon": 4.336,
+      "stop_charge_eur": {
+        "value": 10.4,
+        "is_default": false,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "BE_CHARLEROI_CENTRAL",
+      "name": "Charleroi Central",
+      "country_code": "BE",
+      "lat": 50.405,
+      "lon": 4.439,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "NL_DEN_HAAG",
+      "name": "Den Haag",
+      "country_code": "NL",
+      "lat": 52.08,
+      "lon": 4.325,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "DE_DRESDEN_HBF",
+      "name": "Dresden Hbf",
+      "country_code": "DE",
+      "lat": 51.04,
+      "lon": 13.732,
+      "stop_charge_eur": {
+        "value": 6.5,
+        "is_default": false,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "NL_EINDHOVEN_CENTRAAL",
+      "name": "Eindhoven Centraal",
+      "country_code": "NL",
+      "lat": 51.443,
+      "lon": 5.48,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "DK_ESBJERG",
+      "name": "Esbjerg",
+      "country_code": "DK",
+      "lat": 55.468,
+      "lon": 8.458,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "IT_FIRENZE_SMN",
+      "name": "Firenze S. M. N.",
+      "country_code": "IT",
+      "lat": 43.777,
+      "lon": 11.248,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "DE_FRANKFURT_HBF",
+      "name": "Frankfurt am Main Hbf",
+      "country_code": "DE",
+      "lat": 50.107,
+      "lon": 8.663,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "BE_GENT_SINT_PIETERS",
+      "name": "Gent-Sint-Pieters",
+      "country_code": "BE",
+      "lat": 51.036,
+      "lon": 3.711,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "CH_GENEVE",
+      "name": "Genève",
+      "country_code": "CH",
+      "lat": 46.211,
+      "lon": 6.143,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "AT_GRAZ_HBF",
+      "name": "Graz Hbf",
+      "country_code": "AT",
+      "lat": 47.072,
+      "lon": 15.416,
+      "stop_charge_eur": {
+        "value": 50.5,
+        "is_default": false,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "SE_GOTEBORG_C",
+      "name": "Göteborg C",
+      "country_code": "SE",
+      "lat": 57.709,
+      "lon": 11.973,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "DE_HAMBURG_HBF",
+      "name": "Hamburg Hbf",
+      "country_code": "DE",
+      "lat": 53.553,
+      "lon": 10.007,
+      "stop_charge_eur": {
+        "value": 32.47,
+        "is_default": false,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "AT_INNSBRUCK_HBF",
+      "name": "Innsbruck Hbf",
+      "country_code": "AT",
+      "lat": 47.263,
+      "lon": 11.401,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "AT_KLAGENFURT_HBF",
+      "name": "Klagenfurt Hbf",
+      "country_code": "AT",
+      "lat": 46.616,
+      "lon": 14.314,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "DK_COPENHAGEN",
+      "name": "Koebenhavn H",
+      "country_code": "DK",
+      "lat": 55.673,
+      "lon": 12.565,
+      "stop_charge_eur": {
+        "value": 9.0,
+        "is_default": false,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "DK_KOLDING",
+      "name": "Kolding",
+      "country_code": "DK",
+      "lat": 55.491,
+      "lon": 9.482,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "DE_KOELN_HBF",
+      "name": "Köln Hbf",
+      "country_code": "DE",
+      "lat": 50.943,
+      "lon": 6.959,
+      "stop_charge_eur": {
+        "value": 47.34,
+        "is_default": false,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "CH_LAUSANNE",
+      "name": "Lausanne",
+      "country_code": "CH",
+      "lat": 46.517,
+      "lon": 6.629,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "BE_LEUVEN",
+      "name": "Leuven",
+      "country_code": "BE",
+      "lat": 50.884,
+      "lon": 4.714,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "FR_LILLE_EUROPE",
+      "name": "Lille Europe",
+      "country_code": "FR",
+      "lat": 50.684,
+      "lon": 3.088,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "SE_LINKOPING_C",
+      "name": "Linköping C",
+      "country_code": "SE",
+      "lat": 58.416,
+      "lon": 15.626,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "AT_LINZ_HBF",
+      "name": "Linz Hbf",
+      "country_code": "AT",
+      "lat": 48.29,
+      "lon": 14.292,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "BE_LIEGE_GUILLEMINS",
+      "name": "Liège-Guillemins",
+      "country_code": "BE",
+      "lat": 50.624,
+      "lon": 5.566,
+      "stop_charge_eur": {
+        "value": 126.67,
+        "is_default": false,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "CH_LUZERN",
+      "name": "Luzern",
+      "country_code": "CH",
+      "lat": 47.049,
+      "lon": 8.31,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "FR_LYON_PART_DIEU",
+      "name": "Lyon-Part-Dieu",
+      "country_code": "FR",
+      "lat": 45.761,
+      "lon": 4.86,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "SE_MALMO_C",
+      "name": "Malmö C",
+      "country_code": "SE",
+      "lat": 55.609,
+      "lon": 13.001,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "FR_MARSEILLE_SAINT_CHARLES",
+      "name": "Marseille Saint-Charles",
+      "country_code": "FR",
+      "lat": 43.303,
+      "lon": 5.381,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "IT_MILANO_CENTRALE",
+      "name": "Milano Centrale",
+      "country_code": "IT",
+      "lat": 45.487,
+      "lon": 9.205,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "DE_MUENCHEN_HBF",
+      "name": "München Hbf",
+      "country_code": "DE",
+      "lat": 48.142,
+      "lon": 11.558,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "IT_NAPOLI_CENTRALE",
+      "name": "Napoli Centrale",
+      "country_code": "IT",
+      "lat": 40.853,
+      "lon": 14.273,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "DK_ODENSE",
+      "name": "Odense",
+      "country_code": "DK",
+      "lat": 55.402,
+      "lon": 10.386,
+      "stop_charge_eur": {
+        "value": 93.38,
+        "is_default": false,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "CZ_OLOMOUC_HLN",
+      "name": "Olomouc hl.n.",
+      "country_code": "CZ",
+      "lat": 49.593,
+      "lon": 17.278,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "CZ_OSTRAVA_HLN",
+      "name": "Ostrava hl.n.",
+      "country_code": "CZ",
+      "lat": 49.852,
+      "lon": 18.267,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "FR_PARIS_EST",
+      "name": "Paris Gare de l'Est",
+      "country_code": "FR",
+      "lat": 48.877,
+      "lon": 2.359,
+      "stop_charge_eur": {
+        "value": 13.2,
+        "is_default": false,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "CZ_PLZEN_HLAVNI_NADRAZI",
+      "name": "Plzeň hlavní nádraží",
+      "country_code": "CZ",
+      "lat": 49.743,
+      "lon": 13.388,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "CZ_PRAHA_HLN",
+      "name": "Praha hl.n.",
+      "country_code": "CZ",
+      "lat": 50.083,
+      "lon": 14.436,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "IT_ROMA_TERMINI",
+      "name": "Roma Termini",
+      "country_code": "IT",
+      "lat": 41.9,
+      "lon": 12.503,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "NL_ROTTERDAM_CENTRAAL",
+      "name": "Rotterdam Centraal",
+      "country_code": "NL",
+      "lat": 51.924,
+      "lon": 4.47,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "AT_SALZBURG_HBF",
+      "name": "Salzburg Hbf",
+      "country_code": "AT",
+      "lat": 47.813,
+      "lon": 13.046,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "SE_STOCKHOLM_C",
+      "name": "Stockholm C",
+      "country_code": "SE",
+      "lat": 59.33,
+      "lon": 18.058,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "FR_STRASBOURG",
+      "name": "Strasbourg",
+      "country_code": "FR",
+      "lat": 48.574,
+      "lon": 7.754,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "DE_STUTTGART_HBF",
+      "name": "Stuttgart Hbf",
+      "country_code": "DE",
+      "lat": 48.784,
+      "lon": 9.182,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "IT_TORINO_PORTA_SUSA",
+      "name": "Torino Porta Susa",
+      "country_code": "IT",
+      "lat": 45.072,
+      "lon": 7.666,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "SE_UPPSALA_C",
+      "name": "Uppsala C",
+      "country_code": "SE",
+      "lat": 59.858,
+      "lon": 17.647,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "NL_UTRECHT_CENTRAAL",
+      "name": "Utrecht Centraal",
+      "country_code": "NL",
+      "lat": 52.089,
+      "lon": 5.11,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "AT_WIEN_HBF",
+      "name": "Wien Hbf",
+      "country_code": "AT",
+      "lat": 48.185,
+      "lon": 16.376,
+      "stop_charge_eur": {
+        "value": 11.0,
+        "is_default": false,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "CH_ZUERICH_HB",
+      "name": "Zuerich HB",
+      "country_code": "CH",
+      "lat": 47.378,
+      "lon": 8.54,
+      "stop_charge_eur": {
+        "value": 14.5,
+        "is_default": false,
+        "version": 1,
+        "source_id": 2
+      }
+    },
+    {
+      "stop_id": "SE_OREBRO_C",
+      "name": "Örebro C",
+      "country_code": "SE",
+      "lat": 59.279,
+      "lon": 15.212,
+      "stop_charge_eur": {
+        "value": 11.28,
+        "is_default": true,
+        "version": 1,
+        "source_id": 2
+      }
+    }
+  ]
+}

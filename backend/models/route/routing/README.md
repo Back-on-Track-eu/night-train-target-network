@@ -1,10 +1,16 @@
-# Night train target wetwork — Routing Infrastructure
+# Night Train Target Network — Routing Infrastructure
 
 This folder contains the OpenRailRouting server used to calculate rail travel times
 and distances between stations. It runs as a Docker container and exposes a REST API on the host port configured in `backend/docker/.env`
-(`OPENRAILROUTING_HOST_PORT`, default 8989). With this setup, the limits on requesting routes do 
-only depend on the properties of your local machine but not on request limits of 
-https://routing.openrailrouting.org/maps/ and also routing setting can be adjusted individually.
+(`OPENRAILROUTING_HOST_PORT`, default 8989). With this self-hosted setup,
+request limits depend only on your local machine — not on the public
+https://routing.openrailrouting.org/maps/ instance — and routing settings can
+be adjusted individually.
+
+How the backend consumes this server (`rail_router.py`, routing modes) is
+documented in [`../../README.md`](../../README.md); the day-to-day backend
+workflow that assumes this graph already exists is in
+[`../../../DEVELOPMENT.md`](../../../DEVELOPMENT.md).
 
 
 
@@ -53,7 +59,7 @@ https://download.geofabrik.de/europe-latest.osm.pbf
 
 Save it to:
 ```
-models/routing/docker/data/europe-latest.osm.pbf
+backend/models/route/routing/docker/data/europe-latest.osm.pbf
 ```
 
 > **Note:** This file is large and will take 1–3 hours to download depending on

@@ -2,6 +2,13 @@
 
 This folder contains the domain model for evaluating night train route economics.
 
+**Related documentation:** API reference (all endpoints consuming this layer) —
+[`../api/README.md`](../api/README.md) · evaluation model —
+[`evaluation/README.md`](evaluation/README.md) · energy model —
+[`energy/README.md`](energy/README.md) · routing engine setup —
+[`route/routing/README.md`](route/routing/README.md) · database layer —
+[`../db/README.md`](../db/README.md)
+
 ---
 
 ## Structure
@@ -116,7 +123,7 @@ currently reachable from the API — see `api/README.md`.
 **Strict boundary:** `Trip` and `Route` carry physics only. All EUR values live
 exclusively in `calc.py`. All serialization lives in `api/helpers/` — split by
 domain into `route_serialize.py`, `evaluation_serialize.py`, `params_serialize.py`,
-`proposal_serialize.py`, and `feedback_serialize.py`.
+`proposal_serialize.py`, `feedback_serialize.py`, and `scenario_serialize.py`.
 
 ---
 

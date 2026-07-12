@@ -29,7 +29,7 @@ Each submitted route is scored on:
 
 ## This repository
 
-This repo hosts the technical side of the project — backend and frontend. Data for is stored in a postgres database on our server of back-on-track.
+This repo hosts the technical side of the project — backend and frontend. Data is stored in a PostgreSQL/PostGIS database on Back-on-Track's server.
 
 ## Running the app locally
 
@@ -83,6 +83,24 @@ Working on the frontend day-to-day (VS Code, hot reload, troubleshooting)? See
 `.devcontainer/DEVELOPMENT.md`. Working on the backend instead? See
 `backend/DEVELOPMENT.md`.
 
+
+## Documentation map
+
+| Topic | Document |
+|---|---|
+| AI-assistant / contributor conventions (code style, structure, CI) | [`AGENTS.md`](AGENTS.md) |
+| Backend developer setup (PyCharm, Docker, tests) | [`backend/DEVELOPMENT.md`](backend/DEVELOPMENT.md) |
+| Frontend developer setup (VS Code, Dev Container) | [`.devcontainer/DEVELOPMENT.md`](.devcontainer/DEVELOPMENT.md) |
+| API reference — every endpoint, request/response shapes | [`backend/api/README.md`](backend/api/README.md) |
+| Domain model layer — pipeline, objects, conventions | [`backend/models/README.md`](backend/models/README.md) |
+| Evaluation model — cost/revenue calculation, views, allocation | [`backend/models/evaluation/README.md`](backend/models/evaluation/README.md) |
+| Energy model — status and calibration workstream | [`backend/models/energy/README.md`](backend/models/energy/README.md) |
+| Composition cost calibration workstream | [`backend/models/compositions/calib/README.md`](backend/models/compositions/calib/README.md) |
+| Routing infrastructure — OpenRailRouting setup | [`backend/models/route/routing/README.md`](backend/models/route/routing/README.md) |
+| Database layer — schemas, seeding, inspection | [`backend/db/README.md`](backend/db/README.md) |
+| Test suite — layout and every test's purpose | [`backend/tests/README.md`](backend/tests/README.md) |
+| Frontend — stack, structure, conventions | [`frontend/README.md`](frontend/README.md) |
+
 ## Contributing
 
 Contributions of any kind — code, data, route ideas, documentation — are very welcome!
@@ -96,7 +114,7 @@ For coordination reasons, please **send a short email before you start working o
 
 We'll be introducing a formal request-control process for pull requests shortly. In the meantime — and after — the basic workflow is:
 
-1. Always pull freshly from `master` before starting any work.
+1. Always pull freshly from `main` before starting any work.
 2. Do your work on your own branch.
 3. Open a pull request when ready — it will go through request-control review by the project lead.
 4. Keep branch lifetimes short: merge within **days, not months**.
