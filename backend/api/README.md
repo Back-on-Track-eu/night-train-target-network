@@ -14,6 +14,8 @@
   - [`GET` / `POST /api/proposals`](#list-proposals) — list proposals
   - [`GET /api/proposal/<id>`](#get-proposal) — load a proposal
 - [Input Parameters](#input-parameters)
+- [Scenarios](#scenarios)
+  - [`GET /api/scenarios`](#get-scenarios) — list all scenarios, grouped by current status
 - [Route](#route)
   - [`POST /api/route/plan`](#route-plan) — plan a route
 - [Evaluation](#evaluation)
@@ -417,6 +419,53 @@ field objects with provenance:
 | `version` | int | DB row version of the source row |
 | `source` | object | `{source_id, source_description, source_url}` |
 | `description` | string | Column description from DB |
+
+</details>
+
+---
+
+<a id="scenarios"></a>
+
+## Scenarios
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/scenarios` | All scenarios, grouped by current status, with a count per group |
+
+<details>
+<summary>Request &amp; response details</summary>
+
+No request body, no query params — always returns every row of
+`scenario.scenarios`.
+
+`scenario.scenarios` carries two independent "current" flags (see
+`db/dev/sql/create_scenario_schema.sql`): `is_current_base` (exactly one
+row in the whole table — the live default used when an API call omits
+`scenario_id`) and `is_current_scenario` (exactly one row per
+`scenario_key` — the head of that what-if lineage). A flat
+`is_current=true/false` split would collapse that distinction, so the
+response is split into three groups instead, each with its own `count`:
+
+```json
+{
+  "total_count": 12,
+  "current_base": {
+    "count": 1,
+    "scenarios": [ { "scenario_id": 1, "scenario_key": "base", "scenario_name": "2027 base", "description": "...", "change_log": "...", "editor": "david", "created_at": "2026-06-01T10:00:00+00:00", "is_current_base": true, "is_current_scenario": true, "track_infrastructures_version": 3, "track_infrastructure_defaults_version": 1, "stop_infrastructures_version": 2, "stop_infrastructure_defaults_version": 1 } ]
+  },
+  "current_scenarios": {
+    "count": 3,
+    "scenarios": [ { "scenario_id": 7, "scenario_key": "whatif-de-track-infra", "scenario_name": "What-if: DE power tax -10%", "...": "..." } ]
+  },
+  "historical_scenarios": {
+    "count": 8,
+    "scenarios": [ { "scenario_id": 4, "scenario_key": "whatif-de-track-infra", "is_current_scenario": false, "...": "..." } ]
+  }
+}
+```
+
+Every scenario appears in exactly one group. `current_base` holds zero
+rows only if the database is not correctly seeded.
 
 </details>
 
