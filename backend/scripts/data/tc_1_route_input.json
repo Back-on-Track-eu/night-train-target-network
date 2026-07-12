@@ -7,5 +7,5 @@
   "routing_mode": "fullRouting",
   "timetable_mode": "simpleAutomatic",
   "schedule_mode": "alwaysDaily",
-  "auto_stop_addition": false
+  "auto_stop_addition": true
 }
