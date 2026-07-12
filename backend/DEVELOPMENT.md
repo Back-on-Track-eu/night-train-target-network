@@ -165,6 +165,20 @@ night-train-target-network/
 
 ---
 
+## Further documentation
+
+| Topic | Document |
+|---|---|
+| API reference — every endpoint, request/response shapes | [`api/README.md`](api/README.md) |
+| Domain model layer — pipeline, objects, conventions | [`models/README.md`](models/README.md) |
+| Evaluation model — cost/revenue calculation, views, allocation | [`models/evaluation/README.md`](models/evaluation/README.md) |
+| Routing engine setup — OSM download, graph import | [`models/route/routing/README.md`](models/route/routing/README.md) |
+| Database layer — schemas, seeding, inspection | [`db/README.md`](db/README.md) |
+| Test suite — layout and every test's purpose | [`tests/README.md`](tests/README.md) |
+| Code conventions and CI | [`../AGENTS.md`](../AGENTS.md) |
+
+---
+
 ## Troubleshooting
 
 **`docker-compose up` fails with a missing env variable**

@@ -1,6 +1,23 @@
 # Night Train — Backend API Reference
 
-**V.901.5** — Base URL: `http://localhost:5000`
+Base URL: `http://localhost:5000`
+
+API versions are not tracked in this document — they are reported live in the
+responses themselves: `route_builder_version` (`models/route/version.py`),
+`calc_version` (`models/evaluation/version.py`), and the energy model version
+inside `models.energy` (`models/energy/version.py`). Each `version.py` carries
+its own changelog.
+
+**Related documentation:** domain model & pipeline —
+[`../models/README.md`](../models/README.md) · evaluation model, views &
+allocation — [`../models/evaluation/README.md`](../models/evaluation/README.md)
+· database schemas & versioning — [`../db/README.md`](../db/README.md) ·
+integration tests per endpoint — [`../tests/README.md`](../tests/README.md)
+
+**Worked examples:** real request/response pairs for the main endpoints are
+checked in under [`../scripts/data/`](../scripts/data/), produced by the
+manual test scripts in [`../scripts/`](../scripts/) against a locally running
+stack. Each endpoint section below links its own example files.
 
 ## Table of Contents
 
@@ -31,13 +48,20 @@
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/health` | Liveness check — returns 200 if API process is running |
+| `GET` | `/api/data/status` | Whether the DB data loader initialised at startup |
 
 <details>
 <summary>Request &amp; response details</summary>
 
-**Response**
+**`GET /api/health` response**
 ```json
 {"status": "ok"}
+```
+
+**`GET /api/data/status` response** — `loaded_at` (ISO 8601) only present
+once loading succeeded; `error` only present if it failed:
+```json
+{"loaded": true, "loaded_at": "2026-07-12T08:00:00+00:00"}
 ```
 
 </details>
@@ -214,7 +238,8 @@ a new proposal from one you don't (see below).
 | `GET` | `/api/proposal/<id>` | Load the current version of a proposal |
 
 The route — and, if included, its evaluation — are stored twice: verbatim
-as JSONB (for an exact, cheap round-trip back to the frontend) and, for
+as JSON (deliberately **not** JSONB — JSONB does not preserve key order; see
+`db/README.md`) for an exact, cheap round-trip back to the frontend, and, for
 the route, decomposed into GTFS tables
 (`proposals.routes`/`trips`/`stop_times`/`shapes`/`services`/`calendar`,
 for future export/interop). This duplication is deliberate for now — see
@@ -400,27 +425,70 @@ ever needed.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/params/StopInfrastructures` | All stops with id, name, country, coordinates |
-| `GET` | `/api/params/compositions` | All composition types with full parameters |
+| `GET` | `/api/params/StopInfrastructures` | All stops with location and per-stop charges |
+| `GET` | `/api/params/compositions` | All composition types with full parameters, plus their operators |
 | `GET` | `/api/params/TrackInfrastructures` | All country track infrastructure parameters |
+
+All three accept an optional `scenario_id` **query parameter** pinning which
+version of every parameter table to read; omit it for the live
+`is_current_base` scenario (same semantics as everywhere else — see
+[Scenarios](#scenarios)).
+
+Example responses: [`params_stops_output.json`](../scripts/data/params_stops_output.json) ·
+[`params_compositions_output.json`](../scripts/data/params_compositions_output.json) ·
+[`params_tracks_output.json`](../scripts/data/params_tracks_output.json)
+(produced by [`../scripts/test_params.py`](../scripts/test_params.py)).
 
 <details>
 <summary>Request &amp; response details</summary>
 
-No request body — all are read-only GET endpoints.
+No request body. All three responses share the same envelope pattern —
+documentation and sources appear **once**, not repeated per entity:
 
-Parameter fields (e.g. `tac_eur_train_km`, `parking_eur_day`) are returned as
-field objects with provenance:
+| Key | Description |
+|---|---|
+| `descriptions` | Table + per-field documentation from the DB (`{table, fields}`), identical for every entity so emitted once |
+| `sources` | Every referenced source, keyed by `source_id` — `{source_id, source_description, source_url, source_date}`. Fields reference these by id |
+| `count` | Number of entities in the list below |
+
+**`StopInfrastructures`** adds `default_stops` (`global` fallback +
+`by_country` overrides for the stop charge) and `stops` — one entry per stop:
+`{stop_id, name, country_code, lat, lon, stop_charge_eur}`, where
+`stop_charge_eur` is a *field object* (see below).
+
+**`TrackInfrastructures`** adds `default_track_infra` (the single EU-average
+fallback row, `{value, source_id}` per field) and `track_infrastructures` —
+one entry per country: `country_code` plus a field object for each of
+`tac_eur_train_km`, `parking_eur_day`, `shunting_eur_event`,
+`energy_price_eur_kwh`, `terrain_score`, `terrain_category`, `hsr_allowed`,
+`min_boarding_time_min`, `min_alighting_time_min`, `buffer_quota_per`.
+
+**Field object** — every individually versioned parameter value is wrapped as:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `value` | number | Resolved parameter value |
-| `is_default` | bool | `true` if resolved from the defaults table |
+| `value` | number/string/bool | Resolved parameter value |
+| `is_default` | bool | `true` if resolved from the defaults table rather than the country's own row |
 | `version` | int | DB row version of the source row |
-| `source` | object | `{source_id, source_description, source_url}` |
-| `description` | string | Column description from DB |
+| `source_id` | int or null | Key into the top-level `sources` map — not an inline source object |
+
+**`compositions`** returns `compositions` and `operators`. Composition
+fields are grouped by concern rather than individually versioned —
+`routing` (weight, speed, HSR, dwell minima), `staff`, `energy` (regression
+factors), `capacity` (per `class_main`: `{places, density}`), `equipment`,
+`coaches` (`{count, list}` ordered by position), `fixed_costs`,
+`variable_km`, and `indicative` (placeholder KPIs + reference profile, may
+be `null`). Each composition and operator carries a `source_ids` **list**
+referencing the shared `sources` map, since their fields are sourced as a
+whole entity, not per field. Capacity is keyed by `class_main`
+(Seat/Couchette/Sleeper/Capsule/Catering), not the granular `class_id` —
+see the `CALC_VERSION` 1.2.0 changelog note in
+`models/evaluation/version.py`.
 
 </details>
+
+How parameter tables, defaults, and row versions are structured in the
+database is documented in [`../db/README.md`](../db/README.md).
 
 ---
 
@@ -436,10 +504,12 @@ field objects with provenance:
 <summary>Request &amp; response details</summary>
 
 No request body, no query params — always returns every row of
-`scenario.scenarios`.
+`scenario.scenarios`. Example response:
+[`scenarios_output.json`](../scripts/data/scenarios_output.json)
+(produced by [`../scripts/test_scenarios.py`](../scripts/test_scenarios.py)).
 
 `scenario.scenarios` carries two independent "current" flags (see
-`db/dev/sql/create_scenario_schema.sql`): `is_current_base` (exactly one
+`db/dev/sql/create_scenario_schema.sql` and [`../db/README.md`](../db/README.md)): `is_current_base` (exactly one
 row in the whole table — the live default used when an API call omits
 `scenario_id`) and `is_current_scenario` (exactly one row per
 `scenario_key` — the head of that what-if lineage). A flat
@@ -482,6 +552,15 @@ rows only if the database is not correctly seeded.
 <a id="route-plan"></a>
 
 ### `POST /api/route/plan`
+
+How the route builder pipeline works internally (routing, timetabling,
+auto-stop addition, mode switches) is documented in
+[`../models/README.md`](../models/README.md).
+
+Worked example — Berlin – Dresden – Wien with `auto_stop_addition`
+enabled: request [`tc_1_route_input.json`](../scripts/data/tc_1_route_input.json),
+full response [`tc_1_route_input_output.json`](../scripts/data/tc_1_route_input_output.json)
+(produced by [`../scripts/test_route_plan.py`](../scripts/test_route_plan.py)).
 
 <details>
 <summary>Request &amp; response details</summary>
@@ -659,6 +738,12 @@ easier to scan the rest of the route without wading through coordinate arrays):
 
 ### `POST /api/evaluation/calc`
 
+Worked example: request
+[`tc_1_evaluation_input.json`](../scripts/data/tc_1_evaluation_input.json)
+(the route from the route/plan example, demand injected), full response
+[`tc_1_evaluation_input_output.json`](../scripts/data/tc_1_evaluation_input_output.json)
+(produced by [`../scripts/test_evaluation_calc.py`](../scripts/test_evaluation_calc.py)).
+
 <details>
 <summary>Request &amp; response details</summary>
 
@@ -743,7 +828,7 @@ dimension — it's the whole-route aggregate). The other four views nest a
 breakdown shape, plus an `"all"` entry aggregating across that view's
 dimension.
 
-Each normalised breakdown contains five views:
+Each cell contains the same breakdown under five **normalisations** (not to be confused with the five *views* above — a view selects *what scope* the money belongs to, a normalisation selects *what unit* it is expressed in):
 
 | Key | Unit | Description |
 |-----|------|-------------|
@@ -793,8 +878,11 @@ the field `proposals.proposals`' list/sort endpoints read as `margin_eur`
 
 `od_key` format: `"{origin_stop_id}__{destination_stop_id}__{class_main}"`
 
-See `models/evaluation/README.md` for full documentation of the evaluation model,
-cost allocation rules, and view semantics.
+See [`../models/evaluation/README.md`](../models/evaluation/README.md) for full
+documentation of the evaluation model, cost allocation rules, and view
+semantics — including a plain-language explanation of what each view displays
+and which frontend filter selection maps to which view
+([Views, explained for display](../models/evaluation/README.md#views-explained-for-display)).
 
 </details>
 
@@ -811,5 +899,7 @@ cost allocation rules, and view semantics.
 | `422` | `domain_error` | Valid request but pipeline failed (e.g. unknown stop, no route found, route passes through a country with no row in `track_infrastructures` at all) |
 | `500` | `route_error` | Unexpected error in route builder |
 | `500` | `calc_error` | Unexpected error in evaluation |
+| `500` | `proposal_error` | Unexpected error saving/loading a proposal |
+| `500` | `feedback_error` | Feedback storage failed (mail failure alone never triggers this) |
 | `503` | `infrastructure_error` | DB unreachable or unknown composition ID |
 | `501` | `not_implemented` | Endpoint exists but is not yet implemented |

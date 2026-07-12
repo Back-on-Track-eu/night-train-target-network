@@ -2,6 +2,11 @@
 
 This folder contains the energy consumption model for night train routes.
 
+**Related documentation:** model layer overview — [`../README.md`](../README.md)
+· evaluation model (consumes `energy_kwh`) —
+[`../evaluation/README.md`](../evaluation/README.md) · onboarding guide for the
+energy team — [`ONBOARDING.md`](ONBOARDING.md)
+
 **Current status:** Dummy implementation using a flat 28.0 kWh/km factor.
 The real regression-based model needs to be developed and calibrated.
 That is the purpose of this workstream.
@@ -125,7 +130,7 @@ In a Jupyter notebook:
 - [ ] Enter the calibrated coefficients into `seed.py` for the relevant composition types
 - [ ] Replace the dummy implementation in `calc_energy_consumption.py` with the regression formula
 - [ ] Bump `ENERGY_CALC_VERSION` in `version.py` and add a changelog entry
-- [ ] Run `uv run --group dev pytest tests/ -v` to confirm all tests still pass
+- [ ] Run `uv run --extra dev pytest tests/ -v` to confirm all tests still pass
 - [ ] Open a PR to `backend-dev` — tag David for review
 
 ---
@@ -149,7 +154,7 @@ git clone https://github.com/Back-on-Track-eu/night-train-target-network.git
 cd night-train-target-network/backend
 
 # Install dependencies including dev group (includes jupyter)
-uv sync --group dev
+uv sync --extra dev
 
 # Start JupyterLab
 uv run jupyter lab

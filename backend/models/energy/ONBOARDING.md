@@ -190,7 +190,7 @@ cd night-train-target-network/backend
 **2. Install dependencies**
 
 ```bash
-uv sync --group dev
+uv sync --extra dev
 ```
 
 This installs everything — pandas, scikit-learn, statsmodels, JupyterLab, and the

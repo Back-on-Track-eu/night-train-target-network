@@ -3,6 +3,12 @@
 This folder contains the cost and revenue evaluation pipeline for night train routes.
 It is the mathematical core of the project — everything that produces a EUR number lives here.
 
+**Related documentation:** API reference (response shapes) —
+[`../../api/README.md`](../../api/README.md#evaluation) · model layer overview —
+[`../README.md`](../README.md) · energy model (feeds `energy_kwh`) —
+[`../energy/README.md`](../energy/README.md) · tests
+(`test_30`/`test_31`) — [`../../tests/README.md`](../../tests/README.md)
+
 ```
 models/evaluation/
 ├── calc.py      # Cost/revenue calculation → EvaluationResult
@@ -98,6 +104,13 @@ All nodes support `+=` via `__iadd__` for accumulation. All 17 leaves are €/ye
 `build_breakdown_per_trip_pair(route, result)` — `dict[str, Breakdown]` keyed by
 outbound `trip_id`, plus `"all"` for the whole route.
 
+Currently every route holds exactly **one** trip pair (`api/route.py` builds a
+single `TripPairInput` from the posted stop list), so this matrix has one real
+key and `"all"`, both with the same values as the whole-route Breakdown. The
+per-pair dimension exists for the planned X/Y-shaped routes, where several
+pairs share a trunk — the code and response shape are already
+multi-pair-ready.
+
 ### Layer 2A — per trip pair × country
 
 `build_breakdown_per_trip_pair_per_country(route, result)` —
@@ -162,9 +175,188 @@ divided by the denominator. The source `Breakdown` is unchanged.
 
 ---
 
+## Views, explained for display
+
+*A non-technical map of the five evaluation views — written for the frontend
+filter/selection logic. Every view answers the same question — "how much money?"
+— for a different slice of the route. The frontend never computes a slice
+itself; it only picks which pre-computed view (and key) to read.*
+
+### The five views in one sentence each
+
+| View | Plain-language meaning | Typical question it answers |
+|---|---|---|
+| `route` | The **whole proposal** rolled into one figure set — every trip pair, segment, stop and passenger relation together. | "Is this route economically viable overall?" |
+| `per_trip_pair` | One **outbound + return leg pair** in isolation. Only differs from `route` on Y/X-shaped routes with several pairs. | "Which branch of the Y carries the network?" |
+| `per_trip_pair_per_country` | A trip pair's money **split by country** — costs land where the train drives or where the event happens; revenue where passengers actually sit. | "How much of this route's cost/revenue accrues in Germany?" (→ subsidy discussions per member state) |
+| `per_trip_pair_per_od` | Money attributed to one **passenger relation** (origin → destination × class), aggregated across trip pairs sharing it. | "Does the Wien → Berlin couchette relation pay for itself, or is it cross-subsidised?" |
+| `per_trip_per_stop` | Money attributed to a single **stop call of a single direction**. Only boarding/alighting passengers count at a stop — through-riders are invisible here. | "What does calling at Dresden actually cost and earn?" (→ keep or drop a stop) |
+
+Every dimension additionally carries an `"all"` key — the aggregate across
+that dimension — so a filter set to "all countries" reads the same view, key
+`"all"`, rather than falling back to a different view.
+
+> **Note — one trip pair per route today.** `POST /api/route/plan` currently
+> builds exactly one `TripPair` from the posted stop list, so
+> `per_trip_pair` (and the pair dimension in every other view) holds a
+> single pair key plus `"all"`, with identical numbers. The frontend should
+> still wire the pair filter now — it becomes meaningful once X/Y-shaped
+> routes (multiple pairs sharing a trunk) are supported, without any
+> response-shape change.
+
+### Filter selection → view (decision tree)
+
+![Filter selection to view mapping](docs/view_selection.svg)
+
+Two orthogonal selectors, always:
+
+1. **Scope** (the filter) — decides *which view and key* to read. Trip pair,
+   country, OD relation, and stop are filter dimensions; `"all"` is a valid
+   choice on each.
+2. **Unit** (the normalisation) — decides *which of the five entries inside
+   the cell* to display. Same breakdown tree, divided by a different
+   denominator:
+
+| Normalisation | Unit | Use it to… |
+|---|---|---|
+| `per_year` | €/year | show absolute annual totals (the default) |
+| `per_operating_day` | €/operating day | compare against daily operating benchmarks |
+| `per_trip_km` | €/km | compare routes of different lengths |
+| `per_available_place_km` | €/place-km offered | compare cost efficiency independent of demand |
+| `per_sold_place_km` | €/place-km sold | compare directly against average fares per km |
+
+Inside every cell, `values` (or `data` for `route`) is the same nested
+cost/revenue/margin `Breakdown` dict — so one rendering component can serve
+all five views. The `filter` dict next to `values` carries ready-made
+human-readable labels (e.g. `{"trip_pair": "Berlin Hbf ↔ Wien Hbf",
+"country": "AT"}`) so the frontend never needs to reconstruct display names
+from keys.
+
+### Three concrete filter settings and their JSON
+
+Values below are illustrative; the structure is exact. A full real response
+is checked in at
+[`../../scripts/data/tc_1_evaluation_input_output.json`](../../scripts/data/tc_1_evaluation_input_output.json)
+(produced by [`../../scripts/test_evaluation_calc.py`](../../scripts/test_evaluation_calc.py)
+from [`tc_1_evaluation_input.json`](../../scripts/data/tc_1_evaluation_input.json)).
+
+**1. No filter — whole route, annual totals.** UI state: nothing selected,
+unit = €/year. Read `views.route.data.per_year` (the `route` view has no
+`filter`/`values` nesting — nothing to filter by):
+
+```json
+"views": {
+  "route": {
+    "description": "Whole-route annual totals — every trip pair, segment, stop and OD pair rolled into one figure.",
+    "normalisations": { "per_year": { "...": "..." }, "...": "..." },
+    "data": {
+      "per_year": {
+        "cost":    { "operator": { "...": "..." }, "infrastructure": { "...": "..." }, "total_eur": 5210433.18 },
+        "revenue": { "ticket_revenue_eur": 6120000.0, "total_eur": 6120000.0 },
+        "margin":  { "ebit_margin_eur": 306000.0, "total_eur": 306000.0 },
+        "total_cost_eur": 5210433.18,
+        "total_revenue_eur": 6120000.0,
+        "net_eur": 603566.82
+      },
+      "per_operating_day": { "...": "same tree, ÷ operating days" },
+      "...": "..."
+    }
+  }
+}
+```
+
+**2. All trip pairs + country DE, per km.** UI state: pair filter = "all",
+country filter = Germany, unit = €/km. Read
+`views.per_trip_pair_per_country.data["all"]["DE"]` and display
+`values.per_trip_km`; the `filter` dict is the ready-made UI label:
+
+```json
+"per_trip_pair_per_country": {
+  "description": "Matrix of annual totals by trip pair x country. ...",
+  "normalisations": { "...": "..." },
+  "data": {
+    "all": {
+      "DE": {
+        "filter": { "trip_pair": "all", "country": "DE" },
+        "values": {
+          "per_year":    { "...": "..." },
+          "per_trip_km": {
+            "cost": { "...": "...", "total_eur": 14.82 },
+            "revenue": { "...": "...", "total_eur": 17.65 },
+            "margin": { "...": "...", "total_eur": 0.88 },
+            "total_cost_eur": 14.82,
+            "total_revenue_eur": 17.65,
+            "net_eur": 1.95
+          },
+          "...": "..."
+        }
+      },
+      "AT":  { "...": "..." },
+      "all": { "filter": { "trip_pair": "all", "country": "all" }, "values": { "...": "..." } }
+    },
+    "P1_V1_R1_D0_T1": { "...": "same country keys, scoped to that pair" }
+  }
+}
+```
+
+**3. One pair + one OD relation, per sold place-km.** UI state: pair =
+Berlin ↔ Wien, OD = Wien → Berlin in Couchette, unit = €/sold-place-km.
+Read
+`views.per_trip_pair_per_od.data["P1_V1_R1_D0_T1"]["AT_WIEN_HBF__DE_BERLIN_HBF__Couchette"]`
+and display `values.per_sold_place_km` — comparable 1:1 against the
+relation's average fare per km:
+
+```json
+"per_trip_pair_per_od": {
+  "description": "Matrix of annual totals by trip pair x OD pair ...",
+  "normalisations": { "...": "..." },
+  "data": {
+    "P1_V1_R1_D0_T1": {
+      "AT_WIEN_HBF__DE_BERLIN_HBF__Couchette": {
+        "filter": {
+          "trip_pair": "Berlin Hbf ↔ Wien Hbf",
+          "od_pair": "Wien Hbf → Berlin Hbf (Couchette)"
+        },
+        "values": {
+          "per_sold_place_km": {
+            "cost": { "...": "...", "total_eur": 0.081 },
+            "revenue": { "ticket_revenue_eur": 0.104, "total_eur": 0.104 },
+            "margin": { "...": "...", "total_eur": 0.005 },
+            "total_cost_eur": 0.081,
+            "total_revenue_eur": 0.104,
+            "net_eur": 0.018
+          },
+          "...": "..."
+        }
+      },
+      "all": { "...": "..." }
+    },
+    "all": { "...": "OD keys aggregated across all pairs" }
+  }
+}
+```
+
+**Caveats worth surfacing in the UI:**
+
+- Country, OD, and stop figures are **allocations**, not bookkeeping facts —
+  fixed costs are spread by distance/time/place-km shares (rules in the
+  Layer 2 sections above). Sums across a dimension always reproduce the
+  parent total.
+- `per_sold_place_km` divides by demand — a route with no `od_pairs` has no
+  sold place-km, so this normalisation is not meaningful there.
+- In `per_trip_per_stop`, through-riders don't appear at intermediate stops;
+  a stop's revenue reflects only passengers boarding or alighting there.
+
+---
+
 ## API integration
 
 The evaluation pipeline is called by `POST /api/evaluation/calc` in `api/evaluation.py`.
+A complete worked example — real request and full response — is checked in
+under [`../../scripts/data/`](../../scripts/data/):
+`tc_1_evaluation_input.json` (request) and
+`tc_1_evaluation_input_output.json` (response), produced by the manual test
+script [`../../scripts/test_evaluation_calc.py`](../../scripts/test_evaluation_calc.py).
 Serialization and deserialization are handled exclusively by
 `api/helpers/route_serialize.py` (route in/out) and
 `api/helpers/evaluation_serialize.py` (breakdown/views out, `models`/`input` docs).
@@ -187,104 +379,38 @@ POST /api/evaluation/calc
   ├── [4/5] build_breakdown* functions → Breakdown matrices
   │          views.py: aggregation, allocation, normalisation
   │
-  └── [5/5] normalise_all_to_dict + matrix_to_dict → JSON response
-             evaluation_serialize.py: converts Breakdown tree to nested dict
-             all 5 normalisations included per cell
+  └── [5/5] views_to_dict → JSON response
+             evaluation_serialize.py: converts every Breakdown matrix to the
+             views block — per view: description + normalisations (VIEW_META)
+             + data, all 5 normalisations included per cell
 ```
 
 ### Response structure
 
-```json
-{
-  "calc_version": "...",
-  "models": {
-    "route_builder": {"version": "...", "description": "...", "formulas": {"...": "..."}},
-    "energy":         {"version": "...", "description": "...", "formulas": {"...": "..."}},
-    "evaluation":      {"version": "...", "description": "...", "formulas": {"...": "..."}}
-  },
-  "input": {
-    "route": { "...": "the posted route, verbatim" },
-    "parameters": { "...": "every track/stop/composition parameter actually used, same shape as /api/params/*" }
-  },
-  "result": {
-    "route_id": "P1_V1_R1",
-    "views": {
-      "route": {
-        "per_year":                { <Breakdown dict> },
-        "per_operating_day":       { <Breakdown dict> },
-        "per_trip_km":             { <Breakdown dict> },
-        "per_available_place_km":  { <Breakdown dict> },
-        "per_sold_place_km":       { <Breakdown dict> }
-      },
-      "per_trip_pair": {
-        "P1_V1_R1_D0_T1": { "per_year": {...}, ... },
-        "all":             { "per_year": {...}, ... }
-      },
-      "per_trip_pair_per_country": {
-        "P1_V1_R1_D0_T1": {
-          "DE": { "per_year": {...}, ... },
-          "AT": { "per_year": {...}, ... },
-          "all": { "per_year": {...}, ... }
-        },
-        "all": { "DE": {...}, "all": {...} }
-      },
-      "per_trip_pair_per_od": {
-        "P1_V1_R1_D0_T1": {
-          "AT_WIEN_HBF__DE_BERLIN_HBF__Couchette": { "per_year": {...}, ... },
-          "all": { "per_year": {...}, ... }
-        },
-        "all": { "AT_WIEN_HBF__DE_BERLIN_HBF__Couchette": {...}, ... }
-      },
-      "per_trip_per_stop": {
-        "P1_V1_R1_D0_T1": {
-          "AT_WIEN_HBF": { "per_year": {...}, ... },
-          "all": { "per_year": {...}, ... }
-        },
-        "all": { "AT_WIEN_HBF": {...}, ... }
-      }
-    }
-  }
-}
-```
+The full response shape — `calc_version`, `models`, `input`, and `views` at
+the top level — is documented field-by-field in
+[`../../api/README.md`](../../api/README.md#evaluation) (the single
+authoritative response doc; this README deliberately does not duplicate it).
+What `views.py` contributes is the `views` block:
 
-`models` and `input` are built once per request from static version/formula
-registries and the posted route/parameters — see
-`api/helpers/evaluation_serialize.py:models_to_dict()`. Full field-level
-documentation of this response lives in `api/README.md`; this section only
-covers the `result.views` shape produced by `views.py`.
+- Five views: `route`, `per_trip_pair`, `per_trip_pair_per_country`,
+  `per_trip_pair_per_od`, `per_trip_per_stop` — see
+  [Views, explained for display](#views-explained-for-display) below.
+- Each view is `{description, normalisations, data}`. `description` and
+  `normalisations` come from `VIEW_META` in `views.py` — one documentation
+  block per view, not repeated per data point.
+- `views.route.data` holds the normalised breakdown directly (nothing to
+  filter by). Every other view nests `{filter, values}` per key, where
+  `filter` is a human-readable label dict (one entry per filter dimension,
+  e.g. `{"trip_pair": "Berlin Hbf ↔ Wien Hbf", "country": "AT"}`) and
+  `values` holds the normalised breakdown. Each dimension also carries an
+  `"all"` aggregate key.
+- Each normalised breakdown contains the same `Breakdown` dict under all
+  five normalisations (`per_year`, `per_operating_day`, `per_trip_km`,
+  `per_available_place_km`, `per_sold_place_km`).
 
-Each `<Breakdown dict>` has this structure:
-
-```json
-{
-  "cost": {
-    "operator": {
-      "variable": {
-        "driver_eur": 0.0, "crew_eur": 0.0, "coach_maintenance_eur": 0.0,
-        "loco_eur": 0.0, "svc_stockings_eur": 0.0, "var_overhead_eur": 0.0,
-        "total_eur": 0.0
-      },
-      "fixed": {
-        "coach_amortisation_eur": 0.0, "financing_eur": 0.0,
-        "fix_overhead_eur": 0.0, "cleaning_eur": 0.0, "shunting_eur": 0.0,
-        "total_eur": 0.0
-      },
-      "total_eur": 0.0
-    },
-    "infrastructure": {
-      "tac_eur": 0.0, "energy_eur": 0.0,
-      "station_charge_eur": 0.0, "parking_eur": 0.0,
-      "total_eur": 0.0
-    },
-    "total_eur": 0.0
-  },
-  "revenue": { "ticket_revenue_eur": 0.0, "total_eur": 0.0 },
-  "margin":  { "ebit_margin_eur": 0.0, "total_eur": 0.0 },
-  "total_cost_eur": 0.0,
-  "total_revenue_eur": 0.0,
-  "net_eur": 0.0
-}
-```
+Serialization lives in `api/helpers/evaluation_serialize.py`
+(`views_to_dict()`, `breakdown_to_dict()`, `normalise_all_to_dict()`).
 
 ### Demand in the route JSON
 

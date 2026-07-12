@@ -2,6 +2,11 @@
 
 This folder contains everything database-related for the Night Train backend.
 
+**Related documentation:** API endpoints reading these tables —
+[`../api/README.md`](../api/README.md) · loader consuming the seed
+(`DBDataLoader`) — [`../models/README.md`](../models/README.md) · seed
+assertions in the test suite — [`../tests/README.md`](../tests/README.md)
+
 ---
 
 ## Structure

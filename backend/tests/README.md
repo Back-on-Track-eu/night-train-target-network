@@ -4,6 +4,11 @@ Integration test suite for the night-train-target-network backend. All tests
 run against the **live Docker stack** (postgres + openrailrouting + api) —
 there are no mocks.
 
+**Related documentation:** endpoints under test —
+[`../api/README.md`](../api/README.md) · backend dev workflow —
+[`../DEVELOPMENT.md`](../DEVELOPMENT.md) · database seed the suite asserts
+against — [`../db/README.md`](../db/README.md)
+
 ```bash
 # 1. Start the stack
 cd backend/docker && docker-compose up -d
@@ -20,7 +25,7 @@ built on top of it:
 | Prefix | Layer |
 |---|---|
 | `test_01`–`test_04` | Stack build-up: containers → seeded DB → loader → versioning |
-| `test_10` | Read-only params APIs |
+| `test_10`–`test_11` | Read-only params + scenarios APIs |
 | `test_20`–`test_21` | `POST /api/route/plan` (contract, then content logic) |
 | `test_30`–`test_31` | `POST /api/evaluation/calc` (contract, then content logic) |
 | `test_40` | End-to-end pipeline smoke |
@@ -125,6 +130,22 @@ Shared code:
 | `TestCompositions::test_coach_list_matches_count` | Coach list consistency | every composition | count = len(list); unique positions |
 | `TestCompositions::test_operators_referenced_by_compositions` | Operator join integrity | operator_id per composition | resolves; positive staff rates |
 | `TestCompositions::test_indicative_kpis_present` | Indicative KPIs exposed (placeholder model) | compositions with reference | positive KPIs |
+
+## test_11_scenarios_api.py — GET /api/scenarios
+
+| Test | Purpose | Input | Expected |
+|---|---|---|---|
+| `TestScenariosResponseLayout::test_top_level_keys` | Response layout | `GET /api/scenarios` | `total_count` + `current_base`/`current_scenarios`/`historical_scenarios` groups |
+| `TestScenariosResponseLayout::test_group_shape` | Group structure | response groups | each group is `{count, scenarios}`, `count` matches list length |
+| `TestScenariosResponseLayout::test_total_count_matches_group_sum` | Partition completeness | response | `total_count` = sum of group counts — every scenario in exactly one group |
+| `TestScenariosResponseLayout::test_scenarios_have_required_fields` | Field completeness | every scenario row | full column set exposed |
+| `TestScenariosGrouping::test_current_base_group_flags` | Base group semantics | `current_base` rows | both `is_current_base` and `is_current_scenario` true |
+| `TestScenariosGrouping::test_current_scenarios_group_flags` | Current group semantics | `current_scenarios` rows | non-base current lineage heads only |
+| `TestScenariosGrouping::test_historical_scenarios_group_flags` | Historical group semantics | `historical_scenarios` rows | superseded versions only |
+| `TestScenariosGrouping::test_base_scenario_is_in_current_base_group` | Seed cross-check | seeded base scenario | appears in `current_base`, which holds exactly that row |
+| `TestScenariosGrouping::test_whatif_scenario_is_in_current_scenarios_group` | Seed cross-check | seeded what-if head | appears in `current_scenarios` only |
+
+---
 
 ## test_20_route_plan_api.py — POST /api/route/plan contract
 
