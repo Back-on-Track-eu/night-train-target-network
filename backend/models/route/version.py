@@ -19,7 +19,7 @@ from dataclasses import dataclass
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.2"
+ROUTE_BUILDER_VERSION: str = "0.9.3"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -41,6 +41,30 @@ CHANGELOG: dict = {
         "TripPath with CountryLeg-level physics. plan_route() + adjust_route() "
         "factory pattern. ID convention P{id}_V{ver}_R1_D{dir}_T{idx}. "
         "RailRouter returns TripPath directly.",
+    },
+    "0.9.3": {
+        "date": "2026-07-12",
+        "author": "david",
+        "changes": "auto_stop_addition implemented end to end: finds catalog stops "
+        "within AUTO_STOP_BUFFER_M (3km) of the routed path and greedily adds "
+        "any that fit within a AUTO_STOP_MAX_DETOUR_PER (5%) detour-time "
+        "budget, cheapest first — see models/route/timetable.py. Stop gains a "
+        "new auto_added field (BREAKING for consumers of POST /api/route/plan: "
+        "every from_stop/to_stop in the response now carries this field). "
+        "auto_stop_addition now defaults to true (previously false/no-op), so "
+        "existing callers can see additional stops without a request change "
+        "unless they explicitly pass auto_stop_addition=false. "
+        "timetable_mode/schedule_mode/auto_stop_addition switch logic moved "
+        "out of timetable.py's internal dispatch into route_factory.py, at "
+        "whichever level owns the relevant context — auto_stop_addition is "
+        "decided once per TripPair (from outbound) and reused, reversed, for "
+        "return, rather than re-run independently per direction; return still "
+        "gets its own real routing call for its own physics, only the "
+        "decision of which stops to add is shared (accepted trade-off: return "
+        "no longer gets an independent detour-budget check). Candidate "
+        "costing runs concurrently (ThreadPoolExecutor) rather than "
+        "sequentially. Needs frontend coordination — see project notes on "
+        "auditing Bjarne's frontend for POST /api/route/plan consumers.",
     },
 }
 
