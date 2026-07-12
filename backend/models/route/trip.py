@@ -28,6 +28,12 @@ class Stop:
     departure_time_min=None.
 
     dwell_time_min is derived (departure - arrival) — None at terminals.
+
+    auto_added: True if this stop was not in the caller's original stops
+    list and was inserted by auto_stop_addition (see models/route/timetable.py) —
+    lets the frontend render it differently from a stop the caller chose
+    directly. Always False when auto_stop_addition was disabled or found
+    nothing worth adding.
     """
 
     stop_id: str
@@ -38,6 +44,7 @@ class Stop:
     stop_type: StopType
     arrival_time_min: Optional[int]
     departure_time_min: Optional[int]
+    auto_added: bool = False
 
     @property
     def dwell_time_min(self) -> Optional[int]:

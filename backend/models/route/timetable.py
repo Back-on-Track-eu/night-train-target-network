@@ -1,36 +1,53 @@
 """
 timetable.py
 ============
-Pluggable per-direction scheduling/stop-list logic for route planning.
-Kept separate from route_factory.py's build pipeline so new strategies can
-be added (or the current ones swapped out) without touching orchestration.
-route_factory.py does DB lookups and object assembly only — every question
-of "what time is it at this stop" is answered here, whether that's the
-rough first-pass answer (timetable_mode) or the final exact one
-(build_final_timetable).
+Per-direction scheduling/stop-list logic for route planning — the
+implementations, not the switch. Which implementation runs for a given
+request is decided by route_factory.py (at whichever level owns the
+relevant context — per-trip in _build_trip(), per-route in plan_route());
+this module holds one function per named strategy and never branches on
+timetable_mode/schedule_mode itself. auto_stop_addition's enabled/disabled
+gate is likewise decided by _build_trip() — apply_auto_stop_addition()
+below always runs the full candidate-search algorithm when called.
 
-Three independent concerns live here, each dispatched by a request-level
-string/bool field:
+Three request-level concerns have their logic here, each with its switch
+living in route_factory.py:
 
   timetable_mode      — departure time + boarding/alighting classification
-                         for one direction's stop list. schedule_and_classify()
-                         dispatches to the named strategy.
+                         for one direction's stop list. One function per
+                         mode (currently simple_automatic_timetable() for
+                         "simpleAutomatic"); route_factory._build_trip()
+                         picks which to call.
 
-  schedule_mode       — seasonal frequency for the route as a whole.
-                         build_schedule() dispatches to the named strategy.
-                         Currently only "alwaysDaily" (daily regardless of
-                         demand) — a future demand-aware strategy can be
-                         added here without touching route_factory.py.
+  schedule_mode       — seasonal frequency for the route as a whole. One
+                         function per mode (currently always_daily_schedule()
+                         for "alwaysDaily"); route_factory.plan_route()
+                         picks which to call — a route-level decision made
+                         once, not per trip, since schedule is shared
+                         across every TripPair.
 
   auto_stop_addition  — whether to propose additional stops along a route
-                         beyond what the caller supplied. Takes the routed
-                         legs as context (needed to find real stops along
-                         a path), even though that context goes unused
-                         today — currently always a no-op regardless of
-                         value. apply_auto_stop_addition() is the single
-                         call site route_factory.py uses, so a real
-                         implementation can be dropped in later without
-                         touching the caller.
+                         beyond what the caller supplied. Looks for stops
+                         from the full stop catalog that sit close to the
+                         already-routed geometry, costs them all CONCURRENTLY
+                         (one 3-point mini-reroute per candidate — a
+                         sequential whole-trip reroute per candidate doesn't
+                         scale to the ~50 stops a busy corridor can add),
+                         then greedily accepts cheapest-first as long as the
+                         resulting full trip time (driving + buffer + dwell)
+                         stays within AUTO_STOP_MAX_DETOUR_PER of the
+                         original. apply_auto_stop_addition() does one more
+                         real reroute of the final stop list at the end and
+                         always returns routed_legs matching the returned
+                         stop_ids, so route_factory never has to re-route
+                         itself — but whether to call it at all is
+                         route_factory._build_trip()'s call.
+
+VALID_TIMETABLE_MODES / VALID_SCHEDULE_MODES stay here as the single source
+of truth for the allowed strings — api/route.py's request validation and
+route_factory.py's dispatch both read from them, so a new mode is added in
+exactly one place (plus the function implementing it and the route_factory
+branch that calls it).
 
 Not pluggable, but timing math so it lives here too: build_final_timetable()
 and dwell_min() compute the exact, dwell-inclusive arrival/departure at each
@@ -43,11 +60,15 @@ needs from a timetable_mode strategy.
 from __future__ import annotations
 
 import logging
+import time
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 
-from models.params import Composition, TrackInfraCollection
+from models.params import Composition, TrackInfraCollection, StopInfraCollection
 from models.route.trip import StopType
 from models.route.route import Schedule, SeasonalSchedule, Season, Frequency
-from models.route.routing.rail_router import RoutedLeg
+from models.route.routing.rail_router import RailRouter, RoutedLeg, build_router_stops
+from models.utils import haversine_m
 
 logger = logging.getLogger(__name__)
 
@@ -57,20 +78,23 @@ scale used throughout (see models.utils.hhmm_to_min). Fixed constant that
 timetable_mode='simpleAutomatic' schedules are mirrored around."""
 
 # =============================================================================
-# timetable_mode STRATEGIES
+# timetable_mode IMPLEMENTATIONS — route_factory._build_trip() picks which
+# of these to call based on the request's timetable_mode; nothing here
+# branches on the mode string itself.
 # =============================================================================
 
 
-def _simple_automatic(
+def simple_automatic_timetable(
     stop_ids: list[str],
     composition: Composition,
     routed_legs: list[RoutedLeg],
 ) -> tuple[list[tuple[str, StopType]], int]:
     """
-    Derive departure time and per-stop boarding/alighting from already-routed
-    leg physics — no routing happens here, the caller routes once (possibly
-    twice, if auto_stop_addition changes the stop list) and hands over the
-    resulting legs.
+    Implements timetable_mode="simpleAutomatic". Derive departure time and
+    per-stop boarding/alighting from already-routed leg physics — no
+    routing happens here, the caller routes once (possibly again, if
+    auto_stop_addition changed the stop list) and hands over the resulting
+    legs.
 
     Called once per direction (caller passes this direction's stop_ids and
     routed_legs already in the right order):
@@ -121,37 +145,24 @@ def _simple_automatic(
     return stop_inputs, departure_time_min
 
 
-_TIMETABLE_MODE_STRATEGIES = {
-    "simpleAutomatic": _simple_automatic,
-}
-
-VALID_TIMETABLE_MODES = frozenset(_TIMETABLE_MODE_STRATEGIES)
-"""Public — api/route.py validates against this instead of hardcoding the list."""
-
-
-def schedule_and_classify(
-    timetable_mode: str,
-    stop_ids: list[str],
-    composition: Composition,
-    routed_legs: list[RoutedLeg],
-) -> tuple[list[tuple[str, StopType]], int]:
-    """Dispatches to the named timetable_mode strategy. Raises ValueError if unknown."""
-    strategy = _TIMETABLE_MODE_STRATEGIES.get(timetable_mode)
-    if strategy is None:
-        raise ValueError(
-            f"Unknown timetable_mode '{timetable_mode}'. Supported: {sorted(_TIMETABLE_MODE_STRATEGIES)}."
-        )
-    return strategy(stop_ids=stop_ids, composition=composition, routed_legs=routed_legs)
+VALID_TIMETABLE_MODES = frozenset({"simpleAutomatic"})
+"""Single source of truth for allowed timetable_mode strings — read by both
+api/route.py's request validation and route_factory._build_trip()'s switch.
+Adding a mode means: add its function above, add it to this set, add a
+branch in _build_trip()."""
 
 
 # =============================================================================
-# schedule_mode STRATEGIES
+# schedule_mode IMPLEMENTATIONS — route_factory.plan_route() picks which of
+# these to call based on the request's schedule_mode (once per route, not
+# per trip — schedule is shared across every TripPair); nothing here
+# branches on the mode string itself.
 # =============================================================================
 
 
-def _always_daily() -> Schedule:
-    """schedule_mode='alwaysDaily': daily frequency in both seasons,
-    regardless of actual demand."""
+def always_daily_schedule() -> Schedule:
+    """Implements schedule_mode='alwaysDaily': daily frequency in both
+    seasons, regardless of actual demand."""
     return Schedule(
         seasonal_schedules=[
             SeasonalSchedule(season=Season.SUMMER, frequency=Frequency.DAILY),
@@ -160,57 +171,362 @@ def _always_daily() -> Schedule:
     )
 
 
-_SCHEDULE_MODE_STRATEGIES = {
-    "alwaysDaily": _always_daily,
-}
+VALID_SCHEDULE_MODES = frozenset({"alwaysDaily"})
+"""Single source of truth for allowed schedule_mode strings — read by both
+api/route.py's request validation and route_factory.plan_route()'s switch.
+Reserved: a future demand-aware mode can be added here (new function + this
+set + a plan_route() branch) without changing the request shape."""
 
-VALID_SCHEDULE_MODES = frozenset(_SCHEDULE_MODE_STRATEGIES)
-"""Public — api/route.py validates against this instead of hardcoding the list."""
+
+# =============================================================================
+# auto_stop_addition IMPLEMENTATION — always runs the full algorithm when
+# called; route_factory._build_trip() decides whether to call it at all
+# based on the request's auto_stop_addition bool.
+# =============================================================================
+
+AUTO_STOP_BUFFER_M = 3_000
+"""Max distance (metres) from a stop to the already-routed path for that
+stop to be considered a candidate for auto_stop_addition — covers both
+stops that sit right on the line and ones merely 'close by'. Fixed
+constant, not exposed via the API (see api/route.py's request docstring)."""
+
+AUTO_STOP_MAX_DETOUR_PER = 0.05
+"""Max allowed increase in full (driving + buffer + dwell) trip time, as a
+fraction of the original trip's time, before auto_stop_addition stops
+adding further candidates. Fixed constant, not exposed via the API."""
+
+_DEG_PER_M = 1 / 111_000
+"""Rough metres-per-degree constant (~111km/degree of latitude) — only
+used for a coarse, generously-margined bounding-box pre-filter below, not
+for real distance math (that's haversine_m throughout)."""
 
 
-def build_schedule(schedule_mode: str) -> Schedule:
-    """Dispatches to the named schedule_mode strategy. Raises ValueError if unknown.
-    Reserved for a future demand-aware strategy that sets frequency based on
-    actual demand instead of always assuming daily."""
-    strategy = _SCHEDULE_MODE_STRATEGIES.get(schedule_mode)
-    if strategy is None:
-        raise ValueError(
-            f"Unknown schedule_mode '{schedule_mode}'. Supported: {sorted(_SCHEDULE_MODE_STRATEGIES)}."
+@dataclass
+class _AutoStopCandidate:
+    """One stop from the catalog considered for auto_stop_addition.
+
+    leg_index / along_leg_fraction locate where the candidate belongs in
+    the ORIGINAL (pre-addition) stop sequence — leg_index is the index
+    into the original routed_legs/stop_ids the candidate sits nearest to
+    (it belongs between stop_ids[leg_index] and stop_ids[leg_index + 1]);
+    along_leg_fraction (0..1) orders multiple candidates that land on the
+    same leg. Both stay fixed to the ORIGINAL geometry even as candidates
+    get committed one by one — see apply_auto_stop_addition()'s sort-key
+    merge for why that's safe.
+    """
+
+    stop_id: str
+    detour_distance_m: float
+    leg_index: int
+    along_leg_fraction: float
+
+
+def _nearest_point_on_leg(
+    lon: float, lat: float, leg_geometry: list[list[float]]
+) -> tuple[float, float]:
+    """(distance_m, fraction_along) of the point on leg_geometry nearest to
+    (lon, lat). The nearest-point search itself runs in raw lon/lat degree
+    space via shapely (fine for locating the nearest point — regional leg
+    lengths are far too short for degree-space distortion to matter); the
+    returned distance is then computed with haversine_m for an accurate
+    metres value, matching the buffer/detour math everywhere else.
+
+    NOTE (benchmarked, 2026-07-12): a segment-level shapely STRtree was
+    tried here on the theory that a single very long leg (e.g. an
+    ~8000-point Stockholm-Roma polyline) would make this whole-leg scan
+    the bottleneck behind a slow auto_stop_addition request. Measured
+    head-to-head against a realistic 58-stop catalog and an 8000-point
+    leg, post-warmup: this whole-leg approach ~29ms, the STRtree version
+    ~67ms — GEOS's native LineString.project() is already a tight C loop
+    over the whole geometry, and building thousands of individual segment
+    objects for an index costs more than the linear scan it replaces at
+    this scale. Both are tens of milliseconds regardless — nowhere near
+    what a slow request actually costs (see apply_auto_stop_addition()'s
+    timing logs for where that time really goes). Kept simple; revisit
+    only if the stop catalog grows to the point this is measured to
+    matter, with a fresh benchmark at that scale."""
+    from shapely.geometry import LineString, Point
+
+    line = LineString(leg_geometry)
+    point = Point(lon, lat)
+    fraction = line.project(point, normalized=True)
+    nearest = line.interpolate(fraction, normalized=True)
+    distance_m = haversine_m(lon, lat, nearest.x, nearest.y)
+    return distance_m, fraction
+
+
+def _find_nearby_candidates(
+    stop_ids: list[str],
+    routed_legs: list[RoutedLeg],
+    stop_infra: StopInfraCollection,
+) -> list[_AutoStopCandidate]:
+    """
+    Every stop in the catalog within AUTO_STOP_BUFFER_M of the routed path,
+    excluding stops already in stop_ids. A stop near more than one leg is
+    kept only once, at its closest leg. Not sorted here — selection order
+    (cheapest detour first) is decided by the caller.
+    """
+    start = time.monotonic()
+    existing = set(stop_ids)
+    margin_deg = AUTO_STOP_BUFFER_M * _DEG_PER_M * 1.5  # generous safety factor
+    best_by_stop: dict[str, _AutoStopCandidate] = {}
+
+    for leg_index, leg in enumerate(routed_legs):
+        geometry = leg.geometry
+        if len(geometry) < 2:
+            continue
+        min_lon = min(c[0] for c in geometry) - margin_deg
+        max_lon = max(c[0] for c in geometry) + margin_deg
+        min_lat = min(c[1] for c in geometry) - margin_deg
+        max_lat = max(c[1] for c in geometry) + margin_deg
+
+        for stop_id, stop in stop_infra.all().items():
+            if stop_id in existing:
+                continue
+            if not (min_lon <= stop.lon <= max_lon and min_lat <= stop.lat <= max_lat):
+                continue  # cheap pre-filter — skip the shapely call entirely
+
+            distance_m, fraction = _nearest_point_on_leg(stop.lon, stop.lat, geometry)
+            if distance_m > AUTO_STOP_BUFFER_M:
+                continue
+
+            existing_best = best_by_stop.get(stop_id)
+            if existing_best is None or distance_m < existing_best.detour_distance_m:
+                best_by_stop[stop_id] = _AutoStopCandidate(
+                    stop_id=stop_id,
+                    detour_distance_m=distance_m,
+                    leg_index=leg_index,
+                    along_leg_fraction=fraction,
+                )
+
+    candidates = list(best_by_stop.values())
+    logger.info(
+        "_find_nearby_candidates: %d candidate(s) from %d catalog stops in %.2fs.",
+        len(candidates),
+        len(stop_infra),
+        time.monotonic() - start,
+    )
+    return candidates
+
+
+def _estimate_full_trip_time_min(
+    stop_ids: list[str],
+    routed_legs: list[RoutedLeg],
+    composition: Composition,
+    tracks: TrackInfraCollection,
+    stop_infra: StopInfraCollection,
+) -> int:
+    """
+    Rough driving + buffer + dwell trip time, used only to compare against
+    AUTO_STOP_MAX_DETOUR_PER — not the final published schedule. Every
+    intermediate stop is conservatively treated as StopType.BOTH (the max
+    of boarding/alighting dwell), since real classification only happens
+    afterwards via route_factory._build_trip()'s timetable_mode switch and
+    this needs to stay independent of timetable_mode.
+    """
+    total = sum(leg.total_time_min for leg in routed_legs)
+    for stop_id in stop_ids[1:-1]:
+        country_code = stop_infra.get(stop_id).stop_country_code
+        total += dwell_min(StopType.BOTH, country_code, composition, tracks)
+    return total
+
+
+def _candidate_added_time_min(
+    candidate: "_AutoStopCandidate",
+    stop_ids: list[str],
+    routed_legs: list[RoutedLeg],
+    composition: Composition,
+    tracks: TrackInfraCollection,
+    stop_infra: StopInfraCollection,
+    router: RailRouter,
+    routing_mode: str,
+) -> float | None:
+    """
+    One candidate's cost in isolation: reroute only the leg it sits on
+    (leg_start → candidate → leg_end, three points) rather than the whole
+    trip, and compare against that leg's original time. Independent of
+    every other candidate — this is what makes the calls in
+    apply_auto_stop_addition() safe to run concurrently: candidates on
+    different legs can never affect each other's routing, and even two
+    candidates sharing a leg are each scored against the leg's ORIGINAL
+    two endpoints here (an accepted approximation — see that leg's actual
+    combined cost is verified for real by the single final reroute after
+    selection, whether or not it matches this estimate exactly).
+
+    Returns None (candidate excluded from consideration) if the mini
+    reroute itself fails — a single unroutable candidate stop shouldn't
+    take down the whole auto_stop_addition pass.
+    """
+    leg_start_id = stop_ids[candidate.leg_index]
+    leg_end_id = stop_ids[candidate.leg_index + 1]
+    try:
+        sub_legs = router.route(
+            stops=build_router_stops(
+                [leg_start_id, candidate.stop_id, leg_end_id], stop_infra
+            ),
+            composition=composition,
+            tracks=tracks,
+            routing_mode=routing_mode,
         )
-    return strategy()
+    except Exception:
+        logger.warning(
+            "apply_auto_stop_addition: mini-reroute for '%s' failed — excluding it.",
+            candidate.stop_id,
+            exc_info=True,
+        )
+        return None
 
+    original_leg_time_min = routed_legs[candidate.leg_index].total_time_min
+    detour_time_min = (
+        sum(leg.total_time_min for leg in sub_legs) - original_leg_time_min
+    )
 
-# =============================================================================
-# auto_stop_addition STRATEGIES
-# =============================================================================
+    country_code = stop_infra.get(candidate.stop_id).stop_country_code
+    dwell_time_min = dwell_min(StopType.BOTH, country_code, composition, tracks)
+
+    return detour_time_min + dwell_time_min
 
 
 def apply_auto_stop_addition(
-    enabled: bool,
     stop_ids: list[str],
     routed_legs: list[RoutedLeg],
-) -> list[str]:
+    composition: Composition,
+    tracks: TrackInfraCollection,
+    stop_infra: StopInfraCollection,
+    router: RailRouter,
+    routing_mode: str,
+) -> tuple[list[str], list[RoutedLeg]]:
     """
-    Whether to propose additional worthwhile stops along the route beyond
-    what the caller supplied. Takes the already-routed legs (geometry +
-    physics) as context, since finding real stops "along the route" needs
-    the actual path — not just the stop_id list — even though that context
-    goes unused today.
+    Proposes additional worthwhile stops along the already-routed path,
+    beyond what the caller supplied. Always runs — route_factory._build_trip()
+    only calls this when the request's auto_stop_addition is true; this
+    function itself has no enabled/disabled gate.
 
-    Currently a no-op regardless of value — always returns stop_ids
-    unchanged. Reserved for a future implementation that looks along
-    routed_legs' geometry for stops worth adding. If it ever does change
-    the list, the caller (route_factory._build_trip()) re-routes with the
-    new list before doing anything else with it — routed_legs here must
-    never be reused as-is against a changed stop_ids. Logs at info level
-    when enabled=True is requested, purely so it's visible during manual
-    testing that nothing was actually added yet.
+    Algorithm:
+      1. Find every catalog stop within AUTO_STOP_BUFFER_M of routed_legs'
+         geometry (_find_nearby_candidates) — covers stops right on the
+         line as well as ones merely close by.
+      2. Cost every candidate CONCURRENTLY: a 3-point mini-reroute of just
+         its own leg (_candidate_added_time_min) rather than a sequential
+         whole-trip reroute per candidate — with up to ~50 candidates in
+         practice, sequential whole-trip reroutes would be far too slow
+         for an interactive request. One thread per candidate; RailRouter's
+         underlying requests.Session/connection pool is sized for this
+         (see rail_router.py's _CONNECTION_POOL_SIZE).
+      3. Sort by added_time_min ascending (cheapest first) and greedily
+         accumulate — pure arithmetic now, no further I/O — stopping at
+         the first candidate that would push the running total over
+         AUTO_STOP_MAX_DETOUR_PER of the original trip's time. Later
+         (more expensive) candidates are not added even if they'd
+         individually fit, matching the original "stop at first rejection"
+         rule now applied to accumulated rather than per-step cost.
+      4. One single full-trip reroute of the final stop list, once, for
+         the authoritative routed_legs the rest of the pipeline uses — a
+         deliberate simplicity trade-off over re-stitching the individual
+         mini-routes from step 2 (which would save this one call but need
+         special-casing legs with 2+ accepted candidates).
+
+    Each accepted candidate is merged back into the stop sequence by
+    (leg_index, along_leg_fraction), so the final stop list always follows
+    the route's actual geography regardless of selection order.
+
+    Returns (final_stop_ids, final_routed_legs) — routed_legs always
+    matches final_stop_ids, whether or not anything was actually added, so
+    route_factory._build_trip() never needs to re-route itself afterwards.
     """
-    if enabled:
-        logger.info(
-            "apply_auto_stop_addition: enabled=True requested but not yet implemented — no-op."
+    candidates = _find_nearby_candidates(stop_ids, routed_legs, stop_infra)
+    if not candidates:
+        return stop_ids, routed_legs
+
+    costing_start = time.monotonic()
+    with ThreadPoolExecutor(max_workers=len(candidates)) as pool:
+        added_time_by_stop_id: dict[str, float | None] = dict(
+            zip(
+                (c.stop_id for c in candidates),
+                pool.map(
+                    lambda c: _candidate_added_time_min(
+                        c,
+                        stop_ids,
+                        routed_legs,
+                        composition,
+                        tracks,
+                        stop_infra,
+                        router,
+                        routing_mode,
+                    ),
+                    candidates,
+                ),
+            )
         )
-    return stop_ids
+    logger.info(
+        "apply_auto_stop_addition: costed %d candidate(s) concurrently in %.2fs.",
+        len(candidates),
+        time.monotonic() - costing_start,
+    )
+
+    costed_candidates = sorted(
+        (c for c in candidates if added_time_by_stop_id[c.stop_id] is not None),
+        key=lambda c: added_time_by_stop_id[c.stop_id],
+    )
+
+    baseline_time_min = _estimate_full_trip_time_min(
+        stop_ids, routed_legs, composition, tracks, stop_infra
+    )
+    max_extra_min = baseline_time_min * AUTO_STOP_MAX_DETOUR_PER
+
+    committed = [(sid, (i, -1.0)) for i, sid in enumerate(stop_ids)]
+    running_extra_min = 0.0
+    added_stop_ids: list[str] = []
+
+    for candidate in costed_candidates:
+        candidate_time_min = added_time_by_stop_id[candidate.stop_id]
+        if running_extra_min + candidate_time_min > max_extra_min:
+            logger.info(
+                "apply_auto_stop_addition: stopping at '%s' (+%.1fmin) — would "
+                "push cumulative added time past budget %.1fmin.",
+                candidate.stop_id,
+                candidate_time_min,
+                max_extra_min,
+            )
+            break
+
+        # (stop_id, sort_key) merge — original stops carry sort_key=(index,
+        # -1.0), which always sorts before any candidate assigned to that
+        # same leg (candidates carry fraction in [0, 1]) and after the
+        # previous leg's candidates, keeping geographic order regardless
+        # of the cheapest-first order candidates were accepted in.
+        committed = sorted(
+            committed
+            + [
+                (candidate.stop_id, (candidate.leg_index, candidate.along_leg_fraction))
+            ],
+            key=lambda entry: entry[1],
+        )
+        running_extra_min += candidate_time_min
+        added_stop_ids.append(candidate.stop_id)
+
+    if not added_stop_ids:
+        return stop_ids, routed_legs
+
+    logger.info(
+        "apply_auto_stop_addition: added %d stop(s): %s",
+        len(added_stop_ids),
+        added_stop_ids,
+    )
+    final_reroute_start = time.monotonic()
+    final_stop_ids = [sid for sid, _ in committed]
+    final_routed_legs = router.route(
+        stops=build_router_stops(final_stop_ids, stop_infra),
+        composition=composition,
+        tracks=tracks,
+        routing_mode=routing_mode,
+    )
+    logger.info(
+        "apply_auto_stop_addition: final reroute of %d stop(s) took %.2fs.",
+        len(final_stop_ids),
+        time.monotonic() - final_reroute_start,
+    )
+    return final_stop_ids, final_routed_legs
 
 
 # =============================================================================

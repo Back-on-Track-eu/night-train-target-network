@@ -87,6 +87,7 @@ def _stop_to_dict(stop: Stop) -> dict:
         "stop_type": stop.stop_type.value,
         "arrival_time_min": stop.arrival_time_min,
         "departure_time_min": stop.departure_time_min,
+        "auto_added": stop.auto_added,
     }
 
 
@@ -298,6 +299,7 @@ def _stop_from_dict(d: dict) -> Stop:
         stop_type=StopType(d["stop_type"]),
         arrival_time_min=d.get("arrival_time_min"),
         departure_time_min=d.get("departure_time_min"),
+        auto_added=d.get("auto_added", False),  # older payloads predate this field
     )
 
 
