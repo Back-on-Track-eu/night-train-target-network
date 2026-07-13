@@ -73,7 +73,9 @@ Shared code:
 | `test_stop_infrastructure_global_default_exists` | Global stop default present | pinned version, `country_code IS NULL` | ≥ 1 row |
 | `test_country_geometries_seeded` | PostGIS borders for every stop country | `country_geom IS NULL` per stop country | no missing geometries |
 | `test_exactly_one_current_base_scenario` | Base scenario uniqueness | `scenario.scenarios` | exactly 1 `is_current_base` |
-| `test_whatif_scenario_pins_track_infra_v1` | What-if lineage contract | base + what-if rows | what-if pins track infra v1, copies every other pointer from base |
+| `test_historical_scenario_pins_version_1` | Historical lineage owns its own snapshot | 2026-baseline vs base rows | all four table versions = 1, differ from base |
+| `test_hsr_scenario_pins_version_3` | HSR lineage owns its own snapshot | HSR-allowed vs base rows | all four table versions = 3, differ from base |
+| `test_stop_infrastructure_values_unchanged_by_hsr_scenario` | Stop charges independent of HSR policy | `stop_infrastructures` at base vs HSR version | identical values despite different version numbers |
 
 ## test_03_loader.py — DBDataLoader correctness
 
@@ -96,7 +98,7 @@ Shared code:
 | Test | Purpose | Input | Expected |
 |---|---|---|---|
 | `TestVersionIsolation::test_loader_uses_base_pinned_version` | Default resolution → base snapshot | `build_all_tracks()` | DE tac = 5.40 (v2) |
-| `TestVersionIsolation::test_loader_pinned_to_whatif_returns_old_snapshot` | Explicit pin → exact-match old snapshot | `build_all_tracks(whatif_id)` | DE tac = 3.10 (v1) |
+| `TestVersionIsolation::test_loader_pinned_to_historical_returns_old_snapshot` | Explicit pin → exact-match old snapshot | `build_all_tracks(historical_id)` | DE tac = 3.10 (v1) |
 | `TestVersionIsolation::test_db_has_both_de_versions` | Fixture sanity | DE rows | versions [1, 2] exist |
 | `TestVersionIsolation::test_full_table_snapshot_invariant` | Snapshot completeness contract | country count per version | identical for all versions |
 | `TestVersionIsolation::test_param_version_number_matches_db` | Provenance points at loaded row | DE tac param entry | version = scenario's pinned version |
@@ -123,7 +125,7 @@ Shared code:
 | `TestTrackInfrastructures::test_every_field_is_field_object` | All 10 fields field-objects (guards against a field dropping out) | every country × 10 fields | dict with value + is_default |
 | `TestTrackInfrastructures::test_default_row_covers_all_fields` | EU-average default complete | `default_track_infra` | value for all 10 fields |
 | `TestTrackInfrastructures::test_is_default_flags_via_api` | Provenance via API | SE / DE tac | True / False |
-| `TestTrackInfrastructures::test_scenario_id_pins_parameter_version` | `?scenario_id=` pinning | base vs what-if request | DE tac 5.40 vs 3.10 |
+| `TestTrackInfrastructures::test_scenario_id_pins_parameter_version` | `?scenario_id=` pinning | base vs 2026-baseline request | DE tac 5.40 vs 3.10 |
 | `TestCompositions::test_response_layout` | Top-level shape | GET compositions | descriptions/sources/count/compositions/operators |
 | `TestCompositions::test_composition_sections_present` | Restructured grouped sections | every composition | routing/staff/energy/capacity/equipment/coaches/fixed_costs/variable_km/source_ids |
 | `TestCompositions::test_capacity_non_empty_with_places_and_density` | Capacity content | every composition | ≥ 1 class; places > 0; density > 0 |
@@ -143,7 +145,8 @@ Shared code:
 | `TestScenariosGrouping::test_current_scenarios_group_flags` | Current group semantics | `current_scenarios` rows | non-base current lineage heads only |
 | `TestScenariosGrouping::test_historical_scenarios_group_flags` | Historical group semantics | `historical_scenarios` rows | superseded versions only |
 | `TestScenariosGrouping::test_base_scenario_is_in_current_base_group` | Seed cross-check | seeded base scenario | appears in `current_base`, which holds exactly that row |
-| `TestScenariosGrouping::test_whatif_scenario_is_in_current_scenarios_group` | Seed cross-check | seeded what-if head | appears in `current_scenarios` only |
+| `TestScenariosGrouping::test_hsr_scenario_is_in_current_scenarios_group` | Seed cross-check | seeded HSR-allowed lineage head | appears in `current_scenarios` only |
+| `TestScenariosGrouping::test_historical_scenario_is_in_historical_scenarios_group` | Seed cross-check | seeded 2026 Base Line scenario | appears in `historical_scenarios` only |
 
 ---
 
@@ -183,7 +186,7 @@ all modes defaulted.
 | `TestProposalAndScenario::test_omitted_proposal_id_gets_draft_placeholder` | Draft placeholder rule | no proposal_id | route_id `P{>1e9}_V1_R1` |
 | `TestProposalAndScenario::test_explicit_proposal_id_used_in_route_id` | Explicit id rule | proposal_id=42, version=7 | route_id `P42_V7_R1` |
 | `TestProposalAndScenario::test_omitted_scenario_id_resolves_to_base` | Scenario defaulting | no scenario_id | embedded id = base scenario id |
-| `TestProposalAndScenario::test_explicit_scenario_id_embedded` | Explicit scenario pin | scenario_id = what-if | embedded verbatim |
+| `TestProposalAndScenario::test_explicit_scenario_id_embedded` | Explicit scenario pin | scenario_id = HSR-allowed | embedded verbatim |
 | `TestValidation::*` (7 tests) | Request validation | single stop / missing fields / old stop-object format / wrong types / unknown composition / non-JSON | 400 (validation) or 422 (unknown composition — domain error) |
 
 ## test_21_route_plan_content.py — Route content logic
@@ -258,7 +261,7 @@ Standard input: `eval_standard` (3-stop route, directional demand 40 Couchette
 | `TestMatrixConsistency::test_traversed_countries_appear_in_matrix` | Matrix coverage | traversed countries | all appear as keys |
 | `TestMatrixConsistency::test_od_matrix_carries_directional_keys_with_revenue` | OD keys deterministic | directional demand | both direction keys present, revenue > 0 |
 | `TestMatrixConsistency::test_stop_matrix_terminal_has_station_charge` | Stop matrix content | Berlin cell | station charge > 0 |
-| `TestScenarioOverride::test_whatif_override_lowers_tac` | Scenario override swaps ONLY the re-pinned table | same route, base vs what-if | TAC strictly lower; station charges unchanged |
+| `TestScenarioOverride::test_historical_override_lowers_tac` | Scenario override swaps the re-pinned table | same route, base vs 2026-baseline | TAC strictly lower; station charges unchanged |
 
 ## test_40_pipeline.py — End-to-end smoke
 
@@ -373,9 +376,11 @@ fixed value, so this file passes the same way whether or not SMTP_* is set.
 3. **A stop pair inside a single defaulted country (e.g. two SE stops)** —
    would let TAC-under-default be recomputed for a route that runs entirely on
    default-resolved rates.
-4. **A what-if scenario re-pinning `stop_infrastructures`** — currently only
-   track infra has a second snapshot; a stop-side one would cover the other
-   half of the override matrix.
+4. **A scenario re-pinning `stop_infrastructures` to genuinely different
+   values** — all three currently-seeded snapshots (2026-baseline / base /
+   2032-baseline-hsr-allowed) carry byte-identical stop charges, only the
+   version number differs; a scenario with an actual stop-side value change
+   would cover the other half of the override matrix.
 5. **A stop within `AUTO_STOP_BUFFER_M` (3km, see `models/route/timetable.py`)
    of an existing corridor** — e.g. a small real station a km or two off the
    Berlin-Dresden or Dresden-Wien leg. All 58 currently-seeded stops are

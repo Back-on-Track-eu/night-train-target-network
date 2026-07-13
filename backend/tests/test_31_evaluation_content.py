@@ -451,26 +451,29 @@ class TestMatrixConsistency:
 
 class TestScenarioOverride:
 
-    def test_whatif_override_lowers_tac(
-        self, api_base, route_berlin_wien, whatif_scenario
+    def test_historical_override_lowers_tac(
+        self, api_base, route_berlin_wien, historical_scenario
     ):
-        """Costing the SAME base-planned route under the what-if scenario
-        (track infra v1: DE tac 3.10 instead of 5.40) yields strictly lower
-        TAC — the override actually swaps the parameter version, and only
-        for the table the scenario re-pins."""
+        """Costing the SAME base-planned route under the 2026 Base Line
+        scenario (track infra v1: DE tac 3.10 instead of 5.40) yields
+        strictly lower TAC — the override actually swaps the parameter
+        version."""
         base = evaluate(api_base, inject_demand(route_berlin_wien, []))
-        whatif = evaluate(
+        historical = evaluate(
             api_base,
             inject_demand(route_berlin_wien, []),
-            scenario_id=whatif_scenario["scenario_id"],
+            scenario_id=historical_scenario["scenario_id"],
         )
 
         tac_base = route_bd(base)["cost"]["infrastructure"]["tac_eur"]
-        tac_whatif = route_bd(whatif)["cost"]["infrastructure"]["tac_eur"]
-        assert tac_whatif < tac_base
+        tac_historical = route_bd(historical)["cost"]["infrastructure"]["tac_eur"]
+        assert tac_historical < tac_base
 
-        # Stop infrastructure is pinned identically in both scenarios —
-        # station charges must be unchanged by the override.
+        # Stop infrastructure carries byte-identical values across every
+        # scenario (only the version number differs) — station charges
+        # must be unchanged by the override.
         sc_base = route_bd(base)["cost"]["infrastructure"]["station_charge_eur"]
-        sc_whatif = route_bd(whatif)["cost"]["infrastructure"]["station_charge_eur"]
-        assert sc_whatif == pytest.approx(sc_base, rel=REL_TOL)
+        sc_historical = route_bd(historical)["cost"]["infrastructure"][
+            "station_charge_eur"
+        ]
+        assert sc_historical == pytest.approx(sc_base, rel=REL_TOL)

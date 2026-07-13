@@ -133,18 +133,40 @@ def base_scenario(db_cur):
 
 
 @pytest.fixture(scope="session")
-def whatif_scenario(db_cur):
-    """The seeded what-if scenario (scenario_key='whatif-de-track-infra') —
-    pins track_infrastructures to version 1 (DE's original lower rates),
-    everything else copied from base. Enables scenario override tests."""
+def historical_scenario(db_cur):
+    """The seeded, deprecated historical scenario (scenario_key=
+    '2026-baseline') — pins every table to version 1 (DE's original
+    lower track_tac_eur_train_km among them). is_current_scenario is
+    FALSE for this row (it's not the head of an active lineage), so it's
+    looked up by scenario_key alone. Enables scenario override tests
+    that need a known-different snapshot from the live base."""
+    db_cur.execute(
+        "SELECT * FROM scenario.scenarios WHERE scenario_key = '2026-baseline'"
+    )
+    row = db_cur.fetchone()
+    assert row is not None, (
+        "Historical 2026 scenario missing — see db/dev/seed.py: "
+        "HISTORICAL_SCENARIO_2026."
+    )
+    return row
+
+
+@pytest.fixture(scope="session")
+def hsr_scenario(db_cur):
+    """The seeded 'HSR allowed' scenario (scenario_key=
+    '2032-baseline-hsr-allowed') — a second current lineage head
+    (is_current_scenario=TRUE, is_current_base=FALSE), identical to the
+    live base except track_hsr_allowed=True everywhere. Enables tests of
+    the non-base 'current_scenarios' API group and of pinning to a
+    live-but-non-default scenario_id."""
     db_cur.execute(
         "SELECT * FROM scenario.scenarios "
-        "WHERE scenario_key = 'whatif-de-track-infra' AND is_current_scenario = TRUE"
+        "WHERE scenario_key = '2032-baseline-hsr-allowed' AND is_current_scenario = TRUE"
     )
     row = db_cur.fetchone()
     assert (
         row is not None
-    ), "What-if scenario missing — see db/dev/seed.py: WHATIF_SCENARIO."
+    ), "HSR-allowed scenario missing — see db/dev/seed.py: HSR_SCENARIO."
     return row
 
 

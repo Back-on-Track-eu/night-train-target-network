@@ -11,7 +11,8 @@ Covers:
   - Referential/structural integrity spot checks (compositions have coaches,
     coach classes have places, exactly one row per country at the pinned
     track infra version, defaults rows exist)
-  - Both seeded scenarios (base + what-if) are present and consistent
+  - All three seeded scenarios (2026 Base Line / 2032 Base Line / 2032 Base
+    Line + HSR allowed) are present and consistent
 """
 
 import pytest
@@ -36,11 +37,11 @@ EXPECTED_ROW_COUNTS = {
     "input_params.composition_types": 10,  # STD-3.1 … STD-13.1
     "input_params.composition_type_coaches": 1,
     "input_params.composition_references": 1,
-    "input_params.track_infrastructure_defaults": 1,
-    "input_params.track_infrastructures": 56,  # 2 full-table snapshots × 28 countries
-    "input_params.stop_infrastructure_defaults": 1,
-    "input_params.stop_infrastructures": 8,
-    "scenario.scenarios": 2,  # base + whatif-de-track-infra
+    "input_params.track_infrastructure_defaults": 3,  # 1 per scenario
+    "input_params.track_infrastructures": 84,  # 3 full-table snapshots × 28 countries
+    "input_params.stop_infrastructure_defaults": 3,  # 1 per scenario
+    "input_params.stop_infrastructures": 174,  # 3 full-table snapshots × 58 stops
+    "scenario.scenarios": 3,  # 2026-baseline + base + 2032-baseline-hsr-allowed
     "proposals.proposals": 1,  # one real saved example proposal — see seed_example_proposal()
     "proposals.routes": 1,
     "proposals.trips": 2,  # both directions of the one seeded proposal
@@ -76,12 +77,10 @@ REQUIRED_COLUMNS = {
 
 def test_schemas_exist(db_cur):
     """All four project schemas exist in the database."""
-    db_cur.execute(
-        """
+    db_cur.execute("""
         SELECT schema_name FROM information_schema.schemata
         WHERE schema_name IN ('admin', 'input_params', 'scenario', 'proposals')
-        """
-    )
+        """)
     found = {row["schema_name"] for row in db_cur.fetchall()}
     assert found == EXPECTED_SCHEMAS, f"Missing schemas: {EXPECTED_SCHEMAS - found}"
 
@@ -113,16 +112,14 @@ def test_required_columns_not_null(db_cur, table, columns):
 def test_composition_types_have_coaches(db_cur):
     """Every composition type has at least one coach assigned — a composition
     with zero coaches would have zero capacity and zero weight."""
-    db_cur.execute(
-        """
+    db_cur.execute("""
         SELECT ct.composition_type_id
         FROM input_params.composition_types ct
         LEFT JOIN input_params.composition_type_coaches cc
             ON cc.composition_type_row_id = ct.composition_type_row_id
         GROUP BY ct.composition_type_id
         HAVING COUNT(cc.position) = 0
-        """
-    )
+        """)
     orphans = [row["composition_type_id"] for row in db_cur.fetchall()]
     assert orphans == [], f"Composition types with no coaches: {orphans}"
 
@@ -193,14 +190,12 @@ def test_country_geometries_seeded(db_cur):
     """The PostGIS border geometry is populated for every routing-relevant
     country a seeded stop sits in — CountryIndex is built from these at API
     startup, so a missing polygon breaks country attribution silently."""
-    db_cur.execute(
-        """
+    db_cur.execute("""
         SELECT DISTINCT s.country_code
         FROM input_params.stop_infrastructures s
         JOIN input_params.countries c ON c.country_code = s.country_code
         WHERE c.country_geom IS NULL
-        """
-    )
+        """)
     missing = [row["country_code"] for row in db_cur.fetchall()]
     assert missing == [], f"Stop countries without a border geometry: {missing}"
 
@@ -219,17 +214,52 @@ def test_exactly_one_current_base_scenario(db_cur):
     assert db_cur.fetchone()["n"] == 1
 
 
-def test_whatif_scenario_pins_track_infra_v1(whatif_scenario, base_scenario):
-    """The what-if scenario pins track_infrastructures to version 1 while
-    copying every other version pointer from base — the lineage contract
-    scenario override tests (test_04/test_31) rely on."""
-    assert whatif_scenario["track_infrastructures_version"] == 1
-    assert base_scenario["track_infrastructures_version"] != 1
+def test_historical_scenario_pins_version_1(historical_scenario, base_scenario):
+    """The 2026 Base Line scenario pins all four infrastructure tables to
+    version 1 — its own full snapshot, not a partial diff against base."""
     for col in (
+        "track_infrastructures_version",
         "track_infrastructure_defaults_version",
         "stop_infrastructures_version",
         "stop_infrastructure_defaults_version",
     ):
-        assert (
-            whatif_scenario[col] == base_scenario[col]
-        ), f"what-if {col} should copy base"
+        assert historical_scenario[col] == 1
+        assert historical_scenario[col] != base_scenario[col]
+
+
+def test_hsr_scenario_pins_version_3(hsr_scenario, base_scenario):
+    """The 2032 Base Line + HSR allowed scenario pins all four
+    infrastructure tables to version 3 — independent from base's
+    version 2, per-table, even though only track_hsr_allowed actually
+    differs in the underlying data."""
+    for col in (
+        "track_infrastructures_version",
+        "track_infrastructure_defaults_version",
+        "stop_infrastructures_version",
+        "stop_infrastructure_defaults_version",
+    ):
+        assert hsr_scenario[col] == 3
+        assert hsr_scenario[col] != base_scenario[col]
+
+
+def test_stop_infrastructure_values_unchanged_by_hsr_scenario(
+    db_cur, hsr_scenario, base_scenario
+):
+    """Stop charges don't depend on the HSR policy — the hsr_scenario's
+    stop_infrastructures snapshot (version 3) carries the same values as
+    base's (version 2), even though the version numbers differ."""
+    db_cur.execute(
+        "SELECT stop_id, stop_charge_eur FROM input_params.stop_infrastructures "
+        "WHERE stop_infra_version = %s ORDER BY stop_id",
+        (base_scenario["stop_infrastructures_version"],),
+    )
+    base_rows = db_cur.fetchall()
+    db_cur.execute(
+        "SELECT stop_id, stop_charge_eur FROM input_params.stop_infrastructures "
+        "WHERE stop_infra_version = %s ORDER BY stop_id",
+        (hsr_scenario["stop_infrastructures_version"],),
+    )
+    hsr_rows = db_cur.fetchall()
+    base_values = [dict(r) for r in base_rows]
+    hsr_values = [dict(r) for r in hsr_rows]
+    assert base_values == hsr_values

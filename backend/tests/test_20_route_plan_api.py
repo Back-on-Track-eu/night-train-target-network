@@ -344,12 +344,13 @@ class TestProposalAndScenario:
         of the live is_current_base scenario — never None."""
         assert plan_response["route"]["scenario_id"] == base_scenario["scenario_id"]
 
-    def test_explicit_scenario_id_embedded(self, api_base, whatif_scenario):
-        """An explicit scenario_id (the seeded what-if) is embedded verbatim."""
-        body = {**BASE_REQUEST, "scenario_id": whatif_scenario["scenario_id"]}
+    def test_explicit_scenario_id_embedded(self, api_base, hsr_scenario):
+        """An explicit scenario_id (the seeded HSR-allowed scenario) is
+        embedded verbatim."""
+        body = {**BASE_REQUEST, "scenario_id": hsr_scenario["scenario_id"]}
         resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=90)
         assert resp.status_code == 200
-        assert resp.json()["route"]["scenario_id"] == whatif_scenario["scenario_id"]
+        assert resp.json()["route"]["scenario_id"] == hsr_scenario["scenario_id"]
 
 
 # =============================================================================
