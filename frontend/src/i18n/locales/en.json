@@ -2,6 +2,8 @@
   "proposal": {
     "heading": "So, what's your \ndream night train route?",
     "evaluate": "Evaluate",
+    "edit": "Edit",
+    "cancelEdit": "Cancel Edit",
     "mapPlaceholder": "Map",
     "trainCardPlaceholder": "Train info",
     "searchPlaceholder": "Search stops…",
@@ -9,7 +11,66 @@
     "noStopsFound": "No stops found",
     "minStopsTooltip": "Two stops per route minimum.",
     "loading": "Fetching data…",
-    "tripOutbound": "Outbound",
-    "tripReturn": "Return"
+    "evaluation": {
+      "views": {
+        "route": "Full Route",
+        "per_trip_pair": "By trip pair",
+        "per_trip_pair_per_country": "By country",
+        "per_trip_pair_per_od": "By route section",
+        "per_trip_per_stop": "By stop"
+      },
+      "norms": {
+        "per_year": "Per Year",
+        "per_operating_day": "Per Operating Day",
+        "per_trip_km": "Per Trip-Km",
+        "per_available_place_km": "Per Available Place-Km",
+        "per_sold_place_km": "Per Sold Place-km"
+      },
+      "kpi": {
+        "revenue": "Revenue",
+        "cost": "Cost",
+        "net": "Net"
+      },
+      "groups": {
+        "cost": "Cost",
+        "operator": "Operator",
+        "variable": "Variable",
+        "fixed": "Fixed",
+        "infrastructure": "Infrastructure",
+        "revenue": "Revenue",
+        "margin": "Margin (EBIT)"
+      },
+      "fields": {
+        "driver": "Driver",
+        "crew": "Crew",
+        "coach_maintenance": "Coach maintenance",
+        "loco": "Locomotive",
+        "svc_stockings": "Service stocking",
+        "var_overhead": "Variable overhead",
+        "coach_amortisation": "Coach amortisation",
+        "financing": "Financing",
+        "fix_overhead": "Fixed overhead",
+        "cleaning": "Cleaning",
+        "shunting": "Shunting",
+        "tac": "Track access charges",
+        "energy": "Energy",
+        "station_charge": "Station charges",
+        "parking": "Parking",
+        "ticket_revenue": "Ticket revenue",
+        "ebit_margin": "EBIT margin"
+      },
+      "filters": {
+        "default": "All",
+        "trip_pair": "All trip pairs",
+        "country": "All countries",
+        "od_pair": "All route sections",
+        "trip": "All trips",
+        "stop": "All stops"
+      },
+      "calculating": "Calculating…",
+      "noData": "No data for this selection.",
+      "showRaw": "Raw JSON",
+      "calcVersion": "calc version"
+    }
   }
 }

@@ -28,7 +28,7 @@ from flask import Blueprint, jsonify, request
 
 from api.helpers.dependencies import get_loader, get_country_index
 from api.helpers.route_serialize import route_to_dict
-from models.route.route_factory import plan_route, TripPairInput
+from models.route.route_factory import plan_route, distribute_demand, TripPairInput
 from models.route.timetable import VALID_TIMETABLE_MODES, VALID_SCHEDULE_MODES
 from models.route.routing.rail_router import RailRouter
 from models.route.version import ROUTE_BUILDER_VERSION
@@ -37,6 +37,22 @@ logger = logging.getLogger(__name__)
 bp = Blueprint("route", __name__)
 
 _VALID_ROUTING_MODES = {"simpleRouting", "fullRouting"}
+
+# --- Stopgap demand parameters -----------------------------------------------
+# plan_route() leaves od_pairs empty by design; distribute_demand() is a
+# placeholder proxy demand model, and these inputs are placeholders too — a
+# single scalar utilization and flat per-km fares — just so evaluation returns
+# non-zero revenue until a real demand model (with its own parameters, likely
+# per scenario) lands.
+# TODO: replace with demand-model-driven utilization + fares.
+_STOPGAP_UTILIZATION_PER = 0.7
+_STOPGAP_FARE_PER_KM_BY_CLASS = {
+    "Seat": 0.10,
+    "Couchette": 0.13,
+    "Sleeper": 0.18,
+    "Capsule": 0.12,
+    "Catering": 0.0,
+}
 
 _DRAFT_PROPOSAL_ID_MIN = 1_000_000_000
 _DRAFT_PROPOSAL_ID_MAX = 2_147_483_647  # postgres int4 max — proposals.proposals.proposal_id is SERIAL (int4)
@@ -213,6 +229,15 @@ def plan():
             loader=loader,
             router=router,
             scenario_id=scenario_id,
+        )
+
+        # Stopgap: populate demand so the route carries od_pairs and evaluation
+        # returns non-zero revenue. Mutates the route in place. See the TODO on
+        # the _STOPGAP_* constants above.
+        distribute_demand(
+            route,
+            utilization_per=_STOPGAP_UTILIZATION_PER,
+            fare_per_km_by_class=_STOPGAP_FARE_PER_KM_BY_CLASS,
         )
 
     except ValueError as e:

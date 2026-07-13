@@ -12,19 +12,31 @@ import {
   mdiChevronRight,
 } from '@mdi/js'
 
-const props = defineProps<{ compositions: Composition[] }>()
+const props = defineProps<{ compositions: Composition[]; selectedId?: string | null }>()
 const emit = defineEmits<{ select: [compId: string] }>()
 
-const currentIndex = ref(0)
 const direction = ref<'forward' | 'backward'>('forward')
 
 const count = computed(() => props.compositions.length)
 
+// The selection lives in the parent (selectedId); the card only reflects it.
+// That keeps the shown card correct when the parent locks the list down to a
+// single composition (display) and reopens it to the full set (edit) — the
+// index can never drift out of range.
+const currentIndex = computed(() => {
+  if (props.selectedId) {
+    const i = props.compositions.findIndex((c) => c.comp_id === props.selectedId)
+    if (i >= 0) return i
+  }
+  return 0
+})
+
 function navigate(dir: 'prev' | 'next') {
   direction.value = dir === 'next' ? 'forward' : 'backward'
   const n = count.value
-  currentIndex.value =
-    dir === 'next' ? (currentIndex.value + 1) % n : (currentIndex.value - 1 + n) % n
+  if (n === 0) return
+  const next = dir === 'next' ? (currentIndex.value + 1) % n : (currentIndex.value - 1 + n) % n
+  emit('select', props.compositions[next].comp_id)
 }
 
 const current = computed(() => props.compositions[currentIndex.value])
@@ -49,7 +61,18 @@ const capacityStats = computed(() => {
 
 const transitionName = computed(() => `slide-${direction.value}`)
 
-watch(current, (c) => emit('select', c.comp_id), { immediate: true })
+// Keep the parent holding a valid selection: emit a default whenever the list
+// is populated but selectedId is missing or no longer present in it (initial
+// load, or the list changing underneath the current selection).
+watch(
+  () => [props.compositions, props.selectedId] as const,
+  () => {
+    if (props.compositions.length === 0) return
+    const valid = props.selectedId && props.compositions.some((c) => c.comp_id === props.selectedId)
+    if (!valid) emit('select', props.compositions[0].comp_id)
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
@@ -86,7 +109,7 @@ watch(current, (c) => emit('select', c.comp_id), { immediate: true })
 
       <!-- Animated: capacity + physical specs -->
       <Transition :name="transitionName" mode="out-in">
-        <div :key="currentIndex" class="flex flex-col items-center gap-4 mt-4">
+        <div :key="current?.comp_id" class="flex flex-col items-center gap-4 mt-4">
           <!-- Capacity -->
           <div v-if="capacityStats.length > 0" class="flex justify-center gap-8">
             <div
