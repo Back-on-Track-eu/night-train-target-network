@@ -120,7 +120,7 @@ Four core schemas, all created and seeded by `seed.py`: `admin`, `input_params`,
 
 | Table | Description |
 |---|---|
-| `scenarios` | Container pinning one version of each of the four versioned `input_params` infrastructure tables (`track_infrastructures`, `track_infrastructure_defaults`, `stop_infrastructures`, `stop_infrastructure_defaults`). Every read of infrastructure data goes through a scenario — there's no other notion of "current" for those four tables. Exactly one row has `is_current_base = TRUE` (the live default used when an API call omits `scenario_id`); exactly one row per `scenario_key` has `is_current_scenario = TRUE` (the head of that what-if lineage). `scenario_id` is a surrogate key that changes on every edit; `scenario_key` (e.g. `"base"`, `"whatif-de-track-infra"`) is the stable identifier for one lineage. Compositions, coach types, operators, and composition references are catalogs, not scenario-versioned — see `input_params` above. |
+| `scenarios` | Container pinning one version of each of the four versioned `input_params` infrastructure tables (`track_infrastructures`, `track_infrastructure_defaults`, `stop_infrastructures`, `stop_infrastructure_defaults`). Every read of infrastructure data goes through a scenario — there's no other notion of "current" for those four tables. Exactly one row has `is_current_base = TRUE` (the live default used when an API call omits `scenario_id`); exactly one row per `scenario_key` has `is_current_scenario = TRUE` (the head of that what-if lineage). `scenario_id` is a surrogate key that changes on every edit; `scenario_key` (e.g. `"base"`, `"2032-baseline-hsr-allowed"`) is the stable identifier for one lineage. Compositions, coach types, operators, and composition references are catalogs, not scenario-versioned — see `input_params` above. |
 
 A version bump on any of the four pinned tables is a **full-table snapshot**,
 never a per-row diff: editing one stop's charge duplicates every other row of
@@ -130,11 +130,24 @@ never reinterpreted differently depending on which scenario is asking. This
 is what makes two scenarios branching off the same table in incompatible
 directions safe, and what makes re-evaluating a scenario next year return
 the same numbers even if the base has since moved on — nothing on a
-`scenarios` row is resolved at read time. `seed.py` seeds two scenarios: the
-`"base"` lineage pinning the freshly-seeded version of every table, and a
-`"whatif-de-track-infra"` lineage forked from it to exercise scenario-scoped
-reads in tests. See `create_scenario_schema.sql` for the full column-level
-rationale.
+`scenarios` row is resolved at read time. `seed.py` seeds three scenarios,
+each pinning its own version number (in lockstep, across all four tables —
+every scenario owns a complete, independent snapshot rather than sharing
+rows with another scenario):
+
+- `"2026-baseline"` (version 1) — **2026 Base Line**, a deprecated historical
+  reference (`is_current_base = FALSE`, `is_current_scenario = FALSE`). Only
+  `track_infrastructures`/`track_infrastructure_defaults` carry genuinely
+  different figures (DE's pre-correction rates, a slightly lower EU-average
+  default); the stop-side tables are duplicated with identical values.
+- `"base"` (version 2) — **2032 Base Line**, the live default
+  (`is_current_base = TRUE`). `track_hsr_allowed = FALSE` everywhere.
+- `"2032-baseline-hsr-allowed"` (version 3) — **2032 Base Line + Night
+  Trains on HSR allowed**, a second current lineage head
+  (`is_current_scenario = TRUE`, `is_current_base = FALSE`). Identical to
+  `"base"` in every field except `track_hsr_allowed = TRUE` everywhere.
+
+See `create_scenario_schema.sql` for the full column-level rationale.
 
 ### `proposals`
 

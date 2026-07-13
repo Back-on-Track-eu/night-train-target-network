@@ -525,11 +525,11 @@ response is split into three groups instead, each with its own `count`:
   },
   "current_scenarios": {
     "count": 3,
-    "scenarios": [ { "scenario_id": 7, "scenario_key": "whatif-de-track-infra", "scenario_name": "What-if: DE power tax -10%", "...": "..." } ]
+    "scenarios": [ { "scenario_id": 7, "scenario_key": "2032-baseline-hsr-allowed", "scenario_name": "2032 Base Line + Night Trains on HSR allowed", "...": "..." } ]
   },
   "historical_scenarios": {
     "count": 8,
-    "scenarios": [ { "scenario_id": 4, "scenario_key": "whatif-de-track-infra", "is_current_scenario": false, "...": "..." } ]
+    "scenarios": [ { "scenario_id": 4, "scenario_key": "2026-baseline", "is_current_scenario": false, "...": "..." } ]
   }
 }
 ```
