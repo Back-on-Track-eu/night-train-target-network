@@ -753,13 +753,16 @@ const selectPt = {
     >
       <div v-if="activeFactor" class="flex flex-col gap-6">
         <h3 class="text-xl font-semibold text-primary-50">{{ activeFactor.title }}</h3>
-        <p class="text-sm text-primary-50/70" style="text-align: justify">
+        <!-- width:0 + min-width:100% so the paragraph fills (and wraps to) the
+             width set by the formula box / table, without its own single-line
+             max-content widening the popover. -->
+        <p class="w-0 min-w-full text-justify text-sm text-primary-50/70">
           {{ activeFactor.description }}
         </p>
         <!-- Rendered LaTeX; formula is backend-controlled, so v-html is safe. -->
         <!-- eslint-disable vue/no-v-html -->
         <div
-          class="cost-info-formula max-w-full self-center overflow-x-auto rounded-lg bg-black/20 px-5 py-3 text-primary-50"
+          class="cost-info-formula max-w-full self-center overflow-x-auto rounded-lg bg-black/20 px-8 py-5 text-primary-50"
           v-html="activeFactor.latexHtml"
         />
         <!-- eslint-enable vue/no-v-html -->
