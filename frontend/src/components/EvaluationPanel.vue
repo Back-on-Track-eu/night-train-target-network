@@ -868,10 +868,10 @@ const selectPt = {
             <table class="w-full text-left text-sm">
               <thead>
                 <tr class="text-xs text-primary-50/40">
-                  <th class="pr-3 pb-1 font-medium">
+                  <th class="pr-6 pb-1 font-medium">
                     {{ t('proposal.evaluation.info.rateCol') }}
                   </th>
-                  <th class="pr-3 pb-1 text-right font-medium">
+                  <th class="pr-6 pb-1 text-right font-medium">
                     {{ t('proposal.evaluation.info.valueCol') }}
                   </th>
                   <th class="pb-1 font-medium">
@@ -885,7 +885,7 @@ const selectPt = {
                   :key="idx"
                   class="border-t border-primary-50/10 align-top"
                 >
-                  <td class="py-1.5 pr-3">
+                  <td class="py-1.5 pr-6">
                     <div class="text-primary-50">
                       {{ t(`proposal.evaluation.rates.${rate.id}`) }}
                       <span v-if="rate.scope" class="text-primary-50/50">· {{ rate.scope }}</span>
@@ -897,7 +897,7 @@ const selectPt = {
                       {{ rate.description }}
                     </div>
                   </td>
-                  <td class="py-1.5 pr-3 text-right whitespace-nowrap text-primary-50 tabular-nums">
+                  <td class="py-1.5 pr-6 text-right whitespace-nowrap text-primary-50 tabular-nums">
                     {{ formatRateValue(rate) }}
                     <span v-if="rate.unit" class="text-primary-50/50">{{ rate.unit }}</span>
                   </td>
@@ -965,7 +965,8 @@ const selectPt = {
                   : t('proposal.evaluation.feedback.submit')
               "
               :disabled="!canSubmitFeedback"
-              class="self-start"
+              :unstyled="true"
+              class="cursor-pointer self-start rounded-lg bg-primary-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-600 active:bg-primary-700 disabled:cursor-not-allowed disabled:bg-primary-500/40 disabled:text-white/60 disabled:shadow-none"
               @click="onSubmitFeedback"
             />
             <span v-if="feedbackStatus === 'success'" class="text-sm text-green-400" role="status">
