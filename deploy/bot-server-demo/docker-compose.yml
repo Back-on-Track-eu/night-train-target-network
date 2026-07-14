@@ -80,6 +80,9 @@ services:
       - POSTGRES_DB=${POSTGRES_DB}
       # Reuse the prod stack's routing engine (see header).
       - OPENRAILROUTING_URL=http://targetnetwork-routing:8989
+      # Baked into the image at build time; seed.py reads it to populate
+      # input_params.countries.country_geom (CountryIndex source).
+      - COUNTRIES_GEOJSON_PATH=/app/models/route/routing/countries.geojson
     ports:
       - "127.0.0.1:5056:5000"   # debug access from the box; public = Caddy
     mem_limit: 1g
