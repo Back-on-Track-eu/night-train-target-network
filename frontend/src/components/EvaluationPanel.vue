@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
@@ -474,6 +474,9 @@ function openInfo(nodeKey: string, event: Event) {
 
 function scheduleClose() {
   cancelClose()
+  // Sticky when the form has content: don't yank a half-typed draft away on
+  // unhover. PrimeVue's outside-click dismiss still closes the popover.
+  if (isFeedbackDirty.value) return
   closeTimer = setTimeout(() => infoPopover.value?.hide(), 150)
 }
 
@@ -511,15 +514,41 @@ function formatRateValue(row: RateRow): string {
   return fmtRate.format(value)
 }
 
-// --- Cost-factor feedback form (bottom of the detail popover) ---------------
+// --- Cost-factor feedback form (right column of the detail popover) ----------
 // Posts to the existing POST /api/feedback via the anonymous email path,
 // tagged to the factor the popover is showing (its dotted Breakdown path).
 // These are protocol values sent verbatim in the body, not i18n.
 const FEEDBACK_CATEGORY = 'Evaluation — calculation method'
 
 type FeedbackStatus = 'idle' | 'submitting' | 'success' | 'error'
-const feedbackMessage = ref('')
-const feedbackEmail = ref('')
+
+// Per-factor drafts so a half-typed message/email survives closing and
+// reopening the popover; keyed by factor node key, cleared on a 201.
+interface FeedbackDraft {
+  message: string
+  email: string
+}
+const feedbackDrafts = reactive<Record<string, FeedbackDraft>>({})
+function draftFor(key: string): FeedbackDraft {
+  if (!feedbackDrafts[key]) feedbackDrafts[key] = { message: '', email: '' }
+  return feedbackDrafts[key]
+}
+
+// Bind v-model to the active factor's draft so the fields always show (and
+// mutate) the right factor's stored content.
+const feedbackMessage = computed<string>({
+  get: () => (activeKey.value ? draftFor(activeKey.value).message : ''),
+  set: (v) => {
+    if (activeKey.value) draftFor(activeKey.value).message = v
+  },
+})
+const feedbackEmail = computed<string>({
+  get: () => (activeKey.value ? draftFor(activeKey.value).email : ''),
+  set: (v) => {
+    if (activeKey.value) draftFor(activeKey.value).email = v
+  },
+})
+
 const feedbackStatus = ref<FeedbackStatus>('idle')
 const feedbackErrorMsg = ref('')
 
@@ -532,11 +561,15 @@ const canSubmitFeedback = computed(
   () => emailValid.value && messageValid.value && feedbackStatus.value !== 'submitting',
 )
 
-// Switching the popover to another cost factor clears the message and any
-// prior success/error, so nothing bleeds across factors; the email is kept as
-// it belongs to the same person.
+// "Dirty" = either field has content. Drives the sticky-popover behavior:
+// while dirty the popover stays open on unhover and closes only on outside-click.
+const isFeedbackDirty = computed(
+  () => feedbackMessage.value.length > 0 || feedbackEmail.value.length > 0,
+)
+
+// Switching to another factor only resets the transient status/error — each
+// factor keeps its own draft, which is restored when its popover reopens.
 watch(activeKey, () => {
-  feedbackMessage.value = ''
   feedbackStatus.value = 'idle'
   feedbackErrorMsg.value = ''
 })
@@ -557,8 +590,10 @@ async function onSubmitFeedback() {
       message: feedbackMessage.value.trim(),
     })
     feedbackStatus.value = 'success'
-    feedbackMessage.value = ''
-    feedbackEmail.value = ''
+    // Clear this factor's draft on a successful submit.
+    const draft = draftFor(key)
+    draft.message = ''
+    draft.email = ''
   } catch (err) {
     feedbackStatus.value = 'error'
     feedbackErrorMsg.value =
@@ -812,86 +847,91 @@ const selectPt = {
       @show="onInfoShow"
       @hide="onInfoHide"
     >
-      <div v-if="activeFactor" class="flex flex-col gap-6">
-        <h3 class="text-xl font-semibold text-primary-50">{{ activeFactor.title }}</h3>
-        <!-- width:0 + min-width:100% so the paragraph fills (and wraps to) the
-             width set by the formula box / table, without its own single-line
-             max-content widening the popover. -->
-        <p class="w-0 min-w-full text-justify text-sm text-primary-50/70">
-          {{ activeFactor.description }}
-        </p>
-        <!-- Rendered LaTeX; formula is backend-controlled, so v-html is safe. -->
-        <!-- eslint-disable vue/no-v-html -->
-        <div
-          class="cost-info-formula max-w-full self-center overflow-x-auto rounded-lg bg-black/20 px-8 py-5 text-primary-50"
-          v-html="activeFactor.latexHtml"
-        />
-        <!-- eslint-enable vue/no-v-html -->
-        <template v-if="activeFactor.rates.length">
-          <table class="w-full text-left text-sm">
-            <thead>
-              <tr class="text-xs text-primary-50/40">
-                <th class="pr-3 pb-1 font-medium">
-                  {{ t('proposal.evaluation.info.rateCol') }}
-                </th>
-                <th class="pr-3 pb-1 text-right font-medium">
-                  {{ t('proposal.evaluation.info.valueCol') }}
-                </th>
-                <th class="pb-1 font-medium">
-                  {{ t('proposal.evaluation.info.sourceCol') }}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="(rate, idx) in activeFactor.rates"
-                :key="idx"
-                class="border-t border-primary-50/10 align-top"
-              >
-                <td class="py-1.5 pr-3">
-                  <div class="text-primary-50">
-                    {{ t(`proposal.evaluation.rates.${rate.id}`) }}
-                    <span v-if="rate.scope" class="text-primary-50/50">· {{ rate.scope }}</span>
-                  </div>
-                  <!-- width:0 + min-width:100% so the title drives the column
+      <div v-if="activeFactor" class="flex items-stretch gap-6">
+        <!-- Left column: title · explanation · formula · rates -->
+        <div class="flex min-w-0 max-w-2xl flex-col gap-6">
+          <h3 class="text-xl font-semibold text-primary-50">{{ activeFactor.title }}</h3>
+          <!-- width:0 + min-width:100% so the paragraph fills (and wraps to) the
+               width set by the formula box / table, without its own single-line
+               max-content widening the column. -->
+          <p class="w-0 min-w-full text-justify text-sm text-primary-50/70">
+            {{ activeFactor.description }}
+          </p>
+          <!-- Rendered LaTeX; formula is backend-controlled, so v-html is safe. -->
+          <!-- eslint-disable vue/no-v-html -->
+          <div
+            class="cost-info-formula max-w-full self-center overflow-x-auto rounded-lg bg-black/20 px-8 py-5 text-primary-50"
+            v-html="activeFactor.latexHtml"
+          />
+          <!-- eslint-enable vue/no-v-html -->
+          <template v-if="activeFactor.rates.length">
+            <table class="w-full text-left text-sm">
+              <thead>
+                <tr class="text-xs text-primary-50/40">
+                  <th class="pr-3 pb-1 font-medium">
+                    {{ t('proposal.evaluation.info.rateCol') }}
+                  </th>
+                  <th class="pr-3 pb-1 text-right font-medium">
+                    {{ t('proposal.evaluation.info.valueCol') }}
+                  </th>
+                  <th class="pb-1 font-medium">
+                    {{ t('proposal.evaluation.info.sourceCol') }}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="(rate, idx) in activeFactor.rates"
+                  :key="idx"
+                  class="border-t border-primary-50/10 align-top"
+                >
+                  <td class="py-1.5 pr-3">
+                    <div class="text-primary-50">
+                      {{ t(`proposal.evaluation.rates.${rate.id}`) }}
+                      <span v-if="rate.scope" class="text-primary-50/50">· {{ rate.scope }}</span>
+                    </div>
+                    <!-- width:0 + min-width:100% so the title drives the column
                        width and the description wraps beneath it rather than
                        widening the row (same pattern as the main description). -->
-                  <div v-if="rate.description" class="w-0 min-w-full text-xs text-primary-50/40">
-                    {{ rate.description }}
-                  </div>
-                </td>
-                <td class="py-1.5 pr-3 text-right whitespace-nowrap text-primary-50 tabular-nums">
-                  {{ formatRateValue(rate) }}
-                  <span v-if="rate.unit" class="text-primary-50/50">{{ rate.unit }}</span>
-                </td>
-                <td class="py-1.5 text-xs text-primary-50/60">
-                  <span
-                    v-if="rate.isDefault"
-                    class="mr-1 mb-1 inline-block rounded-full bg-primary-50/10 px-1.5 py-0.5 text-primary-50/50"
-                  >
-                    {{ t('proposal.evaluation.info.defaultBadge') }}
-                  </span>
-                  <span v-for="(src, i) in rate.sources" :key="i" class="block">
-                    <a
-                      v-if="src.source_url"
-                      :href="src.source_url"
-                      target="_blank"
-                      rel="noopener"
-                      class="underline hover:text-primary-50"
+                    <div v-if="rate.description" class="w-0 min-w-full text-xs text-primary-50/40">
+                      {{ rate.description }}
+                    </div>
+                  </td>
+                  <td class="py-1.5 pr-3 text-right whitespace-nowrap text-primary-50 tabular-nums">
+                    {{ formatRateValue(rate) }}
+                    <span v-if="rate.unit" class="text-primary-50/50">{{ rate.unit }}</span>
+                  </td>
+                  <td class="py-1.5 text-xs text-primary-50/60">
+                    <span
+                      v-if="rate.isDefault"
+                      class="mr-1 mb-1 inline-block rounded-full bg-primary-50/10 px-1.5 py-0.5 text-primary-50/50"
                     >
-                      {{ src.source_description || src.source_url }}
-                    </a>
-                    <span v-else>{{ src.source_description }}</span>
-                  </span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </template>
+                      {{ t('proposal.evaluation.info.defaultBadge') }}
+                    </span>
+                    <span v-for="(src, i) in rate.sources" :key="i" class="block">
+                      <a
+                        v-if="src.source_url"
+                        :href="src.source_url"
+                        target="_blank"
+                        rel="noopener"
+                        class="underline hover:text-primary-50"
+                      >
+                        {{ src.source_description || src.source_url }}
+                      </a>
+                      <span v-else>{{ src.source_description }}</span>
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </template>
+        </div>
 
-        <!-- Feedback: report a mistake / suggestion about this cost factor -->
-        <div class="flex flex-col gap-3">
-          <hr class="border-t border-primary-50/10" />
+        <!-- Vertical separator between the content and the feedback form -->
+        <div class="w-px shrink-0 self-stretch bg-primary-50/10" aria-hidden="true" />
+
+        <!-- Right column: report a mistake / suggestion about this cost factor -->
+        <div class="flex w-80 shrink-0 flex-col gap-3">
           <h4 class="text-base font-semibold text-primary-50">
             {{ t('proposal.evaluation.feedback.title') }}
           </h4>
