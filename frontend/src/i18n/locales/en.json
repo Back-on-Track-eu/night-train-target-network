@@ -72,8 +72,7 @@
       "showRaw": "Raw JSON",
       "calcVersion": "calc version",
       "info": {
-        "tooltip": "Click to see what this cost factor means and how it's calculated.",
-        "ratesHeader": "Per-unit rates",
+        "iconLabel": "Show cost factor details",
         "rateCol": "Rate",
         "valueCol": "Value",
         "sourceCol": "Source",

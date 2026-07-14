@@ -446,10 +446,38 @@ function hasInfo(nodeKey: string): boolean {
 
 const infoPopover = ref<InstanceType<typeof Popover> | null>(null)
 const activeKey = ref<string | null>(null)
+// Key whose popover is currently shown — lets us skip a redundant show()
+// (and the flicker it causes) when the cursor re-enters the same icon.
+const openKey = ref<string | null>(null)
+let closeTimer: ReturnType<typeof setTimeout> | null = null
 
+function cancelClose() {
+  if (closeTimer !== null) {
+    clearTimeout(closeTimer)
+    closeTimer = null
+  }
+}
+
+// Hover-intent: open on icon hover, keep open while the cursor is over the
+// popover, and close only after a short delay once it has left both — so
+// moving from the icon into the popover doesn't flicker-close it.
 function openInfo(nodeKey: string, event: Event) {
+  cancelClose()
+  if (openKey.value === nodeKey) return
   activeKey.value = nodeKey
   infoPopover.value?.show(event)
+}
+
+function scheduleClose() {
+  cancelClose()
+  closeTimer = setTimeout(() => infoPopover.value?.hide(), 150)
+}
+
+function onInfoShow() {
+  openKey.value = activeKey.value
+}
+function onInfoHide() {
+  openKey.value = null
 }
 
 const activeFactor = computed(() => {
@@ -460,7 +488,12 @@ const activeFactor = computed(() => {
   return {
     title: t(`proposal.evaluation.fields.${key}`),
     description: formula.description,
-    latexHtml: katex.renderToString(formula.latex, { throwOnError: false, displayMode: true }),
+    // Inline layout + \displaystyle so the box hugs the formula's natural
+    // width (displayMode would stretch it to full width and centre it).
+    latexHtml: katex.renderToString(`\\displaystyle ${formula.latex}`, {
+      throwOnError: false,
+      displayMode: false,
+    }),
     rates: resolveFactorRates(formulaKey(key), props.result.input, props.stops),
   }
 })
@@ -646,10 +679,11 @@ const selectPt = {
               {{ row.label }}
               <button
                 v-if="hasInfo(row.key)"
-                v-tooltip.top="t('proposal.evaluation.info.tooltip')"
                 type="button"
                 class="flex cursor-pointer text-primary-50/40 transition hover:text-primary-50"
-                :aria-label="t('proposal.evaluation.info.tooltip')"
+                :aria-label="t('proposal.evaluation.info.iconLabel')"
+                @mouseenter="openInfo(row.key, $event)"
+                @mouseleave="scheduleClose"
                 @click="openInfo(row.key, $event)"
               >
                 <AppIcon :path="mdiInformationOutline" :size="14" />
@@ -707,24 +741,29 @@ const selectPt = {
     <Popover
       ref="infoPopover"
       :pt="{
-        root: { class: 'cost-info-overlay !rounded-xl !shadow-2xl' },
-        content: { class: '!p-4 !bg-transparent' },
+        root: {
+          class: 'cost-info-overlay !rounded-xl !shadow-2xl',
+          onMouseenter: cancelClose,
+          onMouseleave: scheduleClose,
+        },
+        content: { class: '!p-6 !bg-transparent' },
       }"
+      @show="onInfoShow"
+      @hide="onInfoHide"
     >
-      <div v-if="activeFactor" class="flex max-w-md flex-col gap-3">
-        <h3 class="font-semibold text-primary-50">{{ activeFactor.title }}</h3>
-        <p class="text-sm text-primary-50/70">{{ activeFactor.description }}</p>
+      <div v-if="activeFactor" class="flex flex-col gap-6">
+        <h3 class="text-xl font-semibold text-primary-50">{{ activeFactor.title }}</h3>
+        <p class="text-sm text-primary-50/70" style="text-align: justify">
+          {{ activeFactor.description }}
+        </p>
         <!-- Rendered LaTeX; formula is backend-controlled, so v-html is safe. -->
         <!-- eslint-disable vue/no-v-html -->
         <div
-          class="cost-info-formula max-w-[90%] overflow-x-auto rounded-lg bg-black/20 px-3 py-2 text-primary-50"
+          class="cost-info-formula max-w-full self-center overflow-x-auto rounded-lg bg-black/20 px-5 py-3 text-primary-50"
           v-html="activeFactor.latexHtml"
         />
         <!-- eslint-enable vue/no-v-html -->
         <template v-if="activeFactor.rates.length">
-          <div class="text-xs font-semibold tracking-wide text-primary-50/50 uppercase">
-            {{ t('proposal.evaluation.info.ratesHeader') }}
-          </div>
           <table class="w-full text-left text-sm">
             <thead>
               <tr class="text-xs text-primary-50/40">
@@ -791,7 +830,8 @@ const selectPt = {
 .cost-info-overlay {
   background: #23263d !important;
   border: 1px solid color-mix(in srgb, var(--p-primary-50) 20%, transparent) !important;
-  max-width: min(32rem, calc(100vw - 2rem));
+  /* Grow to fit a wide formula; only the viewport bounds the width. */
+  max-width: calc(100vw - 2rem);
 }
 /* KaTeX inherits the box's text colour; keep the formula on one baseline. */
 .cost-info-formula .katex {
