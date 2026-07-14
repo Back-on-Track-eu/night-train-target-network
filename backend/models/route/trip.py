@@ -70,15 +70,16 @@ class Segment:
     to_stop: Stop
     geometry: list[list[float]]  # [[lon, lat], ...]
     distance_m: int
-    driving_time_min: int
-    buffer_time_min: int
+    driving_time_min: int  # raw router time (constant-cruise-speed passage)
+    dynamics_time_min: int  # per-stop accel/brake loss — see routing/dynamics.py
+    buffer_time_min: int  # schedule buffer: country quota on driving + on dynamics
     energy_kwh: float
     country_distance_shares: dict[str, float]
     country_time_shares: dict[str, float]
 
     @property
     def total_time_min(self) -> int:
-        return self.driving_time_min + self.buffer_time_min
+        return self.driving_time_min + self.dynamics_time_min + self.buffer_time_min
 
 
 @dataclass
@@ -114,12 +115,19 @@ class Trip:
         return sum(s.driving_time_min for s in self.segments)
 
     @property
+    def dynamics_time_min(self) -> int:
+        return sum(s.dynamics_time_min for s in self.segments)
+
+    @property
     def buffer_time_min(self) -> int:
         return sum(s.buffer_time_min for s in self.segments)
 
     @property
     def total_driving_and_buffer_min(self) -> int:
-        return self.driving_time_min + self.buffer_time_min
+        """driving + dynamics + buffer — every in-motion and padding minute,
+        i.e. everything except dwell (kept under its historical name; the
+        dynamics component was split out of driving in route builder 0.9.8)."""
+        return self.driving_time_min + self.dynamics_time_min + self.buffer_time_min
 
     @property
     def total_dwell_min(self) -> int:

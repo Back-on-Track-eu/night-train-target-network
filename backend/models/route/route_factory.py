@@ -8,14 +8,20 @@ Pipeline for plan_route() per TripPair (_build_trip_pair()), per direction (_bui
 1. Load composition + ParamVersions from DB.
 2. Load tracks + stops + ParamVersions from DB.
 3. RailRouter.route() — routes the stop list as given.
-4. auto_stop_addition switch (this module, _build_trip()) — if the request's
-   auto_stop_addition is true, calls apply_auto_stop_addition() (models/
-   route/timetable.py) to look for catalog stops close to the routed path
-   and greedily add any that fit within the detour time budget, re-routing
-   internally as needed; if false, this step is skipped entirely. Either
-   way the routed_legs used from here on match the (possibly extended)
-   stop list, so no separate re-route call is ever needed here. This full
-   search-and-cost pass only ever runs for the OUTBOUND direction —
+4. auto_stop_addition switch (this module, _build_trip()) — three modes
+   (VALID_AUTO_STOP_ADDITION_MODES in models/route/timetable.py):
+     "off"     — step skipped entirely, caller's stop list unmodified.
+     "add"     — apply_auto_stop_addition() looks for catalog stops close
+                 to the routed path and greedily adds any that fit within
+                 the detour time budget, re-routing internally as needed.
+     "suggest" — routes like "off" (nothing added, nothing rerouted), but
+                 suggest_auto_stops() runs the same candidate search +
+                 costing and its AutoStopSuggestions are bubbled up
+                 through plan_route()'s return value for the API to
+                 attach to the response.
+   Either way the routed_legs used from here on match the (possibly
+   extended) stop list, so no separate re-route call is ever needed here.
+   The full search-and-cost pass only ever runs for the OUTBOUND direction —
    _build_trip_pair() reuses its result (reversed) for return via
    _build_trip()'s known_auto_added_stop_ids, rather than re-running the
    whole candidate search for what is, physically, the same corridor
@@ -45,34 +51,25 @@ route_factory.py — at whichever level owns the relevant context: per-trip
 in _build_trip() for timetable_mode, per-TripPair in _build_trip_pair()
 for auto_stop_addition (decided once from outbound, reused for return —
 see above), per-route in plan_route() for schedule_mode (shared across
-every TripPair, decided once). models/route/timetable.py holds one
-function per named behaviour and never branches on the mode/flag itself —
-see that module's docstring.
+every TripPair, decided once). routing_mode's switch lives with its
+implementation, in rail_router.py's route(). models/route/timetable.py
+holds one function per named behaviour and never branches on the
+mode/flag itself — see that module's docstring.
 
-Returns (Route, RouteProvenance) — provenance is not stored on Trip/Route,
-caller persists it alongside route_id when writing a proposal result.
+plan_route() returns (Route, RouteProvenance, list[AutoStopSuggestion]) —
+provenance is not stored on Trip/Route, caller persists it alongside
+route_id when writing a proposal result; suggestions is non-empty only for
+auto_stop_addition="suggest" and is the API's to serialize, never stored
+on the Route (nothing was added to any trip).
 
 ID convention
 -------------
   route_id : P{proposal_id}_V{version}_R1
   trip_id  : P{proposal_id}_V{version}_R1_D{direction}_T{pair_index}
 
-  TODO (David, 2026-07-06, future — not scheduled): considering swapping
-  the D/T order to trip_id = P{proposal_id}_V{version}_R1_T{pair_index}_D{direction},
-  and introducing a distinct trip-PAIR id (as opposed to the current
-  per-trip id) of the form P{proposal_id}_V{version}_R1_T{pair_index} — i.e.
-  drop the trailing _D{direction} entirely for anything that means "the
-  pair", not "one direction of the pair". Motivation: api/helpers/
-  evaluation_serialize.py's "views" section currently keys per_trip_pair /
-  per_trip_pair_per_country / per_trip_pair_per_od by the outbound trip's
-  full trip_id (e.g. "P123_V1_R1_D0_T1") standing in for the whole pair,
-  which is a borrowed/overloaded key, not a real pair identifier. This is
-  a real ID-format change, not a rename: trip_id is threaded through
-  Segment/StopCost/SegmentCost/ODPair.trip_id, the route_to_dict()/
-  route_from_dict() JSON schema, and every test fixture that hardcodes IDs
-  — needs its own scoped pass across route_factory.py (_route_id/_trip_id
-  below), models/route/route.py, api/helpers/route_serialize.py, and
-  tests/ once actually scheduled. Not started here.
+  TODO: a distinct trip-pair id (and D/T reorder) is under consideration —
+  full motivation and blast radius in OPEN_TODOS["trip_pair_id"],
+  models/route/version.py. Not started here.
 
   proposal_id/version are always concrete ints by the time they reach here
   — for a brand new proposal (no DB row yet), api/route.py assigns a random
@@ -107,9 +104,12 @@ from models.route.timetable import (
     simple_automatic_timetable,
     always_daily_schedule,
     apply_auto_stop_addition,
+    suggest_auto_stops,
     build_final_timetable,
+    AutoStopSuggestion,
     VALID_TIMETABLE_MODES,
     VALID_SCHEDULE_MODES,
+    VALID_AUTO_STOP_ADDITION_MODES,
 )
 from models.energy.calc_energy_consumption import calc_energy_consumption
 from models.route.version import ROUTE_BUILDER_VERSION
@@ -154,18 +154,15 @@ class TripPairInput:
     composition_id: str
     timetable_mode: str
     routing_mode: str
-    auto_stop_addition: bool
+    auto_stop_addition: str  # "off" | "add" | "suggest" — see timetable.py
 
 
 # =============================================================================
 # ID GENERATION
 # =============================================================================
 
-# TODO (future, not scheduled): D{direction}_T{pair_index} may become
-# T{pair_index}_D{direction} with a separate trip-pair id
-# (P{proposal_id}_V{version}_R1_T{pair_index}, no _D suffix) introduced
-# alongside it — see the module docstring's "ID convention" section above
-# for the motivation and full blast radius before starting this.
+# TODO: possible D/T reorder + distinct trip-pair id — see
+# OPEN_TODOS["trip_pair_id"] in models/route/version.py before starting.
 
 
 def _route_id(proposal_id: int, version: int) -> str:
@@ -245,6 +242,7 @@ def _build_trip_stops_and_legs(
             geometry=routed_legs[i].geometry,
             distance_m=routed_legs[i].distance_m,
             driving_time_min=routed_legs[i].driving_time_min,
+            dynamics_time_min=routed_legs[i].dynamics_time_min,
             buffer_time_min=routed_legs[i].buffer_time_min,
             energy_kwh=routed_legs[i].energy_kwh,
             country_distance_shares=routed_legs[i].country_distance_shares,
@@ -290,7 +288,7 @@ def _shuntings(trips: list[Trip]) -> list[Shunting]:
     """One Shunting per trip terminal — no deduplication. Each coupling/
     uncoupling is a separate event even if trips share a stop.
     trip_id identifies which trip each shunting belongs to.
-    TODO (Y/X-shape): shared terminals may need fewer events."""
+    TODO: see OPEN_TODOS["shunting_y_shape"] in models/route/version.py."""
     result = []
     for trip in trips:
         if trip.stops:
@@ -364,21 +362,24 @@ def _build_trip(
     router: RailRouter,
     timetable_mode: str,
     routing_mode: str,
-    auto_stop_addition: bool,
+    auto_stop_addition: str,
     known_auto_added_stop_ids: frozenset[str] | None = None,
-) -> Trip:
+) -> tuple[Trip, list[AutoStopSuggestion]]:
     """
-    known_auto_added_stop_ids: when given, skips running
-    apply_auto_stop_addition() entirely regardless of auto_stop_addition —
-    stop_ids is trusted as already final (auto_stop_addition's addition
-    decision was already made elsewhere, e.g. by the outbound direction of
-    this same TripPair; see _build_trip_pair()), and this set is used
-    as-is to mark which of those stops get Stop.auto_added=True. The
-    routing call below still always happens for whichever direction this
-    is — reusing a decision about WHICH stops to add never skips getting
-    THIS direction's own real physics for its own (possibly asymmetric)
-    path, only the expensive candidate-search-and-cost pass that decided
-    the stop list in the first place.
+    Returns (Trip, suggestions). suggestions is non-empty only for
+    auto_stop_addition="suggest" on the direction that actually runs the
+    candidate search (see known_auto_added_stop_ids below) — [] otherwise.
+
+    known_auto_added_stop_ids: when given, skips the candidate search
+    entirely regardless of auto_stop_addition — stop_ids is trusted as
+    already final (the search decision was already made elsewhere, e.g. by
+    the outbound direction of this same TripPair; see _build_trip_pair()),
+    and this set is used as-is to mark which of those stops get
+    Stop.auto_added=True. The routing call below still always happens for
+    whichever direction this is — reusing a decision about WHICH stops to
+    add never skips getting THIS direction's own real physics for its own
+    (possibly asymmetric) path, only the expensive candidate-search-and-
+    cost pass that decided the stop list in the first place.
     """
     tid = _trip_id(proposal_id, proposal_version, direction, pair_index)
 
@@ -389,26 +390,47 @@ def _build_trip(
         routing_mode=routing_mode,
     )
 
-    # auto_stop_addition SWITCH — whether to run candidate search at all.
-    # apply_auto_stop_addition() itself has no enabled/disabled notion; it
-    # always returns routed_legs matching whatever stop_ids it's handed
-    # back (unchanged when skipped here), so no separate re-route is ever
+    # auto_stop_addition SWITCH — which (if any) auto-stop behaviour runs.
+    # The timetable.py functions themselves have no mode gate; "add" always
+    # returns routed_legs matching whatever stop_ids it hands back
+    # (unchanged for "off"/"suggest"), so no separate re-route is ever
     # needed after this block regardless of which branch ran.
+    # VALID_AUTO_STOP_ADDITION_MODES is the same set api/route.py validates
+    # the request against, so an unknown mode can only reach here if that
+    # validation was bypassed.
+    suggestions: list[AutoStopSuggestion] = []
     if known_auto_added_stop_ids is not None:
         auto_added_stop_ids = known_auto_added_stop_ids
-    else:
+    elif auto_stop_addition == "off":
+        auto_added_stop_ids = frozenset()
+    elif auto_stop_addition == "add":
         original_stop_ids = stop_ids
-        if auto_stop_addition:
-            stop_ids, routed_legs = apply_auto_stop_addition(
-                stop_ids,
-                routed_legs,
-                composition=composition,
-                tracks=tracks,
-                stop_infra=stop_infra,
-                router=router,
-                routing_mode=routing_mode,
-            )
+        stop_ids, routed_legs = apply_auto_stop_addition(
+            stop_ids,
+            routed_legs,
+            composition=composition,
+            tracks=tracks,
+            stop_infra=stop_infra,
+            router=router,
+            routing_mode=routing_mode,
+        )
         auto_added_stop_ids = frozenset(stop_ids) - frozenset(original_stop_ids)
+    elif auto_stop_addition == "suggest":
+        suggestions = suggest_auto_stops(
+            stop_ids,
+            routed_legs,
+            composition=composition,
+            tracks=tracks,
+            stop_infra=stop_infra,
+            router=router,
+            routing_mode=routing_mode,
+        )
+        auto_added_stop_ids = frozenset()  # nothing added — suggestion only
+    else:
+        raise ValueError(
+            f"Unknown auto_stop_addition '{auto_stop_addition}'. "
+            f"Supported: {sorted(VALID_AUTO_STOP_ADDITION_MODES)}."
+        )
 
     _check_country_coverage(routed_legs, tracks)
 
@@ -443,7 +465,7 @@ def _build_trip(
     logger.info(
         "_build_trip: id=%s %dm %.0fmin", tid, trip.distance_m, trip.total_time_min
     )
-    return trip
+    return trip, suggestions
 
 
 # =============================================================================
@@ -485,7 +507,7 @@ def _build_trip_pair(
     router: RailRouter,
     scenario_id: int,
     compositions: CompositionCollection,
-) -> tuple[TripPair, ParamVersions, TrackInfraCollection]:
+) -> tuple[TripPair, list[AutoStopSuggestion], ParamVersions, TrackInfraCollection]:
     composition = compositions.get(pair_input.composition_id)
     if composition is None:
         raise ValueError(f"Composition '{pair_input.composition_id}' not found.")
@@ -504,22 +526,24 @@ def _build_trip_pair(
     # asymmetric HSR avoidance), so their departure times are allowed to
     # deviate rather than being forced to share one value.
     #
-    # auto_stop_addition is the one exception: it is decided ONCE, from
-    # outbound, not re-run independently for return. Candidate search +
-    # per-candidate costing means one real RailRouter.route() call per
-    # nearby candidate — for a long corridor with many candidates nearby,
-    # that's the dominant cost of planning a route (measured: ~14s per
-    # direction on a Stockholm-Roma request with 9 candidates found,
-    # against <1s for routing itself), and outbound/return cover the same
-    # physical corridor reversed, so running that full search twice is
-    # mostly redundant work for the same answer. Accepted trade-off: return
-    # no longer gets its own independent detour-budget check against its
-    # own baseline trip time, only outbound's — see
+    # auto_stop_addition is the one exception: its candidate search + per-
+    # candidate costing (modes "add"/"suggest") is decided ONCE, from
+    # outbound, not re-run independently for return. The costing means one
+    # real RailRouter.route() call per nearby candidate — for a long
+    # corridor with many candidates nearby, that's the dominant cost of
+    # planning a route (measured: ~14s per direction on a Stockholm-Roma
+    # request with 9 candidates found, against <1s for routing itself),
+    # and outbound/return cover the same physical corridor reversed, so
+    # running that full search twice is mostly redundant work for the same
+    # answer. Accepted trade-off: return no longer gets its own independent
+    # detour-budget check against its own baseline trip time, only
+    # outbound's — see OPEN_TODOS["return_detour_budget"] in version.py and
     # _build_trip()'s known_auto_added_stop_ids docstring. Return still
     # gets a real routing call for its own (possibly asymmetric) physical
     # path over the shared final stop list; only the search-and-cost pass
-    # that decided which stops to add is shared, not the routing itself.
-    outbound = _build_trip(
+    # that decided which stops to add (or which to suggest) is shared, not
+    # the routing itself.
+    outbound, suggestions = _build_trip(
         proposal_id,
         proposal_version,
         direction=0,
@@ -537,7 +561,7 @@ def _build_trip_pair(
     final_outbound_stop_ids = [s.stop_id for s in outbound.stops]
     auto_added_stop_ids = frozenset(s.stop_id for s in outbound.stops if s.auto_added)
 
-    return_trip = _build_trip(
+    return_trip, _ = _build_trip(
         proposal_id,
         proposal_version,
         direction=1,
@@ -559,7 +583,7 @@ def _build_trip_pair(
         composition=composition,
         od_pairs=[],  # populated later by distribute_demand()
     )
-    return pair, param_versions, tracks
+    return pair, suggestions, param_versions, tracks
 
 
 # =============================================================================
@@ -575,13 +599,20 @@ def plan_route(
     proposal_id: int,
     proposal_version: int,
     scenario_id: int,
-) -> tuple[Route, RouteProvenance]:
+) -> tuple[Route, RouteProvenance, list[AutoStopSuggestion]]:
     """
     Build a Route from scratch. One TripPair per entry in trip_pair_inputs
     (Y-shaped routes pass several, each with its own composition).
     All pairs share the route-level schedule.
     Demand is not set here — call distribute_demand() after plan_route()
     to populate od_pairs on each TripPair.
+
+    Returns (Route, RouteProvenance, suggestions). suggestions is only
+    non-empty for auto_stop_addition="suggest" — the costed candidate
+    stops the search found near each pair's outbound corridor, concatenated
+    across pairs (a Y-shaped route contributes each branch's suggestions in
+    pair order), for api/route.py to serialize into the response. Not part
+    of the Route itself — nothing was added to any trip.
 
     No parameter here has a default and none is Optional — all resolution
     (draft proposal_id/version, "None scenario_id means live base") happens
@@ -615,6 +646,7 @@ def plan_route(
     )
 
     trip_pairs: list[TripPair] = []
+    suggestions: list[AutoStopSuggestion] = []
     merged_param_versions = ParamVersions()
     tracks_used: TrackInfraCollection | None = None
 
@@ -625,7 +657,7 @@ def plan_route(
     compositions = loader.build_all_compositions(scenario_id, include_indicative=False)
 
     for i, pair_input in enumerate(trip_pair_inputs, start=1):
-        pair, param_versions, tracks = _build_trip_pair(
+        pair, pair_suggestions, param_versions, tracks = _build_trip_pair(
             proposal_id,
             proposal_version,
             pair_index=i,
@@ -636,6 +668,7 @@ def plan_route(
             compositions=compositions,
         )
         trip_pairs.append(pair)
+        suggestions.extend(pair_suggestions)
         merged_param_versions.entries.update(param_versions.entries)
         tracks_used = (
             tracks  # identical across pairs (same scenario_id) — last write wins
@@ -662,12 +695,21 @@ def plan_route(
         shuntings=_shuntings([t for pair in trip_pairs for t in pair.trips]),
     )
 
-    logger.info("plan_route done: id=%s pairs=%d", rid, len(route.trip_pairs))
-    return route, RouteProvenance(
-        model_versions=model_versions,
-        param_versions=merged_param_versions,
-        scenario_id=scenario_id,
-        tracks=tracks_used,
+    logger.info(
+        "plan_route done: id=%s pairs=%d suggestions=%d",
+        rid,
+        len(route.trip_pairs),
+        len(suggestions),
+    )
+    return (
+        route,
+        RouteProvenance(
+            model_versions=model_versions,
+            param_versions=merged_param_versions,
+            scenario_id=scenario_id,
+            tracks=tracks_used,
+        ),
+        suggestions,
     )
 
 

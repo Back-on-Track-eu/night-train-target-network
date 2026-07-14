@@ -29,7 +29,7 @@ from dataclasses import dataclass
 # VERSION
 # =============================================================================
 
-CALC_VERSION: str = "0.9.2"
+CALC_VERSION: str = "0.9.3"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -117,6 +117,21 @@ CHANGELOG: dict = {
         "now, losing the previous class_id-level granularity — needs frontend "
         "coordination (see project notes on auditing Bjarne's frontend before "
         "Phase 4/5) since it's a real API contract change, not additive.",
+    },
+    "0.9.3": {
+        "date": "2026-07-14",
+        "author": "david",
+        "changes": "Driver/crew billable hours now computed from time in motion — "
+        "raw router driving time plus the route builder's new per-segment "
+        "traction dynamics component (accel/brake time loss, route builder "
+        "0.9.8: Segment.dynamics_time_min) — instead of raw driving time "
+        "alone; accelerating and braking is time the driver drives and the "
+        "crew is on duty. SegmentCost.driving_time_min (and the "
+        "SegmentPassengerLoad copy views.py aggregates loco/country hours "
+        "from) carries this in-motion figure. Staff, and any per-hour-derived "
+        "figure, grow by roughly 1-2min per segment vs 0.9.2. Loco lease was "
+        "already billed on segment total_time_min, which now includes "
+        "dynamics via the route model itself. No response shape change.",
     },
 }
 

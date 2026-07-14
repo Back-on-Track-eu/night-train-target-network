@@ -19,6 +19,8 @@ Public interface:
   validate_route_dict(data)                     → list[str]  (structural check before deserializing)
   route_to_dict(route, scenario_id, tracks)      → dict       (for POST /api/route response)
   route_from_dict(data, loader, scenario_id)     → (Route, CompositionCollection)  (for POST /api/evaluation/calc)
+  suggested_stops_to_dicts(suggestions)          → list[dict] (for POST /api/route/plan's
+                                                    suggested_stops section, auto_stop_addition="suggest")
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ from models.route.route import (
     ODPair,
 )
 from models.route.trip import Stop, StopType, Segment, Trip
+from models.route.timetable import AutoStopSuggestion
 from models.params import Composition, TrackInfraCollection, CompositionCollection
 
 # =============================================================================
@@ -100,10 +103,37 @@ def _segment_to_dict(seg: Segment, geometry_id: str) -> dict:
         "geometry_id": geometry_id,
         "distance_m": seg.distance_m,
         "driving_time_min": seg.driving_time_min,
+        "dynamics_time_min": seg.dynamics_time_min,
         "buffer_time_min": seg.buffer_time_min,
         "energy_kwh": seg.energy_kwh,
         "country_distance_shares": seg.country_distance_shares,
         "country_time_shares": seg.country_time_shares,
+    }
+
+
+def _trip_general_parameters(trip: Trip) -> dict:
+    """Three headline physics stats for a trip — trip_km, route_duration_min,
+    average_speed_kmh — meant to be read at a glance rather than derived by
+    the reader from segments[]. Embedded per-trip by _trip_to_dict(), between
+    'direction' and 'segments'.
+
+    route_duration_min is the full elapsed time (departure → arrival),
+    i.e. Trip.total_time_min: driving + dynamics + buffer + dwell at intermediate
+    stops. average_speed_kmh is trip_km divided by that same duration, so
+    all three figures stay internally consistent with each other. This is
+    a different, unimplemented formula from the 'avg_speed' entry in
+    ROUTE_FORMULAS (models/route/version.py), which divides by pure
+    driving time only (excluding buffer and dwell) — that entry documents
+    a display-only value that was never wired up, not a contract this
+    function needs to match.
+    """
+    trip_km = trip.distance_m / 1000
+    duration_min = trip.total_time_min
+    average_speed_kmh = trip_km / (duration_min / 60) if duration_min else 0.0
+    return {
+        "trip_km": round(trip_km, 1),
+        "route_duration_min": duration_min,
+        "average_speed_kmh": round(average_speed_kmh, 1),
     }
 
 
@@ -121,8 +151,26 @@ def _trip_to_dict(trip: Trip, geometries: list[dict]) -> dict:
     return {
         "trip_id": trip.trip_id,
         "direction": trip.direction,
+        "general_parameters": _trip_general_parameters(trip),
         "segments": segments,
     }
+
+
+def suggested_stops_to_dicts(suggestions: list[AutoStopSuggestion]) -> list[dict]:
+    """Serialize auto_stop_addition="suggest" output for the response's
+    top-level suggested_stops list. Order is preserved from
+    timetable.suggest_auto_stops() — geographic, along the route."""
+    return [
+        {
+            "stop_id": s.stop_id,
+            "stop_name": s.stop_name,
+            "country_code": s.country_code,
+            "lat": s.lat,
+            "lon": s.lon,
+            "added_time_min": s.added_time_min,
+        }
+        for s in suggestions
+    ]
 
 
 def _composition_to_dict(comp: Composition) -> dict:
@@ -320,6 +368,9 @@ def _segment_from_dict(d: dict, geometries_by_id: dict[str, list]) -> Segment:
         geometry=coords,
         distance_m=int(d["distance_m"]),
         driving_time_min=int(d["driving_time_min"]),
+        # pre-0.9.8 payloads folded dynamics into driving_time_min (0.9.7)
+        # or had none at all (<=0.9.6) — default 0 keeps them loadable
+        dynamics_time_min=int(d.get("dynamics_time_min", 0)),
         buffer_time_min=int(d["buffer_time_min"]),
         energy_kwh=float(d["energy_kwh"]),
         country_distance_shares=d["country_distance_shares"],

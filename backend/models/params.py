@@ -263,7 +263,7 @@ class Operator:
 
     # locomotive — utilization-based full-service lease (capital, maintenance,
     # insurance bundled into the rate). Billed per hour the loco is coupled
-    # to a working train, i.e. segment total_time_min (driving + buffer).
+    # to a working train, i.e. segment total_time_min (driving + dynamics + buffer).
     # Energy, TAC, and driver/crew costs are NOT included — billed separately.
     loco_full_service_lease_eur_h: float
 

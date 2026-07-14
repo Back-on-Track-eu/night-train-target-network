@@ -90,7 +90,8 @@ class SegmentCost:
     from_stop_id: str
     to_stop_id: str
     distance_m: int  # metres
-    driving_time_min: int  # driving only, excludes dwell
+    driving_time_min: int  # time in motion (router driving + traction
+    # dynamics), excludes dwell and buffer
     country_distance_shares: dict[
         str, float
     ]  # fraction of distance per country, sums to 1.0
@@ -412,7 +413,9 @@ def _calc_segment_cost(
     tracks: TrackInfraCollection,
 ) -> SegmentCost:
     distance_km = segment.distance_m / 1000.0
-    driving_h = segment.driving_time_min / 60.0
+    # Time in motion = raw router driving + traction dynamics (accel/brake is
+    # time the driver drives and crew is on duty) — buffer/dwell excluded.
+    driving_h = (segment.driving_time_min + segment.dynamics_time_min) / 60.0
 
     coach_maintenance_eur = composition.coach_maint_eur_km * distance_km
     driver_hours = driving_h * composition.driver_factor
@@ -435,7 +438,9 @@ def _calc_segment_cost(
         from_stop_id=segment.from_stop.stop_id,
         to_stop_id=segment.to_stop.stop_id,
         distance_m=segment.distance_m,
-        driving_time_min=segment.driving_time_min,
+        # SegmentCost/SegmentPassengerLoad carry in-motion time (driving +
+        # dynamics) under this name — see the field docstrings.
+        driving_time_min=segment.driving_time_min + segment.dynamics_time_min,
         country_distance_shares=segment.country_distance_shares,
         country_time_shares=segment.country_time_shares,
         coach_maintenance_eur=coach_maintenance_eur,

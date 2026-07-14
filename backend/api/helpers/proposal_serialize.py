@@ -283,7 +283,12 @@ def proposal_summary_to_dict(row: dict) -> dict:
             for seg in trip["segments"]:
                 total_distance_m += seg["distance_m"]
                 total_driving_min += seg["driving_time_min"]
-                total_time_min += seg["driving_time_min"] + seg["buffer_time_min"]
+                # .get: stored pre-0.9.8 proposals have no dynamics_time_min
+                total_time_min += (
+                    seg["driving_time_min"]
+                    + seg.get("dynamics_time_min", 0)
+                    + seg["buffer_time_min"]
+                )
                 countries.update(seg["country_distance_shares"])
         for stop in _outbound_stops(pair):
             stops.setdefault(stop["stop_id"], stop["stop_name"])

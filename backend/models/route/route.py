@@ -34,8 +34,9 @@ from enum import Enum
 from models.params import ODPair, Composition
 from models.route.trip import Trip
 
-WEEKS_PER_SEASON = 26
-DAYS_PER_OPERATING_WEEK = {"DAILY": 7, "THREE_PER_WEEK": 3}
+# Standard schedule assumptions live in the route model's central registry —
+# see models/route/version.py (STANDARD VALUES).
+from models.route.version import WEEKS_PER_SEASON, DAYS_PER_OPERATING_WEEK
 
 # =============================================================================
 # SCHEDULE
@@ -187,7 +188,7 @@ class TripPair:
     @property
     def loco_propulsion_min(self) -> int:
         """Loco operating time for this pair's two trips, in minutes.
-        Sums driving + buffer + dwell across all segments and stops of
+        Sums driving + dynamics + buffer + dwell across all segments and stops of
         both trips. No cross-pair deduplication — each pair's loco time
         is independent.
 

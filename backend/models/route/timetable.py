@@ -6,9 +6,7 @@ implementations, not the switch. Which implementation runs for a given
 request is decided by route_factory.py (at whichever level owns the
 relevant context — per-trip in _build_trip(), per-route in plan_route());
 this module holds one function per named strategy and never branches on
-timetable_mode/schedule_mode itself. auto_stop_addition's enabled/disabled
-gate is likewise decided by _build_trip() — apply_auto_stop_addition()
-below always runs the full candidate-search algorithm when called.
+timetable_mode/schedule_mode/auto_stop_addition itself.
 
 Three request-level concerns have their logic here, each with its switch
 living in route_factory.py:
@@ -26,28 +24,40 @@ living in route_factory.py:
                          once, not per trip, since schedule is shared
                          across every TripPair.
 
-  auto_stop_addition  — whether to propose additional stops along a route
-                         beyond what the caller supplied. Looks for stops
-                         from the full stop catalog that sit close to the
-                         already-routed geometry, costs them all CONCURRENTLY
-                         (one 3-point mini-reroute per candidate — a
-                         sequential whole-trip reroute per candidate doesn't
-                         scale to the ~50 stops a busy corridor can add),
-                         then greedily accepts cheapest-first as long as the
-                         resulting full trip time (driving + buffer + dwell)
-                         stays within AUTO_STOP_MAX_DETOUR_PER of the
-                         original. apply_auto_stop_addition() does one more
-                         real reroute of the final stop list at the end and
-                         always returns routed_legs matching the returned
-                         stop_ids, so route_factory never has to re-route
-                         itself — but whether to call it at all is
-                         route_factory._build_trip()'s call.
+  auto_stop_addition  — additional stops along a route beyond what the
+                         caller supplied. Split into a shared search+cost
+                         phase and two mode-specific consumers:
+                           find_and_cost_auto_stop_candidates() — every
+                             catalog stop close to the already-routed
+                             geometry, each costed CONCURRENTLY with one
+                             3-point mini-reroute of its own leg (a
+                             sequential whole-trip reroute per candidate
+                             doesn't scale to the ~50 stops a busy corridor
+                             can add). Shared by both modes below.
+                           apply_auto_stop_addition() — mode "add": greedy
+                             cheapest-first acceptance within the
+                             AUTO_STOP_MAX_DETOUR_PER budget, then one real
+                             reroute of the final stop list; always returns
+                             routed_legs matching the returned stop_ids so
+                             route_factory never re-routes itself.
+                           suggest_auto_stops() — mode "suggest": no
+                             selection, no budget, no reroute — just every
+                             costed candidate as an AutoStopSuggestion
+                             (with added_time_min), in geographic order
+                             along the route, for the caller to decide.
+                         Whether either is called at all (and mode "off"
+                         skipping both) is route_factory._build_trip()'s
+                         switch.
 
-VALID_TIMETABLE_MODES / VALID_SCHEDULE_MODES stay here as the single source
-of truth for the allowed strings — api/route.py's request validation and
-route_factory.py's dispatch both read from them, so a new mode is added in
-exactly one place (plus the function implementing it and the route_factory
-branch that calls it).
+VALID_TIMETABLE_MODES / VALID_SCHEDULE_MODES / VALID_AUTO_STOP_ADDITION_MODES
+stay here as the single source of truth for the allowed strings —
+api/route.py's request validation and route_factory.py's dispatch both read
+from them, so a new mode is added in exactly one place (plus the function
+implementing it and the route_factory branch that calls it).
+
+Standard values (MIRROR_MIN, AUTO_STOP_BUFFER_M, AUTO_STOP_MAX_DETOUR_PER)
+live in models/route/version.py — the single registry of every fixed
+assumption the route model makes.
 
 Not pluggable, but timing math so it lives here too: build_final_timetable()
 and dwell_min() compute the exact, dwell-inclusive arrival/departure at each
@@ -68,14 +78,14 @@ from models.params import Composition, TrackInfraCollection, StopInfraCollection
 from models.route.trip import StopType
 from models.route.route import Schedule, SeasonalSchedule, Season, Frequency
 from models.route.routing.rail_router import RailRouter, RoutedLeg, build_router_stops
+from models.route.version import (
+    MIRROR_MIN,
+    AUTO_STOP_BUFFER_M,
+    AUTO_STOP_MAX_DETOUR_PER,
+)
 from models.utils import haversine_m
 
 logger = logging.getLogger(__name__)
-
-MIRROR_MIN = 26 * 60 + 30
-"""02:30, expressed 'next day' (1590) on the continuous minutes-from-midnight
-scale used throughout (see models.utils.hhmm_to_min). Fixed constant that
-timetable_mode='simpleAutomatic' schedules are mirrored around."""
 
 # =============================================================================
 # timetable_mode IMPLEMENTATIONS — route_factory._build_trip() picks which
@@ -179,21 +189,18 @@ set + a plan_route() branch) without changing the request shape."""
 
 
 # =============================================================================
-# auto_stop_addition IMPLEMENTATION — always runs the full algorithm when
-# called; route_factory._build_trip() decides whether to call it at all
-# based on the request's auto_stop_addition bool.
+# auto_stop_addition IMPLEMENTATION — search + costing shared by modes "add"
+# (apply_auto_stop_addition) and "suggest" (suggest_auto_stops); route_
+# factory._build_trip() decides which of them to call, if any ("off").
 # =============================================================================
 
-AUTO_STOP_BUFFER_M = 3_000
-"""Max distance (metres) from a stop to the already-routed path for that
-stop to be considered a candidate for auto_stop_addition — covers both
-stops that sit right on the line and ones merely 'close by'. Fixed
-constant, not exposed via the API (see api/route.py's request docstring)."""
-
-AUTO_STOP_MAX_DETOUR_PER = 0.05
-"""Max allowed increase in full (driving + buffer + dwell) trip time, as a
-fraction of the original trip's time, before auto_stop_addition stops
-adding further candidates. Fixed constant, not exposed via the API."""
+VALID_AUTO_STOP_ADDITION_MODES = frozenset({"off", "add", "suggest"})
+"""Single source of truth for allowed auto_stop_addition strings — read by
+both api/route.py's request validation and route_factory._build_trip()'s
+switch. "off": caller's stop list returned unmodified, no search. "add":
+search + cost + greedy addition within the detour budget. "suggest":
+search + cost like "add", but nothing is added — every costed candidate is
+returned as an AutoStopSuggestion instead, budget deliberately not applied."""
 
 _DEG_PER_M = 1 / 111_000
 """Rough metres-per-degree constant (~111km/degree of latitude) — only
@@ -221,33 +228,46 @@ class _AutoStopCandidate:
     along_leg_fraction: float
 
 
-def _nearest_point_on_leg(
-    lon: float, lat: float, leg_geometry: list[list[float]]
-) -> tuple[float, float]:
-    """(distance_m, fraction_along) of the point on leg_geometry nearest to
-    (lon, lat). The nearest-point search itself runs in raw lon/lat degree
-    space via shapely (fine for locating the nearest point — regional leg
-    lengths are far too short for degree-space distortion to matter); the
-    returned distance is then computed with haversine_m for an accurate
-    metres value, matching the buffer/detour math everywhere else.
+@dataclass(frozen=True)
+class AutoStopSuggestion:
+    """One suggested additional stop for mode "suggest" — public output
+    type, serialized by api/helpers/route_serialize.py into the response's
+    suggested_stops list. added_time_min is the full trip-time increase
+    (detour + dwell) the stop would cost if implemented — same figure the
+    greedy selection in mode "add" budgets against."""
+
+    stop_id: str
+    stop_name: str
+    country_code: str
+    lat: float
+    lon: float
+    added_time_min: float
+
+
+def _nearest_point_on_line(lon: float, lat: float, line) -> tuple[float, float]:
+    """(distance_m, fraction_along) of the point on a prebuilt shapely
+    LineString nearest to (lon, lat). The nearest-point search itself runs
+    in raw lon/lat degree space (fine for locating the nearest point —
+    regional leg lengths are far too short for degree-space distortion to
+    matter); the returned distance is then computed with haversine_m for an
+    accurate metres value, matching the buffer/detour math everywhere else.
+
+    The caller builds the LineString once per leg and reuses it across all
+    stops checked against that leg — constructing an ~8000-point LineString
+    per (stop, leg) pair was the search step's dominant Python-side cost.
 
     NOTE (benchmarked, 2026-07-12): a segment-level shapely STRtree was
-    tried here on the theory that a single very long leg (e.g. an
-    ~8000-point Stockholm-Roma polyline) would make this whole-leg scan
-    the bottleneck behind a slow auto_stop_addition request. Measured
-    head-to-head against a realistic 58-stop catalog and an 8000-point
-    leg, post-warmup: this whole-leg approach ~29ms, the STRtree version
-    ~67ms — GEOS's native LineString.project() is already a tight C loop
-    over the whole geometry, and building thousands of individual segment
-    objects for an index costs more than the linear scan it replaces at
-    this scale. Both are tens of milliseconds regardless — nowhere near
-    what a slow request actually costs (see apply_auto_stop_addition()'s
-    timing logs for where that time really goes). Kept simple; revisit
-    only if the stop catalog grows to the point this is measured to
-    matter, with a fresh benchmark at that scale."""
-    from shapely.geometry import LineString, Point
+    tried on the theory that a single very long leg (e.g. an ~8000-point
+    Stockholm-Roma polyline) would make this whole-line scan the bottleneck
+    behind a slow auto_stop_addition request. Measured head-to-head against
+    a realistic 58-stop catalog and an 8000-point leg, post-warmup: this
+    whole-line approach ~29ms, the STRtree version ~67ms — GEOS's native
+    LineString.project() is already a tight C loop over the whole geometry,
+    and building thousands of individual segment objects for an index costs
+    more than the linear scan it replaces at this scale. Kept simple;
+    revisit only if measured to matter at a much larger catalog scale."""
+    from shapely.geometry import Point
 
-    line = LineString(leg_geometry)
     point = Point(lon, lat)
     fraction = line.project(point, normalized=True)
     nearest = line.interpolate(fraction, normalized=True)
@@ -264,12 +284,40 @@ def _find_nearby_candidates(
     Every stop in the catalog within AUTO_STOP_BUFFER_M of the routed path,
     excluding stops already in stop_ids. A stop near more than one leg is
     kept only once, at its closest leg. Not sorted here — selection order
-    (cheapest detour first) is decided by the caller.
+    is decided by the caller.
+
+    Two cheap pre-filters run before any shapely work, in order:
+      1. Touched-country filter: the catalog is cut down to stops in
+         countries the routed legs actually pass through — read straight
+         off each leg's country_distance_shares, which RailRouter already
+         attributed via point-in-polygon during routing, so this is
+         effectively a free spatial join between route and country
+         geometries (no new query, no new geometry math). With a
+         continental catalog and a route touching a handful of countries
+         this removes the large majority of stops before any per-leg work.
+         Known edge + planned NUTS-1 refinement: see OPEN_TODOS
+         ["auto_stop_nuts1_prefilter"] in models/route/version.py.
+      2. Per-leg bounding box (with a generous margin over
+         AUTO_STOP_BUFFER_M): skips the shapely nearest-point call for
+         stops that can't possibly be within the buffer of this leg.
     """
     start = time.monotonic()
     existing = set(stop_ids)
+    touched_countries = {
+        cc
+        for leg in routed_legs
+        for cc in leg.country_distance_shares
+        if cc != "UNK"  # open water/ferry sentinel — no stop can be "in" it
+    }
+    pool = {
+        stop_id: stop
+        for stop_id, stop in stop_infra.all().items()
+        if stop_id not in existing and stop.stop_country_code in touched_countries
+    }
+
     margin_deg = AUTO_STOP_BUFFER_M * _DEG_PER_M * 1.5  # generous safety factor
     best_by_stop: dict[str, _AutoStopCandidate] = {}
+    from shapely.geometry import LineString
 
     for leg_index, leg in enumerate(routed_legs):
         geometry = leg.geometry
@@ -280,13 +328,14 @@ def _find_nearby_candidates(
         min_lat = min(c[1] for c in geometry) - margin_deg
         max_lat = max(c[1] for c in geometry) + margin_deg
 
-        for stop_id, stop in stop_infra.all().items():
-            if stop_id in existing:
-                continue
+        line = None  # built lazily, once per leg, only if any stop passes the bbox
+        for stop_id, stop in pool.items():
             if not (min_lon <= stop.lon <= max_lon and min_lat <= stop.lat <= max_lat):
-                continue  # cheap pre-filter — skip the shapely call entirely
+                continue
+            if line is None:
+                line = LineString(geometry)
 
-            distance_m, fraction = _nearest_point_on_leg(stop.lon, stop.lat, geometry)
+            distance_m, fraction = _nearest_point_on_line(stop.lon, stop.lat, line)
             if distance_m > AUTO_STOP_BUFFER_M:
                 continue
 
@@ -301,9 +350,11 @@ def _find_nearby_candidates(
 
     candidates = list(best_by_stop.values())
     logger.info(
-        "_find_nearby_candidates: %d candidate(s) from %d catalog stops in %.2fs.",
+        "_find_nearby_candidates: %d candidate(s) from %d catalog stops "
+        "(%d after touched-country prefilter) in %.2fs.",
         len(candidates),
         len(stop_infra),
+        len(pool),
         time.monotonic() - start,
     )
     return candidates
@@ -317,7 +368,8 @@ def _estimate_full_trip_time_min(
     stop_infra: StopInfraCollection,
 ) -> int:
     """
-    Rough driving + buffer + dwell trip time, used only to compare against
+    Rough driving + dynamics + buffer + dwell trip time (total_time_min per
+    leg), used only to compare against
     AUTO_STOP_MAX_DETOUR_PER — not the final published schedule. Every
     intermediate stop is conservatively treated as StopType.BOTH (the max
     of boarding/alighting dwell), since real classification only happens
@@ -332,7 +384,7 @@ def _estimate_full_trip_time_min(
 
 
 def _candidate_added_time_min(
-    candidate: "_AutoStopCandidate",
+    candidate: _AutoStopCandidate,
     stop_ids: list[str],
     routed_legs: list[RoutedLeg],
     composition: Composition,
@@ -346,12 +398,13 @@ def _candidate_added_time_min(
     (leg_start → candidate → leg_end, three points) rather than the whole
     trip, and compare against that leg's original time. Independent of
     every other candidate — this is what makes the calls in
-    apply_auto_stop_addition() safe to run concurrently: candidates on
-    different legs can never affect each other's routing, and even two
-    candidates sharing a leg are each scored against the leg's ORIGINAL
-    two endpoints here (an accepted approximation — see that leg's actual
-    combined cost is verified for real by the single final reroute after
-    selection, whether or not it matches this estimate exactly).
+    find_and_cost_auto_stop_candidates() safe to run concurrently:
+    candidates on different legs can never affect each other's routing,
+    and even two candidates sharing a leg are each scored against the
+    leg's ORIGINAL two endpoints here (an accepted approximation — the
+    leg's actual combined cost is verified for real by mode "add"'s single
+    final reroute after selection, whether or not it matches this estimate
+    exactly).
 
     Returns None (candidate excluded from consideration) if the mini
     reroute itself fails — a single unroutable candidate stop shouldn't
@@ -370,7 +423,7 @@ def _candidate_added_time_min(
         )
     except Exception:
         logger.warning(
-            "apply_auto_stop_addition: mini-reroute for '%s' failed — excluding it.",
+            "auto_stop_addition: mini-reroute for '%s' failed — excluding it.",
             candidate.stop_id,
             exc_info=True,
         )
@@ -387,6 +440,66 @@ def _candidate_added_time_min(
     return detour_time_min + dwell_time_min
 
 
+def find_and_cost_auto_stop_candidates(
+    stop_ids: list[str],
+    routed_legs: list[RoutedLeg],
+    composition: Composition,
+    tracks: TrackInfraCollection,
+    stop_infra: StopInfraCollection,
+    router: RailRouter,
+    routing_mode: str,
+) -> list[tuple[_AutoStopCandidate, float]]:
+    """
+    Shared search + costing phase for modes "add" and "suggest":
+      1. Find every catalog stop within AUTO_STOP_BUFFER_M of routed_legs'
+         geometry (_find_nearby_candidates — prefiltered to route-touched
+         countries, see that function).
+      2. Cost every candidate CONCURRENTLY: a 3-point mini-reroute of just
+         its own leg (_candidate_added_time_min) rather than a sequential
+         whole-trip reroute per candidate — with up to ~50 candidates in
+         practice, sequential whole-trip reroutes would be far too slow
+         for an interactive request. One thread per candidate; RailRouter's
+         underlying requests.Session/connection pool is sized for this
+         (see rail_router.py's _CONNECTION_POOL_SIZE).
+
+    Returns (candidate, added_time_min) pairs, unsorted — candidates whose
+    mini-reroute failed are excluded. Selection order (cheapest-first for
+    "add", geographic for "suggest") is each consumer's own concern.
+    """
+    candidates = _find_nearby_candidates(stop_ids, routed_legs, stop_infra)
+    if not candidates:
+        return []
+
+    costing_start = time.monotonic()
+    with ThreadPoolExecutor(max_workers=len(candidates)) as pool:
+        added_times = list(
+            pool.map(
+                lambda c: _candidate_added_time_min(
+                    c,
+                    stop_ids,
+                    routed_legs,
+                    composition,
+                    tracks,
+                    stop_infra,
+                    router,
+                    routing_mode,
+                ),
+                candidates,
+            )
+        )
+    logger.info(
+        "find_and_cost_auto_stop_candidates: costed %d candidate(s) "
+        "concurrently in %.2fs.",
+        len(candidates),
+        time.monotonic() - costing_start,
+    )
+    return [
+        (candidate, added_time_min)
+        for candidate, added_time_min in zip(candidates, added_times)
+        if added_time_min is not None
+    ]
+
+
 def apply_auto_stop_addition(
     stop_ids: list[str],
     routed_legs: list[RoutedLeg],
@@ -397,22 +510,14 @@ def apply_auto_stop_addition(
     routing_mode: str,
 ) -> tuple[list[str], list[RoutedLeg]]:
     """
-    Proposes additional worthwhile stops along the already-routed path,
-    beyond what the caller supplied. Always runs — route_factory._build_trip()
-    only calls this when the request's auto_stop_addition is true; this
-    function itself has no enabled/disabled gate.
+    Implements auto_stop_addition="add": adds worthwhile stops along the
+    already-routed path, beyond what the caller supplied. Always runs the
+    full algorithm — route_factory._build_trip() only calls this for mode
+    "add"; this function itself has no mode gate.
 
     Algorithm:
-      1. Find every catalog stop within AUTO_STOP_BUFFER_M of routed_legs'
-         geometry (_find_nearby_candidates) — covers stops right on the
-         line as well as ones merely close by.
-      2. Cost every candidate CONCURRENTLY: a 3-point mini-reroute of just
-         its own leg (_candidate_added_time_min) rather than a sequential
-         whole-trip reroute per candidate — with up to ~50 candidates in
-         practice, sequential whole-trip reroutes would be far too slow
-         for an interactive request. One thread per candidate; RailRouter's
-         underlying requests.Session/connection pool is sized for this
-         (see rail_router.py's _CONNECTION_POOL_SIZE).
+      1./2. Shared search + concurrent costing —
+         find_and_cost_auto_stop_candidates() above.
       3. Sort by added_time_min ascending (cheapest first) and greedily
          accumulate — pure arithmetic now, no further I/O — stopping at
          the first candidate that would push the running total over
@@ -434,40 +539,12 @@ def apply_auto_stop_addition(
     matches final_stop_ids, whether or not anything was actually added, so
     route_factory._build_trip() never needs to re-route itself afterwards.
     """
-    candidates = _find_nearby_candidates(stop_ids, routed_legs, stop_infra)
-    if not candidates:
+    costed_candidates = find_and_cost_auto_stop_candidates(
+        stop_ids, routed_legs, composition, tracks, stop_infra, router, routing_mode
+    )
+    if not costed_candidates:
         return stop_ids, routed_legs
-
-    costing_start = time.monotonic()
-    with ThreadPoolExecutor(max_workers=len(candidates)) as pool:
-        added_time_by_stop_id: dict[str, float | None] = dict(
-            zip(
-                (c.stop_id for c in candidates),
-                pool.map(
-                    lambda c: _candidate_added_time_min(
-                        c,
-                        stop_ids,
-                        routed_legs,
-                        composition,
-                        tracks,
-                        stop_infra,
-                        router,
-                        routing_mode,
-                    ),
-                    candidates,
-                ),
-            )
-        )
-    logger.info(
-        "apply_auto_stop_addition: costed %d candidate(s) concurrently in %.2fs.",
-        len(candidates),
-        time.monotonic() - costing_start,
-    )
-
-    costed_candidates = sorted(
-        (c for c in candidates if added_time_by_stop_id[c.stop_id] is not None),
-        key=lambda c: added_time_by_stop_id[c.stop_id],
-    )
+    costed_candidates.sort(key=lambda pair: pair[1])
 
     baseline_time_min = _estimate_full_trip_time_min(
         stop_ids, routed_legs, composition, tracks, stop_infra
@@ -478,8 +555,7 @@ def apply_auto_stop_addition(
     running_extra_min = 0.0
     added_stop_ids: list[str] = []
 
-    for candidate in costed_candidates:
-        candidate_time_min = added_time_by_stop_id[candidate.stop_id]
+    for candidate, candidate_time_min in costed_candidates:
         if running_extra_min + candidate_time_min > max_extra_min:
             logger.info(
                 "apply_auto_stop_addition: stopping at '%s' (+%.1fmin) — would "
@@ -527,6 +603,52 @@ def apply_auto_stop_addition(
         time.monotonic() - final_reroute_start,
     )
     return final_stop_ids, final_routed_legs
+
+
+def suggest_auto_stops(
+    stop_ids: list[str],
+    routed_legs: list[RoutedLeg],
+    composition: Composition,
+    tracks: TrackInfraCollection,
+    stop_infra: StopInfraCollection,
+    router: RailRouter,
+    routing_mode: str,
+) -> list[AutoStopSuggestion]:
+    """
+    Implements auto_stop_addition="suggest": same search + costing as mode
+    "add" (find_and_cost_auto_stop_candidates), but nothing is added and
+    nothing is rerouted — the route stays exactly the caller's own stop
+    list ("off" behaviour) and every costed candidate is returned as an
+    AutoStopSuggestion instead, in geographic order along the route
+    (leg_index, then fraction along that leg).
+
+    The AUTO_STOP_MAX_DETOUR_PER budget is deliberately NOT applied here:
+    "suggest" is informational — the full costed candidate list with each
+    stop's added_time_min lets the caller make their own selection, budget
+    or no budget. Candidates whose mini-reroute failed are excluded, as in
+    mode "add".
+    """
+    costed_candidates = find_and_cost_auto_stop_candidates(
+        stop_ids, routed_legs, composition, tracks, stop_infra, router, routing_mode
+    )
+    costed_candidates.sort(
+        key=lambda pair: (pair[0].leg_index, pair[0].along_leg_fraction)
+    )
+    suggestions = []
+    for candidate, added_time_min in costed_candidates:
+        stop = stop_infra.get(candidate.stop_id)
+        suggestions.append(
+            AutoStopSuggestion(
+                stop_id=stop.stop_id,
+                stop_name=stop.stop_name,
+                country_code=stop.stop_country_code,
+                lat=stop.lat,
+                lon=stop.lon,
+                added_time_min=round(added_time_min, 1),
+            )
+        )
+    logger.info("suggest_auto_stops: %d suggestion(s).", len(suggestions))
+    return suggestions
 
 
 # =============================================================================
