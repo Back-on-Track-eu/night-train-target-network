@@ -22,7 +22,7 @@ FEEDBACK_URL = "/api/feedback"
 FEEDBACK_CATEGORIES_URL = "/api/feedback/categories"
 SCENARIOS_URL = "/api/scenarios"
 
-# Mirrors models/route/route.py: DAYS_PER_OPERATING_WEEK / WEEKS_PER_SEASON.
+# Mirrors models/route/version.py: DAYS_PER_OPERATING_WEEK / WEEKS_PER_SEASON.
 _DAYS_PER_WEEK = {"daily": 7, "three_per_week": 3}
 _WEEKS_PER_SEASON = 26
 

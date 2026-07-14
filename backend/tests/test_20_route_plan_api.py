@@ -10,6 +10,17 @@ plain list of stop IDs (boarding/alighting and departure time are derived —
 see timetable_mode), and returns NO monetary values — those belong to
 POST /api/evaluation/calc.
 
+auto_stop_addition is a three-value string enum since route builder 0.9.5
+("off" / "add" / "suggest", default "add") — booleans are rejected with 400.
+Every mode has its own test case below. The seed catalog deliberately
+contains CZ_BRNO_HLN, which sits ~10m off the natural Berlin-Dresden-Wien
+corridor (Dresden-Praha-Brno-Wien) and comfortably fits the detour budget —
+so the actual insertion/auto_added/suggestion paths are all pinned end to
+end, not just the "no candidates found" outcome. The module fixtures
+therefore pin auto_stop_addition explicitly: plan_response uses "off"
+(deterministic caller's-list route for the structural tests), and
+plan_response_default_add omits the field to cover the "add" default.
+
 Exact departure_time_min values are never asserted here — they're a function
 of live OpenRailRouting output. What IS asserted is the contract automatic
 scheduling makes: first stop boarding, last stop alighting, a real time
@@ -25,14 +36,41 @@ from tests.helpers import ROUTE_URL, all_trips, stop_times
 BASE_REQUEST = {
     "stops": STOPS_BERLIN_DRESDEN_WIEN,
     "composition_id": "STD-7.1",
+    # Pinned off so the structural tests below see a deterministic
+    # caller's-list route — CZ_BRNO_HLN would otherwise be auto-added
+    # (see module docstring); the add/suggest paths have their own
+    # fixture/requests in TestModeSwitches.
+    "auto_stop_addition": "off",
 }
+
+# The stop list the "add" default actually produces on this corridor:
+# CZ_BRNO_HLN merged in at its geographic position (between Dresden and
+# Wien), everything else the caller's own.
+STOPS_WITH_BRNO = [
+    "DE_BERLIN_HBF",
+    "DE_DRESDEN_HBF",
+    "CZ_BRNO_HLN",
+    "AT_WIEN_HBF",
+]
 
 
 @pytest.fixture(scope="module")
 def plan_response(api_base):
     """One full response body (route_builder_version + request echo + route)
-    for the standard 3-stop request — built once for this module."""
+    for the standard 3-stop request with auto_stop_addition="off" — built
+    once for this module."""
     resp = requests.post(f"{api_base}{ROUTE_URL}", json=BASE_REQUEST, timeout=90)
+    assert resp.status_code == 200, f"Route build failed: {resp.text[:300]}"
+    return resp.json()
+
+
+@pytest.fixture(scope="module")
+def plan_response_default_add(api_base):
+    """Same request with auto_stop_addition omitted entirely — covers the
+    "add" default, which inserts CZ_BRNO_HLN on this corridor. Built once
+    for this module."""
+    body = {k: v for k, v in BASE_REQUEST.items() if k != "auto_stop_addition"}
+    resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=90)
     assert resp.status_code == 200, f"Route build failed: {resp.text[:300]}"
     return resp.json()
 
@@ -45,7 +83,9 @@ def plan_response(api_base):
 class TestResponseStructure:
 
     def test_top_level_keys(self, plan_response):
-        """Response carries exactly route_builder_version, request, route."""
+        """Response carries exactly route_builder_version, request, route —
+        no suggested_stops outside auto_stop_addition='suggest' (that mode
+        has its own envelope test in TestModeSwitches)."""
         assert set(plan_response) == {"route_builder_version", "request", "route"}
 
     def test_request_echoed_verbatim(self, plan_response):
@@ -99,6 +139,7 @@ class TestResponseStructure:
             "geometry_id",
             "distance_m",
             "driving_time_min",
+            "dynamics_time_min",
             "buffer_time_min",
             "energy_kwh",
             "country_distance_shares",
@@ -153,10 +194,25 @@ class TestResponseStructure:
         assert sum(comp["places_by_class"].values()) > 0
         assert len(comp["density_by_class"]) > 0
 
-    def test_od_pairs_empty_on_fresh_plan(self, plan_response):
-        """A freshly planned route carries no demand — od_pairs is []."""
+    def test_od_pairs_populated_by_stopgap_demand(self, plan_response):
+        """plan_route() itself leaves od_pairs empty, but the endpoint then
+        runs the stopgap demand distribution (see api/route.py and
+        OPEN_TODOS["demand_model"] in models/route/version.py) so that
+        evaluation returns non-zero revenue — od_pairs comes back populated
+        with directional pairs for BOTH trips of the pair. Only structural
+        properties are pinned here; the distribution itself is a stopgap."""
         for pair in plan_response["route"]["trip_pairs"]:
-            assert pair["od_pairs"] == []
+            od_pairs = pair["od_pairs"]
+            assert od_pairs != []
+            trip_ids = {
+                pair["outbound"]["trip_id"],
+                pair["return_trip"]["trip_id"],
+            }
+            assert {od["trip_id"] for od in od_pairs} == trip_ids
+            for od in od_pairs:
+                assert od["origin_stop_id"] != od["destination_stop_id"]
+                assert od["class_main"]
+                assert od["places_sold"] >= 0
 
     def test_track_infrastructure_present_and_shaped(self, plan_response):
         """route['track_infrastructure'] lists each touched country with the
@@ -172,6 +228,38 @@ class TestResponseStructure:
                 "buffer_quota_per",
             } <= set(entry)
             assert isinstance(entry["defaulted_fields"], list)
+
+    def test_general_parameters_shaped_and_consistent(self, plan_response):
+        """Each trip carries a general_parameters section (trip_km,
+        route_duration_min, average_speed_kmh), sitting between direction
+        and segments, with figures internally consistent with each other
+        and with the trip's own segments."""
+        for trip in all_trips(plan_response["route"]):
+            keys = list(trip)
+            assert (
+                keys.index("direction")
+                < keys.index("general_parameters")
+                < keys.index("segments")
+            )
+
+            stats = trip["general_parameters"]
+            assert set(stats) == {
+                "trip_km",
+                "route_duration_min",
+                "average_speed_kmh",
+            }
+            assert stats["trip_km"] > 0
+            assert stats["route_duration_min"] > 0
+            assert stats["average_speed_kmh"] > 0
+
+            # trip_km matches the sum of the trip's own segment distances
+            expected_km = sum(s["distance_m"] for s in trip["segments"]) / 1000
+            assert stats["trip_km"] == pytest.approx(expected_km, abs=0.05)
+
+            # average_speed_kmh is internally derived from trip_km and
+            # route_duration_min (elapsed time), not recomputed independently
+            expected_speed = stats["trip_km"] / (stats["route_duration_min"] / 60)
+            assert stats["average_speed_kmh"] == pytest.approx(expected_speed, abs=0.05)
 
 
 # =============================================================================
@@ -240,7 +328,7 @@ class TestModeSwitches:
             "routing_mode": "fullRouting",
             "timetable_mode": "simpleAutomatic",
             "schedule_mode": "alwaysDaily",
-            "auto_stop_addition": True,
+            "auto_stop_addition": "add",
         }
         resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=90)
         assert resp.status_code == 200
@@ -254,7 +342,8 @@ class TestModeSwitches:
         assert len(resp.json()["route"]["trip_pairs"]) == 1
 
     @pytest.mark.parametrize(
-        "field", ["routing_mode", "timetable_mode", "schedule_mode"]
+        "field",
+        ["routing_mode", "timetable_mode", "schedule_mode", "auto_stop_addition"],
     )
     def test_invalid_mode_returns_400(self, api_base, field):
         """An unknown value for any mode switch is rejected at validation."""
@@ -262,53 +351,125 @@ class TestModeSwitches:
         resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=10)
         assert resp.status_code == 400
 
-    def test_auto_stop_addition_default_true_with_no_nearby_candidates_is_noop(
-        self, plan_response
-    ):
-        """auto_stop_addition defaults to true and is implemented (see
-        models/route/timetable.py), but the seed catalog only has 8 stops
-        total and every one besides this request's own is far from the
-        Berlin-Dresden-Wien corridor — none falls within AUTO_STOP_BUFFER_M
-        of the routed path. So the module fixture's stop list (built with
-        no auto_stop_addition field at all, i.e. the true default) still
-        comes back unchanged — a real 'no candidates found' outcome, not a
-        skipped/disabled one. This can't tell 'no candidates existed' apart
-        from 'a real candidate was found and correctly rejected' — see
-        tests/README.md's Suggested seed-data additions for what closing
-        that gap needs.
-        """
-        outbound = plan_response["route"]["trip_pairs"][0]["outbound"]
-        assert [s["stop_id"] for s in stop_times(outbound)] == STOPS_BERLIN_DRESDEN_WIEN
+    # --- auto_stop_addition — one case per enum value + bool rejection ------
 
-    def test_auto_stop_addition_false_returns_exact_caller_list(self, api_base):
-        """Explicit opt-out: auto_stop_addition=false skips the algorithm
-        entirely and returns exactly the caller's own stop list."""
-        body = {**BASE_REQUEST, "auto_stop_addition": False}
+    def test_auto_stop_addition_defaults_to_add_and_inserts_brno(
+        self, plan_response_default_add
+    ):
+        """With auto_stop_addition omitted (the 'add' default), CZ_BRNO_HLN
+        — ~10m off the routed corridor, comfortably within the detour
+        budget — is inserted at its geographic position between Dresden and
+        Wien, marked auto_added=true, everything else the caller's own.
+        The return trip carries the same final stop list reversed with the
+        same auto_added marking (the search runs once, from outbound — see
+        _build_trip_pair() in route_factory.py)."""
+        pair = plan_response_default_add["route"]["trip_pairs"][0]
+        assert "suggested_stops" not in plan_response_default_add
+
+        outbound = stop_times(pair["outbound"])
+        assert [s["stop_id"] for s in outbound] == STOPS_WITH_BRNO
+        assert [s["auto_added"] for s in outbound] == [False, False, True, False]
+
+        return_stops = stop_times(pair["return_trip"])
+        assert [s["stop_id"] for s in return_stops] == list(reversed(STOPS_WITH_BRNO))
+        assert [s["auto_added"] for s in return_stops] == [
+            False,
+            True,
+            False,
+            False,
+        ]
+
+    def test_auto_stop_addition_add_explicit_accepted(self, api_base):
+        """Explicit 'add' (the default spelled out) behaves identically to
+        the omitted field — Brno inserted — and does not carry a
+        suggested_stops section (that's exclusive to 'suggest')."""
+        body = {**BASE_REQUEST, "auto_stop_addition": "add"}
         resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=90)
         assert resp.status_code == 200
+        assert "suggested_stops" not in resp.json()
+        outbound = resp.json()["route"]["trip_pairs"][0]["outbound"]
+        assert [s["stop_id"] for s in stop_times(outbound)] == STOPS_WITH_BRNO
+
+    def test_auto_stop_addition_off_returns_exact_caller_list(self, api_base):
+        """Explicit opt-out: auto_stop_addition='off' skips the candidate
+        search entirely and returns exactly the caller's own stop list,
+        with no suggested_stops section."""
+        body = {**BASE_REQUEST, "auto_stop_addition": "off"}
+        resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=90)
+        assert resp.status_code == 200
+        assert "suggested_stops" not in resp.json()
         outbound = resp.json()["route"]["trip_pairs"][0]["outbound"]
         assert [s["stop_id"] for s in stop_times(outbound)] == STOPS_BERLIN_DRESDEN_WIEN
 
-    def test_auto_added_field_present_and_false_with_default_request(
-        self, plan_response
+    def test_auto_stop_addition_suggest_returns_suggested_stops_section(
+        self, api_base, plan_response_default_add
     ):
-        """Every Stop carries auto_added, false for every stop on the module
-        fixture's default request (auto_stop_addition omitted → true, but no
-        candidates exist near this corridor in the seed catalog — see the
-        noop test above)."""
+        """auto_stop_addition='suggest' routes exactly like 'off' (caller's
+        own stop list, nothing added, auto_added false throughout) but
+        carries a top-level suggested_stops list placed between request and
+        route. On this corridor it contains exactly CZ_BRNO_HLN, with a
+        positive added_time_min — and cross-mode consistency holds: the
+        suggested stop ids equal the ids the 'add' default actually
+        inserted (all candidates fit the budget here)."""
+        body = {**BASE_REQUEST, "auto_stop_addition": "suggest"}
+        resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=90)
+        assert resp.status_code == 200
+        payload = resp.json()
+
+        assert set(payload) == {
+            "route_builder_version",
+            "request",
+            "suggested_stops",
+            "route",
+        }
+        keys = list(payload)
+        assert (
+            keys.index("request") < keys.index("suggested_stops") < keys.index("route")
+        )
+
+        suggested = payload["suggested_stops"]
+        assert [s["stop_id"] for s in suggested] == ["CZ_BRNO_HLN"]
+        for s in suggested:
+            assert set(s) == {
+                "stop_id",
+                "stop_name",
+                "country_code",
+                "lat",
+                "lon",
+                "added_time_min",
+            }
+            assert s["added_time_min"] > 0
+
+        # Route itself is exactly the caller's own list — nothing added.
+        outbound = payload["route"]["trip_pairs"][0]["outbound"]
+        assert [s["stop_id"] for s in stop_times(outbound)] == STOPS_BERLIN_DRESDEN_WIEN
+        for stop in stop_times(outbound):
+            assert stop["auto_added"] is False
+
+        # Cross-mode consistency with the 'add' default.
+        added = {
+            s["stop_id"]
+            for s in stop_times(
+                plan_response_default_add["route"]["trip_pairs"][0]["outbound"]
+            )
+            if s["auto_added"]
+        }
+        assert {s["stop_id"] for s in suggested} == added
+
+    def test_auto_added_field_false_throughout_when_off(self, plan_response):
+        """With auto_stop_addition='off' (the module fixture), every stop is
+        the caller's own — auto_added is present and false throughout."""
         outbound = plan_response["route"]["trip_pairs"][0]["outbound"]
         for stop in stop_times(outbound):
             assert stop["auto_added"] is False
 
-    def test_auto_added_field_false_when_disabled(self, api_base):
-        """With auto_stop_addition explicitly false, every stop is the
-        caller's own — auto_added is false throughout."""
-        body = {**BASE_REQUEST, "auto_stop_addition": False}
-        resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=90)
-        assert resp.status_code == 200
-        outbound = resp.json()["route"]["trip_pairs"][0]["outbound"]
-        for stop in stop_times(outbound):
-            assert stop["auto_added"] is False
+    @pytest.mark.parametrize("legacy_bool", [True, False])
+    def test_auto_stop_addition_bool_returns_400(self, api_base, legacy_bool):
+        """Pre-0.9.5 booleans are rejected, not silently mapped to
+        'add'/'off' — the request contract is the string enum only."""
+        body = {**BASE_REQUEST, "auto_stop_addition": legacy_bool}
+        resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=10)
+        assert resp.status_code == 400
 
     def test_auto_stop_addition_wrong_type_returns_400(self, api_base):
         body = {**BASE_REQUEST, "auto_stop_addition": "yes"}

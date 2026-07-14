@@ -175,6 +175,13 @@ def hsr_scenario(db_cur):
 # =============================================================================
 
 
+# All fixtures pin auto_stop_addition="off": these are fixed-corridor
+# physics fixtures whose stop lists downstream tests (test_21 content
+# math, test_50 GTFS decomposition) rely on being exactly as requested —
+# the seeded CZ_BRNO_HLN would otherwise be auto-added to any corridor
+# passing through Brno. The add/suggest behaviour has its own dedicated
+# tests in test_20's TestModeSwitches.
+#
 # proposal_id range convention (avoids collisions between real saved data
 # and test fixtures across the whole suite):
 #   1-99     seed_example_proposal() in db/dev/seed.py (currently just id=1)
@@ -189,6 +196,7 @@ def route_berlin_wien(api_base):
         DEFAULT_COMPOSITION,
         proposal_id=101,
         proposal_version=1,
+        auto_stop_addition="off",
     )
 
 
@@ -201,6 +209,7 @@ def route_berlin_dresden_wien(api_base):
         DEFAULT_COMPOSITION,
         proposal_id=102,
         proposal_version=1,
+        auto_stop_addition="off",
     )
 
 
@@ -213,6 +222,7 @@ def route_berlin_zuerich_wien(api_base):
         DEFAULT_COMPOSITION,
         proposal_id=103,
         proposal_version=1,
+        auto_stop_addition="off",
     )
 
 
@@ -233,6 +243,7 @@ def route_copenhagen_stockholm(api_base):
         "composition_id": DEFAULT_COMPOSITION,
         "proposal_id": 104,
         "proposal_version": 1,
+        "auto_stop_addition": "off",
     }
     resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=90)
     if resp.status_code != 200:
