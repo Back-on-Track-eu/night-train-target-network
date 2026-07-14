@@ -164,7 +164,7 @@ all modes defaulted.
 | `TestResponseStructure::test_outbound_stop_order_matches_request` | Stop order | outbound trip | exactly the requested stop list |
 | `TestResponseStructure::test_return_trip_stops_reversed` | Return mirroring | return trip | reversed outbound stop list |
 | `TestResponseStructure::test_segment_count_equals_stops_minus_one` | Segmentation | every trip | N stops → N−1 segments |
-| `TestResponseStructure::test_segments_carry_physics_fields` | Segment shape | every segment | distance/time/buffer/energy/shares present; distance > 0 |
+| `TestResponseStructure::test_segments_carry_physics_fields` | Segment shape | every segment | distance/time/buffer/slack/energy/shares present; distance > 0; slack 0 outside fixed-night |
 | `TestResponseStructure::test_no_monetary_values_anywhere` | Physics-only contract | whole route dict (recursive) | no `*eur*`/`*cost*` keys anywhere |
 | `TestResponseStructure::test_geometries_and_segments_reference_each_other` | geometry_id integrity | geometries + segments | unique ids, non-empty coords, every reference resolves |
 | `TestResponseStructure::test_composition_embedded_without_cost_fields` | Physics subset of composition | embedded composition | no cost fields; capacity/density present |
@@ -172,9 +172,15 @@ all modes defaulted.
 | `TestResponseStructure::test_track_infrastructure_present_and_shaped` | Track infra info block | route dict | per-country entries with defaulted_fields list |
 | `TestAutomaticScheduling::test_departure_time_assigned` | Scheduling contract | every trip | departure set, 0 ≤ t < 48 h |
 | `TestAutomaticScheduling::test_terminal_stop_types` | Terminal classification | every trip | first=boarding/no arrival; last=alighting/no departure |
-| `TestAutomaticScheduling::test_intermediate_stops_boarding_or_alighting` | Mirror classification (never "both") | intermediate stops | boarding or alighting, both times set |
+| `TestAutomaticScheduling::test_intermediate_stops_classified_three_way` | Threshold classification (never "both") | intermediate stops | boarding, night, or alighting; both times set |
 | `TestAutomaticScheduling::test_stop_times_monotonically_increasing` | Time ordering | every trip | arrivals strictly sorted |
 | `TestAutomaticScheduling::test_schedule_is_daily_both_seasons` | schedule_mode default | route schedule | summer+winter, both `daily` |
+| `TestFixedNightMode::test_interval_covers_night_window_both_directions` | Night-window guarantee, interval reversed for return | fixed-night, Berlin→Dresden interval | dep(A) < 00:00, arr(B) ≥ 05:00, both directions |
+| `TestFixedNightMode::test_short_interval_is_stretched_with_slack` | Slack distribution + time consistency | ~2h interval (must stretch) | slack only on interval legs, total > 0; per-segment elapsed = driving+dynamics+buffer+slack |
+| `TestFixedNightMode::test_slow_stretch_produces_timetable_warning` | Slow-section detection | ~2h interval (must stretch) | exactly one `fixed_night_stretch_slow` warning per trip, full field set, ratio < 1 |
+| `TestFixedNightMode::test_long_interval_gets_no_slack_or_warning` | No-stretch path | Berlin→Wien interval (~7h) | window satisfied, all slack 0, no warnings |
+| `TestFixedNightMode::test_invalid_interval_returns_400` (×6) | Interval validation | missing / 1 stop / duplicate / non-string / not in stops / wrong order | 400 each |
+| `TestFixedNightMode::test_interval_rejected_outside_fixed_night_mode` | Mode coupling | interval with `simpleAutomatic` | 400, not silently ignored |
 | `TestModeSwitches::test_explicit_default_values_accepted` | Explicit defaults valid | all modes spelled out | 200 |
 | `TestModeSwitches::test_simple_routing_mode_accepted` | Alternative routing mode | `routing_mode=simpleRouting` | 200, full route |
 | `TestModeSwitches::test_invalid_mode_returns_400` (×4) | Mode validation | bad routing/timetable/schedule/auto_stop_addition mode | 400 each |

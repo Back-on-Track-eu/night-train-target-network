@@ -583,6 +583,7 @@ layer of candidate stops tagged with `added_time_min`.
 | `composition_id` | string | ✓ | From `/api/params/compositions` |
 | `routing_mode` | string | — | Default `"fullRouting"` — see **Mode switches** below |
 | `timetable_mode` | string | — | Default `"simpleAutomatic"` — see **Mode switches** below |
+| `fixed_night_interval` | array of string | (✓) | Exactly 2 distinct stop IDs from `stops`, start before end in outbound travel order — required for, and only allowed with, `timetable_mode="simpleAutomaticWithFixedNight"` (400 otherwise). May span several legs; applied reversed to the return trip automatically |
 | `schedule_mode` | string | — | Default `"alwaysDaily"` — see **Mode switches** below |
 | `auto_stop_addition` | string | — | `"off"` / `"add"` / `"suggest"`, default `"add"` — see **Mode switches** below. String enum since route builder 0.9.5; booleans are rejected with 400 |
 
@@ -610,11 +611,12 @@ layer of candidate stops tagged with `added_time_min`.
 | `"fullRouting"` (default) | Speed capped at the composition's `max_speed_kmh` everywhere, plus HSR avoidance: track segments whose *permitted* track speed exceeds `HSR_TRACK_SPEED_THRESHOLD_KMH` (strictly above 230 km/h — i.e. dedicated new-build high-speed lines only, upgraded conventional lines up to 230 stay usable; see `models/route/version.py`) are heavily penalized in every country where HSR is not allowed — allowed only when BOTH the composition's `hsr_allowed` AND that country's track-infrastructure `hsr_allowed` are true, evaluated for every country incl. transited-without-stop ones. Conventional lines are never penalized. Every leg additionally carries a per-stop traction-dynamics surcharge — the accel/brake time loss computed from composition weight plus an assumed standard locomotive against the link speeds before/after each stop (see `TRACTION_*` in `models/route/version.py`) — in its own `dynamics_time_min` field, kept separate from the raw router `driving_time_min`; `buffer_time_min` carries the country quota applied to driving and to dynamics (physics first, buffer after). Two-pass routing (snap pass, then custom-model pass) when a custom model applies. |
 | `"simpleRouting"` | Bypasses all of that — single-pass, no speed cap, no HSR avoidance, no traction dynamics. Cheap and fast, but not representative of real physics. Intended for quick manual sanity checks only. |
 
-`timetable_mode` — controls how departure time and boarding/alighting are derived:
+`timetable_mode` — controls how departure time and per-stop classification are derived. Classification is the same three-way rule for every mode (route builder 0.9.10, thresholds `NIGHT_START_MIN`/`NIGHT_END_MIN` in `models/route/version.py`): a stop **departing strictly before 00:00** is `boarding`, one **arriving at/after 05:00** is `alighting`, anything between is a `night` stop (operationally identical to `both` for dwell, but excluded from demand OD pairs). First stop is always boarding and last always alighting regardless of clock time — termini by position, not by the threshold rule. Outbound and return are scheduled independently, so their times can differ (e.g. asymmetric HSR avoidance changes duration).
 
 | Value | Description |
 |---|---|
-| `"simpleAutomatic"` (default, only value) | Routes once, then mirrors the resulting trip duration around a fixed 02:30 constant to get the departure time: everything before 02:30 is a boarding stop, everything at/after is alighting. First stop is always boarding and last is always alighting regardless of clock time — they're termini by position, not by the mirror rule. Outbound and return are scheduled independently, so their departure times can differ (e.g. asymmetric HSR avoidance changes duration). |
+| `"simpleAutomatic"` (default) | Routes once, then mirrors the resulting trip duration around a fixed 02:30 constant (`MIRROR_MIN`) to get the departure time. |
+| `"simpleAutomaticWithFixedNight"` | Requires `fixed_night_interval` `[A, B]`. Instead of the whole trip, the **interval's** midpoint (departure at `A` → arrival at `B`) is centered on 02:30 — so demand-strong feeder sections outside the interval keep sensible evening/morning clock times (e.g. Munich–Berlin–Hamburg as an evening feeder into a Hamburg–Copenhagen night section). Hard constraints: the interval must depart `A` by 23:59 and arrive at `B` at 05:00 or later. A naturally shorter interval (< 5h01) is stretched to exactly that window by distributing `slack_time_min` across the interval's segments proportionally to leg time (pinning dep 23:59 / arr 05:00 in the minimal-stretch case — minimal stretch wins over exact midpoint symmetry). If stretching drops the interval's timetable speed below `FIXED_NIGHT_MIN_SPEED_RATIO` (0.7) of its routing speed, the trip carries a `fixed_night_stretch_slow` entry in `general_parameters.timetable_warnings` — a warning, never an error. The return trip applies the interval reversed automatically. |
 
 `schedule_mode` — controls the route's seasonal operating frequency:
 
@@ -666,13 +668,13 @@ stop list.
         "outbound": {
           "trip_id": "P..._D0_T1",
           "direction": 0,
-          "general_parameters": { "trip_km": 353.2, "route_duration_min": 267, "average_speed_kmh": 79.4 },
+          "general_parameters": { "trip_km": 353.2, "route_duration_min": 267, "average_speed_kmh": 79.4, "timetable_warnings": [] },
           "segments": [ "...Segment, see below..." ]
         },
         "return_trip": {
           "trip_id": "P..._D1_T1",
           "direction": 1,
-          "general_parameters": { "trip_km": 353.2, "route_duration_min": 271, "average_speed_kmh": 78.2 },
+          "general_parameters": { "trip_km": 353.2, "route_duration_min": 271, "average_speed_kmh": 78.2, "timetable_warnings": [] },
           "segments": [ "..." ]
         }
       }
@@ -710,16 +712,18 @@ the route:
 | `stop_id`, `stop_name`, `country_code`, `lat`, `lon` | | Identity/location of the candidate stop |
 | `added_time_min` | float | Full trip-time increase (detour + dwell) this stop would cost if implemented — the same figure `"add"` mode budgets against, 1 decimal |
 
-**`outbound`/`return_trip`.`general_parameters`** — three headline physics
+**`outbound`/`return_trip`.`general_parameters`** — headline physics
 stats for that trip, for quick manual reading rather than deriving them from
 `segments[]` yourself (emitted as `stats` by mistake in 0.9.4 code, fixed to
-the documented `general_parameters` key in 0.9.5):
+the documented `general_parameters` key in 0.9.5), plus derived timetable
+quality warnings (0.9.10):
 
 | Field | Type | Description |
 |---|---|---|
 | `trip_km` | float | Total trip distance for that direction, km (`distance_m` summed across segments, /1000, 1 decimal) |
-| `route_duration_min` | int | Full elapsed time, departure → arrival — driving + dynamics + buffer + dwell at intermediate stops (`Trip.total_time_min`) |
+| `route_duration_min` | int | Full elapsed time, departure → arrival — driving + dynamics + buffer + slack + dwell at intermediate stops (`Trip.total_time_min`) |
 | `average_speed_kmh` | float | `trip_km` ÷ (`route_duration_min` / 60), 1 decimal. Uses elapsed time, not pure driving time — a different, unimplemented formula (`avg_speed` in `ROUTE_FORMULAS`) uses driving time only |
+| `timetable_warnings` | array | Derived timetable quality annotations — `[]` for most trips. Currently only `fixed_night_stretch_slow` (fixed-night mode, interval stretched too slow): `{code, interval: [start_id, end_id], timetable_speed_kmh, routing_speed_kmh, ratio}` with `ratio` = timetable ÷ routing speed, below `FIXED_NIGHT_MIN_SPEED_RATIO` |
 
 **`route.trip_pairs[].composition`** — physics-relevant subset of the composition
 used, not the full object (cost fields like `driver_costs_eur_h` are deliberately
@@ -741,7 +745,8 @@ excluded — see [Evaluation](#evaluation) for those):
 | `from_stop`, `to_stop` | object | `Stop`, see below |
 | `geometry_id` | string | References an entry in `route.geometries` — see below |
 | `distance_m` | int | Leg distance |
-| `driving_time_min`, `dynamics_time_min`, `buffer_time_min` | int | Leg duration components: raw router time (constant-cruise passage), per-stop accel/brake time loss (traction dynamics), and schedule buffer — the country quota applied to driving and to dynamics (the dynamics cruise speed is always derived from raw driving time first, buffer never feeds the physics). Total leg time = the sum of all three |
+| `driving_time_min`, `dynamics_time_min`, `buffer_time_min` | int | Leg duration components: raw router time (constant-cruise passage), per-stop accel/brake time loss (traction dynamics), and schedule buffer — the country quota applied to driving and to dynamics (the dynamics cruise speed is always derived from raw driving time first, buffer never feeds the physics) |
+| `slack_time_min` | int | Deliberate schedule padding beyond routing physics — non-zero only on legs inside a stretched fixed-night interval (see `timetable_mode`). Total leg time = driving + dynamics + buffer + slack, and stop-to-stop elapsed times always match that sum |
 | `energy_kwh` | float | Currently a flat 28.0 kWh/km dummy factor — not calibrated yet |
 | `country_distance_shares`, `country_time_shares` | object | `{country_code: share}`, each sums to 1.0. Includes transit-only countries the leg crosses without stopping |
 
@@ -750,7 +755,7 @@ excluded — see [Evaluation](#evaluation) for those):
 | Field | Type | Description |
 |---|---|---|
 | `stop_id`, `stop_name`, `country_code`, `lat`, `lon` | | Identity/location |
-| `stop_type` | string | `"boarding"`, `"alighting"`, or `"both"` — see `timetable_mode` above |
+| `stop_type` | string | `"boarding"`, `"night"`, `"alighting"`, or `"both"` — see `timetable_mode` above. `night` (0.9.10): departs at/after 00:00 and arrives before 05:00; dwells like `both`, excluded from demand OD pairs |
 | `arrival_time_min` | int or null | `null` only at the first stop of a trip |
 | `departure_time_min` | int or null | `null` only at the last stop of a trip |
 | `auto_added` | bool | `true` if `auto_stop_addition` inserted this stop — always `false` for stops the caller supplied directly |

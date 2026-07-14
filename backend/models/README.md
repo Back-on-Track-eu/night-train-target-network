@@ -71,11 +71,18 @@ plan_route(trip_pair_inputs, loader, router, schedule_mode, proposal_id, proposa
   ├── _check_country_coverage(routed_legs, tracks)                 → raises ValueError if any
   │     transited country has no row at all in input_params.track_infrastructures
   │     (defaulted fields on an existing row are fine)
-  ├── timetable_mode SWITCH (here)     → timetable.simple_automatic_timetable(...) (only
-  │     mode today) → stop_inputs, departure_time_min
+  ├── timetable_mode SWITCH (here)     → timetable.simple_automatic_timetable(...)
+  │     ("simpleAutomatic") or timetable.simple_automatic_fixed_night_timetable(...)
+  │     ("simpleAutomaticWithFixedNight", per-leg slack for a stretched night
+  │     interval) → stop_inputs, departure_time_min[, slack_per_leg];
+  │     both classify stops boarding/night/alighting via the shared
+  │     NIGHT_START_MIN/NIGHT_END_MIN rule (version.py)
   ├── calc_energy_consumption(legs, composition)                   → enriches RoutedLeg.energy_kwh
   ├── timetable.build_final_timetable()                            → exact per-stop arrival/departure
   ├── _build_trip_stops_and_legs(...)                              → list[Segment]
+  │     (slack_per_leg stamped onto Segment.slack_time_min, fixed-night only)
+  ├── timetable.fixed_night_speed_warning(segments, interval)      → TimetableWarning | None
+  │     (fixed-night only — interval stretched too slow? informational)
   ├── Trip._create(...)                                            → Trip (outbound)
   │
   │  return direction (_build_trip(), reusing outbound's decision):
