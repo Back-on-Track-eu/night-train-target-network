@@ -3,13 +3,12 @@
   "proposal_version": null,
   "scenario_id": null,
   "stops": [
-    "DE_BERLIN_HBF",
-    "DE_DRESDEN_HBF",
-    "AT_WIEN_HBF"
+    "SE_STOCKHOLM_C",
+    "IT_ROMA_TERMINI"
   ],
   "composition_id": "STD-7.1",
   "routing_mode": "fullRouting",
   "timetable_mode": "simpleAutomatic",
   "schedule_mode": "alwaysDaily",
-  "auto_stop_addition": "add"
+  "auto_stop_addition": "suggest"
 }

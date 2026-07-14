@@ -546,7 +546,21 @@ _TRACK_INFRA_DEFAULT_2032 = {
     "track_terrain_score": 1.0,
     "track_min_boarding_time": "00:02:00",
     "track_min_alighting_time": "00:02:00",
-    "track_buffer_quota_per": 0.10,
+    # Qualified assumption: schedule buffer quotas across European networks
+    # realistically sit at 30-50% of pure driving time (construction sites,
+    # mixed-traffic congestion, temporary speed restrictions, node dwell
+    # creep); 0.40 is the band's midpoint, used for every country without
+    # an explicit row. The per-country rows below differentiate within the
+    # band — see the comment on each.
+    # TODO: differentiate buffer_quota_per by TIME OF DAY — congestion is
+    # daypart-dependent (after ~05:00 the morning rush builds, while the
+    # night hours most night-train legs actually run in are far emptier),
+    # so a flat per-country quota over-pads genuine night legs and
+    # under-pads early-morning arrival legs. Needs a schema change
+    # (per-country time bands) plus route-model work to apply the quota
+    # per leg by clock time — see OPEN_TODOS["buffer_quota_time_of_day"]
+    # in models/route/version.py before starting.
+    "track_buffer_quota_per": 0.40,
 }
 
 # 2026 deprecated row — a handful of values manipulated downward (same
@@ -556,7 +570,7 @@ _TRACK_INFRA_DEFAULT_2032 = {
 _TRACK_INFRA_DEFAULT_2026_OVERRIDES = {
     "track_tac_eur_train_km": 4.20,
     "track_parking_eur_day": 60.00,
-    "track_buffer_quota_per": 0.08,
+    "track_buffer_quota_per": 0.35,
 }
 
 
@@ -592,7 +606,9 @@ _TRACK_INFRA_CANONICAL_ROWS = [
         "track_hsr_allowed": True,
         "track_min_boarding_time": "00:02:00",
         "track_min_alighting_time": "00:02:00",
-        "track_buffer_quota_per": 0.10,
+        # worst long-distance punctuality of the major networks, Generalsanierung
+        # construction backlog, dense mixed traffic
+        "track_buffer_quota_per": 0.50,
     },
     {
         "country_code": "AT",
@@ -606,7 +622,9 @@ _TRACK_INFRA_CANONICAL_ROWS = [
         "track_hsr_allowed": True,
         "track_min_boarding_time": "00:02:00",
         "track_min_alighting_time": "00:02:00",
-        "track_buffer_quota_per": 0.12,
+        # high ÖBB punctuality, well-maintained network; Alpine corridors and the Wien
+        # node keep it above the floor
+        "track_buffer_quota_per": 0.35,
     },
     {
         "country_code": "CH",
@@ -620,7 +638,8 @@ _TRACK_INFRA_CANONICAL_ROWS = [
         "track_hsr_allowed": True,
         "track_min_boarding_time": "00:03:00",
         "track_min_alighting_time": "00:03:00",
-        "track_buffer_quota_per": 0.15,
+        # best punctuality in Europe — dense but rigorously timetabled; band floor
+        "track_buffer_quota_per": 0.30,
     },
     {
         "country_code": "FR",
@@ -634,7 +653,9 @@ _TRACK_INFRA_CANONICAL_ROWS = [
         "track_hsr_allowed": True,
         "track_min_boarding_time": "00:02:00",
         "track_min_alighting_time": "00:02:00",
-        "track_buffer_quota_per": 0.10,
+        # moderate punctuality; maintenance backlog on the conventional (non-LGV)
+        # network night trains use
+        "track_buffer_quota_per": 0.40,
     },
     {
         "country_code": "BE",
@@ -648,7 +669,9 @@ _TRACK_INFRA_CANONICAL_ROWS = [
         "track_hsr_allowed": True,
         "track_min_boarding_time": "00:02:00",
         "track_min_alighting_time": "00:02:00",
-        "track_buffer_quota_per": 0.10,
+        # dense, congested network around the Brussels node, frequent engineering
+        # works
+        "track_buffer_quota_per": 0.45,
     },
     {
         "country_code": "DK",
@@ -662,7 +685,8 @@ _TRACK_INFRA_CANONICAL_ROWS = [
         "track_hsr_allowed": True,
         "track_min_boarding_time": "00:02:00",
         "track_min_alighting_time": "00:02:00",
-        "track_buffer_quota_per": 0.10,
+        # ERTMS/signalling programme disruptions, Storebælt corridor bottleneck
+        "track_buffer_quota_per": 0.40,
     },
     # SE has NULL tac and parking → will resolve from defaults (tests is_default=True)
     {
@@ -677,7 +701,8 @@ _TRACK_INFRA_CANONICAL_ROWS = [
         "track_hsr_allowed": True,
         "track_min_boarding_time": "00:02:00",
         "track_min_alighting_time": "00:02:00",
-        "track_buffer_quota_per": 0.10,
+        # long single-track stretches, freight mixing, winter operations
+        "track_buffer_quota_per": 0.40,
     },
     # Remaining EU27 members — every field None, resolved entirely from the
     # EU-average default (track_infrastructure_defaults). Real figures TBD;
@@ -989,7 +1014,7 @@ _TRACK_INFRA_V1_OVERRIDES = {
     "DE": {
         "track_tac_eur_train_km": 3.10,
         "track_parking_eur_day": 50.00,
-        "track_buffer_quota_per": 0.08,
+        "track_buffer_quota_per": 0.45,
     },
 }
 
@@ -2066,6 +2091,7 @@ def _example_trip(
                 "geometry_id": geometry_id,
                 "distance_m": distance_m,
                 "driving_time_min": driving_min,
+                "dynamics_time_min": 0,
                 "buffer_time_min": buffer_min,
                 "energy_kwh": energy_kwh,
                 "country_distance_shares": dist_shares,
@@ -2280,7 +2306,7 @@ def seed_example_proposal(cur, conn) -> None:
                 "routing_mode": "fullRouting",
                 "timetable_mode": "simpleAutomatic",
                 "schedule_mode": "alwaysDaily",
-                "auto_stop_addition": False,
+                "auto_stop_addition": "off",
             },
             "route": route,
         }

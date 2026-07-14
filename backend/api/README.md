@@ -557,10 +557,17 @@ How the route builder pipeline works internally (routing, timetabling,
 auto-stop addition, mode switches) is documented in
 [`../models/README.md`](../models/README.md).
 
-Worked example — Berlin – Dresden – Wien with `auto_stop_addition`
-enabled: request [`tc_1_route_input.json`](../scripts/data/tc_1_route_input.json),
+Worked example — Berlin – Dresden – Wien with `auto_stop_addition="add"`:
+request [`tc_1_route_input.json`](../scripts/data/tc_1_route_input.json),
 full response [`tc_1_route_input_output.json`](../scripts/data/tc_1_route_input_output.json)
-(produced by [`../scripts/test_route_plan.py`](../scripts/test_route_plan.py)).
+(produced by [`../scripts/test_route_plan.py`](../scripts/test_route_plan.py),
+which also writes a QGIS-ready `tc_1_route_input_lines.geojson` +
+`tc_1_route_input_stops.geojson` pair alongside it — stops carry
+`auto_added` so caller-supplied vs. auto-added stops can be styled
+differently). A `"suggest"`-mode request lives alongside it as
+[`tc_2_route_input_suggest.json`](../scripts/data/tc_2_route_input_suggest.json),
+which additionally produces a `tc_2_route_input_suggest_suggested_stops.geojson`
+layer of candidate stops tagged with `added_time_min`.
 
 <details>
 <summary>Request &amp; response details</summary>
@@ -577,7 +584,7 @@ full response [`tc_1_route_input_output.json`](../scripts/data/tc_1_route_input_
 | `routing_mode` | string | — | Default `"fullRouting"` — see **Mode switches** below |
 | `timetable_mode` | string | — | Default `"simpleAutomatic"` — see **Mode switches** below |
 | `schedule_mode` | string | — | Default `"alwaysDaily"` — see **Mode switches** below |
-| `auto_stop_addition` | bool | — | Default `true` — see **Mode switches** below |
+| `auto_stop_addition` | string | — | `"off"` / `"add"` / `"suggest"`, default `"add"` — see **Mode switches** below. String enum since route builder 0.9.5; booleans are rejected with 400 |
 
 **Example request**
 ```json
@@ -590,7 +597,7 @@ full response [`tc_1_route_input_output.json`](../scripts/data/tc_1_route_input_
   "routing_mode": "fullRouting",
   "timetable_mode": "simpleAutomatic",
   "schedule_mode": "alwaysDaily",
-  "auto_stop_addition": true
+  "auto_stop_addition": "add"
 }
 ```
 
@@ -600,8 +607,8 @@ full response [`tc_1_route_input_output.json`](../scripts/data/tc_1_route_input_
 
 | Value | Description |
 |---|---|
-| `"fullRouting"` (default) | HSR avoidance and speed cap derived automatically from the composition's `hsr_allowed`/`max_speed_kmh` and each transited country's `hsr_allowed` flag. Two-pass routing (snap pass, then custom-model pass) when avoidance actually applies. |
-| `"simpleRouting"` | Bypasses all of that — single-pass, no speed cap, no HSR avoidance. Cheap and fast, but not representative of real physics. Intended for quick manual sanity checks only. |
+| `"fullRouting"` (default) | Speed capped at the composition's `max_speed_kmh` everywhere, plus HSR avoidance: track segments whose *permitted* track speed exceeds `HSR_TRACK_SPEED_THRESHOLD_KMH` (strictly above 230 km/h — i.e. dedicated new-build high-speed lines only, upgraded conventional lines up to 230 stay usable; see `models/route/version.py`) are heavily penalized in every country where HSR is not allowed — allowed only when BOTH the composition's `hsr_allowed` AND that country's track-infrastructure `hsr_allowed` are true, evaluated for every country incl. transited-without-stop ones. Conventional lines are never penalized. Every leg additionally carries a per-stop traction-dynamics surcharge — the accel/brake time loss computed from composition weight plus an assumed standard locomotive against the link speeds before/after each stop (see `TRACTION_*` in `models/route/version.py`) — in its own `dynamics_time_min` field, kept separate from the raw router `driving_time_min`; `buffer_time_min` carries the country quota applied to driving and to dynamics (physics first, buffer after). Two-pass routing (snap pass, then custom-model pass) when a custom model applies. |
+| `"simpleRouting"` | Bypasses all of that — single-pass, no speed cap, no HSR avoidance, no traction dynamics. Cheap and fast, but not representative of real physics. Intended for quick manual sanity checks only. |
 
 `timetable_mode` — controls how departure time and boarding/alighting are derived:
 
@@ -619,15 +626,29 @@ full response [`tc_1_route_input_output.json`](../scripts/data/tc_1_route_input_
 
 | Value | Description |
 |---|---|
-| `true` (default) | Looks for stops from the full stop catalog that sit close to the routed path (on the line or nearby), and greedily adds any that fit within a fixed detour time budget — cheapest detour first, stopping at the first candidate that would exceed the budget. Added stops come back with `auto_added: true` on their `Stop` in the response (see below) so the frontend can render them differently. Buffer distance and max detour % are fixed constants in `models/route/timetable.py` (`AUTO_STOP_BUFFER_M`, `AUTO_STOP_MAX_DETOUR_PER`), not request fields. The search only runs once per `TripPair`, against the outbound direction — the return trip always adds the same stops (reversed), rather than running its own independent search against its own budget; each direction still gets its own real routed physics for the shared stop list. |
-| `false` | Returns exactly the caller's own stop list, unmodified. |
+| `"off"` | Returns exactly the caller's own stop list, unmodified — no candidate search at all. |
+| `"add"` (default) | Looks for stops from the full stop catalog that sit close to the routed path (on the line or nearby), and greedily adds any that fit within a fixed detour time budget — cheapest detour first, stopping at the first candidate that would exceed the budget. Added stops come back with `auto_added: true` on their `Stop` in the response (see below) so the frontend can render them differently. |
+| `"suggest"` | Routes exactly like `"off"` (nothing added, nothing rerouted), but runs the same candidate search + costing as `"add"` and returns every costed candidate in a top-level `suggested_stops` list, placed between `request` and `route` in the response (see **Response** below) — each with the `added_time_min` the stop would cost if implemented. The detour budget is deliberately **not** applied: suggestion is informational, selection is the caller's. Present even when empty (a real "searched, found nothing" answer). |
+
+For `"add"` and `"suggest"`: the candidate search prefilters the stop catalog
+to countries the routed legs actually pass through (attribution the router
+already computed), buffer distance and max detour % are fixed constants in
+`models/route/version.py` (`AUTO_STOP_BUFFER_M`, `AUTO_STOP_MAX_DETOUR_PER`),
+not request fields, and the search only runs once per `TripPair`, against the
+outbound direction — for `"add"` the return trip always adds the same stops
+(reversed), rather than running its own independent search against its own
+budget; each direction still gets its own real routed physics for the shared
+stop list.
 
 **Response**
 
 ```json
 {
-  "route_builder_version": "0.9.3",
+  "route_builder_version": "0.9.9",
   "request": { "...": "the request body above, echoed back unchanged" },
+  "suggested_stops": [
+    { "...": "ONLY for auto_stop_addition=\"suggest\" — see below; absent for \"off\"/\"add\"" }
+  ],
   "route": {
     "route_id": "P1573795219_V1_R1",
     "scenario_id": 1,
@@ -642,8 +663,18 @@ full response [`tc_1_route_input_output.json`](../scripts/data/tc_1_route_input_
         "composition_id": "STD-7.1",
         "composition": { "...": "physics-relevant Composition fields, see below" },
         "od_pairs": [],
-        "outbound": { "trip_id": "P..._D0_T1", "direction": 0, "segments": [ "...Segment, see below..." ] },
-        "return_trip": { "trip_id": "P..._D1_T1", "direction": 1, "segments": [ "..." ] }
+        "outbound": {
+          "trip_id": "P..._D0_T1",
+          "direction": 0,
+          "general_parameters": { "trip_km": 353.2, "route_duration_min": 267, "average_speed_kmh": 79.4 },
+          "segments": [ "...Segment, see below..." ]
+        },
+        "return_trip": {
+          "trip_id": "P..._D1_T1",
+          "direction": 1,
+          "general_parameters": { "trip_km": 353.2, "route_duration_min": 271, "average_speed_kmh": 78.2 },
+          "segments": [ "..." ]
+        }
       }
     ],
     "parkings": [
@@ -662,9 +693,33 @@ full response [`tc_1_route_input_output.json`](../scripts/data/tc_1_route_input_
 }
 ```
 
-`od_pairs` is always empty from this endpoint — demand is a separate step
-(`distribute_demand()`), not part of planning. `route_id`/`trip_id` follow
+`od_pairs` comes back populated: `plan_route()` itself leaves it empty
+(demand is not part of planning), but the endpoint then runs a stopgap
+demand distribution (`distribute_demand()`, flat utilization and per-km
+fares — see `OPEN_TODOS["demand_model"]` in `models/route/version.py`) so
+that a subsequent `POST /api/evaluation/calc` returns non-zero revenue. `route_id`/`trip_id` follow
 `P{proposal_id}_V{version}_R1[_D{direction}_T{pair_index}]`.
+
+**`suggested_stops[]`** — only present for `auto_stop_addition="suggest"`
+(even when empty), placed between `request` and `route`. Every costed
+candidate the search found near the routed path, in geographic order along
+the route:
+
+| Field | Type | Description |
+|---|---|---|
+| `stop_id`, `stop_name`, `country_code`, `lat`, `lon` | | Identity/location of the candidate stop |
+| `added_time_min` | float | Full trip-time increase (detour + dwell) this stop would cost if implemented — the same figure `"add"` mode budgets against, 1 decimal |
+
+**`outbound`/`return_trip`.`general_parameters`** — three headline physics
+stats for that trip, for quick manual reading rather than deriving them from
+`segments[]` yourself (emitted as `stats` by mistake in 0.9.4 code, fixed to
+the documented `general_parameters` key in 0.9.5):
+
+| Field | Type | Description |
+|---|---|---|
+| `trip_km` | float | Total trip distance for that direction, km (`distance_m` summed across segments, /1000, 1 decimal) |
+| `route_duration_min` | int | Full elapsed time, departure → arrival — driving + dynamics + buffer + dwell at intermediate stops (`Trip.total_time_min`) |
+| `average_speed_kmh` | float | `trip_km` ÷ (`route_duration_min` / 60), 1 decimal. Uses elapsed time, not pure driving time — a different, unimplemented formula (`avg_speed` in `ROUTE_FORMULAS`) uses driving time only |
 
 **`route.trip_pairs[].composition`** — physics-relevant subset of the composition
 used, not the full object (cost fields like `driver_costs_eur_h` are deliberately
@@ -686,7 +741,7 @@ excluded — see [Evaluation](#evaluation) for those):
 | `from_stop`, `to_stop` | object | `Stop`, see below |
 | `geometry_id` | string | References an entry in `route.geometries` — see below |
 | `distance_m` | int | Leg distance |
-| `driving_time_min`, `buffer_time_min` | int | Leg duration components |
+| `driving_time_min`, `dynamics_time_min`, `buffer_time_min` | int | Leg duration components: raw router time (constant-cruise passage), per-stop accel/brake time loss (traction dynamics), and schedule buffer — the country quota applied to driving and to dynamics (the dynamics cruise speed is always derived from raw driving time first, buffer never feeds the physics). Total leg time = the sum of all three |
 | `energy_kwh` | float | Currently a flat 28.0 kWh/km dummy factor — not calibrated yet |
 | `country_distance_shares`, `country_time_shares` | object | `{country_code: share}`, each sums to 1.0. Includes transit-only countries the leg crosses without stopping |
 

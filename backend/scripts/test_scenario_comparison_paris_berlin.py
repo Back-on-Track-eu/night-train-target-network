@@ -14,9 +14,10 @@ By default this compares the two *current* scenarios:
                                  track_hsr_allowed=True everywhere)
 
 track_hsr_allowed feeds directly into route PLANNING, not just cost —
-rail_router.py's HSR-avoidance pass is only skipped when both the
-composition and every transited country's track infra allow it (see
-rail_router.py: composition.hsr_allowed and tracks.get(cc).hsr_allowed).
+rail_router.py penalizes track segments whose permitted speed exceeds
+HSR_TRACK_SPEED_THRESHOLD_KMH (models/route/version.py) in every country
+where HSR is not allowed (composition.hsr_allowed AND that country's
+track hsr_allowed, transited-only countries included).
 So the two scenarios can legitimately produce different routed paths
 (distance/time), not just different tac_eur figures. This script surfaces
 both: the routing-level diff (distance, driving time, per-country
@@ -31,8 +32,10 @@ Usage:
 
 Writes raw route/evaluation responses, a comparison summary, and per-scenario
 GeoJSON layers (routed lines + stops) to scripts/data/ (tc_2_paris_berlin_*).
-The GeoJSON files are ready to drag straight into QGIS (Layer > Add Layer >
-Add Vector Layer) to compare the two routed paths visually. Pre-flight:
+Same GeoJSON shape/logic as scripts/test_route_plan.py's route_to_geojson()
+— kept in sync deliberately so outputs from both scripts drag into the same
+QGIS project consistently (Layer > Add Layer > Add Vector Layer) to compare
+routed paths visually. Pre-flight:
   1. Checks Flask API is reachable
   2. Loads data if not already loaded
   3. Checks OpenRailRouting is running; starts it if not
@@ -180,7 +183,7 @@ def build_route(scenario_id: int) -> dict:
         "schedule_mode": "alwaysDaily",
         # Fixed stop list — isolates the comparison to what the scenario
         # itself changes (routing/parameters), not auto-added stops.
-        "auto_stop_addition": False,
+        "auto_stop_addition": "off",
     }
     resp = requests.post(f"{API_BASE}/api/route/plan", json=body, timeout=90)
     if resp.status_code != 200:
@@ -208,6 +211,7 @@ def outbound_trip_summary(route: dict) -> dict:
     return {
         "distance_km": sum(s["distance_m"] for s in segments) / 1000,
         "driving_time_min": sum(s["driving_time_min"] for s in segments),
+        "dynamics_time_min": sum(s["dynamics_time_min"] for s in segments),
         "buffer_time_min": sum(s["buffer_time_min"] for s in segments),
         "segment_count": len(segments),
     }
@@ -259,6 +263,7 @@ def route_to_geojson(route: dict, scenario_key: str) -> tuple[dict, dict]:
                             "to_stop_id": seg["to_stop"]["stop_id"],
                             "distance_km": round(seg["distance_m"] / 1000, 3),
                             "driving_time_min": seg["driving_time_min"],
+                            "dynamics_time_min": seg["dynamics_time_min"],
                             "buffer_time_min": seg["buffer_time_min"],
                         },
                     }
@@ -277,6 +282,7 @@ def route_to_geojson(route: dict, scenario_key: str) -> tuple[dict, dict]:
                                 "stop_id": stop["stop_id"],
                                 "stop_name": stop["stop_name"],
                                 "country_code": stop["country_code"],
+                                "auto_added": stop["auto_added"],
                             },
                         },
                     )
