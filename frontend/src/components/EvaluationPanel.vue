@@ -792,7 +792,10 @@ const selectPt = {
                     {{ t(`proposal.evaluation.rates.${rate.id}`) }}
                     <span v-if="rate.scope" class="text-primary-50/50">· {{ rate.scope }}</span>
                   </div>
-                  <div v-if="rate.description" class="text-xs text-primary-50/40">
+                  <!-- width:0 + min-width:100% so the title drives the column
+                       width and the description wraps beneath it rather than
+                       widening the row (same pattern as the main description). -->
+                  <div v-if="rate.description" class="w-0 min-w-full text-xs text-primary-50/40">
                     {{ rate.description }}
                   </div>
                 </td>
