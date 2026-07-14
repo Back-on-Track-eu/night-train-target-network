@@ -5,10 +5,14 @@ import katex from 'katex'
 import 'katex/dist/katex.min.css'
 import Select from 'primevue/select'
 import Popover from 'primevue/popover'
+import Textarea from 'primevue/textarea'
+import InputText from 'primevue/inputtext'
+import Button from 'primevue/button'
 import AppIcon from '@/components/AppIcon.vue'
 import RouteSectionSlider from '@/components/RouteSectionSlider.vue'
 import { mdiChevronDown, mdiChevronRight, mdiInformationOutline } from '@mdi/js'
-import { resolveFactorRates, type RateRow } from '@/lib/costFactorRates'
+import { resolveFactorRates, resolveFactorSubCategory, type RateRow } from '@/lib/costFactorRates'
+import { submitFeedback, FeedbackError } from '@/lib/feedbackApi'
 import type {
   Breakdown,
   EvaluationResponse,
@@ -507,6 +511,63 @@ function formatRateValue(row: RateRow): string {
   return fmtRate.format(value)
 }
 
+// --- Cost-factor feedback form (bottom of the detail popover) ---------------
+// Posts to the existing POST /api/feedback via the anonymous email path,
+// tagged to the factor the popover is showing (its dotted Breakdown path).
+// These are protocol values sent verbatim in the body, not i18n.
+const FEEDBACK_CATEGORY = 'Evaluation — calculation method'
+
+type FeedbackStatus = 'idle' | 'submitting' | 'success' | 'error'
+const feedbackMessage = ref('')
+const feedbackEmail = ref('')
+const feedbackStatus = ref<FeedbackStatus>('idle')
+const feedbackErrorMsg = ref('')
+
+// Plausible-email gate for the submit button — the backend regex-validates too;
+// this is just the client-side check.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const emailValid = computed(() => EMAIL_RE.test(feedbackEmail.value.trim()))
+const messageValid = computed(() => feedbackMessage.value.trim().length > 0)
+const canSubmitFeedback = computed(
+  () => emailValid.value && messageValid.value && feedbackStatus.value !== 'submitting',
+)
+
+// Switching the popover to another cost factor clears the message and any
+// prior success/error, so nothing bleeds across factors; the email is kept as
+// it belongs to the same person.
+watch(activeKey, () => {
+  feedbackMessage.value = ''
+  feedbackStatus.value = 'idle'
+  feedbackErrorMsg.value = ''
+})
+
+async function onSubmitFeedback() {
+  const key = activeKey.value
+  if (!key || !canSubmitFeedback.value) return
+  const subCategory = resolveFactorSubCategory(formulaKey(key))
+  if (!subCategory) return
+  feedbackStatus.value = 'submitting'
+  feedbackErrorMsg.value = ''
+  try {
+    await submitFeedback({
+      email: feedbackEmail.value.trim(),
+      subject: `Cost factor feedback: ${t(`proposal.evaluation.fields.${key}`)}`,
+      category: FEEDBACK_CATEGORY,
+      sub_category: subCategory,
+      message: feedbackMessage.value.trim(),
+    })
+    feedbackStatus.value = 'success'
+    feedbackMessage.value = ''
+    feedbackEmail.value = ''
+  } catch (err) {
+    feedbackStatus.value = 'error'
+    feedbackErrorMsg.value =
+      err instanceof FeedbackError && err.message
+        ? err.message
+        : t('proposal.evaluation.feedback.error')
+  }
+}
+
 // --- Formatting -------------------------------------------------------------
 const fmtCompact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 2 })
 const fmtInt = new Intl.NumberFormat('en', { maximumFractionDigits: 0 })
@@ -827,6 +888,54 @@ const selectPt = {
             </tbody>
           </table>
         </template>
+
+        <!-- Feedback: report a mistake / suggestion about this cost factor -->
+        <div class="flex flex-col gap-3">
+          <hr class="border-t border-primary-50/10" />
+          <h4 class="text-base font-semibold text-primary-50">
+            {{ t('proposal.evaluation.feedback.title') }}
+          </h4>
+          <!-- width:0 + min-width:100% so the paragraph wraps to the popover
+               width rather than widening it (same pattern as above). -->
+          <p class="w-0 min-w-full text-sm text-primary-50/70">
+            {{ t('proposal.evaluation.feedback.description') }}
+          </p>
+          <Textarea
+            v-model="feedbackMessage"
+            :placeholder="t('proposal.evaluation.feedback.messagePlaceholder')"
+            :disabled="feedbackStatus === 'submitting'"
+            rows="3"
+            auto-resize
+            class="w-full resize-y rounded-lg border border-primary-50/20 bg-primary-50/5 px-3 py-2 text-sm text-primary-50 placeholder:text-primary-50/40"
+          />
+          <InputText
+            v-model="feedbackEmail"
+            type="email"
+            :placeholder="t('proposal.evaluation.feedback.emailPlaceholder')"
+            :aria-label="t('proposal.evaluation.feedback.emailLabel')"
+            :disabled="feedbackStatus === 'submitting'"
+            class="w-full rounded-lg border border-primary-50/20 bg-primary-50/5 px-3 py-2 text-sm text-primary-50 placeholder:text-primary-50/40"
+          />
+          <div class="flex flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              :label="
+                feedbackStatus === 'submitting'
+                  ? t('proposal.evaluation.feedback.submitting')
+                  : t('proposal.evaluation.feedback.submit')
+              "
+              :disabled="!canSubmitFeedback"
+              class="self-start"
+              @click="onSubmitFeedback"
+            />
+            <span v-if="feedbackStatus === 'success'" class="text-sm text-green-400" role="status">
+              {{ t('proposal.evaluation.feedback.success') }}
+            </span>
+            <span v-else-if="feedbackStatus === 'error'" class="text-sm text-red-400" role="alert">
+              {{ feedbackErrorMsg }}
+            </span>
+          </div>
+        </div>
       </div>
     </Popover>
   </div>
