@@ -70,7 +70,10 @@ services:
         "main:create_app()",
       ]
     environment:
-      - POSTGRES_HOST=db
+      # Container name, NOT the service alias "db": this container also joins
+      # the prod stack's network (for routing), where prod's compose registers
+      # its own "db" alias — the bare name is ambiguous across networks.
+      - POSTGRES_HOST=tn-demo-db
       - POSTGRES_PORT=5432
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
