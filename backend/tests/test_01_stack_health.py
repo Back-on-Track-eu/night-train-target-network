@@ -66,17 +66,18 @@ def test_wrong_method_returns_json_405(api_base):
 
 
 @pytest.mark.timeout(10)
-def test_stub_endpoints_return_501(api_base):
-    """Every remaining Phase 5 stub (auth) returns 501 Not Implemented — a
-    stub silently returning 200 or 404 would mislead the frontend about
-    what exists. Feedback (Phase 4) is no longer in this list — it's a
-    real endpoint now, covered by test_60_feedback_api.py instead."""
-    stubs = [
+def test_no_stub_endpoints_remain(api_base):
+    """No endpoint returns 501 anymore — auth (the last Phase 5 stub) is a
+    real implementation now, covered by test_70_auth_api.py. An empty
+    body on the auth endpoints is a 400 validation error, not a 501; a
+    501 reappearing here would mean a registered blueprint regressed to
+    a stub without the suite noticing."""
+    former_stubs = [
         ("POST", "/api/auth/request-code"),
         ("POST", "/api/auth/verify"),
     ]
-    for method, path in stubs:
+    for method, path in former_stubs:
         resp = requests.request(method, f"{api_base}{path}", json={}, timeout=5)
         assert (
-            resp.status_code == 501
-        ), f"{method} {path} returned {resp.status_code}, expected 501"
+            resp.status_code == 400
+        ), f"{method} {path} returned {resp.status_code}, expected 400 (empty body)"
