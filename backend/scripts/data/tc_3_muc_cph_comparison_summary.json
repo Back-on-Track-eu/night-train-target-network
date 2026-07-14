@@ -1,0 +1,141 @@
+{
+  "stops": [
+    "DE_MUENCHEN_HBF",
+    "DE_BERLIN_HBF",
+    "DE_HAMBURG_HBF",
+    "DK_COPENHAGEN"
+  ],
+  "composition_id": "STD-7.1",
+  "scenario_id": 2,
+  "scenario_key": "base",
+  "fixed_night_interval": [
+    "DE_HAMBURG_HBF",
+    "DK_COPENHAGEN"
+  ],
+  "directions": {
+    "D0": {
+      "timetable_a": [
+        {
+          "stop_id": "DE_MUENCHEN_HBF",
+          "arrival_time_min": null,
+          "departure_time_min": 1124,
+          "stop_type": "boarding"
+        },
+        {
+          "stop_id": "DE_BERLIN_HBF",
+          "arrival_time_min": 1601,
+          "departure_time_min": 1603,
+          "stop_type": "night"
+        },
+        {
+          "stop_id": "DE_HAMBURG_HBF",
+          "arrival_time_min": 1745,
+          "departure_time_min": 1747,
+          "stop_type": "alighting"
+        },
+        {
+          "stop_id": "DK_COPENHAGEN",
+          "arrival_time_min": 2056,
+          "departure_time_min": null,
+          "stop_type": "alighting"
+        }
+      ],
+      "timetable_b": [
+        {
+          "stop_id": "DE_MUENCHEN_HBF",
+          "arrival_time_min": null,
+          "departure_time_min": 813,
+          "stop_type": "boarding"
+        },
+        {
+          "stop_id": "DE_BERLIN_HBF",
+          "arrival_time_min": 1290,
+          "departure_time_min": 1292,
+          "stop_type": "boarding"
+        },
+        {
+          "stop_id": "DE_HAMBURG_HBF",
+          "arrival_time_min": 1434,
+          "departure_time_min": 1436,
+          "stop_type": "boarding"
+        },
+        {
+          "stop_id": "DK_COPENHAGEN",
+          "arrival_time_min": 1745,
+          "departure_time_min": null,
+          "stop_type": "alighting"
+        }
+      ],
+      "b_interval_departure_min": 1436,
+      "b_interval_arrival_min": 1745,
+      "b_slack_per_segment": [
+        0,
+        0,
+        0
+      ],
+      "b_timetable_warnings": []
+    },
+    "D1": {
+      "timetable_a": [
+        {
+          "stop_id": "DK_COPENHAGEN",
+          "arrival_time_min": null,
+          "departure_time_min": 1124,
+          "stop_type": "boarding"
+        },
+        {
+          "stop_id": "DE_HAMBURG_HBF",
+          "arrival_time_min": 1433,
+          "departure_time_min": 1435,
+          "stop_type": "boarding"
+        },
+        {
+          "stop_id": "DE_BERLIN_HBF",
+          "arrival_time_min": 1577,
+          "departure_time_min": 1579,
+          "stop_type": "night"
+        },
+        {
+          "stop_id": "DE_MUENCHEN_HBF",
+          "arrival_time_min": 2056,
+          "departure_time_min": null,
+          "stop_type": "alighting"
+        }
+      ],
+      "timetable_b": [
+        {
+          "stop_id": "DK_COPENHAGEN",
+          "arrival_time_min": null,
+          "departure_time_min": 1436,
+          "stop_type": "boarding"
+        },
+        {
+          "stop_id": "DE_HAMBURG_HBF",
+          "arrival_time_min": 1745,
+          "departure_time_min": 1747,
+          "stop_type": "alighting"
+        },
+        {
+          "stop_id": "DE_BERLIN_HBF",
+          "arrival_time_min": 1889,
+          "departure_time_min": 1891,
+          "stop_type": "alighting"
+        },
+        {
+          "stop_id": "DE_MUENCHEN_HBF",
+          "arrival_time_min": 2368,
+          "departure_time_min": null,
+          "stop_type": "alighting"
+        }
+      ],
+      "b_interval_departure_min": 1436,
+      "b_interval_arrival_min": 1745,
+      "b_slack_per_segment": [
+        0,
+        0,
+        0
+      ],
+      "b_timetable_warnings": []
+    }
+  }
+}

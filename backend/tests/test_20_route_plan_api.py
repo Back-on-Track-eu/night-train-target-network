@@ -131,8 +131,11 @@ class TestResponseStructure:
             assert len(trip["segments"]) == len(stop_times(trip)) - 1
 
     def test_segments_carry_physics_fields(self, plan_response):
-        """Every segment carries distance/time/buffer/energy and the
-        per-country distance/time shares."""
+        """Every segment carries distance/time/buffer/slack/energy and the
+        per-country distance/time shares. slack_time_min exists on every
+        segment but is 0 outside fixed-night stretching (this response is
+        timetable_mode='simpleAutomatic' — the fixed-night mode has its own
+        tests in TestFixedNightMode)."""
         required = {
             "from_stop",
             "to_stop",
@@ -141,6 +144,7 @@ class TestResponseStructure:
             "driving_time_min",
             "dynamics_time_min",
             "buffer_time_min",
+            "slack_time_min",
             "energy_kwh",
             "country_distance_shares",
             "country_time_shares",
@@ -150,6 +154,7 @@ class TestResponseStructure:
                 missing = required - set(seg)
                 assert missing == set(), f"Segment missing fields: {missing}"
                 assert seg["distance_m"] > 0
+                assert seg["slack_time_min"] == 0
 
     def test_no_monetary_values_anywhere(self, plan_response):
         """route/plan is physics-only: no *_eur / *cost* keys anywhere in the
@@ -247,10 +252,13 @@ class TestResponseStructure:
                 "trip_km",
                 "route_duration_min",
                 "average_speed_kmh",
+                "timetable_warnings",
             }
             assert stats["trip_km"] > 0
             assert stats["route_duration_min"] > 0
             assert stats["average_speed_kmh"] > 0
+            # simpleAutomatic never stretches, so never warns
+            assert stats["timetable_warnings"] == []
 
             # trip_km matches the sum of the trip's own segment distances
             expected_km = sum(s["distance_m"] for s in trip["segments"]) / 1000
@@ -287,12 +295,13 @@ class TestAutomaticScheduling:
             assert stops[-1]["stop_type"] == "alighting"
             assert stops[-1]["departure_time_min"] is None
 
-    def test_intermediate_stops_boarding_or_alighting(self, plan_response):
-        """Intermediate stops are classified boarding OR alighting — 'both'
-        cannot be produced by automatic scheduling."""
+    def test_intermediate_stops_classified_three_way(self, plan_response):
+        """Intermediate stops are classified boarding, night, or alighting
+        (departing strictly before 00:00 / arriving at/after 05:00 / in
+        between) — 'both' cannot be produced by automatic scheduling."""
         for trip in all_trips(plan_response["route"]):
             for st in stop_times(trip)[1:-1]:
-                assert st["stop_type"] in ("boarding", "alighting")
+                assert st["stop_type"] in ("boarding", "night", "alighting")
                 assert st["arrival_time_min"] is not None
                 assert st["departure_time_min"] is not None
 
@@ -312,6 +321,161 @@ class TestAutomaticScheduling:
         schedules = plan_response["route"]["schedule"]["seasonal_schedules"]
         assert {s["season"] for s in schedules} == {"summer", "winter"}
         assert all(s["frequency"] == "daily" for s in schedules)
+
+
+# =============================================================================
+# timetable_mode='simpleAutomaticWithFixedNight'
+# =============================================================================
+
+# Night window thresholds, minutes from midnight day 1 — mirror
+# NIGHT_START_MIN / NIGHT_END_MIN in models/route/version.py. Deliberately
+# restated as literals: these tests pin the API contract, not the constants.
+NIGHT_START = 24 * 60  # 00:00 (+1)
+NIGHT_END = 29 * 60  # 05:00 (+1)
+
+FIXED_NIGHT_REQUEST = {
+    **BASE_REQUEST,
+    "timetable_mode": "simpleAutomaticWithFixedNight",
+    # Berlin→Dresden is ~2h naturally — far shorter than the 5h night
+    # window, so this interval MUST be stretched, exercising slack
+    # distribution and the slow-section warning in one live response.
+    "fixed_night_interval": ["DE_BERLIN_HBF", "DE_DRESDEN_HBF"],
+}
+
+
+@pytest.fixture(scope="module")
+def fixed_night_response(api_base):
+    """One full fixed-night response for the Berlin-Dresden interval on the
+    standard corridor — built once for this module."""
+    resp = requests.post(f"{api_base}{ROUTE_URL}", json=FIXED_NIGHT_REQUEST, timeout=90)
+    assert resp.status_code == 200, f"Route build failed: {resp.text[:300]}"
+    return resp.json()
+
+
+class TestFixedNightMode:
+
+    @staticmethod
+    def _interval_times(trip, interval):
+        """(departure at interval start, arrival at interval end) for one
+        trip, looked up by stop_id."""
+        by_id = {s["stop_id"]: s for s in stop_times(trip)}
+        return (
+            by_id[interval[0]]["departure_time_min"],
+            by_id[interval[1]]["arrival_time_min"],
+        )
+
+    def test_interval_covers_night_window_both_directions(self, fixed_night_response):
+        """The fixed interval departs strictly before 00:00 and arrives at
+        05:00 or later — in the outbound direction as requested, and in the
+        return direction with the interval applied reversed automatically."""
+        interval = FIXED_NIGHT_REQUEST["fixed_night_interval"]
+        for trip in all_trips(fixed_night_response["route"]):
+            trip_interval = interval if trip["direction"] == 0 else interval[::-1]
+            dep_a, arr_b = self._interval_times(trip, trip_interval)
+            assert dep_a < NIGHT_START, f"D{trip['direction']}: departs {dep_a}"
+            assert arr_b >= NIGHT_END, f"D{trip['direction']}: arrives {arr_b}"
+
+    def test_short_interval_is_stretched_with_slack(self, fixed_night_response):
+        """A ~2h interval must gain slack to span the 5h+1min night window —
+        slack sits ONLY on the interval's own legs, and each segment's
+        elapsed stop-to-stop time equals its physics components + slack."""
+        interval = FIXED_NIGHT_REQUEST["fixed_night_interval"]
+        for trip in all_trips(fixed_night_response["route"]):
+            trip_interval = set(interval if trip["direction"] == 0 else interval[::-1])
+            total_slack = 0
+            for seg in trip["segments"]:
+                seg_stops = {seg["from_stop"]["stop_id"], seg["to_stop"]["stop_id"]}
+                if not seg_stops == trip_interval:
+                    assert seg["slack_time_min"] == 0
+                total_slack += seg["slack_time_min"]
+
+                elapsed = (
+                    seg["to_stop"]["arrival_time_min"]
+                    - seg["from_stop"]["departure_time_min"]
+                )
+                physics = (
+                    seg["driving_time_min"]
+                    + seg["dynamics_time_min"]
+                    + seg["buffer_time_min"]
+                    + seg["slack_time_min"]
+                )
+                assert elapsed == physics
+            assert total_slack > 0
+
+    def test_slow_stretch_produces_timetable_warning(self, fixed_night_response):
+        """Stretching ~2h of running to a 5h window drops the interval's
+        timetable speed far below FIXED_NIGHT_MIN_SPEED_RATIO of routing
+        speed — every trip carries a fixed_night_stretch_slow warning with
+        both speeds and their ratio."""
+        for trip in all_trips(fixed_night_response["route"]):
+            warnings = trip["general_parameters"]["timetable_warnings"]
+            assert len(warnings) == 1
+            w = warnings[0]
+            assert w["code"] == "fixed_night_stretch_slow"
+            assert set(w) == {
+                "code",
+                "interval",
+                "timetable_speed_kmh",
+                "routing_speed_kmh",
+                "ratio",
+            }
+            assert 0 < w["timetable_speed_kmh"] < w["routing_speed_kmh"]
+            assert 0 < w["ratio"] < 1
+
+    def test_long_interval_gets_no_slack_or_warning(self, api_base):
+        """An interval whose natural span already exceeds the night window
+        (Berlin→Wien, ~7h+) needs no stretching: zero slack everywhere, no
+        warnings, window constraints still satisfied."""
+        body = {
+            **FIXED_NIGHT_REQUEST,
+            "fixed_night_interval": ["DE_BERLIN_HBF", "AT_WIEN_HBF"],
+        }
+        resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=90)
+        assert resp.status_code == 200, resp.text[:300]
+        for trip in all_trips(resp.json()["route"]):
+            interval = (
+                body["fixed_night_interval"]
+                if trip["direction"] == 0
+                else body["fixed_night_interval"][::-1]
+            )
+            dep_a, arr_b = self._interval_times(trip, interval)
+            assert dep_a < NIGHT_START
+            assert arr_b >= NIGHT_END
+            assert all(s["slack_time_min"] == 0 for s in trip["segments"])
+            assert trip["general_parameters"]["timetable_warnings"] == []
+
+    @pytest.mark.parametrize(
+        "interval, reason",
+        [
+            (None, "missing entirely"),
+            (["DE_BERLIN_HBF"], "only one stop"),
+            (["DE_BERLIN_HBF", "DE_BERLIN_HBF"], "same stop twice"),
+            (["DE_BERLIN_HBF", 42], "non-string entry"),
+            (["DE_BERLIN_HBF", "FR_PARIS_EST"], "stop not in stops list"),
+            (["AT_WIEN_HBF", "DE_BERLIN_HBF"], "wrong travel order"),
+        ],
+    )
+    def test_invalid_interval_returns_400(self, api_base, interval, reason):
+        body = {k: v for k, v in FIXED_NIGHT_REQUEST.items()}
+        if interval is None:
+            body.pop("fixed_night_interval")
+        else:
+            body["fixed_night_interval"] = interval
+        resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=30)
+        assert resp.status_code == 400, f"{reason}: {resp.text[:200]}"
+        assert resp.json()["error"] == "validation_error"
+
+    def test_interval_rejected_outside_fixed_night_mode(self, api_base):
+        """fixed_night_interval alongside plain simpleAutomatic is rejected,
+        not silently ignored."""
+        body = {
+            **BASE_REQUEST,
+            "timetable_mode": "simpleAutomatic",
+            "fixed_night_interval": ["DE_BERLIN_HBF", "DE_DRESDEN_HBF"],
+        }
+        resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=30)
+        assert resp.status_code == 400
+        assert resp.json()["error"] == "validation_error"
 
 
 # =============================================================================
