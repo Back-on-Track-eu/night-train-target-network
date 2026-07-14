@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import katex from 'katex'
+import 'katex/dist/katex.min.css'
 import Select from 'primevue/select'
+import Popover from 'primevue/popover'
 import AppIcon from '@/components/AppIcon.vue'
 import RouteSectionSlider from '@/components/RouteSectionSlider.vue'
-import { mdiChevronDown, mdiChevronRight } from '@mdi/js'
+import { mdiChevronDown, mdiChevronRight, mdiInformationOutline } from '@mdi/js'
+import { resolveFactorRates, type RateRow } from '@/lib/costFactorRates'
 import type {
   Breakdown,
   EvaluationResponse,
@@ -431,6 +435,78 @@ const costRows = computed<CostRow[]>(() => {
   return rows
 })
 
+// --- Cost-factor detail popover --------------------------------------------
+// A tree node's key maps to its formula/field key by appending "_eur"
+// (driver → driver_eur); the info icon shows only where a formula exists.
+const formulas = computed(() => props.result.models.evaluation.formulas)
+const formulaKey = (nodeKey: string) => `${nodeKey}_eur`
+function hasInfo(nodeKey: string): boolean {
+  return formulaKey(nodeKey) in formulas.value
+}
+
+const infoPopover = ref<InstanceType<typeof Popover> | null>(null)
+const activeKey = ref<string | null>(null)
+// Key whose popover is currently shown — lets us skip a redundant show()
+// (and the flicker it causes) when the cursor re-enters the same icon.
+const openKey = ref<string | null>(null)
+let closeTimer: ReturnType<typeof setTimeout> | null = null
+
+function cancelClose() {
+  if (closeTimer !== null) {
+    clearTimeout(closeTimer)
+    closeTimer = null
+  }
+}
+
+// Hover-intent: open on icon hover, keep open while the cursor is over the
+// popover, and close only after a short delay once it has left both — so
+// moving from the icon into the popover doesn't flicker-close it.
+function openInfo(nodeKey: string, event: Event) {
+  cancelClose()
+  if (openKey.value === nodeKey) return
+  activeKey.value = nodeKey
+  infoPopover.value?.show(event)
+}
+
+function scheduleClose() {
+  cancelClose()
+  closeTimer = setTimeout(() => infoPopover.value?.hide(), 150)
+}
+
+function onInfoShow() {
+  openKey.value = activeKey.value
+}
+function onInfoHide() {
+  openKey.value = null
+}
+
+const activeFactor = computed(() => {
+  const key = activeKey.value
+  if (!key) return null
+  const formula = formulas.value[formulaKey(key)]
+  if (!formula) return null
+  return {
+    title: t(`proposal.evaluation.fields.${key}`),
+    description: formula.description,
+    // Inline layout + \displaystyle so the box hugs the formula's natural
+    // width (displayMode would stretch it to full width and centre it).
+    latexHtml: katex.renderToString(`\\displaystyle ${formula.latex}`, {
+      throwOnError: false,
+      displayMode: false,
+    }),
+    rates: resolveFactorRates(formulaKey(key), props.result.input, props.stops),
+  }
+})
+
+const fmtRate = new Intl.NumberFormat('en', { maximumFractionDigits: 4 })
+
+// Quota fields are stored as fractions (0.1) but described in "%" — render
+// them as a percentage for readability; other units are shown verbatim.
+function formatRateValue(row: RateRow): string {
+  const value = row.unit.startsWith('%') ? row.value * 100 : row.value
+  return fmtRate.format(value)
+}
+
 // --- Formatting -------------------------------------------------------------
 const fmtCompact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 2 })
 const fmtInt = new Intl.NumberFormat('en', { maximumFractionDigits: 0 })
@@ -597,10 +673,21 @@ const selectPt = {
             </button>
             <span v-else class="w-5 shrink-0" />
             <span
-              class="flex-1 text-sm"
+              class="flex flex-1 items-center gap-1 text-sm"
               :class="row.hasChildren ? 'text-primary-50' : 'text-primary-50/70'"
             >
               {{ row.label }}
+              <button
+                v-if="hasInfo(row.key)"
+                type="button"
+                class="flex cursor-pointer text-primary-50/40 transition hover:text-primary-50"
+                :aria-label="t('proposal.evaluation.info.iconLabel')"
+                @mouseenter="openInfo(row.key, $event)"
+                @mouseleave="scheduleClose"
+                @click="openInfo(row.key, $event)"
+              >
+                <AppIcon :path="mdiInformationOutline" :size="14" />
+              </button>
             </span>
             <span class="w-12 text-right text-xs text-primary-50/40 tabular-nums">
               {{ formatShare(row.share) }}
@@ -649,5 +736,111 @@ const selectPt = {
         >
       </details>
     </div>
+
+    <!-- Cost-factor detail popover: title · explanation · formula · rates -->
+    <Popover
+      ref="infoPopover"
+      :pt="{
+        root: {
+          class: 'cost-info-overlay !rounded-xl !shadow-2xl',
+          onMouseenter: cancelClose,
+          onMouseleave: scheduleClose,
+        },
+        content: { class: '!p-6 !bg-transparent' },
+      }"
+      @show="onInfoShow"
+      @hide="onInfoHide"
+    >
+      <div v-if="activeFactor" class="flex flex-col gap-6">
+        <h3 class="text-xl font-semibold text-primary-50">{{ activeFactor.title }}</h3>
+        <!-- width:0 + min-width:100% so the paragraph fills (and wraps to) the
+             width set by the formula box / table, without its own single-line
+             max-content widening the popover. -->
+        <p class="w-0 min-w-full text-justify text-sm text-primary-50/70">
+          {{ activeFactor.description }}
+        </p>
+        <!-- Rendered LaTeX; formula is backend-controlled, so v-html is safe. -->
+        <!-- eslint-disable vue/no-v-html -->
+        <div
+          class="cost-info-formula max-w-full self-center overflow-x-auto rounded-lg bg-black/20 px-8 py-5 text-primary-50"
+          v-html="activeFactor.latexHtml"
+        />
+        <!-- eslint-enable vue/no-v-html -->
+        <template v-if="activeFactor.rates.length">
+          <table class="w-full text-left text-sm">
+            <thead>
+              <tr class="text-xs text-primary-50/40">
+                <th class="pr-3 pb-1 font-medium">
+                  {{ t('proposal.evaluation.info.rateCol') }}
+                </th>
+                <th class="pr-3 pb-1 text-right font-medium">
+                  {{ t('proposal.evaluation.info.valueCol') }}
+                </th>
+                <th class="pb-1 font-medium">
+                  {{ t('proposal.evaluation.info.sourceCol') }}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="(rate, idx) in activeFactor.rates"
+                :key="idx"
+                class="border-t border-primary-50/10 align-top"
+              >
+                <td class="py-1.5 pr-3">
+                  <div class="text-primary-50">
+                    {{ t(`proposal.evaluation.rates.${rate.id}`) }}
+                    <span v-if="rate.scope" class="text-primary-50/50">· {{ rate.scope }}</span>
+                  </div>
+                  <!-- width:0 + min-width:100% so the title drives the column
+                       width and the description wraps beneath it rather than
+                       widening the row (same pattern as the main description). -->
+                  <div v-if="rate.description" class="w-0 min-w-full text-xs text-primary-50/40">
+                    {{ rate.description }}
+                  </div>
+                </td>
+                <td class="py-1.5 pr-3 text-right whitespace-nowrap text-primary-50 tabular-nums">
+                  {{ formatRateValue(rate) }}
+                  <span v-if="rate.unit" class="text-primary-50/50">{{ rate.unit }}</span>
+                </td>
+                <td class="py-1.5 text-xs text-primary-50/60">
+                  <span
+                    v-if="rate.isDefault"
+                    class="mr-1 mb-1 inline-block rounded-full bg-primary-50/10 px-1.5 py-0.5 text-primary-50/50"
+                  >
+                    {{ t('proposal.evaluation.info.defaultBadge') }}
+                  </span>
+                  <span v-for="(src, i) in rate.sources" :key="i" class="block">
+                    <a
+                      v-if="src.source_url"
+                      :href="src.source_url"
+                      target="_blank"
+                      rel="noopener"
+                      class="underline hover:text-primary-50"
+                    >
+                      {{ src.source_description || src.source_url }}
+                    </a>
+                    <span v-else>{{ src.source_description }}</span>
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </template>
+      </div>
+    </Popover>
   </div>
 </template>
+
+<style>
+.cost-info-overlay {
+  background: #23263d !important;
+  border: 1px solid color-mix(in srgb, var(--p-primary-50) 20%, transparent) !important;
+  /* Grow to fit a wide formula; only the viewport bounds the width. */
+  max-width: calc(100vw - 2rem);
+}
+/* KaTeX inherits the box's text colour; keep the formula on one baseline. */
+.cost-info-formula .katex {
+  font-size: 1.05em;
+}
+</style>

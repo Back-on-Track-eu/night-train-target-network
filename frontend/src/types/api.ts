@@ -119,12 +119,159 @@ export interface EvaluationViews {
   per_trip_per_stop: EvaluationView<Record<string, Record<string, FilteredCell>>>
 }
 
+// --- models.* : per-model version + LaTeX formula registry ------------------
+// Backend: api/helpers/evaluation_serialize.py::models_to_dict(). We only read
+// models.evaluation.formulas (keyed by the cost-factor field name, e.g.
+// "driver_eur") for the cost-factor detail popover; the other sections are
+// typed for completeness but unused.
+
+/** One cost-factor formula: a KaTeX-compatible LaTeX string plus a
+ *  plain-English description. Both are backend-provided and shown as-is. */
+export interface Formula {
+  latex: string
+  description: string
+}
+
+/** Formula registry keyed by cost-factor field name (e.g. "driver_eur"). */
+export type FormulaMap = Record<string, Formula>
+
+export interface EvaluationModelSection {
+  version: string
+  description: string
+  formulas: FormulaMap
+}
+
+export interface EvaluationModels {
+  route_builder: EvaluationModelSection
+  energy: EvaluationModelSection
+  evaluation: EvaluationModelSection
+}
+
+// --- input.parameters : the per-unit rates actually loaded to cost this route
+// Backend: api/helpers/params_serialize.py (reused by input_to_dict()). Each
+// section lists EVERY loaded entity (all countries/stops/compositions), so the
+// popover scopes rates to the entities the route actually uses — see
+// src/lib/costFactorRates.ts.
+
+/** A referenced data source, keyed by source_id inside each section's
+ *  `sources` map. */
+export interface ParamSource {
+  source_id: number
+  source_description: string | null
+  source_url: string | null
+  source_date: string | null
+}
+
+/** A versioned, sourced scalar parameter (track/stop infrastructure fields). */
+export interface ParamField<T = number> {
+  value: T
+  is_default: boolean
+  version: number | null
+  source_id: number | null
+}
+
+/** track_infrastructures[] — one per country. Only the rate fields the
+ *  popover reads are typed. */
+export interface TrackInfraParam {
+  country_code: string
+  tac_eur_train_km: ParamField
+  parking_eur_day: ParamField
+  shunting_eur_event: ParamField
+  energy_price_eur_kwh: ParamField
+}
+
+/** stops[] — one per stop. */
+export interface StopInfraParam {
+  stop_id: string
+  name: string
+  country_code: string
+  stop_charge_eur: ParamField
+}
+
+/** compositions[] — composition-level rates are plain numbers (sourced at the
+ *  entity level via source_ids, not per field). */
+export interface CompositionParam {
+  comp_id: string
+  operator_id: string
+  fixed_costs: {
+    purchase_coach_eur: number
+    coach_amort_years: number
+    cleaning_services_eur_day: number
+  }
+  variable_km: {
+    coach_maint_eur_km: number
+  }
+  source_ids: number[]
+}
+
+/** operators[] — operator-level rates, sourced at the entity level. */
+export interface OperatorParam {
+  operator_id: string
+  operator_name: string
+  driver_costs_eur_h: number
+  crew_costs_eur_h: number
+  var_overhead_per: number
+  financing_quota_per: number
+  fix_overhead_quota_per: number
+  loco_full_service_lease_eur_h: number
+  cost_per_class: Record<string, number>
+  source_ids: number[]
+}
+
+/** Flat {field: description} documentation carried by track/stop sections.
+ *  Each description embeds a trailing "Unit: …" the popover parses out. */
+export interface FieldDescriptions {
+  table?: string
+  fields: Record<string, string>
+}
+
+export interface TrackInfraSection {
+  descriptions: FieldDescriptions
+  sources: Record<string, ParamSource>
+  track_infrastructures: TrackInfraParam[]
+}
+
+export interface StopInfraSection {
+  descriptions: FieldDescriptions
+  sources: Record<string, ParamSource>
+  stops: StopInfraParam[]
+}
+
+export interface CompositionsSection {
+  // Nested documentation: descriptions.compositions[section][field] and
+  // descriptions.operators[field].
+  descriptions: {
+    compositions: Record<string, Record<string, string>>
+    operators: Record<string, string>
+  }
+  sources: Record<string, ParamSource>
+  compositions: CompositionParam[]
+  operators: OperatorParam[]
+}
+
+export interface EvaluationParameters {
+  track_infrastructures: TrackInfraSection
+  stop_infrastructures: StopInfraSection
+  compositions: CompositionsSection
+}
+
+/** The subset of the posted route we read to scope rates to the entities the
+ *  route actually uses (countries it runs through, composition per trip pair). */
+export interface EvaluationInputRoute {
+  track_infrastructure: { country_code: string }[]
+  trip_pairs: { composition_id: string }[]
+}
+
+export interface EvaluationInput {
+  route: EvaluationInputRoute
+  parameters: EvaluationParameters
+}
+
 export interface EvaluationResponse {
   calc_version: string
   route_id: string
-  // Not rendered by the panel yet — kept loosely typed until they are.
-  models: Record<string, unknown>
-  input: Record<string, unknown>
+  models: EvaluationModels
+  input: EvaluationInput
   views: EvaluationViews
 }
 

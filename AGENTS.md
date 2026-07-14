@@ -70,6 +70,9 @@ files describing the same three backend services, kept manually in sync:
 - Icons: use `<AppIcon :path="mdiXxx" />` from `@/components/AppIcon.vue`
   with path constants imported from `@mdi/js` — never use
   `<i class="mdi mdi-*">` CSS font classes
+- Math/LaTeX: render backend-provided LaTeX (e.g. `models.evaluation.formulas`)
+  with **KaTeX** (`katex.renderToString` + `katex/dist/katex.min.css`) — no
+  other math renderer is bundled
 
 ---
 
@@ -223,3 +226,10 @@ pre-commit install
 ```
 
 Run manually: `pre-commit run --all-files`
+
+## Maintaining this file
+
+Keep this file for knowledge useful to almost every future agent session in this project.
+Do not repeat what the codebase already shows; point to the authoritative file or command instead.
+Prefer rewriting or pruning existing entries over appending new ones.
+When updating this file, preserve this bar for all agents and keep entries concise.
