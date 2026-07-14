@@ -18,14 +18,18 @@ id owned by someone else → duplicate under a new proposal_id
 ("branched"). Rows are append-only in all three cases; nothing is ever
 updated in place.
 
-No authentication yet — the request body carries user_id directly.
+Authentication: @optional_auth on save — a bearer token's identity
+overrides the body's user_id (so tokens can't be impersonated away),
+while tokenless saves keep the old body-carried contract until the
+frontend has a login flow. Flip to @require_auth once it does.
 Every user can see and load every proposal.
 """
 
 import logging
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 
+from api.auth_middleware import optional_auth
 from api.helpers.dependencies import get_proposal_repository
 from api.helpers.proposal_serialize import (
     validate_save_body,
@@ -41,6 +45,7 @@ _DEFAULT_LIMIT = 50
 
 
 @bp.post("/proposal")
+@optional_auth
 def save_proposal():
     """
     Save a proposal.
@@ -77,6 +82,10 @@ def save_proposal():
             jsonify({"error": "bad_request", "message": "Request body must be JSON."}),
             400,
         )
+
+    # A bearer token outranks the body's user_id (see module docstring).
+    if g.get("user_id") is not None:
+        body["user_id"] = g.user_id
 
     errors = validate_save_body(body)
     if errors:

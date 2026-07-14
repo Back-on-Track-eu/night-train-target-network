@@ -44,6 +44,7 @@ _loader = None
 _country_index = None
 _proposal_repo = None
 _feedback_repo = None
+_auth_repo = None
 _loaded: bool = False
 _loaded_at: Optional[datetime] = None
 _load_error: Optional[str] = None
@@ -65,11 +66,12 @@ def init() -> None:
     Initialise the DBDataLoader and CountryIndex at startup.
     Called once from main.py before the Flask app starts serving requests.
     """
-    global _loader, _country_index, _proposal_repo, _feedback_repo, _loaded, _loaded_at, _load_error
+    global _loader, _country_index, _proposal_repo, _feedback_repo, _auth_repo, _loaded, _loaded_at, _load_error
 
     from adapters.data_loader_from_db import DBDataLoader
     from adapters.proposal_repository import ProposalRepository
     from adapters.feedback_repository import FeedbackRepository
+    from adapters.auth_repository import AuthRepository
     from models.route.routing.rail_router import CountryIndex
 
     logger.info("Connecting to database...")
@@ -79,6 +81,7 @@ def init() -> None:
         _country_index = CountryIndex(_loader.get_country_geometries())
         _proposal_repo = ProposalRepository()
         _feedback_repo = FeedbackRepository()
+        _auth_repo = AuthRepository()
         _loaded = True
         _loaded_at = datetime.now(timezone.utc)
         _load_error = None
@@ -128,3 +131,13 @@ def get_feedback_repository():
     if not _loaded or _feedback_repo is None:
         raise DataNotLoadedError("Data not loaded. Call POST /api/data/load first.")
     return _feedback_repo
+
+
+def get_auth_repository():
+    """
+    Return the singleton AuthRepository.
+    Raises DataNotLoadedError if init() has not completed successfully.
+    """
+    if not _loaded or _auth_repo is None:
+        raise DataNotLoadedError("Data not loaded. Call POST /api/data/load first.")
+    return _auth_repo
