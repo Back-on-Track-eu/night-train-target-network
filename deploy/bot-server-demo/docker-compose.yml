@@ -1,0 +1,122 @@
+# =============================================================================
+# Target Network — DEMO/DEV stack on bot-server (second instance)
+# =============================================================================
+# Runs current main alongside the untouched June-23 "prod" stack
+# (/opt/targetnetwork), with its own Postgres — this is the Trello Stream-2
+# card "test database as a second instance, prod vs dev distinguished" and
+# the Stream-3 card "initial deployment of first view".
+#
+# The heavy OpenRailRouting JVM is NOT duplicated: this stack joins the
+# prod stack's network and reuses targetnetwork-routing (config.yml and
+# custom_models are identical between the deployed build and main —
+# verified 2026-07-14; the engine is stateless per request).
+#
+# House pattern: nothing publishes a public port except a localhost debug
+# bind. Public access = Caddy vhost on the shared nextcloud_nextcloud
+# network. See README.md in this directory for the full runbook, the Caddy
+# vhost block, and the restart-not-reload gotcha.
+#
+# First-time setup on the server:
+#   cd /opt/targetnetwork-demo/deploy/bot-server-demo
+#   cp .env.example .env && vim .env   # fill values (chmod 600)
+#   docker compose build
+#   docker compose up -d db
+#   docker compose run --rm api python db/dev/seed.py   # one-time seed
+#   docker compose up -d
+# =============================================================================
+name: targetnetwork-demo
+
+services:
+
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: tn-demo-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
+    volumes:
+      - tn_demo_pgdata:/var/lib/postgresql/data
+      # Schema-only init on first boot (empty volume). Order matters:
+      # admin → input_params → scenario (pins input_params versions) →
+      # proposals (FK → admin.users) → ontd. seed.py re-creates all five
+      # from the same files, so these are belt-and-braces for a fresh boot.
+      - ../../backend/db/dev/sql/create_admin_schema.sql:/docker-entrypoint-initdb.d/01_admin.sql:ro
+      - ../../backend/db/dev/sql/create_input_params_schema.sql:/docker-entrypoint-initdb.d/02_input_params.sql:ro
+      - ../../backend/db/dev/sql/create_scenario_schema.sql:/docker-entrypoint-initdb.d/03_scenario.sql:ro
+      - ../../backend/db/dev/sql/create_proposal_schema.sql:/docker-entrypoint-initdb.d/04_proposals.sql:ro
+      - ../../backend/db/dev/sql/create_ontd_schema.sql:/docker-entrypoint-initdb.d/05_ontd.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ../../backend
+      dockerfile: docker/Dockerfile
+    container_name: tn-demo-api
+    # Skip the image's seed-on-start entrypoint (it begins with
+    # DROP SCHEMA ... CASCADE): seed once manually via `compose run`,
+    # then this stack only ever starts gunicorn.
+    command:
+      [
+        "gunicorn",
+        "--bind", "0.0.0.0:5000",
+        "--workers", "2",
+        "--timeout", "120",
+        "main:create_app()",
+      ]
+    environment:
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      # Reuse the prod stack's routing engine (see header).
+      - OPENRAILROUTING_URL=http://targetnetwork-routing:8989
+    ports:
+      - "127.0.0.1:5056:5000"   # debug access from the box; public = Caddy
+    mem_limit: 1g
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - default
+      - caddy_net
+      - tn_prod
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: Dockerfile.demo
+      args:
+        VITE_API_BASE_URL: ""   # same-origin /api/* — Caddy routes to tn-demo-api
+    container_name: tn-demo-frontend
+    networks:
+      - default
+      - caddy_net
+    restart: unless-stopped
+    # Caddy vhost: targetnetwork.65.109.137.97.sslip.io
+    #   handle /api/*  → tn-demo-api:5000
+    #   handle         → tn-demo-frontend:80
+
+volumes:
+  tn_demo_pgdata:
+
+networks:
+  caddy_net:
+    external: true
+    name: nextcloud_nextcloud
+  tn_prod:
+    external: true
+    name: targetnetwork_default
