@@ -97,11 +97,13 @@ from models.params import (
     Composition,
     CompositionCollection,
 )
-from models.route.trip import Stop, StopType, Segment, Trip
+from models.route.trip import Stop, StopType, Segment, Trip, TimetableWarning
 from models.route.route import Route, TripPair, Parking, Shunting, Schedule
 from models.route.routing.rail_router import RailRouter, RoutedLeg, build_router_stops
 from models.route.timetable import (
     simple_automatic_timetable,
+    simple_automatic_fixed_night_timetable,
+    fixed_night_speed_warning,
     always_daily_schedule,
     apply_auto_stop_addition,
     suggest_auto_stops,
@@ -155,6 +157,10 @@ class TripPairInput:
     timetable_mode: str
     routing_mode: str
     auto_stop_addition: str  # "off" | "add" | "suggest" — see timetable.py
+    fixed_night_interval: list[str] | None  # [start, end] stop IDs in outbound
+    # order — required for timetable_mode="simpleAutomaticWithFixedNight",
+    # None for every other mode (enforced at the API boundary); reversed
+    # automatically for the return trip by _build_trip_pair()
 
 
 # =============================================================================
@@ -186,6 +192,7 @@ def _build_trip_stops_and_legs(
     stop_infra: StopInfraCollection,
     departure_time_min: int,
     auto_added_stop_ids: frozenset[str] = frozenset(),
+    slack_per_leg: list[int] | None = None,
 ) -> list[Segment]:
     """
     DB lookups + object assembly only — no timing math here, that's
@@ -200,7 +207,15 @@ def _build_trip_stops_and_legs(
     auto_added field. Empty by default; adjust_route() passes through
     whichever stops were already flagged on the trip it's rebuilding from,
     so the marker survives schedule-only adjustments.
+
+    slack_per_leg: fixed-night stretch minutes per leg (see
+    simple_automatic_fixed_night_timetable) — stamped onto each Segment's
+    slack_time_min and fed into build_final_timetable() so stop times and
+    segment components stay consistent with each other. None (every other
+    timetable_mode) means 0 everywhere.
     """
+    if slack_per_leg is None:
+        slack_per_leg = [0] * len(routed_legs)
     stop_physicals = []
     for stop_id, _ in stop_inputs:
         sp = stop_infra.get(stop_id)
@@ -216,6 +231,7 @@ def _build_trip_stops_and_legs(
         composition=composition,
         tracks=tracks,
         departure_time_min=departure_time_min,
+        slack_per_leg=slack_per_leg,
     )
 
     stops = [
@@ -247,6 +263,7 @@ def _build_trip_stops_and_legs(
             energy_kwh=routed_legs[i].energy_kwh,
             country_distance_shares=routed_legs[i].country_distance_shares,
             country_time_shares=routed_legs[i].country_time_shares,
+            slack_time_min=slack_per_leg[i],
         )
         for i in range(len(routed_legs))
     ]
@@ -363,12 +380,18 @@ def _build_trip(
     timetable_mode: str,
     routing_mode: str,
     auto_stop_addition: str,
+    fixed_night_interval: list[str] | None,
     known_auto_added_stop_ids: frozenset[str] | None = None,
 ) -> tuple[Trip, list[AutoStopSuggestion]]:
     """
     Returns (Trip, suggestions). suggestions is non-empty only for
     auto_stop_addition="suggest" on the direction that actually runs the
     candidate search (see known_auto_added_stop_ids below) — [] otherwise.
+
+    fixed_night_interval: [start, end] stop IDs in THIS direction's travel
+    order (the caller reverses the pair input's interval for the return
+    trip) — consumed only by timetable_mode="simpleAutomaticWithFixedNight",
+    None for every other mode.
 
     known_auto_added_stop_ids: when given, skips the candidate search
     entirely regardless of auto_stop_addition — stop_ids is trusted as
@@ -435,14 +458,25 @@ def _build_trip(
     _check_country_coverage(routed_legs, tracks)
 
     # timetable_mode SWITCH — which named strategy computes departure time
-    # + boarding/alighting for this direction. VALID_TIMETABLE_MODES is the
+    # + stop classification for this direction. VALID_TIMETABLE_MODES is the
     # same set api/route.py validates the request against, so an unknown
-    # mode can only reach here if that validation was bypassed.
+    # mode can only reach here if that validation was bypassed. Only the
+    # fixed-night strategy produces slack; every other mode gets zeros.
     if timetable_mode == "simpleAutomatic":
         stop_inputs, departure_time_min = simple_automatic_timetable(
             stop_ids=stop_ids,
             composition=composition,
             routed_legs=routed_legs,
+        )
+        slack_per_leg = [0] * len(routed_legs)
+    elif timetable_mode == "simpleAutomaticWithFixedNight":
+        stop_inputs, departure_time_min, slack_per_leg = (
+            simple_automatic_fixed_night_timetable(
+                stop_ids=stop_ids,
+                composition=composition,
+                routed_legs=routed_legs,
+                fixed_night_interval=fixed_night_interval,
+            )
         )
     else:
         raise ValueError(
@@ -459,9 +493,24 @@ def _build_trip(
         stop_infra=stop_infra,
         departure_time_min=departure_time_min,
         auto_added_stop_ids=auto_added_stop_ids,
+        slack_per_leg=slack_per_leg,
     )
 
-    trip = Trip._create(trip_id=tid, direction=direction, segments=segments)
+    # Post-build timetable quality check — fixed-night only: did covering
+    # the night window stretch the interval unreasonably slow? Runs on the
+    # final segments (real dwell + slack), informational, never blocks.
+    timetable_warnings: list[TimetableWarning] = []
+    if timetable_mode == "simpleAutomaticWithFixedNight":
+        warning = fixed_night_speed_warning(segments, fixed_night_interval)
+        if warning is not None:
+            timetable_warnings.append(warning)
+
+    trip = Trip._create(
+        trip_id=tid,
+        direction=direction,
+        segments=segments,
+        timetable_warnings=timetable_warnings,
+    )
     logger.info(
         "_build_trip: id=%s %dm %.0fmin", tid, trip.distance_m, trip.total_time_min
     )
@@ -556,11 +605,21 @@ def _build_trip_pair(
         timetable_mode=pair_input.timetable_mode,
         routing_mode=pair_input.routing_mode,
         auto_stop_addition=pair_input.auto_stop_addition,
+        fixed_night_interval=pair_input.fixed_night_interval,
     )
 
     final_outbound_stop_ids = [s.stop_id for s in outbound.stops]
     auto_added_stop_ids = frozenset(s.stop_id for s in outbound.stops if s.auto_added)
 
+    # The fixed night interval is expressed in each direction's own travel
+    # order — reversed here so the return trip fixes its night window on
+    # the same physical corridor section (structurally mirrored times;
+    # not minute-exact, since each direction routes its own physics).
+    return_fixed_night_interval = (
+        list(reversed(pair_input.fixed_night_interval))
+        if pair_input.fixed_night_interval is not None
+        else None
+    )
     return_trip, _ = _build_trip(
         proposal_id,
         proposal_version,
@@ -574,6 +633,7 @@ def _build_trip_pair(
         timetable_mode=pair_input.timetable_mode,
         routing_mode=pair_input.routing_mode,
         auto_stop_addition=pair_input.auto_stop_addition,
+        fixed_night_interval=return_fixed_night_interval,
         known_auto_added_stop_ids=auto_added_stop_ids,
     )
 
@@ -794,6 +854,7 @@ def adjust_route(
                         geometry=seg.geometry,
                         distance_m=seg.distance_m,
                         driving_time_min=seg.driving_time_min,
+                        dynamics_time_min=seg.dynamics_time_min,
                         buffer_time_min=seg.buffer_time_min,
                         energy_kwh=seg.energy_kwh,
                         country_distance_shares=seg.country_distance_shares,
@@ -807,6 +868,10 @@ def adjust_route(
                 auto_added_stop_ids = frozenset(
                     s.stop_id for s in existing_trip.stops if s.auto_added
                 )
+                # Fixed-night slack is likewise a decision already made
+                # (RoutedLeg carries physics only) — carried forward per
+                # leg so a schedule-only adjust keeps the stretched times.
+                slack_per_leg = [seg.slack_time_min for seg in existing_trip.segments]
                 new_segments = _build_trip_stops_and_legs(
                     stop_inputs=stop_inputs,
                     routed_legs=routed_legs,
@@ -815,14 +880,20 @@ def adjust_route(
                     stop_infra=stop_infra,
                     departure_time_min=new_dep,
                     auto_added_stop_ids=auto_added_stop_ids,
+                    slack_per_leg=slack_per_leg,
                 )
             else:
                 new_segments = existing_trip.segments
 
+            # Warnings were derived under the fixed-night interval, which
+            # isn't stored on the Route — carried forward as-is (a pure
+            # departure shift doesn't change interval speeds; a stop_type
+            # change can shift dwell by a few minutes, accepted drift).
             new_trips[existing_trip.direction] = Trip._create(
                 trip_id=new_tid,
                 direction=existing_trip.direction,
                 segments=new_segments,
+                timetable_warnings=list(existing_trip.timetable_warnings),
             )
 
         new_pairs.append(
@@ -909,7 +980,10 @@ def distribute_demand(
             for segment in trip.segments:
                 cumulative_km.append(cumulative_km[-1] + segment.distance_m / 1000.0)
 
-            # Find valid (origin_idx, destination_idx) pairs
+            # Find valid (origin_idx, destination_idx) pairs. NIGHT stops
+            # are deliberately on neither side — demand-quiet by definition
+            # (the whole point of the classification); they still dwell and
+            # cost like BOTH, they just sell no places in this stopgap.
             valid_pairs: list[tuple[int, int]] = [
                 (i, j)
                 for i in range(len(stops))

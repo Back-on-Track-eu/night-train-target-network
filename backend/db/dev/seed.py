@@ -2093,6 +2093,7 @@ def _example_trip(
                 "driving_time_min": driving_min,
                 "dynamics_time_min": 0,
                 "buffer_time_min": buffer_min,
+                "slack_time_min": 0,
                 "energy_kwh": energy_kwh,
                 "country_distance_shares": dist_shares,
                 "country_time_shares": time_shares,

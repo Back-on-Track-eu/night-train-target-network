@@ -72,9 +72,13 @@ _WEEKDAYS = (
 )
 
 # stop_type → (pickup_type, drop_off_type). GTFS: 0 = regular, 1 = none.
+# "night" maps like "both": the classification is a demand statement, not an
+# operational prohibition — boarding and alighting both stay possible at a
+# night stop (it also dwells like "both", see timetable.dwell_min()).
 _STOP_TYPE_TO_PICKUP_DROPOFF = {
     "boarding": (0, 1),
     "alighting": (1, 0),
+    "night": (0, 0),
     "both": (0, 0),
 }
 

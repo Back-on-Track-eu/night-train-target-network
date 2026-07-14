@@ -36,7 +36,7 @@ from models.route.route import (
     Shunting,
     ODPair,
 )
-from models.route.trip import Stop, StopType, Segment, Trip
+from models.route.trip import Stop, StopType, Segment, Trip, TimetableWarning
 from models.route.timetable import AutoStopSuggestion
 from models.params import Composition, TrackInfraCollection, CompositionCollection
 
@@ -105,23 +105,35 @@ def _segment_to_dict(seg: Segment, geometry_id: str) -> dict:
         "driving_time_min": seg.driving_time_min,
         "dynamics_time_min": seg.dynamics_time_min,
         "buffer_time_min": seg.buffer_time_min,
+        "slack_time_min": seg.slack_time_min,
         "energy_kwh": seg.energy_kwh,
         "country_distance_shares": seg.country_distance_shares,
         "country_time_shares": seg.country_time_shares,
     }
 
 
+def _timetable_warning_to_dict(warning: TimetableWarning) -> dict:
+    return {
+        "code": warning.code,
+        "interval": list(warning.interval),
+        "timetable_speed_kmh": warning.timetable_speed_kmh,
+        "routing_speed_kmh": warning.routing_speed_kmh,
+        "ratio": warning.ratio,
+    }
+
+
 def _trip_general_parameters(trip: Trip) -> dict:
-    """Three headline physics stats for a trip — trip_km, route_duration_min,
+    """Headline physics stats for a trip — trip_km, route_duration_min,
     average_speed_kmh — meant to be read at a glance rather than derived by
-    the reader from segments[]. Embedded per-trip by _trip_to_dict(), between
-    'direction' and 'segments'.
+    the reader from segments[], plus the trip's timetable_warnings (derived
+    quality annotations, e.g. fixed_night_stretch_slow — [] for most trips).
+    Embedded per-trip by _trip_to_dict(), between 'direction' and 'segments'.
 
     route_duration_min is the full elapsed time (departure → arrival),
-    i.e. Trip.total_time_min: driving + dynamics + buffer + dwell at intermediate
-    stops. average_speed_kmh is trip_km divided by that same duration, so
-    all three figures stay internally consistent with each other. This is
-    a different, unimplemented formula from the 'avg_speed' entry in
+    i.e. Trip.total_time_min: driving + dynamics + buffer + slack + dwell at
+    intermediate stops. average_speed_kmh is trip_km divided by that same
+    duration, so all figures stay internally consistent with each other.
+    This is a different, unimplemented formula from the 'avg_speed' entry in
     ROUTE_FORMULAS (models/route/version.py), which divides by pure
     driving time only (excluding buffer and dwell) — that entry documents
     a display-only value that was never wired up, not a contract this
@@ -134,6 +146,9 @@ def _trip_general_parameters(trip: Trip) -> dict:
         "trip_km": round(trip_km, 1),
         "route_duration_min": duration_min,
         "average_speed_kmh": round(average_speed_kmh, 1),
+        "timetable_warnings": [
+            _timetable_warning_to_dict(w) for w in trip.timetable_warnings
+        ],
     }
 
 
@@ -372,17 +387,38 @@ def _segment_from_dict(d: dict, geometries_by_id: dict[str, list]) -> Segment:
         # or had none at all (<=0.9.6) — default 0 keeps them loadable
         dynamics_time_min=int(d.get("dynamics_time_min", 0)),
         buffer_time_min=int(d["buffer_time_min"]),
+        # pre-0.9.10 payloads predate fixed-night slack — default 0
+        slack_time_min=int(d.get("slack_time_min", 0)),
         energy_kwh=float(d["energy_kwh"]),
         country_distance_shares=d["country_distance_shares"],
         country_time_shares=d["country_time_shares"],
     )
 
 
+def _timetable_warning_from_dict(d: dict) -> TimetableWarning:
+    return TimetableWarning(
+        code=d["code"],
+        interval=(d["interval"][0], d["interval"][1]),
+        timetable_speed_kmh=float(d["timetable_speed_kmh"]),
+        routing_speed_kmh=float(d["routing_speed_kmh"]),
+        ratio=float(d["ratio"]),
+    )
+
+
 def _trip_from_dict(d: dict, geometries_by_id: dict[str, list]) -> Trip:
+    # timetable_warnings live inside the (otherwise derived) general_parameters
+    # block — the one figure there that CAN'T be recomputed from segments
+    # alone (needs the fixed-night interval, which isn't stored), so it's
+    # read back for round-trip fidelity. Absent for pre-0.9.10 payloads.
+    warnings = [
+        _timetable_warning_from_dict(w)
+        for w in d.get("general_parameters", {}).get("timetable_warnings", [])
+    ]
     return Trip(
         trip_id=d["trip_id"],
         direction=int(d["direction"]),
         segments=[_segment_from_dict(s, geometries_by_id) for s in d["segments"]],
+        timetable_warnings=warnings,
     )
 
 

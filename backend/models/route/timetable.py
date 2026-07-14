@@ -11,11 +11,25 @@ timetable_mode/schedule_mode/auto_stop_addition itself.
 Three request-level concerns have their logic here, each with its switch
 living in route_factory.py:
 
-  timetable_mode      — departure time + boarding/alighting classification
-                         for one direction's stop list. One function per
-                         mode (currently simple_automatic_timetable() for
-                         "simpleAutomatic"); route_factory._build_trip()
-                         picks which to call.
+  timetable_mode      — departure time + stop classification (boarding/
+                         night/alighting) for one direction's stop list.
+                         One function per mode; route_factory._build_trip()
+                         picks which to call:
+                           simple_automatic_timetable() — "simpleAutomatic":
+                             trip duration mirrored around MIRROR_MIN.
+                           simple_automatic_fixed_night_timetable() —
+                             "simpleAutomaticWithFixedNight": the caller's
+                             fixed_night_interval [A, B] is what gets
+                             centered on MIRROR_MIN instead, stretched with
+                             per-leg slack if naturally shorter than the
+                             night window (dep(A) by 23:59, arr(B) from
+                             05:00) — see the function for the full rules.
+                         Both classify intermediate stops with the shared
+                         NIGHT_START_MIN/NIGHT_END_MIN rule (boarding if
+                         departing strictly before 00:00, alighting if
+                         arriving at/after 05:00, night otherwise);
+                         fixed_night_speed_warning() is the fixed-night
+                         mode's post-build quality check.
 
   schedule_mode       — seasonal frequency for the route as a whole. One
                          function per mode (currently always_daily_schedule()
@@ -75,11 +89,14 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from models.params import Composition, TrackInfraCollection, StopInfraCollection
-from models.route.trip import StopType
+from models.route.trip import Segment, StopType, TimetableWarning
 from models.route.route import Schedule, SeasonalSchedule, Season, Frequency
 from models.route.routing.rail_router import RailRouter, RoutedLeg, build_router_stops
 from models.route.version import (
     MIRROR_MIN,
+    NIGHT_START_MIN,
+    NIGHT_END_MIN,
+    FIXED_NIGHT_MIN_SPEED_RATIO,
     AUTO_STOP_BUFFER_M,
     AUTO_STOP_MAX_DETOUR_PER,
 )
@@ -94,6 +111,60 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 
+def _classify_stop_type(arrival_min: int, departure_min: int) -> StopType:
+    """Shared three-way classification for INTERMEDIATE stops, used by every
+    timetable_mode (termini are always boarding/alighting by position, the
+    caller's concern). Boarding is judged on DEPARTURE time, alighting on
+    ARRIVAL time:
+      departure strictly before NIGHT_START_MIN (00:00+1) → boarding
+      arrival at/after NIGHT_END_MIN (05:00+1)            → alighting
+      otherwise                                            → night
+    The two conditions can't both hold (that would need arrival >= Y and
+    departure < X with Y > X), so precedence never matters.
+    """
+    if departure_min < NIGHT_START_MIN:
+        return StopType.BOARDING
+    if arrival_min >= NIGHT_END_MIN:
+        return StopType.ALIGHTING
+    return StopType.NIGHT
+
+
+def _provisional_offsets(
+    pure_leg_times: list[int], slack_per_leg: list[int], min_dwell: int
+) -> tuple[list[int], list[int]]:
+    """Cumulative provisional (arrival, departure) offsets from trip
+    departure per stop — pure leg times plus slack per leg, min-dwell
+    approximation at intermediate stops, no dwell at termini. The common
+    positioning/classification arithmetic behind both timetable modes."""
+    n = len(pure_leg_times) + 1
+    arr_offset = [0] * n
+    dep_offset = [0] * n
+    for i in range(1, n):
+        arr_offset[i] = dep_offset[i - 1] + pure_leg_times[i - 1] + slack_per_leg[i - 1]
+        dep_offset[i] = arr_offset[i] + (min_dwell if i < n - 1 else 0)
+    return arr_offset, dep_offset
+
+
+def _classify_stops(
+    departure_time_min: int, arr_offset: list[int], dep_offset: list[int]
+) -> list[StopType]:
+    """Stop types for a whole direction given its departure time and
+    provisional offsets: first always boarding, last always alighting
+    (termini by position), everything between via _classify_stop_type()
+    on its provisional arrival/departure clock times."""
+    n = len(arr_offset)
+    stop_types: list[StopType] = [StopType.BOARDING]
+    for i in range(1, n - 1):
+        stop_types.append(
+            _classify_stop_type(
+                departure_time_min + arr_offset[i], departure_time_min + dep_offset[i]
+            )
+        )
+    if n > 1:
+        stop_types.append(StopType.ALIGHTING)
+    return stop_types
+
+
 def simple_automatic_timetable(
     stop_ids: list[str],
     composition: Composition,
@@ -101,7 +172,7 @@ def simple_automatic_timetable(
 ) -> tuple[list[tuple[str, StopType]], int]:
     """
     Implements timetable_mode="simpleAutomatic". Derive departure time and
-    per-stop boarding/alighting from already-routed leg physics — no
+    per-stop classification from already-routed leg physics — no
     routing happens here, the caller routes once (possibly again, if
     auto_stop_addition changed the stop list) and hands over the resulting
     legs.
@@ -113,53 +184,255 @@ def simple_automatic_timetable(
          intermediate stop — a light correction so the mirror point isn't
          thrown off by completely ignoring dwell. Mirror that duration
          around MIRROR_MIN (02:30) to get this direction's departure time.
-      2. Walk forward from that departure time using pure leg times (still
-         no dwell) to get a provisional clock time at each intermediate
-         stop, and classify it boarding (before 02:30) or alighting (at/after
-         02:30). First stop is always boarding, last always alighting,
-         regardless of clock time — they're termini by position, not by
-         the mirror rule.
+      2. Walk forward from that departure time to a provisional arrival
+         AND departure clock time per intermediate stop (same min-dwell
+         approximation) and classify via _classify_stop_type(): boarding
+         if it departs strictly before 00:00, alighting if it arrives
+         at/after 05:00, night otherwise. First stop is always boarding,
+         last always alighting, regardless of clock time — they're
+         termini by position, not by the threshold rule.
 
     The real dwell-inclusive timetable is built afterwards via
     build_final_timetable() (below), using the stop types and departure
-    time returned here — that final pass will land a few minutes later
-    at each stop than the provisional classification pass, an accepted
-    approximation for this mode (a stop within ~2 min of 02:30 could in
-    theory land on the other side of the boundary once real dwell is
-    added; not worth iterating to convergence here).
+    time returned here — that final pass can land a few minutes off the
+    provisional classification pass (real dwell vs the min-dwell
+    approximation), an accepted approximation for this mode (a stop
+    within a couple of minutes of a threshold could in theory land on the
+    other side of the boundary once real dwell is added; not worth
+    iterating to convergence here).
 
     Returns (stop_inputs with classified StopType, departure_time_min).
     """
-    n = len(stop_ids)
     pure_leg_times = [leg.total_time_min for leg in routed_legs]
-
     min_dwell = min(
         composition.min_boarding_time_min, composition.min_alighting_time_min
     )
-    approx_dwell_total = min_dwell * max(n - 2, 0)  # only intermediate stops get dwell
-    total_duration = sum(pure_leg_times) + approx_dwell_total
+    arr_offset, dep_offset = _provisional_offsets(
+        pure_leg_times, [0] * len(routed_legs), min_dwell
+    )
 
+    total_duration = arr_offset[-1]  # legs + min-dwell at every intermediate stop
     departure_time_min = round(MIRROR_MIN - total_duration / 2)
 
-    stop_types: list[StopType] = [StopType.BOARDING]  # first stop: always boarding
-    provisional_clock = departure_time_min
-    for i in range(1, n - 1):
-        provisional_clock += pure_leg_times[i - 1]
-        stop_types.append(
-            StopType.BOARDING if provisional_clock < MIRROR_MIN else StopType.ALIGHTING
-        )
-    if n > 1:
-        stop_types.append(StopType.ALIGHTING)  # last stop: always alighting
-
+    stop_types = _classify_stops(departure_time_min, arr_offset, dep_offset)
     stop_inputs = list(zip(stop_ids, stop_types))
     return stop_inputs, departure_time_min
 
 
-VALID_TIMETABLE_MODES = frozenset({"simpleAutomatic"})
+def simple_automatic_fixed_night_timetable(
+    stop_ids: list[str],
+    composition: Composition,
+    routed_legs: list[RoutedLeg],
+    fixed_night_interval: list[str],
+) -> tuple[list[tuple[str, StopType]], int, list[int]]:
+    """
+    Implements timetable_mode="simpleAutomaticWithFixedNight". Same
+    provisional-physics technique as simple_automatic_timetable(), but the
+    schedule is positioned so the MIDPOINT of [departure at interval start
+    A, arrival at interval end B] lands on MIRROR_MIN — instead of the
+    midpoint of the whole trip. Lets a demand-strong feeder section keep
+    evening departures while the night window sits on a chosen corridor
+    section; plain simpleAutomatic is the special case A=first, B=last.
+
+    fixed_night_interval: [A, B] stop IDs in THIS direction's travel order
+    (the caller reverses it for the return trip); both must be in stop_ids
+    with A before B. The interval may span any number of legs — everything
+    below works on cumulative offsets, not per-leg positions.
+
+    Night-window guarantee + stretching: the schedule must satisfy
+    dep(A) < NIGHT_START_MIN (departs 23:59 at the latest — boarding is
+    judged on departure time, strictly before the window) and
+    arr(B) >= NIGHT_END_MIN (arrives 05:00 at the earliest — alighting is
+    judged on arrival time). By construction that also guarantees every
+    stop before A classifies boarding and every stop after B alighting.
+    The minimum interval span is therefore
+    NIGHT_END_MIN - NIGHT_START_MIN + 1 (301 min): a naturally shorter
+    interval is stretched to exactly that minimum by distributing slack
+    minutes across the interval's legs, proportionally to each leg's pure
+    time (largest-remainder rounding so the total is exact). The ideal
+    MIRROR_MIN midpoint is then clamped into the window's constraints —
+    for a minimally-stretched interval that pins dep(A)=23:59 /
+    arr(B)=05:00 exactly (midpoint 02:29.5; minimal stretch deliberately
+    wins over exact midpoint symmetry). The slack ends up on
+    Segment.slack_time_min via the returned slack_per_leg — route_factory
+    threads it through build_final_timetable() and segment assembly.
+    Whether the stretch made the interval unreasonably slow is checked
+    separately, after the final timetable exists — see
+    fixed_night_speed_warning().
+
+    Provisional offsets use the same min-dwell approximation and the same
+    accepted final-pass deviation as simple_automatic_timetable().
+
+    Returns (stop_inputs with classified StopType, departure_time_min,
+    slack_per_leg aligned with routed_legs — zeros outside the interval).
+    """
+    a_idx = _interval_index(stop_ids, fixed_night_interval[0], "start")
+    b_idx = _interval_index(stop_ids, fixed_night_interval[1], "end")
+    if a_idx >= b_idx:
+        raise ValueError(
+            f"fixed_night_interval start '{fixed_night_interval[0]}' must come "
+            f"before end '{fixed_night_interval[1]}' in travel order."
+        )
+
+    pure_leg_times = [leg.total_time_min for leg in routed_legs]
+    min_dwell = min(
+        composition.min_boarding_time_min, composition.min_alighting_time_min
+    )
+
+    no_slack = [0] * len(routed_legs)
+    arr_natural, dep_natural = _provisional_offsets(pure_leg_times, no_slack, min_dwell)
+    natural_span = arr_natural[b_idx] - dep_natural[a_idx]
+
+    # dep(A) <= NIGHT_START_MIN - 1 and arr(B) >= NIGHT_END_MIN together
+    # need at least this much span between the two.
+    required_span = NIGHT_END_MIN - (NIGHT_START_MIN - 1)
+    slack_total = max(0, required_span - natural_span)
+
+    slack_per_leg = no_slack
+    if slack_total > 0:
+        slack_per_leg = _distribute_slack(
+            slack_total, pure_leg_times, first_leg=a_idx, last_leg=b_idx - 1
+        )
+        logger.info(
+            "simple_automatic_fixed_night_timetable: interval [%s, %s] spans "
+            "%dmin naturally, %dmin required — stretched by %dmin.",
+            fixed_night_interval[0],
+            fixed_night_interval[1],
+            natural_span,
+            required_span,
+            slack_total,
+        )
+
+    arr_offset, dep_offset = _provisional_offsets(
+        pure_leg_times, slack_per_leg, min_dwell
+    )
+    span = arr_offset[b_idx] - dep_offset[a_idx]  # natural_span + slack_total
+
+    # Ideal: interval midpoint on MIRROR_MIN — then clamped into the hard
+    # window constraints, which always admit a value since span >=
+    # required_span. Minimal-stretch intervals land on the clamp bounds
+    # (dep(A)=23:59, arr(B)=05:00) rather than the exact midpoint.
+    dep_a = round(MIRROR_MIN - span / 2)
+    dep_a = min(dep_a, NIGHT_START_MIN - 1)
+    dep_a = max(dep_a, NIGHT_END_MIN - span)
+    departure_time_min = dep_a - dep_offset[a_idx]
+
+    stop_types = _classify_stops(departure_time_min, arr_offset, dep_offset)
+    stop_inputs = list(zip(stop_ids, stop_types))
+    return stop_inputs, departure_time_min, slack_per_leg
+
+
+def _interval_index(stop_ids: list[str], stop_id: str, role: str) -> int:
+    """Index of a fixed_night_interval endpoint in stop_ids, with a domain
+    error naming the missing endpoint — api/route.py validates against the
+    caller's own stops, this re-checks against the possibly auto-extended
+    final list (auto_stop_addition only ever inserts, so a miss here means
+    the request validation was bypassed)."""
+    try:
+        return stop_ids.index(stop_id)
+    except ValueError:
+        raise ValueError(
+            f"fixed_night_interval {role} stop '{stop_id}' is not in the "
+            f"trip's stop list."
+        ) from None
+
+
+def _distribute_slack(
+    slack_total: int, pure_leg_times: list[int], first_leg: int, last_leg: int
+) -> list[int]:
+    """slack_total minutes spread over legs first_leg..last_leg (inclusive),
+    proportionally to each leg's pure time, as whole minutes summing exactly
+    to slack_total (largest-remainder rounding). Legs outside the interval
+    get 0. Falls back to an even split if the interval's pure times sum to 0
+    (degenerate, but must not divide by zero)."""
+    slack_per_leg = [0] * len(pure_leg_times)
+    interval = list(range(first_leg, last_leg + 1))
+    interval_time = sum(pure_leg_times[i] for i in interval)
+
+    if interval_time <= 0:
+        base, remainder = divmod(slack_total, len(interval))
+        for k, i in enumerate(interval):
+            slack_per_leg[i] = base + (1 if k < remainder else 0)
+        return slack_per_leg
+
+    exact = [slack_total * pure_leg_times[i] / interval_time for i in interval]
+    floored = [int(x) for x in exact]
+    remainder = slack_total - sum(floored)
+    by_fraction = sorted(
+        range(len(interval)), key=lambda k: exact[k] - floored[k], reverse=True
+    )
+    for k in by_fraction[:remainder]:
+        floored[k] += 1
+    for k, i in enumerate(interval):
+        slack_per_leg[i] = floored[k]
+    return slack_per_leg
+
+
+def fixed_night_speed_warning(
+    segments: list[Segment], fixed_night_interval: list[str]
+) -> TimetableWarning | None:
+    """
+    Post-build quality check for timetable_mode="simpleAutomaticWithFixedNight":
+    compares the fixed interval's timetable speed (elapsed dep(A)→arr(B),
+    slack and intermediate dwell included) against its pure routing speed
+    (driving + dynamics + buffer only). Stretching a naturally short
+    interval to cover the night window can make it arbitrarily slow — below
+    FIXED_NIGHT_MIN_SPEED_RATIO this returns a "fixed_night_stretch_slow"
+    TimetableWarning for the trip's general_parameters.timetable_warnings;
+    None otherwise. A warning, never an error — the route still returns.
+
+    Runs on the final assembled segments (real dwell, real slack), not the
+    provisional physics the timetable strategy positioned with.
+    """
+    stop_ids = [segments[0].from_stop.stop_id] + [s.to_stop.stop_id for s in segments]
+    a_idx = _interval_index(stop_ids, fixed_night_interval[0], "start")
+    b_idx = _interval_index(stop_ids, fixed_night_interval[1], "end")
+
+    interval_segments = segments[a_idx:b_idx]
+    interval_km = sum(s.distance_m for s in interval_segments) / 1000
+    physics_min = sum(
+        s.driving_time_min + s.dynamics_time_min + s.buffer_time_min
+        for s in interval_segments
+    )
+    dep_a = segments[a_idx].from_stop.departure_time_min
+    arr_b = segments[b_idx - 1].to_stop.arrival_time_min
+    timetable_min = arr_b - dep_a
+
+    if physics_min <= 0 or timetable_min <= 0:
+        return None  # degenerate interval — nothing meaningful to compare
+
+    routing_speed_kmh = interval_km / (physics_min / 60)
+    timetable_speed_kmh = interval_km / (timetable_min / 60)
+    ratio = timetable_speed_kmh / routing_speed_kmh
+    if ratio >= FIXED_NIGHT_MIN_SPEED_RATIO:
+        return None
+
+    logger.info(
+        "fixed_night_speed_warning: interval [%s, %s] timetable speed "
+        "%.1fkm/h vs routing speed %.1fkm/h (ratio %.2f < %.2f).",
+        fixed_night_interval[0],
+        fixed_night_interval[1],
+        timetable_speed_kmh,
+        routing_speed_kmh,
+        ratio,
+        FIXED_NIGHT_MIN_SPEED_RATIO,
+    )
+    return TimetableWarning(
+        code="fixed_night_stretch_slow",
+        interval=(fixed_night_interval[0], fixed_night_interval[1]),
+        timetable_speed_kmh=round(timetable_speed_kmh, 1),
+        routing_speed_kmh=round(routing_speed_kmh, 1),
+        ratio=round(ratio, 2),
+    )
+
+
+VALID_TIMETABLE_MODES = frozenset({"simpleAutomatic", "simpleAutomaticWithFixedNight"})
 """Single source of truth for allowed timetable_mode strings — read by both
 api/route.py's request validation and route_factory._build_trip()'s switch.
 Adding a mode means: add its function above, add it to this set, add a
-branch in _build_trip()."""
+branch in _build_trip(). "simpleAutomaticWithFixedNight" additionally
+requires the request's fixed_night_interval, validated in api/route.py and
+threaded through TripPairInput."""
 
 
 # =============================================================================
@@ -663,14 +936,17 @@ def dwell_min(
     tracks: TrackInfraCollection,
 ) -> int:
     """Dwell at one intermediate stop: max of composition/track minimums
-    for whichever of boarding/alighting/both applies. 0 for a stop type
-    that's neither (shouldn't occur for an intermediate stop, but falls
+    for whichever of boarding/alighting/both applies. NIGHT stops are
+    treated exactly like BOTH — both activities remain operationally
+    possible at a night stop, only demand treats it differently (see
+    distribute_demand in route_factory.py). 0 for a stop type that's
+    none of these (shouldn't occur for an intermediate stop, but falls
     back safely rather than raising)."""
     track = tracks.get(country_code)
     candidates: list[int] = []
-    if stop_type in (StopType.BOARDING, StopType.BOTH):
+    if stop_type in (StopType.BOARDING, StopType.BOTH, StopType.NIGHT):
         candidates += [composition.min_boarding_time_min, track.min_boarding_time_min]
-    if stop_type in (StopType.ALIGHTING, StopType.BOTH):
+    if stop_type in (StopType.ALIGHTING, StopType.BOTH, StopType.NIGHT):
         candidates += [composition.min_alighting_time_min, track.min_alighting_time_min]
     return max(candidates) if candidates else 0
 
@@ -682,6 +958,7 @@ def build_final_timetable(
     composition: Composition,
     tracks: TrackInfraCollection,
     departure_time_min: int,
+    slack_per_leg: list[int] | None = None,
 ) -> list[tuple[int | None, int | None]]:
     """
     Exact, dwell-inclusive (arrival_min, departure_min) per stop, given a
@@ -690,11 +967,17 @@ def build_final_timetable(
     there's only one correct way to turn "departure time + stop types"
     into real clock times, so this is a plain function, not dispatched.
 
+    slack_per_leg: fixed-night stretch minutes per leg, aligned with
+    routed_legs (see simple_automatic_fixed_night_timetable) — None means
+    no slack anywhere, the case for every other timetable_mode.
+
     First stop: arrival=None (it's the origin, nothing to arrive at).
     Last stop: departure=None (journey's over). Every stop in between
     departs at arrival + dwell_min().
     """
     n = len(stop_types)
+    if slack_per_leg is None:
+        slack_per_leg = [0] * len(routed_legs)
     clock_min = departure_time_min  # time reached so far
     times: list[tuple[int | None, int | None]] = []
 
@@ -712,7 +995,7 @@ def build_final_timetable(
         )
 
         if not is_last:
-            clock_min = departure_min + routed_legs[i].total_time_min
+            clock_min = departure_min + routed_legs[i].total_time_min + slack_per_leg[i]
 
         times.append((arrival_min, departure_min))
 

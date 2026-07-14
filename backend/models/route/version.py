@@ -26,7 +26,7 @@ from dataclasses import dataclass
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.9"
+ROUTE_BUILDER_VERSION: str = "0.9.10"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -200,6 +200,41 @@ CHANGELOG: dict = {
         "structural guarantee, visible for heavier/faster compositions or "
         "higher quotas. No API contract change.",
     },
+    "0.9.10": {
+        "date": "2026-07-14",
+        "author": "david",
+        "changes": "Night stop classification + timetable_mode "
+        "'simpleAutomaticWithFixedNight'. Stop classification is now "
+        "three-way for ALL timetable modes: boarding if the stop DEPARTS "
+        "strictly before NIGHT_START_MIN (00:00+1), alighting if it "
+        "ARRIVES at/after NIGHT_END_MIN (05:00+1), night otherwise — "
+        "replaces the old two-way split at MIRROR_MIN, and the provisional "
+        "classification walk now includes the min-dwell approximation so "
+        "it can judge departures and arrivals separately. StopType gains "
+        "NIGHT ('night'); dwell treats it like BOTH; the stopgap demand "
+        "model excludes night stops from OD pairs. New mode "
+        "'simpleAutomaticWithFixedNight' (request field "
+        "fixed_night_interval, two stop IDs from the stops list): the "
+        "schedule is positioned so the MIDPOINT of [departure at interval "
+        "start, arrival at interval end] lands on MIRROR_MIN instead of "
+        "mirroring the full trip — lets a demand-strong feeder section "
+        "keep evening departures while the night window sits on a chosen "
+        "corridor section. The interval must depart by 23:59 and arrive "
+        "at 05:00 or later (span >= 301min): a naturally shorter interval "
+        "is stretched by adding slack time (proportionally to leg time "
+        "across the interval's legs), pinning dep=23:59/arr=05:00 exactly "
+        "in the minimal-stretch case; slack is carried as a new "
+        "per-segment slack_time_min component included in total "
+        "segment/trip time. If stretching drops the interval's timetable "
+        "speed below FIXED_NIGHT_MIN_SPEED_RATIO of its routing speed, "
+        "the trip carries a warning in "
+        "general_parameters.timetable_warnings. Bjarne (BREAKING-ish for "
+        "consumers of POST /api/route/plan): stop_type can now be "
+        "'night'; every segment carries a new slack_time_min field (0 "
+        "outside fixed-night stretching); general_parameters gains a "
+        "timetable_warnings list (usually empty). route_from_dict() "
+        "defaults slack_time_min to 0 for stored pre-0.9.10 payloads.",
+    },
 }
 
 
@@ -219,7 +254,28 @@ DEFAULT_AUTO_STOP_ADDITION: str = "add"
 MIRROR_MIN: int = 26 * 60 + 30
 """02:30, expressed 'next day' (1590) on the continuous minutes-from-midnight
 scale used throughout (see models.utils.hhmm_to_min). Fixed constant that
-timetable_mode='simpleAutomatic' schedules are mirrored around."""
+timetable_mode='simpleAutomatic' schedules are mirrored around, and that
+'simpleAutomaticWithFixedNight' centers the fixed night interval on."""
+
+NIGHT_START_MIN: int = 24 * 60
+"""00:00 next day (1440) — threshold X of the night window. Boarding is
+judged on DEPARTURE time: a stop departing strictly before this classifies
+boarding; the fixed-night interval's start stop must depart strictly before
+this (23:59 at the latest)."""
+
+NIGHT_END_MIN: int = 29 * 60
+"""05:00 next day (1740) — threshold Y of the night window. Alighting is
+judged on ARRIVAL time: a stop arriving at/after this classifies alighting;
+anything neither boarding nor alighting is a night stop. The fixed-night
+interval's end stop must arrive no earlier than this."""
+
+FIXED_NIGHT_MIN_SPEED_RATIO: float = 0.7
+"""timetable_mode='simpleAutomaticWithFixedNight' only: minimum acceptable
+ratio of the fixed interval's timetable speed (incl. slack + dwell) to its
+pure routing speed (driving + dynamics + buffer). Stretching a short
+interval to cover the night window can make it arbitrarily slow — below
+this ratio the trip carries a 'fixed_night_stretch_slow' entry in
+general_parameters.timetable_warnings (a warning, never an error)."""
 
 # --- Schedule (seasonal model — models/route/route.py)
 WEEKS_PER_SEASON: int = 26

@@ -98,6 +98,42 @@ def _validate(body: dict) -> list[str]:
             f"'timetable_mode' = '{timetable_mode}' is invalid. Must be one of: {sorted(VALID_TIMETABLE_MODES)}."
         )
 
+    # fixed_night_interval is strictly coupled to its mode: required (and
+    # shape-checked against the stops list) for simpleAutomaticWithFixedNight,
+    # rejected outright alongside any other mode rather than silently
+    # ignored — same strictness pattern as the auto_stop_addition enum.
+    fixed_night_interval = body.get("fixed_night_interval")
+    if timetable_mode == "simpleAutomaticWithFixedNight":
+        if (
+            not isinstance(fixed_night_interval, list)
+            or len(fixed_night_interval) != 2
+            or not all(isinstance(s, str) for s in fixed_night_interval)
+            or fixed_night_interval[0] == fixed_night_interval[1]
+        ):
+            errors.append(
+                "'fixed_night_interval' must be a list of exactly 2 distinct "
+                "stop_id strings when timetable_mode is "
+                "'simpleAutomaticWithFixedNight'."
+            )
+        elif isinstance(stops, list) and all(isinstance(s, str) for s in stops):
+            missing = [s for s in fixed_night_interval if s not in stops]
+            if missing:
+                errors.append(
+                    f"'fixed_night_interval' stops {missing} are not in 'stops'."
+                )
+            elif stops.index(fixed_night_interval[0]) >= stops.index(
+                fixed_night_interval[1]
+            ):
+                errors.append(
+                    "'fixed_night_interval' start must come before its end in "
+                    "'stops' order."
+                )
+    elif fixed_night_interval is not None:
+        errors.append(
+            "'fixed_night_interval' is only allowed with timetable_mode "
+            "'simpleAutomaticWithFixedNight'."
+        )
+
     schedule_mode = body.get("schedule_mode", DEFAULT_SCHEDULE_MODE)
     if schedule_mode not in VALID_SCHEDULE_MODES:
         errors.append(
@@ -145,13 +181,35 @@ def plan():
                                   no stop_type; boarding/alighting is derived
                                   automatically, see timetable_mode)
       composition_id    : str   (required)
-      timetable_mode    : "simpleAutomatic"  (optional, default "simpleAutomatic" — only
-                                  supported value for now. Departure time and per-stop
-                                  boarding/alighting are derived by mirroring the trip
-                                  duration around a fixed 02:30 constant: everything
-                                  before 02:30 is a boarding stop, everything after is
-                                  alighting. First/last stop are always boarding/alighting
-                                  regardless of clock time.)
+      timetable_mode    : "simpleAutomatic" | "simpleAutomaticWithFixedNight"
+                                  (optional, default "simpleAutomatic".
+                                  Departure time and per-stop classification are
+                                  derived automatically. Classification is the same
+                                  for both modes: a stop departing strictly before
+                                  00:00 is boarding, one arriving at/after 05:00 is
+                                  alighting, anything between is a night stop
+                                  (thresholds NIGHT_START_MIN / NIGHT_END_MIN in
+                                  models/route/version.py). First/last stop are
+                                  always boarding/alighting regardless of clock time.
+                                  "simpleAutomatic": the whole trip's duration is
+                                  mirrored around a fixed 02:30 constant.
+                                  "simpleAutomaticWithFixedNight": the
+                                  fixed_night_interval section is centered on 02:30
+                                  instead — demand-strong feeder sections outside it
+                                  keep sensible evening/morning times. The interval
+                                  must depart by 23:59 and arrive at 05:00 or later;
+                                  a naturally shorter interval is stretched by
+                                  adding slack_time_min across its segments, and if
+                                  that makes it slower than
+                                  FIXED_NIGHT_MIN_SPEED_RATIO of routing speed the
+                                  trip carries a fixed_night_stretch_slow entry in
+                                  general_parameters.timetable_warnings.)
+      fixed_night_interval : [stop_id, stop_id]  (required for, and only allowed
+                                  with, timetable_mode="simpleAutomaticWithFixedNight" —
+                                  two distinct stop IDs from 'stops', start before end
+                                  in outbound travel order; may span several legs. The
+                                  return trip applies the interval reversed
+                                  automatically.)
       schedule_mode     : "alwaysDaily"  (optional, default "alwaysDaily" — only supported
                                   value for now. Daily frequency in both seasons regardless
                                   of demand; a future demand-aware strategy can be added
@@ -215,6 +273,8 @@ def plan():
     schedule_mode = body.get("schedule_mode", DEFAULT_SCHEDULE_MODE)
     routing_mode = body.get("routing_mode", DEFAULT_ROUTING_MODE)
     auto_stop_addition = body.get("auto_stop_addition", DEFAULT_AUTO_STOP_ADDITION)
+    fixed_night_interval = body.get("fixed_night_interval")  # None except for
+    # timetable_mode="simpleAutomaticWithFixedNight" — enforced in _validate()
 
     try:
         # Inside the try block: resolve_scenario_id() raises ValueError if
@@ -240,6 +300,7 @@ def plan():
                     timetable_mode=timetable_mode,
                     routing_mode=routing_mode,
                     auto_stop_addition=auto_stop_addition,
+                    fixed_night_interval=fixed_night_interval,
                 )
             ],
             loader=loader,
