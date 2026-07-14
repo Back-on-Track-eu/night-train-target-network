@@ -70,7 +70,33 @@
       "calculating": "Calculating…",
       "noData": "No data for this selection.",
       "showRaw": "Raw JSON",
-      "calcVersion": "calc version"
+      "calcVersion": "calc version",
+      "info": {
+        "tooltip": "Click to see what this cost factor means and how it's calculated.",
+        "ratesHeader": "Per-unit rates",
+        "rateCol": "Rate",
+        "valueCol": "Value",
+        "sourceCol": "Source",
+        "defaultBadge": "default"
+      },
+      "rates": {
+        "driver_rate": "Driver hourly rate",
+        "crew_rate": "Crew hourly rate",
+        "coach_maint_km": "Coach maintenance rate",
+        "loco_lease_h": "Locomotive lease rate",
+        "svc_place": "Service cost per place",
+        "var_overhead_quota": "Variable overhead quota",
+        "coach_purchase": "Coach purchase cost",
+        "coach_amort_years": "Amortisation period",
+        "financing_quota": "Financing quota",
+        "fix_overhead_quota": "Fixed overhead quota",
+        "cleaning_day": "Daily cleaning cost",
+        "shunting_event": "Shunting cost per event",
+        "tac_km": "Track access charge",
+        "energy_kwh": "Energy price",
+        "stop_charge": "Station charge",
+        "parking_day": "Parking cost per day"
+      }
     }
   }
 }
