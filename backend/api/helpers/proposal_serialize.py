@@ -146,7 +146,7 @@ def validate_route_evaluation_sync(
     eval_route_id = evaluation_body.get("route_id")
     if eval_route_id != route.get("route_id"):
         errors.append(
-            "evaluation_body.route_id does not match " "route_body.route.route_id."
+            "evaluation_body.route_id does not match route_body.route.route_id."
         )
 
     eval_input_route = (evaluation_body.get("input") or {}).get("route")

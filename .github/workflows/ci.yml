@@ -23,16 +23,16 @@ jobs:
       - run: npm ci
       - run: npm run format:check
 
-  black-check:
-    name: Black (backend)
+  ruff-check:
+    name: Ruff format (backend)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install black==25.1
-      - run: black --check backend/
+      - run: pip install ruff==0.15.21
+      - run: ruff format --check backend/
 
   type-check:
     name: vue-tsc (frontend)

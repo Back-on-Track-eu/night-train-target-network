@@ -230,6 +230,6 @@ def test_whatif_scenario_pins_track_infra_v1(whatif_scenario, base_scenario):
         "stop_infrastructures_version",
         "stop_infrastructure_defaults_version",
     ):
-        assert (
-            whatif_scenario[col] == base_scenario[col]
-        ), f"what-if {col} should copy base"
+        assert whatif_scenario[col] == base_scenario[col], (
+            f"what-if {col} should copy base"
+        )

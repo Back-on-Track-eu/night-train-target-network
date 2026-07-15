@@ -58,7 +58,6 @@ BREAKDOWN_LEAF_FIELDS = {
 
 
 class TestResponseStructure:
-
     def test_top_level_keys(self, eval_standard):
         """Response carries calc_version, route_id, models, input, views."""
         _, result = eval_standard
@@ -130,9 +129,9 @@ class TestResponseStructure:
                 # per_trip_pair is one level deep; the others two levels.
                 cells = [cell] if "values" in cell else list(cell.values())
                 for c in cells:
-                    assert (
-                        "filter" in c and "values" in c
-                    ), f"{view_name}[{key}]: missing filter/values"
+                    assert "filter" in c and "values" in c, (
+                        f"{view_name}[{key}]: missing filter/values"
+                    )
 
 
 # =============================================================================
@@ -141,16 +140,15 @@ class TestResponseStructure:
 
 
 class TestModelsSection:
-
     def test_three_models_with_version_and_description(self, eval_standard):
         """route_builder, energy, and evaluation each carry a semver version
         and a non-empty description."""
         _, result = eval_standard
         assert set(result["models"]) == {"route_builder", "energy", "evaluation"}
         for name, model in result["models"].items():
-            assert re.fullmatch(
-                r"\d+\.\d+\.\d+", model["version"]
-            ), f"{name}: bad version"
+            assert re.fullmatch(r"\d+\.\d+\.\d+", model["version"]), (
+                f"{name}: bad version"
+            )
             assert model["description"], f"{name}: empty description"
             assert isinstance(model["formulas"], dict)
 
@@ -171,9 +169,9 @@ class TestModelsSection:
         for key, f in result["models"]["evaluation"]["formulas"].items():
             assert f["latex"], f"{key}: empty latex"
             assert f["description"], f"{key}: empty description"
-            assert "\\" in f["latex"] or any(
-                op in f["latex"] for op in "=+-×"
-            ), f"{key}: latex does not look like a formula: {f['latex']!r}"
+            assert "\\" in f["latex"] or any(op in f["latex"] for op in "=+-×"), (
+                f"{key}: latex does not look like a formula: {f['latex']!r}"
+            )
 
 
 # =============================================================================
@@ -182,7 +180,6 @@ class TestModelsSection:
 
 
 class TestInputSection:
-
     def test_route_echoed_verbatim(self, eval_standard):
         """input.route is the route JSON exactly as posted — a faithful
         record of the request, not a re-serialization."""
@@ -210,7 +207,6 @@ class TestInputSection:
 
 
 class TestValidation:
-
     def test_missing_route_returns_400(self, api_base):
         resp = requests.post(f"{api_base}{EVAL_URL}", json={}, timeout=10)
         assert resp.status_code == 400

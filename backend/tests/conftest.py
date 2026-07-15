@@ -126,9 +126,9 @@ def base_scenario(db_cur):
     version numbers tests filter on for the four scenario-versioned tables."""
     db_cur.execute("SELECT * FROM scenario.scenarios WHERE is_current_base = TRUE")
     row = db_cur.fetchone()
-    assert (
-        row is not None
-    ), "No scenario has is_current_base = TRUE — seed data missing."
+    assert row is not None, (
+        "No scenario has is_current_base = TRUE — seed data missing."
+    )
     return row
 
 
@@ -142,9 +142,9 @@ def whatif_scenario(db_cur):
         "WHERE scenario_key = 'whatif-de-track-infra' AND is_current_scenario = TRUE"
     )
     row = db_cur.fetchone()
-    assert (
-        row is not None
-    ), "What-if scenario missing — see db/dev/seed.py: WHATIF_SCENARIO."
+    assert row is not None, (
+        "What-if scenario missing — see db/dev/seed.py: WHATIF_SCENARIO."
+    )
     return row
 
 

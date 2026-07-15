@@ -89,7 +89,6 @@ def eval_zero(api_base, route_berlin_wien):
 
 
 class TestCostRecomputation:
-
     def test_tac_matches_manual_calculation(self, eval_standard, track_rates):
         """Annual TAC equals Σ (per-country km × country tac rate) over all
         trips, annualised — mirrors _calc_segment_cost() exactly."""
@@ -184,7 +183,6 @@ class TestCostRecomputation:
 
 
 class TestBreakdownIdentities:
-
     def test_net_equals_revenue_minus_cost_minus_margin(self, eval_standard):
         _, result = eval_standard
         bd = route_bd(result)
@@ -272,7 +270,6 @@ class TestBreakdownIdentities:
 
 
 class TestNormalisationDivisors:
-
     def test_per_operating_day_times_days_equals_per_year(self, eval_standard):
         """per_operating_day × operating days (from the route's own embedded
         schedule) reproduces per_year."""
@@ -331,7 +328,6 @@ class TestNormalisationDivisors:
 
 
 class TestDemandBehaviour:
-
     @staticmethod
     def _single_od(route, places, price):
         trip_id = route["trip_pairs"][0]["outbound"]["trip_id"]
@@ -390,7 +386,6 @@ class TestDemandBehaviour:
 
 
 class TestMatrixConsistency:
-
     def test_country_all_all_equals_route_view(self, eval_standard):
         """The (all, all) country matrix cell equals the route-level breakdown."""
         _, result = eval_standard
@@ -450,7 +445,6 @@ class TestMatrixConsistency:
 
 
 class TestScenarioOverride:
-
     def test_whatif_override_lowers_tac(
         self, api_base, route_berlin_wien, whatif_scenario
     ):

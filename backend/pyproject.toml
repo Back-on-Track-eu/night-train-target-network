@@ -18,13 +18,17 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "black==25.1",
+    "ruff==0.15.21",
     "jupyterlab>=4.6.0",
     "matplotlib>=3.10",
     "pandas>=3.0.3",
     "pytest>=8.0",
     "pytest-timeout>=2.3",
 ]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

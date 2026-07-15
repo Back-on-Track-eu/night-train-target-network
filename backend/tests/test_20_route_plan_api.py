@@ -43,7 +43,6 @@ def plan_response(api_base):
 
 
 class TestResponseStructure:
-
     def test_top_level_keys(self, plan_response):
         """Response carries exactly route_builder_version, request, route."""
         assert set(plan_response) == {"route_builder_version", "request", "route"}
@@ -180,7 +179,6 @@ class TestResponseStructure:
 
 
 class TestAutomaticScheduling:
-
     def test_departure_time_assigned(self, plan_response):
         """Every trip gets a real departure time on the continuous
         minutes-from-midnight scale (< 48h)."""
@@ -232,7 +230,6 @@ class TestAutomaticScheduling:
 
 
 class TestModeSwitches:
-
     def test_explicit_default_values_accepted(self, api_base):
         """Spelling out every default mode explicitly is accepted."""
         body = {
@@ -322,7 +319,6 @@ class TestModeSwitches:
 
 
 class TestProposalAndScenario:
-
     def test_omitted_proposal_id_gets_draft_placeholder(self, plan_response):
         """Without a proposal_id, a random draft placeholder above one billion
         is minted and proposal_version forced to 1 — route_id P{id}_V1_R1."""
@@ -358,7 +354,6 @@ class TestProposalAndScenario:
 
 
 class TestValidation:
-
     def test_single_stop_returns_400(self, api_base):
         body = {**BASE_REQUEST, "stops": ["DE_BERLIN_HBF"]}
         assert (
