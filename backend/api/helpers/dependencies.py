@@ -66,7 +66,7 @@ def init() -> None:
     Initialise the DBDataLoader and CountryIndex at startup.
     Called once from main.py before the Flask app starts serving requests.
     """
-global \
+    global \
         _loader, \
         _country_index, \
         _proposal_repo, \

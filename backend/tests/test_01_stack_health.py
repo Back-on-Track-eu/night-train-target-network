@@ -3,7 +3,6 @@ test_01_stack_health.py
 =======================
 Verifies the Docker stack came up correctly — the very first thing to check
 before any functional test can be meaningful.
-
 Covers:
   - API liveness (GET /api/health)
   - DB loader initialisation (GET /api/data/status)
@@ -78,6 +77,6 @@ def test_no_stub_endpoints_remain(api_base):
     ]
     for method, path in former_stubs:
         resp = requests.request(method, f"{api_base}{path}", json={}, timeout=5)
-        assert (
-            resp.status_code == 400
-        ), f"{method} {path} returned {resp.status_code}, expected 400 (empty body)"
+        assert resp.status_code == 400, (
+            f"{method} {path} returned {resp.status_code}, expected 400 (empty body)"
+        )
