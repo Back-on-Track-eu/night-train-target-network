@@ -22,6 +22,7 @@ import pytest
 import requests
 
 from api.auth_utils import hash_otp
+from tests.helpers import PROPOSAL_URL, evaluate
 
 _TIMEOUT = 15
 
@@ -278,3 +279,152 @@ def test_feedback_garbage_token_401(api_base):
         timeout=_TIMEOUT,
     )
     assert resp.status_code == 401
+
+
+# =============================================================================
+# Guest → registered merge on verify (persist-on-calc, 2026-07-16)
+# =============================================================================
+#
+# The frontend's register-as-last-step flow: play around as a guest
+# (persisting proposals along the way), then verify an email WITH the guest
+# JWT attached as the bearer — everything the guest owns is reassigned to
+# the verified account, and the guest session dies with an explicit
+# account-merged error. Exercised against the permanent seed proposal so no
+# route build is needed: a guest evaluating a foreign, not-yet-evaluated
+# proposal branches it, which makes the guest an owner in one cheap call.
+
+_SEED_PROPOSAL_ID = 1
+
+
+def _fresh_otp_for(db_cur, db_conn, user_id: int, otp: str) -> None:
+    db_cur.execute(
+        "INSERT INTO admin.auth_tokens (user_id, code_hash, expires_at) "
+        "VALUES (%s, %s, NOW() + INTERVAL '15 minutes')",
+        (user_id, hash_otp(otp)),
+    )
+    db_conn.commit()
+
+
+@pytest.mark.timeout(120)
+def test_verify_with_guest_bearer_merges_guest_assets(api_base, db_cur, db_conn):
+    """End to end: guest persists a proposal (branch-by-eval off the seed
+    proposal), registers with the guest bearer attached, and afterwards the
+    proposal belongs to the new account, the guest row is marked merged,
+    the old guest token is rejected with the account-merged error, and a
+    repeat merge attempt is an idempotent no-op. Sequential by design —
+    each step is the precondition of the next."""
+    # --- a guest who owns something ---
+    resp = requests.post(f"{api_base}/api/auth/guest", timeout=10)
+    _skip_if_rate_limited(resp)
+    guest = resp.json()
+    guest_headers = {"Authorization": f"Bearer {guest['token']}"}
+
+    seed_route = requests.get(
+        f"{api_base}{PROPOSAL_URL}/{_SEED_PROPOSAL_ID}", timeout=10
+    ).json()["route_body"]["route"]
+    branched = evaluate(api_base, seed_route, headers=guest_headers, timeout=90)
+    branch_pid = branched["proposal"]["proposal_id"]
+    assert branched["proposal"]["action"] == "branched"
+
+    try:
+        # --- register with the guest bearer attached ---
+        email, name, otp = _unique_email(), _unique_name(), "314159"
+        db_cur.execute(
+            "INSERT INTO admin.users (email, display_name, is_verified) "
+            "VALUES (%s, %s, FALSE) RETURNING user_id",
+            (email, name),
+        )
+        user_id = db_cur.fetchone()["user_id"]
+        db_conn.commit()
+        _fresh_otp_for(db_cur, db_conn, user_id, otp)
+
+        resp = requests.post(
+            f"{api_base}/api/auth/verify",
+            json={"email": email, "code": otp},
+            headers=guest_headers,
+            timeout=10,
+        )
+        assert resp.status_code == 200
+        merged = resp.json()["merged_guest"]
+        assert merged == {
+            "guest_user_id": guest["user_id"],
+            "proposals_claimed": 1,
+            "feedback_claimed": 0,
+        }
+
+        # --- the proposal changed hands; the guest row is marked ---
+        db_cur.execute(
+            "SELECT user_id FROM proposals.proposals "
+            "WHERE proposal_id = %s AND is_current",
+            (branch_pid,),
+        )
+        assert db_cur.fetchone()["user_id"] == user_id
+        db_cur.execute(
+            "SELECT merged_into_user_id FROM admin.users WHERE user_id = %s",
+            (guest["user_id"],),
+        )
+        assert db_cur.fetchone()["merged_into_user_id"] == user_id
+        db_conn.rollback()
+
+        # --- the old guest token now fails loudly, everywhere ---
+        resp = requests.post(
+            f"{api_base}/api/evaluation/calc",
+            json={},
+            headers=guest_headers,
+            timeout=10,
+        )
+        assert resp.status_code == 401
+        assert "merged" in resp.json()["message"].lower()
+
+        # --- a second merge attempt is an idempotent no-op ---
+        _fresh_otp_for(db_cur, db_conn, user_id, "271801")
+        resp = requests.post(
+            f"{api_base}/api/auth/verify",
+            json={"email": email, "code": "271801"},
+            headers=guest_headers,
+            timeout=10,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["merged_guest"] is None
+    finally:
+        # Local cleanup — this file runs after test_50's module purge, so
+        # the branch (proposal row + GTFS decomposition) is ours to remove.
+        cur = db_conn.cursor()
+        for table, column in (
+            ("proposals.routes", "route_id"),
+            ("proposals.shapes", "shape_id"),
+            ("proposals.services", "service_id"),
+        ):
+            cur.execute(
+                f"DELETE FROM {table} WHERE {column} LIKE %s",
+                (f"P{branch_pid}" + r"\_%",),
+            )
+        cur.execute(
+            "DELETE FROM proposals.proposals WHERE proposal_id = %s", (branch_pid,)
+        )
+        db_conn.commit()
+        cur.close()
+
+
+@pytest.mark.timeout(30)
+def test_verify_with_invalid_bearer_still_succeeds(api_base, db_cur, db_conn):
+    """An unusable Authorization header must never block the registration
+    itself — merged_guest simply stays null."""
+    email, name, otp = _unique_email(), _unique_name(), "161803"
+    db_cur.execute(
+        "INSERT INTO admin.users (email, display_name, is_verified) "
+        "VALUES (%s, %s, FALSE) RETURNING user_id",
+        (email, name),
+    )
+    user_id = db_cur.fetchone()["user_id"]
+    db_conn.commit()
+    _fresh_otp_for(db_cur, db_conn, user_id, otp)
+
+    resp = requests.post(
+        f"{api_base}/api/auth/verify",
+        json={"email": email, "code": otp},
+        headers={"Authorization": "Bearer not-a-jwt"},
+        timeout=10,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["merged_guest"] is None

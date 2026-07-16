@@ -82,10 +82,21 @@ def plan_response_default_add(api_base):
 
 class TestResponseStructure:
     def test_top_level_keys(self, plan_response):
-        """Response carries exactly route_builder_version, request, route —
-        no suggested_stops outside auto_stop_addition='suggest' (that mode
-        has its own envelope test in TestModeSwitches)."""
-        assert set(plan_response) == {"route_builder_version", "request", "route"}
+        """Response carries exactly route_builder_version, request, route,
+        and the persist-on-calc proposal block — no suggested_stops outside
+        auto_stop_addition='suggest' (that mode has its own envelope test in
+        TestModeSwitches). This fixture posts tokenless, so the block
+        reports the compute-only outcome."""
+        assert set(plan_response) == {
+            "route_builder_version",
+            "request",
+            "route",
+            "proposal",
+        }
+        assert plan_response["proposal"] == {
+            "persisted": False,
+            "action": "unauthenticated",
+        }
 
     def test_request_echoed_verbatim(self, plan_response):
         """The request body is echoed back unchanged."""
@@ -581,6 +592,7 @@ class TestModeSwitches:
             "request",
             "suggested_stops",
             "route",
+            "proposal",
         }
         keys = list(payload)
         assert (

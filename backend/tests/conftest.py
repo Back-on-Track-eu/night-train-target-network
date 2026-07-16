@@ -29,6 +29,7 @@ from tests.helpers import (
     directional_od,
     evaluate,
     inject_demand,
+    purge_saved_proposals,
 )
 
 # =============================================================================
@@ -101,6 +102,67 @@ def rollback_after_test():
             _active_conn.rollback()
         except Exception:
             pass
+
+
+# =============================================================================
+# Script identity — the user the suite persists as (persist-on-calc)
+# =============================================================================
+#
+# POST /api/route/plan and /api/evaluation/calc persist their responses for
+# any authenticated caller. The suite authenticates as the seeded
+# 'test_script' user so persisted rows from test runs are identifiable (and
+# purgeable) by owner. The session route fixtures below deliberately stay
+# TOKENLESS: they compute only, keep their draft placeholder IDs, and leave
+# no rows — so every pre-existing test sees unchanged behaviour, and
+# persistence is exercised solely by the dedicated tests (test_50, test_70)
+# through these fixtures.
+
+
+@pytest.fixture(scope="session")
+def script_user_id(db_cur, db_conn):
+    """user_id of the seeded 'test_script' identity — resolved by email,
+    never hard-coded (mirrors test_50's old user_ids pattern)."""
+    db_cur.execute(
+        "SELECT user_id FROM admin.users WHERE email = 'test_script@dev.local'"
+    )
+    row = db_cur.fetchone()
+    assert row is not None, (
+        "Seed user test_script missing — reseed the DB (db/dev/seed.py)."
+    )
+    db_conn.rollback()
+    return row["user_id"]
+
+
+@pytest.fixture(scope="session")
+def script_headers(api_base, db_cur, db_conn, script_user_id):
+    """Authorization header for 'test_script', with a real JWT obtained from
+    the live API: an OTP is injected DB-side (the API correctly never
+    returns codes — same pattern as test_70's user_with_known_otp) and
+    exchanged via POST /api/auth/verify. No JWT_SECRET needed on the host.
+
+    Session teardown purges every proposal the suite persisted (the seeded
+    example proposal excepted) so dev-DB growth stays bounded — the last
+    run's rows exist for inspection only until the next run starts."""
+    from api.auth_utils import hash_otp
+
+    otp = "424242"
+    db_cur.execute(
+        "INSERT INTO admin.auth_tokens (user_id, code_hash, expires_at) "
+        "VALUES (%s, %s, NOW() + INTERVAL '15 minutes')",
+        (script_user_id, hash_otp(otp)),
+    )
+    db_conn.commit()
+
+    resp = requests.post(
+        f"{API_BASE}/api/auth/verify",
+        json={"email": "test_script@dev.local", "code": otp},
+        timeout=10,
+    )
+    assert resp.status_code == 200, f"test_script login failed: {resp.text[:200]}"
+
+    yield {"Authorization": f"Bearer {resp.json()['token']}"}
+
+    purge_saved_proposals(db_conn)
 
 
 @pytest.fixture(scope="session")
