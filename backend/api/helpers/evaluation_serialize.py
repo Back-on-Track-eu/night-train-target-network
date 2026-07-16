@@ -17,8 +17,10 @@ never re-formats numbers.
 
 Public interface:
   breakdown_to_dict(breakdown)                    → dict  (one Breakdown, all 5 normalisations already applied by the caller)
-  normalise_all_to_dict(breakdown, route, pair)    → dict  (all 5 normalisations of one Breakdown)
-  views_to_dict(bd_all, bd_per_pair, matrix_country, matrix_od, matrix_stop, route, trip_pair_by_key)
+  normalise_all_to_dict(breakdown, route, pair, scope) → dict  (all 5 normalisations of one Breakdown; scope = a cell's own
+                                                             annual denominators for route-section cells, None otherwise)
+  views_to_dict(bd_all, bd_per_pair, matrix_country, matrix_od, matrix_section,
+                section_scopes, matrix_stop, route, trip_pair_by_key)
                                                     → dict  (the full "views" section: description + normalisations +
                                                              data per view, views_meta merged in — see views_to_dict())
   models_to_dict()                                 → dict  (version + description + formulas for route_builder / energy / evaluation)
@@ -30,8 +32,9 @@ from __future__ import annotations
 from models.route.route import Route, TripPair
 from models.evaluation.views import (
     Breakdown,
+    NormalisationScope,
     normalise_per_operating_day,
-    normalise_per_trip_km,
+    normalise_per_train_km,
     normalise_per_available_place_km,
     normalise_per_sold_place_km,
     VIEW_META,
@@ -119,23 +122,27 @@ def normalise_all_to_dict(
     breakdown: Breakdown,
     route: Route,
     trip_pair: TripPair | None = None,
+    scope: NormalisationScope | None = None,
 ) -> dict:
     """All normalisations of a Breakdown as a serialized dict.
     Combines computation (normalisers) and serialization in one step
-    since the result is always destined for JSON output."""
+    since the result is always destined for JSON output.
+    scope carries a cell's own annual physical denominators (route
+    sections) — None means the normalisers derive them from
+    route/trip_pair as before."""
     return {
         "per_year": breakdown_to_dict(breakdown),
         "per_operating_day": breakdown_to_dict(
             normalise_per_operating_day(breakdown, route)
         ),
-        "per_trip_km": breakdown_to_dict(
-            normalise_per_trip_km(breakdown, route, trip_pair)
+        "per_train_km": breakdown_to_dict(
+            normalise_per_train_km(breakdown, route, trip_pair, scope)
         ),
         "per_available_place_km": breakdown_to_dict(
-            normalise_per_available_place_km(breakdown, route, trip_pair)
+            normalise_per_available_place_km(breakdown, route, trip_pair, scope)
         ),
         "per_sold_place_km": breakdown_to_dict(
-            normalise_per_sold_place_km(breakdown, route, trip_pair)
+            normalise_per_sold_place_km(breakdown, route, trip_pair, scope)
         ),
     }
 
@@ -213,6 +220,30 @@ def _od_value(stop_names: dict[str, str], od_key: str) -> str:
     origin = stop_names.get(origin_id, origin_id)
     destination = stop_names.get(destination_id, destination_id)
     return f"{origin} \u2192 {destination} ({class_main})"
+
+
+def _section_parts(section_key: str) -> tuple[str, str, str] | None:
+    """section_key is 'origin_stop_id__destination_stop_id__{class_main|all}'
+    (see views.py: build_breakdown_per_trip_pair_per_section), or 'all'.
+    Returns (origin_id, destination_id, class_part) or None for 'all' /
+    malformed keys."""
+    if section_key == "all":
+        return None
+    parts = section_key.split("__")
+    return tuple(parts) if len(parts) == 3 else None
+
+
+def _section_value(stop_names: dict[str, str], section_key: str) -> str:
+    """Human-readable section label — → like a single trip, since a section
+    is directional (the opposite direction is its own key)."""
+    parts = _section_parts(section_key)
+    if parts is None:
+        return "all" if section_key == "all" else section_key
+    origin_id, destination_id, class_part = parts
+    origin = stop_names.get(origin_id, origin_id)
+    destination = stop_names.get(destination_id, destination_id)
+    class_text = "all classes" if class_part == "all" else class_part
+    return f"{origin} \u2192 {destination} ({class_text})"
 
 
 # =============================================================================
@@ -337,11 +368,51 @@ def _per_trip_per_stop_view_to_dict(
     }
 
 
+def _per_trip_pair_per_section_view_to_dict(
+    matrix: dict[tuple[str, str], Breakdown],
+    scopes: dict[tuple[str, str], NormalisationScope],
+    route: Route,
+    trip_pair_by_key: dict[str, TripPair],
+) -> dict:
+    """Keyed by (pair_key, section_key). Section cells normalise against
+    their own annual physics (scopes from
+    build_breakdown_per_trip_pair_per_section) — €/train-km of a section
+    means per that section's train-km, not the whole pair's. The "all"
+    wildcard cells have no scope entry and fall back to the default
+    trip-pair/route denominators, identical to the other views."""
+    meta = VIEW_META["per_trip_pair_per_section"]
+    stop_names, _, pair_labels = _label_context(route)
+    data: dict[str, dict[str, dict]] = {}
+    for (pair_key, section_key), b in matrix.items():
+        trip_pair = trip_pair_by_key.get(pair_key) if pair_key != "all" else None
+        parts = _section_parts(section_key)
+        filter_dict = {
+            "trip_pair": _pair_value(pair_labels, pair_key),
+            "section": _section_value(stop_names, section_key),
+            # class_main separately too — lets the frontend filter the class
+            # dimension without re-parsing the section label
+            "class_main": parts[2] if parts is not None else "all",
+        }
+        data.setdefault(pair_key, {})[section_key] = {
+            "filter": filter_dict,
+            "values": normalise_all_to_dict(
+                b, route, trip_pair, scopes.get((pair_key, section_key))
+            ),
+        }
+    return {
+        "description": meta["description"],
+        "normalisations": meta["normalisations"],
+        "data": data,
+    }
+
+
 def views_to_dict(
     bd_all: Breakdown,
     bd_per_pair: dict[str, Breakdown],
     matrix_country: dict[tuple[str, str], Breakdown],
     matrix_od: dict[tuple[str, str], Breakdown],
+    matrix_section: dict[tuple[str, str], Breakdown],
+    section_scopes: dict[tuple[str, str], NormalisationScope],
     matrix_stop: dict[tuple[str, str], Breakdown],
     route: Route,
     trip_pair_by_key: dict[str, TripPair],
@@ -367,6 +438,9 @@ def views_to_dict(
         ),
         "per_trip_pair_per_od": _per_trip_pair_per_od_view_to_dict(
             matrix_od, route, trip_pair_by_key
+        ),
+        "per_trip_pair_per_section": _per_trip_pair_per_section_view_to_dict(
+            matrix_section, section_scopes, route, trip_pair_by_key
         ),
         "per_trip_per_stop": _per_trip_per_stop_view_to_dict(
             matrix_stop, route, trip_pair_by_key

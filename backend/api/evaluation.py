@@ -33,6 +33,7 @@ from models.evaluation.views import (
     build_breakdown_per_trip_pair,
     build_breakdown_per_trip_pair_per_country,
     build_breakdown_per_trip_pair_per_od,
+    build_breakdown_per_trip_pair_per_section,
     build_breakdown_per_trip_per_stop,
 )
 from models.evaluation.version import CALC_VERSION
@@ -72,6 +73,7 @@ def calc():
                              "data": {"all": {"filter": {...}, "values": {...}}, ...}},
           "per_trip_pair_per_country": {...},
           "per_trip_pair_per_od": {...},
+          "per_trip_pair_per_section": {...},
           "per_trip_per_stop": {...},
         },
       }
@@ -151,6 +153,9 @@ def calc():
         bd_per_pair = build_breakdown_per_trip_pair(route, result)
         matrix_country = build_breakdown_per_trip_pair_per_country(route, result)
         matrix_od = build_breakdown_per_trip_pair_per_od(route, result)
+        matrix_section, section_scopes = build_breakdown_per_trip_pair_per_section(
+            route, result
+        )
         matrix_stop = build_breakdown_per_trip_per_stop(route, result)
     except Exception as e:
         logger.exception("evaluation/calc [4/5] view building failed: %s", e)
@@ -183,6 +188,8 @@ def calc():
                 bd_per_pair,
                 matrix_country,
                 matrix_od,
+                matrix_section,
+                section_scopes,
                 matrix_stop,
                 route,
                 trip_pair_by_key,

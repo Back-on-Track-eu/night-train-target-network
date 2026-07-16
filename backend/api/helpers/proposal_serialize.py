@@ -58,6 +58,7 @@ _EVALUATION_VIEW_KEYS = {
     "per_trip_pair",
     "per_trip_pair_per_country",
     "per_trip_pair_per_od",
+    "per_trip_pair_per_section",
     "per_trip_per_stop",
 }
 

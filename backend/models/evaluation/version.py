@@ -29,7 +29,7 @@ from dataclasses import dataclass
 # VERSION
 # =============================================================================
 
-CALC_VERSION: str = "0.9.3"
+CALC_VERSION: str = "0.9.4"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -40,7 +40,7 @@ CALC_MODEL_DESCRIPTION: str = (
     "Cost/revenue evaluation model: computes fixed and variable operator costs, "
     "third-party infrastructure charges, and OD-pair ticket revenue for a "
     "fully-built Route, then aggregates and normalises the result into "
-    "route / trip-pair / country / OD-pair / stop views."
+    "route / trip-pair / country / OD-pair / route-section / stop views."
 )
 
 CHANGELOG: dict = {
@@ -117,6 +117,43 @@ CHANGELOG: dict = {
         "now, losing the previous class_id-level granularity — needs frontend "
         "coordination (see project notes on auditing Bjarne's frontend before "
         "Phase 4/5) since it's a real API contract change, not additive.",
+    },
+    "0.9.4": {
+        "date": "2026-07-14",
+        "author": "david",
+        "changes": "Views pipeline overhaul — four numeric fixes and one new view. "
+        "(1) Parking now included in every pair-filtered scope (matched via "
+        "ParkingCost.trip_ids) — previously only 'all trips' carried parking, "
+        "single trip-pair selections silently dropped it; the country and OD "
+        "matrices additionally pair-filter parking so multi-pair routes no "
+        "longer multiply-count it. (2) Pair-filtered fleet costs "
+        "(coach_amortisation, financing, fix_overhead, cleaning) scaled to the "
+        "pair's own coach share of a possibly shared composition fleet "
+        "(views.py: _pair_fleet_share) — previously each pair carried the "
+        "combined fleet cost. (3) per_trip_km normalisation RENAMED to "
+        "per_train_km and its divisor annualised (cycle km × operating days); "
+        "per_available_place_km divisor annualised the same way — both "
+        "previously divided €/year values by one cycle's physics, inflating "
+        "the result by a factor of operating_days (per_sold_place_km was "
+        "already annual and is unchanged). (4) per_trip_pair_per_od allocation "
+        "shares now sum to exactly 1 across a pair's OD cells: fixed fleet by "
+        "pair-wide weighted place-km share (was raw od-distance / pair-distance, "
+        "which over-allocated arbitrarily), loco and cleaning by pair-wide "
+        "weighted place-hours share (was per-trip, double-counting across the "
+        "two directions); stop costs at stops where nobody boards or alights "
+        "now fall back to the OD pairs riding through, instead of being "
+        "dropped — with these, OD cells sum to exactly the pair total. "
+        "(5) NEW view per_trip_pair_per_section: a section is "
+        "a physical piece of a trip between two stops — it carries every cost "
+        "occurring there plus a share of route-level costs, and the "
+        "km-proportional revenue of everyone on board (tickets extending "
+        "beyond the section contribute their overlap fraction). Sections carry "
+        "per-class_main sub-cells (train-level costs split by density-weighted "
+        "place-km) summing to the section 'all' cell, and normalise per-unit "
+        "figures against their OWN annual train-km / place-km "
+        "(NormalisationScope). BREAKING for frontend: normalisation key "
+        "per_trip_km → per_train_km, new views key, changed values in every "
+        "pair-filtered cell — needs coordination with Bjarne before merge.",
     },
     "0.9.3": {
         "date": "2026-07-14",
