@@ -26,12 +26,13 @@ def test_pipeline_completes_with_two_trips(route_berlin_dresden_wien):
 
 
 def test_pipeline_produces_all_views(pipeline_result):
-    """The evaluation of a freshly planned route carries all five views."""
+    """The evaluation of a freshly planned route carries all six views."""
     assert set(pipeline_result["views"]) == {
         "route",
         "per_trip_pair",
         "per_trip_pair_per_country",
         "per_trip_pair_per_od",
+        "per_trip_pair_per_section",
         "per_trip_per_stop",
     }
 

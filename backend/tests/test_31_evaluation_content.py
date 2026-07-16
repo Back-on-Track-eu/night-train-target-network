@@ -253,7 +253,7 @@ class TestBreakdownIdentities:
         for norm in (
             "per_year",
             "per_operating_day",
-            "per_trip_km",
+            "per_train_km",
             "per_available_place_km",
             "per_sold_place_km",
         ):
@@ -282,23 +282,30 @@ class TestNormalisationDivisors:
         per_day = route_bd(result, "per_operating_day")["total_cost_eur"]
         assert per_year == pytest.approx(per_day * days, rel=REL_TOL)
 
-    def test_per_trip_km_divisor(self, eval_standard):
-        """per_trip_km divides by the summed distance of ALL trips (outbound
-        + return both counted)."""
+    def test_per_train_km_divisor_is_annual(self, eval_standard):
+        """per_train_km divides by ANNUAL train-km: the summed distance of
+        ALL trips (outbound + return both counted) x operating days — the
+        per_year figure is annual, so the divisor must be too."""
         costed, result = eval_standard
-        total_km = sum(trip_distance_km(t) for t in all_trips(costed))
+        annual_train_km = sum(
+            trip_distance_km(t) for t in all_trips(costed)
+        ) * operating_days(costed)
         per_year = route_bd(result, "per_year")["total_cost_eur"]
-        per_km = route_bd(result, "per_trip_km")["total_cost_eur"]
-        assert per_year == pytest.approx(per_km * total_km, rel=REL_TOL)
+        per_km = route_bd(result, "per_train_km")["total_cost_eur"]
+        assert per_year == pytest.approx(per_km * annual_train_km, rel=REL_TOL)
 
     def test_per_available_place_km_divisor_is_unweighted(self, eval_standard):
-        """per_available_place_km divides by Σ (total places × segment km) —
-        UNWEIGHTED capacity. Class density is exposed as data on compositions
-        but deliberately NOT applied in this divisor (see views.py:
-        normalise_per_available_place_km)."""
+        """per_available_place_km divides by Σ (total places × segment km)
+        × operating days — UNWEIGHTED annual capacity. Class density is
+        exposed as data on compositions but deliberately NOT applied in this
+        divisor (see views.py: normalise_per_available_place_km)."""
         costed, result = eval_standard
         places = sum(costed["trip_pairs"][0]["composition"]["places_by_class"].values())
-        available_pkm = places * sum(trip_distance_km(t) for t in all_trips(costed))
+        available_pkm = (
+            places
+            * sum(trip_distance_km(t) for t in all_trips(costed))
+            * operating_days(costed)
+        )
 
         per_year = route_bd(result, "per_year")["total_cost_eur"]
         per_pkm = route_bd(result, "per_available_place_km")["total_cost_eur"]
@@ -399,6 +406,21 @@ class TestMatrixConsistency:
             route_bd(result)["total_cost_eur"], rel=REL_TOL
         )
 
+    def test_pair_selection_includes_parking(self, eval_standard):
+        """Selecting the (only) trip pair must carry the same parking cost as
+        'all trips' — parking is matched to pairs via ParkingCost.trip_ids
+        and must not vanish behind the pair filter (regression: pre-0.9.4 a
+        pair selection silently dropped parking entirely)."""
+        _, result = eval_standard
+        data = result["views"]["per_trip_pair"]["data"]
+        pair_key = next(k for k in data if k != "all")
+        pair_parking = data[pair_key]["values"]["per_year"]["cost"]["infrastructure"][
+            "parking_eur"
+        ]
+        all_parking = route_bd(result)["cost"]["infrastructure"]["parking_eur"]
+        assert all_parking > 0
+        assert pair_parking == pytest.approx(all_parking, rel=REL_TOL)
+
     def test_country_tac_cells_sum_to_total(self, eval_standard):
         """Per-country TAC cells (in the 'all' trip-pair row) sum back to the
         route-level TAC — the country allocation loses nothing."""
@@ -433,6 +455,25 @@ class TestMatrixConsistency:
             assert key in all_ods, f"OD key missing: {key}"
             assert all_ods[key]["values"]["per_year"]["total_revenue_eur"] > 0
 
+    def test_od_cells_partition_pair_total(self, eval_standard):
+        """OD cells partition the pair total: cost, revenue, and net of all
+        OD cells sum to the pair's 'all' cell (allocation shares sum to
+        exactly 1 — regression: pre-0.9.4 loco/cleaning double-counted,
+        fleet over-allocated, parking and pass-through stop costs dropped)."""
+        _, result = eval_standard
+        data = result["views"]["per_trip_pair_per_od"]["data"]
+        pair_key = next(k for k in data if k != "all")
+        cells = [
+            cell["values"]["per_year"]
+            for key, cell in data[pair_key].items()
+            if key != "all"
+        ]
+        pair_cell = data[pair_key]["all"]["values"]["per_year"]
+        for field in ("total_cost_eur", "total_revenue_eur", "net_eur"):
+            assert pair_cell[field] == pytest.approx(
+                sum(c[field] for c in cells), rel=REL_TOL
+            ), f"OD cells don't sum to pair total for {field}"
+
     def test_stop_matrix_terminal_has_station_charge(self, eval_standard):
         """The origin stop carries a positive station charge in the stop matrix."""
         _, result = eval_standard
@@ -442,6 +483,77 @@ class TestMatrixConsistency:
             "station_charge_eur"
         ]
         assert charge > 0
+
+
+# =============================================================================
+# Section view — physical route sections with class sub-cells
+# =============================================================================
+
+
+class TestSectionView:
+
+    SECTION_ALL = "DE_BERLIN_HBF__AT_WIEN_HBF__all"
+
+    def test_section_keys_present_with_class_cells(self, eval_standard):
+        """The directional demand produces both direction section keys, each
+        with an 'all' cell and one cell per class_main with passengers."""
+        _, result = eval_standard
+        sections = result["views"]["per_trip_pair_per_section"]["data"]["all"]
+        for key in (
+            "DE_BERLIN_HBF__AT_WIEN_HBF__all",
+            "DE_BERLIN_HBF__AT_WIEN_HBF__Couchette",
+            "DE_BERLIN_HBF__AT_WIEN_HBF__Seat",
+            "AT_WIEN_HBF__DE_BERLIN_HBF__all",
+        ):
+            assert key in sections, f"section key missing: {key}"
+
+    def test_class_cells_sum_to_section_all(self, eval_standard):
+        """Per-class cells partition their section: cost, revenue, and margin
+        of the class cells sum to the section's 'all' cell."""
+        _, result = eval_standard
+        sections = result["views"]["per_trip_pair_per_section"]["data"]["all"]
+        all_cell = sections[self.SECTION_ALL]["values"]["per_year"]
+        cls_cells = [
+            cell["values"]["per_year"]
+            for key, cell in sections.items()
+            if key.startswith("DE_BERLIN_HBF__AT_WIEN_HBF__")
+            and not key.endswith("__all")
+        ]
+        assert cls_cells, "no class cells found for section"
+        for field in ("total_cost_eur", "total_revenue_eur", "net_eur"):
+            assert all_cell[field] == pytest.approx(
+                sum(c[field] for c in cls_cells), rel=REL_TOL
+            ), f"class cells don't sum to section 'all' for {field}"
+
+    def test_full_trip_sections_capture_all_revenue(self, eval_standard):
+        """Every ticket rides entirely within its trip's full-length section,
+        so the two full-trip sections (one per direction) together carry the
+        route's entire revenue."""
+        _, result = eval_standard
+        sections = result["views"]["per_trip_pair_per_section"]["data"]["all"]
+        revenue = sum(
+            sections[key]["values"]["per_year"]["total_revenue_eur"]
+            for key in (
+                "DE_BERLIN_HBF__AT_WIEN_HBF__all",
+                "AT_WIEN_HBF__DE_BERLIN_HBF__all",
+            )
+        )
+        assert revenue == pytest.approx(
+            route_bd(result)["total_revenue_eur"], rel=REL_TOL
+        )
+
+    def test_section_train_km_divisor_is_section_scoped(self, eval_standard):
+        """A section cell's per_train_km divides by the SECTION's own annual
+        train-km (section distance x operating days), not the whole pair's.
+        For the full-trip section that's one direction's distance."""
+        costed, result = eval_standard
+        sections = result["views"]["per_trip_pair_per_section"]["data"]["all"]
+        cell = sections[self.SECTION_ALL]["values"]
+        outbound = costed["trip_pairs"][0]["outbound"]
+        section_annual_km = trip_distance_km(outbound) * operating_days(costed)
+        per_year = cell["per_year"]["total_cost_eur"]
+        per_km = cell["per_train_km"]["total_cost_eur"]
+        assert per_year == pytest.approx(per_km * section_annual_km, rel=REL_TOL)
 
 
 # =============================================================================
