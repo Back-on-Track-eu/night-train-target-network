@@ -29,7 +29,7 @@ built on top of it:
 | `test_20`–`test_21` | `POST /api/route/plan` (contract, then content logic) |
 | `test_30`–`test_31` | `POST /api/evaluation/calc` (contract, then content logic) |
 | `test_40` | End-to-end pipeline smoke |
-| `test_50` | Proposals API — save/list/load |
+| `test_50` | Persist-on-calc semantics + proposals list/load |
 | `test_60` | Feedback API — submit/categories |
 
 Shared code:
@@ -281,49 +281,50 @@ Standard input: `eval_standard` (3-stop route, directional demand 40 Couchette
 
 ---
 
-## test_50_proposals_api.py — Proposals API
+## test_50_proposals_api.py — Persist-on-calc + proposals read endpoints
 
-Reuses the shared session route fixtures (no extra OpenRailRouting calls).
-A module-scoped autouse fixture purges saved proposals before and after
-this file and lifts the `proposal_id` sequence above the fixture
-placeholder range (100-999, see `conftest.py`'s range-convention comment)
-so a sequence-assigned ID can never collide with one embedded in a shared
-route fixture.
+The write path lives inside the pipelines (POST /api/proposal is gone):
+these tests exercise the created/unchanged/versioned/branched contract of
+`POST /api/route/plan` and the filled/unchanged/versioned/branched contract
+of `POST /api/evaluation/calc`, plus the remaining list/load endpoints.
+A module-scoped autouse fixture purges persisted proposals before and
+after this file (the permanent seed proposal excepted). The suite
+persists as the seeded `test_script` user (conftest: `script_headers`);
+guest sessions supply the foreign owner. Tests within each fixture group
+build on each other's version history **in definition order** — don't
+reorder or `-k`-split them.
 
-| Test | Purpose | Input | Expected |
+| Test | Pins | Setup | Expectation |
 |---|---|---|---|
-| `test_save_new_proposal_created` | Unknown/draft proposal_id creates | shared route, save | `action=created`, version 1, sequence-assigned id |
-| `test_save_rewrites_all_draft_ids` | Every ID in the stored route carries the real prefix | saved route, reload | no trace of the draft prefix anywhere in the JSON |
-| `test_save_own_proposal_creates_new_version` | Re-saving your own proposal appends a version | save, reload, re-save | `action=versioned`, version 2, `is_current` flips, v1 row kept |
-| `test_save_foreign_proposal_branches` | Saving someone else's proposal duplicates it | David saves, Bjarne re-saves | `action=branched`, new proposal_id, original untouched |
-| `test_save_writes_gtfs_decomposition` | Save decomposes into GTFS tables | saved route | routes/trips/stop_times/shapes/calendar rows correct |
-| `test_gtfs_shape_length_matches_route_physics` | GTFS and JSONB describe the same route | saved route | summed shape length ≈ summed segment distance |
-| `test_save_with_evaluation_stores_and_rewrites_it` | Evaluation snapshot persisted and ID-rewritten | `eval_standard`, save with `evaluation` | GET returns it with the real `route_id`, no draft prefix anywhere |
-| `test_save_with_mismatched_evaluation_is_rejected` | `evaluation.route_id` must match `route.route_id` | evaluation for a different route | `400 validation_error` |
-| `test_save_without_evaluation_leaves_financial_fields_null` | No evaluation → `evaluation_body` NULL | saved route, no `evaluation` | GET's `evaluation` is `null` |
-| `test_save_without_user_id_is_rejected` | Validation | no `user_id` | `400 validation_error` |
-| `test_save_with_unknown_user_is_rejected` | Domain check | nonexistent `user_id` | `422 domain_error` |
-| `test_save_with_unconventional_route_id_is_rejected` | Validation | non-`P{id}_V{v}_R1` route_id | `400 validation_error` |
-| `test_get_proposal_round_trips_plan_response` | GET matches the plan-response shape | saved with `route_builder_version`/`request` | both echoed back verbatim |
+| `test_plan_persists_created` | Authenticated plan persists itself | fresh plan, no proposal_id | `action=created`, version 1, caller owns, route_id final |
+| `test_plan_response_matches_stored_body` | Response IS the stored body | GET round-trip | route_body == response minus `proposal` block, no draft prefix anywhere |
+| `test_plan_writes_gtfs_decomposition` | GTFS side written | DB rows | 2 trips, 2×stops stop_times, daily calendar |
+| `test_tokenless_plan_computes_only` | No token → old contract | tokenless plan | `unauthenticated`, draft id ≥1e9, no row |
+| `test_replan_identical_setup_is_unchanged` | Setup dedupe | replan same setup + proposal_id | `unchanged`, stored current IDs, still 1 version |
+| `test_replan_changed_setup_creates_new_version` | Owner + changed setup versions | different composition | `versioned`, version 2, `is_current` flips, v1 kept |
+| `test_replan_foreign_identical_setup_is_unchanged` | Dedupe outranks ownership | guest, current setup | `unchanged` |
+| `test_replan_foreign_changed_setup_branches` | Foreign + changed setup branches | guest, other composition | `branched`, new id, guest owns, original untouched |
+| `test_eval_fills_own_version_in_place` | The one sanctioned in-place write | eval own persisted route | `filled`, same version, evaluation_body set, no new row |
+| `test_eval_identical_inputs_is_unchanged` | Deterministic no-op | same eval again | `unchanged` |
+| `test_eval_scenario_override_creates_new_version` | Result-touching input versions | historical scenario override | `versioned`, v2, route carried over, response IDs already V2, `scenario_id` reported |
+| `test_eval_of_historical_version_computes_only` | History never mutated | eval the V1 route after V2 exists | `historical_version` |
+| `test_eval_of_unpersisted_route_computes_only` | Drafts have nowhere to land | tokenless-built session fixture | `unpersisted_route` |
+| `test_eval_of_edited_route_computes_only` | Hand-edited JSON never overwrites | demand wiped from stored route | `route_mismatch` |
+| `test_eval_tokenless_computes_only` | No token → compute only | tokenless eval | `unauthenticated` |
+| `test_eval_by_non_owner_branches` | Foreign eval branches | guest evaluates the seed proposal | `branched`, guest owns copy with evaluation, seed untouched |
 | `test_get_unknown_proposal_returns_404` | Domain check | nonexistent proposal_id | `404 not_found` |
-| `test_seeded_example_proposal_is_queryable` | The DB-init-time seed proposal is a real, queryable proposal | `GET /api/proposal/1` | Berlin–Dresden–Wien, both directions, no evaluation |
-| `test_list_returns_current_summaries` | List shape and current-only filtering | two proposals, one re-saved, plus the permanent seed proposal | `total=3`, only current versions, metrics populated |
-| `test_filtered_list_by_country_stop_and_user` | Filters narrow correctly | country/stop/user filters | country/stop isolate Zürich; user (David) returns 2 — his save plus the seed proposal |
-| `test_list_sorting_and_pagination` | Sort + limit/offset | `total_distance_km` sort, `limit=1` | ascending order, `total=3` (2 from this fixture + the seed proposal) |
-| `test_list_sort_by_margin_is_null_safe` | Financial sort tolerates unsaved evaluations | none of the 3 listed proposals (including the seed) has one | sort doesn't raise, `margin_eur` is `null` for all three |
-| `test_list_rejects_unknown_sort_key` | Validation | `sort.by="unknown_field"` | `400 validation_error` |
+| `test_seeded_example_proposal_is_queryable` | The DB-init-time seed proposal is real | `GET /api/proposal/1` | Berlin–Dresden–Wien, both directions, no evaluation |
+| `test_list_returns_current_summaries` | List shape and current-only filtering | test_script ×2 versions + guest's Zürich + seed | `total=3`, only current versions, metrics populated |
+| `test_filtered_list_by_country_stop_and_user` | Filters narrow correctly | country/stop/user filters | country/stop isolate Zürich; user filters return exactly the owner's proposals |
+| `test_list_sorting_and_pagination` | Sort + limit/offset | `total_distance_km` sort, `limit=1` | ascending order, `total=3` |
+| `test_list_sort_by_margin_is_null_safe` | Financial sort tolerates unevaluated proposals | none of the 3 listed has an evaluation | sort doesn't raise, `margin_eur` null for all |
+| `test_list_rejects_unknown_sort_key` | Validation | bad sort key | `400 validation_error` |
 
-Note: `db/dev/seed.py` seeds one permanent example proposal (`proposal_id=1`,
-the natural first-insert outcome on a fresh DB — collision-free now that
-`conftest.py`'s route fixtures use draft placeholders 100+, not 1-4) that
-this module's cleanup fixture deliberately never purges — see
-`_purge_saved_proposals()`'s docstring. Any test asserting an exact
-`total`/count on an unfiltered or David-owned list accounts for it.
-
----
-
----
-
+Note: `db/dev/seed.py` seeds one permanent example proposal
+(`proposal_id=1`, owned by the seed user, no evaluation) — preserved by
+every purge here, and doubling as the foreign, evaluation-free proposal
+the branch-by-eval tests (and test_70's merge test) borrow without an
+extra route build. Any test asserting an exact list total counts it.
 ## test_60_feedback_api.py — Feedback API
 
 A module-scoped autouse fixture purges rows tagged with the
@@ -412,11 +413,15 @@ fixed value, so this file passes the same way whether or not SMTP_* is set.
 ## Conventions
 
 - Session-scoped route fixtures in `conftest.py` are **read-only** — never
-  mutate them; use `inject_demand()` (which copies) to attach demand.
-- Monetary assertions use `pytest.approx(rel=1e-3)` — annual EUR leaves are
-  rounded to 2 decimal places by the API; normalised views round finer,
-  scaled to their divisor (`NORMALISATION_NDIGITS` in
-  `models/evaluation/version.py`).
+  mutate them; use `inject_demand()` (which copies) to attach demand. They
+  are built **tokenless** deliberately (compute-only, draft IDs, zero DB
+  rows) — persistence is exercised solely by the dedicated tests.
+- The suite persists as the seeded `test_script` user via
+  `script_headers` (a real JWT from the live API, OTP injected DB-side —
+  no `JWT_SECRET` needed on the host). Session teardown purges everything
+  the run persisted; the seed proposal survives.
+- Monetary assertions use `pytest.approx(rel=1e-3)` — EUR leaves are rounded
+  to 2 decimal places by the API.
 - `db_conn.commit()`/rollback discipline: the autouse `rollback_after_test`
   fixture prevents an aborted transaction from cascading.
 - Tests must only assert on data the API actually returns. If a field is

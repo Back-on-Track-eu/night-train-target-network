@@ -26,8 +26,7 @@ stack. Each endpoint section below links its own example files.
 - [Feedback](#feedback)
   - [`POST /api/feedback`](#post-feedback) — submit feedback
   - [`GET /api/feedback/categories`](#feedback-categories) — suggested category/sub_category values
-- [Proposals](#proposals)
-  - [`POST /api/proposal`](#post-proposal) — save a proposal
+- [Proposals](#proposals) — persisted automatically by plan/calc (persist-on-calc)
   - [`GET` / `POST /api/proposals`](#list-proposals) — list proposals
   - [`GET /api/proposal/<id>`](#get-proposal) — load a proposal
 - [Input Parameters](#input-parameters)
@@ -89,14 +88,28 @@ Dual-plane model, normalized to one trust ladder
 
 Endpoint protection: decorators in `api/auth_middleware.py`
 (`@require_auth`, `@optional_auth`, `@require_trust(level)`).
-`POST /api/proposal` and `POST /api/feedback` run `@optional_auth`: a
-bearer token's identity overrides the body's `user_id`; tokenless requests
-keep the old body-carried contract until the frontend has a login flow.
+`POST /api/route/plan`, `POST /api/evaluation/calc`, and `POST
+/api/feedback` run `@optional_auth`. Since persist-on-calc (2026-07-16)
+the bearer identity decides persistence: authenticated plan/calc calls
+(guest token is enough) persist their responses as proposals, tokenless
+calls compute only. The intended frontend flow is guest-first — obtain a
+guest JWT on first visit, send it on every plan/calc, and merge on
+registration (below).
+
+**Guest → registered merge:** calling `POST /api/auth/verify` **with the
+guest session's JWT attached as the bearer** reassigns everything that
+guest owns (proposals, feedback) to the verified account in one atomic
+transaction and marks the guest row (`admin.users.merged_into_user_id`).
+The old guest token is rejected from then on with an explicit
+account-merged `401`. This covers both registering as the last step after
+playing around and logging in to an existing account from a guest
+session; an absent or unusable bearer never blocks the verification
+itself (`merged_guest` is simply `null`).
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/api/auth/request-code` | Register/login: send OTP to email (`5/hour` per IP) |
-| `POST` | `/api/auth/verify` | Verify OTP → `{token, user_id, display_name, is_guest}` |
+| `POST` | `/api/auth/verify` | Verify OTP → `{token, user_id, display_name, is_guest, merged_guest}` — guest bearer attached triggers the merge (see above) |
 | `POST` | `/api/auth/guest` | Anonymous guest session → guest JWT (`20/hour` per IP) |
 
 Config (see `docker/.env.example`): `JWT_SECRET` (required),
@@ -249,103 +262,68 @@ wrong, e.g. to the wrong distance).
 
 ## Proposals
 
-Save, list, and load night train proposals. No auth yet — requests carry
-`user_id` directly. Every user can see and load every proposal; a save
-either creates a new proposal, adds a version to one you own, or branches
-a new proposal from one you don't (see below).
+List and load night train proposals. **There is no save endpoint** — since
+persist-on-calc (2026-07-16), `POST /api/route/plan` and `POST
+/api/evaluation/calc` persist their own responses for any authenticated
+caller (a guest token is enough; tokenless calls compute only). Every user
+can see and load every proposal.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/proposal` | Save a proposal (create / new version / branch) |
 | `GET` | `/api/proposals` | List current proposal versions |
 | `POST` | `/api/proposals` | Filtered/sorted/paginated list |
 | `GET` | `/api/proposal/<id>` | Load the current version of a proposal |
 
-The route — and, if included, its evaluation — are stored twice: verbatim
-as JSON (deliberately **not** JSONB — JSONB does not preserve key order; see
-`db/README.md`) for an exact, cheap round-trip back to the frontend, and, for
-the route, decomposed into GTFS tables
+The route — and, once evaluated, its evaluation — are stored twice:
+verbatim as JSON (deliberately **not** JSONB — JSONB does not preserve key
+order; see `db/README.md`) for an exact, cheap round-trip back to the
+frontend, and, for the route, decomposed into GTFS tables
 (`proposals.routes`/`trips`/`stop_times`/`shapes`/`services`/`calendar`,
 for future export/interop). This duplication is deliberate for now — see
-`db/README.md`. Only fully daily schedules (`schedule_mode: "alwaysDaily"`,
-the only mode `/api/route/plan` currently supports) can be saved; a
-non-daily frequency fails with `422 domain_error`.
+`db/README.md`. Only fully daily schedules (`schedule_mode:
+"alwaysDaily"`, the only mode `/api/route/plan` currently supports) can be
+persisted.
 
-**Save posts whole API responses, not hand-picked fields.** `POST
-/api/proposal` takes the *entire* `POST /api/route/plan` response
-(`route_builder_version` + `request` + `route`, all three) as
-`route_body`, and, optionally, the *entire* `POST
-/api/evaluation/calc` response (`calc_version` + `route_id` + `models` +
-`input` + `views`, all five) as `evaluation_body`. Nothing is
-stripped or trimmed before storing — that's why `evaluation_body`
-ends up containing a second copy of the route under `input.route`, next
-to the one already in `route_body.route`. The server validates
-both are structurally complete (every section present, not a partial
-object) and, if both are given, that `evaluation_body` genuinely
-describes the same route as `route_body` — exact deep equality
-of `evaluation_body.input.route` against `route_body.route`,
-not just a `route_id` match. A save is rejected with `400
-validation_error` if either check fails.
+<a id="persistence"></a>
 
-<a id="post-proposal"></a>
+### Persistence semantics (persist-on-calc)
 
-### `POST /api/proposal`
+Both pipelines report what they did in a trailing `proposal` block:
+`{persisted, action, proposal_id, proposal_version, user_id}` (the ID
+fields absent where meaningless, e.g. `unauthenticated`). The stored
+bodies are exactly the responses minus this block. A persistence failure
+never fails the computation itself (`action: "error"`).
 
-**Save semantics** — the posted `route_body.route`'s own
-`route_id` (`P{proposal_id}_V{version}_R1`) decides the outcome; rows are
-always appended, never updated in place:
+**`POST /api/route/plan`** — the posted `proposal_id` (optional) and the
+resolved setup (stops, composition, all modes, scenario, builder version)
+decide the outcome; version rows are appended, never updated:
 
 | Condition | Action | Result |
 |-----------|--------|--------|
-| `proposal_id` is a draft placeholder (≥1e9, from `/api/route/plan`) or unknown | `created` | New `proposal_id` (from the sequence), version 1 |
-| `proposal_id` exists and `user_id` owns the current version | `versioned` | Same `proposal_id`, version + 1, `is_current` flipped |
-| `proposal_id` exists and belongs to a different `user_id` | `branched` | New `proposal_id`, version 1 |
+| No token | `unauthenticated` | Compute only — draft placeholder IDs (≥1e9), nothing stored |
+| No/unknown `proposal_id` | `created` | New `proposal_id` (sequence), version 1, IDs rewritten to `P{id}_V1_` |
+| Known `proposal_id`, identical resolved setup (any owner) | `unchanged` | Nothing written — response IDs reference the stored current version |
+| Known `proposal_id`, changed setup, caller owns current version | `versioned` | Same `proposal_id`, version + 1, `is_current` flipped |
+| Known `proposal_id`, changed setup, foreign owner | `branched` | New `proposal_id`, version 1, owned by the caller |
 
-All IDs inside the posted route (`route_id`, trip IDs, geometry IDs, and
-every trip reference in `od_pairs`/`shuntings`/`parkings`) share the prefix
-`P{proposal_id}_V{version}_` and are rewritten together to the real
-`proposal_id`/version — in both `route_body.route` and, if given,
-`evaluation_body` (which embeds the same IDs under `input.route` and
-as dict keys in several of its `views`). Use the `route_id` returned in
-the response from here on, not the one you posted.
+On any persisted outcome the response's IDs (`route_id`, trip IDs,
+geometry IDs, `od_pairs`/`shuntings`/`parkings` references) are already
+rewritten to the real `P{proposal_id}_V{version}_` prefix — `route_id` is
+final from the first response on.
 
-<details>
-<summary>Request &amp; response details</summary>
+**`POST /api/evaluation/calc`** — the posted route's `route_id` decides
+where the evaluation lands:
 
-**Request body**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `user_id` | int | ✅ | `admin.users` identity of the saver — must already exist |
-| `route_body` | object | ✅ | The **entire** `POST /api/route/plan` response — `{route_builder_version, request, route}`, not just `route` |
-| `change_log` | string | — | What changed in this version |
-| `evaluation_body` | object | — | The **entire** `POST /api/evaluation/calc` response — `{calc_version, route_id, models, input, views}`. Must describe the exact same route as `route_body.route` (see above) — stored as a point-in-time snapshot, not re-derived |
-
-The frontend can spread the `POST /api/route/plan` response straight into
-`route_body`, and the `POST /api/evaluation/calc` response
-straight into `evaluation_body` if one was run — no field-picking on
-either side. A proposal can be saved without `evaluation_body` — its
-financial fields are simply null everywhere until a version with one is
-saved.
-
-**Response `201`**
-```json
-{
-  "action": "created",
-  "proposal": {
-    "proposal_id": 5,
-    "proposal_version": 1,
-    "is_current": true,
-    "user_id": 1,
-    "user_name": "David",
-    "change_log": "initial save",
-    "created_at": "2026-07-08T12:00:00+00:00"
-  },
-  "route_id": "P5_V1_R1"
-}
-```
-
-</details>
+| Condition | Action | Result |
+|-----------|--------|--------|
+| No token | `unauthenticated` | Compute only |
+| Version row missing (draft/foreign route JSON) | `unpersisted_route` | Compute only |
+| Version exists but is not current | `historical_version` | Compute only — history is never mutated |
+| Posted route ≠ stored route (hand-edited) | `route_mismatch` | Compute only |
+| Version has no evaluation yet, caller owns it | `filled` | `evaluation_body` filled **in place** on that version — the one sanctioned in-place write on the otherwise append-only table |
+| Evaluation stored under identical inputs (same route incl. demand, same resolved scenario, same calc version) | `unchanged` | Nothing written — the result is deterministic |
+| Changed inputs (scenario override, new calc version), caller owns current | `versioned` | New version, route_body carried over, this evaluation attached |
+| Changed inputs / empty evaluation, foreign owner | `branched` | New `proposal_id` owned by the caller, evaluation attached |
 
 <a id="list-proposals"></a>
 
@@ -375,7 +353,8 @@ accepts filters/sort/pagination.
 from the saved evaluation snapshot (`views.route.data.per_year` — see
 `db/README.md`); proposals saved without one report `null` financial
 fields and sort as if they were `0` on a financial key, rather than being
-excluded. `countries` includes transit-only countries (derived from
+excluded. Financials appear once a version has been evaluated
+(persist-on-calc fills them — see [Persistence semantics](#persistence)). `countries` includes transit-only countries (derived from
 segment-level `country_distance_shares`, same as the route response).
 
 **Response**
@@ -576,6 +555,15 @@ rows only if the database is not correctly seeded.
 <a id="route-plan"></a>
 
 ### `POST /api/route/plan`
+
+**Persists itself** for authenticated callers (guest token is enough) and
+appends a trailing `proposal` block —
+`{"persisted": true, "action": "created", "proposal_id": 5,
+"proposal_version": 1, "user_id": 3}` — see
+[Persistence semantics](#persistence) for the full
+created/unchanged/versioned/branched contract. Tokenless requests compute
+only (`{"persisted": false, "action": "unauthenticated"}`) and keep the
+draft placeholder IDs.
 
 How the route builder pipeline works internally (routing, timetabling,
 auto-stop addition, mode switches) is documented in
@@ -821,6 +809,14 @@ easier to scan the rest of the route without wading through coordinate arrays):
 <a id="evaluation-calc"></a>
 
 ### `POST /api/evaluation/calc`
+
+**Persists itself** for authenticated callers and appends a trailing
+`proposal` block (see [Persistence semantics](#persistence) — filled in
+place on the version it was computed for, `unchanged` under identical
+inputs, a new version under changed ones). The response also carries a
+top-level `scenario_id`: the scenario the evaluation actually ran under,
+override applied — the posted route's own embedded `scenario_id` is NOT
+updated by an override, so this field is the authoritative one.
 
 Worked example: request
 [`tc_1_evaluation_input.json`](../scripts/data/tc_1_evaluation_input.json)

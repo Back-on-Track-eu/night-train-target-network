@@ -26,7 +26,7 @@ EXPECTED_SCHEMAS = {"admin", "input_params", "scenario", "proposals"}
 # Minimum row counts. Deliberately >= (not ==) so adding seed data doesn't
 # break the suite, while dropping seed data still fails loudly.
 EXPECTED_ROW_COUNTS = {
-    "admin.users": 2,
+    "admin.users": 3,  # David, Bjarne, test_script (suite identity)
     "input_params.sources": 2,
     "input_params.countries": 28,  # 7 original routing countries + 21 further EU27
     "input_params.service_classes": 1,

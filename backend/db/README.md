@@ -155,12 +155,14 @@ GTFS-compatible tables plus a thin project-specific `proposals` version
 container. All GTFS IDs follow the convention
 `P{proposal_id}_V{version}_R1[_D{dir}_T{idx}]`.
 
-The route — and, if the saver included one, its evaluation — is stored
-twice on every save: once verbatim as JSON (`route_body` and, if
-present, `evaluation_body` — same names the API's `POST /api/proposal`
-request and `GET /api/proposal/<id>` response use, see `api/README.md`),
-once decomposed into the GTFS tables below (the route only — evaluation
-results have no GTFS equivalent). These two columns are `JSON`,
+The route — and, once evaluated, its evaluation — is stored twice: once
+verbatim as JSON (`route_body` / `evaluation_body`, the names `GET
+/api/proposal/<id>` returns, see `api/README.md`), once decomposed into
+the GTFS tables below (the route only — evaluation results have no GTFS
+equivalent). Since persist-on-calc (2026-07-16) both are written by the
+pipelines themselves: `POST /api/route/plan` persists its own response as
+`route_body`, `POST /api/evaluation/calc` persists its own response as
+`evaluation_body`. These two columns are `JSON`,
 deliberately not `JSONB` — `JSONB`'s decomposed binary storage does not
 preserve original key order (confirmed empirically: a value round-tripped
 through `JSONB` comes back with keys in a different order than it went
@@ -176,11 +178,11 @@ what's stored. Neither column is trimmed before storing, so
 `evaluation_body`'s `input.route` ends up holding a full second copy of
 the same route already in `route_body.route` — a deliberate simplicity
 tradeoff (see the schema comments in `create_proposal_schema.sql`), not
-an oversight: the API layer
-(`api/helpers/proposal_serialize.py:validate_route_evaluation_sync`)
-rejects a save with `400 validation_error` if the two copies don't
-describe the exact same route, so this table can never hold two
-disagreeing versions of one proposal's route. `evaluation_body` is a
+an oversight: since persist-on-calc both bodies are produced by the
+pipelines themselves, so they agree by construction (`POST
+/api/evaluation/calc` refuses to persist against a version whose stored
+route no longer matches the posted one — `route_mismatch`), and this
+table can never hold two disagreeing versions of one proposal's route. `evaluation_body` is a
 point-in-time snapshot of a `POST /api/evaluation/calc` response — not
 re-derived — so it can drift from a fresh call if parameters change
 later, the same tradeoff scenario pinning already makes elsewhere. List
@@ -196,15 +198,15 @@ summaries read `total_revenue_eur`/`total_cost_eur`/`net_eur` out of
 | `routes` | GTFS routes.txt — one row per proposal version route |
 | `trips` | GTFS trips.txt — one scheduled run per proposal version |
 | `stop_times` | GTFS stop_times.txt — ordered stop sequence per trip (times as INTERVAL) |
-| `proposals` | Version container. `proposal_id` is stable across versions; `proposal_version` increments on every save (append-only, never updated in place); `is_current` flags the latest version per `proposal_id`. `route_body` JSON holds the exact `POST /api/route/plan` response the version was saved from, key order preserved; `evaluation_body` JSON (nullable) holds the `POST /api/evaluation/calc` response, if one was saved, same guarantee |
+| `proposals` | Version container. `proposal_id` is stable across versions; `proposal_version` increments on every persisted change (append-only — the single exception is `evaluation_body`, filled in place on the version it was computed for while still NULL, see the 2026-07-16 migration); `is_current` flags the latest version per `proposal_id`. `route_body` JSON holds the exact `POST /api/route/plan` response the version was saved from, key order preserved; `evaluation_body` JSON (nullable) holds the `POST /api/evaluation/calc` response, if one was saved, same guarantee |
 
 **Seed data.** `db/dev/seed.py` seeds exactly one proposal (`proposal_id=1`
 — the natural first-insert outcome on a fresh DB, no reservation needed —
 Berlin Hbf → Dresden Hbf → Wien Hbf, owned by David) — saved through
 `adapters.proposal_repository.ProposalRepository.save()`, the same code
-path a live `POST /api/proposal` uses, so the seeded GTFS rows and the
+path the persist-on-calc pipelines use, so the seeded GTFS rows and the
 `proposals.proposals` row that owns them are structurally identical to a
-real save rather than a hand-maintained parallel representation. This
+real persisted plan rather than a hand-maintained parallel representation. This
 keeps the "every GTFS row is linked to a real proposal" invariant true
 with no exception, including at seed time. It's saved without an
 evaluation, so its financial fields are null until someone evaluates and
