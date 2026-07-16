@@ -113,8 +113,8 @@ def insert_rows(cur, table: str, rows: list[dict]) -> None:
 # ============================================================
 
 USERS = [
-    {"user_name": "David", "email": "david@backontrack.eu"},
-    {"user_name": "Bjarne", "email": "bjarne@backontrack.eu"},
+    {"display_name": "David", "email": "david@backontrack.eu", "is_verified": True},
+    {"display_name": "Bjarne", "email": "bjarne@backontrack.eu", "is_verified": True},
 ]
 
 # ============================================================

@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import { octilinearPath } from '@/utils/octilinear'
 
 // Two sources/layers: the in-scope route (highlighted) and the out-of-scope
 // route (dimmed grey). The dim layer is added first so the highlight draws on
@@ -91,8 +92,12 @@ function syncPolyline() {
     return
   }
 
+  // Real backend rail geometry (`shape`) is authoritative and drawn as-is. The
+  // raw-stops fallback (edit mode, before a shape is computed) is rendered as a
+  // schematic octilinear "train itinerary" connector instead of a straight line.
   const coords =
-    props.shape?.coordinates ?? props.stops.map((s) => [s.lon, s.lat] as [number, number])
+    props.shape?.coordinates ??
+    octilinearPath(props.stops.map((s) => [s.lon, s.lat] as [number, number]))
   src.setData({ type: 'FeatureCollection', features: [lineFeature(coords)] })
   srcDim.setData({ type: 'FeatureCollection', features: [] })
 }

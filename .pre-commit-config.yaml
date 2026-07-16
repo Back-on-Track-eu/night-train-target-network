@@ -4,11 +4,10 @@
 
 repos:
   # Python formatting (backend)
-  - repo: https://github.com/psf/black
-    rev: 25.1.0
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.21
     hooks:
-      - id: black
-        language_version: python3.12
+      - id: ruff-format
         files: ^backend/
 
   # JS/TS/Vue/JSON/CSS/Markdown formatting (frontend)

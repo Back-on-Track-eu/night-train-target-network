@@ -117,7 +117,7 @@ def ensure_routing_running():
                 return True
         except requests.ConnectionError:
             pass
-        print(f"    ...waiting ({(i+1)*2}s)")
+        print(f"    ...waiting ({(i + 1) * 2}s)")
 
     print("[✗] OpenRailRouting did not become ready in time.")
     return False

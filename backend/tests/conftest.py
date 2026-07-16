@@ -126,9 +126,9 @@ def base_scenario(db_cur):
     version numbers tests filter on for the four scenario-versioned tables."""
     db_cur.execute("SELECT * FROM scenario.scenarios WHERE is_current_base = TRUE")
     row = db_cur.fetchone()
-    assert (
-        row is not None
-    ), "No scenario has is_current_base = TRUE — seed data missing."
+    assert row is not None, (
+        "No scenario has is_current_base = TRUE — seed data missing."
+    )
     return row
 
 
@@ -164,9 +164,9 @@ def hsr_scenario(db_cur):
         "WHERE scenario_key = '2032-baseline-hsr-allowed' AND is_current_scenario = TRUE"
     )
     row = db_cur.fetchone()
-    assert (
-        row is not None
-    ), "HSR-allowed scenario missing — see db/dev/seed.py: HSR_SCENARIO."
+    assert row is not None, (
+        "HSR-allowed scenario missing — see db/dev/seed.py: HSR_SCENARIO."
+    )
     return row
 
 

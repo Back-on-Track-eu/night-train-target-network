@@ -70,7 +70,44 @@
       "calculating": "Calculating…",
       "noData": "No data for this selection.",
       "showRaw": "Raw JSON",
-      "calcVersion": "calc version"
+      "calcVersion": "calc version",
+      "info": {
+        "iconLabel": "Show cost factor details",
+        "rateCol": "Rate",
+        "valueCol": "Value",
+        "sourceCol": "Source",
+        "defaultBadge": "default"
+      },
+      "rates": {
+        "driver_rate": "Driver hourly rate",
+        "crew_rate": "Crew hourly rate",
+        "coach_maint_km": "Coach maintenance rate",
+        "loco_lease_h": "Locomotive lease rate",
+        "svc_place": "Service cost per place",
+        "var_overhead_quota": "Variable overhead quota",
+        "coach_purchase": "Coach purchase cost",
+        "coach_amort_years": "Amortisation period",
+        "financing_quota": "Financing quota",
+        "fix_overhead_quota": "Fixed overhead quota",
+        "cleaning_day": "Daily cleaning cost",
+        "shunting_event": "Shunting cost per event",
+        "tac_km": "Track access charge",
+        "energy_kwh": "Energy price",
+        "stop_charge": "Station charge",
+        "parking_day": "Parking cost per day"
+      },
+      "feedback": {
+        "title": "Found a mistake? Hit us up!",
+        "description": "We are doing what we can to update our data sources to base our calculations on realistic assumptions. If you, however, found a mistake or have a suggestion for improvements, please let us know! Thank you for your contribution!",
+        "messagePlaceholder": "Describe the mistake or your suggestion…",
+        "emailPlaceholder": "your.email{'@'}example.com",
+        "emailLabel": "Your e-mail",
+        "submit": "Send feedback",
+        "submitting": "Sending…",
+        "success": "Thank you! Your feedback has been sent.",
+        "error": "Something went wrong. Please try again.",
+        "invalidEmail": "Please enter a valid e-mail address."
+      }
     }
   }
 }

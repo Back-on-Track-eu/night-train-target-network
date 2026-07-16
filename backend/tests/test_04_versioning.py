@@ -25,7 +25,6 @@ import pytest
 
 
 class TestVersionIsolation:
-
     def test_loader_uses_base_pinned_version(self, loader):
         """Loader with no scenario_id resolves to the base scenario and
         returns DE's v2 value (tac=5.40) — not the older snapshot."""
@@ -64,9 +63,9 @@ class TestVersionIsolation:
             GROUP BY track_infra_version
             """)
         counts = {r["track_infra_version"]: r["n_countries"] for r in db_cur.fetchall()}
-        assert (
-            len(set(counts.values())) == 1
-        ), f"Snapshot invariant broken — country count differs by version: {counts}"
+        assert len(set(counts.values())) == 1, (
+            f"Snapshot invariant broken — country count differs by version: {counts}"
+        )
 
     def test_param_version_number_matches_db(self, loader, base_scenario):
         """A param_versions entry's version equals the scenario's pinned
@@ -83,23 +82,22 @@ class TestVersionIsolation:
 
 
 class TestParamProvenance:
-
     def test_param_versions_key_format(self, loader):
         """Every key follows 'table_short:entity_id:field_name'."""
         tracks = loader.build_all_tracks()
         for key in tracks.param_versions.entries:
-            assert (
-                len(key.split(":")) == 3
-            ), f"param_versions key '{key}' does not follow 'table:entity:field'"
+            assert len(key.split(":")) == 3, (
+                f"param_versions key '{key}' does not follow 'table:entity:field'"
+            )
 
     def test_param_versions_entries_complete(self, loader):
         """Every entry carries a non-None value and a positive int version."""
         tracks = loader.build_all_tracks()
         for key, entry in tracks.param_versions.entries.items():
             assert entry.value is not None, f"param_versions['{key}'].value is None"
-            assert (
-                isinstance(entry.version, int) and entry.version > 0
-            ), f"param_versions['{key}'].version = {entry.version!r}"
+            assert isinstance(entry.version, int) and entry.version > 0, (
+                f"param_versions['{key}'].version = {entry.version!r}"
+            )
 
     def test_field_descriptions_populated(self, loader):
         """Track infra field descriptions (from DB column comments) are
@@ -178,12 +176,12 @@ def test_git_sha_injected_in_ci():
     from models.route.version import GIT_SHA as ROUTE_SHA
 
     expected = os.environ["GITHUB_SHA"]
-    assert (
-        ROUTE_SHA == expected
-    ), f"route/version.py GIT_SHA not injected: '{ROUTE_SHA}'"
-    assert (
-        ENERGY_SHA == expected
-    ), f"energy/version.py GIT_SHA not injected: '{ENERGY_SHA}'"
-    assert (
-        CALC_SHA == expected
-    ), f"evaluation/version.py GIT_SHA not injected: '{CALC_SHA}'"
+    assert ROUTE_SHA == expected, (
+        f"route/version.py GIT_SHA not injected: '{ROUTE_SHA}'"
+    )
+    assert ENERGY_SHA == expected, (
+        f"energy/version.py GIT_SHA not injected: '{ENERGY_SHA}'"
+    )
+    assert CALC_SHA == expected, (
+        f"evaluation/version.py GIT_SHA not injected: '{CALC_SHA}'"
+    )

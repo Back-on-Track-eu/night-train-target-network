@@ -2,16 +2,36 @@ DROP SCHEMA IF EXISTS admin CASCADE;
 CREATE SCHEMA admin;
 
 CREATE TABLE admin.users (
-    user_id     SERIAL PRIMARY KEY,
-    user_name   TEXT NOT NULL,
-    email       TEXT NOT NULL UNIQUE,
+    user_id      SERIAL PRIMARY KEY,
+    email        TEXT UNIQUE,
+    display_name TEXT NOT NULL UNIQUE,
+    is_verified  BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE  admin.users              IS 'Platform users — created by the auth endpoints (OTP registration, guest sessions, first Keycloak-SSO sign-in). user_id is the identity every other schema references — proposals and feedback both key on it.';
+COMMENT ON COLUMN admin.users.user_id      IS 'Stable surrogate identity, referenced by proposals.proposals.user_id and admin.feedback.user_id.';
+COMMENT ON COLUMN admin.users.email        IS 'Login identity — unique. NULL for guest accounts; required for registered users (enforced by the API, not a DB constraint).';
+COMMENT ON COLUMN admin.users.display_name IS 'User-chosen public name (proposal lists, feedback), unique across the tool. Guest names carry the reserved "guest_" prefix.';
+COMMENT ON COLUMN admin.users.is_verified  IS 'TRUE after the first successful OTP verification (and always for Keycloak-SSO rows). FALSE for guests.';
+
+CREATE TABLE admin.auth_tokens (
+    token_id    SERIAL PRIMARY KEY,
+    user_id     INTEGER NOT NULL REFERENCES admin.users(user_id) ON DELETE CASCADE,
+    code_hash   TEXT NOT NULL,
+    expires_at  TIMESTAMPTZ NOT NULL,
+    used        BOOLEAN NOT NULL DEFAULT FALSE,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-COMMENT ON TABLE  admin.users            IS 'Platform users. Rows are created on user registration (Phase 5 OTP/magic-link auth); until then they are seeded manually. user_id is the identity every other schema references — proposals and feedback both key on it.';
-COMMENT ON COLUMN admin.users.user_id    IS 'Stable surrogate identity, referenced by proposals.proposals.user_id and admin.feedback.user_id.';
-COMMENT ON COLUMN admin.users.user_name  IS 'Display name shown in the frontend (proposal lists, feedback), decoupled from the login email.';
-COMMENT ON COLUMN admin.users.email      IS 'Login identity — unique; the future magic-link auth flow is email-based.';
+CREATE INDEX idx_auth_tokens_lookup
+    ON admin.auth_tokens (user_id, expires_at)
+    WHERE NOT used;
+
+COMMENT ON TABLE  admin.auth_tokens            IS 'Short-lived OTP tokens for email login. One row per issued code; marked used on first successful verify (or superseded when a newer code is requested).';
+COMMENT ON COLUMN admin.auth_tokens.code_hash  IS 'SHA-256 hex digest of the 6-digit OTP. Never store the plaintext code.';
+COMMENT ON COLUMN admin.auth_tokens.expires_at IS 'Hard expiry — tokens older than this are rejected even if not yet marked used.';
+COMMENT ON COLUMN admin.auth_tokens.used       IS 'Set TRUE on first successful verification, or when a newer code supersedes this one. Single-use enforcement.';
 
 CREATE TABLE admin.feedback (
     feedback_id   SERIAL PRIMARY KEY,

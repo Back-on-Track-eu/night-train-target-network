@@ -45,7 +45,6 @@ def scenarios_body(api_base):
 
 
 class TestScenariosResponseLayout:
-
     def test_top_level_keys(self, scenarios_body):
         """Top level carries total_count plus the three groups."""
         assert set(scenarios_body) >= {"total_count", *GROUPS}
@@ -75,7 +74,6 @@ class TestScenariosResponseLayout:
 
 
 class TestScenariosGrouping:
-
     def test_current_base_group_flags(self, scenarios_body):
         """Every scenario in current_base has both flags True."""
         for scenario in scenarios_body["current_base"]["scenarios"]:

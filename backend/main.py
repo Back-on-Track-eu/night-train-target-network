@@ -10,8 +10,9 @@ Start with:
 Endpoints — see api/README.md for full documentation.
 
   GET  /api/health
-  POST /api/auth/request-code        ⚠️  stub — not yet implemented
-  POST /api/auth/verify              ⚠️  stub — not yet implemented
+  POST /api/auth/request-code
+  POST /api/auth/verify
+  POST /api/auth/guest
   POST /api/feedback
   GET  /api/feedback/categories
   POST /api/proposal
@@ -31,7 +32,9 @@ import logging
 from flask import Flask, jsonify
 from flask_cors import CORS
 
+from api.auth_utils import check_auth_config
 from api.helpers.dependencies import DataNotLoadedError, init
+from api.limiter import limiter
 from api import health, params, route, evaluation, auth, feedback, proposals, scenarios
 
 logging.basicConfig(
@@ -42,10 +45,17 @@ logger = logging.getLogger(__name__)
 
 
 def create_app() -> Flask:
+    # Fails fast on a missing JWT_SECRET; warns when no OTP mail lane is
+    # configured; validates the optional Keycloak OIDC config (dormant
+    # until KEYCLOAK_ISSUER_URL is set — see api/auth_oidc.py).
+    check_auth_config()
     init()
 
     app = Flask(__name__)
     CORS(app)
+
+    # --- rate limiter (per-endpoint limits live in api/auth.py) ---
+    limiter.init_app(app)
 
     # --- blueprints ---
     app.register_blueprint(health.bp, url_prefix="/api")
@@ -80,6 +90,18 @@ def create_app() -> Flask:
     @app.errorhandler(405)
     def handle_method_not_allowed(e):
         return jsonify({"error": "method_not_allowed", "message": str(e)}), 405
+
+    @app.errorhandler(429)
+    def handle_rate_limit(e):
+        return (
+            jsonify(
+                {
+                    "error": "rate_limited",
+                    "message": "Too many requests. Please wait a moment and try again.",
+                }
+            ),
+            429,
+        )
 
     @app.errorhandler(500)
     def handle_internal_error(e):

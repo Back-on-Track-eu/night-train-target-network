@@ -27,7 +27,8 @@ files describing the same three backend services, kept manually in sync:
 
 ### Python (backend)
 
-- Style: **Black** (`black==25.1`, enforced in CI and pre-commit)
+- Style: **`ruff format`** (`ruff==0.15.21`, enforced in CI and pre-commit);
+  config is the single `[tool.ruff]` section in `backend/pyproject.toml`
 - Dependencies: managed with `uv` (`pyproject.toml` + `uv.lock`); never run
   `pip install` directly in the project — use `uv add`/`uv sync`
 - Domain objects in `models/` carry **no serialization methods** — all
@@ -70,6 +71,9 @@ files describing the same three backend services, kept manually in sync:
 - Icons: use `<AppIcon :path="mdiXxx" />` from `@/components/AppIcon.vue`
   with path constants imported from `@mdi/js` — never use
   `<i class="mdi mdi-*">` CSS font classes
+- Math/LaTeX: render backend-provided LaTeX (e.g. `models.evaluation.formulas`)
+  with **KaTeX** (`katex.renderToString` + `katex/dist/katex.min.css`) — no
+  other math renderer is bundled
 
 ---
 
@@ -138,7 +142,7 @@ running — these are integration tests against a live stack, not mocks. See
 | `.devcontainer/docker-compose.yml` | Self-contained VS Code devcontainer stack — duplicates the above, plus `frontend` |
 | `.github/workflows/ci.yml` | Frontend/backend formatting + frontend type-check (see CI/CD below) |
 | `.github/workflows/backend-tests.yml` | Version-bump enforcement + full backend integration test run |
-| `.pre-commit-config.yaml` | Pre-commit: black (`backend/`) + prettier (`frontend/`) |
+| `.pre-commit-config.yaml` | Pre-commit: ruff-format (`backend/`) + prettier (`frontend/`) |
 
 ---
 
@@ -202,7 +206,7 @@ Two separate workflows:
 | Job | What it checks |
 | --- | -------------- |
 | `prettier-check` | Frontend formatting (`npm run format:check`) |
-| `black-check` | Backend Python formatting (`black --check backend/`) |
+| `ruff-check` | Backend Python formatting (`ruff format --check backend/`) |
 | `type-check` | Frontend TypeScript (`npm run type-check` via `vue-tsc`) |
 
 **`.github/workflows/backend-tests.yml`** — runs on push to `main`/`backend-dev`
@@ -223,3 +227,10 @@ pre-commit install
 ```
 
 Run manually: `pre-commit run --all-files`
+
+## Maintaining this file
+
+Keep this file for knowledge useful to almost every future agent session in this project.
+Do not repeat what the codebase already shows; point to the authoritative file or command instead.
+Prefer rewriting or pruning existing entries over appending new ones.
+When updating this file, preserve this bar for all agents and keep entries concise.

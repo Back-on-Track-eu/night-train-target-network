@@ -723,12 +723,12 @@ def build_breakdown_per_trip_pair_per_od(
 
         # Pre-compute per-OD totals across all segments (keyed by (trip_id, od_key))
         # We compute internally per trip_id then aggregate into od_key for output
-        od_place_km: dict[tuple, float] = (
-            {}
-        )  # (trip_id, od_key) → total weighted_place_km
-        od_place_hours: dict[tuple, float] = (
-            {}
-        )  # (trip_id, od_key) → total weighted_place_hours
+        od_place_km: dict[
+            tuple, float
+        ] = {}  # (trip_id, od_key) → total weighted_place_km
+        od_place_hours: dict[
+            tuple, float
+        ] = {}  # (trip_id, od_key) → total weighted_place_hours
 
         for sl in pair_loads:
             for ol in sl.od_loads:

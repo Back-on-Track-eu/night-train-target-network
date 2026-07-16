@@ -75,7 +75,11 @@ class FeedbackRepository:
         threading a cross-repository dependency for."""
         with self._cursor() as cur:
             cur.execute(
-                "SELECT user_id, user_name, email FROM admin.users WHERE user_id = %s",
+                # display_name aliased to user_name: the API response field
+                # is user_name across proposals/feedback; renaming that
+                # contract is a separate, frontend-coordinated change.
+                "SELECT user_id, display_name AS user_name, email "
+                "FROM admin.users WHERE user_id = %s",
                 (user_id,),
             )
             row = cur.fetchone()

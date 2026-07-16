@@ -105,7 +105,7 @@ frontend/
 
 ## Pre-commit Hooks
 
-Hooks run Black (backend) and Prettier (frontend) automatically on every `git commit`.
+Hooks run `ruff format` (backend) and Prettier (frontend) automatically on every `git commit`.
 
 **Install once per machine:**
 
@@ -121,8 +121,8 @@ pre-commit run --all-files
 ```
 
 Hooks are defined in `/.pre-commit-config.yaml` at the repo root. They mirror the
-`prettier-check` and `black-check` CI jobs — if CI fails on formatting, run
-`npm run format` (frontend) or `black backend/` (backend) and recommit.
+`prettier-check` and `ruff-check` CI jobs — if CI fails on formatting, run
+`npm run format` (frontend) or `ruff format backend/` (backend) and recommit.
 
 ---
 
