@@ -176,6 +176,13 @@ jobs:
         run: |
           cd backend/docker
           cp .env.example .env
+          # Auth config for the CI stack: dev-mode OTPs (logged, not
+          # mailed), rate limits off, throwaway JWT secret.
+          {
+            echo "JWT_SECRET=ci-only-throwaway-secret"
+            echo "AUTH_EMAIL_DEV_MODE=true"
+            echo "TESTING=true"
+          } >> .env
           docker compose up -d --build
         env:
           POSTGRES_USER:     bot_admin

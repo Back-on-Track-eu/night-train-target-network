@@ -184,7 +184,10 @@ class ProposalRepository:
         """admin.users row for user_id, or None."""
         with self._cursor() as cur:
             cur.execute(
-                "SELECT user_id, user_name, email FROM admin.users WHERE user_id = %s",
+                # display_name aliased to user_name — see feedback_repository
+                # .get_user(): the API field name stays user_name for now.
+                "SELECT user_id, display_name AS user_name, email "
+                "FROM admin.users WHERE user_id = %s",
                 (user_id,),
             )
             row = cur.fetchone()
@@ -467,7 +470,7 @@ class ProposalRepository:
         with self._cursor() as cur:
             cur.execute(
                 "SELECT p.proposal_id, p.proposal_version, p.is_current, "
-                "       p.user_id, u.user_name, p.change_log, p.created_at, "
+                "       p.user_id, u.display_name AS user_name, p.change_log, p.created_at, "
                 "       p.route_body, p.evaluation_body "
                 "FROM proposals.proposals p "
                 "LEFT JOIN admin.users u USING (user_id) "
@@ -488,7 +491,7 @@ class ProposalRepository:
         stops) are applied by the caller on the summaries."""
         sql = (
             "SELECT p.proposal_id, p.proposal_version, p.is_current, "
-            "       p.user_id, u.user_name, p.change_log, p.created_at, "
+            "       p.user_id, u.display_name AS user_name, p.change_log, p.created_at, "
             # route_body is JSON (not JSONB — preserves key order, see
             # create_proposal_schema.sql), so the delete-key operator (-)
             # used below needs an explicit ::jsonb cast; that operator only

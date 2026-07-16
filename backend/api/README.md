@@ -22,7 +22,7 @@ stack. Each endpoint section below links its own example files.
 ## Table of Contents
 
 - [Health](#health)
-- [Auth](#auth) ⚠️ not yet implemented
+- [Auth](#auth)
 - [Feedback](#feedback)
   - [`POST /api/feedback`](#post-feedback) — submit feedback
   - [`GET /api/feedback/categories`](#feedback-categories) — suggested category/sub_category values
@@ -70,15 +70,39 @@ once loading succeeded; `error` only present if it failed:
 
 <a id="auth"></a>
 
-## Auth ⚠️ NOT YET IMPLEMENTED
+## Auth
 
-> These endpoints are stubbed and return `501 Not Implemented`.
-> Phase 5 will implement OTP/magic-link JWT auth.
+Dual-plane model, normalized to one trust ladder
+(`guest < OTP-contributor < SSO-operator`, exposed as `g.trust_level`):
+
+- **Local plane (these endpoints)** — email-OTP login + anonymous guest
+  sessions for public contributors. Users live in `admin.users`; JWTs are
+  HS256, signed with `JWT_SECRET`. OTP mail goes through
+  `adapters/mailer.py` (BoT SMTP; `AUTH_EMAIL_DEV_MODE=true` logs codes
+  instead for local dev). Rate limits per client IP (`api/limiter.py`).
+- **Operator plane ("Sign in with BoT account")** — Keycloak OIDC tokens,
+  validated against the realm's JWKS (`api/auth_oidc.py`). **Dormant until
+  `KEYCLOAK_ISSUER_URL` + `KEYCLOAK_CLIENT_ID` are set** — activates by
+  configuration when BoT's central identity goes live, no code change. On
+  first sign-in the operator gets an email-matched `admin.users` row so
+  proposals/feedback keep working.
+
+Endpoint protection: decorators in `api/auth_middleware.py`
+(`@require_auth`, `@optional_auth`, `@require_trust(level)`).
+`POST /api/proposal` and `POST /api/feedback` run `@optional_auth`: a
+bearer token's identity overrides the body's `user_id`; tokenless requests
+keep the old body-carried contract until the frontend has a login flow.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/auth/request-code` | Send OTP to email address |
-| `POST` | `/api/auth/verify` | Verify OTP and return JWT token |
+| `POST` | `/api/auth/request-code` | Register/login: send OTP to email (`5/hour` per IP) |
+| `POST` | `/api/auth/verify` | Verify OTP → `{token, user_id, display_name, is_guest}` |
+| `POST` | `/api/auth/guest` | Anonymous guest session → guest JWT (`20/hour` per IP) |
+
+Config (see `docker/.env.example`): `JWT_SECRET` (required),
+`AUTH_EMAIL_DEV_MODE`, `SMTP_*` (shared with feedback mail),
+`KEYCLOAK_ISSUER_URL` / `KEYCLOAK_CLIENT_ID` / `KEYCLOAK_JWKS_URL`
+(optional operator plane), `TESTING=true` disables rate limits.
 
 ---
 

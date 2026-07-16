@@ -2,7 +2,10 @@
 # export-for-claude.ps1
 # =============================================================================
 # Zips all relevant source files from the night-train-target-network project
-# for upload to Claude. Run from anywhere — uses hardcoded project root.
+# for upload to Claude. Run from anywhere — the project root is derived from
+# this script's own location (../ from .claude/), so it works correctly
+# whether run from the main checkout or any `git worktree` (each worktree
+# has its own copy of this script, sitting in its own .claude/ directory).
 #
 # Usage (from repo root or anywhere):
 #   .\.claude\export-for-claude.ps1
@@ -15,12 +18,17 @@ param(
     [string]$OutputPath = ""
 )
 
-$ProjectRoot = "C:\Users\david\PycharmProjects\night-train-target-network"
+# Derive the project root from where THIS script lives, not a hardcoded
+# path — $PSScriptRoot is always .claude\, so its parent is the repo root
+# of whichever checkout (main tree or worktree) invoked it.
+$ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $TempDir = Join-Path $ProjectRoot ".claude\export-temp"
 
 if ($OutputPath -eq "") {
     $OutputPath = Join-Path $ProjectRoot "project-snapshot.zip"
 }
+
+Write-Host "Project root: $ProjectRoot" -ForegroundColor DarkGray
 
 # Remove existing zip if present
 if (Test-Path $OutputPath) {

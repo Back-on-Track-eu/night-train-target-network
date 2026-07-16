@@ -16,9 +16,10 @@ adapters/feedback_repository.py.
 
 import logging
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 
 from adapters import mailer
+from api.auth_middleware import optional_auth
 from api.helpers.dependencies import get_feedback_repository, get_loader
 from api.helpers.feedback_serialize import (
     build_categories_payload,
@@ -31,6 +32,7 @@ bp = Blueprint("feedback", __name__)
 
 
 @bp.post("/feedback")
+@optional_auth
 def submit_feedback():
     """
     Submit feedback. Sends a notification mail to
@@ -61,6 +63,13 @@ def submit_feedback():
             jsonify({"error": "bad_request", "message": "Request body must be JSON."}),
             400,
         )
+
+    # A bearer token outranks whatever the body claims: nobody can submit
+    # feedback under someone else's user_id just by writing it in the JSON.
+    # Anonymous (no-token) submissions keep the body user_id/email contract.
+    if g.get("user_id") is not None:
+        body["user_id"] = g.user_id
+        body.pop("email", None)
 
     errors = validate_feedback_body(body)
     if errors:
