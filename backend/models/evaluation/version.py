@@ -29,9 +29,27 @@ from dataclasses import dataclass
 # VERSION
 # =============================================================================
 
-CALC_VERSION: str = "0.9.4"
+CALC_VERSION: str = "0.9.5"
 
 GIT_SHA: str = "unknown"  # injected by CI
+
+# Decimal places for the EUR leaves of each normalised Breakdown — precision
+# must scale with the divisor. Annual figures are naturally 2dp currency, but
+# €/place-km values on a realistic route are of order 1e-3 to 1e-2 per leaf,
+# so rounding them to 2dp quantizes real differences into noise (the root
+# cause of the 0.9.4 per_available_place_km divergence — see CHANGELOG 0.9.5).
+NORMALISATION_NDIGITS: dict[str, int] = {
+    "per_year": 2,
+    "per_operating_day": 2,
+    "per_train_km": 4,
+    "per_available_place_km": 6,
+    "per_sold_place_km": 6,
+}
+
+# Decimal places for the total_eur / total_cost_eur / total_revenue_eur /
+# net_eur properties — fine enough for every leaf precision above, coarse
+# enough to absorb float summation noise.
+BREAKDOWN_TOTAL_NDIGITS: int = 6
 
 # Short, plain-English summary of what this model computes — embedded as-is
 # in the "models" section of POST /api/evaluation/calc's response, alongside
@@ -117,6 +135,25 @@ CHANGELOG: dict = {
         "now, losing the previous class_id-level granularity — needs frontend "
         "coordination (see project notes on auditing Bjarne's frontend before "
         "Phase 4/5) since it's a real API contract change, not additive.",
+    },
+    "0.9.5": {
+        "date": "2026-07-16",
+        "author": "david",
+        "changes": "Normalisation precision now scales with the divisor "
+        "(NORMALISATION_NDIGITS in version.py): per_year and per_operating_day "
+        "leaves stay at 2dp, per_train_km moves to 4dp, per_available_place_km "
+        "and per_sold_place_km to 6dp; the total_eur / total_cost_eur / "
+        "total_revenue_eur / net_eur properties round at 6dp everywhere "
+        "(BREAKDOWN_TOTAL_NDIGITS). Previously every leaf and total was rounded "
+        "to 2dp — a 1.1.0-era rule that predates 0.9.4's annualised place-km "
+        "divisors. At €/place-km magnitude (order 1e-3 to 1e-2 per leaf) that "
+        "quantization turned the per-place-km views into rounding noise, off by "
+        "roughly 9% in aggregate on the standard test route — the root cause of "
+        "the long-open test_per_available_place_km_divisor_is_unweighted xfail "
+        "(the divisor itself was always exact; the numerator leaves were "
+        "quantized). No response shape change; per_year and per_operating_day "
+        "values unchanged; per_train_km and per-place-km values gain decimal "
+        "places.",
     },
     "0.9.4": {
         "date": "2026-07-14",

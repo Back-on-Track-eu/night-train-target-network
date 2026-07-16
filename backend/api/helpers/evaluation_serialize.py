@@ -9,11 +9,12 @@ Split out of the former serialize.py (2026-07-06) into two domain files —
 this one for evaluation output, route_serialize.py for Route (de)serialization
 — mirroring the existing params_serialize.py split for the params endpoints.
 
-EUR values are NOT rounded here — every leaf and total_eur/net_eur property
-on a Breakdown is already exactly 2 decimal places by the time it reaches
-this file (see models/evaluation/views.py: _round_breakdown() and the
-rounded total_eur/net_eur properties). This file only shapes dicts, it
-never re-formats numbers.
+EUR values are NOT rounded here — every leaf on a Breakdown is already
+rounded by the time it reaches this file, at a precision scaled to its
+normalisation (2dp for annual EUR, finer for per-unit views — see
+models/evaluation/views.py: _round_breakdown() and NORMALISATION_NDIGITS /
+BREAKDOWN_TOTAL_NDIGITS in models/evaluation/version.py). This file only
+shapes dicts, it never re-formats numbers.
 
 Public interface:
   breakdown_to_dict(breakdown)                    → dict  (one Breakdown, all 5 normalisations already applied by the caller)

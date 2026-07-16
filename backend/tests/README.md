@@ -413,8 +413,10 @@ fixed value, so this file passes the same way whether or not SMTP_* is set.
 
 - Session-scoped route fixtures in `conftest.py` are **read-only** — never
   mutate them; use `inject_demand()` (which copies) to attach demand.
-- Monetary assertions use `pytest.approx(rel=1e-3)` — EUR leaves are rounded
-  to 2 decimal places by the API.
+- Monetary assertions use `pytest.approx(rel=1e-3)` — annual EUR leaves are
+  rounded to 2 decimal places by the API; normalised views round finer,
+  scaled to their divisor (`NORMALISATION_NDIGITS` in
+  `models/evaluation/version.py`).
 - `db_conn.commit()`/rollback discipline: the autouse `rollback_after_test`
   fixture prevents an aborted transaction from cascading.
 - Tests must only assert on data the API actually returns. If a field is

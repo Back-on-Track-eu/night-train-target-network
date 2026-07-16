@@ -276,13 +276,21 @@ optional `scope` parameter (a `NormalisationScope`) carries a route-section
 cell's own annual denominators; `scope=None` derives them from
 `route`/`trip_pair` as usual.
 
-| Function | Denominator (annual) | Result unit |
-|---|---|---|
-| `normalise(breakdown, denominator)` | Caller-supplied | Arbitrary |
-| `normalise_per_operating_day(breakdown, route)` | `operating_days_per_year` | €/operating-day |
-| `normalise_per_train_km(breakdown, route, trip_pair=None, scope=None)` | Cycle distance (both directions) × operating days | €/train-km |
-| `normalise_per_available_place_km(breakdown, route, trip_pair=None, scope=None)` | Capacity × cycle distance × operating days | €/available-place-km |
-| `normalise_per_sold_place_km(breakdown, route, trip_pair=None, scope=None)` | `places_sold` × distance per OD range (`places_sold` is already annual) | €/sold-place-km |
+Leaf rounding **scales with the divisor** (`NORMALISATION_NDIGITS` in
+version.py): annual figures are 2dp currency, but per-place-km leaves are of
+order 10⁻³–10⁻² € — rounding those to 2dp quantizes them into noise (the
+0.9.4 bug behind the long-open per_available_place_km divisor xfail; the
+divisor itself was always exact). Totals (`total_eur`/`net_eur` properties)
+round at `BREAKDOWN_TOTAL_NDIGITS` (6dp), fine enough for every leaf
+precision.
+
+| Function | Denominator (annual) | Result unit | Leaf precision |
+|---|---|---|---|
+| `normalise(breakdown, denominator, ndigits=2)` | Caller-supplied | Arbitrary | `ndigits` |
+| `normalise_per_operating_day(breakdown, route)` | `operating_days_per_year` | €/operating-day | 2dp |
+| `normalise_per_train_km(breakdown, route, trip_pair=None, scope=None)` | Cycle distance (both directions) × operating days | €/train-km | 4dp |
+| `normalise_per_available_place_km(breakdown, route, trip_pair=None, scope=None)` | Capacity × cycle distance × operating days | €/available-place-km | 6dp |
+| `normalise_per_sold_place_km(breakdown, route, trip_pair=None, scope=None)` | `places_sold` × distance per OD range (`places_sold` is already annual) | €/sold-place-km | 6dp |
 
 ---
 

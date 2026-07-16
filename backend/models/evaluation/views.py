@@ -32,6 +32,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from models.route.route import Route, TripPair
+from models.evaluation.version import (
+    BREAKDOWN_TOTAL_NDIGITS,
+    NORMALISATION_NDIGITS,
+)
 from models.evaluation.calc import (
     EvaluationResult,
     SegmentPassengerLoad,
@@ -65,7 +69,7 @@ class OperatorVariableCost:
             + self.loco_eur
             + self.svc_stockings_eur
             + self.var_overhead_eur,
-            2,
+            BREAKDOWN_TOTAL_NDIGITS,
         )
 
     def __iadd__(self, other: OperatorVariableCost) -> OperatorVariableCost:
@@ -96,7 +100,7 @@ class OperatorFixedCost:
             + self.fix_overhead_eur
             + self.cleaning_eur
             + self.shunting_eur,
-            2,
+            BREAKDOWN_TOTAL_NDIGITS,
         )
 
     def __iadd__(self, other: OperatorFixedCost) -> OperatorFixedCost:
@@ -115,7 +119,9 @@ class OperatorCost:
 
     @property
     def total_eur(self) -> float:
-        return round(self.variable.total_eur + self.fixed.total_eur, 2)
+        return round(
+            self.variable.total_eur + self.fixed.total_eur, BREAKDOWN_TOTAL_NDIGITS
+        )
 
     def __iadd__(self, other: OperatorCost) -> OperatorCost:
         self.variable += other.variable
@@ -136,7 +142,7 @@ class InfrastructureCost:
     def total_eur(self) -> float:
         return round(
             self.tac_eur + self.energy_eur + self.station_charge_eur + self.parking_eur,
-            2,
+            BREAKDOWN_TOTAL_NDIGITS,
         )
 
     def __iadd__(self, other: InfrastructureCost) -> InfrastructureCost:
@@ -154,7 +160,10 @@ class CostBreakdown:
 
     @property
     def total_eur(self) -> float:
-        return round(self.operator.total_eur + self.infrastructure.total_eur, 2)
+        return round(
+            self.operator.total_eur + self.infrastructure.total_eur,
+            BREAKDOWN_TOTAL_NDIGITS,
+        )
 
     def __iadd__(self, other: CostBreakdown) -> CostBreakdown:
         self.operator += other.operator
@@ -168,7 +177,7 @@ class RevenueBreakdown:
 
     @property
     def total_eur(self) -> float:
-        return round(self.ticket_revenue_eur, 2)
+        return round(self.ticket_revenue_eur, BREAKDOWN_TOTAL_NDIGITS)
 
     def __iadd__(self, other: RevenueBreakdown) -> RevenueBreakdown:
         self.ticket_revenue_eur += other.ticket_revenue_eur
@@ -183,7 +192,7 @@ class MarginBreakdown:
 
     @property
     def total_eur(self) -> float:
-        return round(self.ebit_margin_eur, 2)
+        return round(self.ebit_margin_eur, BREAKDOWN_TOTAL_NDIGITS)
 
     def __iadd__(self, other: MarginBreakdown) -> MarginBreakdown:
         self.ebit_margin_eur += other.ebit_margin_eur
@@ -203,16 +212,17 @@ class Breakdown:
 
     @property
     def total_cost_eur(self) -> float:
-        return round(self.cost.total_eur, 2)
+        return round(self.cost.total_eur, BREAKDOWN_TOTAL_NDIGITS)
 
     @property
     def total_revenue_eur(self) -> float:
-        return round(self.revenue.total_eur, 2)
+        return round(self.revenue.total_eur, BREAKDOWN_TOTAL_NDIGITS)
 
     @property
     def net_eur(self) -> float:
         return round(
-            self.total_revenue_eur - self.total_cost_eur - self.margin.total_eur, 2
+            self.total_revenue_eur - self.total_cost_eur - self.margin.total_eur,
+            BREAKDOWN_TOTAL_NDIGITS,
         )
 
     def __iadd__(self, other: Breakdown) -> Breakdown:
@@ -274,15 +284,17 @@ def _map_breakdown(b: Breakdown, fn) -> Breakdown:
     return r
 
 
-def _round_breakdown(b: Breakdown) -> Breakdown:
+def _round_breakdown(b: Breakdown, ndigits: int = 2) -> Breakdown:
     """
-    Round every EUR leaf of a Breakdown to 2 decimal places, returning a new
-    Breakdown. Applied at the end of every builder and normaliser in this
-    file so serialize.py never needs its own number formatting — by the
-    time a Breakdown reaches breakdown_to_dict(), every value (leaves and
-    the total_eur/net_eur properties above) is already exactly 2dp.
+    Round every EUR leaf of a Breakdown to ndigits decimal places, returning
+    a new Breakdown. Applied at the end of every builder (default 2dp —
+    annual EUR) and normaliser (NORMALISATION_NDIGITS — precision scales
+    with the divisor, since €/place-km leaves are orders of magnitude
+    smaller than €/year) in this file, so serialize.py never needs its own
+    number formatting. The total_eur/net_eur properties round at
+    BREAKDOWN_TOTAL_NDIGITS, fine enough for every leaf precision used here.
     """
-    return _map_breakdown(b, lambda v: round(v, 2))
+    return _map_breakdown(b, lambda v: round(v, ndigits))
 
 
 def _scale_breakdown(b: Breakdown, factor: float) -> Breakdown:
@@ -1607,15 +1619,18 @@ def build_breakdown_per_trip_per_stop(
 # =============================================================================
 
 
-def normalise(breakdown: Breakdown, denominator: float) -> Breakdown:
+def normalise(breakdown: Breakdown, denominator: float, ndigits: int = 2) -> Breakdown:
     """
-    Divide every leaf of breakdown by denominator, returning a new Breakdown.
-    The tree shape is preserved — only the values change.
+    Divide every leaf of breakdown by denominator and round to ndigits
+    (see NORMALISATION_NDIGITS), returning a new Breakdown. The tree shape
+    is preserved — only the values change.
     Returns a zero Breakdown if denominator is 0.
     """
     if denominator == 0.0:
         return Breakdown()
-    return _round_breakdown(_map_breakdown(breakdown, lambda v: v / denominator))
+    return _round_breakdown(
+        _map_breakdown(breakdown, lambda v: v / denominator), ndigits
+    )
 
 
 def normalise_per_operating_day(
@@ -1627,7 +1642,11 @@ def normalise_per_operating_day(
     Since Breakdown is already €/year, this reverses the annualisation
     applied in build_breakdown.
     """
-    return normalise(breakdown, float(route.schedule.operating_days_per_year))
+    return normalise(
+        breakdown,
+        float(route.schedule.operating_days_per_year),
+        NORMALISATION_NDIGITS["per_operating_day"],
+    )
 
 
 def normalise_per_train_km(
@@ -1650,14 +1669,20 @@ def normalise_per_train_km(
     trip_pair=pair → that pair's cycle distance × operating days.
     """
     if scope is not None:
-        return normalise(breakdown, scope.train_km)
+        return normalise(
+            breakdown, scope.train_km, NORMALISATION_NDIGITS["per_train_km"]
+        )
     trips = (
         [t for pair in route.trip_pairs for t in pair.trips]
         if trip_pair is None
         else list(trip_pair.trips)
     )
     cycle_km = sum(seg.distance_m / 1000.0 for trip in trips for seg in trip.segments)
-    return normalise(breakdown, cycle_km * route.schedule.operating_days_per_year)
+    return normalise(
+        breakdown,
+        cycle_km * route.schedule.operating_days_per_year,
+        NORMALISATION_NDIGITS["per_train_km"],
+    )
 
 
 def normalise_per_available_place_km(
@@ -1680,7 +1705,11 @@ def normalise_per_available_place_km(
     trip_pair=pair → that pair's trips only.
     """
     if scope is not None:
-        return normalise(breakdown, scope.available_place_km)
+        return normalise(
+            breakdown,
+            scope.available_place_km,
+            NORMALISATION_NDIGITS["per_available_place_km"],
+        )
     pairs = [trip_pair] if trip_pair is not None else route.trip_pairs
     cycle_place_km = sum(
         sum(pair.composition.places_by_class.values()) * seg.distance_m / 1000.0
@@ -1688,7 +1717,11 @@ def normalise_per_available_place_km(
         for trip in pair.trips
         for seg in trip.segments
     )
-    return normalise(breakdown, cycle_place_km * route.schedule.operating_days_per_year)
+    return normalise(
+        breakdown,
+        cycle_place_km * route.schedule.operating_days_per_year,
+        NORMALISATION_NDIGITS["per_available_place_km"],
+    )
 
 
 def normalise_per_sold_place_km(
@@ -1710,7 +1743,11 @@ def normalise_per_sold_place_km(
     trip_pair=pair → that pair's OD pairs only.
     """
     if scope is not None:
-        return normalise(breakdown, scope.sold_place_km)
+        return normalise(
+            breakdown,
+            scope.sold_place_km,
+            NORMALISATION_NDIGITS["per_sold_place_km"],
+        )
     pairs = [trip_pair] if trip_pair is not None else route.trip_pairs
     sold_place_km = 0.0
     for pair in pairs:
@@ -1731,7 +1768,9 @@ def normalise_per_sold_place_km(
                     for i, seg in enumerate(trip.segments)
                     if start_idx <= i < end_idx
                 )
-    return normalise(breakdown, sold_place_km)
+    return normalise(
+        breakdown, sold_place_km, NORMALISATION_NDIGITS["per_sold_place_km"]
+    )
 
 
 # =============================================================================
