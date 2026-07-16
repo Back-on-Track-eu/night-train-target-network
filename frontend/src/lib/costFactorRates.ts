@@ -62,6 +62,41 @@ const FACTOR_RATES: Record<string, string[]> = {
   parking_eur: ['parking_day'],
 }
 
+// Cost-factor formula key (e.g. "driver_eur") → the full dotted Breakdown
+// path the feedback API expects as `sub_category` (see backend
+// models/evaluation/views.py's Breakdown tree, enumerated by
+// GET /api/feedback/categories under "Evaluation — calculation method").
+// The cost tree's node keys are the short form ("driver"); append "_eur" to
+// get the formula key used here, so the popover can tag feedback to the exact
+// factor it is showing.
+const FACTOR_SUB_CATEGORY: Record<string, string> = {
+  driver_eur: 'cost.operator.variable.driver_eur',
+  crew_eur: 'cost.operator.variable.crew_eur',
+  coach_maintenance_eur: 'cost.operator.variable.coach_maintenance_eur',
+  loco_eur: 'cost.operator.variable.loco_eur',
+  svc_stockings_eur: 'cost.operator.variable.svc_stockings_eur',
+  var_overhead_eur: 'cost.operator.variable.var_overhead_eur',
+  coach_amortisation_eur: 'cost.operator.fixed.coach_amortisation_eur',
+  financing_eur: 'cost.operator.fixed.financing_eur',
+  fix_overhead_eur: 'cost.operator.fixed.fix_overhead_eur',
+  cleaning_eur: 'cost.operator.fixed.cleaning_eur',
+  shunting_eur: 'cost.operator.fixed.shunting_eur',
+  tac_eur: 'cost.infrastructure.tac_eur',
+  energy_eur: 'cost.infrastructure.energy_eur',
+  station_charge_eur: 'cost.infrastructure.station_charge_eur',
+  parking_eur: 'cost.infrastructure.parking_eur',
+}
+
+/**
+ * The `sub_category` value POST /api/feedback wants for a cost factor — the
+ * factor's full dotted Breakdown path. `factorKey` is the formula/field key
+ * (e.g. "driver_eur"). Returns null for keys with no mapping (aggregates or
+ * non-cost factors), so the caller can withhold submission.
+ */
+export function resolveFactorSubCategory(factorKey: string): string | null {
+  return FACTOR_SUB_CATEGORY[factorKey] ?? null
+}
+
 /** Split "…text. Unit: €/h" into the description text and the unit token. */
 function splitUnit(desc: string | undefined): { text: string; unit: string } {
   if (!desc) return { text: '', unit: '' }

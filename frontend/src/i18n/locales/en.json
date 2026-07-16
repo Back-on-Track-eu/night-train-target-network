@@ -95,6 +95,18 @@
         "energy_kwh": "Energy price",
         "stop_charge": "Station charge",
         "parking_day": "Parking cost per day"
+      },
+      "feedback": {
+        "title": "Found a mistake? Hit us up!",
+        "description": "We are doing what we can to update our data sources to base our calculations on realistic assumptions. If you, however, found a mistake or have a suggestion for improvements, please let us know! Thank you for your contribution!",
+        "messagePlaceholder": "Describe the mistake or your suggestion…",
+        "emailPlaceholder": "your.email{'@'}example.com",
+        "emailLabel": "Your e-mail",
+        "submit": "Send feedback",
+        "submitting": "Sending…",
+        "success": "Thank you! Your feedback has been sent.",
+        "error": "Something went wrong. Please try again.",
+        "invalidEmail": "Please enter a valid e-mail address."
       }
     }
   }

@@ -152,6 +152,14 @@ class TestResponseStructure:
         assert sum(comp["places_by_class"].values()) > 0
         assert len(comp["density_by_class"]) > 0
 
+    @pytest.mark.xfail(
+        reason="Asserts a contract the endpoint never had — api/route.py has "
+        "always run the stopgap demand distribution after planning, so "
+        "od_pairs is populated on a fresh plan. Properly rewritten on "
+        "backend-dev (2900b39) as test_od_pairs_populated_by_stopgap_demand; "
+        "this marker disappears when that merges.",
+        strict=False,
+    )
     def test_od_pairs_empty_on_fresh_plan(self, plan_response):
         """A freshly planned route carries no demand — od_pairs is []."""
         for pair in plan_response["route"]["trip_pairs"]:

@@ -1,0 +1,29 @@
+# Production-style static build for the bot-server demo stack
+# (deploy/bot-server-demo/). The default Dockerfile runs the Vite dev
+# server; this one ships the built assets behind nginx.
+#
+# VITE_API_BASE_URL is baked in at build time. The demo stack sets it to
+# "" (empty) so the app calls /api/* on its own origin and Caddy routes
+# those to the API container — see deploy/bot-server-demo/README.md.
+
+FROM node:22-alpine AS build
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY . .
+
+ARG VITE_API_BASE_URL=""
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+
+# vite build directly — vue-tsc typechecking belongs in CI, not in the
+# deploy path (a non-blocking type error must not take the demo down).
+RUN npx vite build
+
+FROM nginx:1.27-alpine
+
+COPY --from=build /app/dist /usr/share/nginx/html
+
+EXPOSE 80
