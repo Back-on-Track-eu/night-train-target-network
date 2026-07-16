@@ -121,10 +121,12 @@ Allocation rules per country:
 
 | Cost | Method |
 |---|---|
-| `driver`, `crew`, `loco`, `cleaning` | `country_time_shares` |
-| `coach_maintenance`, `coach_amortisation`, `financing`, `fix_overhead` | `country_distance_shares` |
+| `driver`, `crew` (driving) | `country_time_shares` per segment |
+| `driver`, `crew` (dwell) | 100% to `StopCost.country_code` |
+| `loco`, `cleaning` | Pair-level time share (`t_share`) |
+| `coach_maintenance`, `tac`, `energy` | `country_distance_shares` per segment |
+| `coach_amortisation`, `financing`, `fix_overhead` | Pair-level distance share (`d_share`) |
 | `shunting` | 100% to terminal stop's country (`Shunting.country_code`) |
-| `tac`, `energy` | Directly from `SegmentCost` (already split in calc.py) |
 | `station_charge` | 100% to `StopCost.country_code` |
 | `parking` | 100% to `Parking.country_code` |
 | `svc_stockings`, `var_overhead`, `revenue`, `margin` | OD weighted place-km share per country |
@@ -216,6 +218,53 @@ Only boarding and alighting OD pairs are attributed at each stop — through-rid
 are invisible at the stop level. Fixed costs are allocated by half the boarding/
 alighting OD pairs' weighted place-km relative to the route total (half at origin,
 half at destination, so all stops sum to 100%).
+
+### Allocation matrix — all views at a glance
+
+The per-layer tables above are the detailed reference; this matrix puts every
+parameter side by side across views. Source-unit annualisation (calc.py →
+€/year) is identical in all views. Abbreviations: *wpkm/wph* =
+density-weighted place-km / place-hours, *B/A* = OD pairs boarding or
+alighting at the stop, *route_share* = B/A wpkm (half at origin, half at
+destination) over route total wpkm.
+
+| Parameter | per_trip_pair (filter) | × country | × OD pair | × section (`__all` cell) | per trip × stop |
+|---|---|---|---|---|---|
+| `driver` (driving) | direct Σ pair segments | seg × country time share | seg × wph share | 100% of segments in section | adjacent seg × B/A wpkm share |
+| `crew` (driving) | direct | seg × country time share | seg × wph share | 100% in section | adjacent seg × B/A wpkm share |
+| `driver`/`crew` (dwell) | direct Σ pair stops | 100% stop country | `places_sold` share at stop | 100% of stop calls in section | direct from `StopCost` |
+| `coach_maintenance` | direct | seg × country distance share | seg × wpkm share | 100% in section | adjacent seg × B/A wpkm share |
+| `tac` | direct | seg × country distance share | seg × wpkm share | 100% in section | adjacent seg × B/A wpkm share |
+| `energy` | direct | seg × country distance share | seg × wpkm share | 100% in section | adjacent seg × B/A wpkm share |
+| `station_charge` | direct | 100% stop country | `places_sold` share at stop | 100% of stop calls in section | direct from `StopCost` |
+| `loco` | direct (lease × pair loco min) | pair loco × `t_share` | pair-wide wph share | direct: lease × section min (drive + dwell) | route total × route_share |
+| `coach_amortisation` | fleet cost × pair fleet share | fleet share × `d_share` | fleet share × pair-wide wpkm share | fleet share × section-km / pair-km | fleet total × route_share |
+| `financing` | × pair fleet share | fleet share × `d_share` | fleet share × wpkm share | fleet share × section-km share | × route_share |
+| `fix_overhead` | × pair fleet share | fleet share × `d_share` | fleet share × wpkm share | fleet share × section-km share | × route_share |
+| `cleaning` | × pair fleet share | fleet share × `t_share` | fleet share × wph share | fleet share × section drive-h / pair drive-h | × route_share |
+| `shunting` | direct Σ pair events | 100% event country | pair total × revenue share | pair total × section revenue share | route total × route_share |
+| `parking` | direct (`trip_ids` ∩) | 100% parking country (pair-filtered) | pair total (pair-filtered) × revenue share | pair total (pair-filtered) × section revenue share | route total × route_share |
+| `svc_stockings` | direct Σ OD records | OD × wpkm country share | direct (native per OD) | OD × overlap-km / ride-km | direct, B/A only |
+| `var_overhead` | direct | OD × wpkm country share | direct | OD × overlap-km / ride-km | direct, B/A only |
+| `ticket_revenue` | direct | OD × wpkm country share | direct | OD × overlap-km / ride-km | direct, B/A only |
+| `ebit_margin` | direct | OD × wpkm country share | direct | OD × overlap-km / ride-km | direct, B/A only |
+
+Sum properties per view: country and OD cells **partition** the pair total
+(every share family sums to 1.0); per-stop cells partition the route total
+(route_share sums to 1.0 via the half-origin / half-destination split);
+section cells deliberately do **not** sum (sections overlap by construction).
+
+Two intentional asymmetries, kept for simplicity and flagged here so they are
+not mistaken for bugs:
+
+- **`cleaning` in per trip × stop** collapses into the generic wpkm-based
+  `route_share` like all non-direct costs there, although it is time-based in
+  every other view. The stop view has a single allocation basis by design.
+- **`loco` in sections** is the only cost computed directly from section
+  physics (lease rate × section minutes) rather than as a share of the pair
+  total — section loco cells therefore exclude turnaround/idle minutes
+  outside any section and would not sum to the pair figure even without
+  overlap.
 
 ### Layer 3 — normalisers
 

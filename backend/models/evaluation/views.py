@@ -459,12 +459,13 @@ def build_breakdown_per_trip_pair_per_country(
     Matrix keyed by (pair_key, country_code), with "all" as wildcard in either position.
 
     Allocation rules:
-      driver, crew, loco, cleaning   → country_time_shares
-      coach_maintenance,
+      driver, crew (driving)         → country_time_shares per segment
+      driver, crew (dwell)           → 100% to StopCost.country_code
+      loco, cleaning                 → pair-level time share (t_share)
+      coach_maintenance, tac, energy → country_distance_shares per segment
       coach_amortisation, financing,
-      fix_overhead                   → country_distance_shares
+      fix_overhead                   → pair-level distance share (d_share)
       shunting                       → 100% to terminal stop's country
-      tac, energy                    → directly from SegmentCost
       station_charge                 → 100% to StopCost.country_code
       parking                        → 100% to Parking.country_code
       svc_stockings, var_overhead,
@@ -680,10 +681,12 @@ def build_breakdown_per_trip_pair_per_od(
       (pair_key, od_key)      — one pair, one OD pair
 
     Cost allocation per OD pair:
-      coach_maintenance, tac, energy     → place_km share per segment
-                                           (od_load.place_km / seg_load.total_place_km)
-      driver, crew                       → place_hours share per segment
-                                           (od_load.place_hours / seg_load.total_place_hours)
+      coach_maintenance, tac, energy     → weighted place-km share per segment
+                                           (od_load.weighted_place_km /
+                                           seg_load.total_weighted_place_km)
+      driver, crew                       → weighted place-hours share per segment
+                                           (od_load.weighted_place_hours /
+                                           seg_load.total_weighted_place_hours)
       loco, cleaning                     → od weighted place-hours share of the
                                            whole pair (sums to 1 across both
                                            directions — loco/cleaning are billed
@@ -1752,8 +1755,8 @@ _VIEW_FILTER_STAGES: dict[str, list[str]] = {
     ],
     "per_trip_pair_per_od": [
         "one trip pair (outbound + return), or 'all'",
-        "one OD pair (origin, destination, class), via place-km/place-hours/revenue "
-        "allocation share, or 'all'",
+        "one OD pair (origin, destination, class), via weighted place-km / "
+        "weighted place-hours / revenue allocation share, or 'all'",
     ],
     "per_trip_pair_per_section": [
         "one trip pair (outbound + return), or 'all'",
@@ -1778,8 +1781,8 @@ _VIEW_DESCRIPTIONS: dict[str, str] = {
     "cost — see build_breakdown_per_trip_pair_per_country().",
     "per_trip_pair_per_od": "Matrix of annual totals by trip pair x OD pair (origin, "
     "destination, class) — money attributed to one passenger "
-    "relation. Cost types are allocated by place-km, "
-    "place-hours, or revenue share depending on the cost — see "
+    "relation. Cost types are allocated by weighted place-km, "
+    "weighted place-hours, or revenue share depending on the cost — see "
     "build_breakdown_per_trip_pair_per_od(). Cells partition "
     "the pair total (they sum to it).",
     "per_trip_pair_per_section": "Matrix of annual totals by trip pair x route "
