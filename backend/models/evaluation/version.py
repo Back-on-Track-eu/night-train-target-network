@@ -29,7 +29,7 @@ from dataclasses import dataclass
 # VERSION
 # =============================================================================
 
-CALC_VERSION: str = "0.9.5"
+CALC_VERSION: str = "0.9.6"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -135,6 +135,27 @@ CHANGELOG: dict = {
         "now, losing the previous class_id-level granularity — needs frontend "
         "coordination (see project notes on auditing Bjarne's frontend before "
         "Phase 4/5) since it's a real API contract change, not additive.",
+    },
+    "0.9.6": {
+        "date": "2026-07-16",
+        "author": "david",
+        "changes": "Persist-on-calc: POST /api/evaluation/calc now persists its "
+        "own response for any authenticated caller (guest or registered) — "
+        "POST /api/proposal is gone. Two response additions: a top-level "
+        "'scenario_id' (the scenario the evaluation actually ran under, "
+        "override applied — the posted route's embedded scenario_id is NOT "
+        "updated by an override) between route_id and models, and a trailing "
+        "'proposal' block ({persisted, action, proposal_id, "
+        "proposal_version}). Persistence contract: the evaluation fills its "
+        "own version row in place when that version has none yet (the one "
+        "sanctioned in-place write on the append-only proposals table); "
+        "identical inputs (same route incl. demand, same resolved scenario, "
+        "same calc version) are a no-op ('unchanged'); changed inputs create "
+        "a new version carrying the unchanged route_body ('versioned' / "
+        "'branched' per ownership); unpersisted, historical, or hand-edited "
+        "routes are answered but never stored. Tokenless requests compute "
+        "only. BREAKING for frontend: save flow removed, Authorization "
+        "header now expected on calc — coordinate with Bjarne.",
     },
     "0.9.5": {
         "date": "2026-07-16",

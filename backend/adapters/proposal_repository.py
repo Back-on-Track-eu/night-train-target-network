@@ -7,13 +7,13 @@ parameter data).
 
 A save is one transaction that inserts a proposals.proposals row plus the
 full GTFS decomposition of the route (services/calendar/shapes/routes/
-trips/stop_times). save() takes the WHOLE response of each upstream API
-call — route_body is exactly what POST /api/route/plan returned
-(route_builder_version + request + route), and evaluation_body, if
-given, is exactly what POST /api/evaluation/calc returned (calc_version +
-route_id + models + input + views). Both are stored verbatim (after
-draft-ID rewriting) as route_body/evaluation_body JSONB — no field
-picked apart or trimmed. See db/dev/sql/create_proposal_schema.sql for
+trips/stop_times). Since persist-on-calc (2026-07-16) save() is called by
+the pipelines themselves — POST /api/route/plan persists its own response
+as route_body, POST /api/evaluation/calc persists its own response as
+evaluation_body (attach_evaluation() when filling the version it was
+computed for, save() when changed inputs force a new version). Both are
+stored verbatim (after draft-ID rewriting) — no field picked apart or
+trimmed. See db/dev/sql/create_proposal_schema.sql for
 the versioning contract this module implements:
 
   save() action outcomes
@@ -95,7 +95,7 @@ def parse_route_id(route_id: str) -> tuple[int, int]:
     return int(match.group(1)), int(match.group(2))
 
 
-def _rewrite_id_prefix(obj: Any, old_prefix: str, new_prefix: str) -> Any:
+def rewrite_id_prefix(obj: Any, old_prefix: str, new_prefix: str) -> Any:
     """Recursively replace the proposal/version ID prefix in every string
     value AND dict key of a JSON structure. Covers route_id, trip_ids,
     geometry_ids, and all trip references (od_pairs, shuntings, parkings)
@@ -109,10 +109,10 @@ def _rewrite_id_prefix(obj: Any, old_prefix: str, new_prefix: str) -> Any:
             new_prefix + obj[len(old_prefix) :] if obj.startswith(old_prefix) else obj
         )
     if isinstance(obj, list):
-        return [_rewrite_id_prefix(item, old_prefix, new_prefix) for item in obj]
+        return [rewrite_id_prefix(item, old_prefix, new_prefix) for item in obj]
     if isinstance(obj, dict):
         return {
-            _rewrite_id_prefix(key, old_prefix, new_prefix): _rewrite_id_prefix(
+            rewrite_id_prefix(key, old_prefix, new_prefix): rewrite_id_prefix(
                 value, old_prefix, new_prefix
             )
             for key, value in obj.items()
@@ -198,6 +198,51 @@ class ProposalRepository:
         self._conn.rollback()  # release the read-only transaction
         return dict(row) if row else None
 
+    def get_version(self, proposal_id: int, proposal_version: int) -> Optional[dict]:
+        """One exact version row (full bodies), or None."""
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT proposal_id, proposal_version, is_current, user_id, "
+                "       route_body, evaluation_body "
+                "FROM proposals.proposals "
+                "WHERE proposal_id = %s AND proposal_version = %s",
+                (proposal_id, proposal_version),
+            )
+            row = cur.fetchone()
+        self._conn.rollback()
+        return dict(row) if row else None
+
+    def attach_evaluation(
+        self, proposal_id: int, proposal_version: int, evaluation_body: dict
+    ) -> bool:
+        """Fill a still-NULL evaluation_body on the exact version the
+        evaluation was computed for — the one sanctioned in-place write on
+        the otherwise append-only proposals table (see the 2026-07-16
+        migration's column comment). Returns False without writing when the
+        row is missing or already evaluated (the caller then decides between
+        no-op and a new version via save())."""
+        try:
+            with self._cursor() as cur:
+                cur.execute(
+                    "UPDATE proposals.proposals SET evaluation_body = %s "
+                    "WHERE proposal_id = %s AND proposal_version = %s "
+                    "AND evaluation_body IS NULL "
+                    "RETURNING proposal_version",
+                    (Json(evaluation_body), proposal_id, proposal_version),
+                )
+                filled = cur.fetchone() is not None
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
+        if filled:
+            logger.info(
+                "evaluation attached: proposal_id=%s version=%s",
+                proposal_id,
+                proposal_version,
+            )
+        return filled
+
     # ------------------------------------------------------------------
     # Save
     # ------------------------------------------------------------------
@@ -263,7 +308,7 @@ class ProposalRepository:
                 old_prefix = f"P{posted_pid}_V{posted_version}_"
                 new_prefix = f"P{new_pid}_V{new_version}_"
 
-                route_body = _rewrite_id_prefix(route_body, old_prefix, new_prefix)
+                route_body = rewrite_id_prefix(route_body, old_prefix, new_prefix)
                 # The embedded request may still carry the draft
                 # proposal_id/proposal_version as integers — the string
                 # rewrite above doesn't touch ints, so correct them here.
@@ -283,7 +328,7 @@ class ProposalRepository:
                 route = route_body["route"]  # post-rewrite, for GTFS below
 
                 evaluation_body = (
-                    _rewrite_id_prefix(evaluation_body, old_prefix, new_prefix)
+                    rewrite_id_prefix(evaluation_body, old_prefix, new_prefix)
                     if evaluation_body is not None
                     else None
                 )

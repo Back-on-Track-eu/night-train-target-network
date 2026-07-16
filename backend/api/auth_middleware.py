@@ -96,6 +96,18 @@ def _load_identity_from_request() -> dict | None:
     # --- local plane: HS256 JWT issued by this app ---
     payload = decode_jwt(token)
     is_guest = bool(payload.get("is_guest", False))
+    if is_guest:
+        # A guest that verified an email was merged into that account
+        # (auth.py: verify) — its still-valid guest token must fail loudly,
+        # not act as the abandoned identity. One indexed PK lookup, guest
+        # tokens only. Late import for the same reason as the OIDC path.
+        from api.helpers.dependencies import get_auth_repository
+
+        if get_auth_repository().merged_target(int(payload["sub"])) is not None:
+            raise AuthError(
+                "This guest session has been merged into a registered "
+                "account. Please log in with your email."
+            )
     return {
         "user_id": int(payload["sub"]),
         "email": payload.get("email"),

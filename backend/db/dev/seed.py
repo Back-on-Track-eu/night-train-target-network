@@ -115,6 +115,14 @@ def insert_rows(cur, table: str, rows: list[dict]) -> None:
 USERS = [
     {"display_name": "David", "email": "david@backontrack.eu", "is_verified": True},
     {"display_name": "Bjarne", "email": "bjarne@backontrack.eu", "is_verified": True},
+    # Identity the integration test suite and manual scripts authenticate as,
+    # so auto-persisted proposals from test runs are identifiable (and
+    # cleanable) by owner — see tests/conftest.py: script_token.
+    {
+        "display_name": "test_script",
+        "email": "test_script@dev.local",
+        "is_verified": True,
+    },
 ]
 
 # ============================================================

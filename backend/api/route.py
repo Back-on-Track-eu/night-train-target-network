@@ -29,9 +29,15 @@ of every fixed assumption the route model makes.
 import logging
 import random
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 
-from api.helpers.dependencies import get_loader, get_country_index
+from adapters.proposal_repository import rewrite_id_prefix
+from api.auth_middleware import optional_auth
+from api.helpers.dependencies import (
+    get_loader,
+    get_country_index,
+    get_proposal_repository,
+)
 from api.helpers.route_serialize import route_to_dict, suggested_stops_to_dicts
 from models.route.route_factory import plan_route, distribute_demand, TripPairInput
 from models.route.timetable import (
@@ -161,7 +167,91 @@ def _validate(body: dict) -> list[str]:
     return errors
 
 
+def _resolved_setup(request_dict: dict, scenario_id: int) -> tuple:
+    """Everything about a plan request that can change the built route —
+    defaults applied, so an omitted field and an explicitly-posted default
+    compare equal. Used for the persist dedupe: a replan with identical
+    setup produces an identical route (stopgap demand included — it is
+    derived from the route), so no new version is written."""
+    return (
+        list(request_dict["stops"]),
+        request_dict["composition_id"],
+        request_dict.get("timetable_mode", DEFAULT_TIMETABLE_MODE),
+        request_dict.get("fixed_night_interval"),
+        request_dict.get("schedule_mode", DEFAULT_SCHEDULE_MODE),
+        request_dict.get("routing_mode", DEFAULT_ROUTING_MODE),
+        request_dict.get("auto_stop_addition", DEFAULT_AUTO_STOP_ADDITION),
+        scenario_id,
+    )
+
+
+def _persist_plan(
+    payload: dict, body: dict, proposal_id: int, proposal_version: int, scenario_id: int
+) -> tuple[dict, dict]:
+    """Auto-persist a successful plan response (persist-on-calc, 2026-07-16).
+
+    Tokenless requests compute only — persistence is a feature of identity
+    (guest or registered; the frontend always holds at least a guest token,
+    scripts/tests authenticate as the seeded test_script user).
+
+    Dedupe: when the request targets an existing proposal and its resolved
+    setup matches the current version's (and the builder version is
+    unchanged), no row is written — the payload's draft IDs are rewritten to
+    the matched current version instead, so the response references exactly
+    the stored state.
+
+    Returns (payload, proposal_block); never raises — a persistence failure
+    must not discard a successfully built route.
+    """
+    if g.get("user_id") is None:
+        return payload, {"persisted": False, "action": "unauthenticated"}
+
+    try:
+        repo = get_proposal_repository()
+
+        posted_pid = body.get("proposal_id")
+        current = repo.get_current(posted_pid) if posted_pid is not None else None
+        if current is not None:
+            stored_body = current["route_body"]
+            same_setup = stored_body[
+                "route_builder_version"
+            ] == ROUTE_BUILDER_VERSION and _resolved_setup(
+                stored_body["request"], stored_body["route"]["scenario_id"]
+            ) == _resolved_setup(body, scenario_id)
+            if same_setup:
+                old_prefix = f"P{proposal_id}_V{proposal_version}_"
+                new_prefix = (
+                    f"P{current['proposal_id']}_V{current['proposal_version']}_"
+                )
+                payload = rewrite_id_prefix(payload, old_prefix, new_prefix)
+                payload["request"] = {
+                    **payload["request"],
+                    "proposal_id": current["proposal_id"],
+                    "proposal_version": current["proposal_version"],
+                }
+                return payload, {
+                    "persisted": False,
+                    "action": "unchanged",
+                    "proposal_id": current["proposal_id"],
+                    "proposal_version": current["proposal_version"],
+                    "user_id": current["user_id"],
+                }
+
+        record = repo.save(route_body=payload, user_id=g.user_id, change_log=None)
+        return record["route_body"], {
+            "persisted": True,
+            "action": record["action"],
+            "proposal_id": record["proposal_id"],
+            "proposal_version": record["proposal_version"],
+            "user_id": record["user_id"],
+        }
+    except Exception:
+        logger.exception("plan persisted nothing (unexpected persistence error)")
+        return payload, {"persisted": False, "action": "error"}
+
+
 @bp.post("/plan")
+@optional_auth
 def plan():
     """
     Plan a new route (always a full build — no in-place adjust here).
@@ -269,6 +359,12 @@ def plan():
         # ignored in favour of 1.
         proposal_id = _draft_proposal_id()
         proposal_version = 1
+    elif proposal_version is None:
+        # proposal_id without a version: since persist-on-calc the posted
+        # version is only the draft-prefix seed anyway (the persist layer
+        # assigns the real one), so default it instead of building
+        # unparseable P{id}_VNone_ IDs.
+        proposal_version = 1
     timetable_mode = body.get("timetable_mode", DEFAULT_TIMETABLE_MODE)
     schedule_mode = body.get("schedule_mode", DEFAULT_SCHEDULE_MODE)
     routing_mode = body.get("routing_mode", DEFAULT_ROUTING_MODE)
@@ -335,5 +431,13 @@ def plan():
     if auto_stop_addition == "suggest":
         payload["suggested_stops"] = suggested_stops_to_dicts(suggestions)
     payload["route"] = route_to_dict(route, provenance.scenario_id, provenance.tracks)
+
+    # Persist-on-calc: the stored route_body is exactly the three/four-key
+    # envelope above; the proposal block is response metadata only and is
+    # appended after (never inside) the persisted body.
+    payload, proposal_block = _persist_plan(
+        payload, body, proposal_id, proposal_version, scenario_id
+    )
+    payload["proposal"] = proposal_block
 
     return jsonify(payload), 200

@@ -6,24 +6,16 @@ route_serialize.py / evaluation_serialize.py / params_serialize.py split:
 all dict-shaping lives here, none of it in the repository or blueprint.
 
 Public interface:
-  validate_save_body(body)              → list[str]  (structural check of POST /api/proposal)
   validate_list_body(body)              → list[str]  (structural check of POST /api/proposals)
-  validate_route_body(data)             → list[str]  (integrity check of a whole /api/route/plan response)
-  validate_evaluation_body(data)        → list[str]  (integrity check of a whole /api/evaluation/calc response)
-  validate_route_evaluation_sync(a, b)  → list[str]  (cross-check: do they describe the same route?)
   proposal_meta_to_dict(record)         → dict       (metadata block shared by all responses)
   proposal_summary_to_dict(row)         → dict       (metadata + metrics for list responses)
 
-A save posts the WHOLE response of each upstream API call, not a
-hand-picked subset — route_body is exactly what
-POST /api/route/plan returned (route_builder_version + request + route,
-all three), and evaluation_body, if given, is exactly what
-POST /api/evaluation/calc returned (calc_version + route_id + models +
-input + views, all five). This means evaluation_body.input.route is
-a second, duplicate copy of the same route already in
-route_body.route — a deliberate tradeoff for simplicity, not an
-oversight (see db/README.md and validate_route_evaluation_sync below,
-which enforces the two copies actually agree).
+The save-path validators (validate_save_body & co.) were removed with the
+POST /api/proposal endpoint (persist-on-calc, 2026-07-16): the pipelines
+persist their own responses, so both stored bodies agree with each other
+by construction instead of by validation. evaluation_body.input.route is
+still a second, duplicate copy of the same route in route_body.route — a
+deliberate simplicity tradeoff, not an oversight (see db/README.md).
 
 A list summary derives its route metrics (distance, times, countries,
 stops) from the stored route JSON on the fly, and its financial metrics
@@ -35,9 +27,6 @@ without an evaluation.
 """
 
 from __future__ import annotations
-
-from api.helpers.route_serialize import validate_route_dict
-from adapters.proposal_repository import parse_route_id
 
 SORT_KEYS = {
     "created_at",
@@ -66,139 +55,6 @@ _EVALUATION_VIEW_KEYS = {
 # =============================================================================
 # PROPOSALS — validate
 # =============================================================================
-
-
-def validate_route_body(data: dict) -> list[str]:
-    """Integrity check for a whole POST /api/route/plan response — every
-    top-level section must be present, since proposals.proposals.
-    route_body stores this object whole rather than just its route
-    section (see module docstring)."""
-    errors = []
-    if not isinstance(data.get("route_builder_version"), str):
-        errors.append("route_body.route_builder_version must be a string.")
-    if not isinstance(data.get("request"), dict):
-        errors.append("route_body.request must be an object.")
-
-    route = data.get("route")
-    if not isinstance(route, dict):
-        errors.append("route_body.route must be an object.")
-        return errors
-
-    errors += validate_route_dict(route)
-    try:
-        parse_route_id(route.get("route_id", ""))
-    except ValueError as e:
-        errors.append(str(e))
-    return errors
-
-
-def validate_evaluation_body(data: dict) -> list[str]:
-    """Integrity check for a whole POST /api/evaluation/calc response —
-    every top-level section must be present, since proposals.proposals.
-    evaluation_body stores this object whole, untrimmed (including the
-    duplicate route copy under input.route — see module docstring)."""
-    errors = []
-    if not isinstance(data.get("calc_version"), str):
-        errors.append("evaluation_body.calc_version must be a string.")
-    if not isinstance(data.get("route_id"), str):
-        errors.append("evaluation_body.route_id must be a string.")
-    if not isinstance(data.get("models"), dict):
-        errors.append("evaluation_body.models must be an object.")
-
-    input_section = data.get("input")
-    if not isinstance(input_section, dict):
-        errors.append("evaluation_body.input must be an object.")
-    else:
-        if not isinstance(input_section.get("route"), dict):
-            errors.append("evaluation_body.input.route must be an object.")
-        if not isinstance(input_section.get("parameters"), dict):
-            errors.append("evaluation_body.input.parameters must be an object.")
-
-    views = data.get("views")
-    if not isinstance(views, dict):
-        errors.append("evaluation_body.views must be an object.")
-    else:
-        missing = _EVALUATION_VIEW_KEYS - set(views)
-        if missing:
-            errors.append(f"evaluation_body.views missing key(s): {sorted(missing)}.")
-        for key in _EVALUATION_VIEW_KEYS & set(views):
-            if not isinstance(views[key], dict):
-                errors.append(f"evaluation_body.views.{key} must be an object.")
-
-    return errors
-
-
-def validate_route_evaluation_sync(
-    route_body: dict, evaluation_body: dict
-) -> list[str]:
-    """When both are posted together they must describe the exact same
-    route — evaluation_body embeds a full second copy of it under
-    input.route (see module docstring), so a mismatch here means the two
-    upstream calls the frontend made don't actually agree on what was
-    evaluated. Callers should only invoke this after confirming both
-    passed their own validate_route_body()/
-    validate_evaluation_body() checks — it assumes both are
-    structurally sound."""
-    errors = []
-    route = route_body.get("route")
-    if not isinstance(route, dict):
-        return errors  # already reported elsewhere
-
-    eval_route_id = evaluation_body.get("route_id")
-    if eval_route_id != route.get("route_id"):
-        errors.append(
-            "evaluation_body.route_id does not match route_body.route.route_id."
-        )
-
-    eval_input_route = (evaluation_body.get("input") or {}).get("route")
-    if eval_input_route != route:
-        errors.append(
-            "evaluation_body.input.route does not match "
-            "route_body.route — they must describe the exact same "
-            "route. Re-run POST /api/evaluation/calc on the route you're "
-            "about to save, or omit evaluation_body."
-        )
-
-    return errors
-
-
-def validate_save_body(body: dict) -> list[str]:
-    """Structural validation of a POST /api/proposal payload. Both
-    route_body (required) and evaluation_body (optional) are
-    the WHOLE response of their respective upstream API call — see module
-    docstring."""
-    errors = []
-
-    if not isinstance(body.get("user_id"), int):
-        errors.append("'user_id' must be an integer.")
-    if body.get("change_log") is not None and not isinstance(body["change_log"], str):
-        errors.append("'change_log' must be a string if provided.")
-
-    route_body = body.get("route_body")
-    if not isinstance(route_body, dict):
-        errors.append(
-            "'route_body' must be an object — the whole "
-            "POST /api/route/plan response, not just its 'route' section."
-        )
-        route_body = None
-    else:
-        errors += validate_route_body(route_body)
-
-    evaluation_body = body.get("evaluation_body")
-    if evaluation_body is not None:
-        if not isinstance(evaluation_body, dict):
-            errors.append(
-                "'evaluation_body' must be an object if provided — the "
-                "whole POST /api/evaluation/calc response."
-            )
-            evaluation_body = None
-        else:
-            errors += validate_evaluation_body(evaluation_body)
-
-    if route_body is not None and evaluation_body is not None:
-        errors += validate_route_evaluation_sync(route_body, evaluation_body)
-
-    return errors
 
 
 def validate_list_body(body: dict) -> list[str]:

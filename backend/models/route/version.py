@@ -26,7 +26,7 @@ from dataclasses import dataclass
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.10"
+ROUTE_BUILDER_VERSION: str = "0.9.11"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -41,6 +41,25 @@ ROUTE_BUILDER_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.11": {
+        "date": "2026-07-16",
+        "author": "david",
+        "changes": "Persist-on-calc: POST /api/route/plan now persists its own "
+        "response as a proposal for any authenticated caller (guest or "
+        "registered) — POST /api/proposal is gone. The response gains a "
+        "trailing 'proposal' block ({persisted, action, proposal_id, "
+        "proposal_version, user_id}); on a persisted plan all draft IDs in "
+        "the response are already rewritten to the real "
+        "P{proposal_id}_V{version} prefix, so route_id is final from the "
+        "first response on. Replanning an existing proposal with an "
+        "identical resolved setup (stops, composition, all modes, scenario, "
+        "builder version) writes nothing and returns the stored current "
+        "version's IDs (action 'unchanged'); a changed setup versions or "
+        "branches per the ownership rules that POST /api/proposal used to "
+        "apply. Tokenless requests compute only (action 'unauthenticated'). "
+        "BREAKING for frontend: save flow removed, Authorization header now "
+        "expected on plan (guest token minimum) — coordinate with Bjarne.",
+    },
     "0.9.1": {
         "date": "2026-06-25",
         "author": "david",

@@ -6,6 +6,7 @@ CREATE TABLE admin.users (
     email        TEXT UNIQUE,
     display_name TEXT NOT NULL UNIQUE,
     is_verified  BOOLEAN NOT NULL DEFAULT FALSE,
+    merged_into_user_id INTEGER REFERENCES admin.users(user_id),
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -13,6 +14,7 @@ COMMENT ON TABLE  admin.users              IS 'Platform users — created by the
 COMMENT ON COLUMN admin.users.user_id      IS 'Stable surrogate identity, referenced by proposals.proposals.user_id and admin.feedback.user_id.';
 COMMENT ON COLUMN admin.users.email        IS 'Login identity — unique. NULL for guest accounts; required for registered users (enforced by the API, not a DB constraint).';
 COMMENT ON COLUMN admin.users.display_name IS 'User-chosen public name (proposal lists, feedback), unique across the tool. Guest names carry the reserved "guest_" prefix.';
+COMMENT ON COLUMN admin.users.merged_into_user_id IS 'Set when this (guest) account was merged into a registered account on OTP verification — proposals and feedback were reassigned to that user_id. A token for a merged user is rejected with an explicit account-merged error. NULL for live accounts.';
 COMMENT ON COLUMN admin.users.is_verified  IS 'TRUE after the first successful OTP verification (and always for Keycloak-SSO rows). FALSE for guests.';
 
 CREATE TABLE admin.auth_tokens (
