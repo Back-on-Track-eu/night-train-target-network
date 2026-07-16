@@ -102,9 +102,9 @@ def _acceleration_profile(
         distance_m = mass_kg * v**2 / (2 * force_n)
     else:
         time_s = mass_kg * v1 / force_n + mass_kg * (v**2 - v1**2) / (2 * power_w)
-        distance_m = mass_kg * v1**2 / (2 * force_n) + mass_kg * (
-            v**3 - v1**3
-        ) / (3 * power_w)
+        distance_m = mass_kg * v1**2 / (2 * force_n) + mass_kg * (v**3 - v1**3) / (
+            3 * power_w
+        )
     return time_s, distance_m
 
 
