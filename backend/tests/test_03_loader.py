@@ -115,12 +115,12 @@ LOADER_READ_COLUMNS = [
 def test_column_exists_in_schema(table, column):
     """Every column the loader reads exists in the SQL schema files."""
     table_lower = table.lower()
-    assert (
-        table_lower in SCHEMA_COLUMNS
-    ), f"Table {table} not found in schema files. Found: {sorted(SCHEMA_COLUMNS)}"
-    assert (
-        column in SCHEMA_COLUMNS[table_lower]
-    ), f"Column {table}.{column} not found in schema"
+    assert table_lower in SCHEMA_COLUMNS, (
+        f"Table {table} not found in schema files. Found: {sorted(SCHEMA_COLUMNS)}"
+    )
+    assert column in SCHEMA_COLUMNS[table_lower], (
+        f"Column {table}.{column} not found in schema"
+    )
 
 
 # =============================================================================

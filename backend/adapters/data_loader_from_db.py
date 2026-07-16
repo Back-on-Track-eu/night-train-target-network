@@ -701,10 +701,10 @@ class DBDataLoader:
                 },
                 "equipment": {
                     "has_bikes": (
-                        "True if ANY coach in the composition has bicycle " "spaces."
+                        "True if ANY coach in the composition has bicycle spaces."
                     ),
                     "has_climatization": (
-                        "True if ANY coach in the composition has air " "conditioning."
+                        "True if ANY coach in the composition has air conditioning."
                     ),
                     "has_plugs": (
                         "True if ANY coach in the composition has passenger "
@@ -1130,12 +1130,10 @@ class DBDataLoader:
         # fix applied to the analogous composition_type fields in
         # build_all_compositions()).
         descriptions.fields["min_boarding_time_min"] = (
-            "Infrastructure-dependent minimum dwell time at boarding "
-            "stops. Unit: min"
+            "Infrastructure-dependent minimum dwell time at boarding stops. Unit: min"
         )
         descriptions.fields["min_alighting_time_min"] = (
-            "Infrastructure-dependent minimum dwell time at alighting "
-            "stops. Unit: min"
+            "Infrastructure-dependent minimum dwell time at alighting stops. Unit: min"
         )
 
         result: dict[str, TrackInfrastructure] = {}

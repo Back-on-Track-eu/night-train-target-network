@@ -41,7 +41,6 @@ DUMMY_KWH_PER_KM = 28.0
 
 
 class TestCountryAttribution:
-
     def test_shares_sum_to_one_per_segment(self, route_berlin_zuerich_wien):
         """country_distance_shares and country_time_shares each sum to 1.0
         on every segment — the allocation basis for TAC/energy costing."""
@@ -93,7 +92,6 @@ class TestCountryAttribution:
 
 
 class TestRouteGeometry:
-
     def test_outbound_and_return_distances_symmetric(self, route_berlin_wien):
         """Outbound and return follow (near-)identical rail paths — total
         distances agree within 5%."""
@@ -132,7 +130,6 @@ class TestRouteGeometry:
 
 
 class TestTimetableMath:
-
     def test_arrival_equals_departure_plus_driving_plus_buffer(
         self, route_berlin_dresden_wien
     ):
@@ -168,7 +165,6 @@ class TestTimetableMath:
 
 
 class TestTrackInfraDefaulting:
-
     def test_se_route_lists_dk_and_se(self, route_copenhagen_stockholm):
         """Copenhagen → Stockholm lists both DK and SE track infra entries."""
         countries = {
@@ -191,9 +187,9 @@ class TestTrackInfraDefaulting:
             "buffer_quota_per",
         }
         for entry in route_copenhagen_stockholm["track_infrastructure"]:
-            assert (
-                set(entry["defaulted_fields"]) <= exposed
-            ), f"{entry['country_code']}: unexpected defaulted field"
+            assert set(entry["defaulted_fields"]) <= exposed, (
+                f"{entry['country_code']}: unexpected defaulted field"
+            )
 
 
 # =============================================================================
@@ -236,7 +232,6 @@ class TestEnergyModel:
 
 
 class TestParkingsAndShuntings:
-
     def test_two_shuntings_per_trip(self, route_berlin_wien):
         """Current rule: 2 shuntings per trip (one per trip end/start), no
         deduplication → one round-trip pair produces 4 shuntings."""
@@ -253,9 +248,9 @@ class TestParkingsAndShuntings:
             for trip in all_trips(route_berlin_wien)
         }
         for s in route_berlin_wien["shuntings"]:
-            assert (
-                s["stop_id"] in terminals_by_trip[s["trip_id"]]
-            ), f"Shunting at non-terminal stop {s['stop_id']} for {s['trip_id']}"
+            assert s["stop_id"] in terminals_by_trip[s["trip_id"]], (
+                f"Shunting at non-terminal stop {s['stop_id']} for {s['trip_id']}"
+            )
 
     def test_parkings_deduplicated_by_stop(self, route_berlin_wien):
         """Parkings exist and are deduplicated by stop_id, each listing the

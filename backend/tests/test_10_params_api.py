@@ -59,7 +59,6 @@ def compositions_body(api_base):
 
 
 class TestStopInfrastructures:
-
     def test_response_layout(self, stops_body):
         """Top level carries descriptions, sources, default_stops, count, stops."""
         assert set(stops_body) >= {
@@ -121,7 +120,6 @@ class TestStopInfrastructures:
 
 
 class TestTrackInfrastructures:
-
     def test_response_layout(self, tracks_body):
         """Top level carries descriptions, sources, default_track_infra,
         count, track_infrastructures."""
@@ -140,9 +138,9 @@ class TestTrackInfrastructures:
         dropping out of the response (as shunting_eur_event once did)."""
         for track in tracks_body["track_infrastructures"]:
             for field in TRACK_FIELD_NAMES:
-                assert isinstance(
-                    track.get(field), dict
-                ), f"{track['country_code']}.{field} is not a field object"
+                assert isinstance(track.get(field), dict), (
+                    f"{track['country_code']}.{field} is not a field object"
+                )
                 assert {"value", "is_default"} <= set(track[field])
 
     def test_default_row_covers_all_fields(self, tracks_body):
@@ -187,7 +185,6 @@ class TestTrackInfrastructures:
 
 
 class TestCompositions:
-
     def test_response_layout(self, compositions_body):
         """Top level carries descriptions, sources, count, compositions,
         operators (the restructured shape)."""
@@ -234,9 +231,9 @@ class TestCompositions:
             coaches = comp["coaches"]
             assert coaches["count"] == len(coaches["list"])
             positions = [c["position"] for c in coaches["list"]]
-            assert len(positions) == len(
-                set(positions)
-            ), f"{comp['comp_id']}: duplicate coach positions"
+            assert len(positions) == len(set(positions)), (
+                f"{comp['comp_id']}: duplicate coach positions"
+            )
 
     def test_operators_referenced_by_compositions(self, compositions_body):
         """Every composition's operator_id resolves to an entry in the
