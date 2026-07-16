@@ -256,7 +256,7 @@ Standard input: `eval_standard` (3-stop route, directional demand 40 Couchette
 | `TestBreakdownIdentities::*` (6 tests) | Tree arithmetic | per_year breakdown | net = revenue − cost − margin; every total = sum of its leaves |
 | `TestBreakdownIdentities::test_net_identity_holds_in_all_normalisations` | Normalisation preserves identities | all 5 normalisations | net identity holds in each |
 | `TestNormalisationDivisors::test_per_operating_day_times_days_equals_per_year` | Divisor: operating days from embedded schedule | per_operating_day × days | == per_year |
-| `TestNormalisationDivisors::test_per_trip_km_divisor` | Divisor: all trips' km | per_trip_km × total km | == per_year |
+| `TestNormalisationDivisors::test_per_train_km_divisor_is_annual` | Divisor: all trips' km × operating days | per_train_km × annual train-km | == per_year |
 | `TestNormalisationDivisors::test_per_available_place_km_divisor_is_unweighted` | Divisor: **unweighted** capacity place-km (density deliberately not applied) | per_pkm × (places × km) | == per_year |
 | `TestNormalisationDivisors::test_per_sold_place_km_divisor` | Divisor: sold place-km over each OD's segment range | per_pkm × Σ(70 × trip km) | == per_year |
 | `TestNormalisationDivisors::test_per_sold_cost_exceeds_per_available_at_partial_load` | Partial load relation | eval_standard | per-sold cost > per-available cost |

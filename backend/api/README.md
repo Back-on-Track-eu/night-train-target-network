@@ -877,24 +877,25 @@ All top-level keys, no wrapper object:
     "per_trip_pair":              {"description": "...", "normalisations": {"...": "..."}, "data": {"<pair_key>": {"filter": {"...": "..."}, "values": { "<normalised breakdown>": "see below" }}, "all": { "...": "..." }}},
     "per_trip_pair_per_country":  {"description": "...", "normalisations": {"...": "..."}, "data": {"<pair_key>": {"<country_code>": {"filter": {"...": "..."}, "values": {"...": "..."}}}, "all": { "...": "..." }}},
     "per_trip_pair_per_od":       {"description": "...", "normalisations": {"...": "..."}, "data": {"<pair_key>": {"<od_key>": {"filter": {"...": "..."}, "values": {"...": "..."}}}, "all": { "...": "..." }}},
+    "per_trip_pair_per_section":  {"description": "...", "normalisations": {"...": "..."}, "data": {"<pair_key>": {"<section_key>": {"filter": {"...": "..."}, "values": {"...": "..."}}}, "all": { "...": "..." }}},
     "per_trip_per_stop":          {"description": "...", "normalisations": {"...": "..."}, "data": {"<trip_id>": {"<stop_id>": {"filter": {"...": "..."}, "values": {"...": "..."}}}, "all": { "...": "..." }}}
   }
 }
 ```
 
 `views.route.data` holds the normalised breakdown directly (no filter
-dimension — it's the whole-route aggregate). The other four views nest a
+dimension — it's the whole-route aggregate). The other five views nest a
 `{filter, values}` pair per key, where `values` holds the same normalised
 breakdown shape, plus an `"all"` entry aggregating across that view's
 dimension.
 
-Each cell contains the same breakdown under five **normalisations** (not to be confused with the five *views* above — a view selects *what scope* the money belongs to, a normalisation selects *what unit* it is expressed in):
+Each cell contains the same breakdown under five **normalisations** (not to be confused with the six *views* above — a view selects *what scope* the money belongs to, a normalisation selects *what unit* it is expressed in). All per-unit denominators are annual, matching the €/year leaves; route-section cells divide by the section's own annual physics:
 
 | Key | Unit | Description |
 |-----|------|-------------|
 | `per_year` | €/year | Annual totals |
 | `per_operating_day` | €/operating-day | Per day the service runs |
-| `per_trip_km` | €/km | Per km of total trip distance (both directions) |
+| `per_train_km` | €/train-km | Per annual train-km (cycle distance × operating days; a section's own distance for section cells) |
 | `per_available_place_km` | €/available-place-km | Per capacity × distance |
 | `per_sold_place_km` | €/sold-place-km | Per actual passenger × distance |
 
