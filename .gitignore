@@ -119,3 +119,4 @@ desktop.ini
 *.tmp
 *.bak
 *.orig
+deploy/**/.env

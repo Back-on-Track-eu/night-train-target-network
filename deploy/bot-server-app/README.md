@@ -23,6 +23,24 @@ Both environments share the existing `targetnetwork-routing` engine
 joining its `targetnetwork_default` network. **Do not restart it casually**
 — the rail graph takes ~2 min to reload.
 
+## Try it locally — one command
+
+```bash
+cd deploy/bot-server-app && ./local.sh     # → http://localhost:8090
+```
+
+Runs the exact server stack plus a local Caddy playing bot-server's vhost
+role (`docker-compose.local.yml` + `Caddyfile.local`). First boot is detected
+automatically and handles build + seed + migration baseline in the right
+order; a generated `.env` needs no editing. `./local.sh down` stops,
+`./local.sh reset` wipes the database, `./local.sh logs` follows the api.
+Port taken? Set `LOCAL_HTTP_PORT` in `.env`.
+
+No routing engine locally (the ~840 MiB JVM stays on the server), so route
+*planning* fails — health, data, auth, and proposals all work. For daily
+development use `backend/docker/docker-compose.yml` or the devcontainer
+instead; this stack is for rehearsing the server deploy.
+
 ## First-time setup of an environment
 
 ```bash
