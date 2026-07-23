@@ -1,0 +1,42 @@
+source_id,parameter,value,unit,condition,confidence,conversion_note,extraction_note
+S13,driver_costs_eur_h,52.0,EUR/h,any,low,,seed placeholder
+S13,crew_costs_eur_h,38.0,EUR/h,any,low,,seed placeholder
+S13,driver_overhead_h,1.0,h/trip,any,low,,seed placeholder
+S13,crew_overhead_h,1.0,h/trip,any,low,,seed placeholder
+S13,loco_full_service_lease_eur_h,145.0,EUR/h,any,low,,seed placeholder
+S13,financing_quota_per,0.04,1/year,any,low,,seed placeholder
+S13,fix_overhead_quota_per,0.15,share of coach amortisation,any,low,,seed placeholder
+S13,var_overhead_per,0.1,share of revenue,any,low,,seed placeholder
+S13,ebit_margin_per,0.03,share of revenue,any,low,,seed placeholder
+S13,purchase_coach_eur,20000000.0,EUR/coach,any,low,,seed placeholder — implausible; priority replacement
+S13,coach_amort_years,30,years,new,low,,seed placeholder
+S13,coach_avail_per,0.8,share,any,low,,seed placeholder
+S13,cleaning_eur_day,1753.584,EUR/coach/day,any,low,,seed placeholder
+S13,coach_maint_eur_km,2.86533333,EUR/train-km (as implemented in calc.py),any,low,UNIT AUDIT: DDL comment says coach-km but calc.py applies per train-km,seed placeholder
+S13,svc_stockings_eur_place_seat,0.01,EUR/place,any,low,,seed placeholder
+S13,svc_stockings_eur_place_couchette,0.05,EUR/place,any,low,,seed placeholder
+S13,svc_stockings_eur_place_sleeper,0.1,EUR/place,any,low,,seed placeholder
+S05,coach_amort_years,5-50,years (policy range),new,high,,OeBB AR 2025 p.212: rolling stock useful life 5-50 years — supports 30y for new coaches
+S09,driver_costs_eur_h,57.0,EUR/h,any,medium,Price basis BVWP 2016 — consider wage indexation to target year,"Thesis parameter table (Gehalt Lokfuehrer), source PTV et al. 2016 (Methodikhandbuch Bundesverkehrswegeplan)"
+S09,trainmanager_costs_eur_h,49.0,EUR/h,any,medium,BVWP 2016 basis,Gehalt Zugfuehrer — reflect via coach crew factors if a train manager is carried
+S09,crew_costs_eur_h,39.0,EUR/h,any,medium,BVWP 2016 basis,Gehalt Zugbegleiter
+S09,coach_capital_service_eur_h,18.72,EUR/operating-hour,new,medium,BVWP rate +1/3 night-train uplift applied by thesis,"Tabelle 10 invest_cost_hour 0.01872 Tsd EUR/h, all four coach types — convertible to purchase-equivalent via operating hours and annuity"
+S09,coach_maint_eur_km,3.25,EUR/coach-km,any,medium,BVWP rate +1/3 night-train uplift,"Tabelle 10 maintenance_cost_km 0.00325 Tsd EUR/km. VERIFIED AGAINST S17 (primary, Tab. 7-5): REFUTED as a coach-level rate — the BVWP tables are per TRAIN-km for full trainsets (1.3-7.8 EUR/train-km); a 190m 230km/h multi-system train costs 5.96 EUR/train-km, i.e. ~0.80 EUR/coach-km. The thesis appears to have read a per-train value as per-coach. Superseded by the S17 observations"
+S09,loco_capital_service_eur_h,120.0,EUR/h,any,medium,"BVWP, 'leicht erhoeht'",Loco table invest_cost_hour 0.12 Tsd EUR/h
+S09,loco_maint_eur_km,2.0,EUR/km,any,medium,BVWP,Loco table maintenance_cost_km — capital + maintenance together form a corridor for our bundled full-service lease rate
+S09,svc_stockings_eur_place,15.0,EUR (unit ambiguous — likely per served bed/trip),any,low,,"Cservice,nighttrain 0.015 Tsd EUR 'z.B. Bettwaesche' — unit not fully specified; conflicts with nox-derived ~0.7 EUR/place avg; likely includes breakfast/catering"
+S09,crew_factor_per_coach,1.0,attendants/coach,any,medium,,Tabelle 10 train_attendant_count = 1 per coach — upper corridor vs our 0.5
+S17,driver_costs_eur_h,68.3,EUR/deployment-hour,any,high,"2021 tariff basis (BuRa-ZugTV/GDL LF5); build-up: +20% employer social, +15% night/Sunday, +15% admin overhead, +2% pension (factor 1.619), 1648 h/yr, Dienstplanwirkungsgrad 60%",Tab. 7-2 p.88 Triebfahrzeugfuehrer — roster efficiency embedded; raw hourly rate 40.95 EUR/h
+S17,trainmanager_costs_eur_h,62.7,EUR/deployment-hour,any,high,Same build-up; +10% equipment/uniform; 70% roster efficiency,Tab. 7-2 Zugchef SPV — raw 43.91 EUR/h
+S17,crew_costs_eur_h,51.3,EUR/deployment-hour,any,high,Same build-up; +10% equipment/uniform; 70% roster efficiency,Tab. 7-2 Zugbetreuer SPV — raw 35.90 EUR/h
+S17,crew_per_train,1 driver + 1 Zugchef + 1-3 Zugbetreuer,persons/train,any,high,,Tab. 7-7 p.93 — SPFV day trains; night trains need own assumption
+S17,coach_amort_years,30,years,new,high,,Tab. 7-4 p.90 Nutzungsdauer der SPFV-Zuege — confirms S05 policy range and the 30y choice
+S17,coach_avail_per,0.909,share,new,high,Derived: 10% Betriebs- und Werkstattreserve -> 1/1.1,Tab. 7-4 — official reserve assumption; brutto deployment 4380 h/yr (365d x 12h)
+S17,redesign_cost_share,0.15,"share of initial investment, at year 15",new,high,,Tab. 7-4 — mid-life redesign; NOT covered by our straight-line purchase amortisation — documented in README
+S17,real_interest_rate,0.017,1/year (real),any,high,,"Tab. 7-4 massgebender Realzinssatz — societal discount rate, NOT an operator WACC; recorded as lower bound context for financing_quota"
+S17,coach_maint_eur_km,0.8,EUR/coach-km (derived),new,high,"Derived: HGV C multi-system (190m, 390 seats, 230 km/h) 5.96 EUR/train-km / ~7.5 vehicle units; rates include shunting/depot-run shares; price basis 2021","Tab. 7-5 p.91 — settles the S09 conflict: BVWP maintenance is per train-km, ~0.80 EUR/coach-km at night-train-like formations"
+S06,financing_wacc,6.5,percent,,medium,full annuity over 32y,study model input
+S06,amort_years,32,years,new,medium,,study model input
+S06,driver_eur_h,62-104,EUR/h,15-country range,medium,productive-hour basis,reconciles with 90.33 deployment-h via roster efficiency
+S06,crew_eur_h,Zf 45-70; Betr. 32-47,EUR/h,15-country range,medium,productive-hour basis,47/0.70 ≈ 67 ≈ attendant deployment rate
+S06,coach_price_per_class,WL 3.8 / Bc 2.8 / B 2.0,MEUR,new,medium,144/106/76 kEUR/m,sourced class spread; basis if class factors reintroduced

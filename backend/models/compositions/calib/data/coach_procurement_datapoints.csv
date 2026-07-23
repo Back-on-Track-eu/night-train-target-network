@@ -1,0 +1,13 @@
+source_id,coach_or_unit,coach_category,condition,price_eur,price_basis,places,year,verify_status,note
+S13,Current seed placeholder,any,any,20000000.0,per coach,,2026,placeholder,Known to be implausible — kept as visible prior
+S03,European Sleeper coach fleet (refurbished second-hand),mixed,refurbished,,acquisition+refurb per coach,,2023-2026,TO_VERIFY,Extract fleet book value / capex per coach from valuation document
+S14,"Nightjet Viaggio Next Level order, 33 x 7-car trainsets",mixed (2 sleeper + 3 couchette/mini-cabin + seat + multifunction),new,3030000.0,per coach (derived: >700M EUR / 33 trainsets / 7 cars),254.0,2023,verified,OeBB CEO Matthae to Railway Gazette Dec 2023: 'more than EUR 700m' for 33 trainsets
+S15,"Nightjet second batch, 20 x 7-car trainsets",mixed (2 sleeper + 3 couchette/mini-cabin + seat + multifunction),new,2857143.0,per coach (derived: ~400M EUR / 20 / 7),254.0,2021,verified,OeBB statement to Railvolution 2021: batch volume ~400M
+S16,DB City Night Line fleet takeover (42 sleepers + 15 couchette cars),mixed (sleeper+couchette),"refurbished (acquisition only, pre-refurbishment)",701754.0,per coach (derived: 40M EUR / 57 cars),,2016,TO_VERIFY,Secondary press sourcing; refurbishment capex additional — locate primary 2016 disclosure and ES refurb costs (S03) to complete
+S18,"French TET night coach deep renovation (129 coaches, completed summer 2023)",mixed (couchette+seat),refurbished (refurbishment capex only),705426.0,per coach (derived: 91M EUR / 129 coaches),,2023,verified,SNCF Groupe primary statement; supersedes the ~100M/130-coach programme announcements (S08 Ramboll and press); deep renovation of 1980s Corail stock without full rebuild — completes the refurbished purchase cost: S16 acquisition (~0.70M) + this (~0.71M) ~ 1.4M/coach
+S17,"HGV C reference trainset (190m, 390 seats, 230 km/h, multi-system)",mixed trainset (HGV C reference),new,3575714.0,per coach-equivalent (derived: 25.03 M EUR / 7 units),390.0,2021,verified,"Tab. 7-5 investment 25.03 M EUR multi-system — third independent new-build anchor, consistent with Nightjet-derived 2.86-3.03 M"
+S36,Talgo night coach,mixed,new,4750000.0,2026 award (scope caveats),,2026,TO_VERIFY,"excluded from per-metre fit: ~357 kEUR/m, scope unresolvable"
+S37,FLIRTNEX car (coach-equivalent),mixed,new,4000000.0,"2023 contract, traction share removed",,2023,ok,~145 kEUR/m
+S38,CalSleeper Mk5 car,mixed,new,2700000.0,2015 contract,,2015,ok,117 kEUR/m 2015 -> ~141 escalated
+S39,Skoda ICN sleeper,sleeper,new,1980000.0,"2023 contract, budget-capped",,2023,ok,75 kEUR/m floor
+S06,French rental coach (all-in TCO),mixed,new,678000.0,"per coach-year, 15y rental, 1.83bn/180",,2025,TO_VERIFY,upper bracket for annual capital+maintenance

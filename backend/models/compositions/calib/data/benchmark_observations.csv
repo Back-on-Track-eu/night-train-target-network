@@ -1,0 +1,50 @@
+source_id,scenario,source_account,value_type,value,unit,extraction_note
+S01,2030 projection,2 - Cost,eur_per_train_km,36.598,EUR/train-km,Sheet1 C84
+S01,2030 projection,21 - Route Cost,eur_per_train_km,27.097,EUR/train-km,Sheet1 C85
+S01,2030 projection,210 Coach Leasing,eur_per_train_km,5.936,EUR/train-km,Sheet1 C86
+S01,2030 projection,211 Loco Leasing & Drivers,eur_per_train_km,2.819,EUR/train-km,Sheet1 C87
+S01,2030 projection,212 Track & Station Access,eur_per_train_km,3.566,EUR/train-km,Sheet1 C88 — out of scope; kept for total reconciliation
+S01,2030 projection,213 OPS Infrastructure Access,eur_per_train_km,0.312,EUR/train-km,Sheet1 C89 — out of scope
+S01,2030 projection,214 Servicing,eur_per_train_km,2.634,EUR/train-km,Sheet1 C90
+S01,2030 projection,215 Cabin Crew,eur_per_train_km,2.595,EUR/train-km,Sheet1 C91
+S01,2030 projection,216 Electricity,eur_per_train_km,2.437,EUR/train-km,Sheet1 C92 — out of scope
+S01,2030 projection,217 Stockings,eur_per_train_km,0.32,EUR/train-km,Sheet1 C93
+S01,2030 projection,218 External OPS Services,eur_per_train_km,1.136,EUR/train-km,Sheet1 C94
+S01,2030 projection,219 Maintenance,eur_per_train_km,5.342,EUR/train-km,Sheet1 C95 — includes loco maintenance
+S01,2030 projection,221 Fixed Overhead Cost,eur_per_train_km,4.962,EUR/train-km,Sheet1 C97
+S01,2030 projection,222 Variable Overhead Cost,eur_per_train_km,4.54,EUR/train-km,Sheet1 C108
+S01,2030 projection,2 - Cost,ct_per_place_km,7.993,EUR-ct/place-km,Sheet1 C123 (ASK basis)
+S01,2030 projection,21 - Route Cost,ct_per_place_km,5.918,EUR-ct/place-km,Sheet1 C124
+S01,2030 projection,210 Coach Leasing,ct_per_place_km,1.296,EUR-ct/place-km,Sheet1 C125
+S01,2030 projection,215 Cabin Crew,ct_per_place_km,0.567,EUR-ct/place-km,Sheet1 C130
+S01,2030 projection,219 Maintenance,ct_per_place_km,1.167,EUR-ct/place-km,Sheet1 C134
+S01,2036 projection,2 - Cost,eur_per_train_km,34.71,EUR/train-km,Sheet1 D84
+S01,2036 projection,21 - Route Cost,eur_per_train_km,29.221,EUR/train-km,Sheet1 D85
+S01,2036 projection,212 Track & Station Access,eur_per_train_km,3.405,EUR/train-km,Sheet1 D88 — out of scope
+S01,2036 projection,213 OPS Infrastructure Access,eur_per_train_km,0.352,EUR/train-km,Sheet1 D89 — out of scope
+S01,2036 projection,216 Electricity,eur_per_train_km,2.683,EUR/train-km,Sheet1 D92 — out of scope
+S01,2036 projection,218 External OPS Services,eur_per_train_km,0.955,EUR/train-km,Sheet1 D94
+S01,2036 projection,221 Fixed Overhead Cost,eur_per_train_km,1.572,EUR/train-km,Sheet1 D97 — mature-state fixed overhead; quota derivation: (221+218)=2.53 on in-scope ops base 29.221-3.405-0.352-2.683=22.78 -> 0.111 share of other operating costs
+S01,2036 projection,222 Variable Overhead Cost,eur_per_train_km,3.917,EUR/train-km,Sheet1 D108
+S01,2030 projection,222 Variable Overhead Cost,share_of_revenue,0.1428,share,Sheet1 C186 — scale-up state
+S01,2036 projection,222 Variable Overhead Cost,share_of_revenue,0.0779,share,Sheet1 D186 — mature state; basis for the var_overhead_per choice
+S01,2030 projection,2 - Cost,eur_per_trip,36114.09,EUR/trip,Sheet1 C45
+S01,2030 projection,21 - Route Cost,eur_per_trip,26737.92,EUR/trip,Sheet1 C46
+S02,Madrid-London 2012,HS Overnight Day Train (500 seats) total,ct_per_place_km,5.88,EUR-ct-2012/seat-km,Costs per available seat-km figure — seat-only lower anchor; total incl. infra+energy
+S02,Madrid-London 2012,HS Simple Night Train (400 seats + 267 berths) total,ct_per_place_km,5.29,EUR-ct-2012/seat-km,Same figure
+S02,Madrid-London 2012,HS Traditional Night Train (102 seats + 400 berths + 13 luxury) total,ct_per_place_km,6.95,EUR-ct-2012/seat-km,Same figure
+S02,Madrid-London 2012,HS Hotel Night Train (240 luxury beds) total,ct_per_place_km,18.21,EUR-ct-2012/seat-km,Same figure — premium-heavy upper anchor
+S04,FY2025 actual,Ticket revenue,eur_total_year,10500000.0,EUR/year,"Pitch deck: 'more than EUR 10.5 million in annual ticket sales' 2025 — revenue side context, not a cost observation"
+S03,FY2025,Operating costs,eur_total_year,11900000.0,EUR/year,"Valuation P&L: opex 11,900 kEUR against 10,500 kEUR revenue"
+S03,FY2025,Overhead team costs,eur_total_year,819000.0,EUR/year,Valuation P&L
+S03,FY2025,Overhead general costs,eur_total_year,1885000.0,EUR/year,"Valuation P&L — team+general = 2,704 kEUR = 22.7% of opex / 25.7% of revenue (start-up phase)"
+S03,FY2025,EBITDA,eur_total_year,-4104000.0,EUR/year,Valuation P&L
+S03,steady-state projection (final year),Overhead share of operating costs,share_of_cost,0.059,share,Final projection column: overheads ~3.66M on opex 61.8M — mature-phase overhead ratio corridor
+S07,study cost model,Total night train cost,ct_per_place_km,6.39,EUR-ct/place-km,Study's own model: 6.39 ct/Platzkm night train vs 5.0-5.5 ct/seat-km short-haul air — INCLUDES infrastructure and energy; third independent per-place-km anchor between UIC and nox
+S07,Nelldal 2017 via study,"Total cost, 10-coach train, German section",eur_per_train_km,25.0,EUR/train-km,Stockholm-Hamburg study cited in S07: ~25 EUR/Zugkm on the German section (highest TAC) for a 10-coach formation — INCLUDES infrastructure
+S07,study cost model,Revenue requirement per sold place (Seat),eur_per_place_trip,60.0,EUR/place,"'Erloessaetze je verkauften Sitz bzw. Bett zwischen 60 EUR (Sitz) und 250 EUR (Einzelkabine), um wirtschaftlich zu sein' — cross-check on the SUM of per-place costs"
+S07,study cost model,Revenue requirement per sold place (single sleeper cabin),eur_per_place_trip,250.0,EUR/place,Same passage — upper end
+S06,halftrain_base,total,cost_per_train_km,44.51,EUR/train-km,348 places; 900 km base; 2 WL×30 + 4 Bc×54 + 1 seat×72; invest 25.05M
+S06,halftrain_base,total,cost_per_place_km,6.39,ct/place-km,incl. infra+energy
+S06,halftrain_base,operator_only,cost_per_train_km,37.4,EUR/train-km,x0.84 after Energie 9% + Trasse/Station 7%; implied ~150-180k km/consist-yr
+S06,halftrain_base,shares,cost_shares,0.0,percent,Rollmaterial 45 / Reinigung+Abstellung 14 / Overhead 11 / Personal 11 / Energie 9 / Trasse 7
