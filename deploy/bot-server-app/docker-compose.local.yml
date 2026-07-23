@@ -1,0 +1,22 @@
+# Local-only overlay (used by local.sh, never on the server): adds the
+# Caddy that bot-server already has, so http://localhost:8080 serves the
+# frontend with /api/* routed to the api container — the same vhost logic
+# as production. Caddyfile.local reads ENV_NAME via Caddy's {$VAR}
+# placeholders to find the right container names.
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: tn-${ENV_NAME}-local-caddy
+    environment:
+      - ENV_NAME=${ENV_NAME}
+    ports:
+      # Override with LOCAL_HTTP_PORT in .env if 8090 is taken on your machine.
+      - "${LOCAL_HTTP_PORT:-8090}:8080"
+    volumes:
+      - ./Caddyfile.local:/etc/caddy/Caddyfile:ro
+    networks:
+      - caddy_net
+    depends_on:
+      - api
+      - frontend
+    restart: unless-stopped
