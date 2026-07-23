@@ -61,7 +61,9 @@ CREATE TABLE IF NOT EXISTS admin.schema_migrations (
 
 # Standalone transaction-control lines (see module docstring). Matched only
 # at line start so e.g. a COMMENT mentioning "COMMIT;" mid-line survives.
-_TX_CONTROL = re.compile(r"^\s*(BEGIN|COMMIT|ROLLBACK)\s*;\s*$", re.IGNORECASE | re.MULTILINE)
+_TX_CONTROL = re.compile(
+    r"^\s*(BEGIN|COMMIT|ROLLBACK)\s*;\s*$", re.IGNORECASE | re.MULTILINE
+)
 
 
 def _connect():
@@ -117,7 +119,9 @@ def _apply(conn, filename: str) -> None:
     raw = (MIGRATIONS_DIR / filename).read_text()
     sql, n_stripped = _TX_CONTROL.subn("", raw)
     if n_stripped:
-        print(f"  (stripped {n_stripped} transaction-control line(s) — runner owns the transaction)")
+        print(
+            f"  (stripped {n_stripped} transaction-control line(s) — runner owns the transaction)"
+        )
     with conn.cursor() as cur:
         cur.execute(sql)
         cur.execute(
@@ -130,8 +134,12 @@ def _apply(conn, filename: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--dry-run", action="store_true", help="list pending migrations, change nothing")
-    mode.add_argument("--check", action="store_true", help="exit 2 if migrations are pending")
+    mode.add_argument(
+        "--dry-run", action="store_true", help="list pending migrations, change nothing"
+    )
+    mode.add_argument(
+        "--check", action="store_true", help="exit 2 if migrations are pending"
+    )
     mode.add_argument(
         "--baseline",
         action="store_true",
@@ -157,7 +165,9 @@ def main() -> None:
 
         if args.baseline:
             if not pending:
-                print("migrate.py: nothing to baseline — all migrations already recorded.")
+                print(
+                    "migrate.py: nothing to baseline — all migrations already recorded."
+                )
                 return
             with conn.cursor() as cur:
                 for f in pending:
@@ -166,7 +176,9 @@ def main() -> None:
                         (f,),
                     )
             conn.commit()
-            print(f"migrate.py: baselined {len(pending)} migration(s) (recorded, NOT executed):")
+            print(
+                f"migrate.py: baselined {len(pending)} migration(s) (recorded, NOT executed):"
+            )
             for f in pending:
                 print(f"  {f}")
             return
@@ -184,7 +196,7 @@ def main() -> None:
                     f"migrate.py: FAILED on {f} — rolled back, stopping. "
                     f"Nothing after this file was attempted.\n{e}"
                 )
-            print(f"  applied.")
+            print("  applied.")
         print(f"migrate.py: done — {len(pending)} migration(s) applied.")
     finally:
         conn.close()
