@@ -4,7 +4,7 @@ views.py — Breakdown tree and views over EvaluationResult.
 Canonical unit: €/year. Every leaf is annualised at build time.
 
 Conversion rules (calc.py → €/year):
-  €/year already   coach_amortisation, financing, fix_overhead,
+  €/year already   coach_amortisation, financing,
                    revenue, svc_stockings, var_overhead, ebit_margin
   €/operating-day  cleaning, parking             → × operating_days
   €/segment        all variable + infra costs    → × operating_days
@@ -30,6 +30,7 @@ driver/crew merge driving (SegmentCost) and dwelling (StopCost).
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from models.route.route import Route, TripPair
 from models.evaluation.version import (
@@ -237,6 +238,30 @@ class Breakdown:
 # =============================================================================
 
 
+def _apply_fix_overhead(b: "Breakdown", quota: float) -> "Breakdown":
+    """Set the fixed-overhead leaf as quota × all other operator operating
+    costs on THIS breakdown (variable excl. var_overhead + fixed excl. the
+    fix leaf itself — subtracted, so the call is idempotent). The base is
+    additive across cells, so per-cell application keeps country/section/
+    OD/stop cells summing exactly to the route total. Third-party
+    infrastructure charges (tac, energy, station, parking) and the
+    revenue-side var_overhead are outside the base per the operators DDL
+    semantics (CALC_VERSION 0.9.7).
+    Quota note: fix_overhead_quota_per is operator-level; matrix returns
+    use the enclosing builder's (last) pair composition, which is exact
+    while all operators share one quota (both calibrated operators: 0.12).
+    If operator quotas ever diverge, track quota per cell key instead.
+    Returns b for use in comprehensions."""
+    base = (
+        b.cost.operator.variable.total_eur
+        - b.cost.operator.variable.var_overhead_eur
+        + b.cost.operator.fixed.total_eur
+        - b.cost.operator.fixed.fix_overhead_eur
+    )
+    b.cost.operator.fixed.fix_overhead_eur = quota * base
+    return b
+
+
 def _ann_op_day(value: float, operating_days: int) -> float:
     """€/operating-day → €/year."""
     return value * operating_days
@@ -386,9 +411,6 @@ def build_breakdown(
         b.cost.operator.fixed.financing_eur += (
             fc.financing_eur * fleet_share
         )  # already €/year
-        b.cost.operator.fixed.fix_overhead_eur += (
-            fc.fix_overhead_eur * fleet_share
-        )  # already €/year
         b.cost.operator.fixed.cleaning_eur += (
             _ann_op_day(fc.cleaning_eur, operating_days) * fleet_share
         )
@@ -434,6 +456,9 @@ def build_breakdown(
             continue
         b.cost.operator.variable.svc_stockings_eur += c.svc_stockings_eur
         b.cost.operator.variable.var_overhead_eur += c.var_overhead_eur
+
+    # Fixed overhead — see _apply_fix_overhead (CALC_VERSION 0.9.7).
+    _apply_fix_overhead(b, composition.fix_overhead_quota_per)
 
     for m in result.od_pair_margins:
         if trip_ids is not None and m.trip_id not in trip_ids:
@@ -591,9 +616,6 @@ def build_breakdown_per_trip_pair_per_country(
                 b.cost.operator.fixed.financing_eur += (
                     fc.financing_eur * fleet_share * d_share
                 )
-                b.cost.operator.fixed.fix_overhead_eur += (
-                    fc.fix_overhead_eur * fleet_share * d_share
-                )
                 b.cost.operator.fixed.cleaning_eur += (
                     _ann_op_day(fc.cleaning_eur, operating_days) * fleet_share * t_share
                 )
@@ -665,7 +687,10 @@ def build_breakdown_per_trip_pair_per_country(
         matrix[("all", country)] = b_all
 
     matrix[("all", "all")] = build_breakdown(route, result)
-    return {k: _round_breakdown(v) for k, v in matrix.items()}
+    return {
+        k: _round_breakdown(_apply_fix_overhead(v, composition.fix_overhead_quota_per))
+        for k, v in matrix.items()
+    }
 
 
 # =============================================================================
@@ -874,9 +899,6 @@ def build_breakdown_per_trip_pair_per_od(
                 b.cost.operator.fixed.financing_eur += (
                     fc.financing_eur * fleet_share * wpkm_share
                 )
-                b.cost.operator.fixed.fix_overhead_eur += (
-                    fc.fix_overhead_eur * fleet_share * wpkm_share
-                )
                 b.cost.operator.fixed.cleaning_eur += (
                     _ann_op_day(fc.cleaning_eur, operating_days)
                     * fleet_share
@@ -997,7 +1019,10 @@ def build_breakdown_per_trip_pair_per_od(
 
     # ("all", "all")
     matrix[("all", "all")] = build_breakdown(route, result)
-    return {k: _round_breakdown(v) for k, v in matrix.items()}
+    return {
+        k: _round_breakdown(_apply_fix_overhead(v, composition.fix_overhead_quota_per))
+        for k, v in matrix.items()
+    }
 
 
 # =============================================================================
@@ -1017,12 +1042,29 @@ class NormalisationScope:
     train_km: float  # annual train-km in scope
     available_place_km: float  # annual capacity place-km in scope
     sold_place_km: float  # annual sold place-km in scope
+    # annual sold place-km per class_main — optional until every scope
+    # builder provides it; None disables the per-class per-sold view for
+    # that cell (see normalise_per_sold_place_km)
+    sold_place_km_by_class: dict[str, float] | None = None
 
     def __add__(self, other: "NormalisationScope") -> "NormalisationScope":
         return NormalisationScope(
             train_km=self.train_km + other.train_km,
             available_place_km=self.available_place_km + other.available_place_km,
             sold_place_km=self.sold_place_km + other.sold_place_km,
+            sold_place_km_by_class=(
+                {
+                    k: (self.sold_place_km_by_class or {}).get(k, 0.0)
+                    + (other.sold_place_km_by_class or {}).get(k, 0.0)
+                    for k in {
+                        *(self.sold_place_km_by_class or {}),
+                        *(other.sold_place_km_by_class or {}),
+                    }
+                }
+                if self.sold_place_km_by_class is not None
+                and other.sold_place_km_by_class is not None
+                else None
+            ),
         )
 
 
@@ -1100,7 +1142,9 @@ def build_breakdown_per_trip_pair_per_section(
         pair_key = pair.outbound.trip_id
         trip_ids = {pair.outbound.trip_id, pair.return_trip.trip_id}
         composition = pair.composition
-        density_by_class = composition.density_by_class
+        # length density (m/place, real section geometry) — successor of
+        # the retired density_by_class (2026-07-22)
+        density_by_class = composition.density_by_class_main_length
         total_places = sum(composition.places_by_class.values())
 
         pair_loads = [sl for sl in segment_loads.values() if sl.trip_id in trip_ids]
@@ -1213,9 +1257,6 @@ def build_breakdown_per_trip_pair_per_section(
                     b.cost.operator.fixed.financing_eur += (
                         fc.financing_eur * fleet_share * d_share
                     )
-                    b.cost.operator.fixed.fix_overhead_eur += (
-                        fc.fix_overhead_eur * fleet_share * d_share
-                    )
                     b.cost.operator.fixed.cleaning_eur += (
                         _ann_op_day(fc.cleaning_eur, operating_days)
                         * fleet_share
@@ -1296,6 +1337,9 @@ def build_breakdown_per_trip_pair_per_section(
                     train_km=section_km * operating_days,
                     available_place_km=total_places * section_km * operating_days,
                     sold_place_km=total_sold_pkm,
+                    # per class_main — activates the class-keyed per_sold
+                    # view on section cells (CALC 0.9.8)
+                    sold_place_km_by_class=dict(sold_pkm_by_class),
                 )
                 # Accumulate, don't overwrite — the same directional section
                 # key can only recur if a stop sequence repeats, but silently
@@ -1334,6 +1378,9 @@ def build_breakdown_per_trip_pair_per_section(
                         * section_km
                         * operating_days,
                         sold_place_km=sold_pkm_by_class.get(cls, 0.0),
+                        # a class cell's per_sold view carries only its
+                        # own class
+                        sold_place_km_by_class={cls: sold_pkm_by_class.get(cls, 0.0)},
                     )
                     if cls_key in matrix:
                         matrix[cls_key] += cb
@@ -1351,7 +1398,9 @@ def build_breakdown_per_trip_pair_per_section(
     }
     for sk in all_section_keys:
         b_all = Breakdown()
-        scope_all = NormalisationScope(0.0, 0.0, 0.0)
+        # seed with an empty dict so __add__ merges accumulate (both sides
+        # must be non-None)
+        scope_all = NormalisationScope(0.0, 0.0, 0.0, sold_place_km_by_class={})
         for pair in route.trip_pairs:
             cell_key = (pair.outbound.trip_id, sk)
             if cell_key in matrix:
@@ -1363,7 +1412,10 @@ def build_breakdown_per_trip_pair_per_section(
     # ("all", "all") — whole route; default (route) normalisation scope
     matrix[("all", "all")] = build_breakdown(route, result)
 
-    return {k: _round_breakdown(v) for k, v in matrix.items()}, scopes
+    return {
+        k: _round_breakdown(_apply_fix_overhead(v, composition.fix_overhead_quota_per))
+        for k, v in matrix.items()
+    }, scopes
 
 
 # =============================================================================
@@ -1444,7 +1496,6 @@ def build_breakdown_per_trip_per_stop(
         fc.coach_amortisation_eur for fc in result.composition_fleet_costs
     )
     fleet_fin = sum(fc.financing_eur for fc in result.composition_fleet_costs)
-    fleet_fix = sum(fc.fix_overhead_eur for fc in result.composition_fleet_costs)
     fleet_clean = sum(
         _ann_op_day(fc.cleaning_eur, operating_days)
         for fc in result.composition_fleet_costs
@@ -1565,7 +1616,6 @@ def build_breakdown_per_trip_per_stop(
                     fleet_amort * route_share
                 )
                 b.cost.operator.fixed.financing_eur += fleet_fin * route_share
-                b.cost.operator.fixed.fix_overhead_eur += fleet_fix * route_share
                 b.cost.operator.fixed.cleaning_eur += fleet_clean * route_share
                 b.cost.operator.variable.loco_eur += loco_total * route_share
                 b.cost.operator.fixed.shunting_eur += shunting_total * route_share
@@ -1611,12 +1661,190 @@ def build_breakdown_per_trip_per_stop(
 
     # ("all", "all")
     matrix[("all", "all")] = build_breakdown(route, result)
-    return {k: _round_breakdown(v) for k, v in matrix.items()}
+    return {
+        k: _round_breakdown(_apply_fix_overhead(v, composition.fix_overhead_quota_per))
+        for k, v in matrix.items()
+    }
 
 
 # =============================================================================
 # LAYER 3 — NORMALISERS
 # =============================================================================
+
+
+# =============================================================================
+# CLASS-MAIN COST ALLOCATION  (calibration model, calib/CALIBRATION.md)
+# =============================================================================
+#
+# Composition costs are attributed to class_mains on FIVE bases:
+#   hardware  — X·length-share + (1−X)·weight-share of the revenue space,
+#               service areas per head (driver, loco, maintenance, cleaning,
+#               capital, fix overhead, shunting, and the infrastructure
+#               charges tac/station/parking per decision 2026-07-22)
+#   crew      — per-coach crew factors attributed to the coach's classes
+#   energy    — per-coach weight attributed to the coach's classes by places
+#   stockings — natively class-specific (operator class rates × places)
+#   revenue   — class ticket revenue (var_overhead, EBIT, revenue leaves)
+#
+# The values shift when the calibration changes, but the OUTPUT STRUCTURE
+# is stable — documented per 2026-07-22 decision (see calib README and
+# CALC_FORMULAS).
+#
+# EXACT since the 2026-07-22 schema: real section geometry, wo_service
+# fields, X (length_cost_prop) and the Zugchef factor all read from the
+# composition; places-based fallbacks remain only for pre-redesign seeds.
+
+_CLASS_ALLOC_X_DEFAULT = 0.7  # length share in the hardware blend
+
+
+@dataclass
+class ClassMainShares:
+    """Allocation shares per class_main, one dict per basis; every dict
+    sums to 1.0 over the composition's class_mains."""
+
+    hardware: dict[str, float]
+    crew: dict[str, float]
+    energy: dict[str, float]
+    stockings: dict[str, float]
+    per_head: dict[str, float]
+    revenue: dict[str, float] | None = None  # None until demand attached
+
+    def for_leaf(self, group: str, leaf: str) -> dict[str, float]:
+        if group == "revenue" or leaf == "var_overhead_eur":
+            return self.revenue if self.revenue is not None else self.per_head
+        if leaf == "crew_eur":
+            return self.crew
+        if leaf == "energy_eur":
+            return self.energy
+        if leaf == "svc_stockings_eur":
+            return self.stockings
+        return self.hardware
+
+
+def build_class_main_shares(
+    composition, revenue_by_class: dict[str, float] | None = None
+) -> ClassMainShares:
+    """Compute the allocation shares from the composition's real coach
+    list and section geometry (exact since the 2026-07-22 schema:
+    section_length_m/section_weight_t/section_crew_factor on class
+    assignments, wo_service fields on coach types, X and the Zugchef
+    factor on the composition). Falls back to places-based splits only
+    where section geometry is absent (pre-redesign seeds)."""
+    X = getattr(composition, "length_cost_prop", None) or _CLASS_ALLOC_X_DEFAULT
+    L = sum(ct.length_m for ct in composition.coaches.values())
+    W = sum(ct.weight_gross_t for ct in composition.coaches.values())
+
+    def _wo(ct, attr, full):
+        val = getattr(ct, attr, None)
+        return full if val is None else val  # 0.0 is valid (pure service coach)
+
+    Lwo = sum(
+        _wo(ct, "length_wo_service_m", ct.length_m)
+        for ct in composition.coaches.values()
+    )
+    Wwo = sum(
+        _wo(ct, "weight_wo_service_t", ct.weight_gross_t)
+        for ct in composition.coaches.values()
+    )
+    l_sec: dict[str, float] = {}
+    w_sec: dict[str, float] = {}
+    crew_raw: dict[str, float] = {}
+    energy_raw: dict[str, float] = {}
+    places: dict[str, int] = {}
+    for ct in composition.coaches.values():
+        coach_places = ct.total_places()
+        for a in ct.classes.values():
+            cm = a.class_main
+            frac = a.places / coach_places if coach_places else 0.0
+            sec_m = getattr(a, "section_length_m", None)
+            sec_m = ct.length_m * frac if not sec_m else sec_m
+            sec_t = getattr(a, "section_weight_t", None)
+            sec_t = ct.weight_gross_t * frac if not sec_t else sec_t
+            sec_crew = getattr(a, "section_crew_factor", None)
+            if sec_crew is None:
+                sec_crew = ct.crew_factor * frac
+            l_sec[cm] = l_sec.get(cm, 0.0) + sec_m
+            w_sec[cm] = w_sec.get(cm, 0.0) + sec_t
+            crew_raw[cm] = crew_raw.get(cm, 0.0) + sec_crew
+            energy_raw[cm] = energy_raw.get(cm, 0.0) + ct.weight_gross_t * frac
+            places[cm] = places.get(cm, 0) + a.places
+
+    def _norm(d: dict[str, float]) -> dict[str, float]:
+        s = sum(d.values())
+        return {k: v / s for k, v in d.items()} if s else dict(d)
+
+    total_places = sum(places.values())
+    per_head = {k: v / total_places for k, v in places.items()}
+    # hardware: two-step model — revenue-space X-blend on wo_service bases,
+    # service-area fraction (same X-blend of the servicing share) per head
+    frac_svc = X * (L - Lwo) / L + (1 - X) * (W - Wwo) / W if L and W else 0.0
+    space = _norm(
+        {
+            k: X * l_sec.get(k, 0.0) / Lwo + (1 - X) * w_sec.get(k, 0.0) / Wwo
+            for k in places
+        }
+    )
+    hardware = {k: (1 - frac_svc) * space[k] + frac_svc * per_head[k] for k in places}
+    # crew: native section factors + the Zugchef (whole-train role) per head
+    zugchef = getattr(composition, "zugchef_crew_factor", 0.0) or 0.0
+    crew_total = sum(crew_raw.values()) + zugchef
+    if crew_total:
+        crew = {
+            k: (crew_raw.get(k, 0.0) + zugchef * per_head[k]) / crew_total
+            for k in places
+        }
+    else:
+        crew = per_head
+    stock_rates = getattr(composition, "svc_stockings_eur_place", None)
+    if isinstance(stock_rates, dict) and stock_rates:
+        raw = {
+            k: sum(
+                stock_rates.get(a.class_id, stock_rates.get(a.class_main, 0.0))
+                * a.places
+                for ct in composition.coaches.values()
+                for a in ct.classes.values()
+                if a.class_main == k
+            )
+            for k in places
+        }
+        stockings = _norm(raw) if sum(raw.values()) else per_head
+    else:
+        stockings = per_head
+    revenue = _norm(dict(revenue_by_class)) if revenue_by_class else None
+    return ClassMainShares(
+        hardware=hardware,
+        crew=crew,
+        energy=_norm(energy_raw),
+        stockings=stockings,
+        per_head=per_head,
+        revenue=revenue,
+    )
+
+
+def normalise_by_class_main(
+    breakdown: Breakdown, shares: ClassMainShares
+) -> dict[str, Breakdown]:
+    """Split a Breakdown into one Breakdown per class_main, each leaf
+    multiplied by its basis-specific share (see ClassMainShares). Leaves
+    are additive, so the per-class breakdowns sum back to the input."""
+    out: dict[str, Breakdown] = {}
+    for cm in shares.per_head:
+        b = Breakdown()
+        for group, obj, target in (
+            (
+                "operator_variable",
+                breakdown.cost.operator.variable,
+                b.cost.operator.variable,
+            ),
+            ("operator_fixed", breakdown.cost.operator.fixed, b.cost.operator.fixed),
+            ("infrastructure", breakdown.cost.infrastructure, b.cost.infrastructure),
+            ("revenue", breakdown.revenue, b.revenue),
+        ):
+            for f in dataclasses.fields(obj):
+                share = shares.for_leaf(group, f.name).get(cm, 0.0)
+                setattr(target, f.name, getattr(obj, f.name) * share)
+        out[cm] = b
+    return out
 
 
 def normalise(breakdown: Breakdown, denominator: float, ndigits: int = 2) -> Breakdown:
@@ -1724,32 +1952,10 @@ def normalise_per_available_place_km(
     )
 
 
-def normalise_per_sold_place_km(
-    breakdown: Breakdown,
-    route: Route,
-    trip_pair: TripPair | None = None,
-    scope: NormalisationScope | None = None,
-) -> Breakdown:
-    """
-    Divide every leaf by total sold place-km → €/sold-place-km.
-
-    Sold place-km = Σ(od.places_sold × segment_distance_km) for each OD
-    pair across its segment range (origin_stop_idx to destination_stop_idx).
-    Already annual — places_sold is annual. Unweighted — raw sold seat-km
-    regardless of class density.
-
-    scope set      → the cell's own annual sold place-km.
-    trip_pair=None → whole route (all pairs).
-    trip_pair=pair → that pair's OD pairs only.
-    """
-    if scope is not None:
-        return normalise(
-            breakdown,
-            scope.sold_place_km,
-            NORMALISATION_NDIGITS["per_sold_place_km"],
-        )
-    pairs = [trip_pair] if trip_pair is not None else route.trip_pairs
-    sold_place_km = 0.0
+def _sold_place_km_by_class(pairs) -> dict[str, float]:
+    """Annual sold place-km per class_main across the given trip pairs
+    (same segment-range logic the aggregate divisor used)."""
+    out: dict[str, float] = {}
     for pair in pairs:
         for trip in pair.trips:
             stop_ids = [s.stop_id for s in trip.stops]
@@ -1763,14 +1969,66 @@ def normalise_per_sold_place_km(
                     continue
                 start_idx = stop_ids.index(od.origin_stop_id)
                 end_idx = stop_ids.index(od.destination_stop_id)
-                sold_place_km += sum(
+                pkm = sum(
                     od.places_sold * seg.distance_m / 1000.0
                     for i, seg in enumerate(trip.segments)
                     if start_idx <= i < end_idx
                 )
-    return normalise(
-        breakdown, sold_place_km, NORMALISATION_NDIGITS["per_sold_place_km"]
-    )
+                out[od.class_main] = out.get(od.class_main, 0.0) + pkm
+    return out
+
+
+def revenue_by_class_main(pairs) -> dict[str, float]:
+    """Annual ticket revenue per class_main (places_sold × avg_price) —
+    the revenue basis for var_overhead/EBIT/revenue leaves in the class
+    allocation."""
+    out: dict[str, float] = {}
+    for pair in pairs:
+        for od in pair.od_pairs:
+            out[od.class_main] = out.get(od.class_main, 0.0) + (
+                od.places_sold * od.avg_price
+            )
+    return out
+
+
+def normalise_per_sold_place_km(
+    breakdown: Breakdown,
+    route: Route,
+    shares: ClassMainShares,
+    trip_pair: TripPair | None = None,
+    scope: NormalisationScope | None = None,
+) -> dict[str, Breakdown] | None:
+    """
+    € per SOLD place-km, PER CLASS_MAIN (changed with CALC_VERSION 0.9.8).
+
+    Numerator: the class_main's allocated share of every cost leaf
+    (normalise_by_class_main — hardware/crew/energy/stockings/revenue
+    bases). Denominator: that class's own annual sold place-km. This is
+    the economically honest per-sold figure: at 50% couchette occupancy
+    the sold couchette places carry the full couchette cost share, so
+    the per-sold-place cost doubles.
+
+    Classes with zero sold place-km are omitted (their allocated cost has
+    no sold-place denominator). Section-view scopes carry per-class sold
+    place-km since CALC 0.9.8 (class cells: their own class only); None
+    is returned only for scopes without the per-class dict (defensive —
+    all current builders provide it).
+    """
+    if scope is not None:
+        if scope.sold_place_km_by_class is None:
+            return None
+        sold_by_class = scope.sold_place_km_by_class
+    else:
+        pairs = [trip_pair] if trip_pair is not None else route.trip_pairs
+        sold_by_class = _sold_place_km_by_class(pairs)
+    per_class = normalise_by_class_main(breakdown, shares)
+    out: dict[str, Breakdown] = {}
+    for cm, b in per_class.items():
+        pkm = sold_by_class.get(cm, 0.0)
+        if pkm <= 0:
+            continue
+        out[cm] = normalise(b, pkm, NORMALISATION_NDIGITS["per_sold_place_km"])
+    return out
 
 
 # =============================================================================
@@ -1864,9 +2122,22 @@ _NORMALISATION_STAGES: dict[str, tuple[str, list[str]]] = {
         ["÷ annual available place-km"],
     ),
     "per_sold_place_km": (
-        "Divided by annual sold place-km in scope (annual tickets sold × distance, "
-        "unweighted by class density).",
-        ["÷ annual sold place-km"],
+        "PER CLASS_MAIN (CALC_VERSION 0.9.8): each class's allocated cost "
+        "share divided by that class's OWN annual sold place-km. Unsold "
+        "capacity concentrates cost on sold places within the class — at "
+        "50% couchette occupancy the per-sold-couchette cost doubles. "
+        "null for cells without per-class sold place-km (route sections, "
+        "until their scope builder is extended).",
+        ["× class_main allocation shares", "÷ the class's annual sold place-km"],
+    ),
+    "by_class_main": (
+        "The full annual breakdown split per class_main via the "
+        "calibration allocation model — hardware (X·length + (1−X)·weight "
+        "of revenue space, service areas per head), crew (per-coach "
+        "factors), energy (per-coach weight by places), stockings (class "
+        "rates), revenue (ticket revenue). Per-class breakdowns sum back "
+        "to the cell total.",
+        ["× class_main allocation shares"],
     ),
 }
 

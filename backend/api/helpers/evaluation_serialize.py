@@ -18,7 +18,7 @@ shapes dicts, it never re-formats numbers.
 
 Public interface:
   breakdown_to_dict(breakdown)                    → dict  (one Breakdown, all 5 normalisations already applied by the caller)
-  normalise_all_to_dict(breakdown, route, pair, scope) → dict  (all 5 normalisations of one Breakdown; scope = a cell's own
+  normalise_all_to_dict(breakdown, route, pair, scope) → dict  (all normalisations of one Breakdown incl. by_class_main; scope = a cell's own
                                                              annual denominators for route-section cells, None otherwise)
   views_to_dict(bd_all, bd_per_pair, matrix_country, matrix_od, matrix_section,
                 section_scopes, matrix_stop, route, trip_pair_by_key)
@@ -38,6 +38,9 @@ from models.evaluation.views import (
     normalise_per_train_km,
     normalise_per_available_place_km,
     normalise_per_sold_place_km,
+    normalise_by_class_main,
+    build_class_main_shares,
+    revenue_by_class_main,
     VIEW_META,
 )
 from models.evaluation.version import (
@@ -130,7 +133,17 @@ def normalise_all_to_dict(
     since the result is always destined for JSON output.
     scope carries a cell's own annual physical denominators (route
     sections) — None means the normalisers derive them from
-    route/trip_pair as before."""
+    route/trip_pair as before.
+
+    Class-main allocation (CALC_VERSION 0.9.8): shares are built from the
+    pair's composition (route level: the first pair's — exact while all
+    pairs share one composition) with class revenue from its OD demand.
+    per_sold_place_km is a dict per class_main (null when the cell's
+    scope has no per-class sold place-km yet); by_class_main carries the
+    full per-class split of the annual breakdown."""
+    pairs = [trip_pair] if trip_pair is not None else route.trip_pairs
+    shares = build_class_main_shares(pairs[0].composition, revenue_by_class_main(pairs))
+    per_sold = normalise_per_sold_place_km(breakdown, route, shares, trip_pair, scope)
     return {
         "per_year": breakdown_to_dict(breakdown),
         "per_operating_day": breakdown_to_dict(
@@ -142,9 +155,15 @@ def normalise_all_to_dict(
         "per_available_place_km": breakdown_to_dict(
             normalise_per_available_place_km(breakdown, route, trip_pair, scope)
         ),
-        "per_sold_place_km": breakdown_to_dict(
-            normalise_per_sold_place_km(breakdown, route, trip_pair, scope)
+        "per_sold_place_km": (
+            {cm: breakdown_to_dict(b) for cm, b in per_sold.items()}
+            if per_sold is not None
+            else None
         ),
+        "by_class_main": {
+            cm: breakdown_to_dict(b)
+            for cm, b in normalise_by_class_main(breakdown, shares).items()
+        },
     }
 
 

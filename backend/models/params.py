@@ -214,14 +214,15 @@ class ServiceClass:
     class_main groups individual classes into top-level categories:
     Seat, Couchette, Sleeper, Capsule, Catering.
 
-    density: space units consumed per place of this class, used for cost
-    allocation. E.g. a 6-berth couchette has density 1/6 since 6 places
+    Density retired as a data column (2026-07-22): densities are derived
+    per composition and class_main from real section geometry — see
+    CompositionType.density_by_class_main_*. Cost allocation uses the
+    calibration model (views.build_class_main_shares), not density.
     share one compartment unit. Stored in DB on the classes table.
     """
 
     class_id: str  # e.g. "seat (reclining)", "couchette (6-berth)"
     class_main: str  # e.g. "Seat", "Couchette", "Sleeper"
-    density: float  # space units per place — stored in DB, not derived
 
 
 # =============================================================================
@@ -253,8 +254,6 @@ class Operator:
     operator_name: str
     driver_costs_eur_h: float  # EUR per driver hour (rate, not duration)
     crew_costs_eur_h: float  # EUR per crew hour (rate, not duration)
-    driver_overhead_min: int  # overhead time per driver per trip in minutes
-    crew_overhead_min: int  # overhead time per crew member per trip in minutes
     ebit_margin_per: float
     financing_quota_per: float
     var_overhead_per: float
@@ -282,13 +281,17 @@ class CoachClassAssignment:
     input_params.classes. One entry per class_id per CoachType.
     A coach type may carry zero, one, or multiple class assignments.
 
-    density is denormalised from ServiceClass for convenient aggregation.
     """
 
     class_id: str  # FK → input_params.classes.class_id
     class_main: str  # denormalised from input_params.classes
     places: int  # number of places of this class in the coach
-    density: float  # denormalised from ServiceClass.density
+    # real section geometry (workbook 2026-07-22) — basis of the class
+    # cost allocation and of derived densities; Σ section_length_m over a
+    # coach's sections = coach length excl. service areas
+    section_length_m: float
+    section_weight_t: float
+    section_crew_factor: float
 
 
 @dataclass
@@ -312,6 +315,10 @@ class CoachType:
 
     coachtype_id: str
     weight_gross_t: float
+    length_m: float
+    length_wo_service_m: float
+    weight_wo_service_t: float
+    has_wifi: bool
     crew_factor: float
     bikes: int
     climatization: bool
@@ -360,6 +367,13 @@ class CompositionType:
     driver_factor: float
     max_speed_kmh: float
     hsr_allowed: bool
+    material_strategy: (
+        str  # 'new' | 'refurbished' — drives the parameter family and operator tier
+    )
+    n_locos: int  # locomotives needed; scales loco lease (and energy weight, once calibrated)
+    zugchef_crew_factor: float  # attendant-equivalents (1.19 / 2.38)
+    length_cost_prop: float  # X of the class cost allocation (1-X on weight)
+    food_and_beverages: str | None  # catering concept (composition-level)
     coaches: dict[int, CoachType]  # keyed by position
 
     # energy regression coefficients
@@ -379,11 +393,89 @@ class CompositionType:
     cleaning_services_eur_day: float
     coach_maint_eur_km: float
 
+    # indicative comparison KPIs — seeded from the composition cost
+    # calibration (calib/CALIBRATION.md): S41 reference route, 2032 prices,
+    # operator-controllable scope. Comparison figures, not route
+    # evaluations. None when the seed predates the calibration.
+    indicative_cost_eur_train_km: Optional[float] = None
+    indicative_cost_ct_place_km: Optional[float] = None
+
     # --- derived getters ---
 
     def total_weight_t(self) -> float:
         """Total gross weight of all coaches in tonnes."""
         return sum(c.weight_gross_t for c in self.coaches.values())
+
+    def total_length_m(self) -> float:
+        """Total coach length in metres (locomotive excluded)."""
+        return sum(c.length_m for c in self.coaches.values())
+
+    def total_length_wo_service_m(self) -> float:
+        """Composition length excluding service areas."""
+        return sum(c.length_wo_service_m for c in self.coaches.values())
+
+    def total_weight_wo_service_t(self) -> float:
+        """Composition weight excluding service areas."""
+        return sum(c.weight_wo_service_t for c in self.coaches.values())
+
+    def total_places(self) -> int:
+        """Total places across all coaches and classes."""
+        return sum(a.places for c in self.coaches.values() for a in c.classes.values())
+
+    def total_crew(self) -> float:
+        """Σ coach crew factors + Zugchef factor (attendant-equivalents)."""
+        return (
+            sum(c.crew_factor for c in self.coaches.values()) + self.zugchef_crew_factor
+        )
+
+    def amenities(self) -> dict[str, bool]:
+        """OR-aggregation over coaches: the composition offers an amenity
+        if any coach does."""
+        cs = list(self.coaches.values())
+        return {
+            "has_wifi": any(c.has_wifi for c in cs),
+            "has_bikes": any(c.bikes > 0 for c in cs),
+            "has_climatization": any(c.climatization for c in cs),
+            "has_plugs": any(c.plugs for c in cs),
+        }
+
+    def density_by_class_main_length(self) -> dict[str, float]:
+        """Metres of section per place, per class_main — derived from real
+        section geometry (replaces the retired service_class_density)."""
+        m: dict[str, float] = {}
+        pl: dict[str, int] = {}
+        for c in self.coaches.values():
+            for a in c.classes.values():
+                m[a.class_main] = m.get(a.class_main, 0.0) + a.section_length_m
+                pl[a.class_main] = pl.get(a.class_main, 0) + a.places
+        return {k: m[k] / pl[k] for k in m if pl.get(k)}
+
+    def avg_density_length_m_per_place(self) -> float:
+        """Average length density (m/place) on the FULL composition
+        length — service areas included, since every passenger uses them
+        (workbook columns AL/AM). Note: per-class densities use section
+        geometry (wo_service space); the composition average deliberately
+        includes the shared areas."""
+        return self.total_length_m() / self.total_places()
+
+    def avg_density_weight_t_per_place(self) -> float:
+        """Average weight density (t/place) on the full weight — service
+        areas included (workbook AM)."""
+        return self.total_weight_t() / self.total_places()
+
+    def density_by_class_main_weight(self) -> dict[str, float]:
+        """Tonnes of section per place, per class_main."""
+        t: dict[str, float] = {}
+        pl: dict[str, int] = {}
+        for c in self.coaches.values():
+            for a in c.classes.values():
+                t[a.class_main] = t.get(a.class_main, 0.0) + a.section_weight_t
+                pl[a.class_main] = pl.get(a.class_main, 0) + a.places
+        return {k: t[k] / pl[k] for k in t if pl.get(k)}
+
+    def total_places(self) -> int:
+        """Total places across all coaches and classes."""
+        return sum(a.places for c in self.coaches.values() for a in c.classes.values())
 
     def total_crew(self) -> float:
         """Total fractional crew across all coaches."""
@@ -404,33 +496,6 @@ class CompositionType:
             for a in coach.classes.values():
                 result[a.class_main] = result.get(a.class_main, 0) + a.places
         return result
-
-    def density_by_class(self) -> dict[str, float]:
-        """
-        Places-weighted average density per class_id across all coaches.
-        density = sum(places_i * density_i) / sum(places_i)
-        """
-        weighted: dict[str, float] = {}
-        totals: dict[str, int] = {}
-        for coach in self.coaches.values():
-            for class_id, a in coach.classes.items():
-                weighted[class_id] = weighted.get(class_id, 0.0) + a.places * a.density
-                totals[class_id] = totals.get(class_id, 0) + a.places
-        return {cid: weighted[cid] / totals[cid] for cid in weighted if totals[cid] > 0}
-
-    def density_by_main_class(self) -> dict[str, float]:
-        """
-        Places-weighted average density per class_main across all coaches.
-        """
-        weighted: dict[str, float] = {}
-        totals: dict[str, int] = {}
-        for coach in self.coaches.values():
-            for a in coach.classes.values():
-                weighted[a.class_main] = (
-                    weighted.get(a.class_main, 0.0) + a.places * a.density
-                )
-                totals[a.class_main] = totals.get(a.class_main, 0) + a.places
-        return {cm: weighted[cm] / totals[cm] for cm in weighted if totals[cm] > 0}
 
     def weighted_avg_by_main_class(
         self, per_class_id_values: dict[str, float]
@@ -490,6 +555,12 @@ class Composition:
     operator_id: str
     operator_name: str
 
+    material_strategy: str
+    n_locos: int
+    zugchef_crew_factor: float
+    length_cost_prop: float
+    food_and_beverages: str | None
+
     # routing
     driver_factor: float
     max_speed_kmh: float
@@ -504,6 +575,12 @@ class Composition:
 
     # general train properties (derived from coaches)
     total_weight_t: float
+    total_length_m: float
+    total_length_wo_service_m: float
+    total_weight_wo_service_t: float
+    # places-weighted average densities (workbook AL/AM analog)
+    avg_density_length_m_per_place: float
+    avg_density_weight_t_per_place: float
     total_crew: float
 
     # capacity (derived from coaches) — keyed by class_main (Seat, Couchette,
@@ -513,9 +590,13 @@ class Composition:
     # as served at the same cost factor (David, 2026-07-06), so there is no
     # need for OD pairs or cost lookups to go any more granular than this.
     places_by_class: dict[str, int]  # keyed by class_main
-    density_by_class: dict[str, float]  # keyed by class_main, places-weighted avg
+    # derived per-class densities from real section geometry (m/place and
+    # t/place) — replace the retired service_class_density
+    density_by_class_main_length: dict[str, float]
+    density_by_class_main_weight: dict[str, float]
 
     # equipment (derived from coaches) — True if ANY coach in the composition has it
+    has_wifi: bool
     has_bikes: bool
     has_climatization: bool
     has_plugs: bool
@@ -528,8 +609,6 @@ class Composition:
     # operator cost
     driver_costs_eur_h: float
     crew_costs_eur_h: float
-    driver_overhead_min: int
-    crew_overhead_min: int
     ebit_margin_per: float
     financing_quota_per: float
     var_overhead_per: float
@@ -548,10 +627,8 @@ class Composition:
     cleaning_services_eur_day: float
     coach_maint_eur_km: float
 
-    # indicative KPIs — computed at load time via
-    # models.compositions.calc_indicative_figures.compute_indicative_figures()
-    # (currently a placeholder — see IndicativeFigures). None if no
-    # composition_references row exists in the DB.
+    # indicative KPIs — seeded calibration values read from
+    # composition_types columns (see IndicativeFigures). None if no
     indicative: Optional["IndicativeFigures"] = field(default=None)
 
     @classmethod
@@ -560,7 +637,7 @@ class Composition:
         Construct a fully resolved Composition from its CompositionType.
         Called exclusively by DBDataLoader.build_all_compositions().
 
-        places_by_class / density_by_class / svc_stockings_eur_place are all
+        places_by_class / density_by_class_main_* / svc_stockings_eur_place are all
         aggregated up to class_main here (2026-07-06) — see the field
         comments above and CompositionType.places_by_main_class() /
         density_by_main_class() / weighted_avg_by_main_class(). Previously
@@ -575,6 +652,11 @@ class Composition:
             comp_description=comp_type.comp_description,
             operator_id=comp_type.operator.operator_id,
             operator_name=comp_type.operator.operator_name,
+            material_strategy=comp_type.material_strategy,
+            n_locos=comp_type.n_locos,
+            zugchef_crew_factor=comp_type.zugchef_crew_factor,
+            length_cost_prop=comp_type.length_cost_prop,
+            food_and_beverages=comp_type.food_and_beverages,
             driver_factor=comp_type.driver_factor,
             max_speed_kmh=comp_type.max_speed_kmh,
             hsr_allowed=comp_type.hsr_allowed,
@@ -584,17 +666,22 @@ class Composition:
             energy_factor_speed=comp_type.energy_factor_speed,
             energy_factor_terrain=comp_type.energy_factor_terrain,
             total_weight_t=comp_type.total_weight_t(),
+            total_length_m=comp_type.total_length_m(),
+            total_length_wo_service_m=comp_type.total_length_wo_service_m(),
+            total_weight_wo_service_t=comp_type.total_weight_wo_service_t(),
+            avg_density_length_m_per_place=comp_type.avg_density_length_m_per_place(),
+            avg_density_weight_t_per_place=comp_type.avg_density_weight_t_per_place(),
             total_crew=comp_type.total_crew(),
             places_by_class=comp_type.places_by_main_class(),
-            density_by_class=comp_type.density_by_main_class(),
+            density_by_class_main_length=comp_type.density_by_class_main_length(),
+            density_by_class_main_weight=comp_type.density_by_class_main_weight(),
+            has_wifi=comp_type.amenities()["has_wifi"],
             has_bikes=any(c.bikes > 0 for c in comp_type.coaches.values()),
             has_climatization=any(c.climatization for c in comp_type.coaches.values()),
             has_plugs=any(c.plugs for c in comp_type.coaches.values()),
             coaches=dict(comp_type.coaches),
             driver_costs_eur_h=comp_type.operator.driver_costs_eur_h,
             crew_costs_eur_h=comp_type.operator.crew_costs_eur_h,
-            driver_overhead_min=comp_type.operator.driver_overhead_min,
-            crew_overhead_min=comp_type.operator.crew_overhead_min,
             ebit_margin_per=comp_type.operator.ebit_margin_per,
             financing_quota_per=comp_type.operator.financing_quota_per,
             var_overhead_per=comp_type.operator.var_overhead_per,
@@ -648,7 +735,6 @@ class CompositionCollection:
     sub-sections, matching that function's per-composition dict exactly),
     "operators", and "indicative" (with "kpis"/"reference" sub-sections).
     Deliberately NOT grouped by source table (composition_types/
-    operators/coach_types/composition_references) the way it briefly was
     — several DB columns (e.g. weight_gross_t, crew_factor, bikes on
     coach_types) are never exposed per-coach in the response at all, only
     as composition-level sums/booleans, so a table-shaped descriptions
@@ -685,73 +771,30 @@ class CompositionCollection:
 
 
 # =============================================================================
-# COMPOSITION REFERENCE  (input_params.composition_references)
 # =============================================================================
-
-
-@dataclass
-class CompositionReference:
-    """
-    Reference trip profile for a composition — used to compute indicative
-    cost figures for composition comparison.
-
-    Stored in input_params.composition_references and loaded alongside the
-    composition. Not versioned, same as CompositionType — exactly one row
-    per composition_type_id (enforced by a UNIQUE constraint on
-    composition_type_row_id). The indicative figures are computed at
-    runtime via models.compositions.calc_indicative_figures
-    .compute_indicative_figures() — see IndicativeFigures. That module is
-    currently a placeholder (returns dummy figures); a full compositions
-    cost model, analogous to models/evaluation/calc.py for a concrete
-    route, is planned to replace it.
-    """
-
-    composition_type_id: str
-
-    # reference trip physics
-    ref_distance_km: float
-    ref_avg_speed_kmh: float
-    ref_terrain_score: float
-    ref_operating_days: int
-
-    # reference demand
-    ref_utilization_by_class: dict[str, float]  # keyed by class_main
-    ref_avg_fare_by_class: dict[str, float]  # keyed by class_main
 
 
 @dataclass
 class IndicativeFigures:
     """
-    Pre-computed indicative cost KPIs for a composition, derived from
-    models.compositions.calc_indicative_figures.compute_indicative_figures()
-    using a CompositionReference profile. Used for composition comparison
-    only.
+    Indicative cost KPIs for a composition — seeded values from the
+    composition cost calibration (backend/models/compositions/calib/
+    CALIBRATION.md), read from composition_types columns by
+    DBDataLoader.build_all_compositions(). Basis: S41 reference route
+    (1,000 km, 14.5 h trip, 350 operating days, 2 trainsets), 2032
+    prices, operator-controllable scope (no infrastructure access,
+    energy, variable overhead or EBIT). Comparison figures between
+    compositions — not route evaluations (models/evaluation/calc.py
+    computes those for concrete routes).
 
-    PLACEHOLDER VALUES as of this writing — models/compositions/ doesn't
-    have a real cost model yet, so compute_indicative_figures() returns
-    dummy figures (currently all zero) rather than raising. Treat these
-    as provisional until that model exists; the field names/shape here
-    are expected to stay stable across that change.
+    The basis (S41 reference route, 2032 prices, operator-controllable
+    scope) is documented in the composition_types column comments —
+    exposed via the API descriptions block — and derived in full in
+    calib/CALIBRATION.md (the umbrella source).
     """
 
     cost_eur_per_train_km: float
-    """Total composition cost ÷ reference distance, for the reference
-    trip profile — analogous to a route's total cost ÷ distance in
-    models/evaluation/calc.py, but composition-level and route-agnostic."""
-
-    cost_eur_per_place_km_by_class: dict[str, float]
-    """Keyed by class_id (see Composition.places_by_class) — the same
-    total cost allocated to each class present in the composition,
-    divided by that class's density-weighted place-km."""
-
-    # the reference profile these KPIs were computed from — carried
-    # alongside so API consumers can see the assumptions, not just the result
-    reference: Optional[CompositionReference] = field(default=None)
-
-
-# =============================================================================
-# TRACK INFRASTRUCTURE DEFAULTS  (input_params.infrastructure_defaults)
-# =============================================================================
+    cost_ct_per_place_km: float
 
 
 @dataclass
@@ -1152,7 +1195,7 @@ class ODPair:
     (e.g. "Seat", "Couchette", "Sleeper"). One ODPair per class per
     OD pair per trip — if a single OD pair carries both Couchette and
     Sleeper demand, that is two ODPair objects. Matches
-    Composition.places_by_class / density_by_class / svc_stockings_eur_place
+    Composition.places_by_class / density_by_class_main_* / svc_stockings_eur_place
     (2026-07-06) — those are now aggregated up to class_main too, so there
     is no need (and no way) to target a more granular class_id here.
 

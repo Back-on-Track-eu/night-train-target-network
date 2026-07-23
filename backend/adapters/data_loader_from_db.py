@@ -53,7 +53,6 @@ import psycopg2.extras
 from models.params import (
     ParamsSource,
     ParamVersionEntry,
-    CompositionReference,
     IndicativeFigures,
     ParamVersions,
     ServiceClass,
@@ -232,7 +231,7 @@ class DBDataLoader:
         """
         Resolve a scenario_id (or None → the live is_current_base scenario)
         to its four per-table version pointers. Infrastructure only —
-        operators/coach_types/composition_types/composition_references are
+        operators/coach_types/composition_types are
         unversioned catalogs and have no scenario pointer at all (see
         scenario.scenarios' docstring in create_scenario_schema.sql).
 
@@ -339,7 +338,6 @@ class DBDataLoader:
             row["service_class_id"]: ServiceClass(
                 class_id=row["service_class_id"],
                 class_main=row["service_class_main"],
-                density=_f(row["service_class_density"]),
             )
             for row in rows
         }
@@ -437,8 +435,6 @@ class DBDataLoader:
                 operator_name=row["operator_name"],
                 driver_costs_eur_h=_f(row["operator_driver_costs_eur_h"]),
                 crew_costs_eur_h=_f(row["operator_crew_costs_eur_h"]),
-                driver_overhead_min=_interval_to_min(row["operator_driver_overhead_h"]),
-                crew_overhead_min=_interval_to_min(row["operator_crew_overhead_h"]),
                 ebit_margin_per=_f(row["operator_ebit_margin_per"]),
                 financing_quota_per=_f(row["operator_financing_quota_per"]),
                 var_overhead_per=_f(row["operator_var_overhead_per"]),
@@ -457,8 +453,6 @@ class DBDataLoader:
             op_fields = {
                 "driver_costs_eur_h": operator.driver_costs_eur_h,
                 "crew_costs_eur_h": operator.crew_costs_eur_h,
-                "driver_overhead_h": operator.driver_overhead_min,
-                "crew_overhead_h": operator.crew_overhead_min,
                 "ebit_margin_per": operator.ebit_margin_per,
                 "financing_quota_per": operator.financing_quota_per,
                 "var_overhead_per": operator.var_overhead_per,
@@ -512,7 +506,9 @@ class DBDataLoader:
 
             cur.execute(
                 """
-                SELECT coach_type_row_id, service_class_id, coach_type_class_places
+                SELECT coach_type_row_id, service_class_id,
+                       coach_type_class_places,
+                       section_length_m, section_weight_t, section_crew_factor
                 FROM input_params.coach_type_classes
             """
             )
@@ -535,7 +531,9 @@ class DBDataLoader:
                 class_id=cr["service_class_id"],
                 class_main=sc.class_main,
                 places=_i(cr["coach_type_class_places"]),
-                density=sc.density,
+                section_length_m=_f(cr["section_length_m"] or 0),
+                section_weight_t=_f(cr["section_weight_t"] or 0),
+                section_crew_factor=_f(cr["section_crew_factor"] or 0),
             )
 
         coach_types: dict[str, CoachType] = {}
@@ -546,6 +544,10 @@ class DBDataLoader:
             coach_type = CoachType(
                 coachtype_id=coachtype_id,
                 weight_gross_t=_f(row["coach_type_weight_gross_t"]),
+                length_m=_f(row["coach_type_length_m"]),
+                length_wo_service_m=_f(row["coach_type_length_wo_service_m"]),
+                weight_wo_service_t=_f(row["coach_type_weight_wo_service_t"]),
+                has_wifi=bool(row["coach_type_has_wifi"]),
                 crew_factor=_f(row["coach_type_crew_factor"]),
                 bikes=_i(row["coach_type_bikes"]),
                 climatization=_b(row["coach_type_climatization"]),
@@ -589,20 +591,22 @@ class DBDataLoader:
         did one round of queries per composition_id — an N+1 pattern).
 
         Not scenario-versioned: composition_types, operators, coach_types,
-        and composition_references are all unversioned catalogs (see their
+        are all unversioned catalogs (see their
         docstrings in models/params.py) — a changed value means a new id,
         never editing a row in place. scenario_id is still accepted, and
-        still matters when include_indicative=True: indicative KPIs are
-        computed using track/stop infrastructure costs, which ARE
-        scenario-versioned. It has no effect on composition/operator/coach
-        type field values themselves.
+        scenario_id has no effect on composition/operator/coach type
+        field values themselves (all unversioned catalogs); since
+        CALC_VERSION 0.9.7 indicative KPIs are seeded values too, so
+        scenario_id no longer influences them either.
 
-        include_indicative: set False to skip loading tracks/stops and
-        computing Composition.indicative entirely — route_factory doesn't
-        use indicative KPIs (they're a composition-comparison display
-        figure, not a routing input), so building a Route would otherwise
-        pay for a tracks/stops reload it never uses. composition_reference
-        provenance is still registered either way (cheap — no extra query).
+        include_indicative: set False to skip attaching
+        Composition.indicative — route_factory doesn't use indicative
+        KPIs (a composition-comparison display figure, not a routing
+        input). Since CALC_VERSION 0.9.7 the KPIs are seeded calibration
+        values read from composition_types columns, so this flag no
+        longer gates any tracks/stops loading — it only controls whether
+        the field is populated. composition_reference provenance is
+        registered either way.
         """
         sources = self._load_sources()
         service_classes = self._load_service_classes()
@@ -637,9 +641,6 @@ class DBDataLoader:
         comp_type_coaches_columns = self._load_column_comments(
             "input_params", "composition_type_coaches"
         )
-        ref_columns = self._load_column_comments(
-            "input_params", "composition_references"
-        )
 
         descriptions = {
             "compositions": {
@@ -667,28 +668,33 @@ class DBDataLoader:
                         "Vehicle-dependent minimum dwell time at alighting "
                         "stops. Unit: min"
                     ),
+                    "n_locos": comp_type_columns.get("composition_type_n_locos"),
                 },
                 "staff": {
                     "driver_factor": comp_type_columns.get(
                         "composition_type_driver_factor"
                     ),
                     "crew_factor_total": (
-                        "Total fractional cabin crew required — sum of "
-                        "crew_factor across all coaches in this composition."
+                        "Total fractional cabin crew: Σ coach crew "
+                        "factors + the Zugchef factor, priced at the "
+                        "operator crew rate."
                     ),
-                },
-                "energy": {
-                    "factor_weight": comp_type_columns.get(
-                        "composition_type_energy_factor_weight"
+                    "zugchef_crew_factor": comp_type_columns.get(
+                        "composition_type_zugchef_crew_factor"
                     ),
-                    "factor_speed": comp_type_columns.get(
-                        "composition_type_energy_factor_speed"
+                    "crew_factor_coaches": (
+                        "Σ crew factors across the composition's coaches "
+                        "(crew_factor_total minus the Zugchef factor)."
                     ),
-                    "factor_terrain": comp_type_columns.get(
-                        "composition_type_energy_factor_terrain"
+                    "costs_per_hour": (
+                        "Hourly staff rates (denormalised from the "
+                        "operator) and the combined staff cost per "
+                        "operated hour: driver_factor × driver rate + "
+                        "crew_factor_total × crew rate. Unit: €/h"
                     ),
                 },
                 "capacity": {
+                    "total_places": ("Total places across all classes and coaches."),
                     "places": (
                         "Total places of this class across all coaches in "
                         "the composition — summed across coaches."
@@ -697,6 +703,16 @@ class DBDataLoader:
                         "Places-weighted average density of this class "
                         "across all coaches in the composition — space "
                         "units consumed per place, used for cost allocation."
+                    ),
+                    "avg_density_length_m_per_place": (
+                        "Average length density on the FULL composition "
+                        "length — service areas included, every "
+                        "passenger uses them (workbook AL). Unit: m/place"
+                    ),
+                    "avg_density_weight_t_per_place": (
+                        "Average weight density on the full weight, "
+                        "service areas included (workbook AM). "
+                        "Unit: t/place"
                     ),
                 },
                 "equipment": {
@@ -710,12 +726,19 @@ class DBDataLoader:
                         "True if ANY coach in the composition has passenger "
                         "power sockets."
                     ),
+                    "food_and_beverages": comp_type_columns.get(
+                        "composition_type_food_and_beverages"
+                    ),
                 },
                 "coaches": {
                     "count": "Number of coaches in this composition.",
                     "coach_type_id": coach_type_columns.get("coach_type_id"),
                     "position": comp_type_coaches_columns.get("position"),
                     "remarks": coach_type_columns.get("coach_type_remarks"),
+                    "list": (
+                        "Ordered formation; coach_type_id references the "
+                        "top-level coach_types catalog."
+                    ),
                 },
                 "fixed_costs": {
                     "purchase_coach_eur": comp_type_columns.get(
@@ -742,8 +765,6 @@ class DBDataLoader:
                     "operator_driver_costs_eur_h"
                 ),
                 "crew_costs_eur_h": operator_columns.get("operator_crew_costs_eur_h"),
-                "driver_overhead_h": operator_columns.get("operator_driver_overhead_h"),
-                "crew_overhead_h": operator_columns.get("operator_crew_overhead_h"),
                 "ebit_margin_per": operator_columns.get("operator_ebit_margin_per"),
                 "financing_quota_per": operator_columns.get(
                     "operator_financing_quota_per"
@@ -759,41 +780,45 @@ class DBDataLoader:
                     "operator_class_svc_stockings_eur_place"
                 ),
             },
+            "coach_types": (
+                "All coach types across the catalog, keyed by "
+                "coach_type_id and referenced from compositions' "
+                "coaches.list: physicals incl./excl. service areas "
+                "(a dining car has zero revenue space), crew factor, "
+                "places, equipment, and class_ids referencing the "
+                "classes section."
+            ),
+            "classes": (
+                "All service classes across the catalog grouped by "
+                "class_main — one entry per class_id "
+                '("<coach_type_id> - <section label>") with its '
+                "carrying coach type and places."
+            ),
+            "cost_allocation": {
+                "by_class_main": (
+                    "Per class_main: its blended cost proportion "
+                    "(workbook cost_acc columns) — X·length + "
+                    "(1−X)·weight of the revenue space, service-area "
+                    "costs per head — identical to the evaluation's "
+                    "by_class_main hardware basis; sums to 1. See "
+                    "calib/CALIBRATION.md."
+                ),
+            },
             "indicative": {
                 "kpis": {
                     "cost_eur_per_train_km": (
-                        "Total composition cost ÷ reference distance, for "
-                        "the reference trip profile. PLACEHOLDER figure — "
-                        "see models/compositions/calc_indicative_figures.py."
+                        "Seeded calibration value: annual operator-"
+                        "controllable cost per train-km on the S41 "
+                        "reference route (1,000 km, 14.5 h trip, 350 "
+                        "operating days, 2 trainsets), nominal 2032 "
+                        "prices, excl. infrastructure charges, energy, "
+                        "variable overhead and EBIT. Derivation: "
+                        "calib/CALIBRATION.md (umbrella source)."
                     ),
-                    "cost_eur_per_place_km_by_class": (
-                        "The same total cost allocated to each class "
-                        "present in the composition, divided by that "
-                        "class's density-weighted place-km. PLACEHOLDER "
-                        "figure — see "
-                        "models/compositions/calc_indicative_figures.py."
-                    ),
-                },
-                "reference": {
-                    "ref_distance_km": ref_columns.get("ref_distance_km"),
-                    "ref_avg_speed_kmh": ref_columns.get("ref_avg_speed_kmh"),
-                    "ref_terrain_score": ref_columns.get("ref_terrain_score"),
-                    "ref_operating_days": ref_columns.get("ref_operating_days"),
-                    # These two API keys are each assembled from five
-                    # per-class DB columns (ref_utilization_seat/
-                    # _couchette/_sleeper/_capsule/_catering, and the
-                    # ref_avg_fare_* equivalents) — no single column
-                    # comment applies, so this is composed rather than
-                    # looked up directly.
-                    "ref_utilization_by_class": (
-                        "Reference load factor (share of places sold), "
-                        "keyed by class_main (Seat, Couchette, Sleeper, "
-                        "Capsule, Catering). Unit: %"
-                    ),
-                    "ref_avg_fare_by_class": (
-                        "Reference average fare per sold place, keyed by "
-                        "class_main (Seat, Couchette, Sleeper, Capsule, "
-                        "Catering). Unit: €"
+                    "cost_ct_per_place_km": (
+                        "The same cost basis divided by total places — "
+                        "ct per available place-km on the S41 reference "
+                        "route, 2032 prices."
                     ),
                 },
             },
@@ -818,9 +843,6 @@ class DBDataLoader:
             )
             coach_slot_rows = cur.fetchall()
 
-            cur.execute("SELECT * FROM input_params.composition_references")
-            ref_rows = cur.fetchall()
-
         # --- assemble each composition's ordered coach slots, referencing
         #     the already-built shared CoachType instances ---
         coaches_by_comp_row: dict[int, dict[int, CoachType]] = {}
@@ -836,14 +858,6 @@ class DBDataLoader:
             coaches_by_comp_row.setdefault(sr["composition_type_row_id"], {})[
                 sr["position"]
             ] = coach_types[coach_id]
-
-        ref_rows_by_comp_row = {r["composition_type_row_id"]: r for r in ref_rows}
-
-        # load tracks + stops once for all indicative calculations — only
-        # if indicative figures are actually wanted (see include_indicative
-        # docstring above)
-        tracks = self.build_all_tracks(scenario_id) if include_indicative else None
-        stop_infra = self.build_all_stops(scenario_id) if include_indicative else None
 
         result: dict[str, Composition] = {}
         for row in comp_rows:
@@ -885,6 +899,23 @@ class DBDataLoader:
                         row["composition_type_cleaning_eur_day"]
                     ),
                     coach_maint_eur_km=_f(row["composition_type_coach_maint_eur_km"]),
+                    material_strategy=row["composition_type_material_strategy"],
+                    n_locos=int(row["composition_type_n_locos"]),
+                    zugchef_crew_factor=_f(row["composition_type_zugchef_crew_factor"]),
+                    length_cost_prop=_f(row["composition_type_length_cost_prop"]),
+                    food_and_beverages=row["composition_type_food_and_beverages"],
+                    indicative_cost_eur_train_km=(
+                        _f(row["composition_type_indicative_cost_eur_train_km"])
+                        if row["composition_type_indicative_cost_eur_train_km"]
+                        is not None
+                        else None
+                    ),
+                    indicative_cost_ct_place_km=(
+                        _f(row["composition_type_indicative_cost_ct_place_km"])
+                        if row["composition_type_indicative_cost_ct_place_km"]
+                        is not None
+                        else None
+                    ),
                 )
 
                 comp_src = _src(row, "source_id", sources)
@@ -912,87 +943,21 @@ class DBDataLoader:
 
                 comp = Composition.from_type(comp_type)
 
-                # --- indicative KPIs, if a reference profile exists ---
-                ref_row = ref_rows_by_comp_row.get(comp_row_id)
-                if ref_row:
-                    ref = CompositionReference(
-                        composition_type_id=comp_id,
-                        ref_distance_km=float(ref_row["ref_distance_km"]),
-                        ref_avg_speed_kmh=float(ref_row["ref_avg_speed_kmh"]),
-                        ref_terrain_score=float(ref_row["ref_terrain_score"]),
-                        ref_operating_days=int(ref_row["ref_operating_days"]),
-                        ref_utilization_by_class={
-                            "Seat": float(ref_row["ref_utilization_seat"]),
-                            "Couchette": float(ref_row["ref_utilization_couchette"]),
-                            "Sleeper": float(ref_row["ref_utilization_sleeper"]),
-                            "Capsule": float(ref_row["ref_utilization_capsule"]),
-                            "Catering": float(ref_row["ref_utilization_catering"]),
-                        },
-                        ref_avg_fare_by_class={
-                            "Seat": float(ref_row["ref_avg_fare_seat"]),
-                            "Couchette": float(ref_row["ref_avg_fare_couchette"]),
-                            "Sleeper": float(ref_row["ref_avg_fare_sleeper"]),
-                            "Capsule": float(ref_row["ref_avg_fare_capsule"]),
-                            "Catering": float(ref_row["ref_avg_fare_catering"]),
-                        },
+                # --- indicative KPIs: seeded calibration values from the
+                #     composition_types columns (calib/CALIBRATION.md).
+                #     Their basis is documented in the column comments
+                #     (→ API descriptions block) and derived in
+                #     calib/CALIBRATION.md — no per-composition row. ---
+                if (
+                    include_indicative
+                    and comp_type.indicative_cost_eur_train_km is not None
+                    and comp_type.indicative_cost_ct_place_km is not None
+                ):
+                    comp.indicative = IndicativeFigures(
+                        cost_eur_per_train_km=(comp_type.indicative_cost_eur_train_km),
+                        cost_ct_per_place_km=(comp_type.indicative_cost_ct_place_km),
                     )
-
-                    ref_src = _src(ref_row, "source_id", sources)
-                    ref_fields = {
-                        "ref_distance_km": ref.ref_distance_km,
-                        "ref_avg_speed_kmh": ref.ref_avg_speed_kmh,
-                        "ref_terrain_score": ref.ref_terrain_score,
-                        "ref_operating_days": ref.ref_operating_days,
-                        "ref_utilization_seat": ref.ref_utilization_by_class["Seat"],
-                        "ref_utilization_couchette": ref.ref_utilization_by_class[
-                            "Couchette"
-                        ],
-                        "ref_utilization_sleeper": ref.ref_utilization_by_class[
-                            "Sleeper"
-                        ],
-                        "ref_utilization_capsule": ref.ref_utilization_by_class[
-                            "Capsule"
-                        ],
-                        "ref_utilization_catering": ref.ref_utilization_by_class[
-                            "Catering"
-                        ],
-                        "ref_avg_fare_seat": ref.ref_avg_fare_by_class["Seat"],
-                        "ref_avg_fare_couchette": ref.ref_avg_fare_by_class[
-                            "Couchette"
-                        ],
-                        "ref_avg_fare_sleeper": ref.ref_avg_fare_by_class["Sleeper"],
-                        "ref_avg_fare_capsule": ref.ref_avg_fare_by_class["Capsule"],
-                        "ref_avg_fare_catering": ref.ref_avg_fare_by_class["Catering"],
-                    }
-                    for field_name, field_val in ref_fields.items():
-                        param_versions.add(
-                            key=f"composition_reference:{comp_id}:{field_name}",
-                            value=field_val,
-                            source=ref_src,
-                        )
-
-                    if include_indicative:
-                        try:
-                            from models.compositions.calc_indicative_figures import (
-                                compute_indicative_figures,
-                            )
-
-                            comp.indicative = compute_indicative_figures(
-                                comp, ref, tracks, stop_infra
-                            )
-                            comp.indicative.reference = ref
-                        except Exception as e:
-                            logger.warning(
-                                "Indicative figures failed for '%s': %s", comp_id, e
-                            )
-                            comp.indicative = None
-                    else:
-                        comp.indicative = None
                 else:
-                    logger.warning(
-                        "No composition_references row for '%s' — indicative figures unavailable.",
-                        comp_id,
-                    )
                     comp.indicative = None
 
                 result[comp_id] = comp

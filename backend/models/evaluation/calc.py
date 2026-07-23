@@ -11,7 +11,7 @@ Cost hierarchy
                 route-wide deduplicated operating time — see Route.loco_propulsion_min)
   Parking     → one ParkingCost per Parking event (parking_eur_day per country)
   Shunting    → one ShuntingCost per Shunting event (shunting_eur_event per country)
-  Composition → fixed fleet costs (amortisation, financing, fix overhead,
+  Composition → fixed fleet costs (amortisation, financing,
                 cleaning), summed across all TripPairs sharing that
                 composition — not per TripPair, since two pairs using the
                 same composition share one fleet, not two
@@ -124,12 +124,16 @@ class SegmentCost:
         return self.variable_km_eur + self.variable_hour_eur + self.infrastructure_eur
 
 
+# Fixed overhead is NOT computed here (changed with CALC_VERSION 0.9.7):
+# the quota applies to ALL other operator operating costs, which only come
+# together — annualised and consistently scoped — in views.py's
+# _build_breakdown(). See fix_overhead there.
 @dataclass
 class CompositionFleetCost:
     """
     Fixed cost for one composition type's fleet, summed across all
     TripPairs using it. Not trip-pair-level: amortisation, financing,
-    fix overhead, and cleaning are all properties of owning N coach sets
+    and cleaning are all properties of owning N coach sets
     of this composition — if two TripPairs share a comp_id, the cost is
     computed once for their combined coach count, not once per pair
     (which would double-count the same fleet).
@@ -140,7 +144,6 @@ class CompositionFleetCost:
     Units per field:
       coach_amortisation_eur  €/year   (purchase_coach_eur / coach_amort_years × n)
       financing_eur           €/year   (purchase_coach_eur × financing_quota_per × n)
-      fix_overhead_eur        €/year   (coach_amortisation_eur × fix_overhead_quota_per)
       cleaning_eur            €/operating-day  (cleaning_services_eur_day × n)
     """
 
@@ -150,17 +153,11 @@ class CompositionFleetCost:
     )
     coach_amortisation_eur: float  # €/year
     financing_eur: float  # €/year
-    fix_overhead_eur: float  # €/year
     cleaning_eur: float  # €/operating-day
 
     @property
     def total_eur(self) -> float:
-        return (
-            self.coach_amortisation_eur
-            + self.financing_eur
-            + self.fix_overhead_eur
-            + self.cleaning_eur
-        )
+        return self.coach_amortisation_eur + self.financing_eur + self.cleaning_eur
 
 
 @dataclass
@@ -215,7 +212,7 @@ class RouteCost:
     Parking/Shunting). Parking and shunting costs live in EvaluationResult
     as separate lists, one cost object per event.
 
-    loco_eur: €/trip-cycle (loco_lease_eur_h × loco_propulsion_min / 60)
+    loco_eur: €/trip-cycle (n_locos × loco_lease_eur_h × loco_propulsion_min / 60)
     """
 
     route_id: str
@@ -293,7 +290,7 @@ class ODSegmentLoad:
     destination_stop_id: str
     class_main: str
     places_sold: int  # annual
-    density: float  # space factor from Composition.density_by_class
+    density: float  # space factor: length density m/place (Composition.density_by_class_main_length)
 
     place_km: float  # places_sold × distance_km
     place_hours: float  # places_sold × driving_h
@@ -379,12 +376,6 @@ class EvaluationResult:
 def _calc_stop_cost(
     trip_id: str, stop: Stop, stop_infra: StopInfraCollection, composition: Composition
 ) -> StopCost:
-    # TODO: composition.driver_overhead_min / composition.crew_overhead_min
-    # (per-trip overhead per Operator docstring: "Billable hours = driving
-    # time + operator_driver_overhead_h") are loaded but not applied anywhere
-    # in this file yet — driver/crew billable hours currently only reflect
-    # dwell + driving time, not the per-trip overhead on top. Same class of
-    # gap as the driver_factor/total_crew fix above; deferred for now.
     sp = stop_infra.get(stop.stop_id)
     station_charge_eur = sp.stop_charge_eur if sp else 0.0
     country_code = stop.country_code
@@ -482,15 +473,12 @@ def _calc_composition_fleet_costs(route: Route) -> list[CompositionFleetCost]:
             else 0.0
         )
         financing_eur = c.purchase_coach_eur * c.financing_quota_per * n  # €/year
-        fix_overhead_eur = coach_amortisation_eur * c.fix_overhead_quota_per  # €/year
-
         results.append(
             CompositionFleetCost(
                 comp_id=comp_id,
                 coaches_required=n,
                 coach_amortisation_eur=coach_amortisation_eur,
                 financing_eur=financing_eur,
-                fix_overhead_eur=fix_overhead_eur,
                 cleaning_eur=c.cleaning_services_eur_day * n,  # €/operating-day
             )
         )
@@ -507,7 +495,12 @@ def _calc_route_cost(route: Route, tracks: TrackInfraCollection) -> RouteCost:
     in _calc_parking_costs and _calc_shunting_costs."""
     composition = route.trip_pairs[0].composition
     loco_eur = (
-        composition.loco_full_service_lease_eur_h * route.loco_propulsion_min / 60.0
+        # n_locos scales the full-service lease; the energy-weight effect
+        # of additional locos follows with the energy model calibration
+        composition.n_locos
+        * composition.loco_full_service_lease_eur_h
+        * route.loco_propulsion_min
+        / 60.0
     )
     return RouteCost(route_id=route.route_id, loco_eur=loco_eur)
 
@@ -640,7 +633,10 @@ def compute_segment_passenger_loads(
     loads: dict[tuple[str, int], SegmentPassengerLoad] = {}
 
     for pair in route.trip_pairs:
-        density_by_class = pair.composition.density_by_class
+        # space weighting now uses the derived length density (m/place,
+        # real section geometry) — successor of the retired abstract
+        # density_by_class (2026-07-22); same role, physical units
+        density_by_class = pair.composition.density_by_class_main_length
         for trip in pair.trips:
             trip_stop_idx = stop_indices[trip.trip_id]
             for seg_idx in range(len(trip.segments)):

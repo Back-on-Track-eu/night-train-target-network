@@ -29,7 +29,7 @@ from dataclasses import dataclass
 # VERSION
 # =============================================================================
 
-CALC_VERSION: str = "0.9.6"
+CALC_VERSION: str = "0.9.8"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -39,6 +39,7 @@ GIT_SHA: str = "unknown"  # injected by CI
 # so rounding them to 2dp quantizes real differences into noise (the root
 # cause of the 0.9.4 per_available_place_km divergence — see CHANGELOG 0.9.5).
 NORMALISATION_NDIGITS: dict[str, int] = {
+    "by_class_main": 2,
     "per_year": 2,
     "per_operating_day": 2,
     "per_train_km": 4,
@@ -62,6 +63,46 @@ CALC_MODEL_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.8": {
+        "date": "2026-07-22",
+        "author": "david",
+        "changes": "Class-main cost allocation (calibration model, "
+        "calib/CALIBRATION.md): every cost leaf is attributable to "
+        "class_mains on five bases — hardware (X·length + (1−X)·weight of "
+        "revenue space, service areas per head; covers driver, loco, "
+        "maintenance, cleaning, capital, fix overhead, shunting, tac, "
+        "station charges, parking — the 0.9.4 revenue-share rule for "
+        "shunting/parking is retired), crew (per-coach factors), energy "
+        "(per-coach weight by places), stockings (native class rates), "
+        "revenue (ticket revenue; var_overhead/EBIT). BREAKING for the "
+        "frontend: per_sold_place_km is now a dict per class_main — each "
+        "class's allocated cost over ITS OWN sold place-km (50% couchette "
+        "occupancy doubles per-sold-couchette cost); new by_class_main "
+        "view carries the full per-class breakdown. Values in all "
+        "class-dimensioned cells shift (structure otherwise stable): "
+        "real-geometry allocation replaces the density proxy — e.g. seat "
+        "share in REF-PREM-12 rises from 4.0% (density) to 9.4%.",
+    },
+    "0.9.7": {
+        "date": "2026-07-21",
+        "author": "david",
+        "changes": "Composition cost calibration v2 (calib/CALIBRATION.md). "
+        "BREAKING for stored evaluations and frontend: (1) fix_overhead_eur "
+        "moved from CompositionFleetCost (calc.py) to views.py "
+        "_build_breakdown() and changed base — now quota × all other "
+        "annualised operator operating costs (variable excl. var_overhead + "
+        "fixed), per the operators DDL semantics, instead of quota × coach "
+        "amortisation only. evaluation_body's composition_fleet_costs lose "
+        "the fix_overhead_eur key; the breakdown leaf stays. (2) driver/crew "
+        "overhead hours removed end to end (schema columns dropped — roster "
+        "inefficiency is embedded in the deployment-hour rates). (3) Seed "
+        "recalibrated throughout (operators STD-REF/STD-NEW with "
+        "material-tiered loco lease 161/174, EBIT 0.10, per-metre purchase "
+        "model, 2032 price basis) — all evaluated figures shift. (4) "
+        "IndicativeFigures carries seeded calibration KPIs "
+        "(cost_eur_per_train_km, cost_ct_per_place_km) instead of "
+        "placeholders; cost_eur_per_place_km_by_class dropped.",
+    },
     "1.0.0": {
         "date": "2026-06-25",
         "author": "david",
@@ -251,6 +292,21 @@ class CalcFormula:
 
 
 CALC_FORMULAS: dict[str, CalcFormula] = {
+    "class_main_allocation": CalcFormula(
+        latex=r"s_{c} = (1-f_{svc})\left(X \frac{L_c}{L_{rev}} + (1-X)\frac{W_c}{W_{rev}}\right) + f_{svc}\frac{P_c}{P}",
+        description="Hardware-cost share of class_main c: X-blend of its "
+        "section length/weight over the revenue space (excl. service "
+        "areas), plus the service-area fraction f_svc allocated per "
+        "place. X = composition_type_length_cost_prop (0.7). Crew, "
+        "energy, stockings and revenue leaves use their own native bases "
+        "— see views.ClassMainShares.",
+    ),
+    "per_sold_place_km_by_class": CalcFormula(
+        latex=r"c_{c} = \frac{s_{c} \cdot C}{pkm^{sold}_{c}}",
+        description="Per-sold-place-km cost of class_main c: its "
+        "allocated cost share over its OWN annual sold place-km. Unsold "
+        "capacity concentrates cost on sold places within the class.",
+    ),
     # ------------------------------------------------------------------
     # Every key below matches, verbatim, a field name in breakdown_to_dict()
     # output (models/evaluation views under the "views" section) — see
@@ -312,9 +368,13 @@ CALC_FORMULAS: dict[str, CalcFormula] = {
         "operator's financing quota and the number of coaches required.",
     ),
     "fix_overhead_eur": CalcFormula(
-        latex=r"C_{fix,oh} = C_{coach,amort} \times q_{fix,oh}",
-        description="Fixed overhead: applied as a share of this composition's own "
-        "annual coach amortisation cost.",
+        latex=r"C_{fix,oh} = q_{fix,oh} \times \left(C_{op,var} - C_{var,oh} + C_{op,fix}\right)",
+        description="Fixed overhead: the operator's quota applied to all other "
+        "annualised operator operating costs — variable costs excluding the "
+        "revenue-side variable overhead, plus fixed costs. Third-party "
+        "infrastructure charges are outside the base. Computed per breakdown "
+        "cell in views.py (additive, so cells sum to the route total); "
+        "changed from share-of-amortisation with CALC_VERSION 0.9.7.",
     ),
     "cleaning_eur": CalcFormula(
         latex=r"C_{clean} = c_{clean/day} \times n \times d_{op}",
