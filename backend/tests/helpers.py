@@ -35,7 +35,7 @@ _WEEKS_PER_SEASON = 26
 def build_route(
     api_base: str,
     stops: list[str],
-    composition_id: str = "STD-7.1",
+    composition_id: str = "NEW-BAL-7",
     timeout: int = 90,
     headers: dict | None = None,
     **extra,

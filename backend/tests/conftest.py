@@ -52,7 +52,12 @@ STOPS_BERLIN_DRESDEN_WIEN = ["DE_BERLIN_HBF", "DE_DRESDEN_HBF", "AT_WIEN_HBF"]
 STOPS_BERLIN_ZUERICH_WIEN = ["DE_BERLIN_HBF", "CH_ZUERICH_HB", "AT_WIEN_HBF"]
 STOPS_COPENHAGEN_STOCKHOLM = ["DK_COPENHAGEN", "SE_STOCKHOLM_C"]
 
-DEFAULT_COMPOSITION = "STD-7.1"
+# Two calibrated test compositions — one per material strategy, so the
+# suite exercises both mechanics end to end: STD-NEW operator (loco 174,
+# 30y/0.909 amortisation/availability, maint 1.00×n, hsr_allowed) vs
+# STD-REF (161, 12y/0.80, 1.30×n, no HSR, v_max 200).
+DEFAULT_COMPOSITION = "NEW-BAL-7"
+REF_COMPOSITION = "REF-BUD-6"
 
 
 # =============================================================================
@@ -251,7 +256,7 @@ def hsr_scenario(db_cur):
 #   1000+    tests/test_50_proposals_api.py's own dynamically-saved proposals
 @pytest.fixture(scope="session")
 def route_berlin_wien(api_base):
-    """2-stop, 2-country route: Berlin → Wien (DE, AT), STD-7.1."""
+    """2-stop, 2-country route: Berlin → Wien (DE, AT), NEW-BAL-7."""
     return build_route(
         api_base,
         STOPS_BERLIN_WIEN,

@@ -112,7 +112,10 @@ class TestRouteGeometry:
         """Same stops, different compositions with identical routing flags
         (both STD, hsr_allowed=True) → identical route distance."""
         distances = {}
-        for i, comp_id in enumerate(("STD-3.1", "STD-7.1")):
+        # Same material family on purpose: REF compositions route differently
+        # (hsr_allowed=False, v_max 200) — distance invariance only holds
+        # within one material strategy.
+        for i, comp_id in enumerate(("NEW-BAL-7", "NEW-BAL-14")):
             route = build_route(
                 api_base,
                 STOPS_BERLIN_WIEN,
@@ -121,7 +124,7 @@ class TestRouteGeometry:
                 proposal_version=i + 1,
             )
             distances[comp_id] = trip_distance_km(trip_by_direction(route, 0))
-        assert distances["STD-3.1"] == distances["STD-7.1"]
+        assert distances["NEW-BAL-7"] == distances["NEW-BAL-14"]
 
 
 # =============================================================================
@@ -221,7 +224,7 @@ class TestEnergyModel:
         """The dummy model ignores composition weight entirely — same stops,
         different compositions → identical total energy."""
         energies = {}
-        for i, comp_id in enumerate(("STD-3.1", "STD-13.1")):
+        for i, comp_id in enumerate(("NEW-BAL-7", "NEW-BAL-14")):
             route = build_route(
                 api_base,
                 STOPS_BERLIN_WIEN,
@@ -230,7 +233,7 @@ class TestEnergyModel:
                 proposal_version=i + 1,
             )
             energies[comp_id] = sum(trip_energy_kwh(t) for t in all_trips(route))
-        assert energies["STD-3.1"] == pytest.approx(energies["STD-13.1"], rel=1e-6)
+        assert energies["NEW-BAL-7"] == pytest.approx(energies["NEW-BAL-14"], rel=1e-6)
 
 
 # =============================================================================

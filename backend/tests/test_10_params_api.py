@@ -218,14 +218,68 @@ class TestCompositions:
             missing = sections - set(comp)
             assert missing == set(), f"{comp['comp_id']} missing sections: {missing}"
 
+    def test_service_areas_reduce_wo_service_totals(self, compositions_body):
+        """REF-PREM-12 carries a dining car: wo_service totals must be
+        strictly smaller than full totals; pure-revenue compositions are
+        equal both ways."""
+        comps = {c["comp_id"]: c for c in compositions_body["compositions"]}
+        # the dining car carries zero revenue space — visible in the
+        # coach_types catalog (composition wo_service totals are internal)
+        ark = compositions_body["coach_types"]["ARkimmbz"]
+        assert ark["length_wo_service_m"] == 0.0
+        assert ark["places_total"] == 0 and ark["crew_factor"] == 2.0
+        assert comps["NEW-BAL-7"]["staff"]["zugchef_crew_factor"] == 1.19
+        assert comps["NEW-BAL-14"]["staff"]["zugchef_crew_factor"] == 2.38
+        # allocation value pin: REF-PREM-12 seat carries its dining-car
+        # per-head slice on top of the pure space share
+        prem_mix = comps["REF-PREM-12"]["cost_allocation"]["by_class_main"]
+        assert prem_mix["Seat"] == pytest.approx(0.0944, abs=0.001)
+
+    def test_coach_types_catalog(self, compositions_body):
+        """Top-level coach_types: every referenced type once, equipment
+        keys complete, class_ids resolve into the classes section."""
+        cts = compositions_body["coach_types"]
+        assert len(cts) == 24
+        all_class_ids = {
+            e["class_id"] for lst in compositions_body["classes"].values() for e in lst
+        }
+        for ct in cts.values():
+            assert set(ct["equipment"]) == {
+                "has_wifi",
+                "has_bikes",
+                "has_climatization",
+                "has_plugs",
+            }
+            for cid in ct["class_ids"]:
+                assert cid in all_class_ids
+
+    def test_classes_catalog_grouped_by_class_main(self, compositions_body):
+        """Top-level classes section: every class_id once, grouped by
+        class_main, with carrying coach type and places."""
+        classes = compositions_body["classes"]
+        assert set(classes) <= {"Seat", "Couchette", "Sleeper", "Capsule"}
+        all_ids = [e["class_id"] for lst in classes.values() for e in lst]
+        assert len(all_ids) == len(set(all_ids)), "class_ids must be unique"
+        assert len(all_ids) == 25  # one per coach section (2026-07-22)
+        for cm, lst in classes.items():
+            for e in lst:
+                assert e["places"] > 0 and e["coach_type_id"]
+
     def test_capacity_non_empty_with_places_and_density(self, compositions_body):
         """Every composition has at least one capacity class, each with a
         positive place count and positive density."""
         for comp in compositions_body["compositions"]:
-            assert len(comp["capacity"]) > 0, f"{comp['comp_id']} has empty capacity"
-            for cls, cap in comp["capacity"].items():
+            assert len(comp["capacity"]["by_class"]) > 0, (
+                f"{comp['comp_id']} has empty capacity"
+            )
+            for cls, cap in comp["capacity"]["by_class"].items():
                 assert cap["places"] > 0, f"{comp['comp_id']}.{cls}: places <= 0"
-                assert cap["density"] > 0, f"{comp['comp_id']}.{cls}: density <= 0"
+                assert cap["density_length_m_per_place"] > 0, (
+                    f"{comp['comp_id']}.{cls}: length density <= 0"
+                )
+                assert cap["density_weight_t_per_place"] > 0, (
+                    f"{comp['comp_id']}.{cls}: weight density <= 0"
+                )
 
     def test_coach_list_matches_count(self, compositions_body):
         """coaches.count equals the length of coaches.list, and positions are
@@ -249,16 +303,50 @@ class TestCompositions:
             assert op["crew_costs_eur_h"] > 0
 
     def test_indicative_kpis_present(self, compositions_body):
-        """At least one composition carries indicative KPIs (placeholder
-        figures today — see calc_indicative_figures.py — but non-zero)."""
-        with_ind = [
-            c
-            for c in compositions_body["compositions"]
-            if c.get("indicative") is not None
-        ]
-        assert len(with_ind) >= 1
-        for comp in with_ind:
-            kpis = comp["indicative"]["kpis"]
+        """Indicative block carries the seeded calibration KPIs (per-train-km
+        and ct-per-place-km) plus the reference profile; the per-class
+        placeholder breakdown is gone since CALC_VERSION 0.9.7."""
+        comps = {c["comp_id"]: c for c in compositions_body["compositions"]}
+        with_ind = [c for c in comps.values() if c.get("indicative")]
+        assert with_ind, "no composition returned indicative KPIs"
+        for c in with_ind:
+            kpis = c["indicative"]["kpis"]
             assert kpis["cost_eur_per_train_km"] > 0
-            assert len(kpis["cost_eur_per_place_km_by_class"]) > 0
-            assert all(v > 0 for v in kpis["cost_eur_per_place_km_by_class"].values())
+            assert kpis["cost_ct_per_place_km"] > 0
+            assert "cost_eur_per_place_km_by_class" not in kpis
+            assert c["material_strategy"] in ("new", "refurbished")
+            assert c["routing"]["total_length_m"] > 0
+            r = c["routing"]
+            assert "total_length_wo_service_m" not in r  # internal only
+            assert r["n_locos"] >= 1
+            s = c["staff"]
+            assert s["zugchef_crew_factor"] > 0
+            assert s["crew_factor_total"] == pytest.approx(
+                s["crew_factor_coaches"] + s["zugchef_crew_factor"], abs=1e-3
+            )
+            assert set(c["cost_allocation"]) == {"by_class_main"}
+            assert "food_and_beverages" in c["equipment"]
+            cap = c["capacity"]
+            assert cap["avg_density_length_m_per_place"] > 0
+            assert cap["avg_density_weight_t_per_place"] > 0
+            assert "energy" not in c  # dropped from the API for now
+            assert "length_cost_prop" not in c["cost_allocation"]
+            mix = c["cost_allocation"]["by_class_main"]
+            assert sum(mix.values()) == pytest.approx(1.0, abs=0.001)
+            cap = c["capacity"]
+            assert cap["total_places"] == sum(
+                v["places"] for v in cap["by_class"].values()
+            )
+            sph = c["staff"]["costs_per_hour"]
+            assert sph["total_staff_eur_h"] == pytest.approx(
+                sph["driver_eur_h"] * c["staff"]["driver_factor"]
+                + sph["crew_eur_h"] * c["staff"]["crew_factor_total"],
+                abs=0.05,
+            )
+            assert len(c["coaches"]["list"]) == c["coaches"]["count"]
+            for entry in c["coaches"]["list"]:
+                assert entry["coach_type_id"] in compositions_body["coach_types"]
+        # the KPI basis is carried by the column-comment descriptions
+        desc = compositions_body["descriptions"]
+        ind_desc = desc["indicative"]["kpis"]["cost_eur_per_train_km"]
+        assert "S41" in ind_desc and "2032" in ind_desc

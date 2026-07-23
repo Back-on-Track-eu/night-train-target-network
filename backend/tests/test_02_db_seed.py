@@ -27,16 +27,15 @@ EXPECTED_SCHEMAS = {"admin", "input_params", "scenario", "proposals"}
 # break the suite, while dropping seed data still fails loudly.
 EXPECTED_ROW_COUNTS = {
     "admin.users": 3,  # David, Bjarne, test_script (suite identity)
-    "input_params.sources": 2,
+    "input_params.sources": 3,  # 2 legacy + calibration umbrella
     "input_params.countries": 28,  # 7 original routing countries + 21 further EU27
-    "input_params.service_classes": 1,
-    "input_params.operators": 1,
-    "input_params.operator_class_costs": 1,
-    "input_params.coach_types": 3,
-    "input_params.coach_type_classes": 3,
-    "input_params.composition_types": 10,  # STD-3.1 … STD-13.1
-    "input_params.composition_type_coaches": 1,
-    "input_params.composition_references": 1,
+    "input_params.service_classes": 25,  # one per coach section (class_id naming rule)
+    "input_params.operators": 2,  # STD-REF / STD-NEW
+    "input_params.operator_class_costs": 50,  # 2 operators × 25 section classes (fan-out by class_main)
+    "input_params.coach_types": 24,  # real coach types (workbook 2026-07-22)
+    "input_params.coach_type_classes": 25,
+    "input_params.composition_types": 8,  # the eight calibrated standard compositions
+    "input_params.composition_type_coaches": 76,
     "input_params.track_infrastructure_defaults": 3,  # 1 per scenario
     "input_params.track_infrastructures": 84,  # 3 full-table snapshots × 28 countries
     "input_params.stop_infrastructure_defaults": 3,  # 1 per scenario
@@ -132,19 +131,6 @@ def test_coach_type_classes_have_places(db_cur):
     )
     bad = db_cur.fetchone()["n"]
     assert bad == 0, f"{bad} coach_type_class rows have zero or negative places"
-
-
-def test_service_classes_have_no_invalid_density(db_cur):
-    """Density (space consumption per place) is never NULL and never
-    negative. Exactly 0.0 is allowed and expected for non-passenger classes
-    like Catering, which occupy space but sell no places; a NULL or negative
-    value, by contrast, would corrupt capacity weighting."""
-    db_cur.execute(
-        "SELECT service_class_id FROM input_params.service_classes "
-        "WHERE service_class_density IS NULL OR service_class_density < 0"
-    )
-    bad = [row["service_class_id"] for row in db_cur.fetchall()]
-    assert bad == [], f"service_class rows with NULL/negative density: {bad}"
 
 
 def test_track_infra_one_row_per_country_at_pinned_version(db_cur, base_scenario):

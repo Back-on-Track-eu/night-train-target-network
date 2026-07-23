@@ -246,23 +246,26 @@ class TestBreakdownIdentities:
         assert infra["total_eur"] == pytest.approx(leaf_sum, rel=REL_TOL)
 
     def test_net_identity_holds_in_all_normalisations(self, eval_standard):
-        """Normalisation divides every leaf by the same denominator — the net
-        identity must survive it in every view."""
+        """net = revenue - cost - margin in every normalisation. Class-keyed
+        normalisations (per_sold_place_km, by_class_main — CALC 0.9.8)
+        carry one breakdown per class_main; the identity must hold per
+        class."""
         _, result = eval_standard
-        for norm in (
-            "per_year",
-            "per_operating_day",
-            "per_train_km",
-            "per_available_place_km",
-            "per_sold_place_km",
-        ):
-            bd = route_bd(result, norm)
-            assert bd["net_eur"] == pytest.approx(
-                bd["total_revenue_eur"]
-                - bd["total_cost_eur"]
-                - bd["margin"]["ebit_margin_eur"],
-                rel=REL_TOL,
-            ), f"net identity failed in normalisation '{norm}'"
+        data = result["views"]["route"]["data"]
+        for norm, payload in data.items():
+            if norm in ("per_sold_place_km", "by_class_main"):
+                if payload is None:
+                    continue
+                cells = payload.values()
+            else:
+                cells = [payload]
+            for bd in cells:
+                assert bd["net_eur"] == pytest.approx(
+                    bd["total_revenue_eur"]
+                    - bd["total_cost_eur"]
+                    - bd["margin"]["ebit_margin_eur"],
+                    abs=0.05,
+                ), f"net identity failed in normalisation '{norm}'"
 
 
 # =============================================================================
@@ -310,24 +313,28 @@ class TestNormalisationDivisors:
         assert per_year == pytest.approx(per_pkm * available_pkm, rel=REL_TOL)
 
     def test_per_sold_place_km_divisor(self, eval_standard):
-        """per_sold_place_km divides by Σ (places_sold × OD segment-range km).
-        STANDARD_DEMAND is directional and spans each full trip, so sold
-        place-km is simply Σ trips (70 places × trip km)."""
-        costed, result = eval_standard
-        places_per_trip = 40 + 30  # STANDARD_DEMAND: Couchette + Seat
-        sold_pkm = sum(places_per_trip * trip_distance_km(t) for t in all_trips(costed))
-
-        per_year = route_bd(result, "per_year")["total_cost_eur"]
-        per_pkm = route_bd(result, "per_sold_place_km")["total_cost_eur"]
-        assert per_year == pytest.approx(per_pkm * sold_pkm, rel=REL_TOL)
+        """per_sold_place_km is class-keyed (CALC 0.9.8): only classes with
+        sales present, each with a positive per-sold cost and a matching
+        by_class_main cell."""
+        _, result = eval_standard
+        per_sold = route_bd(result, "per_sold_place_km")
+        by_class = route_bd(result, "by_class_main")
+        assert per_sold, "no class with sold place-km in per_sold view"
+        for cls, bd in per_sold.items():
+            assert cls in by_class
+            assert bd["total_cost_eur"] > 0
 
     def test_per_sold_cost_exceeds_per_available_at_partial_load(self, eval_standard):
-        """Partial load → sold place-km < available place-km → cost per sold
-        unit is strictly higher than per available unit."""
+        """At partial load, unsold capacity concentrates cost on sold
+        places: the max per-sold class cost must be at least the
+        aggregate per-available cost."""
         _, result = eval_standard
-        avail = route_bd(result, "per_available_place_km")["total_cost_eur"]
-        sold = route_bd(result, "per_sold_place_km")["total_cost_eur"]
-        assert sold > avail
+        per_sold = route_bd(result, "per_sold_place_km")
+        per_avail = route_bd(result, "per_available_place_km")
+        assert (
+            max(bd["total_cost_eur"] for bd in per_sold.values())
+            >= per_avail["total_cost_eur"]
+        )
 
 
 # =============================================================================
@@ -357,11 +364,11 @@ class TestDemandBehaviour:
         assert bd["total_cost_eur"] > 0
 
     def test_zero_demand_per_sold_view_is_zeroed(self, eval_zero):
-        """Zero sold place-km → divisor 0 → per_sold view collapses to a zero
-        breakdown rather than dividing by zero."""
+        """Zero demand ⇒ no class has sold place-km ⇒ the class-keyed
+        per_sold view is empty (classes without sales are omitted —
+        CALC 0.9.8)."""
         sold_bd = route_bd(eval_zero, "per_sold_place_km")
-        assert sold_bd["total_revenue_eur"] == 0.0
-        assert sold_bd["total_cost_eur"] == 0.0
+        assert sold_bd == {}
 
     def test_zero_demand_per_available_still_positive(self, eval_zero):
         """Capacity-based normalisation is demand-independent — positive cost

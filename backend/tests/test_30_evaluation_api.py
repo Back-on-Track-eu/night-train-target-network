@@ -27,6 +27,7 @@ NORMALISATIONS = (
     "per_train_km",
     "per_available_place_km",
     "per_sold_place_km",
+    "by_class_main",
 )
 
 # Every leaf field breakdown_to_dict() emits — the evaluation model must
