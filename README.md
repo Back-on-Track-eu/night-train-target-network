@@ -29,7 +29,16 @@ Each submitted route is scored on:
 
 ## This repository
 
-This repo hosts the technical side of the project — backend and frontend. Data is stored in a PostgreSQL/PostGIS database on Back-on-Track's server.
+This repo hosts the technical side of the project — backend, frontend, and server deployment. Data is stored in a PostgreSQL/PostGIS database on Back-on-Track's server.
+
+## Environments
+
+| | URL | Deployed from |
+|---|---|---|
+| **Staging** (test) | `https://targetnetwork.65.109.137.97.sslip.io` (basic-auth) | every merge to the `staging` branch |
+| **Production** | `https://targetnetwork.back-on-track.eu` | every merge to the `production` branch |
+
+There is no `main` branch: all work lands in `staging` via pull request, and `staging` is merged into `production` once tested. Merges deploy automatically — see [`deploy/bot-server-app/README.md`](deploy/bot-server-app/README.md) for how that works, including a one-command local rehearsal (`./local.sh`).
 
 ## Running the app locally
 
@@ -100,6 +109,7 @@ Working on the frontend day-to-day (VS Code, hot reload, troubleshooting)? See
 | Database layer — schemas, seeding, inspection | [`backend/db/README.md`](backend/db/README.md) |
 | Test suite — layout and every test's purpose | [`backend/tests/README.md`](backend/tests/README.md) |
 | Frontend — stack, structure, conventions | [`frontend/README.md`](frontend/README.md) |
+| Server environments + deploy pipelines (staging/production) | [`deploy/bot-server-app/README.md`](deploy/bot-server-app/README.md) |
 
 ## Contributing
 
@@ -114,9 +124,9 @@ For coordination reasons, please **send a short email before you start working o
 
 We'll be introducing a formal request-control process for pull requests shortly. In the meantime — and after — the basic workflow is:
 
-1. Always pull freshly from `main` before starting any work.
+1. Always pull freshly from `staging` before starting any work (there is no `main`).
 2. Do your work on your own branch.
-3. Open a pull request when ready — it will go through request-control review by the project lead.
+3. Open a pull request targeting `staging` when ready — it will go through request-control review by the project lead. Merging into `staging` deploys to the staging environment automatically.
 4. Keep branch lifetimes short: merge within **days, not months**.
 
 ---
