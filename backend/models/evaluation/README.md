@@ -290,9 +290,46 @@ precision.
 | `normalise_per_operating_day(breakdown, route)` | `operating_days_per_year` | €/operating-day | 2dp |
 | `normalise_per_train_km(breakdown, route, trip_pair=None, scope=None)` | Cycle distance (both directions) × operating days | €/train-km | 4dp |
 | `normalise_per_available_place_km(breakdown, route, trip_pair=None, scope=None)` | Capacity × cycle distance × operating days | €/available-place-km | 6dp |
-| `normalise_per_sold_place_km(breakdown, route, trip_pair=None, scope=None)` | `places_sold` × distance per OD range (`places_sold` is already annual) | €/sold-place-km | 6dp |
+| `normalise_per_sold_place_km(breakdown, route, shares, trip_pair=None, scope=None)` | PER CLASS_MAIN (CALC 0.9.8): the class's allocated cost share ÷ its OWN annual sold place-km — classes without sales omitted | dict per class_main, €/sold-place-km | 6dp |
+| `normalise_by_class_main(breakdown, shares)` | splits every leaf by its allocation basis (see below) | dict per class_main, €/year | 2dp |
 
 ---
+
+## Class-main cost allocation (CALC_VERSION 0.9.8)
+
+Every cost leaf is attributable to class_mains on five bases, computed by
+`build_class_main_shares(composition, revenue_by_class)` from real coach
+section geometry (calibrated in `models/compositions/calib/CALIBRATION.md`,
+formulas in `CALC_FORMULAS["class_main_allocation"]`):
+
+| Basis | Covers | Mechanism |
+|---|---|---|
+| hardware | driver, loco, maintenance, cleaning, capital, fix overhead, shunting, tac, station charges, parking | X·length share + (1−X)·weight share of the revenue space (excl. service areas); the service-area cost fraction is allocated per place — every passenger pays equally for shared areas. X = `composition_type_length_cost_prop` (0.7). Retires the 0.9.4 revenue-share rule for shunting/parking. |
+| crew | crew_eur | native per-section crew factors; the Zugchef factor (whole-train role) per head |
+| energy | energy_eur | per-coach weight attributed to the coach's classes by places (loco weight follows with the energy model calibration) |
+| stockings | svc_stockings_eur | native class rates × places |
+| revenue | var_overhead, EBIT, revenue leaves | class ticket revenue (places_sold × avg_price); falls back to per-head when no demand is attached |
+
+Shares per basis sum to 1, leaves are additive, so the per-class
+breakdowns of any cell sum back to that cell exactly — the same holds
+across country/section/OD/stop cells since the bases are additive.
+
+Two consumers share this machinery: the evaluation's `by_class_main`
+view and the compositions API's `cost_allocation.by_class_main`
+(hardware basis) — one implementation, no drift possible.
+
+**Per-sold semantics:** each class's per-sold cost divides its allocated
+cost by its *own* sold place-km. Unsold capacity concentrates cost on
+sold places within the class: at 50% couchette occupancy, the per-sold
+couchette cost doubles. Section-view scopes carry per-class sold
+place-km (class cells: their own class only); zero demand yields an
+empty dict, not null.
+
+**Weighted place-km:** the space weighting now uses the derived length
+density (m/place from real section geometry,
+`density_by_class_main_length`) — successor of the retired
+`service_class_density` column; same role, physical units. Values
+shift, structure stays.
 
 ## Views, explained for display
 
@@ -343,7 +380,8 @@ Two orthogonal selectors, always:
 | `per_operating_day` | €/operating day | compare against daily operating benchmarks |
 | `per_train_km` | €/train-km (annual basis) | compare routes of different lengths |
 | `per_available_place_km` | €/place-km offered | compare cost efficiency independent of demand |
-| `per_sold_place_km` | €/place-km sold | compare directly against average fares per km |
+| `per_sold_place_km` | €/place-km sold, per class_main | compare each class directly against its average fares per km |
+| `by_class_main` | €/year per class_main | the full cost/revenue split across classes |
 
 Inside every cell, `values` (or `data` for `route`) is the same nested
 cost/revenue/margin `Breakdown` dict — so one rendering component can serve
@@ -462,7 +500,7 @@ relation's average fare per km:
   fixed costs are spread by distance/time/place-km shares (rules in the
   Layer 2 sections above). Sums across a dimension always reproduce the
   parent total.
-- `per_sold_place_km` divides by demand — a route with no `od_pairs` has no
+- `per_sold_place_km` divides by class demand — a route with no `od_pairs` has no
   sold place-km, so this normalisation is not meaningful there.
 - In `per_trip_per_stop`, through-riders don't appear at intermediate stops;
   a stop's revenue reflects only passengers boarding or alighting there.

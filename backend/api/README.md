@@ -475,18 +475,36 @@ one entry per country: `country_code` plus a field object for each of
 | `version` | int | DB row version of the source row |
 | `source_id` | int or null | Key into the top-level `sources` map — not an inline source object |
 
-**`compositions`** returns `compositions` and `operators`. Composition
-fields are grouped by concern rather than individually versioned —
-`routing` (weight, speed, HSR, dwell minima), `staff`, `energy` (regression
-factors), `capacity` (per `class_main`: `{places, density}`), `equipment`,
-`coaches` (`{count, list}` ordered by position), `fixed_costs`,
-`variable_km`, and `indicative` (placeholder KPIs + reference profile, may
-be `null`). Each composition and operator carries a `source_ids` **list**
-referencing the shared `sources` map, since their fields are sourced as a
-whole entity, not per field. Capacity is keyed by `class_main`
-(Seat/Couchette/Sleeper/Capsule/Catering), not the granular `class_id` —
-see the `CALC_VERSION` 1.2.0 changelog note in
-`models/evaluation/version.py`.
+**`compositions`** returns `compositions`, `operators`, `classes` and
+`coach_types` (redesigned 2026-07-22 — real-coach catalog, see
+`models/compositions/calib/CALIBRATION.md`). Composition fields are
+grouped by concern:
+`routing` (weight, **total_length_m**, speed, HSR, dwell minima,
+**n_locos**), `staff` (driver/crew factors incl. the
+**zugchef_crew_factor** — total = Σ coach factors + Zugchef — and
+**costs_per_hour** with the combined `total_staff_eur_h`), `capacity`
+(**total_places**, the full-composition **average densities**
+`avg_density_length_m_per_place` / `avg_density_weight_t_per_place`
+— service areas included — and **by_class** per `class_main`:
+`{places, density_length_m_per_place, density_weight_t_per_place}` from
+real section geometry), `equipment` (amenity OR-aggregations incl.
+**has_wifi**, plus the **food_and_beverages** catering concept),
+`coaches` (`{count, list}` — the ordered formation referencing the
+top-level **coach_types** catalog), `fixed_costs`, `variable_km`,
+**cost_allocation** (`by_class_main`: each class's blended cost
+proportion — the workbook cost_acc columns; identical to the
+evaluation's by_class_main hardware basis; sums to 1), and `indicative`
+(seeded calibration KPIs + basis via `descriptions`, may be `null`).
+The energy regression factors are not exposed (pending the energy model
+calibration).
+
+**`coach_types`** (top-level, keyed by `coach_type_id`): physicals
+incl./excl. service areas (a dining car has zero revenue space), crew
+factor, places, equipment, `class_ids` referencing **`classes`**, own
+`source_ids`. **`classes`** groups every `class_id`
+("<coach_type_id> - <section label>") by `class_main` with carrying
+coach type and places. Each composition and operator carries a
+`source_ids` **list** referencing the shared `sources` map.
 
 </details>
 
@@ -748,7 +766,9 @@ excluded — see [Evaluation](#evaluation) for those):
 | `min_boarding_time_min`, `min_alighting_time_min` | Dwell time inputs |
 | `energy_factor_weight`, `energy_factor_speed`, `energy_factor_terrain` | Energy model inputs |
 | `total_weight_t`, `total_crew` | Physical properties |
-| `places_by_class`, `density_by_class` | Capacity, keyed by service class |
+| `places_by_class` | Capacity, keyed by class_main |
+| `density_by_class_main_length`, `density_by_class_main_weight` | Derived densities (m and t per place) from real section geometry — replace the retired `density_by_class` (2026-07-22) |
+| `total_length_m` | Composition length (m) |
 
 **`segments[]`** (on `outbound`/`return_trip`) — one entry per leg between two consecutive stops:
 
@@ -917,7 +937,8 @@ Each cell contains the same breakdown under five **normalisations** (not to be c
 | `per_operating_day` | €/operating-day | Per day the service runs |
 | `per_train_km` | €/train-km | Per annual train-km (cycle distance × operating days; a section's own distance for section cells) |
 | `per_available_place_km` | €/available-place-km | Per capacity × distance |
-| `per_sold_place_km` | €/sold-place-km | Per actual passenger × distance |
+| `per_sold_place_km` | dict per class_main, €/sold-place-km | Each class's allocated cost ÷ its OWN sold place-km (CALC 0.9.8) — 50% occupancy doubles the per-sold cost; classes without sales omitted; `null` only for scopes without per-class data |
+| `by_class_main` | dict per class_main, same units as the cell | The full breakdown split by the class allocation model — per-class cells sum back to the cell total |
 
 Each of those five is itself a nested cost/revenue/margin breakdown:
 
