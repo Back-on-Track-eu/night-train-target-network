@@ -1,3 +1,7 @@
+<p align="center">
+  <a href="https://back-on-track.eu"><img src="docs/bot-logo.png" alt="Back-on-Track" width="130"/></a>
+</p>
+
 # Night Train Target Network
 
 An open-source initiative by [Back-on-Track](https://back-on-track.eu) to design and evaluate a European night train target network that could realistically be implemented by 2032.
