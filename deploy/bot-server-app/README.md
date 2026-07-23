@@ -33,12 +33,19 @@ cd /opt/targetnetwork-staging && git checkout staging
 cd deploy/bot-server-app
 cp .env.example .env && vim .env        # fill; chmod 600 .env
 
+docker compose build
 docker compose up -d db                 # initdb runs create_*.sql = latest state
+docker compose run --rm --no-deps api python db/dev/seed.py
+                                        # one-time seed (params + demo data).
+                                        # --no-deps: skips the migrate gate,
+                                        # which can't pass before the baseline
 docker compose run --rm migrate python db/migrate.py --baseline
-                                        # DB born at latest state: record all
-                                        # migrations as applied, execute nothing
-docker compose run --rm api python db/dev/seed.py   # one-time seed (params + demo data)
-docker compose up -d --build
+                                        # AFTER seed, never before: seed.py drops
+                                        # and recreates the schemas, taking the
+                                        # tracking table with it. A DB born from
+                                        # the creates is at latest state: record
+                                        # all migrations as applied, execute none
+docker compose up -d
 ```
 
 After first-time setup, never run seed.py or `--baseline` on the environment
