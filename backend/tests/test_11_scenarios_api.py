@@ -7,8 +7,8 @@ Response contract for the read-only scenario listing endpoint:
 
 Covers the three-group response layout (current_base / current_scenarios /
 historical_scenarios), per-scenario field shape, count consistency, and
-that the seeded base/what-if scenarios (see conftest.py: base_scenario,
-whatif_scenario) land in the groups their flags dictate.
+that the seeded scenarios (see conftest.py: base_scenario, hsr_scenario,
+historical_scenario) land in the groups their flags dictate.
 """
 
 import pytest
@@ -101,12 +101,24 @@ class TestScenariosGrouping:
         assert current_base[0]["scenario_id"] == base_scenario["scenario_id"]
         assert current_base[0]["scenario_key"] == base_scenario["scenario_key"]
 
-    def test_whatif_scenario_is_in_current_scenarios_group(
-        self, scenarios_body, whatif_scenario
+    def test_hsr_scenario_is_in_current_scenarios_group(
+        self, scenarios_body, hsr_scenario
     ):
-        """The seeded what-if lineage head appears in current_scenarios,
-        not current_base or historical_scenarios."""
+        """The seeded HSR-allowed lineage head appears in
+        current_scenarios, not current_base or historical_scenarios."""
         current_keys = {
             s["scenario_key"] for s in scenarios_body["current_scenarios"]["scenarios"]
         }
-        assert whatif_scenario["scenario_key"] in current_keys
+        assert hsr_scenario["scenario_key"] in current_keys
+
+    def test_historical_scenario_is_in_historical_scenarios_group(
+        self, scenarios_body, historical_scenario
+    ):
+        """The deprecated 2026 Base Line scenario (is_current_scenario=
+        FALSE) appears in historical_scenarios, not current_base or
+        current_scenarios."""
+        historical_keys = {
+            s["scenario_key"]
+            for s in scenarios_body["historical_scenarios"]["scenarios"]
+        }
+        assert historical_scenario["scenario_key"] in historical_keys

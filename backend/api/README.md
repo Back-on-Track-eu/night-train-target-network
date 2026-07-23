@@ -26,8 +26,7 @@ stack. Each endpoint section below links its own example files.
 - [Feedback](#feedback)
   - [`POST /api/feedback`](#post-feedback) — submit feedback
   - [`GET /api/feedback/categories`](#feedback-categories) — suggested category/sub_category values
-- [Proposals](#proposals)
-  - [`POST /api/proposal`](#post-proposal) — save a proposal
+- [Proposals](#proposals) — persisted automatically by plan/calc (persist-on-calc)
   - [`GET` / `POST /api/proposals`](#list-proposals) — list proposals
   - [`GET /api/proposal/<id>`](#get-proposal) — load a proposal
 - [Input Parameters](#input-parameters)
@@ -89,14 +88,28 @@ Dual-plane model, normalized to one trust ladder
 
 Endpoint protection: decorators in `api/auth_middleware.py`
 (`@require_auth`, `@optional_auth`, `@require_trust(level)`).
-`POST /api/proposal` and `POST /api/feedback` run `@optional_auth`: a
-bearer token's identity overrides the body's `user_id`; tokenless requests
-keep the old body-carried contract until the frontend has a login flow.
+`POST /api/route/plan`, `POST /api/evaluation/calc`, and `POST
+/api/feedback` run `@optional_auth`. Since persist-on-calc (2026-07-16)
+the bearer identity decides persistence: authenticated plan/calc calls
+(guest token is enough) persist their responses as proposals, tokenless
+calls compute only. The intended frontend flow is guest-first — obtain a
+guest JWT on first visit, send it on every plan/calc, and merge on
+registration (below).
+
+**Guest → registered merge:** calling `POST /api/auth/verify` **with the
+guest session's JWT attached as the bearer** reassigns everything that
+guest owns (proposals, feedback) to the verified account in one atomic
+transaction and marks the guest row (`admin.users.merged_into_user_id`).
+The old guest token is rejected from then on with an explicit
+account-merged `401`. This covers both registering as the last step after
+playing around and logging in to an existing account from a guest
+session; an absent or unusable bearer never blocks the verification
+itself (`merged_guest` is simply `null`).
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/api/auth/request-code` | Register/login: send OTP to email (`5/hour` per IP) |
-| `POST` | `/api/auth/verify` | Verify OTP → `{token, user_id, display_name, is_guest}` |
+| `POST` | `/api/auth/verify` | Verify OTP → `{token, user_id, display_name, is_guest, merged_guest}` — guest bearer attached triggers the merge (see above) |
 | `POST` | `/api/auth/guest` | Anonymous guest session → guest JWT (`20/hour` per IP) |
 
 Config (see `docker/.env.example`): `JWT_SECRET` (required),
@@ -249,103 +262,68 @@ wrong, e.g. to the wrong distance).
 
 ## Proposals
 
-Save, list, and load night train proposals. No auth yet — requests carry
-`user_id` directly. Every user can see and load every proposal; a save
-either creates a new proposal, adds a version to one you own, or branches
-a new proposal from one you don't (see below).
+List and load night train proposals. **There is no save endpoint** — since
+persist-on-calc (2026-07-16), `POST /api/route/plan` and `POST
+/api/evaluation/calc` persist their own responses for any authenticated
+caller (a guest token is enough; tokenless calls compute only). Every user
+can see and load every proposal.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/proposal` | Save a proposal (create / new version / branch) |
 | `GET` | `/api/proposals` | List current proposal versions |
 | `POST` | `/api/proposals` | Filtered/sorted/paginated list |
 | `GET` | `/api/proposal/<id>` | Load the current version of a proposal |
 
-The route — and, if included, its evaluation — are stored twice: verbatim
-as JSON (deliberately **not** JSONB — JSONB does not preserve key order; see
-`db/README.md`) for an exact, cheap round-trip back to the frontend, and, for
-the route, decomposed into GTFS tables
+The route — and, once evaluated, its evaluation — are stored twice:
+verbatim as JSON (deliberately **not** JSONB — JSONB does not preserve key
+order; see `db/README.md`) for an exact, cheap round-trip back to the
+frontend, and, for the route, decomposed into GTFS tables
 (`proposals.routes`/`trips`/`stop_times`/`shapes`/`services`/`calendar`,
 for future export/interop). This duplication is deliberate for now — see
-`db/README.md`. Only fully daily schedules (`schedule_mode: "alwaysDaily"`,
-the only mode `/api/route/plan` currently supports) can be saved; a
-non-daily frequency fails with `422 domain_error`.
+`db/README.md`. Only fully daily schedules (`schedule_mode:
+"alwaysDaily"`, the only mode `/api/route/plan` currently supports) can be
+persisted.
 
-**Save posts whole API responses, not hand-picked fields.** `POST
-/api/proposal` takes the *entire* `POST /api/route/plan` response
-(`route_builder_version` + `request` + `route`, all three) as
-`route_body`, and, optionally, the *entire* `POST
-/api/evaluation/calc` response (`calc_version` + `route_id` + `models` +
-`input` + `views`, all five) as `evaluation_body`. Nothing is
-stripped or trimmed before storing — that's why `evaluation_body`
-ends up containing a second copy of the route under `input.route`, next
-to the one already in `route_body.route`. The server validates
-both are structurally complete (every section present, not a partial
-object) and, if both are given, that `evaluation_body` genuinely
-describes the same route as `route_body` — exact deep equality
-of `evaluation_body.input.route` against `route_body.route`,
-not just a `route_id` match. A save is rejected with `400
-validation_error` if either check fails.
+<a id="persistence"></a>
 
-<a id="post-proposal"></a>
+### Persistence semantics (persist-on-calc)
 
-### `POST /api/proposal`
+Both pipelines report what they did in a trailing `proposal` block:
+`{persisted, action, proposal_id, proposal_version, user_id}` (the ID
+fields absent where meaningless, e.g. `unauthenticated`). The stored
+bodies are exactly the responses minus this block. A persistence failure
+never fails the computation itself (`action: "error"`).
 
-**Save semantics** — the posted `route_body.route`'s own
-`route_id` (`P{proposal_id}_V{version}_R1`) decides the outcome; rows are
-always appended, never updated in place:
+**`POST /api/route/plan`** — the posted `proposal_id` (optional) and the
+resolved setup (stops, composition, all modes, scenario, builder version)
+decide the outcome; version rows are appended, never updated:
 
 | Condition | Action | Result |
 |-----------|--------|--------|
-| `proposal_id` is a draft placeholder (≥1e9, from `/api/route/plan`) or unknown | `created` | New `proposal_id` (from the sequence), version 1 |
-| `proposal_id` exists and `user_id` owns the current version | `versioned` | Same `proposal_id`, version + 1, `is_current` flipped |
-| `proposal_id` exists and belongs to a different `user_id` | `branched` | New `proposal_id`, version 1 |
+| No token | `unauthenticated` | Compute only — draft placeholder IDs (≥1e9), nothing stored |
+| No/unknown `proposal_id` | `created` | New `proposal_id` (sequence), version 1, IDs rewritten to `P{id}_V1_` |
+| Known `proposal_id`, identical resolved setup (any owner) | `unchanged` | Nothing written — response IDs reference the stored current version |
+| Known `proposal_id`, changed setup, caller owns current version | `versioned` | Same `proposal_id`, version + 1, `is_current` flipped |
+| Known `proposal_id`, changed setup, foreign owner | `branched` | New `proposal_id`, version 1, owned by the caller |
 
-All IDs inside the posted route (`route_id`, trip IDs, geometry IDs, and
-every trip reference in `od_pairs`/`shuntings`/`parkings`) share the prefix
-`P{proposal_id}_V{version}_` and are rewritten together to the real
-`proposal_id`/version — in both `route_body.route` and, if given,
-`evaluation_body` (which embeds the same IDs under `input.route` and
-as dict keys in several of its `views`). Use the `route_id` returned in
-the response from here on, not the one you posted.
+On any persisted outcome the response's IDs (`route_id`, trip IDs,
+geometry IDs, `od_pairs`/`shuntings`/`parkings` references) are already
+rewritten to the real `P{proposal_id}_V{version}_` prefix — `route_id` is
+final from the first response on.
 
-<details>
-<summary>Request &amp; response details</summary>
+**`POST /api/evaluation/calc`** — the posted route's `route_id` decides
+where the evaluation lands:
 
-**Request body**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `user_id` | int | ✅ | `admin.users` identity of the saver — must already exist |
-| `route_body` | object | ✅ | The **entire** `POST /api/route/plan` response — `{route_builder_version, request, route}`, not just `route` |
-| `change_log` | string | — | What changed in this version |
-| `evaluation_body` | object | — | The **entire** `POST /api/evaluation/calc` response — `{calc_version, route_id, models, input, views}`. Must describe the exact same route as `route_body.route` (see above) — stored as a point-in-time snapshot, not re-derived |
-
-The frontend can spread the `POST /api/route/plan` response straight into
-`route_body`, and the `POST /api/evaluation/calc` response
-straight into `evaluation_body` if one was run — no field-picking on
-either side. A proposal can be saved without `evaluation_body` — its
-financial fields are simply null everywhere until a version with one is
-saved.
-
-**Response `201`**
-```json
-{
-  "action": "created",
-  "proposal": {
-    "proposal_id": 5,
-    "proposal_version": 1,
-    "is_current": true,
-    "user_id": 1,
-    "user_name": "David",
-    "change_log": "initial save",
-    "created_at": "2026-07-08T12:00:00+00:00"
-  },
-  "route_id": "P5_V1_R1"
-}
-```
-
-</details>
+| Condition | Action | Result |
+|-----------|--------|--------|
+| No token | `unauthenticated` | Compute only |
+| Version row missing (draft/foreign route JSON) | `unpersisted_route` | Compute only |
+| Version exists but is not current | `historical_version` | Compute only — history is never mutated |
+| Posted route ≠ stored route (hand-edited) | `route_mismatch` | Compute only |
+| Version has no evaluation yet, caller owns it | `filled` | `evaluation_body` filled **in place** on that version — the one sanctioned in-place write on the otherwise append-only table |
+| Evaluation stored under identical inputs (same route incl. demand, same resolved scenario, same calc version) | `unchanged` | Nothing written — the result is deterministic |
+| Changed inputs (scenario override, new calc version), caller owns current | `versioned` | New version, route_body carried over, this evaluation attached |
+| Changed inputs / empty evaluation, foreign owner | `branched` | New `proposal_id` owned by the caller, evaluation attached |
 
 <a id="list-proposals"></a>
 
@@ -375,7 +353,8 @@ accepts filters/sort/pagination.
 from the saved evaluation snapshot (`views.route.data.per_year` — see
 `db/README.md`); proposals saved without one report `null` financial
 fields and sort as if they were `0` on a financial key, rather than being
-excluded. `countries` includes transit-only countries (derived from
+excluded. Financials appear once a version has been evaluated
+(persist-on-calc fills them — see [Persistence semantics](#persistence)). `countries` includes transit-only countries (derived from
 segment-level `country_distance_shares`, same as the route response).
 
 **Response**
@@ -549,11 +528,11 @@ response is split into three groups instead, each with its own `count`:
   },
   "current_scenarios": {
     "count": 3,
-    "scenarios": [ { "scenario_id": 7, "scenario_key": "whatif-de-track-infra", "scenario_name": "What-if: DE power tax -10%", "...": "..." } ]
+    "scenarios": [ { "scenario_id": 7, "scenario_key": "2032-baseline-hsr-allowed", "scenario_name": "2032 Base Line + Night Trains on HSR allowed", "...": "..." } ]
   },
   "historical_scenarios": {
     "count": 8,
-    "scenarios": [ { "scenario_id": 4, "scenario_key": "whatif-de-track-infra", "is_current_scenario": false, "...": "..." } ]
+    "scenarios": [ { "scenario_id": 4, "scenario_key": "2026-baseline", "is_current_scenario": false, "...": "..." } ]
   }
 }
 ```
@@ -577,14 +556,30 @@ rows only if the database is not correctly seeded.
 
 ### `POST /api/route/plan`
 
+**Persists itself** for authenticated callers (guest token is enough) and
+appends a trailing `proposal` block —
+`{"persisted": true, "action": "created", "proposal_id": 5,
+"proposal_version": 1, "user_id": 3}` — see
+[Persistence semantics](#persistence) for the full
+created/unchanged/versioned/branched contract. Tokenless requests compute
+only (`{"persisted": false, "action": "unauthenticated"}`) and keep the
+draft placeholder IDs.
+
 How the route builder pipeline works internally (routing, timetabling,
 auto-stop addition, mode switches) is documented in
 [`../models/README.md`](../models/README.md).
 
-Worked example — Berlin – Dresden – Wien with `auto_stop_addition`
-enabled: request [`tc_1_route_input.json`](../scripts/data/tc_1_route_input.json),
+Worked example — Berlin – Dresden – Wien with `auto_stop_addition="add"`:
+request [`tc_1_route_input.json`](../scripts/data/tc_1_route_input.json),
 full response [`tc_1_route_input_output.json`](../scripts/data/tc_1_route_input_output.json)
-(produced by [`../scripts/test_route_plan.py`](../scripts/test_route_plan.py)).
+(produced by [`../scripts/test_route_plan.py`](../scripts/test_route_plan.py),
+which also writes a QGIS-ready `tc_1_route_input_lines.geojson` +
+`tc_1_route_input_stops.geojson` pair alongside it — stops carry
+`auto_added` so caller-supplied vs. auto-added stops can be styled
+differently). A `"suggest"`-mode request lives alongside it as
+[`tc_2_route_input_suggest.json`](../scripts/data/tc_2_route_input_suggest.json),
+which additionally produces a `tc_2_route_input_suggest_suggested_stops.geojson`
+layer of candidate stops tagged with `added_time_min`.
 
 <details>
 <summary>Request &amp; response details</summary>
@@ -600,8 +595,9 @@ full response [`tc_1_route_input_output.json`](../scripts/data/tc_1_route_input_
 | `composition_id` | string | ✓ | From `/api/params/compositions` |
 | `routing_mode` | string | — | Default `"fullRouting"` — see **Mode switches** below |
 | `timetable_mode` | string | — | Default `"simpleAutomatic"` — see **Mode switches** below |
+| `fixed_night_interval` | array of string | (✓) | Exactly 2 distinct stop IDs from `stops`, start before end in outbound travel order — required for, and only allowed with, `timetable_mode="simpleAutomaticWithFixedNight"` (400 otherwise). May span several legs; applied reversed to the return trip automatically |
 | `schedule_mode` | string | — | Default `"alwaysDaily"` — see **Mode switches** below |
-| `auto_stop_addition` | bool | — | Default `true` — see **Mode switches** below |
+| `auto_stop_addition` | string | — | `"off"` / `"add"` / `"suggest"`, default `"add"` — see **Mode switches** below. String enum since route builder 0.9.5; booleans are rejected with 400 |
 
 **Example request**
 ```json
@@ -614,7 +610,7 @@ full response [`tc_1_route_input_output.json`](../scripts/data/tc_1_route_input_
   "routing_mode": "fullRouting",
   "timetable_mode": "simpleAutomatic",
   "schedule_mode": "alwaysDaily",
-  "auto_stop_addition": true
+  "auto_stop_addition": "add"
 }
 ```
 
@@ -624,14 +620,15 @@ full response [`tc_1_route_input_output.json`](../scripts/data/tc_1_route_input_
 
 | Value | Description |
 |---|---|
-| `"fullRouting"` (default) | HSR avoidance and speed cap derived automatically from the composition's `hsr_allowed`/`max_speed_kmh` and each transited country's `hsr_allowed` flag. Two-pass routing (snap pass, then custom-model pass) when avoidance actually applies. |
-| `"simpleRouting"` | Bypasses all of that — single-pass, no speed cap, no HSR avoidance. Cheap and fast, but not representative of real physics. Intended for quick manual sanity checks only. |
+| `"fullRouting"` (default) | Speed capped at the composition's `max_speed_kmh` everywhere, plus HSR avoidance: track segments whose *permitted* track speed exceeds `HSR_TRACK_SPEED_THRESHOLD_KMH` (strictly above 230 km/h — i.e. dedicated new-build high-speed lines only, upgraded conventional lines up to 230 stay usable; see `models/route/version.py`) are heavily penalized in every country where HSR is not allowed — allowed only when BOTH the composition's `hsr_allowed` AND that country's track-infrastructure `hsr_allowed` are true, evaluated for every country incl. transited-without-stop ones. Conventional lines are never penalized. Every leg additionally carries a per-stop traction-dynamics surcharge — the accel/brake time loss computed from composition weight plus an assumed standard locomotive against the link speeds before/after each stop (see `TRACTION_*` in `models/route/version.py`) — in its own `dynamics_time_min` field, kept separate from the raw router `driving_time_min`; `buffer_time_min` carries the country quota applied to driving and to dynamics (physics first, buffer after). Two-pass routing (snap pass, then custom-model pass) when a custom model applies. |
+| `"simpleRouting"` | Bypasses all of that — single-pass, no speed cap, no HSR avoidance, no traction dynamics. Cheap and fast, but not representative of real physics. Intended for quick manual sanity checks only. |
 
-`timetable_mode` — controls how departure time and boarding/alighting are derived:
+`timetable_mode` — controls how departure time and per-stop classification are derived. Classification is the same three-way rule for every mode (route builder 0.9.10, thresholds `NIGHT_START_MIN`/`NIGHT_END_MIN` in `models/route/version.py`): a stop **departing strictly before 00:00** is `boarding`, one **arriving at/after 05:00** is `alighting`, anything between is a `night` stop (operationally identical to `both` for dwell, but excluded from demand OD pairs). First stop is always boarding and last always alighting regardless of clock time — termini by position, not by the threshold rule. Outbound and return are scheduled independently, so their times can differ (e.g. asymmetric HSR avoidance changes duration).
 
 | Value | Description |
 |---|---|
-| `"simpleAutomatic"` (default, only value) | Routes once, then mirrors the resulting trip duration around a fixed 02:30 constant to get the departure time: everything before 02:30 is a boarding stop, everything at/after is alighting. First stop is always boarding and last is always alighting regardless of clock time — they're termini by position, not by the mirror rule. Outbound and return are scheduled independently, so their departure times can differ (e.g. asymmetric HSR avoidance changes duration). |
+| `"simpleAutomatic"` (default) | Routes once, then mirrors the resulting trip duration around a fixed 02:30 constant (`MIRROR_MIN`) to get the departure time. |
+| `"simpleAutomaticWithFixedNight"` | Requires `fixed_night_interval` `[A, B]`. Instead of the whole trip, the **interval's** midpoint (departure at `A` → arrival at `B`) is centered on 02:30 — so demand-strong feeder sections outside the interval keep sensible evening/morning clock times (e.g. Munich–Berlin–Hamburg as an evening feeder into a Hamburg–Copenhagen night section). Hard constraints: the interval must depart `A` by 23:59 and arrive at `B` at 05:00 or later. A naturally shorter interval (< 5h01) is stretched to exactly that window by distributing `slack_time_min` across the interval's segments proportionally to leg time (pinning dep 23:59 / arr 05:00 in the minimal-stretch case — minimal stretch wins over exact midpoint symmetry). If stretching drops the interval's timetable speed below `FIXED_NIGHT_MIN_SPEED_RATIO` (0.7) of its routing speed, the trip carries a `fixed_night_stretch_slow` entry in `general_parameters.timetable_warnings` — a warning, never an error. The return trip applies the interval reversed automatically. |
 
 `schedule_mode` — controls the route's seasonal operating frequency:
 
@@ -643,15 +640,29 @@ full response [`tc_1_route_input_output.json`](../scripts/data/tc_1_route_input_
 
 | Value | Description |
 |---|---|
-| `true` (default) | Looks for stops from the full stop catalog that sit close to the routed path (on the line or nearby), and greedily adds any that fit within a fixed detour time budget — cheapest detour first, stopping at the first candidate that would exceed the budget. Added stops come back with `auto_added: true` on their `Stop` in the response (see below) so the frontend can render them differently. Buffer distance and max detour % are fixed constants in `models/route/timetable.py` (`AUTO_STOP_BUFFER_M`, `AUTO_STOP_MAX_DETOUR_PER`), not request fields. The search only runs once per `TripPair`, against the outbound direction — the return trip always adds the same stops (reversed), rather than running its own independent search against its own budget; each direction still gets its own real routed physics for the shared stop list. |
-| `false` | Returns exactly the caller's own stop list, unmodified. |
+| `"off"` | Returns exactly the caller's own stop list, unmodified — no candidate search at all. |
+| `"add"` (default) | Looks for stops from the full stop catalog that sit close to the routed path (on the line or nearby), and greedily adds any that fit within a fixed detour time budget — cheapest detour first, stopping at the first candidate that would exceed the budget. Added stops come back with `auto_added: true` on their `Stop` in the response (see below) so the frontend can render them differently. |
+| `"suggest"` | Routes exactly like `"off"` (nothing added, nothing rerouted), but runs the same candidate search + costing as `"add"` and returns every costed candidate in a top-level `suggested_stops` list, placed between `request` and `route` in the response (see **Response** below) — each with the `added_time_min` the stop would cost if implemented. The detour budget is deliberately **not** applied: suggestion is informational, selection is the caller's. Present even when empty (a real "searched, found nothing" answer). |
+
+For `"add"` and `"suggest"`: the candidate search prefilters the stop catalog
+to countries the routed legs actually pass through (attribution the router
+already computed), buffer distance and max detour % are fixed constants in
+`models/route/version.py` (`AUTO_STOP_BUFFER_M`, `AUTO_STOP_MAX_DETOUR_PER`),
+not request fields, and the search only runs once per `TripPair`, against the
+outbound direction — for `"add"` the return trip always adds the same stops
+(reversed), rather than running its own independent search against its own
+budget; each direction still gets its own real routed physics for the shared
+stop list.
 
 **Response**
 
 ```json
 {
-  "route_builder_version": "0.9.3",
+  "route_builder_version": "0.9.9",
   "request": { "...": "the request body above, echoed back unchanged" },
+  "suggested_stops": [
+    { "...": "ONLY for auto_stop_addition=\"suggest\" — see below; absent for \"off\"/\"add\"" }
+  ],
   "route": {
     "route_id": "P1573795219_V1_R1",
     "scenario_id": 1,
@@ -666,8 +677,18 @@ full response [`tc_1_route_input_output.json`](../scripts/data/tc_1_route_input_
         "composition_id": "STD-7.1",
         "composition": { "...": "physics-relevant Composition fields, see below" },
         "od_pairs": [],
-        "outbound": { "trip_id": "P..._D0_T1", "direction": 0, "segments": [ "...Segment, see below..." ] },
-        "return_trip": { "trip_id": "P..._D1_T1", "direction": 1, "segments": [ "..." ] }
+        "outbound": {
+          "trip_id": "P..._D0_T1",
+          "direction": 0,
+          "general_parameters": { "trip_km": 353.2, "route_duration_min": 267, "average_speed_kmh": 79.4, "timetable_warnings": [] },
+          "segments": [ "...Segment, see below..." ]
+        },
+        "return_trip": {
+          "trip_id": "P..._D1_T1",
+          "direction": 1,
+          "general_parameters": { "trip_km": 353.2, "route_duration_min": 271, "average_speed_kmh": 78.2, "timetable_warnings": [] },
+          "segments": [ "..." ]
+        }
       }
     ],
     "parkings": [
@@ -686,9 +707,35 @@ full response [`tc_1_route_input_output.json`](../scripts/data/tc_1_route_input_
 }
 ```
 
-`od_pairs` is always empty from this endpoint — demand is a separate step
-(`distribute_demand()`), not part of planning. `route_id`/`trip_id` follow
+`od_pairs` comes back populated: `plan_route()` itself leaves it empty
+(demand is not part of planning), but the endpoint then runs a stopgap
+demand distribution (`distribute_demand()`, flat utilization and per-km
+fares — see `OPEN_TODOS["demand_model"]` in `models/route/version.py`) so
+that a subsequent `POST /api/evaluation/calc` returns non-zero revenue. `route_id`/`trip_id` follow
 `P{proposal_id}_V{version}_R1[_D{direction}_T{pair_index}]`.
+
+**`suggested_stops[]`** — only present for `auto_stop_addition="suggest"`
+(even when empty), placed between `request` and `route`. Every costed
+candidate the search found near the routed path, in geographic order along
+the route:
+
+| Field | Type | Description |
+|---|---|---|
+| `stop_id`, `stop_name`, `country_code`, `lat`, `lon` | | Identity/location of the candidate stop |
+| `added_time_min` | float | Full trip-time increase (detour + dwell) this stop would cost if implemented — the same figure `"add"` mode budgets against, 1 decimal |
+
+**`outbound`/`return_trip`.`general_parameters`** — headline physics
+stats for that trip, for quick manual reading rather than deriving them from
+`segments[]` yourself (emitted as `stats` by mistake in 0.9.4 code, fixed to
+the documented `general_parameters` key in 0.9.5), plus derived timetable
+quality warnings (0.9.10):
+
+| Field | Type | Description |
+|---|---|---|
+| `trip_km` | float | Total trip distance for that direction, km (`distance_m` summed across segments, /1000, 1 decimal) |
+| `route_duration_min` | int | Full elapsed time, departure → arrival — driving + dynamics + buffer + slack + dwell at intermediate stops (`Trip.total_time_min`) |
+| `average_speed_kmh` | float | `trip_km` ÷ (`route_duration_min` / 60), 1 decimal. Uses elapsed time, not pure driving time — a different, unimplemented formula (`avg_speed` in `ROUTE_FORMULAS`) uses driving time only |
+| `timetable_warnings` | array | Derived timetable quality annotations — `[]` for most trips. Currently only `fixed_night_stretch_slow` (fixed-night mode, interval stretched too slow): `{code, interval: [start_id, end_id], timetable_speed_kmh, routing_speed_kmh, ratio}` with `ratio` = timetable ÷ routing speed, below `FIXED_NIGHT_MIN_SPEED_RATIO` |
 
 **`route.trip_pairs[].composition`** — physics-relevant subset of the composition
 used, not the full object (cost fields like `driver_costs_eur_h` are deliberately
@@ -710,7 +757,8 @@ excluded — see [Evaluation](#evaluation) for those):
 | `from_stop`, `to_stop` | object | `Stop`, see below |
 | `geometry_id` | string | References an entry in `route.geometries` — see below |
 | `distance_m` | int | Leg distance |
-| `driving_time_min`, `buffer_time_min` | int | Leg duration components |
+| `driving_time_min`, `dynamics_time_min`, `buffer_time_min` | int | Leg duration components: raw router time (constant-cruise passage), per-stop accel/brake time loss (traction dynamics), and schedule buffer — the country quota applied to driving and to dynamics (the dynamics cruise speed is always derived from raw driving time first, buffer never feeds the physics) |
+| `slack_time_min` | int | Deliberate schedule padding beyond routing physics — non-zero only on legs inside a stretched fixed-night interval (see `timetable_mode`). Total leg time = driving + dynamics + buffer + slack, and stop-to-stop elapsed times always match that sum |
 | `energy_kwh` | float | Currently a flat 28.0 kWh/km dummy factor — not calibrated yet |
 | `country_distance_shares`, `country_time_shares` | object | `{country_code: share}`, each sums to 1.0. Includes transit-only countries the leg crosses without stopping |
 
@@ -719,7 +767,7 @@ excluded — see [Evaluation](#evaluation) for those):
 | Field | Type | Description |
 |---|---|---|
 | `stop_id`, `stop_name`, `country_code`, `lat`, `lon` | | Identity/location |
-| `stop_type` | string | `"boarding"`, `"alighting"`, or `"both"` — see `timetable_mode` above |
+| `stop_type` | string | `"boarding"`, `"night"`, `"alighting"`, or `"both"` — see `timetable_mode` above. `night` (0.9.10): departs at/after 00:00 and arrives before 05:00; dwells like `both`, excluded from demand OD pairs |
 | `arrival_time_min` | int or null | `null` only at the first stop of a trip |
 | `departure_time_min` | int or null | `null` only at the last stop of a trip |
 | `auto_added` | bool | `true` if `auto_stop_addition` inserted this stop — always `false` for stops the caller supplied directly |
@@ -761,6 +809,14 @@ easier to scan the rest of the route without wading through coordinate arrays):
 <a id="evaluation-calc"></a>
 
 ### `POST /api/evaluation/calc`
+
+**Persists itself** for authenticated callers and appends a trailing
+`proposal` block (see [Persistence semantics](#persistence) — filled in
+place on the version it was computed for, `unchanged` under identical
+inputs, a new version under changed ones). The response also carries a
+top-level `scenario_id`: the scenario the evaluation actually ran under,
+override applied — the posted route's own embedded `scenario_id` is NOT
+updated by an override, so this field is the authoritative one.
 
 Worked example: request
 [`tc_1_evaluation_input.json`](../scripts/data/tc_1_evaluation_input.json)
@@ -841,24 +897,25 @@ All top-level keys, no wrapper object:
     "per_trip_pair":              {"description": "...", "normalisations": {"...": "..."}, "data": {"<pair_key>": {"filter": {"...": "..."}, "values": { "<normalised breakdown>": "see below" }}, "all": { "...": "..." }}},
     "per_trip_pair_per_country":  {"description": "...", "normalisations": {"...": "..."}, "data": {"<pair_key>": {"<country_code>": {"filter": {"...": "..."}, "values": {"...": "..."}}}, "all": { "...": "..." }}},
     "per_trip_pair_per_od":       {"description": "...", "normalisations": {"...": "..."}, "data": {"<pair_key>": {"<od_key>": {"filter": {"...": "..."}, "values": {"...": "..."}}}, "all": { "...": "..." }}},
+    "per_trip_pair_per_section":  {"description": "...", "normalisations": {"...": "..."}, "data": {"<pair_key>": {"<section_key>": {"filter": {"...": "..."}, "values": {"...": "..."}}}, "all": { "...": "..." }}},
     "per_trip_per_stop":          {"description": "...", "normalisations": {"...": "..."}, "data": {"<trip_id>": {"<stop_id>": {"filter": {"...": "..."}, "values": {"...": "..."}}}, "all": { "...": "..." }}}
   }
 }
 ```
 
 `views.route.data` holds the normalised breakdown directly (no filter
-dimension — it's the whole-route aggregate). The other four views nest a
+dimension — it's the whole-route aggregate). The other five views nest a
 `{filter, values}` pair per key, where `values` holds the same normalised
 breakdown shape, plus an `"all"` entry aggregating across that view's
 dimension.
 
-Each cell contains the same breakdown under five **normalisations** (not to be confused with the five *views* above — a view selects *what scope* the money belongs to, a normalisation selects *what unit* it is expressed in):
+Each cell contains the same breakdown under five **normalisations** (not to be confused with the six *views* above — a view selects *what scope* the money belongs to, a normalisation selects *what unit* it is expressed in). All per-unit denominators are annual, matching the €/year leaves; route-section cells divide by the section's own annual physics:
 
 | Key | Unit | Description |
 |-----|------|-------------|
 | `per_year` | €/year | Annual totals |
 | `per_operating_day` | €/operating-day | Per day the service runs |
-| `per_trip_km` | €/km | Per km of total trip distance (both directions) |
+| `per_train_km` | €/train-km | Per annual train-km (cycle distance × operating days; a section's own distance for section cells) |
 | `per_available_place_km` | €/available-place-km | Per capacity × distance |
 | `per_sold_place_km` | €/sold-place-km | Per actual passenger × distance |
 

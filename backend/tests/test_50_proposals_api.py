@@ -1,25 +1,37 @@
 """
 test_50_proposals_api.py
 ========================
-Proposal save/list/load endpoints — the write path on top of everything
-below it in the dependency order (routes come from the shared session
-fixtures, so no extra OpenRailRouting calls happen here).
+Persist-on-calc semantics and the remaining proposals read endpoints — the
+write path is now inside the pipelines themselves (POST /api/proposal is
+gone, see api/route.py: _persist_plan and api/evaluation.py:
+_persist_evaluation).
 
 Covers:
-  - POST /api/proposal: created / versioned / branched semantics, draft ID
-    rewriting, GTFS decomposition, validation and domain errors
+  - POST /api/route/plan persistence: created / unchanged (setup dedupe) /
+    versioned / branched, draft ID rewriting, GTFS decomposition,
+    tokenless compute-only
+  - POST /api/evaluation/calc persistence: filled (in-place on the version
+    it was computed for) / unchanged / versioned on scenario change /
+    branched for non-owners, and the compute-only outcomes
+    (unauthenticated, unpersisted_route, historical_version,
+    route_mismatch)
   - GET  /api/proposal/<id>: round-trip of the stored plan response, 404
   - GET/POST /api/proposals: summaries, filters (user/country/stop),
     sorting, pagination
 
-Isolation: saves commit through the API's own connection, so the suite's
-per-test rollback can't undo them. The module fixture purges saved
-proposals (JSONB rows + their GTFS decomposition) before and after this
-file — except the one permanent example proposal seeded at DB init time
-(db/dev/seed.py, proposal_id=_SEED_PROPOSAL_ID) — and bumps the
-proposal_id sequence above the placeholder IDs the session route fixtures
-were planned with (100-999, see conftest.py) so a sequence-assigned ID
-can never collide with a fixture's embedded one.
+Identities: the suite persists as the seeded 'test_script' user
+(conftest.py: script_headers); guest sessions from POST /api/auth/guest
+supply the second, foreign owner where branching semantics need one.
+
+Isolation & ordering: persistence commits through the API's own
+connection, so the suite's per-test rollback can't undo it. The module
+fixture purges persisted proposals before and after this file — except
+the permanent example proposal seeded at DB init time (db/dev/seed.py,
+proposal_id=_SEED_PROPOSAL_ID). The session route fixtures are tokenless
+and therefore never persisted here. Tests WITHIN a module-fixture group
+below build on each other's version history in definition order (e.g.
+"unchanged" runs before the setup change creates version 2) — documented
+per group, don't reorder or -k-split them.
 """
 
 import pytest
@@ -28,19 +40,24 @@ import requests
 from tests.helpers import (
     PROPOSAL_URL,
     PROPOSALS_URL,
-    save_proposal,
+    ROUTE_URL,
+    evaluate,
+    inject_demand,
+    purge_saved_proposals,
 )
 
-# Well above the proposal_id placeholders (100-999) the session route
-# fixtures embed — see conftest.py's range-convention comment.
-_SEQUENCE_FLOOR = 1000
-
 # Matches db/dev/seed.py's _SEED_PROPOSAL_ID / seed_example_proposal() —
-# a real saved proposal seeded at DB init time, permanent and outside
+# a real persisted proposal seeded at DB init time, permanent and outside
 # this module's purge, so a full test run doesn't erase the one working
 # example a person could inspect right after docker-compose up.
 _SEED_PROPOSAL_ID = 1
 _SEED_ROUTE_ID = f"P{_SEED_PROPOSAL_ID}_V1_R1"
+
+# The cheapest corridor the seed data supports — every fresh authenticated
+# plan in this file uses it to keep OpenRailRouting time bounded.
+_STOPS = ["DE_BERLIN_HBF", "AT_WIEN_HBF"]
+_COMPOSITION = "STD-7.1"
+_OTHER_COMPOSITION = "STD-6.1"  # setup change for the versioned/branched paths
 
 
 def _find_prefixed_strings(obj, prefix: str, limit: int = 5) -> list[str]:
@@ -71,159 +88,176 @@ def _find_prefixed_strings(obj, prefix: str, limit: int = 5) -> list[str]:
     return found
 
 
-def _wrap(route: dict) -> dict:
-    """Minimal route_body envelope around a bare route dict, for
-    tests that POST the raw body directly (error-path tests bypassing the
-    save_proposal() helper's more complete wrapping)."""
-    return {"route_builder_version": "test", "request": {}, "route": route}
-
-
-def _purge_saved_proposals(conn) -> None:
-    """Delete everything a proposal save writes in THIS module, while
-    preserving the one real example proposal seeded at DB init time (see
-    _SEED_PROPOSAL_ID above). Saved GTFS IDs all start with 'P'
-    (P{id}_V{version}_...), the seeded GTFS demo rows don't (NJ-...) — so
-    the prefix cleanly separates test data from unrelated seed data.
-    '!~ ^P1_V1_R1' is a regex anchor, not a numeric comparison — it
-    excludes exactly the seed's own IDs (P1_V1_R1, P1_V1_R1_D0_T1_SHAPE,
-    P1_V1_R1_SVC, ...) without accidentally also excluding P100_.../
-    P1000_...-prefixed rows this module creates, which share the "P1"
-    substring but not the "P1_" boundary. Deleting routes cascades trips
-    and stop_times; deleting services cascades calendar and
-    calendar_dates."""
-    cur = conn.cursor()
-    cur.execute(
-        f"DELETE FROM proposals.routes WHERE route_id ~ '^P' "
-        f"AND route_id !~ '^{_SEED_ROUTE_ID}'"
+def _plan(api_base, headers, **extra) -> dict:
+    """POST /api/route/plan on the cheap 2-stop corridor and return the FULL
+    response (persist-on-calc needs the envelope + proposal block, not just
+    the route dict tests/helpers.build_route returns)."""
+    body = {
+        "stops": _STOPS,
+        "composition_id": _COMPOSITION,
+        "auto_stop_addition": "off",
+        **extra,
+    }
+    resp = requests.post(
+        f"{api_base}{ROUTE_URL}", json=body, timeout=90, headers=headers
     )
-    cur.execute(
-        f"DELETE FROM proposals.shapes WHERE shape_id ~ '^P' "
-        f"AND shape_id !~ '^{_SEED_ROUTE_ID}'"
-    )
-    cur.execute(
-        f"DELETE FROM proposals.services WHERE service_id ~ '^P' "
-        f"AND service_id !~ '^{_SEED_ROUTE_ID}'"
-    )
-    cur.execute(
-        "DELETE FROM proposals.proposals WHERE proposal_id != %s",
-        (_SEED_PROPOSAL_ID,),
-    )
-    conn.commit()
-    cur.close()
+    assert resp.status_code == 200, f"route/plan failed: {resp.text[:300]}"
+    return resp.json()
 
 
 @pytest.fixture(scope="module", autouse=True)
-def clean_proposals(db_conn):
-    """Purge saved proposals before and after this module (the seeded
-    example proposal, id=_SEED_PROPOSAL_ID, is preserved — see
-    _purge_saved_proposals), and lift the proposal_id sequence above the
-    fixture placeholder range."""
-    _purge_saved_proposals(db_conn)
-    cur = db_conn.cursor()
-    cur.execute(
-        "SELECT setval(pg_get_serial_sequence('proposals.proposals', 'proposal_id'), "
-        "%s, true)",
-        (_SEQUENCE_FLOOR,),
-    )
-    db_conn.commit()
-    cur.close()
+def clean_proposals(db_conn, script_headers):
+    """Purge persisted proposals before and after this module (the seeded
+    example proposal is preserved — see purge_saved_proposals). Depends on
+    script_headers so the session-level teardown purge there runs strictly
+    after this module's own."""
+    purge_saved_proposals(db_conn)
     yield
-    _purge_saved_proposals(db_conn)
+    purge_saved_proposals(db_conn)
 
 
 @pytest.fixture(scope="module")
-def user_ids(db_conn):
-    """(david, bjarne) user_ids resolved by email — never hard-coded."""
-    cur = db_conn.cursor()
-    ids = {}
-    for email in ("david@backontrack.eu", "bjarne@backontrack.eu"):
-        cur.execute("SELECT user_id FROM admin.users WHERE email = %s", (email,))
-        row = cur.fetchone()
-        assert row is not None, f"Seed user {email} missing — see db/dev/seed.py."
-        ids[email] = row[0]
-    cur.close()
-    db_conn.rollback()
-    return ids["david@backontrack.eu"], ids["bjarne@backontrack.eu"]
-
-
-# =============================================================================
-# POST /api/proposal — save semantics
-# =============================================================================
-
-
-@pytest.mark.timeout(30)
-def test_save_new_proposal_created(api_base, route_berlin_dresden_wien, user_ids):
-    """Saving a route with an unknown (fixture-placeholder) proposal_id
-    creates a new proposal at version 1 with a sequence-assigned ID."""
-    david, _ = user_ids
-    body = save_proposal(
-        api_base, route_berlin_dresden_wien, david, change_log="initial save"
-    )
-
-    assert body["action"] == "created"
-    proposal = body["proposal"]
-    assert proposal["proposal_version"] == 1
-    assert proposal["is_current"] is True
-    assert proposal["user_id"] == david
-    assert proposal["user_name"] == "David"
-    assert proposal["change_log"] == "initial save"
-    assert body["route_id"] == f"P{proposal['proposal_id']}_V1_R1"
-    # Sequence-assigned, never the placeholder embedded in the fixture route.
-    assert proposal["proposal_id"] > _SEQUENCE_FLOOR
-
-
-@pytest.mark.timeout(30)
-def test_save_rewrites_all_draft_ids(api_base, route_berlin_dresden_wien, user_ids):
-    """Every ID in the stored route (route_id, trip_ids, geometry refs,
-    shunting/parking trip references) carries the real proposal prefix —
-    no trace of the draft prefix survives."""
-    david, _ = user_ids
-    saved = save_proposal(api_base, route_berlin_dresden_wien, david)
-    pid = saved["proposal"]["proposal_id"]
-
-    resp = requests.get(f"{api_base}{PROPOSAL_URL}/{pid}", timeout=10)
+def guest(api_base):
+    """A guest session — the foreign owner for branch semantics.
+    {'headers': ..., 'user_id': ...}"""
+    resp = requests.post(f"{api_base}/api/auth/guest", timeout=10)
+    if resp.status_code == 429:
+        pytest.skip("guest endpoint rate-limited — rerun later")
     assert resp.status_code == 200
-    route = resp.json()["route_body"]["route"]
+    body = resp.json()
+    return {
+        "headers": {"Authorization": f"Bearer {body['token']}"},
+        "user_id": body["user_id"],
+    }
 
-    old_prefix = route_berlin_dresden_wien["route_id"].rsplit("R1", 1)[0]  # "P2_V1_"
-    new_prefix = f"P{pid}_V1_"
-    assert route["route_id"] == f"{new_prefix}R1"
-    leftover = _find_prefixed_strings(route, old_prefix)
-    assert not leftover, f"draft prefix survived rewrite: {leftover}"
 
-    for pair in route["trip_pairs"]:
-        for trip in (pair["outbound"], pair["return_trip"]):
-            assert trip["trip_id"].startswith(new_prefix)
-            for seg in trip["segments"]:
-                assert seg["geometry_id"].startswith(new_prefix)
-    assert all(g["id"].startswith(new_prefix) for g in route["geometries"])
-    assert all(s["trip_id"].startswith(new_prefix) for s in route["shuntings"])
-    assert all(
-        tid.startswith(new_prefix) for p in route["parkings"] for tid in p["trip_ids"]
-    )
+# =============================================================================
+# POST /api/route/plan — persistence semantics
+# (tests share `planned` and build on each other in definition order)
+# =============================================================================
+
+
+@pytest.fixture(scope="module")
+def planned(api_base, script_headers, clean_proposals):
+    """One fresh authenticated plan — the proposal the plan-side tests
+    version, branch, and dedupe against."""
+    return _plan(api_base, script_headers)
+
+
+@pytest.mark.timeout(120)
+def test_plan_persists_created(planned, script_user_id):
+    """An authenticated plan without a proposal_id persists itself:
+    action 'created', version 1, owned by the caller, route_id final."""
+    block = planned["proposal"]
+    assert block["persisted"] is True
+    assert block["action"] == "created"
+    assert block["proposal_version"] == 1
+    assert block["user_id"] == script_user_id
+    pid = block["proposal_id"]
+    assert planned["route"]["route_id"] == f"P{pid}_V1_R1"
 
 
 @pytest.mark.timeout(30)
-def test_save_own_proposal_creates_new_version(
-    api_base, route_berlin_dresden_wien, user_ids, db_cur
-):
-    """Re-saving your own proposal appends version 2 and flips is_current —
-    append-only, the version-1 row stays."""
-    david, _ = user_ids
-    first = save_proposal(api_base, route_berlin_dresden_wien, david)
-    pid = first["proposal"]["proposal_id"]
+def test_plan_response_matches_stored_body(api_base, planned):
+    """The response IS the stored route_body (plus the proposal block): no
+    draft prefix survives anywhere, and GET /api/proposal/<id> round-trips
+    the envelope byte-for-byte."""
+    pid = planned["proposal"]["proposal_id"]
 
-    saved_route = requests.get(f"{api_base}{PROPOSAL_URL}/{pid}", timeout=10).json()[
-        "route_body"
-    ]["route"]
-    second = save_proposal(
-        api_base, saved_route, david, change_log="tweaked composition"
+    # No draft placeholder (P1xxxxxxxxx_) anywhere in the response.
+    leftovers = [
+        s
+        for s in _find_prefixed_strings(planned["route"], "P1", limit=50)
+        if not s.replace("key:", "").startswith(f"P{pid}_")
+    ]
+    assert not leftovers, f"draft prefix survived rewrite: {leftovers[:5]}"
+
+    body = requests.get(f"{api_base}{PROPOSAL_URL}/{pid}", timeout=10).json()
+    stored = body["route_body"]
+    assert stored == {k: v for k, v in planned.items() if k != "proposal"}
+    assert body["proposal"]["proposal_id"] == pid
+    assert body["evaluation_body"] is None  # plan persists the route only
+
+
+@pytest.mark.timeout(30)
+def test_plan_writes_gtfs_decomposition(planned, db_cur):
+    """The persisted version carries its GTFS decomposition: one route, a
+    service with a daily calendar, both trips with ordered stop_times."""
+    route_id = planned["route"]["route_id"]
+
+    db_cur.execute(
+        "SELECT trip_id FROM proposals.trips WHERE route_id = %s", (route_id,)
+    )
+    trip_ids = {r["trip_id"] for r in db_cur.fetchall()}
+    assert len(trip_ids) == 2  # outbound + return
+
+    db_cur.execute(
+        "SELECT COUNT(*) AS n FROM proposals.stop_times WHERE trip_id = ANY(%s)",
+        (list(trip_ids),),
+    )
+    assert db_cur.fetchone()["n"] == 2 * len(_STOPS)
+
+    db_cur.execute(
+        "SELECT monday, sunday FROM proposals.calendar WHERE service_id = %s",
+        (f"{route_id}_SVC",),
+    )
+    cal = db_cur.fetchone()
+    assert cal is not None and cal["monday"] and cal["sunday"]
+
+
+@pytest.mark.timeout(120)
+def test_tokenless_plan_computes_only(api_base, db_cur):
+    """No token → the old contract: draft placeholder IDs, nothing written,
+    proposal block says so."""
+    payload = _plan(api_base, headers=None)
+    assert payload["proposal"] == {"persisted": False, "action": "unauthenticated"}
+    draft_pid = int(payload["route"]["route_id"].split("_")[0][1:])
+    assert draft_pid > 1_000_000_000
+
+    db_cur.execute(
+        "SELECT 1 FROM proposals.proposals WHERE proposal_id = %s", (draft_pid,)
+    )
+    assert db_cur.fetchone() is None
+
+
+@pytest.mark.timeout(120)
+def test_replan_identical_setup_is_unchanged(api_base, script_headers, planned, db_cur):
+    """Replanning an existing proposal with an identical resolved setup
+    writes nothing — the response references the stored current version."""
+    pid = planned["proposal"]["proposal_id"]
+    payload = _plan(api_base, script_headers, proposal_id=pid)
+
+    block = payload["proposal"]
+    assert block["persisted"] is False
+    assert block["action"] == "unchanged"
+    assert block["proposal_id"] == pid
+    assert block["proposal_version"] == 1
+    assert payload["route"]["route_id"] == f"P{pid}_V1_R1"
+    assert payload["request"]["proposal_id"] == pid
+
+    db_cur.execute(
+        "SELECT COUNT(*) AS n FROM proposals.proposals WHERE proposal_id = %s", (pid,)
+    )
+    assert db_cur.fetchone()["n"] == 1  # still only version 1
+
+
+@pytest.mark.timeout(120)
+def test_replan_changed_setup_creates_new_version(
+    api_base, script_headers, planned, db_cur
+):
+    """A result-touching setup change (different composition) by the owner
+    appends version 2 and flips is_current — append-only, version 1 stays."""
+    pid = planned["proposal"]["proposal_id"]
+    payload = _plan(
+        api_base, script_headers, proposal_id=pid, composition_id=_OTHER_COMPOSITION
     )
 
-    assert second["action"] == "versioned"
-    assert second["proposal"]["proposal_id"] == pid
-    assert second["proposal"]["proposal_version"] == 2
-    assert second["route_id"] == f"P{pid}_V2_R1"
+    block = payload["proposal"]
+    assert block["persisted"] is True
+    assert block["action"] == "versioned"
+    assert block["proposal_id"] == pid
+    assert block["proposal_version"] == 2
+    assert payload["route"]["route_id"] == f"P{pid}_V2_R1"
 
     db_cur.execute(
         "SELECT proposal_version, is_current FROM proposals.proposals "
@@ -237,256 +271,209 @@ def test_save_own_proposal_creates_new_version(
     ]
 
 
-@pytest.mark.timeout(30)
-def test_save_foreign_proposal_branches(api_base, route_berlin_dresden_wien, user_ids):
-    """Saving someone else's proposal duplicates it under a new proposal_id
-    at version 1 — the original stays untouched and current."""
-    david, bjarne = user_ids
-    original = save_proposal(api_base, route_berlin_dresden_wien, david)
-    pid = original["proposal"]["proposal_id"]
+@pytest.mark.timeout(120)
+def test_replan_foreign_identical_setup_is_unchanged(api_base, planned, guest):
+    """The dedupe outranks ownership: a foreign caller replanning the
+    current setup (version 2's composition, after the test above) gets the
+    stored version back, no branch."""
+    pid = planned["proposal"]["proposal_id"]
+    payload = _plan(
+        api_base,
+        guest["headers"],
+        proposal_id=pid,
+        composition_id=_OTHER_COMPOSITION,
+    )
+    assert payload["proposal"]["action"] == "unchanged"
+    assert payload["proposal"]["proposal_version"] == 2
 
-    saved_route = requests.get(f"{api_base}{PROPOSAL_URL}/{pid}", timeout=10).json()[
-        "route_body"
-    ]["route"]
-    branch = save_proposal(api_base, saved_route, bjarne)
 
-    assert branch["action"] == "branched"
-    assert branch["proposal"]["proposal_id"] != pid
-    assert branch["proposal"]["proposal_version"] == 1
-    assert branch["proposal"]["user_id"] == bjarne
+@pytest.mark.timeout(120)
+def test_replan_foreign_changed_setup_branches(api_base, planned, guest, db_cur):
+    """A setup change by a non-owner duplicates under a new proposal_id
+    owned by the caller — the original proposal is untouched."""
+    pid = planned["proposal"]["proposal_id"]
+    payload = _plan(api_base, guest["headers"], proposal_id=pid)  # back to STD-7.1
 
-    untouched = requests.get(f"{api_base}{PROPOSAL_URL}/{pid}", timeout=10).json()
-    assert untouched["proposal"]["proposal_version"] == 1
-    assert untouched["proposal"]["user_id"] == david
+    block = payload["proposal"]
+    assert block["persisted"] is True
+    assert block["action"] == "branched"
+    assert block["proposal_id"] != pid
+    assert block["proposal_version"] == 1
+    assert block["user_id"] == guest["user_id"]
+
+    db_cur.execute(
+        "SELECT MAX(proposal_version) AS v FROM proposals.proposals "
+        "WHERE proposal_id = %s",
+        (pid,),
+    )
+    assert db_cur.fetchone()["v"] == 2  # original unchanged
 
 
 # =============================================================================
-# POST /api/proposal — GTFS decomposition
+# POST /api/evaluation/calc — persistence semantics
+# (tests share `planned_eval` and build on each other in definition order)
 # =============================================================================
 
 
-@pytest.mark.timeout(30)
-def test_save_writes_gtfs_decomposition(
-    api_base, route_berlin_dresden_wien, user_ids, db_cur
+@pytest.fixture(scope="module")
+def planned_eval(api_base, script_headers, clean_proposals):
+    """A second fresh authenticated plan, kept separate from `planned` so
+    the eval-side history isn't entangled with the plan-side versioning
+    tests above."""
+    return _plan(api_base, script_headers)
+
+
+@pytest.mark.timeout(120)
+def test_eval_fills_own_version_in_place(
+    api_base, script_headers, planned_eval, db_cur
 ):
-    """A save decomposes the route into all GTFS tables: routes row with a
-    derived long name, one trip per direction, one stop_time per stop, a
-    per-trip shape whose length matches the segment physics, and an
-    all-week daily calendar."""
-    david, _ = user_ids
-    saved = save_proposal(api_base, route_berlin_dresden_wien, david)
-    route_id = saved["route_id"]
+    """Evaluating a persisted route fills that version's evaluation_body in
+    place — same version, no new row, response IDs unchanged."""
+    pid = planned_eval["proposal"]["proposal_id"]
+    result = evaluate(api_base, planned_eval["route"], headers=script_headers)
+
+    block = result["proposal"]
+    assert block["persisted"] is True
+    assert block["action"] == "filled"
+    assert block["proposal_id"] == pid
+    assert block["proposal_version"] == 1
+    assert result["route_id"] == f"P{pid}_V1_R1"
+    assert result["scenario_id"] == planned_eval["route"]["scenario_id"]
 
     db_cur.execute(
-        "SELECT route_long_name FROM proposals.routes WHERE route_id = %s", (route_id,)
+        "SELECT COUNT(*) AS n, "
+        "       BOOL_OR(evaluation_body IS NOT NULL) AS has_eval "
+        "FROM proposals.proposals WHERE proposal_id = %s",
+        (pid,),
     )
-    long_name = db_cur.fetchone()["route_long_name"]
-    assert "Berlin" in long_name and "Wien" in long_name
-
-    db_cur.execute(
-        "SELECT trip_id, direction_id, shape_id, composition_type_id "
-        "FROM proposals.trips WHERE route_id = %s ORDER BY direction_id",
-        (route_id,),
-    )
-    trips = db_cur.fetchall()
-    assert [t["direction_id"] for t in trips] == [0, 1]
-    assert all(t["composition_type_id"] == "STD-7.1" for t in trips)
-
-    for trip in trips:
-        # 3-stop fixture route → 3 stop_times per direction.
-        db_cur.execute(
-            "SELECT COUNT(*) AS n FROM proposals.stop_times WHERE trip_id = %s",
-            (trip["trip_id"],),
-        )
-        assert db_cur.fetchone()["n"] == 3
-
-        db_cur.execute(
-            "SELECT length_km FROM proposals.shapes WHERE shape_id = %s",
-            (trip["shape_id"],),
-        )
-        length_km = float(db_cur.fetchone()["length_km"])
-        assert length_km > 0
-
-    # One shared all-week daily service for the version.
-    db_cur.execute(
-        "SELECT monday, sunday, start_date, end_date FROM proposals.calendar "
-        "WHERE service_id = %s",
-        (f"{route_id}_SVC",),
-    )
-    calendar = db_cur.fetchone()
-    assert calendar["monday"] is True and calendar["sunday"] is True
-
-
-@pytest.mark.timeout(30)
-def test_gtfs_shape_length_matches_route_physics(
-    api_base, route_berlin_dresden_wien, user_ids, db_cur
-):
-    """Sum of persisted shape lengths equals the route's total segment
-    distance — the GTFS side and the JSONB side describe the same route."""
-    david, _ = user_ids
-    saved = save_proposal(api_base, route_berlin_dresden_wien, david)
-
-    expected_km = (
-        sum(
-            seg["distance_m"]
-            for pair in route_berlin_dresden_wien["trip_pairs"]
-            for trip in (pair["outbound"], pair["return_trip"])
-            for seg in trip["segments"]
-        )
-        / 1000.0
-    )
-
-    db_cur.execute(
-        "SELECT SUM(s.length_km) AS total FROM proposals.trips t "
-        "JOIN proposals.shapes s ON s.shape_id = t.shape_id "
-        "WHERE t.route_id = %s",
-        (saved["route_id"],),
-    )
-    assert float(db_cur.fetchone()["total"]) == pytest.approx(expected_km, abs=0.1)
-
-
-# =============================================================================
-# POST /api/proposal — evaluation snapshot
-# =============================================================================
+    row = db_cur.fetchone()
+    assert row["has_eval"] and row["n"] == 1  # filled in place, no new row
 
 
 @pytest.mark.timeout(60)
-def test_save_with_evaluation_stores_and_rewrites_it(api_base, eval_standard, user_ids):
-    """A save that includes an evaluation stores it, rewrites its embedded
-    draft IDs (the evaluation response echoes the route under
-    input.route), and round-trips it via GET."""
-    david, _ = user_ids
-    costed_route, evaluation = eval_standard
-
-    saved = save_proposal(api_base, costed_route, david, evaluation=evaluation)
-    pid = saved["proposal"]["proposal_id"]
-
-    body = requests.get(f"{api_base}{PROPOSAL_URL}/{pid}", timeout=10).json()
-    stored_eval = body["evaluation_body"]
-    assert stored_eval is not None
-    assert stored_eval["route_id"] == saved["route_id"]
-
-    old_prefix = costed_route["route_id"].rsplit("R1", 1)[0]
-    leftover = _find_prefixed_strings(stored_eval, old_prefix)
-    assert not leftover, f"draft prefix survived rewrite: {leftover}"
-    assert stored_eval["input"]["route"]["route_id"] == saved["route_id"]
+def test_eval_identical_inputs_is_unchanged(api_base, script_headers, planned_eval):
+    """Re-evaluating under identical inputs (same route incl. demand, same
+    resolved scenario, same calc version) recomputes but writes nothing."""
+    result = evaluate(api_base, planned_eval["route"], headers=script_headers)
+    block = result["proposal"]
+    assert block["persisted"] is False
+    assert block["action"] == "unchanged"
+    assert block["proposal_version"] == 1
 
 
 @pytest.mark.timeout(60)
-def test_save_with_mismatched_evaluation_is_rejected(
-    api_base, route_berlin_zuerich_wien, eval_standard, user_ids
+def test_eval_scenario_override_creates_new_version(
+    api_base, script_headers, planned_eval, historical_scenario, db_cur
 ):
-    """evaluation_body.input.route must match route_body.route
-    exactly (validate_route_evaluation_sync) — guards against posting an
-    evaluation snapshot for the wrong route. eval_standard is built for
-    route_berlin_dresden_wien, so pairing it with the (different) Zürich
-    route always produces a mismatch."""
-    david, _ = user_ids
-    _, evaluation = eval_standard
-    resp = requests.post(
-        f"{api_base}{PROPOSAL_URL}",
-        json={
-            "user_id": david,
-            "route_body": _wrap(route_berlin_zuerich_wien),
-            "evaluation_body": evaluation,
-        },
-        timeout=10,
+    """A scenario override is a result-touching input change: a new version
+    is appended carrying the unchanged route_body and the new evaluation.
+    The response's IDs already reference the new version."""
+    pid = planned_eval["proposal"]["proposal_id"]
+    scenario_id = historical_scenario["scenario_id"]
+    result = evaluate(
+        api_base, planned_eval["route"], scenario_id=scenario_id, headers=script_headers
     )
-    assert resp.status_code == 400
-    assert resp.json()["error"] == "validation_error"
+
+    block = result["proposal"]
+    assert block["persisted"] is True
+    assert block["action"] == "versioned"
+    assert block["proposal_version"] == 2
+    assert result["route_id"] == f"P{pid}_V2_R1"
+    assert result["scenario_id"] == scenario_id
+
+    # Version 2's route_body is version 1's route carried over (only the
+    # IDs are rewritten) — same corridor, same physics.
+    db_cur.execute(
+        "SELECT route_body FROM proposals.proposals "
+        "WHERE proposal_id = %s AND proposal_version = 2",
+        (pid,),
+    )
+    v2_route = db_cur.fetchone()["route_body"]["route"]
+    assert v2_route["route_id"] == f"P{pid}_V2_R1"
+    v1_seg = planned_eval["route"]["trip_pairs"][0]["outbound"]["segments"]
+    v2_seg = v2_route["trip_pairs"][0]["outbound"]["segments"]
+    assert [s["distance_m"] for s in v2_seg] == [s["distance_m"] for s in v1_seg]
 
 
-@pytest.mark.timeout(30)
-def test_save_without_evaluation_leaves_financial_fields_null(
-    api_base, route_berlin_dresden_wien, user_ids
+@pytest.mark.timeout(60)
+def test_eval_of_historical_version_computes_only(
+    api_base, script_headers, planned_eval
 ):
-    """A save with no evaluation stores evaluation_body as NULL — GET
-    reflects that, and the proposal still lists fine with null financials."""
-    david, _ = user_ids
-    saved = save_proposal(api_base, route_berlin_dresden_wien, david)
-    body = requests.get(
-        f"{api_base}{PROPOSAL_URL}/{saved['proposal']['proposal_id']}", timeout=10
-    ).json()
-    assert body["evaluation_body"] is None
+    """After the scenario override advanced the proposal to version 2,
+    evaluating the version-1 route again is answered but never mutates
+    history."""
+    result = evaluate(api_base, planned_eval["route"], headers=script_headers)
+    block = result["proposal"]
+    assert block["persisted"] is False
+    assert block["action"] == "historical_version"
+    assert block["proposal_version"] == 1
 
 
-# =============================================================================
-# POST /api/proposal — validation and domain errors
-# =============================================================================
-
-
-@pytest.mark.timeout(10)
-def test_save_without_user_id_is_rejected(api_base, route_berlin_dresden_wien):
-    resp = requests.post(
-        f"{api_base}{PROPOSAL_URL}",
-        json={"route_body": _wrap(route_berlin_dresden_wien)},
-        timeout=10,
-    )
-    assert resp.status_code == 400
-    assert resp.json()["error"] == "validation_error"
-
-
-@pytest.mark.timeout(10)
-def test_save_with_unknown_user_is_rejected(
-    api_base, route_berlin_dresden_wien, user_ids
+@pytest.mark.timeout(60)
+def test_eval_of_unpersisted_route_computes_only(
+    api_base, script_headers, route_berlin_wien
 ):
-    resp = requests.post(
-        f"{api_base}{PROPOSAL_URL}",
-        json={
-            "user_id": 999_999_999,
-            "route_body": _wrap(route_berlin_dresden_wien),
-        },
-        timeout=10,
-    )
-    assert resp.status_code == 422
-    assert resp.json()["error"] == "domain_error"
+    """The session fixtures are tokenless drafts — evaluating one is
+    answered but has nowhere to persist."""
+    result = evaluate(api_base, route_berlin_wien, headers=script_headers)
+    assert result["proposal"] == {"persisted": False, "action": "unpersisted_route"}
 
 
-@pytest.mark.timeout(10)
-def test_save_with_unconventional_route_id_is_rejected(
-    api_base, route_berlin_dresden_wien, user_ids
-):
-    """A route_id outside the P{id}_V{version}_R1 convention can't be
-    version-resolved and is rejected up front."""
-    david, _ = user_ids
-    broken = {**route_berlin_dresden_wien, "route_id": "NJ-BER-VIE"}
-    resp = requests.post(
-        f"{api_base}{PROPOSAL_URL}",
-        json={"user_id": david, "route_body": _wrap(broken)},
-        timeout=10,
+@pytest.mark.timeout(60)
+def test_eval_of_edited_route_computes_only(api_base, script_headers, planned_eval):
+    """A route that no longer matches its stored version (here: replaced
+    demand) is answered but not stored — hand-edited JSON never overwrites
+    a persisted version."""
+    pid = planned_eval["proposal"]["proposal_id"]
+    current = requests.get(f"{api_base}{PROPOSAL_URL}/{pid}", timeout=10).json()
+    edited = inject_demand(current["route_body"]["route"], [])  # demand wiped
+    result = evaluate(api_base, edited, headers=script_headers)
+    block = result["proposal"]
+    assert block["persisted"] is False
+    assert block["action"] == "route_mismatch"
+
+
+@pytest.mark.timeout(60)
+def test_eval_tokenless_computes_only(api_base, planned_eval):
+    result = evaluate(api_base, planned_eval["route"])
+    assert result["proposal"] == {"persisted": False, "action": "unauthenticated"}
+
+
+@pytest.mark.timeout(60)
+def test_eval_by_non_owner_branches(api_base, guest, db_cur):
+    """A non-owner evaluating a persisted route they don't own branches —
+    exercised against the permanent seed proposal (no evaluation, owned by
+    the seed user), so no extra route build is needed."""
+    seed_route = requests.get(
+        f"{api_base}{PROPOSAL_URL}/{_SEED_PROPOSAL_ID}", timeout=10
+    ).json()["route_body"]["route"]
+    result = evaluate(api_base, seed_route, headers=guest["headers"], timeout=90)
+
+    block = result["proposal"]
+    assert block["persisted"] is True
+    assert block["action"] == "branched"
+    assert block["proposal_id"] != _SEED_PROPOSAL_ID
+
+    db_cur.execute(
+        "SELECT user_id, evaluation_body IS NOT NULL AS has_eval "
+        "FROM proposals.proposals WHERE proposal_id = %s",
+        (block["proposal_id"],),
     )
-    assert resp.status_code == 400
-    assert resp.json()["error"] == "validation_error"
+    row = db_cur.fetchone()
+    assert row["user_id"] == guest["user_id"] and row["has_eval"]
+
+    # The seed proposal itself is untouched.
+    db_cur.execute(
+        "SELECT evaluation_body IS NULL AS still_empty FROM proposals.proposals "
+        "WHERE proposal_id = %s",
+        (_SEED_PROPOSAL_ID,),
+    )
+    assert db_cur.fetchone()["still_empty"]
 
 
 # =============================================================================
 # GET /api/proposal/<id>
 # =============================================================================
-
-
-@pytest.mark.timeout(30)
-def test_get_proposal_round_trips_plan_response(
-    api_base, route_berlin_dresden_wien, user_ids
-):
-    """GET returns the stored plan-response shape (route_builder_version /
-    request / route) plus the proposal metadata block."""
-    david, _ = user_ids
-    saved = save_proposal(
-        api_base,
-        route_berlin_dresden_wien,
-        david,
-        route_builder_version="test-rbv",
-        request={"stops": ["DE_BERLIN_HBF"]},
-    )
-    pid = saved["proposal"]["proposal_id"]
-
-    body = requests.get(f"{api_base}{PROPOSAL_URL}/{pid}", timeout=10).json()
-    assert body["proposal"]["proposal_id"] == pid
-    assert body["route_body"]["route_builder_version"] == "test-rbv"
-    assert body["route_body"]["request"] == {"stops": ["DE_BERLIN_HBF"]}
-    assert body["route_body"]["route"]["route_id"] == saved["route_id"]
-    # Same structure as the plan response — geometries included for the map.
-    assert isinstance(body["route_body"]["route"]["geometries"], list)
 
 
 @pytest.mark.timeout(10)
@@ -526,32 +513,37 @@ def test_seeded_example_proposal_is_queryable(api_base):
 
 
 @pytest.fixture(scope="module")
-def listed_proposals(
-    api_base,
-    route_berlin_wien,
-    route_berlin_zuerich_wien,
-    user_ids,
-    db_conn,
-):
+def listed_proposals(api_base, script_headers, guest, db_conn):
     """Two proposals with distinct footprints for filter tests: the 2-stop
-    DE/AT route saved twice by David (so only its version 2 may appear in
-    lists), and the CH-touching route saved by Bjarne. Starts from a clean
-    slate so list totals are exact."""
-    _purge_saved_proposals(db_conn)
-    david, bjarne = user_ids
+    DE/AT corridor persisted twice by test_script (a composition change
+    appends version 2, so only that version may appear in lists), and a
+    CH-touching corridor persisted by a guest. Starts from a clean slate so
+    list totals are exact (three with the permanent seed proposal)."""
+    purge_saved_proposals(db_conn)
 
-    first = save_proposal(api_base, route_berlin_wien, david)
-    saved_route = requests.get(
-        f"{api_base}{PROPOSAL_URL}/{first['proposal']['proposal_id']}", timeout=10
-    ).json()["route_body"]["route"]
-    berlin_wien = save_proposal(api_base, saved_route, david)
+    first = _plan(api_base, script_headers)
+    pid = first["proposal"]["proposal_id"]
+    berlin_wien = _plan(
+        api_base, script_headers, proposal_id=pid, composition_id=_OTHER_COMPOSITION
+    )
 
-    zuerich = save_proposal(api_base, route_berlin_zuerich_wien, bjarne)
-    return {"berlin_wien": berlin_wien, "zuerich": zuerich}
+    zuerich_body = {
+        "stops": ["DE_BERLIN_HBF", "CH_ZUERICH_HB", "AT_WIEN_HBF"],
+        "composition_id": _COMPOSITION,
+        "auto_stop_addition": "off",
+    }
+    resp = requests.post(
+        f"{api_base}{ROUTE_URL}",
+        json=zuerich_body,
+        timeout=120,
+        headers=guest["headers"],
+    )
+    assert resp.status_code == 200, f"zuerich plan failed: {resp.text[:300]}"
+    return {"berlin_wien": berlin_wien, "zuerich": resp.json()}
 
 
-@pytest.mark.timeout(30)
-def test_list_returns_current_summaries(api_base, listed_proposals, user_ids):
+@pytest.mark.timeout(300)
+def test_list_returns_current_summaries(api_base, listed_proposals, script_user_id):
     """GET /api/proposals lists exactly one entry per proposal (current
     version only) with all summary fields populated. Total is 3, not 2 —
     the two proposals this fixture creates plus the permanent seeded
@@ -562,19 +554,19 @@ def test_list_returns_current_summaries(api_base, listed_proposals, user_ids):
     by_id = {p["proposal_id"]: p for p in body["proposals"]}
     berlin_wien = by_id[listed_proposals["berlin_wien"]["proposal"]["proposal_id"]]
     assert berlin_wien["proposal_version"] == 2  # v1 must not be listed
-    assert berlin_wien["user_name"] == "David"
+    assert berlin_wien["user_id"] == script_user_id
+    assert berlin_wien["user_name"] == "test_script"
     assert "Berlin" in berlin_wien["name"] and "Wien" in berlin_wien["name"]
     assert berlin_wien["total_distance_km"] > 0
     assert berlin_wien["total_time_h"] > berlin_wien["total_driving_time_h"] > 0
     assert set(berlin_wien["countries"]) >= {"DE", "AT"}
-    assert {"stop_id": "DE_BERLIN_HBF", "stop_name": "Berlin Hbf"} in berlin_wien[
-        "stops"
-    ] or any(s["stop_id"] == "DE_BERLIN_HBF" for s in berlin_wien["stops"])
+    assert any(s["stop_id"] == "DE_BERLIN_HBF" for s in berlin_wien["stops"])
 
 
 @pytest.mark.timeout(30)
-def test_filtered_list_by_country_stop_and_user(api_base, listed_proposals, user_ids):
-    david, bjarne = user_ids
+def test_filtered_list_by_country_stop_and_user(
+    api_base, listed_proposals, script_user_id, guest
+):
     zuerich_pid = listed_proposals["zuerich"]["proposal"]["proposal_id"]
 
     def filtered(filter_body):
@@ -594,11 +586,15 @@ def test_filtered_list_by_country_stop_and_user(api_base, listed_proposals, user
     assert body["total"] == 1
     assert body["proposals"][0]["proposal_id"] == zuerich_pid
 
-    # User: David owns the seeded example proposal plus his own
-    # berlin_wien save — two current proposals, not one.
-    body = filtered({"user_ids": [david]})
-    assert body["total"] == 2
-    assert all(p["user_id"] == david for p in body["proposals"])
+    # User: test_script owns exactly its berlin_wien proposal (the seed
+    # proposal belongs to the seed user, the Zürich one to the guest).
+    body = filtered({"user_ids": [script_user_id]})
+    assert body["total"] == 1
+    assert body["proposals"][0]["user_id"] == script_user_id
+
+    body = filtered({"user_ids": [guest["user_id"]]})
+    assert body["total"] == 1
+    assert body["proposals"][0]["proposal_id"] == zuerich_pid
 
 
 @pytest.mark.timeout(30)
@@ -626,10 +622,10 @@ def test_list_sorting_and_pagination(api_base, listed_proposals):
 
 @pytest.mark.timeout(30)
 def test_list_sort_by_margin_is_null_safe(api_base, listed_proposals):
-    """Neither proposal this fixture creates was saved with an evaluation,
-    and neither is the permanent seed proposal — sorting by a financial
-    key must not raise on the resulting null margin_eur values, and every
-    entry should report null financials."""
+    """Neither proposal this fixture creates carries an evaluation (plans
+    persist the route only), and neither does the permanent seed proposal —
+    sorting by a financial key must not raise on the resulting null
+    margin_eur values, and every entry should report null financials."""
     resp = requests.post(
         f"{api_base}{PROPOSALS_URL}",
         json={"sort": [{"by": "margin_eur", "dir": "desc"}]},

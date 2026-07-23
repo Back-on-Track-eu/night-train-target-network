@@ -22,7 +22,7 @@ FEEDBACK_URL = "/api/feedback"
 FEEDBACK_CATEGORIES_URL = "/api/feedback/categories"
 SCENARIOS_URL = "/api/scenarios"
 
-# Mirrors models/route/route.py: DAYS_PER_OPERATING_WEEK / WEEKS_PER_SEASON.
+# Mirrors models/route/version.py: DAYS_PER_OPERATING_WEEK / WEEKS_PER_SEASON.
 _DAYS_PER_WEEK = {"daily": 7, "three_per_week": 3}
 _WEEKS_PER_SEASON = 26
 
@@ -37,69 +37,46 @@ def build_route(
     stops: list[str],
     composition_id: str = "STD-7.1",
     timeout: int = 90,
+    headers: dict | None = None,
     **extra,
 ) -> dict:
     """POST /api/route/plan with the given stops/composition (plus any extra
     request fields, e.g. scenario_id or routing_mode) and return the route dict.
-    Asserts 200 — callers testing error paths post directly instead."""
+    Asserts 200 — callers testing error paths post directly instead.
+
+    headers: pass an Authorization header to plan as an authenticated user
+    (the plan then auto-persists as a proposal — see api/route.py:
+    _persist_plan). Tokenless (the default, used by every session route
+    fixture) computes only and keeps the draft placeholder IDs."""
     body = {"stops": stops, "composition_id": composition_id, **extra}
-    resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=timeout)
+    resp = requests.post(
+        f"{api_base}{ROUTE_URL}", json=body, timeout=timeout, headers=headers
+    )
     assert resp.status_code == 200, f"route/plan failed: {resp.text[:300]}"
     return resp.json()["route"]
 
 
 def evaluate(
-    api_base: str, route: dict, scenario_id: int | None = None, timeout: int = 60
+    api_base: str,
+    route: dict,
+    scenario_id: int | None = None,
+    timeout: int = 60,
+    headers: dict | None = None,
 ) -> dict:
     """POST /api/evaluation/calc for a route dict (optionally overriding the
-    scenario) and return the full response body. Asserts 200."""
+    scenario) and return the full response body. Asserts 200.
+
+    headers: pass an Authorization header to evaluate as an authenticated
+    user (the evaluation then auto-persists onto its proposal version — see
+    api/evaluation.py: _persist_evaluation). Tokenless computes only."""
     body: dict = {"route": route}
     if scenario_id is not None:
         body["scenario_id"] = scenario_id
-    resp = requests.post(f"{api_base}{EVAL_URL}", json=body, timeout=timeout)
+    resp = requests.post(
+        f"{api_base}{EVAL_URL}", json=body, timeout=timeout, headers=headers
+    )
     assert resp.status_code == 200, f"evaluation/calc failed: {resp.text[:300]}"
     return resp.json()
-
-
-def save_proposal(
-    api_base: str,
-    route: dict,
-    user_id: int,
-    timeout: int = 30,
-    evaluation: dict | None = None,
-    route_builder_version: str = "test",
-    request: dict | None = None,
-    **extra,
-) -> dict:
-    """POST /api/proposal for a route dict as the given user. Wraps `route`
-    into a route_body envelope ({route_builder_version, request,
-    route} — route_builder_version/request default to test-only placeholder
-    values unless overridden) since the endpoint now requires the whole
-    POST /api/route/plan response, not just its route section. `evaluation`,
-    if given, is passed through as evaluation_body verbatim — build it
-    via evaluate(route) first so its input.route matches `route` (the
-    endpoint rejects a mismatch). Any other kwargs (e.g. change_log) go at
-    the top level of the save body. Asserts 201 — callers testing error
-    paths post directly instead."""
-    body = {
-        "user_id": user_id,
-        "route_body": {
-            "route_builder_version": route_builder_version,
-            "request": request if request is not None else {},
-            "route": route,
-        },
-        **extra,
-    }
-    if evaluation is not None:
-        body["evaluation_body"] = evaluation
-    resp = requests.post(f"{api_base}{PROPOSAL_URL}", json=body, timeout=timeout)
-    assert resp.status_code == 201, f"proposal save failed: {resp.text[:300]}"
-    return resp.json()
-
-
-# =============================================================================
-# Route JSON navigation
-# =============================================================================
 
 
 def all_trips(route: dict) -> list[dict]:
@@ -242,3 +219,36 @@ def directional_od(
 def route_bd(result: dict, normalisation: str = "per_year") -> dict:
     """Route-level breakdown of an evaluation result at one normalisation."""
     return result["views"]["route"]["data"][normalisation]
+
+
+def purge_saved_proposals(conn, keep_route_id: str = "P1_V1_R1") -> None:
+    """Delete everything the persist-on-calc pipelines wrote, except the one
+    real example proposal seeded at DB init time (keep_route_id — see
+    db/dev/seed.py: seed_example_proposal). Persisted GTFS IDs all start
+    with 'P' (P{id}_V{version}_...), the seeded GTFS demo rows don't
+    (NJ-...) — the prefix cleanly separates persisted data from unrelated
+    seed data. '!~ ^P1_V1_R1' is a regex anchor, not a numeric comparison —
+    it excludes exactly the seed's own IDs without also excluding
+    P100_.../P1000_...-prefixed rows, which share the "P1" substring but
+    not the "P1_" boundary. Deleting routes cascades trips and stop_times;
+    deleting services cascades calendar and calendar_dates. Commits."""
+    keep_pid = int(keep_route_id.split("_")[0][1:])
+    cur = conn.cursor()
+    cur.execute(
+        f"DELETE FROM proposals.routes WHERE route_id ~ '^P' "
+        f"AND route_id !~ '^{keep_route_id}'"
+    )
+    cur.execute(
+        f"DELETE FROM proposals.shapes WHERE shape_id ~ '^P' "
+        f"AND shape_id !~ '^{keep_route_id}'"
+    )
+    cur.execute(
+        f"DELETE FROM proposals.services WHERE service_id ~ '^P' "
+        f"AND service_id !~ '^{keep_route_id}'"
+    )
+    cur.execute(
+        "DELETE FROM proposals.proposals WHERE proposal_id != %s",
+        (keep_pid,),
+    )
+    conn.commit()
+    cur.close()

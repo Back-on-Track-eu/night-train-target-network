@@ -9,7 +9,7 @@ Covers:
   - Country attribution: shares sum to 1, expected countries present,
     per-country km sums to trip distance
   - Route geometry sanity: direct vs detour distance, outbound/return symmetry
-  - Timetable math: arrival = departure + driving + buffer, dwell at
+  - Timetable math: arrival = departure + driving + dynamics + buffer, dwell at
     intermediate stops
   - Track infra defaulting as seen by route/plan (SE)
   - Energy model: flat 28 kWh/km dummy factor, composition-independent
@@ -139,7 +139,13 @@ class TestTimetableMath:
             for seg in trip["segments"]:
                 dep = seg["from_stop"]["departure_time_min"]
                 arr = seg["to_stop"]["arrival_time_min"]
-                assert arr == dep + seg["driving_time_min"] + seg["buffer_time_min"]
+                assert (
+                    arr
+                    == dep
+                    + seg["driving_time_min"]
+                    + seg["dynamics_time_min"]
+                    + seg["buffer_time_min"]
+                )
 
     def test_intermediate_dwell_at_least_one_minute(self, route_berlin_dresden_wien):
         """Dresden (the intermediate stop) has a real positive dwell —
@@ -157,6 +163,7 @@ class TestTimetableMath:
         for trip in all_trips(route_berlin_dresden_wien):
             for seg in trip["segments"]:
                 assert seg["buffer_time_min"] >= 0
+                assert seg["dynamics_time_min"] >= 0
 
 
 # =============================================================================

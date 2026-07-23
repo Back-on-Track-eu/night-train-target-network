@@ -6,9 +6,9 @@ full-table snapshot resolution, default value handling, param_versions
 structure, scenario pinning, and CI model-version injection.
 
 Fixture values relied on (see db/dev/seed.py):
-  - DE track infra exists at two snapshot versions: v2 tac=5.40 (base
-    scenario's pinned version) and v1 tac=3.10 (pinned by the what-if
-    scenario 'whatif-de-track-infra').
+  - DE track infra exists at three snapshot versions: v2 tac=5.40 (base
+    scenario's pinned version) and v1 tac=3.10 (pinned by the historical
+    scenario '2026-baseline').
   - SE tac_eur_train_km is NULL at every version → resolves from the
     EU-average default row (is_default=True).
   - SE_STOCKHOLM_C stop_charge_eur is NULL → resolves from the global
@@ -32,40 +32,36 @@ class TestVersionIsolation:
         assert de is not None
         assert de.tac_eur_train_km == pytest.approx(5.40, rel=1e-3)
 
-    def test_loader_pinned_to_whatif_returns_old_snapshot(
-        self, loader, whatif_scenario
+    def test_loader_pinned_to_historical_returns_old_snapshot(
+        self, loader, historical_scenario
     ):
-        """Loader pinned to the what-if scenario returns DE's v1 value
-        (tac=3.10) — exact-match resolution on the pinned version, no
-        fallback to 'latest'."""
-        de = loader.build_all_tracks(whatif_scenario["scenario_id"]).get("DE")
+        """Loader pinned to the 2026 Base Line scenario returns DE's v1
+        value (tac=3.10) — exact-match resolution on the pinned version,
+        no fallback to 'latest'."""
+        de = loader.build_all_tracks(historical_scenario["scenario_id"]).get("DE")
         assert de is not None
         assert de.tac_eur_train_km == pytest.approx(3.10, rel=1e-3)
 
-    def test_db_has_both_de_versions(self, db_cur):
-        """Both DE snapshot rows exist — confirms the fixture the two tests
-        above depend on is actually in place."""
-        db_cur.execute(
-            """
+    def test_db_has_all_three_de_versions(self, db_cur):
+        """All three DE snapshot rows exist — confirms the fixture the two
+        tests above depend on is actually in place."""
+        db_cur.execute("""
             SELECT track_infra_version FROM input_params.track_infrastructures
             WHERE country_code = 'DE' ORDER BY track_infra_version
-            """
-        )
+            """)
         versions = [r["track_infra_version"] for r in db_cur.fetchall()]
-        assert versions == [1, 2]
+        assert versions == [1, 2, 3]
 
     def test_full_table_snapshot_invariant(self, db_cur):
         """Every track_infrastructures version is a COMPLETE snapshot — the
         same set of countries at every version (the full-table-snapshot
         write contract). A version that dropped or gained a country partway
         would break exact-match resolution."""
-        db_cur.execute(
-            """
+        db_cur.execute("""
             SELECT track_infra_version, COUNT(DISTINCT country_code) AS n_countries
             FROM input_params.track_infrastructures
             GROUP BY track_infra_version
-            """
-        )
+            """)
         counts = {r["track_infra_version"]: r["n_countries"] for r in db_cur.fetchall()}
         assert len(set(counts.values())) == 1, (
             f"Snapshot invariant broken — country count differs by version: {counts}"

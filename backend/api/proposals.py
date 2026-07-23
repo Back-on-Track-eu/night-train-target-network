@@ -1,38 +1,29 @@
 """
 proposals.py
 ============
-Proposal endpoints — saving, listing, and loading night train proposals
+Proposal endpoints — listing and loading night train proposals
 (formerly the "scenarios" API; renamed to avoid colliding with the
 parameter-versioning scenario.scenarios concept).
 
-  POST /api/proposal        — save a proposal (create / new version / branch)
   GET  /api/proposals       — list current proposal versions
   POST /api/proposals       — filtered/sorted/paginated list
   GET  /api/proposal/<id>   — load the current version of a proposal
 
-Save semantics (implemented in adapters/proposal_repository.py):
-the posted route_body.route's own proposal_id decides the
-outcome. Unknown or draft placeholder id → "created". Known id owned by
-the saving user → new version of the same proposal ("versioned"). Known
-id owned by someone else → duplicate under a new proposal_id
-("branched"). Rows are append-only in all three cases; nothing is ever
-updated in place.
-
-Authentication: @optional_auth on save — a bearer token's identity
-overrides the body's user_id (so tokens can't be impersonated away),
-while tokenless saves keep the old body-carried contract until the
-frontend has a login flow. Flip to @require_auth once it does.
-Every user can see and load every proposal.
+There is no save endpoint anymore (persist-on-calc, 2026-07-16): POST
+/api/route/plan and POST /api/evaluation/calc persist their own responses
+for any authenticated caller (guest or registered) — see api/route.py:
+_persist_plan() and api/evaluation.py: _persist_evaluation() for the
+created/versioned/branched/filled/unchanged contract, implemented on
+adapters/proposal_repository.py. Every user can see and load every
+proposal.
 """
 
 import logging
 
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, jsonify, request
 
-from api.auth_middleware import optional_auth
 from api.helpers.dependencies import get_proposal_repository
 from api.helpers.proposal_serialize import (
-    validate_save_body,
     validate_list_body,
     proposal_meta_to_dict,
     proposal_summary_to_dict,
@@ -42,93 +33,6 @@ logger = logging.getLogger(__name__)
 bp = Blueprint("proposals", __name__)
 
 _DEFAULT_LIMIT = 50
-
-
-@bp.post("/proposal")
-@optional_auth
-def save_proposal():
-    """
-    Save a proposal.
-
-    Request body — post the WHOLE response of each upstream API call, not
-    a hand-picked subset:
-      user_id           : int   (required — admin.users identity of the saver)
-      change_log        : str   (optional — what changed in this version)
-      route_body        : dict  (required — the entire POST /api/route/plan
-                                  response: {route_builder_version, request, route})
-      evaluation_body   : dict  (optional — the entire POST /api/evaluation/calc
-                                  response: {calc_version, route_id, models, input, views}.
-                                  Its route_id and input.route must exactly match
-                                  route_body.route — see
-                                  proposal_serialize.validate_route_evaluation_sync)
-
-    A proposal can be saved without evaluation_body — its financial
-    fields are simply null until a version with one is saved.
-
-    Response (201):
-      {
-        "action": "created" | "versioned" | "branched",
-        "proposal": {proposal_id, proposal_version, is_current, user_id,
-                     user_name, change_log, created_at},
-        "route_id": "P{proposal_id}_V{proposal_version}_R1"
-      }
-    All draft IDs in the posted route (route_id, trip_ids, geometry_ids, ...)
-    are rewritten to the real proposal_id/version — the returned route_id is
-    the one to use from here on.
-    """
-    body = request.get_json(silent=True)
-    if not body:
-        return (
-            jsonify({"error": "bad_request", "message": "Request body must be JSON."}),
-            400,
-        )
-
-    # A bearer token outranks the body's user_id (see module docstring).
-    if g.get("user_id") is not None:
-        body["user_id"] = g.user_id
-
-    errors = validate_save_body(body)
-    if errors:
-        return jsonify({"error": "validation_error", "details": errors}), 400
-
-    repo = get_proposal_repository()
-
-    user = repo.get_user(body["user_id"])
-    if user is None:
-        return (
-            jsonify(
-                {
-                    "error": "domain_error",
-                    "message": f"user_id {body['user_id']} does not exist.",
-                }
-            ),
-            422,
-        )
-
-    try:
-        record = repo.save(
-            route_body=body["route_body"],
-            user_id=body["user_id"],
-            change_log=body.get("change_log"),
-            evaluation_body=body.get("evaluation_body"),
-        )
-    except ValueError as e:
-        logger.warning("proposal save failed (domain error): %s", e)
-        return jsonify({"error": "domain_error", "message": str(e)}), 422
-    except Exception as e:
-        logger.exception("proposal save failed (unexpected): %s", e)
-        return jsonify({"error": "proposal_error", "message": str(e)}), 500
-
-    return (
-        jsonify(
-            {
-                "action": record["action"],
-                "proposal": proposal_meta_to_dict({**record, **user}),
-                "route_id": record["route_id"],
-            }
-        ),
-        201,
-    )
 
 
 @bp.get("/proposals")

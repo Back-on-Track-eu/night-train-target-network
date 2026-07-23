@@ -29,7 +29,7 @@ built on top of it:
 | `test_20`–`test_21` | `POST /api/route/plan` (contract, then content logic) |
 | `test_30`–`test_31` | `POST /api/evaluation/calc` (contract, then content logic) |
 | `test_40` | End-to-end pipeline smoke |
-| `test_50` | Proposals API — save/list/load |
+| `test_50` | Persist-on-calc semantics + proposals list/load |
 | `test_60` | Feedback API — submit/categories |
 
 Shared code:
@@ -73,7 +73,9 @@ Shared code:
 | `test_stop_infrastructure_global_default_exists` | Global stop default present | pinned version, `country_code IS NULL` | ≥ 1 row |
 | `test_country_geometries_seeded` | PostGIS borders for every stop country | `country_geom IS NULL` per stop country | no missing geometries |
 | `test_exactly_one_current_base_scenario` | Base scenario uniqueness | `scenario.scenarios` | exactly 1 `is_current_base` |
-| `test_whatif_scenario_pins_track_infra_v1` | What-if lineage contract | base + what-if rows | what-if pins track infra v1, copies every other pointer from base |
+| `test_historical_scenario_pins_version_1` | Historical lineage owns its own snapshot | 2026-baseline vs base rows | all four table versions = 1, differ from base |
+| `test_hsr_scenario_pins_version_3` | HSR lineage owns its own snapshot | HSR-allowed vs base rows | all four table versions = 3, differ from base |
+| `test_stop_infrastructure_values_unchanged_by_hsr_scenario` | Stop charges independent of HSR policy | `stop_infrastructures` at base vs HSR version | identical values despite different version numbers |
 
 ## test_03_loader.py — DBDataLoader correctness
 
@@ -96,7 +98,7 @@ Shared code:
 | Test | Purpose | Input | Expected |
 |---|---|---|---|
 | `TestVersionIsolation::test_loader_uses_base_pinned_version` | Default resolution → base snapshot | `build_all_tracks()` | DE tac = 5.40 (v2) |
-| `TestVersionIsolation::test_loader_pinned_to_whatif_returns_old_snapshot` | Explicit pin → exact-match old snapshot | `build_all_tracks(whatif_id)` | DE tac = 3.10 (v1) |
+| `TestVersionIsolation::test_loader_pinned_to_historical_returns_old_snapshot` | Explicit pin → exact-match old snapshot | `build_all_tracks(historical_id)` | DE tac = 3.10 (v1) |
 | `TestVersionIsolation::test_db_has_both_de_versions` | Fixture sanity | DE rows | versions [1, 2] exist |
 | `TestVersionIsolation::test_full_table_snapshot_invariant` | Snapshot completeness contract | country count per version | identical for all versions |
 | `TestVersionIsolation::test_param_version_number_matches_db` | Provenance points at loaded row | DE tac param entry | version = scenario's pinned version |
@@ -123,7 +125,7 @@ Shared code:
 | `TestTrackInfrastructures::test_every_field_is_field_object` | All 10 fields field-objects (guards against a field dropping out) | every country × 10 fields | dict with value + is_default |
 | `TestTrackInfrastructures::test_default_row_covers_all_fields` | EU-average default complete | `default_track_infra` | value for all 10 fields |
 | `TestTrackInfrastructures::test_is_default_flags_via_api` | Provenance via API | SE / DE tac | True / False |
-| `TestTrackInfrastructures::test_scenario_id_pins_parameter_version` | `?scenario_id=` pinning | base vs what-if request | DE tac 5.40 vs 3.10 |
+| `TestTrackInfrastructures::test_scenario_id_pins_parameter_version` | `?scenario_id=` pinning | base vs 2026-baseline request | DE tac 5.40 vs 3.10 |
 | `TestCompositions::test_response_layout` | Top-level shape | GET compositions | descriptions/sources/count/compositions/operators |
 | `TestCompositions::test_composition_sections_present` | Restructured grouped sections | every composition | routing/staff/energy/capacity/equipment/coaches/fixed_costs/variable_km/source_ids |
 | `TestCompositions::test_capacity_non_empty_with_places_and_density` | Capacity content | every composition | ≥ 1 class; places > 0; density > 0 |
@@ -143,7 +145,8 @@ Shared code:
 | `TestScenariosGrouping::test_current_scenarios_group_flags` | Current group semantics | `current_scenarios` rows | non-base current lineage heads only |
 | `TestScenariosGrouping::test_historical_scenarios_group_flags` | Historical group semantics | `historical_scenarios` rows | superseded versions only |
 | `TestScenariosGrouping::test_base_scenario_is_in_current_base_group` | Seed cross-check | seeded base scenario | appears in `current_base`, which holds exactly that row |
-| `TestScenariosGrouping::test_whatif_scenario_is_in_current_scenarios_group` | Seed cross-check | seeded what-if head | appears in `current_scenarios` only |
+| `TestScenariosGrouping::test_hsr_scenario_is_in_current_scenarios_group` | Seed cross-check | seeded HSR-allowed lineage head | appears in `current_scenarios` only |
+| `TestScenariosGrouping::test_historical_scenario_is_in_historical_scenarios_group` | Seed cross-check | seeded 2026 Base Line scenario | appears in `historical_scenarios` only |
 
 ---
 
@@ -161,29 +164,37 @@ all modes defaulted.
 | `TestResponseStructure::test_outbound_stop_order_matches_request` | Stop order | outbound trip | exactly the requested stop list |
 | `TestResponseStructure::test_return_trip_stops_reversed` | Return mirroring | return trip | reversed outbound stop list |
 | `TestResponseStructure::test_segment_count_equals_stops_minus_one` | Segmentation | every trip | N stops → N−1 segments |
-| `TestResponseStructure::test_segments_carry_physics_fields` | Segment shape | every segment | distance/time/buffer/energy/shares present; distance > 0 |
+| `TestResponseStructure::test_segments_carry_physics_fields` | Segment shape | every segment | distance/time/buffer/slack/energy/shares present; distance > 0; slack 0 outside fixed-night |
 | `TestResponseStructure::test_no_monetary_values_anywhere` | Physics-only contract | whole route dict (recursive) | no `*eur*`/`*cost*` keys anywhere |
 | `TestResponseStructure::test_geometries_and_segments_reference_each_other` | geometry_id integrity | geometries + segments | unique ids, non-empty coords, every reference resolves |
 | `TestResponseStructure::test_composition_embedded_without_cost_fields` | Physics subset of composition | embedded composition | no cost fields; capacity/density present |
-| `TestResponseStructure::test_od_pairs_empty_on_fresh_plan` | No demand on fresh plan | trip pairs | `od_pairs == []` |
+| `TestResponseStructure::test_od_pairs_populated_by_stopgap_demand` | Stopgap demand distribution runs after planning (see `api/route.py`, `OPEN_TODOS["demand_model"]`) | trip pairs | `od_pairs` non-empty, covers both trips of the pair, structural fields only (no distribution values pinned) |
 | `TestResponseStructure::test_track_infrastructure_present_and_shaped` | Track infra info block | route dict | per-country entries with defaulted_fields list |
 | `TestAutomaticScheduling::test_departure_time_assigned` | Scheduling contract | every trip | departure set, 0 ≤ t < 48 h |
 | `TestAutomaticScheduling::test_terminal_stop_types` | Terminal classification | every trip | first=boarding/no arrival; last=alighting/no departure |
-| `TestAutomaticScheduling::test_intermediate_stops_boarding_or_alighting` | Mirror classification (never "both") | intermediate stops | boarding or alighting, both times set |
+| `TestAutomaticScheduling::test_intermediate_stops_classified_three_way` | Threshold classification (never "both") | intermediate stops | boarding, night, or alighting; both times set |
 | `TestAutomaticScheduling::test_stop_times_monotonically_increasing` | Time ordering | every trip | arrivals strictly sorted |
 | `TestAutomaticScheduling::test_schedule_is_daily_both_seasons` | schedule_mode default | route schedule | summer+winter, both `daily` |
+| `TestFixedNightMode::test_interval_covers_night_window_both_directions` | Night-window guarantee, interval reversed for return | fixed-night, Berlin→Dresden interval | dep(A) < 00:00, arr(B) ≥ 05:00, both directions |
+| `TestFixedNightMode::test_short_interval_is_stretched_with_slack` | Slack distribution + time consistency | ~2h interval (must stretch) | slack only on interval legs, total > 0; per-segment elapsed = driving+dynamics+buffer+slack |
+| `TestFixedNightMode::test_slow_stretch_produces_timetable_warning` | Slow-section detection | ~2h interval (must stretch) | exactly one `fixed_night_stretch_slow` warning per trip, full field set, ratio < 1 |
+| `TestFixedNightMode::test_long_interval_gets_no_slack_or_warning` | No-stretch path | Berlin→Wien interval (~7h) | window satisfied, all slack 0, no warnings |
+| `TestFixedNightMode::test_invalid_interval_returns_400` (×6) | Interval validation | missing / 1 stop / duplicate / non-string / not in stops / wrong order | 400 each |
+| `TestFixedNightMode::test_interval_rejected_outside_fixed_night_mode` | Mode coupling | interval with `simpleAutomatic` | 400, not silently ignored |
 | `TestModeSwitches::test_explicit_default_values_accepted` | Explicit defaults valid | all modes spelled out | 200 |
 | `TestModeSwitches::test_simple_routing_mode_accepted` | Alternative routing mode | `routing_mode=simpleRouting` | 200, full route |
-| `TestModeSwitches::test_invalid_mode_returns_400` (×3) | Mode validation | bad routing/timetable/schedule mode | 400 each |
-| `TestModeSwitches::test_auto_stop_addition_default_true_with_no_nearby_candidates_is_noop` | auto_stop_addition defaults to true and is implemented, but no seeded stop is near this corridor | default request (field omitted) | 200, stop list unchanged (no candidates found) |
-| `TestModeSwitches::test_auto_stop_addition_false_returns_exact_caller_list` | Explicit opt-out | `auto_stop_addition=false` | 200, stop list unchanged |
-| `TestModeSwitches::test_auto_added_field_present_and_false_with_default_request` | `Stop.auto_added` contract | default request (field omitted) | every stop `auto_added=false` |
-| `TestModeSwitches::test_auto_added_field_false_when_disabled` | `Stop.auto_added` contract | `auto_stop_addition=false` | every stop `auto_added=false` |
-| `TestModeSwitches::test_auto_stop_addition_wrong_type_returns_400` | Type validation | `auto_stop_addition="yes"` | 400 |
+| `TestModeSwitches::test_invalid_mode_returns_400` (×4) | Mode validation | bad routing/timetable/schedule/auto_stop_addition mode | 400 each |
+| `TestModeSwitches::test_auto_stop_addition_defaults_to_add_and_inserts_brno` | auto_stop_addition defaults to `"add"`; CZ_BRNO_HLN sits on the corridor and fits the budget | default request (field omitted) | stops = Berlin, Dresden, **Brno**, Wien; `auto_added` true on Brno only; return trip reversed with mirrored `auto_added`; no `suggested_stops` section |
+| `TestModeSwitches::test_auto_stop_addition_add_explicit_accepted` | Explicit `"add"` behaves identically to the omitted field | `auto_stop_addition="add"` | 200, Brno inserted, no `suggested_stops` section |
+| `TestModeSwitches::test_auto_stop_addition_off_returns_exact_caller_list` | Explicit opt-out | `auto_stop_addition="off"` | 200, stop list unchanged, no `suggested_stops` section |
+| `TestModeSwitches::test_auto_stop_addition_suggest_returns_suggested_stops_section` | `"suggest"` envelope + routing-like-off contract + cross-mode consistency with `"add"` | `auto_stop_addition="suggest"` | 200; `suggested_stops` = exactly CZ_BRNO_HLN with full field set and `added_time_min > 0`, ordered between `request` and `route`; stop list unchanged, `auto_added=false` throughout; suggested ids == the ids `"add"` inserted |
+| `TestModeSwitches::test_auto_added_field_false_throughout_when_off` | `Stop.auto_added` contract | module fixture (`auto_stop_addition="off"`) | every stop `auto_added=false` |
+| `TestModeSwitches::test_auto_stop_addition_bool_returns_400` (×2) | Pre-0.9.5 booleans rejected, not mapped | `auto_stop_addition=true` / `false` | 400 each |
+| `TestModeSwitches::test_auto_stop_addition_wrong_type_returns_400` | Value validation | `auto_stop_addition="yes"` | 400 |
 | `TestProposalAndScenario::test_omitted_proposal_id_gets_draft_placeholder` | Draft placeholder rule | no proposal_id | route_id `P{>1e9}_V1_R1` |
 | `TestProposalAndScenario::test_explicit_proposal_id_used_in_route_id` | Explicit id rule | proposal_id=42, version=7 | route_id `P42_V7_R1` |
 | `TestProposalAndScenario::test_omitted_scenario_id_resolves_to_base` | Scenario defaulting | no scenario_id | embedded id = base scenario id |
-| `TestProposalAndScenario::test_explicit_scenario_id_embedded` | Explicit scenario pin | scenario_id = what-if | embedded verbatim |
+| `TestProposalAndScenario::test_explicit_scenario_id_embedded` | Explicit scenario pin | scenario_id = HSR-allowed | embedded verbatim |
 | `TestValidation::*` (7 tests) | Request validation | single stop / missing fields / old stop-object format / wrong types / unknown composition / non-JSON | 400 (validation) or 422 (unknown composition — domain error) |
 
 ## test_21_route_plan_content.py — Route content logic
@@ -198,7 +209,7 @@ all modes defaulted.
 | `TestRouteGeometry::test_outbound_and_return_distances_symmetric` | Path symmetry | Berlin→Wien pair | distances agree within 5% |
 | `TestRouteGeometry::test_detour_not_shorter_than_direct` | Routing optimality sanity | direct vs via-Zürich | detour ≥ direct |
 | `TestRouteGeometry::test_distance_independent_of_composition` | Same flags → same path | STD-3.1 vs STD-7.1 | identical distance |
-| `TestTimetableMath::test_arrival_equals_departure_plus_driving_plus_buffer` | Exact build_final_timetable() math | every segment | arrival = departure + driving + buffer |
+| `TestTimetableMath::test_arrival_equals_departure_plus_driving_plus_buffer` | Exact build_final_timetable() math | every segment | arrival = departure + driving + dynamics + buffer |
 | `TestTimetableMath::test_intermediate_dwell_at_least_one_minute` | Real dwell applied | Dresden stop | dwell ≥ 1 min |
 | `TestTimetableMath::test_buffer_time_non_negative` | Buffer sanity | every segment | buffer ≥ 0 |
 | `TestTrackInfraDefaulting::test_se_route_lists_dk_and_se` | Defaulted country included | Copenhagen→Stockholm | DK and SE listed |
@@ -245,7 +256,7 @@ Standard input: `eval_standard` (3-stop route, directional demand 40 Couchette
 | `TestBreakdownIdentities::*` (6 tests) | Tree arithmetic | per_year breakdown | net = revenue − cost − margin; every total = sum of its leaves |
 | `TestBreakdownIdentities::test_net_identity_holds_in_all_normalisations` | Normalisation preserves identities | all 5 normalisations | net identity holds in each |
 | `TestNormalisationDivisors::test_per_operating_day_times_days_equals_per_year` | Divisor: operating days from embedded schedule | per_operating_day × days | == per_year |
-| `TestNormalisationDivisors::test_per_trip_km_divisor` | Divisor: all trips' km | per_trip_km × total km | == per_year |
+| `TestNormalisationDivisors::test_per_train_km_divisor_is_annual` | Divisor: all trips' km × operating days | per_train_km × annual train-km | == per_year |
 | `TestNormalisationDivisors::test_per_available_place_km_divisor_is_unweighted` | Divisor: **unweighted** capacity place-km (density deliberately not applied) | per_pkm × (places × km) | == per_year |
 | `TestNormalisationDivisors::test_per_sold_place_km_divisor` | Divisor: sold place-km over each OD's segment range | per_pkm × Σ(70 × trip km) | == per_year |
 | `TestNormalisationDivisors::test_per_sold_cost_exceeds_per_available_at_partial_load` | Partial load relation | eval_standard | per-sold cost > per-available cost |
@@ -258,7 +269,7 @@ Standard input: `eval_standard` (3-stop route, directional demand 40 Couchette
 | `TestMatrixConsistency::test_traversed_countries_appear_in_matrix` | Matrix coverage | traversed countries | all appear as keys |
 | `TestMatrixConsistency::test_od_matrix_carries_directional_keys_with_revenue` | OD keys deterministic | directional demand | both direction keys present, revenue > 0 |
 | `TestMatrixConsistency::test_stop_matrix_terminal_has_station_charge` | Stop matrix content | Berlin cell | station charge > 0 |
-| `TestScenarioOverride::test_whatif_override_lowers_tac` | Scenario override swaps ONLY the re-pinned table | same route, base vs what-if | TAC strictly lower; station charges unchanged |
+| `TestScenarioOverride::test_historical_override_lowers_tac` | Scenario override swaps the re-pinned table | same route, base vs 2026-baseline | TAC strictly lower; station charges unchanged |
 
 ## test_40_pipeline.py — End-to-end smoke
 
@@ -270,49 +281,50 @@ Standard input: `eval_standard` (3-stop route, directional demand 40 Couchette
 
 ---
 
-## test_50_proposals_api.py — Proposals API
+## test_50_proposals_api.py — Persist-on-calc + proposals read endpoints
 
-Reuses the shared session route fixtures (no extra OpenRailRouting calls).
-A module-scoped autouse fixture purges saved proposals before and after
-this file and lifts the `proposal_id` sequence above the fixture
-placeholder range (100-999, see `conftest.py`'s range-convention comment)
-so a sequence-assigned ID can never collide with one embedded in a shared
-route fixture.
+The write path lives inside the pipelines (POST /api/proposal is gone):
+these tests exercise the created/unchanged/versioned/branched contract of
+`POST /api/route/plan` and the filled/unchanged/versioned/branched contract
+of `POST /api/evaluation/calc`, plus the remaining list/load endpoints.
+A module-scoped autouse fixture purges persisted proposals before and
+after this file (the permanent seed proposal excepted). The suite
+persists as the seeded `test_script` user (conftest: `script_headers`);
+guest sessions supply the foreign owner. Tests within each fixture group
+build on each other's version history **in definition order** — don't
+reorder or `-k`-split them.
 
-| Test | Purpose | Input | Expected |
+| Test | Pins | Setup | Expectation |
 |---|---|---|---|
-| `test_save_new_proposal_created` | Unknown/draft proposal_id creates | shared route, save | `action=created`, version 1, sequence-assigned id |
-| `test_save_rewrites_all_draft_ids` | Every ID in the stored route carries the real prefix | saved route, reload | no trace of the draft prefix anywhere in the JSON |
-| `test_save_own_proposal_creates_new_version` | Re-saving your own proposal appends a version | save, reload, re-save | `action=versioned`, version 2, `is_current` flips, v1 row kept |
-| `test_save_foreign_proposal_branches` | Saving someone else's proposal duplicates it | David saves, Bjarne re-saves | `action=branched`, new proposal_id, original untouched |
-| `test_save_writes_gtfs_decomposition` | Save decomposes into GTFS tables | saved route | routes/trips/stop_times/shapes/calendar rows correct |
-| `test_gtfs_shape_length_matches_route_physics` | GTFS and JSONB describe the same route | saved route | summed shape length ≈ summed segment distance |
-| `test_save_with_evaluation_stores_and_rewrites_it` | Evaluation snapshot persisted and ID-rewritten | `eval_standard`, save with `evaluation` | GET returns it with the real `route_id`, no draft prefix anywhere |
-| `test_save_with_mismatched_evaluation_is_rejected` | `evaluation.route_id` must match `route.route_id` | evaluation for a different route | `400 validation_error` |
-| `test_save_without_evaluation_leaves_financial_fields_null` | No evaluation → `evaluation_body` NULL | saved route, no `evaluation` | GET's `evaluation` is `null` |
-| `test_save_without_user_id_is_rejected` | Validation | no `user_id` | `400 validation_error` |
-| `test_save_with_unknown_user_is_rejected` | Domain check | nonexistent `user_id` | `422 domain_error` |
-| `test_save_with_unconventional_route_id_is_rejected` | Validation | non-`P{id}_V{v}_R1` route_id | `400 validation_error` |
-| `test_get_proposal_round_trips_plan_response` | GET matches the plan-response shape | saved with `route_builder_version`/`request` | both echoed back verbatim |
+| `test_plan_persists_created` | Authenticated plan persists itself | fresh plan, no proposal_id | `action=created`, version 1, caller owns, route_id final |
+| `test_plan_response_matches_stored_body` | Response IS the stored body | GET round-trip | route_body == response minus `proposal` block, no draft prefix anywhere |
+| `test_plan_writes_gtfs_decomposition` | GTFS side written | DB rows | 2 trips, 2×stops stop_times, daily calendar |
+| `test_tokenless_plan_computes_only` | No token → old contract | tokenless plan | `unauthenticated`, draft id ≥1e9, no row |
+| `test_replan_identical_setup_is_unchanged` | Setup dedupe | replan same setup + proposal_id | `unchanged`, stored current IDs, still 1 version |
+| `test_replan_changed_setup_creates_new_version` | Owner + changed setup versions | different composition | `versioned`, version 2, `is_current` flips, v1 kept |
+| `test_replan_foreign_identical_setup_is_unchanged` | Dedupe outranks ownership | guest, current setup | `unchanged` |
+| `test_replan_foreign_changed_setup_branches` | Foreign + changed setup branches | guest, other composition | `branched`, new id, guest owns, original untouched |
+| `test_eval_fills_own_version_in_place` | The one sanctioned in-place write | eval own persisted route | `filled`, same version, evaluation_body set, no new row |
+| `test_eval_identical_inputs_is_unchanged` | Deterministic no-op | same eval again | `unchanged` |
+| `test_eval_scenario_override_creates_new_version` | Result-touching input versions | historical scenario override | `versioned`, v2, route carried over, response IDs already V2, `scenario_id` reported |
+| `test_eval_of_historical_version_computes_only` | History never mutated | eval the V1 route after V2 exists | `historical_version` |
+| `test_eval_of_unpersisted_route_computes_only` | Drafts have nowhere to land | tokenless-built session fixture | `unpersisted_route` |
+| `test_eval_of_edited_route_computes_only` | Hand-edited JSON never overwrites | demand wiped from stored route | `route_mismatch` |
+| `test_eval_tokenless_computes_only` | No token → compute only | tokenless eval | `unauthenticated` |
+| `test_eval_by_non_owner_branches` | Foreign eval branches | guest evaluates the seed proposal | `branched`, guest owns copy with evaluation, seed untouched |
 | `test_get_unknown_proposal_returns_404` | Domain check | nonexistent proposal_id | `404 not_found` |
-| `test_seeded_example_proposal_is_queryable` | The DB-init-time seed proposal is a real, queryable proposal | `GET /api/proposal/1` | Berlin–Dresden–Wien, both directions, no evaluation |
-| `test_list_returns_current_summaries` | List shape and current-only filtering | two proposals, one re-saved, plus the permanent seed proposal | `total=3`, only current versions, metrics populated |
-| `test_filtered_list_by_country_stop_and_user` | Filters narrow correctly | country/stop/user filters | country/stop isolate Zürich; user (David) returns 2 — his save plus the seed proposal |
-| `test_list_sorting_and_pagination` | Sort + limit/offset | `total_distance_km` sort, `limit=1` | ascending order, `total=3` (2 from this fixture + the seed proposal) |
-| `test_list_sort_by_margin_is_null_safe` | Financial sort tolerates unsaved evaluations | none of the 3 listed proposals (including the seed) has one | sort doesn't raise, `margin_eur` is `null` for all three |
-| `test_list_rejects_unknown_sort_key` | Validation | `sort.by="unknown_field"` | `400 validation_error` |
+| `test_seeded_example_proposal_is_queryable` | The DB-init-time seed proposal is real | `GET /api/proposal/1` | Berlin–Dresden–Wien, both directions, no evaluation |
+| `test_list_returns_current_summaries` | List shape and current-only filtering | test_script ×2 versions + guest's Zürich + seed | `total=3`, only current versions, metrics populated |
+| `test_filtered_list_by_country_stop_and_user` | Filters narrow correctly | country/stop/user filters | country/stop isolate Zürich; user filters return exactly the owner's proposals |
+| `test_list_sorting_and_pagination` | Sort + limit/offset | `total_distance_km` sort, `limit=1` | ascending order, `total=3` |
+| `test_list_sort_by_margin_is_null_safe` | Financial sort tolerates unevaluated proposals | none of the 3 listed has an evaluation | sort doesn't raise, `margin_eur` null for all |
+| `test_list_rejects_unknown_sort_key` | Validation | bad sort key | `400 validation_error` |
 
-Note: `db/dev/seed.py` seeds one permanent example proposal (`proposal_id=1`,
-the natural first-insert outcome on a fresh DB — collision-free now that
-`conftest.py`'s route fixtures use draft placeholders 100+, not 1-4) that
-this module's cleanup fixture deliberately never purges — see
-`_purge_saved_proposals()`'s docstring. Any test asserting an exact
-`total`/count on an unfiltered or David-owned list accounts for it.
-
----
-
----
-
+Note: `db/dev/seed.py` seeds one permanent example proposal
+(`proposal_id=1`, owned by the seed user, no evaluation) — preserved by
+every purge here, and doubling as the foreign, evaluation-free proposal
+the branch-by-eval tests (and test_70's merge test) borrow without an
+extra route build. Any test asserting an exact list total counts it.
 ## test_60_feedback_api.py — Feedback API
 
 A module-scoped autouse fixture purges rows tagged with the
@@ -373,30 +385,41 @@ fixed value, so this file passes the same way whether or not SMTP_* is set.
 3. **A stop pair inside a single defaulted country (e.g. two SE stops)** —
    would let TAC-under-default be recomputed for a route that runs entirely on
    default-resolved rates.
-4. **A what-if scenario re-pinning `stop_infrastructures`** — currently only
-   track infra has a second snapshot; a stop-side one would cover the other
-   half of the override matrix.
-5. **A stop within `AUTO_STOP_BUFFER_M` (3km, see `models/route/timetable.py`)
-   of an existing corridor** — e.g. a small real station a km or two off the
-   Berlin-Dresden or Dresden-Wien leg. All 58 currently-seeded stops are
-   already used deliberately as endpoints/via-points of the existing route
-   fixtures or sit nowhere near another corridor, so
-   `auto_stop_addition=true` has no real candidate to find today —
-   `test_20::TestModeSwitches`'s auto_stop_addition tests can only pin "no
-   candidates found" (a real, correct, but incomplete outcome), not the
-   actual insertion/budget-check/`auto_added=true` path. Picking real
-   coordinates that land within the routing engine's actual path needs the
-   live stack to verify against — not something to guess at blind. Once
-   available, also worth pinning: outbound and return trips of the same
-   pair carry the *same* `auto_added` stops (reversed) — the search only
-   runs once, from outbound, and return reuses its result rather than
-   running its own independent search (see `_build_trip_pair()`'s comment
-   in `route_factory.py` for why).
+4. **A scenario re-pinning `stop_infrastructures` to genuinely different
+   values** — all three currently-seeded snapshots (2026-baseline / base /
+   2032-baseline-hsr-allowed) carry byte-identical stop charges, only the
+   version number differs; a scenario with an actual stop-side value change
+   would cover the other half of the override matrix.
+5. ~~**A stop within `AUTO_STOP_BUFFER_M` of an existing corridor**~~ —
+   **DONE**: `CZ_BRNO_HLN` (Brno hl.n., 49.191/16.613) sits ~10m off the
+   natural Berlin-Dresden-Wien routing (Dresden-Praha-Brno-Wien) and
+   comfortably inside the detour budget, so the full `auto_stop_addition`
+   behaviour is now pinned end to end in `test_20::TestModeSwitches`: the
+   actual insertion at geographic position with `auto_added=true`, the
+   outbound-and-return-carry-the-same-added-stops rule (search runs once,
+   from outbound — see `_build_trip_pair()` in `route_factory.py`), a
+   populated `suggested_stops` list with a real `added_time_min`, and
+   cross-mode consistency (`"suggest"` lists exactly what `"add"`
+   inserts). Because of this, every fixed-corridor fixture in
+   `conftest.py` and `test_20`'s structural `BASE_REQUEST` pin
+   `auto_stop_addition="off"` — otherwise Brno (and, for the 2-stop
+   Berlin-Wien fixture, Dresden too) would be auto-added into routes whose
+   exact stop lists downstream tests rely on. Still open within this
+   topic: a candidate that gets *rejected* by the budget check (a stop
+   near a corridor but with a detour cost above
+   `AUTO_STOP_MAX_DETOUR_PER`) — today every near-corridor candidate fits,
+   so the rejection branch is only covered implicitly.
 
 ## Conventions
 
 - Session-scoped route fixtures in `conftest.py` are **read-only** — never
-  mutate them; use `inject_demand()` (which copies) to attach demand.
+  mutate them; use `inject_demand()` (which copies) to attach demand. They
+  are built **tokenless** deliberately (compute-only, draft IDs, zero DB
+  rows) — persistence is exercised solely by the dedicated tests.
+- The suite persists as the seeded `test_script` user via
+  `script_headers` (a real JWT from the live API, OTP injected DB-side —
+  no `JWT_SECRET` needed on the host). Session teardown purges everything
+  the run persisted; the seed proposal survives.
 - Monetary assertions use `pytest.approx(rel=1e-3)` — EUR leaves are rounded
   to 2 decimal places by the API.
 - `db_conn.commit()`/rollback discipline: the autouse `rollback_after_test`

@@ -18,9 +18,11 @@ Pipeline steps — each logged individually:
 import logging
 import time
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 
-from api.helpers.dependencies import get_loader
+from adapters.proposal_repository import parse_route_id
+from api.auth_middleware import optional_auth
+from api.helpers.dependencies import get_loader, get_proposal_repository
 from api.helpers.route_serialize import validate_route_dict, route_from_dict
 from api.helpers.evaluation_serialize import (
     views_to_dict,
@@ -33,6 +35,7 @@ from models.evaluation.views import (
     build_breakdown_per_trip_pair,
     build_breakdown_per_trip_pair_per_country,
     build_breakdown_per_trip_pair_per_od,
+    build_breakdown_per_trip_pair_per_section,
     build_breakdown_per_trip_per_stop,
 )
 from models.evaluation.version import CALC_VERSION
@@ -47,7 +50,101 @@ def _validate_body(body: dict) -> list[str]:
     return validate_route_dict(body["route"])
 
 
+def _persist_evaluation(
+    response_body: dict, posted_route: dict, resolved_scenario_id: int
+) -> tuple[dict, dict]:
+    """Auto-persist a computed evaluation (persist-on-calc, 2026-07-16).
+
+    The posted route's P{id}_V{version} route_id decides where it lands:
+
+      no token                      → compute only ("unauthenticated")
+      version row missing           → compute only ("unpersisted_route" —
+                                      the plan itself was never persisted,
+                                      e.g. a tokenless plan or foreign JSON)
+      version not current           → compute only ("historical_version" —
+                                      evaluating old versions never mutates
+                                      history)
+      posted route != stored route  → compute only ("route_mismatch" —
+                                      hand-edited route JSON is answered but
+                                      not stored)
+      no evaluation stored yet      → fill that version in place ("filled");
+                                      a non-owner branches instead (save()
+                                      semantics, evaluation attached)
+      stored under same inputs      → no-op ("unchanged" — same route incl.
+                                      demand, same resolved scenario, same
+                                      calc version ⇒ deterministic result)
+      stored under changed inputs   → new version, same route_body, this
+                                      evaluation attached ("versioned" /
+                                      "branched" per save() ownership rules)
+
+    Returns (response_body, proposal_block); never raises — a persistence
+    failure must not discard a computed evaluation. When save() creates a
+    new version, the returned response IS the rewritten evaluation_body, so
+    its IDs reference the version actually stored.
+    """
+    if g.get("user_id") is None:
+        return response_body, {"persisted": False, "action": "unauthenticated"}
+
+    try:
+        pid, version = parse_route_id(posted_route["route_id"])
+        repo = get_proposal_repository()
+        stored = repo.get_version(pid, version)
+
+        if stored is None:
+            return response_body, {"persisted": False, "action": "unpersisted_route"}
+        if not stored["is_current"]:
+            return response_body, {
+                "persisted": False,
+                "action": "historical_version",
+                "proposal_id": pid,
+                "proposal_version": version,
+            }
+        if stored["route_body"]["route"] != posted_route:
+            return response_body, {
+                "persisted": False,
+                "action": "route_mismatch",
+                "proposal_id": pid,
+                "proposal_version": version,
+            }
+
+        meta = {"proposal_id": pid, "proposal_version": version}
+        stored_eval = stored["evaluation_body"]
+
+        if stored_eval is None and stored["user_id"] == g.user_id:
+            filled = repo.attach_evaluation(pid, version, response_body)
+            if filled:
+                return response_body, {"persisted": True, "action": "filled", **meta}
+            # Lost the race to a concurrent fill — re-read and fall through
+            # to the unchanged/new-version comparison below.
+            stored_eval = repo.get_version(pid, version)["evaluation_body"]
+
+        if stored_eval is not None and (
+            stored_eval.get("calc_version") == response_body["calc_version"]
+            and stored_eval.get("scenario_id") == resolved_scenario_id
+        ):
+            return response_body, {"persisted": False, "action": "unchanged", **meta}
+
+        # Changed inputs (or a non-owner filling): new version / branch, the
+        # unchanged route_body carried over, this evaluation attached.
+        record = repo.save(
+            route_body=stored["route_body"],
+            user_id=g.user_id,
+            change_log=None,
+            evaluation_body=response_body,
+        )
+        return record["evaluation_body"], {
+            "persisted": True,
+            "action": record["action"],
+            "proposal_id": record["proposal_id"],
+            "proposal_version": record["proposal_version"],
+        }
+    except Exception:
+        logger.exception("evaluation persisted nothing (unexpected persistence error)")
+        return response_body, {"persisted": False, "action": "error"}
+
+
 @bp.post("/calc")
+@optional_auth
 def calc():
     """
     Run cost/revenue evaluation for a Route.
@@ -72,6 +169,7 @@ def calc():
                              "data": {"all": {"filter": {...}, "values": {...}}, ...}},
           "per_trip_pair_per_country": {...},
           "per_trip_pair_per_od": {...},
+          "per_trip_pair_per_section": {...},
           "per_trip_per_stop": {...},
         },
       }
@@ -151,6 +249,9 @@ def calc():
         bd_per_pair = build_breakdown_per_trip_pair(route, result)
         matrix_country = build_breakdown_per_trip_pair_per_country(route, result)
         matrix_od = build_breakdown_per_trip_pair_per_od(route, result)
+        matrix_section, section_scopes = build_breakdown_per_trip_pair_per_section(
+            route, result
+        )
         matrix_stop = build_breakdown_per_trip_per_stop(route, result)
     except Exception as e:
         logger.exception("evaluation/calc [4/5] view building failed: %s", e)
@@ -165,6 +266,11 @@ def calc():
         response_body = {
             "calc_version": CALC_VERSION,
             "route_id": route.route_id,
+            # The scenario the evaluation actually ran under (override
+            # applied) — the posted route's own embedded scenario_id is NOT
+            # updated by an override, so this is the authoritative one. Also
+            # what the persist layer compares to decide "unchanged".
+            "scenario_id": resolved_scenario_id,
             # Static documentation — version, description, LaTeX + plain-English
             # formulas for every model that contributed to this evaluation.
             "models": models_to_dict(),
@@ -183,6 +289,8 @@ def calc():
                 bd_per_pair,
                 matrix_country,
                 matrix_od,
+                matrix_section,
+                section_scopes,
                 matrix_stop,
                 route,
                 trip_pair_by_key,
@@ -197,5 +305,13 @@ def calc():
         route.route_id,
         time.monotonic() - t_start,
     )
+
+    # Persist-on-calc: the stored evaluation_body is exactly the response
+    # above; the proposal block is response metadata only and is appended
+    # after (never inside) the persisted body.
+    response_body, proposal_block = _persist_evaluation(
+        response_body, body["route"], resolved_scenario_id
+    )
+    response_body["proposal"] = proposal_block
 
     return jsonify(response_body), 200

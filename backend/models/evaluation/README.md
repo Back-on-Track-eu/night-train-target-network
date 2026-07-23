@@ -121,10 +121,12 @@ Allocation rules per country:
 
 | Cost | Method |
 |---|---|
-| `driver`, `crew`, `loco`, `cleaning` | `country_time_shares` |
-| `coach_maintenance`, `coach_amortisation`, `financing`, `fix_overhead` | `country_distance_shares` |
+| `driver`, `crew` (driving) | `country_time_shares` per segment |
+| `driver`, `crew` (dwell) | 100% to `StopCost.country_code` |
+| `loco`, `cleaning` | Pair-level time share (`t_share`) |
+| `coach_maintenance`, `tac`, `energy` | `country_distance_shares` per segment |
+| `coach_amortisation`, `financing`, `fix_overhead` | Pair-level distance share (`d_share`) |
 | `shunting` | 100% to terminal stop's country (`Shunting.country_code`) |
-| `tac`, `energy` | Directly from `SegmentCost` (already split in calc.py) |
 | `station_charge` | 100% to `StopCost.country_code` |
 | `parking` | 100% to `Parking.country_code` |
 | `svc_stockings`, `var_overhead`, `revenue`, `margin` | OD weighted place-km share per country |
@@ -144,11 +146,68 @@ Allocation rules per OD pair:
 |---|---|
 | `coach_maintenance`, `tac`, `energy` | Weighted place-km share per segment |
 | `driver`, `crew` | Weighted place-hours share per segment |
-| `coach_amortisation`, `financing`, `fix_overhead` | OD distance share of full trip |
-| `loco`, `cleaning` | Weighted place-hours share of pair total |
-| `station_charge`, `dwell_driver`, `dwell_crew` | `places_sold` share at boarding/alighting stop |
-| `shunting`, `parking` | Revenue share (`od_revenue / total_trip_revenue`) |
+| `coach_amortisation`, `financing`, `fix_overhead` | Pair fleet share × OD weighted place-km share of the pair |
+| `loco`, `cleaning` | OD weighted place-hours share of the pair (both directions) |
+| `station_charge`, `dwell_driver`, `dwell_crew` | `places_sold` share at boarding/alighting stop; if nobody boards or alights there, `places_sold` share of the ODs riding through |
+| `shunting`, `parking` | Revenue share (`od_revenue / total_trip_revenue`); parking pair-filtered via `ParkingCost.trip_ids` |
 | `svc_stockings`, `var_overhead`, `revenue`, `margin` | Direct from `ODPairRevenue/Cost/Margin` |
+
+Every allocation share family sums to exactly 1 across a pair's OD cells, so
+**OD cells partition the pair total** — `Σ OD cells == (pair, "all")`, leaf by
+leaf (pinned by `test_od_cells_partition_pair_total`).
+
+*Fleet share* (`_pair_fleet_share`): calc.py sums `coaches_required` across
+all pairs sharing a `comp_id` (one shared fleet), so every pair-filtered view
+scales fleet costs by the pair's own coach count over the fleet total.
+
+### Layer 2B2 — per trip pair × route section
+
+`build_breakdown_per_trip_pair_per_section(route, result)` —
+returns **two** dicts: the matrix `dict[tuple[str, str], Breakdown]` keyed by
+`(pair_key, section_key)`, and a parallel `dict[tuple[str, str],
+NormalisationScope]` carrying each cell's own annual physical denominators.
+
+`section_key` is `"{origin_stop_id}__{destination_stop_id}__{class_main}"`
+with `class_main = "all"` for the class-independent section cell. Keys are
+**directional** — Hamburg→Berlin and Berlin→Hamburg are separate sections on
+separate trips.
+
+A section is a **physical piece of a trip** between two of its stops — not a
+ticket relation (that is Layer 2B). Selecting `[Hamburg, Berlin]` on a
+`[Copenhagen, Hamburg, Berlin, Munich]` trip means:
+
+- every cost occurring between Hamburg and Berlin, plus a share of
+  route-level costs, and
+- the **km-proportional revenue of everyone on board there** — a
+  Copenhagen→Munich passenger contributes exactly the fraction of their fare
+  matching the km they ride within the section.
+
+Allocation rules per section (`__all` cell):
+
+| Cost | Method |
+|---|---|
+| `driver`, `crew`, `coach_maintenance`, `tac`, `energy` | 100% of the segments inside the section |
+| `station_charge`, dwell `driver`/`crew` | 100% of stop calls origin..destination (both boundary stops included) |
+| `loco` | Direct: lease rate × section operating minutes (segment total time + dwell) |
+| `coach_amortisation`, `financing`, `fix_overhead` | Pair fleet share × section-km / pair-km |
+| `cleaning` | Pair fleet share × section driving hours / pair driving hours |
+| `shunting`, `parking` | Pair totals × section revenue / pair revenue (parking pair-filtered) |
+| `svc_stockings`, `var_overhead`, `revenue`, `margin` | Σ over on-board ticket groups of value × overlap-km / ride-km |
+
+Each section additionally carries **per-class cells** (`__Seat`,
+`__Couchette`, …): the passenger-side leaves of that class directly, plus
+every train-level leaf of the `__all` cell scaled by the class's
+density-weighted place-km share within the section — class cells sum exactly
+to the section's `__all` cell.
+
+**Sections overlap by construction** (the full-trip section *is* the whole
+trip), so section cells deliberately do **not** sum to the pair total —
+unlike every other matrix view. The wildcard cells `(pair, "all")` and
+`("all", "all")` are the usual whole-pair / whole-route Breakdowns.
+
+Per-unit normalisations of a section cell divide by the section's **own**
+annual physics (its `NormalisationScope`): €/train-km of a section means per
+that section's annual train-km, not the whole pair's.
 
 ### Layer 2C — per trip × stop
 
@@ -160,36 +219,97 @@ are invisible at the stop level. Fixed costs are allocated by half the boarding/
 alighting OD pairs' weighted place-km relative to the route total (half at origin,
 half at destination, so all stops sum to 100%).
 
+### Allocation matrix — all views at a glance
+
+The per-layer tables above are the detailed reference; this matrix puts every
+parameter side by side across views. Source-unit annualisation (calc.py →
+€/year) is identical in all views. Abbreviations: *wpkm/wph* =
+density-weighted place-km / place-hours, *B/A* = OD pairs boarding or
+alighting at the stop, *route_share* = B/A wpkm (half at origin, half at
+destination) over route total wpkm.
+
+| Parameter | per_trip_pair (filter) | × country | × OD pair | × section (`__all` cell) | per trip × stop |
+|---|---|---|---|---|---|
+| `driver` (driving) | direct Σ pair segments | seg × country time share | seg × wph share | 100% of segments in section | adjacent seg × B/A wpkm share |
+| `crew` (driving) | direct | seg × country time share | seg × wph share | 100% in section | adjacent seg × B/A wpkm share |
+| `driver`/`crew` (dwell) | direct Σ pair stops | 100% stop country | `places_sold` share at stop | 100% of stop calls in section | direct from `StopCost` |
+| `coach_maintenance` | direct | seg × country distance share | seg × wpkm share | 100% in section | adjacent seg × B/A wpkm share |
+| `tac` | direct | seg × country distance share | seg × wpkm share | 100% in section | adjacent seg × B/A wpkm share |
+| `energy` | direct | seg × country distance share | seg × wpkm share | 100% in section | adjacent seg × B/A wpkm share |
+| `station_charge` | direct | 100% stop country | `places_sold` share at stop | 100% of stop calls in section | direct from `StopCost` |
+| `loco` | direct (lease × pair loco min) | pair loco × `t_share` | pair-wide wph share | direct: lease × section min (drive + dwell) | route total × route_share |
+| `coach_amortisation` | fleet cost × pair fleet share | fleet share × `d_share` | fleet share × pair-wide wpkm share | fleet share × section-km / pair-km | fleet total × route_share |
+| `financing` | × pair fleet share | fleet share × `d_share` | fleet share × wpkm share | fleet share × section-km share | × route_share |
+| `fix_overhead` | × pair fleet share | fleet share × `d_share` | fleet share × wpkm share | fleet share × section-km share | × route_share |
+| `cleaning` | × pair fleet share | fleet share × `t_share` | fleet share × wph share | fleet share × section drive-h / pair drive-h | × route_share |
+| `shunting` | direct Σ pair events | 100% event country | pair total × revenue share | pair total × section revenue share | route total × route_share |
+| `parking` | direct (`trip_ids` ∩) | 100% parking country (pair-filtered) | pair total (pair-filtered) × revenue share | pair total (pair-filtered) × section revenue share | route total × route_share |
+| `svc_stockings` | direct Σ OD records | OD × wpkm country share | direct (native per OD) | OD × overlap-km / ride-km | direct, B/A only |
+| `var_overhead` | direct | OD × wpkm country share | direct | OD × overlap-km / ride-km | direct, B/A only |
+| `ticket_revenue` | direct | OD × wpkm country share | direct | OD × overlap-km / ride-km | direct, B/A only |
+| `ebit_margin` | direct | OD × wpkm country share | direct | OD × overlap-km / ride-km | direct, B/A only |
+
+Sum properties per view: country and OD cells **partition** the pair total
+(every share family sums to 1.0); per-stop cells partition the route total
+(route_share sums to 1.0 via the half-origin / half-destination split);
+section cells deliberately do **not** sum (sections overlap by construction).
+
+Two intentional asymmetries, kept for simplicity and flagged here so they are
+not mistaken for bugs:
+
+- **`cleaning` in per trip × stop** collapses into the generic wpkm-based
+  `route_share` like all non-direct costs there, although it is time-based in
+  every other view. The stop view has a single allocation basis by design.
+- **`loco` in sections** is the only cost computed directly from section
+  physics (lease rate × section minutes) rather than as a share of the pair
+  total — section loco cells therefore exclude turnaround/idle minutes
+  outside any section and would not sum to the pair figure even without
+  overlap.
+
 ### Layer 3 — normalisers
 
 All normalisers take a `Breakdown` and return a new `Breakdown` with every leaf
 divided by the denominator. The source `Breakdown` is unchanged.
 
-| Function | Denominator | Result unit |
-|---|---|---|
-| `normalise(breakdown, denominator)` | Caller-supplied | Arbitrary |
-| `normalise_per_operating_day(breakdown, route)` | `operating_days_per_year` | €/operating-day |
-| `normalise_per_trip_km(breakdown, route, trip_pair=None)` | Total trip distance km (both directions) | €/km |
-| `normalise_per_available_place_km(breakdown, route, trip_pair=None)` | Capacity × distance | €/available-place-km |
-| `normalise_per_sold_place_km(breakdown, route, trip_pair=None)` | `places_sold` × distance per OD range | €/sold-place-km |
+All denominators are **annual**, matching the Breakdown's €/year leaves. The
+optional `scope` parameter (a `NormalisationScope`) carries a route-section
+cell's own annual denominators; `scope=None` derives them from
+`route`/`trip_pair` as usual.
+
+Leaf rounding **scales with the divisor** (`NORMALISATION_NDIGITS` in
+version.py): annual figures are 2dp currency, but per-place-km leaves are of
+order 10⁻³–10⁻² € — rounding those to 2dp quantizes them into noise (the
+0.9.4 bug behind the long-open per_available_place_km divisor xfail; the
+divisor itself was always exact). Totals (`total_eur`/`net_eur` properties)
+round at `BREAKDOWN_TOTAL_NDIGITS` (6dp), fine enough for every leaf
+precision.
+
+| Function | Denominator (annual) | Result unit | Leaf precision |
+|---|---|---|---|
+| `normalise(breakdown, denominator, ndigits=2)` | Caller-supplied | Arbitrary | `ndigits` |
+| `normalise_per_operating_day(breakdown, route)` | `operating_days_per_year` | €/operating-day | 2dp |
+| `normalise_per_train_km(breakdown, route, trip_pair=None, scope=None)` | Cycle distance (both directions) × operating days | €/train-km | 4dp |
+| `normalise_per_available_place_km(breakdown, route, trip_pair=None, scope=None)` | Capacity × cycle distance × operating days | €/available-place-km | 6dp |
+| `normalise_per_sold_place_km(breakdown, route, trip_pair=None, scope=None)` | `places_sold` × distance per OD range (`places_sold` is already annual) | €/sold-place-km | 6dp |
 
 ---
 
 ## Views, explained for display
 
-*A non-technical map of the five evaluation views — written for the frontend
+*A non-technical map of the six evaluation views — written for the frontend
 filter/selection logic. Every view answers the same question — "how much money?"
 — for a different slice of the route. The frontend never computes a slice
 itself; it only picks which pre-computed view (and key) to read.*
 
-### The five views in one sentence each
+### The six views in one sentence each
 
 | View | Plain-language meaning | Typical question it answers |
 |---|---|---|
 | `route` | The **whole proposal** rolled into one figure set — every trip pair, segment, stop and passenger relation together. | "Is this route economically viable overall?" |
 | `per_trip_pair` | One **outbound + return leg pair** in isolation. Only differs from `route` on Y/X-shaped routes with several pairs. | "Which branch of the Y carries the network?" |
 | `per_trip_pair_per_country` | A trip pair's money **split by country** — costs land where the train drives or where the event happens; revenue where passengers actually sit. | "How much of this route's cost/revenue accrues in Germany?" (→ subsidy discussions per member state) |
-| `per_trip_pair_per_od` | Money attributed to one **passenger relation** (origin → destination × class), aggregated across trip pairs sharing it. | "Does the Wien → Berlin couchette relation pay for itself, or is it cross-subsidised?" |
+| `per_trip_pair_per_od` | Money attributed to one **passenger relation** (origin → destination × class), aggregated across trip pairs sharing it. OD cells partition the pair total. | "Does the Wien → Berlin couchette relation pay for itself, or is it cross-subsidised?" |
+| `per_trip_pair_per_section` | Money attributed to a **physical piece of a trip** between two stops: all costs occurring there, and the km-proportional revenue of everyone on board — including through-riders. Per-class sub-cells included. Sections overlap, so they don't sum to the pair total. | "What does the Hamburg → Berlin leg of this route cost and earn, counting everyone riding it?" (→ infrastructure/leg-level discussions) |
 | `per_trip_per_stop` | Money attributed to a single **stop call of a single direction**. Only boarding/alighting passengers count at a stop — through-riders are invisible here. | "What does calling at Dresden actually cost and earn?" (→ keep or drop a stop) |
 
 Every dimension additionally carries an `"all"` key — the aggregate across
@@ -221,7 +341,7 @@ Two orthogonal selectors, always:
 |---|---|---|
 | `per_year` | €/year | show absolute annual totals (the default) |
 | `per_operating_day` | €/operating day | compare against daily operating benchmarks |
-| `per_trip_km` | €/km | compare routes of different lengths |
+| `per_train_km` | €/train-km (annual basis) | compare routes of different lengths |
 | `per_available_place_km` | €/place-km offered | compare cost efficiency independent of demand |
 | `per_sold_place_km` | €/place-km sold | compare directly against average fares per km |
 
@@ -268,7 +388,7 @@ unit = €/year. Read `views.route.data.per_year` (the `route` view has no
 **2. All trip pairs + country DE, per km.** UI state: pair filter = "all",
 country filter = Germany, unit = €/km. Read
 `views.per_trip_pair_per_country.data["all"]["DE"]` and display
-`values.per_trip_km`; the `filter` dict is the ready-made UI label:
+`values.per_train_km`; the `filter` dict is the ready-made UI label:
 
 ```json
 "per_trip_pair_per_country": {
@@ -280,7 +400,7 @@ country filter = Germany, unit = €/km. Read
         "filter": { "trip_pair": "all", "country": "DE" },
         "values": {
           "per_year":    { "...": "..." },
-          "per_trip_km": {
+          "per_train_km": {
             "cost": { "...": "...", "total_eur": 14.82 },
             "revenue": { "...": "...", "total_eur": 17.65 },
             "margin": { "...": "...", "total_eur": 0.88 },
@@ -394,7 +514,7 @@ authoritative response doc; this README deliberately does not duplicate it).
 What `views.py` contributes is the `views` block:
 
 - Five views: `route`, `per_trip_pair`, `per_trip_pair_per_country`,
-  `per_trip_pair_per_od`, `per_trip_per_stop` — see
+  `per_trip_pair_per_od`, `per_trip_pair_per_section`, `per_trip_per_stop` — see
   [Views, explained for display](#views-explained-for-display) below.
 - Each view is `{description, normalisations, data}`. `description` and
   `normalisations` come from `VIEW_META` in `views.py` — one documentation
@@ -406,7 +526,7 @@ What `views.py` contributes is the `views` block:
   `values` holds the normalised breakdown. Each dimension also carries an
   `"all"` aggregate key.
 - Each normalised breakdown contains the same `Breakdown` dict under all
-  five normalisations (`per_year`, `per_operating_day`, `per_trip_km`,
+  five normalisations (`per_year`, `per_operating_day`, `per_train_km`,
   `per_available_place_km`, `per_sold_place_km`).
 
 Serialization lives in `api/helpers/evaluation_serialize.py`

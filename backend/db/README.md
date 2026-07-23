@@ -120,7 +120,7 @@ Four core schemas, all created and seeded by `seed.py`: `admin`, `input_params`,
 
 | Table | Description |
 |---|---|
-| `scenarios` | Container pinning one version of each of the four versioned `input_params` infrastructure tables (`track_infrastructures`, `track_infrastructure_defaults`, `stop_infrastructures`, `stop_infrastructure_defaults`). Every read of infrastructure data goes through a scenario — there's no other notion of "current" for those four tables. Exactly one row has `is_current_base = TRUE` (the live default used when an API call omits `scenario_id`); exactly one row per `scenario_key` has `is_current_scenario = TRUE` (the head of that what-if lineage). `scenario_id` is a surrogate key that changes on every edit; `scenario_key` (e.g. `"base"`, `"whatif-de-track-infra"`) is the stable identifier for one lineage. Compositions, coach types, operators, and composition references are catalogs, not scenario-versioned — see `input_params` above. |
+| `scenarios` | Container pinning one version of each of the four versioned `input_params` infrastructure tables (`track_infrastructures`, `track_infrastructure_defaults`, `stop_infrastructures`, `stop_infrastructure_defaults`). Every read of infrastructure data goes through a scenario — there's no other notion of "current" for those four tables. Exactly one row has `is_current_base = TRUE` (the live default used when an API call omits `scenario_id`); exactly one row per `scenario_key` has `is_current_scenario = TRUE` (the head of that what-if lineage). `scenario_id` is a surrogate key that changes on every edit; `scenario_key` (e.g. `"base"`, `"2032-baseline-hsr-allowed"`) is the stable identifier for one lineage. Compositions, coach types, operators, and composition references are catalogs, not scenario-versioned — see `input_params` above. |
 
 A version bump on any of the four pinned tables is a **full-table snapshot**,
 never a per-row diff: editing one stop's charge duplicates every other row of
@@ -130,11 +130,24 @@ never reinterpreted differently depending on which scenario is asking. This
 is what makes two scenarios branching off the same table in incompatible
 directions safe, and what makes re-evaluating a scenario next year return
 the same numbers even if the base has since moved on — nothing on a
-`scenarios` row is resolved at read time. `seed.py` seeds two scenarios: the
-`"base"` lineage pinning the freshly-seeded version of every table, and a
-`"whatif-de-track-infra"` lineage forked from it to exercise scenario-scoped
-reads in tests. See `create_scenario_schema.sql` for the full column-level
-rationale.
+`scenarios` row is resolved at read time. `seed.py` seeds three scenarios,
+each pinning its own version number (in lockstep, across all four tables —
+every scenario owns a complete, independent snapshot rather than sharing
+rows with another scenario):
+
+- `"2026-baseline"` (version 1) — **2026 Base Line**, a deprecated historical
+  reference (`is_current_base = FALSE`, `is_current_scenario = FALSE`). Only
+  `track_infrastructures`/`track_infrastructure_defaults` carry genuinely
+  different figures (DE's pre-correction rates, a slightly lower EU-average
+  default); the stop-side tables are duplicated with identical values.
+- `"base"` (version 2) — **2032 Base Line**, the live default
+  (`is_current_base = TRUE`). `track_hsr_allowed = FALSE` everywhere.
+- `"2032-baseline-hsr-allowed"` (version 3) — **2032 Base Line + Night
+  Trains on HSR allowed**, a second current lineage head
+  (`is_current_scenario = TRUE`, `is_current_base = FALSE`). Identical to
+  `"base"` in every field except `track_hsr_allowed = TRUE` everywhere.
+
+See `create_scenario_schema.sql` for the full column-level rationale.
 
 ### `proposals`
 
@@ -142,12 +155,14 @@ GTFS-compatible tables plus a thin project-specific `proposals` version
 container. All GTFS IDs follow the convention
 `P{proposal_id}_V{version}_R1[_D{dir}_T{idx}]`.
 
-The route — and, if the saver included one, its evaluation — is stored
-twice on every save: once verbatim as JSON (`route_body` and, if
-present, `evaluation_body` — same names the API's `POST /api/proposal`
-request and `GET /api/proposal/<id>` response use, see `api/README.md`),
-once decomposed into the GTFS tables below (the route only — evaluation
-results have no GTFS equivalent). These two columns are `JSON`,
+The route — and, once evaluated, its evaluation — is stored twice: once
+verbatim as JSON (`route_body` / `evaluation_body`, the names `GET
+/api/proposal/<id>` returns, see `api/README.md`), once decomposed into
+the GTFS tables below (the route only — evaluation results have no GTFS
+equivalent). Since persist-on-calc (2026-07-16) both are written by the
+pipelines themselves: `POST /api/route/plan` persists its own response as
+`route_body`, `POST /api/evaluation/calc` persists its own response as
+`evaluation_body`. These two columns are `JSON`,
 deliberately not `JSONB` — `JSONB`'s decomposed binary storage does not
 preserve original key order (confirmed empirically: a value round-tripped
 through `JSONB` comes back with keys in a different order than it went
@@ -163,11 +178,11 @@ what's stored. Neither column is trimmed before storing, so
 `evaluation_body`'s `input.route` ends up holding a full second copy of
 the same route already in `route_body.route` — a deliberate simplicity
 tradeoff (see the schema comments in `create_proposal_schema.sql`), not
-an oversight: the API layer
-(`api/helpers/proposal_serialize.py:validate_route_evaluation_sync`)
-rejects a save with `400 validation_error` if the two copies don't
-describe the exact same route, so this table can never hold two
-disagreeing versions of one proposal's route. `evaluation_body` is a
+an oversight: since persist-on-calc both bodies are produced by the
+pipelines themselves, so they agree by construction (`POST
+/api/evaluation/calc` refuses to persist against a version whose stored
+route no longer matches the posted one — `route_mismatch`), and this
+table can never hold two disagreeing versions of one proposal's route. `evaluation_body` is a
 point-in-time snapshot of a `POST /api/evaluation/calc` response — not
 re-derived — so it can drift from a fresh call if parameters change
 later, the same tradeoff scenario pinning already makes elsewhere. List
@@ -183,15 +198,15 @@ summaries read `total_revenue_eur`/`total_cost_eur`/`net_eur` out of
 | `routes` | GTFS routes.txt — one row per proposal version route |
 | `trips` | GTFS trips.txt — one scheduled run per proposal version |
 | `stop_times` | GTFS stop_times.txt — ordered stop sequence per trip (times as INTERVAL) |
-| `proposals` | Version container. `proposal_id` is stable across versions; `proposal_version` increments on every save (append-only, never updated in place); `is_current` flags the latest version per `proposal_id`. `route_body` JSON holds the exact `POST /api/route/plan` response the version was saved from, key order preserved; `evaluation_body` JSON (nullable) holds the `POST /api/evaluation/calc` response, if one was saved, same guarantee |
+| `proposals` | Version container. `proposal_id` is stable across versions; `proposal_version` increments on every persisted change (append-only — the single exception is `evaluation_body`, filled in place on the version it was computed for while still NULL, see the 2026-07-16 migration); `is_current` flags the latest version per `proposal_id`. `route_body` JSON holds the exact `POST /api/route/plan` response the version was saved from, key order preserved; `evaluation_body` JSON (nullable) holds the `POST /api/evaluation/calc` response, if one was saved, same guarantee |
 
 **Seed data.** `db/dev/seed.py` seeds exactly one proposal (`proposal_id=1`
 — the natural first-insert outcome on a fresh DB, no reservation needed —
 Berlin Hbf → Dresden Hbf → Wien Hbf, owned by David) — saved through
 `adapters.proposal_repository.ProposalRepository.save()`, the same code
-path a live `POST /api/proposal` uses, so the seeded GTFS rows and the
+path the persist-on-calc pipelines use, so the seeded GTFS rows and the
 `proposals.proposals` row that owns them are structurally identical to a
-real save rather than a hand-maintained parallel representation. This
+real persisted plan rather than a hand-maintained parallel representation. This
 keeps the "every GTFS row is linked to a real proposal" invariant true
 with no exception, including at seed time. It's saved without an
 evaluation, so its financial fields are null until someone evaluates and

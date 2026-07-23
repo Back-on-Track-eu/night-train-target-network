@@ -10,7 +10,8 @@ Response shape (CALC_VERSION >= 1.2.0):
   models.{route_builder|energy|evaluation}.{version, description, formulas},
   input.{route, parameters.{track_infrastructures, stop_infrastructures, compositions}},
   views.{route|per_trip_pair|per_trip_pair_per_country|per_trip_pair_per_od|
-         per_trip_per_stop}.{description, normalisations, data}
+         per_trip_pair_per_section|per_trip_per_stop}.{description,
+         normalisations, data}
 """
 
 import re
@@ -23,7 +24,7 @@ from tests.helpers import EVAL_URL, inject_demand, route_bd
 NORMALISATIONS = (
     "per_year",
     "per_operating_day",
-    "per_trip_km",
+    "per_train_km",
     "per_available_place_km",
     "per_sold_place_km",
 )
@@ -73,14 +74,15 @@ class TestResponseStructure:
         costed, result = eval_standard
         assert result["route_id"] == costed["route_id"]
 
-    def test_views_has_all_five(self, eval_standard):
-        """All five view dimensions are present."""
+    def test_views_has_all_six(self, eval_standard):
+        """All six view dimensions are present."""
         _, result = eval_standard
         assert set(result["views"]) == {
             "route",
             "per_trip_pair",
             "per_trip_pair_per_country",
             "per_trip_pair_per_od",
+            "per_trip_pair_per_section",
             "per_trip_per_stop",
         }
 
@@ -121,6 +123,7 @@ class TestResponseStructure:
             "per_trip_pair",
             "per_trip_pair_per_country",
             "per_trip_pair_per_od",
+            "per_trip_pair_per_section",
             "per_trip_per_stop",
         ):
             data = result["views"][view_name]["data"]

@@ -24,10 +24,31 @@ track_infrastructure_defaults, stop_infrastructures,
 stop_infrastructure_defaults) are versioned — "current" is entirely a
 scenario.scenarios concept for these (see create_scenario_schema.sql). A
 version bump is a FULL-TABLE SNAPSHOT: editing one row duplicates every
-other row of that table forward into the new version number. The
-TRACK_INFRASTRUCTURES fixture below deliberately seeds two full
-generations (version 1 and version 2, all 7 countries in each) to
-demonstrate and test this.
+other row of that table forward into the new version number.
+
+Each of the three seeded scenarios (see the "scenario" section near the
+bottom of this file) pins its own version number, in lockstep, across all
+four tables — i.e. version 1 belongs entirely to the "2026 Base Line"
+scenario, version 2 to "2032 Base Line", version 3 to "2032 Base Line +
+Night Trains on HSR allowed":
+
+  - version 1 — 2026 Base Line (deprecated): the original, lower-cost
+    baseline. Only track_infrastructures/track_infrastructure_defaults
+    carry deliberately different figures (DE's pre-correction rates,
+    a slightly lower EU-average default); stop_infrastructures and
+    stop_infrastructure_defaults are duplicated unchanged, since nothing
+    about stop charges differs for this scenario.
+  - version 2 — 2032 Base Line (current default, is_current_base=TRUE):
+    the current parameter set, with track_hsr_allowed=False everywhere
+    (night trains may not use HSR infrastructure).
+  - version 3 — 2032 Base Line + Night Trains on HSR allowed (the other
+    current scenario lineage head): identical to version 2 in every
+    field except track_hsr_allowed=True everywhere.
+
+Because each scenario owns a full, independent snapshot of all four
+tables, comparing data across scenarios must go through resolved values,
+not version-number equality — see test_04_versioning.py /
+test_31_evaluation_content.py for the pattern.
 
 operators, coach_types, composition_types, and composition_references are
 NOT versioned — they're a catalog you add to, not history you edit. Each
@@ -94,6 +115,14 @@ def insert_rows(cur, table: str, rows: list[dict]) -> None:
 USERS = [
     {"display_name": "David", "email": "david@backontrack.eu", "is_verified": True},
     {"display_name": "Bjarne", "email": "bjarne@backontrack.eu", "is_verified": True},
+    # Identity the integration test suite and manual scripts authenticate as,
+    # so auto-persisted proposals from test runs are identifiable (and
+    # cleanable) by owner — see tests/conftest.py: script_token.
+    {
+        "display_name": "test_script",
+        "email": "test_script@dev.local",
+        "is_verified": True,
+    },
 ]
 
 # ============================================================
@@ -140,7 +169,7 @@ COUNTRIES = [
     # Remaining EU27 members — added so _check_country_coverage() in
     # route_factory.py doesn't reject a route for merely transiting one of
     # these, even though none has real track_infrastructures figures yet
-    # (see _TRACK_INFRA_V2_ROWS below: every field but country_code is None,
+    # (see _TRACK_INFRA_CANONICAL_ROWS below: every field but country_code is None,
     # so TrackInfraCollection resolves every one of them from the EU-average
     # default — is_default stays False since a real row exists, but expect
     # a "using EU default" warning logged per field per country).
@@ -501,31 +530,78 @@ COACH_TYPE_CLASSES_RAW = [
 # ============================================================
 # track infrastructure
 # ============================================================
+#
+# Three full-table snapshots, one per scenario (see the "scenario" section
+# near the bottom of this file):
+#   version 1 — 2026 Base Line (deprecated): the original, lower-cost
+#     figures, kept only as a frozen historical reference.
+#   version 2 — 2032 Base Line (current default): track_hsr_allowed=False
+#     everywhere — night trains may not use HSR infrastructure.
+#   version 3 — 2032 Base Line + Night Trains on HSR allowed: identical to
+#     version 2 except track_hsr_allowed=True everywhere.
+# A scenario pins one version NUMBER for the whole table, never a
+# per-country flag — see create_scenario_schema.sql.
 
-TRACK_INFRA_DEFAULTS = [
-    {
-        "track_infra_default_key": "_default",
-        "track_tac_eur_train_km": 4.50,
-        "track_parking_eur_day": 65.00,
-        "track_shunting_eur_event": 575.00,
-        "track_shunting_eur_event": 575.00,
-        "track_energy_price_eur_kwh": 0.150,
-        "track_terrain_category": "Flat",
-        "track_terrain_score": 1.0,
-        "track_hsr_allowed": True,
-        "track_min_boarding_time": "00:02:00",
-        "track_min_alighting_time": "00:02:00",
-        "track_buffer_quota_per": 0.10,
-    },
-]
+# 2032 default row. track_hsr_allowed is set per-version below (see
+# _build_track_infra_defaults) rather than baked in here.
+_TRACK_INFRA_DEFAULT_2032 = {
+    "track_infra_default_key": "_default",
+    "track_tac_eur_train_km": 4.50,
+    "track_parking_eur_day": 65.00,
+    "track_shunting_eur_event": 575.00,
+    "track_energy_price_eur_kwh": 0.150,
+    "track_terrain_category": "Flat",
+    "track_terrain_score": 1.0,
+    "track_min_boarding_time": "00:02:00",
+    "track_min_alighting_time": "00:02:00",
+    # Qualified assumption: schedule buffer quotas across European networks
+    # realistically sit at 30-50% of pure driving time (construction sites,
+    # mixed-traffic congestion, temporary speed restrictions, node dwell
+    # creep); 0.40 is the band's midpoint, used for every country without
+    # an explicit row. The per-country rows below differentiate within the
+    # band — see the comment on each.
+    # TODO: differentiate buffer_quota_per by TIME OF DAY — congestion is
+    # daypart-dependent (after ~05:00 the morning rush builds, while the
+    # night hours most night-train legs actually run in are far emptier),
+    # so a flat per-country quota over-pads genuine night legs and
+    # under-pads early-morning arrival legs. Needs a schema change
+    # (per-country time bands) plus route-model work to apply the quota
+    # per leg by clock time — see OPEN_TODOS["buffer_quota_time_of_day"]
+    # in models/route/version.py before starting.
+    "track_buffer_quota_per": 0.40,
+}
 
-# Two full-table snapshots to exercise/demonstrate full-snapshot versioning:
-# version 1 is the original data (DE at old, lower rates); version 2 is the
-# current data (DE corrected upward, every other country duplicated forward
-# unchanged). A scenario pins one version NUMBER for the whole table, never
-# a per-country flag — see create_scenario_schema.sql.
+# 2026 deprecated row — a handful of values manipulated downward (same
+# spirit as DE's track_infrastructures pre-correction rates below), just
+# enough to make the two default rows distinguishable in the frozen
+# historical scenario. Everything not overridden here matches 2032.
+_TRACK_INFRA_DEFAULT_2026_OVERRIDES = {
+    "track_tac_eur_train_km": 4.20,
+    "track_parking_eur_day": 60.00,
+    "track_buffer_quota_per": 0.35,
+}
 
-_TRACK_INFRA_V2_ROWS = [
+
+def _build_track_infra_defaults() -> list[dict]:
+    v2032 = _TRACK_INFRA_DEFAULT_2032
+    return [
+        {
+            **v2032,
+            **_TRACK_INFRA_DEFAULT_2026_OVERRIDES,
+            "track_hsr_allowed": True,
+            "track_infra_default_version": 1,
+        },
+        {**v2032, "track_hsr_allowed": False, "track_infra_default_version": 2},
+        {**v2032, "track_hsr_allowed": True, "track_infra_default_version": 3},
+    ]
+
+
+TRACK_INFRA_DEFAULTS = _build_track_infra_defaults()
+
+# Canonical per-country dataset (all 28 countries) — hsr_allowed here is
+# irrelevant, it's overridden per-version below (True for the 2026 and
+# 2032+HSR snapshots, False for the 2032 no-HSR snapshot).
+_TRACK_INFRA_CANONICAL_ROWS = [
     {
         "country_code": "DE",
         "track_infra_version": 2,
@@ -538,7 +614,9 @@ _TRACK_INFRA_V2_ROWS = [
         "track_hsr_allowed": True,
         "track_min_boarding_time": "00:02:00",
         "track_min_alighting_time": "00:02:00",
-        "track_buffer_quota_per": 0.10,
+        # worst long-distance punctuality of the major networks, Generalsanierung
+        # construction backlog, dense mixed traffic
+        "track_buffer_quota_per": 0.50,
     },
     {
         "country_code": "AT",
@@ -552,7 +630,9 @@ _TRACK_INFRA_V2_ROWS = [
         "track_hsr_allowed": True,
         "track_min_boarding_time": "00:02:00",
         "track_min_alighting_time": "00:02:00",
-        "track_buffer_quota_per": 0.12,
+        # high ÖBB punctuality, well-maintained network; Alpine corridors and the Wien
+        # node keep it above the floor
+        "track_buffer_quota_per": 0.35,
     },
     {
         "country_code": "CH",
@@ -566,7 +646,8 @@ _TRACK_INFRA_V2_ROWS = [
         "track_hsr_allowed": True,
         "track_min_boarding_time": "00:03:00",
         "track_min_alighting_time": "00:03:00",
-        "track_buffer_quota_per": 0.15,
+        # best punctuality in Europe — dense but rigorously timetabled; band floor
+        "track_buffer_quota_per": 0.30,
     },
     {
         "country_code": "FR",
@@ -580,7 +661,9 @@ _TRACK_INFRA_V2_ROWS = [
         "track_hsr_allowed": True,
         "track_min_boarding_time": "00:02:00",
         "track_min_alighting_time": "00:02:00",
-        "track_buffer_quota_per": 0.10,
+        # moderate punctuality; maintenance backlog on the conventional (non-LGV)
+        # network night trains use
+        "track_buffer_quota_per": 0.40,
     },
     {
         "country_code": "BE",
@@ -594,7 +677,9 @@ _TRACK_INFRA_V2_ROWS = [
         "track_hsr_allowed": True,
         "track_min_boarding_time": "00:02:00",
         "track_min_alighting_time": "00:02:00",
-        "track_buffer_quota_per": 0.10,
+        # dense, congested network around the Brussels node, frequent engineering
+        # works
+        "track_buffer_quota_per": 0.45,
     },
     {
         "country_code": "DK",
@@ -608,7 +693,8 @@ _TRACK_INFRA_V2_ROWS = [
         "track_hsr_allowed": True,
         "track_min_boarding_time": "00:02:00",
         "track_min_alighting_time": "00:02:00",
-        "track_buffer_quota_per": 0.10,
+        # ERTMS/signalling programme disruptions, Storebælt corridor bottleneck
+        "track_buffer_quota_per": 0.40,
     },
     # SE has NULL tac and parking → will resolve from defaults (tests is_default=True)
     {
@@ -623,7 +709,8 @@ _TRACK_INFRA_V2_ROWS = [
         "track_hsr_allowed": True,
         "track_min_boarding_time": "00:02:00",
         "track_min_alighting_time": "00:02:00",
-        "track_buffer_quota_per": 0.10,
+        # long single-track stretches, freight mixing, winter operations
+        "track_buffer_quota_per": 0.40,
     },
     # Remaining EU27 members — every field None, resolved entirely from the
     # EU-average default (track_infrastructure_defaults). Real figures TBD;
@@ -927,39 +1014,77 @@ _TRACK_INFRA_V2_ROWS = [
     },
 ]
 
-# Version 1 = the same full snapshot, except DE still carries its original,
-# lower (pre-correction) rates. Every other country is duplicated forward
-# unchanged — exactly the full-table-snapshot invariant in practice.
+# Version 1 (2026 Base Line, deprecated) = the same full snapshot, except
+# DE still carries its original, lower (pre-correction) rates — exactly
+# the full-table-snapshot invariant in practice. track_hsr_allowed is
+# forced True on every non-null row, matching the pre-2032-policy figures.
 _TRACK_INFRA_V1_OVERRIDES = {
     "DE": {
         "track_tac_eur_train_km": 3.10,
         "track_parking_eur_day": 50.00,
-        "track_buffer_quota_per": 0.08,
+        "track_buffer_quota_per": 0.45,
     },
 }
 
 
+def _with_hsr_allowed(row: dict, hsr_allowed: bool) -> dict:
+    """Override track_hsr_allowed on a row, unless it's None (the 21
+    EU27-placeholder countries deliberately resolve every field from the
+    default row — see _TRACK_INFRA_CANONICAL_ROWS above)."""
+    if row["track_hsr_allowed"] is None:
+        return row
+    return {**row, "track_hsr_allowed": hsr_allowed}
+
+
 def _build_track_infrastructures_v1() -> list[dict]:
     rows = []
-    for row in _TRACK_INFRA_V2_ROWS:
-        v1_row = {**row, "track_infra_version": 1}
+    for row in _TRACK_INFRA_CANONICAL_ROWS:
+        v1_row = {**_with_hsr_allowed(row, True), "track_infra_version": 1}
         v1_row.update(_TRACK_INFRA_V1_OVERRIDES.get(row["country_code"], {}))
         rows.append(v1_row)
     return rows
 
 
-TRACK_INFRASTRUCTURES = _build_track_infrastructures_v1() + _TRACK_INFRA_V2_ROWS
+def _build_track_infrastructures_v2() -> list[dict]:
+    """2032 Base Line — night trains may not use HSR infrastructure."""
+    return [
+        {**_with_hsr_allowed(row, False), "track_infra_version": 2}
+        for row in _TRACK_INFRA_CANONICAL_ROWS
+    ]
+
+
+def _build_track_infrastructures_v3() -> list[dict]:
+    """2032 Base Line + Night Trains on HSR allowed — identical to v2
+    except every non-null track_hsr_allowed flips to True."""
+    return [
+        {**_with_hsr_allowed(row, True), "track_infra_version": 3}
+        for row in _TRACK_INFRA_CANONICAL_ROWS
+    ]
+
+
+TRACK_INFRASTRUCTURES = (
+    _build_track_infrastructures_v1()
+    + _build_track_infrastructures_v2()
+    + _build_track_infrastructures_v3()
+)
 
 # ============================================================
 # stop infrastructure
 # ============================================================
+#
+# Three full-table snapshots, one per scenario — same lockstep numbering
+# as track infrastructure above (1 = 2026 Base Line, 2 = 2032 Base Line,
+# 3 = 2032 Base Line + HSR allowed). Stop charges don't depend on the HSR
+# policy, so all three versions carry byte-identical values; only the
+# version number differs, satisfying "each scenario holds its own
+# infrastructure rows" without inventing an artificial value difference.
 
-STOP_INFRA_DEFAULTS = [
+_STOP_INFRA_DEFAULT_CANONICAL = [
     # global default (country_code NULL)
     {"country_code": None, "stop_charge_eur": 11.28},
 ]
 
-STOP_INFRASTRUCTURES = [
+_STOP_INFRASTRUCTURES_CANONICAL = [
     # Stops with explicit stop_charge_eur
     {
         "stop_id": "DE_BERLIN_HBF",
@@ -1509,6 +1634,26 @@ STOP_INFRASTRUCTURES = [
     },
 ]
 
+
+def _build_stop_infra_defaults() -> list[dict]:
+    return [
+        {**row, "stop_infra_default_version": version}
+        for version in (1, 2, 3)
+        for row in _STOP_INFRA_DEFAULT_CANONICAL
+    ]
+
+
+def _build_stop_infrastructures() -> list[dict]:
+    return [
+        {**row, "stop_infra_version": version}
+        for version in (1, 2, 3)
+        for row in _STOP_INFRASTRUCTURES_CANONICAL
+    ]
+
+
+STOP_INFRA_DEFAULTS = _build_stop_infra_defaults()
+STOP_INFRASTRUCTURES = _build_stop_infrastructures()
+
 # ============================================================
 # composition_types
 # ============================================================
@@ -1782,50 +1927,71 @@ def seed_composition_references(cur):
 # ============================================================
 # scenario
 # ============================================================
-# Base scenario pins the exact version numbers seeded above for each of
-# the four infrastructure tables — every scenario row is a complete,
-# self-contained pin, no NULLs, so it stays reproducible even after the
-# base moves on. Compositions/coach types/operators/composition
-# references aren't part of a scenario at all — see
-# create_scenario_schema.sql.
-# The what-if scenario is a genuinely separate lineage (its own
-# scenario_key): it copies every pointer forward from the base at the
-# moment it was created, then overrides only track_infrastructures_version.
+# Each scenario pins its own version number, in lockstep, across all four
+# infrastructure tables — every scenario row is a complete, self-contained
+# pin, no NULLs, and no table is shared/inherited between scenarios (see
+# the versioning note at the top of this file). Compositions/coach
+# types/operators/composition references aren't part of a scenario at
+# all — see create_scenario_schema.sql.
+#
+# Three scenarios, one scenario_key each (three independent lineages, not
+# forks of one another):
+#   1. "2026-baseline"                — 2026 Base Line (deprecated: not
+#      the base, not a current lineage head — a frozen historical
+#      reference kept only for version-snapshot regression tests).
+#   2. "base"                         — 2032 Base Line (the live default;
+#      is_current_base=TRUE).
+#   3. "2032-baseline-hsr-allowed"    — 2032 Base Line + Night Trains on
+#      HSR allowed (a second current lineage head; is_current_scenario=TRUE,
+#      is_current_base=FALSE).
 
-BASE_SCENARIO = {
-    "scenario_key": "base",
-    "scenario_name": "2026 base",
-    "description": "Illustrative baseline parameter set — all tables at their current seeded version.",
+HISTORICAL_SCENARIO_2026 = {
+    "scenario_key": "2026-baseline",
+    "scenario_name": "2026 Base Line",
+    "description": "Deprecated historical baseline — pre-2032-correction "
+    "parameter set. Not in active use: not the live base, and not the "
+    "head of a current what-if lineage. Kept as a frozen reference so "
+    "older evaluations stay reproducible.",
     "change_log": "Initial seed.",
     "editor": "david",
-    "is_current_base": True,
-    "is_current_scenario": True,
-    "track_infrastructures_version": 2,
+    "is_current_base": False,
+    "is_current_scenario": False,
+    "track_infrastructures_version": 1,
     "track_infrastructure_defaults_version": 1,
     "stop_infrastructures_version": 1,
     "stop_infrastructure_defaults_version": 1,
 }
 
-WHATIF_SCENARIO = {
-    "scenario_key": "whatif-de-track-infra",
-    "scenario_name": "What-if: DE track infra pre-correction",
-    "description": "Demonstrates a what-if lineage: copied forward from '2026 base' at "
-    "creation time, then only track_infrastructures_version overridden "
-    "(to version 1, DE's original lower rates). Every other pointer is an "
-    "explicit copy, not an inherited NULL, so this scenario stays "
-    "reproducible even after the base moves on.",
-    "change_log": "Forked from 'base' scenario_key, pinned track_infrastructures to version 1.",
+BASE_SCENARIO = {
+    "scenario_key": "base",
+    "scenario_name": "2032 Base Line",
+    "description": "Live default parameter set — track_hsr_allowed=False "
+    "everywhere (night trains may not use HSR infrastructure).",
+    "change_log": "Initial seed.",
+    "editor": "david",
+    "is_current_base": True,
+    "is_current_scenario": True,
+    "track_infrastructures_version": 2,
+    "track_infrastructure_defaults_version": 2,
+    "stop_infrastructures_version": 2,
+    "stop_infrastructure_defaults_version": 2,
+}
+
+HSR_SCENARIO = {
+    "scenario_key": "2032-baseline-hsr-allowed",
+    "scenario_name": "2032 Base Line + Night Trains on HSR allowed",
+    "description": "A second current lineage, independent of 'base': "
+    "identical to the 2032 Base Line in every field except "
+    "track_hsr_allowed=True everywhere. Own full snapshot of all four "
+    "tables (version 3), not a partial diff against 'base'.",
+    "change_log": "Initial seed.",
     "editor": "david",
     "is_current_base": False,
     "is_current_scenario": True,
-    "track_infrastructures_version": 1,
-    "track_infrastructure_defaults_version": BASE_SCENARIO[
-        "track_infrastructure_defaults_version"
-    ],
-    "stop_infrastructures_version": BASE_SCENARIO["stop_infrastructures_version"],
-    "stop_infrastructure_defaults_version": BASE_SCENARIO[
-        "stop_infrastructure_defaults_version"
-    ],
+    "track_infrastructures_version": 3,
+    "track_infrastructure_defaults_version": 3,
+    "stop_infrastructures_version": 3,
+    "stop_infrastructure_defaults_version": 3,
 }
 
 
@@ -1933,7 +2099,9 @@ def _example_trip(
                 "geometry_id": geometry_id,
                 "distance_m": distance_m,
                 "driving_time_min": driving_min,
+                "dynamics_time_min": 0,
                 "buffer_time_min": buffer_min,
+                "slack_time_min": 0,
                 "energy_kwh": energy_kwh,
                 "country_distance_shares": dist_shares,
                 "country_time_shares": time_shares,
@@ -2147,7 +2315,7 @@ def seed_example_proposal(cur, conn) -> None:
                 "routing_mode": "fullRouting",
                 "timetable_mode": "simpleAutomatic",
                 "schedule_mode": "alwaysDaily",
-                "auto_stop_addition": False,
+                "auto_stop_addition": "off",
             },
             "route": route,
         }
@@ -2227,7 +2395,11 @@ def main():
     seed_sources(cur, source_ids)
 
     print("Seeding scenario.scenarios...")
-    insert_rows(cur, "scenario.scenarios", [BASE_SCENARIO, WHATIF_SCENARIO])
+    insert_rows(
+        cur,
+        "scenario.scenarios",
+        [HISTORICAL_SCENARIO_2026, BASE_SCENARIO, HSR_SCENARIO],
+    )
 
     conn.commit()
 
@@ -2250,7 +2422,7 @@ def main():
         (
             "input_params",
             "track_infrastructures",
-        ),  # 14 rows: 2 full snapshots x 7 countries
+        ),  # 84 rows: 3 full snapshots x 28 countries
         ("input_params", "stop_infrastructure_defaults"),
         ("input_params", "stop_infrastructures"),
         ("input_params", "composition_types"),

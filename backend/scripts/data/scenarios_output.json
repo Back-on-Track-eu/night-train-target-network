@@ -1,22 +1,22 @@
 {
-  "total_count": 2,
+  "total_count": 3,
   "current_base": {
     "count": 1,
     "scenarios": [
       {
-        "scenario_id": 1,
+        "scenario_id": 2,
         "scenario_key": "base",
-        "scenario_name": "2026 base",
-        "description": "Illustrative baseline parameter set — all tables at their current seeded version.",
+        "scenario_name": "2032 Base Line",
+        "description": "Live default parameter set — track_hsr_allowed=False everywhere (night trains may not use HSR infrastructure).",
         "change_log": "Initial seed.",
         "editor": "david",
-        "created_at": "2026-07-12T15:48:34.756118+00:00",
+        "created_at": "2026-07-13T15:47:32.935970+00:00",
         "is_current_base": true,
         "is_current_scenario": true,
         "track_infrastructures_version": 2,
-        "track_infrastructure_defaults_version": 1,
-        "stop_infrastructures_version": 1,
-        "stop_infrastructure_defaults_version": 1
+        "track_infrastructure_defaults_version": 2,
+        "stop_infrastructures_version": 2,
+        "stop_infrastructure_defaults_version": 2
       }
     ]
   },
@@ -24,24 +24,40 @@
     "count": 1,
     "scenarios": [
       {
-        "scenario_id": 2,
-        "scenario_key": "whatif-de-track-infra",
-        "scenario_name": "What-if: DE track infra pre-correction",
-        "description": "Demonstrates a what-if lineage: copied forward from '2026 base' at creation time, then only track_infrastructures_version overridden (to version 1, DE's original lower rates). Every other pointer is an explicit copy, not an inherited NULL, so this scenario stays reproducible even after the base moves on.",
-        "change_log": "Forked from 'base' scenario_key, pinned track_infrastructures to version 1.",
+        "scenario_id": 3,
+        "scenario_key": "2032-baseline-hsr-allowed",
+        "scenario_name": "2032 Base Line + Night Trains on HSR allowed",
+        "description": "A second current lineage, independent of 'base': identical to the 2032 Base Line in every field except track_hsr_allowed=True everywhere. Own full snapshot of all four tables (version 3), not a partial diff against 'base'.",
+        "change_log": "Initial seed.",
         "editor": "david",
-        "created_at": "2026-07-12T15:48:34.756118+00:00",
+        "created_at": "2026-07-13T15:47:32.935970+00:00",
         "is_current_base": false,
         "is_current_scenario": true,
+        "track_infrastructures_version": 3,
+        "track_infrastructure_defaults_version": 3,
+        "stop_infrastructures_version": 3,
+        "stop_infrastructure_defaults_version": 3
+      }
+    ]
+  },
+  "historical_scenarios": {
+    "count": 1,
+    "scenarios": [
+      {
+        "scenario_id": 1,
+        "scenario_key": "2026-baseline",
+        "scenario_name": "2026 Base Line",
+        "description": "Deprecated historical baseline — pre-2032-correction parameter set. Not in active use: not the live base, and not the head of a current what-if lineage. Kept as a frozen reference so older evaluations stay reproducible.",
+        "change_log": "Initial seed.",
+        "editor": "david",
+        "created_at": "2026-07-13T15:47:32.935970+00:00",
+        "is_current_base": false,
+        "is_current_scenario": false,
         "track_infrastructures_version": 1,
         "track_infrastructure_defaults_version": 1,
         "stop_infrastructures_version": 1,
         "stop_infrastructure_defaults_version": 1
       }
     ]
-  },
-  "historical_scenarios": {
-    "count": 0,
-    "scenarios": []
   }
 }

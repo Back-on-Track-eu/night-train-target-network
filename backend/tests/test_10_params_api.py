@@ -157,26 +157,29 @@ class TestTrackInfrastructures:
         assert tracks["SE"]["tac_eur_train_km"]["is_default"] is True
         assert tracks["DE"]["tac_eur_train_km"]["is_default"] is False
 
-    def test_scenario_id_pins_parameter_version(self, api_base, whatif_scenario):
-        """?scenario_id=<what-if> returns DE's v1 snapshot values (tac=3.10),
-        while the default request returns the base's v2 (tac=5.40)."""
+    def test_scenario_id_pins_parameter_version(self, api_base, historical_scenario):
+        """?scenario_id=<2026-baseline> returns DE's v1 snapshot values
+        (tac=3.10), while the default request returns the base's v2
+        (tac=5.40)."""
         base = requests.get(
             f"{api_base}/api/params/TrackInfrastructures", timeout=15
         ).json()
-        whatif = requests.get(
+        historical = requests.get(
             f"{api_base}/api/params/TrackInfrastructures",
-            params={"scenario_id": whatif_scenario["scenario_id"]},
+            params={"scenario_id": historical_scenario["scenario_id"]},
             timeout=15,
         ).json()
 
         de_base = next(
             t for t in base["track_infrastructures"] if t["country_code"] == "DE"
         )
-        de_whatif = next(
-            t for t in whatif["track_infrastructures"] if t["country_code"] == "DE"
+        de_historical = next(
+            t for t in historical["track_infrastructures"] if t["country_code"] == "DE"
         )
         assert de_base["tac_eur_train_km"]["value"] == pytest.approx(5.40, rel=1e-3)
-        assert de_whatif["tac_eur_train_km"]["value"] == pytest.approx(3.10, rel=1e-3)
+        assert de_historical["tac_eur_train_km"]["value"] == pytest.approx(
+            3.10, rel=1e-3
+        )
 
 
 # =============================================================================

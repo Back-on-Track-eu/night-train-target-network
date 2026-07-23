@@ -29,6 +29,7 @@ from tests.helpers import (
     directional_od,
     evaluate,
     inject_demand,
+    purge_saved_proposals,
 )
 
 # =============================================================================
@@ -103,6 +104,67 @@ def rollback_after_test():
             pass
 
 
+# =============================================================================
+# Script identity — the user the suite persists as (persist-on-calc)
+# =============================================================================
+#
+# POST /api/route/plan and /api/evaluation/calc persist their responses for
+# any authenticated caller. The suite authenticates as the seeded
+# 'test_script' user so persisted rows from test runs are identifiable (and
+# purgeable) by owner. The session route fixtures below deliberately stay
+# TOKENLESS: they compute only, keep their draft placeholder IDs, and leave
+# no rows — so every pre-existing test sees unchanged behaviour, and
+# persistence is exercised solely by the dedicated tests (test_50, test_70)
+# through these fixtures.
+
+
+@pytest.fixture(scope="session")
+def script_user_id(db_cur, db_conn):
+    """user_id of the seeded 'test_script' identity — resolved by email,
+    never hard-coded (mirrors test_50's old user_ids pattern)."""
+    db_cur.execute(
+        "SELECT user_id FROM admin.users WHERE email = 'test_script@dev.local'"
+    )
+    row = db_cur.fetchone()
+    assert row is not None, (
+        "Seed user test_script missing — reseed the DB (db/dev/seed.py)."
+    )
+    db_conn.rollback()
+    return row["user_id"]
+
+
+@pytest.fixture(scope="session")
+def script_headers(api_base, db_cur, db_conn, script_user_id):
+    """Authorization header for 'test_script', with a real JWT obtained from
+    the live API: an OTP is injected DB-side (the API correctly never
+    returns codes — same pattern as test_70's user_with_known_otp) and
+    exchanged via POST /api/auth/verify. No JWT_SECRET needed on the host.
+
+    Session teardown purges every proposal the suite persisted (the seeded
+    example proposal excepted) so dev-DB growth stays bounded — the last
+    run's rows exist for inspection only until the next run starts."""
+    from api.auth_utils import hash_otp
+
+    otp = "424242"
+    db_cur.execute(
+        "INSERT INTO admin.auth_tokens (user_id, code_hash, expires_at) "
+        "VALUES (%s, %s, NOW() + INTERVAL '15 minutes')",
+        (script_user_id, hash_otp(otp)),
+    )
+    db_conn.commit()
+
+    resp = requests.post(
+        f"{API_BASE}/api/auth/verify",
+        json={"email": "test_script@dev.local", "code": otp},
+        timeout=10,
+    )
+    assert resp.status_code == 200, f"test_script login failed: {resp.text[:200]}"
+
+    yield {"Authorization": f"Bearer {resp.json()['token']}"}
+
+    purge_saved_proposals(db_conn)
+
+
 @pytest.fixture(scope="session")
 def loader():
     """Session-scoped DBDataLoader — same construction path as inside Docker,
@@ -133,17 +195,39 @@ def base_scenario(db_cur):
 
 
 @pytest.fixture(scope="session")
-def whatif_scenario(db_cur):
-    """The seeded what-if scenario (scenario_key='whatif-de-track-infra') —
-    pins track_infrastructures to version 1 (DE's original lower rates),
-    everything else copied from base. Enables scenario override tests."""
+def historical_scenario(db_cur):
+    """The seeded, deprecated historical scenario (scenario_key=
+    '2026-baseline') — pins every table to version 1 (DE's original
+    lower track_tac_eur_train_km among them). is_current_scenario is
+    FALSE for this row (it's not the head of an active lineage), so it's
+    looked up by scenario_key alone. Enables scenario override tests
+    that need a known-different snapshot from the live base."""
     db_cur.execute(
-        "SELECT * FROM scenario.scenarios "
-        "WHERE scenario_key = 'whatif-de-track-infra' AND is_current_scenario = TRUE"
+        "SELECT * FROM scenario.scenarios WHERE scenario_key = '2026-baseline'"
     )
     row = db_cur.fetchone()
     assert row is not None, (
-        "What-if scenario missing — see db/dev/seed.py: WHATIF_SCENARIO."
+        "Historical 2026 scenario missing — see db/dev/seed.py: "
+        "HISTORICAL_SCENARIO_2026."
+    )
+    return row
+
+
+@pytest.fixture(scope="session")
+def hsr_scenario(db_cur):
+    """The seeded 'HSR allowed' scenario (scenario_key=
+    '2032-baseline-hsr-allowed') — a second current lineage head
+    (is_current_scenario=TRUE, is_current_base=FALSE), identical to the
+    live base except track_hsr_allowed=True everywhere. Enables tests of
+    the non-base 'current_scenarios' API group and of pinning to a
+    live-but-non-default scenario_id."""
+    db_cur.execute(
+        "SELECT * FROM scenario.scenarios "
+        "WHERE scenario_key = '2032-baseline-hsr-allowed' AND is_current_scenario = TRUE"
+    )
+    row = db_cur.fetchone()
+    assert row is not None, (
+        "HSR-allowed scenario missing — see db/dev/seed.py: HSR_SCENARIO."
     )
     return row
 
@@ -153,6 +237,13 @@ def whatif_scenario(db_cur):
 # =============================================================================
 
 
+# All fixtures pin auto_stop_addition="off": these are fixed-corridor
+# physics fixtures whose stop lists downstream tests (test_21 content
+# math, test_50 GTFS decomposition) rely on being exactly as requested —
+# the seeded CZ_BRNO_HLN would otherwise be auto-added to any corridor
+# passing through Brno. The add/suggest behaviour has its own dedicated
+# tests in test_20's TestModeSwitches.
+#
 # proposal_id range convention (avoids collisions between real saved data
 # and test fixtures across the whole suite):
 #   1-99     seed_example_proposal() in db/dev/seed.py (currently just id=1)
@@ -167,6 +258,7 @@ def route_berlin_wien(api_base):
         DEFAULT_COMPOSITION,
         proposal_id=101,
         proposal_version=1,
+        auto_stop_addition="off",
     )
 
 
@@ -179,6 +271,7 @@ def route_berlin_dresden_wien(api_base):
         DEFAULT_COMPOSITION,
         proposal_id=102,
         proposal_version=1,
+        auto_stop_addition="off",
     )
 
 
@@ -191,6 +284,7 @@ def route_berlin_zuerich_wien(api_base):
         DEFAULT_COMPOSITION,
         proposal_id=103,
         proposal_version=1,
+        auto_stop_addition="off",
     )
 
 
@@ -211,6 +305,7 @@ def route_copenhagen_stockholm(api_base):
         "composition_id": DEFAULT_COMPOSITION,
         "proposal_id": 104,
         "proposal_version": 1,
+        "auto_stop_addition": "off",
     }
     resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=90)
     if resp.status_code != 200:

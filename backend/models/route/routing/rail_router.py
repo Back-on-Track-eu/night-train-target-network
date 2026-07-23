@@ -14,6 +14,16 @@ Responsibilities
 - Country attribution of route geometry via shapely point-in-polygon.
 - Physics per segment: distance_m, driving_time_min, buffer_time_min,
   country_distance_shares, country_time_shares.
+- fullRouting custom model: composition speed cap + HSR avoidance — only
+  track whose permitted speed exceeds HSR_TRACK_SPEED_THRESHOLD_KMH is
+  penalized, and only where hsr_allowed (composition AND country) is
+  false. Thresholds/factor live in models/route/version.py (STANDARD
+  VALUES); mechanism in _build_custom_model()'s docstring.
+- fullRouting traction dynamics: each leg's dynamics_time_min is filled
+  with the per-stop accel/brake time loss (routing/dynamics.py), kept
+  separate from the raw router driving_time_min so the two stay
+  differentiable — applied here so every consumer of route() gets
+  consistent physics.
 
 NOT responsible for:
 - Stop timetable data  (→ models/route/route_factory.py — Stop is built there)
@@ -30,6 +40,11 @@ Public surface
   RailRoutingError
   RoutedLeg  (output type — public)
   StopInput  (input type — public; wraps StopInfrastructure + StopType)
+  VALID_ROUTING_MODES  (single source of truth for allowed routing_mode
+    strings — the routing_mode switch lives in RailRouter.route() below,
+    so its registry lives here too, mirroring VALID_TIMETABLE_MODES /
+    VALID_SCHEDULE_MODES in models/route/timetable.py; api/route.py's
+    request validation reads from it)
   build_router_stops(stop_ids, stop_infra) → list[StopInput]  (shared stop_id
     → StopInput conversion — used by route_factory.py and timetable.py's
     auto_stop_addition trial re-routes)
@@ -51,6 +66,12 @@ from models.params import (
     StopInfraCollection,
 )
 from models.route.trip import StopType
+from models.route.routing.dynamics import apply_traction_dynamics
+from models.route.version import (
+    HSR_TRACK_SPEED_THRESHOLD_KMH,
+    HSR_TRACK_SPEED_SANITY_MAX_KMH,
+    HSR_AVOIDANCE_PRIORITY_FACTOR,
+)
 from models.utils import ms_to_min, haversine_path_m, bbox_area
 
 logger = logging.getLogger(__name__)
@@ -107,20 +128,30 @@ class RoutedLeg:
     country_distance_shares and country_time_shares sum to 1.0 each.
     energy_kwh is 0.0 on return — enriched in-place by
     calc_energy_consumption() before route_factory builds Stops.
+    driving_time_min is the raw router time; the per-stop traction
+    dynamics surcharge is carried separately in dynamics_time_min
+    (filled for routing_mode="fullRouting" — see routing/dynamics.py) so
+    the two stay differentiable downstream. buffer_time_min carries the
+    country buffer quota applied to driving (at parse time) and to
+    dynamics (added afterwards by apply_traction_dynamics — computed
+    strictly AFTER the dynamics' cruise speed was derived from raw
+    driving time); never on dwell.
     """
 
     geometry: list[list[float]]  # [[lon, lat], ...]
     distance_m: int
-    driving_time_min: int
-    buffer_time_min: int
+    driving_time_min: int  # raw router time (constant-cruise-speed passage)
+    dynamics_time_min: int  # 0 until apply_traction_dynamics() runs (fullRouting)
+    buffer_time_min: int  # quota on driving (parse time) + quota on dynamics
+    # (added by apply_traction_dynamics afterwards) — never on dwell
     energy_kwh: float  # 0.0 until energy model runs
     country_distance_shares: dict[str, float]  # {country_code: share}, sums to 1.0
     country_time_shares: dict[str, float]  # {country_code: share}, sums to 1.0
 
     @property
     def total_time_min(self) -> int:
-        """Driving + buffer time — matches Segment.total_time_min."""
-        return self.driving_time_min + self.buffer_time_min
+        """Driving + dynamics + buffer time — matches Segment.total_time_min."""
+        return self.driving_time_min + self.dynamics_time_min + self.buffer_time_min
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +208,11 @@ class CountryIndex:
 # Router
 # ---------------------------------------------------------------------------
 
+VALID_ROUTING_MODES = frozenset({"simpleRouting", "fullRouting"})
+"""Single source of truth for allowed routing_mode strings — read by both
+api/route.py's request validation and RailRouter.route()'s switch below.
+Adding a mode means: add it to this set and add a branch in route()."""
+
 
 class RailRoutingError(Exception):
     """Raised when the routing engine returns an error."""
@@ -232,19 +268,32 @@ class RailRouter:
         stops: list[StopInput],
         composition: Composition,
         tracks: TrackInfraCollection,
-        routing_mode: str = "fullRouting",
+        routing_mode: str,
     ) -> list[RoutedLeg]:
         """
         Route a trip and return bare segment physics.
 
-        routing_mode:
-          "fullRouting"   — today's behaviour: HSR avoidance and speed cap
-                             derived automatically from composition/track
-                             flags, two-pass routing when a custom model
-                             is needed.
+        routing_mode (no default here — defaulting is an API-boundary
+        concern, see api/route.py; every caller passes it explicitly):
+          "fullRouting"   — speed capped at the composition's own
+                             max_speed_kmh everywhere, plus HSR avoidance:
+                             track segments whose PERMITTED speed exceeds
+                             HSR_TRACK_SPEED_THRESHOLD_KMH (see
+                             models/route/version.py) are heavily
+                             penalized in every country where HSR is not
+                             allowed (composition.hsr_allowed AND that
+                             country's track hsr_allowed — evaluated for
+                             every country, transited-only ones included).
+                             Each returned leg also carries the per-stop
+                             traction dynamics surcharge (accel/brake
+                             time loss) in its own dynamics_time_min
+                             field (see routing/dynamics.py). Two-pass routing
+                             when a custom model is needed. See
+                             _build_custom_model().
           "simpleRouting" — bypass all of that: single-pass, no speed cap,
-                             no HSR avoidance. Cheap/fast, for quick manual
-                             checks — not representative of real physics.
+                             no HSR avoidance, no traction dynamics.
+                             Cheap/fast, for quick manual checks — not
+                             representative of real physics.
 
         Two-pass routing is used when a custom model is needed:
           pass 1 — CH routing to snap stops to the rail network
@@ -256,65 +305,137 @@ class RailRouter:
         if len(stops) < 2:
             raise ValueError("At least 2 stops are required.")
 
+        # routing_mode SWITCH — VALID_ROUTING_MODES is the same set
+        # api/route.py validates the request against, so an unknown mode
+        # can only reach here if that validation was bypassed.
         if routing_mode == "simpleRouting":
-            raw = self._post_route(self._build_payload(stops, None, None))
+            raw = self._post_route(self._build_payload(stops, None))
             return self._parse_response(raw, stops, tracks)
+        if routing_mode != "fullRouting":
+            raise ValueError(
+                f"Unknown routing_mode '{routing_mode}'. "
+                f"Supported: {sorted(VALID_ROUTING_MODES)}."
+            )
 
         vehicle_max_speed_kmh = int(composition.max_speed_kmh)
+        # HSR permission per country: high-speed line access in a country is
+        # allowed only when BOTH the composition and that country's track
+        # infrastructure say hsr_allowed — evaluated over the FULL track
+        # collection (complete over every country, see TrackInfraCollection),
+        # not just countries with a stop on this trip: a route can transit a
+        # country without stopping in it, and that country's hsr_allowed
+        # must still bind. What "avoid" means per segment (permitted track
+        # speed above HSR_TRACK_SPEED_THRESHOLD_KMH, not the whole country
+        # network) is _build_custom_model()'s concern below.
         avoid_hsr = {
-            cc: not (
-                composition.hsr_allowed
-                and (tracks.get(cc).hsr_allowed if tracks.get(cc) else True)
-            )
-            for cc in {
-                s.stop.stop_country_code for s in stops if s.stop.stop_country_code
-            }
+            cc: not (composition.hsr_allowed and track.hsr_allowed)
+            for cc, track in tracks.all().items()
         }
         custom_model = self._build_custom_model(vehicle_max_speed_kmh, avoid_hsr)
 
         if custom_model:
-            snap_raw = self._post_route(self._build_payload(stops, None, None))
+            snap_raw = self._post_route(self._build_payload(stops, None))
             snapped_coords = snap_raw["paths"][0]["snapped_waypoints"]["coordinates"]
             raw = self._post_route(
                 self._build_payload(
                     stops,
-                    vehicle_max_speed_kmh,
-                    avoid_hsr,
+                    custom_model,
                     override_coords=snapped_coords,
                 )
             )
         else:
-            raw = self._post_route(self._build_payload(stops, None, None))
+            raw = self._post_route(self._build_payload(stops, None))
 
-        return self._parse_response(raw, stops, tracks)
+        legs = self._parse_response(raw, stops, tracks)
+        # Traction dynamics (fullRouting only): GraphHopper has no vehicle
+        # model, so parsed driving times assume the train passes every stop
+        # at cruise speed. Fill each leg's dynamics_time_min with its
+        # accel/brake time loss here — the single call site every consumer
+        # shares (trips, auto-stop candidate mini-reroutes, final reroutes)
+        # — rather than in route_factory, which would leave timetable.py's
+        # reroutes without it. driving_time_min stays raw router time;
+        # the dynamics' own buffer share (same country quota) is added to
+        # buffer_time_min there too, strictly after the cruise speed was
+        # derived from raw driving time. See routing/dynamics.py.
+        apply_traction_dynamics(legs, composition, tracks)
+        return legs
 
     def _build_custom_model(
         self,
         vehicle_max_speed_kmh: int | None,
         avoid_high_speed_lines: dict[str, bool] | None,
     ) -> dict | None:
+        """
+        GraphHopper custom model for the fullRouting pass, or None when
+        nothing needs one (no speed cap, no country disallowing HSR).
+
+        Two independent concerns:
+          speed    — hard cap at the composition's own max_speed_kmh on
+                     every segment (how fast THIS train may go, everywhere).
+          priority — HSR avoidance: a segment is penalized by
+                     HSR_AVOIDANCE_PRIORITY_FACTOR iff its PERMITTED track
+                     speed (max_speed encoded value, from OSM maxspeed —
+                     already in graph.encoded_values, see docker/config.yml)
+                     lies in (HSR_TRACK_SPEED_THRESHOLD_KMH,
+                     HSR_TRACK_SPEED_SANITY_MAX_KMH) AND HSR is not allowed
+                     there. Only high-speed track is penalized — never a
+                     country's conventional network (that was the pre-0.9.6
+                     routing error, see CHANGELOG). The upper bound guards
+                     against GraphHopper's missing-maxspeed sentinel (0 or
+                     infinity depending on version — the two-sided range
+                     excludes both), so untagged track is never mistaken
+                     for high-speed infrastructure.
+
+        Where the priority rule applies:
+          - Every country disallows (composition-level ban, or e.g. the
+            2032 Base Line where track_hsr_allowed=False everywhere) —
+            ONE global rule, no area polygons at all: far smaller payload
+            and inherently covers any country missing a border polygon.
+          - Mixed permissions — one rule per disallowing country, scoped
+            to that country's border polygon (in_<area> && speed range).
+        """
         speed_rules, priority_rules, areas = [], [], {}
 
         if vehicle_max_speed_kmh is not None:
             speed_rules.append({"if": "true", "limit_to": str(vehicle_max_speed_kmh)})
 
+        hsr_condition = (
+            f"max_speed > {HSR_TRACK_SPEED_THRESHOLD_KMH} "
+            f"&& max_speed < {HSR_TRACK_SPEED_SANITY_MAX_KMH}"
+        )
         if avoid_high_speed_lines:
-            for cc, avoid in avoid_high_speed_lines.items():
-                if not avoid:
-                    continue
-                ring = self._country_index.get_largest_polygon(cc)
-                if ring is None:
-                    logger.warning("No polygon for '%s' — skipping HSR avoidance.", cc)
-                    continue
-                closed_ring = ring if ring[0] == ring[-1] else ring + [ring[0]]
-                area_name = f"hsr{cc.lower()}"
-                areas[area_name] = {
-                    "type": "Feature",
-                    "id": area_name,
-                    "properties": {},
-                    "geometry": {"type": "Polygon", "coordinates": [closed_ring]},
-                }
-                priority_rules.append({"if": f"in_{area_name}", "multiply_by": "0.01"})
+            disallowing = sorted(
+                cc for cc, avoid in avoid_high_speed_lines.items() if avoid
+            )
+            if disallowing and len(disallowing) == len(avoid_high_speed_lines):
+                priority_rules.append(
+                    {
+                        "if": hsr_condition,
+                        "multiply_by": str(HSR_AVOIDANCE_PRIORITY_FACTOR),
+                    }
+                )
+            else:
+                for cc in disallowing:
+                    ring = self._country_index.get_largest_polygon(cc)
+                    if ring is None:
+                        logger.warning(
+                            "No polygon for '%s' — skipping HSR avoidance.", cc
+                        )
+                        continue
+                    closed_ring = ring if ring[0] == ring[-1] else ring + [ring[0]]
+                    area_name = f"hsr{cc.lower()}"
+                    areas[area_name] = {
+                        "type": "Feature",
+                        "id": area_name,
+                        "properties": {},
+                        "geometry": {"type": "Polygon", "coordinates": [closed_ring]},
+                    }
+                    priority_rules.append(
+                        {
+                            "if": f"in_{area_name} && {hsr_condition}",
+                            "multiply_by": str(HSR_AVOIDANCE_PRIORITY_FACTOR),
+                        }
+                    )
 
         if not speed_rules and not priority_rules:
             return None
@@ -334,11 +455,13 @@ class RailRouter:
     def _build_payload(
         self,
         stops: list[StopInput],
-        vehicle_max_speed_kmh: int | None,
-        avoid_high_speed_lines: dict[str, bool] | None,
+        custom_model: dict | None,
         override_coords: list[list[float]] | None = None,
     ) -> dict:
         """
+        custom_model: prebuilt by _build_custom_model() (or None for a plain
+        CH pass) — passed in rather than rebuilt here, so route() builds it
+        exactly once per call.
         override_coords: snapped [lon, lat] pairs from pass 1, used in place
         of the original stop coordinates for pass 2 of two-pass routing.
         """
@@ -354,9 +477,8 @@ class RailRouter:
             "instructions": False,
             "details": self.DETAILS,
         }
-        cm = self._build_custom_model(vehicle_max_speed_kmh, avoid_high_speed_lines)
-        if cm:
-            payload["custom_model"] = cm
+        if custom_model:
+            payload["custom_model"] = custom_model
             payload["ch.disable"] = True
         return payload
 
@@ -461,6 +583,7 @@ class RailRouter:
                     geometry=coords[from_idx : to_idx + 1],
                     distance_m=round(total_dist_m),
                     driving_time_min=ms_to_min(total_dur_ms),
+                    dynamics_time_min=0,  # filled by apply_traction_dynamics()
                     buffer_time_min=total_buffer_min,
                     energy_kwh=0.0,  # populated by calc_energy_consumption()
                     country_distance_shares=country_distance_shares,

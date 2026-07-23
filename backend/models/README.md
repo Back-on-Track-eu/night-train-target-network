@@ -22,7 +22,8 @@ models/
 │   ├── route.py                     # Route, TripPair, Parking, Shunting, ODPair, Schedule
 │   ├── route_factory.py             # plan_route(), adjust_route(), distribute_demand()
 │   ├── timetable.py                 # Pluggable timetable_mode / schedule_mode / auto_stop_addition strategies
-│   └── routing/
+│   ├── version.py                   # ROUTE_BUILDER_VERSION + all standard values & open TODOs of the route model
+│   └── routing/                     # rail_router.py (GraphHopper wrapper) + dynamics.py (per-stop accel/brake time loss)
 │       ├── rail_router.py           # OpenRailRouting (GraphHopper) wrapper
 │       └── docker/                  # Self-hosted routing engine Docker setup
 ├── energy/
@@ -52,18 +53,36 @@ plan_route(trip_pair_inputs, loader, router, schedule_mode, proposal_id, proposa
   │  per TripPair (_build_trip_pair()):
   │  outbound direction (_build_trip()):
   ├── rail_router.route(stops, composition, tracks, routing_mode)  → list[RoutedLeg]
-  ├── auto_stop_addition SWITCH (here) → if true: timetable.apply_auto_stop_addition(
-  │     routed_legs, composition, tracks, stop_infra, router, routing_mode) → stop_ids,
-  │     routed_legs (re-routes internally as needed); if false, step is skipped entirely.
-  │     Only ever runs for outbound — see below.
+  │     (fullRouting: each leg carries the per-stop traction dynamics
+  │     surcharge — accel/brake time loss, routing/dynamics.py — in its own
+  │     dynamics_time_min field next to raw driving_time_min; applied inside
+  │     route() so auto-stop mini-reroutes get it too; buffer quota applies
+  │     to driving and dynamics, strictly after the physics)
+  ├── auto_stop_addition SWITCH (here) → "off": step skipped entirely;
+  │     "add": timetable.apply_auto_stop_addition(routed_legs, composition,
+  │     tracks, stop_infra, router, routing_mode) → stop_ids, routed_legs
+  │     (re-routes internally as needed); "suggest": timetable.
+  │     suggest_auto_stops(...) → list[AutoStopSuggestion] (nothing added,
+  │     nothing rerouted — suggestions bubble up through plan_route()'s
+  │     return value for api/route.py to serialize). Search + costing is
+  │     shared (timetable.find_and_cost_auto_stop_candidates(), catalog
+  │     prefiltered to route-touched countries). Only ever runs for
+  │     outbound — see below.
   ├── _check_country_coverage(routed_legs, tracks)                 → raises ValueError if any
   │     transited country has no row at all in input_params.track_infrastructures
   │     (defaulted fields on an existing row are fine)
-  ├── timetable_mode SWITCH (here)     → timetable.simple_automatic_timetable(...) (only
-  │     mode today) → stop_inputs, departure_time_min
+  ├── timetable_mode SWITCH (here)     → timetable.simple_automatic_timetable(...)
+  │     ("simpleAutomatic") or timetable.simple_automatic_fixed_night_timetable(...)
+  │     ("simpleAutomaticWithFixedNight", per-leg slack for a stretched night
+  │     interval) → stop_inputs, departure_time_min[, slack_per_leg];
+  │     both classify stops boarding/night/alighting via the shared
+  │     NIGHT_START_MIN/NIGHT_END_MIN rule (version.py)
   ├── calc_energy_consumption(legs, composition)                   → enriches RoutedLeg.energy_kwh
   ├── timetable.build_final_timetable()                            → exact per-stop arrival/departure
   ├── _build_trip_stops_and_legs(...)                              → list[Segment]
+  │     (slack_per_leg stamped onto Segment.slack_time_min, fixed-night only)
+  ├── timetable.fixed_night_speed_warning(segments, interval)      → TimetableWarning | None
+  │     (fixed-night only — interval stretched too slow? informational)
   ├── Trip._create(...)                                            → Trip (outbound)
   │
   │  return direction (_build_trip(), reusing outbound's decision):
@@ -76,6 +95,9 @@ plan_route(trip_pair_inputs, loader, router, schedule_mode, proposal_id, proposa
   │
   └── Route._create(schedule, trip_pairs, parkings, shuntings)  → Route
 
+plan_route() returns (Route, RouteProvenance, list[AutoStopSuggestion]) —
+suggestions non-empty only for auto_stop_addition="suggest".
+
 distribute_demand(route, utilization_per, fare_per_km_by_class)  → Route (with od_pairs)
 
 evaluate_route(route, tracks, stop_infra)  → EvaluationResult   [calc.py]
@@ -87,23 +109,33 @@ build_breakdown*(route, result)            → Breakdown matrices  [views.py]
 switch (which named behaviour runs) in `route_factory.py`, at whichever
 level owns the relevant context — `schedule_mode` in `plan_route()` (route-
 level, shared across every `TripPair`), `timetable_mode` in `_build_trip()`
-(per-trip, since departure time is direction-specific). `auto_stop_addition`
-is per-`TripPair`, not per-trip: `_build_trip_pair()` runs it once from
-outbound and reuses the result (reversed) for return, rather than
-re-running the whole candidate-search-and-cost pass for what is physically
-the same corridor reversed — that pass, not routing itself, is the
-dominant cost of planning a route through a dense stop catalog. Return
-still gets its own real routing call for its own (possibly asymmetric)
-physical path; only the decision of *which stops to add* is shared, not
+(per-trip, since departure time is direction-specific); `routing_mode`'s
+switch lives with its implementation in `rail_router.py`'s `route()`.
+`auto_stop_addition` is a three-value enum (`"off"` / `"add"` / `"suggest"`)
+and per-`TripPair`, not per-trip: `_build_trip_pair()` runs the candidate
+search + costing once, from outbound, and reuses the result (reversed) for
+return, rather than re-running the whole pass for what is physically the
+same corridor reversed — that pass, not routing itself, is the dominant
+cost of planning a route through a dense stop catalog (the search itself
+prefilters the catalog to route-touched countries, read straight off the
+legs' country shares the router already attributed). Return still gets its
+own real routing call for its own (possibly asymmetric) physical path; only
+the decision of *which stops to add* (or *which to suggest*) is shared, not
 the routing. Accepted trade-off: return no longer gets an independent
-detour-budget check against its own baseline trip time. `timetable.py` holds
-one function per named behaviour and never branches on the mode/flag
+detour-budget check against its own baseline trip time (see
+`OPEN_TODOS["return_detour_budget"]` in `route/version.py`). `timetable.py`
+holds one function per named behaviour and never branches on the mode/flag
 itself — see that module's docstring. `VALID_TIMETABLE_MODES` /
-`VALID_SCHEDULE_MODES` in `timetable.py` are the single source of truth
-both `api/route.py`'s request validation and `route_factory.py`'s
-switches read from. For schedule-only changes on an already-built Route
-(departure time, stop types), `adjust_route()` still exists but isn't
-currently reachable from the API — see `api/README.md`.
+`VALID_SCHEDULE_MODES` / `VALID_AUTO_STOP_ADDITION_MODES` in `timetable.py`
+and `VALID_ROUTING_MODES` in `rail_router.py` are the single sources of
+truth both `api/route.py`'s request validation and the switches read from.
+Every standard value the route model assumes (mode defaults, mirror time,
+auto-stop thresholds, schedule constants, stopgap demand parameters) and
+every open TODO on the route model are consolidated in
+`route/version.py` (`STANDARD VALUES` / `OPEN_TODOS`). For schedule-only
+changes on an already-built Route (departure time, stop types),
+`adjust_route()` still exists but isn't currently reachable from the API —
+see `api/README.md`.
 
 ---
 

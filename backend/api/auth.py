@@ -38,6 +38,7 @@ from adapters import mailer
 from api.auth_utils import (
     AuthError,
     create_jwt,
+    decode_jwt,
     generate_guest_name,
     generate_otp,
     hash_otp,
@@ -161,6 +162,26 @@ def request_code():
     return jsonify({}), 200
 
 
+def _guest_user_id_from_bearer() -> int | None:
+    """Guest user_id from an Authorization header on /verify, if present and
+    valid — the signal that a guest session is registering and its proposals
+    and feedback should be claimed. Anything else (no header, malformed,
+    invalid/expired token, non-guest token) is None: an unusable bearer must
+    never block the registration itself."""
+    auth_header = request.headers.get("Authorization", "")
+    parts = auth_header.split()
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return None
+    try:
+        payload = decode_jwt(parts[1])
+    except AuthError:
+        logger.info("verify: ignoring invalid bearer token during registration")
+        return None
+    if not payload.get("is_guest"):
+        return None
+    return int(payload["sub"])
+
+
 # ---------------------------------------------------------------------------
 # POST /api/auth/verify
 # ---------------------------------------------------------------------------
@@ -178,9 +199,19 @@ def verify():
         "code":  "482917"
     }
 
+    Guest merge: send the current guest session's JWT as the Authorization
+    bearer on this call and, on success, everything that guest owns
+    (proposals, feedback) is reassigned to the verified account and the
+    guest row is marked merged (its token stops working with an explicit
+    account-merged error). This covers registering as the last step after
+    playing around, and equally logging in to an existing account from a
+    guest session. An absent/invalid bearer never blocks verification.
+
     Response
     --------
-    200  {"token": "...", "user_id": 42, "display_name": "railfan42", "is_guest": false}
+    200  {"token": "...", "user_id": 42, "display_name": "railfan42",
+          "is_guest": false, "merged_guest": null |
+          {"guest_user_id": 99, "proposals_claimed": 2, "feedback_claimed": 0}}
     400  {"error": "bad_request"}     -- missing fields
     401  {"error": "invalid_code"}    -- wrong, expired, or already-used code
     """
@@ -219,6 +250,25 @@ def verify():
 
     logger.info("User %d (%s) verified successfully.", user["user_id"], email)
 
+    # Guest → registered merge (see docstring). Runs after the OTP is
+    # consumed so a failed merge can never burn the code, and never fails
+    # the verification itself.
+    merged_guest = None
+    guest_user_id = _guest_user_id_from_bearer()
+    if guest_user_id is not None and guest_user_id != user["user_id"]:
+        try:
+            counts = repo.merge_guest_into(guest_user_id, user["user_id"])
+        except Exception:
+            logger.exception(
+                "guest merge failed (guest %d -> user %d); verification "
+                "proceeds without it",
+                guest_user_id,
+                user["user_id"],
+            )
+            counts = None
+        if counts is not None:
+            merged_guest = {"guest_user_id": guest_user_id, **counts}
+
     token = create_jwt(
         user_id=user["user_id"],
         email=email,
@@ -233,6 +283,7 @@ def verify():
                 "user_id": user["user_id"],
                 "display_name": user["display_name"],
                 "is_guest": False,
+                "merged_guest": merged_guest,
             }
         ),
         200,

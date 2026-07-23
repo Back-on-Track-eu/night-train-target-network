@@ -86,6 +86,20 @@ class AuthRepository:
         self._conn.rollback()
         return row is not None
 
+    def merged_target(self, user_id: int) -> Optional[int]:
+        """merged_into_user_id of a user, or None. Checked by the auth
+        middleware for guest tokens so a session that was merged into a
+        registered account fails with an explicit message instead of
+        silently acting as the abandoned guest."""
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT merged_into_user_id FROM admin.users WHERE user_id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        self._conn.rollback()
+        return row["merged_into_user_id"] if row else None
+
     # ------------------------------------------------------------------
     # Writes — users
     # ------------------------------------------------------------------
@@ -208,3 +222,74 @@ class AuthRepository:
         except Exception:
             self._conn.rollback()
             raise
+
+    # ------------------------------------------------------------------
+    # Writes — guest merge
+    # ------------------------------------------------------------------
+
+    def merge_guest_into(self, guest_user_id: int, user_id: int) -> Optional[dict]:
+        """Reassign everything a guest owns to a registered account and mark
+        the guest row merged — one transaction, because a half-merged guest
+        (proposals moved, marker missing) would allow a second, conflicting
+        merge. This is the only adapter writing across schemas (proposals +
+        admin): atomicity of the merge outranks the one-schema-per-adapter
+        convention here.
+
+        Returns {"proposals_claimed": n, "feedback_claimed": m}, or None when
+        no merge happened: unknown user, not a guest (has an email), already
+        merged into this same account (idempotent no-op), or already merged
+        into a different one (logged, refused).
+        """
+        try:
+            with self._cursor() as cur:
+                cur.execute(
+                    "SELECT email, merged_into_user_id FROM admin.users "
+                    "WHERE user_id = %s FOR UPDATE",
+                    (guest_user_id,),
+                )
+                row = cur.fetchone()
+                if row is None or row["email"] is not None:
+                    self._conn.rollback()
+                    return None
+                if row["merged_into_user_id"] is not None:
+                    if row["merged_into_user_id"] != user_id:
+                        logger.warning(
+                            "guest %d already merged into %d; refusing merge into %d",
+                            guest_user_id,
+                            row["merged_into_user_id"],
+                            user_id,
+                        )
+                    self._conn.rollback()
+                    return None
+
+                cur.execute(
+                    "UPDATE proposals.proposals SET user_id = %s WHERE user_id = %s",
+                    (user_id, guest_user_id),
+                )
+                proposals_claimed = cur.rowcount
+                cur.execute(
+                    "UPDATE admin.feedback SET user_id = %s WHERE user_id = %s",
+                    (user_id, guest_user_id),
+                )
+                feedback_claimed = cur.rowcount
+                cur.execute(
+                    "UPDATE admin.users SET merged_into_user_id = %s "
+                    "WHERE user_id = %s",
+                    (user_id, guest_user_id),
+                )
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
+
+        logger.info(
+            "guest %d merged into user %d (%d proposals, %d feedback rows)",
+            guest_user_id,
+            user_id,
+            proposals_claimed,
+            feedback_claimed,
+        )
+        return {
+            "proposals_claimed": proposals_claimed,
+            "feedback_claimed": feedback_claimed,
+        }

@@ -29,9 +29,27 @@ from dataclasses import dataclass
 # VERSION
 # =============================================================================
 
-CALC_VERSION: str = "0.9.2"
+CALC_VERSION: str = "0.9.6"
 
 GIT_SHA: str = "unknown"  # injected by CI
+
+# Decimal places for the EUR leaves of each normalised Breakdown — precision
+# must scale with the divisor. Annual figures are naturally 2dp currency, but
+# €/place-km values on a realistic route are of order 1e-3 to 1e-2 per leaf,
+# so rounding them to 2dp quantizes real differences into noise (the root
+# cause of the 0.9.4 per_available_place_km divergence — see CHANGELOG 0.9.5).
+NORMALISATION_NDIGITS: dict[str, int] = {
+    "per_year": 2,
+    "per_operating_day": 2,
+    "per_train_km": 4,
+    "per_available_place_km": 6,
+    "per_sold_place_km": 6,
+}
+
+# Decimal places for the total_eur / total_cost_eur / total_revenue_eur /
+# net_eur properties — fine enough for every leaf precision above, coarse
+# enough to absorb float summation noise.
+BREAKDOWN_TOTAL_NDIGITS: int = 6
 
 # Short, plain-English summary of what this model computes — embedded as-is
 # in the "models" section of POST /api/evaluation/calc's response, alongside
@@ -40,7 +58,7 @@ CALC_MODEL_DESCRIPTION: str = (
     "Cost/revenue evaluation model: computes fixed and variable operator costs, "
     "third-party infrastructure charges, and OD-pair ticket revenue for a "
     "fully-built Route, then aggregates and normalises the result into "
-    "route / trip-pair / country / OD-pair / stop views."
+    "route / trip-pair / country / OD-pair / route-section / stop views."
 )
 
 CHANGELOG: dict = {
@@ -117,6 +135,98 @@ CHANGELOG: dict = {
         "now, losing the previous class_id-level granularity — needs frontend "
         "coordination (see project notes on auditing Bjarne's frontend before "
         "Phase 4/5) since it's a real API contract change, not additive.",
+    },
+    "0.9.6": {
+        "date": "2026-07-16",
+        "author": "david",
+        "changes": "Persist-on-calc: POST /api/evaluation/calc now persists its "
+        "own response for any authenticated caller (guest or registered) — "
+        "POST /api/proposal is gone. Two response additions: a top-level "
+        "'scenario_id' (the scenario the evaluation actually ran under, "
+        "override applied — the posted route's embedded scenario_id is NOT "
+        "updated by an override) between route_id and models, and a trailing "
+        "'proposal' block ({persisted, action, proposal_id, "
+        "proposal_version}). Persistence contract: the evaluation fills its "
+        "own version row in place when that version has none yet (the one "
+        "sanctioned in-place write on the append-only proposals table); "
+        "identical inputs (same route incl. demand, same resolved scenario, "
+        "same calc version) are a no-op ('unchanged'); changed inputs create "
+        "a new version carrying the unchanged route_body ('versioned' / "
+        "'branched' per ownership); unpersisted, historical, or hand-edited "
+        "routes are answered but never stored. Tokenless requests compute "
+        "only. BREAKING for frontend: save flow removed, Authorization "
+        "header now expected on calc — coordinate with Bjarne.",
+    },
+    "0.9.5": {
+        "date": "2026-07-16",
+        "author": "david",
+        "changes": "Normalisation precision now scales with the divisor "
+        "(NORMALISATION_NDIGITS in version.py): per_year and per_operating_day "
+        "leaves stay at 2dp, per_train_km moves to 4dp, per_available_place_km "
+        "and per_sold_place_km to 6dp; the total_eur / total_cost_eur / "
+        "total_revenue_eur / net_eur properties round at 6dp everywhere "
+        "(BREAKDOWN_TOTAL_NDIGITS). Previously every leaf and total was rounded "
+        "to 2dp — a 1.1.0-era rule that predates 0.9.4's annualised place-km "
+        "divisors. At €/place-km magnitude (order 1e-3 to 1e-2 per leaf) that "
+        "quantization turned the per-place-km views into rounding noise, off by "
+        "roughly 9% in aggregate on the standard test route — the root cause of "
+        "the long-open test_per_available_place_km_divisor_is_unweighted xfail "
+        "(the divisor itself was always exact; the numerator leaves were "
+        "quantized). No response shape change; per_year and per_operating_day "
+        "values unchanged; per_train_km and per-place-km values gain decimal "
+        "places.",
+    },
+    "0.9.4": {
+        "date": "2026-07-14",
+        "author": "david",
+        "changes": "Views pipeline overhaul — four numeric fixes and one new view. "
+        "(1) Parking now included in every pair-filtered scope (matched via "
+        "ParkingCost.trip_ids) — previously only 'all trips' carried parking, "
+        "single trip-pair selections silently dropped it; the country and OD "
+        "matrices additionally pair-filter parking so multi-pair routes no "
+        "longer multiply-count it. (2) Pair-filtered fleet costs "
+        "(coach_amortisation, financing, fix_overhead, cleaning) scaled to the "
+        "pair's own coach share of a possibly shared composition fleet "
+        "(views.py: _pair_fleet_share) — previously each pair carried the "
+        "combined fleet cost. (3) per_trip_km normalisation RENAMED to "
+        "per_train_km and its divisor annualised (cycle km × operating days); "
+        "per_available_place_km divisor annualised the same way — both "
+        "previously divided €/year values by one cycle's physics, inflating "
+        "the result by a factor of operating_days (per_sold_place_km was "
+        "already annual and is unchanged). (4) per_trip_pair_per_od allocation "
+        "shares now sum to exactly 1 across a pair's OD cells: fixed fleet by "
+        "pair-wide weighted place-km share (was raw od-distance / pair-distance, "
+        "which over-allocated arbitrarily), loco and cleaning by pair-wide "
+        "weighted place-hours share (was per-trip, double-counting across the "
+        "two directions); stop costs at stops where nobody boards or alights "
+        "now fall back to the OD pairs riding through, instead of being "
+        "dropped — with these, OD cells sum to exactly the pair total. "
+        "(5) NEW view per_trip_pair_per_section: a section is "
+        "a physical piece of a trip between two stops — it carries every cost "
+        "occurring there plus a share of route-level costs, and the "
+        "km-proportional revenue of everyone on board (tickets extending "
+        "beyond the section contribute their overlap fraction). Sections carry "
+        "per-class_main sub-cells (train-level costs split by density-weighted "
+        "place-km) summing to the section 'all' cell, and normalise per-unit "
+        "figures against their OWN annual train-km / place-km "
+        "(NormalisationScope). BREAKING for frontend: normalisation key "
+        "per_trip_km → per_train_km, new views key, changed values in every "
+        "pair-filtered cell — needs coordination with Bjarne before merge.",
+    },
+    "0.9.3": {
+        "date": "2026-07-14",
+        "author": "david",
+        "changes": "Driver/crew billable hours now computed from time in motion — "
+        "raw router driving time plus the route builder's new per-segment "
+        "traction dynamics component (accel/brake time loss, route builder "
+        "0.9.8: Segment.dynamics_time_min) — instead of raw driving time "
+        "alone; accelerating and braking is time the driver drives and the "
+        "crew is on duty. SegmentCost.driving_time_min (and the "
+        "SegmentPassengerLoad copy views.py aggregates loco/country hours "
+        "from) carries this in-motion figure. Staff, and any per-hour-derived "
+        "figure, grow by roughly 1-2min per segment vs 0.9.2. Loco lease was "
+        "already billed on segment total_time_min, which now includes "
+        "dynamics via the route model itself. No response shape change.",
     },
 }
 
