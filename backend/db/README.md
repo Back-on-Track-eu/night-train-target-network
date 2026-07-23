@@ -81,8 +81,42 @@ See `backend/DEVELOPMENT.md` for the full backend developer setup guide.
 The files in `db/dev/sql/` are the **source of truth** for the database structure
 across all environments — dev, test, and production.
 
-When setting up the production database, run these files once manually
-(without the seed data in `seed.py`). Migration tooling will be added in a later phase.
+`create_*.sql` + `seed.py` always represent the **latest** schema and are for
+**local databases only** (the seeder drops and recreates). Server databases
+(staging, production) are never reseeded — they move forward exclusively
+through `db/dev/sql/migrations/*.sql`, applied by `db/migrate.py`.
+
+### Migrations (`db/migrate.py`)
+
+Every schema change ships twice: folded into the `create_*.sql` files (so a
+fresh local seed is already current) **and** as a dated migration file
+`migrations/YYYY-MM-DD_name.sql` (so server databases with existing data can
+move forward). The date prefix defines execution order.
+
+`migrate.py` records applied filenames in `admin.schema_migrations` (created
+on first contact) and applies each pending file **in one transaction together
+with its tracking row** — a crash can't leave a migration applied-but-
+unrecorded. Because the runner owns the transaction, **new migration files
+must not contain their own `BEGIN;`/`COMMIT;`** (standalone transaction-control
+lines are stripped for older files that predate this rule).
+
+```
+python db/migrate.py              # apply pending migrations
+python db/migrate.py --dry-run    # list pending, change nothing
+python db/migrate.py --check      # exit 2 if pending (deploy assertion)
+python db/migrate.py --baseline   # record all as applied, execute nothing
+```
+
+`--baseline` exists for databases whose schema already contains the changes
+(a fresh seed, or a server DB that received the files by hand): run it exactly
+once, then never again. Deploys run `migrate.py` before starting the API, so
+a deployed backend can never meet a database missing its schema changes.
+
+Editorial rule for the stop tables: base and HSR lineages stay identical only
+by construction — a stop-charge correction must **fan out to every current
+scenario lineage**, and a partial reseed of `input_params`/`scenario` that
+preserves `proposals` would dangle pinned `scenario_id`s. Reseed = everything
+or nothing.
 
 ---
 
