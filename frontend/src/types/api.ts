@@ -11,8 +11,29 @@ export interface Composition {
   comp_id: string
   description: string
   operator_id: string
-  routing: { max_speed_kmh: number; total_weight_t: number; hsr_allowed: boolean }
-  capacity: Record<string, { places: number; density: number }>
+  routing: {
+    max_speed_kmh: number
+    total_weight_t: number
+    total_length_m: number
+    n_locos: number
+    hsr_allowed: boolean
+  }
+  // Redesigned 2026-07-22: totals + full-composition average densities
+  // (service areas included) + per-class_main entries with derived
+  // densities from real section geometry.
+  capacity: {
+    total_places: number
+    avg_density_length_m_per_place: number
+    avg_density_weight_t_per_place: number
+    by_class: Record<
+      string,
+      {
+        places: number
+        density_length_m_per_place: number
+        density_weight_t_per_place: number
+      }
+    >
+  }
 }
 
 export interface StopsResponse {
@@ -21,6 +42,26 @@ export interface StopsResponse {
 
 export interface CompositionsResponse {
   compositions: Composition[]
+  operators: unknown[]
+  // All service classes grouped by class_main; class_id =
+  // "<coach_type_id> - <section label>".
+  classes: Record<string, { class_id: string; coach_type_id: string; places: number }[]>
+  // All coach types keyed by coach_type_id, referenced from
+  // compositions' coaches.list and carrying class_ids into "classes".
+  coach_types: Record<
+    string,
+    {
+      length_m: number
+      length_wo_service_m: number
+      weight_gross_t: number
+      weight_wo_service_t: number
+      crew_factor: number
+      places_total: number
+      equipment: Record<string, boolean>
+      class_ids: string[]
+      remarks: string
+    }
+  >
 }
 
 // --- POST /api/evaluation/calc ----------------------------------------------
@@ -37,14 +78,24 @@ export const VIEW_KEYS = [
 ] as const
 export type ViewKey = (typeof VIEW_KEYS)[number]
 
-export const NORM_KEYS = [
+// Scalar normalisations: one Breakdown per cell.
+export const SCALAR_NORM_KEYS = [
   'per_year',
   'per_operating_day',
-  'per_trip_km',
+  'per_train_km', // renamed from per_trip_km (CALC 0.9.4)
   'per_available_place_km',
-  'per_sold_place_km',
 ] as const
+export type ScalarNormKey = (typeof SCALAR_NORM_KEYS)[number]
+
+// Class-keyed normalisations (CALC 0.9.8): one Breakdown per class_main.
+export const CLASS_NORM_KEYS = ['per_sold_place_km', 'by_class_main'] as const
+export type ClassNormKey = (typeof CLASS_NORM_KEYS)[number]
+
+// Everything the backend offers, in display order.
+export const NORM_KEYS = [...SCALAR_NORM_KEYS, ...CLASS_NORM_KEYS] as const
 export type NormKey = (typeof NORM_KEYS)[number]
+
+export type ClassKeyedBreakdowns = Record<string, Breakdown>
 
 export interface BreakdownOperatorVariable {
   driver_eur: number
@@ -90,8 +141,14 @@ export interface Breakdown {
   net_eur: number
 }
 
-/** All five normalisations of one Breakdown. */
-export type Normalisations = Record<NormKey, Breakdown>
+/** All normalisations of one cell. per_sold_place_km: each class's
+ *  allocated cost over its OWN sold place-km — {} without demand, null
+ *  only for scopes without per-class data. by_class_main: the full
+ *  per-class split; per-class cells sum back to the cell total. */
+export interface Normalisations extends Record<ScalarNormKey, Breakdown> {
+  per_sold_place_km: ClassKeyedBreakdowns | null
+  by_class_main: ClassKeyedBreakdowns
+}
 
 /** One filtered data point: human-readable filter labels (one entry per
  *  dimension, backend-provided) alongside the values. */
@@ -116,6 +173,7 @@ export interface EvaluationViews {
   per_trip_pair: EvaluationView<Record<string, FilteredCell>>
   per_trip_pair_per_country: EvaluationView<Record<string, Record<string, FilteredCell>>>
   per_trip_pair_per_od: EvaluationView<Record<string, Record<string, FilteredCell>>>
+  per_trip_pair_per_section: EvaluationView<Record<string, Record<string, FilteredCell>>>
   per_trip_per_stop: EvaluationView<Record<string, Record<string, FilteredCell>>>
 }
 

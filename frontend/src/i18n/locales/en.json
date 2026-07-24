@@ -22,9 +22,10 @@
       "norms": {
         "per_year": "Per Year",
         "per_operating_day": "Per Operating Day",
-        "per_trip_km": "Per Trip-Km",
+        "per_train_km": "Per Train-Km",
         "per_available_place_km": "Per Available Place-Km",
-        "per_sold_place_km": "Per Sold Place-km"
+        "per_sold_place_km": "Per Sold Place-km",
+        "by_class_main": "By Class"
       },
       "kpi": {
         "revenue": "Revenue",

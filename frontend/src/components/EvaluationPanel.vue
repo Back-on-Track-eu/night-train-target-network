@@ -15,14 +15,17 @@ import { resolveFactorRates, resolveFactorSubCategory, type RateRow } from '@/li
 import { submitFeedback, FeedbackError } from '@/lib/feedbackApi'
 import type {
   Breakdown,
+  ClassKeyedBreakdowns,
+  ClassNormKey,
   EvaluationResponse,
   FilteredCell,
   MapScope,
   Normalisations,
   NormKey,
+  ScalarNormKey,
   ViewKey,
 } from '@/types/api'
-import { NORM_KEYS, VIEW_KEYS } from '@/types/api'
+import { CLASS_NORM_KEYS, NORM_KEYS, SCALAR_NORM_KEYS, VIEW_KEYS } from '@/types/api'
 
 const props = defineProps<{
   result: EvaluationResponse
@@ -38,6 +41,12 @@ const { t, te } = useI18n()
 // pick one value on each axis and you land on exactly one Breakdown.
 const view = ref<ViewKey>('route')
 const normalisation = ref<NormKey>('per_year')
+// Class selection for the class-keyed normalisations (per_sold_place_km,
+// by_class_main); options come from the landed cell's own keys.
+const classSel = ref<string | null>(null)
+const isClassNorm = computed(() =>
+  (CLASS_NORM_KEYS as readonly string[]).includes(normalisation.value),
+)
 const sel1 = ref('all')
 const sel2 = ref('all')
 
@@ -296,9 +305,30 @@ function sumBreakdowns(bs: Breakdown[]): Breakdown {
   return acc
 }
 
+function sumClassKeyed(
+  dicts: (ClassKeyedBreakdowns | null)[],
+): ClassKeyedBreakdowns {
+  // Class-wise sum over cells (union of classes). Exact for
+  // by_class_main (leaves are additive); for per_sold_place_km this is
+  // the same section-aggregation fidelity the panel applies to the
+  // scalar norms — the backend's per_trip_pair_per_section view carries
+  // exact per-class per-sold cells if needed later.
+  const classes = new Set<string>()
+  for (const d of dicts) if (d) for (const k of Object.keys(d)) classes.add(k)
+  const out: ClassKeyedBreakdowns = {}
+  for (const cls of classes) {
+    const parts = dicts.flatMap((d) => (d && d[cls] ? [d[cls]] : []))
+    if (parts.length) out[cls] = sumBreakdowns(parts)
+  }
+  return out
+}
+
 function sumNorms(cells: Normalisations[]): Normalisations {
   const out = {} as Normalisations
-  for (const nk of NORM_KEYS) out[nk] = sumBreakdowns(cells.map((c) => c[nk]))
+  for (const nk of SCALAR_NORM_KEYS) out[nk] = sumBreakdowns(cells.map((c) => c[nk]))
+  for (const nk of CLASS_NORM_KEYS as readonly ClassNormKey[]) {
+    out[nk] = sumClassKeyed(cells.map((c) => c[nk]))
+  }
   return out
 }
 
@@ -323,9 +353,32 @@ const currentNorms = computed<Normalisations | null>(() => {
   return props.result.views[v].data[sel1.value]?.[sel2.value]?.values ?? null
 })
 
-const currentBreakdown = computed<Breakdown | null>(
-  () => currentNorms.value?.[normalisation.value] ?? null,
+// Classes available in the landed cell for the selected class-keyed norm.
+const classOptions = computed(() => {
+  if (!isClassNorm.value) return []
+  const dict = currentNorms.value?.[normalisation.value as ClassNormKey] ?? null
+  return dict ? Object.keys(dict).sort() : []
+})
+watch(
+  classOptions,
+  (opts) => {
+    if (!isClassNorm.value) return
+    if (!classSel.value || !opts.includes(classSel.value)) classSel.value = opts[0] ?? null
+  },
+  { immediate: true },
 )
+
+const currentBreakdown = computed<Breakdown | null>(() => {
+  const norms = currentNorms.value
+  if (!norms) return null
+  const nk = normalisation.value
+  if ((CLASS_NORM_KEYS as readonly string[]).includes(nk)) {
+    const dict = norms[nk as ClassNormKey]
+    if (!dict || !classSel.value) return null
+    return dict[classSel.value] ?? null
+  }
+  return norms[nk as ScalarNormKey] ?? null
+})
 
 // --- Cost tree: hierarchical node spec, flattened for rendering ------------
 interface CostNode {
@@ -687,7 +740,15 @@ const selectPt = {
         :pt="selectPt"
       />
 
-      <div class="ml-auto">
+      <div class="ml-auto flex items-center gap-2">
+        <!-- Class selector for the class-keyed normalisations -->
+        <Select
+          v-if="isClassNorm && classOptions.length > 0"
+          v-model="classSel"
+          :options="classOptions"
+          :unstyled="true"
+          :pt="selectPt"
+        />
         <Select
           v-model="normalisation"
           :options="normOptions"
