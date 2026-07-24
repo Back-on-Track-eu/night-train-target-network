@@ -86,7 +86,7 @@ watch(
         >
           <AppIcon :path="mdiChevronLeft" :size="20" />
         </button>
-        <p class="text-base font-bold text-primary-50">{{ current.description }}</p>
+        <p class="text-base font-bold text-primary-50">{{ current.comp_id }}</p>
         <button
           v-if="count > 1"
           class="shrink-0 cursor-pointer text-primary-50/40 transition hover:text-primary-50"
@@ -95,6 +95,11 @@ watch(
           <AppIcon :path="mdiChevronRight" :size="20" />
         </button>
       </div>
+
+      <!-- Description: smaller line below the headline -->
+      <p v-if="current.description" class="-mt-3 text-sm text-primary-50/60">
+        {{ current.description }}
+      </p>
 
       <!-- Pagination dots -->
       <div v-if="count > 1" class="flex gap-1.5">
