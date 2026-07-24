@@ -1,14 +1,14 @@
 # Night Train Target Network
 
-An open-source initiative by [Back-on-Track](https://back-on-track.eu) to design and evaluate a European night train target network that could realistically be implemented by 2032.
+An open-source initiative by [Back-on-Track.eu](https://back-on-track.eu) to design and evaluate a European night train target network that could realistically be implemented by 2032.
 
 ## Vision
 
-Back-on-Track wants to put a serious, evidence-based night train network proposal in front of the new European Commission and other key political stakeholders. The study needs to answer three core questions:
+Back-on-Track wants to put a serious, evidence-based night train network proposal in front of the European Commission (DG MOVE) and other key political stakeholders. The study needs to answer three core questions:
 
 - **Which routes should be part of the network - in addition to the ones that exist today?** — based on future demand potential, including passengers likely to shift from air travel.
-- **How much public subsidy is needed** — per route and for the network as a whole — to create the framework conditions under which operators can run economically sustainable services?
-- **Which night train concepts work best** on which routes or parts of the network?
+- **How much public subsidy is needed** — per route and for the network as a whole — to create the framework conditions under which operators can run economically sustainable services? And how do politically determined conditions constrain the offer?
+- **Which night train concepts work best** on which routes or parts of the network? And how could new concepts boost demand?
 
 To build broad acceptance for the results from the start, we're drawing on Back-on-Track's community of members, lobbyists, experts and politicians to crowdsource route and train concept ideas, evaluate them transparently, and use the strongest proposals as the foundation for the target network.
 
