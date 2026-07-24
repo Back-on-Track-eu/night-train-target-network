@@ -301,9 +301,7 @@ function sumBreakdowns(bs: Breakdown[]): Breakdown {
   return acc
 }
 
-function sumClassKeyed(
-  dicts: (ClassKeyedBreakdowns | null)[],
-): ClassKeyedBreakdowns {
+function sumClassKeyed(dicts: (ClassKeyedBreakdowns | null)[]): ClassKeyedBreakdowns {
   // Class-wise sum over cells (union of classes). Exact where leaves are
   // additive (per_year, per_operating_day); for the per-unit norms this
   // is the same section-aggregation fidelity the panel has always
@@ -354,9 +352,7 @@ const classOptions = computed(() => {
   const dict = currentNorms.value?.[normalisation.value] ?? null
   if (!dict) return []
   const keys = Object.keys(dict).sort()
-  const ordered = keys.includes('all')
-    ? ['all', ...keys.filter((k) => k !== 'all')]
-    : keys
+  const ordered = keys.includes('all') ? ['all', ...keys.filter((k) => k !== 'all')] : keys
   return ordered.map((k) => ({
     value: k,
     label: k === 'all' ? t('proposal.evaluation.classes.all') : k,
@@ -858,7 +854,9 @@ const selectPt = {
 
         <div class="flex flex-1 flex-col gap-4">
           <div class="rounded-xl bg-primary-50/5 p-4">
-            <div class="mb-2 flex items-baseline justify-between border-b border-primary-50/10 pb-2">
+            <div
+              class="mb-2 flex items-baseline justify-between border-b border-primary-50/10 pb-2"
+            >
               <span class="font-semibold text-primary-50">
                 {{ t('proposal.evaluation.groups.revenue') }}
               </span>
@@ -877,7 +875,9 @@ const selectPt = {
           </div>
 
           <div class="rounded-xl bg-primary-50/5 p-4">
-            <div class="mb-2 flex items-baseline justify-between border-b border-primary-50/10 pb-2">
+            <div
+              class="mb-2 flex items-baseline justify-between border-b border-primary-50/10 pb-2"
+            >
               <span class="font-semibold text-primary-50">
                 {{ t('proposal.evaluation.groups.margin') }}
               </span>
