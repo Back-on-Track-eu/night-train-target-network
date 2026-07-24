@@ -613,7 +613,7 @@ class DBDataLoader:
 
         # descriptions mirrors the ACTUAL response structure built by
         # api/helpers/params_serialize.py's composition_collection_to_dict()
-        # — grouped by response section (routing/staff/energy/capacity/
+        # — grouped by response section (routing/staff/capacity/
         # equipment/coaches/fixed_costs/variable_km, then operators, then
         # indicative), not by raw source table. This matters because the
         # two don't line up 1:1: several DB columns (weight_gross_t,

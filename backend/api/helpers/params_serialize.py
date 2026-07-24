@@ -251,7 +251,7 @@ def composition_collection_to_dict(compositions: CompositionCollection) -> dict:
 
       descriptions  : documentation mirroring the actual response shape
                       below (grouped "compositions" — with "routing"/
-                      "staff"/"energy"/"capacity"/"equipment"/"coaches"/
+                      "staff"/"capacity"/"equipment"/"coaches"/
                       "fixed_costs"/"variable_km" sub-sections —,
                       "operators", "indicative"), once — see
                       CompositionCollection.descriptions
@@ -315,6 +315,23 @@ def composition_collection_to_dict(compositions: CompositionCollection) -> dict:
                     "crew_factor_coaches": round(
                         c.total_crew - c.zugchef_crew_factor, 4
                     ),
+                    # hourly staff rates denormalised from the operator
+                    # (driver_costs_eur_h/crew_costs_eur_h — same values
+                    # exposed at "operators"[...].driver_costs_eur_h, kept
+                    # here too so a composition's staff cost per hour is
+                    # readable without a second lookup) plus the combined
+                    # rate: driver_factor × driver rate + crew_factor_total
+                    # × crew rate — see descriptions.compositions.staff.
+                    # costs_per_hour
+                    "costs_per_hour": {
+                        "driver_eur_h": c.driver_costs_eur_h,
+                        "crew_eur_h": c.crew_costs_eur_h,
+                        "total_staff_eur_h": round(
+                            c.driver_costs_eur_h * c.driver_factor
+                            + c.crew_costs_eur_h * c.total_crew,
+                            2,
+                        ),
+                    },
                 },
                 # --- capacity and density per top-level accommodation class
                 #     (class_main — Seat/Couchette/Sleeper/Capsule/Catering),

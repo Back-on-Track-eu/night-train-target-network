@@ -730,7 +730,7 @@ class CompositionCollection:
 
     descriptions mirrors the ACTUAL response structure built by
     api/helpers/params_serialize.py's composition_collection_to_dict() —
-    grouped as "compositions" (with "routing"/"staff"/"energy"/
+    grouped as "compositions" (with "routing"/"staff"/
     "capacity"/"equipment"/"coaches"/"fixed_costs"/"variable_km"
     sub-sections, matching that function's per-composition dict exactly),
     "operators", and "indicative" (with "kpis"/"reference" sub-sections).

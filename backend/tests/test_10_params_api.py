@@ -202,11 +202,13 @@ class TestCompositions:
 
     def test_composition_sections_present(self, compositions_body):
         """Every composition carries the grouped sub-sections of the
-        restructured response."""
+        restructured response. 'energy' is deliberately absent (dropped
+        from the API — see test_indicative_kpis_present's `"energy" not
+        in c`, and adapters/data_loader_from_db.py's descriptions dict,
+        which never documents an energy section either)."""
         sections = {
             "routing",
             "staff",
-            "energy",
             "capacity",
             "equipment",
             "coaches",
@@ -217,6 +219,7 @@ class TestCompositions:
         for comp in compositions_body["compositions"]:
             missing = sections - set(comp)
             assert missing == set(), f"{comp['comp_id']} missing sections: {missing}"
+            assert "energy" not in comp, f"{comp['comp_id']}: unexpected 'energy' key"
 
     def test_service_areas_reduce_wo_service_totals(self, compositions_body):
         """REF-PREM-12 carries a dining car: wo_service totals must be
