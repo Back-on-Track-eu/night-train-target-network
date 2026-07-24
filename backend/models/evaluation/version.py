@@ -29,7 +29,7 @@ from dataclasses import dataclass
 # VERSION
 # =============================================================================
 
-CALC_VERSION: str = "0.9.8"
+CALC_VERSION: str = "0.9.9"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -38,8 +38,8 @@ GIT_SHA: str = "unknown"  # injected by CI
 # €/place-km values on a realistic route are of order 1e-3 to 1e-2 per leaf,
 # so rounding them to 2dp quantizes real differences into noise (the root
 # cause of the 0.9.4 per_available_place_km divergence — see CHANGELOG 0.9.5).
+# Class cells (CALC 0.9.9: every norm is class-keyed) use their norm's digits.
 NORMALISATION_NDIGITS: dict[str, int] = {
-    "by_class_main": 2,
     "per_year": 2,
     "per_operating_day": 2,
     "per_train_km": 4,
@@ -63,6 +63,25 @@ CALC_MODEL_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.9": {
+        "date": "2026-07-24",
+        "author": "david",
+        "changes": "Class_main becomes an orthogonal axis on EVERY "
+        "normalisation. BREAKING for the frontend: each of per_year, "
+        "per_operating_day, per_train_km, per_available_place_km and "
+        "per_sold_place_km is now a dict keyed by class_main plus 'all' "
+        "('all' = the whole cell as before; class cells = its allocation "
+        "split). Divisors: class-independent for per_year/per_operating_"
+        "day/per_train_km (class cells sum back to 'all'); a class's OWN "
+        "capacity resp. sold place-km for per_available/per_sold ('all' "
+        "under per_sold is the fleet-wide weighted average — restored "
+        "after its 0.9.8 removal). The by_class_main view is retired — "
+        "identical to per_year's class cells. Class splits are exact "
+        "(builder cells) for section/OD-scoped data — a class-scoped "
+        "cell's own axis is the identity — and calibration-shares-based "
+        "elsewhere. NormalisationScope carries "
+        "available_place_km_by_class alongside sold_place_km_by_class.",
+    },
     "0.9.8": {
         "date": "2026-07-22",
         "author": "david",

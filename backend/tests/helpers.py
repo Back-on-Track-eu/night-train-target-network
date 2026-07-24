@@ -180,7 +180,7 @@ def replicated_od(route: dict, template: list[dict]) -> list[dict]:
     """Replicate each OD template entry once per trip (outbound + return of
     every pair), filling trip_id. Origins/destinations are used as given —
     entries against a trip's travel direction still count for revenue but
-    contribute 0 sold place-km (see views.py:normalise_per_sold_place_km)."""
+    contribute 0 sold place-km (see views.py:build_class_keyed_normalisations)."""
     ods = []
     for trip in all_trips(route):
         for od in template:
@@ -216,9 +216,16 @@ def directional_od(
 # =============================================================================
 
 
-def route_bd(result: dict, normalisation: str = "per_year") -> dict:
-    """Route-level breakdown of an evaluation result at one normalisation."""
-    return result["views"]["route"]["data"][normalisation]
+def route_bd(
+    result: dict, normalisation: str = "per_year", class_main: str = "all"
+) -> dict:
+    """Route-level breakdown of an evaluation result at one normalisation.
+    CALC 0.9.9: every normalisation is a dict keyed by class_main plus
+    'all' — default returns the 'all' cell (the whole route, matching the
+    pre-0.9.9 scalar payloads). Pass class_main=None for the raw
+    class-keyed dict."""
+    cells = result["views"]["route"]["data"][normalisation]
+    return cells if class_main is None else cells[class_main]
 
 
 def purge_saved_proposals(conn, keep_route_id: str = "P1_V1_R1") -> None:

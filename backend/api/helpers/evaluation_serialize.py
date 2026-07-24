@@ -18,8 +18,10 @@ shapes dicts, it never re-formats numbers.
 
 Public interface:
   breakdown_to_dict(breakdown)                    → dict  (one Breakdown, all 5 normalisations already applied by the caller)
-  normalise_all_to_dict(breakdown, route, pair, scope) → dict  (all normalisations of one Breakdown incl. by_class_main; scope = a cell's own
-                                                             annual denominators for route-section cells, None otherwise)
+  normalise_all_to_dict(breakdown, route, pair, scope, class_split_override)
+                                                    → dict  (all normalisations of one Breakdown, each class-keyed with 'all' —
+                                                             CALC 0.9.9; scope = a cell's own annual denominators for
+                                                             route-section cells, None otherwise)
   views_to_dict(bd_all, bd_per_pair, matrix_country, matrix_od, matrix_section,
                 section_scopes, matrix_stop, route, trip_pair_by_key)
                                                     → dict  (the full "views" section: description + normalisations +
@@ -34,11 +36,7 @@ from models.route.route import Route, TripPair
 from models.evaluation.views import (
     Breakdown,
     NormalisationScope,
-    normalise_per_operating_day,
-    normalise_per_train_km,
-    normalise_per_available_place_km,
-    normalise_per_sold_place_km,
-    normalise_by_class_main,
+    build_class_keyed_normalisations,
     build_class_main_shares,
     revenue_by_class_main,
     VIEW_META,
@@ -127,6 +125,7 @@ def normalise_all_to_dict(
     route: Route,
     trip_pair: TripPair | None = None,
     scope: NormalisationScope | None = None,
+    class_split_override: dict[str, Breakdown] | None = None,
 ) -> dict:
     """All normalisations of a Breakdown as a serialized dict.
     Combines computation (normalisers) and serialization in one step
@@ -135,35 +134,22 @@ def normalise_all_to_dict(
     sections) — None means the normalisers derive them from
     route/trip_pair as before.
 
-    Class-main allocation (CALC_VERSION 0.9.8): shares are built from the
-    pair's composition (route level: the first pair's — exact while all
-    pairs share one composition) with class revenue from its OD demand.
-    per_sold_place_km is a dict per class_main (null when the cell's
-    scope has no per-class sold place-km yet); by_class_main carries the
-    full per-class split of the annual breakdown."""
+    CALC_VERSION 0.9.9: class_main is an orthogonal axis on EVERY
+    normalisation — each norm key maps to {"all" | class_main: breakdown
+    dict}. Shares are built from the pair's composition (route level: the
+    first pair's — exact while all pairs share one composition) with
+    class revenue from its OD demand; class_split_override passes an
+    exact per-class split through to build_class_keyed_normalisations
+    where the view has one (section/OD class cells). The former
+    by_class_main view is retired — it equals per_year's class cells."""
     pairs = [trip_pair] if trip_pair is not None else route.trip_pairs
     shares = build_class_main_shares(pairs[0].composition, revenue_by_class_main(pairs))
-    per_sold = normalise_per_sold_place_km(breakdown, route, shares, trip_pair, scope)
+    keyed = build_class_keyed_normalisations(
+        breakdown, route, shares, trip_pair, scope, class_split_override
+    )
     return {
-        "per_year": breakdown_to_dict(breakdown),
-        "per_operating_day": breakdown_to_dict(
-            normalise_per_operating_day(breakdown, route)
-        ),
-        "per_train_km": breakdown_to_dict(
-            normalise_per_train_km(breakdown, route, trip_pair, scope)
-        ),
-        "per_available_place_km": breakdown_to_dict(
-            normalise_per_available_place_km(breakdown, route, trip_pair, scope)
-        ),
-        "per_sold_place_km": (
-            {cm: breakdown_to_dict(b) for cm, b in per_sold.items()}
-            if per_sold is not None
-            else None
-        ),
-        "by_class_main": {
-            cm: breakdown_to_dict(b)
-            for cm, b in normalise_by_class_main(breakdown, shares).items()
-        },
+        norm: {cls: breakdown_to_dict(b) for cls, b in cells.items()}
+        for norm, cells in keyed.items()
     }
 
 
@@ -335,18 +321,27 @@ def _per_trip_pair_per_od_view_to_dict(
     route: Route,
     trip_pair_by_key: dict[str, TripPair],
 ) -> dict:
+    """OD cells are class-scoped (od_key carries one class_main), so their
+    class axis is the identity — {cls: the cell itself} — never a shares
+    re-split; the 'all' wildcard cells get the default shares split."""
     meta = VIEW_META["per_trip_pair_per_od"]
     stop_names, _, pair_labels = _label_context(route)
     data: dict[str, dict[str, dict]] = {}
     for (pair_key, od_key), b in matrix.items():
         trip_pair = trip_pair_by_key.get(pair_key) if pair_key != "all" else None
+        od_parts = od_key.split("__") if od_key != "all" else None
+        class_override = (
+            {od_parts[2]: b} if od_parts is not None and len(od_parts) == 3 else None
+        )
         filter_dict = {
             "trip_pair": _pair_value(pair_labels, pair_key),
             "od_pair": _od_value(stop_names, od_key),
         }
         data.setdefault(pair_key, {})[od_key] = {
             "filter": filter_dict,
-            "values": normalise_all_to_dict(b, route, trip_pair),
+            "values": normalise_all_to_dict(
+                b, route, trip_pair, class_split_override=class_override
+            ),
         }
     return {
         "description": meta["description"],
@@ -399,13 +394,32 @@ def _per_trip_pair_per_section_view_to_dict(
     build_breakdown_per_trip_pair_per_section) — €/train-km of a section
     means per that section's train-km, not the whole pair's. The "all"
     wildcard cells have no scope entry and fall back to the default
-    trip-pair/route denominators, identical to the other views."""
+    trip-pair/route denominators, identical to the other views.
+
+    Class axis (CALC 0.9.9): a "__all" section cell's class split is its
+    sibling "__{cls}" cells — the builder's exact per-class split, so the
+    axis agrees with the class cells to the cent; a "__{cls}" cell's own
+    axis is the identity. Only the "all" wildcard cells fall back to the
+    shares-based split."""
     meta = VIEW_META["per_trip_pair_per_section"]
     stop_names, _, pair_labels = _label_context(route)
     data: dict[str, dict[str, dict]] = {}
     for (pair_key, section_key), b in matrix.items():
         trip_pair = trip_pair_by_key.get(pair_key) if pair_key != "all" else None
         parts = _section_parts(section_key)
+        class_override: dict[str, Breakdown] | None = None
+        if parts is not None:
+            origin_id, destination_id, class_part = parts
+            if class_part == "all":
+                # exact split: every sibling class cell of this section
+                prefix = f"{origin_id}__{destination_id}__"
+                class_override = {
+                    sk[len(prefix) :]: cell_b
+                    for (pk, sk), cell_b in matrix.items()
+                    if pk == pair_key and sk.startswith(prefix) and sk != section_key
+                }
+            else:
+                class_override = {class_part: b}
         filter_dict = {
             "trip_pair": _pair_value(pair_labels, pair_key),
             "section": _section_value(stop_names, section_key),
@@ -416,7 +430,11 @@ def _per_trip_pair_per_section_view_to_dict(
         data.setdefault(pair_key, {})[section_key] = {
             "filter": filter_dict,
             "values": normalise_all_to_dict(
-                b, route, trip_pair, scopes.get((pair_key, section_key))
+                b,
+                route,
+                trip_pair,
+                scopes.get((pair_key, section_key)),
+                class_split_override=class_override,
             ),
         }
     return {

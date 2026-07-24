@@ -290,8 +290,8 @@ precision.
 | `normalise_per_operating_day(breakdown, route)` | `operating_days_per_year` | €/operating-day | 2dp |
 | `normalise_per_train_km(breakdown, route, trip_pair=None, scope=None)` | Cycle distance (both directions) × operating days | €/train-km | 4dp |
 | `normalise_per_available_place_km(breakdown, route, trip_pair=None, scope=None)` | Capacity × cycle distance × operating days | €/available-place-km | 6dp |
-| `normalise_per_sold_place_km(breakdown, route, shares, trip_pair=None, scope=None)` | PER CLASS_MAIN (CALC 0.9.8): the class's allocated cost share ÷ its OWN annual sold place-km — classes without sales omitted | dict per class_main, €/sold-place-km | 6dp |
-| `normalise_by_class_main(breakdown, shares)` | splits every leaf by its allocation basis (see below) | dict per class_main, €/year | 2dp |
+| `normalise_by_class_main(breakdown, shares)` | splits every leaf (incl. margin since 0.9.9) by its allocation basis (see below) | dict per class_main, €/year | unrounded |
+| `build_class_keyed_normalisations(breakdown, route, shares, trip_pair=None, scope=None, class_split_override=None)` | all of the above — CALC 0.9.9: returns `{norm: {"all" \| class_main: Breakdown}}`; class cells divide by the same divisor for per_year/per_operating_day/per_train_km (they sum back to `"all"`) and by the class's OWN capacity resp. sold place-km for the two place-km norms | dict per norm per class | per norm |
 
 ---
 
@@ -314,9 +314,11 @@ Shares per basis sum to 1, leaves are additive, so the per-class
 breakdowns of any cell sum back to that cell exactly — the same holds
 across country/section/OD/stop cells since the bases are additive.
 
-Two consumers share this machinery: the evaluation's `by_class_main`
-view and the compositions API's `cost_allocation.by_class_main`
-(hardware basis) — one implementation, no drift possible.
+Two consumers share this machinery: the evaluation's class axis on
+every normalisation (CALC 0.9.9 — the former `by_class_main` view,
+retired as redundant with `per_year`'s class cells) and the
+compositions API's `cost_allocation.by_class_main` (hardware basis) —
+one implementation, no drift possible.
 
 **Per-sold semantics:** each class's per-sold cost divides its allocated
 cost by its *own* sold place-km. Unsold capacity concentrates cost on
@@ -380,8 +382,17 @@ Two orthogonal selectors, always:
 | `per_operating_day` | €/operating day | compare against daily operating benchmarks |
 | `per_train_km` | €/train-km (annual basis) | compare routes of different lengths |
 | `per_available_place_km` | €/place-km offered | compare cost efficiency independent of demand |
-| `per_sold_place_km` | €/place-km sold, per class_main | compare each class directly against its average fares per km |
-| `by_class_main` | €/year per class_main | the full cost/revenue split across classes |
+| `per_sold_place_km` | €/place-km sold | compare against average fares per km |
+
+3. **Class** (CALC 0.9.9) — decides *which class cell inside the
+   normalisation* to display. Every normalisation is a dict keyed by
+   class_main plus `"all"`: `"all"` is the whole cell (for
+   `per_sold_place_km`, the fleet-wide weighted average); a class cell is
+   the cell's allocation split, divided by the class's OWN capacity resp.
+   sold place-km for the two place-km norms and by the shared divisor
+   otherwise (those class cells sum back to `"all"`). Classes without
+   capacity (available) or sales (sold) are omitted from the place-km
+   dicts.
 
 Inside every cell, `values` (or `data` for `route`) is the same nested
 cost/revenue/margin `Breakdown` dict — so one rendering component can serve
@@ -399,8 +410,9 @@ is checked in at
 from [`tc_1_evaluation_input.json`](../../scripts/data/tc_1_evaluation_input.json)).
 
 **1. No filter — whole route, annual totals.** UI state: nothing selected,
-unit = €/year. Read `views.route.data.per_year` (the `route` view has no
-`filter`/`values` nesting — nothing to filter by):
+unit = €/year, class = all. Read `views.route.data.per_year.all` (the
+`route` view has no `filter`/`values` nesting — nothing to filter by;
+`"all"` is the class key, CALC 0.9.9):
 
 ```json
 "views": {
@@ -409,14 +421,18 @@ unit = €/year. Read `views.route.data.per_year` (the `route` view has no
     "normalisations": { "per_year": { "...": "..." }, "...": "..." },
     "data": {
       "per_year": {
-        "cost":    { "operator": { "...": "..." }, "infrastructure": { "...": "..." }, "total_eur": 5210433.18 },
-        "revenue": { "ticket_revenue_eur": 6120000.0, "total_eur": 6120000.0 },
-        "margin":  { "ebit_margin_eur": 306000.0, "total_eur": 306000.0 },
-        "total_cost_eur": 5210433.18,
-        "total_revenue_eur": 6120000.0,
-        "net_eur": 603566.82
+        "all": {
+          "cost":    { "operator": { "...": "..." }, "infrastructure": { "...": "..." }, "total_eur": 5210433.18 },
+          "revenue": { "ticket_revenue_eur": 6120000.0, "total_eur": 6120000.0 },
+          "margin":  { "ebit_margin_eur": 306000.0, "total_eur": 306000.0 },
+          "total_cost_eur": 5210433.18,
+          "total_revenue_eur": 6120000.0,
+          "net_eur": 603566.82
+        },
+        "Seat":     { "...": "the Seat allocation split — same tree" },
+        "Sleeper":  { "...": "..." }
       },
-      "per_operating_day": { "...": "same tree, ÷ operating days" },
+      "per_operating_day": { "all": { "...": "same tree, ÷ operating days" }, "...": "..." },
       "...": "..."
     }
   }
@@ -424,9 +440,9 @@ unit = €/year. Read `views.route.data.per_year` (the `route` view has no
 ```
 
 **2. All trip pairs + country DE, per km.** UI state: pair filter = "all",
-country filter = Germany, unit = €/km. Read
+country filter = Germany, unit = €/km, class = all. Read
 `views.per_trip_pair_per_country.data["all"]["DE"]` and display
-`values.per_train_km`; the `filter` dict is the ready-made UI label:
+`values.per_train_km.all`; the `filter` dict is the ready-made UI label:
 
 ```json
 "per_trip_pair_per_country": {
@@ -437,14 +453,18 @@ country filter = Germany, unit = €/km. Read
       "DE": {
         "filter": { "trip_pair": "all", "country": "DE" },
         "values": {
-          "per_year":    { "...": "..." },
+          "per_year":    { "all": { "...": "..." }, "...": "..." },
           "per_train_km": {
-            "cost": { "...": "...", "total_eur": 14.82 },
-            "revenue": { "...": "...", "total_eur": 17.65 },
-            "margin": { "...": "...", "total_eur": 0.88 },
-            "total_cost_eur": 14.82,
-            "total_revenue_eur": 17.65,
-            "net_eur": 1.95
+            "all": {
+              "cost": { "...": "...", "total_eur": 14.82 },
+              "revenue": { "...": "...", "total_eur": 17.65 },
+              "margin": { "...": "...", "total_eur": 0.88 },
+              "total_cost_eur": 14.82,
+              "total_revenue_eur": 17.65,
+              "net_eur": 1.95
+            },
+            "Seat": { "...": "class cells share the train-km divisor and sum back to 'all'" },
+            "...": "..."
           },
           "...": "..."
         }
@@ -462,7 +482,9 @@ Berlin ↔ Wien, OD = Wien → Berlin in Couchette, unit = €/sold-place-km.
 Read
 `views.per_trip_pair_per_od.data["P1_V1_R1_D0_T1"]["AT_WIEN_HBF__DE_BERLIN_HBF__Couchette"]`
 and display `values.per_sold_place_km` — comparable 1:1 against the
-relation's average fare per km:
+relation's average fare per km. An OD cell is class-scoped (its key
+carries one class_main), so its class axis is the identity: `"all"` and
+`"Couchette"` hold the same figures.
 
 ```json
 "per_trip_pair_per_od": {
@@ -477,12 +499,15 @@ relation's average fare per km:
         },
         "values": {
           "per_sold_place_km": {
-            "cost": { "...": "...", "total_eur": 0.081 },
-            "revenue": { "ticket_revenue_eur": 0.104, "total_eur": 0.104 },
-            "margin": { "...": "...", "total_eur": 0.005 },
-            "total_cost_eur": 0.081,
-            "total_revenue_eur": 0.104,
-            "net_eur": 0.018
+            "all": {
+              "cost": { "...": "...", "total_eur": 0.081 },
+              "revenue": { "ticket_revenue_eur": 0.104, "total_eur": 0.104 },
+              "margin": { "...": "...", "total_eur": 0.005 },
+              "total_cost_eur": 0.081,
+              "total_revenue_eur": 0.104,
+              "net_eur": 0.018
+            },
+            "Couchette": { "...": "identical — the cell IS this class" }
           },
           "...": "..."
         }
@@ -500,8 +525,9 @@ relation's average fare per km:
   fixed costs are spread by distance/time/place-km shares (rules in the
   Layer 2 sections above). Sums across a dimension always reproduce the
   parent total.
-- `per_sold_place_km` divides by class demand — a route with no `od_pairs` has no
-  sold place-km, so this normalisation is not meaningful there.
+- `per_sold_place_km` divides by demand — a route with no `od_pairs` has no
+  sold place-km, so this normalisation is empty there (`"all"` and every
+  class cell omitted, CALC 0.9.9).
 - In `per_trip_per_stop`, through-riders don't appear at intermediate stops;
   a stop's revenue reflects only passengers boarding or alighting there.
 
@@ -563,9 +589,11 @@ What `views.py` contributes is the `views` block:
   e.g. `{"trip_pair": "Berlin Hbf ↔ Wien Hbf", "country": "AT"}`) and
   `values` holds the normalised breakdown. Each dimension also carries an
   `"all"` aggregate key.
-- Each normalised breakdown contains the same `Breakdown` dict under all
-  five normalisations (`per_year`, `per_operating_day`, `per_train_km`,
-  `per_available_place_km`, `per_sold_place_km`).
+- Each normalised breakdown carries the same five normalisations
+  (`per_year`, `per_operating_day`, `per_train_km`,
+  `per_available_place_km`, `per_sold_place_km`), each a dict keyed by
+  class_main plus `"all"` holding the same `Breakdown` tree
+  (CALC 0.9.9 — see the Class axis above).
 
 Serialization lives in `api/helpers/evaluation_serialize.py`
 (`views_to_dict()`, `breakdown_to_dict()`, `normalise_all_to_dict()`).
@@ -586,4 +614,6 @@ utilisation rate and per-km fare.
 - Y/X-shape routes: `loco_propulsion_min` and `shunting_count` don't yet deduplicate
   shared trunk infrastructure across trip pairs (TODO comments in `route.py`)
 - `seat/couchette/sleeper_density` still `0.0` in `DBDataLoader` — deferred
-- Per-class normalisation (one `Breakdown` per class) not yet implemented
+- Class axis on route sections uses the builder's exact class cells; other
+  views split by calibration shares — composition-level, so all pairs must
+  share one composition for route-level class cells to be exact

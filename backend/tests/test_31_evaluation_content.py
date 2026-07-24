@@ -246,26 +246,19 @@ class TestBreakdownIdentities:
         assert infra["total_eur"] == pytest.approx(leaf_sum, rel=REL_TOL)
 
     def test_net_identity_holds_in_all_normalisations(self, eval_standard):
-        """net = revenue - cost - margin in every normalisation. Class-keyed
-        normalisations (per_sold_place_km, by_class_main — CALC 0.9.8)
-        carry one breakdown per class_main; the identity must hold per
-        class."""
+        """net = revenue - cost - margin in every normalisation. CALC 0.9.9:
+        every normalisation is class-keyed ("all" + one cell per
+        class_main); the identity must hold in every cell."""
         _, result = eval_standard
         data = result["views"]["route"]["data"]
         for norm, payload in data.items():
-            if norm in ("per_sold_place_km", "by_class_main"):
-                if payload is None:
-                    continue
-                cells = payload.values()
-            else:
-                cells = [payload]
-            for bd in cells:
+            for cls, bd in payload.items():
                 assert bd["net_eur"] == pytest.approx(
                     bd["total_revenue_eur"]
                     - bd["total_cost_eur"]
                     - bd["margin"]["ebit_margin_eur"],
                     abs=0.05,
-                ), f"net identity failed in normalisation '{norm}'"
+                ), f"net identity failed in '{norm}' class '{cls}'"
 
 
 # =============================================================================
@@ -313,23 +306,42 @@ class TestNormalisationDivisors:
         assert per_year == pytest.approx(per_pkm * available_pkm, rel=REL_TOL)
 
     def test_per_sold_place_km_divisor(self, eval_standard):
-        """per_sold_place_km is class-keyed (CALC 0.9.8): only classes with
-        sales present, each with a positive per-sold cost and a matching
-        by_class_main cell."""
+        """per_sold_place_km is class-keyed with 'all' restored as the
+        fleet-wide weighted average (CALC 0.9.9): only classes with sales
+        present, each with a positive per-sold cost and a matching
+        per_year class cell; the 'all' cell sits within the class range."""
         _, result = eval_standard
-        per_sold = route_bd(result, "per_sold_place_km")
-        by_class = route_bd(result, "by_class_main")
-        assert per_sold, "no class with sold place-km in per_sold view"
-        for cls, bd in per_sold.items():
-            assert cls in by_class
+        per_sold = route_bd(result, "per_sold_place_km", class_main=None)
+        per_year_classes = route_bd(result, "per_year", class_main=None)
+        class_cells = {cls: bd for cls, bd in per_sold.items() if cls != "all"}
+        assert class_cells, "no class with sold place-km in per_sold view"
+        assert "all" in per_sold
+        for cls, bd in class_cells.items():
+            assert cls in per_year_classes
             assert bd["total_cost_eur"] > 0
+        costs = [bd["total_cost_eur"] for bd in class_cells.values()]
+        assert min(costs) <= per_sold["all"]["total_cost_eur"] <= max(costs)
+
+    def test_class_cells_sum_to_all_where_divisor_is_class_independent(
+        self, eval_standard
+    ):
+        """per_year / per_operating_day / per_train_km share one divisor
+        across the class axis, so class cells must sum back to 'all' (up
+        to per-leaf rounding)."""
+        _, result = eval_standard
+        for norm in ("per_year", "per_operating_day", "per_train_km"):
+            cells = route_bd(result, norm, class_main=None)
+            class_sum = sum(bd["net_eur"] for cls, bd in cells.items() if cls != "all")
+            assert class_sum == pytest.approx(cells["all"]["net_eur"], abs=0.5), (
+                f"class cells don't sum to 'all' in '{norm}'"
+            )
 
     def test_per_sold_cost_exceeds_per_available_at_partial_load(self, eval_standard):
         """At partial load, unsold capacity concentrates cost on sold
         places: the max per-sold class cost must be at least the
         aggregate per-available cost."""
         _, result = eval_standard
-        per_sold = route_bd(result, "per_sold_place_km")
+        per_sold = route_bd(result, "per_sold_place_km", class_main=None)
         per_avail = route_bd(result, "per_available_place_km")
         assert (
             max(bd["total_cost_eur"] for bd in per_sold.values())
@@ -364,10 +376,10 @@ class TestDemandBehaviour:
         assert bd["total_cost_eur"] > 0
 
     def test_zero_demand_per_sold_view_is_zeroed(self, eval_zero):
-        """Zero demand ⇒ no class has sold place-km ⇒ the class-keyed
-        per_sold view is empty (classes without sales are omitted —
-        CALC 0.9.8)."""
-        sold_bd = route_bd(eval_zero, "per_sold_place_km")
+        """Zero demand ⇒ no sold place-km anywhere ⇒ the class-keyed
+        per_sold view is empty — classes without sales are omitted, and
+        'all' is omitted when total sold place-km is 0 (CALC 0.9.9)."""
+        sold_bd = route_bd(eval_zero, "per_sold_place_km", class_main=None)
         assert sold_bd == {}
 
     def test_zero_demand_per_available_still_positive(self, eval_zero):
@@ -405,7 +417,7 @@ class TestMatrixConsistency:
         """The (all, all) country matrix cell equals the route-level breakdown."""
         _, result = eval_standard
         cell = result["views"]["per_trip_pair_per_country"]["data"]["all"]["all"]
-        assert cell["values"]["per_year"]["total_cost_eur"] == pytest.approx(
+        assert cell["values"]["per_year"]["all"]["total_cost_eur"] == pytest.approx(
             route_bd(result)["total_cost_eur"], rel=REL_TOL
         )
 
@@ -417,9 +429,9 @@ class TestMatrixConsistency:
         _, result = eval_standard
         data = result["views"]["per_trip_pair"]["data"]
         pair_key = next(k for k in data if k != "all")
-        pair_parking = data[pair_key]["values"]["per_year"]["cost"]["infrastructure"][
-            "parking_eur"
-        ]
+        pair_parking = data[pair_key]["values"]["per_year"]["all"]["cost"][
+            "infrastructure"
+        ]["parking_eur"]
         all_parking = route_bd(result)["cost"]["infrastructure"]["parking_eur"]
         assert all_parking > 0
         assert pair_parking == pytest.approx(all_parking, rel=REL_TOL)
@@ -430,7 +442,7 @@ class TestMatrixConsistency:
         _, result = eval_standard
         countries = result["views"]["per_trip_pair_per_country"]["data"]["all"]
         tac_sum = sum(
-            cell["values"]["per_year"]["cost"]["infrastructure"]["tac_eur"]
+            cell["values"]["per_year"]["all"]["cost"]["infrastructure"]["tac_eur"]
             for cc, cell in countries.items()
             if cc != "all"
         )
@@ -456,7 +468,7 @@ class TestMatrixConsistency:
             "AT_WIEN_HBF__DE_BERLIN_HBF__Couchette",
         ):
             assert key in all_ods, f"OD key missing: {key}"
-            assert all_ods[key]["values"]["per_year"]["total_revenue_eur"] > 0
+            assert all_ods[key]["values"]["per_year"]["all"]["total_revenue_eur"] > 0
 
     def test_od_cells_partition_pair_total(self, eval_standard):
         """OD cells partition the pair total: cost, revenue, and net of all
@@ -467,11 +479,11 @@ class TestMatrixConsistency:
         data = result["views"]["per_trip_pair_per_od"]["data"]
         pair_key = next(k for k in data if k != "all")
         cells = [
-            cell["values"]["per_year"]
+            cell["values"]["per_year"]["all"]
             for key, cell in data[pair_key].items()
             if key != "all"
         ]
-        pair_cell = data[pair_key]["all"]["values"]["per_year"]
+        pair_cell = data[pair_key]["all"]["values"]["per_year"]["all"]
         for field in ("total_cost_eur", "total_revenue_eur", "net_eur"):
             assert pair_cell[field] == pytest.approx(
                 sum(c[field] for c in cells), rel=REL_TOL
@@ -482,7 +494,7 @@ class TestMatrixConsistency:
         _, result = eval_standard
         all_stops = result["views"]["per_trip_per_stop"]["data"]["all"]
         berlin = all_stops["DE_BERLIN_HBF"]
-        charge = berlin["values"]["per_year"]["cost"]["infrastructure"][
+        charge = berlin["values"]["per_year"]["all"]["cost"]["infrastructure"][
             "station_charge_eur"
         ]
         assert charge > 0
@@ -514,9 +526,9 @@ class TestSectionView:
         of the class cells sum to the section's 'all' cell."""
         _, result = eval_standard
         sections = result["views"]["per_trip_pair_per_section"]["data"]["all"]
-        all_cell = sections[self.SECTION_ALL]["values"]["per_year"]
+        all_cell = sections[self.SECTION_ALL]["values"]["per_year"]["all"]
         cls_cells = [
-            cell["values"]["per_year"]
+            cell["values"]["per_year"]["all"]
             for key, cell in sections.items()
             if key.startswith("DE_BERLIN_HBF__AT_WIEN_HBF__")
             and not key.endswith("__all")
@@ -534,7 +546,7 @@ class TestSectionView:
         _, result = eval_standard
         sections = result["views"]["per_trip_pair_per_section"]["data"]["all"]
         revenue = sum(
-            sections[key]["values"]["per_year"]["total_revenue_eur"]
+            sections[key]["values"]["per_year"]["all"]["total_revenue_eur"]
             for key in (
                 "DE_BERLIN_HBF__AT_WIEN_HBF__all",
                 "AT_WIEN_HBF__DE_BERLIN_HBF__all",
@@ -553,9 +565,138 @@ class TestSectionView:
         cell = sections[self.SECTION_ALL]["values"]
         outbound = costed["trip_pairs"][0]["outbound"]
         section_annual_km = trip_distance_km(outbound) * operating_days(costed)
-        per_year = cell["per_year"]["total_cost_eur"]
-        per_km = cell["per_train_km"]["total_cost_eur"]
+        per_year = cell["per_year"]["all"]["total_cost_eur"]
+        per_km = cell["per_train_km"]["all"]["total_cost_eur"]
         assert per_year == pytest.approx(per_km * section_annual_km, rel=REL_TOL)
+
+
+# =============================================================================
+# Class axis — exhaustively, across every view/filter/normalisation combo
+# =============================================================================
+
+
+def _iter_all_cells(result: dict):
+    """Yield (view_name, cell_label, values) for every cell in every view —
+    'route' has no filter/values nesting (data IS the values dict directly);
+    per_trip_pair is one level deep ({key: {filter, values}}); the matrix
+    views (country/od/section/stop) are two levels deep
+    ({key1: {key2: {filter, values}}}). values is always the
+    {norm: {class_main | "all": breakdown}} payload for that cell (CALC
+    0.9.9), so every assertion below runs identically regardless of which
+    view/filter combination produced it."""
+    yield "route", "route", result["views"]["route"]["data"]
+    for view_name in (
+        "per_trip_pair",
+        "per_trip_pair_per_country",
+        "per_trip_pair_per_od",
+        "per_trip_pair_per_section",
+        "per_trip_per_stop",
+    ):
+        for k1, v1 in result["views"][view_name]["data"].items():
+            if "values" in v1:
+                yield view_name, k1, v1["values"]
+            else:
+                for k2, v2 in v1.items():
+                    yield view_name, f"{k1}/{k2}", v2["values"]
+
+
+class TestClassAxisAcrossAllViewsAndNorms:
+    """The class axis (CALC 0.9.9) is orthogonal to view and filter by
+    design — these checks walk every (view, filtered cell, normalisation)
+    combination the standard fixture produces, not just the route view's
+    defaults, so a bug that only shows up in one corner of the cube (as
+    the per_sold 'all' mediant-bound violation did — it was invisible at
+    route/per_year and only surfaced once "all" was checked against the
+    class range) gets caught."""
+
+    def test_every_present_norm_has_an_all_cell(self, eval_standard):
+        _, result = eval_standard
+        checked = 0
+        for view_name, label, values in _iter_all_cells(result):
+            for norm, cells in values.items():
+                if not cells:
+                    continue  # e.g. per_sold_place_km with zero demand there
+                assert "all" in cells, f"{view_name}[{label}][{norm}]: no 'all' cell"
+                checked += 1
+        assert checked > 20, "too few cells exercised — fixture may have shrunk"
+
+    def test_net_identity_holds_everywhere(self, eval_standard):
+        """net = revenue - cost - margin in every view, every filtered
+        cell, every normalisation, every class cell — not just 'all'."""
+        _, result = eval_standard
+        checked = 0
+        for view_name, label, values in _iter_all_cells(result):
+            for norm, cells in values.items():
+                for cls, bd in cells.items():
+                    assert bd["net_eur"] == pytest.approx(
+                        bd["total_revenue_eur"]
+                        - bd["total_cost_eur"]
+                        - bd["margin"]["ebit_margin_eur"],
+                        abs=0.05,
+                    ), f"net identity failed: {view_name}[{label}][{norm}][{cls}]"
+                    checked += 1
+        assert checked > 50, "too few cells exercised — fixture may have shrunk"
+
+    def test_class_independent_norms_sum_to_all_everywhere(self, eval_standard):
+        """per_year / per_operating_day / per_train_km share one divisor
+        across the class axis, so class cells must sum back to 'all' in
+        EVERY view and filtered cell that carries more than one class —
+        not just the route view (test_class_cells_sum_to_all_where_
+        divisor_is_class_independent above checks that narrower case)."""
+        _, result = eval_standard
+        class_independent = ("per_year", "per_operating_day", "per_train_km")
+        checked = 0
+        for view_name, label, values in _iter_all_cells(result):
+            for norm in class_independent:
+                cells = values.get(norm)
+                if not cells or "all" not in cells or len(cells) < 2:
+                    continue  # single-class (identity) cells trivially match
+                class_sum = sum(
+                    bd["net_eur"] for cls, bd in cells.items() if cls != "all"
+                )
+                assert class_sum == pytest.approx(cells["all"]["net_eur"], abs=0.5), (
+                    f"{view_name}[{label}][{norm}]: class cells don't sum to 'all'"
+                )
+                checked += 1
+        assert checked > 5, "too few multi-class cells exercised"
+
+    def test_per_unit_norms_all_within_class_range_everywhere(self, eval_standard):
+        """per_available_place_km / per_sold_place_km: 'all' must be a
+        mediant of the participating classes' own cost-per-unit ratios —
+        it can never fall outside their [min, max] — in every view and
+        filtered cell with more than one class present. Regression guard:
+        pre-fix, a class with a zero divisor (no capacity, or — for
+        per_sold — no sales that period) still had its cost folded into
+        'all's numerator while being excluded from the denominator,
+        which can push 'all' past every class's own figure (observed in
+        production: two class costs of ~69 and ~44 €/sold-place-km
+        against an 'all' of ~135 — see build_class_keyed_normalisations)."""
+        _, result = eval_standard
+        per_unit = ("per_available_place_km", "per_sold_place_km")
+        checked = 0
+        for view_name, label, values in _iter_all_cells(result):
+            for norm in per_unit:
+                cells = values.get(norm)
+                if not cells or "all" not in cells:
+                    continue
+                class_costs = [
+                    bd["total_cost_eur"] for cls, bd in cells.items() if cls != "all"
+                ]
+                if len(class_costs) < 2:
+                    continue  # identity cells (OD/section class-scoped)
+                lo, hi = min(class_costs), max(class_costs)
+                all_cost = cells["all"]["total_cost_eur"]
+                # 6dp leaf rounding can nudge the mediant a hair past an
+                # exact bound; REL_TOL scaled against the range absorbs
+                # that without masking a real violation like the one this
+                # test was written to catch (~2x past the upper bound)
+                slack = max(abs(hi), abs(lo)) * REL_TOL
+                assert lo - slack <= all_cost <= hi + slack, (
+                    f"{view_name}[{label}][{norm}]: 'all'={all_cost} outside "
+                    f"class range [{lo}, {hi}]"
+                )
+                checked += 1
+        assert checked > 0, "no multi-class per-unit cell found — check fixture demand"
 
 
 # =============================================================================

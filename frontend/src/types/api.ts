@@ -78,21 +78,17 @@ export const VIEW_KEYS = [
 ] as const
 export type ViewKey = (typeof VIEW_KEYS)[number]
 
-// Scalar normalisations: one Breakdown per cell.
-export const SCALAR_NORM_KEYS = [
+// Normalisations (CALC 0.9.9): class_main is an orthogonal axis on EVERY
+// normalisation — each norm maps to {"all" | class_main: Breakdown}.
+// "all" is the whole cell; class cells are its allocation split. The former
+// by_class_main norm is retired (identical to per_year's class cells).
+export const NORM_KEYS = [
   'per_year',
   'per_operating_day',
   'per_train_km', // renamed from per_trip_km (CALC 0.9.4)
   'per_available_place_km',
+  'per_sold_place_km',
 ] as const
-export type ScalarNormKey = (typeof SCALAR_NORM_KEYS)[number]
-
-// Class-keyed normalisations (CALC 0.9.8): one Breakdown per class_main.
-export const CLASS_NORM_KEYS = ['per_sold_place_km', 'by_class_main'] as const
-export type ClassNormKey = (typeof CLASS_NORM_KEYS)[number]
-
-// Everything the backend offers, in display order.
-export const NORM_KEYS = [...SCALAR_NORM_KEYS, ...CLASS_NORM_KEYS] as const
 export type NormKey = (typeof NORM_KEYS)[number]
 
 export type ClassKeyedBreakdowns = Record<string, Breakdown>
@@ -141,14 +137,12 @@ export interface Breakdown {
   net_eur: number
 }
 
-/** All normalisations of one cell. per_sold_place_km: each class's
- *  allocated cost over its OWN sold place-km — {} without demand, null
- *  only for scopes without per-class data. by_class_main: the full
- *  per-class split; per-class cells sum back to the cell total. */
-export interface Normalisations extends Record<ScalarNormKey, Breakdown> {
-  per_sold_place_km: ClassKeyedBreakdowns | null
-  by_class_main: ClassKeyedBreakdowns
-}
+/** All normalisations of one cell (CALC 0.9.9): each norm is a dict keyed
+ *  by class_main plus "all". "all" = the whole cell; class cells = its
+ *  allocation split. Classes without capacity (available) or sales (sold)
+ *  are omitted from the two place-km norms; "all" is omitted from
+ *  per_sold when the cell has no sold place-km at all. */
+export type Normalisations = Record<NormKey, ClassKeyedBreakdowns>
 
 /** One filtered data point: human-readable filter labels (one entry per
  *  dimension, backend-provided) alongside the values. */
