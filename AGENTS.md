@@ -87,7 +87,7 @@ docker compose -f .devcontainer/docker-compose.yml up --build
 ```
 
 - Frontend: http://localhost:5173 (Vite HMR — edits reflect instantly)
-- Backend API: http://localhost:5000
+- Backend API: http://localhost:5050 (host side moved off 5000 — macOS AirPlay Receiver squats there; container still binds 5000 internally)
 - OpenRailRouting: http://localhost:8989 (admin/metrics on 8990)
 
 ### Backend stack only (PyCharm / backend work)
