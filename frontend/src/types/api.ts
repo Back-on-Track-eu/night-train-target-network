@@ -40,6 +40,18 @@ export interface StopsResponse {
   stops: Stop[]
 }
 
+// One candidate stop along the routed path, returned by POST /api/route/plan
+// only when auto_stop_addition="suggest". added_time_min is the full trip-time
+// increase (detour + dwell) the stop would cost if added.
+export interface SuggestedStop {
+  stop_id: string
+  stop_name: string
+  country_code: string
+  lat: number
+  lon: number
+  added_time_min: number
+}
+
 export interface CompositionsResponse {
   compositions: Composition[]
   operators: unknown[]
