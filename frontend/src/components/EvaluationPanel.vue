@@ -15,6 +15,7 @@ import { resolveFactorRates, resolveFactorSubCategory, type RateRow } from '@/li
 import { submitFeedback, FeedbackError } from '@/lib/feedbackApi'
 import type {
   Breakdown,
+  ClassKeyedBreakdowns,
   EvaluationResponse,
   FilteredCell,
   MapScope,
@@ -33,11 +34,15 @@ const emit = defineEmits<{ scopeChange: [scope: MapScope] }>()
 
 const { t, te } = useI18n()
 
-// --- Selection state: the three axes of the result cube -------------------
-// view (grouping) × drill-down keys (sel1/sel2) × normalisation (unit)
-// pick one value on each axis and you land on exactly one Breakdown.
+// --- Selection state: the four axes of the result cube --------------------
+// view (grouping) × drill-down keys (sel1/sel2) × normalisation (unit) ×
+// class (CALC 0.9.9: every normalisation is class-keyed) — pick one value
+// on each axis and you land on exactly one Breakdown.
 const view = ref<ViewKey>('route')
 const normalisation = ref<NormKey>('per_year')
+// Class selection — active for EVERY normalisation since CALC 0.9.9;
+// options come from the landed cell's own keys ("all" + class_mains).
+const classSel = ref<string>('all')
 const sel1 = ref('all')
 const sel2 = ref('all')
 
@@ -296,9 +301,26 @@ function sumBreakdowns(bs: Breakdown[]): Breakdown {
   return acc
 }
 
+function sumClassKeyed(dicts: (ClassKeyedBreakdowns | null)[]): ClassKeyedBreakdowns {
+  // Class-wise sum over cells (union of classes). Exact where leaves are
+  // additive (per_year, per_operating_day); for the per-unit norms this
+  // is the same section-aggregation fidelity the panel has always
+  // applied — the backend's per_trip_pair_per_section view carries exact
+  // per-class cells if needed later.
+  const classes = new Set<string>()
+  for (const d of dicts) if (d) for (const k of Object.keys(d)) classes.add(k)
+  const out: ClassKeyedBreakdowns = {}
+  for (const cls of classes) {
+    const parts = dicts.flatMap((d) => (d && d[cls] ? [d[cls]] : []))
+    if (parts.length) out[cls] = sumBreakdowns(parts)
+  }
+  return out
+}
+
 function sumNorms(cells: Normalisations[]): Normalisations {
+  // CALC 0.9.9: every normalisation is class-keyed.
   const out = {} as Normalisations
-  for (const nk of NORM_KEYS) out[nk] = sumBreakdowns(cells.map((c) => c[nk]))
+  for (const nk of NORM_KEYS) out[nk] = sumClassKeyed(cells.map((c) => c[nk]))
   return out
 }
 
@@ -323,9 +345,35 @@ const currentNorms = computed<Normalisations | null>(() => {
   return props.result.views[v].data[sel1.value]?.[sel2.value]?.values ?? null
 })
 
-const currentBreakdown = computed<Breakdown | null>(
-  () => currentNorms.value?.[normalisation.value] ?? null,
+// Classes available in the landed cell for the selected normalisation —
+// "all" pinned first, class_mains sorted after it. Options carry labels so
+// "all" can render as a translated "All classes".
+const classOptions = computed(() => {
+  const dict = currentNorms.value?.[normalisation.value] ?? null
+  if (!dict) return []
+  const keys = Object.keys(dict).sort()
+  const ordered = keys.includes('all') ? ['all', ...keys.filter((k) => k !== 'all')] : keys
+  return ordered.map((k) => ({
+    value: k,
+    label: k === 'all' ? t('proposal.evaluation.classes.all') : k,
+  }))
+})
+watch(
+  classOptions,
+  (opts) => {
+    const keys = opts.map((o) => o.value)
+    if (!keys.includes(classSel.value)) classSel.value = keys[0] ?? 'all'
+  },
+  { immediate: true },
 )
+
+const currentBreakdown = computed<Breakdown | null>(() => {
+  const norms = currentNorms.value
+  if (!norms) return null
+  const dict = norms[normalisation.value]
+  if (!dict) return null
+  return dict[classSel.value] ?? null
+})
 
 // --- Cost tree: hierarchical node spec, flattened for rendering ------------
 interface CostNode {
@@ -687,7 +735,17 @@ const selectPt = {
         :pt="selectPt"
       />
 
-      <div class="ml-auto">
+      <div class="ml-auto flex items-center gap-2">
+        <!-- Class axis (CALC 0.9.9) — active for every normalisation -->
+        <Select
+          v-if="classOptions.length > 1"
+          v-model="classSel"
+          :options="classOptions"
+          option-value="value"
+          option-label="label"
+          :unstyled="true"
+          :pt="selectPt"
+        />
         <Select
           v-model="normalisation"
           :options="normOptions"
@@ -739,7 +797,7 @@ const selectPt = {
         </div>
       </div>
 
-      <!-- Cost tree (left) | Revenue (right) -->
+      <!-- Cost tree (left) | Revenue + Expected Margin (right) -->
       <div class="flex items-start gap-4">
         <div class="w-1/2 rounded-xl bg-primary-50/5 p-4">
           <div class="mb-2 flex items-center gap-1 border-b border-primary-50/10 pb-2">
@@ -794,22 +852,58 @@ const selectPt = {
           </div>
         </div>
 
-        <div class="flex-1 rounded-xl bg-primary-50/5 p-4">
-          <div class="mb-2 flex items-baseline justify-between border-b border-primary-50/10 pb-2">
-            <span class="font-semibold text-primary-50">
-              {{ t('proposal.evaluation.groups.revenue') }}
-            </span>
-            <span class="font-semibold text-primary-50 tabular-nums">
-              {{ formatEur(currentBreakdown.revenue.total_eur) }}
-            </span>
+        <div class="flex flex-1 flex-col gap-4">
+          <div class="rounded-xl bg-primary-50/5 p-4">
+            <div
+              class="mb-2 flex items-baseline justify-between border-b border-primary-50/10 pb-2"
+            >
+              <span class="font-semibold text-primary-50">
+                {{ t('proposal.evaluation.groups.revenue') }}
+              </span>
+              <span class="font-semibold text-primary-50 tabular-nums">
+                {{ formatEur(currentBreakdown.revenue.total_eur) }}
+              </span>
+            </div>
+            <div class="flex items-center justify-between py-1">
+              <span class="text-sm text-primary-50/70">
+                {{ t('proposal.evaluation.fields.ticket_revenue') }}
+              </span>
+              <span class="text-sm text-primary-50 tabular-nums">
+                {{ formatEur(currentBreakdown.revenue.ticket_revenue_eur) }}
+              </span>
+            </div>
           </div>
-          <div class="flex items-center justify-between py-1">
-            <span class="text-sm text-primary-50/70">
-              {{ t('proposal.evaluation.fields.ticket_revenue') }}
-            </span>
-            <span class="text-sm text-primary-50 tabular-nums">
-              {{ formatEur(currentBreakdown.revenue.ticket_revenue_eur) }}
-            </span>
+
+          <div class="rounded-xl bg-primary-50/5 p-4">
+            <div
+              class="mb-2 flex items-baseline justify-between border-b border-primary-50/10 pb-2"
+            >
+              <span class="font-semibold text-primary-50">
+                {{ t('proposal.evaluation.groups.margin') }}
+              </span>
+              <span class="font-semibold text-primary-50 tabular-nums">
+                −{{ formatEur(currentBreakdown.margin.total_eur) }}
+              </span>
+            </div>
+            <div class="flex items-center justify-between py-1">
+              <span class="flex items-center gap-1 text-sm text-primary-50/70">
+                {{ t('proposal.evaluation.fields.ebit_margin') }}
+                <button
+                  v-if="hasInfo('ebit_margin')"
+                  type="button"
+                  class="flex cursor-pointer text-primary-50/40 transition hover:text-primary-50"
+                  :aria-label="t('proposal.evaluation.info.iconLabel')"
+                  @mouseenter="openInfo('ebit_margin', $event)"
+                  @mouseleave="scheduleClose"
+                  @click="openInfo('ebit_margin', $event)"
+                >
+                  <AppIcon :path="mdiInformationOutline" :size="14" />
+                </button>
+              </span>
+              <span class="text-sm text-primary-50 tabular-nums">
+                −{{ formatEur(currentBreakdown.margin.ebit_margin_eur) }}
+              </span>
+            </div>
           </div>
         </div>
       </div>

@@ -56,8 +56,8 @@ _SEED_ROUTE_ID = f"P{_SEED_PROPOSAL_ID}_V1_R1"
 # The cheapest corridor the seed data supports — every fresh authenticated
 # plan in this file uses it to keep OpenRailRouting time bounded.
 _STOPS = ["DE_BERLIN_HBF", "AT_WIEN_HBF"]
-_COMPOSITION = "STD-7.1"
-_OTHER_COMPOSITION = "STD-6.1"  # setup change for the versioned/branched paths
+_COMPOSITION = "NEW-BAL-7"
+_OTHER_COMPOSITION = "REF-BAL-9"  # setup change for the versioned/branched paths
 
 
 def _find_prefixed_strings(obj, prefix: str, limit: int = 5) -> list[str]:
@@ -292,7 +292,7 @@ def test_replan_foreign_changed_setup_branches(api_base, planned, guest, db_cur)
     """A setup change by a non-owner duplicates under a new proposal_id
     owned by the caller — the original proposal is untouched."""
     pid = planned["proposal"]["proposal_id"]
-    payload = _plan(api_base, guest["headers"], proposal_id=pid)  # back to STD-7.1
+    payload = _plan(api_base, guest["headers"], proposal_id=pid)  # back to NEW-BAL-7
 
     block = payload["proposal"]
     assert block["persisted"] is True

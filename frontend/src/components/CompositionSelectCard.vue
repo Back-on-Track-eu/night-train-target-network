@@ -6,6 +6,7 @@ import {
   mdiSeatPassenger,
   mdiBunkBed,
   mdiBed,
+  mdiBedOutline,
   mdiWeight,
   mdiSpeedometer,
   mdiChevronLeft,
@@ -41,21 +42,19 @@ function navigate(dir: 'prev' | 'next') {
 
 const current = computed(() => props.compositions[currentIndex.value])
 
-function sumPlacesByDensity(comp: Composition, density: number): number {
-  return Object.values(comp.capacity)
-    .filter((c) => Math.abs(c.density - density) < 0.005)
-    .reduce((sum, c) => sum + c.places, 0)
-}
-
+// capacity.by_class is keyed by class_main directly (2026-07-22) — the
+// old density-constant matching is gone with the retired density column.
 const capacityStats = computed(() => {
-  const c = current.value
+  const by = current.value?.capacity.by_class ?? {}
   const stats: { icon: string; count: number }[] = []
-  const seats = sumPlacesByDensity(c, 1 / 64)
-  const couchettes = sumPlacesByDensity(c, 1 / 20)
-  const sleepers = sumPlacesByDensity(c, 1 / 12)
+  const seats = by['Seat']?.places ?? 0
+  const couchettes = by['Couchette']?.places ?? 0
+  const sleepers = by['Sleeper']?.places ?? 0
+  const capsules = by['Capsule']?.places ?? 0
   if (seats > 0) stats.push({ icon: mdiSeatPassenger, count: seats })
   if (couchettes > 0) stats.push({ icon: mdiBunkBed, count: couchettes })
   if (sleepers > 0) stats.push({ icon: mdiBed, count: sleepers })
+  if (capsules > 0) stats.push({ icon: mdiBedOutline, count: capsules })
   return stats
 })
 
@@ -87,7 +86,7 @@ watch(
         >
           <AppIcon :path="mdiChevronLeft" :size="20" />
         </button>
-        <p class="text-base font-bold text-primary-50">{{ current.description }}</p>
+        <p class="text-base font-bold text-primary-50">{{ current.comp_id }}</p>
         <button
           v-if="count > 1"
           class="shrink-0 cursor-pointer text-primary-50/40 transition hover:text-primary-50"
@@ -96,6 +95,11 @@ watch(
           <AppIcon :path="mdiChevronRight" :size="20" />
         </button>
       </div>
+
+      <!-- Description: smaller line below the headline -->
+      <p v-if="current.description" class="-mt-3 text-sm text-primary-50/60">
+        {{ current.description }}
+      </p>
 
       <!-- Pagination dots -->
       <div v-if="count > 1" class="flex gap-1.5">

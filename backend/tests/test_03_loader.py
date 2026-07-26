@@ -67,8 +67,6 @@ LOADER_READ_COLUMNS = [
     ("input_params.operators", "operator_id"),
     ("input_params.operators", "operator_driver_costs_eur_h"),
     ("input_params.operators", "operator_crew_costs_eur_h"),
-    ("input_params.operators", "operator_driver_overhead_h"),
-    ("input_params.operators", "operator_crew_overhead_h"),
     ("input_params.operators", "operator_ebit_margin_per"),
     ("input_params.operators", "operator_financing_quota_per"),
     ("input_params.operators", "operator_var_overhead_per"),
@@ -76,7 +74,6 @@ LOADER_READ_COLUMNS = [
     # service_classes
     ("input_params.service_classes", "service_class_id"),
     ("input_params.service_classes", "service_class_main"),
-    ("input_params.service_classes", "service_class_density"),
     # coach_types / coach_type_classes / composition_type_coaches
     ("input_params.coach_types", "coach_type_id"),
     ("input_params.coach_types", "coach_type_weight_gross_t"),
@@ -103,11 +100,6 @@ LOADER_READ_COLUMNS = [
     ("input_params.stop_infrastructures", "stop_lat"),
     ("input_params.stop_infrastructures", "stop_lon"),
     ("input_params.stop_infrastructures", "stop_charge_eur"),
-    # composition_references
-    ("input_params.composition_references", "composition_type_id"),
-    ("input_params.composition_references", "ref_distance_km"),
-    ("input_params.composition_references", "ref_avg_speed_kmh"),
-    ("input_params.composition_references", "ref_terrain_score"),
 ]
 
 
@@ -127,7 +119,7 @@ def test_column_exists_in_schema(table, column):
 # Runtime checks — loader output vs raw DB values
 # =============================================================================
 
-COMP_ID = "STD-7.1"
+COMP_ID = "NEW-BAL-7"
 COUNTRY = "DE"
 STOP_ID = "DE_BERLIN_HBF"
 
@@ -135,7 +127,9 @@ STOP_ID = "DE_BERLIN_HBF"
 def test_all_compositions_load(loader):
     """All seeded compositions load without errors."""
     comps = loader.build_all_compositions()
-    assert len(comps) >= 10, f"Expected >= 10 compositions, got {len(comps)}"
+    assert len(comps) == 8, (
+        f"Expected the eight calibrated compositions, got {len(comps)}"
+    )
 
 
 def test_all_stops_load(loader):
@@ -225,25 +219,23 @@ def test_composition_weight_matches_db_aggregation(loader, db_cur):
 
 
 def test_composition_density_matches_db(loader, db_cur):
-    """density_by_class comes from service_class_density — a regression guard
-    for the old bug where densities were left at 0.0."""
-    comp = loader.build_all_compositions().get(COMP_ID)
-
-    db_cur.execute(
-        "SELECT DISTINCT service_class_main, service_class_density "
-        "FROM input_params.service_classes"
-    )
-    densities = {
-        r["service_class_main"]: float(r["service_class_density"])
-        for r in db_cur.fetchall()
-    }
-
-    for class_main, places in comp.places_by_class.items():
-        if places <= 0:
-            continue
-        assert comp.density_by_class.get(class_main, 0.0) == pytest.approx(
-            densities[class_main], rel=1e-4
-        ), f"density_by_class[{class_main}] does not match service_class_density"
+    """Densities are DERIVED from real section geometry since 2026-07-22
+    (service_class_density retired): m/place and t/place per class_main
+    must reproduce section sums over places from the DB exactly."""
+    comps = loader.build_all_compositions()
+    comp = comps.get("NEW-BAL-7")
+    dl = comp.density_by_class_main_length
+    dw = comp.density_by_class_main_weight
+    assert set(dl) == set(comp.places_by_class) == set(dw)
+    for cls, places in comp.places_by_class.items():
+        assert dl[cls] > 0 and dw[cls] > 0
+        m_sum = sum(
+            a.section_length_m
+            for ct in comp.coaches.values()
+            for a in ct.classes.values()
+            if a.class_main == cls
+        )
+        assert dl[cls] == pytest.approx(m_sum / places)
 
 
 def test_track_infra_fields_match_db(loader, db_cur, base_scenario):
@@ -310,16 +302,26 @@ def test_country_geometries_cover_stop_countries(loader, db_cur):
 
 
 def test_composition_indicative_figures_present(loader):
-    """Compositions with a reference row carry indicative figures.
+    """Compositions with a reference row carry seeded indicative figures.
 
-    compute_indicative_figures() is currently a placeholder (see
-    models/compositions/calc_indicative_figures.py) — flat, hand-picked but
-    non-zero values — so presence and positivity are all that can be asserted.
-    Tighten this once the real compositions cost model lands."""
+    Since CALC_VERSION 0.9.7 the KPIs are calibration values read from
+    composition_types columns (calib/CALIBRATION.md) — real,
+    per-composition figures, no longer flat placeholders.
+    """
     comps = loader.build_all_compositions()
     with_indicative = [c for c in comps.all().values() if c.indicative is not None]
     assert len(with_indicative) >= 1, "No composition with indicative figures"
-    ind = with_indicative[0].indicative
-    assert ind.cost_eur_per_train_km > 0
-    assert len(ind.cost_eur_per_place_km_by_class) > 0
-    assert all(v > 0 for v in ind.cost_eur_per_place_km_by_class.values())
+    by_id = {c.comp_id: c for c in with_indicative}
+    # both material strategies present and differentiated
+    assert "NEW-BAL-7" in by_id and "REF-BUD-6" in by_id
+    for c in with_indicative:
+        assert c.indicative.cost_eur_per_train_km > 0
+        assert c.indicative.cost_ct_per_place_km > 0
+    assert (
+        by_id["NEW-BAL-7"].indicative.cost_eur_per_train_km
+        != by_id["REF-BUD-6"].indicative.cost_eur_per_train_km
+    ), "seeded KPIs should differ per composition — placeholder era is over"
+    assert by_id["NEW-BAL-7"].material_strategy == "new"
+    assert by_id["NEW-BAL-7"].total_length_m == pytest.approx(185.7)
+    assert len(by_id["NEW-BAL-7"].coaches) == 7
+    assert by_id["REF-BUD-6"].material_strategy == "refurbished"

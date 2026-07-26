@@ -1,0 +1,17 @@
+source_id,source_account,our_key,in_scope,adjustment_note
+S01,210 Coach Leasing,coach_amortisation_eur+financing_eur,yes,Lease annuity bundles capital+financing (and possibly heavy maintenance — verify); convert to purchase-equivalent before comparing
+S01,211 Loco Leasing & Drivers,loco_eur+driver_eur,yes,Split loco vs driver before per-parameter comparison; split assumption documented here once made
+S01,212 Track & Station Access,tac_eur+station_charge_eur,no,Infrastructure — excluded from this workstream
+S01,213 OPS Infrastructure Access,shunting_eur+parking_eur,no,Infrastructure — excluded
+S01,214 Servicing,cleaning_eur,yes,Assumed cleaning + service preparation; verify no catering logistics
+S01,215 Cabin Crew,crew_eur,yes,Direct match
+S01,216 Electricity,energy_eur,no,Energy — separate workstream
+S01,217 Stockings,svc_stockings_eur,yes,Direct match
+S01,218 External OPS Services,fix_overhead_eur,partial,Judgment call: external ops services treated as fixed overhead
+S01,219 Maintenance,coach_maintenance_eur,yes,Includes loco maintenance which our model bundles into loco_eur — deduct an assumed loco share before comparing
+S01,221 Fixed Overhead Cost,fix_overhead_eur,yes,Payroll+tools+offices+marketing+R&D vs fix_overhead_quota on amortisation
+S01,222 Variable Overhead Cost,var_overhead_eur,yes,Incentives+compensations+customer service+payments — matches %-of-revenue logic
+S02,Total cost per ASK (Madrid-London cases),operator_controllable_subtotal,partial,Published only as total incl. infrastructure and energy; deduct assumed infra+energy share and inflate 2012 prices before level comparison; ordering/spread across compositions usable directly
+S07,Total night train cost (6.39 ct/place-km),operator_controllable_subtotal,partial,Includes infrastructure (their TAC assumption: 2.76 EUR/train-km) and energy — strip both before level comparison
+S11,Annual subsidy for defined capacity,operator_controllable_subtotal,partial,"Subsidy = cost minus revenue; consistency check on net result, not gross cost level; SEK->EUR at contract-period rate"
+S13,seed placeholders (all parameters),per-parameter,yes,Explicit priors; every calibrated value replaces one of these rows visibly

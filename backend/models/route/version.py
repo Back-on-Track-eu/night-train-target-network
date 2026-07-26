@@ -26,7 +26,7 @@ from dataclasses import dataclass
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.11"
+ROUTE_BUILDER_VERSION: str = "0.9.12"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -41,6 +41,16 @@ ROUTE_BUILDER_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.12": {
+        "date": "2026-07-21",
+        "author": "david",
+        "changes": "Composition object reshaped with the cost calibration v2: "
+        "driver/crew overhead minutes removed; material_strategy added "
+        "(new/refurbished — also on CompositionType together with the "
+        "seeded indicative KPI columns). Routing behaviour unchanged; "
+        "composition-aware v_max routing (REF capped at 200 km/h) remains "
+        "an open follow-up.",
+    },
     "0.9.11": {
         "date": "2026-07-16",
         "author": "david",

@@ -40,15 +40,13 @@ COMMENT ON COLUMN input_params.sources.source_date        IS 'Date the source da
 -- service_classes
 -- ---------------------------------------------------------------
 CREATE TABLE input_params.service_classes (
-    service_class_id      VARCHAR(100) PRIMARY KEY,
-    service_class_main    VARCHAR(50)  NOT NULL,
-    service_class_density NUMERIC(8,6) NOT NULL
+    service_class_id      VARCHAR(200) PRIMARY KEY,
+    service_class_main    VARCHAR(50)  NOT NULL
 );
 
 COMMENT ON TABLE  input_params.service_classes                    IS 'Stable accommodation class taxonomy. service_class_main groups: Seat, Couchette, Sleeper, Capsule, Catering.';
 COMMENT ON COLUMN input_params.service_classes.service_class_id   IS 'Unique class identifier (e.g. "couchette (6-berth)", "Sleeper (2-berth) with shower & WC").';
 COMMENT ON COLUMN input_params.service_classes.service_class_main IS 'Top-level accommodation category: Seat, Couchette, Sleeper, Capsule, or Catering.';
-COMMENT ON COLUMN input_params.service_classes.service_class_density IS 'Space units consumed per place of this class. Used for cost allocation. E.g. 6-berth couchette = 1/6 ≈ 0.166667. Unit: space units/place';
 
 -- ---------------------------------------------------------------
 -- operators
@@ -59,8 +57,6 @@ CREATE TABLE input_params.operators (
     operator_name                   VARCHAR(200)  NOT NULL,
     operator_driver_costs_eur_h     NUMERIC(8,2)  NOT NULL,
     operator_crew_costs_eur_h       NUMERIC(8,2)  NOT NULL,
-    operator_driver_overhead_h      INTERVAL      NOT NULL,
-    operator_crew_overhead_h        INTERVAL      NOT NULL,
     operator_ebit_margin_per        NUMERIC(5,4)  NOT NULL,
     operator_financing_quota_per    NUMERIC(5,4)  NOT NULL,
     operator_var_overhead_per       NUMERIC(5,4)  NOT NULL,
@@ -71,15 +67,13 @@ CREATE TABLE input_params.operators (
 );
 
 COMMENT ON TABLE  input_params.operators IS 'Train operating company — bears operational costs. Not versioned: operator_id is a natural key referenced (as a soft reference, not an enforced FK) from coach_types and composition_types. Changing rates means adding a new operator_id, never editing a row in place — see coach_types/composition_types for the same catalog-not-history model.';
-COMMENT ON COLUMN input_params.operators.operator_driver_costs_eur_h     IS 'Driver staff cost per billable hour. Billable hours = driving time + operator_driver_overhead_h. Unit: €/h';
-COMMENT ON COLUMN input_params.operators.operator_crew_costs_eur_h       IS 'Cabin crew cost per billable hour. Unit: €/h';
-COMMENT ON COLUMN input_params.operators.operator_driver_overhead_h      IS 'Fixed overhead hours added per trip for driver cost calculation. Unit: h/trip';
-COMMENT ON COLUMN input_params.operators.operator_crew_overhead_h        IS 'Fixed overhead hours added per trip for crew cost calculation. Unit: h/trip';
+COMMENT ON COLUMN input_params.operators.operator_driver_costs_eur_h     IS 'Driver staff cost per deployment hour (roster inefficiency embedded — no separate overhead hours). Billable hours = trip time. Unit: €/h';
+COMMENT ON COLUMN input_params.operators.operator_crew_costs_eur_h       IS 'Cabin crew cost per deployment hour, attendant rate. The train manager is carried as +1.19 attendant-equivalents inside the composition crew factor sums. Unit: €/h';
 COMMENT ON COLUMN input_params.operators.operator_ebit_margin_per        IS 'Required EBIT margin as a share of revenue. Unit: %';
 COMMENT ON COLUMN input_params.operators.operator_financing_quota_per    IS 'Annual financing cost as a share of total capital employed. Unit: %/year';
 COMMENT ON COLUMN input_params.operators.operator_var_overhead_per       IS 'Variable overhead as a share of total ticket revenue. Unit: %';
 COMMENT ON COLUMN input_params.operators.operator_fix_overhead_quota_per IS 'Fixed overhead as a share of all other railway operation costs. Unit: %';
-COMMENT ON COLUMN input_params.operators.operator_loco_lease_eur_h       IS 'Full-service locomotive lease rate, utilization-based — bundles capital, maintenance, and insurance. Billed per loco operating hour (driving + buffer + dwell). Unit: €/h';
+COMMENT ON COLUMN input_params.operators.operator_loco_lease_eur_h       IS 'Full-service locomotive lease rate, utilization-based — bundles capital, maintenance, and insurance. Billed per loco operating hour (driving + buffer + dwell). Configuration-tiered by fleet material: base <=200 km/h vs 230 km/h config, represented as separate operator rows (STD-REF / STD-NEW). Unit: €/h';
 COMMENT ON COLUMN input_params.operators.source_id                       IS 'Source for all values in this row.';
 
 -- ---------------------------------------------------------------
@@ -87,7 +81,7 @@ COMMENT ON COLUMN input_params.operators.source_id                       IS 'Sou
 -- ---------------------------------------------------------------
 CREATE TABLE input_params.operator_class_costs (
     operator_row_id                        INTEGER      NOT NULL REFERENCES input_params.operators(operator_row_id) ON DELETE CASCADE,
-    service_class_id                       VARCHAR(100) NOT NULL REFERENCES input_params.service_classes(service_class_id),
+    service_class_id                       VARCHAR(200) NOT NULL REFERENCES input_params.service_classes(service_class_id),
     operator_class_svc_stockings_eur_place NUMERIC(8,4) NOT NULL,
     source_id                              INTEGER      REFERENCES input_params.sources(source_id),
     PRIMARY KEY (operator_row_id, service_class_id)
@@ -105,6 +99,10 @@ CREATE TABLE input_params.coach_types (
     coach_type_id          VARCHAR(50)  NOT NULL,
     coach_type_operator_id VARCHAR(50),
     coach_type_weight_gross_t NUMERIC(8,3),
+    coach_type_length_m       NUMERIC(6,2) NOT NULL,
+    coach_type_has_wifi       BOOLEAN NOT NULL DEFAULT FALSE,
+    coach_type_length_wo_service_m NUMERIC(6,2) NOT NULL,
+    coach_type_weight_wo_service_t NUMERIC(8,3) NOT NULL,
     coach_type_bikes          INTEGER   NOT NULL DEFAULT 0,
     coach_type_climatization  BOOLEAN   NOT NULL DEFAULT FALSE,
     coach_type_plugs          BOOLEAN   NOT NULL DEFAULT FALSE,
@@ -118,6 +116,10 @@ COMMENT ON TABLE  input_params.coach_types IS 'Individual railcar/coach types. C
 COMMENT ON COLUMN input_params.coach_types.coach_type_id             IS 'Unique coach type identifier (e.g. WLABmz, Bcmz, type1).';
 COMMENT ON COLUMN input_params.coach_types.coach_type_operator_id    IS 'Operating company this coach type belongs to. Soft reference to input_params.operators.operator_id (not an enforced FK). Nullable for generic/shared types.';
 COMMENT ON COLUMN input_params.coach_types.coach_type_weight_gross_t IS 'Gross weight of a single coach of this type. Unit: t';
+COMMENT ON COLUMN input_params.coach_types.coach_type_length_m       IS 'Coach length over buffers. Basis of the per-metre purchase model and of composition total length. Unit: m';
+COMMENT ON COLUMN input_params.coach_types.coach_type_has_wifi       IS 'Coach offers WiFi. Composition-level amenities are OR-aggregations over coaches.';
+COMMENT ON COLUMN input_params.coach_types.coach_type_length_wo_service_m IS 'Coach length excluding service areas (dining/shared sections). Revenue-space basis of the class cost allocation. Unit: m';
+COMMENT ON COLUMN input_params.coach_types.coach_type_weight_wo_service_t IS 'Coach weight excluding service areas. Unit: t';
 COMMENT ON COLUMN input_params.coach_types.coach_type_bikes          IS 'Number of bicycle spaces in this coach type.';
 COMMENT ON COLUMN input_params.coach_types.coach_type_climatization  IS 'Whether this coach type has air conditioning.';
 COMMENT ON COLUMN input_params.coach_types.coach_type_plugs          IS 'Whether this coach type has passenger power sockets.';
@@ -129,10 +131,13 @@ COMMENT ON COLUMN input_params.coach_types.source_id                 IS 'Source 
 -- ---------------------------------------------------------------
 CREATE TABLE input_params.coach_type_classes (
     coach_type_row_id        INTEGER      NOT NULL REFERENCES input_params.coach_types(coach_type_row_id) ON DELETE CASCADE,
-    service_class_id         VARCHAR(100) NOT NULL REFERENCES input_params.service_classes(service_class_id),
+    service_class_id         VARCHAR(200) NOT NULL REFERENCES input_params.service_classes(service_class_id),
     coach_type_class_places  INTEGER      NOT NULL CHECK (coach_type_class_places > 0),
     source_id                INTEGER      REFERENCES input_params.sources(source_id),
-    PRIMARY KEY (coach_type_row_id, service_class_id)
+    PRIMARY KEY (coach_type_row_id, service_class_id),
+    section_length_m    NUMERIC(6,2),
+    section_weight_t    NUMERIC(8,3),
+    section_crew_factor NUMERIC(5,2) NOT NULL DEFAULT 0
 );
 
 COMMENT ON TABLE  input_params.coach_type_classes IS 'Places per accommodation class within a coach type.';
@@ -160,6 +165,14 @@ CREATE TABLE input_params.composition_types (
     composition_type_cleaning_eur_day    NUMERIC(10,3) NOT NULL,
     composition_type_coach_maint_eur_km  NUMERIC(10,8) NOT NULL,
     composition_type_driver_factor       NUMERIC(4,2)  NOT NULL DEFAULT 1,
+    composition_type_n_locos             SMALLINT      NOT NULL DEFAULT 1,
+    composition_type_zugchef_crew_factor NUMERIC(5,2)  NOT NULL DEFAULT 1.19,
+    composition_type_length_cost_prop    NUMERIC(4,3)  NOT NULL DEFAULT 0.700,
+    composition_type_food_and_beverages  VARCHAR(120),
+    composition_type_material_strategy   VARCHAR(15)   NOT NULL
+        CHECK (composition_type_material_strategy IN ('new', 'refurbished')),
+    composition_type_indicative_cost_eur_train_km NUMERIC(8,2),
+    composition_type_indicative_cost_ct_place_km  NUMERIC(6,2),
     source_id                            INTEGER       REFERENCES input_params.sources(source_id),
     UNIQUE (composition_type_id)
 );
@@ -169,16 +182,23 @@ COMMENT ON COLUMN input_params.composition_types.composition_type_id          IS
 COMMENT ON COLUMN input_params.composition_types.composition_type_operator_id IS 'Operating company. Soft reference to input_params.operators.operator_id (not an enforced FK).';
 COMMENT ON COLUMN input_params.composition_types.composition_type_hsr_allowed IS 'Whether this composition may use high-speed rail infrastructure.';
 COMMENT ON COLUMN input_params.composition_types.composition_type_max_speed_kmh IS 'Maximum operational speed. Unit: km/h';
+COMMENT ON COLUMN input_params.composition_types.composition_type_material_strategy IS 'Rolling stock material strategy: ''new'' (230 km/h-capable, 30y amortisation, 0.909 availability) or ''refurbished'' (200 km/h cap, 12y, 0.80). Drives the operator row selection (STD-NEW / STD-REF) and the parameter family — see calib/CALIBRATION.md.';
+COMMENT ON COLUMN input_params.composition_types.composition_type_indicative_cost_eur_train_km IS 'Indicative operator-controllable cost per train-km on the S41 reference route (1,000 km, 14.5 h trip, 350 operating days, 2 trainsets), 2032 prices, excluding infrastructure access, energy, variable overhead and EBIT. Comparison KPI between compositions — not a route evaluation. Derivation: calib/CALIBRATION.md. Unit: €/train-km';
+COMMENT ON COLUMN input_params.composition_types.composition_type_indicative_cost_ct_place_km IS 'Same cost basis divided by places. Unit: ct/place-km';
+COMMENT ON COLUMN input_params.composition_types.composition_type_n_locos IS 'Number of locomotives. Scales loco lease costs and (once calibrated) the energy weight basis. Unit: count';
+COMMENT ON COLUMN input_params.composition_types.composition_type_zugchef_crew_factor IS 'Train manager factor in attendant-equivalents (1.19; 2.38 for >=10-coach formations). Total crew = sum of coach crew factors + this factor. Unit: attendant-equivalents';
+COMMENT ON COLUMN input_params.composition_types.composition_type_length_cost_prop IS 'X of the class cost allocation: X*length share + (1-X)*weight share on revenue space; service areas per place. See calib/CALIBRATION.md. Unit: fraction';
+COMMENT ON COLUMN input_params.composition_types.composition_type_food_and_beverages IS 'Catering concept (e.g. ''dining car''). Coach amenities aggregate separately.';
 COMMENT ON COLUMN input_params.composition_types.composition_type_energy_factor_weight  IS 'Energy regression coefficient for tonne-kilometre term. Unit: kWh/(t·km)';
 COMMENT ON COLUMN input_params.composition_types.composition_type_energy_factor_speed   IS 'Energy regression coefficient for speed-squared term. Unit: kWh/((km/h)²·km)';
 COMMENT ON COLUMN input_params.composition_types.composition_type_energy_factor_terrain IS 'Energy regression coefficient for terrain profile.';
 COMMENT ON COLUMN input_params.composition_types.composition_type_min_boarding_time  IS 'Vehicle-dependent minimum dwell time at boarding stops. Unit: h';
 COMMENT ON COLUMN input_params.composition_types.composition_type_min_alighting_time IS 'Vehicle-dependent minimum dwell time at alighting stops. Unit: h';
-COMMENT ON COLUMN input_params.composition_types.composition_type_purchase_coach_eur IS 'Total purchase cost for all coaches. Unit: €';
+COMMENT ON COLUMN input_params.composition_types.composition_type_purchase_coach_eur IS 'Average purchase price per coach, derived from the per-metre model (new 145 / refurbished 53 k€ per metre of coach, double-deck ×1.12) applied to the composition''s coach lengths. Derivation: calib/CALIBRATION.md, Coach purchase cost. Unit: €/coach';
 COMMENT ON COLUMN input_params.composition_types.composition_type_coach_avail_per    IS 'Share of calendar days coach fleet is available. Unit: %';
 COMMENT ON COLUMN input_params.composition_types.composition_type_coach_amort_years  IS 'Coach amortisation period. Unit: years';
-COMMENT ON COLUMN input_params.composition_types.composition_type_cleaning_eur_day   IS 'Daily cleaning and service preparation cost. Unit: €/day';
-COMMENT ON COLUMN input_params.composition_types.composition_type_coach_maint_eur_km IS 'Variable coach maintenance cost per km. Unit: €/km';
+COMMENT ON COLUMN input_params.composition_types.composition_type_cleaning_eur_day   IS 'Cleaning & overnight service preparation per coach per operating day, nominal 2032. Unit: €/coach/day';
+COMMENT ON COLUMN input_params.composition_types.composition_type_coach_maint_eur_km IS 'Coach maintenance for the whole composition per train-km (per-coach rate × number of coaches; new 1.00 / refurbished 1.30 €/coach-km, nominal 2032). Unit: €/train-km';
 COMMENT ON COLUMN input_params.composition_types.composition_type_driver_factor      IS 'Number of drivers required per trip (e.g. 1 or 2).';
 COMMENT ON COLUMN input_params.composition_types.source_id                           IS 'Source for all values in this row.';
 
@@ -194,54 +214,6 @@ CREATE TABLE input_params.composition_type_coaches (
 
 COMMENT ON TABLE  input_params.composition_type_coaches          IS 'Ordered coach slots per composition type.';
 COMMENT ON COLUMN input_params.composition_type_coaches.position IS 'Position of the coach in the composition (1 = first coach behind the locomotive).';
-
--- ---------------------------------------------------------------
--- composition_references
--- Reference trip profile per composition — used to compute
--- indicative KPIs at load time via compute_indicative_figures()
--- in models/compositions/calc_indicative_figures.py (currently a
--- placeholder — see that module). One current row per
--- composition_type_id.
--- ---------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS input_params.composition_references (
-    composition_reference_id  SERIAL          PRIMARY KEY,
-    composition_type_row_id   INTEGER         NOT NULL REFERENCES input_params.composition_types(composition_type_row_id) ON DELETE CASCADE,
-    composition_type_id       TEXT            NOT NULL,
-    ref_distance_km           INTEGER         NOT NULL,
-    ref_avg_speed_kmh         NUMERIC(6,2)    NOT NULL,
-    ref_terrain_score         NUMERIC(6,3)    NOT NULL,
-    ref_operating_days        INTEGER         NOT NULL DEFAULT 360,
-    ref_utilization_seat      NUMERIC(4,3)    NOT NULL DEFAULT 0.70,
-    ref_utilization_couchette NUMERIC(4,3)    NOT NULL DEFAULT 0.65,
-    ref_utilization_sleeper   NUMERIC(4,3)    NOT NULL DEFAULT 0.80,
-    ref_utilization_capsule   NUMERIC(4,3)    NOT NULL DEFAULT 0.70,
-    ref_utilization_catering  NUMERIC(4,3)    NOT NULL DEFAULT 0.00,
-    ref_avg_fare_seat         NUMERIC(8,2)    NOT NULL DEFAULT 49.00,
-    ref_avg_fare_couchette    NUMERIC(8,2)    NOT NULL DEFAULT 79.00,
-    ref_avg_fare_sleeper      NUMERIC(8,2)    NOT NULL DEFAULT 129.00,
-    ref_avg_fare_capsule      NUMERIC(8,2)    NOT NULL DEFAULT 99.00,
-    ref_avg_fare_catering     NUMERIC(8,2)    NOT NULL DEFAULT 0.00,
-    source_id                 INTEGER         REFERENCES input_params.sources(source_id),
-    UNIQUE (composition_type_row_id)
-);
-
-COMMENT ON TABLE input_params.composition_references IS
-    'Reference trip profile per composition for indicative KPI computation. Not versioned, same as composition_types: exactly one row per composition_type_row_id, enforced by UNIQUE — a changed reference profile means a new composition_type_id (and a new row here to match), never editing in place.';
-COMMENT ON COLUMN input_params.composition_references.ref_distance_km           IS 'Reference trip one-way distance used to compute indicative KPIs. Unit: km';
-COMMENT ON COLUMN input_params.composition_references.ref_avg_speed_kmh         IS 'Reference trip average speed. Unit: km/h';
-COMMENT ON COLUMN input_params.composition_references.ref_terrain_score         IS 'Reference trip average terrain difficulty score (same scale as TrackInfrastructure.terrain_score).';
-COMMENT ON COLUMN input_params.composition_references.ref_operating_days        IS 'Reference trip operating days per year. Unit: days/year';
-COMMENT ON COLUMN input_params.composition_references.ref_utilization_seat      IS 'Reference load factor (share of places sold) for the Seat class. Unit: %';
-COMMENT ON COLUMN input_params.composition_references.ref_utilization_couchette IS 'Reference load factor (share of places sold) for the Couchette class. Unit: %';
-COMMENT ON COLUMN input_params.composition_references.ref_utilization_sleeper   IS 'Reference load factor (share of places sold) for the Sleeper class. Unit: %';
-COMMENT ON COLUMN input_params.composition_references.ref_utilization_capsule   IS 'Reference load factor (share of places sold) for the Capsule class. Unit: %';
-COMMENT ON COLUMN input_params.composition_references.ref_utilization_catering  IS 'Reference load factor (share of places sold) for the Catering class. Unit: %';
-COMMENT ON COLUMN input_params.composition_references.ref_avg_fare_seat         IS 'Reference average fare per sold place for the Seat class. Unit: €';
-COMMENT ON COLUMN input_params.composition_references.ref_avg_fare_couchette    IS 'Reference average fare per sold place for the Couchette class. Unit: €';
-COMMENT ON COLUMN input_params.composition_references.ref_avg_fare_sleeper      IS 'Reference average fare per sold place for the Sleeper class. Unit: €';
-COMMENT ON COLUMN input_params.composition_references.ref_avg_fare_capsule      IS 'Reference average fare per sold place for the Capsule class. Unit: €';
-COMMENT ON COLUMN input_params.composition_references.ref_avg_fare_catering     IS 'Reference average fare per sold place for the Catering class. Unit: €';
-COMMENT ON COLUMN input_params.composition_references.source_id                 IS 'Source for all values in this row.';
 
 -- ---------------------------------------------------------------
 -- track_infrastructure_defaults
@@ -373,3 +345,6 @@ COMMENT ON COLUMN input_params.stop_infrastructures.stop_charge_eur IS 'Station 
 COMMENT ON COLUMN input_params.stop_infrastructures.stop_charge_src IS 'Source for stop_charge_eur.';
 COMMENT ON COLUMN input_params.stop_infrastructures.change_log      IS 'Free-text description of changes made in this version.';
 COMMENT ON COLUMN input_params.stop_infrastructures.stop_infra_version IS 'Per-table full-snapshot version number. Resolved via scenario.scenarios.stop_infrastructures_version — never inferred.';
+COMMENT ON COLUMN input_params.coach_type_classes.section_length_m IS 'Length of this class section within the coach. Basis of the class cost allocation and derived per-class densities. Unit: m';
+COMMENT ON COLUMN input_params.coach_type_classes.section_weight_t IS 'Weight of this class section within the coach. Unit: t';
+COMMENT ON COLUMN input_params.coach_type_classes.section_crew_factor IS 'Crew factor natively attributable to this section. Unit: attendant-equivalents';

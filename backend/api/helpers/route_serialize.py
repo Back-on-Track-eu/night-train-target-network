@@ -207,11 +207,15 @@ def _composition_to_dict(comp: Composition) -> dict:
         "energy_factor_speed": comp.energy_factor_speed,
         "energy_factor_terrain": comp.energy_factor_terrain,
         "total_weight_t": comp.total_weight_t,
+        "total_length_m": comp.total_length_m,
         "total_crew": comp.total_crew,
         # Keyed by class_main (Seat/Couchette/Sleeper/Capsule/Catering),
         # not class_id, since 2026-07-06 — see Composition's field comments.
         "places_by_class": comp.places_by_class,
-        "density_by_class": comp.density_by_class,
+        # derived from real section geometry (m and t per place) —
+        # replace the retired density_by_class (2026-07-22)
+        "density_by_class_main_length": comp.density_by_class_main_length,
+        "density_by_class_main_weight": comp.density_by_class_main_weight,
     }
 
 
