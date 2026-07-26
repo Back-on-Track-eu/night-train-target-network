@@ -11,6 +11,13 @@
     "noStopsFound": "No stops found",
     "minStopsTooltip": "Two stops per route minimum.",
     "loading": "Fetching data…",
+    "map": {
+      "travelTime": "Travel time",
+      "unknownDuration": "—",
+      "durationHm": "{h}h {m}m",
+      "durationH": "{h}h",
+      "durationM": "{m}m"
+    },
     "evaluation": {
       "views": {
         "route": "Full Route",

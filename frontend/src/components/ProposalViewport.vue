@@ -110,6 +110,17 @@ function formatMinutes(min: number | null): string | null {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 
+// Travel time of a leg, in minutes, from the timetable the API already returns.
+// A negative difference means the leg runs over midnight, so wrap by a full day
+// (the mirror-around-02:30 timetable can also put either value outside 0-1439,
+// which the same modulo handles). Null when either end has no time.
+function legTravelMinutes(seg: BackendSegment): number | null {
+  const departure = seg.from_stop.departure_time_min
+  const arrival = seg.to_stop.arrival_time_min
+  if (departure == null || arrival == null) return null
+  return (((arrival - departure) % 1440) + 1440) % 1440
+}
+
 function toStopTimeFmt(stop: BackendStop): StopTimeFmt {
   return {
     stop_id: stop.stop_id,
@@ -636,11 +647,15 @@ function splitLineAtFraction(
 interface MapSegment {
   coordinates: [number, number][]
   highlighted: boolean
+  fromName: string
+  toName: string
+  travelMinutes: number | null
 }
 
 // Per-segment geometry for the displayed trip, each flagged highlighted/dimmed
-// according to the evaluation panel's current scope. Null outside display mode
-// (MapView then falls back to the plain shape).
+// according to the evaluation panel's current scope and carrying the endpoint
+// names + travel time MapView shows on hover. Null outside display mode (MapView
+// then falls back to the plain shape).
 const mapSegments = computed<MapSegment[] | null>(() => {
   const rr = rawRoute.value
   const tripId = selectedTripId.value
@@ -673,6 +688,13 @@ const mapSegments = computed<MapSegment[] | null>(() => {
   const out: MapSegment[] = []
   trip.segments.forEach((seg, i) => {
     const coords = geoById.get(seg.geometry_id) ?? []
+    // Identity of the leg for the hover tooltip. A leg split at a border keeps
+    // the same names/time on both halves — either half describes the whole leg.
+    const leg = {
+      fromName: seg.from_stop.stop_name,
+      toName: seg.to_stop.stop_name,
+      travelMinutes: legTravelMinutes(seg),
+    }
     if (scope.kind === 'country') {
       const fromC = seg.from_stop.country_code
       const toC = seg.to_stop.country_code
@@ -686,12 +708,12 @@ const mapSegments = computed<MapSegment[] | null>(() => {
         countries.includes(toC)
       ) {
         const [before, after] = splitLineAtFraction(coords, seg.country_distance_shares[fromC] ?? 0)
-        out.push({ coordinates: before, highlighted: fromC === scope.country })
-        out.push({ coordinates: after, highlighted: toC === scope.country })
+        out.push({ ...leg, coordinates: before, highlighted: fromC === scope.country })
+        out.push({ ...leg, coordinates: after, highlighted: toC === scope.country })
       } else {
         const inScope =
           fromC === scope.country || toC === scope.country || countries.includes(scope.country)
-        out.push({ coordinates: coords, highlighted: inScope })
+        out.push({ ...leg, coordinates: coords, highlighted: inScope })
       }
       return
     }
@@ -700,7 +722,7 @@ const mapSegments = computed<MapSegment[] | null>(() => {
       highlighted = false // whole line dims; only the marker stays lit
     else if (scope.kind === 'od') highlighted = odRange ? i >= odRange[0] && i < odRange[1] : true
     else highlighted = true
-    out.push({ coordinates: coords, highlighted })
+    out.push({ ...leg, coordinates: coords, highlighted })
   })
 
   // Safety: a country/OD scope that matched nothing shouldn't grey the whole
