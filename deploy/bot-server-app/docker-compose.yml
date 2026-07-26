@@ -1,0 +1,167 @@
+# =============================================================================
+# Target Network — parameterized app stack (staging AND production)
+# =============================================================================
+# ONE compose definition for both server environments, parameterized through
+# .env (ENV_NAME, ports, credentials). Two clones of this repo live on
+# bot-server, each pinned to its branch:
+#
+#   /opt/targetnetwork-staging      checkout: staging     ENV_NAME=staging
+#   /opt/targetnetwork-production   checkout: production  ENV_NAME=production
+#
+# Both run this same file from their own checkout, so the stack definition
+# can never drift between environments — only .env differs.
+#
+# The heavy OpenRailRouting JVM is NOT part of this stack: both environments
+# share the existing targetnetwork-routing container (stateless per request,
+# ~840 MiB graph in RAM — the box cannot afford it twice). We join its
+# network below.
+#
+# House pattern: nothing publishes a public port except localhost debug
+# binds. Public access = Caddy vhost on the shared nextcloud_nextcloud
+# network. See README.md here for the runbook (first-time setup, baseline,
+# Caddy blocks, David's pgAdmin tunnel).
+#
+# Deploys are driven by deploy.sh (called from GitHub Actions on push to
+# the environment's branch): git pull, build, migrate, health check.
+# =============================================================================
+name: targetnetwork-${ENV_NAME:?set ENV_NAME in .env (staging|production)}
+
+services:
+
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: tn-${ENV_NAME}-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
+    ports:
+      # Localhost-only: this is what an SSH tunnel targets for desktop
+      # pgAdmin access (staging 55433, production 55434 by convention).
+      - "127.0.0.1:${DB_DEBUG_PORT:?set DB_DEBUG_PORT in .env}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Schema-only init on first boot (empty volume) — latest state.
+      # A DB born this way already contains every migration: run
+      # `docker compose run --rm migrate python db/migrate.py --baseline`
+      # once before first `up` (see README).
+      - ../../backend/db/dev/sql/create_admin_schema.sql:/docker-entrypoint-initdb.d/01_admin.sql:ro
+      - ../../backend/db/dev/sql/create_input_params_schema.sql:/docker-entrypoint-initdb.d/02_input_params.sql:ro
+      - ../../backend/db/dev/sql/create_scenario_schema.sql:/docker-entrypoint-initdb.d/03_scenario.sql:ro
+      - ../../backend/db/dev/sql/create_proposal_schema.sql:/docker-entrypoint-initdb.d/04_proposals.sql:ro
+      - ../../backend/db/dev/sql/create_ontd_schema.sql:/docker-entrypoint-initdb.d/05_ontd.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  # One-shot: applies pending SQL migrations, then exits. The api service
+  # refuses to start until this has completed successfully, so a deployed
+  # backend can never meet a database missing its schema changes.
+  migrate:
+    build:
+      context: ../../backend
+      dockerfile: docker/Dockerfile
+    image: tn-${ENV_NAME}-backend
+    container_name: tn-${ENV_NAME}-migrate
+    command: ["python", "db/migrate.py"]
+    environment:
+      - POSTGRES_HOST=tn-${ENV_NAME}-db
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    image: tn-${ENV_NAME}-backend
+    container_name: tn-${ENV_NAME}-api
+    # Skip the image's seed-on-start entrypoint (it begins with
+    # DROP SCHEMA ... CASCADE) — server databases are never reseeded.
+    # Schema changes arrive exclusively through the migrate service.
+    command:
+      [
+        "gunicorn",
+        "--bind", "0.0.0.0:5000",
+        "--workers", "2",
+        "--timeout", "120",
+        "main:create_app()",
+      ]
+    environment:
+      # Container names, NOT the service alias "db": this container also
+      # joins the routing stack's network, where the old compose registers
+      # its own "db" alias — the bare name is ambiguous across networks.
+      - POSTGRES_HOST=tn-${ENV_NAME}-db
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      # Shared routing engine (see header).
+      - OPENRAILROUTING_URL=http://targetnetwork-routing:8989
+      # Baked into the image at build time; seed.py reads it to populate
+      # input_params.countries.country_geom (CountryIndex source).
+      - COUNTRIES_GEOJSON_PATH=/app/models/route/routing/countries.geojson
+      # Auth plane (see backend/api/README.md). JWT_SECRET is a boot
+      # requirement; SMTP_* enable real OTP mail; KEYCLOAK_* stay empty
+      # until the bot realm exists (OIDC plane is dormant without them).
+      - JWT_SECRET=${JWT_SECRET:?set JWT_SECRET in .env}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+      - AUTH_EMAIL_DEV_MODE=${AUTH_EMAIL_DEV_MODE:-}
+      - KEYCLOAK_ISSUER_URL=${KEYCLOAK_ISSUER_URL:-}
+      - KEYCLOAK_CLIENT_ID=${KEYCLOAK_CLIENT_ID:-}
+    ports:
+      - "127.0.0.1:${API_DEBUG_PORT:?set API_DEBUG_PORT in .env}:5000"
+    mem_limit: 1g
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - default
+      - caddy_net
+      - routing_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: Dockerfile.demo
+      args:
+        VITE_API_BASE_URL: ""   # same-origin /api/* — Caddy routes to tn-<env>-api
+    image: tn-${ENV_NAME}-frontend
+    container_name: tn-${ENV_NAME}-frontend
+    networks:
+      - default
+      - caddy_net
+    restart: unless-stopped
+    # Caddy vhosts (see README):
+    #   staging:    targetnetwork.65.109.137.97.sslip.io (basic-auth)
+    #   production: targetnetwork.back-on-track.eu
+
+volumes:
+  pgdata:
+    name: tn_${ENV_NAME}_pgdata
+
+networks:
+  caddy_net:
+    external: true
+    name: nextcloud_nextcloud
+  routing_net:
+    external: true
+    name: targetnetwork_default

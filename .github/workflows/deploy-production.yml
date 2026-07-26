@@ -1,0 +1,27 @@
+name: Deploy production
+
+# Every push to production (in practice: staging merged into production once
+# tested) deploys to the production environment on bot-server. Same forced-
+# command SSH mechanism as deploy-staging.yml.
+
+on:
+  push:
+    branches: [production]
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        env:
+          SSH_KEY: ${{ secrets.TN_DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H cloud.back-on-track.eu >> ~/.ssh/known_hosts 2>/dev/null
+          ssh -i ~/.ssh/deploy_key root@cloud.back-on-track.eu production

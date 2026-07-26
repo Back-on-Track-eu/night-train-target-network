@@ -1,0 +1,29 @@
+name: Deploy staging
+
+# Every push to staging (in practice: a merged PR — branch protection requires
+# the CI checks, so what lands here already passed them) deploys to the
+# staging environment on bot-server. The SSH key is locked to a forced
+# command on the server (deploy/bot-server-app/dispatch.sh): it can trigger
+# this one deploy and nothing else.
+
+on:
+  push:
+    branches: [staging]
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        env:
+          SSH_KEY: ${{ secrets.TN_DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H cloud.back-on-track.eu >> ~/.ssh/known_hosts 2>/dev/null
+          ssh -i ~/.ssh/deploy_key root@cloud.back-on-track.eu staging

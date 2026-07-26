@@ -9,6 +9,7 @@ This is a **monorepo** with two independently deployable parts:
 | ------------ | ----------- | ------------------------ | ------------------------ |
 | Backend API  | `backend/`  | Python 3.12 (Flask, uv)  | `backend/main.py`       |
 | Frontend SPA | `frontend/` | TypeScript (Vue 3, Vite) | `frontend/src/main.ts`  |
+| Server deploy | `deploy/`  | Compose + bash           | `deploy/bot-server-app/README.md` |
 
 Data lives in PostgreSQL 16/PostGIS. Routing is served by a self-hosted
 OpenRailRouting (GraphHopper fork) container. There are two Docker Compose
@@ -119,6 +120,49 @@ Requires the full Docker stack (`postgres` + `openrailrouting` + `api`)
 running — these are integration tests against a live stack, not mocks. See
 `backend/tests/README.md` for the full test layout.
 
+### Deploy stack rehearsal (validate a deploy without a server)
+
+```bash
+cd deploy/bot-server-app && ./local.sh    # → http://localhost:8090
+```
+
+Runs the same compose stack the servers run (no routing engine — route
+planning fails, everything else works). See `deploy/bot-server-app/README.md`.
+
+---
+
+## Branches, environments & deployment
+
+There is **no `main` branch**. Two protected branches map to two server
+environments; all work lands via pull request:
+
+| Branch | Role | Deploys to (on merge) |
+| ------ | ---- | --------------------- |
+| `staging` | Integration — every PR targets this | staging env, `targetnetwork.65.109.137.97.sslip.io` (basic-auth) |
+| `production` | Released — receives `staging` merges once tested | `targetnetwork.back-on-track.eu` |
+
+A merged PR triggers `.github/workflows/deploy-staging.yml` /
+`deploy-production.yml`: SSH to bot-server → `deploy/bot-server-app/deploy.sh`
+(pull, build, **apply pending DB migrations before the api starts**, health
+check). A failed deploy is a red X on the merge commit.
+
+---
+
+## Database changes — the migrations contract
+
+Server databases are **never reseeded**. Every schema change ships twice:
+
+1. folded into `backend/db/dev/sql/create_*.sql` (fresh local seeds are
+   always at the latest state), **and**
+2. as a dated migration `backend/db/dev/sql/migrations/YYYY-MM-DD_name.sql`
+   (how the server databases move forward — applied automatically at deploy
+   by `backend/db/migrate.py`).
+
+Migration files must **not** contain their own `BEGIN;`/`COMMIT;` — the
+runner wraps each file in one transaction together with its tracking record.
+Full contract, `--baseline` semantics, and editorial rules:
+`backend/db/README.md`.
+
 ---
 
 ## Important Files
@@ -154,8 +198,9 @@ for quick reference (all under `/api`):
 ```
 GET  /api/health
 GET  /api/data/status
-POST /api/auth/request-code        ⚠️  stub — returns 501
-POST /api/auth/verify              ⚠️  stub — returns 501
+POST /api/auth/request-code        OTP mail (rate-limited 5/h per IP)
+POST /api/auth/verify              OTP → JWT; merges guest work into the account
+POST /api/auth/guest               anonymous JWT (rate-limited 20/h per IP)
 POST /api/feedback
 GET  /api/feedback/categories
 POST /api/proposal
@@ -166,9 +211,14 @@ GET  /api/params/StopInfrastructures
 GET  /api/params/compositions
 GET  /api/params/TrackInfrastructures
 GET  /api/scenarios
-POST /api/route/plan
-POST /api/evaluation/calc
+POST /api/route/plan               @optional_auth — persists on calc
+POST /api/evaluation/calc          @optional_auth — persists on calc
 ```
+
+Auth has two planes: the OTP/guest plane above (always on; needs
+`JWT_SECRET` at boot, `SMTP_*` or `AUTH_EMAIL_DEV_MODE=true` for mail) and
+a dormant Keycloak/OIDC plane that activates when `KEYCLOAK_ISSUER_URL` +
+`KEYCLOAK_CLIENT_ID` are set. Details: `backend/api/README.md`.
 
 Full request/response documentation: `backend/api/README.md`.
 
@@ -199,9 +249,9 @@ Name the file `<name>Store.ts`.
 
 ## CI/CD
 
-Two separate workflows:
+Four workflows:
 
-**`.github/workflows/ci.yml`** — runs on every push/PR to `main`:
+**`.github/workflows/ci.yml`** — runs on every push/PR to `staging`/`production`:
 
 | Job | What it checks |
 | --- | -------------- |
@@ -209,8 +259,13 @@ Two separate workflows:
 | `ruff-check` | Backend Python formatting (`ruff format --check backend/`) |
 | `type-check` | Frontend TypeScript (`npm run type-check` via `vue-tsc`) |
 
-**`.github/workflows/backend-tests.yml`** — runs on push to `main`/`backend-dev`
-and PRs to `main`, only when `backend/**` or `.devcontainer/**` changed:
+**`.github/workflows/deploy-staging.yml` / `deploy-production.yml`** — on
+push to the matching branch, deploy to the matching server environment (see
+"Branches, environments & deployment" above).
+
+**`.github/workflows/backend-tests.yml`** — runs on push to
+`staging`/`production`/`backend-dev`, only when `backend/**` or
+`.devcontainer/**` changed:
 
 | Job | What it checks |
 | --- | -------------- |

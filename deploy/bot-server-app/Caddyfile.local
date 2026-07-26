@@ -1,0 +1,9 @@
+# Local preview vhost — mirrors the server's Caddy blocks (README).
+:8080 {
+	handle /api/* {
+		reverse_proxy tn-{$ENV_NAME}-api:5000
+	}
+	handle {
+		reverse_proxy tn-{$ENV_NAME}-frontend:80
+	}
+}

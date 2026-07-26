@@ -39,7 +39,16 @@ it is used by both `backend/docker/docker-compose.yml` and `.devcontainer/docker
 cp backend/docker/.env.example backend/docker/.env
 ```
 
-The default values in `.env.example` work out of the box for local development.
+One value is required before the API will boot — a JWT signing secret
+(the API **fails fast without it**):
+
+```bash
+# generate one and paste it into backend/docker/.env as JWT_SECRET=...
+openssl rand -base64 48
+```
+
+Every other default in `.env.example` works out of the box for local
+development (OTP mail stays in dev mode: codes are logged, not sent).
 Edit `backend/docker/.env` if you need to change ports or paths.
 
 ---

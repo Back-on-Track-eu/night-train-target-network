@@ -123,3 +123,4 @@ desktop.ini
 # Large data
 # -----------------------------------------------------------------------------
 backend/models/compositions/calib/seed/
+deploy/**/.env
