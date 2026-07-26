@@ -35,7 +35,7 @@ from tests.helpers import ROUTE_URL, all_trips, stop_times
 
 BASE_REQUEST = {
     "stops": STOPS_BERLIN_DRESDEN_WIEN,
-    "composition_id": "STD-7.1",
+    "composition_id": "NEW-BAL-7",
     # Pinned off so the structural tests below see a deterministic
     # caller's-list route — CZ_BRNO_HLN would otherwise be auto-added
     # (see module docstring); the add/suggest paths have their own
@@ -203,11 +203,13 @@ class TestResponseStructure:
         """The embedded composition is the physics-relevant subset only —
         no cost fields, but capacity/density per class present."""
         comp = plan_response["route"]["trip_pairs"][0]["composition"]
-        assert comp["comp_id"] == "STD-7.1"
+        assert comp["comp_id"] == "NEW-BAL-7"
         cost_like = {k for k in comp if "eur" in k.lower() or "cost" in k.lower()}
         assert cost_like == set(), f"Cost-like fields on composition: {cost_like}"
         assert sum(comp["places_by_class"].values()) > 0
-        assert len(comp["density_by_class"]) > 0
+        assert len(comp["density_by_class_main_length"]) > 0
+        assert len(comp["density_by_class_main_weight"]) > 0
+        assert comp["total_length_m"] > 0
 
     def test_od_pairs_populated_by_stopgap_demand(self, plan_response):
         """plan_route() itself leaves od_pairs empty, but the endpoint then
@@ -699,7 +701,7 @@ class TestValidation:
         )
 
     def test_missing_stops_returns_400(self, api_base):
-        body = {"composition_id": "STD-7.1"}
+        body = {"composition_id": "NEW-BAL-7"}
         assert (
             requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=10).status_code
             == 400

@@ -29,7 +29,7 @@
       "norms": {
         "per_year": "Per Year",
         "per_operating_day": "Per Operating Day",
-        "per_trip_km": "Per Trip-Km",
+        "per_train_km": "Per Train-Km",
         "per_available_place_km": "Per Available Place-Km",
         "per_sold_place_km": "Per Sold Place-km"
       },
@@ -45,7 +45,7 @@
         "fixed": "Fixed",
         "infrastructure": "Infrastructure",
         "revenue": "Revenue",
-        "margin": "Margin (EBIT)"
+        "margin": "Expected Margin"
       },
       "fields": {
         "driver": "Driver",
@@ -114,6 +114,9 @@
         "success": "Thank you! Your feedback has been sent.",
         "error": "Something went wrong. Please try again.",
         "invalidEmail": "Please enter a valid e-mail address."
+      },
+      "classes": {
+        "all": "All Classes"
       }
     }
   }

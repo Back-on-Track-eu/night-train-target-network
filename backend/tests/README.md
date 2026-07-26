@@ -67,7 +67,6 @@ Shared code:
 | `test_required_columns_not_null` (parametrized ×5) | Non-nullable columns intact | `COUNT(*) WHERE col IS NULL` | 0 NULLs |
 | `test_composition_types_have_coaches` | No zero-capacity compositions | JOIN composition_types↔coaches | every composition has ≥ 1 coach |
 | `test_coach_type_classes_have_places` | Positive place counts | coach_type_classes | no row with places ≤ 0 |
-| `test_service_classes_have_no_invalid_density` | Density never NULL/negative (0.0 allowed for non-passenger classes like Catering; regression guard for the old densities-all-0.0 bug) | service_classes | no NULL/negative density |
 | `test_track_infra_one_row_per_country_at_pinned_version` | Exact-match resolution unambiguous | rows at base pinned version | exactly 1 row per country |
 | `test_track_infrastructure_default_row_exists` | Default fallback row present | pinned defaults version | ≥ 1 row |
 | `test_stop_infrastructure_global_default_exists` | Global stop default present | pinned version, `country_code IS NULL` | ≥ 1 row |
@@ -82,16 +81,16 @@ Shared code:
 | Test | Purpose | Input | Expected |
 |---|---|---|---|
 | `test_column_exists_in_schema` (parametrized ×50) | SQL schema contains every column the loader reads (static, no live DB round-trip) | parsed `db/dev/sql/*.sql` | every (table, column) pair present |
-| `test_all_compositions_load` | Full composition load succeeds | `build_all_compositions()` | ≥ 10 compositions |
+| `test_all_compositions_load` | Full composition load succeeds | `build_all_compositions()` | exactly the 8 calibrated compositions |
 | `test_all_stops_load` | Full stop load succeeds | `build_all_stops()` | ≥ 8 stops |
 | `test_composition_fields_match_db` | Loader values = raw DB values (incl. operator join) | STD-7.1 vs DB row | id/speed/hsr/driver-cost/ebit all match |
 | `test_composition_capacity_matches_db_aggregation` | `places_by_class` (keyed by class_main) correct | SQL aggregation over coaches | loader = DB per class |
 | `test_composition_weight_matches_db_aggregation` | `total_weight_t` correct | SUM of coach gross weights | loader = DB |
-| `test_composition_density_matches_db` | `density_by_class` from `service_class_density` (regression guard) | service_classes rows | loader = DB per class present |
+| `test_composition_density_matches_db` | Derived densities (`density_by_class_main_length/weight`, m and t per place) reproduce section sums ÷ places (`service_class_density` retired 2026-07-22) | coach section geometry | loader = section math per class |
 | `test_track_infra_fields_match_db` | Track values at pinned version, flagged non-default | DE row at pinned version | values match, `is_default=False` |
 | `test_stop_fields_match_db` | Stop identity/location correct | DE_BERLIN_HBF at pinned version | all fields match |
 | `test_country_geometries_cover_stop_countries` | Runtime geometry availability for CountryIndex | `get_country_geometries()` | polygon for every stop country |
-| `test_composition_indicative_figures_present` | Indicative KPIs wired through (placeholder model — tighten when the real compositions cost model lands) | `build_all_compositions()` | ≥ 1 composition with positive KPIs |
+| `test_composition_indicative_figures_present` | Seeded calibration KPIs wired through, per composition, differentiated by material strategy | `build_all_compositions()` | NEW-BAL-7 & REF-BUD-6 present with distinct positive KPIs |
 
 ## test_04_versioning.py — Scenario versioning & provenance
 

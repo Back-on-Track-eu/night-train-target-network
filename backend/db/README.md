@@ -20,7 +20,8 @@ db/
 │   │   ├── create_scenario_schema.sql
 │   │   ├── create_proposal_schema.sql
 │   │   └── create_ontd_schema.sql     # separate/optional — see "ontd schema" below
-│   ├── seed.py                 # Seeds admin/input_params/scenario/proposals with illustrative test data
+│   ├── seed.py                 # Seeds admin/input_params/scenario/proposals; operational
+│   │                           # parameters come from models/compositions/calib/seed/*.csv
 │   ├── sql_loader.py           # Loads .sql files from the sql/ folder
 │   ├── ontd_loader.py          # Separate script: loads the ontd schema from the ONTD GitHub snapshot
 │   ├── Dockerfile              # Builds the seeder image
@@ -28,6 +29,32 @@ db/
 │   └── .env.example            # Default credentials for local use (POSTGRES_* only)
 └── README.md                   # This file
 ```
+
+---
+
+## Calibration seed CSVs (derived artifacts)
+
+`seed.py` reads the operational parameters (operators, coach types with
+per-class sections, the eight standard compositions, class cost
+allocation) from `models/compositions/calib/seed/*.csv`. These CSVs are
+**derived artifacts and not committed** — the calibration notebook
+`models/compositions/calib/02_calibration.ipynb` is the source of truth,
+and its derivations are documented in `calib/CALIBRATION.md`.
+
+When the CSVs are absent, `seed.py` regenerates them automatically by
+executing the notebook's compute + export cells directly from the
+`.ipynb` JSON (no jupyter needed). That path is **stdlib-only by
+contract** — the notebook's export cell documents the constraint — so it
+works inside the API container and in CI, where dev extras (pandas,
+matplotlib) are not installed; display/validation/chart cells are
+skipped by code-token detection. To update values: re-run the notebook,
+never edit seed.py or the CSVs by hand.
+
+The 2026-07-22 schema redesign (real coach types, per-section class
+entries with geometry, composition crew/loco/allocation columns,
+retirement of `service_class_density`) is documented column-by-column in
+the DDL comments (`sql/create_input_params_schema.sql`) and in the
+migration `sql/migrations/2026-07-22_composition_redesign.sql`.
 
 ---
 

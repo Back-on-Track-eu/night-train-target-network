@@ -21,6 +21,8 @@ import requests
 
 from tests.helpers import EVAL_URL, inject_demand, route_bd
 
+# CALC 0.9.9: by_class_main retired; every normalisation is a dict keyed
+# by class_main plus "all" (the whole cell).
 NORMALISATIONS = (
     "per_year",
     "per_operating_day",
@@ -98,6 +100,18 @@ class TestResponseStructure:
     def test_route_view_has_all_normalisations(self, eval_standard):
         _, result = eval_standard
         assert set(result["views"]["route"]["data"]) == set(NORMALISATIONS)
+
+    def test_every_normalisation_is_class_keyed(self, eval_standard):
+        """CALC 0.9.9: each normalisation payload is {'all' | class_main:
+        breakdown}. 'all' must be present everywhere demand exists (the
+        standard fixture has demand)."""
+        _, result = eval_standard
+        data = result["views"]["route"]["data"]
+        for norm, payload in data.items():
+            assert isinstance(payload, dict), f"{norm}: not class-keyed"
+            assert "all" in payload, f"{norm}: 'all' cell missing"
+            for cls, bd in payload.items():
+                assert "net_eur" in bd, f"{norm}[{cls}]: not a breakdown"
 
     def test_breakdown_tree_shape(self, eval_standard):
         """The route-level per_year breakdown carries the full cost/revenue/

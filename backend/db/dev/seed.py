@@ -11,7 +11,6 @@ Run order:
      operator_class_costs → coach_types → coach_type_classes →
      track_infrastructure_defaults → track_infrastructures →
      stop_infrastructure_defaults → stop_infrastructures →
-     composition_types → composition_type_coaches → composition_references
   3. scenario: scenarios (base scenario pinning the version numbers seeded
      for the four infrastructure tables, plus one illustrative what-if
      scenario)
@@ -50,7 +49,6 @@ tables, comparing data across scenarios must go through resolved values,
 not version-number equality — see test_04_versioning.py /
 test_31_evaluation_content.py for the pattern.
 
-operators, coach_types, composition_types, and composition_references are
 NOT versioned — they're a catalog you add to, not history you edit. Each
 row's natural id (operator_id, coach_type_id, composition_type_id) is
 permanent; changing a value means seeding a new id, never editing a row
@@ -126,6 +124,107 @@ USERS = [
 ]
 
 # ============================================================
+# calibration seed CSVs
+# ============================================================
+# Operational parameters are exported by
+# models/compositions/calib/02_calibration.ipynb (final cell) into
+# calib/seed/*.csv and read here — update values by re-running the
+# notebook, never by editing this file. Derivations:
+# models/compositions/calib/CALIBRATION.md.
+
+import csv
+from pathlib import Path
+
+CALIB_SEED_DIR = (
+    Path(__file__).resolve().parents[2] / "models" / "compositions" / "calib" / "seed"
+)
+
+
+_CALIB_SEED_CSVS = (
+    "operators.csv",
+    "operator_class_costs.csv",
+    "coach_types.csv",
+    "coach_type_classes.csv",
+    "composition_types.csv",
+    "composition_type_coaches.csv",
+    "class_cost_allocation.csv",
+)
+
+
+def _ensure_calib_seed_csvs() -> None:
+    """Regenerate the calib seed CSVs from the calibration notebook when
+    they are absent. The CSVs are derived artifacts (not committed); the
+    notebook is the source of truth. Only its pandas/matplotlib-free
+    cells are executed — the compute + seed-export path is stdlib-only
+    by design (the notebook's export cell documents the contract), so
+    this works inside the API container without dev extras."""
+    if all((CALIB_SEED_DIR / f).is_file() for f in _CALIB_SEED_CSVS):
+        return
+    import json as _json
+    import os as _os
+    import re as _re
+
+    calib_dir = CALIB_SEED_DIR.parent
+    nb_path = calib_dir / "02_calibration.ipynb"
+    assert nb_path.is_file(), (
+        f"calib seed CSVs missing and {nb_path} not found — cannot "
+        "regenerate; commit the CSVs or restore the notebook"
+    )
+    print(
+        "  calib seed CSVs missing — regenerating from "
+        "02_calibration.ipynb (stdlib cells only)..."
+    )
+    with open(nb_path, encoding="utf-8") as fh:
+        nb = _json.load(fh)
+    ns: dict = {}
+    cwd = _os.getcwd()
+    _os.chdir(calib_dir)  # the export cell writes seed/ relative paths
+    try:
+        for cell in nb["cells"]:
+            if cell["cell_type"] != "code":
+                continue
+            src = "".join(cell["source"])
+            # skip display/validation/chart cells by actual code tokens
+            # (import statements and pd./plt. usage) — NOT by prose, so
+            # comments mentioning pandas/matplotlib don't trip the filter
+            if _re.search(
+                r"^\s*(?:import|from)\s+(?:pandas|matplotlib)", src, _re.M
+            ) or _re.search(r"\bpd\.|\bplt\.", src):
+                continue
+            exec(compile(src, "<02_calibration>", "exec"), ns)
+    finally:
+        _os.chdir(cwd)
+    missing = [f for f in _CALIB_SEED_CSVS if not (CALIB_SEED_DIR / f).is_file()]
+    assert not missing, (
+        f"notebook execution did not produce {missing} — the notebook's "
+        "compute/export cells may have gained a pandas dependency; keep "
+        "them stdlib-only (see the export cell's header comment)"
+    )
+    print("  calib seed CSVs regenerated.")
+
+
+_ensure_calib_seed_csvs()
+
+
+def _read_calib_csv(name: str) -> list[dict]:
+    path = CALIB_SEED_DIR / name
+    assert path.is_file(), (
+        f"missing {path} — run models/compositions/calib/02_calibration.ipynb "
+        "top to bottom first (its final cell writes the seed CSVs)"
+    )
+    with open(path, newline="", encoding="utf-8") as fh:
+        return list(csv.DictReader(fh))
+
+
+def _num(row: dict, *keys: str) -> dict:
+    """Return a copy of row with the given keys coerced to float."""
+    out = dict(row)
+    for k in keys:
+        out[k] = float(out[k])
+    return out
+
+
+# ============================================================
 # sources
 # ============================================================
 
@@ -142,8 +241,21 @@ SOURCES = [
     },
 ]
 
+SOURCES.append(
+    {
+        "source_description": (
+            "Back-on-Track (2026) and various other sources — composition "
+            "cost calibration; for further details see "
+            "backend/models/compositions/calib/CALIBRATION.md"
+        ),
+        "source_url": "backend/models/compositions/calib/CALIBRATION.md",
+        "source_date": "2026-07-21",
+    }
+)
+
 SRC_EXCEL = "B-o-T_targetnetwork_DB_v2.xlsx — illustrative placeholder values"
 SRC_ILLUSTRATIVE = "Illustrative / internal estimate"
+SRC_CALIBRATION = SOURCES[-1]["source_description"]
 
 
 def fetch_source_ids(cur) -> dict[str, int]:
@@ -293,238 +405,94 @@ def seed_country_geometries(cur) -> None:
 # seat=1/64, couchette=1/20, sleeper=1/12
 # ============================================================
 
+# One service class per coach section (class_id = "<coach> - <section
+# label>", workbook 2026-07-22); density retired — densities are derived
+# per composition from section geometry.
+SERVICE_CLASSES = sorted(
+    {
+        (row["class_id"], row["class_main"].capitalize())
+        for row in _read_calib_csv("coach_type_classes.csv")
+    }
+)
 SERVICE_CLASSES = [
-    # Seat
-    {
-        "service_class_id": "seat (reclining)",
-        "service_class_main": "Seat",
-        "service_class_density": round(1 / 64, 6),
-    },
-    {
-        "service_class_id": "seat (compartment)",
-        "service_class_main": "Seat",
-        "service_class_density": round(1 / 64, 6),
-    },
-    {
-        "service_class_id": "seat (large room)",
-        "service_class_main": "Seat",
-        "service_class_density": round(1 / 64, 6),
-    },
-    {
-        "service_class_id": "seat (spare)",
-        "service_class_main": "Seat",
-        "service_class_density": round(1 / 64, 6),
-    },
-    {
-        "service_class_id": "seat (playzone)",
-        "service_class_main": "Seat",
-        "service_class_density": round(1 / 64, 6),
-    },
-    {
-        "service_class_id": "seat PRM",
-        "service_class_main": "Seat",
-        "service_class_density": round(1 / 64, 6),
-    },
-    # Couchette
-    {
-        "service_class_id": "couchette (4-berth)",
-        "service_class_main": "Couchette",
-        "service_class_density": round(1 / 20, 6),
-    },
-    {
-        "service_class_id": "couchette (5-berth)",
-        "service_class_main": "Couchette",
-        "service_class_density": round(1 / 20, 6),
-    },
-    {
-        "service_class_id": "couchette (6-berth)",
-        "service_class_main": "Couchette",
-        "service_class_density": round(1 / 20, 6),
-    },
-    {
-        "service_class_id": "couchette (large room)",
-        "service_class_main": "Couchette",
-        "service_class_density": round(1 / 20, 6),
-    },
-    {
-        "service_class_id": "couchette PRM (2-berth)",
-        "service_class_main": "Couchette",
-        "service_class_density": round(1 / 20, 6),
-    },
-    # Capsule
-    {
-        "service_class_id": "Capsule (1-bed) with seat",
-        "service_class_main": "Capsule",
-        "service_class_density": 1.0,
-    },
-    {
-        "service_class_id": "Capsule (2-bed) with seats",
-        "service_class_main": "Capsule",
-        "service_class_density": round(1 / 2, 6),
-    },
-    {
-        "service_class_id": "Capsule (double) with seats",
-        "service_class_main": "Capsule",
-        "service_class_density": round(1 / 2, 6),
-    },
-    {
-        "service_class_id": "Capsule (3-bed) with seats",
-        "service_class_main": "Capsule",
-        "service_class_density": round(1 / 3, 6),
-    },
-    {
-        "service_class_id": "Mini-Cabin (bed)",
-        "service_class_main": "Capsule",
-        "service_class_density": 1.0,
-    },
-    # Sleeper
-    {
-        "service_class_id": "Sleeper (2-berth) with shower & WC",
-        "service_class_main": "Sleeper",
-        "service_class_density": round(1 / 12, 6),
-    },
-    {
-        "service_class_id": "Sleeper (2-berth) with shower option & WC",
-        "service_class_main": "Sleeper",
-        "service_class_density": round(1 / 12, 6),
-    },
-    {
-        "service_class_id": "Sleeper (double) with shower & WC",
-        "service_class_main": "Sleeper",
-        "service_class_density": round(1 / 12, 6),
-    },
-    {
-        "service_class_id": "Sleeper (3-berth) with shower & WC",
-        "service_class_main": "Sleeper",
-        "service_class_density": round(1 / 12, 6),
-    },
-    {
-        "service_class_id": "Sleeper (2-berth) with basin",
-        "service_class_main": "Sleeper",
-        "service_class_density": round(1 / 12, 6),
-    },
-    {
-        "service_class_id": "Sleeper (3-berth) with basin",
-        "service_class_main": "Sleeper",
-        "service_class_density": round(1 / 12, 6),
-    },
-    {
-        "service_class_id": "Sleeper (4-berth) with basin",
-        "service_class_main": "Sleeper",
-        "service_class_density": round(1 / 12, 6),
-    },
-    {
-        "service_class_id": "Sleeper PRM (2-berth)",
-        "service_class_main": "Sleeper",
-        "service_class_density": round(1 / 12, 6),
-    },
-    {
-        "service_class_id": "Sleeper PRM (double)",
-        "service_class_main": "Sleeper",
-        "service_class_density": round(1 / 12, 6),
-    },
-    {
-        "service_class_id": "Sleeper PRM (single)",
-        "service_class_main": "Sleeper",
-        "service_class_density": round(1 / 12, 6),
-    },
-    # Catering
-    {
-        "service_class_id": "Catering",
-        "service_class_main": "Catering",
-        "service_class_density": 0.0,
-    },
+    {"service_class_id": cid, "service_class_main": cm} for cid, cm in SERVICE_CLASSES
 ]
+
 
 # ============================================================
 # operators
 # ============================================================
 
 OPERATORS = [
-    {
-        "operator_id": "STD",
-        "operator_name": "Standard (illustrative)",
-        "operator_driver_costs_eur_h": 52.00,
-        "operator_crew_costs_eur_h": 38.00,
-        "operator_driver_overhead_h": "01:00:00",
-        "operator_crew_overhead_h": "01:00:00",
-        "operator_ebit_margin_per": 0.03,
-        "operator_financing_quota_per": 0.04,
-        "operator_var_overhead_per": 0.10,
-        "operator_fix_overhead_quota_per": 0.15,
-        # Full-service locomotive lease — utilization-based, bundles
-        # capital, maintenance, and insurance. Illustrative rate based on
-        # European full-service lease providers (ELP, Railpool, Alpha
-        # Trains), billed per loco operating hour.
-        "operator_loco_lease_eur_h": 145.00,
-    },
+    _num(
+        row,
+        "operator_driver_costs_eur_h",
+        "operator_crew_costs_eur_h",
+        "operator_ebit_margin_per",
+        "operator_financing_quota_per",
+        "operator_var_overhead_per",
+        "operator_fix_overhead_quota_per",
+        "operator_loco_lease_eur_h",
+    )
+    for row in _read_calib_csv("operators.csv")
 ]
 
+# Calibrated per class_main (seat/couchette/sleeper/capsule); fanned out
+# over every service_class_id of that main class. Catering classes carry
+# no stockings entry (dropped in the calibration).
+_CLASS_COST_BY_MAIN = {
+    (row["operator_id"], row["class_main"].lower()): float(
+        row["svc_stockings_eur_place"]
+    )
+    for row in _read_calib_csv("operator_class_costs.csv")
+}
+
 OPERATOR_CLASS_COSTS_RAW = [
-    ("STD", "seat (reclining)", 0.01),
-    ("STD", "seat (compartment)", 0.01),
-    ("STD", "seat (large room)", 0.01),
-    ("STD", "seat (spare)", 0.01),
-    ("STD", "seat (playzone)", 0.01),
-    ("STD", "seat PRM", 0.01),
-    ("STD", "couchette (4-berth)", 0.05),
-    ("STD", "couchette (5-berth)", 0.05),
-    ("STD", "couchette (6-berth)", 0.05),
-    ("STD", "couchette (large room)", 0.05),
-    ("STD", "couchette PRM (2-berth)", 0.05),
-    ("STD", "Sleeper (2-berth) with shower & WC", 0.10),
-    ("STD", "Sleeper (2-berth) with shower option & WC", 0.10),
-    ("STD", "Sleeper (double) with shower & WC", 0.10),
-    ("STD", "Sleeper (3-berth) with shower & WC", 0.10),
-    ("STD", "Sleeper (2-berth) with basin", 0.10),
-    ("STD", "Sleeper (3-berth) with basin", 0.10),
-    ("STD", "Sleeper (4-berth) with basin", 0.10),
-    ("STD", "Sleeper PRM (2-berth)", 0.10),
-    ("STD", "Sleeper PRM (double)", 0.10),
-    ("STD", "Sleeper PRM (single)", 0.10),
+    (op, sc["service_class_id"], rate)
+    for (op, main), rate in _CLASS_COST_BY_MAIN.items()
+    for sc in SERVICE_CLASSES
+    if sc["service_class_main"].lower() == main
 ]
 
 # ============================================================
 # coach_types
 # ============================================================
 
+# Synthetic interim coach types from the calibration aggregates — one
+# virtual coach per (composition, class present). Places and crew factors
+# match the calibrated composition exactly (crew factors sum to
+# attendants + 1.19 manager-equivalents); weights are allocated by places
+# share. Replaced by the real per-coach workbook split later.
+_COACHES = _read_calib_csv("coach_types.csv")
+
 COACH_TYPES = [
     {
-        "coach_type_id": "type1",
-        "coach_type_operator_id": "STD",
-        "coach_type_weight_gross_t": 52.00,
-        "coach_type_bikes": 0,
-        "coach_type_climatization": True,
-        "coach_type_plugs": True,
-        "coach_type_crew_factor": 0.5,
-        "coach_type_remarks": "STD seat coach — 80 reclining seats",
-    },
-    {
-        "coach_type_id": "type2",
-        "coach_type_operator_id": "STD",
-        "coach_type_weight_gross_t": 50.70,
-        "coach_type_bikes": 0,
-        "coach_type_climatization": True,
-        "coach_type_plugs": False,
-        "coach_type_crew_factor": 0.5,
-        "coach_type_remarks": "STD couchette coach — 48 couchette (6-berth) places",
-    },
-    {
-        "coach_type_id": "type3",
-        "coach_type_operator_id": "STD",
-        "coach_type_weight_gross_t": 55.50,
-        "coach_type_bikes": 0,
-        "coach_type_climatization": True,
-        "coach_type_plugs": True,
-        "coach_type_crew_factor": 1.0,
-        "coach_type_remarks": "STD sleeper coach — 24 sleeper berths (2-berth with shower & WC)",
-    },
+        "coach_type_id": row["coach_type_id"],
+        "coach_type_operator_id": row["coach_type_operator_id"],
+        "coach_type_weight_gross_t": float(row["coach_type_weight_gross_t"]),
+        "coach_type_length_m": float(row["coach_type_length_m"]),
+        "coach_type_weight_wo_service_t": float(row["coach_type_weight_wo_service_t"]),
+        "coach_type_length_wo_service_m": float(row["coach_type_length_wo_service_m"]),
+        "coach_type_has_wifi": row["coach_type_has_wifi"] == "True",
+        "coach_type_bikes": 1 if row["coach_type_bikes"] == "True" else 0,
+        "coach_type_climatization": row["coach_type_climatization"] == "True",
+        "coach_type_plugs": row["coach_type_plugs"] == "True",
+        "coach_type_crew_factor": float(row["coach_type_crew_factor"]),
+        "coach_type_remarks": row["coach_type_remarks"],
+    }
+    for row in _COACHES
 ]
 
 COACH_TYPE_CLASSES_RAW = [
-    ("type1", "seat (reclining)", 80),
-    ("type2", "couchette (6-berth)", 48),
-    ("type3", "Sleeper (2-berth) with shower & WC", 24),
+    (
+        row["coach_type_id"],
+        row["class_id"],
+        int(row["places"]),
+        float(row["section_length_m"]),
+        float(row["section_weight_t"]),
+        float(row["section_crew_factor"]),
+    )
+    for row in _read_calib_csv("coach_type_classes.csv")
 ]
 
 # ============================================================
@@ -1658,111 +1626,56 @@ STOP_INFRASTRUCTURES = _build_stop_infrastructures()
 # composition_types
 # ============================================================
 
-STD_COMP_DEFAULTS = dict(
-    composition_type_operator_id="STD",
-    composition_type_hsr_allowed=True,
-    composition_type_max_speed_kmh=230,
+# The eleven calibrated standard compositions, read from calib/seed/.
+# Energy factors and boarding/alighting times are not part of the cost
+# calibration — they keep the established defaults until the energy
+# model calibration workstream lands.
+_COMP_ENERGY_AND_TIMES = dict(
     composition_type_energy_factor_weight=0.000168,
     composition_type_energy_factor_speed=0.015123,
     composition_type_energy_factor_terrain=0.034545,
     composition_type_min_boarding_time="00:02:00",
     composition_type_min_alighting_time="00:02:00",
-    composition_type_purchase_coach_eur=20000000.00,
-    composition_type_coach_avail_per=0.80,
-    composition_type_coach_amort_years=30,
-    composition_type_cleaning_eur_day=1753.584,
-    composition_type_coach_maint_eur_km=2.86533333,
-    composition_type_driver_factor=1.0,
 )
 
-COMPOSITION_TYPES_VARYING = [
-    ("STD-3.1", "Standard 3 coach composition"),
-    ("STD-4.1", "Standard 4 coach composition v1"),
-    ("STD-4.2", "Standard 4 coach composition v2"),
-    ("STD-5.1", "Standard 5 coach composition v1"),
-    ("STD-5.2", "Standard 5 coach composition v2"),
-    ("STD-6.1", "Standard 6 coach composition v1"),
-    ("STD-6.2", "Standard 6 coach composition v2"),
-    ("STD-7.1", "Standard 7 coach composition"),
-    ("STD-9.1", "Standard 9 coach composition"),
-    ("STD-13.1", "Standard 13 coach composition"),
-]
+_COMP_CSV_HELPER_COLS = {"n_coaches", "length_m", "attendants"}
 
 
 def build_composition_types() -> list[dict]:
-    return [
-        {
-            "composition_type_id": comp_id,
-            "composition_type_description": description,
-            **STD_COMP_DEFAULTS,
-        }
-        for comp_id, description in COMPOSITION_TYPES_VARYING
-    ]
+    rows = []
+    for raw in _read_calib_csv("composition_types.csv"):
+        row = {k: v for k, v in raw.items() if k not in _COMP_CSV_HELPER_COLS}
+        row = _num(
+            row,
+            "composition_type_zugchef_crew_factor",
+            "composition_type_length_cost_prop",
+            "composition_type_max_speed_kmh",
+            "composition_type_purchase_coach_eur",
+            "composition_type_coach_avail_per",
+            "composition_type_cleaning_eur_day",
+            "composition_type_coach_maint_eur_km",
+            "composition_type_driver_factor",
+            "composition_type_indicative_cost_eur_train_km",
+            "composition_type_indicative_cost_ct_place_km",
+        )
+        row["composition_type_coach_amort_years"] = int(
+            row["composition_type_coach_amort_years"]
+        )
+        row["composition_type_n_locos"] = int(row["composition_type_n_locos"])
+        row["composition_type_hsr_allowed"] = (
+            row["composition_type_hsr_allowed"] == "True"
+        )
+        rows.append({**row, **_COMP_ENERGY_AND_TIMES})
+    return rows
 
+
+COMPOSITION_TYPE_IDS = [
+    r["composition_type_id"] for r in _read_calib_csv("composition_types.csv")
+]
 
 COMPOSITION_TYPE_COACHES_RAW = [
-    ("STD-3.1", 1, "type2"),
-    ("STD-3.1", 2, "type2"),
-    ("STD-3.1", 3, "type2"),
-    ("STD-4.1", 1, "type1"),
-    ("STD-4.1", 2, "type2"),
-    ("STD-4.1", 3, "type2"),
-    ("STD-4.1", 4, "type2"),
-    ("STD-4.2", 1, "type2"),
-    ("STD-4.2", 2, "type2"),
-    ("STD-4.2", 3, "type2"),
-    ("STD-4.2", 4, "type2"),
-    ("STD-5.1", 1, "type1"),
-    ("STD-5.1", 2, "type2"),
-    ("STD-5.1", 3, "type2"),
-    ("STD-5.1", 4, "type2"),
-    ("STD-5.1", 5, "type3"),
-    ("STD-5.2", 1, "type2"),
-    ("STD-5.2", 2, "type2"),
-    ("STD-5.2", 3, "type2"),
-    ("STD-5.2", 4, "type2"),
-    ("STD-5.2", 5, "type3"),
-    ("STD-6.1", 1, "type1"),
-    ("STD-6.1", 2, "type2"),
-    ("STD-6.1", 3, "type2"),
-    ("STD-6.1", 4, "type2"),
-    ("STD-6.1", 5, "type2"),
-    ("STD-6.1", 6, "type3"),
-    ("STD-6.2", 1, "type2"),
-    ("STD-6.2", 2, "type2"),
-    ("STD-6.2", 3, "type2"),
-    ("STD-6.2", 4, "type2"),
-    ("STD-6.2", 5, "type2"),
-    ("STD-6.2", 6, "type3"),
-    ("STD-7.1", 1, "type1"),
-    ("STD-7.1", 2, "type1"),
-    ("STD-7.1", 3, "type2"),
-    ("STD-7.1", 4, "type2"),
-    ("STD-7.1", 5, "type2"),
-    ("STD-7.1", 6, "type3"),
-    ("STD-7.1", 7, "type3"),
-    ("STD-9.1", 1, "type1"),
-    ("STD-9.1", 2, "type1"),
-    ("STD-9.1", 3, "type2"),
-    ("STD-9.1", 4, "type2"),
-    ("STD-9.1", 5, "type2"),
-    ("STD-9.1", 6, "type2"),
-    ("STD-9.1", 7, "type2"),
-    ("STD-9.1", 8, "type3"),
-    ("STD-9.1", 9, "type3"),
-    ("STD-13.1", 1, "type1"),
-    ("STD-13.1", 2, "type1"),
-    ("STD-13.1", 3, "type2"),
-    ("STD-13.1", 4, "type2"),
-    ("STD-13.1", 5, "type2"),
-    ("STD-13.1", 6, "type2"),
-    ("STD-13.1", 7, "type2"),
-    ("STD-13.1", 8, "type2"),
-    ("STD-13.1", 9, "type2"),
-    ("STD-13.1", 10, "type3"),
-    ("STD-13.1", 11, "type3"),
-    ("STD-13.1", 12, "type3"),
-    ("STD-13.1", 13, "type3"),
+    (row["composition_type_id"], int(row["position"]), row["coach_type_id"])
+    for row in _read_calib_csv("composition_type_coaches.csv")
 ]
 
 # ============================================================
@@ -1788,6 +1701,7 @@ COMPOSITION_TYPE_COACHES_RAW = [
 def seed_sources(cur, source_ids: dict) -> None:
     ill = source_ids[SRC_ILLUSTRATIVE]
     exc = source_ids[SRC_EXCEL]
+    cal = source_ids[SRC_CALIBRATION]
     cur.execute(
         "UPDATE input_params.track_infrastructure_defaults SET track_tac_src=%s, track_parking_src=%s, track_energy_price_src=%s, track_terrain_src=%s, track_hsr_src=%s, track_min_boarding_src=%s, track_min_alighting_src=%s, track_buffer_src=%s",
         (ill,) * 8,
@@ -1805,19 +1719,19 @@ def seed_sources(cur, source_ids: dict) -> None:
         (ill, ill),
     )
     cur.execute(
-        "UPDATE input_params.operators                     SET source_id=%s", (ill,)
+        "UPDATE input_params.operators                     SET source_id=%s", (cal,)
     )
     cur.execute(
-        "UPDATE input_params.operator_class_costs          SET source_id=%s", (ill,)
+        "UPDATE input_params.operator_class_costs          SET source_id=%s", (cal,)
     )
     cur.execute(
-        "UPDATE input_params.coach_types                   SET source_id=%s", (ill,)
+        "UPDATE input_params.coach_types                   SET source_id=%s", (cal,)
     )
     cur.execute(
-        "UPDATE input_params.coach_type_classes            SET source_id=%s", (ill,)
+        "UPDATE input_params.coach_type_classes            SET source_id=%s", (cal,)
     )
     cur.execute(
-        "UPDATE input_params.composition_types             SET source_id=%s", (exc,)
+        "UPDATE input_params.composition_types             SET source_id=%s", (cal,)
     )
 
 
@@ -1837,7 +1751,14 @@ def seed_operator_class_costs(cur):
 
 
 def seed_coach_type_classes(cur):
-    for coach_type_id, service_class_id, places in COACH_TYPE_CLASSES_RAW:
+    for (
+        coach_type_id,
+        service_class_id,
+        places,
+        section_length_m,
+        section_weight_t,
+        section_crew_factor,
+    ) in COACH_TYPE_CLASSES_RAW:
         cur.execute(
             "SELECT coach_type_row_id FROM input_params.coach_types WHERE coach_type_id=%s",
             (coach_type_id,),
@@ -1845,9 +1766,17 @@ def seed_coach_type_classes(cur):
         coach_type_row_id = cur.fetchone()[0]
         cur.execute(
             """INSERT INTO input_params.coach_type_classes
-               (coach_type_row_id, service_class_id, coach_type_class_places)
-               VALUES (%s, %s, %s)""",
-            (coach_type_row_id, service_class_id, places),
+               (coach_type_row_id, service_class_id, coach_type_class_places,
+                section_length_m, section_weight_t, section_crew_factor)
+               VALUES (%s, %s, %s, %s, %s, %s)""",
+            (
+                coach_type_row_id,
+                service_class_id,
+                places,
+                section_length_m,
+                section_weight_t,
+                section_crew_factor,
+            ),
         )
 
 
@@ -1871,61 +1800,6 @@ def seed_composition_type_coaches(cur):
         )
 
 
-def seed_composition_references(cur):
-    """
-    Seed a reference trip profile for every composition in
-    COMPOSITION_TYPES_VARYING, so none come back with indicative=null.
-
-    Same illustrative reference profile reused for all compositions for
-    now — compute_indicative_figures() is itself still a flat placeholder
-    (see models/compositions/calc_indicative_figures.py), so per-
-    composition differentiation here wouldn't be reflected in the
-    indicative KPIs yet anyway. Revisit alongside the real compositions
-    cost model.
-    """
-    reference_profile = dict(
-        ref_distance_km=800,
-        ref_avg_speed_kmh=90.0,
-        ref_terrain_score=1.3,
-        ref_operating_days=360,
-        ref_utilization_seat=0.70,
-        ref_utilization_couchette=0.65,
-        ref_utilization_sleeper=0.80,
-        ref_utilization_capsule=0.00,
-        ref_utilization_catering=0.00,
-        ref_avg_fare_seat=49.00,
-        ref_avg_fare_couchette=79.00,
-        ref_avg_fare_sleeper=129.00,
-        ref_avg_fare_capsule=0.00,
-        ref_avg_fare_catering=0.00,
-    )
-    for comp_id, _description in COMPOSITION_TYPES_VARYING:
-        cur.execute(
-            """
-            SELECT composition_type_row_id FROM input_params.composition_types
-            WHERE composition_type_id = %s
-        """,
-            (comp_id,),
-        )
-        row = cur.fetchone()
-        if row is None:
-            print(f"  WARNING: {comp_id} not found — skipping reference seed")
-            continue
-        insert_rows(
-            cur,
-            "input_params.composition_references",
-            [
-                dict(
-                    composition_type_row_id=row[0],
-                    composition_type_id=comp_id,
-                    **reference_profile,
-                ),
-            ],
-        )
-
-
-# ============================================================
-# scenario
 # ============================================================
 # Each scenario pins its own version number, in lockstep, across all four
 # infrastructure tables — every scenario row is a complete, self-contained
@@ -2030,7 +1904,11 @@ def _composition_physics_dict(comp) -> dict:
         "total_weight_t": comp.total_weight_t,
         "total_crew": comp.total_crew,
         "places_by_class": comp.places_by_class,
-        "density_by_class": comp.density_by_class,
+        # derived from real section geometry — replaces the retired
+        # density_by_class (2026-07-22); mirrors route_serialize
+        "density_by_class_main_length": comp.density_by_class_main_length,
+        "density_by_class_main_weight": comp.density_by_class_main_weight,
+        "total_length_m": comp.total_length_m,
     }
 
 
@@ -2111,7 +1989,7 @@ def _example_trip(
 
 
 def _build_example_route(scenario_id: int, composition, tracks) -> dict:
-    """Berlin Hbf -> Dresden Hbf -> Wien Hbf, STD-7.1, no demand (od_pairs
+    """Berlin Hbf -> Dresden Hbf -> Wien Hbf, NEW-BAL-7, no demand (od_pairs
     empty — financial fields on this proposal are null until someone
     evaluates and re-saves it, same as any proposal saved without an
     evaluation). Draft route_id follows the real >=1e9 placeholder
@@ -2298,7 +2176,7 @@ def seed_example_proposal(cur, conn) -> None:
 
         loader = DBDataLoader()
         try:
-            composition = loader.build_all_compositions(scenario_id).get("STD-7.1")
+            composition = loader.build_all_compositions(scenario_id).get("NEW-BAL-7")
             tracks = loader.build_all_tracks(scenario_id)
         finally:
             loader.close()
@@ -2311,7 +2189,7 @@ def seed_example_proposal(cur, conn) -> None:
             # not just its route section, so this can't be omitted/None.
             "request": {
                 "stops": ["DE_BERLIN_HBF", "DE_DRESDEN_HBF", "AT_WIEN_HBF"],
-                "composition_id": "STD-7.1",
+                "composition_id": "NEW-BAL-7",
                 "routing_mode": "fullRouting",
                 "timetable_mode": "simpleAutomatic",
                 "schedule_mode": "alwaysDaily",
@@ -2389,7 +2267,6 @@ def main():
     print("Seeding input_params.composition_types...")
     insert_rows(cur, "input_params.composition_types", build_composition_types())
     seed_composition_type_coaches(cur)
-    seed_composition_references(cur)
 
     print("Injecting source IDs...")
     seed_sources(cur, source_ids)
@@ -2427,7 +2304,6 @@ def main():
         ("input_params", "stop_infrastructures"),
         ("input_params", "composition_types"),
         ("input_params", "composition_type_coaches"),
-        ("input_params", "composition_references"),
         ("scenario", "scenarios"),
         ("proposals", "proposals"),
         ("proposals", "routes"),
