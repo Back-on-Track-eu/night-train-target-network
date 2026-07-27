@@ -14,7 +14,7 @@ against — [`../db/README.md`](../db/README.md)
 cd backend/docker && docker-compose up -d
 
 # 2. Run tests (from backend/)
-uv run --extra dev pytest tests/ -v
+uv run --extra dev python -m pytest tests/ -v
 ```
 
 ## Layout
