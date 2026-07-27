@@ -20,8 +20,18 @@
       "skip": "Skip",
       "confirm": "Add {count} stop | Add {count} stops",
       "confirmNone": "Continue without stops"
+    "frequency": {
+      "daily": "Daily",
+      "three_per_week": "3× per week"
+    "map": {
+      "travelTime": "Travel time",
+      "unknownDuration": "—",
+      "durationHm": "{h}h {m}m",
+      "durationH": "{h}h",
+      "durationM": "{m}m"
     },
     "evaluation": {
+      "scenario": "Scenario",
       "views": {
         "route": "Full Route",
         "per_trip_pair": "By trip pair",

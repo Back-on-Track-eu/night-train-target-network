@@ -50,6 +50,36 @@ export interface SuggestedStop {
   lat: number
   lon: number
   added_time_min: number
+// A scenario is a named snapshot of infrastructure parameters (track-access
+// charges, energy prices, terrain, per-stop charges, hsr_allowed). It pins one
+// version each of four DB tables; routing-relevant data lives in the two
+// `track_*` versions, cost-only data in the `stop_*` versions.
+export interface Scenario {
+  scenario_id: number
+  scenario_key: string
+  scenario_name: string
+  description: string | null
+  change_log: string | null
+  editor: string | null
+  created_at: string
+  is_current_base: boolean
+  is_current_scenario: boolean
+  track_infrastructures_version: number
+  track_infrastructure_defaults_version: number
+  stop_infrastructures_version: number
+  stop_infrastructure_defaults_version: number
+}
+
+interface ScenarioGroup {
+  count: number
+  scenarios: Scenario[]
+}
+
+export interface ScenariosResponse {
+  current_base: ScenarioGroup
+  current_scenarios: ScenarioGroup
+  historical_scenarios: ScenarioGroup
+  total_count: number
 }
 
 export interface CompositionsResponse {
