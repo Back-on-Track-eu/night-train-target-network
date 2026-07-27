@@ -82,7 +82,7 @@ takes a few minutes (routing graph + image builds); subsequent runs are fast.
 **4. Open the app**
 
 - Frontend: [http://localhost:5173](http://localhost:5173)
-- Backend API health check: [http://localhost:5000/api/health](http://localhost:5000/api/health)
+- Backend API health check: [http://localhost:5050/api/health](http://localhost:5050/api/health)
 
 **Stopping it**
 

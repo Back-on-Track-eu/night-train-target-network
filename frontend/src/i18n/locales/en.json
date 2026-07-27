@@ -19,6 +19,7 @@
       "durationM": "{m}m"
     },
     "evaluation": {
+      "scenario": "Scenario",
       "views": {
         "route": "Full Route",
         "per_trip_pair": "By trip pair",

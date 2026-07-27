@@ -58,9 +58,9 @@ docker compose -f .devcontainer/docker-compose.yml up --build
 
 **4. Verify everything works**
 ```bash
-curl http://localhost:5000/api/health
-curl http://localhost:5000/api/params/StopInfrastructures
-curl http://localhost:5000/api/params/compositions
+curl http://localhost:5050/api/health
+curl http://localhost:5050/api/params/StopInfrastructures
+curl http://localhost:5050/api/params/compositions
 ```
 
 ---
@@ -90,7 +90,7 @@ self-contained duplicate of `backend/docker/docker-compose.yml`'s
 |---|---|---|
 | `postgres` | `night_train_postgres` | `5432` |
 | `openrailrouting` | `openrailrouting` | `8989` (routing), `8990` (admin/metrics) |
-| `backend-api` | `backend-api` | `5000` |
+| `backend-api` | `backend-api` | `5050` (host) → `5000` (container) — host side moved off 5000 to avoid macOS AirPlay Receiver |
 | `frontend` | `night-train-frontend` | `5173` (Vite HMR — edits reflect instantly) |
 
 The `backend-api` service seeds the database (via its entrypoint) and
@@ -100,7 +100,7 @@ starts Flask under gunicorn on every start — no separate seed step needed.
 
 ## API Reference
 
-Base URL: `http://localhost:5000`. Full request/response documentation is
+Base URL: `http://localhost:5050`. Full request/response documentation is
 in `backend/api/README.md`; the endpoints below are current as of this guide:
 
 ### Health

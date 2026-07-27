@@ -13,6 +13,7 @@ import RouteSectionSlider from '@/components/RouteSectionSlider.vue'
 import { mdiChevronDown, mdiChevronRight, mdiInformationOutline } from '@mdi/js'
 import { resolveFactorRates, resolveFactorSubCategory, type RateRow } from '@/lib/costFactorRates'
 import { submitFeedback, FeedbackError } from '@/lib/feedbackApi'
+import { useStore } from '@/stores/store'
 import type {
   Breakdown,
   ClassKeyedBreakdowns,
@@ -33,6 +34,7 @@ const props = defineProps<{
 const emit = defineEmits<{ scopeChange: [scope: MapScope] }>()
 
 const { t, te } = useI18n()
+const store = useStore()
 
 // --- Selection state: the four axes of the result cube --------------------
 // view (grouping) × drill-down keys (sel1/sel2) × normalisation (unit) ×
@@ -694,12 +696,32 @@ const selectPt = {
     class: 'cursor-pointer px-4 py-2 text-sm text-primary-50 transition hover:bg-primary-50/10',
   },
 }
+
+// Scenario selector: same pill as selectPt, but a slightly thicker golden
+// gradient border (see `.scenario-gold-border` in the <style> block) makes it
+// stand out. Label stays white/bold like the others; overlay stays dark.
+const scenarioSelectPt = {
+  root: {
+    class:
+      'scenario-gold-border flex cursor-pointer items-center rounded-full transition hover:brightness-110',
+  },
+  label: { class: 'px-3 py-1.5 text-sm font-semibold text-primary-50 leading-none' },
+  dropdown: { class: 'flex items-center pr-3 text-primary-50/60' },
+  overlay: {
+    class:
+      'z-50 mt-1 overflow-hidden rounded-xl border border-primary-50/20 bg-sapphire-100 shadow-xl',
+  },
+  listContainer: { class: 'overflow-auto' },
+  option: {
+    class: 'cursor-pointer px-4 py-2 text-sm text-primary-50 transition hover:bg-primary-50/10',
+  },
+}
 </script>
 
 <template>
   <div class="flex flex-col gap-4">
     <!-- Controls: view tabs (left) · drill-downs · unit (right) -->
-    <div class="flex flex-wrap items-center gap-3">
+    <div class="mt-6 flex flex-wrap items-center gap-3">
       <div class="flex overflow-hidden rounded-full border border-primary-50/20">
         <button
           v-for="opt in viewOptions"
@@ -753,6 +775,16 @@ const selectPt = {
           option-label="label"
           :unstyled="true"
           :pt="selectPt"
+        />
+        <Select
+          v-if="store.scenarios.length > 0"
+          v-model="store.selectedScenarioId"
+          :options="store.scenarios"
+          option-value="scenario_id"
+          option-label="scenario_name"
+          :aria-label="t('proposal.evaluation.scenario')"
+          :unstyled="true"
+          :pt="scenarioSelectPt"
         />
       </div>
     </div>
@@ -1086,5 +1118,17 @@ const selectPt = {
 /* KaTeX inherits the box's text colour; keep the formula on one baseline. */
 .cost-info-formula .katex {
   font-size: 1.05em;
+}
+
+/* Scenario selector: a shiny gold gradient on the border only (transparent
+   interior over the page background), a touch thicker than the other pills.
+   The double background clips the fill to padding-box and the gradient to
+   border-box, which keeps the rounded-full corners. */
+.scenario-gold-border {
+  border: 2.5px solid transparent;
+  border-radius: 9999px;
+  background:
+    linear-gradient(#1d1e33, #1d1e33) padding-box,
+    linear-gradient(110deg, #fcd34d 0%, #fef9c3 45%, #fbbf24 100%) border-box;
 }
 </style>

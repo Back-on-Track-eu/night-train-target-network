@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, computed } from 'vue'
+import { onMounted, ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useStore } from '@/stores/store'
 import type { EvaluationResponse, MapScope, Stop } from '@/types/api'
@@ -95,6 +95,7 @@ interface BackendGeometry {
 
 interface BackendRoute {
   route_id: string
+  scenario_id: number
   trip_pairs: BackendTripPair[]
   geometries: BackendGeometry[]
 }
@@ -243,6 +244,8 @@ async function evaluate() {
         // alighting is now derived automatically from the timetable.
         stops: validStops.map((s) => s.selectedStop!.stop_id),
         composition_id: selectedCompositionId.value,
+        // Plan under the selected scenario (null = live base, resolved server-side).
+        scenario_id: store.selectedScenarioId,
       }),
     })
     const json = await response.json()
@@ -276,7 +279,7 @@ async function evaluate() {
 // Cost/revenue evaluation for the completed routing. Posts the raw route to
 // the backend calc endpoint (single source of truth — see plan). For now we
 // just log the JSON and dump it into a panel under the viewport.
-async function runCalc() {
+async function runCalc(scenarioOverride?: number) {
   if (!rawRoute.value) return
   calcError.value = null
   calcResult.value = null
@@ -284,8 +287,14 @@ async function runCalc() {
     const res = await fetch(`${BASE_URL}/api/evaluation/calc`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      // scenario_id omitted — the route JSON carries its own.
-      body: JSON.stringify({ route: rawRoute.value }),
+      // Without an override the route JSON carries its own scenario. When the
+      // user switches to a cost-only scenario we re-run calc alone and pass the
+      // new scenario_id to override the route's embedded one.
+      body: JSON.stringify(
+        scenarioOverride === undefined
+          ? { route: rawRoute.value }
+          : { route: rawRoute.value, scenario_id: scenarioOverride },
+      ),
     })
     const json = await res.json()
     if (!res.ok) {
@@ -298,6 +307,30 @@ async function runCalc() {
     calcError.value = err instanceof Error ? err.message : 'Unknown network error'
   }
 }
+
+// Keep the displayed route and cost calc on the same scenario. When the user
+// switches scenarios: if it only changes cost-relevant params (the two track
+// version pointers are unchanged, so routing is guaranteed identical) we skip
+// the reroute and re-run calc alone; otherwise we replan (which chains calc).
+watch(
+  () => store.selectedScenarioId,
+  (newId, oldId) => {
+    if (!rawRoute.value || currentMode.value === 'loading') return
+    if (newId == null || newId === oldId) return
+    const routed = store.scenarioById(rawRoute.value.scenario_id)
+    const next = store.scenarioById(newId)
+    const routingIdentical =
+      routed != null &&
+      next != null &&
+      routed.track_infrastructures_version === next.track_infrastructures_version &&
+      routed.track_infrastructure_defaults_version === next.track_infrastructure_defaults_version
+    if (routingIdentical) {
+      runCalc(newId)
+    } else {
+      evaluate()
+    }
+  },
+)
 
 interface ItineraryStop {
   id: number
@@ -743,6 +776,7 @@ onMounted(async () => {
     ]
   }
   store.fetchCompositions()
+  store.fetchScenarios()
 })
 </script>
 

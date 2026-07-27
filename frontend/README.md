@@ -39,7 +39,7 @@ docker compose -f .devcontainer/docker-compose.yml up --build
 ```
 
 - **Frontend**: http://localhost:5173 — Vite HMR, edits reflect instantly without rebuild
-- **Backend API**: http://localhost:5000
+- **Backend API**: http://localhost:5050
 - **OpenRailRouting**: http://localhost:8989
 
 ### Without Docker

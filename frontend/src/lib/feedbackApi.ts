@@ -1,9 +1,9 @@
 // Thin client for POST /api/feedback — the anonymous (email reply-to) path
 // used by the cost-factor feedback form in the evaluation panel's detail
-// popover. Same hardcoded backend origin as the store (stores/store.ts); no
-// generic API client exists to extend, so this mirrors that fetch pattern.
+// popover. No generic API client exists to extend, so this mirrors the
+// store's fetch pattern (stores/store.ts).
 
-const BASE_URL = 'http://localhost:5000'
+const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5000'
 
 /** Request body for a cost-factor feedback submission (anonymous path). */
 export interface FeedbackPayload {

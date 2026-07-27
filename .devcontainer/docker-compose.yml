@@ -54,8 +54,10 @@ services:
       context: ../backend
       dockerfile: docker/Dockerfile
     container_name: backend-api
+    # Host side is 5050, not 5000: macOS's AirPlay Receiver squats on 5000.
+    # Container always binds 5000 (see backend/docker/entrypoint.sh).
     ports:
-      - "5000:5000"
+      - "5050:5000"
     env_file:
       - ../backend/docker/.env
     environment:
@@ -84,6 +86,8 @@ services:
     container_name: night-train-frontend
     ports:
       - "5173:5173"
+    environment:
+      VITE_API_BASE_URL: http://localhost:5050
     volumes:
       - ../frontend:/app
       - /app/node_modules
