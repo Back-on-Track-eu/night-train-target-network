@@ -473,14 +473,6 @@ class CompositionType:
                 pl[a.class_main] = pl.get(a.class_main, 0) + a.places
         return {k: t[k] / pl[k] for k in t if pl.get(k)}
 
-    def total_places(self) -> int:
-        """Total places across all coaches and classes."""
-        return sum(a.places for c in self.coaches.values() for a in c.classes.values())
-
-    def total_crew(self) -> float:
-        """Total fractional crew across all coaches."""
-        return sum(c.crew_factor for c in self.coaches.values())
-
     def places_by_class(self) -> dict[str, int]:
         """Total places per class_id across all coaches."""
         result: dict[str, int] = {}

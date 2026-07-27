@@ -29,7 +29,7 @@ from dataclasses import dataclass
 # VERSION
 # =============================================================================
 
-CALC_VERSION: str = "0.9.9"
+CALC_VERSION: str = "0.9.10"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -63,6 +63,24 @@ CALC_MODEL_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.10": {
+        "date": "2026-07-27",
+        "author": "david",
+        "changes": "Three bug fixes flagged by review, no shape change but "
+        "cost values shift on every route: (1) total_crew() on "
+        "CompositionType was accidentally defined twice — the second "
+        "definition silently dropped zugchef_crew_factor, undercounting "
+        "driver/crew_eur ~25-37%. (2) _calc_composition_fleet_costs() "
+        "multiplied purchase_coach_eur/cleaning_services_eur_day (both "
+        "per-coach rates since 0.9.8's composition catalog) by the "
+        "trainset/rake share instead of coach count — "
+        "coach_amortisation_eur/financing_eur/cleaning_eur were 6-14x "
+        "low. (3) loco_eur in views.py's per-trip-pair, per-OD, and "
+        "per-stop-section builders (plus the route-level fixed-cost-"
+        "share total) didn't apply composition.n_locos — harmless while "
+        "every composition is single-loco, but would have silently "
+        "halved cost for the first double-headed composition.",
+    },
     "0.9.9": {
         "date": "2026-07-24",
         "author": "david",

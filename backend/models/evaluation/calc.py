@@ -141,10 +141,12 @@ class CompositionFleetCost:
     Shunting is NOT here — see ShuntingCost, computed per movement at
     route level rather than per composition.
 
-    Units per field:
-      coach_amortisation_eur  €/year   (purchase_coach_eur / coach_amort_years × n)
-      financing_eur           €/year   (purchase_coach_eur × financing_quota_per × n)
-      cleaning_eur            €/operating-day  (cleaning_services_eur_day × n)
+    Units per field (n = coaches_required, the trainset share; n_coaches =
+    n × coaches per composition — purchase_coach_eur and
+    cleaning_services_eur_day are per-coach rates):
+      coach_amortisation_eur  €/year   (purchase_coach_eur / coach_amort_years × n_coaches)
+      financing_eur           €/year   (purchase_coach_eur × financing_quota_per × n_coaches)
+      cleaning_eur            €/operating-day  (cleaning_services_eur_day × n_coaches)
     """
 
     comp_id: str
@@ -467,19 +469,28 @@ def _calc_composition_fleet_costs(route: Route) -> list[CompositionFleetCost]:
     results = []
     for comp_id, n in coach_totals.items():
         c = compositions[comp_id]
+        # purchase_coach_eur / cleaning_services_eur_day are per-coach rates —
+        # n is the trainset (rake) share (see coaches_required docstring above),
+        # so the €/year and €/operating-day formulas need the coach count too.
+        n_coaches = n * len(c.coaches)
         coach_amortisation_eur = (  # €/year
-            c.purchase_coach_eur / c.coach_amort_years * n
+            c.purchase_coach_eur / c.coach_amort_years * n_coaches
             if c.coach_amort_years > 0
             else 0.0
         )
-        financing_eur = c.purchase_coach_eur * c.financing_quota_per * n  # €/year
+        financing_eur = (
+            c.purchase_coach_eur * c.financing_quota_per * n_coaches
+        )  # €/year
         results.append(
             CompositionFleetCost(
                 comp_id=comp_id,
+                # kept in trainset units (not n_coaches) — _pair_fleet_share()
+                # in views.py divides a pair's own trainset count by this, and
+                # both sides must share the same unit for that ratio to hold.
                 coaches_required=n,
                 coach_amortisation_eur=coach_amortisation_eur,
                 financing_eur=financing_eur,
-                cleaning_eur=c.cleaning_services_eur_day * n,  # €/operating-day
+                cleaning_eur=c.cleaning_services_eur_day * n_coaches,  # €/operating-day
             )
         )
     return results

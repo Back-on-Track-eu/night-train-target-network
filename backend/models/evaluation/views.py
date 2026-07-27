@@ -427,7 +427,11 @@ def build_breakdown(
         else route.loco_propulsion_min
     )
     b.cost.operator.variable.loco_eur = _ann_trip(
-        composition.loco_full_service_lease_eur_h * loco_min / 60.0, operating_days
+        composition.n_locos
+        * composition.loco_full_service_lease_eur_h
+        * loco_min
+        / 60.0,
+        operating_days,
     )
 
     sc_trip_ids = trip_ids  # None = all, set = filtered to pair
@@ -622,7 +626,8 @@ def build_breakdown_per_trip_pair_per_country(
 
             # Loco — time-based
             loco_eur = (
-                composition.loco_full_service_lease_eur_h
+                composition.n_locos
+                * composition.loco_full_service_lease_eur_h
                 * pair.loco_propulsion_min
                 / 60.0
             )
@@ -908,7 +913,8 @@ def build_breakdown_per_trip_pair_per_od(
             # Loco — billed once per pair cycle, allocated by weighted
             # place-hours share
             loco_eur = (
-                composition.loco_full_service_lease_eur_h
+                composition.n_locos
+                * composition.loco_full_service_lease_eur_h
                 * pair.loco_propulsion_min
                 / 60.0
             )
@@ -1256,7 +1262,10 @@ def build_breakdown_per_trip_pair_per_section(
                     + section_dwell_min
                 )
                 b.cost.operator.variable.loco_eur += _ann_trip(
-                    composition.loco_full_service_lease_eur_h * section_loco_min / 60.0,
+                    composition.n_locos
+                    * composition.loco_full_service_lease_eur_h
+                    * section_loco_min
+                    / 60.0,
                     operating_days,
                 )
 
@@ -1530,7 +1539,8 @@ def build_breakdown_per_trip_per_stop(
         for fc in result.composition_fleet_costs
     )
     loco_total = _ann_trip(
-        route.trip_pairs[0].composition.loco_full_service_lease_eur_h
+        route.trip_pairs[0].composition.n_locos
+        * route.trip_pairs[0].composition.loco_full_service_lease_eur_h
         * route.loco_propulsion_min
         / 60.0,
         operating_days,
