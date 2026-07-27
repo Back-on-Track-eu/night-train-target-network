@@ -11,6 +11,9 @@
     "noStopsFound": "No stops found",
     "minStopsTooltip": "Two stops per route minimum.",
     "loading": "Fetching data…",
+    "frequency": {
+      "daily": "Daily",
+      "three_per_week": "3× per week"
     "map": {
       "travelTime": "Travel time",
       "unknownDuration": "—",

@@ -13,7 +13,13 @@ import {
   mdiChevronRight,
 } from '@mdi/js'
 
-const props = defineProps<{ compositions: Composition[]; selectedId?: string | null }>()
+// compact: display mode — show only the name and capacities, hiding the
+// description and physical specs (weight / max. speed).
+const props = defineProps<{
+  compositions: Composition[]
+  selectedId?: string | null
+  compact?: boolean
+}>()
 const emit = defineEmits<{ select: [compId: string] }>()
 
 const direction = ref<'forward' | 'backward'>('forward')
@@ -97,7 +103,7 @@ watch(
       </div>
 
       <!-- Description: smaller line below the headline -->
-      <p v-if="current.description" class="-mt-3 text-sm text-primary-50/60">
+      <p v-if="!compact && current.description" class="-mt-3 text-sm text-primary-50/60">
         {{ current.description }}
       </p>
 
@@ -127,7 +133,7 @@ watch(
           </div>
 
           <!-- Physical specs -->
-          <div class="flex justify-center gap-8 text-primary-50/70">
+          <div v-if="!compact" class="flex justify-center gap-8 text-primary-50/70">
             <div class="flex items-center gap-2">
               <AppIcon :path="mdiWeight" :size="20" />
               <span class="text-base font-semibold"

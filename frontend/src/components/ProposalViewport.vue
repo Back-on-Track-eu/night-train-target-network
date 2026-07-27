@@ -9,6 +9,7 @@ import Skeleton from 'primevue/skeleton'
 import AppIcon from '@/components/AppIcon.vue'
 import StopSelect from '@/components/StopSelect.vue'
 import CompositionSelectCard from '@/components/CompositionSelectCard.vue'
+import RouteStatsCard from '@/components/RouteStatsCard.vue'
 import EvaluationPanel from '@/components/EvaluationPanel.vue'
 import MapView from '@/components/MapView.vue'
 import { mdiClose, mdiPencil, mdiPlus, mdiSwapVertical, mdiTrashCan } from '@mdi/js'
@@ -77,9 +78,19 @@ interface BackendSegment {
   country_distance_shares: Record<string, number>
 }
 
+// Headline physics figures the backend attaches per trip (route_serialize.py
+// _trip_general_parameters) — read at a glance rather than derived from
+// segments.
+interface BackendGeneralParameters {
+  trip_km: number
+  route_duration_min: number
+  average_speed_kmh: number
+}
+
 interface BackendTripSide {
   trip_id: string
   direction: number
+  general_parameters: BackendGeneralParameters
   segments: BackendSegment[]
 }
 
@@ -93,11 +104,17 @@ interface BackendGeometry {
   coords: number[][]
 }
 
+interface BackendSeasonalSchedule {
+  season: string
+  frequency: string
+}
+
 interface BackendRoute {
   route_id: string
   scenario_id: number
   trip_pairs: BackendTripPair[]
   geometries: BackendGeometry[]
+  schedule: { seasonal_schedules: BackendSeasonalSchedule[] }
 }
 
 // Minutes-since-midnight (as returned by the API) -> "HH:MM" for display.
@@ -226,6 +243,35 @@ const compositionCards = computed(() => {
     if (sel.length > 0) return sel
   }
   return store.compositions
+})
+
+// The raw backend trip currently shown (matches selectedTripId) — the source
+// of the headline figures in RouteStatsCard.
+const selectedBackendTrip = computed<BackendTripSide | null>(() => {
+  const rr = rawRoute.value
+  const id = selectedTripId.value
+  if (!rr || !id) return null
+  for (const pair of rr.trip_pairs) {
+    if (pair.outbound.trip_id === id) return pair.outbound
+    if (pair.return_trip.trip_id === id) return pair.return_trip
+  }
+  return null
+})
+
+// Distance / duration / average speed for the displayed trip plus the route's
+// operating frequency — all straight from /api/route/plan. Null until a route
+// has been planned.
+const routeStats = computed(() => {
+  const trip = selectedBackendTrip.value
+  const rr = rawRoute.value
+  if (!trip || !rr) return null
+  const gp = trip.general_parameters
+  const frequencies = [...new Set(rr.schedule.seasonal_schedules.map((s) => s.frequency))]
+  return {
+    distanceKm: gp.trip_km,
+    avgSpeedKmh: gp.average_speed_kmh,
+    frequencies,
+  }
 })
 
 async function evaluate() {
@@ -1010,13 +1056,26 @@ onMounted(async () => {
           </div>
         </div>
 
-        <!-- Composition card — switchable in edit, locked to the used one in display -->
-        <CompositionSelectCard
+        <!-- Composition card — switchable in edit, locked to the used one in
+             display (where it's also collapsed to name + capacities only) -->
+        <div
           v-if="store.compositionsStatus === 'success' && store.compositions.length > 0"
-          :compositions="compositionCards"
-          :selected-id="selectedCompositionId"
-          @select="(id) => (selectedCompositionId = id)"
-        />
+          class="flex flex-col gap-6"
+        >
+          <CompositionSelectCard
+            :compositions="compositionCards"
+            :selected-id="selectedCompositionId"
+            :compact="currentMode === 'display'"
+            @select="(id) => (selectedCompositionId = id)"
+          />
+          <!-- Headline route figures — display mode only, once a route exists -->
+          <RouteStatsCard
+            v-if="currentMode === 'display' && routeStats"
+            :distance-km="routeStats.distanceKm"
+            :avg-speed-kmh="routeStats.avgSpeedKmh"
+            :frequencies="routeStats.frequencies"
+          />
+        </div>
         <div
           v-else
           class="flex h-32 items-center justify-center rounded-xl bg-primary-50/5 text-sm text-primary-50/40"
