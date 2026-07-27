@@ -10,16 +10,21 @@ services:
     image: postgis/postgis:16-3.4-alpine
     container_name: night_train_postgres
     restart: unless-stopped
-    environment:
-      POSTGRES_USER:     ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB:       ${POSTGRES_DB}
+    # Deliberately differs from backend/docker/docker-compose.yml: there, the
+    # compose project directory *is* backend/docker/, so ${POSTGRES_*} is
+    # interpolated from its .env. Here the project directory is .devcontainer/,
+    # which has no .env — interpolation would silently yield empty strings and
+    # postgres would refuse to initialise. So load the shared file with
+    # env_file, and let the healthcheck expand the vars inside the container
+    # ($$ escapes compose interpolation).
+    env_file:
+      - ../backend/docker/.env
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 5s
       timeout: 5s
       retries: 5
