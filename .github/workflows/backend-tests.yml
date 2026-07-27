@@ -194,7 +194,7 @@ jobs:
         run: |
           echo "Waiting for API..."
           attempts=0
-          until curl -sf http://localhost:5000/api/health > /dev/null; do
+          until curl -sf http://localhost:5050/api/health > /dev/null; do
             attempts=$((attempts + 1))
             if [ $attempts -ge 60 ]; then
               echo "API did not become healthy after 2 minutes"
@@ -231,7 +231,7 @@ jobs:
           POSTGRES_DB:       target_network_test_db
           POSTGRES_USER:     bot_admin
           POSTGRES_PASSWORD: devpassword
-          API_BASE_URL:      http://localhost:5000
+          API_BASE_URL:      http://localhost:5050
 
       # ------------------------------------------------------------------
       # Always print logs on failure

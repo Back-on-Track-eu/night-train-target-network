@@ -73,9 +73,9 @@ Wait until all three containers (`night_train_postgres`, `openrailrouting`, `nig
 ## Verifying the setup
 
 ```powershell
-Invoke-RestMethod -Uri http://localhost:5000/api/health
-Invoke-RestMethod -Uri http://localhost:5000/api/params/StopInfrastructures
-Invoke-RestMethod -Uri http://localhost:5000/api/params/compositions
+Invoke-RestMethod -Uri http://localhost:5050/api/health
+Invoke-RestMethod -Uri http://localhost:5050/api/params/StopInfrastructures
+Invoke-RestMethod -Uri http://localhost:5050/api/params/compositions
 ```
 
 ---

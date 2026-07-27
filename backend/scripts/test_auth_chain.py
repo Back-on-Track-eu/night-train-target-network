@@ -74,7 +74,7 @@ import time
 
 import requests
 
-API_BASE = "http://localhost:5000"
+API_BASE = os.environ.get("API_BASE_URL", "http://localhost:5050")
 CONTAINER_NAME = "backend-api"
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "data")
 
@@ -101,7 +101,7 @@ def check_flask():
     except requests.ConnectionError:
         pass
     print(
-        "[\u2717] Flask API not reachable at localhost:5000. "
+        f"[\u2717] Flask API not reachable at {API_BASE}. "
         "Start the stack first (docker-compose up)."
     )
     return False

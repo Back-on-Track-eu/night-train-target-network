@@ -13,7 +13,7 @@ export type LoadStatus = 'idle' | 'loading' | 'success' | 'error'
 
 // Same-origin by default in production builds (set VITE_API_BASE_URL='' and
 // let the reverse proxy route /api/*); localhost fallback for bare local dev.
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5000'
+const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5050'
 
 export const useStore = defineStore('store', () => {
   const stops = ref<Stop[]>([])

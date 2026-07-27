@@ -36,7 +36,7 @@ from tests.helpers import (
 # Configuration — from environment, with local-stack defaults
 # =============================================================================
 
-API_BASE = os.environ.get("API_BASE_URL", "http://localhost:5000")
+API_BASE = os.environ.get("API_BASE_URL", "http://localhost:5050")
 
 DB_CONFIG = {
     "host": os.environ.get("POSTGRES_HOST", "localhost"),

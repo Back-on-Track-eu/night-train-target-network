@@ -26,7 +26,7 @@ import os
 import sys
 import requests
 
-API_BASE = "http://localhost:5000"
+API_BASE = os.environ.get("API_BASE_URL", "http://localhost:5050")
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "data")
 
 ENDPOINTS = {
@@ -51,7 +51,7 @@ def check_flask():
     except requests.ConnectionError:
         pass
     print(
-        "[✗] Flask API not reachable at localhost:5000. Start it with: uv run python main.py"
+        f"[✗] Flask API not reachable at {API_BASE}. Start it with: uv run python main.py"
     )
     return False
 

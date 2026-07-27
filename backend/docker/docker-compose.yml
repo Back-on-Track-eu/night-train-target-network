@@ -58,8 +58,10 @@ services:
       dockerfile: docker/Dockerfile
     image: docker-api
     container_name: night-train-api
+    # Host side is 5050, not 5000 — matches .devcontainer/docker-compose.yml
+    # (macOS AirPlay Receiver squats on 5000). Container always binds 5000.
     ports:
-      - "5000:5000"
+      - "5050:5000"
     env_file:
       - .env
     environment:

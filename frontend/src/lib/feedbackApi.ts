@@ -3,7 +3,7 @@
 // popover. No generic API client exists to extend, so this mirrors the
 // store's fetch pattern (stores/store.ts).
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5000'
+const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5050'
 
 /** Request body for a cost-factor feedback submission (anonymous path). */
 export interface FeedbackPayload {
