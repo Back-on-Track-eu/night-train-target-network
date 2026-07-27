@@ -20,7 +20,7 @@ const props = defineProps<{ mode: 'edit' | 'loading' | 'display' }>()
 const { t } = useI18n()
 const store = useStore()
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5000'
+const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5050'
 
 const currentMode = ref<'edit' | 'loading' | 'display'>(props.mode)
 const selectedCompositionId = ref<string | null>(null)
@@ -266,6 +266,32 @@ async function requestPlan(
   stopIds: string[],
   autoStopAddition: 'off' | 'suggest',
 ): Promise<{ route: BackendRoute; suggested_stops?: SuggestedStop[] } | null> {
+  try {
+    const response = await fetch(`${BASE_URL}/api/route/plan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        stops: stopIds,
+        composition_id: selectedCompositionId.value,
+        auto_stop_addition: autoStopAddition,
+        // Plan under the selected scenario (null = live base, resolved server-side).
+        scenario_id: store.selectedScenarioId,
+      }),
+    })
+    const json = await response.json()
+    if (!response.ok) {
+      evaluateError.value = json.message ?? `HTTP ${response.status}`
+      currentMode.value = 'edit'
+      return null
+    }
+    return json
+  } catch (err) {
+    evaluateError.value = err instanceof Error ? err.message : 'Unknown network error'
+    currentMode.value = 'edit'
+    return null
+  }
+}
+
 // The raw backend trip currently shown (matches selectedTripId) — the source
 // of the headline figures in RouteStatsCard.
 const selectedBackendTrip = computed<BackendTripSide | null>(() => {
@@ -294,37 +320,6 @@ const routeStats = computed(() => {
     frequencies,
   }
 })
-
-async function evaluate() {
-  const validStops = itinerary.value.filter((s) => s.selectedStop !== null)
-  if (validStops.length < 2 || !selectedCompositionId.value) return
-  currentMode.value = 'loading'
-  evaluateError.value = null
-  try {
-    const response = await fetch(`${BASE_URL}/api/route/plan`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        stops: stopIds,
-        composition_id: selectedCompositionId.value,
-        auto_stop_addition: autoStopAddition,
-        // Plan under the selected scenario (null = live base, resolved server-side).
-        scenario_id: store.selectedScenarioId,
-      }),
-    })
-    const json = await response.json()
-    if (!response.ok) {
-      evaluateError.value = json.message ?? `HTTP ${response.status}`
-      currentMode.value = 'edit'
-      return null
-    }
-    return json
-  } catch (err) {
-    evaluateError.value = err instanceof Error ? err.message : 'Unknown network error'
-    currentMode.value = 'edit'
-    return null
-  }
-}
 
 // Wire a successful plan response into the display: adapt the route, select the
 // outbound trip, rebuild the itinerary from the planned route (so the builder

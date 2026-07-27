@@ -20,9 +20,11 @@
       "skip": "Skip",
       "confirm": "Add {count} stop | Add {count} stops",
       "confirmNone": "Continue without stops"
+    },
     "frequency": {
       "daily": "Daily",
       "three_per_week": "3× per week"
+    },
     "map": {
       "travelTime": "Travel time",
       "unknownDuration": "—",

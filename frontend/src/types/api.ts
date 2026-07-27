@@ -50,6 +50,8 @@ export interface SuggestedStop {
   lat: number
   lon: number
   added_time_min: number
+}
+
 // A scenario is a named snapshot of infrastructure parameters (track-access
 // charges, energy prices, terrain, per-stop charges, hsr_allowed). It pins one
 // version each of four DB tables; routing-relevant data lives in the two
