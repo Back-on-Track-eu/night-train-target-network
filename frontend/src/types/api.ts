@@ -40,6 +40,16 @@ export interface StopsResponse {
   stops: Stop[]
 }
 
+// One candidate stop along the routed path, returned by POST /api/route/plan
+// only when auto_stop_addition="suggest". added_time_min is the full trip-time
+// increase (detour + dwell) the stop would cost if added.
+export interface SuggestedStop {
+  stop_id: string
+  stop_name: string
+  country_code: string
+  lat: number
+  lon: number
+  added_time_min: number
 // A scenario is a named snapshot of infrastructure parameters (track-access
 // charges, energy prices, terrain, per-stop charges, hsr_allowed). It pins one
 // version each of four DB tables; routing-relevant data lives in the two

@@ -2,12 +2,13 @@
 import { onMounted, ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useStore } from '@/stores/store'
-import type { EvaluationResponse, MapScope, Stop } from '@/types/api'
+import type { EvaluationResponse, MapScope, Stop, SuggestedStop } from '@/types/api'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Skeleton from 'primevue/skeleton'
 import AppIcon from '@/components/AppIcon.vue'
 import StopSelect from '@/components/StopSelect.vue'
+import StopSuggestionOverlay from '@/components/StopSuggestionOverlay.vue'
 import CompositionSelectCard from '@/components/CompositionSelectCard.vue'
 import RouteStatsCard from '@/components/RouteStatsCard.vue'
 import EvaluationPanel from '@/components/EvaluationPanel.vue'
@@ -34,6 +35,16 @@ const calcError = ref<string | null>(null)
 // Which part of the route the evaluation panel is currently scoped to — drives
 // the map's highlight/dim. 'all' = whole route.
 const evalScope = ref<MapScope>({ kind: 'all' })
+
+// Stop-suggestion overlay state. evaluate() first plans with
+// auto_stop_addition="suggest": the backend routes exactly the caller's stops
+// but returns the candidate stops along the way. If any come back, we prompt
+// the user to pick which to include (default: none) instead of adding them
+// automatically. basePlan holds that first "suggest" response so it can be
+// reused directly when the user adds nothing.
+const suggestedStops = ref<SuggestedStop[]>([])
+const showStopOverlay = ref(false)
+const basePlan = ref<{ route: BackendRoute } | null>(null)
 
 interface StopTimeFmt {
   stop_id: string
@@ -245,6 +256,16 @@ const compositionCards = computed(() => {
   return store.compositions
 })
 
+// POST /api/route/plan for the given stop ids and auto_stop_addition mode.
+// Returns the parsed response, or null on error (having set evaluateError and
+// dropped back to edit mode). proposal_id/proposal_version are omitted — this
+// is always a brand new plan from this screen, and the API mints its own draft
+// id/version. Per-stop stop_type is gone too: boarding/alighting is derived
+// automatically from the timetable.
+async function requestPlan(
+  stopIds: string[],
+  autoStopAddition: 'off' | 'suggest',
+): Promise<{ route: BackendRoute; suggested_stops?: SuggestedStop[] } | null> {
 // The raw backend trip currently shown (matches selectedTripId) — the source
 // of the headline figures in RouteStatsCard.
 const selectedBackendTrip = computed<BackendTripSide | null>(() => {
@@ -284,12 +305,9 @@ async function evaluate() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        // proposal_id/proposal_version omitted — this is always a brand new
-        // plan from this screen, and the API mints its own draft id/version
-        // when they're absent. Per-stop stop_type is gone too: boarding/
-        // alighting is now derived automatically from the timetable.
-        stops: validStops.map((s) => s.selectedStop!.stop_id),
+        stops: stopIds,
         composition_id: selectedCompositionId.value,
+        auto_stop_addition: autoStopAddition,
         // Plan under the selected scenario (null = live base, resolved server-side).
         scenario_id: store.selectedScenarioId,
       }),
@@ -298,28 +316,109 @@ async function evaluate() {
     if (!response.ok) {
       evaluateError.value = json.message ?? `HTTP ${response.status}`
       currentMode.value = 'edit'
-    } else {
-      rawRoute.value = json.route
-      const route = adaptRoute(json.route)
-      routeResult.value = route
-      selectedTripId.value =
-        route.trips.find((t) => t.direction_id === 0)?.trip_id ?? route.trips[0]?.trip_id ?? null
-      // Rebuild the itinerary from the planned route so the builder reflects
-      // what's actually on the map — the router may have inserted intermediate
-      // stops that are now part of the route. Commit that as the clean state so
-      // the builder isn't "dirty" and Cancel Edit can restore exactly this.
-      itinerary.value = itineraryFromRoute(route)
-      committedItinerary.value = itinerary.value.map((s) => ({ ...s }))
-      committedCompId.value = selectedCompositionId.value
-      currentMode.value = 'display'
-      // Fire-and-forget — let cost/revenue results fill in underneath without
-      // blocking the route/map render.
-      runCalc()
+      return null
     }
+    return json
   } catch (err) {
     evaluateError.value = err instanceof Error ? err.message : 'Unknown network error'
     currentMode.value = 'edit'
+    return null
   }
+}
+
+// Wire a successful plan response into the display: adapt the route, select the
+// outbound trip, rebuild the itinerary from the planned route (so the builder
+// reflects what's actually on the map — including any stops the user chose to
+// add) and commit it as the clean state so the builder isn't "dirty" and Cancel
+// Edit can restore exactly this.
+function applyPlan(json: { route: BackendRoute }) {
+  rawRoute.value = json.route
+  const route = adaptRoute(json.route)
+  routeResult.value = route
+  selectedTripId.value =
+    route.trips.find((t) => t.direction_id === 0)?.trip_id ?? route.trips[0]?.trip_id ?? null
+  itinerary.value = itineraryFromRoute(route)
+  committedItinerary.value = itinerary.value.map((s) => ({ ...s }))
+  committedCompId.value = selectedCompositionId.value
+  currentMode.value = 'display'
+  // Fire-and-forget — let cost/revenue results fill in underneath without
+  // blocking the route/map render.
+  runCalc()
+}
+
+async function evaluate() {
+  const validStops = itinerary.value.filter((s) => s.selectedStop !== null)
+  if (validStops.length < 2 || !selectedCompositionId.value) return
+  currentMode.value = 'loading'
+  evaluateError.value = null
+  // First pass: "suggest" routes exactly the caller's stops and reports the
+  // candidate stops along the way, without adding any automatically.
+  const json = await requestPlan(
+    validStops.map((s) => s.selectedStop!.stop_id),
+    'suggest',
+  )
+  if (!json) return
+  const suggestions = json.suggested_stops ?? []
+  if (suggestions.length > 0) {
+    // Hand the choice to the user; the map keeps its loading spinner behind the
+    // overlay until they confirm.
+    basePlan.value = json
+    suggestedStops.value = suggestions
+    showStopOverlay.value = true
+  } else {
+    applyPlan(json)
+  }
+}
+
+// User confirmed the suggestion overlay. With no stops chosen, the first
+// "suggest" plan already routed exactly the caller's stops, so reuse it
+// directly. Otherwise insert the chosen stops into the itinerary (by proximity)
+// and re-plan with auto_stop_addition="off" — the caller has made the selection,
+// so no further suggestions are wanted.
+async function confirmStopSelection(selectedIds: string[]) {
+  showStopOverlay.value = false
+  const base = basePlan.value
+  const chosen = suggestedStops.value.filter((s) => selectedIds.includes(s.stop_id))
+  suggestedStops.value = []
+  basePlan.value = null
+  if (!base) {
+    currentMode.value = 'edit'
+    return
+  }
+  if (chosen.length === 0) {
+    applyPlan(base)
+    return
+  }
+  for (const s of chosen) insertSuggestedStop(s)
+  currentMode.value = 'loading'
+  const stopIds = itinerary.value.filter((s) => s.selectedStop).map((s) => s.selectedStop!.stop_id)
+  const json = await requestPlan(stopIds, 'off')
+  if (!json) return
+  applyPlan(json)
+}
+
+// User dismissed the overlay without choosing — abandon this evaluation and
+// return to editing, leaving the itinerary untouched.
+function cancelStopSelection() {
+  showStopOverlay.value = false
+  suggestedStops.value = []
+  basePlan.value = null
+  currentMode.value = 'edit'
+}
+
+// Turn a suggested stop into a full Stop record (preferring the loaded stop
+// list, falling back to the fields the suggestion already carries) and insert
+// it into the itinerary at the best-fitting position via addStop().
+function insertSuggestedStop(s: SuggestedStop) {
+  const stop: Stop = store.stops.find((st) => st.stop_id === s.stop_id) ?? {
+    stop_id: s.stop_id,
+    name: s.stop_name,
+    country_code: s.country_code,
+    lat: s.lat,
+    lon: s.lon,
+    stop_charge_eur: { value: 0, is_default: true },
+  }
+  addStop(stop)
 }
 
 // Cost/revenue evaluation for the completed routing. Posts the raw route to
@@ -1157,6 +1256,15 @@ onMounted(async () => {
         {{ t('proposal.evaluation.calculating') }}
       </div>
     </div>
+
+    <!-- Prompt to pick which stops along the route to include. Shown only when
+         the "suggest" plan found candidates; default is none selected. -->
+    <StopSuggestionOverlay
+      v-if="showStopOverlay"
+      :suggestions="suggestedStops"
+      @confirm="confirmStopSelection"
+      @cancel="cancelStopSelection"
+    />
   </div>
 </template>
 
