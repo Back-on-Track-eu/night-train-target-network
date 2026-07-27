@@ -1,6 +1,13 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { Stop, Composition, StopsResponse, CompositionsResponse } from '@/types/api'
+import type {
+  Stop,
+  Composition,
+  Scenario,
+  StopsResponse,
+  CompositionsResponse,
+  ScenariosResponse,
+} from '@/types/api'
 
 export type LoadStatus = 'idle' | 'loading' | 'success' | 'error'
 
@@ -16,6 +23,19 @@ export const useStore = defineStore('store', () => {
   const compositions = ref<Composition[]>([])
   const compositionsStatus = ref<LoadStatus>('idle')
   const compositionsError = ref<string | null>(null)
+
+  // Base + current scenarios only (historical/superseded are hidden). The
+  // selected id threads into route/plan and evaluation/calc so routing and cost
+  // always reflect one scenario.
+  const scenarios = ref<Scenario[]>([])
+  const scenariosStatus = ref<LoadStatus>('idle')
+  const scenariosError = ref<string | null>(null)
+  const selectedScenarioId = ref<number | null>(null)
+
+  function scenarioById(id: number | null): Scenario | undefined {
+    if (id === null) return undefined
+    return scenarios.value.find((s) => s.scenario_id === id)
+  }
 
   async function fetchStops(): Promise<void> {
     stopsStatus.value = 'loading'
@@ -57,6 +77,31 @@ export const useStore = defineStore('store', () => {
     }
   }
 
+  async function fetchScenarios(): Promise<void> {
+    scenariosStatus.value = 'loading'
+    scenariosError.value = null
+    try {
+      const response = await fetch(`${BASE_URL}/api/scenarios`)
+      const json: ScenariosResponse = await response.json()
+      if (!response.ok) {
+        scenariosStatus.value = 'error'
+        scenariosError.value = `HTTP ${response.status}`
+      } else {
+        // Base first, then the other current what-if scenarios.
+        scenarios.value = [...json.current_base.scenarios, ...json.current_scenarios.scenarios]
+        selectedScenarioId.value =
+          scenarios.value.find((s) => s.is_current_base)?.scenario_id ??
+          scenarios.value[0]?.scenario_id ??
+          null
+        scenariosStatus.value = 'success'
+        console.log('[scenarios]', scenarios.value)
+      }
+    } catch (err) {
+      scenariosStatus.value = 'error'
+      scenariosError.value = err instanceof Error ? err.message : 'Unknown network error'
+    }
+  }
+
   return {
     stops,
     stopsStatus,
@@ -64,7 +109,13 @@ export const useStore = defineStore('store', () => {
     compositions,
     compositionsStatus,
     compositionsError,
+    scenarios,
+    scenariosStatus,
+    scenariosError,
+    selectedScenarioId,
+    scenarioById,
     fetchStops,
     fetchCompositions,
+    fetchScenarios,
   }
 })

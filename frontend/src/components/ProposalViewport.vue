@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, computed } from 'vue'
+import { onMounted, ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useStore } from '@/stores/store'
 import type { EvaluationResponse, MapScope, Stop } from '@/types/api'
@@ -111,6 +111,7 @@ interface BackendSeasonalSchedule {
 
 interface BackendRoute {
   route_id: string
+  scenario_id: number
   trip_pairs: BackendTripPair[]
   geometries: BackendGeometry[]
   schedule: { seasonal_schedules: BackendSeasonalSchedule[] }
@@ -125,6 +126,17 @@ function formatMinutes(min: number | null): string | null {
   const h = Math.floor(wrapped / 60)
   const m = wrapped % 60
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+}
+
+// Travel time of a leg, in minutes, from the timetable the API already returns.
+// A negative difference means the leg runs over midnight, so wrap by a full day
+// (the mirror-around-02:30 timetable can also put either value outside 0-1439,
+// which the same modulo handles). Null when either end has no time.
+function legTravelMinutes(seg: BackendSegment): number | null {
+  const departure = seg.from_stop.departure_time_min
+  const arrival = seg.to_stop.arrival_time_min
+  if (departure == null || arrival == null) return null
+  return (((arrival - departure) % 1440) + 1440) % 1440
 }
 
 function toStopTimeFmt(stop: BackendStop): StopTimeFmt {
@@ -278,6 +290,8 @@ async function evaluate() {
         // alighting is now derived automatically from the timetable.
         stops: validStops.map((s) => s.selectedStop!.stop_id),
         composition_id: selectedCompositionId.value,
+        // Plan under the selected scenario (null = live base, resolved server-side).
+        scenario_id: store.selectedScenarioId,
       }),
     })
     const json = await response.json()
@@ -311,7 +325,7 @@ async function evaluate() {
 // Cost/revenue evaluation for the completed routing. Posts the raw route to
 // the backend calc endpoint (single source of truth — see plan). For now we
 // just log the JSON and dump it into a panel under the viewport.
-async function runCalc() {
+async function runCalc(scenarioOverride?: number) {
   if (!rawRoute.value) return
   calcError.value = null
   calcResult.value = null
@@ -319,8 +333,14 @@ async function runCalc() {
     const res = await fetch(`${BASE_URL}/api/evaluation/calc`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      // scenario_id omitted — the route JSON carries its own.
-      body: JSON.stringify({ route: rawRoute.value }),
+      // Without an override the route JSON carries its own scenario. When the
+      // user switches to a cost-only scenario we re-run calc alone and pass the
+      // new scenario_id to override the route's embedded one.
+      body: JSON.stringify(
+        scenarioOverride === undefined
+          ? { route: rawRoute.value }
+          : { route: rawRoute.value, scenario_id: scenarioOverride },
+      ),
     })
     const json = await res.json()
     if (!res.ok) {
@@ -333,6 +353,30 @@ async function runCalc() {
     calcError.value = err instanceof Error ? err.message : 'Unknown network error'
   }
 }
+
+// Keep the displayed route and cost calc on the same scenario. When the user
+// switches scenarios: if it only changes cost-relevant params (the two track
+// version pointers are unchanged, so routing is guaranteed identical) we skip
+// the reroute and re-run calc alone; otherwise we replan (which chains calc).
+watch(
+  () => store.selectedScenarioId,
+  (newId, oldId) => {
+    if (!rawRoute.value || currentMode.value === 'loading') return
+    if (newId == null || newId === oldId) return
+    const routed = store.scenarioById(rawRoute.value.scenario_id)
+    const next = store.scenarioById(newId)
+    const routingIdentical =
+      routed != null &&
+      next != null &&
+      routed.track_infrastructures_version === next.track_infrastructures_version &&
+      routed.track_infrastructure_defaults_version === next.track_infrastructure_defaults_version
+    if (routingIdentical) {
+      runCalc(newId)
+    } else {
+      evaluate()
+    }
+  },
+)
 
 interface ItineraryStop {
   id: number
@@ -682,11 +726,15 @@ function splitLineAtFraction(
 interface MapSegment {
   coordinates: [number, number][]
   highlighted: boolean
+  fromName: string
+  toName: string
+  travelMinutes: number | null
 }
 
 // Per-segment geometry for the displayed trip, each flagged highlighted/dimmed
-// according to the evaluation panel's current scope. Null outside display mode
-// (MapView then falls back to the plain shape).
+// according to the evaluation panel's current scope and carrying the endpoint
+// names + travel time MapView shows on hover. Null outside display mode (MapView
+// then falls back to the plain shape).
 const mapSegments = computed<MapSegment[] | null>(() => {
   const rr = rawRoute.value
   const tripId = selectedTripId.value
@@ -719,6 +767,13 @@ const mapSegments = computed<MapSegment[] | null>(() => {
   const out: MapSegment[] = []
   trip.segments.forEach((seg, i) => {
     const coords = geoById.get(seg.geometry_id) ?? []
+    // Identity of the leg for the hover tooltip. A leg split at a border keeps
+    // the same names/time on both halves — either half describes the whole leg.
+    const leg = {
+      fromName: seg.from_stop.stop_name,
+      toName: seg.to_stop.stop_name,
+      travelMinutes: legTravelMinutes(seg),
+    }
     if (scope.kind === 'country') {
       const fromC = seg.from_stop.country_code
       const toC = seg.to_stop.country_code
@@ -732,12 +787,12 @@ const mapSegments = computed<MapSegment[] | null>(() => {
         countries.includes(toC)
       ) {
         const [before, after] = splitLineAtFraction(coords, seg.country_distance_shares[fromC] ?? 0)
-        out.push({ coordinates: before, highlighted: fromC === scope.country })
-        out.push({ coordinates: after, highlighted: toC === scope.country })
+        out.push({ ...leg, coordinates: before, highlighted: fromC === scope.country })
+        out.push({ ...leg, coordinates: after, highlighted: toC === scope.country })
       } else {
         const inScope =
           fromC === scope.country || toC === scope.country || countries.includes(scope.country)
-        out.push({ coordinates: coords, highlighted: inScope })
+        out.push({ ...leg, coordinates: coords, highlighted: inScope })
       }
       return
     }
@@ -746,7 +801,7 @@ const mapSegments = computed<MapSegment[] | null>(() => {
       highlighted = false // whole line dims; only the marker stays lit
     else if (scope.kind === 'od') highlighted = odRange ? i >= odRange[0] && i < odRange[1] : true
     else highlighted = true
-    out.push({ coordinates: coords, highlighted })
+    out.push({ ...leg, coordinates: coords, highlighted })
   })
 
   // Safety: a country/OD scope that matched nothing shouldn't grey the whole
@@ -767,6 +822,7 @@ onMounted(async () => {
     ]
   }
   store.fetchCompositions()
+  store.fetchScenarios()
 })
 </script>
 
