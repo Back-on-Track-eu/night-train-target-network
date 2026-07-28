@@ -3,6 +3,14 @@ import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-csp-worker.js?url'
+
+// Vite 8 production builds corrupt the worker MapLibre assembles from its own
+// bundled code (maplibre-gl-js#7339): GeoJSON sources then fail in the worker
+// ("<name> is not defined") and route lines never render, while dev builds are
+// unaffected. Point MapLibre at the self-contained CSP worker file instead so
+// the worker never depends on how the main bundle was chunked or minified.
+maplibregl.setWorkerUrl(maplibreWorkerUrl)
 import { octilinearPath } from '@/utils/octilinear'
 
 // Two sources/layers: the in-scope route (highlighted) and the out-of-scope
