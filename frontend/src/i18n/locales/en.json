@@ -150,18 +150,17 @@
       "stationPlaceholder": "Any station",
       "country": "Country",
       "countryPlaceholder": "Any country",
+      "noCountries": "No countries found",
       "button": "Search"
     },
     "sort": {
-      "label": "Sort by",
-      "marginDesc": "Highest margin",
-      "marginAsc": "Lowest margin",
-      "revenueDesc": "Highest revenue",
-      "costAsc": "Lowest cost",
-      "newest": "Newest first",
-      "oldest": "Oldest first",
-      "longestDistance": "Longest distance",
-      "shortestDistance": "Shortest distance"
+      "direction": "Toggle sort direction",
+      "margin": "Margin",
+      "revenue": "Revenue",
+      "cost": "Cost",
+      "date": "Date",
+      "distance": "Distance",
+      "duration": "Duration"
     },
     "card": {
       "distance": "Distance",

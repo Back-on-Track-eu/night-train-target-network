@@ -2,9 +2,18 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Select from 'primevue/select'
-import { mdiArrowLeftRight, mdiMapMarkerOutline, mdiEarth, mdiMagnify, mdiPlus } from '@mdi/js'
+import {
+  mdiArrowLeftRight,
+  mdiMapMarkerOutline,
+  mdiEarth,
+  mdiMagnify,
+  mdiPlus,
+  mdiSortAscending,
+  mdiSortDescending,
+} from '@mdi/js'
 import AppIcon from '@/components/AppIcon.vue'
 import StopSelect from '@/components/StopSelect.vue'
+import CountrySelect from '@/components/CountrySelect.vue'
 import ProposalCard from '@/components/ProposalCard.vue'
 import GalleryMap from '@/components/GalleryMap.vue'
 import { useStore } from '@/stores/store'
@@ -35,8 +44,10 @@ const toStop = ref<Stop | null>(null)
 const stationStop = ref<Stop | null>(null)
 const countryCode = ref<string | null>(null)
 
-// Encoded "<by>:<dir>" so the Select can use a primitive option-value.
-const sortValue = ref('margin_eur:desc')
+// Sort as a field + direction. The field Select shows only field names; the
+// direction is an icon toggle (ascending/descending).
+const sortField = ref<ProposalSortKey>('margin_eur')
+const sortDir = ref<'asc' | 'desc'>('desc')
 
 // Result list (accumulated across pages) + pagination bookkeeping.
 const proposals = ref<ProposalSummary[]>([])
@@ -53,29 +64,38 @@ const tabs = computed(() => [
   { value: 'byCountry' as const, label: t('gallery.tabs.byCountry'), icon: mdiEarth },
 ])
 
-const sortOptions = computed(() => [
-  { value: 'margin_eur:desc', label: t('gallery.sort.marginDesc') },
-  { value: 'margin_eur:asc', label: t('gallery.sort.marginAsc') },
-  { value: 'total_revenue_eur:desc', label: t('gallery.sort.revenueDesc') },
-  { value: 'total_cost_eur:asc', label: t('gallery.sort.costAsc') },
-  { value: 'created_at:desc', label: t('gallery.sort.newest') },
-  { value: 'created_at:asc', label: t('gallery.sort.oldest') },
-  { value: 'total_distance_km:desc', label: t('gallery.sort.longestDistance') },
-  { value: 'total_distance_km:asc', label: t('gallery.sort.shortestDistance') },
+const sortFieldOptions = computed(() => [
+  { value: 'margin_eur', label: t('gallery.sort.margin') },
+  { value: 'total_revenue_eur', label: t('gallery.sort.revenue') },
+  { value: 'total_cost_eur', label: t('gallery.sort.cost') },
+  { value: 'created_at', label: t('gallery.sort.date') },
+  { value: 'total_distance_km', label: t('gallery.sort.distance') },
+  { value: 'total_time_h', label: t('gallery.sort.duration') },
 ])
 
-// Distinct country codes present in the loaded stops (reactive — stops load
-// asynchronously after mount).
+// Country codes present in the loaded stops, resolved to full names. Intl gives
+// display names with no bundled data; unknown codes fall back to the code.
+const regionNames = new Intl.DisplayNames(['en'], { type: 'region' })
+function countryName(code: string): string {
+  try {
+    return regionNames.of(code) ?? code
+  } catch {
+    return code
+  }
+}
 const countryOptions = computed(() =>
   [...new Set(store.stops.map((s) => s.country_code))]
-    .sort()
-    .map((code) => ({ value: code, label: code })),
+    .map((code) => ({ code, name: countryName(code) }))
+    .sort((a, b) => a.name.localeCompare(b.name)),
+)
+const selectedCountryName = computed(() =>
+  countryCode.value ? countryName(countryCode.value) : null,
 )
 
-const currentSort = computed<ProposalSort>(() => {
-  const [by, dir] = sortValue.value.split(':')
-  return { by: by as ProposalSortKey, dir: dir === 'asc' ? 'asc' : 'desc' }
-})
+const currentSort = computed<ProposalSort>(() => ({ by: sortField.value, dir: sortDir.value }))
+function toggleSortDir(): void {
+  sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
+}
 
 const reachedEnd = computed(() => initialized.value && proposals.value.length >= total.value)
 
@@ -204,7 +224,7 @@ function onHoverRoute(key: string | null): void {
   lastScrolledKey = key
   cardsContainer.value
     ?.querySelector<HTMLElement>(`[data-proposal="${key}"]`)
-    ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   flashedKey.value = key
   if (flashTimer) clearTimeout(flashTimer)
   flashTimer = window.setTimeout(() => {
@@ -212,7 +232,7 @@ function onHoverRoute(key: string | null): void {
   }, 900)
 }
 
-watch([mode, fromStop, toStop, stationStop, countryCode, sortValue], resetAndLoad)
+watch([mode, fromStop, toStop, stationStop, countryCode, sortField, sortDir], resetAndLoad)
 watch(proposals, ensureRoutes)
 
 let observer: IntersectionObserver | null = null
@@ -248,18 +268,12 @@ const selectPt = {
 
 const ctaClass =
   'flex cursor-pointer items-center gap-1.5 rounded-full bg-primary-50/10 px-5 py-2 text-sm text-primary-50 transition hover:bg-primary-50/20'
+const iconBtnClass =
+  'flex cursor-pointer items-center justify-center rounded-full border border-primary-50/20 p-2 text-primary-50/70 transition hover:bg-primary-50/10'
 </script>
 
 <template>
   <div class="flex w-full flex-col gap-6">
-    <!-- Top-right CTA into the route planner -->
-    <div class="flex justify-end">
-      <button type="button" :class="ctaClass" @click="emit('create')">
-        <AppIcon :path="mdiPlus" :size="18" />
-        {{ t('gallery.cta.create') }}
-      </button>
-    </div>
-
     <!-- Search bar -->
     <div class="flex flex-col items-center gap-4">
       <!-- Category tabs -->
@@ -324,22 +338,18 @@ const ctaClass =
           </StopSelect>
         </template>
 
-        <!-- By Country: a country select -->
+        <!-- By Country: same picker style as the stop selection -->
         <template v-else>
-          <div class="flex flex-col px-4 py-1.5">
-            <span class="text-xs font-semibold text-primary-50">{{
-              t('gallery.search.country')
-            }}</span>
-            <Select
-              v-model="countryCode"
-              :options="countryOptions"
-              option-value="value"
-              option-label="label"
-              :placeholder="t('gallery.search.countryPlaceholder')"
-              :unstyled="true"
-              :pt="selectPt"
-            />
-          </div>
+          <CountrySelect :countries="countryOptions" @select="countryCode = $event">
+            <div class="flex flex-col rounded-full px-4 py-1.5 hover:bg-primary-50/10">
+              <span class="text-xs font-semibold text-primary-50">{{
+                t('gallery.search.country')
+              }}</span>
+              <span class="text-sm" :class="countryCode ? 'text-primary-50' : 'text-primary-50/40'">
+                {{ selectedCountryName ?? t('gallery.search.countryPlaceholder') }}
+              </span>
+            </div>
+          </CountrySelect>
         </template>
 
         <!-- Search button -->
@@ -354,32 +364,37 @@ const ctaClass =
       </div>
     </div>
 
-    <!-- Sort control -->
+    <!-- Controls: sort (above the card list) + plan a new route (above the map) -->
     <div class="flex items-center gap-2">
-      <span class="text-sm text-primary-50/50">{{ t('gallery.sort.label') }}</span>
       <Select
-        v-model="sortValue"
-        :options="sortOptions"
+        v-model="sortField"
+        :options="sortFieldOptions"
         option-value="value"
         option-label="label"
         :unstyled="true"
         :pt="selectPt"
       />
+      <button
+        type="button"
+        :class="iconBtnClass"
+        :aria-label="t('gallery.sort.direction')"
+        @click="toggleSortDir"
+      >
+        <AppIcon :path="sortDir === 'asc' ? mdiSortAscending : mdiSortDescending" :size="18" />
+      </button>
+      <button type="button" :class="[ctaClass, 'ml-auto']" @click="emit('create')">
+        <AppIcon :path="mdiPlus" :size="18" />
+        {{ t('gallery.cta.create') }}
+      </button>
     </div>
 
-    <!-- Results: cards (left half, two per row) + map of every result route
-         (right half, sticky while the card column scrolls) -->
+    <!-- Results: one column of cards (left) + a browser-height sticky map (right) -->
     <div class="flex gap-6">
-      <div class="flex w-1/2 flex-col gap-4">
+      <div class="flex w-96 shrink-0 flex-col gap-4">
         <p v-if="errorMsg" class="text-sm text-red-400">{{ errorMsg }}</p>
 
-        <div v-if="proposals.length" ref="cardsContainer" class="columns-2 gap-4">
-          <div
-            v-for="p in proposals"
-            :key="proposalKey(p)"
-            :data-proposal="proposalKey(p)"
-            class="mb-4 break-inside-avoid"
-          >
+        <div v-if="proposals.length" ref="cardsContainer" class="flex flex-col gap-4">
+          <div v-for="p in proposals" :key="proposalKey(p)" :data-proposal="proposalKey(p)">
             <ProposalCard :proposal="p" :flash="flashedKey === proposalKey(p)" />
           </div>
         </div>
@@ -406,8 +421,10 @@ const ctaClass =
         </div>
       </div>
 
-      <div class="w-1/2">
-        <div class="sticky top-6 h-[70vh] overflow-hidden rounded-xl border border-primary-50/10">
+      <div class="flex-1">
+        <div
+          class="sticky top-6 h-[calc(100vh-3rem)] overflow-hidden rounded-xl border border-primary-50/10"
+        >
           <GalleryMap :routes="mapRoutes" @hover-route="onHoverRoute" />
         </div>
       </div>
