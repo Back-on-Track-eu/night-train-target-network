@@ -164,23 +164,35 @@ def proposal_summary_to_dict(row: dict) -> dict:
     }
 
 
+_NO_FINANCIALS = {
+    "total_revenue_eur": None,
+    "total_cost_eur": None,
+    "margin_eur": None,
+    "margin_per": None,
+}
+
+
 def _financial_summary(eval_totals: dict | None) -> dict:
     """total_revenue_eur/total_cost_eur/margin_eur/margin_per from a
     saved evaluation's views.route.data.per_year block, or all-null if the
     proposal was saved without an evaluation. margin_eur is net_eur (the
     bottom line after cost, revenue, and the EBIT margin target — see
     models/evaluation/views.py:Breakdown.net_eur), not the raw EBIT target
-    itself."""
+    itself.
+
+    Since CALC 0.9.9 per_year is keyed by class_main plus "all" (each value a
+    full Breakdown), so the whole-route totals live under the "all" block —
+    fall back to eval_totals itself for evaluations stored before that axis
+    existed. Missing/partial totals degrade to all-null rather than raising:
+    a single bad snapshot must not 500 the whole proposal list."""
     if not eval_totals:
-        return {
-            "total_revenue_eur": None,
-            "total_cost_eur": None,
-            "margin_eur": None,
-            "margin_per": None,
-        }
-    revenue = eval_totals["total_revenue_eur"]
-    cost = eval_totals["total_cost_eur"]
-    margin = eval_totals["net_eur"]
+        return dict(_NO_FINANCIALS)
+    totals = eval_totals.get("all", eval_totals)
+    revenue = totals.get("total_revenue_eur")
+    cost = totals.get("total_cost_eur")
+    margin = totals.get("net_eur")
+    if revenue is None or cost is None or margin is None:
+        return dict(_NO_FINANCIALS)
     return {
         "total_revenue_eur": revenue,
         "total_cost_eur": cost,

@@ -379,3 +379,116 @@ export type MapScope =
   | { kind: 'country'; country: string }
   | { kind: 'od'; originStopId: string; destinationStopId: string }
   | { kind: 'stop'; stopId: string }
+
+// --- POST /api/auth/guest ---------------------------------------------------
+// Backend: api/auth.py::guest(). Anonymous session — a real identity server-side
+// (guest tokens expire after 30 days). We only keep the token to attach as a
+// Bearer on the persist-on-calc endpoints; the other fields are informational.
+export interface GuestSessionResponse {
+  token: string
+  user_id: number
+  display_name: string
+  is_guest: boolean
+}
+
+// --- POST /api/proposals ----------------------------------------------------
+// Backend: api/proposals.py + api/helpers/proposal_serialize.py. Read-only list
+// of saved proposals (every user sees every proposal). Filtering/sorting is done
+// server-side; the four financial fields are null for proposals saved without an
+// evaluation snapshot.
+
+// One proposal, as produced by proposal_summary_to_dict(). snake_case mirrors
+// the backend JSON verbatim.
+export interface ProposalSummary {
+  proposal_id: number
+  proposal_version: number
+  is_current: boolean
+  user_id: number
+  user_name: string | null
+  change_log: string | null
+  created_at: string
+  name: string
+  total_distance_km: number
+  total_driving_time_h: number
+  total_time_h: number
+  countries: string[]
+  stops: { stop_id: string; stop_name: string }[]
+  total_revenue_eur: number | null
+  total_cost_eur: number | null
+  margin_eur: number | null
+  margin_per: number | null
+}
+
+// Sortable keys accepted by the backend (SORT_KEYS in proposal_serialize.py).
+// Note margin_per is deliberately NOT sortable server-side.
+export const PROPOSAL_SORT_KEYS = [
+  'created_at',
+  'total_distance_km',
+  'total_time_h',
+  'total_revenue_eur',
+  'total_cost_eur',
+  'margin_eur',
+] as const
+export type ProposalSortKey = (typeof PROPOSAL_SORT_KEYS)[number]
+
+export interface ProposalSort {
+  by: ProposalSortKey
+  dir: 'asc' | 'desc'
+}
+
+// All filter keys are OR / any-match server-side.
+export interface ProposalsFilter {
+  user_ids?: number[]
+  countries?: string[]
+  stop_ids?: string[]
+}
+
+export interface ProposalsRequest {
+  filter?: ProposalsFilter
+  sort?: ProposalSort[]
+  limit?: number
+  offset?: number
+}
+
+export interface ProposalsResponse {
+  // Count after filtering, before pagination — what infinite scroll compares
+  // loaded length against.
+  total: number
+  proposals: ProposalSummary[]
+}
+
+// --- GET /api/proposal/<id> -------------------------------------------------
+// The full stored envelopes. The gallery map only needs the route geometry and
+// the endpoint stops, so we type just those fields (the route object carries
+// much more — see backend/api/route.py).
+export interface ProposalRouteStopPoint {
+  stop_id: string
+  stop_name: string
+  lat: number
+  lon: number
+}
+
+export interface ProposalDetailResponse {
+  route_body: {
+    route: {
+      geometries: { id: string; coords: [number, number][] }[]
+      trip_pairs: {
+        outbound: {
+          segments: {
+            from_stop: ProposalRouteStopPoint
+            to_stop: ProposalRouteStopPoint
+          }[]
+        }
+      }[]
+    }
+  }
+  evaluation_body: unknown | null
+}
+
+// A proposal reduced to what the gallery map draws: its routed line geometry
+// (one entry per stored geometry leg) and endpoint stops for markers.
+export interface GalleryMapRoute {
+  key: string
+  lines: [number, number][][]
+  stops: { lat: number; lon: number; name: string }[]
+}

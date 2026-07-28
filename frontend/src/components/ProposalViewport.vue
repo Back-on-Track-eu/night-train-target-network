@@ -13,9 +13,10 @@ import CompositionSelectCard from '@/components/CompositionSelectCard.vue'
 import RouteStatsCard from '@/components/RouteStatsCard.vue'
 import EvaluationPanel from '@/components/EvaluationPanel.vue'
 import MapView from '@/components/MapView.vue'
-import { mdiClose, mdiPencil, mdiPlus, mdiSwapVertical, mdiTrashCan } from '@mdi/js'
+import { mdiArrowLeft, mdiClose, mdiPencil, mdiPlus, mdiSwapVertical, mdiTrashCan } from '@mdi/js'
 
 const props = defineProps<{ mode: 'edit' | 'loading' | 'display' }>()
+const emit = defineEmits<{ back: [] }>()
 
 const { t } = useI18n()
 const store = useStore()
@@ -269,7 +270,7 @@ async function requestPlan(
   try {
     const response = await fetch(`${BASE_URL}/api/route/plan`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...store.authHeaders() },
       body: JSON.stringify({
         stops: stopIds,
         composition_id: selectedCompositionId.value,
@@ -426,7 +427,7 @@ async function runCalc(scenarioOverride?: number) {
   try {
     const res = await fetch(`${BASE_URL}/api/evaluation/calc`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...store.authHeaders() },
       // Without an override the route JSON carries its own scenario. When the
       // user switches to a cost-only scenario we re-run calc alone and pass the
       // new scenario_id to override the route's embedded one.
@@ -907,7 +908,9 @@ const mapSegments = computed<MapSegment[] | null>(() => {
 })
 
 onMounted(async () => {
-  await store.fetchStops()
+  // App.vue loads this reference data at startup; only fetch if we arrived here
+  // before it finished (or a fetch errored).
+  if (store.stopsStatus !== 'success') await store.fetchStops()
   if (store.stops.length >= 2) {
     const shuffled = [...store.stops].sort(() => Math.random() - 0.5)
     itinerary.value = [
@@ -915,13 +918,19 @@ onMounted(async () => {
       { id: _nextId++, name: shuffled[1].name, selectedStop: shuffled[1] },
     ]
   }
-  store.fetchCompositions()
-  store.fetchScenarios()
+  if (store.compositionsStatus !== 'success') store.fetchCompositions()
+  if (store.scenariosStatus !== 'success') store.fetchScenarios()
 })
 </script>
 
 <template>
   <div class="flex flex-col gap-6">
+    <div class="flex">
+      <button type="button" :class="pillClass" @click="emit('back')">
+        <AppIcon :path="mdiArrowLeft" :size="16" />
+        {{ t('gallery.back') }}
+      </button>
+    </div>
     <div class="flex gap-6">
       <!-- Left panel -->
       <div class="flex w-1/2 flex-col justify-center gap-12">

@@ -134,5 +134,50 @@
         "all": "All Classes"
       }
     }
+  },
+  "gallery": {
+    "tabs": {
+      "aToB": "From A to B",
+      "byStation": "By Station",
+      "byCountry": "By Country"
+    },
+    "search": {
+      "from": "From",
+      "fromPlaceholder": "Origin station",
+      "to": "To",
+      "toPlaceholder": "Destination station",
+      "station": "Station",
+      "stationPlaceholder": "Any station",
+      "country": "Country",
+      "countryPlaceholder": "Any country",
+      "button": "Search"
+    },
+    "sort": {
+      "label": "Sort by",
+      "marginDesc": "Highest margin",
+      "marginAsc": "Lowest margin",
+      "revenueDesc": "Highest revenue",
+      "costAsc": "Lowest cost",
+      "newest": "Newest first",
+      "oldest": "Oldest first",
+      "longestDistance": "Longest distance",
+      "shortestDistance": "Shortest distance"
+    },
+    "card": {
+      "distance": "Distance",
+      "countries": "Countries",
+      "stops": "Stops",
+      "savedBy": "Saved by",
+      "km": "{value} km"
+    },
+    "back": "Back to gallery",
+    "cta": {
+      "create": "Plan a new route"
+    },
+    "empty": "No proposals yet. Plan and evaluate a route to get started.",
+    "loading": "Loading proposals…",
+    "loadingMore": "Loading more…",
+    "end": "That's all {count} proposals.",
+    "error": "Could not load proposals."
   }
 }

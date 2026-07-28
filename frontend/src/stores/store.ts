@@ -7,6 +7,7 @@ import type {
   StopsResponse,
   CompositionsResponse,
   ScenariosResponse,
+  GuestSessionResponse,
 } from '@/types/api'
 
 export type LoadStatus = 'idle' | 'loading' | 'success' | 'error'
@@ -31,6 +32,13 @@ export const useStore = defineStore('store', () => {
   const scenariosStatus = ref<LoadStatus>('idle')
   const scenariosError = ref<string | null>(null)
   const selectedScenarioId = ref<number | null>(null)
+
+  // Guest-session stopgap: the frontend acts as an anonymous guest so
+  // persist-on-calc (POST /api/route/plan, /api/evaluation/calc) actually saves.
+  // A fresh guest is acquired on every app load (no persistence across reloads);
+  // the gallery lists every proposal regardless of owner, so data still shows up.
+  const guestToken = ref<string | null>(null)
+  const guestStatus = ref<LoadStatus>('idle')
 
   function scenarioById(id: number | null): Scenario | undefined {
     if (id === null) return undefined
@@ -102,6 +110,33 @@ export const useStore = defineStore('store', () => {
     }
   }
 
+  // Acquire an anonymous guest token. Never throws: a failed guest session just
+  // means requests stay tokenless (compute-only, nothing persists) rather than
+  // breaking the app.
+  async function initGuestSession(): Promise<void> {
+    guestStatus.value = 'loading'
+    try {
+      const response = await fetch(`${BASE_URL}/api/auth/guest`, { method: 'POST' })
+      const json: GuestSessionResponse = await response.json()
+      if (!response.ok) {
+        guestStatus.value = 'error'
+        return
+      }
+      guestToken.value = json.token
+      guestStatus.value = 'success'
+      console.log('[guest]', json.display_name, json.user_id)
+    } catch (err) {
+      guestStatus.value = 'error'
+      console.warn('[guest] session unavailable — requests will be tokenless', err)
+    }
+  }
+
+  // Bearer header for the persist-on-calc endpoints; empty when we have no
+  // guest token yet (spread into a fetch headers object with `...`).
+  function authHeaders(): Record<string, string> {
+    return guestToken.value ? { Authorization: `Bearer ${guestToken.value}` } : {}
+  }
+
   return {
     stops,
     stopsStatus,
@@ -117,5 +152,9 @@ export const useStore = defineStore('store', () => {
     fetchStops,
     fetchCompositions,
     fetchScenarios,
+    guestToken,
+    guestStatus,
+    initGuestSession,
+    authHeaders,
   }
 })
