@@ -164,9 +164,7 @@
     },
     "card": {
       "distance": "Distance",
-      "countries": "Countries",
-      "stops": "Stops",
-      "savedBy": "Saved by",
+      "proposedBy": "Proposed by {name}",
       "km": "{value} km"
     },
     "back": "Back to gallery",

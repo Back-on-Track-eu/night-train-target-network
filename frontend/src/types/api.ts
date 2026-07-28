@@ -477,6 +477,8 @@ export interface ProposalDetailResponse {
           segments: {
             from_stop: ProposalRouteStopPoint
             to_stop: ProposalRouteStopPoint
+            // Country codes in the order the segment traverses them.
+            country_distance_shares: Record<string, number>
           }[]
         }
       }[]

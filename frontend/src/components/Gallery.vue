@@ -162,7 +162,9 @@ function onSentinel(): void {
 const proposalKey = (p: ProposalSummary) => `${p.proposal_id}-${p.proposal_version}`
 // `routed` separates a real routed geometry (many points per leg) from a
 // straight-line stand-in (e.g. the seed proposal) — only routed ones map.
-type CachedRoute = GalleryMapRoute & { routed: boolean }
+// `orderedCountries` lists the countries in itinerary order (the summary's own
+// `countries` is alphabetical), used for the flag order on the card.
+type CachedRoute = GalleryMapRoute & { routed: boolean; orderedCountries: string[] }
 const routeCache = ref<Record<string, CachedRoute>>({})
 const mapRoutes = computed(() =>
   proposals.value
@@ -189,6 +191,14 @@ async function ensureRoutes(list: ProposalSummary[]): Promise<void> {
           )
         }
         const lines = route.geometries.map((g) => g.coords)
+        const orderedCountries: string[] = []
+        for (const pair of route.trip_pairs) {
+          for (const seg of pair.outbound.segments) {
+            for (const cc of Object.keys(seg.country_distance_shares)) {
+              if (!orderedCountries.includes(cc)) orderedCountries.push(cc)
+            }
+          }
+        }
         const entry: CachedRoute = {
           key: proposalKey(p),
           lines,
@@ -196,6 +206,7 @@ async function ensureRoutes(list: ProposalSummary[]): Promise<void> {
           // A routed leg carries many intermediate points; a straight-line
           // stand-in is just its two endpoints.
           routed: lines.some((l) => l.length > 2),
+          orderedCountries,
         }
         return entry
       } catch {
@@ -213,6 +224,8 @@ async function ensureRoutes(list: ProposalSummary[]): Promise<void> {
 // only fires once (until the pointer leaves and re-enters).
 const cardsContainer = ref<HTMLElement | null>(null)
 const flashedKey = ref<string | null>(null)
+// Set while a card is hovered; drives the map's route highlight (card → map).
+const cardHoverKey = ref<string | null>(null)
 let lastScrolledKey: string | null = null
 let flashTimer: number | undefined
 function onHoverRoute(key: string | null): void {
@@ -268,8 +281,10 @@ const selectPt = {
 
 const ctaClass =
   'flex cursor-pointer items-center gap-1.5 rounded-full bg-primary-50/10 px-5 py-2 text-sm text-primary-50 transition hover:bg-primary-50/20'
+// A circle whose 28px (h-7/w-7) diameter equals the sort Select's height, so
+// the two sit as an equal-height pair.
 const iconBtnClass =
-  'flex cursor-pointer items-center justify-center rounded-full border border-primary-50/20 p-2 text-primary-50/70 transition hover:bg-primary-50/10'
+  'flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-full border border-primary-50/20 text-primary-50/70 transition hover:bg-primary-50/10'
 </script>
 
 <template>
@@ -277,7 +292,7 @@ const iconBtnClass =
     <!-- Search bar -->
     <div class="flex flex-col items-center gap-4">
       <!-- Category tabs -->
-      <div class="flex overflow-hidden rounded-full border border-primary-50/20">
+      <div class="flex divide-x divide-primary-50/20 overflow-hidden rounded-full">
         <button
           v-for="tab in tabs"
           :key="tab.value"
@@ -355,7 +370,7 @@ const iconBtnClass =
         <!-- Search button -->
         <button
           type="button"
-          class="flex cursor-pointer items-center justify-center rounded-full bg-primary-500 p-3 text-white transition hover:bg-primary-600"
+          class="flex cursor-pointer items-center justify-center rounded-full bg-primary-50/10 p-3 text-primary-50 transition hover:bg-primary-50/20"
           :aria-label="t('gallery.search.button')"
           @click="resetAndLoad"
         >
@@ -366,22 +381,24 @@ const iconBtnClass =
 
     <!-- Controls: sort (above the card list) + plan a new route (above the map) -->
     <div class="flex items-center gap-2">
-      <Select
-        v-model="sortField"
-        :options="sortFieldOptions"
-        option-value="value"
-        option-label="label"
-        :unstyled="true"
-        :pt="selectPt"
-      />
-      <button
-        type="button"
-        :class="iconBtnClass"
-        :aria-label="t('gallery.sort.direction')"
-        @click="toggleSortDir"
-      >
-        <AppIcon :path="sortDir === 'asc' ? mdiSortAscending : mdiSortDescending" :size="18" />
-      </button>
+      <div class="flex items-stretch gap-2">
+        <Select
+          v-model="sortField"
+          :options="sortFieldOptions"
+          option-value="value"
+          option-label="label"
+          :unstyled="true"
+          :pt="selectPt"
+        />
+        <button
+          type="button"
+          :class="iconBtnClass"
+          :aria-label="t('gallery.sort.direction')"
+          @click="toggleSortDir"
+        >
+          <AppIcon :path="sortDir === 'asc' ? mdiSortAscending : mdiSortDescending" :size="18" />
+        </button>
+      </div>
       <button type="button" :class="[ctaClass, 'ml-auto']" @click="emit('create')">
         <AppIcon :path="mdiPlus" :size="18" />
         {{ t('gallery.cta.create') }}
@@ -394,8 +411,18 @@ const iconBtnClass =
         <p v-if="errorMsg" class="text-sm text-red-400">{{ errorMsg }}</p>
 
         <div v-if="proposals.length" ref="cardsContainer" class="flex flex-col gap-4">
-          <div v-for="p in proposals" :key="proposalKey(p)" :data-proposal="proposalKey(p)">
-            <ProposalCard :proposal="p" :flash="flashedKey === proposalKey(p)" />
+          <div
+            v-for="p in proposals"
+            :key="proposalKey(p)"
+            :data-proposal="proposalKey(p)"
+            @mouseenter="cardHoverKey = proposalKey(p)"
+            @mouseleave="cardHoverKey = null"
+          >
+            <ProposalCard
+              :proposal="p"
+              :flash="flashedKey === proposalKey(p)"
+              :ordered-countries="routeCache[proposalKey(p)]?.orderedCountries"
+            />
           </div>
         </div>
         <p v-else-if="initialized && !loading" class="py-8 text-center text-sm text-primary-50/50">
@@ -425,7 +452,11 @@ const iconBtnClass =
         <div
           class="sticky top-6 h-[calc(100vh-3rem)] overflow-hidden rounded-xl border border-primary-50/10"
         >
-          <GalleryMap :routes="mapRoutes" @hover-route="onHoverRoute" />
+          <GalleryMap
+            :routes="mapRoutes"
+            :highlighted-key="cardHoverKey"
+            @hover-route="onHoverRoute"
+          />
         </div>
       </div>
     </div>

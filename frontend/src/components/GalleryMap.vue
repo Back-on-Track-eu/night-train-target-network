@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue'
-import maplibregl from 'maplibre-gl'
+import maplibregl, { type FilterSpecification } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import type { GalleryMapRoute } from '@/types/api'
 
@@ -15,7 +15,7 @@ const ROUTES_LAYER = 'gallery-routes-line'
 // hover, so this is the hit target (MapLibre still hit-tests zero-opacity fills).
 const ROUTES_HIT_LAYER = 'gallery-routes-hit'
 
-const props = defineProps<{ routes: GalleryMapRoute[] }>()
+const props = defineProps<{ routes: GalleryMapRoute[]; highlightedKey?: string | null }>()
 const emit = defineEmits<{ hoverRoute: [key: string | null] }>()
 
 const mapContainer = ref<HTMLDivElement | null>(null)
@@ -54,23 +54,21 @@ function fit() {
 
 function sync() {
   if (!map || !mapLoaded) return
-  // Features are being replaced — drop any stale highlight so a departed route
-  // doesn't leave a dangling thick line.
+  // Features are being replaced — clear any active isolation so a departed
+  // route doesn't leave the others permanently hidden.
   hoveredKey = null
-  setHighlight(null)
+  setIsolate(null)
   ;(map.getSource(ROUTES_SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(routesFC())
   fit()
 }
 
-// Thicken only the hovered proposal's route; every other route keeps its
-// default width. null restores the flat all-equal styling.
-function setHighlight(key: string | null) {
+// Isolate the focused route: show only it and hide every other route (both the
+// visible line and its hover hit-target). null shows them all again.
+function setIsolate(key: string | null) {
   if (!map || !mapLoaded) return
-  map.setPaintProperty(
-    ROUTES_LAYER,
-    'line-width',
-    key ? ['case', ['==', ['get', 'key'], key], 5, 2.5] : 2.5,
-  )
+  const filter = (key ? ['==', ['get', 'key'], key] : null) as FilterSpecification | null
+  map.setFilter(ROUTES_LAYER, filter)
+  map.setFilter(ROUTES_HIT_LAYER, filter)
 }
 
 function onRouteHover(e: maplibregl.MapLayerMouseEvent) {
@@ -80,7 +78,7 @@ function onRouteHover(e: maplibregl.MapLayerMouseEvent) {
   map.getCanvas().style.cursor = key ? 'pointer' : ''
   if (key === hoveredKey) return
   hoveredKey = key
-  setHighlight(key)
+  setIsolate(key)
   emit('hoverRoute', key)
 }
 
@@ -88,7 +86,7 @@ function onRouteLeave() {
   if (!map || hoveredKey === null) return
   map.getCanvas().style.cursor = ''
   hoveredKey = null
-  setHighlight(null)
+  setIsolate(null)
   emit('hoverRoute', null)
 }
 
@@ -134,6 +132,13 @@ onMounted(() => {
 })
 
 watch(() => props.routes, sync, { deep: true })
+
+// Card-driven highlight: hovering a card in the list thickens its route here,
+// mirroring the map→card direction.
+watch(
+  () => props.highlightedKey,
+  (k) => setIsolate(k ?? null),
+)
 
 onUnmounted(() => {
   resizeObserver?.disconnect()
