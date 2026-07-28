@@ -55,7 +55,12 @@ def _bearer_token() -> str | None:
         return None
 
     parts = auth_header.split()
-    if len(parts) != 2 or parts[0].lower() != "bearer":
+    if parts and parts[0].lower() != "bearer":
+        # A different auth scheme (e.g. "Basic ..." injected by the browser
+        # behind the staging basic-auth wall) is not ours to validate —
+        # treat the request as anonymous instead of rejecting it.
+        return None
+    if len(parts) != 2:
         raise AuthError("Invalid Authorization header format. Expected: Bearer <token>")
     return parts[1]
 
