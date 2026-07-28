@@ -4,7 +4,7 @@ import sys
 class StationFilter(osm.SimpleHandler):
     def __init__(self):
         super(StationFilter, self).__init__()
-        self.writer = osm.SimpleWriter("data/raw/stations_europe.osm.pbf")
+        self.writer = osm.SimpleWriter("data/raw/all_stations_europe.osm.pbf")
 
     def node(self, n):
         if self._is_station(n):
@@ -22,6 +22,7 @@ class StationFilter(osm.SimpleHandler):
         tags = o.tags
         return (
             tags.get("railway") in ("station", "halt")
+            or tags.get("public_transport") == "station"
         )
 
 def main(input_file):
