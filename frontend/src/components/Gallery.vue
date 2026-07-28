@@ -179,16 +179,22 @@ async function ensureRoutes(list: ProposalSummary[]): Promise<void> {
     missing.map(async (p) => {
       try {
         const { route } = (await fetchProposalRoute(p.proposal_id)).route_body
+        // Every stop along the route, in order — each segment's origin, then the
+        // final segment's destination. The gallery map dedupes the boundary
+        // repeats when it draws the bubbles.
         const stops: GalleryMapRoute['stops'] = []
         for (const pair of route.trip_pairs) {
           const segs = pair.outbound.segments
           if (!segs.length) continue
-          const first = segs[0].from_stop
+          for (const seg of segs) {
+            stops.push({
+              lat: seg.from_stop.lat,
+              lon: seg.from_stop.lon,
+              name: seg.from_stop.stop_name,
+            })
+          }
           const last = segs[segs.length - 1].to_stop
-          stops.push(
-            { lat: first.lat, lon: first.lon, name: first.stop_name },
-            { lat: last.lat, lon: last.lon, name: last.stop_name },
-          )
+          stops.push({ lat: last.lat, lon: last.lon, name: last.stop_name })
         }
         const lines = route.geometries.map((g) => g.coords)
         const orderedCountries: string[] = []
