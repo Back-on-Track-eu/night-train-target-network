@@ -19,6 +19,13 @@ Endpoints — see api/README.md for full documentation.
   GET  /api/proposals
   POST /api/proposals
   GET  /api/proposal/<id>
+  GET    /api/proposal/<id>/likes
+  POST   /api/proposal/<id>/likes
+  DELETE /api/proposal/<id>/likes
+  GET    /api/proposal/<id>/comments
+  POST   /api/proposal/<id>/comments
+  PATCH  /api/proposal/<id>/comments/<cid>
+  DELETE /api/proposal/<id>/comments/<cid>
   GET  /api/params/StopInfrastructures
   GET  /api/params/compositions
   GET  /api/params/TrackInfrastructures
@@ -35,7 +42,17 @@ from flask_cors import CORS
 from api.auth_utils import check_auth_config
 from api.helpers.dependencies import DataNotLoadedError, init
 from api.limiter import limiter
-from api import health, params, route, evaluation, auth, feedback, proposals, scenarios
+from api import (
+    health,
+    params,
+    route,
+    evaluation,
+    auth,
+    feedback,
+    proposals,
+    proposal_engagement,
+    scenarios,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -65,6 +82,7 @@ def create_app() -> Flask:
     app.register_blueprint(auth.bp, url_prefix="/api/auth")
     app.register_blueprint(feedback.bp, url_prefix="/api")
     app.register_blueprint(proposals.bp, url_prefix="/api")
+    app.register_blueprint(proposal_engagement.bp, url_prefix="/api")
     app.register_blueprint(scenarios.bp, url_prefix="/api")
 
     # --- settings ---

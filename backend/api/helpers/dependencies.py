@@ -12,21 +12,24 @@ data, not one of the scenario-versioned tables, so there's no need to
 re-query it per request. Route handlers call get_country_index() to access
 it.
 
-A ProposalRepository (write path for saved proposals) and a
-FeedbackRepository (write path for feedback submissions) are created
-alongside them — each holds its own connection to the same database,
-keeping DBDataLoader strictly read-only. Route handlers call
-get_proposal_repository() / get_feedback_repository() to access them.
+A ProposalRepository (write path for saved proposals), a
+FeedbackRepository (write path for feedback submissions), and a
+ProposalEngagementRepository (write path for proposal likes/comments) are
+created alongside them — each holds its own connection to the same
+database, keeping DBDataLoader strictly read-only. Route handlers call
+get_proposal_repository() / get_feedback_repository() /
+get_proposal_engagement_repository() to access them.
 
 State
 -----
-  _loader        : DBDataLoader instance (created at startup)
-  _country_index : CountryIndex instance (built at startup from the loader)
-  _proposal_repo : ProposalRepository instance (created at startup)
-  _feedback_repo : FeedbackRepository instance (created at startup)
-  _loaded        : bool — True after successful DB connection
-  _loaded_at     : datetime | None — UTC timestamp of startup
-  _load_error    : str | None — error message if startup failed
+  _loader          : DBDataLoader instance (created at startup)
+  _country_index   : CountryIndex instance (built at startup from the loader)
+  _proposal_repo   : ProposalRepository instance (created at startup)
+  _feedback_repo   : FeedbackRepository instance (created at startup)
+  _engagement_repo : ProposalEngagementRepository instance (created at startup)
+  _loaded          : bool — True after successful DB connection
+  _loaded_at       : datetime | None — UTC timestamp of startup
+  _load_error      : str | None — error message if startup failed
 """
 
 from __future__ import annotations
@@ -44,6 +47,7 @@ _loader = None
 _country_index = None
 _proposal_repo = None
 _feedback_repo = None
+_engagement_repo = None
 _auth_repo = None
 _loaded: bool = False
 _loaded_at: Optional[datetime] = None
@@ -71,6 +75,7 @@ def init() -> None:
         _country_index, \
         _proposal_repo, \
         _feedback_repo, \
+        _engagement_repo, \
         _auth_repo, \
         _loaded, \
         _loaded_at, \
@@ -79,6 +84,7 @@ def init() -> None:
     from adapters.data_loader_from_db import DBDataLoader
     from adapters.proposal_repository import ProposalRepository
     from adapters.feedback_repository import FeedbackRepository
+    from adapters.proposal_engagement_repository import ProposalEngagementRepository
     from adapters.auth_repository import AuthRepository
     from models.route.routing.rail_router import CountryIndex
 
@@ -89,6 +95,7 @@ def init() -> None:
         _country_index = CountryIndex(_loader.get_country_geometries())
         _proposal_repo = ProposalRepository()
         _feedback_repo = FeedbackRepository()
+        _engagement_repo = ProposalEngagementRepository()
         _auth_repo = AuthRepository()
         _loaded = True
         _loaded_at = datetime.now(timezone.utc)
@@ -139,6 +146,16 @@ def get_feedback_repository():
     if not _loaded or _feedback_repo is None:
         raise DataNotLoadedError("Data not loaded. Call POST /api/data/load first.")
     return _feedback_repo
+
+
+def get_proposal_engagement_repository():
+    """
+    Return the singleton ProposalEngagementRepository.
+    Raises DataNotLoadedError if init() has not completed successfully.
+    """
+    if not _loaded or _engagement_repo is None:
+        raise DataNotLoadedError("Data not loaded. Call POST /api/data/load first.")
+    return _engagement_repo
 
 
 def get_auth_repository():

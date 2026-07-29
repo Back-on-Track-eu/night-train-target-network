@@ -235,10 +235,19 @@ class AuthRepository:
         admin): atomicity of the merge outranks the one-schema-per-adapter
         convention here.
 
-        Returns {"proposals_claimed": n, "feedback_claimed": m}, or None when
-        no merge happened: unknown user, not a guest (has an email), already
-        merged into this same account (idempotent no-op), or already merged
-        into a different one (logged, refused).
+        Likes need one extra step feedback/proposals/comments don't:
+        proposals.likes carries UNIQUE(proposal_id, user_id), so if the
+        guest and the target account both already liked the same proposal,
+        a straight reassignment would collide. The guest's copy is dropped
+        in that case (the target's own like already counts) before the
+        rest are reassigned — the merge never fails on this, it just
+        doesn't double-count.
+
+        Returns {"proposals_claimed": n, "feedback_claimed": m,
+        "likes_claimed": k, "comments_claimed": j}, or None when no merge
+        happened: unknown user, not a guest (has an email), already merged
+        into this same account (idempotent no-op), or already merged into a
+        different one (logged, refused).
         """
         try:
             with self._cursor() as cur:
@@ -272,6 +281,29 @@ class AuthRepository:
                     (user_id, guest_user_id),
                 )
                 feedback_claimed = cur.rowcount
+
+                # Drop the guest's like on any proposal the target account
+                # already liked, so the reassignment below can't violate
+                # UNIQUE(proposal_id, user_id).
+                cur.execute(
+                    "DELETE FROM proposals.likes WHERE user_id = %s "
+                    "AND proposal_id IN ("
+                    "    SELECT proposal_id FROM proposals.likes WHERE user_id = %s"
+                    ")",
+                    (guest_user_id, user_id),
+                )
+                cur.execute(
+                    "UPDATE proposals.likes SET user_id = %s WHERE user_id = %s",
+                    (user_id, guest_user_id),
+                )
+                likes_claimed = cur.rowcount
+
+                cur.execute(
+                    "UPDATE proposals.comments SET user_id = %s WHERE user_id = %s",
+                    (user_id, guest_user_id),
+                )
+                comments_claimed = cur.rowcount
+
                 cur.execute(
                     "UPDATE admin.users SET merged_into_user_id = %s "
                     "WHERE user_id = %s",
@@ -283,13 +315,18 @@ class AuthRepository:
             raise
 
         logger.info(
-            "guest %d merged into user %d (%d proposals, %d feedback rows)",
+            "guest %d merged into user %d (%d proposals, %d feedback rows, "
+            "%d likes, %d comments)",
             guest_user_id,
             user_id,
             proposals_claimed,
             feedback_claimed,
+            likes_claimed,
+            comments_claimed,
         )
         return {
             "proposals_claimed": proposals_claimed,
             "feedback_claimed": feedback_claimed,
+            "likes_claimed": likes_claimed,
+            "comments_claimed": comments_claimed,
         }

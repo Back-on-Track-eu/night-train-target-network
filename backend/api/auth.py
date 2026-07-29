@@ -201,17 +201,19 @@ def verify():
 
     Guest merge: send the current guest session's JWT as the Authorization
     bearer on this call and, on success, everything that guest owns
-    (proposals, feedback) is reassigned to the verified account and the
-    guest row is marked merged (its token stops working with an explicit
-    account-merged error). This covers registering as the last step after
-    playing around, and equally logging in to an existing account from a
-    guest session. An absent/invalid bearer never blocks verification.
+    (proposals, feedback, likes, comments) is reassigned to the verified
+    account and the guest row is marked merged (its token stops working
+    with an explicit account-merged error). This covers registering as
+    the last step after playing around, and equally logging in to an
+    existing account from a guest session. An absent/invalid bearer never
+    blocks verification.
 
     Response
     --------
     200  {"token": "...", "user_id": 42, "display_name": "railfan42",
           "is_guest": false, "merged_guest": null |
-          {"guest_user_id": 99, "proposals_claimed": 2, "feedback_claimed": 0}}
+          {"guest_user_id": 99, "proposals_claimed": 2, "feedback_claimed": 0,
+           "likes_claimed": 3, "comments_claimed": 1}}
     400  {"error": "bad_request"}     -- missing fields
     401  {"error": "invalid_code"}    -- wrong, expired, or already-used code
     """
