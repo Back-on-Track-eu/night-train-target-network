@@ -22,7 +22,7 @@ import pytest
 import requests
 
 from api.auth_utils import hash_otp
-from tests.helpers import PROPOSAL_URL, evaluate
+from tests.helpers import PROPOSAL_URL, comments_url, evaluate, likes_url
 
 _TIMEOUT = 15
 
@@ -350,6 +350,8 @@ def test_verify_with_guest_bearer_merges_guest_assets(api_base, db_cur, db_conn)
             "guest_user_id": guest["user_id"],
             "proposals_claimed": 1,
             "feedback_claimed": 0,
+            "likes_claimed": 0,
+            "comments_claimed": 0,
         }
 
         # --- the proposal changed hands; the guest row is marked ---
@@ -401,6 +403,103 @@ def test_verify_with_guest_bearer_merges_guest_assets(api_base, db_cur, db_conn)
             )
         cur.execute(
             "DELETE FROM proposals.proposals WHERE proposal_id = %s", (branch_pid,)
+        )
+        db_conn.commit()
+        cur.close()
+
+
+@pytest.mark.timeout(60)
+def test_verify_with_guest_bearer_merges_likes_and_comments(api_base, db_cur, db_conn):
+    """Likes and comments follow a guest into their verified account too
+    (2026-07-29, adapters/auth_repository.py: merge_guest_into). Exercises
+    both paths in one flow: a plain comment reassignment, and the one case
+    that needs special handling — the guest and the target account having
+    both already liked the same proposal, where UNIQUE(proposal_id, user_id)
+    means the guest's copy must be dropped rather than reassigned. Targets
+    the permanent seed proposal, no route build needed."""
+    # --- a registered target account, with its own like already in place ---
+    email, name, target_otp = _unique_email(), _unique_name(), "112358"
+    db_cur.execute(
+        "INSERT INTO admin.users (email, display_name, is_verified) "
+        "VALUES (%s, %s, FALSE) RETURNING user_id",
+        (email, name),
+    )
+    target_user_id = db_cur.fetchone()["user_id"]
+    db_conn.commit()
+    _fresh_otp_for(db_cur, db_conn, target_user_id, target_otp)
+
+    resp = requests.post(
+        f"{api_base}/api/auth/verify",
+        json={"email": email, "code": target_otp},
+        timeout=10,
+    )
+    assert resp.status_code == 200
+    target_headers = {"Authorization": f"Bearer {resp.json()['token']}"}
+    requests.post(
+        f"{api_base}{likes_url(_SEED_PROPOSAL_ID)}", headers=target_headers, timeout=10
+    )
+
+    # --- a guest who independently likes and comments on the same proposal ---
+    resp = requests.post(f"{api_base}/api/auth/guest", timeout=10)
+    _skip_if_rate_limited(resp)
+    guest = resp.json()
+    guest_headers = {"Authorization": f"Bearer {guest['token']}"}
+    requests.post(
+        f"{api_base}{likes_url(_SEED_PROPOSAL_ID)}", headers=guest_headers, timeout=10
+    )
+    resp = requests.post(
+        f"{api_base}{comments_url(_SEED_PROPOSAL_ID)}",
+        json={"body": "Merge me into the registered account."},
+        headers=guest_headers,
+        timeout=10,
+    )
+    assert resp.status_code == 201
+    comment_id = resp.json()["comment_id"]
+
+    try:
+        # --- log back in as the target, with the guest bearer attached ---
+        _fresh_otp_for(db_cur, db_conn, target_user_id, "271828")
+        resp = requests.post(
+            f"{api_base}/api/auth/verify",
+            json={"email": email, "code": "271828"},
+            headers=guest_headers,
+            timeout=10,
+        )
+        assert resp.status_code == 200
+        merged = resp.json()["merged_guest"]
+        # likes_claimed=0: the guest's like collided with the target's own
+        # pre-existing like and was dropped, not reassigned.
+        assert merged == {
+            "guest_user_id": guest["user_id"],
+            "proposals_claimed": 0,
+            "feedback_claimed": 0,
+            "likes_claimed": 0,
+            "comments_claimed": 1,
+        }
+
+        # --- exactly one like remains, still the target's original row ---
+        db_cur.execute(
+            "SELECT user_id FROM proposals.likes WHERE proposal_id = %s",
+            (_SEED_PROPOSAL_ID,),
+        )
+        rows = db_cur.fetchall()
+        assert [r["user_id"] for r in rows] == [target_user_id]
+
+        # --- the comment changed hands ---
+        db_cur.execute(
+            "SELECT user_id FROM proposals.comments WHERE comment_id = %s",
+            (comment_id,),
+        )
+        assert db_cur.fetchone()["user_id"] == target_user_id
+        db_conn.rollback()
+    finally:
+        cur = db_conn.cursor()
+        cur.execute(
+            "DELETE FROM proposals.likes WHERE proposal_id = %s AND user_id = %s",
+            (_SEED_PROPOSAL_ID, target_user_id),
+        )
+        cur.execute(
+            "DELETE FROM proposals.comments WHERE comment_id = %s", (comment_id,)
         )
         db_conn.commit()
         cur.close()

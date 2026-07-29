@@ -22,6 +22,16 @@ FEEDBACK_URL = "/api/feedback"
 FEEDBACK_CATEGORIES_URL = "/api/feedback/categories"
 SCENARIOS_URL = "/api/scenarios"
 
+
+def likes_url(proposal_id: int) -> str:
+    return f"{PROPOSAL_URL}/{proposal_id}/likes"
+
+
+def comments_url(proposal_id: int, comment_id: int | None = None) -> str:
+    base = f"{PROPOSAL_URL}/{proposal_id}/comments"
+    return base if comment_id is None else f"{base}/{comment_id}"
+
+
 # Mirrors models/route/version.py: DAYS_PER_OPERATING_WEEK / WEEKS_PER_SEASON.
 _DAYS_PER_WEEK = {"daily": 7, "three_per_week": 3}
 _WEEKS_PER_SEASON = 26
@@ -238,9 +248,18 @@ def purge_saved_proposals(conn, keep_route_id: str = "P1_V1_R1") -> None:
     it excludes exactly the seed's own IDs without also excluding
     P100_.../P1000_...-prefixed rows, which share the "P1" substring but
     not the "P1_" boundary. Deleting routes cascades trips and stop_times;
-    deleting services cascades calendar and calendar_dates. Commits."""
+    deleting services cascades calendar and calendar_dates.
+
+    proposals.likes/proposals.comments are cleared unconditionally (not
+    keyed off keep_route_id) — db/dev/seed.py seeds no engagement rows on
+    any proposal, including the permanent example, so there is nothing to
+    preserve there. This lets engagement tests exercise the permanent seed
+    proposal directly without ever leaving state behind. Commits.
+    """
     keep_pid = int(keep_route_id.split("_")[0][1:])
     cur = conn.cursor()
+    cur.execute("DELETE FROM proposals.likes")
+    cur.execute("DELETE FROM proposals.comments")
     cur.execute(
         f"DELETE FROM proposals.routes WHERE route_id ~ '^P' "
         f"AND route_id !~ '^{keep_route_id}'"
