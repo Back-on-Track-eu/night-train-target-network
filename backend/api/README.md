@@ -29,6 +29,10 @@ stack. Each endpoint section below links its own example files.
 - [Proposals](#proposals) — persisted automatically by plan/calc (persist-on-calc)
   - [`GET` / `POST /api/proposals`](#list-proposals) — list proposals
   - [`GET /api/proposal/<id>`](#get-proposal) — load a proposal
+- [Proposal Engagement](#proposal-engagement) — likes and comments
+  - [`GET` / `POST` / `DELETE /api/proposal/<id>/likes`](#proposal-likes) — like/unlike a proposal
+  - [`GET` / `POST /api/proposal/<id>/comments`](#proposal-comments) — read/add comments
+  - [`PATCH` / `DELETE /api/proposal/<id>/comments/<cid>`](#proposal-comment-item) — edit/delete own comment
 - [Input Parameters](#input-parameters)
 - [Scenarios](#scenarios)
   - [`GET /api/scenarios`](#get-scenarios) — list all scenarios, grouped by current status
@@ -98,13 +102,14 @@ registration (below).
 
 **Guest → registered merge:** calling `POST /api/auth/verify` **with the
 guest session's JWT attached as the bearer** reassigns everything that
-guest owns (proposals, feedback) to the verified account in one atomic
-transaction and marks the guest row (`admin.users.merged_into_user_id`).
-The old guest token is rejected from then on with an explicit
-account-merged `401`. This covers both registering as the last step after
-playing around and logging in to an existing account from a guest
-session; an absent or unusable bearer never blocks the verification
-itself (`merged_guest` is simply `null`).
+guest owns (proposals, feedback, likes, comments — see `db/README.md`'s
+Proposal Engagement note for the one extra step likes need) to the
+verified account in one atomic transaction and marks the guest row
+(`admin.users.merged_into_user_id`). The old guest token is rejected from
+then on with an explicit account-merged `401`. This covers both
+registering as the last step after playing around and logging in to an
+existing account from a guest session; an absent or unusable bearer never
+blocks the verification itself (`merged_guest` is simply `null`).
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -419,6 +424,111 @@ payloads originally posted to `POST /api/route/plan` and `POST
 
 No delete endpoint — proposals are removed manually in the database if
 ever needed.
+
+---
+
+<a id="proposal-engagement"></a>
+
+## Proposal Engagement
+
+Thumbs-up likes and a flat comment thread per proposal. Both key on the
+stable `proposal_id`, not a specific `proposal_version` — a like or a
+comment is about the proposal as an ongoing discussion and survives it
+being edited into a new version (see `db/README.md` for the soft-reference
+rationale). `GET`s are open, same as loading a proposal; writes need at
+least a guest token (`@require_auth`, `TRUST_GUEST`) — the same floor a
+guest already clears to save a proposal.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/proposal/<id>/likes` | Like count + whether the caller liked it |
+| `POST` | `/api/proposal/<id>/likes` | Like (idempotent) |
+| `DELETE` | `/api/proposal/<id>/likes` | Unlike (idempotent) |
+| `GET` | `/api/proposal/<id>/comments` | Flat comment thread, oldest first |
+| `POST` | `/api/proposal/<id>/comments` | Add a comment |
+| `PATCH` | `/api/proposal/<id>/comments/<cid>` | Edit own comment |
+| `DELETE` | `/api/proposal/<id>/comments/<cid>` | Soft-delete own comment |
+
+<a id="proposal-likes"></a>
+
+### `GET` / `POST` / `DELETE /api/proposal/<id>/likes`
+
+<details>
+<summary>Request &amp; response details</summary>
+
+No request body on any of the three. `liked_by_me` reflects the caller's
+own token — always `false` for an unauthenticated `GET`. `POST`/`DELETE`
+are idempotent: liking twice or unliking when no like exists both just
+return the current state rather than erroring.
+
+**Response** (all three)
+```json
+{"count": 4, "liked_by_me": true}
+```
+
+`404 not_found` if `proposal_id` doesn't exist.
+
+</details>
+
+<a id="proposal-comments"></a>
+
+### `GET` / `POST /api/proposal/<id>/comments`
+
+<details>
+<summary>Request &amp; response details</summary>
+
+**Request body** (`POST` only)
+```json
+{"body": "This routing through Zürich adds a lot of dwell time — have you compared the Basel alternative?"}
+```
+`body` is required, non-empty, max 4000 characters.
+
+**Response** (`GET`)
+```json
+{
+  "proposal_id": 5,
+  "comments": [
+    {
+      "comment_id": 12, "proposal_id": 5, "proposal_version": 2,
+      "user_id": 3, "user_name": "Bjarne",
+      "body": "This routing through Zürich adds a lot of dwell time — have you compared the Basel alternative?",
+      "is_deleted": false,
+      "created_at": "2026-07-29T09:12:00+00:00",
+      "updated_at": "2026-07-29T09:12:00+00:00"
+    }
+  ]
+}
+```
+`proposal_version` is a context stamp — the version that was current when
+the comment was posted, not re-derived on later versions. A soft-deleted
+comment (`is_deleted: true`) keeps its place in the list with `body`
+cleared server-side. `user_name` is `"[deleted]"` when `user_id` is
+`null` (the author's account was later deleted). `POST` returns the new
+comment (`201`); `404 not_found` if `proposal_id` doesn't exist.
+
+</details>
+
+<a id="proposal-comment-item"></a>
+
+### `PATCH` / `DELETE /api/proposal/<id>/comments/<cid>`
+
+<details>
+<summary>Request &amp; response details</summary>
+
+Author-only — `403 forbidden` if the caller didn't write the comment.
+`404 not_found` if `comment_id` doesn't exist under that `proposal_id`,
+or is already soft-deleted.
+
+**Request body** (`PATCH` only)
+```json
+{"body": "Updated: compared both, Basel is 12 min faster."}
+```
+Same validation as `POST`. Returns the updated comment (`200`).
+
+`DELETE` soft-deletes (clears `body`, sets `is_deleted`) and returns `204`
+with no body.
+
+</details>
 
 ---
 

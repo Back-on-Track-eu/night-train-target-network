@@ -30,6 +30,7 @@ built on top of it:
 | `test_30`–`test_31` | `POST /api/evaluation/calc` (contract, then content logic) |
 | `test_40` | End-to-end pipeline smoke |
 | `test_50` | Persist-on-calc semantics + proposals list/load |
+| `test_51` | Proposal engagement — likes + comments |
 | `test_60` | Feedback API — submit/categories |
 
 Shared code:
@@ -41,9 +42,13 @@ Shared code:
   that only *read* a route must reuse these instead of building their own.
 - **`helpers.py`** — HTTP wrappers (`build_route`, `evaluate`), route-JSON
   navigation (`all_trips`, `stop_times`, `country_km`, `trip_distance_km`,
-  `operating_days`, …) and demand construction (`inject_demand`,
-  `directional_od`, `replicated_od`). Everything is derived strictly from
-  data present in the API responses — nothing is fabricated.
+  `operating_days`, …), demand construction (`inject_demand`,
+  `directional_od`, `replicated_od`), and endpoint URL helpers
+  (`likes_url`, `comments_url`). Everything is derived strictly from data
+  present in the API responses — nothing is fabricated. `purge_saved_proposals`
+  also unconditionally clears `proposals.likes`/`proposals.comments` (no
+  permanent seed data lives there), so engagement tests can safely target
+  the permanent seed proposal.
 
 ---
 
@@ -324,6 +329,41 @@ Note: `db/dev/seed.py` seeds one permanent example proposal
 every purge here, and doubling as the foreign, evaluation-free proposal
 the branch-by-eval tests (and test_70's merge test) borrow without an
 extra route build. Any test asserting an exact list total counts it.
+
+## test_51_proposal_engagement_api.py — Proposal likes + comments
+
+Targets the permanent seed proposal (`proposal_id=1`) directly rather than
+building a fresh route — engagement rows don't depend on route content,
+and this avoids a live OpenRailRouting call per test. Safe because
+`proposals.likes`/`proposals.comments` carry no permanent seed data of
+their own; `helpers.purge_saved_proposals` now clears both tables
+unconditionally (not keyed to the kept proposal_id) on every module/session
+purge. A module-scoped autouse fixture purges before and after this file;
+a few tests that assert exact counts also purge per-test to avoid
+cross-test interference on the shared seed proposal.
+
+| Test | Pins | Setup | Expectation |
+|---|---|---|---|
+| `test_get_likes_unknown_proposal_returns_404` | Soft-reference validation | nonexistent proposal_id | `404 not_found` |
+| `test_like_requires_auth` | Write floor | no token | `401` |
+| `test_like_unknown_proposal_returns_404` | Soft-reference validation | authenticated, nonexistent proposal_id | `404 not_found` |
+| `test_like_unliked_proposal_starts_at_zero` | Clean baseline | fresh purge | `{count: 0, liked_by_me: false}` |
+| `test_like_is_idempotent_and_per_caller` | Idempotent + per-user | like twice, then a second user's GET/POST | 2nd like is a no-op; `liked_by_me` is per-caller, not global |
+| `test_unlike_is_idempotent` | Idempotent unlike | unlike twice | both `200`, second is a no-op |
+| `test_unlike_requires_auth` | Write floor | no token | `401` |
+| `test_get_comments_unknown_proposal_returns_404` | Soft-reference validation | nonexistent proposal_id | `404 not_found` |
+| `test_comment_requires_auth` | Write floor | no token | `401` |
+| `test_comment_rejects_empty_body` | Validation | blank/whitespace body | `400 validation_error` |
+| `test_comment_rejects_oversized_body` | Validation | 4001-char body | `400 validation_error` |
+| `test_comment_unknown_proposal_returns_404` | Soft-reference validation | authenticated, nonexistent proposal_id | `404 not_found` |
+| `test_add_comment_returns_stored_shape` | Stored shape | fresh comment | body stripped, `proposal_version` stamped from the target's current version, `created_at == updated_at` |
+| `test_list_comments_includes_posted_comment` | Listing | GET after POST | comment_id present |
+| `test_edit_comment_by_author_succeeds` | Author can edit | PATCH as author | `200`, body updated, `updated_at` bumped |
+| `test_edit_comment_by_other_user_is_forbidden` | Ownership | PATCH as guest | `403 forbidden` |
+| `test_edit_comment_unknown_id_returns_404` | Domain check | nonexistent comment_id | `404 not_found` |
+| `test_delete_comment_by_other_user_is_forbidden` | Ownership | DELETE as guest | `403 forbidden` |
+| `test_delete_comment_by_author_soft_deletes` | Soft-delete contract | DELETE as author | `204`; still listed with `is_deleted=true`, `body=""`; further PATCH/DELETE on it → `404` |
+
 ## test_60_feedback_api.py — Feedback API
 
 A module-scoped autouse fixture purges rows tagged with the

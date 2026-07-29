@@ -260,6 +260,33 @@ summaries read `total_revenue_eur`/`total_cost_eur`/`net_eur` out of
 | `trips` | GTFS trips.txt — one scheduled run per proposal version |
 | `stop_times` | GTFS stop_times.txt — ordered stop sequence per trip (times as INTERVAL) |
 | `proposals` | Version container. `proposal_id` is stable across versions; `proposal_version` increments on every persisted change (append-only — the single exception is `evaluation_body`, filled in place on the version it was computed for while still NULL, see the 2026-07-16 migration); `is_current` flags the latest version per `proposal_id`. `route_body` JSON holds the exact `POST /api/route/plan` response the version was saved from, key order preserved; `evaluation_body` JSON (nullable) holds the `POST /api/evaluation/calc` response, if one was saved, same guarantee |
+| `likes` | Thumbs-up on a proposal, one per user (`UNIQUE(proposal_id, user_id)`), no down-vote. Keys on the stable `proposal_id`, not a specific version — see below |
+| `comments` | Flat (non-threaded) discussion per proposal. Soft-deleted (`is_deleted`, body cleared server-side) rather than removed, so the thread stays chronologically intact |
+
+`likes`/`comments` (2026-07-29, `api/proposal_engagement.py`) key on
+`proposal_id` alone rather than `(proposal_id, proposal_version)` — a like
+or a comment is about the proposal as an ongoing discussion, not one
+snapshot of it, and survives the proposal being edited into a new
+version. Because `proposal_id` alone isn't unique on `proposals.proposals`
+(the primary key is the composite pair), it can't be an FK target there;
+both tables carry it as a **soft reference**, the same convention already
+used for `stop_times.stop_id` and `trips.composition_type_id` —
+existence is checked at the API layer
+(`adapters/proposal_engagement_repository.py`) instead of by a DB
+constraint. Each row also stamps the `proposal_version` that was current
+at the moment of the like/comment, as read-only context — it is never
+re-derived if the proposal is later versioned.
+
+Both tables' `user_id` is reassigned on a guest→registered merge
+(`adapters/auth_repository.py: merge_guest_into()`, see `api/README.md`'s
+Auth section), same as `proposals.proposals.user_id` and
+`admin.feedback.user_id` — a guest's likes and comments follow them into
+their verified account. `likes` needs one extra step the others don't:
+its `UNIQUE(proposal_id, user_id)` means the guest and the target account
+could already both have liked the same proposal, so the guest's copy is
+dropped in that case (the target's own like already counts) before the
+rest are reassigned — the merge never fails on this, it just avoids a
+constraint violation.
 
 **Seed data.** `db/dev/seed.py` seeds exactly one proposal (`proposal_id=1`
 — the natural first-insert outcome on a fresh DB, no reservation needed —
