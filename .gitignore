@@ -92,6 +92,9 @@ backend/models/route/routing/countries.geojson
 git_status.txt
 test_output.txt
 
+# Large Data
+backend/models/infrastructure/data/raw/
+
 # Credentials
 credentials/
 
