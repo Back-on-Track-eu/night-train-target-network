@@ -76,6 +76,29 @@ Things to have ready before starting:
    works well (same pattern as the calibration notebooks). The final pipeline
    should be a plain script, so it can be re-run when data updates.
 
+   `filter_stations.py` (same folder) does the shrinking step in pure Python
+   instead of the CLI, so it stays reproducible without requiring the
+   `osmium` CLI tool to be installed separately — only the `osmium`/`tqdm`/
+   `psutil` Python packages, which are already project dependencies.
+
+   It supports multiple tag-based filters (`station`, `light_rail`, `subway`,
+   `tram`, `train_yes`, `uic_name`, `uic_ref`) in a single shared pass over
+   the input — selecting several filters, or `all` (the default), does not
+   re-read the file once per filter, since a continent-sized extract can
+   take hours to scan:
+
+   ```
+   uv run python filter_stations.py data/raw/europe-latest.osm.pbf
+   uv run python filter_stations.py data/raw/europe-latest.osm.pbf --filters station tram
+   ```
+
+   `-o`/`--output` sets an output *prefix*, not a full filename — each
+   selected filter writes `<prefix>_<filtername>.osm.pbf`. Default prefix is
+   the input filename with `.osm.pbf` stripped. A continent-sized extract can
+   take several hours, more so with multiple filters selected at once — the
+   progress bar reports objects processed, total matches, and current RAM
+   usage so a long run doesn't look stalled.
+
 2. **The current night train stop list** as CSV in GTFS-like format:
    `stop_name, stop_country, stop_timezone, stop_lat, stop_lon`.
    Note: it has **no station IDs** (no UIC/IBNR), so matching to OSM must work
