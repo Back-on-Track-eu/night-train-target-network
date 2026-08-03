@@ -2,25 +2,24 @@
 test_37_proposal_projection.py
 ================================
 Pure-function tests for WP4 (docs/PROPOSALS_DESIGN.md §3.1/§5.4):
-adapters/proposal_projection.py's route_fingerprint() and
+adapters/proposal/projection.py's route_fingerprint() and
 build_summary_row(), plus the fingerprint's wiring into
 POST /api/proposal/calc's response (route_fingerprint, cache_hit).
 
-No publish endpoint exists yet (WP5) — the schema-conformance case at the
-bottom inserts a build_summary_row() row directly into the still-empty
-proposals.proposal_summaries table (landed by WP1), the same way
-test_36_proposal_gtfs_roundtrip.py exercises WP3's write path ahead of
-WP5's cutover. No commit happens anywhere in this file — the session-
-scoped autouse rollback_after_test fixture (conftest.py) cleans up after
-every test.
+The schema-conformance case at the bottom inserts a build_summary_row()
+row directly into proposals.proposal_summaries, keeping this file focused
+purely on the projection functions — endpoint-level coverage of the real
+summary writer (publish()) lives in test_50. No commit happens anywhere
+in this file — the autouse rollback_after_test fixture (conftest.py)
+cleans up after every test.
 """
 
 import json
 
 import pytest
 
-from adapters.proposal_projection import route_fingerprint, build_summary_row
-from adapters.proposal_repository import ProposalRepository
+from adapters.proposal.projection import build_summary_row, route_fingerprint
+from adapters.proposal.repository import ProposalRepository
 from tests.conftest import STOPS_BERLIN_DRESDEN_WIEN, STOPS_BERLIN_WIEN
 from tests.helpers import compute
 
@@ -79,7 +78,7 @@ class TestFingerprint:
         identically — the canonical extract never reads route_id/trip_id/
         geometry_id, only stop_id, so re-prefixing the route dict must
         not change the fingerprint."""
-        from adapters.proposal_repository import rewrite_id_prefix
+        from adapters.proposal.id_prefix import rewrite_id_prefix
 
         prefixed = rewrite_id_prefix(calc_response["route"], "R1", "P999_V1_R1")
         assert route_fingerprint(prefixed) == calc_response["route_fingerprint"]

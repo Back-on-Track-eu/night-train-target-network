@@ -2,18 +2,12 @@
 test_35_proposal_calc_api.py
 =============================
 Contract tests for POST /api/proposal/calc — the merged compute endpoint
-(PROPOSALS_DESIGN.md §2.1, WP2). Combines the response-structure and
-request-validation coverage of test_20_route_plan_api.py /
-test_21_route_plan_content.py (route side) and test_30_evaluation_api.py /
-test_31_evaluation_content.py (evaluation side), applied to the single
-merged response shape instead of two separate calls.
-
-This is a first pass at the merged contract, not a line-for-line port of
-every case in the four files above — the old endpoints keep their own
-test files untouched (they stay live until WP5's cutover), so nothing here
-replaces that coverage; it establishes the new one. Deeper content-parity
+(PROPOSALS_DESIGN.md §2.1, WP2). Response-structure and
+request-validation coverage for the single merged response shape;
+content-logic coverage lives in test_20_route_content.py (route side) and
+test_30_evaluation_content.py (evaluation side). Deeper content-parity
 cases (every timetable/routing mode combination, full breakdown-field
-completeness per view) can be ported over incrementally.
+completeness per view) can still be ported over incrementally.
 
 Response shape (§2.1):
   route_builder_version, calc_version, request (resolved),
@@ -41,7 +35,7 @@ BASE_REQUEST = {
     "stops": STOPS_BERLIN_DRESDEN_WIEN,
     "composition_id": "NEW-BAL-7",
     # Pinned off for deterministic structural assertions — see
-    # test_20_route_plan_api.py's module docstring for why CZ_BRNO_HLN
+    # test_20_route_content.py's module docstring for why CZ_BRNO_HLN
     # would otherwise get auto-added on this corridor.
     "auto_stop_addition": "off",
 }
@@ -235,7 +229,7 @@ class TestValidation:
 
     def test_boolean_auto_stop_addition_rejected(self, api_base):
         """auto_stop_addition is a string enum since route builder 0.9.5 —
-        booleans are rejected (same contract as /api/route/plan)."""
+        booleans are rejected."""
         resp = requests.post(
             f"{api_base}{PROPOSAL_CALC_URL}",
             json={

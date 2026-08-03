@@ -26,25 +26,22 @@ built on top of it:
 |---|---|
 | `test_01`–`test_04` | Stack build-up: containers → seeded DB → loader → versioning |
 | `test_10`–`test_11` | Read-only params + scenarios APIs |
-| `test_21` | Route-building content logic (via `POST /api/proposal/calc`) |
-| `test_31` | Evaluation content logic (model-layer — `compute_evaluation_domain()`) |
+| `test_20` | Route-building content logic (via `POST /api/proposal/calc`) |
+| `test_30` | Evaluation content logic (model-layer — `compute_evaluation_domain()`) |
 | `test_35` | `POST /api/proposal/calc` — the merged compute endpoint (contract) |
-| `test_36` | GTFS+sidecar round-trip (`route_gtfs_serialize.py`) — the write path `publish()` calls |
+| `test_36` | GTFS+sidecar round-trip (`adapters/proposal/gtfs_store.py`) — the write path `publish()` calls |
+| `test_37` | Fingerprint + gallery-summary projection (`adapters/proposal/projection.py`) |
 | `test_40` | End-to-end pipeline smoke |
-| `test_50` | `POST /api/proposal/publish` + proposals list/load (WP5's only write path) |
+| `test_50` | `POST /api/proposal/publish` + proposals list/load (the only write path) |
 | `test_51` | Proposal engagement — likes + comments |
 | `test_60` | Feedback API — submit/categories |
+| `test_70`–`test_71` | Auth — integration (API + DB) and standalone units |
 
-WP5 (`docs/PROPOSALS_DESIGN.md` §10) removed `POST /api/route/plan` and
-`POST /api/evaluation/calc` along with the old persist-on-calc world —
-`test_20_route_plan_api.py` and `test_30_evaluation_api.py` (their
-contract tests) are deleted; `test_21`/`test_31`/`test_40` (content/
-smoke tests, which don't test HTTP contract per se) were converted
-instead of deleted — `test_21` now drives route-building through
-`POST /api/proposal/calc`, and `test_31`/`test_40` now call the model
-layer directly (`tests/helpers.py:compute_evaluation_domain()`) since
-`POST /api/proposal/calc` has no way to inject custom demand into an
-already-built route the way the old `POST /api/evaluation/calc` did.
+Content tests that need *controlled* demand (`test_30`, `test_40`) call
+the model layer directly (`tests/helpers.py:compute_evaluation_domain()`),
+since `POST /api/proposal/calc` deliberately offers no way to inject
+custom demand into an already-built route — it always runs the stopgap
+demand model (`models/demand/`) internally.
 
 Shared code:
 
@@ -56,24 +53,19 @@ Shared code:
   *read* a route must reuse these instead of building their own.
 - **`helpers.py`** — HTTP wrappers (`build_route` for `POST /api/proposal/calc`
   — route section only; `compute` for the same endpoint's full response;
-  `publish` for `POST /api/proposal/publish`, WP5's only write path), the
-  model-layer replacement for the old `evaluate(inject_demand(...))`
-  pattern (`compute_evaluation_domain()` — reconstructs a route dict as a
-  domain object via `route_from_dict()`, applies demand directly via
-  `add_directional_domain_demand()`, evaluates, and serializes back into
-  the same response shape the old `POST /api/evaluation/calc` returned, so
-  every test written against that shape needed no changes beyond calling
-  this instead), route-JSON navigation (`all_trips`, `stop_times`,
-  `country_km`, `trip_distance_km`, `operating_days`, …), the older
-  dict-based demand helpers (`inject_demand`, `directional_od`,
-  `replicated_od` — no longer called by any shipped test file since the
-  model-layer helpers replaced their use case, kept as reusable utilities),
-  and endpoint URL helpers (`likes_url`, `comments_url`). Everything is
-  derived strictly from data present in the API responses — nothing is
-  fabricated. `purge_saved_proposals` also unconditionally clears
-  `proposals.likes`/`proposals.comments` (no permanent seed data lives
-  there), so engagement tests can safely target the permanent seed
-  proposal.
+  `publish` for `POST /api/proposal/publish`, the only write path),
+  model-layer evaluation with controlled demand
+  (`compute_evaluation_domain()` — reconstructs a route dict as a domain
+  object via `route_from_dict()`, applies demand directly via
+  `add_directional_domain_demand()`, and runs
+  `models.pipeline.evaluate_and_build_views()`), route-JSON navigation
+  (`all_trips`, `stop_times`, `country_km`, `trip_distance_km`,
+  `operating_days`, …), and endpoint URL helpers (`likes_url`,
+  `comments_url`). Everything is derived strictly from data present in the
+  API responses — nothing is fabricated. `purge_saved_proposals` also
+  unconditionally clears `proposals.likes`/`proposals.comments` (no
+  permanent seed data lives there), so engagement tests can safely target
+  the permanent seed proposal.
 
 ---
 
@@ -179,7 +171,7 @@ Shared code:
 
 ---
 
-## test_21_route_plan_content.py — Route content logic
+## test_20_route_content.py — Route content logic
 
 Built via `POST /api/proposal/calc` (WP5 removed the standalone
 `POST /api/route/plan` this originally targeted — same route-building
@@ -223,16 +215,15 @@ content, same models/route pipeline, just a different HTTP entry point).
 | `TestScenarioHandling::test_omitted_scenario_id_resolves_to_base` | Scenario defaulting | no scenario_id | embedded id = base scenario id |
 | `TestScenarioHandling::test_explicit_scenario_id_embedded` | Explicit scenario pin | scenario_id = HSR-allowed | embedded verbatim |
 
-## test_31_evaluation_content.py — Evaluation content logic
+## test_30_evaluation_content.py — Evaluation content logic
 
-WP5 removed `POST /api/evaluation/calc`, which this file used to drive via
-`evaluate(inject_demand(route, ods))` for controlled demand scenarios —
-`POST /api/proposal/calc` has no equivalent (it always builds fresh and
-runs the stopgap demand model internally, no override). These tests now
-call the model layer directly instead (`tests/helpers.py:
-compute_evaluation_domain()` — `route_from_dict()` ->
-`add_directional_domain_demand()` -> `evaluate_route()` -> views),
-skipping HTTP for the compute step entirely.
+Controlled demand scenarios need an override `POST /api/proposal/calc`
+deliberately doesn't offer (it always builds fresh and runs the stopgap
+demand model internally), so these tests call the model layer directly
+(`tests/helpers.py:compute_evaluation_domain()` — `route_from_dict()` ->
+`add_directional_domain_demand()` ->
+`models.pipeline.evaluate_and_build_views()`), skipping HTTP for the
+compute step entirely.
 
 Costs are recomputed **by hand** from the route JSON physics plus the rates
 served by `/api/params/*`, so these tests also pin cross-endpoint consistency.
@@ -272,7 +263,7 @@ call, route + evaluation, no persistence. Covers response-structure and
 validation, plus assertions specific to the merge itself (resolved
 request, neutral IDs, no duplicate route under `evaluation.input`,
 statelessness). Content-level route/evaluation correctness lives
-elsewhere — `test_21` (route-building) and `test_31` (evaluation
+elsewhere — `test_20` (route-building) and `test_30` (evaluation
 formulas) — rather than being duplicated here.
 
 | Test | Purpose | Input | Expected |
@@ -298,11 +289,11 @@ formulas) — rather than being duplicated here.
 
 ## test_36_proposal_gtfs_roundtrip.py — GTFS+sidecar round-trip
 
-`api/helpers/route_gtfs_serialize.py`'s `insert_route_gtfs()` (write) and
+`adapters/proposal/gtfs_store.py`'s `insert_route_gtfs()` (write) and
 `route_dict_from_gtfs()` (read) — the GTFS+sidecar persistence path
-(`docs/PROPOSALS_DESIGN.md` §5.1/§5.2) that `adapters/proposal_repository.
-py`'s `publish()` (WP5) and `GET /api/proposal/<id>` (`api/proposals.py`)
-now call directly. This file still tests the two functions standalone
+(`docs/PROPOSALS_DESIGN.md` §5.1/§5.2) that `adapters/proposal/
+repository.py`'s `publish()` and `GET /api/proposal/<id>`
+(`api/proposals.py`) call directly. This file still tests the two functions standalone
 (writing real `POST /api/proposal/calc` responses into the DB under real
 `proposal_id`s, allocated from the live `proposals.proposals` sequence
 via `ProposalRepository._next_proposal_id()`, and reconstructing them
@@ -332,11 +323,28 @@ the pre-storage floating-point value.
 | `TestRouteRoundtrip::test_unknown_proposal_raises` | Domain check | nonexistent `proposal_id` | `ValueError` |
 | `TestInputParametersRoundtrip::test_input_parameters_deep_equal_original` | `input_parameters_from_scenario()` — parameters rebuilt from scenario pin alone, no GTFS insert needed | same scenario_id as the original compute | rebuilt `evaluation.input.parameters` deep-equals original (JSON-normalized) |
 
+## test_37_proposal_projection.py — Fingerprint + summary projection
+
+`adapters/proposal/projection.py`'s pure functions (`route_fingerprint()`,
+`build_summary_row()`) plus the fingerprint/`cache_hit` wiring in the
+`POST /api/proposal/calc` response.
+
+| Test | Purpose | Input | Expected |
+|---|---|---|---|
+| `TestFingerprint::test_present_and_well_formed` | Fingerprint in the compute response | calc response | `sha256:`-prefixed hex |
+| `TestFingerprint::test_deterministic_across_identical_requests` | §3.1 determinism | same request twice | identical fingerprints |
+| `TestFingerprint::test_differs_for_a_different_route` | Sensitivity | different stop list | different fingerprint |
+| `TestFingerprint::test_matches_direct_call_on_route_dict` | Wiring = direct function call | response route dict | `route_fingerprint()` matches response field |
+| `TestFingerprint::test_ignores_id_prefix` | Prefix independence by construction | prefixed vs bare route dict | identical fingerprints |
+| `TestCacheHitPlaceholder::test_always_false` | WP13 placeholder semantics | calc response | `cache_hit == false` |
+| `TestSummaryRow::*` | Every non-identity summary column present, metrics plausible, KPIs match the evaluation views, demand KPIs flagged placeholder, valid simplified MultiLineString | calc response | see file |
+| `TestSummaryRowSchemaConformance::test_row_inserts_cleanly` | Row shape matches `proposal_summaries` DDL | direct INSERT | insert succeeds (rolled back) |
+
 ## test_40_pipeline.py — End-to-end smoke
 
-The "cost" half now runs at the model layer (`compute_evaluation_domain()`)
-rather than via the removed `POST /api/evaluation/calc` — see `test_31`'s
-note above. "Plan" still goes through a live `POST /api/proposal/calc`.
+The "cost" half runs at the model layer (`compute_evaluation_domain()`)
+— see `test_30`'s note above. "Plan" goes through a live
+`POST /api/proposal/calc`.
 
 | Test | Purpose | Input | Expected |
 |---|---|---|---|
@@ -442,6 +450,24 @@ fixed value, so this file passes the same way whether or not SMTP_* is set.
 | `test_feedback_categories_eval_view_is_dynamic` | Sub-category list matches the five evaluation views exactly | — | exact set match |
 | `test_feedback_categories_static_lists_present` | Static categories have content; free-text ones don't | — | Route/General non-empty, Bug/Feature/Other empty |
 
+## test_70_auth_api.py — Auth integration
+
+Integration tests for the local auth plane (`api/auth.py`) — request-code,
+verify, guest — plus the identity wiring on publish. OTPs are never exposed
+by the API, so verify-flow tests inject a token row with a known
+plaintext's hash through the DB fixture. Guest-merge coverage includes the
+merged token failing loudly on `POST /api/proposal/publish` (the remaining
+`@require_auth` write endpoint). Rate-limited environments make
+request-code tests skip rather than fail. See the file's module docstring
+and per-test docstrings for details.
+
+## test_71_auth_units.py — Auth units
+
+Pure unit tests for the auth building blocks — no Docker stack, no DB:
+`auth_utils` (OTP, display names, local HS256 JWTs) and `auth_oidc` (plane
+routing + Keycloak-token verification against a locally generated RSA
+key). The only file in the suite runnable standalone.
+
 ## Dropped from the previous suite (and why)
 
 - **Per-class breakdown tests** (`test_density.py`: `per_available_place_of_class`
@@ -452,13 +478,11 @@ fixed value, so this file passes the same way whether or not SMTP_* is set.
   by `test_per_available_place_km_divisor_is_unweighted`, which pins the
   actual divisor exactly.
 - **Terrain-effect energy tests** (skipped placeholders) — the dummy model has
-  no terrain effect. The flat-factor tests in `test_21` pin current behaviour
+  no terrain effect. The flat-factor tests in `test_20` pin current behaviour
   and are marked for replacement when the calibrated model lands.
 - **model_versions / calc_formulas skip-stubs** — the evaluation response now
   serialises a full `models` section, so these became *real* tests
-  (now `test_35::TestModelsSection` — this row originally referenced the
-  since-deleted `test_30`, WP2/WP5's merged-endpoint contract test took
-  over the same coverage). The route-JSON variants stayed dropped
+  (now `test_35::TestModelsSection`). The route-JSON variants stayed dropped
   (model versions are still not embedded in route JSON).
 - **Duplicate 200-status tests** — fixtures already assert 200 on build;
   repeating the POST purely to assert the status wasted a full routing call.
@@ -468,7 +492,7 @@ fixed value, so this file passes the same way whether or not SMTP_* is set.
   `country_distance_shares`, and energy at segment level.
 - **`test_pipeline_country_breakdown_infrastructure_only`** — its original
   claim (a `scope` field) never existed; its structural remainder is covered
-  by `test_35::test_views_has_all_six` (originally `test_30`, deleted WP5).
+  by `test_35::test_views_has_all_six`.
 
 ## Suggested seed-data additions (not yet implemented)
 
@@ -489,16 +513,14 @@ fixed value, so this file passes the same way whether or not SMTP_* is set.
    **DONE**: `CZ_BRNO_HLN` (Brno hl.n., 49.191/16.613) sits ~10m off the
    natural Berlin-Dresden-Wien routing (Dresden-Praha-Brno-Wien) and
    comfortably inside the detour budget, so the full `auto_stop_addition`
-   behaviour is now pinned end to end in `test_21::TestModeSwitches`
-   (originally `test_20`, ported into `test_21` when `test_20` was deleted
-   WP5): the
+   behaviour is now pinned end to end in `test_20::TestModeSwitches`: the
    actual insertion at geographic position with `auto_added=true`, the
    outbound-and-return-carry-the-same-added-stops rule (search runs once,
    from outbound — see `_build_trip_pair()` in `route_factory.py`), a
    populated `suggested_stops` list with a real `added_time_min`, and
    cross-mode consistency (`"suggest"` lists exactly what `"add"`
    inserts). Because of this, every fixed-corridor fixture in
-   `conftest.py` and `test_21`'s structural `BASE_REQUEST` pin
+   `conftest.py` and `test_20`'s structural `BASE_REQUEST` pin
    `auto_stop_addition="off"` — otherwise Brno (and, for the 2-stop
    Berlin-Wien fixture, Dresden too) would be auto-added into routes whose
    exact stop lists downstream tests rely on. Still open within this
@@ -510,9 +532,10 @@ fixed value, so this file passes the same way whether or not SMTP_* is set.
 ## Conventions
 
 - Session-scoped route fixtures in `conftest.py` are **read-only** — never
-  mutate them; use `inject_demand()` (which copies) to attach demand. They
-  are built **tokenless** deliberately (compute-only, draft IDs, zero DB
-  rows) — persistence is exercised solely by the dedicated tests.
+  mutate them; `compute_evaluation_domain()` reconstructs its own domain
+  objects from them, so applying demand there never touches the fixture.
+  They are built **tokenless** deliberately (compute-only, draft IDs, zero
+  DB rows) — persistence is exercised solely by the dedicated tests.
 - The suite persists as the seeded `test_script` user via
   `script_headers` (a real JWT from the live API, OTP injected DB-side —
   no `JWT_SECRET` needed on the host). Session teardown purges everything

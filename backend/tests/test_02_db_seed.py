@@ -72,7 +72,7 @@ EXPECTED_PHASE1_TABLES = {
 
 # Columns WP5's finalizing migration (2026-08-04_proposal_schema_phase2_
 # cutover.sql) enforces NOT NULL on, now that the sole write path
-# (ProposalRepository.publish() / route_gtfs_serialize.insert_route_gtfs())
+# (ProposalRepository.publish() / gtfs_store.insert_route_gtfs())
 # always sets them — no half-states, no unpopulated rows possible anymore.
 EXPECTED_PHASE2_NOT_NULL_COLUMNS = {
     "proposals.proposals": ["route_fingerprint", "compute_request"],

@@ -10,7 +10,7 @@ Start the stack before running:
 Run tests from backend/:
     uv run --extra dev pytest tests/ -v
 
-Expensive route builds (a POST /api/route/plan can take tens of seconds
+Expensive route builds (a POST /api/proposal/calc can take tens of seconds
 against live OpenRailRouting) are session-scoped here and shared across
 files — a test that only reads a route must use one of these fixtures
 instead of building its own.
@@ -108,17 +108,14 @@ def rollback_after_test():
 
 
 # =============================================================================
-# Script identity — the user the suite persists as (persist-on-calc)
+# Script identity — the user the suite publishes as
 # =============================================================================
 #
-# POST /api/route/plan and /api/evaluation/calc persist their responses for
-# any authenticated caller. The suite authenticates as the seeded
-# 'test_script' user so persisted rows from test runs are identifiable (and
-# purgeable) by owner. The session route fixtures below deliberately stay
-# TOKENLESS: they compute only, keep their draft placeholder IDs, and leave
-# no rows — so every pre-existing test sees unchanged behaviour, and
-# persistence is exercised solely by the dedicated tests (test_50, test_70)
-# through these fixtures.
+# The suite authenticates as the seeded 'test_script' user so published
+# rows from test runs are identifiable (and purgeable) by owner. The
+# session route fixtures below are TOKENLESS: POST /api/proposal/calc is
+# stateless and leaves no rows — persistence is exercised solely by the
+# dedicated publish tests (test_50, test_70).
 
 
 @pytest.fixture(scope="session")
@@ -241,7 +238,7 @@ def hsr_scenario(db_cur):
 
 
 # All fixtures pin auto_stop_addition="off": these are fixed-corridor
-# physics fixtures whose stop lists downstream tests (test_21 content
+# physics fixtures whose stop lists downstream tests (test_20 content
 # math, test_50 GTFS decomposition) rely on being exactly as requested —
 # the seeded CZ_BRNO_HLN would otherwise be auto-added to any corridor
 # passing through Brno. The add/suggest behaviour has its own dedicated
@@ -325,10 +322,8 @@ STANDARD_DEMAND = [("Couchette", 40, 89.0), ("Seat", 30, 49.0)]
 @pytest.fixture(scope="session")
 def eval_standard(loader, route_berlin_dresden_wien):
     """Evaluation of route_berlin_dresden_wien under STANDARD_DEMAND.
-    Returns (costed_route_dict, evaluation_response) — same contract as
-    the old evaluate(inject_demand(route, ods)) HTTP round trip, computed
-    at the model layer instead now that POST /api/evaluation/calc is gone
-    (WP5) — see tests/helpers.py:compute_evaluation_domain()."""
+    Returns (costed_route_dict, evaluation_response), computed at the
+    model layer — see tests/helpers.py:compute_evaluation_domain()."""
     return compute_evaluation_domain(
         route_berlin_dresden_wien, loader, demand=STANDARD_DEMAND
     )

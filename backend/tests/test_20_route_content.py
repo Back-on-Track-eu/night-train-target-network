@@ -1,15 +1,10 @@
 """
-test_21_route_plan_content.py
-=============================
+test_20_route_content.py
+========================
 Content-logic tests for route-building — verifies the numbers a route
 carries are internally consistent and match the models that produced them,
-using only data present in the response.
-
-WP5: POST /api/route/plan was removed along with the old persist-on-calc
-world; these tests now build routes via POST /api/proposal/calc instead
-(tests/helpers.py:build_route()) — the route-building content itself is
-unchanged (proposal/calc runs the exact same models/route pipeline), only
-the HTTP entry point moved.
+using only data present in the response. Routes are built via
+POST /api/proposal/calc (tests/helpers.py:build_route()).
 
 Covers:
   - Country attribution: shares sum to 1, expected countries present,
@@ -23,13 +18,10 @@ Covers:
   - Parkings/shuntings derivation
   - Mode switches (routing_mode/timetable_mode/schedule_mode/
     auto_stop_addition), fixed-night interval stretching, scenario_id
-    handling — ported from the deleted test_20_route_plan_api.py (WP5:
-    that file tested `POST /api/route/plan`'s HTTP *contract*, which
-    `test_35_proposal_calc_api.py` now covers for `/api/proposal/calc`,
-    but it also carried substantial *content* coverage — the actual
-    Brno auto-insertion behavior, fixed-night slack/warning math — with
-    no equivalent elsewhere. Ported here rather than dropped; only the
-    endpoint and response-envelope shape changed, not what's asserted.
+    handling — content coverage ported from the pre-WP5 contract suite
+    (Brno auto-insertion behavior, fixed-night slack/warning math); only
+    the endpoint and response-envelope shape changed at the port, not
+    what's asserted.
 """
 
 import pytest
@@ -288,7 +280,7 @@ class TestParkingsAndShuntings:
 
 # =============================================================================
 # Mode switches, fixed-night interval, and scenario handling
-# (ported from the deleted test_20_route_plan_api.py — see module docstring)
+# (ported from the pre-WP5 contract suite — see module docstring)
 # =============================================================================
 
 BASE_REQUEST = {

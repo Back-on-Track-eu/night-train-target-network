@@ -2,7 +2,7 @@
 test_36_proposal_gtfs_roundtrip.py
 ====================================
 Round-trip tests for WP3 (docs/PROPOSALS_DESIGN.md §5.1/§5.2):
-api/helpers/route_gtfs_serialize.py's insert_route_gtfs() +
+adapters/proposal/gtfs_store.py's insert_route_gtfs() +
 route_dict_from_gtfs() must deep-equal the original POST /api/proposal/calc
 (WP2) route it was given, and input_parameters_from_scenario() must
 deep-equal the original evaluation.input.parameters.
@@ -22,16 +22,17 @@ crash mid-test either.
 Writes go through db_cur (conftest.py) — a plain DB cursor, deliberately
 NOT ProposalRepository — insert_route_gtfs()/route_dict_from_gtfs() are
 standalone functions that take a cursor, independent of that class (see
-route_gtfs_serialize.py's module docstring for why).
+gtfs_store.py's module docstring for why).
 """
 
 import json
 
 import pytest
 
-from adapters.proposal_projection import route_fingerprint
-from adapters.proposal_repository import ProposalRepository, rewrite_id_prefix
-from api.helpers.route_gtfs_serialize import (
+from adapters.proposal.projection import route_fingerprint
+from adapters.proposal.id_prefix import rewrite_id_prefix
+from adapters.proposal.repository import ProposalRepository
+from adapters.proposal.gtfs_store import (
     insert_route_gtfs,
     route_dict_from_gtfs,
     input_parameters_from_scenario,
@@ -150,7 +151,7 @@ class TestRouteRoundtrip:
         ]
         assert any(s["auto_added"] for s in stops_in_route), (
             "fixture assumption: CZ_BRNO_HLN should auto-add on this "
-            "corridor — see test_20_route_plan_api.py's module docstring"
+            "corridor — see test_20_route_content.py's module docstring"
         )
 
         scenario_id = response["request"]["scenario_id"]

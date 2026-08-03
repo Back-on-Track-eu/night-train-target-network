@@ -2,9 +2,8 @@
 test_50_proposals_api.py
 ========================
 POST /api/proposal/publish, GET /api/proposal/<id>, and GET/POST
-/api/proposals — the WP5 cutover (PROPOSALS_DESIGN.md §2.2, §7.1, §7.2).
-POST /api/route/plan and POST /api/evaluation/calc are gone; publish is
-now the only user write path.
+/api/proposals (PROPOSALS_DESIGN.md §2.2, §7.1, §7.2). Publish is the
+only user write path.
 
 Covers:
   - publish mode="new": create, response shape, GTFS decomposition, load

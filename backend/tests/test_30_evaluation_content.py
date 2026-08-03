@@ -1,21 +1,18 @@
 """
-test_31_evaluation_content.py
+test_30_evaluation_content.py
 =============================
 Content-logic tests for the evaluation model (models/evaluation/calc.py)
 — the numbers, not just the shape.
 
-WP5: POST /api/evaluation/calc was removed along with the old persist-on-
-calc world; it accepted an arbitrary pre-built route JSON, which is how
-this file drove controlled demand scenarios (inject_demand() + evaluate())
-for formula-correctness testing. Its replacement, POST /api/proposal/calc,
-has no such override — it always builds fresh and runs the stopgap demand
-model internally. These tests now call the model layer directly instead
+Controlled demand scenarios need an override POST /api/proposal/calc
+deliberately doesn't offer (it always builds fresh and runs the stopgap
+demand model internally), so these tests call the model layer directly
 (tests/helpers.py:compute_evaluation_domain() — route_from_dict() ->
-add_directional_domain_demand() -> evaluate_route() -> views), skipping
-HTTP for the compute step entirely; only route_berlin_wien/
-route_berlin_dresden_wien themselves still come from a live POST
-/api/proposal/calc (session-scoped fixtures, conftest.py). See
-docs/PROPOSALS_DESIGN.md's WP5 entry for the decision.
+add_directional_domain_demand() -> models.pipeline.
+evaluate_and_build_views() -> views), skipping HTTP for the compute step
+entirely; only route_berlin_wien/route_berlin_dresden_wien themselves
+still come from a live POST /api/proposal/calc (session-scoped fixtures,
+conftest.py). See docs/PROPOSALS_DESIGN.md's WP5 entry for the decision.
 
 The core idea: recompute cost components BY HAND from (a) the physics in the
 posted route JSON and (b) the parameter values served by /api/params/*, then
