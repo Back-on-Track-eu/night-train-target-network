@@ -21,7 +21,9 @@ track hsr_allowed, transited-only countries included).
 So the two scenarios can legitimately produce different routed paths
 (distance/time), not just different tac_eur figures. This script surfaces
 both: the routing-level diff (distance, driving time, per-country
-hsr_allowed) and the cost-level diff (POST /api/evaluation/calc).
+hsr_allowed) and the cost-level diff — both via one POST
+/api/proposal/calc per scenario (WP5 merged the old two-call route/plan +
+evaluation/calc pair into this single endpoint).
 
 The 2026 Base Line ("2026-baseline") is deliberately excluded — it's a
 deprecated historical reference, not a live policy comparison.
@@ -173,7 +175,11 @@ def fetch_scenario(scenario_key: str) -> dict:
 # =============================================================================
 
 
-def build_route(scenario_id: int) -> dict:
+def compute(scenario_id: int) -> dict:
+    """POST /api/proposal/calc — WP5 merged the old two-call route/plan +
+    evaluation/calc pair into one; both endpoints are gone. Same scenario
+    for build and cost (this script never needed the old evaluation/calc's
+    override-to-a-different-scenario capability), so the merge is exact."""
     body = {
         "scenario_id": scenario_id,
         "stops": STOPS,
@@ -185,20 +191,9 @@ def build_route(scenario_id: int) -> dict:
         # itself changes (routing/parameters), not auto-added stops.
         "auto_stop_addition": "off",
     }
-    resp = requests.post(f"{API_BASE}/api/route/plan", json=body, timeout=90)
+    resp = requests.post(f"{API_BASE}/api/proposal/calc", json=body, timeout=90)
     if resp.status_code != 200:
-        print(f"[✗] route/plan failed for scenario_id={scenario_id}: {resp.text[:300]}")
-        sys.exit(1)
-    return resp.json()["route"]
-
-
-def evaluate_route(route: dict, scenario_id: int) -> dict:
-    body = {"route": route, "scenario_id": scenario_id}
-    resp = requests.post(f"{API_BASE}/api/evaluation/calc", json=body, timeout=60)
-    if resp.status_code != 200:
-        print(
-            f"[✗] evaluation/calc failed for scenario_id={scenario_id}: {resp.text[:300]}"
-        )
+        print(f"[✗] proposal/calc failed for scenario_id={scenario_id}: {resp.text[:300]}")
         sys.exit(1)
     return resp.json()
 
@@ -306,10 +301,12 @@ def compare(scenario_a: dict, scenario_b: dict) -> None:
     print(f"  B: {label_b}  [scenario_id={scenario_b['scenario_id']}]")
     print("-" * 72)
 
-    route_a = build_route(scenario_a["scenario_id"])
-    route_b = build_route(scenario_b["scenario_id"])
-    eval_a = evaluate_route(route_a, scenario_a["scenario_id"])
-    eval_b = evaluate_route(route_b, scenario_b["scenario_id"])
+    result_a = compute(scenario_a["scenario_id"])
+    result_b = compute(scenario_b["scenario_id"])
+    route_a = result_a["route"]
+    route_b = result_b["route"]
+    eval_a = result_a["evaluation"]
+    eval_b = result_b["evaluation"]
 
     trip_a = outbound_trip_summary(route_a)
     trip_b = outbound_trip_summary(route_b)

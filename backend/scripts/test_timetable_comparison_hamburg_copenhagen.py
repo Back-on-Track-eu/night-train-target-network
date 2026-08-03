@@ -178,7 +178,9 @@ def fetch_scenario(scenario_key: str) -> dict:
 
 
 def build_route(scenario_id: int, fixed_night_interval: list[str] | None) -> dict:
-    """One POST /api/route/plan — mode A (interval=None, simpleAutomatic) or
+    """One POST /api/proposal/calc (WP5 removed the standalone POST
+    /api/route/plan this originally targeted — same "route" response key,
+    only the URL changed) — mode A (interval=None, simpleAutomatic) or
     mode B (interval set, simpleAutomaticWithFixedNight). Everything else is
     pinned identical so the timetable is the only thing that differs."""
     body = {
@@ -197,10 +199,10 @@ def build_route(scenario_id: int, fixed_night_interval: list[str] | None) -> dic
         body["timetable_mode"] = "simpleAutomaticWithFixedNight"
         body["fixed_night_interval"] = fixed_night_interval
 
-    resp = requests.post(f"{API_BASE}/api/route/plan", json=body, timeout=90)
+    resp = requests.post(f"{API_BASE}/api/proposal/calc", json=body, timeout=90)
     if resp.status_code != 200:
         print(
-            f"[✗] route/plan failed for timetable_mode={body['timetable_mode']}: "
+            f"[✗] proposal/calc failed for timetable_mode={body['timetable_mode']}: "
             f"{resp.text[:300]}"
         )
         sys.exit(1)

@@ -1,8 +1,21 @@
 """
 test_31_evaluation_content.py
 =============================
-Content-logic tests for POST /api/evaluation/calc — the numbers, not just
-the shape.
+Content-logic tests for the evaluation model (models/evaluation/calc.py)
+— the numbers, not just the shape.
+
+WP5: POST /api/evaluation/calc was removed along with the old persist-on-
+calc world; it accepted an arbitrary pre-built route JSON, which is how
+this file drove controlled demand scenarios (inject_demand() + evaluate())
+for formula-correctness testing. Its replacement, POST /api/proposal/calc,
+has no such override — it always builds fresh and runs the stopgap demand
+model internally. These tests now call the model layer directly instead
+(tests/helpers.py:compute_evaluation_domain() — route_from_dict() ->
+add_directional_domain_demand() -> evaluate_route() -> views), skipping
+HTTP for the compute step entirely; only route_berlin_wien/
+route_berlin_dresden_wien themselves still come from a live POST
+/api/proposal/calc (session-scoped fixtures, conftest.py). See
+docs/PROPOSALS_DESIGN.md's WP5 entry for the decision.
 
 The core idea: recompute cost components BY HAND from (a) the physics in the
 posted route JSON and (b) the parameter values served by /api/params/*, then
@@ -26,9 +39,8 @@ import requests
 
 from tests.helpers import (
     all_trips,
+    compute_evaluation_domain,
     country_km,
-    evaluate,
-    inject_demand,
     operating_days,
     route_bd,
     stop_times,
@@ -79,9 +91,9 @@ def maint_rates(api_base):
 
 
 @pytest.fixture(scope="module")
-def eval_zero(api_base, route_berlin_wien):
+def eval_zero(loader, route_berlin_wien):
     """Evaluation of the 2-stop route with zero demand (empty od_pairs)."""
-    return evaluate(api_base, inject_demand(route_berlin_wien, []))
+    return compute_evaluation_domain(route_berlin_wien, loader, demand=[])[1]
 
 
 # =============================================================================
@@ -355,20 +367,6 @@ class TestNormalisationDivisors:
 
 
 class TestDemandBehaviour:
-    @staticmethod
-    def _single_od(route, places, price):
-        trip_id = route["trip_pairs"][0]["outbound"]["trip_id"]
-        return [
-            {
-                "origin_stop_id": "DE_BERLIN_HBF",
-                "destination_stop_id": "AT_WIEN_HBF",
-                "class_main": "Seat",
-                "trip_id": trip_id,
-                "places_sold": places,
-                "avg_price": price,
-            }
-        ]
-
     def test_zero_demand_gives_zero_revenue_but_positive_cost(self, eval_zero):
         """No demand → zero revenue; running the train still costs money."""
         bd = route_bd(eval_zero)
@@ -387,20 +385,14 @@ class TestDemandBehaviour:
         per available place-km even with zero demand."""
         assert route_bd(eval_zero, "per_available_place_km")["total_cost_eur"] > 0
 
-    def test_fare_scales_revenue_linearly(self, api_base, route_berlin_wien):
+    def test_fare_scales_revenue_linearly(self, loader, route_berlin_wien):
         """Revenue is linear in avg_price: tripling the fare triples revenue
         exactly (places held constant)."""
-        cheap = evaluate(
-            api_base,
-            inject_demand(
-                route_berlin_wien, self._single_od(route_berlin_wien, 30, 33.0)
-            ),
+        _, cheap = compute_evaluation_domain(
+            route_berlin_wien, loader, demand=[("Seat", 30, 33.0)]
         )
-        pricey = evaluate(
-            api_base,
-            inject_demand(
-                route_berlin_wien, self._single_od(route_berlin_wien, 30, 99.0)
-            ),
+        _, pricey = compute_evaluation_domain(
+            route_berlin_wien, loader, demand=[("Seat", 30, 99.0)]
         )
         assert route_bd(pricey)["total_revenue_eur"] == pytest.approx(
             route_bd(cheap)["total_revenue_eur"] * 3.0, rel=REL_TOL
@@ -706,16 +698,17 @@ class TestClassAxisAcrossAllViewsAndNorms:
 
 class TestScenarioOverride:
     def test_historical_override_lowers_tac(
-        self, api_base, route_berlin_wien, historical_scenario
+        self, loader, route_berlin_wien, historical_scenario
     ):
         """Costing the SAME base-planned route under the 2026 Base Line
         scenario (track infra v1: DE tac 3.10 instead of 5.40) yields
         strictly lower TAC — the override actually swaps the parameter
         version."""
-        base = evaluate(api_base, inject_demand(route_berlin_wien, []))
-        historical = evaluate(
-            api_base,
-            inject_demand(route_berlin_wien, []),
+        _, base = compute_evaluation_domain(route_berlin_wien, loader, demand=[])
+        _, historical = compute_evaluation_domain(
+            route_berlin_wien,
+            loader,
+            demand=[],
             scenario_id=historical_scenario["scenario_id"],
         )
 

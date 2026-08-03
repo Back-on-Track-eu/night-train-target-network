@@ -70,9 +70,11 @@ EXPECTED_PHASE1_TABLES = {
     "proposals.compute_cache_result",
 }
 
-# Columns the same phase-1 migration adds to existing tables — deliberately
-# NULLABLE for now (populated starting WP2-5), unlike REQUIRED_COLUMNS below.
-EXPECTED_PHASE1_NULLABLE_COLUMNS = {
+# Columns WP5's finalizing migration (2026-08-04_proposal_schema_phase2_
+# cutover.sql) enforces NOT NULL on, now that the sole write path
+# (ProposalRepository.publish() / route_gtfs_serialize.insert_route_gtfs())
+# always sets them — no half-states, no unpopulated rows possible anymore.
+EXPECTED_PHASE2_NOT_NULL_COLUMNS = {
     "proposals.proposals": ["route_fingerprint", "compute_request"],
     "proposals.stop_times": ["stop_type"],
 }
@@ -154,13 +156,12 @@ def test_phase1_table_exists(db_cur, table):
 
 @pytest.mark.parametrize(
     "table,columns",
-    EXPECTED_PHASE1_NULLABLE_COLUMNS.items(),
+    EXPECTED_PHASE2_NOT_NULL_COLUMNS.items(),
 )
-def test_phase1_nullable_columns_exist(db_cur, table, columns):
-    """The phase-1 migration's new columns on existing tables are present
-    and still nullable — the old persist-on-calc write path never sets
-    them, so a NOT NULL constraint here would break every existing save
-    until WP5's cutover populates them for real."""
+def test_phase2_not_null_columns_enforced(db_cur, table, columns):
+    """WP5's finalizing migration enforces NOT NULL on these columns —
+    every proposal is now always fully populated (no half-states, §2.4),
+    so a nullable column here would mean the migration didn't apply."""
     schema, tbl = table.split(".")
     for col in columns:
         db_cur.execute(
@@ -170,7 +171,7 @@ def test_phase1_nullable_columns_exist(db_cur, table, columns):
         )
         row = db_cur.fetchone()
         assert row is not None, f"{table}.{col}: column not found"
-        assert row["is_nullable"] == "YES", f"{table}.{col}: expected nullable"
+        assert row["is_nullable"] == "NO", f"{table}.{col}: expected NOT NULL"
 
 
 def test_proposal_summaries_geom_is_postgis_geometry(db_cur):

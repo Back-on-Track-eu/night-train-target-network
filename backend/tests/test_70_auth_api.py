@@ -22,7 +22,7 @@ import pytest
 import requests
 
 from api.auth_utils import hash_otp
-from tests.helpers import PROPOSAL_URL, comments_url, evaluate, likes_url
+from tests.helpers import PROPOSAL_URL, comments_url, likes_url, publish
 
 _TIMEOUT = 15
 
@@ -319,12 +319,25 @@ def test_verify_with_guest_bearer_merges_guest_assets(api_base, db_cur, db_conn)
     guest = resp.json()
     guest_headers = {"Authorization": f"Bearer {guest['token']}"}
 
-    seed_route = requests.get(
+    # WP5: the old "evaluate a foreign, not-yet-evaluated proposal ->
+    # branches it" mechanic no longer exists (POST /api/evaluation/calc is
+    # gone). The equivalent under the new design (§6 "build on foreign")
+    # is: load the foreign proposal (read-only), then publish as new
+    # under the guest, optionally with based_on_proposal_id — a guest
+    # publish is exactly "owns something" for this test's purposes.
+    seed = requests.get(
         f"{api_base}{PROPOSAL_URL}/{_SEED_PROPOSAL_ID}", timeout=10
-    ).json()["route_body"]["route"]
-    branched = evaluate(api_base, seed_route, headers=guest_headers, timeout=90)
-    branch_pid = branched["proposal"]["proposal_id"]
-    assert branched["proposal"]["action"] == "branched"
+    ).json()
+    branched = publish(
+        api_base,
+        seed["request"],
+        name="Branched from seed (guest)",
+        mode="new",
+        based_on_proposal_id=_SEED_PROPOSAL_ID,
+        headers=guest_headers,
+        timeout=90,
+    )
+    branch_pid = branched["proposal_id"]
 
     try:
         # --- register with the guest bearer attached ---
@@ -355,9 +368,10 @@ def test_verify_with_guest_bearer_merges_guest_assets(api_base, db_cur, db_conn)
         }
 
         # --- the proposal changed hands; the guest row is marked ---
+        # WP5: proposals.proposals is now one row per proposal (is_current
+        # dropped) — no AND is_current needed.
         db_cur.execute(
-            "SELECT user_id FROM proposals.proposals "
-            "WHERE proposal_id = %s AND is_current",
+            "SELECT user_id FROM proposals.proposals WHERE proposal_id = %s",
             (branch_pid,),
         )
         assert db_cur.fetchone()["user_id"] == user_id
@@ -369,8 +383,13 @@ def test_verify_with_guest_bearer_merges_guest_assets(api_base, db_cur, db_conn)
         db_conn.rollback()
 
         # --- the old guest token now fails loudly, everywhere ---
+        # WP5: POST /api/evaluation/calc is gone; POST /api/proposal/
+        # publish is the remaining @require_auth write endpoint, so it's
+        # what actually exercises the merged-token rejection (the auth
+        # decorator runs before body validation, so an empty body still
+        # hits the 401 first).
         resp = requests.post(
-            f"{api_base}/api/evaluation/calc",
+            f"{api_base}{PROPOSAL_URL}/publish",
             json={},
             headers=guest_headers,
             timeout=10,

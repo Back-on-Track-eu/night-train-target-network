@@ -14,10 +14,9 @@ no helper here — tests for such fields don't exist in this suite.
 
 import requests
 
-ROUTE_URL = "/api/route/plan"
-EVAL_URL = "/api/evaluation/calc"
 PROPOSAL_URL = "/api/proposal"
 PROPOSAL_CALC_URL = "/api/proposal/calc"
+PROPOSAL_PUBLISH_URL = "/api/proposal/publish"
 PROPOSALS_URL = "/api/proposals"
 FEEDBACK_URL = "/api/feedback"
 FEEDBACK_CATEGORIES_URL = "/api/feedback/categories"
@@ -48,45 +47,50 @@ def build_route(
     stops: list[str],
     composition_id: str = "NEW-BAL-7",
     timeout: int = 90,
-    headers: dict | None = None,
     **extra,
 ) -> dict:
-    """POST /api/route/plan with the given stops/composition (plus any extra
-    request fields, e.g. scenario_id or routing_mode) and return the route dict.
-    Asserts 200 — callers testing error paths post directly instead.
+    """POST /api/proposal/calc with the given stops/composition (plus any
+    extra request fields, e.g. scenario_id or routing_mode) and return the
+    route dict. Asserts 200 — callers testing error paths post directly
+    instead.
 
-    headers: pass an Authorization header to plan as an authenticated user
-    (the plan then auto-persists as a proposal — see api/route.py:
-    _persist_plan). Tokenless (the default, used by every session route
-    fixture) computes only and keeps the draft placeholder IDs."""
+    WP5: repointed from the removed POST /api/route/plan to
+    POST /api/proposal/calc (same route-building content, evaluation
+    always included alongside it now — callers that only want the route
+    just ignore the rest of the response, as they always could). Always
+    stateless — no headers/persistence concept exists here any more."""
     body = {"stops": stops, "composition_id": composition_id, **extra}
-    resp = requests.post(
-        f"{api_base}{ROUTE_URL}", json=body, timeout=timeout, headers=headers
-    )
-    assert resp.status_code == 200, f"route/plan failed: {resp.text[:300]}"
+    resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=timeout)
+    assert resp.status_code == 200, f"proposal/calc failed: {resp.text[:300]}"
     return resp.json()["route"]
 
 
-def evaluate(
+def publish(
     api_base: str,
-    route: dict,
-    scenario_id: int | None = None,
-    timeout: int = 60,
+    compute_request: dict,
+    name: str,
+    mode: str = "new",
+    proposal_id: int | None = None,
+    based_on_proposal_id: int | None = None,
     headers: dict | None = None,
+    timeout: int = 60,
 ) -> dict:
-    """POST /api/evaluation/calc for a route dict (optionally overriding the
-    scenario) and return the full response body. Asserts 200.
+    """POST /api/proposal/publish (WP5's only user write path) and return
+    the full response body. Asserts 200 — callers testing error paths
+    (403/404/422/etc.) post directly instead.
 
-    headers: pass an Authorization header to evaluate as an authenticated
-    user (the evaluation then auto-persists onto its proposal version — see
-    api/evaluation.py: _persist_evaluation). Tokenless computes only."""
-    body: dict = {"route": route}
-    if scenario_id is not None:
-        body["scenario_id"] = scenario_id
+    headers: an Authorization header is required (publish is
+    @require_auth) — callers always pass one; there's no tokenless case
+    to default to, unlike build_route()/compute()."""
+    body = {"compute_request": compute_request, "name": name, "mode": mode}
+    if proposal_id is not None:
+        body["proposal_id"] = proposal_id
+    if based_on_proposal_id is not None:
+        body["based_on_proposal_id"] = based_on_proposal_id
     resp = requests.post(
-        f"{api_base}{EVAL_URL}", json=body, timeout=timeout, headers=headers
+        f"{api_base}{PROPOSAL_PUBLISH_URL}", json=body, timeout=timeout, headers=headers
     )
-    assert resp.status_code == 200, f"evaluation/calc failed: {resp.text[:300]}"
+    assert resp.status_code == 200, f"proposal/publish failed: {resp.text[:300]}"
     return resp.json()
 
 
@@ -243,6 +247,150 @@ def directional_od(
             }
         )
     return ods
+
+
+# =============================================================================
+# Model-layer evaluation (WP5 replacement for evaluate(inject_demand(...)))
+# =============================================================================
+#
+# POST /api/evaluation/calc accepted an arbitrary pre-built route JSON,
+# which is how the old test suite drove controlled demand scenarios
+# (inject_demand() + evaluate()) for formula-correctness testing.
+# POST /api/proposal/calc has no equivalent — it only takes stops/
+# composition_id and always runs the stopgap distribute_demand()
+# internally, no override. Formula-correctness tests that need custom
+# demand now call the model layer directly instead (route_from_dict ->
+# add_directional_domain_demand -> evaluate_route -> views), skipping
+# HTTP entirely — see docs/PROPOSALS_DESIGN.md's WP5 entry for the
+# decision.
+
+
+def add_directional_domain_demand(
+    route, class_main: str, places_sold: int, avg_price: float
+):
+    """Domain-object equivalent of directional_od() + inject_demand():
+    appends one full-route ODPair per trip (outbound + return of every
+    pair), oriented in that trip's own travel direction (first stop ->
+    last stop) — the same well-defined, non-zero sold place-km guarantee
+    directional_od() gives. Appends (doesn't replace) so callers can
+    build up multi-class demand with repeated calls, same as the old
+    `ods += directional_od(...)` loop over STANDARD_DEMAND. Mutates route
+    in place; returns it for chaining."""
+    from models.params import ODPair
+
+    for pair in route.trip_pairs:
+        for trip in (pair.outbound, pair.return_trip):
+            stops = [trip.segments[0].from_stop] + [
+                seg.to_stop for seg in trip.segments
+            ]
+            pair.od_pairs = pair.od_pairs + [
+                ODPair(
+                    origin_stop_id=stops[0].stop_id,
+                    destination_stop_id=stops[-1].stop_id,
+                    class_main=class_main,
+                    trip_id=trip.trip_id,
+                    places_sold=places_sold,
+                    avg_price=avg_price,
+                )
+            ]
+    return route
+
+
+def compute_evaluation_domain(
+    route_dict: dict,
+    loader,
+    demand: list[tuple[str, int, float]],
+    scenario_id: int | None = None,
+) -> tuple[dict, dict]:
+    """Reconstruct route_dict (a POST /api/proposal/calc route section,
+    e.g. from a session route fixture) as a domain Route via
+    route_from_dict(), apply `demand` (a list of (class_main, places_sold,
+    avg_price) — see add_directional_domain_demand()), evaluate, and
+    serialize back into exactly the old POST /api/evaluation/calc response
+    shape ({calc_version, route_id, scenario_id, models, input, views}).
+
+    scenario_id: optional override, same semantics as route_from_dict()'s
+    own parameter — costs the route under a different scenario than it
+    was planned with (e.g. a historical/what-if pin). Defaults to the
+    route's own embedded scenario_id.
+
+    Returns (costed_route_dict, result) — costed_route_dict is the
+    od_pairs-populated route (route_to_dict() shape, input.route equals
+    it verbatim), result is the full evaluation response. Same contract
+    the old evaluate(inject_demand(route, ods)) round trip provided, so
+    every test written against that shape needs no changes beyond calling
+    this instead of the HTTP helper."""
+    from api.helpers.evaluation_serialize import (
+        input_to_dict,
+        models_to_dict,
+        views_to_dict,
+    )
+    from api.helpers.route_serialize import route_from_dict, route_to_dict
+    from models.evaluation.calc import evaluate_route
+    from models.evaluation.version import CALC_VERSION
+    from models.evaluation.views import (
+        build_breakdown,
+        build_breakdown_per_trip_pair,
+        build_breakdown_per_trip_pair_per_country,
+        build_breakdown_per_trip_pair_per_od,
+        build_breakdown_per_trip_pair_per_section,
+        build_breakdown_per_trip_per_stop,
+    )
+
+    resolved_scenario_id = (
+        scenario_id if scenario_id is not None else route_dict["scenario_id"]
+    )
+    route, compositions = route_from_dict(
+        route_dict, loader, scenario_id=resolved_scenario_id
+    )
+    # route_dict came from POST /api/proposal/calc, which always runs the
+    # stopgap distribute_demand() internally — its od_pairs are already
+    # populated. Clear that baseline before applying `demand`, so an empty
+    # demand list genuinely means zero demand and a non-empty one replaces
+    # rather than adds to the stopgap figures — the same wholesale-replace
+    # semantics the old inject_demand() had.
+    for pair in route.trip_pairs:
+        pair.od_pairs = []
+    for class_main, places_sold, avg_price in demand:
+        add_directional_domain_demand(route, class_main, places_sold, avg_price)
+
+    tracks = loader.build_all_tracks(resolved_scenario_id)
+    stop_infra = loader.build_all_stops(resolved_scenario_id)
+    result_obj = evaluate_route(route=route, tracks=tracks, stop_infra=stop_infra)
+
+    bd_all = build_breakdown(route, result_obj)
+    bd_per_pair = build_breakdown_per_trip_pair(route, result_obj)
+    matrix_country = build_breakdown_per_trip_pair_per_country(route, result_obj)
+    matrix_od = build_breakdown_per_trip_pair_per_od(route, result_obj)
+    matrix_section, section_scopes = build_breakdown_per_trip_pair_per_section(
+        route, result_obj
+    )
+    matrix_stop = build_breakdown_per_trip_per_stop(route, result_obj)
+
+    costed = route_to_dict(route, resolved_scenario_id, tracks)
+    trip_pair_by_key = {p.outbound.trip_id: p for p in route.trip_pairs}
+
+    result = {
+        "calc_version": CALC_VERSION,
+        "route_id": route.route_id,
+        "scenario_id": resolved_scenario_id,
+        "models": models_to_dict(),
+        "input": input_to_dict(
+            costed, tracks, stop_infra, compositions, include_route=True
+        ),
+        "views": views_to_dict(
+            bd_all,
+            bd_per_pair,
+            matrix_country,
+            matrix_od,
+            matrix_section,
+            section_scopes,
+            matrix_stop,
+            route,
+            trip_pair_by_key,
+        ),
+    }
+    return costed, result
 
 
 # =============================================================================

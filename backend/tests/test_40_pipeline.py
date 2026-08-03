@@ -2,22 +2,30 @@
 test_40_pipeline.py
 ===================
 Thin end-to-end smoke test — one pass through the full two-step pipeline
-(plan → cost) verifying the pieces plug into each other. Everything asserted
-in depth elsewhere (route content: test_20/21, evaluation content:
-test_30/31) is deliberately NOT repeated here.
+(plan -> cost) verifying the pieces plug into each other. Everything
+asserted in depth elsewhere (route content: test_21, evaluation content:
+test_31) is deliberately NOT repeated here.
+
+WP5: the "cost" half now runs at the model layer (tests/helpers.py:
+compute_evaluation_domain()) rather than via the removed POST
+/api/evaluation/calc — see test_31's module docstring for the full
+rationale. "Plan" still goes through a live POST /api/proposal/calc
+(route_berlin_dresden_wien, conftest.py), so this remains a genuine
+plan-then-cost smoke test, just with the cost step's HTTP hop removed.
 """
 
 import pytest
 
-from tests.helpers import all_trips, directional_od, evaluate, inject_demand, route_bd
+from tests.helpers import all_trips, compute_evaluation_domain, route_bd
 
 
 @pytest.fixture(scope="module")
-def pipeline_result(api_base, route_berlin_dresden_wien):
-    """Plan (shared session route) → inject demand → evaluate."""
-    route = route_berlin_dresden_wien
-    ods = directional_od(route, "Couchette", 40, 89.0)
-    return evaluate(api_base, inject_demand(route, ods))
+def pipeline_result(loader, route_berlin_dresden_wien):
+    """Plan (shared session route) -> inject demand -> evaluate."""
+    _, result = compute_evaluation_domain(
+        route_berlin_dresden_wien, loader, demand=[("Couchette", 40, 89.0)]
+    )
+    return result
 
 
 def test_pipeline_completes_with_two_trips(route_berlin_dresden_wien):

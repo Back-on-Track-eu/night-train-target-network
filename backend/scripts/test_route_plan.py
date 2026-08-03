@@ -1,13 +1,19 @@
 """
 test_route_plan.py
 ===================
-Manual test script for POST /api/route/plan.
+Manual test script for POST /api/proposal/calc (route-building half —
+WP5 removed the standalone POST /api/route/plan this script originally
+targeted; /api/proposal/calc's "route" response key is identical in
+shape, so this script only needed its endpoint URL updated, not its
+request/response handling).
 
 Usage:
     python scripts/test_route_plan.py <path/to/request.json>
 
-Reads the request body from the given JSON file, POSTs it to
-/api/route/plan, and writes, alongside the request file (same base name,
+Reads the request body from the given JSON file (proposal_id/
+proposal_version fields, if present from an older fixture, are silently
+ignored — /api/proposal/calc has no persistence concept), POSTs it to
+/api/proposal/calc, and writes, alongside the request file (same base name,
 e.g. tc_1_route_input.json):
   <base>_output.json           — the full raw response, pretty-printed
   <base>_lines.geojson         — every trip segment as a LineString,
@@ -224,11 +230,11 @@ def test_route_plan(path: str):
     stops_path = f"{base}_stops.geojson"
     suggested_stops_path = f"{base}_suggested_stops.geojson"
 
-    print(f"\nPOST /api/route/plan")
+    print(f"\nPOST /api/proposal/calc")
     print(f"Request: {path}")
     print("-" * 60)
 
-    response = requests.post(f"{API_BASE}/api/route/plan", json=request_body)
+    response = requests.post(f"{API_BASE}/api/proposal/calc", json=request_body)
     print(f"Status: {response.status_code}")
 
     try:
@@ -301,7 +307,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     print("=" * 60)
-    print("  Night Train — route/plan endpoint test")
+    print("  Night Train — proposal/calc endpoint test (route-building half)")
     print("=" * 60)
 
     if not check_flask():

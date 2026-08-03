@@ -24,11 +24,9 @@ import pytest
 import requests
 
 from tests.helpers import (
-    ROUTE_URL,
+    PROPOSAL_CALC_URL,
     build_route,
-    directional_od,
-    evaluate,
-    inject_demand,
+    compute_evaluation_domain,
     purge_saved_proposals,
 )
 
@@ -247,13 +245,12 @@ def hsr_scenario(db_cur):
 # math, test_50 GTFS decomposition) rely on being exactly as requested —
 # the seeded CZ_BRNO_HLN would otherwise be auto-added to any corridor
 # passing through Brno. The add/suggest behaviour has its own dedicated
-# tests in test_20's TestModeSwitches.
+# tests in test_35's TestSuggestMode / TestModeSwitches-equivalent classes.
 #
-# proposal_id range convention (avoids collisions between real saved data
-# and test fixtures across the whole suite):
-#   1-99     seed_example_proposal() in db/dev/seed.py (currently just id=1)
-#   100-999  draft placeholders for THIS file's session-scoped route fixtures
-#   1000+    tests/test_50_proposals_api.py's own dynamically-saved proposals
+# WP5: these are now built via POST /api/proposal/calc (stateless,
+# neutral structural ids) — proposal_id/proposal_version no longer exist
+# as request fields (those are publish-only concerns, §2.1), so the old
+# draft-placeholder-id range convention that used to live here is gone.
 @pytest.fixture(scope="session")
 def route_berlin_wien(api_base):
     """2-stop, 2-country route: Berlin → Wien (DE, AT), NEW-BAL-7."""
@@ -261,8 +258,6 @@ def route_berlin_wien(api_base):
         api_base,
         STOPS_BERLIN_WIEN,
         DEFAULT_COMPOSITION,
-        proposal_id=101,
-        proposal_version=1,
         auto_stop_addition="off",
     )
 
@@ -274,8 +269,6 @@ def route_berlin_dresden_wien(api_base):
         api_base,
         STOPS_BERLIN_DRESDEN_WIEN,
         DEFAULT_COMPOSITION,
-        proposal_id=102,
-        proposal_version=1,
         auto_stop_addition="off",
     )
 
@@ -287,8 +280,6 @@ def route_berlin_zuerich_wien(api_base):
         api_base,
         STOPS_BERLIN_ZUERICH_WIEN,
         DEFAULT_COMPOSITION,
-        proposal_id=103,
-        proposal_version=1,
         auto_stop_addition="off",
     )
 
@@ -308,11 +299,9 @@ def route_copenhagen_stockholm(api_base):
     body = {
         "stops": STOPS_COPENHAGEN_STOCKHOLM,
         "composition_id": DEFAULT_COMPOSITION,
-        "proposal_id": 104,
-        "proposal_version": 1,
         "auto_stop_addition": "off",
     }
-    resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=90)
+    resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=90)
     if resp.status_code != 200:
         pytest.skip(
             "Copenhagen→Stockholm did not build "
@@ -334,12 +323,12 @@ STANDARD_DEMAND = [("Couchette", 40, 89.0), ("Seat", 30, 49.0)]
 
 
 @pytest.fixture(scope="session")
-def eval_standard(api_base, route_berlin_dresden_wien):
+def eval_standard(loader, route_berlin_dresden_wien):
     """Evaluation of route_berlin_dresden_wien under STANDARD_DEMAND.
-    Returns (costed_route_dict_as_posted, evaluation_response)."""
-    route = route_berlin_dresden_wien
-    ods = []
-    for class_main, places, price in STANDARD_DEMAND:
-        ods += directional_od(route, class_main, places, price)
-    costed = inject_demand(route, ods)
-    return costed, evaluate(api_base, costed)
+    Returns (costed_route_dict, evaluation_response) — same contract as
+    the old evaluate(inject_demand(route, ods)) HTTP round trip, computed
+    at the model layer instead now that POST /api/evaluation/calc is gone
+    (WP5) — see tests/helpers.py:compute_evaluation_domain()."""
+    return compute_evaluation_domain(
+        route_berlin_dresden_wien, loader, demand=STANDARD_DEMAND
+    )
