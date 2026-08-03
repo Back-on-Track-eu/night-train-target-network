@@ -14,10 +14,12 @@ allocation — [`../models/evaluation/README.md`](../models/evaluation/README.md
 · database schemas & versioning — [`../db/README.md`](../db/README.md) ·
 integration tests per endpoint — [`../tests/README.md`](../tests/README.md)
 
-**Worked examples:** real request/response pairs for the main endpoints are
-checked in under [`../scripts/data/`](../scripts/data/), produced by the
-manual test scripts in [`../scripts/`](../scripts/) against a locally running
-stack. Each endpoint section below links its own example files.
+**Worked examples:** request fixtures for the main endpoints are checked
+in under [`../scripts/data/`](../scripts/data/); the matching
+`*_output.json` response files linked below are generated locally by
+running the manual test scripts in [`../scripts/`](../scripts/) against a
+running stack (they are not checked in). Each endpoint section below links
+its own example files.
 
 ## Table of Contents
 
@@ -372,7 +374,7 @@ and the `trip_windows` timetable filter land in WP6.
       "proposal_id": 5, "proposal_version": 2, "user_id": 1,
       "name": "Berlin Hbf – Wien Hbf",
       "route_fingerprint": "sha256:...", "composition_id": "NEW-BAL-7",
-      "scenario_id": 1, "route_builder_version": "0.9.12", "calc_version": "1.2.0",
+      "scenario_id": 1, "route_builder_version": "0.9.13", "calc_version": "0.9.10",
       "total_distance_km": 683.4, "total_time_h": 9.0, "avg_speed_kmh": 76.0,
       "n_stops": 3, "countries": ["AT", "DE"], "stop_ids": ["DE_BERLIN_HBF", "..."],
       "cost_eur_per_train_km": 12.4, "revenue_eur_per_train_km": 14.1,
@@ -412,7 +414,7 @@ No request body.
   "name": "Berlin Hbf – Wien Hbf",
   "created_at": "2026-08-04T12:00:00+00:00",
   "updated_at": "2026-08-04T12:00:00+00:00",
-  "route_builder_version": "0.9.12", "calc_version": "1.2.0",
+  "route_builder_version": "0.9.13", "calc_version": "0.9.10",
   "route_fingerprint": "sha256:...",
   "request": { "...": "the resolved compute_request this proposal was published from" },
   "route": { "route_id": "P5_V1_R1", "...": "identical shape to POST /api/proposal/calc's route block" },
@@ -796,8 +798,8 @@ stop list.
 
 ```json
 {
-  "route_builder_version": "0.9.12",
-  "calc_version": "1.2.0",
+  "route_builder_version": "0.9.13",
+  "calc_version": "0.9.10",
   "route_fingerprint": "sha256:3f9a1c...",
   "cache_hit": false,
   "request": {

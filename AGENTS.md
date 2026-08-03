@@ -33,12 +33,22 @@ files describing the same three backend services, kept manually in sync:
 - Dependencies: managed with `uv` (`pyproject.toml` + `uv.lock`); never run
   `pip install` directly in the project — use `uv add`/`uv sync`
 - Domain objects in `models/` carry **no serialization methods** — all
-  `to_dict`/`from_dict` logic lives exclusively in `api/helpers/*_serialize.py`,
-  split by domain (`route_serialize.py`, `evaluation_serialize.py`,
-  `params_serialize.py`, `proposal_serialize.py`, `feedback_serialize.py`,
+  dict↔domain `to_dict`/`from_dict` logic lives in
+  `api/helpers/*_serialize.py`, split by domain (`route_serialize.py`,
+  `evaluation_serialize.py`, `params_serialize.py`,
+  `proposal_serialize.py`, `feedback_serialize.py`,
   `scenario_serialize.py`)
-- No dict-shaping or SQL in blueprint files (`api/*.py`) — blueprints are
-  thin delegation only
+- Layering: `api/*.py` (blueprints, thin delegation only — no dict-shaping,
+  no SQL) → `api/helpers/` (validation + serialization, Flask-free apart
+  from `dependencies.py`) → `adapters/` (**all** DB access — repositories,
+  loaders, and the GTFS store) → `models/` (pure domain; pipeline
+  *sequencing* lives in `models/pipeline.py`). Direction rules: `adapters/`
+  may import the pure serializers from `api/helpers/` (they are Flask-free
+  by design) but never blueprint files or `dependencies.py`; `models/`
+  imports nothing from `api/` or `adapters/`. Proposal persistence is
+  grouped in the `adapters/proposal/` package (`repository.py`,
+  `gtfs_store.py`, `projection.py`, `engagement_repository.py`,
+  `id_prefix.py`)
 - Meaningful but sparse comments; longer explanations go in module
   docstrings or READMEs, not inline blocks
 
@@ -170,10 +180,10 @@ Full contract, `--baseline` semantics, and editorial rules:
 | File | Purpose |
 | ---- | ------- |
 | `backend/main.py` | Flask app factory, blueprint registration, global JSON error handlers — endpoint list is in its module docstring |
-| `backend/api/helpers/dependencies.py` | Singleton state: `DBDataLoader`, `CountryIndex`, `ProposalRepository`, `FeedbackRepository`, all built once at startup; `get_loader()` etc. for route handlers |
-| `backend/api/*.py` | One blueprint file per domain: `health.py`, `params.py`, `route.py`, `evaluation.py`, `auth.py`, `feedback.py`, `proposals.py`, `scenarios.py` |
+| `backend/api/helpers/dependencies.py` | Singleton state: `DBDataLoader`, `CountryIndex`, `RailRouter`, `ProposalRepository`, `FeedbackRepository`, all built once at startup; `get_loader()` etc. for route handlers |
+| `backend/api/*.py` | One blueprint file per domain: `health.py`, `params.py`, `proposal_calc.py`, `proposal_publish.py`, `proposals.py`, `proposal_engagement.py`, `auth.py`, `feedback.py`, `scenarios.py` |
 | `backend/api/helpers/*_serialize.py` | All `to_dict`/`from_dict` logic, split by domain — see Python conventions above |
-| `backend/models/` | Domain layer (routing, energy, evaluation) — no serialization, no monetary values outside `models/evaluation/calc.py`. See `backend/models/README.md` |
+| `backend/models/` | Domain layer (routing, demand, energy, evaluation, pipeline) — no serialization, no monetary values outside `models/evaluation/calc.py`. See `backend/models/README.md` |
 | `backend/db/dev/sql/` | Schema DDL, source of truth for all environments. See `backend/db/README.md` |
 | `backend/tests/` | Integration test suite, numbered by layer. See `backend/tests/README.md` |
 | `frontend/src/main.ts` | App bootstrap — plugin registration order matters |
@@ -203,16 +213,18 @@ POST /api/auth/verify              OTP → JWT; merges guest work into the accou
 POST /api/auth/guest               anonymous JWT (rate-limited 20/h per IP)
 POST /api/feedback
 GET  /api/feedback/categories
-POST /api/proposal
+POST /api/proposal/calc            merged compute (route + evaluation), stateless
+POST /api/proposal/publish         @require_auth — the only user write path
 GET  /api/proposals
 POST /api/proposals
 GET  /api/proposal/<id>
+GET/POST/DELETE /api/proposal/<id>/likes
+GET/POST /api/proposal/<id>/comments
+PATCH/DELETE /api/proposal/<id>/comments/<cid>
 GET  /api/params/StopInfrastructures
 GET  /api/params/compositions
 GET  /api/params/TrackInfrastructures
 GET  /api/scenarios
-POST /api/route/plan               @optional_auth — persists on calc
-POST /api/evaluation/calc          @optional_auth — persists on calc
 ```
 
 Auth has two planes: the OTP/guest plane above (always on; needs
@@ -229,8 +241,8 @@ Full request/response documentation: `backend/api/README.md`.
 ### New API endpoint
 
 1. Add the route to the relevant existing blueprint file in `backend/api/`
-   (`health.py`, `params.py`, `route.py`, `evaluation.py`, `auth.py`,
-   `feedback.py`, `proposals.py`, `scenarios.py`) or create a new blueprint file
+   (see the blueprint list in Important Files above) or create a new
+   blueprint file
 2. Register the blueprint in `backend/main.py` if it is a new file
 3. Add serialization logic to the matching `api/helpers/*_serialize.py` file
    — never inline dict-shaping in the blueprint

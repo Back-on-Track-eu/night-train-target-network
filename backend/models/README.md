@@ -3,7 +3,8 @@
 This folder contains the domain model for evaluating night train route economics.
 
 **Related documentation:** API reference (all endpoints consuming this layer) —
-[`../api/README.md`](../api/README.md) · evaluation model —
+[`../api/README.md`](../api/README.md) · demand model —
+[`demand/README.md`](demand/README.md) · evaluation model —
 [`evaluation/README.md`](evaluation/README.md) · energy model —
 [`energy/README.md`](energy/README.md) · routing engine setup —
 [`route/routing/README.md`](route/routing/README.md) · database layer —
@@ -16,11 +17,16 @@ This folder contains the domain model for evaluating night train route economics
 ```
 models/
 ├── params.py                        # Shared parameter dataclasses (loaded from DB)
+├── pipeline.py                      # run_compute() / evaluate_and_build_views() — domain-level pipeline dispatch
 ├── utils.py                         # Shared unit conversion utilities
+├── demand/
+│   ├── stopgap.py                   # distribute_demand() — stopgap uniform-distribution proxy
+│   ├── version.py                   # DEMAND_MODEL_VERSION + stopgap standard values & open TODOs
+│   └── README.md                    # Demand model documentation (incl. incoming real-model design)
 ├── route/
 │   ├── trip.py                      # Stop, Segment, Trip — physics domain objects
 │   ├── route.py                     # Route, TripPair, Parking, Shunting, ODPair, Schedule
-│   ├── route_factory.py             # plan_route(), adjust_route(), distribute_demand()
+│   ├── route_factory.py             # plan_route() — sole Trip/TripPair/Route constructor
 │   ├── timetable.py                 # Pluggable timetable_mode / schedule_mode / auto_stop_addition strategies
 │   ├── version.py                   # ROUTE_BUILDER_VERSION + all standard values & open TODOs of the route model
 │   └── routing/                     # rail_router.py (GraphHopper wrapper) + dynamics.py (per-stop accel/brake time loss)
@@ -64,7 +70,7 @@ plan_route(trip_pair_inputs, loader, router, schedule_mode, proposal_id, proposa
   │     (re-routes internally as needed); "suggest": timetable.
   │     suggest_auto_stops(...) → list[AutoStopSuggestion] (nothing added,
   │     nothing rerouted — suggestions bubble up through plan_route()'s
-  │     return value for api/route.py to serialize). Search + costing is
+  │     return value for the API layer to serialize). Search + costing is
   │     shared (timetable.find_and_cost_auto_stop_candidates(), catalog
   │     prefiltered to route-touched countries). Only ever runs for
   │     outbound — see below.
@@ -98,12 +104,20 @@ plan_route(trip_pair_inputs, loader, router, schedule_mode, proposal_id, proposa
 plan_route() returns (Route, RouteProvenance, list[AutoStopSuggestion]) —
 suggestions non-empty only for auto_stop_addition="suggest".
 
-distribute_demand(route, utilization_per, fare_per_km_by_class)  → Route (with od_pairs)
+distribute_demand(route, utilization_per, fare_per_km_by_class)  → Route (with od_pairs)  [demand/stopgap.py]
 
-evaluate_route(route, tracks, stop_infra)  → EvaluationResult   [calc.py]
+evaluate_route(route, tracks, stop_infra)  → EvaluationResult   [evaluation/calc.py]
 
-build_breakdown*(route, result)            → Breakdown matrices  [views.py]
+build_all_views(route, result)             → ViewsBundle         [evaluation/views.py]
 ```
+
+`models/pipeline.py` is the domain-level dispatch over these steps:
+`run_compute()` runs the whole sequence (plan → stopgap demand → evaluate
+→ views) for every compute path (`POST /api/proposal/calc`, publish);
+`evaluate_and_build_views()` is the post-routing half, for callers that
+bring their own `Route`/demand (the DB seed's hand-crafted example,
+model-layer tests with controlled demand). Serialization stays out of
+`pipeline.py` — that's `api/helpers/proposal_compute.py`.
 
 `timetable_mode`, `schedule_mode`, and `auto_stop_addition` each have their
 switch (which named behaviour runs) in `route_factory.py`, at whichever
@@ -128,14 +142,13 @@ holds one function per named behaviour and never branches on the mode/flag
 itself — see that module's docstring. `VALID_TIMETABLE_MODES` /
 `VALID_SCHEDULE_MODES` / `VALID_AUTO_STOP_ADDITION_MODES` in `timetable.py`
 and `VALID_ROUTING_MODES` in `rail_router.py` are the single sources of
-truth both `api/route.py`'s request validation and the switches read from.
-Every standard value the route model assumes (mode defaults, mirror time,
-auto-stop thresholds, schedule constants, stopgap demand parameters) and
-every open TODO on the route model are consolidated in
-`route/version.py` (`STANDARD VALUES` / `OPEN_TODOS`). For schedule-only
-changes on an already-built Route (departure time, stop types),
-`adjust_route()` still exists but isn't currently reachable from the API —
-see `api/README.md`.
+truth both the compute request validation
+(`api/helpers/proposal_compute.py`) and the switches read from. Every
+standard value the route model assumes (mode defaults, mirror time,
+auto-stop thresholds, schedule constants) and every open TODO on the route
+model are consolidated in `route/version.py` (`STANDARD VALUES` /
+`OPEN_TODOS`); the stopgap demand parameters live in
+`demand/version.py`.
 
 ---
 
@@ -143,7 +156,9 @@ see `api/README.md`.
 
 | Layer | Responsibility |
 |---|---|
-| `route_factory.py` | Sole constructor for `Trip`, `TripPair`, `Route` — orchestrates the full plan/adjust pipeline |
+| `pipeline.py` | Domain-level dispatch: plan → demand → evaluate → views, one implementation for every compute path |
+| `route_factory.py` | Sole constructor for `Trip`, `TripPair`, `Route` — orchestrates the full planning pipeline |
+| `demand/stopgap.py` | Stopgap demand model — populates `TripPair.od_pairs` |
 | `rail_router.py` | HTTP calls to routing engine, country attribution, buffer computation → `RoutedLeg` |
 | `calc_energy_consumption.py` | Energy model — enriches `RoutedLeg.energy_kwh` |
 | `calc.py` | All monetary values — produces flat `EvaluationResult` with one cost object per event |
@@ -211,29 +226,21 @@ e.g. P1_V1_R1       — route for proposal 1, version 1
 
 `proposal_id` is stable across versions. `proposal_version` increments on every change.
 
-`route_factory.py` itself only ever sees concrete ints for both — a brand new
-proposal (not yet saved, no real DB id) is resolved at the API boundary
-(`api/route.py`) before `plan_route()` is called: a random placeholder
-`proposal_id` above one billion is assigned and `proposal_version` is forced
-to `1`. This is a stand-in for a future scenarios/proposals module that will
-properly own draft-vs-saved handling; `route_factory.py` doesn't need to know
-"not saved yet" is even a possible state.
+`route_factory.py` itself only ever sees concrete ints for both.
+Ephemeral compute (`POST /api/proposal/calc`, `docs/PROPOSALS_DESIGN.md`
+§2.1) passes the fixed neutral placeholders `NEUTRAL_PROPOSAL_ID`/
+`NEUTRAL_PROPOSAL_VERSION` (both `0`, `models/route/version.py`): that
+endpoint never persists, so there's no collision risk — the `P0_V0_`
+prefix exists only for the instant it takes `rewrite_id_prefix()`
+(`adapters/proposal/id_prefix.py`) to strip it back off into the neutral
+`R1`/`R1_D0_T1`/... IDs the merged response returns. Publish
+(`adapters/proposal/repository.py`) then rewrites those bare structural
+ids up to the real `P{proposal_id}_V{version}_` prefix.
 
-`api/proposal_calc.py` (`POST /api/proposal/calc`, WP2 — see
-`docs/PROPOSALS_DESIGN.md` §2.1) resolves the same way but with a fixed
-placeholder instead of a random one (`NEUTRAL_PROPOSAL_ID`/
-`NEUTRAL_PROPOSAL_VERSION`, both `0`, in `models/route/version.py`): that
-endpoint never persists, so there's no future-collision risk to guard
-against — the `P0_V0_` prefix exists only for the instant it takes
-`rewrite_id_prefix()` (`adapters/proposal_repository.py`) to strip it back
-off into the neutral `R1`/`R1_D0_T0`/... IDs the merged response returns.
-
-`RouteProvenance` (returned alongside the `Route` by `plan_route()`) also
-now carries `compositions` and `stop_infra`, not just `tracks` — added
-2026-08-03 so `api/proposal_calc.py`'s evaluate step can reuse what
-`plan_route()` already built internally instead of a second DB/catalog
-load. Purely additive: existing callers (`api/route.py`) simply don't
-read the two new fields.
+`RouteProvenance` (returned alongside the `Route` by `plan_route()`)
+carries `compositions` and `stop_infra` alongside `tracks`, so the
+pipeline's evaluate step reuses what `plan_route()` already built
+internally instead of a second DB/catalog load.
 
 ---
 

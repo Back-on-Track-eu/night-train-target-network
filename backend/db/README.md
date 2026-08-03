@@ -159,18 +159,20 @@ package instead of only at the end:
   existing persist-on-calc tables/columns, which keep running untouched.
   Nothing dropped, no constraint the old code violates.
 - **Phase 1b** (`migrations/2026-08-03_proposal_schema_phase1b_auto_added.sql`,
-  WP3) — one additional nullable column (`stop_times.auto_added`) phase 1
-  missed; see the `proposals` schema section below for why. WP3 also
-  landed the sidecar tables' write/read path
-  (`api/helpers/route_gtfs_serialize.py`), round-trip-tested but not yet
-  wired into any live endpoint.
-- **Phase 2** (WP5) — the single cutover migration: drops
-  `route_body`/`evaluation_body`/`is_current`/`change_log`, enforces the
-  final `NOT NULL`s, and lands in the same PR as the code that requires
-  the new shape. Decided data strategy: **drop and recreate, no row
-  migration** — current stored proposals are pre-launch test artifacts,
-  and `update_log`/`likes`/`comments` survive structurally since they
-  already use soft references.
+  WP3) — one additional column (`stop_times.auto_added`) phase 1 missed;
+  see the `proposals` schema section below for why. WP3 also landed the
+  sidecar tables' write/read path (now `adapters/proposal/gtfs_store.py`),
+  round-trip-tested standalone ahead of the cutover.
+- **Phase 2** (`migrations/2026-08-04_proposal_schema_phase2_cutover.sql`,
+  WP5 — landed) — the single cutover migration: dropped
+  `route_body`/`evaluation_body`/`is_current`/`change_log`, added
+  `name`/`composition_id`/`scenario_id`/`route_builder_version`/
+  `calc_version`/`evaluation_output`/`updated_at`, changed the PK to
+  `proposal_id` alone, and enforced the final `NOT NULL`s, in the same PR
+  as the code that requires the new shape. Data strategy applied: **drop
+  and recreate, no row migration** — the stored proposals were pre-launch
+  test artifacts; `update_log`/`likes`/`comments` survived structurally
+  (soft references), their stale rows truncated for a clean start.
 
 ---
 
@@ -243,39 +245,21 @@ GTFS-compatible tables plus a thin project-specific `proposals` version
 container. All GTFS IDs follow the convention
 `P{proposal_id}_V{version}_R1[_D{dir}_T{idx}]`.
 
-The route — and, once evaluated, its evaluation — is stored twice: once
-verbatim as JSON (`route_body` / `evaluation_body`, the names `GET
-/api/proposal/<id>` returns, see `api/README.md`), once decomposed into
-the GTFS tables below (the route only — evaluation results have no GTFS
-equivalent). Since persist-on-calc (2026-07-16) both are written by the
-pipelines themselves: `POST /api/route/plan` persists its own response as
-`route_body`, `POST /api/evaluation/calc` persists its own response as
-`evaluation_body`. These two columns are `JSON`,
-deliberately not `JSONB` — `JSONB`'s decomposed binary storage does not
-preserve original key order (confirmed empirically: a value round-tripped
-through `JSONB` comes back with keys in a different order than it went
-in), which defeats the point of a column that exists specifically to
-hand back the exact bytes originally posted to `/api/route/plan` and
-`/api/evaluation/calc`. `JSON` (the text-based type) preserves an exact
-copy of the input, key order included. The tradeoff: `JSONB`-only
-operators (`-`, `#-`, `@>`, `<@`, `?`, `?|`, `?&`, `||`) and GIN indexing
-aren't available directly on these two columns — queries needing them
-cast explicitly with `::jsonb` (see `list_current()` in
-`adapters/proposal_repository.py`), a read-only cast with no effect on
-what's stored. Neither column is trimmed before storing, so
-`evaluation_body`'s `input.route` ends up holding a full second copy of
-the same route already in `route_body.route` — a deliberate simplicity
-tradeoff (see the schema comments in `create_proposal_schema.sql`), not
-an oversight: since persist-on-calc both bodies are produced by the
-pipelines themselves, so they agree by construction (`POST
-/api/evaluation/calc` refuses to persist against a version whose stored
-route no longer matches the posted one — `route_mismatch`), and this
-table can never hold two disagreeing versions of one proposal's route. `evaluation_body` is a
-point-in-time snapshot of a `POST /api/evaluation/calc` response — not
-re-derived — so it can drift from a fresh call if parameters change
-later, the same tradeoff scenario pinning already makes elsewhere. List
-summaries read `total_revenue_eur`/`total_cost_eur`/`net_eur` out of
-`evaluation_body -> views -> route -> data -> per_year`.
+The route is stored exactly once (`docs/PROPOSALS_DESIGN.md` §5.1):
+decomposed into the GTFS tables below plus the sidecar tables — no JSON
+route copy exists anywhere. The evaluation's irreducible parts
+(`models` + `views`) are stored as the `evaluation_output` JSON column on
+`proposals.proposals`; `evaluation.input.parameters` is never stored — it
+is rebuilt on read from the `scenario_id` pin
+(`adapters/proposal/gtfs_store.py`'s `input_parameters_from_scenario()`).
+`evaluation_output` and `compute_request` are `JSON`, deliberately not
+`JSONB` — `JSONB`'s decomposed binary storage does not preserve original
+key order (confirmed empirically), which defeats the point of columns
+that exist to hand back exactly what a compute produced. The single
+writer for all of it is `adapters/proposal/repository.py`'s `publish()`
+(one transaction: container row + GTFS/sidecars via
+`gtfs_store.insert_route_gtfs()` + summary row + `update_log`); the read
+side is `route_dict_from_gtfs()` plus the stored `evaluation_output`.
 
 | Table | Description |
 |---|---|
@@ -286,7 +270,7 @@ summaries read `total_revenue_eur`/`total_cost_eur`/`net_eur` out of
 | `routes` | GTFS routes.txt — one row per proposal version route |
 | `trips` | GTFS trips.txt — one scheduled run per proposal version |
 | `stop_times` | GTFS stop_times.txt — ordered stop sequence per trip (times as INTERVAL) |
-| `proposals` | Version container. `proposal_id` is stable across versions; `proposal_version` increments on every persisted change (append-only — the single exception is `evaluation_body`, filled in place on the version it was computed for while still NULL, see the 2026-07-16 migration); `is_current` flags the latest version per `proposal_id`. `route_body` JSON holds the exact `POST /api/route/plan` response the version was saved from, key order preserved; `evaluation_body` JSON (nullable) holds the `POST /api/evaluation/calc` response, if one was saved, same guarantee |
+| `proposals` | Container — one row per proposal, always current (PK `proposal_id`, §5.3), no version history. `proposal_version` is an internal state counter bumped on every overwrite-publish/refresh, embedded in every row-ID prefix. Carries `name`, `route_fingerprint`, `composition_id`, `scenario_id`, model versions, the resolved `compute_request` (JSON), and `evaluation_output` (JSON, models+views only — no half-states: every proposal has route AND evaluation) |
 | `likes` | Thumbs-up on a proposal, one per user (`UNIQUE(proposal_id, user_id)`), no down-vote. Keys on the stable `proposal_id`, not a specific version — see below |
 | `comments` | Flat (non-threaded) discussion per proposal. Soft-deleted (`is_deleted`, body cleared server-side) rather than removed, so the thread stays chronologically intact |
 
@@ -315,17 +299,11 @@ dropped in that case (the target's own like already counts) before the
 rest are reassigned — the merge never fails on this, it just avoids a
 constraint violation.
 
-**Proposals redesign, schema phase 1 (2026-08-03, additive-only — see the
-two-phase migration note above).** `proposals.proposals` gained two
-nullable columns ahead of the WP5 cutover: `route_fingerprint` (route
-identity fingerprint, informational only) and `compute_request` (resolved
-`POST /api/proposal/calc` request, verbatim — mirrors `route_body`'s
-JSON-not-JSONB key-order rationale). `stop_times` gained a nullable
-`stop_type` column (lossless boarding/alighting/night/both
-classification). None of the three is populated by the current
-persist-on-calc write path (`adapters/proposal_repository.py`'s
-`_insert_gtfs()`, still unchanged) — that stays true until WP5's cutover
-replaces it.
+**Proposals redesign, schema phases (2026-08-03/04 — see the two-phase
+migration note above).** Phase 1 added `route_fingerprint` and
+`compute_request` to `proposals.proposals` and `stop_type` to
+`stop_times` (all nullable at the time); phase 2 (WP5) made them
+`NOT NULL` together with the cutover to the final container shape above.
 
 **Phase 1b (`migrations/2026-08-03_proposal_schema_phase1b_auto_added.sql`,
 WP3).** `stop_times` gained a third nullable-in-name-only column,
@@ -334,31 +312,26 @@ WP3).** `stop_times` gained a third nullable-in-name-only column,
 not derivable after the fact (a record of what the one-time
 `auto_stop_addition` candidate search decided, not something
 recomputable from stored physics), so WP3 added it alongside the sidecar
-write path below rather than silently losing the field on every
+write path rather than silently losing the field on every
 reconstruction.
 
-The phase 1 migration adds ten new tables. As of WP3
-(`api/helpers/route_gtfs_serialize.py`, `insert_route_gtfs()`/
-`route_dict_from_gtfs()`), they're no longer empty in principle — that
-module is a **complete, standalone GTFS+sidecar write/read path**,
-round-trip-tested end to end (`tests/test_36_proposal_gtfs_roundtrip.py`)
-against real `POST /api/proposal/calc` (WP2) responses. It is
-deliberately **not** wired into the live persist-on-calc pipeline yet
-(`adapters/proposal_repository.py`'s `_insert_gtfs()` stays untouched and
-is what every current endpoint still uses) — WP5 is what retires the old
-write path and switches the real `POST /api/proposal/publish` endpoint
-over to this one. Until then, rows only exist here during test runs:
+The phase 1 migration added ten further tables, all live since WP5's
+cutover. The sidecars are written/read by
+`adapters/proposal/gtfs_store.py` (`insert_route_gtfs()`/
+`route_dict_from_gtfs()`), round-trip-tested end to end
+(`tests/test_36_proposal_gtfs_roundtrip.py`) and called from within
+`publish()`'s transaction:
 
 | Table | Description |
 |---|---|
-| `segments` | One row per `Segment` (`models/route/trip.py`) — the atomic per-stop-pair physics unit of a trip (distance, driving/dynamics/buffer/slack time, energy, per-country shares). Composite PK `(trip_id, segment_sequence)`. Geometry stored per-segment on `shapes` (`{trip_id}_L{i}_SHAPE`, mirroring `route_to_dict()`'s own `geometry_id` convention) — WP3's write path deliberately doesn't also write a concatenated per-trip shape the way the old `_insert_gtfs()` does; `trips.shape_id` is left `NULL` |
-| `od_pairs` | One row per `ODPair` (`models/params.py`) — demand for one origin-destination pair, one accommodation class, one trip. `avg_price NUMERIC(10,2)` genuinely rounds the stopgap demand model's raw output (`distribute_demand()`'s flat per-km fare × distance, e.g. `77.38690000000001`) to the cent — correct precision for a EUR column, not a bug; the round-trip tests round the expected side the same way rather than asserting exact equality against a value that was never going to survive real storage |
+| `segments` | One row per `Segment` (`models/route/trip.py`) — the atomic per-stop-pair physics unit of a trip (distance, driving/dynamics/buffer/slack time, energy, per-country shares). Composite PK `(trip_id, segment_sequence)`. Geometry stored per-segment on `shapes` (`{trip_id}_L{i}_SHAPE`, mirroring `route_to_dict()`'s own `geometry_id` convention) — WP3's write path deliberately doesn't also write a concatenated per-trip shape the way the GTFS export would; `trips.shape_id` is left `NULL` |
+| `od_pairs` | One row per `ODPair` (`models/params.py`) — demand for one origin-destination pair, one accommodation class, one trip. `avg_price NUMERIC(10,2)` genuinely rounds the stopgap demand model's raw output (`models/demand/stopgap.py`'s flat per-km fare × distance, e.g. `77.38690000000001`) to the cent — correct precision for a EUR column, not a bug; the round-trip tests round the expected side the same way rather than asserting exact equality against a value that was never going to survive real storage |
 | `parkings` | One row per `Parking` (`models/route/route.py`) — overnight parking location, deduplicated by `stop_id` within the route; `trip_ids` lists every trip that parks there |
 | `shuntings` | One row per `Shunting` (`models/route/route.py`) — one shunting event at a trip terminal; not deduplicated, up to 4 rows per round trip |
 | `timetable_warnings` | One row per `TimetableWarning` (`models/route/trip.py`) — a derived timetable quality annotation, informational only |
 | `seasonal_schedules` | One row per `SeasonalSchedule` (`models/route/route.py`) — operating frequency (daily/three_per_week) per season on a route |
-| `update_log` | Append-only timeline event log (published/overwritten/recalculated/branched_from/branched_to) — preserves state transitions that `proposals.proposals` itself prunes on overwrite. Still unpopulated — lands with WP5 |
-| `proposal_summaries` | Derived projection over `proposals.proposals` for the gallery/map — route metrics, financial KPIs, placeholder demand KPIs, simplified PostGIS geometry. Not a source of truth; rebuildable at any time. The row-building logic (`adapters/proposal_projection.py`'s `build_summary_row()`, WP4) is complete and round-trip-tested against this table's schema (`tests/test_37_proposal_projection.py`), but nothing writes here from a real endpoint yet — still unpopulated in practice until WP5 wires the publish handler |
+| `update_log` | Append-only timeline event log (published/overwritten/recalculated/branched_from/branched_to) — preserves state transitions that `proposals.proposals` itself prunes on overwrite. Written by `publish()` |
+| `proposal_summaries` | Derived projection over `proposals.proposals` for the gallery/map — route metrics, financial KPIs, placeholder demand KPIs, simplified PostGIS geometry. Not a source of truth; rebuildable at any time. Row-building logic: `adapters/proposal/projection.py`'s `build_summary_row()` (WP4, `tests/test_37_proposal_projection.py`); upserted by `publish()`, one row per proposal |
 | `compute_cache_pointer` | Compute cache, pointer side — `request_hash` → which result it resolves to, plus request-specific response parts. `UNLOGGED`. Still unpopulated — lands with WP13 |
 | `compute_cache_result` | Compute cache, result side — `(route_fingerprint, scenario_id, composition_id)` → the shared route + evaluation payload, stored once per distinct result. `UNLOGGED`. Still unpopulated — lands with WP13 |
 
@@ -372,15 +345,15 @@ column-level comments.
 
 **Seed data.** `db/dev/seed.py` seeds exactly one proposal (`proposal_id=1`
 — the natural first-insert outcome on a fresh DB, no reservation needed —
-Berlin Hbf → Dresden Hbf → Wien Hbf, owned by David) — saved through
-`adapters.proposal_repository.ProposalRepository.save()`, the same code
-path the persist-on-calc pipelines use, so the seeded GTFS rows and the
-`proposals.proposals` row that owns them are structurally identical to a
-real persisted plan rather than a hand-maintained parallel representation. This
-keeps the "every GTFS row is linked to a real proposal" invariant true
-with no exception, including at seed time. It's saved without an
-evaluation, so its financial fields are null until someone evaluates and
-re-saves it. `proposal_id=1` is collision-free because
+Berlin Hbf → Dresden Hbf → Wien Hbf, owned by David) — published through
+`adapters.proposal.repository.ProposalRepository.publish()`, the same
+write path `POST /api/proposal/publish` uses, so the seeded GTFS rows and
+the `proposals.proposals` row that owns them are structurally identical
+to a real publish rather than a hand-maintained parallel representation.
+Its hand-crafted route runs through the real evaluation pipeline
+(`models.pipeline.evaluate_and_build_views()`) at seed time, so
+cost/revenue on the example are real computed numbers — no half-states.
+`proposal_id=1` is collision-free because
 `tests/conftest.py`'s route-fixture draft placeholders live at `100`+
 (see that file's range-convention comment) and
 `tests/test_50_proposals_api.py`'s own sequence floor is `1000`+. Every

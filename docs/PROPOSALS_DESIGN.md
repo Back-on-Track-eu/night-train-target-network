@@ -1308,3 +1308,64 @@ and compare (WP9) once those land. Verify the key-correctness assumption
 converging on the same result (pointer→shared result); miss on any
 output-changing field; response `request` echo always matches the actual
 request; TTL expiry; flush empties both maps.
+
+---
+
+## 11. Post-WP5 consolidation pass (2026-08-03) ✅
+
+A dedicated cleanup PR between WP5 and WP6, resolving the inefficiencies
+the "full suite green after every WP" premise deliberately accumulated
+(code kept alive for mechanisms scheduled for later shutdown). No
+behaviour change — response shapes, stored data, and all computed numbers
+are identical; `ROUTE_BUILDER_VERSION` bumped to 0.9.13 solely for the CI
+version-check contract (files under its watch were touched).
+
+- **Adapters restructured**: proposal persistence grouped into the
+  `adapters/proposal/` package — `repository.py`, `gtfs_store.py`
+  (moved from `api/helpers/route_gtfs_serialize.py`: it executes SQL, so
+  it belongs in adapters per "all DB access in adapters/"; this also
+  removes the adapters→api/helpers inversion `projection.py`'s own
+  docstring warned against), `projection.py`, `engagement_repository.py`,
+  and the new `id_prefix.py` (`rewrite_id_prefix()`, shared by the /calc
+  prefix strip and publish's prefix mint). Layering rule refined in
+  `AGENTS.md`: adapters may import the Flask-free pure serializers from
+  `api/helpers/`, never blueprint files or `dependencies.py`.
+- **`models/demand/` created**: the stopgap demand model
+  (`distribute_demand()`, its STOPGAP_* standard values, the
+  `demand_model` TODO) moved out of `models/route/` into the package the
+  real demand model will land in. `DEMAND_MODEL_VERSION` placeholder
+  established on its own track.
+- **Pipeline deduplicated**: `models/evaluation/views.py` gained
+  `ViewsBundle` + `build_all_views()`; `models/pipeline.py` gained
+  `evaluate_and_build_views()` (the post-routing half). The six-view
+  assembly previously duplicated across the pipeline, `db/dev/seed.py`'s
+  example proposal, and `tests/helpers.py` now has one implementation.
+  `views_to_dict()` takes the bundle directly.
+- **Validation relocated**: `validate_calc_body()` moved from the
+  `api/proposal_calc.py` view module into
+  `api/helpers/proposal_compute.py`, so `publish_dispatch.py` no longer
+  imports from a blueprint file.
+- **`RailRouter` is a startup singleton** (`dependencies.py`,
+  `get_rail_router()`) — the per-request construction rebuilt a
+  `requests.Session` + 64-connection pool on every compute, starting each
+  request on a cold pool; `Session` is safe for concurrent use, so one
+  warm shared instance strictly improves concurrency.
+- **Dead code removed**: `route_factory.adjust_route()` (unreachable
+  since the cutover, ~150 lines), `route_serialize.validate_route_dict()`,
+  `parse_route_id()`, `ProposalRepository.get_user()` (the
+  `FeedbackRepository` copy with the only caller survives),
+  `tests/helpers.py`'s dict-based demand helpers
+  (`inject_demand`/`directional_od`/`replicated_od`),
+  `scripts/test_evaluation_calc.py` (tombstone) +
+  `scripts/data/tc_1_evaluation_input.json`. Retained deliberately with
+  a note: `adapters/data_loader_from_spreadsheet.py` (basis for the ONTD
+  Google-Sheets import, WP10 — currently bit-rotted against
+  `models/params.py`, needs a rework pass when that work starts).
+- **Tests renumbered** to close the cutover's deletion scars:
+  `test_21_route_plan_content.py` → `test_20_route_content.py`,
+  `test_31_evaluation_content.py` → `test_30_evaluation_content.py`.
+- **Docs**: full stale-reference sweep (removed endpoints, moved modules)
+  across all module docstrings and READMEs; `db/README.md`'s proposals
+  section rewritten to the post-cutover storage model; `AGENTS.md` API
+  surface/blueprint list/layering updated; `tests/README.md` gained the
+  missing `test_37`/`test_70`/`test_71` sections.

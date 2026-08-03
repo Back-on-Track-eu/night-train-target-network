@@ -90,8 +90,8 @@ uv run --extra dev pytest tests/ -v
 Tests require the full Docker stack to be running (`postgres` + `openrailrouting` + `api`).
 
 The suite is organised by layer (stack health → DB seed → loader → versioning →
-params API → route/plan → evaluation/calc → proposal/calc (merged, WP2) →
-pipeline). See `tests/README.md`
+params API → route/evaluation content → proposal compute/publish →
+pipeline → engagement/feedback/auth). See `tests/README.md`
 for a complete list of every test file and test, with purpose, input, and
 expected outcome.
 
