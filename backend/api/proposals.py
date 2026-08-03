@@ -1,32 +1,29 @@
 """
 proposals.py
 ============
-Proposal endpoints — listing and loading night train proposals
-(formerly the "scenarios" API; renamed to avoid colliding with the
-parameter-versioning scenario.scenarios concept).
+Proposal listing and loading (PROPOSALS_DESIGN.md §7.1/§7.2, WP5-minimal
+— the full gallery/map filter contract is WP6, the on-load version-
+refresh fallback is WP7/WP8).
 
-  GET  /api/proposals       — list current proposal versions
-  POST /api/proposals       — filtered/sorted/paginated list
-  GET  /api/proposal/<id>   — load the current version of a proposal
+  GET  /api/proposals       — list, no filters
+  POST /api/proposals       — list with the one WP5 filter (user_ids) + pagination
+  GET  /api/proposal/<id>   — load one proposal, reconstructed from GTFS + summary
 
-There is no save endpoint anymore (persist-on-calc, 2026-07-16): POST
-/api/route/plan and POST /api/evaluation/calc persist their own responses
-for any authenticated caller (guest or registered) — see api/route.py:
-_persist_plan() and api/evaluation.py: _persist_evaluation() for the
-created/versioned/branched/filled/unchanged contract, implemented on
-adapters/proposal_repository.py. Every user can see and load every
-proposal.
+There is no save endpoint here — POST /api/proposal/publish
+(api/proposal_publish.py) is the only write path (§2.2). Every user can
+see and load every proposal; loading is unauthenticated (GETs are open,
+same policy as api/proposal_engagement.py's GETs).
 """
 
 import logging
 
 from flask import Blueprint, jsonify, request
 
-from api.helpers.dependencies import get_proposal_repository
+from api.helpers.dependencies import get_loader, get_proposal_repository
 from api.helpers.proposal_serialize import (
+    proposal_to_response_dict,
+    summary_row_to_dict,
     validate_list_body,
-    proposal_meta_to_dict,
-    proposal_summary_to_dict,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,37 +34,26 @@ _DEFAULT_LIMIT = 50
 
 @bp.get("/proposals")
 def list_proposals():
-    """All current proposal versions, newest first, as summaries — same
+    """All proposals, most recently updated first, as summaries — same
     shape as POST /api/proposals with an empty body."""
-    return _list_response(filters={}, sort=[], limit=None, offset=0)
+    return _list_response(user_ids=None, limit=None, offset=0)
 
 
 @bp.post("/proposals")
 def filter_proposals():
     """
-    Filtered/sorted/paginated proposal list.
+    List proposals — WP5-minimal: one filter (user_ids) + pagination.
+    The full §7.1 contract (range/list/substring filters over every
+    summary column, map sections, trip_windows) is WP6.
 
     Request body (all fields optional):
       {
-        "filter": {
-          "user_ids":  [int, ...],   proposals whose current version was saved by any of these users
-          "countries": [str, ...],   routes touching any of these country codes (incl. transit-only)
-          "stop_ids":  [str, ...]    routes serving any of these stops
-        },
-        "sort":   [{"by": "created_at" | "total_distance_km" | "total_time_h" |
-                          "total_revenue_eur" | "total_cost_eur" | "margin_eur",
-                    "dir": "asc" | "desc"}, ...],
+        "filter": {"user_ids": [int, ...]},   // e.g. "my proposals"
         "limit":  int (default 50),
-        "offset": int (default 0)
+        "offset": int
       }
 
-    Response: {"total": <count after filtering>, "proposals": [<summary>, ...]}
-    Each summary carries metadata, route metrics (name, total_distance_km,
-    total_driving_time_h, total_time_h, countries, stops), and financial
-    metrics (total_revenue_eur, total_cost_eur, margin_eur, margin_per) —
-    the latter null unless the proposal was saved with an evaluation
-    snapshot. Proposals without one sort as if their financial fields were
-    zero rather than being excluded from a financial sort.
+    Response: {"total": <count before pagination>, "proposals": [<summary>, ...]}
     """
     body = request.get_json(silent=True) or {}
     errors = validate_list_body(body)
@@ -75,8 +61,7 @@ def filter_proposals():
         return jsonify({"error": "validation_error", "details": errors}), 400
 
     return _list_response(
-        filters=body.get("filter", {}),
-        sort=body.get("sort", []),
+        user_ids=body.get("filter", {}).get("user_ids"),
         limit=body.get("limit", _DEFAULT_LIMIT),
         offset=body.get("offset", 0),
     )
@@ -85,20 +70,20 @@ def filter_proposals():
 @bp.get("/proposal/<int:proposal_id>")
 def get_proposal(proposal_id: int):
     """
-    Load the current version of a proposal.
+    Load a proposal — reconstructed compute-response shape (§2.1) plus
+    proposal metadata (§7.2). Route/evaluation are rebuilt from storage
+    (GTFS + sidecars, evaluation_output + the scenario pin) rather than
+    read back verbatim — see adapters/proposal_repository.py's
+    reconstruct_route()/reconstruct_evaluation() and
+    api/helpers/route_gtfs_serialize.py for what "rebuilt" means for each
+    section.
 
-    Response returns the two stored envelopes directly — the exact
-    payloads that were originally posted to POST /api/route/plan and
-    POST /api/evaluation/calc (after draft-ID rewriting), unchanged:
-      {
-        "proposal": {proposal_id, proposal_version, ...},
-        "route_body": {route_builder_version, request, route},
-        "evaluation_body": {calc_version, route_id, models, input, views} | null
-      }
-    `evaluation_body` is null if the proposal was saved without one.
+    Response: identical shape to POST /api/proposal/publish's response
+    (api/helpers/proposal_serialize.py's proposal_to_response_dict()).
     """
-    record = get_proposal_repository().get_current(proposal_id)
-    if record is None:
+    repo = get_proposal_repository()
+    container = repo.get_container(proposal_id)
+    if container is None:
         return (
             jsonify(
                 {
@@ -109,16 +94,14 @@ def get_proposal(proposal_id: int):
             404,
         )
 
-    return (
-        jsonify(
-            {
-                "proposal": proposal_meta_to_dict(record),
-                "route_body": record["route_body"],
-                "evaluation_body": record["evaluation_body"],
-            }
-        ),
-        200,
+    loader = get_loader()
+    route = repo.reconstruct_route(
+        proposal_id, container["proposal_version"], container["scenario_id"], loader
     )
+    evaluation = repo.reconstruct_evaluation(container, loader)
+
+    payload = proposal_to_response_dict(container, route=route, evaluation=evaluation)
+    return jsonify(payload), 200
 
 
 # =============================================================================
@@ -126,34 +109,9 @@ def get_proposal(proposal_id: int):
 # =============================================================================
 
 
-def _list_response(filters: dict, sort: list, limit: int | None, offset: int):
-    """Build summaries from the repository, apply content filters and
-    sorting in Python (row volumes are small — dozens, not thousands), and
-    paginate. user_ids is the one filter pushed down to SQL."""
-    rows = get_proposal_repository().list_current(user_ids=filters.get("user_ids"))
-    summaries = [proposal_summary_to_dict(row) for row in rows]
-
-    countries = set(filters.get("countries") or [])
-    if countries:
-        summaries = [s for s in summaries if countries & set(s["countries"])]
-    stop_ids = set(filters.get("stop_ids") or [])
-    if stop_ids:
-        summaries = [
-            s for s in summaries if stop_ids & {stop["stop_id"] for stop in s["stops"]}
-        ]
-
-    # Multi-key sort: apply keys in reverse so the first entry wins overall —
-    # Python's sort is stable. Default order (created_at DESC) comes from SQL.
-    # Financial fields are null for proposals saved without an evaluation;
-    # they sort as if 0 rather than raising or being excluded.
-    for entry in reversed(sort):
-        by = entry["by"]
-        summaries.sort(
-            key=lambda s: s[by] or 0, reverse=entry.get("dir", "asc") == "desc"
-        )
-
-    total = len(summaries)
-    if limit is not None:
-        summaries = summaries[offset : offset + limit]
-
+def _list_response(user_ids: list | None, limit: int | None, offset: int):
+    rows, total = get_proposal_repository().list_summaries(
+        user_ids=user_ids, limit=limit, offset=offset
+    )
+    summaries = [summary_row_to_dict(row) for row in rows]
     return jsonify({"total": total, "proposals": summaries}), 200

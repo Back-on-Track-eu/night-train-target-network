@@ -14,10 +14,10 @@ convention as stop_times.stop_id / trips.composition_type_id). Every
 write here first resolves the proposal's current version via
 _current_version(), which both confirms the proposal_id exists and
 supplies the proposal_version stamped onto the row. That lookup is
-duplicated from ProposalRepository.get_current() rather than shared — the
-two repositories deliberately hold independent connections (same
-rationale as FeedbackRepository.get_user()) — but kept intentionally
-cheap: no route_body/evaluation_body in the SELECT.
+duplicated from ProposalRepository.get_container()/.owner() rather than
+shared — the two repositories deliberately hold independent connections
+(same rationale as FeedbackRepository.get_user()) — but kept
+intentionally cheap: proposal_version only, no route/evaluation data.
 """
 
 from __future__ import annotations
@@ -78,8 +78,9 @@ class ProposalEngagementRepository:
         proposal_id doesn't exist. Used both to validate the soft
         reference and to stamp the version context on writes."""
         cur.execute(
-            "SELECT proposal_version FROM proposals.proposals "
-            "WHERE proposal_id = %s AND is_current",
+            # WP5 (proposals redesign cutover): proposals.proposals is now
+            # one row per proposal, always current — is_current dropped.
+            "SELECT proposal_version FROM proposals.proposals WHERE proposal_id = %s",
             (proposal_id,),
         )
         row = cur.fetchone()

@@ -1989,15 +1989,16 @@ def _example_trip(
 
 
 def _build_example_route(scenario_id: int, composition, tracks) -> dict:
-    """Berlin Hbf -> Dresden Hbf -> Wien Hbf, NEW-BAL-7, no demand (od_pairs
-    empty — financial fields on this proposal are null until someone
-    evaluates and re-saves it, same as any proposal saved without an
-    evaluation). Draft route_id follows the real >=1e9 placeholder
-    convention /api/route/plan uses, so ProposalRepository.save() exercises
-    the exact same ID-rewrite path a live save does. On a fresh DB this
-    naturally becomes proposal_id=1 (first-ever insert) — see
-    _SEED_PROPOSAL_ID's comment for why that's collision-free."""
-    draft_prefix = "P1234567890_V1_R1"
+    """Berlin Hbf -> Dresden Hbf -> Wien Hbf, NEW-BAL-7. Route physics are
+    hand-crafted (not routed via a live OpenRailRouting call) so seeding
+    has no dependency on the routing container being up yet — see
+    seed_example_proposal()'s docstring for how this feeds into a real
+    evaluation. route_id uses the bare "R1" structural-id convention
+    (mirrors a fresh compute response, PROPOSALS_DESIGN.md §2.1) so the
+    resulting dict is publish()-ready the same way a live compute's
+    output is — adapters/proposal_repository.py's publish() rewrites it
+    up to the real P{proposal_id}_V{version}_ prefix."""
+    draft_prefix = "R1"
     composition_dict = _composition_physics_dict(composition)
 
     berlin = ("DE_BERLIN_HBF", "Berlin Hbf", "DE", 52.525, 13.369)
@@ -2123,16 +2124,120 @@ def _build_example_route(scenario_id: int, composition, tracks) -> dict:
 _SEED_PROPOSAL_ID = 1
 
 
+def _compute_example_proposal(
+    route_dict: dict, scenario_id: int, loader, tracks
+) -> dict:
+    """Run the hand-crafted example route dict through the real
+    evaluation pipeline — distribute_demand() -> evaluate_route() -> the
+    six breakdown views — and serialize the result into exactly the shape
+    api/helpers/proposal_compute.compute_proposal() produces (§2.1), so
+    ProposalRepository.publish() can't tell the difference from a live
+    compute. Deliberately does NOT go through compute_proposal() itself
+    (which calls models/pipeline.run_compute() -> plan_route(), requiring
+    a live RailRouter/OpenRailRouting) — the whole point of hand-crafting
+    the route's physics is to keep DB seeding independent of the routing
+    container being up yet."""
+    from api.helpers.evaluation_serialize import (
+        input_to_dict,
+        models_to_dict,
+        views_to_dict,
+    )
+    from api.helpers.route_serialize import route_from_dict, route_to_dict
+    from adapters.proposal_projection import route_fingerprint
+    from models.evaluation.calc import evaluate_route
+    from models.evaluation.version import CALC_VERSION
+    from models.evaluation.views import (
+        build_breakdown,
+        build_breakdown_per_trip_pair,
+        build_breakdown_per_trip_pair_per_country,
+        build_breakdown_per_trip_pair_per_od,
+        build_breakdown_per_trip_pair_per_section,
+        build_breakdown_per_trip_per_stop,
+    )
+    from models.route.route_factory import distribute_demand
+    from models.route.version import (
+        ROUTE_BUILDER_VERSION,
+        STOPGAP_FARE_PER_KM_BY_CLASS,
+        STOPGAP_UTILIZATION_PER,
+    )
+
+    route, compositions = route_from_dict(route_dict, loader, scenario_id=scenario_id)
+    distribute_demand(
+        route,
+        utilization_per=STOPGAP_UTILIZATION_PER,
+        fare_per_km_by_class=STOPGAP_FARE_PER_KM_BY_CLASS,
+    )
+    stop_infra = loader.build_all_stops(scenario_id)
+    result = evaluate_route(route=route, tracks=tracks, stop_infra=stop_infra)
+
+    bd_all = build_breakdown(route, result)
+    bd_per_pair = build_breakdown_per_trip_pair(route, result)
+    matrix_country = build_breakdown_per_trip_pair_per_country(route, result)
+    matrix_od = build_breakdown_per_trip_pair_per_od(route, result)
+    matrix_section, section_scopes = build_breakdown_per_trip_pair_per_section(
+        route, result
+    )
+    matrix_stop = build_breakdown_per_trip_per_stop(route, result)
+
+    serialized_route = route_to_dict(route, scenario_id, tracks)
+    trip_pair_by_key = {p.outbound.trip_id: p for p in route.trip_pairs}
+
+    return {
+        "route_builder_version": ROUTE_BUILDER_VERSION,
+        "calc_version": CALC_VERSION,
+        "route_fingerprint": route_fingerprint(serialized_route),
+        "request": {
+            "stops": ["DE_BERLIN_HBF", "DE_DRESDEN_HBF", "AT_WIEN_HBF"],
+            "composition_id": "NEW-BAL-7",
+            "scenario_id": scenario_id,
+            "timetable_mode": "simpleAutomatic",
+            "fixed_night_interval": None,
+            "schedule_mode": "alwaysDaily",
+            "routing_mode": "fullRouting",
+            "auto_stop_addition": "off",
+        },
+        "route": serialized_route,
+        "evaluation": {
+            "models": models_to_dict(),
+            "input": input_to_dict(
+                serialized_route, tracks, stop_infra, compositions, include_route=False
+            ),
+            "views": views_to_dict(
+                bd_all,
+                bd_per_pair,
+                matrix_country,
+                matrix_od,
+                matrix_section,
+                section_scopes,
+                matrix_stop,
+                route,
+                trip_pair_by_key,
+            ),
+        },
+    }
+
+
 def seed_example_proposal(cur, conn) -> None:
     """
-    Seeds one real, saved proposal (Berlin Hbf -> Dresden Hbf -> Wien Hbf)
-    through the exact same code path a live POST /api/proposal uses —
-    ProposalRepository.save() — so the demo GTFS rows and the
-    proposals.proposals row that owns them are structurally identical to
-    a real save, not a hand-maintained parallel representation. Must run
-    after conn.commit() so the users/scenario/composition/track rows it
-    reads are visible to the separate connections ProposalRepository and
-    DBDataLoader open.
+    Seeds one real, published proposal (Berlin Hbf -> Dresden Hbf -> Wien
+    Hbf) through the exact same write path a live POST /api/proposal/
+    publish uses — ProposalRepository.publish() — so the demo GTFS rows
+    and the proposals.proposals row that owns them are structurally
+    identical to a real publish, not a hand-maintained parallel
+    representation. Must run after conn.commit() so the users/scenario/
+    composition/track rows it reads are visible to the separate
+    connections the loader and ProposalRepository open.
+
+    WP5 note: proposals no longer support half-states — every published
+    proposal carries both route AND evaluation (§2.4). This seed now runs
+    the hand-crafted example route through the real evaluation pipeline
+    (_compute_example_proposal() — distribute_demand -> evaluate_route ->
+    views) instead of the old no-demand illustrative stub, so cost/revenue
+    on the seeded example are real computed numbers, not absent. It still
+    deliberately does NOT go through the full compute_proposal()/
+    models.pipeline.run_compute() pipeline (which needs a live
+    RailRouter/OpenRailRouting) — see _compute_example_proposal()'s
+    docstring.
 
     Best-effort: an illustrative example isn't load-bearing the way
     input_params/admin data is. A failure here is logged and swallowed
@@ -2178,33 +2283,20 @@ def seed_example_proposal(cur, conn) -> None:
         try:
             composition = loader.build_all_compositions(scenario_id).get("NEW-BAL-7")
             tracks = loader.build_all_tracks(scenario_id)
+            route_dict = _build_example_route(scenario_id, composition, tracks)
+            computed = _compute_example_proposal(
+                route_dict, scenario_id, loader, tracks
+            )
         finally:
             loader.close()
 
-        route = _build_example_route(scenario_id, composition, tracks)
-        route_body = {
-            "route_builder_version": "seed",
-            # The conceptual request that would have produced this route —
-            # save() now requires the whole POST /api/route/plan response,
-            # not just its route section, so this can't be omitted/None.
-            "request": {
-                "stops": ["DE_BERLIN_HBF", "DE_DRESDEN_HBF", "AT_WIEN_HBF"],
-                "composition_id": "NEW-BAL-7",
-                "routing_mode": "fullRouting",
-                "timetable_mode": "simpleAutomatic",
-                "schedule_mode": "alwaysDaily",
-                "auto_stop_addition": "off",
-            },
-            "route": route,
-        }
-
         repo = ProposalRepository()
         try:
-            repo.save(
-                route_body=route_body,
+            repo.publish(
+                mode="new",
                 user_id=user_id,
-                change_log="Seed data — illustrative example proposal.",
-                evaluation_body=None,
+                name="Berlin – Dresden – Wien (seed example)",
+                computed=computed,
             )
         finally:
             repo.close()

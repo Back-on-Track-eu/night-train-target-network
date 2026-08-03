@@ -53,7 +53,7 @@ NORMALISATION_NDIGITS: dict[str, int] = {
 BREAKDOWN_TOTAL_NDIGITS: int = 6
 
 # Short, plain-English summary of what this model computes — embedded as-is
-# in the "models" section of POST /api/evaluation/calc's response, alongside
+# in the "models" section of POST /api/proposal/calc's response, alongside
 # CALC_VERSION and CALC_FORMULAS.
 CALC_MODEL_DESCRIPTION: str = (
     "Cost/revenue evaluation model: computes fixed and variable operator costs, "

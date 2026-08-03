@@ -127,7 +127,7 @@ CREATE TABLE proposals.stop_times (
     stop_headsign   TEXT,
     pickup_type     SMALLINT NOT NULL DEFAULT 0,
     drop_off_type   SMALLINT NOT NULL DEFAULT 0,
-    stop_type       TEXT,  -- lossless boarding/alighting/night/both classification (2026-08-03, proposals redesign phase 1) — nullable until WP3 populates it; see migrations/2026-08-03_proposal_schema_phase1.sql
+    stop_type       TEXT NOT NULL,  -- lossless boarding/alighting/night/both classification — always set by the sole write path (route_gtfs_serialize.insert_route_gtfs(), WP5)
     auto_added      BOOLEAN NOT NULL DEFAULT FALSE,  -- mirrors Stop.auto_added (2026-08-03, proposals redesign phase 1b) — see migrations/2026-08-03_proposal_schema_phase1b_auto_added.sql
     PRIMARY KEY (trip_id, stop_sequence)
 );
@@ -141,87 +141,70 @@ COMMENT ON COLUMN proposals.stop_times.departure_time IS 'Scheduled departure ti
 COMMENT ON COLUMN proposals.stop_times.stop_headsign  IS 'Optional destination sign override for this specific stop.';
 COMMENT ON COLUMN proposals.stop_times.pickup_type    IS 'GTFS pickup type: 0 = regular, 1 = no pickup, 2 = phone agency, 3 = coordinate with driver.';
 COMMENT ON COLUMN proposals.stop_times.drop_off_type  IS 'GTFS drop-off type: 0 = regular, 1 = no drop-off, 2 = phone agency, 3 = coordinate with driver.';
-COMMENT ON COLUMN proposals.stop_times.stop_type      IS 'Lossless stop classification: boarding, alighting, night, or both (mirrors models.route.trip.StopType) — not losslessly encoded by pickup_type/drop_off_type alone ("night" and "both" both map to (0,0)). Nullable in phase 1 — not yet populated by any write path.';
+COMMENT ON COLUMN proposals.stop_times.stop_type      IS 'Lossless stop classification: boarding, alighting, night, or both (mirrors models.route.trip.StopType) — not losslessly encoded by pickup_type/drop_off_type alone ("night" and "both" both map to (0,0)). Always set by the sole write path (route_gtfs_serialize.insert_route_gtfs(), WP5).';
 COMMENT ON COLUMN proposals.stop_times.auto_added     IS 'Mirrors models.route.trip.Stop.auto_added — true if auto_stop_addition inserted this stop. Added phase 1b (2026-08-03) to close a round-trip gap phase 1 missed.';
 
 -- ---------------------------------------------------------------
 -- proposals  (not GTFS — project-specific version container)
 --
--- Refit 2026-07-08: the former wide evaluation table (denormalised
--- metrics, JSONB breakdowns, parameter snapshot) is reduced to a thin
--- version container around two JSON columns. route_body is the
--- exact POST /api/route/plan response the proposal was saved from
--- ({route_builder_version, request, route}); evaluation_body, if the
--- saver included one, is the exact POST /api/evaluation/calc response
--- ({calc_version, route_id, models, input, views}). Neither is trimmed
--- before storing, so evaluation_body.input.route ends up holding a
--- second, full copy of the same route already in route_body.route —
--- a deliberate simplicity tradeoff (2026-07-09), not an oversight. The
--- API layer (api/helpers/proposal_serialize.py:
--- validate_route_evaluation_sync) rejects a save with 400
--- validation_error if the two copies don't describe the exact same
--- route, so this table can never end up holding two disagreeing
--- versions of one proposal's route. The route is additionally
--- decomposed into the GTFS tables above; three representations written
--- on every save (JSON x2, GTFS) is a deliberate "for now" — the JSON
--- guarantees an exact, cheap round-trip back to the frontend (GET
--- /api/proposal/<id> returns both columns truly verbatim, byte for
--- byte, key order included — see next paragraph), the GTFS side keeps
--- export/interop viable, and neither blocks a later consolidation.
+-- ---------------------------------------------------------------
+-- proposals  (not GTFS — project-specific version container)
 --
--- route_body/evaluation_body are JSON, deliberately NOT JSONB (2026-07-
--- 09 fix). JSONB is a decomposed binary format: per PostgreSQL's own
--- documentation, storing a value as JSONB does not preserve the
--- original key order or insignificant whitespace — object keys come
--- back in an implementation-defined order on read, not the order the
--- application wrote them in. Since these two columns exist specifically
--- to let GET /api/proposal/<id> hand back the exact bytes originally
--- POSTed to /api/route/plan and /api/evaluation/calc, that reordering
--- defeats the column's whole purpose. JSON (the older, text-based type)
--- stores an exact copy of the input text and so preserves key order
--- exactly. The tradeoff: JSONB-only operators (-, #-, @>, <@, ?, ?|,
--- ?&, ||) and GIN indexing aren't available directly on a JSON column;
--- ->, ->>, #>, #>> still work on both types. Where this schema's own
--- queries need a JSONB-only operator (see adapters/proposal_repository.
--- py's list_current(), which uses - to strip bulky keys before
--- returning a list summary), they cast explicitly with ::jsonb at query
--- time — a normal, cheap, read-only cast that has no effect on what's
--- stored.
+-- WP5 (proposals redesign cutover, 2026-08-04, docs/PROPOSALS_DESIGN.md
+-- §5.3): one row per proposal, always current — no version history.
+-- proposal_version is an internal state counter bumped on every
+-- overwrite-publish or system refresh (§4); the previous state is
+-- hard-deleted in the same transaction (adapters/proposal_repository.py:
+-- publish()). proposals.update_log is the append-only timeline that
+-- survives what this table prunes.
 --
--- Versioning contract (same append-only discipline as
--- scenario.scenarios): rows are never updated in place. Saving changes
--- to your own proposal inserts a new row with the same proposal_id and
--- proposal_version + 1, flipping is_current. Saving changes to someone
--- else's proposal inserts a brand-new proposal_id at version 1.
+-- The route lives in GTFS + sidecar tables (above), not here — no
+-- route_body JSON blob. evaluation_output holds only the computed
+-- models + views (§5.1); input.parameters is never stored, rebuilt on
+-- read via the scenario_id pin (api/helpers/route_gtfs_serialize.py:
+-- input_parameters_from_scenario()) — storing it per proposal would
+-- duplicate the params tables into every row. compute_request is the
+-- resolved POST /api/proposal/calc request the publish was computed
+-- from, verbatim.
+--
+-- compute_request/evaluation_output are JSON, deliberately NOT JSONB:
+-- JSONB does not preserve original key order (PostgreSQL's own
+-- documentation) — object keys come back in an implementation-defined
+-- order on read. Since GET /api/proposal/<id> and POST /api/proposal/
+-- publish's response both need stable, predictable key order, JSON (the
+-- older, text-based type, which stores an exact copy of the input text)
+-- is used instead.
 -- ---------------------------------------------------------------
 CREATE TABLE proposals.proposals (
-    proposal_id        SERIAL,
-    proposal_version   INTEGER NOT NULL DEFAULT 1,
-    is_current         BOOLEAN NOT NULL DEFAULT TRUE,
-    user_id            INTEGER REFERENCES admin.users(user_id) ON DELETE SET NULL,
-    route_body         JSON NOT NULL,
-    evaluation_body    JSON,
-    change_log         TEXT,
-    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
-    route_fingerprint  TEXT,  -- proposals redesign phase 1 (2026-08-03) — nullable until WP4 populates it; see migrations/2026-08-03_proposal_schema_phase1.sql
-    compute_request    JSON,  -- proposals redesign phase 1 (2026-08-03) — nullable until WP2/5 populate it
-    PRIMARY KEY (proposal_id, proposal_version)
+    proposal_id            SERIAL PRIMARY KEY,
+    proposal_version       INTEGER NOT NULL DEFAULT 1,
+    user_id                INTEGER REFERENCES admin.users(user_id) ON DELETE SET NULL,
+    name                   TEXT NOT NULL,
+    route_fingerprint      TEXT NOT NULL,
+    composition_id         TEXT NOT NULL,
+    scenario_id            INTEGER NOT NULL,
+    route_builder_version  TEXT NOT NULL,
+    calc_version           TEXT NOT NULL,
+    compute_request        JSON NOT NULL,
+    evaluation_output      JSON NOT NULL,
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at             TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE UNIQUE INDEX idx_proposals_one_current_per_id
-    ON proposals.proposals (proposal_id)
-    WHERE is_current;
+COMMENT ON TABLE  proposals.proposals                        IS 'One row per proposal, always current (§5.3) — no version history. All GTFS rows of the current state are linked by ID convention P{proposal_id}_V{proposal_version}_R1, not by FK.';
+COMMENT ON COLUMN proposals.proposals.proposal_id            IS 'Stable identity. Assigned from the sequence for new proposals, unchanged across overwrite-publishes.';
+COMMENT ON COLUMN proposals.proposals.proposal_version       IS 'Internal state counter — bumped on every overwrite-publish or system refresh (§4), embedded in every row-ID prefix. Not a version-history concept: exactly one state exists at any time.';
+COMMENT ON COLUMN proposals.proposals.user_id                IS 'FK to admin.users — the owner. Decides overwrite-vs-new at the next publish. Nullable (SET NULL on user deletion).';
+COMMENT ON COLUMN proposals.proposals.name                   IS 'User-supplied proposal name.';
+COMMENT ON COLUMN proposals.proposals.route_fingerprint      IS 'Route identity fingerprint (§3.1) — informational only, no lookup/index depends on it.';
+COMMENT ON COLUMN proposals.proposals.composition_id         IS 'The proposal''s current composition — an overwrite-publish may change it like any other input. Soft reference to input_params.composition_types.composition_type_id.';
+COMMENT ON COLUMN proposals.proposals.scenario_id            IS 'The base snapshot the stored evaluation ran under — always the current base at publish time (§2.2); system-managed via the version-refresh mechanism (§4.2) when the base moves.';
+COMMENT ON COLUMN proposals.proposals.route_builder_version  IS 'ROUTE_BUILDER_VERSION the route was built with — drives the version-refresh mechanism (§4.2).';
+COMMENT ON COLUMN proposals.proposals.calc_version           IS 'CALC_VERSION the evaluation ran with — drives the version-refresh mechanism (§4.2). Always populated: every proposal has route AND evaluation, no half-states (§2.4).';
+COMMENT ON COLUMN proposals.proposals.compute_request        IS 'Resolved POST /api/proposal/calc request, verbatim (§2.1).';
+COMMENT ON COLUMN proposals.proposals.evaluation_output      IS 'The computed evaluation''s models + views only (§5.1) — NOT input.parameters (rebuilt on read) and NOT a route copy (route lives in GTFS + sidecars).';
+COMMENT ON COLUMN proposals.proposals.updated_at             IS 'Bumped on every overwrite-publish and system refresh.';
 
-COMMENT ON TABLE  proposals.proposals                   IS 'One row per saved version of a night train proposal. proposal_id is stable across versions; proposal_version increments on every save by the owner (append-only — rows are never updated). All GTFS rows of a version are linked by ID convention P{proposal_id}_V{proposal_version}_R1, not by FK.';
-COMMENT ON COLUMN proposals.proposals.proposal_id       IS 'Stable surrogate key across all versions of a proposal. Assigned from the sequence for new/branched proposals, reused for new versions.';
-COMMENT ON COLUMN proposals.proposals.proposal_version  IS 'Monotonically increasing version counter within a proposal_id.';
-COMMENT ON COLUMN proposals.proposals.is_current        IS 'True for the latest version of this proposal_id. Enforced by partial unique index.';
-COMMENT ON COLUMN proposals.proposals.user_id           IS 'FK to admin.users — user who saved this version. Owner of the current version decides overwrite-vs-branch on the next save. Nullable (SET NULL on user deletion).';
-COMMENT ON COLUMN proposals.proposals.route_body        IS 'JSON (not JSONB — see column type note above): the exact, whole POST /api/route/plan response this version was saved from ({route_builder_version, request, route}, all three sections — the API rejects a save whose route_body is missing any of them), with all draft IDs already rewritten to the real proposal_id/proposal_version. Same name in the API request/response bodies (POST /api/proposal request field, GET /api/proposal/<id> response field) — GET returns this column verbatim, key order included.';
-COMMENT ON COLUMN proposals.proposals.evaluation_body   IS 'JSON (not JSONB — see column type note above): the exact, whole POST /api/evaluation/calc response for this version, if the saver included one (optional — a proposal can be saved without demand/evaluation). Untrimmed, so input.route is a full second copy of route_body.route — see the table comment above. Same draft-ID rewrite applied as route_body, and will still drift from a fresh /api/evaluation/calc call if parameters change later (a snapshot, not re-derived — mirrors how scenario pinning already works elsewhere). List summaries read total_revenue_eur/total_cost_eur/net_eur out of views.route.data.per_year here. Same name in the API request/response bodies, same as route_body — GET returns this column verbatim (null if absent), key order included.';
-COMMENT ON COLUMN proposals.proposals.change_log        IS 'Free-text description of what changed in this version.';
-COMMENT ON COLUMN proposals.proposals.route_fingerprint IS 'Route identity fingerprint (docs/PROPOSALS_DESIGN.md §3.1) — informational only, no lookup/index depends on it. Nullable in phase 1 (nothing populates it until WP4 of the proposals redesign); becomes NOT NULL on the final slimmed schema (WP5), which also drops is_current/route_body/evaluation_body/change_log above — see the design doc for the full cutover.';
-COMMENT ON COLUMN proposals.proposals.compute_request   IS 'Resolved POST /api/proposal/calc request, verbatim (docs/PROPOSALS_DESIGN.md §2.1). Nullable in phase 1 (nothing populates it until WP2/WP5); NOT NULL on the final schema. JSON, not JSONB — same key-order rationale as route_body/evaluation_body above.';
 -- ---------------------------------------------------------------
 -- likes / comments  (proposal engagement — 2026-07-29)
 -- ---------------------------------------------------------------
@@ -468,8 +451,8 @@ COMMENT ON COLUMN proposals.update_log.detail           IS 'Event-specific conte
 -- ---------------------------------------------------------------
 -- proposal_summaries (§5.4) — derived projection, NOT a source of
 -- truth. Rebuildable at any time by a backfill script; written in the
--- same transaction as every publish/refresh once WP5 lands. Empty
--- until then — this migration only lands the shape.
+-- same transaction as every publish (adapters/proposal_repository.py:
+-- publish() -> _upsert_summary(), WP5).
 -- ---------------------------------------------------------------
 CREATE TABLE proposals.proposal_summaries (
     proposal_id             INTEGER PRIMARY KEY,
@@ -513,7 +496,7 @@ CREATE INDEX idx_summaries_stop_ids  ON proposals.proposal_summaries USING GIN (
 CREATE INDEX idx_summaries_geom      ON proposals.proposal_summaries USING GIST (geom_simplified);
 -- btree indexes on sortable KPI columns added as query patterns settle (§5.4)
 
-COMMENT ON TABLE  proposals.proposal_summaries                        IS 'Derived projection over proposals.proposals — one row per proposal, NOT a source of truth. Written in the same transaction as every publish/refresh (from WP5 on); rebuildable at any time by a backfill script. Empty until WP5 wires the publish handler.';
+COMMENT ON TABLE  proposals.proposal_summaries                        IS 'Derived projection over proposals.proposals — one row per proposal, NOT a source of truth. Written in the same transaction as every publish (and, from WP8 on, the version-refresh batch); rebuildable at any time by a backfill script.';
 COMMENT ON COLUMN proposals.proposal_summaries.route_fingerprint      IS 'Route identity fingerprint (§3.1) — informational only, same as proposals.proposals.route_fingerprint.';
 COMMENT ON COLUMN proposals.proposal_summaries.subsidy_eur_per_year   IS 'max(0, -net_eur): gap to target margin. Unit: EUR/year';
 COMMENT ON COLUMN proposals.proposal_summaries.geom_simplified        IS 'Per-segment shapes concatenated and simplified (Douglas-Peucker, tolerance tuned for gallery-map zoom levels) — small enough to ship all proposals in one map response for a long time.';

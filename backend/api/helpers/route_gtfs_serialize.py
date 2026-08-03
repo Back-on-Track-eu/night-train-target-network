@@ -26,24 +26,22 @@ module never reimplements general_parameters, the composition/track
 physics-subset shape, or geometry_id assignment; it only has to get the
 domain objects right and everything downstream is proven code.
 
-Deliberately standalone from adapters.proposal_repository.
-ProposalRepository — that module's own _insert_gtfs() (the old,
-pre-WP3 write path) stays exactly as it is, still used by the
-still-live persist-on-calc endpoints until WP5's cutover. This module
-exists for the WP3 round-trip tests today; WP5 is what wires
-insert_route_gtfs() into the real publish endpoint and retires the old
-one. Both target the same physical tables under the same
-P{proposal_id}_V{version}_ ID convention, so callers are responsible for
-using proposal_id/version values the old path hasn't also written to
-(the round-trip tests allocate real ids from the shared sequence via
-ProposalRepository._next_proposal_id(), so this is a non-issue: the
-sequence is the single source of "not used yet" for both paths).
+WP5 update: this is now the SOLE GTFS write/read path — the old
+adapters.proposal_repository._insert_gtfs() (pre-WP3, persist-on-calc)
+was removed in WP5's cutover along with route_body/evaluation_body.
+adapters/proposal_repository.py's publish() calls insert_route_gtfs()
+directly (within its own transaction/cursor) and no longer does any GTFS
+assembly itself — the low-level GTFS constants/helpers below (weekday
+flags, the fixed service window, the stop_type->pickup/drop_off mapping,
+_route_long_name) used to live in proposal_repository.py; they moved
+here with the write path itself so proposal_repository.py can import
+insert_route_gtfs() from this module without a circular import.
 
 Segment geometry is stored per-segment on `shapes` (shape_id convention
 "{trip_id}_L{i}_SHAPE", mirroring route_to_dict()'s own geometry_id
-convention) rather than concatenated per-trip like the old write path —
-per §5.2, the per-trip concatenated shape is a GTFS-export-time concern,
-not a storage one. trips.shape_id is left NULL here.
+convention) rather than concatenated per-trip — per §5.2, the per-trip
+concatenated shape is a GTFS-export-time concern, not a storage one.
+trips.shape_id is left NULL here.
 """
 
 from __future__ import annotations
@@ -52,15 +50,6 @@ import re
 
 from psycopg2.extras import Json
 
-from adapters.proposal_repository import (
-    ProposalRepository,
-    _min_to_interval,
-    _trip_stops,
-    _STOP_TYPE_TO_PICKUP_DROPOFF,
-    _WEEKDAYS,
-    _SERVICE_START,
-    _SERVICE_END,
-)
 from api.helpers.route_serialize import route_to_dict
 from api.helpers.evaluation_serialize import input_to_dict
 from models.route.route import (
@@ -77,6 +66,63 @@ from models.route.trip import Stop, StopType, Segment, Trip, TimetableWarning
 from models.params import ODPair
 
 _TRIP_SUFFIX_PATTERN = re.compile(r"_D(\d+)_T(\d+)$")
+
+# Nominal GTFS calendar window for persisted services — the project's
+# target timetable year, 2032 (per the December-to-December European
+# rail timetable-change convention: 2nd Sunday of December through the
+# day before the following year's 2nd Sunday). GTFS requires concrete
+# dates; the model itself only knows seasonal frequencies, so every saved
+# service is pinned to this window until real timetable-year handling
+# exists. If "2032" means the timetable period covering most of calendar
+# year 2032 (starting Dec 2031) rather than the one starting Dec 2032,
+# swap these two lines for "2031-12-14" / "2032-12-11".
+_SERVICE_START = "2032-12-12"
+_SERVICE_END = "2033-12-10"
+
+_WEEKDAYS = (
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+)
+
+# stop_type → (pickup_type, drop_off_type). GTFS: 0 = regular, 1 = none.
+# "night" maps like "both": the classification is a demand statement, not an
+# operational prohibition — boarding and alighting both stay possible at a
+# night stop (it also dwells like "both", see timetable.dwell_min()).
+_STOP_TYPE_TO_PICKUP_DROPOFF = {
+    "boarding": (0, 1),
+    "alighting": (1, 0),
+    "night": (0, 0),
+    "both": (0, 0),
+}
+
+
+def _min_to_interval(minutes: int) -> str:
+    """Minutes-from-service-day-midnight → 'HH:MM:SS' INTERVAL literal.
+    Values ≥ 1440 min naturally produce the GTFS overnight convention of
+    times above 24:00:00."""
+    return f"{minutes // 60:02d}:{minutes % 60:02d}:00"
+
+
+def _trip_stops(trip: dict) -> list[dict]:
+    """Ordered stop dicts of a trip: first segment's from_stop, then every
+    segment's to_stop."""
+    segments = trip["segments"]
+    return [segments[0]["from_stop"]] + [seg["to_stop"] for seg in segments]
+
+
+def _route_long_name(route: dict) -> str:
+    """'Origin – Destination' from each trip pair's outbound endpoints,
+    multiple pairs joined by ' / ' (Y-shaped routes)."""
+    names = []
+    for pair in route["trip_pairs"]:
+        stops = _trip_stops(pair["outbound"])
+        names.append(f"{stops[0]['stop_name']} – {stops[-1]['stop_name']}")
+    return " / ".join(names)
 
 
 # =============================================================================
@@ -102,7 +148,7 @@ def insert_route_gtfs(cur, route: dict) -> None:
     _insert_service(cur, service_id, route["schedule"])
     cur.execute(
         "INSERT INTO proposals.routes (route_id, route_long_name) VALUES (%s, %s)",
-        (route_id, ProposalRepository._route_long_name(route)),
+        (route_id, _route_long_name(route)),
     )
     for ss in route["schedule"]["seasonal_schedules"]:
         cur.execute(
@@ -171,7 +217,12 @@ def _insert_service(cur, service_id: str, schedule: dict) -> None:
 
 
 def _insert_trip(
-    cur, route_id: str, service_id: str, trip: dict, composition_id: str, coords_by_id: dict
+    cur,
+    route_id: str,
+    service_id: str,
+    trip: dict,
+    composition_id: str,
+    coords_by_id: dict,
 ) -> None:
     trip_id = trip["trip_id"]
     stops = _trip_stops(trip)
@@ -243,7 +294,9 @@ def _insert_stop_times(cur, trip_id: str, stops: list[dict]) -> None:
         )
 
 
-def _insert_segments(cur, trip_id: str, segments: list[dict], coords_by_id: dict) -> None:
+def _insert_segments(
+    cur, trip_id: str, segments: list[dict], coords_by_id: dict
+) -> None:
     """One shapes row + one segments row per segment (0-based sequence,
     matching route_to_dict()'s geometry_id index) — the per-segment shape
     storage §5.2 calls for, replacing the old write path's one
@@ -315,12 +368,11 @@ def route_dict_from_gtfs(
 ) -> dict:
     """Reconstruct the route_to_dict() shape from GTFS + sidecar rows.
 
-    scenario_id: explicit parameter, not looked up from any stored
-    proposal row — proposals.proposals doesn't carry a scenario_id column
-    yet (that's WP5's slimmed schema, §5.3). Callers supply it themselves
-    for now (WP3's round-trip tests already have it from the original
-    compute request); WP5's load endpoint will read it off the container
-    row once that column exists.
+    scenario_id: explicit parameter rather than looked up internally —
+    kept that way even now that proposals.proposals.scenario_id exists
+    (§5.3, WP5), since the caller (api/proposals.py's GET /api/proposal/
+    <id>) already has the container row in hand and passing its
+    scenario_id through avoids a second, redundant lookup here.
     """
     route_id = f"P{proposal_id}_V{proposal_version}_R1"
 
@@ -342,7 +394,9 @@ def route_dict_from_gtfs(
     )
     schedule = Schedule(
         seasonal_schedules=[
-            SeasonalSchedule(season=Season(r["season"]), frequency=Frequency(r["frequency"]))
+            SeasonalSchedule(
+                season=Season(r["season"]), frequency=Frequency(r["frequency"])
+            )
             for r in cur.fetchall()
         ]
     )
@@ -374,8 +428,12 @@ def route_dict_from_gtfs(
             raise ValueError(
                 f"route_dict_from_gtfs: composition '{composition_id}' not found."
             )
-        outbound = _build_trip(cur, group[0]["trip_id"], direction=0, stop_infra=stop_infra)
-        return_trip = _build_trip(cur, group[1]["trip_id"], direction=1, stop_infra=stop_infra)
+        outbound = _build_trip(
+            cur, group[0]["trip_id"], direction=0, stop_infra=stop_infra
+        )
+        return_trip = _build_trip(
+            cur, group[1]["trip_id"], direction=1, stop_infra=stop_infra
+        )
         od_pairs = _build_od_pairs(cur, group[0]["trip_id"], group[1]["trip_id"])
         trip_pairs.append(
             TripPair(
@@ -431,7 +489,9 @@ def _build_trip(cur, trip_id: str, direction: int, stop_infra) -> Trip:
                 # arrival_time_min read the opposite ends) — None here
                 # matches the domain contract regardless of what GTFS's
                 # fill-from-the-other-side convention wrote to that column.
-                arrival_time_min=None if i == 0 else _interval_to_min(row["arrival_time"]),
+                arrival_time_min=None
+                if i == 0
+                else _interval_to_min(row["arrival_time"]),
                 departure_time_min=(
                     None if i == n - 1 else _interval_to_min(row["departure_time"])
                 ),
@@ -487,7 +547,10 @@ def _build_trip(cur, trip_id: str, direction: int, stop_infra) -> Trip:
     ]
 
     return Trip(
-        trip_id=trip_id, direction=direction, segments=segments, timetable_warnings=warnings
+        trip_id=trip_id,
+        direction=direction,
+        segments=segments,
+        timetable_warnings=warnings,
     )
 
 

@@ -15,7 +15,8 @@ Endpoints — see api/README.md for full documentation.
   POST /api/auth/guest
   POST /api/feedback
   GET  /api/feedback/categories
-  POST /api/proposal
+  POST /api/proposal/calc
+  POST /api/proposal/publish
   GET  /api/proposals
   POST /api/proposals
   GET  /api/proposal/<id>
@@ -30,8 +31,11 @@ Endpoints — see api/README.md for full documentation.
   GET  /api/params/compositions
   GET  /api/params/TrackInfrastructures
   GET  /api/scenarios
-  POST /api/route/plan
-  POST /api/evaluation/calc
+
+WP5 cutover (PROPOSALS_DESIGN.md §2, §10): POST /api/route/plan and
+POST /api/evaluation/calc are gone — POST /api/proposal/calc (merged
+ephemeral compute, WP2) and POST /api/proposal/publish (the only user
+write path, WP5) replace them.
 """
 
 import logging
@@ -45,9 +49,8 @@ from api.limiter import limiter
 from api import (
     health,
     params,
-    route,
-    evaluation,
     proposal_calc,
+    proposal_publish,
     auth,
     feedback,
     proposals,
@@ -78,12 +81,12 @@ def create_app() -> Flask:
     # --- blueprints ---
     app.register_blueprint(health.bp, url_prefix="/api")
     app.register_blueprint(params.bp, url_prefix="/api/params")
-    app.register_blueprint(route.bp, url_prefix="/api/route")
-    app.register_blueprint(evaluation.bp, url_prefix="/api/evaluation")
-    # WP2 (PROPOSALS_DESIGN.md §2.1): merged ephemeral compute endpoint,
-    # additive and parallel to route.bp + evaluation.bp above — those stay
-    # in place, persist-on-calc and all, until WP5's cutover.
+    # WP2 + WP5 (PROPOSALS_DESIGN.md §2): merged ephemeral compute
+    # (calc) + the only user write path (publish) — replace the old
+    # POST /api/route/plan + POST /api/evaluation/calc pair, removed in
+    # WP5's cutover.
     app.register_blueprint(proposal_calc.bp, url_prefix="/api/proposal")
+    app.register_blueprint(proposal_publish.bp, url_prefix="/api/proposal")
     app.register_blueprint(auth.bp, url_prefix="/api/auth")
     app.register_blueprint(feedback.bp, url_prefix="/api")
     app.register_blueprint(proposals.bp, url_prefix="/api")

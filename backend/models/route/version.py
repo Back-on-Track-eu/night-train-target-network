@@ -388,25 +388,18 @@ STOPGAP_FARE_PER_KM_BY_CLASS: dict[str, float] = {
 }
 """Placeholder flat per-km fares by class_main — same caveat as above."""
 
-# --- Draft proposal placeholder ids (api/route.py)
-DRAFT_PROPOSAL_ID_MIN: int = 1_000_000_000
-DRAFT_PROPOSAL_ID_MAX: int = 2_147_483_647
-"""Random placeholder proposal_id range for a route that hasn't been saved
-as a proposal yet. proposals.proposals.proposal_id is a SERIAL int4
-starting at 1, so a value above one billion won't realistically collide
-with a real one (upper bound = postgres int4 max). See OPEN_TODOS."""
-
-# --- Neutral placeholder ids (api/proposal_calc.py, PROPOSALS_DESIGN.md §2.1)
+# --- Neutral placeholder ids (api/helpers/proposal_compute.py, PROPOSALS_DESIGN.md §2.1)
 NEUTRAL_PROPOSAL_ID: int = 0
 NEUTRAL_PROPOSAL_VERSION: int = 0
 """Fixed (not random) placeholder used only to satisfy plan_route()'s
-id-building signature for POST /api/proposal/calc. Unlike
-DRAFT_PROPOSAL_ID_MIN/MAX above, this never risks colliding with anything:
-/api/proposal/calc never persists, so its P{id}_V{version}_ prefix exists
-only for the instant it takes rewrite_id_prefix() (adapters/
+id-building signature for POST /api/proposal/calc. Never risks colliding
+with anything: /api/proposal/calc never persists, so its P{id}_V{version}_
+prefix exists only for the instant it takes rewrite_id_prefix() (adapters/
 proposal_repository.py) to strip it back off into the neutral R1/T.../
 structural IDs §2.1 specifies. A fixed value keeps that round trip
-deterministic and easy to assert on in tests."""
+deterministic and easy to assert on in tests. Publish (WP5) then rewrites
+those same bare structural ids up to the real P{proposal_id}_V{version}_
+prefix — see adapters/proposal_repository.py's _STRUCTURAL_ROUTE_PREFIX."""
 
 
 # =============================================================================
@@ -476,12 +469,6 @@ OPEN_TODOS: dict[str, str] = {
         "_shuntings() creates one Shunting per trip terminal with no "
         "deduplication; Y/X-shaped routes with shared terminals may need "
         "fewer coupling/uncoupling events."
-    ),
-    "draft_proposal_module": (
-        "The random draft proposal_id (DRAFT_PROPOSAL_ID_MIN/MAX above, "
-        "minted in api/route.py) is a stand-in for a future scenarios/"
-        "proposals module that will own draft-vs-saved handling properly "
-        "and hand back whatever id it thinks is appropriate."
     ),
     "adjust_route_unreachable": (
         "route_factory.adjust_route() (schedule-only changes, no rerouting) "

@@ -14,9 +14,10 @@ Rating (thumbs-up "like") and commenting on saved proposals.
   DELETE /api/proposal/<id>/comments/<cid>  — soft-delete own comment
 
 GETs are open, same as proposal loading (api/proposals.py). Writes need
-@require_auth at the TRUST_GUEST floor — the same bar POST /api/route/plan
-already clears for a guest to save a proposal. Both resources key on
-proposal_id (a soft reference, see adapters/proposal_engagement_repository.py)
+@require_auth at the TRUST_GUEST floor — the same bar POST /api/proposal/
+publish already clears for a guest to publish a proposal. Both resources
+key on proposal_id (a soft reference, see
+adapters/proposal_engagement_repository.py)
 rather than a specific proposal_version, so a like or a discussion survives
 the proposal being edited into a new version.
 """
