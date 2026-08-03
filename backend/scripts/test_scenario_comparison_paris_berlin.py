@@ -33,7 +33,7 @@ Usage:
 
 Writes raw route/evaluation responses, a comparison summary, and per-scenario
 GeoJSON layers (routed lines + stops) to scripts/data/ (tc_2_paris_berlin_*).
-Same GeoJSON shape/logic as scripts/test_route_plan.py's route_to_geojson()
+Same GeoJSON shape/logic as scripts/test_proposal_calc.py's route_to_geojson()
 — kept in sync deliberately so outputs from both scripts drag into the same
 QGIS project consistently (Layer > Add Layer > Add Vector Layer) to compare
 routed paths visually. Pre-flight:
@@ -313,8 +313,12 @@ def compare(scenario_a: dict, scenario_b: dict) -> None:
     hsr_a = track_hsr_flags(route_a)
     hsr_b = track_hsr_flags(route_b)
 
-    bd_a = eval_a["views"]["route"]["data"]["per_year"]
-    bd_b = eval_b["views"]["route"]["data"]["per_year"]
+    # Every normalisation is class-keyed since CALC 0.9.9
+    # ({"all": <breakdown>, class_main: <breakdown>, ...}) — index into
+    # "all" for the whole-route, all-classes figure. See
+    # models/evaluation/README.md's "Class axis" section.
+    bd_a = eval_a["views"]["route"]["data"]["per_year"]["all"]
+    bd_b = eval_b["views"]["route"]["data"]["per_year"]["all"]
     tac_a = bd_a["cost"]["infrastructure"]["tac_eur"]
     tac_b = bd_b["cost"]["infrastructure"]["tac_eur"]
 

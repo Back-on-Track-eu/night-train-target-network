@@ -405,7 +405,7 @@ from keys.
 
 Values below are illustrative; the structure is exact. A full real
 `evaluation.views` block can be produced locally by running
-[`../../scripts/test_route_plan.py`](../../scripts/test_route_plan.py)
+[`../../scripts/test_proposal_calc.py`](../../scripts/test_proposal_calc.py)
 against `POST /api/proposal/calc` (the `*_output.json` it writes contains
 the complete merged response).
 

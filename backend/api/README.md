@@ -712,11 +712,11 @@ allocation rules, and view semantics in
 Worked example — Berlin – Dresden – Wien with `auto_stop_addition="add"`:
 request [`tc_1_route_input.json`](../scripts/data/tc_1_route_input.json),
 full response [`tc_1_route_input_output.json`](../scripts/data/tc_1_route_input_output.json)
-(produced by [`../scripts/test_route_plan.py`](../scripts/test_route_plan.py),
-which also writes a QGIS-ready `tc_1_route_input_lines.geojson` +
-`tc_1_route_input_stops.geojson` pair alongside it — stops carry
-`auto_added` so caller-supplied vs. auto-added stops can be styled
-differently). A `"suggest"`-mode request lives alongside it as
+(produced by [`../scripts/test_proposal_calc.py`](../scripts/test_proposal_calc.py),
+which also prints/validates the evaluation block and writes a QGIS-ready
+`tc_1_route_input_lines.geojson` + `tc_1_route_input_stops.geojson` pair
+alongside it — stops carry `auto_added` so caller-supplied vs. auto-added
+stops can be styled differently). A `"suggest"`-mode request lives alongside it as
 [`tc_2_route_input_suggest.json`](../scripts/data/tc_2_route_input_suggest.json),
 which additionally produces a `tc_2_route_input_suggest_suggested_stops.geojson`
 layer of candidate stops tagged with `added_time_min`.
@@ -888,7 +888,7 @@ Four things worth calling out explicitly (`docs/PROPOSALS_DESIGN.md` §2.1):
    route already appears once, as a sibling of `evaluation`.
 4. **`route_fingerprint` and `cache_hit`** — `route_fingerprint` (§3.1) is
    a SHA-256 over the route's resolved stops/times/geometry, computed by
-   `adapters/proposal_projection.py`; it agrees between ephemeral and
+   `adapters/proposal/projection.py`; it agrees between ephemeral and
    published forms of the identical route by construction (the canonical
    extract never reads `route_id`/`trip_id`/`geometry_id`). `cache_hit`
    is always `false` for now — no compute cache exists yet (WP13 wires
@@ -997,7 +997,7 @@ data}`:
 ```
 
 `views.route.data` holds the normalised breakdown directly (no filter
-dimension — it's the whole-route aggregate). The other five views nest a
+dimension — it's the whole-route aggregate); the other five views nest a
 `{filter, values}` pair per key, where `values` holds the same normalised
 breakdown shape, plus an `"all"` entry aggregating across that view's
 dimension. `od_key` format: `"{origin_stop_id}__{destination_stop_id}__{class_main}"`.
@@ -1010,10 +1010,23 @@ Each cell contains the same breakdown under five **normalisations** (not to be c
 | `per_operating_day` | €/operating-day | Per day the service runs |
 | `per_train_km` | €/train-km | Per annual train-km (cycle distance × operating days; a section's own distance for section cells) |
 | `per_available_place_km` | €/available-place-km | Per capacity × distance |
-| `per_sold_place_km` | dict per class_main, €/sold-place-km | Each class's allocated cost ÷ its OWN sold place-km — 50% occupancy doubles the per-sold cost; classes without sales omitted; `null` only for scopes without per-class data |
-| `by_class_main` | dict per class_main, same units as the cell | The full breakdown split by the class allocation model — per-class cells sum back to the cell total |
+| `per_sold_place_km` | €/sold-place-km | Each class's allocated cost ÷ its OWN sold place-km — 50% occupancy doubles the per-sold cost; classes without sales omitted |
 
-Each of those five is itself a nested cost/revenue/margin breakdown:
+**Every normalisation above is itself class-keyed** (CALC 0.9.9): each of
+the five keys maps to `{"all": <breakdown>, <class_main>: <breakdown>, ...}`,
+not a bare breakdown — `"all"` is the whole-cell aggregate, read it for a
+total; each `class_main` key is that class's own share. For `per_year`/
+`per_operating_day`/`per_train_km` the class cells sum back to `"all"`
+exactly (the divisor is class-independent); for the two place-km
+normalisations they don't (each divides by that class's own place-km).
+So the actual bottom line for a route is
+`evaluation.views.route.data.per_year.all.net_eur`, not
+`...data.per_year.net_eur` — there is no bare-breakdown form at any level.
+(There used to be a separate `by_class_main` normalisation key; it was
+retired as redundant with `per_year`'s own class cells.)
+
+Each `class_main` key (including `"all"`) under a normalisation holds this
+nested cost/revenue/margin breakdown:
 
 ```json
 {
