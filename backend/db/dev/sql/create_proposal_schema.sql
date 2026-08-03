@@ -488,7 +488,8 @@ CREATE TABLE proposals.proposal_summaries (
     subsidy_eur_per_t_co2       NUMERIC(10, 2),
     demand_kpis_placeholder     BOOLEAN NOT NULL DEFAULT TRUE,
 
-    updated_at               TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at                TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at                TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX idx_summaries_countries ON proposals.proposal_summaries USING GIN (countries);
@@ -501,6 +502,7 @@ COMMENT ON COLUMN proposals.proposal_summaries.route_fingerprint      IS 'Route 
 COMMENT ON COLUMN proposals.proposal_summaries.subsidy_eur_per_year   IS 'max(0, -net_eur): gap to target margin. Unit: EUR/year';
 COMMENT ON COLUMN proposals.proposal_summaries.geom_simplified        IS 'Per-segment shapes concatenated and simplified (Douglas-Peucker, tolerance tuned for gallery-map zoom levels) — small enough to ship all proposals in one map response for a long time.';
 COMMENT ON COLUMN proposals.proposal_summaries.demand_kpis_placeholder IS 'TRUE while demand_*/shift_*/co2_* columns are placeholder-faked (§8) — no demand model exists yet.';
+COMMENT ON COLUMN proposals.proposal_summaries.created_at             IS 'Set once at the proposal''s first publish, never touched by an overwrite-publish or refresh — repository.py''s _upsert_summary() excludes it from the ON CONFLICT UPDATE. Gallery filter/sort target (WP6.1).';
 
 -- ---------------------------------------------------------------
 -- compute_cache_pointer / compute_cache_result (§2.3) — server-side

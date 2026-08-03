@@ -63,6 +63,7 @@ from models.route.route import (
 )
 from models.route.trip import Stop, StopType, Segment, Trip, TimetableWarning
 from models.params import ODPair
+from models.utils import min_to_interval as _min_to_interval
 
 _TRIP_SUFFIX_PATTERN = re.compile(r"_D(\d+)_T(\d+)$")
 
@@ -98,13 +99,6 @@ _STOP_TYPE_TO_PICKUP_DROPOFF = {
     "night": (0, 0),
     "both": (0, 0),
 }
-
-
-def _min_to_interval(minutes: int) -> str:
-    """Minutes-from-service-day-midnight → 'HH:MM:SS' INTERVAL literal.
-    Values ≥ 1440 min naturally produce the GTFS overnight convention of
-    times above 24:00:00."""
-    return f"{minutes // 60:02d}:{minutes % 60:02d}:00"
 
 
 def _trip_stops(trip: dict) -> list[dict]:

@@ -1,12 +1,13 @@
 """
 proposals.py
 ============
-Proposal listing and loading (PROPOSALS_DESIGN.md §7.1/§7.2, WP5-minimal
-— the full gallery/map filter contract is WP6, the on-load version-
-refresh fallback is WP7/WP8).
+Proposal listing and loading (PROPOSALS_DESIGN.md §7.1/§7.2). Gallery/map
+filtering is the full WP6 contract; the on-load version-refresh fallback
+is still WP7/WP8.
 
-  GET  /api/proposals       — list, no filters
-  POST /api/proposals       — list with the one WP5 filter (user_ids) + pagination
+  GET  /api/proposals       — list, no filters, summaries only
+  POST /api/proposals       — gallery + map in one endpoint (§7.1): generic
+                               filters, sort, pagination, sectioned response
   GET  /api/proposal/<id>   — load one proposal, reconstructed from GTFS + summary
 
 There is no save endpoint here — POST /api/proposal/publish
@@ -21,6 +22,9 @@ from flask import Blueprint, jsonify, request
 
 from api.helpers.dependencies import get_loader, get_proposal_repository
 from api.helpers.proposal_serialize import (
+    map_country_counts_to_geojson,
+    map_lines_to_geojson,
+    map_stop_counts_to_dict,
     proposal_to_response_dict,
     summary_row_to_dict,
     validate_list_body,
@@ -30,41 +34,56 @@ logger = logging.getLogger(__name__)
 bp = Blueprint("proposals", __name__)
 
 _DEFAULT_LIMIT = 50
+_DEFAULT_INCLUDE = ["summaries"]
 
 
 @bp.get("/proposals")
 def list_proposals():
     """All proposals, most recently updated first, as summaries — same
     shape as POST /api/proposals with an empty body."""
-    return _list_response(user_ids=None, limit=None, offset=0)
+    return _list_response({})
 
 
 @bp.post("/proposals")
 def filter_proposals():
     """
-    List proposals — WP5-minimal: one filter (user_ids) + pagination.
-    The full §7.1 contract (range/list/substring filters over every
-    summary column, map sections, trip_windows) is WP6.
+    Gallery + map in one endpoint (§7.1). Every numeric summary column
+    accepts a {"min", "max"} range, `created_at`/`updated_at` the same
+    range shape with ISO 8601 strings, every scalar categorical column
+    (`user_ids`, `composition_ids`, `proposal_ids`) an OR-only value
+    list, `name` a substring; `countries`/`stop_ids` accept a plain list
+    (OR/"any" — the default) or {"values": [...], "mode": "any"|"all"}
+    for AND/"all". `trip_windows` matches a single trip's timetable,
+    `bbox` a viewport intersection. `include` picks which response
+    sections to compute — only the sections asked for run their query.
+    `route_builder_version`/`calc_version`/`scenario_id` are not
+    filterable (internal/analytical; every gallery row is always on the
+    current base scenario by construction — scenario_outdated flags the
+    transient exception).
 
     Request body (all fields optional):
       {
-        "filter": {"user_ids": [int, ...]},   // e.g. "my proposals"
-        "limit":  int (default 50),
-        "offset": int
+        "filter":  {...},                          // see §7.1 for the full shape
+        "sort":    [{"by": <column>, "dir": "asc"|"desc"}],
+        "limit":   int (default 50), "offset": int,
+        "include": ["summaries", "map_lines", "map_stop_counts", "map_country_counts"]
       }
 
-    Response: {"total": <count before pagination>, "proposals": [<summary>, ...]}
+    Response sections, each present iff requested via `include`:
+      "summaries":          {"total": int, "proposals": [<summary>, ...]}
+      "map_lines":           GeoJSON FeatureCollection, one feature per
+                              stop-pair corridor (proposal_count for line
+                              thickness, proposal_ids for the assignment)
+      "map_stop_counts":    [{"stop_id", "lat", "lon", "n"}, ...]
+      "map_country_counts":  GeoJSON FeatureCollection, one feature per
+                              country (border geometry + proposal count)
     """
     body = request.get_json(silent=True) or {}
     errors = validate_list_body(body)
     if errors:
         return jsonify({"error": "validation_error", "details": errors}), 400
 
-    return _list_response(
-        user_ids=body.get("filter", {}).get("user_ids"),
-        limit=body.get("limit", _DEFAULT_LIMIT),
-        offset=body.get("offset", 0),
-    )
+    return _list_response(body)
 
 
 @bp.get("/proposal/<int:proposal_id>")
@@ -109,9 +128,34 @@ def get_proposal(proposal_id: int):
 # =============================================================================
 
 
-def _list_response(user_ids: list | None, limit: int | None, offset: int):
-    rows, total = get_proposal_repository().list_summaries(
-        user_ids=user_ids, limit=limit, offset=offset
-    )
-    summaries = [summary_row_to_dict(row) for row in rows]
-    return jsonify({"total": total, "proposals": summaries}), 200
+def _list_response(body: dict):
+    """Assembles the sectioned §7.1 response — only the sections named in
+    `include` run their query (each section's repository method takes the
+    same `filters` dict, so every section reflects the same filter)."""
+    repo = get_proposal_repository()
+    filters = body.get("filter", {})
+    include = body.get("include") or _DEFAULT_INCLUDE
+
+    response = {}
+    if "summaries" in include:
+        rows, total = repo.list_summaries(
+            filters=filters,
+            sort=body.get("sort"),
+            limit=body.get("limit", _DEFAULT_LIMIT),
+            offset=body.get("offset", 0),
+        )
+        response["summaries"] = {
+            "total": total,
+            "proposals": [summary_row_to_dict(row) for row in rows],
+        }
+    if "map_lines" in include:
+        response["map_lines"] = map_lines_to_geojson(repo.map_lines(filters))
+    if "map_stop_counts" in include:
+        response["map_stop_counts"] = map_stop_counts_to_dict(
+            repo.map_stop_counts(filters)
+        )
+    if "map_country_counts" in include:
+        response["map_country_counts"] = map_country_counts_to_geojson(
+            repo.map_country_counts(filters)
+        )
+    return jsonify(response), 200

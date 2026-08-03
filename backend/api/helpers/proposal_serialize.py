@@ -5,21 +5,54 @@ Serialization for the proposals endpoints — mirrors the existing
 route_serialize.py / evaluation_serialize.py / params_serialize.py split:
 all dict-shaping lives here, none of it in the repository or blueprint.
 
-WP5 rewrite: the old route_body/evaluation_body-trimming serializers
-(proposal_meta_to_dict, proposal_summary_to_dict operating on a JSON blob)
-are gone with those columns. This module now shapes the slimmed
-container + proposal_summaries row shapes (§5.3/§5.4) instead.
+WP6 rewrite: validate_list_body() now covers the full §7.1 contract
+(generic range/list/substring/array filters over every summary column,
+trip_windows, bbox, sort, include, sources) — column-kind checks are
+delegated to adapters/proposal/filter_builder.py's registry so the set of
+filterable/sortable columns is declared exactly once. summary_row_to_dict()
+gained scenario_outdated and created_at; three new section serializers
+(map_lines/map_stop_counts/map_country_counts) shape the map response.
+
+WP6.1 revision: route_builder_version/calc_version/scenario_id are no
+longer filterable (internal/analytical, and gallery rows are always on
+the current base scenario by construction — §7.1); created_at/updated_at
+range filters, a proposal_ids filter, and a likes_count range filter
+(live-joined from proposals.likes, not a summary column — §4.2-style
+"joined, never stored") were added; countries/stop_ids gained an
+explicit any (OR, default) vs all (AND) mode; map_lines is now a
+segment-level aggregation (one feature per distinct stop-pair corridor,
+carrying every proposal that uses it) rather than one feature per
+proposal; map_country_counts now carries each country's border geometry
+alongside its count.
 
 Public interface:
-  validate_list_body(body)        -> list[str]  (structural check of POST /api/proposals, WP5-minimal)
-  proposal_meta_to_dict(record)   -> dict        (metadata block shared by publish/load responses)
-  proposal_to_response_dict(...)  -> dict        (full §2.1-shaped response: metadata + route + evaluation)
-  summary_row_to_dict(row)        -> dict        (one proposal_summaries row for list responses)
+  validate_list_body(body)             -> list[str]  (structural check of POST /api/proposals, §7.1)
+  proposal_meta_to_dict(record)        -> dict        (metadata block shared by publish/load responses)
+  proposal_to_response_dict(...)       -> dict        (full §2.1-shaped response: metadata + route + evaluation)
+  summary_row_to_dict(row)             -> dict        (one proposal_summaries row for list responses)
+  map_lines_to_geojson(rows)           -> dict        (GeoJSON FeatureCollection, one feature per corridor)
+  map_stop_counts_to_dict(rows)        -> list[dict]
+  map_country_counts_to_geojson(rows)  -> dict         (GeoJSON FeatureCollection, one feature per country)
 """
 
 from __future__ import annotations
 
-_LIST_FILTER_KEYS = {"user_ids"}
+import json
+
+from adapters.proposal.filter_builder import (
+    ALL_FILTER_KEYS,
+    ARRAY_COLUMNS,
+    DATETIME_RANGE_COLUMNS,
+    LIST_COLUMNS,
+    RANGE_COLUMNS,
+    SORTABLE_COLUMNS,
+    SUBSTRING_COLUMNS,
+    SUPPORTED_SOURCES,
+)
+
+_INCLUDE_SECTIONS = {"summaries", "map_lines", "map_stop_counts", "map_country_counts"}
+_DEFAULT_INCLUDE = ["summaries"]
+_ARRAY_FILTER_MODES = {"any", "all"}
 
 
 # =============================================================================
@@ -28,26 +61,16 @@ _LIST_FILTER_KEYS = {"user_ids"}
 
 
 def validate_list_body(body: dict) -> list[str]:
-    """Structural validation of a POST /api/proposals payload. WP5-minimal
-    — only the one filter (user_ids) and pagination exist so far; the
-    full §7.1 filter/sort/section contract is WP6."""
+    """Structural validation of a POST /api/proposals payload — the full
+    §7.1 contract (WP6): generic filters over every summary column,
+    trip_windows, bbox, sort, include, pagination. Column-kind checks
+    (which filter keys exist, which are sortable) are driven by
+    filter_builder.py's registry rather than a second hand-maintained
+    list here."""
     errors = []
-
-    filters = body.get("filter", {})
-    if not isinstance(filters, dict):
-        errors.append("'filter' must be an object if provided.")
-    else:
-        unknown = set(filters) - _LIST_FILTER_KEYS
-        if unknown:
-            errors.append(
-                f"Unknown filter key(s): {sorted(unknown)}. "
-                f"Supported: {sorted(_LIST_FILTER_KEYS)}."
-            )
-        if filters.get("user_ids") is not None and not (
-            isinstance(filters["user_ids"], list)
-            and all(isinstance(u, int) for u in filters["user_ids"])
-        ):
-            errors.append("'filter.user_ids' must be a list of integers.")
+    errors += _validate_filters(body.get("filter", {}))
+    errors += _validate_sort(body.get("sort"))
+    errors += _validate_include(body.get("include"))
 
     for key in ("limit", "offset"):
         if body.get(key) is not None and not (
@@ -56,6 +79,156 @@ def validate_list_body(body: dict) -> list[str]:
             errors.append(f"'{key}' must be a non-negative integer if provided.")
 
     return errors
+
+
+def _validate_filters(filters) -> list[str]:
+    if not isinstance(filters, dict):
+        return ["'filter' must be an object if provided."]
+
+    errors = []
+    unknown = set(filters) - ALL_FILTER_KEYS
+    if unknown:
+        errors.append(
+            f"Unknown filter key(s): {sorted(unknown)}. "
+            f"Supported: {sorted(ALL_FILTER_KEYS)}."
+        )
+
+    sources = filters.get("sources")
+    if sources is not None:
+        unsupported = set(sources) - SUPPORTED_SOURCES
+        if unsupported:
+            errors.append(
+                f"Unsupported filter.sources value(s): {sorted(unsupported)}. "
+                f"Only {sorted(SUPPORTED_SOURCES)} until ONTD integration (WP10)."
+            )
+
+    for key in RANGE_COLUMNS:
+        bounds = filters.get(key)
+        if bounds is None:
+            continue
+        if not isinstance(bounds, dict) or not set(bounds) <= {"min", "max"}:
+            errors.append(f"'filter.{key}' must be an object with 'min'/'max'.")
+
+    for key in DATETIME_RANGE_COLUMNS:
+        bounds = filters.get(key)
+        if bounds is None:
+            continue
+        if not isinstance(bounds, dict) or not set(bounds) <= {"min", "max"}:
+            errors.append(f"'filter.{key}' must be an object with 'min'/'max'.")
+            continue
+        for bound_key in ("min", "max"):
+            value = bounds.get(bound_key)
+            if value is not None and not isinstance(value, str):
+                errors.append(
+                    f"'filter.{key}.{bound_key}' must be an ISO 8601 datetime string."
+                )
+
+    for key in LIST_COLUMNS:
+        values = filters.get(key)
+        if values is not None and not isinstance(values, list):
+            errors.append(f"'filter.{key}' must be a list.")
+
+    for key in ARRAY_COLUMNS:
+        raw = filters.get(key)
+        if raw is None:
+            continue
+        errors += _validate_array_filter(key, raw)
+
+    for key in SUBSTRING_COLUMNS:
+        needle = filters.get(key)
+        if needle is not None and not isinstance(needle, str):
+            errors.append(f"'filter.{key}' must be a string.")
+
+    trip_windows = filters.get("trip_windows")
+    if trip_windows is not None:
+        errors += _validate_trip_windows(trip_windows)
+
+    bbox = filters.get("bbox")
+    if bbox is not None and not (
+        isinstance(bbox, list)
+        and len(bbox) == 4
+        and all(isinstance(v, (int, float)) for v in bbox)
+    ):
+        errors.append("'filter.bbox' must be [west, south, east, north].")
+
+    return errors
+
+
+def _validate_array_filter(key: str, raw) -> list[str]:
+    """Either a plain list of strings (mode "any"/OR, the default) or
+    {"values": [...], "mode": "any"|"all"} — see filter_builder.py's
+    _parse_array_filter()."""
+    if isinstance(raw, list):
+        if all(isinstance(v, str) for v in raw):
+            return []
+        return [f"'filter.{key}' must be a list of strings."]
+    if isinstance(raw, dict):
+        errors = []
+        values = raw.get("values")
+        if not (isinstance(values, list) and all(isinstance(v, str) for v in values)):
+            errors.append(f"'filter.{key}.values' must be a list of strings.")
+        mode = raw.get("mode", "any")
+        if mode not in _ARRAY_FILTER_MODES:
+            errors.append(f"'filter.{key}.mode' must be 'any' or 'all'.")
+        return errors
+    return [
+        f"'filter.{key}' must be a list of strings, or "
+        f"{{'values': [...], 'mode': 'any'|'all'}}."
+    ]
+
+
+def _validate_trip_windows(trip_windows) -> list[str]:
+    if not isinstance(trip_windows, list):
+        return ["'filter.trip_windows' must be a list."]
+    errors = []
+    for i, entry in enumerate(trip_windows):
+        if not isinstance(entry, dict) or "stop_id" not in entry:
+            errors.append(f"'filter.trip_windows[{i}]' must have a 'stop_id'.")
+            continue
+        if "departure" not in entry and "arrival" not in entry:
+            errors.append(
+                f"'filter.trip_windows[{i}]' needs a 'departure' and/or 'arrival' window."
+            )
+        for direction in ("departure", "arrival"):
+            window = entry.get(direction)
+            if window is None:
+                continue
+            if not isinstance(window, dict) or not ({"from", "to"} & set(window)):
+                errors.append(
+                    f"'filter.trip_windows[{i}].{direction}' needs 'from' and/or 'to'."
+                )
+    return errors
+
+
+def _validate_sort(sort) -> list[str]:
+    if sort is None:
+        return []
+    if not isinstance(sort, list):
+        return ["'sort' must be a list."]
+    errors = []
+    for i, entry in enumerate(sort):
+        if not isinstance(entry, dict) or "by" not in entry:
+            errors.append(f"'sort[{i}]' must have a 'by' column.")
+            continue
+        if entry["by"] not in SORTABLE_COLUMNS:
+            errors.append(f"'sort[{i}].by' unknown column: '{entry['by']}'.")
+        if entry.get("dir", "asc") not in ("asc", "desc"):
+            errors.append(f"'sort[{i}].dir' must be 'asc' or 'desc'.")
+    return errors
+
+
+def _validate_include(include) -> list[str]:
+    if include is None:
+        return []
+    if not isinstance(include, list):
+        return ["'include' must be a list."]
+    unknown = set(include) - _INCLUDE_SECTIONS
+    if unknown:
+        return [
+            f"Unknown include section(s): {sorted(unknown)}. "
+            f"Supported: {sorted(_INCLUDE_SECTIONS)}."
+        ]
+    return []
 
 
 # =============================================================================
@@ -110,8 +283,13 @@ def summary_row_to_dict(row: dict) -> dict:
     names already match the API field names 1:1, so this is mostly
     pass-through; the shaping job is casting NUMERIC/Decimal columns to
     plain floats (jsonify() can't serialize Decimal) and formatting
-    updated_at."""
+    created_at/updated_at. `source` is always "proposal" here — ontd rows
+    get their own row shape once WP10's union lands. `scenario_outdated`
+    is a derived column repository.py's queries always SELECT alongside
+    the rest (joined against scenario.scenarios, never stored — §4.2)."""
     return {
+        "source": "proposal",
+        "scenario_outdated": row["scenario_outdated"],
         "proposal_id": row["proposal_id"],
         "proposal_version": row["proposal_version"],
         "user_id": row["user_id"],
@@ -140,7 +318,81 @@ def summary_row_to_dict(row: dict) -> dict:
         "co2_savings_t_per_year": _to_float(row["co2_savings_t_per_year"]),
         "subsidy_eur_per_t_co2": _to_float(row["subsidy_eur_per_t_co2"]),
         "demand_kpis_placeholder": row["demand_kpis_placeholder"],
+        "likes_count": row["likes_count"],
+        "created_at": _isoformat(row.get("created_at")),
         "updated_at": _isoformat(row.get("updated_at")),
+    }
+
+
+def map_lines_to_geojson(rows: list[dict]) -> dict:
+    """`map_lines` section (§7.1, WP6.1 revision): GeoJSON
+    FeatureCollection with one feature per distinct stop-pair corridor
+    (`stop_a`/`stop_b`, direction-agnostic — the physical line between
+    two stops, not one feature per trip or proposal), so a frontend can
+    drive line *thickness* off `proposal_count` and look up which
+    proposals share a corridor via `proposal_ids`. `avg_margin_eur_per_
+    train_km` is the mean across exactly those proposals, for optional
+    colouring. geometry arrives pre-serialized JSON
+    (proposals.shapes.geometry is stored as GeoJSON already, no
+    ST_AsGeoJSON needed) — parsed here, not re-queried."""
+    return {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "geometry": row["geometry"]
+                if isinstance(row["geometry"], dict)
+                else json.loads(row["geometry"]),
+                "properties": {
+                    "stop_a": row["stop_a"],
+                    "stop_b": row["stop_b"],
+                    "proposal_count": row["proposal_count"],
+                    "proposal_ids": list(row["proposal_ids"]),
+                    "avg_margin_eur_per_train_km": _to_float(
+                        row["avg_margin_eur_per_train_km"]
+                    ),
+                },
+            }
+            for row in rows
+        ],
+    }
+
+
+def map_stop_counts_to_dict(rows: list[dict]) -> list[dict]:
+    """`map_stop_counts` section (§7.1): routes touching each stop, for
+    the map's per-stop density markers."""
+    return [
+        {
+            "stop_id": row["stop_id"],
+            "lat": _to_float(row["stop_lat"]),
+            "lon": _to_float(row["stop_lon"]),
+            "n": row["n"],
+        }
+        for row in rows
+    ]
+
+
+def map_country_counts_to_geojson(rows: list[dict]) -> dict:
+    """`map_country_counts` section (§7.1, WP6.1 revision): GeoJSON
+    FeatureCollection for the coverage choropleth — one feature per
+    country touched by the filtered set, carrying both the proposal
+    count and the country's own border geometry (joined from
+    input_params.countries.country_geom) so the frontend doesn't need a
+    second lookup to render it. `geometry` is `None` for a country code
+    with no matched border polygon (e.g. "UNK" — an unattributed
+    segment, §5.4) — still a valid GeoJSON Feature, just ungeometried."""
+    return {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "geometry": json.loads(row["geom_geojson"])
+                if row["geom_geojson"] is not None
+                else None,
+                "properties": {"country": row["country"], "n": row["n"]},
+            }
+            for row in rows
+        ],
     }
 
 

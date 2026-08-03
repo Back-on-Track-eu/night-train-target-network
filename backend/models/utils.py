@@ -61,6 +61,19 @@ def hhmm_to_min(hhmm: str) -> int:
     return h * 60 + m
 
 
+def min_to_interval(minutes: int) -> str:
+    """
+    Minutes-from-service-day-midnight -> 'HH:MM:SS' Postgres INTERVAL
+    literal. Values >= 1440 min naturally produce the GTFS overnight
+    convention of times above 24:00:00 (e.g. 1530 -> "25:30:00").
+
+    Shared by the GTFS write path (gtfs_store.py, stop_times rows) and
+    the gallery trip_windows filter (filter_builder.py, stop_times range
+    queries) — one INTERVAL-literal format, one place it's defined.
+    """
+    return f"{minutes // 60:02d}:{minutes % 60:02d}:00"
+
+
 def min_to_h(minutes: Optional[int]) -> Optional[float]:
     """Convert minutes to decimal hours. Returns None if input is None."""
     if minutes is None:

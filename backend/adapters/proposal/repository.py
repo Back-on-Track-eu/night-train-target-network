@@ -33,6 +33,7 @@ import psycopg2
 import psycopg2.extras
 from psycopg2.extras import Json
 
+from adapters.proposal.filter_builder import build_order_by, build_where
 from adapters.proposal.gtfs_store import (
     input_parameters_from_scenario,
     insert_route_gtfs,
@@ -372,7 +373,9 @@ class ProposalRepository:
         """One row per proposal (§5.4) — identity columns from the
         container write, metrics/KPIs from proposal_projection.
         build_summary_row(). geom_simplified is the one column needing a
-        non-literal SQL expression (ST_GeomFromGeoJSON), so it's handled
+        non-literal SQL expression (ST_GeomFromGeoJSON), and created_at
+        the one needing to survive an overwrite untouched (it belongs to
+        the proposal's original publish, not this state's) — both handled
         separately from the rest of summary's plain-valued columns rather
         than folded into one uniform placeholder list."""
         request_echo = prefixed["request"]
@@ -388,17 +391,23 @@ class ProposalRepository:
             "calc_version": prefixed["calc_version"],
         }
         metric_columns = [k for k in summary if k != "geom_simplified"]
-        columns = list(identity) + metric_columns + ["geom_simplified"]
+        columns = list(identity) + metric_columns + ["geom_simplified", "created_at"]
         placeholders = ["%s"] * (len(identity) + len(metric_columns)) + [
-            "ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326)"
+            "ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326)",
+            "now()",
         ]
         values = (
             list(identity.values())
             + [summary[k] for k in metric_columns]
             + [Json(summary["geom_simplified"])]
         )
+        # created_at is bound to "now()" directly (no param) and excluded
+        # from the ON CONFLICT SET list below — an overwrite-publish keeps
+        # the row's original creation time.
         assignments = ", ".join(
-            f"{col} = EXCLUDED.{col}" for col in columns if col != "proposal_id"
+            f"{col} = EXCLUDED.{col}"
+            for col in columns
+            if col not in ("proposal_id", "created_at")
         )
         cur.execute(
             f"INSERT INTO proposals.proposal_summaries ({', '.join(columns)}) "
@@ -518,49 +527,180 @@ class ProposalRepository:
         self._conn.rollback()
         return row["user_id"] if row else None
 
+    # Every proposal_summaries column the `summaries` section returns.
+    _SUMMARY_COLUMNS = (
+        "proposal_id, proposal_version, user_id, name, "
+        "route_fingerprint, composition_id, scenario_id, "
+        "route_builder_version, calc_version, total_distance_km, "
+        "total_time_h, avg_speed_kmh, n_stops, countries, stop_ids, "
+        "cost_eur_per_train_km, revenue_eur_per_train_km, "
+        "margin_eur_per_train_km, subsidy_eur_per_year, "
+        "demand_trips_per_year, demand_trip_km_per_year, "
+        "shift_air_trips_per_year, shift_air_trip_km_per_year, "
+        "shift_car_trips_per_year, shift_car_trip_km_per_year, "
+        "co2_savings_t_per_year, subsidy_eur_per_t_co2, "
+        "demand_kpis_placeholder, created_at, updated_at"
+    )
+
+    # scenario_outdated (§4.2): TRUE once a proposal's pinned scenario_id
+    # stops being the live base — joined against scenario.scenarios,
+    # never stored. Every section below that returns proposal rows
+    # carries this same subquery so gallery/map/count all agree.
+    _SCENARIO_OUTDATED_EXPR = (
+        "scenario_id != (SELECT scenario_id FROM scenario.scenarios "
+        "WHERE is_current_base) AS scenario_outdated"
+    )
+
+    # likes_count is not a proposal_summaries column — a like changes
+    # independently of publish/refresh, so storing it there would go
+    # stale. Every filterable/sortable query below is built on top of
+    # this CTE instead of the bare table, so filter_builder's generic
+    # `likes_count >= %s` (etc.) resolves against a real column of the
+    # CTE's output rather than needing special-casing per query.
+    # COALESCE covers proposals with zero likes (no matching row to join).
+    _LIKES_CTE = (
+        "proposal_summaries_with_likes AS ("
+        "  SELECT ps.*, COALESCE(l.likes_count, 0)::int AS likes_count "
+        "  FROM proposals.proposal_summaries ps "
+        "  LEFT JOIN ("
+        "    SELECT proposal_id, count(*) AS likes_count "
+        "    FROM proposals.likes GROUP BY proposal_id"
+        "  ) l ON l.proposal_id = ps.proposal_id"
+        ")"
+    )
+
     def list_summaries(
         self,
-        user_ids: Optional[list[int]] = None,
+        filters: Optional[dict] = None,
+        sort: Optional[list[dict]] = None,
         limit: Optional[int] = None,
         offset: int = 0,
     ) -> tuple[list[dict], int]:
-        """Minimal WP5 list — straight off proposal_summaries, newest
-        first (updated_at). Full filter/sort/section support (§7.1) is
-        WP6; this only carries the one filter (user_ids, e.g. "my
-        proposals") and pagination needed for a bare gallery to work.
-        Returns (rows, total_before_pagination)."""
-        where = ""
-        params: tuple = ()
-        if user_ids:
-            where = " WHERE user_id = ANY(%s)"
-            params = (user_ids,)
+        """The full §7.1 `summaries` section (WP6) — every generic filter
+        (adapters/proposal/filter_builder.py), sorted, windowed-counted,
+        paginated. Returns (rows, total_before_pagination)."""
+        where_sql, params = build_where(filters or {})
+        where_clause = f" WHERE {where_sql}" if where_sql else ""
 
         with self._cursor() as cur:
             cur.execute(
-                f"SELECT count(*) AS total FROM proposals.proposal_summaries{where}",
+                f"WITH {self._LIKES_CTE} "
+                "SELECT count(*) AS total "
+                f"FROM proposal_summaries_with_likes{where_clause}",
                 params,
             )
             total = cur.fetchone()["total"]
 
             sql = (
-                "SELECT proposal_id, proposal_version, user_id, name, "
-                "       route_fingerprint, composition_id, scenario_id, "
-                "       route_builder_version, calc_version, total_distance_km, "
-                "       total_time_h, avg_speed_kmh, n_stops, countries, stop_ids, "
-                "       cost_eur_per_train_km, revenue_eur_per_train_km, "
-                "       margin_eur_per_train_km, subsidy_eur_per_year, "
-                "       demand_trips_per_year, demand_trip_km_per_year, "
-                "       shift_air_trips_per_year, shift_air_trip_km_per_year, "
-                "       shift_car_trips_per_year, shift_car_trip_km_per_year, "
-                "       co2_savings_t_per_year, subsidy_eur_per_t_co2, "
-                "       demand_kpis_placeholder, updated_at "
-                f"FROM proposals.proposal_summaries{where} "
-                "ORDER BY updated_at DESC"
+                f"WITH {self._LIKES_CTE} "
+                f"SELECT {self._SUMMARY_COLUMNS}, likes_count, {self._SCENARIO_OUTDATED_EXPR} "
+                f"FROM proposal_summaries_with_likes{where_clause} "
+                f"ORDER BY {build_order_by(sort)}"
             )
+            page_params = list(params)
             if limit is not None:
                 sql += " LIMIT %s OFFSET %s"
-                params = params + (limit, offset)
-            cur.execute(sql, params)
+                page_params += [limit, offset]
+            cur.execute(sql, page_params)
             rows = cur.fetchall()
         self._conn.rollback()
         return [dict(row) for row in rows], total
+
+    def map_lines(self, filters: Optional[dict] = None) -> list[dict]:
+        """`map_lines` section (§7.1, WP6.1 revision): one row per
+        distinct stop-pair corridor within the filtered set — not one row
+        per proposal. A corridor is (from_stop_id, to_stop_id) with
+        direction collapsed (LEAST/GREATEST): outbound and return trips
+        traverse the same physical line, and routing between two fixed
+        stops is deterministic regardless of composition/scenario, so
+        grouping this way is exact, not an approximation. Every trip of
+        every filtered proposal is walked via the same
+        P{proposal_id}_V{proposal_version}_R1 route_id convention
+        trip_windows uses; geometry comes from one representative
+        proposals.segments.shape_id per corridor (proposals.shapes.geometry
+        is already stored as GeoJSON — no ST_AsGeoJSON needed)."""
+        where_sql, params = build_where(filters or {})
+        where_clause = f" WHERE {where_sql}" if where_sql else ""
+        with self._cursor() as cur:
+            cur.execute(
+                f"WITH {self._LIKES_CTE}, filtered AS ("
+                "  SELECT proposal_id, proposal_version, margin_eur_per_train_km "
+                f"  FROM proposal_summaries_with_likes{where_clause}"
+                "), segs AS ("
+                "  SELECT f.proposal_id, f.margin_eur_per_train_km, "
+                "         LEAST(s.from_stop_id, s.to_stop_id) AS stop_a, "
+                "         GREATEST(s.from_stop_id, s.to_stop_id) AS stop_b, "
+                "         s.shape_id "
+                "  FROM filtered f "
+                "  JOIN proposals.trips t "
+                "    ON t.route_id = 'P' || f.proposal_id || '_V' || f.proposal_version || '_R1' "
+                "  JOIN proposals.segments s ON s.trip_id = t.trip_id "
+                "  WHERE s.shape_id IS NOT NULL"
+                "), grouped AS ("
+                "  SELECT stop_a, stop_b, "
+                "         array_agg(DISTINCT proposal_id ORDER BY proposal_id) AS proposal_ids, "
+                "         count(DISTINCT proposal_id) AS proposal_count, "
+                "         avg(margin_eur_per_train_km) AS avg_margin_eur_per_train_km, "
+                "         min(shape_id) AS shape_id "
+                "  FROM segs "
+                "  GROUP BY stop_a, stop_b"
+                ") "
+                "SELECT g.stop_a, g.stop_b, g.proposal_ids, g.proposal_count, "
+                "       g.avg_margin_eur_per_train_km, sh.geometry "
+                "FROM grouped g JOIN proposals.shapes sh ON sh.shape_id = g.shape_id",
+                params,
+            )
+            rows = cur.fetchall()
+        self._conn.rollback()
+        return [dict(row) for row in rows]
+
+    def map_stop_counts(self, filters: Optional[dict] = None) -> list[dict]:
+        """`map_stop_counts` section (§7.1): routes touching each stop
+        within the filtered set, joined to the current base scenario's
+        pinned stop_infrastructures snapshot for lat/lon (§3.1's
+        full-snapshot resolution — never inferred)."""
+        where_sql, params = build_where(filters or {})
+        where_clause = f" WHERE {where_sql}" if where_sql else ""
+        with self._cursor() as cur:
+            cur.execute(
+                f"WITH {self._LIKES_CTE} "
+                "SELECT sub.stop_id, si.stop_lat, si.stop_lon, count(*) AS n "
+                "FROM (SELECT unnest(stop_ids) AS stop_id "
+                f"      FROM proposal_summaries_with_likes{where_clause}) sub "
+                "JOIN input_params.stop_infrastructures si "
+                "  ON si.stop_id = sub.stop_id "
+                " AND si.stop_infra_version = ("
+                "       SELECT stop_infrastructures_version FROM scenario.scenarios "
+                "       WHERE is_current_base) "
+                "GROUP BY sub.stop_id, si.stop_lat, si.stop_lon",
+                params,
+            )
+            rows = cur.fetchall()
+        self._conn.rollback()
+        return [dict(row) for row in rows]
+
+    def map_country_counts(self, filters: Optional[dict] = None) -> list[dict]:
+        """`map_country_counts` section (§7.1, WP6.1 revision): proposal
+        count per country within the filtered set, joined to
+        input_params.countries for the border geometry the coverage
+        choropleth needs — no second lookup required on the frontend.
+        LEFT JOIN: a country code with no matched border (e.g. "UNK", an
+        unattributed segment — §5.4) still gets a row, geometry NULL."""
+        where_sql, params = build_where(filters or {})
+        where_clause = f" WHERE {where_sql}" if where_sql else ""
+        with self._cursor() as cur:
+            cur.execute(
+                f"WITH {self._LIKES_CTE} "
+                "SELECT sub.country, count(*) AS n, "
+                "       ST_AsGeoJSON(c.country_geom) AS geom_geojson "
+                "FROM ("
+                "  SELECT unnest(countries) AS country "
+                f"  FROM proposal_summaries_with_likes{where_clause}"
+                ") sub "
+                "LEFT JOIN input_params.countries c ON c.country_code = sub.country "
+                "GROUP BY sub.country, c.country_geom",
+                params,
+            )
+            rows = cur.fetchall()
+        self._conn.rollback()
+        return [dict(row) for row in rows]
