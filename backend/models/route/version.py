@@ -396,6 +396,18 @@ as a proposal yet. proposals.proposals.proposal_id is a SERIAL int4
 starting at 1, so a value above one billion won't realistically collide
 with a real one (upper bound = postgres int4 max). See OPEN_TODOS."""
 
+# --- Neutral placeholder ids (api/proposal_calc.py, PROPOSALS_DESIGN.md §2.1)
+NEUTRAL_PROPOSAL_ID: int = 0
+NEUTRAL_PROPOSAL_VERSION: int = 0
+"""Fixed (not random) placeholder used only to satisfy plan_route()'s
+id-building signature for POST /api/proposal/calc. Unlike
+DRAFT_PROPOSAL_ID_MIN/MAX above, this never risks colliding with anything:
+/api/proposal/calc never persists, so its P{id}_V{version}_ prefix exists
+only for the instant it takes rewrite_id_prefix() (adapters/
+proposal_repository.py) to strip it back off into the neutral R1/T.../
+structural IDs §2.1 specifies. A fixed value keeps that round trip
+deterministic and easy to assert on in tests."""
+
 
 # =============================================================================
 # OPEN TODOS — every open item on the route model, consolidated. Inline

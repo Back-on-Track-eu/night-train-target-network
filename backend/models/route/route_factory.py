@@ -139,6 +139,19 @@ class RouteProvenance:
     so api/route.py can pass it to route_to_dict() for the response's
     track_infrastructure block — Route itself never stores it (physics-only,
     per the project's separation-of-concerns rule)."""
+    compositions: CompositionCollection
+    """The full composition catalog for this scenario, built once in
+    plan_route() (below) and otherwise discarded after use. Threaded
+    through here (2026-08-03, WP2/PROPOSALS_DESIGN.md efficiency note) so
+    api/proposal_calc.py's merged evaluate step doesn't have to reload it a
+    second time via loader.build_all_compositions() — the same efficiency
+    rationale as tracks above, not a new one."""
+    stop_infra: StopInfraCollection
+    """All stop infrastructure for this scenario, built once in
+    plan_route() (for parkings) and otherwise discarded after use.
+    Threaded through for the same reason as compositions above — avoids
+    api/proposal_calc.py's evaluate step reloading it via
+    loader.build_all_stops() a second time."""
 
 
 @dataclass
@@ -768,6 +781,8 @@ def plan_route(
             param_versions=merged_param_versions,
             scenario_id=scenario_id,
             tracks=tracks_used,
+            compositions=compositions,
+            stop_infra=stop_infra,
         ),
         suggestions,
     )

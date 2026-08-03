@@ -28,6 +28,7 @@ built on top of it:
 | `test_10`–`test_11` | Read-only params + scenarios APIs |
 | `test_20`–`test_21` | `POST /api/route/plan` (contract, then content logic) |
 | `test_30`–`test_31` | `POST /api/evaluation/calc` (contract, then content logic) |
+| `test_35` | `POST /api/proposal/calc` — WP2's merged compute endpoint (contract) |
 | `test_40` | End-to-end pipeline smoke |
 | `test_50` | Persist-on-calc semantics + proposals list/load |
 | `test_51` | Proposal engagement — likes + comments |
@@ -40,7 +41,9 @@ Shared code:
   `route_berlin_zuerich_wien`, `route_copenhagen_stockholm`) plus
   `eval_standard`. Route builds are expensive (live OpenRailRouting) — tests
   that only *read* a route must reuse these instead of building their own.
-- **`helpers.py`** — HTTP wrappers (`build_route`, `evaluate`), route-JSON
+- **`helpers.py`** — HTTP wrappers (`build_route`, `evaluate`, `compute` —
+  the last for `POST /api/proposal/calc`, WP2's merged endpoint;
+  stateless, so unlike the other two it takes no `headers` param), route-JSON
   navigation (`all_trips`, `stop_times`, `country_km`, `trip_distance_km`,
   `operating_days`, …), demand construction (`inject_demand`,
   `directional_od`, `replicated_od`), and endpoint URL helpers
@@ -274,6 +277,41 @@ Standard input: `eval_standard` (3-stop route, directional demand 40 Couchette
 | `TestMatrixConsistency::test_od_matrix_carries_directional_keys_with_revenue` | OD keys deterministic | directional demand | both direction keys present, revenue > 0 |
 | `TestMatrixConsistency::test_stop_matrix_terminal_has_station_charge` | Stop matrix content | Berlin cell | station charge > 0 |
 | `TestScenarioOverride::test_historical_override_lowers_tac` | Scenario override swaps the re-pinned table | same route, base vs 2026-baseline | TAC strictly lower; station charges unchanged |
+
+## test_35_proposal_calc_api.py — POST /api/proposal/calc contract (merged)
+
+WP2's merged compute endpoint (`docs/PROPOSALS_DESIGN.md` §2.1) — one
+call, route + evaluation, no persistence. A first pass at the merged
+contract combining `test_20`/`test_30`'s response-structure and
+validation coverage into one shape, plus new assertions specific to the
+merge itself (resolved request, neutral IDs, no duplicate route under
+`evaluation.input`, statelessness). It doesn't replace `test_20`/`test_21`/
+`test_30`/`test_31` — those keep testing `/api/route/plan` and
+`/api/evaluation/calc`, which stay live until WP5's cutover — and it
+doesn't yet port every content-level case those four files cover (full
+mode-switch matrix, breakdown-field completeness); that can follow
+incrementally as later WPs touch this endpoint again.
+
+| Test | Purpose | Input | Expected |
+|---|---|---|---|
+| `TestResponseStructure::test_top_level_keys` | Response envelope | standard request | `route_builder_version, calc_version, request, route, evaluation` present |
+| `TestResponseStructure::test_calc_version_is_semver` / `test_route_builder_version_is_semver` | Version strings | response | both `x.y.z` |
+| `TestResponseStructure::test_no_suggested_stops_when_off` | Conditional key | `auto_stop_addition="off"` | `suggested_stops` absent |
+| `TestResponseStructure::test_evaluation_has_models_input_views` | Evaluation envelope | response | exactly `models, input, views` |
+| `TestResponseStructure::test_views_has_all_six` | View completeness | response | all 6 view dimensions |
+| `TestResponseStructure::test_input_has_no_route_copy` | §2.1: no duplicate route | `evaluation.input` | no `route` key, exactly `{parameters}` |
+| `TestResponseStructure::test_input_parameters_present` | Parameter documentation | `evaluation.input.parameters` | tracks/stops/compositions present |
+| `TestResolvedRequest::test_request_has_no_proposal_identity` | Publish concerns excluded | `request` | no `proposal_id`/`proposal_version` |
+| `TestResolvedRequest::test_request_echoes_composition_and_stops` | Echo fidelity | `request` | matches posted stops/composition |
+| `TestResolvedRequest::test_request_scenario_id_is_concrete` | Scenario resolution | `request.scenario_id` | concrete int even when omitted |
+| `TestResolvedRequest::test_omitted_defaults_resolved_explicitly` | §2.1 resolved-request contract | implicit vs explicit-default requests | identical `request` echo |
+| `TestNeutralIds::test_route_id_has_no_proposal_prefix` | §2.1 neutral IDs | `route.route_id` | `"R1"`, no `P{id}_V{n}_` prefix |
+| `TestNeutralIds::test_trip_ids_have_no_proposal_prefix` | Neutral trip IDs | every trip | starts with `"R1_"`, not `"P"` |
+| `TestNeutralIds::test_per_trip_pair_view_keys_are_neutral` | Prefix stripped from dict **keys** too | `views.per_trip_pair.data` keys | no `P` prefix |
+| `TestValidation::*` (7 tests) | Request validation | missing stops / too few stops / missing composition_id / invalid timetable_mode / boolean auto_stop_addition / non-int scenario_id / non-JSON body | 400 each |
+| `TestSuggestMode::test_suggest_returns_suggested_stops_key` / `test_suggest_does_not_modify_stops` | `"suggest"` mode | `auto_stop_addition="suggest"` | `suggested_stops` present, list; stop list unchanged |
+| `TestStatelessness::test_no_persistence_metadata_in_response` | No `proposal` block | response | key absent (unlike `/api/route/plan`/`/api/evaluation/calc`) |
+| `TestStatelessness::test_repeated_identical_requests_are_independent` | No shared state | same request twice | identical resolved `request` and `route_id` both calls |
 
 ## test_40_pipeline.py — End-to-end smoke
 

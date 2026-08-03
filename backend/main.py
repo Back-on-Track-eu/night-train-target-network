@@ -47,6 +47,7 @@ from api import (
     params,
     route,
     evaluation,
+    proposal_calc,
     auth,
     feedback,
     proposals,
@@ -79,6 +80,10 @@ def create_app() -> Flask:
     app.register_blueprint(params.bp, url_prefix="/api/params")
     app.register_blueprint(route.bp, url_prefix="/api/route")
     app.register_blueprint(evaluation.bp, url_prefix="/api/evaluation")
+    # WP2 (PROPOSALS_DESIGN.md §2.1): merged ephemeral compute endpoint,
+    # additive and parallel to route.bp + evaluation.bp above — those stay
+    # in place, persist-on-calc and all, until WP5's cutover.
+    app.register_blueprint(proposal_calc.bp, url_prefix="/api/proposal")
     app.register_blueprint(auth.bp, url_prefix="/api/auth")
     app.register_blueprint(feedback.bp, url_prefix="/api")
     app.register_blueprint(proposals.bp, url_prefix="/api")

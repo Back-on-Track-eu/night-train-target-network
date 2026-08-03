@@ -219,6 +219,22 @@ to `1`. This is a stand-in for a future scenarios/proposals module that will
 properly own draft-vs-saved handling; `route_factory.py` doesn't need to know
 "not saved yet" is even a possible state.
 
+`api/proposal_calc.py` (`POST /api/proposal/calc`, WP2 — see
+`docs/PROPOSALS_DESIGN.md` §2.1) resolves the same way but with a fixed
+placeholder instead of a random one (`NEUTRAL_PROPOSAL_ID`/
+`NEUTRAL_PROPOSAL_VERSION`, both `0`, in `models/route/version.py`): that
+endpoint never persists, so there's no future-collision risk to guard
+against — the `P0_V0_` prefix exists only for the instant it takes
+`rewrite_id_prefix()` (`adapters/proposal_repository.py`) to strip it back
+off into the neutral `R1`/`R1_D0_T0`/... IDs the merged response returns.
+
+`RouteProvenance` (returned alongside the `Route` by `plan_route()`) also
+now carries `compositions` and `stop_infra`, not just `tracks` — added
+2026-08-03 so `api/proposal_calc.py`'s evaluate step can reuse what
+`plan_route()` already built internally instead of a second DB/catalog
+load. Purely additive: existing callers (`api/route.py`) simply don't
+read the two new fields.
+
 ---
 
 ## Unit conventions

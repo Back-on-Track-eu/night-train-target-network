@@ -36,6 +36,8 @@ stack. Each endpoint section below links its own example files.
 - [Input Parameters](#input-parameters)
 - [Scenarios](#scenarios)
   - [`GET /api/scenarios`](#get-scenarios) — list all scenarios, grouped by current status
+- [Proposal Compute (merged)](#proposal-compute) — WP2: route + evaluation in one call
+  - [`POST /api/proposal/calc`](#proposal-calc) — plan a route and evaluate it, stateless
 - [Route](#route)
   - [`POST /api/route/plan`](#route-plan) — plan a route
 - [Evaluation](#evaluation)
@@ -99,6 +101,13 @@ the bearer identity decides persistence: authenticated plan/calc calls
 calls compute only. The intended frontend flow is guest-first — obtain a
 guest JWT on first visit, send it on every plan/calc, and merge on
 registration (below).
+
+`POST /api/proposal/calc` (WP2, [below](#proposal-compute)) runs **no**
+auth decorator at all — it never persists anything, so there is no bearer
+identity to branch on and an `Authorization` header has no effect. Once
+WP5 lands, `/api/route/plan` and `/api/evaluation/calc` are removed and
+persistence moves to the dedicated `POST /api/proposal/publish` instead;
+until then both flows coexist.
 
 **Guest → registered merge:** calling `POST /api/auth/verify` **with the
 guest session's JWT attached as the bearer** reassigns everything that
@@ -672,9 +681,120 @@ rows only if the database is not correctly seeded.
 
 ---
 
-<a id="route"></a>
+<a id="proposal-compute"></a>
 
-## Route
+## Proposal Compute (merged)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/proposal/calc` | Plan a route **and** evaluate it in one call — stateless, no persistence |
+
+<a id="proposal-calc"></a>
+
+### `POST /api/proposal/calc`
+
+WP2 of the proposals refactor (`docs/PROPOSALS_DESIGN.md` §2.1) — the
+merged compute endpoint. One request → route + evaluation, one response,
+no side effects: it never writes to the database and never touches
+`admin.users` identity, so there is no `proposal` block in the response
+and no auth header has any effect (contrast with `/api/route/plan` /
+`/api/evaluation/calc` below, both still live and still persist-on-calc
+until WP5's cutover removes them).
+
+Internally this is exactly `POST /api/route/plan` immediately followed by
+`POST /api/evaluation/calc` on the route it just built — same route
+builder, same evaluation model, same views — just without the network
+round trip, the persistence branching, or a second infrastructure/catalog
+load (tracks, stop infrastructure, and the composition catalog are all
+built once and reused across both halves).
+
+<details>
+<summary>Request &amp; response details</summary>
+
+**Request body** — identical to `POST /api/route/plan`'s fields (see
+[Route](#route) below for the full field table and mode-switch
+explanations), **minus** `proposal_id`/`proposal_version` — those are
+publish-only concerns that don't exist yet (landing in WP5's `POST
+/api/proposal/publish`) and have no meaning for a call that never
+persists:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `stops` | array of string | ✓ | Same as `/api/route/plan` |
+| `composition_id` | string | ✓ | Same as `/api/route/plan` |
+| `scenario_id` | int | — | Same as `/api/route/plan` — pins parameter versions, omit for the live base |
+| `routing_mode` | string | — | Same as `/api/route/plan` |
+| `timetable_mode` | string | — | Same as `/api/route/plan` |
+| `fixed_night_interval` | array of string | (✓) | Same as `/api/route/plan` |
+| `schedule_mode` | string | — | Same as `/api/route/plan` |
+| `auto_stop_addition` | string | — | Same as `/api/route/plan` |
+
+**Response**
+
+```json
+{
+  "route_builder_version": "0.9.12",
+  "calc_version": "1.2.0",
+  "request": {
+    "stops": ["DE_BERLIN_HBF", "DE_DRESDEN_HBF", "AT_WIEN_HBF"],
+    "composition_id": "NEW-BAL-7",
+    "scenario_id": 1,
+    "timetable_mode": "simpleAutomatic",
+    "fixed_night_interval": null,
+    "schedule_mode": "alwaysDaily",
+    "auto_stop_addition": "add"
+  },
+  "suggested_stops": [
+    { "...": "ONLY for auto_stop_addition=\"suggest\" — same shape as /api/route/plan" }
+  ],
+  "route": {
+    "route_id": "R1",
+    "...": "identical shape to POST /api/route/plan's route block — see below"
+  },
+  "evaluation": {
+    "models": { "...": "identical to POST /api/evaluation/calc's models block" },
+    "input": {
+      "parameters": { "...": "identical to POST /api/evaluation/calc's input.parameters block" }
+    },
+    "views": { "...": "identical to POST /api/evaluation/calc's views block" }
+  }
+}
+```
+
+Three differences from stitching the two old responses together by hand,
+all deliberate (`docs/PROPOSALS_DESIGN.md` §2.1):
+
+1. **`request` is resolved, not echoed raw** — every optional field is
+   present with its default applied and `scenario_id` is always a
+   concrete int, so an omitted field and an explicitly-posted default
+   compare equal. No `proposal_id`/`proposal_version` ever appear here.
+2. **IDs are neutral** — `route_id`/`trip_id`/`geometry_id` (and the
+   evaluation views' dict keys that reuse `trip_id`, e.g.
+   `views.per_trip_pair.data`) carry no `P{id}_V{version}_` prefix.
+   Prefixed IDs only exist on published proposals (from WP5 on);
+   ephemeral compute always returns `R1`, `R1_D0_T0`, etc.
+3. **No duplicate route** — `evaluation.input` has no `route` key. The
+   route already appears once, as a sibling of `evaluation` — unlike
+   `POST /api/evaluation/calc`'s `input.route`, which exists there only
+   because that endpoint is a standalone call receiving the route as
+   its own input.
+
+`route_fingerprint` and a `cache_hit` flag are specified in
+`docs/PROPOSALS_DESIGN.md` §2.1 but **not yet present** — they land in
+WP4 (fingerprint/projection module) and WP13 (compute cache)
+respectively.
+
+**Errors:** same set as `/api/route/plan` + `/api/evaluation/calc`
+combined — `400 bad_request` / `400 validation_error` (see
+[Error responses](#error-responses)), `422 domain_error` (route or
+evaluation domain failure), `500 calc_error` (unexpected pipeline
+failure). No `503 infrastructure_error` distinct from the shared set.
+
+</details>
+
+---
+
+
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|

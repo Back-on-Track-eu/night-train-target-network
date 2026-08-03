@@ -17,6 +17,7 @@ import requests
 ROUTE_URL = "/api/route/plan"
 EVAL_URL = "/api/evaluation/calc"
 PROPOSAL_URL = "/api/proposal"
+PROPOSAL_CALC_URL = "/api/proposal/calc"
 PROPOSALS_URL = "/api/proposals"
 FEEDBACK_URL = "/api/feedback"
 FEEDBACK_CATEGORIES_URL = "/api/feedback/categories"
@@ -86,6 +87,29 @@ def evaluate(
         f"{api_base}{EVAL_URL}", json=body, timeout=timeout, headers=headers
     )
     assert resp.status_code == 200, f"evaluation/calc failed: {resp.text[:300]}"
+    return resp.json()
+
+
+def compute(
+    api_base: str,
+    stops: list[str],
+    composition_id: str = "NEW-BAL-7",
+    timeout: int = 90,
+    **extra,
+) -> dict:
+    """POST /api/proposal/calc (WP2's merged endpoint) with the given
+    stops/composition (plus any extra request fields, e.g. scenario_id,
+    routing_mode, auto_stop_addition) and return the full response body
+    (route_builder_version, calc_version, request, route, evaluation —
+    and suggested_stops when auto_stop_addition="suggest"). Asserts 200 —
+    callers testing error paths post directly instead.
+
+    Always stateless: proposal/calc never persists, so unlike build_route()/
+    evaluate() there is no headers param — an Authorization header would
+    have no effect here."""
+    body = {"stops": stops, "composition_id": composition_id, **extra}
+    resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=timeout)
+    assert resp.status_code == 200, f"proposal/calc failed: {resp.text[:300]}"
     return resp.json()
 
 

@@ -535,15 +535,29 @@ carries one class_main), so its class axis is the identity: `"all"` and
 
 ## API integration
 
-The evaluation pipeline is called by `POST /api/evaluation/calc` in `api/evaluation.py`.
-A complete worked example — real request and full response — is checked in
+The evaluation pipeline is called by `POST /api/evaluation/calc` in
+`api/evaluation.py`, and — since WP2 (`docs/PROPOSALS_DESIGN.md` §2.1,
+2026-08-03) — also by `POST /api/proposal/calc` in `api/proposal_calc.py`,
+which runs it immediately after building the route in the same request
+rather than as a separate call. The one pipeline-relevant difference:
+`api/proposal_calc.py` calls `evaluate_route()` directly on the `Route`
+object `plan_route()` just returned (no `route_from_dict()` deserialize
+step), and reuses `RouteProvenance.tracks`/`.stop_infra`/`.compositions`
+instead of `api/evaluation.py`'s own `loader.build_all_tracks()` +
+`loader.build_all_stops()` calls below — `evaluate_route()` itself is
+identical either way. A complete worked example — real request and full
+response — is checked in
 under [`../../scripts/data/`](../../scripts/data/):
 `tc_1_evaluation_input.json` (request) and
 `tc_1_evaluation_input_output.json` (response), produced by the manual test
 script [`../../scripts/test_evaluation_calc.py`](../../scripts/test_evaluation_calc.py).
 Serialization and deserialization are handled exclusively by
 `api/helpers/route_serialize.py` (route in/out) and
-`api/helpers/evaluation_serialize.py` (breakdown/views out, `models`/`input` docs).
+`api/helpers/evaluation_serialize.py` (breakdown/views out, `models`/`input` docs —
+`input_to_dict()` takes an `include_route` flag since WP2, `False` for
+`api/proposal_calc.py` to avoid a duplicate route copy under
+`evaluation.input`, `True` — the original behaviour — for
+`api/evaluation.py`).
 Domain objects have no `to_dict()` or `from_dict()` methods.
 
 ### Request flow

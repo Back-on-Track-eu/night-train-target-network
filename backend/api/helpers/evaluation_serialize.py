@@ -574,12 +574,17 @@ def input_to_dict(
     tracks: TrackInfraCollection,
     stop_infra: StopInfraCollection,
     compositions: CompositionCollection,
+    include_route: bool = True,
 ) -> dict:
     """Everything that went into this evaluation.
 
     route: the route JSON exactly as posted to POST /api/evaluation/calc —
     included verbatim (not re-serialized from the reconstructed Route) so
-    it's a faithful record of the actual request body.
+    it's a faithful record of the actual request body. include_route=False
+    for POST /api/proposal/calc (api/proposal_calc.py, PROPOSALS_DESIGN.md
+    §2.1): its merged response already carries the route once, as a
+    sibling key of "evaluation" — a second copy under evaluation.input
+    would violate the "route appears exactly once" rule.
 
     parameters: every track/stop/composition parameter actually loaded to
     cost this route, reusing the same params_serialize.py functions the
@@ -587,11 +592,11 @@ def input_to_dict(
     own description, source, and is_default flag (see params_serialize.py),
     so there's no separate description/source scheme to maintain here.
     """
-    return {
-        "route": route_dict,
-        "parameters": {
-            "track_infrastructures": track_infra_to_dict(tracks),
-            "stop_infrastructures": stop_infra_to_dict(stop_infra),
-            "compositions": composition_collection_to_dict(compositions),
-        },
+    parameters = {
+        "track_infrastructures": track_infra_to_dict(tracks),
+        "stop_infrastructures": stop_infra_to_dict(stop_infra),
+        "compositions": composition_collection_to_dict(compositions),
     }
+    if not include_route:
+        return {"parameters": parameters}
+    return {"route": route_dict, "parameters": parameters}

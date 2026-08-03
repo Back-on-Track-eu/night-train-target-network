@@ -1011,15 +1011,26 @@ additive — existing endpoints and tests untouched.
 
 **WP2 — Merged compute endpoint (additive)** *(parallel to WP1)*
 `POST /api/proposal/calc`: orchestrate route building + evaluation in one
-pipeline (API boundary only — `models/route` and `models/evaluation` stay
-untouched); neutral structural IDs; merged request validation (verified:
-calc carried no extra inputs beyond the scenario override); response shape
-per §2.1 incl. the **resolved** request echo and `cache_hit` meta
-(fingerprint wiring completed after WP4). The old `/api/route/plan` and
-`/api/evaluation/calc` **stay in place until WP5** — no persist hooks are
-touched here. *Testable by*: stateless endpoint tests over the merged
-response shape, reusing the existing plan/calc fixtures. *Green because*:
-purely additive endpoint.
+pipeline (API boundary, with one deliberate additive exception —
+`RouteProvenance` (`models/route/route_factory.py`) now also carries
+`compositions`/`stop_infra` alongside `tracks`, so the merged endpoint
+reuses what `plan_route()` already builds internally instead of a second
+`loader.build_all_compositions()`/`build_all_stops()` call; existing
+callers unaffected, no behaviour change, see `RouteProvenance`'s
+docstring. This is a general principle for the whole refactor, not a
+WP2-only carve-out: **prefer reuse over parallel reload whenever an
+additive, non-behaviour-changing extension is available — a duplicate
+load is only acceptable as a genuinely temporary stopgap, not a default.**
+`models/evaluation` stays untouched); neutral structural IDs; merged
+request validation (verified: calc carried no extra inputs beyond the
+scenario override); response shape per §2.1 incl. the **resolved** request
+echo and `cache_hit` meta (fingerprint wiring completed after WP4). The
+old `/api/route/plan` and `/api/evaluation/calc` **stay in place until
+WP5** — no persist hooks are touched here. *Testable by*: stateless
+endpoint tests over the merged response shape, reusing the existing
+plan/calc fixtures. *Green because*: purely additive endpoint plus a
+purely additive provenance extension — no existing caller's behaviour
+changes.
 
 **WP3 — Route decomposition + reconstruction serializer** *(after WP1)*
 GTFS + sidecar insert (write side, prefix assignment as at publish); new
