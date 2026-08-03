@@ -158,6 +158,12 @@ package instead of only at the end:
   `proposal_summaries`, and the compute cache land alongside the
   existing persist-on-calc tables/columns, which keep running untouched.
   Nothing dropped, no constraint the old code violates.
+- **Phase 1b** (`migrations/2026-08-03_proposal_schema_phase1b_auto_added.sql`,
+  WP3) — one additional nullable column (`stop_times.auto_added`) phase 1
+  missed; see the `proposals` schema section below for why. WP3 also
+  landed the sidecar tables' write/read path
+  (`api/helpers/route_gtfs_serialize.py`), round-trip-tested but not yet
+  wired into any live endpoint.
 - **Phase 2** (WP5) — the single cutover migration: drops
   `route_body`/`evaluation_body`/`is_current`/`change_log`, enforces the
   final `NOT NULL`s, and lands in the same PR as the code that requires
@@ -317,23 +323,44 @@ identity fingerprint, informational only) and `compute_request` (resolved
 JSON-not-JSONB key-order rationale). `stop_times` gained a nullable
 `stop_type` column (lossless boarding/alighting/night/both
 classification). None of the three is populated by the current
-persist-on-calc write path — that starts with WP2/WP3/WP5.
+persist-on-calc write path (`adapters/proposal_repository.py`'s
+`_insert_gtfs()`, still unchanged) — that stays true until WP5's cutover
+replaces it.
 
-The same migration adds ten new, currently-empty tables — nothing writes
-to them yet, existence is all `test_02_db_seed.py` asserts for now:
+**Phase 1b (`migrations/2026-08-03_proposal_schema_phase1b_auto_added.sql`,
+WP3).** `stop_times` gained a third nullable-in-name-only column,
+`auto_added BOOLEAN NOT NULL DEFAULT FALSE` — mirrors
+`Stop.auto_added` (`models/route/trip.py`). Phase 1 missed this one: it's
+not derivable after the fact (a record of what the one-time
+`auto_stop_addition` candidate search decided, not something
+recomputable from stored physics), so WP3 added it alongside the sidecar
+write path below rather than silently losing the field on every
+reconstruction.
+
+The phase 1 migration adds ten new tables. As of WP3
+(`api/helpers/route_gtfs_serialize.py`, `insert_route_gtfs()`/
+`route_dict_from_gtfs()`), they're no longer empty in principle — that
+module is a **complete, standalone GTFS+sidecar write/read path**,
+round-trip-tested end to end (`tests/test_36_proposal_gtfs_roundtrip.py`)
+against real `POST /api/proposal/calc` (WP2) responses. It is
+deliberately **not** wired into the live persist-on-calc pipeline yet
+(`adapters/proposal_repository.py`'s `_insert_gtfs()` stays untouched and
+is what every current endpoint still uses) — WP5 is what retires the old
+write path and switches the real `POST /api/proposal/publish` endpoint
+over to this one. Until then, rows only exist here during test runs:
 
 | Table | Description |
 |---|---|
-| `segments` | One row per `Segment` (`models/route/trip.py`) — the atomic per-stop-pair physics unit of a trip (distance, driving/dynamics/buffer/slack time, energy, per-country shares). Composite PK `(trip_id, segment_sequence)` |
-| `od_pairs` | One row per `ODPair` (`models/params.py`) — demand for one origin-destination pair, one accommodation class, one trip |
+| `segments` | One row per `Segment` (`models/route/trip.py`) — the atomic per-stop-pair physics unit of a trip (distance, driving/dynamics/buffer/slack time, energy, per-country shares). Composite PK `(trip_id, segment_sequence)`. Geometry stored per-segment on `shapes` (`{trip_id}_L{i}_SHAPE`, mirroring `route_to_dict()`'s own `geometry_id` convention) — WP3's write path deliberately doesn't also write a concatenated per-trip shape the way the old `_insert_gtfs()` does; `trips.shape_id` is left `NULL` |
+| `od_pairs` | One row per `ODPair` (`models/params.py`) — demand for one origin-destination pair, one accommodation class, one trip. `avg_price NUMERIC(10,2)` genuinely rounds the stopgap demand model's raw output (`distribute_demand()`'s flat per-km fare × distance, e.g. `77.38690000000001`) to the cent — correct precision for a EUR column, not a bug; the round-trip tests round the expected side the same way rather than asserting exact equality against a value that was never going to survive real storage |
 | `parkings` | One row per `Parking` (`models/route/route.py`) — overnight parking location, deduplicated by `stop_id` within the route; `trip_ids` lists every trip that parks there |
 | `shuntings` | One row per `Shunting` (`models/route/route.py`) — one shunting event at a trip terminal; not deduplicated, up to 4 rows per round trip |
 | `timetable_warnings` | One row per `TimetableWarning` (`models/route/trip.py`) — a derived timetable quality annotation, informational only |
 | `seasonal_schedules` | One row per `SeasonalSchedule` (`models/route/route.py`) — operating frequency (daily/three_per_week) per season on a route |
-| `update_log` | Append-only timeline event log (published/overwritten/recalculated/branched_from/branched_to) — preserves state transitions that `proposals.proposals` itself prunes on overwrite |
-| `proposal_summaries` | Derived projection over `proposals.proposals` for the gallery/map — route metrics, financial KPIs, placeholder demand KPIs, simplified PostGIS geometry. Not a source of truth; rebuildable at any time |
-| `compute_cache_pointer` | Compute cache, pointer side — `request_hash` → which result it resolves to, plus request-specific response parts. `UNLOGGED` |
-| `compute_cache_result` | Compute cache, result side — `(route_fingerprint, scenario_id, composition_id)` → the shared route + evaluation payload, stored once per distinct result. `UNLOGGED` |
+| `update_log` | Append-only timeline event log (published/overwritten/recalculated/branched_from/branched_to) — preserves state transitions that `proposals.proposals` itself prunes on overwrite. Still unpopulated — lands with WP5 |
+| `proposal_summaries` | Derived projection over `proposals.proposals` for the gallery/map — route metrics, financial KPIs, placeholder demand KPIs, simplified PostGIS geometry. Not a source of truth; rebuildable at any time. Still unpopulated — lands with WP5 |
+| `compute_cache_pointer` | Compute cache, pointer side — `request_hash` → which result it resolves to, plus request-specific response parts. `UNLOGGED`. Still unpopulated — lands with WP13 |
+| `compute_cache_result` | Compute cache, result side — `(route_fingerprint, scenario_id, composition_id)` → the shared route + evaluation payload, stored once per distinct result. `UNLOGGED`. Still unpopulated — lands with WP13 |
 
 Segments/od_pairs/timetable_warnings key off `trip_id`; parkings/shuntings/
 seasonal_schedules key off `route_id` — matching where each field lives on

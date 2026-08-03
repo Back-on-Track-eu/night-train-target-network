@@ -128,6 +128,7 @@ CREATE TABLE proposals.stop_times (
     pickup_type     SMALLINT NOT NULL DEFAULT 0,
     drop_off_type   SMALLINT NOT NULL DEFAULT 0,
     stop_type       TEXT,  -- lossless boarding/alighting/night/both classification (2026-08-03, proposals redesign phase 1) — nullable until WP3 populates it; see migrations/2026-08-03_proposal_schema_phase1.sql
+    auto_added      BOOLEAN NOT NULL DEFAULT FALSE,  -- mirrors Stop.auto_added (2026-08-03, proposals redesign phase 1b) — see migrations/2026-08-03_proposal_schema_phase1b_auto_added.sql
     PRIMARY KEY (trip_id, stop_sequence)
 );
 
@@ -141,6 +142,7 @@ COMMENT ON COLUMN proposals.stop_times.stop_headsign  IS 'Optional destination s
 COMMENT ON COLUMN proposals.stop_times.pickup_type    IS 'GTFS pickup type: 0 = regular, 1 = no pickup, 2 = phone agency, 3 = coordinate with driver.';
 COMMENT ON COLUMN proposals.stop_times.drop_off_type  IS 'GTFS drop-off type: 0 = regular, 1 = no drop-off, 2 = phone agency, 3 = coordinate with driver.';
 COMMENT ON COLUMN proposals.stop_times.stop_type      IS 'Lossless stop classification: boarding, alighting, night, or both (mirrors models.route.trip.StopType) — not losslessly encoded by pickup_type/drop_off_type alone ("night" and "both" both map to (0,0)). Nullable in phase 1 — not yet populated by any write path.';
+COMMENT ON COLUMN proposals.stop_times.auto_added     IS 'Mirrors models.route.trip.Stop.auto_added — true if auto_stop_addition inserted this stop. Added phase 1b (2026-08-03) to close a round-trip gap phase 1 missed.';
 
 -- ---------------------------------------------------------------
 -- proposals  (not GTFS — project-specific version container)

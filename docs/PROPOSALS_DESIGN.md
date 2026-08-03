@@ -1032,16 +1032,36 @@ plan/calc fixtures. *Green because*: purely additive endpoint plus a
 purely additive provenance extension — no existing caller's behaviour
 changes.
 
-**WP3 — Route decomposition + reconstruction serializer** *(after WP1)*
-GTFS + sidecar insert (write side, prefix assignment as at publish); new
-`api/helpers/route_gtfs_serialize.py` with `route_dict_from_gtfs()`
-(composition/track_infrastructure reloaded via loader,
-`general_parameters` recomputed) and the `input.parameters` rebuild helper
-(scenario-pin → `params_serialize.py`). *Testable by*: standalone
-round-trip tests — WP2 compute responses as fixtures, written under test
-proposal IDs into WP1's tables, reconstructed, deep-equal (parameters
-included). No publish endpoint needed. *Green because*: new module + new
-tables only; old persist path untouched.
+**WP3 — Route decomposition + reconstruction serializer** *(after WP1)* ✅
+*implemented 2026-08-03.* GTFS + sidecar insert (write side, prefix
+assignment as at publish); new `api/helpers/route_gtfs_serialize.py` with
+`insert_route_gtfs()` (write) and `route_dict_from_gtfs()` (read —
+composition/track_infrastructure reloaded via loader, `general_parameters`
+recomputed by reconstructing domain objects and handing off to the
+existing `route_to_dict()` rather than reimplementing its serialization)
+and `input_parameters_from_scenario()` (scenario-pin → `params_serialize.py`,
+reused via `evaluation_serialize.input_to_dict(..., include_route=False)`).
+Standalone from `adapters/proposal_repository.py`'s old `_insert_gtfs()`,
+which stays untouched and in use until WP5's cutover.
+
+One additive schema gap found and closed during implementation: `phase 1`
+missed a column for `Stop.auto_added` — not derivable after the fact, so
+`migrations/2026-08-03_proposal_schema_phase1b_auto_added.sql` adds
+`stop_times.auto_added BOOLEAN NOT NULL DEFAULT FALSE` alongside `stop_type`.
+Also confirmed, not a bug: `proposals.od_pairs.avg_price NUMERIC(10,2)`
+genuinely rounds `distribute_demand()`'s raw stopgap fare output (which
+carries far more than 2 decimals) on storage — correct precision for a
+EUR column; the round-trip tests' expectations account for this rather
+than the schema being loosened to avoid it.
+
+*Testable by*: standalone round-trip tests
+(`tests/test_36_proposal_gtfs_roundtrip.py`) — WP2 compute responses as
+fixtures, written under real `proposal_id`s (allocated from the live
+`proposals.proposals` sequence — no separate test-ID range needed),
+reconstructed, deep-equal (parameters included). No publish endpoint
+needed. *Green because*: new module + phase 1b's one additive column
+only; old persist path untouched — 411 passed, 0 failed on the full suite
+after landing.
 
 **WP4 — Fingerprint & projection module** *(after WP3)*
 `adapters/proposal_projection.py`: canonical route extract + SHA-256

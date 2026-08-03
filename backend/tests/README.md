@@ -29,6 +29,7 @@ built on top of it:
 | `test_20`–`test_21` | `POST /api/route/plan` (contract, then content logic) |
 | `test_30`–`test_31` | `POST /api/evaluation/calc` (contract, then content logic) |
 | `test_35` | `POST /api/proposal/calc` — WP2's merged compute endpoint (contract) |
+| `test_36` | WP3's GTFS+sidecar round-trip (`route_gtfs_serialize.py`) — no endpoint yet |
 | `test_40` | End-to-end pipeline smoke |
 | `test_50` | Persist-on-calc semantics + proposals list/load |
 | `test_51` | Proposal engagement — likes + comments |
@@ -312,6 +313,38 @@ incrementally as later WPs touch this endpoint again.
 | `TestSuggestMode::test_suggest_returns_suggested_stops_key` / `test_suggest_does_not_modify_stops` | `"suggest"` mode | `auto_stop_addition="suggest"` | `suggested_stops` present, list; stop list unchanged |
 | `TestStatelessness::test_no_persistence_metadata_in_response` | No `proposal` block | response | key absent (unlike `/api/route/plan`/`/api/evaluation/calc`) |
 | `TestStatelessness::test_repeated_identical_requests_are_independent` | No shared state | same request twice | identical resolved `request` and `route_id` both calls |
+
+## test_36_proposal_gtfs_roundtrip.py — GTFS+sidecar round-trip (WP3, no endpoint yet)
+
+`api/helpers/route_gtfs_serialize.py`'s `insert_route_gtfs()` (write) and
+`route_dict_from_gtfs()` (read) — a complete, standalone GTFS+sidecar
+persistence path (`docs/PROPOSALS_DESIGN.md` §5.1/§5.2), tested by writing
+real `POST /api/proposal/calc` (WP2) responses into the DB under real
+`proposal_id`s (allocated from the live `proposals.proposals` sequence via
+`ProposalRepository._next_proposal_id()`) and reconstructing them back.
+Not wired into any endpoint yet — that's WP5. No commit anywhere in this
+file; the autouse `rollback_after_test` fixture cleans up every write.
+
+Comparisons normalize the reconstructed side through a JSON round-trip
+(`_json_normalize()`) before comparing against the "published" side —
+`route_dict_from_gtfs()` returns native Python objects (e.g. `Decimal`,
+int-keyed dicts) while the expected side came back from an actual HTTP
+response, already JSON-flattened; comparing them raw would fail on
+formatting differences that carry no real information. Separately,
+`_round_avg_price()` rounds `avg_price` on the expected side to 2 decimals
+— `proposals.od_pairs.avg_price NUMERIC(10,2)` genuinely rounds the
+stopgap demand model's raw, unrounded fare output on storage, correctly,
+so the round-trip's expectation has to match what actually persists, not
+the pre-storage floating-point value.
+
+| Test | Purpose | Input | Expected |
+|---|---|---|---|
+| `TestRouteRoundtrip::test_two_stop_route_deep_equals_after_roundtrip` | Baseline round-trip | 2-stop route, `auto_stop_addition="off"` | reconstructed route deep-equals published (mod ID prefix + avg_price rounding) |
+| `TestRouteRoundtrip::test_three_stop_route_with_intermediate_stop_deep_equals` | Longer segment chain, a night-classified intermediate stop | 3-stop route | same deep-equal contract |
+| `TestRouteRoundtrip::test_auto_added_stop_survives_roundtrip` | The gap phase 1b closed | `auto_stop_addition="add"` (Brno auto-added) | `auto_added=true` survives on the inserted stop, both directions |
+| `TestRouteRoundtrip::test_od_pairs_survive_roundtrip` | `proposals.od_pairs` carries real content | stopgap demand always populates `od_pairs` | reconstructed od_pairs (compared against the **published**, ID-rewritten copy — od_pairs carry `trip_id` references) match, avg_price rounded |
+| `TestRouteRoundtrip::test_unknown_proposal_raises` | Domain check | nonexistent `proposal_id` | `ValueError` |
+| `TestInputParametersRoundtrip::test_input_parameters_deep_equal_original` | `input_parameters_from_scenario()` — parameters rebuilt from scenario pin alone, no GTFS insert needed | same scenario_id as the original compute | rebuilt `evaluation.input.parameters` deep-equals original (JSON-normalized) |
 
 ## test_40_pipeline.py — End-to-end smoke
 
