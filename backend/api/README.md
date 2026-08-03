@@ -735,6 +735,8 @@ persists:
 {
   "route_builder_version": "0.9.12",
   "calc_version": "1.2.0",
+  "route_fingerprint": "sha256:3f9a1c...",
+  "cache_hit": false,
   "request": {
     "stops": ["DE_BERLIN_HBF", "DE_DRESDEN_HBF", "AT_WIEN_HBF"],
     "composition_id": "NEW-BAL-7",
@@ -779,10 +781,14 @@ all deliberate (`docs/PROPOSALS_DESIGN.md` §2.1):
    because that endpoint is a standalone call receiving the route as
    its own input.
 
-`route_fingerprint` and a `cache_hit` flag are specified in
-`docs/PROPOSALS_DESIGN.md` §2.1 but **not yet present** — they land in
-WP4 (fingerprint/projection module) and WP13 (compute cache)
-respectively.
+4. **`route_fingerprint` and `cache_hit`** — `route_fingerprint` (§3.1) is
+   a SHA-256 over the route's resolved stops/times/geometry, computed by
+   `adapters/proposal_projection.py` (WP4); it agrees between ephemeral
+   and published forms of the identical route by construction (the
+   canonical extract never reads `route_id`/`trip_id`/`geometry_id`).
+   `cache_hit` is always `false` for now — no compute cache exists yet
+   (WP13 wires the real lookup; the field is added early so that lands as
+   a pure logic swap, not a response-shape change).
 
 **Errors:** same set as `/api/route/plan` + `/api/evaluation/calc`
 combined — `400 bad_request` / `400 validation_error` (see

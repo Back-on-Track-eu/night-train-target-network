@@ -1063,16 +1063,39 @@ needed. *Green because*: new module + phase 1b's one additive column
 only; old persist path untouched — 411 passed, 0 failed on the full suite
 after landing.
 
-**WP4 — Fingerprint & projection module** *(after WP3)*
-`adapters/proposal_projection.py`: canonical route extract + SHA-256
-fingerprint (§3.1 rules incl. prefix stripping and coordinate rounding);
-summary-row builder (route metrics, KPI extraction, geometry concatenation
-+ simplification, placeholder KPI filler + flag). Wire fingerprint +
-`cache_hit` into the WP2 compute response. *Testable by*: pure-function
-tests on compute fixtures; equal-fingerprint assertions for ephemeral vs
-prefixed and original vs reconstructed forms; projection rows asserted
-against `proposal_summaries`. *Green because*: additive module; the only
-touched endpoint (WP2's) gains a field.
+**WP4 — Fingerprint & projection module** *(after WP3)* ✅ *implemented
+2026-08-03.* `adapters/proposal_projection.py`: canonical route extract +
+SHA-256 fingerprint (§3.1); summary-row builder (route metrics, KPI
+extraction, geometry concatenation + simplification, placeholder KPI
+filler + flag). Fingerprint + `cache_hit` wired into the WP2 compute
+response (`cache_hit` hardcoded `false` — no cache exists until WP13;
+adding the field now means WP13 is a pure logic swap, not a response-shape
+change).
+
+Two implementation-time refinements over the plan text: (1) "prefix
+stripping" turned out to be unnecessary rather than a rule to implement —
+the canonical extract never reads `route_id`/`trip_id`/`geometry_id` in
+the first place, only `stop_id` (a stable, unprefixed reference), so
+ephemeral and published forms hash identically by construction; a
+dedicated test (`TestFingerprint.test_ignores_id_prefix`) asserts this
+directly rather than relying on it as an implicit consequence. (2)
+`total_time_h` in the summary row is read from each trip's
+`general_parameters.route_duration_min` rather than re-summed from
+segments the way the pre-refactor `proposal_summary_to_dict` does — that
+helper's manual sum silently omits `slack_time_min`; the trip-level field
+is already correct and avoids re-deriving it.
+
+*Testable by*: pure-function tests on compute fixtures
+(`tests/test_37_proposal_projection.py`); equal-fingerprint assertions for
+ephemeral vs prefixed and original vs reconstructed forms
+(`tests/test_36_proposal_gtfs_roundtrip.py`'s `TestFingerprintRoundtrip`);
+projection rows asserted against `proposal_summaries` via a direct test
+insert (schema conformance ahead of WP5's real writer). *Green because*:
+additive module; the only touched endpoint (WP2's) gains two fields — no
+existing test's assertions narrowed the response shape. Confirmed: 425
+passed, 1 skipped (the pre-existing
+`test_per_available_place_km_divisor_is_unweighted` xfail — unrelated to
+this WP) on the full suite via `uv run --extra dev pytest tests/ -v`.
 
 **WP5 — Cutover: publish endpoint, repository, schema phase 2** *(after
 WP2 + WP4; the core WP — the one deliberately large one)*
