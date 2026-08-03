@@ -49,6 +49,7 @@ import time
 from flask import Blueprint, jsonify, request
 
 from adapters.proposal_repository import rewrite_id_prefix
+from adapters.proposal_projection import route_fingerprint
 from api.helpers.dependencies import get_loader, get_country_index
 from api.helpers.route_serialize import route_to_dict, suggested_stops_to_dicts
 from api.helpers.evaluation_serialize import (
@@ -191,6 +192,8 @@ def calc():
       {
         "route_builder_version": "...",
         "calc_version": "...",
+        "route_fingerprint": "sha256:...",  // §3.1, adapters/proposal_projection.py
+        "cache_hit": false,            // always false until WP13 wires the real compute cache
         "request": { ... },            // resolved: defaults applied, scenario_id concrete
         "suggested_stops": [ ... ],    // only when auto_stop_addition="suggest"
         "route": { ... },              // route_to_dict() shape, neutral ids (R1, ...)
@@ -198,9 +201,6 @@ def calc():
           "models": { ... }, "input": { "parameters": { ... } }, "views": { ... }
         }
       }
-
-    route_fingerprint and cache_hit are not wired in yet — they land in
-    WP4 (fingerprint/projection module) and WP13 (compute cache).
     """
     t_start = time.monotonic()
 
@@ -311,6 +311,12 @@ def calc():
     route_dict = route_to_dict(route, provenance.scenario_id, provenance.tracks)
     trip_pair_by_key = {p.outbound.trip_id: p for p in route.trip_pairs}
 
+    # §3.1 — computed from route_dict before the prefix strip below, but
+    # prefix-independent by construction: the canonical extract only ever
+    # uses stop_id (never route_id/trip_id/geometry_id), so the fingerprint
+    # is identical whichever side of rewrite_id_prefix() it's taken from.
+    fingerprint = route_fingerprint(route_dict)
+
     # Resolved request echo per §2.1: "defaults applied, scenario_id
     # concrete" — an omitted field and an explicitly-posted default must
     # compare equal, so build this explicitly rather than echoing the
@@ -329,7 +335,11 @@ def calc():
     payload = {
         "route_builder_version": ROUTE_BUILDER_VERSION,
         "calc_version": CALC_VERSION,
-        # route_fingerprint intentionally absent — wired in WP4.
+        "route_fingerprint": fingerprint,
+        # No compute cache yet (WP13) — every call is necessarily a fresh
+        # compute, so this is always false rather than absent, keeping the
+        # response shape stable ahead of WP13's logic swap.
+        "cache_hit": False,
         "request": resolved_request,
     }
     if auto_stop_addition == "suggest":
