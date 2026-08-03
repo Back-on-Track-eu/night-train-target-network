@@ -13,6 +13,11 @@ Covers:
     track infra version, defaults rows exist)
   - All three seeded scenarios (2026 Base Line / 2032 Base Line / 2032 Base
     Line + HSR allowed) are present and consistent
+  - Proposals redesign, schema phase 1 (2026-08-03, additive-only — see
+    docs/PROPOSALS_DESIGN.md §10 WP1): new sidecar/update_log/
+    proposal_summaries/compute-cache tables exist, the new columns on
+    proposals.proposals/stop_times exist and are still nullable, the
+    PostGIS geometry column and UNLOGGED cache tables are set up correctly
 """
 
 import pytest
@@ -45,6 +50,31 @@ EXPECTED_ROW_COUNTS = {
     "proposals.routes": 1,
     "proposals.trips": 2,  # both directions of the one seeded proposal
     "proposals.stop_times": 6,  # 3 stops x 2 directions
+}
+
+# Tables added by the proposals redesign, schema phase 1 (2026-08-03,
+# additive-only — see docs/PROPOSALS_DESIGN.md §10 WP1 and
+# migrations/2026-08-03_proposal_schema_phase1.sql). Existence-only checks:
+# nothing seeds them yet, since the compute/publish endpoints that would
+# write to them don't exist until later WPs.
+EXPECTED_PHASE1_TABLES = {
+    "proposals.segments",
+    "proposals.od_pairs",
+    "proposals.parkings",
+    "proposals.shuntings",
+    "proposals.timetable_warnings",
+    "proposals.seasonal_schedules",
+    "proposals.update_log",
+    "proposals.proposal_summaries",
+    "proposals.compute_cache_pointer",
+    "proposals.compute_cache_result",
+}
+
+# Columns the same phase-1 migration adds to existing tables — deliberately
+# NULLABLE for now (populated starting WP2-5), unlike REQUIRED_COLUMNS below.
+EXPECTED_PHASE1_NULLABLE_COLUMNS = {
+    "proposals.proposals": ["route_fingerprint", "compute_request"],
+    "proposals.stop_times": ["stop_type"],
 }
 
 # Columns that must never be NULL. Every other track_infrastructures column
@@ -101,6 +131,77 @@ def test_required_columns_not_null(db_cur, table, columns):
         db_cur.execute(f"SELECT COUNT(*) AS n FROM {schema}.{tbl} WHERE {col} IS NULL")
         nulls = db_cur.fetchone()["n"]
         assert nulls == 0, f"{table}.{col} has {nulls} NULL values"
+
+
+# =============================================================================
+# Proposals redesign — schema phase 1 (2026-08-03, additive-only)
+# =============================================================================
+
+
+@pytest.mark.parametrize("table", sorted(EXPECTED_PHASE1_TABLES))
+def test_phase1_table_exists(db_cur, table):
+    """Every table the phase-1 migration adds is present. Existence only —
+    the tables are empty until later WPs wire up writers (WP5 for
+    update_log/proposal_summaries, WP13 for the compute cache)."""
+    schema, tbl = table.split(".")
+    db_cur.execute(
+        "SELECT COUNT(*) AS n FROM information_schema.tables "
+        "WHERE table_schema = %s AND table_name = %s",
+        (schema, tbl),
+    )
+    assert db_cur.fetchone()["n"] == 1, f"{table}: table not found"
+
+
+@pytest.mark.parametrize(
+    "table,columns",
+    EXPECTED_PHASE1_NULLABLE_COLUMNS.items(),
+)
+def test_phase1_nullable_columns_exist(db_cur, table, columns):
+    """The phase-1 migration's new columns on existing tables are present
+    and still nullable — the old persist-on-calc write path never sets
+    them, so a NOT NULL constraint here would break every existing save
+    until WP5's cutover populates them for real."""
+    schema, tbl = table.split(".")
+    for col in columns:
+        db_cur.execute(
+            "SELECT is_nullable FROM information_schema.columns "
+            "WHERE table_schema = %s AND table_name = %s AND column_name = %s",
+            (schema, tbl, col),
+        )
+        row = db_cur.fetchone()
+        assert row is not None, f"{table}.{col}: column not found"
+        assert row["is_nullable"] == "YES", f"{table}.{col}: expected nullable"
+
+
+def test_proposal_summaries_geom_is_postgis_geometry(db_cur):
+    """proposal_summaries.geom_simplified is a PostGIS geometry column, not
+    a plain type — information_schema doesn't expose the (MultiLineString,
+    4326) type modifier, so this only asserts the underlying udt_name;
+    the full type constraint is exercised once WP5/WP6 start writing and
+    querying real geometries."""
+    db_cur.execute(
+        "SELECT udt_name FROM information_schema.columns "
+        "WHERE table_schema = 'proposals' AND table_name = 'proposal_summaries' "
+        "AND column_name = 'geom_simplified'"
+    )
+    row = db_cur.fetchone()
+    assert row is not None, "proposal_summaries.geom_simplified: column not found"
+    assert row["udt_name"] == "geometry"
+
+
+def test_compute_cache_tables_are_unlogged(db_cur):
+    """Both compute cache tables are UNLOGGED (docs/PROPOSALS_DESIGN.md
+    §2.3) — a disposable performance layer, no WAL overhead, safe to lose
+    on crash."""
+    db_cur.execute(
+        "SELECT relname, relpersistence FROM pg_class "
+        "WHERE relname IN ('compute_cache_pointer', 'compute_cache_result')"
+    )
+    persistence = {row["relname"]: row["relpersistence"] for row in db_cur.fetchall()}
+    assert persistence == {
+        "compute_cache_pointer": "u",
+        "compute_cache_result": "u",
+    }
 
 
 # =============================================================================
