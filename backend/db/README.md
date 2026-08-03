@@ -173,6 +173,13 @@ package instead of only at the end:
   and recreate, no row migration** — the stored proposals were pre-launch
   test artifacts; `update_log`/`likes`/`comments` survived structurally
   (soft references), their stale rows truncated for a clean start.
+- **`proposal_summaries.created_at`**
+  (`migrations/2026-08-04_proposal_summaries_created_at.sql`, WP6.1) —
+  one additional column the gallery's `created_at`/`updated_at` range
+  filter needed (§7.1's "all filter/sort work runs against
+  `proposal_summaries`" rules out joining `proposals.proposals.created_at`
+  at query time instead). Backfilled from `proposals.proposals.created_at`
+  via a soft-reference `UPDATE...FROM`, not defaulted to `now()`.
 
 ---
 

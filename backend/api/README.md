@@ -30,7 +30,7 @@ its own example files.
   - [`GET /api/feedback/categories`](#feedback-categories) — suggested category/sub_category values
 - [Proposals](#proposals) — publish, list, and load
   - [`POST /api/proposal/publish`](#proposal-publish) — publish a computed proposal, the only write path
-  - [`GET` / `POST /api/proposals`](#list-proposals) — list proposals
+  - [`GET` / `POST /api/proposals`](#list-proposals) — gallery + map in one endpoint
   - [`GET /api/proposal/<id>`](#get-proposal) — load a proposal
 - [Proposal Engagement](#proposal-engagement) — likes and comments
   - [`GET` / `POST` / `DELETE /api/proposal/<id>/likes`](#proposal-likes) — like/unlike a proposal
@@ -278,7 +278,7 @@ comes into existence through an explicit publish.
 |--------|----------|-------------|
 | `POST` | `/api/proposal/publish` | Publish a computed proposal — the only user write path |
 | `GET` | `/api/proposals` | List proposals, newest first |
-| `POST` | `/api/proposals` | Filtered/paginated list |
+| `POST` | `/api/proposals` | Gallery + map: filter/sort/paginate, sectioned response |
 | `GET` | `/api/proposal/<id>` | Load a proposal |
 
 Every proposal is stored **once**: the route decomposed into GTFS tables
@@ -348,51 +348,199 @@ against it.
 
 ### `GET` / `POST /api/proposals`
 
-`GET` returns every proposal as a summary, newest first. `POST` accepts
-filters and pagination. This is the WP5-minimal contract — full
-range/list/substring filters over every summary column, map sections,
-and the `trip_windows` timetable filter land in WP6.
+The gallery + map contract in one endpoint (`docs/PROPOSALS_DESIGN.md`
+§7.1). `GET` returns every proposal as a summary, newest first — the
+empty-filter convenience case of `POST` below. `POST` accepts a generic
+filter/sort/pagination model plus an `include` list that picks which
+response **sections** to compute; a section not listed in `include`
+doesn't run its query at all.
 
 <details>
 <summary>Request &amp; response details</summary>
 
-**Request body** (`POST` only, all fields optional)
+**What can be filtered, and how**
+
+| Filter key | Column | Kind | Shape |
+|---|---|---|---|
+| `sources` | — | fixed | `["proposal"]` only — `"existing"` (ONTD) is WP10 |
+| `proposal_ids` | `proposal_id` | list (OR) | `[int, ...]` |
+| `user_ids` | `user_id` | list (OR) | `[int, ...]` |
+| `composition_ids` | `composition_id` | list (OR) | `[str, ...]` |
+| `demand_kpis_placeholder` | `demand_kpis_placeholder` | list (OR) | `[bool, ...]` |
+| `countries` | `countries` (`TEXT[]`) | array, any/all | `[str, ...]` or `{"values": [...], "mode": "any"\|"all"}` |
+| `stop_ids` | `stop_ids` (`TEXT[]`) | array, any/all | `[str, ...]` or `{"values": [...], "mode": "any"\|"all"}` |
+| `name` | `name` | substring | case-insensitive `str` |
+| `total_distance_km`, `total_time_h`, `avg_speed_kmh`, `n_stops` | same | range | `{"min": num, "max": num}` |
+| `cost_eur_per_train_km`, `revenue_eur_per_train_km`, `margin_eur_per_train_km`, `subsidy_eur_per_year` | same | range | `{"min": num, "max": num}` |
+| `demand_trips_per_year`, `demand_trip_km_per_year`, `shift_air_trips_per_year`, `shift_air_trip_km_per_year`, `shift_car_trips_per_year`, `shift_car_trip_km_per_year`, `co2_savings_t_per_year`, `subsidy_eur_per_t_co2` | same | range | `{"min": num, "max": num}` |
+| `likes_count` | live-joined from `proposals.likes` | range | `{"min": num, "max": num}` |
+| `created_at`, `updated_at` | same | range | `{"min": iso8601, "max": iso8601}` |
+| `trip_windows` | reaches into `stop_times` | special | see below |
+| `bbox` | `geom_simplified` | special | `[west, south, east, north]` |
+
+**Not filterable**: `route_builder_version`/`calc_version` (internal/
+analytical, not a gallery-facing dimension) and `scenario_id` (every
+gallery row is always on the current base scenario by construction —
+`scenario_outdated` flags the transient exception instead, §4.2).
+
+**What can be sorted by** — every column in the table above except the
+three "special" rows (`sources`, `trip_windows`, `bbox`, none of which
+are single-valued), plus the derived `scenario_outdated` and
+`route_fingerprint`. `sort` is `[{"by": <column>, "dir": "asc"|"desc"}]`;
+an unsortable `by` 400s.
+
+**Array filter modes** (`countries`/`stop_ids` only — every other list
+filter is OR-only by construction, since a proposal has exactly one
+`composition_id`/`user_id`/etc.): a plain list is `mode: "any"`
+(overlap `&&` — the proposal touches *at least one* of these); `{"values":
+[...], "mode": "all"}` is containment (`@>` — the proposal touches
+*every* one of these).
+
+**`trip_windows`** reaches past the summary table into the stored
+timetables: each entry constrains the departure and/or arrival time at
+one stop, and a proposal matches only when a **single trip** satisfies
+every entry. Times are wall-clock `"HH:MM"` with an optional integer
+`day_offset` for next-day arrivals.
+
+**`bbox`** is `[west, south, east, north]` — proposals whose
+`geom_simplified` intersects the box (GiST-indexed).
+
+`include` defaults to `["summaries"]` if omitted. `limit`/`offset` only
+apply to the `summaries` section — `map_lines`/`map_stop_counts`/
+`map_country_counts` always reflect the full filtered set (the map isn't
+paginated).
+
 ```json
 {
-  "filter": { "user_ids": [1] },
-  "limit": 50,
-  "offset": 0
+  "filter": {
+    "sources":         ["proposal"],
+    "proposal_ids":    [5],
+    "user_ids":        [1],
+    "countries":       {"values": ["DE", "AT"], "mode": "all"},
+    "stop_ids":        ["DE_BERLIN_HBF"],
+    "composition_ids": ["NEW-BAL-7"],
+    "demand_kpis_placeholder": [true],
+    "name": "wien",
+
+    "total_distance_km":        { "min": 800, "max": 1500 },
+    "total_time_h":              { "min": 8 },
+    "avg_speed_kmh":              { "max": 90 },
+    "n_stops":                    { "max": 12 },
+    "cost_eur_per_train_km":      { "min": 0 },
+    "revenue_eur_per_train_km":   { "min": 0 },
+    "margin_eur_per_train_km":    { "min": 0 },
+    "subsidy_eur_per_year":       { "max": 5000000 },
+    "demand_trips_per_year":      { "min": 0 },
+    "demand_trip_km_per_year":    { "min": 0 },
+    "shift_air_trips_per_year":   { "min": 0 },
+    "shift_air_trip_km_per_year": { "min": 0 },
+    "shift_car_trips_per_year":   { "min": 0 },
+    "shift_car_trip_km_per_year": { "min": 0 },
+    "co2_savings_t_per_year":     { "min": 0 },
+    "subsidy_eur_per_t_co2":      { "min": 0 },
+    "likes_count":                 { "min": 1 },
+    "created_at":                  { "min": "2026-01-01T00:00:00+00:00" },
+    "updated_at":                  { "min": "2026-01-01T00:00:00+00:00" },
+
+    "trip_windows": [
+      { "stop_id": "DE_BERLIN_HBF", "departure": { "from": "20:00", "to": "23:00" } },
+      { "stop_id": "AT_WIEN_HBF",   "arrival":   { "from": "07:00", "to": "09:30", "day_offset": 1 } }
+    ],
+
+    "bbox": [8.0, 45.0, 20.0, 55.0]
+  },
+  "sort":    [{ "by": "likes_count", "dir": "desc" }],
+  "limit":   50,
+  "offset":  0,
+  "include": ["summaries", "map_lines", "map_stop_counts", "map_country_counts"]
 }
 ```
 
-**Response**
+**Response** — one key per requested `include` section:
+
 ```json
 {
-  "total": 12,
-  "proposals": [
-    {
-      "proposal_id": 5, "proposal_version": 2, "user_id": 1,
-      "name": "Berlin Hbf – Wien Hbf",
-      "route_fingerprint": "sha256:...", "composition_id": "NEW-BAL-7",
-      "scenario_id": 1, "route_builder_version": "0.9.13", "calc_version": "0.9.10",
-      "total_distance_km": 683.4, "total_time_h": 9.0, "avg_speed_kmh": 76.0,
-      "n_stops": 3, "countries": ["AT", "DE"], "stop_ids": ["DE_BERLIN_HBF", "..."],
-      "cost_eur_per_train_km": 12.4, "revenue_eur_per_train_km": 14.1,
-      "margin_eur_per_train_km": 1.7, "subsidy_eur_per_year": 0.0,
-      "demand_trips_per_year": 4200, "demand_trip_km_per_year": 2870000,
-      "shift_air_trips_per_year": 1470, "shift_air_trip_km_per_year": 1004000,
-      "shift_car_trips_per_year": 840, "shift_car_trip_km_per_year": 574000,
-      "co2_savings_t_per_year": 210.4, "subsidy_eur_per_t_co2": null,
-      "demand_kpis_placeholder": true,
-      "updated_at": "2026-08-04T12:00:00+00:00"
-    }
-  ]
+  "summaries": {
+    "total": 12,
+    "proposals": [
+      {
+        "source": "proposal", "scenario_outdated": false,
+        "proposal_id": 5, "proposal_version": 2, "user_id": 1,
+        "name": "Berlin Hbf – Wien Hbf",
+        "route_fingerprint": "sha256:...", "composition_id": "NEW-BAL-7",
+        "scenario_id": 1, "route_builder_version": "0.9.13", "calc_version": "0.9.10",
+        "total_distance_km": 683.4, "total_time_h": 9.0, "avg_speed_kmh": 76.0,
+        "n_stops": 3, "countries": ["AT", "DE"], "stop_ids": ["DE_BERLIN_HBF", "..."],
+        "cost_eur_per_train_km": 12.4, "revenue_eur_per_train_km": 14.1,
+        "margin_eur_per_train_km": 1.7, "subsidy_eur_per_year": 0.0,
+        "demand_trips_per_year": 4200, "demand_trip_km_per_year": 2870000,
+        "shift_air_trips_per_year": 1470, "shift_air_trip_km_per_year": 1004000,
+        "shift_car_trips_per_year": 840, "shift_car_trip_km_per_year": 574000,
+        "co2_savings_t_per_year": 210.4, "subsidy_eur_per_t_co2": null,
+        "demand_kpis_placeholder": true, "likes_count": 3,
+        "created_at": "2026-08-01T09:00:00+00:00",
+        "updated_at": "2026-08-04T12:00:00+00:00"
+      }
+    ]
+  },
+  "map_lines": {
+    "type": "FeatureCollection",
+    "features": [
+      {
+        "type": "Feature",
+        "geometry": { "type": "LineString", "coordinates": ["..."] },
+        "properties": {
+          "stop_a": "AT_WIEN_HBF", "stop_b": "DE_BERLIN_HBF",
+          "proposal_count": 2, "proposal_ids": [5, 8],
+          "avg_margin_eur_per_train_km": 0.9
+        }
+      }
+    ]
+  },
+  "map_stop_counts": [
+    { "stop_id": "DE_BERLIN_HBF", "lat": 52.525, "lon": 13.369, "n": 4 }
+  ],
+  "map_country_counts": {
+    "type": "FeatureCollection",
+    "features": [
+      {
+        "type": "Feature",
+        "geometry": { "type": "MultiPolygon", "coordinates": ["..."] },
+        "properties": { "country": "DE", "n": 6 }
+      }
+    ]
+  }
 }
 ```
-Every row is a straight read off `proposals.proposal_summaries` — see
-`docs/PROPOSALS_DESIGN.md` §5.4. `demand_*`/`shift_*`/`co2_*` are
-deterministic placeholder figures (`demand_kpis_placeholder: true`) until
-the demand model lands — see §8.
+
+Every `summaries` row is a straight read off `proposals.proposal_summaries`
+(`docs/PROPOSALS_DESIGN.md` §5.4) plus three derived fields: `source`
+(always `"proposal"` until WP10's ONTD union), `scenario_outdated` (`true`
+between a base-scenario move and this proposal's refresh — joined
+against `scenario.scenarios`, never stored, §4.2), and `likes_count`
+(live-joined from `proposals.likes`, not a summary column — a like
+changes independently of publish/refresh, so storing it would go stale).
+`demand_*`/`shift_*`/`co2_*` are deterministic placeholder figures
+(`demand_kpis_placeholder: true`) until the demand model lands — see §8.
+
+`map_lines` is **not** one feature per proposal — it's one feature per
+distinct stop-pair **corridor** (direction-agnostic: outbound and return
+share a corridor), so a frontend can drive line *thickness* off
+`proposal_count` and look up which proposals share a corridor via
+`proposal_ids`; `avg_margin_eur_per_train_km` is the mean across exactly
+those proposals, for optional colouring. `map_country_counts` is one
+feature per country touched by the filtered set, carrying both the count
+and the country's own border geometry (`input_params.countries.
+country_geom`) so the frontend doesn't need a second lookup for the
+choropleth — `geometry: null` for a country code with no matched border
+(e.g. `"UNK"`, an unattributed segment). Neither paginates.
+`map_stop_counts` is one row per stop touched by the filtered set, joined
+to the *current base* scenario's pinned `stop_infrastructures` snapshot
+for coordinates.
+
+**Errors:** `400 validation_error` for an unknown filter/sort/include key,
+a malformed range/list/array-mode/trip_windows/bbox shape, or
+`sources: ["existing"]` (not yet supported).
 
 </details>
 
@@ -430,7 +578,12 @@ No request body.
 </details>
 
 No delete endpoint (`docs/PROPOSALS_DESIGN.md` §7.4) — proposals are
-removed manually in the database if ever needed.
+removed manually in the database if ever needed. `proposal_summaries` has
+no FK to `proposals.proposals` (§5.4 — a derived, rebuildable
+projection, not authoritative data), so nothing cascades a manual
+delete: clean up `proposal_summaries` in the same statement/transaction
+(`DELETE FROM proposals.proposal_summaries WHERE proposal_id = ...`) or
+the gallery/map endpoint keeps returning an orphaned row for it.
 
 ---
 

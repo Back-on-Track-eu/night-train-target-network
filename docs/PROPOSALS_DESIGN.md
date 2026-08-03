@@ -661,6 +661,7 @@ CREATE TABLE proposals.proposal_summaries (
     subsidy_eur_per_t_co2       NUMERIC(10,2),
     demand_kpis_placeholder     BOOLEAN NOT NULL DEFAULT TRUE,
 
+    created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),  -- set once, never touched by overwrite (WP6.1)
     updated_at              TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -742,21 +743,36 @@ the caller picks sections via `include`.
 current base scenario (or flagged `scenario_outdated: true` between a base
 move and its refresh, derived by joining `scenario.scenarios`). There is no
 variant-level mode — scenario browsing happens in compare (§7.3), where
-other scenarios are a first-class dimension.
+other scenarios are a first-class dimension. Because every row is always
+on the current base by construction, `scenario_id` is **not** a filter —
+there is essentially only one value to filter on at any moment, and the
+transient exception already has its own flag. `route_builder_version`/
+`calc_version` are likewise not filters: internal/analytical version
+tracking, not a gallery-facing dimension.
 
 **Filter rule**: every **numeric** summary column (§5.4) accepts a
-`{"min": …, "max": …}` range (either bound optional); every **categorical**
-column accepts a value list; `name` accepts a case-insensitive substring.
-Every summary column is sortable. The example below is not exhaustive — it
-shows one filter of each kind:
+`{"min": …, "max": …}` range (either bound optional) — `created_at`/
+`updated_at` the same shape with ISO 8601 strings, and `likes_count`
+(live-joined from `proposals.likes`, not a stored summary column — a like
+changes independently of publish/refresh, so storing it would go stale)
+likewise. Every scalar categorical column (`proposal_id`, `user_id`,
+`composition_id`, `demand_kpis_placeholder`) accepts a value list — always
+OR, since a proposal has exactly one value. `countries`/`stop_ids`
+(`TEXT[]` columns — a proposal can carry several) accept either a plain
+list (`mode: "any"`, OR/overlap `&&` — the default) or `{"values": [...],
+"mode": "all"}` (AND/containment `@>`). `name` accepts a case-insensitive
+substring. Every filterable column is sortable, plus the derived
+`scenario_outdated` and `route_fingerprint`. The example below is not
+exhaustive — it shows one filter of each kind:
 
 ```jsonc
 {
   "filter": {
     "sources":         ["proposal", "existing"],       // default ["proposal"]
+    "proposal_ids":    [int, ...],
     "user_ids":        [int, ...],                     // e.g. "my proposals"
-    "countries":       [str, ...],
-    "stop_ids":        [str, ...],
+    "countries":       [str, ...],                     // or {"values": [...], "mode": "any"|"all"}
+    "stop_ids":        [str, ...],                     // or {"values": [...], "mode": "any"|"all"}
     "composition_ids": [str, ...],
     "name":            "brenner",                      // substring, case-insensitive
     "total_distance_km":   {"min": 800, "max": 1500},
@@ -765,6 +781,9 @@ shows one filter of each kind:
     "n_stops":             {"max": 12},
     "margin_eur_per_train_km": {"min": 0},             // any KPI column likewise
     "subsidy_eur_per_year":    {"max": 5000000},
+    "likes_count":              {"min": 1},
+    "created_at":               {"min": "2026-01-01T00:00:00+00:00"},
+    "updated_at":               {"min": "2026-01-01T00:00:00+00:00"},
 
     "trip_windows": [                                  // timetable filter, see below
       {"stop_id": "OSM-...-berlin-hbf", "departure": {"from": "20:00", "to": "23:00"}},
@@ -773,7 +792,7 @@ shows one filter of each kind:
 
     "bbox": [w, s, e, n]                               // optional, see below
   },
-  "sort":    [{"by": <any summary column>, "dir": "asc"|"desc"}],
+  "sort":    [{"by": <any filterable column>, "dir": "asc"|"desc"}],
   "limit":   int, "offset": int,
   "include": ["summaries", "map_lines", "map_stop_counts", "map_country_counts"]
 }
@@ -799,15 +818,25 @@ anyway (below), it becomes relevant only at volumes we do not have yet.
 Response sections:
 
 - `summaries`: paginated summary rows + `total` (windowed count), each row
-  carrying `source: "proposal" | "existing"` and `scenario_outdated`. ONTD
-  rows have KPI fields null and no user/engagement metadata.
-- `map_lines`: GeoJSON FeatureCollection of `geom_simplified` with minimal
-  properties (id, source, name, one colorable KPI) — filtered but **not**
-  paginated (the map shows the whole filtered set).
+  carrying `source: "proposal" | "existing"`, `scenario_outdated`, and
+  `likes_count`. ONTD rows have KPI fields null and no user/engagement
+  metadata.
+- `map_lines`: GeoJSON FeatureCollection, one feature per distinct
+  stop-pair **corridor** (direction-agnostic — outbound and return share a
+  corridor) rather than one per proposal, so a client can drive line
+  *thickness* off `proposal_count` and look up which proposals share a
+  corridor via `proposal_ids`; `avg_margin_eur_per_train_km` is the mean
+  across exactly those proposals, for optional colouring — filtered but
+  **not** paginated (the map shows the whole filtered set).
 - `map_stop_counts`: `[{stop_id, lat, lon, n}]` — routes touching each stop
   (unnest over `stop_ids`, coordinates joined from the stop catalog).
-- `map_country_counts`: `{country: n}` — for the coverage choropleth
-  ("which countries have no proposals yet").
+- `map_country_counts`: GeoJSON FeatureCollection, one feature per country
+  touched by the filtered set, carrying both the proposal count and the
+  country's own border geometry (`input_params.countries.country_geom`) so
+  the frontend doesn't need a second lookup for the choropleth
+  ("which countries have no proposals yet") — `geometry: null` for a
+  country code with no matched border (e.g. `"UNK"`, an unattributed
+  segment).
 
 `GET /api/proposals` stays as the empty-filter, summaries-only
 convenience.
@@ -1369,3 +1398,152 @@ version-check contract (files under its watch were touched).
   section rewritten to the post-cutover storage model; `AGENTS.md` API
   surface/blueprint list/layering updated; `tests/README.md` gained the
   missing `test_37`/`test_70`/`test_71` sections.
+
+---
+
+## 12. WP6 implementation notes (2026-08-03) ✅
+
+Delivers the full §7.1 contract on top of WP5-minimal's one-filter list.
+No schema change — everything runs against the existing
+`proposal_summaries` table and its GIN/GiST indexes (§5.4); `sources:
+["existing"]` (the ONTD union) still 400s until WP10.
+
+- **`adapters/proposal/filter_builder.py`** (new): the single column-kind
+  registry (RANGE/LIST/ARRAY/SUBSTRING) driving both SQL generation
+  (`build_where()`, `build_order_by()`) and structural validation, so a
+  column's filter/sort behaviour is declared once. `trip_windows` is a
+  correlated `EXISTS` over `proposals.trips`/`stop_times` (one join per
+  window entry, all sharing `t.trip_id` so a single trip must satisfy
+  every entry); the trip's owning proposal is resolved via the
+  `P{proposal_id}_V{proposal_version}_R1` route_id convention rather than
+  a stored link. `bbox` is `ST_Intersects` against `geom_simplified`
+  (GiST-indexed) — implemented now rather than deferred, since the SQL is
+  trivial once the filter builder exists.
+- **`models/utils.py`** gained `min_to_interval()`, promoted out of
+  `gtfs_store.py`'s previously-private copy — one HH:MM↔INTERVAL
+  convention shared by the GTFS write path and the new `trip_windows`
+  filter.
+- **`adapters/proposal/repository.py`**: `list_summaries()` rewritten for
+  the full filter/sort/pagination contract; three new methods —
+  `map_lines()`, `map_stop_counts()` (joined to the *current base*
+  scenario's pinned `stop_infrastructures` snapshot for coordinates),
+  `map_country_counts()` — all sharing `filter_builder.build_where()` so
+  every section reflects the same filtered set. `scenario_outdated`
+  (§4.2) is a derived subquery against `scenario.scenarios WHERE
+  is_current_base`, never stored, selected alongside every summary row.
+- **`api/proposals.py`**: `POST /api/proposals` response is now
+  **sectioned** — `include` (default `["summaries"]`) picks which of
+  `summaries`/`map_lines`/`map_stop_counts`/`map_country_counts` the
+  response carries, and only requested sections run their query. This
+  replaces WP5-minimal's flat `{total, proposals}` envelope — a breaking
+  response-shape change flagged for WP12's Bjarne-coordination batch
+  (`frontend/src/types/api.ts` audit).
+- **Tests**: `test_50_proposals_api.py`'s `TestList` updated for the new
+  envelope; `test_52_proposals_gallery_api.py` (new) covers one filter of
+  each kind, `trip_windows` match/no-match, `bbox` hit/miss, sort, the
+  windowed `total`, every `include` section, and `scenario_outdated`
+  (via a direct `proposal_summaries.scenario_id` mutation in the test —
+  no production code path rewrites this column outside publish/refresh).
+- **Docs**: `api/README.md`'s `GET`/`POST /api/proposals` section
+  rewritten to the full §7.1 request/response shape.
+- **Not yet done**: `scripts/test_proposals_gallery.py` (manual
+  seed+demo script) exists but isn't yet part of the standard WP closing
+  checklist — added ad hoc after WP6 landed, not audited against the
+  "every WP updates its own script" convention the other WPs follow.
+
+---
+
+## 13. WP6.1 revision (2026-08-04) ✅
+
+A round of feedback on WP6 landed as its own follow-up pass rather than
+re-opening WP6 — the two live-tested findings (orphaned `proposal_summaries`
+rows from `purge_saved_proposals()` never cleaning them up; the total
+count this exposed) plus a design revision to `map_lines`, five filter
+changes, and a new `likes_count` dimension. §7.1 and §5.4 above are
+updated in place to the revised contract; this section is the changelog.
+
+**Filter/sort changes**:
+- `route_builder_version`/`calc_version`/`scenario_id` are **no longer
+  filterable** — internal/analytical, and every gallery row is always on
+  the current base scenario by construction (the `sources`/`scenario_id`
+  discussion in §7.1 already covered why). Still plain summary fields.
+- **`proposal_ids`** added (OR-only list, same shape as `user_ids`).
+- **`created_at`/`updated_at`** range filters added — required adding
+  `created_at` to `proposal_summaries` itself (§5.4), since §7.1's own
+  "all filter/sort work runs against `proposal_summaries`" principle
+  rules out joining `proposals.proposals.created_at` at query time
+  instead. Migration: `db/dev/sql/migrations/
+  2026-08-04_proposal_summaries_created_at.sql`, backfilled from
+  `proposals.proposals.created_at` (not defaulted to `now()`).
+  `adapters/proposal/repository.py`'s `_upsert_summary()` sets it once at
+  INSERT and excludes it from the `ON CONFLICT` `UPDATE`, so an
+  overwrite-publish doesn't reset it.
+- **`countries`/`stop_ids` gained an any/all mode** — a plain list stays
+  `mode: "any"` (OR, array overlap `&&`, the pre-revision behaviour);
+  `{"values": [...], "mode": "all"}` is AND (containment `@>`). Every
+  other list filter stays OR-only by construction (a proposal has
+  exactly one `composition_id`/`user_id`/etc., so AND could never match).
+- **`likes_count`** added as a range filter/sort — not a
+  `proposal_summaries` column (a like changes independently of publish/
+  refresh, so storing it would go stale the same way any cached count
+  would); `adapters/proposal/repository.py` now builds every gallery/map
+  query on top of a `proposal_summaries_with_likes` CTE (`proposal_
+  summaries` LEFT JOIN a `proposals.likes` count-per-proposal subquery,
+  `COALESCE`d to 0) instead of the bare table, so `filter_builder.py`'s
+  generic `likes_count >= %s` resolves against a real column of the
+  CTE's output — the same mechanism every other section (not just
+  `summaries`) filters through, so a `likes_count` filter narrows
+  `map_lines`/`map_stop_counts`/`map_country_counts` consistently too.
+
+**`map_lines` redesign** — the original WP6 shape (one GeoJSON feature
+per proposal, coloured by that proposal's own margin) didn't match the
+actual use case: line *thickness* by how many proposals run along a
+given physical corridor. Now one feature per distinct stop-pair corridor
+(`stop_a`/`stop_b`, direction collapsed via `LEAST`/`GREATEST` — outbound
+and return share a corridor), carrying `proposal_count` (thickness),
+`proposal_ids` (the assignment), and `avg_margin_eur_per_train_km`
+(mean across those proposals, for optional colouring). Grouping by stop
+pair rather than by geometry match is exact, not approximate: routing
+between two fixed stops is deterministic (same routing graph) regardless
+of which proposal or composition asks, so two proposals sharing a
+stop pair are guaranteed to share the exact geometry too. Implemented as
+a walk over `proposals.trips`/`proposals.segments` per filtered proposal
+(via the same `P{proposal_id}_V{proposal_version}_R1` route_id
+convention `trip_windows` already uses), grouped, then joined to one
+representative `proposals.shapes.geometry` per corridor (already stored
+as GeoJSON — no `ST_AsGeoJSON` needed).
+
+**`map_country_counts` gained geometry** — was `{country: n}`; is now a
+GeoJSON FeatureCollection, one feature per country, `properties: {country,
+n}` and `geometry` the country's own border polygon
+(`input_params.countries.country_geom`, `LEFT JOIN`ed so an unmatched
+code like `"UNK"` still gets a row with `geometry: null`) — the frontend
+choropleth no longer needs a second lookup to render it.
+
+**Bug fix (found while live-testing WP6, not a WP6 regression)**:
+`tests/helpers.py`'s `purge_saved_proposals()` deleted
+`proposals.proposals`/`routes`/`shapes`/`services`/`likes`/`comments` but
+never `proposals.proposal_summaries` — which has no FK to
+`proposals.proposals` (§5.4, deliberate: a derived, rebuildable
+projection, not authoritative data), so nothing cascaded the cleanup.
+Every pytest run that published-then-purged left orphaned summary rows
+behind, invisible until WP6's `total` was the first thing to actually
+count and surface them. Fixed in `purge_saved_proposals()`; `api/
+README.md`'s manual-deletion note for `GET /api/proposal/<id>` corrected
+to say the same applies to any manual production deletion.
+
+**Tests**: `test_52_proposals_gallery_api.py` gained
+`test_proposal_ids_filter`, `test_array_filter_any_vs_all_mode` (+ invalid-
+mode rejection), `test_created_at_range_filter`, `test_updated_at_range_
+filter`, `test_version_and_scenario_filters_no_longer_accepted`, and a new
+`TestLikesCount` class (`likes_count` appears in `summaries`, is
+filterable, is sortable); `test_map_lines_geojson`/`test_map_country_
+counts` rewritten for the new shapes; a new `test_map_lines_thickness_
+reflects_shared_corridor` publishes a second proposal on the identical
+corridor and asserts both land on the same `map_lines` feature.
+
+**Docs**: §7.1's filter/sort/response prose and JSON examples rewritten
+in place (not just this changelog); §5.4's `CREATE TABLE` example gained
+`created_at`; `api/README.md`'s section rewritten to match, including a
+filterable/sortable column reference table; `db/README.md` gained a
+changelog entry for the new migration.
