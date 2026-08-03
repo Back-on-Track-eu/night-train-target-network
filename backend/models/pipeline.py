@@ -3,69 +3,81 @@ pipeline.py
 ===========
 Central dispatch for the route-plan-and-evaluate pipeline (PROPOSALS_
 DESIGN.md §2.1, WP5). Pure domain-level orchestration: no Flask, no dicts,
-no DB writes — composes models/route and models/evaluation exactly the way
-api/proposal_calc.py used to do inline, moved down a layer so every caller
-(the /calc endpoint, publish, the future compute cache of WP13, and
-model-level tests that need a fully evaluated Route without going through
-HTTP) shares one implementation instead of each re-assembling the same six
-steps.
+no DB writes — composes models/route, models/demand, and models/evaluation
+so every caller (the /calc endpoint, publish, the future compute cache of
+WP13, model-level tests, and the DB seed's example proposal) shares one
+implementation instead of each re-assembling the same steps.
 
 Serialization stays out of this module on purpose — that's api/helpers/
 proposal_compute.py's job (dicts, fingerprinting, ID-prefix stripping).
 This module only ever hands back domain objects.
 
 Public interface:
-  run_compute(...) -> ComputeResult
+  run_compute(...) -> ComputeResult                     (full pipeline:
+                                                          plan → stopgap
+                                                          demand → evaluate
+                                                          → views)
+  evaluate_and_build_views(route, tracks, stop_infra)
+      -> (EvaluationResult, ViewsBundle)                (the post-routing
+                                                          half, for callers
+                                                          that bring their
+                                                          own Route/demand:
+                                                          db/dev/seed.py's
+                                                          hand-crafted
+                                                          example, tests/
+                                                          helpers.py's
+                                                          controlled-demand
+                                                          evaluations)
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from models.evaluation.calc import EvaluationResult, evaluate_route
-from models.evaluation.views import (
-    Breakdown,
-    NormalisationScope,
-    build_breakdown,
-    build_breakdown_per_trip_pair,
-    build_breakdown_per_trip_pair_per_country,
-    build_breakdown_per_trip_pair_per_od,
-    build_breakdown_per_trip_pair_per_section,
-    build_breakdown_per_trip_per_stop,
+from models.demand.stopgap import distribute_demand
+from models.demand.version import (
+    STOPGAP_FARE_PER_KM_BY_CLASS,
+    STOPGAP_UTILIZATION_PER,
 )
+from models.evaluation.calc import EvaluationResult, evaluate_route
+from models.evaluation.views import ViewsBundle, build_all_views
+from models.params import StopInfraCollection, TrackInfraCollection
 from models.route.route import Route
 from models.route.route_factory import (
     AutoStopSuggestion,
     RouteProvenance,
     TripPairInput,
-    distribute_demand,
     plan_route,
 )
 from models.route.routing.rail_router import RailRouter
-from models.route.version import (
-    STOPGAP_FARE_PER_KM_BY_CLASS,
-    STOPGAP_UTILIZATION_PER,
-)
 
 
 @dataclass
 class ComputeResult:
-    """Everything one compute pass produces — route, provenance, and every
-    evaluation view, all still domain objects. Callers serialize whatever
+    """Everything one compute pass produces — route, provenance, and the
+    full evaluation, all still domain objects. Callers serialize whatever
     subset they need (api/helpers/proposal_compute.py serializes all of
-    it; a model-level test typically only reads bd_all/bd_per_pair)."""
+    it; a model-level test typically only reads views.bd_all/bd_per_pair).
+    """
 
     route: Route
     provenance: RouteProvenance
     suggestions: list[AutoStopSuggestion]
     evaluation_result: EvaluationResult
-    bd_all: Breakdown
-    bd_per_pair: dict[str, Breakdown]
-    matrix_country: dict[tuple[str, str], Breakdown]
-    matrix_od: dict[tuple[str, str], Breakdown]
-    matrix_section: dict[tuple[str, str], Breakdown]
-    section_scopes: dict[tuple[str, str], NormalisationScope]
-    matrix_stop: dict[tuple[str, str], Breakdown]
+    views: ViewsBundle
+
+
+def evaluate_and_build_views(
+    route: Route,
+    tracks: TrackInfraCollection,
+    stop_infra: StopInfraCollection,
+) -> tuple[EvaluationResult, ViewsBundle]:
+    """Evaluate an already-built, already-demand-populated Route and build
+    every breakdown view — the post-routing half of run_compute(), exposed
+    for callers that construct their Route another way (the seed's
+    hand-crafted example route, tests applying controlled demand)."""
+    result = evaluate_route(route=route, tracks=tracks, stop_infra=stop_infra)
+    return result, build_all_views(route, result)
 
 
 def run_compute(
@@ -83,9 +95,9 @@ def run_compute(
     loader,
     router: RailRouter,
 ) -> ComputeResult:
-    """Build a route and evaluate it in one call — the six steps every
-    compute path (POST /api/proposal/calc, publish, future cache misses)
-    needs: plan → stopgap demand → evaluate → the six breakdown views.
+    """Build a route and evaluate it in one call — the steps every compute
+    path (POST /api/proposal/calc, publish, future cache misses) needs:
+    plan → stopgap demand → evaluate → views.
 
     proposal_id/proposal_version: purely ID-building placeholders for
     plan_route()'s P{id}_V{version}_-prefixed ID convention (see
@@ -115,36 +127,21 @@ def run_compute(
     )
 
     # Stopgap demand distribution — see OPEN_TODOS["demand_model"] in
-    # models/route/version.py. Mutates route in place.
+    # models/demand/version.py. Mutates route in place.
     distribute_demand(
         route,
         utilization_per=STOPGAP_UTILIZATION_PER,
         fare_per_km_by_class=STOPGAP_FARE_PER_KM_BY_CLASS,
     )
 
-    evaluation_result = evaluate_route(
-        route=route, tracks=provenance.tracks, stop_infra=provenance.stop_infra
+    evaluation_result, views = evaluate_and_build_views(
+        route, provenance.tracks, provenance.stop_infra
     )
-
-    bd_all = build_breakdown(route, evaluation_result)
-    bd_per_pair = build_breakdown_per_trip_pair(route, evaluation_result)
-    matrix_country = build_breakdown_per_trip_pair_per_country(route, evaluation_result)
-    matrix_od = build_breakdown_per_trip_pair_per_od(route, evaluation_result)
-    matrix_section, section_scopes = build_breakdown_per_trip_pair_per_section(
-        route, evaluation_result
-    )
-    matrix_stop = build_breakdown_per_trip_per_stop(route, evaluation_result)
 
     return ComputeResult(
         route=route,
         provenance=provenance,
         suggestions=suggestions,
         evaluation_result=evaluation_result,
-        bd_all=bd_all,
-        bd_per_pair=bd_per_pair,
-        matrix_country=matrix_country,
-        matrix_od=matrix_od,
-        matrix_section=matrix_section,
-        section_scopes=section_scopes,
-        matrix_stop=matrix_stop,
+        views=views,
     )

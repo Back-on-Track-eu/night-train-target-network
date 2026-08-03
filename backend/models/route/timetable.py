@@ -65,7 +65,7 @@ living in route_factory.py:
 
 VALID_TIMETABLE_MODES / VALID_SCHEDULE_MODES / VALID_AUTO_STOP_ADDITION_MODES
 stay here as the single source of truth for the allowed strings —
-api/route.py's request validation and route_factory.py's dispatch both read
+the compute request validation (api/helpers/proposal_compute.py) and route_factory.py's dispatch both read
 from them, so a new mode is added in exactly one place (plus the function
 implementing it and the route_factory branch that calls it).
 
@@ -324,7 +324,7 @@ def simple_automatic_fixed_night_timetable(
 
 def _interval_index(stop_ids: list[str], stop_id: str, role: str) -> int:
     """Index of a fixed_night_interval endpoint in stop_ids, with a domain
-    error naming the missing endpoint — api/route.py validates against the
+    error naming the missing endpoint — api/helpers/proposal_compute.py validates against the
     caller's own stops, this re-checks against the possibly auto-extended
     final list (auto_stop_addition only ever inserts, so a miss here means
     the request validation was bypassed)."""
@@ -428,10 +428,10 @@ def fixed_night_speed_warning(
 
 VALID_TIMETABLE_MODES = frozenset({"simpleAutomatic", "simpleAutomaticWithFixedNight"})
 """Single source of truth for allowed timetable_mode strings — read by both
-api/route.py's request validation and route_factory._build_trip()'s switch.
+the compute request validation (api/helpers/proposal_compute.py) and route_factory._build_trip()'s switch.
 Adding a mode means: add its function above, add it to this set, add a
 branch in _build_trip(). "simpleAutomaticWithFixedNight" additionally
-requires the request's fixed_night_interval, validated in api/route.py and
+requires the request's fixed_night_interval, validated in api/helpers/proposal_compute.py and
 threaded through TripPairInput."""
 
 
@@ -456,7 +456,7 @@ def always_daily_schedule() -> Schedule:
 
 VALID_SCHEDULE_MODES = frozenset({"alwaysDaily"})
 """Single source of truth for allowed schedule_mode strings — read by both
-api/route.py's request validation and route_factory.plan_route()'s switch.
+the compute request validation (api/helpers/proposal_compute.py) and route_factory.plan_route()'s switch.
 Reserved: a future demand-aware mode can be added here (new function + this
 set + a plan_route() branch) without changing the request shape."""
 
@@ -469,7 +469,7 @@ set + a plan_route() branch) without changing the request shape."""
 
 VALID_AUTO_STOP_ADDITION_MODES = frozenset({"off", "add", "suggest"})
 """Single source of truth for allowed auto_stop_addition strings — read by
-both api/route.py's request validation and route_factory._build_trip()'s
+both the compute request validation (api/helpers/proposal_compute.py) and route_factory._build_trip()'s
 switch. "off": caller's stop list returned unmodified, no search. "add":
 search + cost + greedy addition within the detour budget. "suggest":
 search + cost like "add", but nothing is added — every costed candidate is

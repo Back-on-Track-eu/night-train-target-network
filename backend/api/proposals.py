@@ -73,9 +73,9 @@ def get_proposal(proposal_id: int):
     Load a proposal — reconstructed compute-response shape (§2.1) plus
     proposal metadata (§7.2). Route/evaluation are rebuilt from storage
     (GTFS + sidecars, evaluation_output + the scenario pin) rather than
-    read back verbatim — see adapters/proposal_repository.py's
+    read back verbatim — see adapters/proposal/repository.py's
     reconstruct_route()/reconstruct_evaluation() and
-    api/helpers/route_gtfs_serialize.py for what "rebuilt" means for each
+    adapters/proposal/gtfs_store.py for what "rebuilt" means for each
     section.
 
     Response: identical shape to POST /api/proposal/publish's response

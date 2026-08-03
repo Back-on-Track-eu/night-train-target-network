@@ -1688,7 +1688,7 @@ COMPOSITION_TYPE_COACHES_RAW = [
 # demo route with its own ad-hoc IDs (as this block used to be) violated
 # that silently. seed_example_proposal(), called at the end of main(),
 # builds one real proposal (Berlin Hbf -> Dresden Hbf -> Wien Hbf) and
-# saves it through adapters.proposal_repository.ProposalRepository — the
+# saves it through adapters.proposal.repository.ProposalRepository — the
 # exact same code path a live POST /api/proposal uses — so the seeded
 # example and a real save are structurally identical by construction,
 # not by two independently maintained representations.
@@ -1996,7 +1996,7 @@ def _build_example_route(scenario_id: int, composition, tracks) -> dict:
     evaluation. route_id uses the bare "R1" structural-id convention
     (mirrors a fresh compute response, PROPOSALS_DESIGN.md §2.1) so the
     resulting dict is publish()-ready the same way a live compute's
-    output is — adapters/proposal_repository.py's publish() rewrites it
+    output is — adapters/proposal/repository.py's publish() rewrites it
     up to the real P{proposal_id}_V{version}_ prefix."""
     draft_prefix = "R1"
     composition_dict = _composition_physics_dict(composition)
@@ -2128,38 +2128,31 @@ def _compute_example_proposal(
     route_dict: dict, scenario_id: int, loader, tracks
 ) -> dict:
     """Run the hand-crafted example route dict through the real
-    evaluation pipeline — distribute_demand() -> evaluate_route() -> the
-    six breakdown views — and serialize the result into exactly the shape
-    api/helpers/proposal_compute.compute_proposal() produces (§2.1), so
-    ProposalRepository.publish() can't tell the difference from a live
-    compute. Deliberately does NOT go through compute_proposal() itself
-    (which calls models/pipeline.run_compute() -> plan_route(), requiring
-    a live RailRouter/OpenRailRouting) — the whole point of hand-crafting
-    the route's physics is to keep DB seeding independent of the routing
-    container being up yet."""
+    evaluation pipeline — distribute_demand() (models/demand) ->
+    models.pipeline.evaluate_and_build_views() — and serialize the result
+    into exactly the shape api/helpers/proposal_compute.compute_proposal()
+    produces (§2.1), so ProposalRepository.publish() can't tell the
+    difference from a live compute. Deliberately does NOT go through
+    run_compute() itself (whose plan_route() step requires a live
+    RailRouter/OpenRailRouting) — the whole point of hand-crafting the
+    route's physics is to keep DB seeding independent of the routing
+    container being up yet; only the post-routing half of the pipeline is
+    reused."""
     from api.helpers.evaluation_serialize import (
         input_to_dict,
         models_to_dict,
         views_to_dict,
     )
     from api.helpers.route_serialize import route_from_dict, route_to_dict
-    from adapters.proposal_projection import route_fingerprint
-    from models.evaluation.calc import evaluate_route
-    from models.evaluation.version import CALC_VERSION
-    from models.evaluation.views import (
-        build_breakdown,
-        build_breakdown_per_trip_pair,
-        build_breakdown_per_trip_pair_per_country,
-        build_breakdown_per_trip_pair_per_od,
-        build_breakdown_per_trip_pair_per_section,
-        build_breakdown_per_trip_per_stop,
-    )
-    from models.route.route_factory import distribute_demand
-    from models.route.version import (
-        ROUTE_BUILDER_VERSION,
+    from adapters.proposal.projection import route_fingerprint
+    from models.demand.stopgap import distribute_demand
+    from models.demand.version import (
         STOPGAP_FARE_PER_KM_BY_CLASS,
         STOPGAP_UTILIZATION_PER,
     )
+    from models.evaluation.version import CALC_VERSION
+    from models.pipeline import evaluate_and_build_views
+    from models.route.version import ROUTE_BUILDER_VERSION
 
     route, compositions = route_from_dict(route_dict, loader, scenario_id=scenario_id)
     distribute_demand(
@@ -2168,19 +2161,9 @@ def _compute_example_proposal(
         fare_per_km_by_class=STOPGAP_FARE_PER_KM_BY_CLASS,
     )
     stop_infra = loader.build_all_stops(scenario_id)
-    result = evaluate_route(route=route, tracks=tracks, stop_infra=stop_infra)
-
-    bd_all = build_breakdown(route, result)
-    bd_per_pair = build_breakdown_per_trip_pair(route, result)
-    matrix_country = build_breakdown_per_trip_pair_per_country(route, result)
-    matrix_od = build_breakdown_per_trip_pair_per_od(route, result)
-    matrix_section, section_scopes = build_breakdown_per_trip_pair_per_section(
-        route, result
-    )
-    matrix_stop = build_breakdown_per_trip_per_stop(route, result)
+    _, views = evaluate_and_build_views(route, tracks, stop_infra)
 
     serialized_route = route_to_dict(route, scenario_id, tracks)
-    trip_pair_by_key = {p.outbound.trip_id: p for p in route.trip_pairs}
 
     return {
         "route_builder_version": ROUTE_BUILDER_VERSION,
@@ -2202,17 +2185,7 @@ def _compute_example_proposal(
             "input": input_to_dict(
                 serialized_route, tracks, stop_infra, compositions, include_route=False
             ),
-            "views": views_to_dict(
-                bd_all,
-                bd_per_pair,
-                matrix_country,
-                matrix_od,
-                matrix_section,
-                section_scopes,
-                matrix_stop,
-                route,
-                trip_pair_by_key,
-            ),
+            "views": views_to_dict(views, route),
         },
     }
 
@@ -2231,11 +2204,11 @@ def seed_example_proposal(cur, conn) -> None:
     WP5 note: proposals no longer support half-states — every published
     proposal carries both route AND evaluation (§2.4). This seed now runs
     the hand-crafted example route through the real evaluation pipeline
-    (_compute_example_proposal() — distribute_demand -> evaluate_route ->
-    views) instead of the old no-demand illustrative stub, so cost/revenue
-    on the seeded example are real computed numbers, not absent. It still
-    deliberately does NOT go through the full compute_proposal()/
-    models.pipeline.run_compute() pipeline (which needs a live
+    (_compute_example_proposal() — distribute_demand ->
+    evaluate_and_build_views) instead of the old no-demand illustrative
+    stub, so cost/revenue on the seeded example are real computed numbers,
+    not absent. It still deliberately does NOT go through the full
+    compute_proposal()/run_compute() pipeline (which needs a live
     RailRouter/OpenRailRouting) — see _compute_example_proposal()'s
     docstring.
 
@@ -2256,7 +2229,7 @@ def seed_example_proposal(cur, conn) -> None:
         if str(backend_root) not in sys.path:
             sys.path.insert(0, str(backend_root))
 
-        from adapters.proposal_repository import ProposalRepository
+        from adapters.proposal.repository import ProposalRepository
         from adapters.data_loader_from_db import DBDataLoader
     except ImportError:
         print(

@@ -1,10 +1,11 @@
 """
-proposal_engagement_repository.py
-==================================
+engagement_repository.py
+========================
 Write-path database adapter for proposal likes and comments — mirrors
 FeedbackRepository (adapters/feedback_repository.py): its own connection
-to the same database, kept separate from ProposalRepository (which owns
-the heavier route/GTFS write path) and from DBDataLoader (read-only). See
+to the same database, kept separate from ProposalRepository (repository.py,
+which owns the heavier route/GTFS write path) and from DBDataLoader
+(read-only). See
 db/dev/sql/create_proposal_schema.sql for the proposals.likes /
 proposals.comments tables this module writes to.
 

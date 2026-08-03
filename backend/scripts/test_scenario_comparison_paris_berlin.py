@@ -22,8 +22,7 @@ So the two scenarios can legitimately produce different routed paths
 (distance/time), not just different tac_eur figures. This script surfaces
 both: the routing-level diff (distance, driving time, per-country
 hsr_allowed) and the cost-level diff — both via one POST
-/api/proposal/calc per scenario (WP5 merged the old two-call route/plan +
-evaluation/calc pair into this single endpoint).
+/api/proposal/calc per scenario (route + evaluation in one call).
 
 The 2026 Base Line ("2026-baseline") is deliberately excluded — it's a
 deprecated historical reference, not a live policy comparison.
@@ -176,8 +175,7 @@ def fetch_scenario(scenario_key: str) -> dict:
 
 
 def compute(scenario_id: int) -> dict:
-    """POST /api/proposal/calc — WP5 merged the old two-call route/plan +
-    evaluation/calc pair into one; both endpoints are gone. Same scenario
+    """POST /api/proposal/calc — route + evaluation in one call. Same scenario
     for build and cost (this script never needed the old evaluation/calc's
     override-to-a-different-scenario capability), so the merge is exact."""
     body = {
@@ -193,7 +191,9 @@ def compute(scenario_id: int) -> dict:
     }
     resp = requests.post(f"{API_BASE}/api/proposal/calc", json=body, timeout=90)
     if resp.status_code != 200:
-        print(f"[✗] proposal/calc failed for scenario_id={scenario_id}: {resp.text[:300]}")
+        print(
+            f"[✗] proposal/calc failed for scenario_id={scenario_id}: {resp.text[:300]}"
+        )
         sys.exit(1)
     return resp.json()
 

@@ -1,12 +1,13 @@
 """
-proposal_projection.py
-=======================
+projection.py
+=============
 Fingerprint + gallery-summary projection (PROPOSALS_DESIGN.md §3.1/§5.4,
 WP4). Pure functions over the same dicts POST /api/proposal/calc already
 returns (route_to_dict() shape + the evaluation "views" block) — no DB
-access, no domain-object construction. Lives under adapters/, not
-api/helpers/, because the repository calls it during publish (WP5); an
-api/helpers import from adapters/ would invert the project's layering.
+access, no domain-object construction. Lives under adapters/proposal/
+because the repository calls it during publish (WP5); adapters must never
+be imported *by* the pure serializers, only the other way around (see
+AGENTS.md's layering note).
 
 Public interface:
   route_fingerprint(route)            → str   (§3.1 — SHA-256 over the
@@ -28,9 +29,9 @@ Public interface:
                                                  publish time, not this
                                                  module's.)
 
-Callers: api/proposal_calc.py (fingerprint only, for the WP2 compute
-response); adapters/proposal_repository.py from WP5 onward (both
-functions, at publish/refresh time).
+Callers: api/helpers/proposal_compute.py (fingerprint only, for the
+merged compute response); repository.py from WP5 onward (both functions,
+at publish/refresh time).
 """
 
 from __future__ import annotations

@@ -178,9 +178,7 @@ def fetch_scenario(scenario_key: str) -> dict:
 
 
 def build_route(scenario_id: int, fixed_night_interval: list[str] | None) -> dict:
-    """One POST /api/proposal/calc (WP5 removed the standalone POST
-    /api/route/plan this originally targeted — same "route" response key,
-    only the URL changed) — mode A (interval=None, simpleAutomatic) or
+    """One POST /api/proposal/calc — mode A (interval=None, simpleAutomatic) or
     mode B (interval set, simpleAutomaticWithFixedNight). Everything else is
     pinned identical so the timetable is the only thing that differs."""
     body = {

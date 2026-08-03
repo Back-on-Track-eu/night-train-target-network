@@ -1,12 +1,16 @@
 """
-route_gtfs_serialize.py
-========================
-GTFS + sidecar serialization — the write/read counterpart of
-route_serialize.py's route_to_dict()/route_from_dict(), but against
+gtfs_store.py
+=============
+GTFS + sidecar persistence — the DB write/read counterpart of
+api/helpers/route_serialize.py's route_to_dict()/route_from_dict(), against
 proposals.{routes,trips,stop_times,shapes,services,calendar} + the WP1
 sidecar tables (proposals.segments, od_pairs, parkings, shuntings,
 timetable_warnings, seasonal_schedules) instead of a JSON blob
-(PROPOSALS_DESIGN.md §5.1/§5.2, WP3).
+(PROPOSALS_DESIGN.md §5.1/§5.2, WP3). Lives under adapters/ — it
+executes SQL, and the project's layering keeps all DB access in adapters/;
+the pure dict↔domain serializers it delegates to stay in api/helpers/
+(Flask-free by design, importable from here — see AGENTS.md's layering
+note).
 
 Two halves, mirroring route_serialize.py's own split:
 
@@ -26,16 +30,11 @@ module never reimplements general_parameters, the composition/track
 physics-subset shape, or geometry_id assignment; it only has to get the
 domain objects right and everything downstream is proven code.
 
-WP5 update: this is now the SOLE GTFS write/read path — the old
-adapters.proposal_repository._insert_gtfs() (pre-WP3, persist-on-calc)
-was removed in WP5's cutover along with route_body/evaluation_body.
-adapters/proposal_repository.py's publish() calls insert_route_gtfs()
-directly (within its own transaction/cursor) and no longer does any GTFS
-assembly itself — the low-level GTFS constants/helpers below (weekday
-flags, the fixed service window, the stop_type->pickup/drop_off mapping,
-_route_long_name) used to live in proposal_repository.py; they moved
-here with the write path itself so proposal_repository.py can import
-insert_route_gtfs() from this module without a circular import.
+WP5 update: this is the SOLE GTFS write/read path — the old
+persist-on-calc _insert_gtfs() was removed in WP5's cutover along with
+route_body/evaluation_body. repository.py's publish() calls
+insert_route_gtfs() directly (within its own transaction/cursor) and does
+no GTFS assembly itself.
 
 Segment geometry is stored per-segment on `shapes` (shape_id convention
 "{trip_id}_L{i}_SHAPE", mirroring route_to_dict()'s own geometry_id
@@ -134,11 +133,9 @@ def insert_route_gtfs(cur, route: dict) -> None:
     """Full GTFS + sidecar decomposition of a route dict (route_to_dict()
     shape). route["route_id"] must already carry its real
     P{proposal_id}_V{version}_R1 prefix — this function assumes ID
-    rewriting already happened (same assumption the old
-    adapters.proposal_repository._insert_gtfs() makes), it does no
-    rewriting itself.
+    rewriting already happened — it does no rewriting itself.
 
-    Nothing here is discarded — unlike the old write path, every WP1
+    Nothing here is discarded — every WP1
     sidecar table gets populated, plus stop_times.stop_type/auto_added.
     """
     route_id = route["route_id"]
@@ -614,7 +611,7 @@ def _build_shuntings(cur, route_id: str) -> list[Shunting]:
 
 
 def input_parameters_from_scenario(scenario_id: int, loader) -> dict:
-    """Rebuild POST /api/evaluation/calc's evaluation.input.parameters
+    """Rebuild the evaluation.input.parameters block
     section from a scenario pin alone (§5.1 — parameters are never stored
     per proposal, only the scenario_id that resolves them). Reuses
     evaluation_serialize.input_to_dict() itself (include_route=False, same

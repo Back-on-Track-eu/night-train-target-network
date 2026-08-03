@@ -1,9 +1,9 @@
 """
-proposal_repository.py
-======================
+repository.py
+=============
 Write-path database adapter for published proposals — the persistence
-counterpart to data_loader_from_db.py (which stays strictly read-only for
-parameter data).
+counterpart to adapters/data_loader_from_db.py (which stays strictly
+read-only for parameter data).
 
 WP5 cutover (PROPOSALS_DESIGN.md §2.2/§5): replaces the old persist-on-
 calc world (save()/attach_evaluation()/get_version(), route_body/
@@ -14,43 +14,40 @@ or updates the existing one in place (mode="overwrite", previous GTFS/
 sidecar rows pruned in the same transaction). See docs/PROPOSALS_DESIGN.md
 §2.2 for the full new/overwrite contract this module implements.
 
-The actual GTFS + sidecar writing is NOT here — api/helpers/
-route_gtfs_serialize.py's insert_route_gtfs() (WP3) is the sole writer,
-called from within publish()'s transaction via the same cursor. This
-module owns the proposals.proposals / proposal_summaries / update_log
-rows and the transaction boundary around all of it, plus the low-level
-prefixed-ID utilities (parse_route_id/rewrite_id_prefix) shared by
-api/helpers/proposal_compute.py (strips the neutral prefix for /calc) and
-this module (adds the real prefix at publish time).
+The actual GTFS + sidecar writing is NOT here — gtfs_store.py's
+insert_route_gtfs() (WP3) is the sole writer, called from within
+publish()'s transaction via the same cursor. This module owns the
+proposals.proposals / proposal_summaries / update_log rows and the
+transaction boundary around all of it. The prefixed-ID rewrite it applies
+at publish time lives in id_prefix.py (shared with api/helpers/
+proposal_compute.py, which strips the neutral prefix for /calc).
 """
 
 from __future__ import annotations
 
 import logging
 import os
-import re
-from typing import Any, Optional
+from typing import Optional
 
 import psycopg2
 import psycopg2.extras
 from psycopg2.extras import Json
 
-from adapters.proposal_projection import build_summary_row
-from api.helpers.route_gtfs_serialize import (
+from adapters.proposal.gtfs_store import (
     input_parameters_from_scenario,
     insert_route_gtfs,
     route_dict_from_gtfs,
 )
+from adapters.proposal.id_prefix import rewrite_id_prefix
+from adapters.proposal.projection import build_summary_row
 
 logger = logging.getLogger(__name__)
-
-_ROUTE_ID_PATTERN = re.compile(r"^P(\d+)_V(\d+)_R1$")
 
 # Every ID route_factory.py mints for a route starts with this — see
 # api/helpers/proposal_compute.py's _NEUTRAL_PREFIX docstring. Publish
 # rewrites this bare structural form up to the real P{id}_V{version}_
 # prefix; single-route proposals only (today's only reachable case — see
-# route_gtfs_serialize.py and route_factory.py), so "R1" is precise, not a
+# gtfs_store.py and route_factory.py), so "R1" is precise, not a
 # loose heuristic: nothing else in a compute response starts with it.
 _STRUCTURAL_ROUTE_PREFIX = "R1"
 
@@ -62,50 +59,6 @@ class ProposalNotFoundError(Exception):
 class ProposalForbiddenError(Exception):
     """Raised by publish(mode="overwrite") when proposal_id belongs to a
     different user."""
-
-
-def parse_route_id(route_id: str) -> tuple[int, int]:
-    """Extract (proposal_id, proposal_version) from a route_id following the
-    P{proposal_id}_V{version}_R1 convention. Raises ValueError otherwise."""
-    match = _ROUTE_ID_PATTERN.match(route_id or "")
-    if not match:
-        raise ValueError(
-            f"route_id '{route_id}' does not follow the "
-            "P{proposal_id}_V{version}_R1 convention."
-        )
-    return int(match.group(1)), int(match.group(2))
-
-
-def rewrite_id_prefix(obj: Any, old_prefix: str, new_prefix: str) -> Any:
-    """Recursively replace an ID prefix in every string value AND dict key
-    of a JSON structure. Covers route_id, trip_ids, geometry_ids, and all
-    trip references (od_pairs, shuntings, parkings) as values — and, in
-    the evaluation response's per-trip-pair/per-stop views
-    (api/helpers/evaluation_serialize.py), trip_id/pair-key strings used
-    as dict keys rather than values (e.g. data[pair_key][country_key]).
-    Keys are always strings in a JSON-compatible dict, so the same
-    startswith/replace logic applies to both.
-
-    old_prefix must be non-empty and precise — every caller in this
-    codebase uses either the neutral P0_V0_ prefix or the bare "R1"
-    structural prefix, both of which are guaranteed not to collide with
-    any other string in a compute response (stop names, country codes,
-    etc. never start with either). An empty old_prefix would match every
-    string in the structure, which is never what a caller wants."""
-    if isinstance(obj, str):
-        return (
-            new_prefix + obj[len(old_prefix) :] if obj.startswith(old_prefix) else obj
-        )
-    if isinstance(obj, list):
-        return [rewrite_id_prefix(item, old_prefix, new_prefix) for item in obj]
-    if isinstance(obj, dict):
-        return {
-            rewrite_id_prefix(key, old_prefix, new_prefix): rewrite_id_prefix(
-                value, old_prefix, new_prefix
-            )
-            for key, value in obj.items()
-        }
-    return obj
 
 
 class ProposalRepository:
@@ -143,24 +96,6 @@ class ProposalRepository:
     def close(self) -> None:
         if self._conn and not self._conn.closed:
             self._conn.close()
-
-    # ------------------------------------------------------------------
-    # Users
-    # ------------------------------------------------------------------
-
-    def get_user(self, user_id: int) -> Optional[dict]:
-        """admin.users row for user_id, or None."""
-        with self._cursor() as cur:
-            cur.execute(
-                # display_name aliased to user_name — see feedback_repository
-                # .get_user(): the API field name stays user_name for now.
-                "SELECT user_id, display_name AS user_name, email "
-                "FROM admin.users WHERE user_id = %s",
-                (user_id,),
-            )
-            row = cur.fetchone()
-        self._conn.rollback()  # release the read-only transaction
-        return dict(row) if row else None
 
     @staticmethod
     def _next_proposal_id(cur) -> int:
@@ -230,7 +165,7 @@ class ProposalRepository:
                 request_echo = prefixed["request"]
                 # §5.1 — only models + views are irreducible/stored;
                 # input.parameters is rebuilt on read via the scenario pin
-                # (route_gtfs_serialize.input_parameters_from_scenario()).
+                # (gtfs_store.input_parameters_from_scenario()).
                 storage_evaluation = {
                     "models": evaluation_full["models"],
                     "views": evaluation_full["views"],
@@ -518,7 +453,7 @@ class ProposalRepository:
         """The slimmed proposals.proposals container row (§5.3) + owner
         display name, or None if unknown. Does NOT include the route or
         evaluation — GET /api/proposal/<id> (api/proposals.py) rebuilds
-        those separately via route_gtfs_serialize.py, since the container
+        those separately via gtfs_store.py, since the container
         alone doesn't carry them (§5.1: route lives in GTFS, evaluation's
         input.parameters is rebuilt from the scenario pin)."""
         with self._cursor() as cur:
@@ -541,7 +476,7 @@ class ProposalRepository:
         self, proposal_id: int, proposal_version: int, scenario_id: int, loader
     ) -> dict:
         """route_to_dict()-shaped route, rebuilt from GTFS + sidecar rows
-        (route_gtfs_serialize.route_dict_from_gtfs(), WP3) — the read-side
+        (gtfs_store.route_dict_from_gtfs(), WP3) — the read-side
         counterpart of publish()'s insert_route_gtfs() call. Encapsulated
         here (rather than handing api/proposals.py a raw cursor) so the
         repository stays the sole owner of DB access."""
@@ -557,7 +492,7 @@ class ProposalRepository:
         proposal — models/views come back verbatim from the stored
         evaluation_output column (§5.1: irreducible, stored as-is);
         input.parameters is rebuilt fresh via the scenario pin
-        (route_gtfs_serialize.input_parameters_from_scenario()), never
+        (gtfs_store.input_parameters_from_scenario()), never
         stored (would duplicate the params tables into every row)."""
         stored = container["evaluation_output"]
         # input_parameters_from_scenario() returns the whole {"parameters":

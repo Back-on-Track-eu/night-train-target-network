@@ -2,10 +2,8 @@
 test_route_plan.py
 ===================
 Manual test script for POST /api/proposal/calc (route-building half —
-WP5 removed the standalone POST /api/route/plan this script originally
-targeted; /api/proposal/calc's "route" response key is identical in
-shape, so this script only needed its endpoint URL updated, not its
-request/response handling).
+the "route" response key; the merged response's evaluation block is
+written out raw but not post-processed here).
 
 Usage:
     python scripts/test_route_plan.py <path/to/request.json>
@@ -241,7 +239,7 @@ def test_route_plan(path: str):
         response_body = response.json()
     except requests.exceptions.JSONDecodeError:
         # Not a JSON body at all — most likely a raw Flask/Werkzeug error page,
-        # meaning the exception happened outside api/route.py's own try/except.
+        # meaning the exception happened outside api/proposal_calc.py's own try/except.
         # Check the Flask server's own terminal for the actual traceback.
         print("\nNon-JSON response body (raw Flask error page?) — check the Flask")
         print("server's terminal for the actual traceback. Raw response body:\n")

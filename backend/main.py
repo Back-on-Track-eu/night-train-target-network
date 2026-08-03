@@ -32,10 +32,9 @@ Endpoints — see api/README.md for full documentation.
   GET  /api/params/TrackInfrastructures
   GET  /api/scenarios
 
-WP5 cutover (PROPOSALS_DESIGN.md §2, §10): POST /api/route/plan and
-POST /api/evaluation/calc are gone — POST /api/proposal/calc (merged
-ephemeral compute, WP2) and POST /api/proposal/publish (the only user
-write path, WP5) replace them.
+POST /api/proposal/calc is the merged ephemeral compute endpoint and
+POST /api/proposal/publish the only user write path (PROPOSALS_DESIGN.md
+§2).
 """
 
 import logging
@@ -81,10 +80,8 @@ def create_app() -> Flask:
     # --- blueprints ---
     app.register_blueprint(health.bp, url_prefix="/api")
     app.register_blueprint(params.bp, url_prefix="/api/params")
-    # WP2 + WP5 (PROPOSALS_DESIGN.md §2): merged ephemeral compute
-    # (calc) + the only user write path (publish) — replace the old
-    # POST /api/route/plan + POST /api/evaluation/calc pair, removed in
-    # WP5's cutover.
+    # Merged ephemeral compute (calc) + the only user write path
+    # (publish) — PROPOSALS_DESIGN.md §2.
     app.register_blueprint(proposal_calc.bp, url_prefix="/api/proposal")
     app.register_blueprint(proposal_publish.bp, url_prefix="/api/proposal")
     app.register_blueprint(auth.bp, url_prefix="/api/auth")

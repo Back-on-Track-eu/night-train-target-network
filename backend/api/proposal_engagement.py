@@ -17,7 +17,7 @@ GETs are open, same as proposal loading (api/proposals.py). Writes need
 @require_auth at the TRUST_GUEST floor — the same bar POST /api/proposal/
 publish already clears for a guest to publish a proposal. Both resources
 key on proposal_id (a soft reference, see
-adapters/proposal_engagement_repository.py)
+adapters/proposal/engagement_repository.py)
 rather than a specific proposal_version, so a like or a discussion survives
 the proposal being edited into a new version.
 """

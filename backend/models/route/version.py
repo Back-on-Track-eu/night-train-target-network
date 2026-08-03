@@ -26,12 +26,12 @@ from dataclasses import dataclass
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.12"
+ROUTE_BUILDER_VERSION: str = "0.9.13"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
 # Short, plain-English summary of what this model computes — embedded as-is
-# in the "models" section of POST /api/evaluation/calc's response, alongside
+# in the "models" section of the merged compute response, alongside
 # ROUTE_BUILDER_VERSION and ROUTE_FORMULAS.
 ROUTE_BUILDER_DESCRIPTION: str = (
     "Route/timetable builder: turns a list of stops, a composition, and "
@@ -41,6 +41,16 @@ ROUTE_BUILDER_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.13": {
+        "date": "2026-08-03",
+        "author": "david",
+        "changes": "Pure refactor, outputs unchanged: adjust_route() removed "
+        "(unreachable since WP5's cutover); the stopgap demand model "
+        "(distribute_demand() + STOPGAP_* standard values and the "
+        "demand_model TODO) moved out to the new models/demand/ package "
+        "ahead of the real demand model landing there. Version bumped for "
+        "the CI version-check contract only — no computed number changes.",
+    },
     "0.9.12": {
         "date": "2026-07-21",
         "author": "david",
@@ -273,7 +283,7 @@ CHANGELOG: dict = {
 # change and warrants a version bump above.
 # =============================================================================
 
-# --- API request defaults (applied once, at the API boundary — api/route.py)
+# --- API request defaults (applied once, at the API boundary — api/helpers/proposal_compute.py)
 DEFAULT_TIMETABLE_MODE: str = "simpleAutomatic"
 DEFAULT_SCHEDULE_MODE: str = "alwaysDaily"
 DEFAULT_ROUTING_MODE: str = "fullRouting"
@@ -374,20 +384,6 @@ deceleration); 0.5 m/s² is a comfortable service value appropriate for
 sleeping passengers — full emergency capability is far higher and
 irrelevant for timetabling."""
 
-# --- Stopgap demand (distribute_demand() inputs — see OPEN_TODOS)
-STOPGAP_UTILIZATION_PER: float = 0.7
-"""Placeholder scalar utilization applied uniformly to every class until a
-real demand model lands."""
-
-STOPGAP_FARE_PER_KM_BY_CLASS: dict[str, float] = {
-    "Seat": 0.10,
-    "Couchette": 0.13,
-    "Sleeper": 0.18,
-    "Capsule": 0.12,
-    "Catering": 0.0,
-}
-"""Placeholder flat per-km fares by class_main — same caveat as above."""
-
 # --- Neutral placeholder ids (api/helpers/proposal_compute.py, PROPOSALS_DESIGN.md §2.1)
 NEUTRAL_PROPOSAL_ID: int = 0
 NEUTRAL_PROPOSAL_VERSION: int = 0
@@ -395,11 +391,11 @@ NEUTRAL_PROPOSAL_VERSION: int = 0
 id-building signature for POST /api/proposal/calc. Never risks colliding
 with anything: /api/proposal/calc never persists, so its P{id}_V{version}_
 prefix exists only for the instant it takes rewrite_id_prefix() (adapters/
-proposal_repository.py) to strip it back off into the neutral R1/T.../
+proposal/id_prefix.py) to strip it back off into the neutral R1/T.../
 structural IDs §2.1 specifies. A fixed value keeps that round trip
 deterministic and easy to assert on in tests. Publish (WP5) then rewrites
 those same bare structural ids up to the real P{proposal_id}_V{version}_
-prefix — see adapters/proposal_repository.py's _STRUCTURAL_ROUTE_PREFIX."""
+prefix — see adapters/proposal/repository.py's _STRUCTURAL_ROUTE_PREFIX."""
 
 
 # =============================================================================
@@ -421,14 +417,6 @@ OPEN_TODOS: dict[str, str] = {
         "ODPair.trip_id, route_to_dict()/route_from_dict(), and every test "
         "fixture hardcoding IDs — needs its own scoped pass across "
         "route_factory.py, route.py, route_serialize.py, and tests/."
-    ),
-    "demand_model": (
-        "Replace distribute_demand()'s stopgap inputs (STOPGAP_UTILIZATION_"
-        "PER, STOPGAP_FARE_PER_KM_BY_CLASS above) and its uniform-"
-        "distribution proxy with a real demand model accounting for "
-        "asymmetric directional demand, price elasticity, and competition "
-        "from other modes — likely with per-scenario parameters. Target "
-        "module: models/demand/."
     ),
     "auto_stop_nuts1_prefilter": (
         "Candidate search prefilters the stop catalog to countries the "
@@ -469,11 +457,6 @@ OPEN_TODOS: dict[str, str] = {
         "_shuntings() creates one Shunting per trip terminal with no "
         "deduplication; Y/X-shaped routes with shared terminals may need "
         "fewer coupling/uncoupling events."
-    ),
-    "adjust_route_unreachable": (
-        "route_factory.adjust_route() (schedule-only changes, no rerouting) "
-        "exists but is not reachable from any API endpoint — kept for a "
-        "future save/versioning flow."
     ),
 }
 

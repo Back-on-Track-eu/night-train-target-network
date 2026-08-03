@@ -19,7 +19,7 @@ import logging
 
 from flask import Blueprint, g, jsonify, request
 
-from adapters.proposal_repository import ProposalForbiddenError, ProposalNotFoundError
+from adapters.proposal.repository import ProposalForbiddenError, ProposalNotFoundError
 from api.auth_middleware import require_auth
 from api.helpers.proposal_serialize import proposal_to_response_dict
 from api.helpers.publish_dispatch import (

@@ -5,7 +5,7 @@ POST /api/proposal/publish's case-dispatch (PROPOSALS_DESIGN.md §2.2,
 WP5). All persisting case distinctions in one small component: validate
 the publish envelope, enforce the base-scenario rule, compute (never
 trust a client-supplied result), and hand off to
-adapters/proposal_repository.py's publish() for the actual write.
+adapters/proposal/repository.py's publish() for the actual write.
 
 Deliberately Flask-agnostic beyond taking user_id as a plain argument —
 api/proposal_publish.py reads it off g.user_id (the auth layer) and
@@ -16,7 +16,7 @@ at all. Only api/proposal_publish.py (the view) touches flask.g/request.
 Public interface:
   validate_publish_body(body) -> list[str]
   dispatch_publish(body, user_id) -> dict   (raises ScenarioNotBaseError /
-                                              adapters.proposal_repository.
+                                              adapters.proposal.repository.
                                               ProposalNotFoundError /
                                               ProposalForbiddenError /
                                               ValueError on failure)
@@ -25,8 +25,7 @@ Public interface:
 from __future__ import annotations
 
 from api.helpers.dependencies import get_loader, get_proposal_repository
-from api.helpers.proposal_compute import compute_proposal
-from api.proposal_calc import validate_calc_body
+from api.helpers.proposal_compute import compute_proposal, validate_calc_body
 
 
 class ScenarioNotBaseError(Exception):
@@ -37,8 +36,8 @@ class ScenarioNotBaseError(Exception):
 def validate_publish_body(body: dict) -> list[str]:
     """Structural validation of the publish envelope itself (§2.2) —
     compute_request's own fields are validated separately via
-    validate_calc_body(), since that's exactly the same request shape
-    /calc already validates."""
+    proposal_compute.validate_calc_body(), since that's exactly the same
+    request shape /calc already validates."""
     errors = []
 
     if not isinstance(body.get("name"), str) or not body["name"].strip():
@@ -74,7 +73,7 @@ def dispatch_publish(body: dict, user_id: int) -> dict:
     doesn't belong in the pure structural validator), enforce the
     base-scenario rule, compute, and publish.
 
-    Returns adapters.proposal_repository.ProposalRepository.publish()'s
+    Returns adapters.proposal.repository.ProposalRepository.publish()'s
     result dict — ready for api/helpers/proposal_serialize.py to shape
     into the final HTTP response.
     """

@@ -43,8 +43,8 @@ Public surface
   VALID_ROUTING_MODES  (single source of truth for allowed routing_mode
     strings — the routing_mode switch lives in RailRouter.route() below,
     so its registry lives here too, mirroring VALID_TIMETABLE_MODES /
-    VALID_SCHEDULE_MODES in models/route/timetable.py; api/route.py's
-    request validation reads from it)
+    VALID_SCHEDULE_MODES in models/route/timetable.py; the compute
+    request validation in api/helpers/proposal_compute.py reads from it)
   build_router_stops(stop_ids, stop_infra) → list[StopInput]  (shared stop_id
     → StopInput conversion — used by route_factory.py and timetable.py's
     auto_stop_addition trial re-routes)
@@ -100,9 +100,9 @@ def build_router_stops(
     docstring); real StopType classification happens afterwards, via
     route_factory._build_trip()'s timetable_mode switch.
 
-    Single call site for this conversion — route_factory.py (initial routing,
-    adjust_route()) and timetable.py (auto_stop_addition's trial re-routes)
-    both use this rather than each building StopInput lists themselves.
+    Single call site for this conversion — route_factory.py (initial
+    routing) and timetable.py (auto_stop_addition's trial re-routes) both
+    use this rather than each building StopInput lists themselves.
     """
     router_stops = [
         StopInput(stop=stop_infra.get(sid), stop_type=StopType.BOTH) for sid in stop_ids
@@ -210,7 +210,7 @@ class CountryIndex:
 
 VALID_ROUTING_MODES = frozenset({"simpleRouting", "fullRouting"})
 """Single source of truth for allowed routing_mode strings — read by both
-api/route.py's request validation and RailRouter.route()'s switch below.
+the compute request validation (api/helpers/proposal_compute.py) and RailRouter.route()'s switch below.
 Adding a mode means: add it to this set and add a branch in route()."""
 
 
@@ -274,7 +274,7 @@ class RailRouter:
         Route a trip and return bare segment physics.
 
         routing_mode (no default here — defaulting is an API-boundary
-        concern, see api/route.py; every caller passes it explicitly):
+        concern, see api/helpers/proposal_compute.py; every caller passes it explicitly):
           "fullRouting"   — speed capped at the composition's own
                              max_speed_kmh everywhere, plus HSR avoidance:
                              track segments whose PERMITTED speed exceeds
@@ -306,7 +306,7 @@ class RailRouter:
             raise ValueError("At least 2 stops are required.")
 
         # routing_mode SWITCH — VALID_ROUTING_MODES is the same set
-        # api/route.py validates the request against, so an unknown mode
+        # the compute request validation (api/helpers/proposal_compute.py) checks against, so an unknown mode
         # can only reach here if that validation was bypassed.
         if routing_mode == "simpleRouting":
             raw = self._post_route(self._build_payload(stops, None))
