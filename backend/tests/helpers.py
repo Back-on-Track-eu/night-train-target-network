@@ -335,6 +335,13 @@ def purge_saved_proposals(conn, keep_route_id: str = "P1_V1_R1") -> None:
     not the "P1_" boundary. Deleting routes cascades trips and stop_times;
     deleting services cascades calendar and calendar_dates.
 
+    proposal_summaries has no FK to proposals.proposals (§5.4 — it's a
+    derived, rebuildable projection, not authoritative data), so it needs
+    its own explicit DELETE here: nothing cascades it. Skipping this
+    silently orphans a row on every purge, which a later gallery/map call
+    then counts and returns — a real, previously-undetected leak this
+    purge left every prior test run.
+
     proposals.likes/proposals.comments are cleared unconditionally (not
     keyed off keep_route_id) — db/dev/seed.py seeds no engagement rows on
     any proposal, including the permanent example, so there is nothing to
@@ -359,6 +366,10 @@ def purge_saved_proposals(conn, keep_route_id: str = "P1_V1_R1") -> None:
     )
     cur.execute(
         "DELETE FROM proposals.proposals WHERE proposal_id != %s",
+        (keep_pid,),
+    )
+    cur.execute(
+        "DELETE FROM proposals.proposal_summaries WHERE proposal_id != %s",
         (keep_pid,),
     )
     conn.commit()

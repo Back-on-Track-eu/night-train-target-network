@@ -343,11 +343,15 @@ def test_seeded_example_proposal_is_queryable(api_base):
 
 
 class TestList:
+    """WP6-minimal coverage of the sectioned response envelope — the full
+    §7.1 filter/sort/section contract is covered end to end in
+    test_52_proposals_gallery_api.py."""
+
     def test_list_includes_published_and_seed(self, api_base, published):
         resp = requests.get(f"{api_base}{PROPOSALS_URL}", timeout=15)
         assert resp.status_code == 200
         body = resp.json()
-        ids = {p["proposal_id"] for p in body["proposals"]}
+        ids = {p["proposal_id"] for p in body["summaries"]["proposals"]}
         assert published["proposal_id"] in ids
         assert _SEED_PROPOSAL_ID in ids
 
@@ -358,16 +362,16 @@ class TestList:
             timeout=15,
         )
         assert resp.status_code == 200
-        body = resp.json()
-        assert all(p["user_id"] == script_user_id for p in body["proposals"])
-        assert published["proposal_id"] in {p["proposal_id"] for p in body["proposals"]}
+        proposals = resp.json()["summaries"]["proposals"]
+        assert all(p["user_id"] == script_user_id for p in proposals)
+        assert published["proposal_id"] in {p["proposal_id"] for p in proposals}
 
     def test_pagination(self, api_base, published):
         resp = requests.post(
             f"{api_base}{PROPOSALS_URL}", json={"limit": 1, "offset": 0}, timeout=15
         )
         assert resp.status_code == 200
-        assert len(resp.json()["proposals"]) <= 1
+        assert len(resp.json()["summaries"]["proposals"]) <= 1
 
     def test_list_rejects_unknown_filter_key(self, api_base):
         resp = requests.post(
