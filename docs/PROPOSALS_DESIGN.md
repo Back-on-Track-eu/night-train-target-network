@@ -573,6 +573,7 @@ CREATE TABLE proposals.proposals (
     proposal_id            SERIAL PRIMARY KEY,      -- one row per proposal, always current
     proposal_version       INTEGER NOT NULL DEFAULT 1,  -- internal state counter (§4)
     user_id                INTEGER REFERENCES admin.users(user_id) ON DELETE SET NULL,
+    name                   TEXT NOT NULL,           -- see WP5 implementation note below
     route_fingerprint      TEXT NOT NULL,           -- informational (§3.1)
     composition_id         TEXT NOT NULL,
     scenario_id            INTEGER NOT NULL,        -- the base snapshot the stored
@@ -587,6 +588,23 @@ CREATE TABLE proposals.proposals (
     updated_at             TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ```
+
+**Deviation from the original locked shape (decided during WP5
+implementation):** `name` was added to the container. The design as
+originally written omitted it — only `proposal_summaries` (§5.4) carried
+`name`, on the theory that identity/metadata belonged with the other
+container columns but display fields belonged with the projection. In
+practice that made `name` the one piece of proposal identity a load
+(`GET /api/proposal/<id>`) couldn't return without joining the
+"derived, not a source of truth, rebuildable at any time" summary table
+— i.e. the container would depend on the projection for its own identity
+data, backwards from §5.4's own stated relationship between the two
+tables. `name` is genuinely proposal metadata (what the user called it),
+not a derived metric, so it stays on the container; `proposal_summaries.
+name` remains a denormalized copy for gallery listing, kept in sync by
+`publish()`'s single-transaction write, same as every other identity
+column duplicated across the two tables (`route_fingerprint`,
+`composition_id`, `scenario_id`, version fields).
 
 No family/variant indexes — nothing looks proposals up by fingerprint or
 coordinate. Proposal identity is the `proposal_id` alone.
@@ -1098,25 +1116,116 @@ passed, 1 skipped (the pre-existing
 this WP) on the full suite via `uv run --extra dev pytest tests/ -v`.
 
 **WP5 — Cutover: publish endpoint, repository, schema phase 2** *(after
-WP2 + WP4; the core WP — the one deliberately large one)*
-The single PR where old and new worlds swap, atomically:
-`POST /api/proposal/publish` (compute-or-cache, base-scenario validation
-422 `scenario_not_base`, ownership check, publish handler
+WP2 + WP4; the core WP — the one deliberately large one)* ✅ *implemented
+2026-08-05.* The single PR where old and new worlds swap, atomically:
+`POST /api/proposal/publish` (base-scenario validation 422
+`scenario_not_base`, ownership check, publish handler
 `api/helpers/publish_dispatch.py` with its two cases, `based_on` timeline
 entries, prefixed-ID assignment); `adapters/proposal_repository.py`
-rewritten around single-transaction publish (proposal row + GTFS/sidecars
+rewritten around single-transaction `publish()` (proposal row + GTFS/sidecars
 + summary + update_log; prune on overwrite; `FOR UPDATE` serialization);
 **minimal** `GET /api/proposal/<id>` (compute-response shape via WP3
 reconstruction) and **minimal** `POST/GET /api/proposals` (plain summaries
 list, pagination — full filters follow in WP6); removal of
 `/api/route/plan` + `/api/evaluation/calc` and all persist-on-calc code;
-**finalizing migration** (drop `route_body`/`evaluation_body`-old/
+**finalizing migration** (drop `route_body`/`evaluation_body`/
 `is_current`/`change_log`, enforce NOT NULLs — see data note below);
 complete rewrite of the persist test suite. *Testable by*: integration
 tests — create, edit, composition change via overwrite and via new,
-build-on-foreign, non-base rejection, concurrent publishes, load
-round-trips. *Green because*: everything depending on the old world is
+build-on-foreign, non-base rejection, load round-trips (concurrent
+publishes covered structurally by `FOR UPDATE` serialization in
+`publish()`, not by a dedicated threaded test — see the deviations note
+below). *Green because*: everything depending on the old world is
 replaced within this one PR.
+
+Several deviations/decisions made during implementation, none changing
+the locked design, one amending it:
+
+1. **`models/pipeline.py` (new layer, not in the original plan).** Domain
+   orchestration (plan → distribute demand → evaluate → build views) was
+   pulled out of `api/proposal_calc.py` into a new `models/pipeline.py`
+   module, with `api/helpers/proposal_compute.py` left as a thin
+   serialization wrapper around it. Rationale: pipeline *sequencing* is
+   domain-level composition, not serialization, so it belongs in
+   `models/` under this project's existing layering rule
+   (`models/` = domain, `api/helpers/` = serialization, `adapters/` = DB)
+   — keeping it in `api/helpers/` (as the original WP2 code had it) was
+   an artifact of not yet having a publish path that needed to reuse it.
+   Both `POST /api/proposal/calc` and `publish_dispatch.py` now call the
+   same `compute_proposal()` (`api/helpers/proposal_compute.py`), which
+   calls `models.pipeline.run_compute()` — the two paths can't drift
+   apart, and WP13's compute cache has a natural insertion point at the
+   `proposal_compute.py` level.
+2. **`name` added to `proposals.proposals`** — see §5.3's own note; the
+   locked container shape omitted it, WP5 added it back for the reason
+   documented there.
+3. **Compute-or-cache in the design text was compute-only in practice.**
+   §2.2's "freshly or from the compute cache" always resolves to "freshly"
+   right now, since WP13 (the cache) hasn't landed — `dispatch_publish()`
+   calls `compute_proposal()` unconditionally. No code changes needed
+   when WP13 lands: the integrity rule ("never persist a client-supplied
+   result") holds either way, and the cache is designed to be a
+   transparent lookup ahead of the same compute call.
+4. **Concurrent-publish testing scope.** The design's "testable by" list
+   named concurrent publishes explicitly; `publish()`'s `FOR UPDATE` row
+   lock on overwrite provides the actual serialization, but the test
+   suite doesn't exercise it with real concurrent threads/connections —
+   only sequential overwrite/ownership/not-found cases. Flagged as a gap
+   rather than silently dropped; a genuine concurrency test (two
+   overwrite-publishes racing against the same `proposal_id`) is
+   reasonable follow-up work, not part of this PR.
+5. **Test suite: `test_20_route_plan_api.py` and
+   `test_30_evaluation_api.py` deleted** (their HTTP contract coverage
+   for the removed endpoints is superseded by `test_35`); their
+   *content*-level coverage was not simply dropped, though — see below.
+6. **`test_21`/`test_31`/`test_40` converted, not deleted.** These test
+   route-building and evaluation *content*, not HTTP contract, so they
+   were repointed to the surviving endpoints/model layer instead of
+   removed: `test_21` now drives route-building through
+   `POST /api/proposal/calc`; `test_31`/`test_40` call the model layer
+   directly (`tests/helpers.py:compute_evaluation_domain()` —
+   `route_from_dict()` → `add_directional_domain_demand()` →
+   `evaluate_route()` → views) since `POST /api/proposal/calc` has no way
+   to inject custom demand into an already-built route the way the old
+   `POST /api/evaluation/calc` did (a real capability gap, not a
+   like-for-like replacement — flagged and confirmed before proceeding).
+   `test_20`'s `TestFixedNightMode`/`TestModeSwitches`/scenario-handling
+   classes (behavioral content, not contract) were ported into `test_21`
+   for the same reason, after initially being dropped by mistake and
+   caught on a later cross-reference sweep — see `test_21`'s module
+   docstring for the full port rationale.
+7. **`test_50_proposals_api.py` is a full rewrite**, per the design's own
+   call — the old persist-on-calc contract (created/unchanged/versioned/
+   branched) has no shape in common with publish's new/overwrite pair.
+8. **`db/dev/seed.py`'s example proposal now carries a real evaluation.**
+   The pre-WP5 seed published a route with no demand/evaluation (a
+   half-state the old schema allowed). WP5's "no half-states" rule
+   (§2.4) makes that impossible, so `seed_example_proposal()` now runs
+   its hand-crafted route through the real evaluation pipeline
+   (`_compute_example_proposal()` — deliberately *not* through
+   `models.pipeline.run_compute()`, to avoid a live-OpenRailRouting
+   dependency at DB-seed time; the route's physics stay hand-crafted,
+   only demand/cost/revenue are newly real) before calling `publish()`
+   directly.
+9. **Four standalone dev scripts under `scripts/`** (`test_route_plan.py`,
+   `test_evaluation_calc.py`, `test_scenario_comparison_paris_berlin.py`,
+   `test_timetable_comparison_hamburg_copenhagen.py`) referenced the
+   removed endpoints. Three were repointed to `/api/proposal/calc`
+   (mechanical URL/response-shape updates); `test_evaluation_calc.py`'s
+   whole premise (costing an arbitrary pre-built route under injected
+   demand) has no HTTP successor, so it was retired with a notice
+   pointing at the same model-layer pattern `test_31`/`test_40` use.
+
+*Testable by* confirmed via: `ruff format`/`ruff check` clean on every
+changed file; full-tree `py_compile`; real (non-DB) import of every new/
+changed module including `main.py`; and constructing a live Flask app
+with the actual blueprints registered to confirm the URL map has no
+route collisions (`/api/proposal/calc`, `/api/proposal/publish`,
+`/api/proposal/<id>`, engagement routes all coexist as expected). Full
+integration-test execution against the live Docker stack (the suite's
+normal green-bar check) was not run as part of this implementation pass
+— the usual `uv run --extra dev pytest tests/ -v` from `backend/` is the
+next step before merging.
 
 *Data strategy (decided)*: **drop and recreate, no row migration.** The
 finalizing migration is an ordinary migration SQL through the standard
