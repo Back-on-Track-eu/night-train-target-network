@@ -29,6 +29,7 @@ import json
 
 import pytest
 
+from adapters.proposal_projection import route_fingerprint
 from adapters.proposal_repository import ProposalRepository, rewrite_id_prefix
 from api.helpers.route_gtfs_serialize import (
     insert_route_gtfs,
@@ -110,7 +111,9 @@ class TestRouteRoundtrip:
 
         assert _json_normalize(reconstructed) == _round_avg_price(published_route)
 
-    def test_three_stop_route_with_intermediate_stop_deep_equals(self, db_cur, loader, api_base):
+    def test_three_stop_route_with_intermediate_stop_deep_equals(
+        self, db_cur, loader, api_base
+    ):
         """Covers a night-classified intermediate stop and a longer
         segment chain — not just the 2-stop terminal-only case above."""
         response = compute(
@@ -192,14 +195,40 @@ class TestRouteRoundtrip:
         # compare against published_route's copy, not response["route"]'s
         # pre-rewrite (neutral-ID) one.
         published_od_pairs = published_route["trip_pairs"][0]["od_pairs"]
-        assert _json_normalize(reconstructed)["trip_pairs"][0]["od_pairs"] == _round_avg_price(
-            published_od_pairs
-        )
-
+        assert _json_normalize(reconstructed)["trip_pairs"][0][
+            "od_pairs"
+        ] == _round_avg_price(published_od_pairs)
 
     def test_unknown_proposal_raises(self, db_cur, loader):
         with pytest.raises(ValueError, match="no trips found"):
             route_dict_from_gtfs(987654321, 1, loader, 1, db_cur)
+
+
+class TestFingerprintRoundtrip:
+    """WP4's 'testable by' clause (docs/PROPOSALS_DESIGN.md §3.1): the
+    fingerprint of a reconstructed route must equal the fingerprint of the
+    original compute result, in both its ephemeral (neutral-id) and
+    published (prefixed) forms."""
+
+    def test_fingerprint_equal_ephemeral_prefixed_and_reconstructed(
+        self, db_cur, loader, api_base
+    ):
+        response = compute(
+            api_base,
+            stops=STOPS_BERLIN_DRESDEN_WIEN,
+            composition_id="NEW-BAL-7",
+            auto_stop_addition="off",
+        )
+        scenario_id = response["request"]["scenario_id"]
+        pid, version, published_route = _publish_fixture(db_cur, response)
+
+        insert_route_gtfs(db_cur, published_route)
+        reconstructed = route_dict_from_gtfs(pid, version, loader, scenario_id, db_cur)
+
+        ephemeral_fp = response["route_fingerprint"]
+        assert ephemeral_fp == route_fingerprint(response["route"])
+        assert ephemeral_fp == route_fingerprint(published_route)
+        assert ephemeral_fp == route_fingerprint(reconstructed)
 
 
 class TestInputParametersRoundtrip:

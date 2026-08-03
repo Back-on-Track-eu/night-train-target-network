@@ -64,10 +64,26 @@ class TestResponseStructure:
         assert set(calc_response) >= {
             "route_builder_version",
             "calc_version",
+            "route_fingerprint",
+            "cache_hit",
             "request",
             "route",
             "evaluation",
         }
+
+    def test_route_fingerprint_is_well_formed(self, calc_response):
+        """§3.1 — deeper fingerprint coverage (determinism, prefix
+        independence, reconstruction equality) lives in
+        test_37_proposal_projection.py and
+        test_36_proposal_gtfs_roundtrip.py; this is just the contract
+        shape check alongside the rest of this file's structural tests."""
+        fp = calc_response["route_fingerprint"]
+        assert re.fullmatch(r"sha256:[0-9a-f]{64}", fp)
+
+    def test_cache_hit_is_false(self, calc_response):
+        """No compute cache exists yet (WP13) — every /calc call is a
+        fresh compute."""
+        assert calc_response["cache_hit"] is False
 
     def test_calc_version_is_semver(self, calc_response):
         assert re.fullmatch(r"\d+\.\d+\.\d+", calc_response["calc_version"])
