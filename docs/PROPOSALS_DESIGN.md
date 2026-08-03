@@ -1,8 +1,8 @@
-# Proposals — Storage, Identity, Gallery & Compare Design
+# Proposals — Storage, Gallery & Compare Design
 
-Status: agreed design, pre-implementation (2026-07-31)
+Status: agreed design, pre-implementation (2026-08-01)
 Scope: compute/publish APIs, `proposals` schema, gallery/map/compare, ONTD integration
-Suggested location in repo: `docs/PROPOSALS_DESIGN.md`
+Location in repo: `docs/PROPOSALS_DESIGN.md`
 
 ---
 
@@ -11,11 +11,11 @@ Suggested location in repo: `docs/PROPOSALS_DESIGN.md`
 Design of the proposal lifecycle and storage for the public tool, supporting:
 
 - a public gallery view with SQL-backed filtering, sorting, pagination —
-  showing by default **one item per proposal family, evaluated on the
+  every stored proposal is a gallery item, **always evaluated on the
   current base scenario**
 - map views (route lines, stop/country heat aggregates) driven by the same filters
-- a compare view across variants (composition/scenario) of one route family
-  or across different proposals
+- a compare view across scenarios/compositions of one proposal or across
+  different proposals
 - the KPI set required by the political target audience (cost/revenue/margin
   per train-km, subsidy need, demand, modal shift, CO2 — the
   demand-dependent ones faked until the demand model exists)
@@ -23,16 +23,23 @@ Design of the proposal lifecycle and storage for the public tool, supporting:
   clearly marked, without financial KPIs
 - multi-user public operation
 
-Two architecture decisions (2026-07-31) supersede the earlier
-persist-on-calc concept and shape everything below:
+Three architecture decisions supersede the earlier persist-on-calc concept
+and shape everything below:
 
-1. **Merged compute API.** Route planning and evaluation are one endpoint
-   (`POST /api/proposal/calc`), one pipeline, one response. There are no
-   half-states: a result always contains route *and* evaluation.
-2. **Ephemeral compute, explicit publish.** Computing writes nothing to the
-   database. Proposals come into existence only through an explicit
-   `POST /api/proposal/publish`. The database contains deliberate artifacts,
-   not exploration states.
+1. **Merged compute API** (2026-07-31). Route planning and evaluation are
+   one endpoint (`POST /api/proposal/calc`), one pipeline, one response.
+   There are no half-states: a result always contains route *and*
+   evaluation.
+2. **Ephemeral compute, explicit publish** (2026-07-31). Computing writes
+   nothing to the database. Proposals come into existence only through an
+   explicit `POST /api/proposal/publish`. The database contains deliberate
+   artifacts, not exploration states.
+3. **One stored state per route artifact** (2026-08-01). A proposal is a
+   route with a composition, always evaluated on the current base scenario.
+   There are no stored scenario/composition variants ("family members") —
+   variant exploration is ephemeral compute, accelerated by the compute
+   cache (§2.3). This dissolves the earlier family/variant-coordinate/
+   default-member machinery entirely.
 
 ---
 
@@ -40,7 +47,7 @@ persist-on-calc concept and shape everything below:
 
 ### 2.1 `POST /api/proposal/calc` — ephemeral compute
 
-One stateless request → route + evaluation, no side effects:
+One stateless request → route + evaluation, no side effects.
 
 **Request** — the former plan request minus all persistence identity
 (`proposal_id`/`proposal_version` are publish concerns; drafts do not exist
@@ -55,7 +62,10 @@ belongs to publish (§2.2).
   // WHAT to compute
   "stops":              ["stop_id", "..."],        // required, min 2, plain IDs
   "composition_id":     "REF-BAL-9",               // required
-  "scenario_id":        4,                         // optional; omitted = current base
+  "scenario_id":        4,                         // optional; omitted = current base.
+                                                   // Any scenario is computable —
+                                                   // what-ifs live here and in compare;
+                                                   // only PUBLISH is base-restricted (§2.2)
 
   // HOW to compute (all optional, defaults + validation rules as today)
   "timetable_mode":       "simpleAutomatic" | "simpleAutomaticWithFixedNight",
@@ -73,7 +83,7 @@ belongs to publish (§2.2).
 {
   "route_builder_version": "0.9.13",
   "calc_version":          "0.9.10",               // both version tracks stay separate
-  "route_fingerprint":     "sha256:…",             // §3.1, for family reasoning
+  "route_fingerprint":     "sha256:…",             // §3.1, informational + compare context
 
   "request": { … },                                // the RESOLVED request: defaults
                                                    // applied, scenario_id concrete.
@@ -115,9 +125,9 @@ deliberate depths:
 Tracks and composition therefore appear twice at different depths — kept
 deliberately, each section stays self-describing. There is **no route copy
 under `evaluation.input`** anywhere (the route is a sibling key; the old
-calc response only carried one because it was a standalone endpoint), which
-also removes the former reinject-on-read rule: stored and computed
-responses share one shape with the route appearing exactly once.
+calc response only carried one because it was a standalone endpoint):
+stored and computed responses share one shape with the route appearing
+exactly once.
 
 Further notes:
 
@@ -126,19 +136,18 @@ Further notes:
   published proposals; publish assigns them. The fingerprint
   canonicalization strips prefixes anyway (§3.1), so fingerprints agree
   between ephemeral and published forms.
-- **No persistence decisions.** No actions (`created`/`loaded`/
-  `unchanged`/`branched`), no family lookups, no dispatch matrix. Request
-  in, result out, forget.
+- **No persistence decisions.** No actions, no lookups. Request in, result
+  out, forget.
 
 The frontend holds the current result in memory; unsaved exploration dies
-with the session. Mitigation (frontend concern, coordination item WP13):
+with the session. Mitigation (frontend concern, coordination item WP12):
 draft caching in the client, warn-on-navigate for unsaved changes.
 
 ### 2.2 `POST /api/proposal/publish` — the only user write path
 
 ```jsonc
 {
-  "compute_request": { … },            // the exact request of §2.1
+  "compute_request": { … },            // the exact resolved request of §2.1
   "name": "Berlin–Roma via Brenner",
   "mode": "new" | "overwrite",
   "proposal_id": 123,                  // overwrite only: the owned proposal to replace.
@@ -150,29 +159,33 @@ draft caching in the client, warn-on-navigate for unsaved changes.
 
 **Integrity rule: the server never persists client-supplied results.** The
 publish request carries *inputs*, not outputs; the server computes the
-result itself and persists what it computed. v1 simply recomputes on
-publish (publishing is rare; one routing run is acceptable). Optimization
-later: the compute cache (§2.3) lets publish reuse a server-computed result
-by request hash — same guarantee, no recompute. For a public, politically
-consumed gallery this is non-negotiable: no path may exist by which
-manipulated KPIs enter the database.
+result itself and persists what it computed — freshly or from the compute
+cache (§2.3), which only ever holds server-computed results. For a public,
+politically consumed gallery this is non-negotiable: no path may exist by
+which manipulated KPIs enter the database.
 
-**The publish handler.** All case distinctions of persisting live in one
-component behind this endpoint (e.g. `api/helpers/publish_dispatch.py`) —
-the successor of the former plan/calc dispatch matrix, now with a fraction
-of its cases. Family membership is pure backend logic; from the user's
-perspective there is only *one* proposal, so the handler keeps the family
-consistent silently — no confirmation round-trips, no extra parameters:
+**Base-scenario rule: published proposals are always evaluated on the
+current base scenario.** A `compute_request` whose `scenario_id` is not the
+current base is rejected (422, `scenario_not_base`) — what-if scenarios are
+an *analysis* dimension (compute, compare), never an *artifact* dimension.
+This is what keeps the gallery's promise ("KPIs always on the current
+parameter reality") structural rather than conventional. The frontend's
+publish flow re-computes on base first if the user explored under a
+what-if.
+
+**The publish handler** (e.g. `api/helpers/publish_dispatch.py`) — all
+persisting case distinctions in one small component:
 
 | Case | Handling |
 |---|---|
-| `mode: "new"` | insert under the calling user (guest or registered); `proposal_id` must be absent. If the fingerprint matches an existing own family, the proposal is simply a new member of it — no constraint prevents duplicates (§3.2). `update_log` 'published' (+ the informational `branched_from`/`branched_to` pair when `based_on_proposal_id` is given — this replaces the old branch machinery: building on a foreign proposal is loading it, exploring ephemerally, publishing as new) |
-| `mode: "overwrite"`, fingerprint unchanged | replace the stored state of the *owned* proposal: state counter +1, previous state hard-deleted in the same transaction (GTFS/sidecar rows by ID prefix, summary row upserted), `update_log` 'overwritten' |
-| `mode: "overwrite"`, fingerprint changed | as above, **plus**: any other members of the old family are hard-deleted in the same transaction (`update_log` 'discarded' each). They were internal variants of a route that no longer exists in this form — keeping them would surface stale states. The user never sees or confirms this; it is the backend keeping its own representation consistent |
+| `mode: "new"` | insert under the calling user (guest or registered); `proposal_id` must be absent. Duplicates of existing routes — own or foreign — are allowed and never checked for (§3.2). `update_log` 'published' (+ the informational `branched_from`/`branched_to` pair when `based_on_proposal_id` is given: building on a foreign proposal is loading it, exploring ephemerally, publishing as new) |
+| `mode: "overwrite"` | replace the stored state of the *owned* proposal — route, composition, evaluation, whatever changed: state counter +1, previous state hard-deleted in the same transaction (GTFS/sidecar rows by ID prefix, summary row upserted), fingerprint/composition columns updated, `update_log` 'overwritten' |
 
-Ownership is checked in both overwrite cases (403/404 for foreign or
-unknown ids). **The acting user is never part of the request body**: identity
-comes exclusively from the auth layer (JWT → `user_id` via the existing
+That is the whole table: with one stored state per artifact there are no
+sibling discards, no family lookups, no fingerprint-dependent branches.
+Ownership is checked for overwrite (403/404 for foreign or unknown ids).
+**The acting user is never part of the request body**: identity comes
+exclusively from the auth layer (JWT → `user_id` via the existing
 middleware, guests included) — a client-supplied `user_id` would be an
 impersonation vector, the same class of input the integrity rule above
 bans.
@@ -186,50 +199,159 @@ save is an ordinary `overwrite` against it.
 
 A server-side, TTL-bounded cache (default 3 h, configurable) over compute
 results, so that "playing around" — toggling scenarios, compositions, and
-settings back and forth — hits routing only once per distinct input state.
-Strictly a performance layer: invisible to the data model, never a source
-of truth, safe to flush at any time.
+settings back and forth, in the editor **and** in compare — hits routing
+only once per distinct input state. With stored variants gone (§1,
+decision 3), this cache is the designated home of every non-base,
+non-published result. Strictly a performance layer: invisible to the data
+model, never a source of truth, safe to flush at any time.
 
-**Level 1 — full results.** Key: hash of the canonical resolved compute
-request + `ROUTE_BUILDER_VERSION` + `CALC_VERSION`. Value: the complete
-compute response. Serves repeat `POST /api/proposal/calc` calls and the
-publish path (§2.2): a publish whose request hash hits the cache persists
-the cached server-computed result without recomputing — the integrity
-guarantee holds because only server-computed results ever enter the cache.
+**Fed by every compute path**: direct `POST /api/proposal/calc` calls and
+the ephemeral computes inside `POST /api/proposals/compare` (§7.3) go
+through the same compute function and the same cache — comparing warms the
+editor and vice versa.
 
-**Level 2 (optional extension) — route stage.** Key: hash of only the
-routing-relevant subset of the request (stops, composition, scenario,
-timetable/routing settings). Value: the built route before evaluation.
-Lets a change of evaluation-only inputs skip the expensive routing stage
-and re-run just the (sub-second) evaluation — closing the one efficiency
-gap the merged API opened.
+**Cache identity of a computed result =
+`(route_fingerprint, scenario_id, composition_id)`.** The fingerprint alone
+is not sufficient: the same physical route under two scenarios (identical
+infrastructure in both) or two same-speed compositions hashes identically
+but evaluates differently, so scenario and composition stay in the triple.
 
-Correctness of the key: scenario rows are immutable snapshots (edits create
-new `scenario_id`s), so `scenario_id` inside the request is a sound key
-component and base-scenario moves invalidate naturally by changing the id;
-version constants in the key invalidate on every bump. Assumption to verify
-in implementation: all parameter tables feeding evaluation (compositions,
-infrastructure, …) are reachable through the scenario pin — anything that
-is not must join the key.
+Because the fingerprint is only known **after** routing, the cache is two
+small maps:
+
+1. **Pointer map**: `request_hash → (fingerprint, scenario_id,
+   composition_id)` — written the first time a distinct resolved request
+   is computed; tiny rows. Request-*specific* response parts (the resolved
+   `request` echo, `suggested_stops` in suggest mode) belong on this side
+   / are assembled at response time — the shared result core must never
+   carry another request's echo, since publish reads it.
+2. **Result map**: `(fingerprint, scenario_id, composition_id) → route +
+   evaluation core` — the payload, stored **once per distinct result** no
+   matter how many requests converge on it (settings that do not change
+   the output, independent users planning the same route).
+
+Lookup: hash the resolved request → pointer hit → result fetch, zero
+compute. Pointer miss → compute → write both. Compare sides (§7.3) and
+publish (§2.2) resolve through the same two maps.
+
+**No version constants in the key.** With a TTL of hours, guarding keys
+against events that happen every few weeks is backwards: instead the cache
+is **flushed on every `ROUTE_BUILDER_VERSION`/`CALC_VERSION` bump** — an
+explicit first step of the version-bump procedure, natural home in the
+refresh script (§4.2). Base-scenario moves need no flush at all: the new
+base has a new `scenario_id`, so old entries never match again and age out
+via TTL.
+
+The compute response carries a `cache_hit: bool` meta field — directly
+assertable in tests and useful frontend telemetry.
+
+Key correctness: scenario rows are immutable snapshots (edits create new
+`scenario_id`s), so `scenario_id` is a sound key component. Assumption to
+verify in implementation: all parameter tables feeding evaluation are
+reachable through the scenario pin — anything that is not must join the
+key. Optional future extension: a route-stage cache keyed by the
+routing-relevant request subset, relevant only if evaluation-only inputs
+ever exist.
 
 **Storage**: shared across gunicorn workers, so not per-process memory. To
-avoid new infrastructure, an `UNLOGGED` PostgreSQL table (key, response
-JSON, created_at) with TTL cleanup on write is sufficient; a memory store
+avoid new infrastructure, two `UNLOGGED` PostgreSQL tables (pointer,
+result; created_at + TTL cleanup on write) are sufficient; a memory store
 (e.g. Redis) stays a drop-in upgrade if response sizes or traffic ever
 demand it.
+
+**Implementation (agreed 2026-08-03; tables land in WP1, logic in WP13)**
+
+```sql
+CREATE UNLOGGED TABLE proposals.compute_cache_pointer (
+    request_hash       TEXT PRIMARY KEY,
+    route_fingerprint  TEXT NOT NULL,
+    scenario_id        INTEGER NOT NULL,
+    composition_id     TEXT NOT NULL,
+    resolved_request   JSON NOT NULL,   -- request echo, request-specific
+    suggested_stops    JSON,            -- suggest-mode only, request-specific
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNLOGGED TABLE proposals.compute_cache_result (
+    route_fingerprint  TEXT NOT NULL,
+    scenario_id        INTEGER NOT NULL,
+    composition_id     TEXT NOT NULL,
+    payload            JSON NOT NULL,   -- route + evaluation core, shared
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (route_fingerprint, scenario_id, composition_id)
+);
+
+CREATE INDEX idx_cache_pointer_created ON proposals.compute_cache_pointer (created_at);
+CREATE INDEX idx_cache_result_created  ON proposals.compute_cache_result (created_at);
+```
+
+No FKs on either table — both key off value tuples
+(`route_fingerprint`/`scenario_id`/`composition_id`, `request_hash`), never
+off a `proposals.proposals` row, so the usual logged/unlogged FK
+restriction doesn't come up. The `created_at` indexes exist for the
+cleanup sweep below, not for lookups.
+
+**Read path.** Canonicalize the resolved compute request (sorted keys,
+stable number formatting) → `request_hash`. Look up
+`compute_cache_pointer`:
+- **miss** → run the compute pipeline, which yields `(fingerprint,
+  scenario_id, composition_id, payload)`
+- **hit** → fetch `compute_cache_result` by the pointer row's
+  `(route_fingerprint, scenario_id, composition_id)`; assemble the
+  response from that shared `payload` plus the pointer row's
+  request-specific `resolved_request`/`suggested_stops`; set
+  `cache_hit: true`
+
+**Write path**, both inserts after a successful compute, result before
+pointer:
+
+```sql
+INSERT INTO compute_cache_result (route_fingerprint, scenario_id, composition_id, payload)
+VALUES (...)
+ON CONFLICT (route_fingerprint, scenario_id, composition_id) DO NOTHING;
+
+INSERT INTO compute_cache_pointer (request_hash, route_fingerprint, scenario_id, composition_id, resolved_request, suggested_stops)
+VALUES (...)
+ON CONFLICT (request_hash) DO NOTHING;
+```
+
+`DO NOTHING` on the result insert is what makes "stored once per distinct
+result" hold under concurrency: two requests converging on the same route
+at nearly the same time just have the second write no-op rather than
+duplicate or error. Result rows are write-once — a cache **hit** never
+touches `created_at` again (no LRU-style refresh-on-read); a hot result
+that ages past the TTL is simply recomputed and re-written cheaply by the
+next miss. This keeps the write path free of any read-then-update
+branching.
+
+**TTL cleanup — opportunistic, not a scheduled job.** Attached to the
+write path, run probabilistically on **1% of writes** (not every write, to
+avoid paying a `DELETE` scan per request), in the same transaction as the
+write:
+
+```sql
+DELETE FROM compute_cache_pointer WHERE created_at < now() - INTERVAL '3 hours';
+DELETE FROM compute_cache_result  WHERE created_at < now() - INTERVAL '3 hours';
+```
+
+TTL value (default 3 h) and the 1% sampling rate are both config constants,
+overridable via env for tests. No pg_cron, no external scheduler — the
+table self-bounds in size purely from ordinary traffic.
+
+**Flush on version bump.** No version constants in the cache key (see
+above), so a `ROUTE_BUILDER_VERSION`/`CALC_VERSION` bump just
+`TRUNCATE`s both tables as the first step of `refresh_proposals.py`
+(§4.2, WP8) — a full flush, not a TTL-aware partial one.
 
 ### 2.4 What this removes (vs. the persist-on-calc design)
 
 - the first-level dispatch handler and its decision matrix
-- family copy on foreign interaction (loading foreign proposals is just
-  reading; publishing as new is the "copy")
+- families, variant coordinates, default-member resolution, the variants
+  matrix, `?resolve=default`, sibling discards, family copies
 - `loaded` / `unchanged` / `already_exists` response actions
 - half-states: every stored proposal has route **and** evaluation —
-  `calc_version` and `evaluation_output` become NOT NULL, the
-  `has_evaluation` gallery filter disappears, evaluation-to-route-state
-  matching is by construction
-- stale-sibling cascades on every edit (now one silent consolidation
-  inside the publish handler)
+  `calc_version` and `evaluation_output` are NOT NULL, evaluation always
+  belongs to its route by construction
 - guest exploration hygiene (ephemeral compute leaves nothing behind)
 
 ---
@@ -238,8 +360,8 @@ demand it.
 
 ### 3.1 Route fingerprint
 
-A route's uniqueness is defined by its **resolved outputs**, not its request
-settings:
+A route's uniqueness (for fingerprinting) is defined by its **resolved
+outputs**, not its request settings:
 
 > stop lists, route geometries, and trip schedules (exact departure and
 > arrival times) for each trip in the proposal
@@ -261,76 +383,38 @@ Canonicalization rules:
 - the fingerprint of a reconstructed route (§5.1) must equal the
   fingerprint of the original compute result — enforced by round-trip tests
 
-Consequence (accepted): request settings (`timetable_mode`,
-`fixed_night_interval`, `routing_mode`, `schedule_mode`,
-`auto_stop_addition`) are *state*, but when a setting change alters the
-resolved times/stops/geometry, the fingerprint changes with it. The
-fingerprint always describes what the route *is*, not how it was requested.
+No **persistence** logic depends on the fingerprint: no lookup, index,
+uniqueness rule, or handler branch. It is computed by the projection,
+stored as a column, returned by compute, and used by compare (§7.3) to
+state route context ("identical route, different composition/scenario").
+Its productive uses are elsewhere: as the core of the compute-cache
+result identity `(fingerprint, scenario_id, composition_id)` (§2.3 —
+deduplicating results across requests that converge on the identical
+route) and as the natural clustering key for route-level analytics ("how
+often was this exact route proposed", corridor duplication across users).
 
-### 3.2 Proposal identity, families, variant coordinates
-
-Three distinct concepts, in descending scope:
+### 3.2 Proposal identity
 
 - **Proposal identity = `proposal_id`.** Nothing else. The editor's load
   semantics guarantee it: a user loads (or computes and publishes) a
   proposal and all editing targets that one proposal until a different one
   is loaded or created; overwrite-vs-new is the user's explicit choice at
   publish time.
-- **Family key = `(user_id, route_fingerprint)`** — a pure grouping of one
-  user's *published* proposals sharing a route, discovered by indexed
-  lookup (`idx_summaries_family`, §5.4), never enforced by a constraint.
-- **Variant coordinate = `(composition_id, scenario_id)`** — addresses a
-  member *within* a family: the cells of the variants matrix (§7.2), the
-  sides of a compare (§7.3), the default member (§3.3). Within a family the
-  fingerprint is shared, so the coordinate is the only distinguishing part;
-  it has no meaning as a global key.
-
-**Families are strictly single-user** — trivially now: only publishes
-create proposals, and a publish always creates/overwrites a proposal of the
-calling user. Interacting with a foreign proposal is reading; making it
-yours is publishing as new.
-
-**No deduplication.** The same route — and even the same variant coordinate
-within a family — may exist more than once (same or different users):
-publish never searches for an existing match. The only deliberate lookup of
-existing proposals is the family matrix (§7.2); coordinate collisions there
-resolve to the most recently updated member.
-
-Families contain only what users deliberately published (plus system
-materializations, §3.3). There is no lazy sibling materialization concept
-anymore: an unexplored variant coordinate is simply computed ephemerally
-when someone wants to see it, and becomes a family member only if published.
-
-### 3.3 Default family member
-
-The gallery and the proposal editor need one canonical variant per family
-to present, and its KPIs must reflect the **current base scenario** — a
-proposal's headline numbers in a public gallery must never come from a
-superseded or what-if parameter state by default.
-
-**Default member** of a family: the member with `scenario_id = ` the
-current base scenario (`scenario.scenarios` row with `is_current_base`),
-with the composition of the family's most recently updated member.
-Determined by query, not by a stored flag:
-`DISTINCT ON (route_fingerprint, user_id) … ORDER BY (scenario is current
-base) DESC, updated_at DESC`, supported by `idx_summaries_family`.
-
-When the base scenario moves (data change → new scenario row, old
-`is_current_base = FALSE` — scenario rows themselves are never rewritten),
-the current-base member of a family does not exist yet. Rules:
-
-- the **version-refresh batch** (§4.2) materializes the new default members
-  proactively — the one case besides refresh where the system publishes
-  without a user action, always **under the family owner's `user_id`**
-  (`update_log` with `user_id NULL`)
-- until then, the gallery falls back to the previously newest member,
-  flagged `scenario_outdated: true` (derived by joining
-  `scenario.scenarios`, not stored)
-- on load with `?resolve=default` (§7.2), a missing default member is
-  materialized on demand, same ownership rule
-
-Old-scenario members are kept as pinned snapshots (that is what scenario
-pinning is for); they are simply never the default.
+- **A proposal is a route with a composition, evaluated on the current base
+  scenario.** Scenario is not an identity dimension: the stored
+  `scenario_id` records *which base snapshot* the stored evaluation ran
+  under (provenance + staleness signal, system-managed via refresh §4.2),
+  never a user choice. Composition is simply the proposal's current
+  composition — an overwrite-publish may change it like any other input.
+- **No deduplication.** The same route may exist more than once (same or
+  different users, same or different composition): publish never searches
+  for an existing match. Wanting "this route with couchettes" *and* "this
+  route with seaters" as two gallery items = two proposals via
+  `mode: "new"` — deliberate, visible duplication.
+- **Variant exploration is ephemeral.** Scenario/composition switching in
+  the editor and in compare is pure compute (cache-backed, §2.3); nothing
+  of it is stored unless the user publishes — and publishing pins to base
+  (§2.2), so a what-if result can inform an artifact but never *be* one.
 
 ---
 
@@ -347,10 +431,9 @@ overwrite-publishes, or a publish racing the refresh batch).
 
 ### 4.1 `proposals.update_log`
 
-States are pruned and siblings can be discarded, while likes/comments stamp
-state numbers — an append-only event log preserves the timeline ("comment
-on state 3, route overwritten afterwards, then recalculated with a new calc
-version"):
+States are pruned while likes/comments stamp state numbers — an append-only
+event log preserves the timeline ("comment on state 3, route overwritten
+afterwards, then recalculated with a new calc version"):
 
 ```sql
 CREATE TABLE proposals.update_log (
@@ -358,17 +441,14 @@ CREATE TABLE proposals.update_log (
     proposal_id       INTEGER NOT NULL,          -- soft ref, same convention as likes/comments
     proposal_version  INTEGER NOT NULL,          -- state counter AFTER the event
     user_id           INTEGER REFERENCES admin.users(user_id) ON DELETE SET NULL,
-                                                 -- NULL for system events (refresh,
-                                                 -- default-member materialization)
+                                                 -- NULL for system events (refresh)
     event             TEXT NOT NULL,             -- 'published' | 'overwritten'
-                                                 -- | 'recalculated' | 'discarded'
+                                                 -- | 'recalculated'
                                                  -- | 'branched_from' | 'branched_to'
     detail            JSONB,                     -- branch: {"source_proposal_id":…}
                                                  -- recalculated: {"trigger":"calc_version"
                                                  --   |"route_builder_version"
-                                                 --   |"default_materialization","from":…,"to":…}
-                                                 -- discarded: {"cause":"overwrite_discard",
-                                                 --   "edited_proposal_id":…}
+                                                 --   |"base_scenario_moved","from":…,"to":…}
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_update_log_proposal ON proposals.update_log (proposal_id, created_at);
@@ -381,35 +461,40 @@ in the system navigates from a proposal to its source. The frontend
 timeline is the chronological merge of `update_log` + `comments` + `likes`
 (§7.5).
 
-### 4.2 Version refresh — published proposals always at the newest calculation state
+### 4.2 Version refresh — proposals always at the newest calculation state
 
-Users never republish because of a version change; the system keeps the
-stored artifacts current. Triggers:
+Users never republish because of a version or parameter change; the system
+keeps the stored artifacts current. Triggers:
 
 - `ROUTE_BUILDER_VERSION` bump → recompute (route + evaluation) all proposals
 - `CALC_VERSION` bump → recompute evaluations
-- **base scenario moved** → materialize missing default members (§3.3)
+- **base scenario moved** (parameter data change → new scenario row, old
+  one drops `is_current_base`; scenario rows themselves are never
+  rewritten) → recompute **all** proposals under the new base and update
+  their stored `scenario_id`. This deliberately revises the earlier
+  "scenario pins are never rewritten" rule — that rule protected pinned
+  variant artifacts, which no longer exist; under the artifact contract
+  "always evaluated on current base" (§2.2), moving the pin *is* the
+  feature. `update_log` 'recalculated' with trigger `base_scenario_moved`.
 
 Mechanisms, in order of preference:
 
-1. **Batch script** (`backend/scripts/refresh_proposals.py`): scans for
-   outdated proposals / missing default members, re-runs the compute
-   pipeline per proposal, overwrites/creates in place (owner kept,
+1. **Batch script** (`backend/scripts/refresh_proposals.py`): on a
+   version bump, **first flushes the compute cache** (§2.3), then scans for
+   proposals with outdated versions or a non-current-base `scenario_id`,
+   re-runs the compute pipeline, overwrites in place (owner kept,
    `update_log` 'recalculated' with `user_id NULL`). Run after every
    version bump / base scenario move; idempotent, resumable, dry-run mode,
    **configurable concurrency limit** (routing capacity; first beneficiary
    of a future routing cluster — parked topic).
 2. **On-load fallback**: `GET /api/proposal/<id>` detects an outdated
-   proposal or missing default member and refreshes/materializes before
-   returning — correctness for anything the batch hasn't reached, at the
-   cost of one slow load.
+   proposal and refreshes before returning — correctness for anything the
+   batch hasn't reached, at the cost of one slow load.
 
-A refresh may change the fingerprint (new routing graph). Unlike an
-overwrite-publish, a refresh never discards family members: a graph change
-affects all members of a family equally, so each member's own refresh moves
-it to the same new fingerprint — the family converges on its own, and
-discarding would delete proposals that are about to become valid members
-again.
+Between a base move and a proposal's refresh, gallery and load flag the row
+`scenario_outdated: true` (derived by joining `scenario.scenarios`, not
+stored). A refresh may change the fingerprint (new routing graph, new
+infrastructure) — it simply updates the column.
 
 ---
 
@@ -442,17 +527,16 @@ refresh batch). Rationale for the route side (verified against
   per-stop classification (`stop_type` — not losslessly encoded in GTFS
   pickup/drop_off: "night" and "both" both map to (0,0)), and the compute
   request
-- **irreducible evaluation data**: the entire calc output (`models`,
-  `input` parameters, `views`) — not reconstructible from anything
+- **irreducible evaluation data**: the computed `models` + `views`
 
 Read path: `route_dict_from_gtfs()` (new, in `api/helpers/`, the read-side
 counterpart of the GTFS insert) rebuilds a route dict that deep-equals the
 original compute result and hashes to the same fingerprint;
 `input.parameters` is rebuilt alongside it via the scenario pin. Both are
-enforced by round-trip tests. The former verbatim-byte guarantee is replaced by this
-**deterministic reconstruction** guarantee. The JSON-not-JSONB rationale
-continues to apply to the evaluation output column (key order must
-survive).
+enforced by round-trip tests. The former verbatim-byte guarantee is
+replaced by this **deterministic reconstruction** guarantee. The
+JSON-not-JSONB rationale continues to apply to the evaluation output column
+(key order must survive).
 
 Accepted coupling: the sidecar schema evolves together with the route dict
 / `ROUTE_BUILDER_VERSION`. The version-refresh mechanism (§4.2) mitigates
@@ -489,11 +573,12 @@ CREATE TABLE proposals.proposals (
     proposal_id            SERIAL PRIMARY KEY,      -- one row per proposal, always current
     proposal_version       INTEGER NOT NULL DEFAULT 1,  -- internal state counter (§4)
     user_id                INTEGER REFERENCES admin.users(user_id) ON DELETE SET NULL,
-    route_fingerprint      TEXT NOT NULL,
+    route_fingerprint      TEXT NOT NULL,           -- informational (§3.1)
     composition_id         TEXT NOT NULL,
-    scenario_id            INTEGER NOT NULL,        -- pinned; never rewritten (§4.2).
-                                                    -- Lineage/currentness derived by joining
-                                                    -- scenario.scenarios, not stored here.
+    scenario_id            INTEGER NOT NULL,        -- the base snapshot the stored
+                                                    -- evaluation ran under; system-managed
+                                                    -- via refresh (§4.2). Currentness
+                                                    -- derived by joining scenario.scenarios.
     route_builder_version  TEXT NOT NULL,
     calc_version           TEXT NOT NULL,           -- always evaluated (§2.4)
     compute_request        JSON NOT NULL,           -- resolved compute request, verbatim
@@ -501,20 +586,16 @@ CREATE TABLE proposals.proposals (
     created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at             TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-
-CREATE INDEX idx_proposals_variant
-    ON proposals.proposals (user_id, route_fingerprint, composition_id, scenario_id);
 ```
 
-Plain (non-unique) index for family and variant-coordinate lookups (§3.2,
-§7.2). Duplicates are expected and allowed; proposal identity is the
-`proposal_id` alone.
+No family/variant indexes — nothing looks proposals up by fingerprint or
+coordinate. Proposal identity is the `proposal_id` alone.
 
 Dropped vs. the current implementation: `is_current` + partial unique index
 (one row per proposal), `change_log` (superseded by `update_log`),
-`route_body` (route lives in GTFS + sidecars), the `input.route` copy
-and `input.parameters` inside the evaluation JSON (both rebuilt on read,
-§5.1), and nullable `calc_version`/evaluation (no half-states).
+`route_body` (route lives in GTFS + sidecars), the route copy and
+`input.parameters` inside the evaluation JSON (both rebuilt on read, §5.1),
+and nullable `calc_version`/evaluation (no half-states).
 
 ### 5.4 `proposals.proposal_summaries` (derived projection)
 
@@ -529,7 +610,7 @@ CREATE TABLE proposals.proposal_summaries (
     proposal_id             INTEGER PRIMARY KEY,
     proposal_version        INTEGER NOT NULL,
     user_id                 INTEGER,
-    route_fingerprint       TEXT NOT NULL,
+    route_fingerprint       TEXT NOT NULL,           -- informational (§3.1)
     composition_id          TEXT NOT NULL,
     scenario_id             INTEGER NOT NULL,
     name                    TEXT NOT NULL,
@@ -565,8 +646,6 @@ CREATE TABLE proposals.proposal_summaries (
     updated_at              TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_summaries_family      ON proposals.proposal_summaries
-    (route_fingerprint, user_id, updated_at DESC);   -- family + default-member resolution (§3.3)
 CREATE INDEX idx_summaries_countries   ON proposals.proposal_summaries USING GIN (countries);
 CREATE INDEX idx_summaries_stop_ids    ON proposals.proposal_summaries USING GIN (stop_ids);
 CREATE INDEX idx_summaries_geom        ON proposals.proposal_summaries USING GIST (geom_simplified);
@@ -583,7 +662,8 @@ a pure module `adapters/proposal_projection.py` (called by the repository
 during publish, so it cannot live under `api/helpers/` without inverting
 the dependency direction). Route metrics computed as today's
 `proposal_summary_to_dict`; per-train-km KPIs from the existing
-`views.*.per_train_km` normalisation; annual totals from `per_year`.
+`views.*.per_train_km` normalisation; annual totals from `per_year`; the
+fingerprint (§3.1) computed here.
 
 ### 5.5 ONTD summaries (projection at seed time)
 
@@ -599,32 +679,34 @@ existing routes" policy at schema level, not by convention).
 
 ## 6. Lifecycle flows end to end
 
-*Create:* compute (ephemeral, as often as wanted) → publish `new` → one
-transaction writes GTFS + sidecars, evaluation output, summary row,
-`update_log` 'published'. The proposal is immediately complete (route +
-evaluation + KPIs).
+*Create:* compute (ephemeral, as often as wanted, cache-backed) → publish
+`new` on the current base scenario → one transaction writes GTFS +
+sidecars, evaluation output, summary row, `update_log` 'published'. The
+proposal is immediately complete (route + evaluation + KPIs).
 
 *Edit:* load own proposal → compute edits ephemerally → publish `overwrite`
-→ state counter +1, previous state pruned. If the route changed, the
-publish handler silently deletes any other members of the old family in the
-same transaction (§2.2) — from the user's perspective there is only one
-proposal; family consistency is backend business.
+→ state counter +1, previous state pruned. Route, composition, settings —
+whatever changed is simply the new state; there is nothing else to keep
+consistent.
 
-*Variant:* load own proposal → switch composition/scenario in the editor →
-compute ephemerally → publish `new` → new member of the same family
-(fingerprint unchanged).
+*Explore variants:* load any proposal → switch scenario/composition in the
+editor → ephemeral compute (cache-backed) — nothing stored. Publishing a
+composition variant the user wants to *keep* is `mode: "new"` (a second
+gallery item) or `overwrite` (the proposal now uses that composition), the
+user's choice. Scenario variants are never publishable (§2.2) — they live
+in exploration and compare.
 
 *Build on foreign:* load foreign proposal (read-only) → explore ephemerally
 → publish `new` (optionally with `based_on_proposal_id` for the timeline).
-No copy machinery, no branch semantics in storage.
 
-*Compare:* per-side resolution (§7.3): published members load; missing
-coordinates are computed **ephemerally and not persisted** — the response
-marks such sides `published: false`. Publishing a computed side afterwards
-is an ordinary publish.
+*Compare:* per-side resolution (§7.3): a side without overrides is the
+stored proposal; any override → ephemeral compute (cache-backed), marked
+`published: false`. Publishing a computed side afterwards is an ordinary
+publish (base-scenario rule applies).
 
-*Version bump / base scenario move:* refresh batch recomputes / materializes
-default members (§4.2); on-load fallback covers the gap.
+*Version bump / base scenario move:* refresh batch recomputes all affected
+proposals in place (§4.2); `scenario_outdated` flags + on-load fallback
+cover the gap.
 
 ---
 
@@ -638,13 +720,11 @@ All list/filter/sort/aggregate work runs in SQL against
 One filter model drives both gallery and map. The response is sectioned;
 the caller picks sections via `include`.
 
-**The gallery shows exclusively default members** (§3.3): one item per
-family, KPIs always on the current base scenario. Items whose default
-member is not materialized yet fall back to the newest member, flagged
-`scenario_outdated: true`. There is no mode that lists all variants —
-variant-level browsing lives in the variants matrix on
-`GET /api/proposal/<id>` (§7.2) and in compare (§7.3), where other
-scenarios are a first-class dimension.
+**Every stored proposal is a gallery item**, always representing the
+current base scenario (or flagged `scenario_outdated: true` between a base
+move and its refresh, derived by joining `scenario.scenarios`). There is no
+variant-level mode — scenario browsing happens in compare (§7.3), where
+other scenarios are a first-class dimension.
 
 **Filter rule**: every **numeric** summary column (§5.4) accepts a
 `{"min": …, "max": …}` range (either bound optional); every **categorical**
@@ -716,61 +796,60 @@ convenience.
 
 ### 7.2 `GET /api/proposal/<id>` — load
 
-- optional `?resolve=default`: resolves and returns the family's **default
-  member** (§3.3), materializing it if missing — the standard way the
-  editor opens a proposal from the gallery ("always land on current base")
-- performs the on-load version-refresh fallback (§4.2)
+- performs the on-load version-refresh fallback (§4.2), so a load always
+  returns the current-base state (or the freshly refreshed one)
 - returns exactly the compute-response shape (§2.1) — reconstructed route
   dict, evaluation with `input.parameters` rebuilt via the scenario pin,
   route appearing once — plus proposal metadata (id, owner, name, versions,
-  timestamps)
-- `variants` section: the family matrix
-  `{composition_id × scenario_id → proposal_id | null}`, scoped to the
-  proposal owner's family, from one indexed query. Cells with more than one
-  candidate (duplicates are allowed) show the most recently updated one. A
-  null cell is not stored — the frontend computes it ephemerally via
-  `POST /api/proposal/calc` and offers publishing.
+  timestamps, `scenario_outdated` when the refresh fallback was skipped or
+  deferred)
+
+Scenario/composition switching from a loaded proposal is a frontend concern:
+it takes the returned resolved `request`, changes the field, and calls
+`POST /api/proposal/calc` (cache-backed) — no stored variants exist to
+enumerate, so there is no variants section.
 
 ### 7.3 `POST /api/proposals/compare`
 
-Each side is anchored on **exactly one family member**, with optional
-coordinate overrides resolved within that side's own family. Same anchor on
-both sides = within-family compare (e.g. TAC scenario A vs B on one route);
-different anchors = cross-proposal compare (e.g. your proposal vs someone
-else's, each on a chosen scenario):
+Each side is anchored on one **proposal**, with optional overrides computed
+within that side. Same anchor on both sides = variant compare on one route
+(e.g. TAC scenario A vs B); different anchors = cross-proposal compare
+(e.g. your proposal vs someone else's, each on a chosen scenario):
 
 ```jsonc
 {
   "sides": [
-    {"proposal_id": 123, "scenario_id": 4},        // side A: my proposal, scenario 4
+    {"proposal_id": 123, "scenario_id": 4},        // side A: my proposal under scenario 4
     {"proposal_id": 456, "scenario_id": 4}         // side B: other user's proposal,
   ]                                                //   same scenario for a fair diff.
-                                                   // Omitted coordinate = the anchor's
-                                                   // own; a bare {"proposal_id": …} side
-                                                   // is simply that proposal as stored.
+                                                   // Omitted override = the proposal as
+                                                   // stored; a bare {"proposal_id": …}
+                                                   // side is simply that proposal.
+                                                   // Overridable: scenario_id,
+                                                   // composition_id.
 }
 ```
 
-Stored members load; a missing coordinate is **computed ephemerally** from
-the anchor's compute request with the overridden coordinate — nothing is
-persisted, the side is marked `published: false`, and no ownership question
-arises (this replaces the former system-materialization rule for compare).
-Response per side: full route dict + evaluation output (+ summary row for
-published sides); plus a `diff` section with per-KPI absolute and relative
-deltas and a structured diff over the shared `views` trees (same view keys
-→ per-leaf deltas), so the compare view can show *which* cost component
-moved; plus family context (same or different fingerprint, which
-coordinates differ). Ephemeral sides share the compute latency of the
-editor — the UI needs a loading state.
+A side without overrides loads the stored proposal. A side **with**
+overrides is computed ephemerally — the anchor's stored `compute_request`
+with the overridden fields, through the ordinary compute function (which
+both reads and feeds the compute cache, §2.3) — never persisted, marked
+`published: false`, no ownership questions. Response per side: full
+compute-response shape (+ summary row for stored sides); plus a `diff`
+section with per-KPI absolute and relative deltas and a structured diff
+over the shared `views` trees (same view keys → per-leaf deltas), so the
+compare view can show *which* cost component moved; plus route context via
+the fingerprints (identical route or not, which inputs differ). Ephemeral
+sides share the compute latency of the editor on a cache miss — the UI
+needs a loading state.
 
 Two sides for now; the shape allows more later.
 
 ### 7.4 No delete API
 
-The silent discard inside the publish handler (§2.2) covers the one in-flow
-removal need; anything else is manual/script work directly on the database.
-(Guest-hygiene retention job: not needed — ephemeral compute leaves no
-drafts behind.)
+With one stored state per artifact there is no in-flow removal at all;
+cleanup is manual/script work directly on the database. (Guest-hygiene
+retention job: not needed — ephemeral compute leaves no drafts behind.)
 
 ### 7.5 `GET /api/proposal/<id>/timeline`
 
@@ -781,7 +860,7 @@ proposal. Natural home: `api/proposal_engagement.py`.
 
 `POST /api/route/plan` and `POST /api/evaluation/calc` are replaced by
 `POST /api/proposal/calc` + `POST /api/proposal/publish`. Removal, not
-deprecation — the frontend migrates in the same coordination batch (WP13);
+deprecation — the frontend migrates in the same coordination batch (WP12);
 `test_stub_endpoints_return_501` and the API README change accordingly.
 
 ---
@@ -830,10 +909,8 @@ architecture already draws:
   and computes the `subsidy_eur_per_t_co2` ratio itself.
 
 Forward-looking note: if a demand-*aware* `schedule_mode` ever varies
-seasonal frequency, recheck identity — frequency is not part of the
-fingerprint (stops/geometry/times only), so proposals differing only in
-frequency would share a family coordinate. Harmless under no-dedupe, but it
-should be a conscious decision then.
+seasonal frequency, recheck fingerprinting — frequency is not part of the
+fingerprint (stops/geometry/times only).
 
 Placeholder policy (first implementation, to get API + frontend running):
 the projection fills demand-dependent columns with **deterministic fakes
@@ -854,163 +931,217 @@ backfill path needed.
    tracks (`ROUTE_BUILDER_VERSION`, `CALC_VERSION`) remain separate
    constants.
 2. **Ephemeral compute, explicit publish**: computing never writes;
-   proposals exist only through publish (plus system refresh /
-   default-member materialization). Unsaved exploration is a frontend
-   concern (draft caching, warn-on-navigate).
-3. **Publish integrity**: the server never persists client-supplied
+   proposals exist only through publish (plus system refresh). Unsaved
+   exploration is a frontend concern (draft caching, warn-on-navigate).
+3. **One stored state per route artifact**: no stored scenario/composition
+   variants, no families, no variant coordinates, no default-member
+   resolution. Variant exploration is ephemeral compute backed by the
+   compute cache, which is fed by both `/calc` and compare.
+4. **Published proposals are always on the current base scenario**: publish
+   rejects non-base `scenario_id` (422). What-if scenarios are an analysis
+   dimension (compute, compare), never an artifact dimension. The refresh
+   batch re-bases all proposals when the base moves — this deliberately
+   revises the earlier "pins are never rewritten" rule, whose purpose
+   (protecting pinned variant artifacts) no longer exists.
+5. **Publish integrity**: the server never persists client-supplied
    results — publish carries inputs, the server computes what it stores,
-   either freshly or from the server-side compute cache (§2.3), which only
-   ever holds server-computed results.
-4. **Overwrite vs new is the user's explicit choice** at publish; all
-   further case handling lives in the publish handler. Families are backend
-   logic invisible to users: an overwrite that changes the route silently
-   deletes the old family's other members in the same transaction. System
-   refreshes never discard (members converge via their own refresh).
-5. Hard delete of previous states, in-transaction; `update_log` preserves
-   the timeline for comments/likes. One row per proposal — no `is_current`
-   flag, no `change_log` column.
-6. Route stored **once**: GTFS + sidecar tables, reconstructed on read;
+   freshly or from the compute cache, which only ever holds
+   server-computed results. The acting user comes exclusively from the
+   auth layer, never the request body.
+6. **Overwrite vs new is the user's explicit choice** at publish; the
+   publish handler has exactly these two cases. Hard delete of the
+   previous state in-transaction; one row per proposal — no `is_current`
+   flag, no `change_log` column; `update_log` preserves the timeline for
+   comments/likes.
+7. Route stored **once**: GTFS + sidecar tables, reconstructed on read;
    evaluation output stored as `models` + `views` only — route and
    `input.parameters` are rebuilt on read (parameters exactly recoverable
    through the immutable scenario pin).
-7. **Proposal identity is `proposal_id` alone; no deduplication.**
-   Fingerprint and variant coordinate `(composition_id, scenario_id)` only
-   group and address members within a family; `(user_id,
-   route_fingerprint, composition_id, scenario_id)` is a plain index, not
-   a constraint.
-8. **Families are strictly single-user**; building on a foreign proposal is
-   loading + ephemeral exploration + publish-as-new
-   (`based_on_proposal_id` optional, timeline-informational only).
-9. The gallery shows **exclusively default members** — one item per
-   family (current base scenario × most recently updated composition),
-   `scenario_outdated` fallback until materialized. Variant-level browsing
-   happens only in the variants matrix and in compare.
-10. Scenario pins on proposals are never rewritten; base scenario moves are
-    handled by materializing new default members (batch + on-load) under
-    the family owner.
-11. Version bumps are handled by the system (batch refresh + on-load
-    fallback), logged in `update_log`.
+8. **Proposal identity is `proposal_id` alone; no deduplication.** The
+   route fingerprint is informational (compare context, analytics) — no
+   lookup, index, or handler branch depends on it.
+9. Building on a foreign proposal = loading + ephemeral exploration +
+   publish-as-new (`based_on_proposal_id` optional,
+   timeline-informational only).
+10. Every stored proposal is a gallery item; `scenario_outdated` flags the
+    window between a base move and the proposal's refresh.
+11. Version bumps and base moves are handled by the system (batch refresh +
+    on-load fallback), logged in `update_log`.
 12. Subsidy = gap to target margin (`max(0, -net_eur)`).
-13. Route identity for fingerprinting = resolved stop lists + geometries +
-    exact trip schedules; request settings are state.
+13. Fingerprint identity = resolved stop lists + geometries + exact trip
+    schedules; request settings are state.
 14. ONTD stays in its own schema; union at API level with explicit `source`
     marking and no KPIs for existing routes.
 15. Demand-dependent KPIs faked with an explicit placeholder flag until the
     demand model exists.
-16. Compare takes one family-member anchor per side; missing coordinates
-    are computed ephemerally, never persisted.
+16. Compare takes one proposal anchor per side; overridden sides are
+    computed ephemerally (cache-backed), never persisted.
 17. No delete API, no guest-hygiene job.
 
 ---
 
 ## 10. Implementation plan — work packages
 
-Sized so each can be worked off in its own chat thread. Dependencies noted;
-every WP ends with the standard closing steps (README sweep, sanity check,
+Sized so each can be worked off in its own chat thread, and sequenced so
+that **the full test suite is green after every single WP** — each WP ships
+its own tests, script updates, and README adjustments. The one structural
+device making this possible is the **two-phase schema migration**: WP1 is
+purely additive (old code keeps running), and WP5 is the single cutover PR
+that finalizes the schema atomically with the code that requires it. Every
+WP ends with the standard closing steps (README sweep, sanity check,
 feat/test/docs commits, full suite green from `backend/` via
 `uv run --extra dev pytest`).
 
-**WP1 — Schema migration** *(no dependencies)*
-Migration under `backend/db/dev/sql/migrations/` + `create_proposal_schema.sql`
-rewrite: slimmed `proposals.proposals` (§5.3, NOT NULL evaluation/calc
-columns, `compute_request`, dropped `is_current`/`change_log`/`route_body`),
-sidecar tables (§5.2), `update_log`, `proposal_summaries` (financial KPIs
-NOT NULL) with all indexes, rewritten table/column comments. Verify PostGIS
-geometry column on the dev DB.
+**WP1 — Schema migration, phase 1 (additive only)** *(no dependencies)*
+Migration under `backend/db/dev/sql/migrations/`: new tables — sidecars
+(§5.2), `update_log`, `proposal_summaries`, the two compute-cache
+tables `compute_cache_pointer` + `compute_cache_result` (exact DDL and
+read/write/cleanup algorithm finalized in §2.3, 2026-08-03) —
+plus new **nullable** columns on `proposals.proposals`
+(`route_fingerprint`, `compute_request`, `stop_times.stop_type`). Nothing
+dropped, no constraint the existing persist-on-calc code violates. The
+cache tables' read/write/cleanup logic itself (request hashing, the 1%
+opportunistic TTL sweep, the version-bump flush) is WP13 — WP1 only lands
+the tables and indexes.
+*Testable by*: migration applies on a fresh dev DB + schema-assertion
+checks extending `backend/tests/test_02_db_seed.py` (information_schema
+table/column existence, PostGIS geometry column on
+`proposal_summaries.geom_simplified`). *Green because*: strictly
+additive — existing endpoints and tests untouched.
 
-**WP2 — Merged compute endpoint** *(parallel to WP1 — no persistence involved)*
+**WP2 — Merged compute endpoint (additive)** *(parallel to WP1)*
 `POST /api/proposal/calc`: orchestrate route building + evaluation in one
 pipeline (API boundary only — `models/route` and `models/evaluation` stay
-untouched and separate); neutral structural IDs; merged request validation
-(verified: calc carried no extra inputs beyond the scenario override);
-response shape per §2.1 incl. the **resolved** request echo (fingerprint
-wiring completed after WP4). Remove persist hooks from the pipeline. Update
-`test_stub_endpoints_return_501` and API README.
+untouched); neutral structural IDs; merged request validation (verified:
+calc carried no extra inputs beyond the scenario override); response shape
+per §2.1 incl. the **resolved** request echo and `cache_hit` meta
+(fingerprint wiring completed after WP4). The old `/api/route/plan` and
+`/api/evaluation/calc` **stay in place until WP5** — no persist hooks are
+touched here. *Testable by*: stateless endpoint tests over the merged
+response shape, reusing the existing plan/calc fixtures. *Green because*:
+purely additive endpoint.
 
 **WP3 — Route decomposition + reconstruction serializer** *(after WP1)*
-GTFS + sidecar insert (write side, prefix assignment at publish); new
+GTFS + sidecar insert (write side, prefix assignment as at publish); new
 `api/helpers/route_gtfs_serialize.py` with `route_dict_from_gtfs()`
-rebuilding the exact route dict (composition/track_infrastructure reloaded
-via loader, `general_parameters` recomputed) and the `input.parameters`
-rebuild helper (scenario-pin → `params_serialize.py`). Round-trip tests:
-compute result → store → reconstruct → deep-equal, parameters included.
+(composition/track_infrastructure reloaded via loader,
+`general_parameters` recomputed) and the `input.parameters` rebuild helper
+(scenario-pin → `params_serialize.py`). *Testable by*: standalone
+round-trip tests — WP2 compute responses as fixtures, written under test
+proposal IDs into WP1's tables, reconstructed, deep-equal (parameters
+included). No publish endpoint needed. *Green because*: new module + new
+tables only; old persist path untouched.
 
 **WP4 — Fingerprint & projection module** *(after WP3)*
 `adapters/proposal_projection.py`: canonical route extract + SHA-256
 fingerprint (§3.1 rules incl. prefix stripping and coordinate rounding);
 summary-row builder (route metrics, KPI extraction, geometry concatenation
-+ simplification, placeholder KPI filler + flag). Tests: identical routes
-in ephemeral vs published form and original-vs-reconstructed routes produce
-equal fingerprints. Wire fingerprint into the WP2 compute response.
++ simplification, placeholder KPI filler + flag). Wire fingerprint +
+`cache_hit` into the WP2 compute response. *Testable by*: pure-function
+tests on compute fixtures; equal-fingerprint assertions for ephemeral vs
+prefixed and original vs reconstructed forms; projection rows asserted
+against `proposal_summaries`. *Green because*: additive module; the only
+touched endpoint (WP2's) gains a field.
 
-**WP5 — Publish endpoint & repository** *(after WP2 + WP4; the core WP)*
-`POST /api/proposal/publish`: recompute-on-publish, `mode` new/overwrite,
-ownership check, publish handler (`api/helpers/publish_dispatch.py`)
-with its case table incl. silent sibling discard on route change,
-`based_on_proposal_id` timeline entries, prefixed-ID assignment;
-`adapters/proposal_repository.py` rewritten around single-transaction
-publish (proposal row + GTFS/sidecars + summary + update_log; prune on
-overwrite; `FOR UPDATE` serialization). Integration tests: create, edit
-with/without discard, variant publish, build-on-foreign, concurrent
-publishes.
+**WP5 — Cutover: publish endpoint, repository, schema phase 2** *(after
+WP2 + WP4; the core WP — the one deliberately large one)*
+The single PR where old and new worlds swap, atomically:
+`POST /api/proposal/publish` (compute-or-cache, base-scenario validation
+422 `scenario_not_base`, ownership check, publish handler
+`api/helpers/publish_dispatch.py` with its two cases, `based_on` timeline
+entries, prefixed-ID assignment); `adapters/proposal_repository.py`
+rewritten around single-transaction publish (proposal row + GTFS/sidecars
++ summary + update_log; prune on overwrite; `FOR UPDATE` serialization);
+**minimal** `GET /api/proposal/<id>` (compute-response shape via WP3
+reconstruction) and **minimal** `POST/GET /api/proposals` (plain summaries
+list, pagination — full filters follow in WP6); removal of
+`/api/route/plan` + `/api/evaluation/calc` and all persist-on-calc code;
+**finalizing migration** (drop `route_body`/`evaluation_body`-old/
+`is_current`/`change_log`, enforce NOT NULLs — see data note below);
+complete rewrite of the persist test suite. *Testable by*: integration
+tests — create, edit, composition change via overwrite and via new,
+build-on-foreign, non-base rejection, concurrent publishes, load
+round-trips. *Green because*: everything depending on the old world is
+replaced within this one PR.
 
-**WP6 — Gallery/map endpoint** *(after WP5)*
-`api/proposals.py` + `api/helpers/proposal_serialize.py`: SQL-pushed
-filters (generic range/list/substring over all summary columns), default-
-member resolution via DISTINCT ON + `scenario_outdated` fallback, the
-`trip_windows` stop-time filter (GTFS overnight-time convention), sorting,
-windowed count, `include` sections; `bbox` optional/deferrable. Remove
-Python-side filtering.
+*Data strategy (decided)*: **drop and recreate, no row migration.** The
+finalizing migration is an ordinary migration SQL through the standard
+`db/migrate.py` process that drops all old proposal-storage tables
+(`proposals.proposals` + the old GTFS decomposition) and creates the final
+shape — current stored proposals are pre-launch test artifacts.
+Engagement tables and `update_log` use soft references, so they survive
+structurally; their stale pre-cutover rows are truncated in the same
+migration for a clean start. Nothing to reseed: proposals are
+user-generated content, and the params/ONTD/scenario schemas are
+untouched.
 
-**WP7 — Load endpoint** *(after WP5, parallel to WP6)*
-`GET /api/proposal/<id>`: reconstructed response shape, `variants` section,
-`?resolve=default` with default-member materialization under the family
-owner (§3.3).
+**WP6 — Gallery/map endpoint (full)** *(after WP5)*
+Extends WP5's minimal list to the full §7.1 contract: generic
+range/list/substring filters over all summary columns,
+`scenario_outdated` derivation, `trip_windows` stop-time filter (GTFS
+overnight-time convention), sorting, windowed count, `include` sections;
+`bbox` optional/deferrable. *Testable by*: endpoint tests over seeded
+published proposals per filter class.
+
+**WP7 — Load endpoint completion** *(after WP5, parallel to WP6; small)*
+Extends WP5's minimal load to the full §7.2 contract: proposal metadata
+block, `scenario_outdated`, response-contract tests against the §2.1
+shape. *Testable by*: contract tests on published fixtures.
 
 **WP8 — Version-refresh mechanism** *(after WP5, parallel to WP6/7)*
-`backend/scripts/refresh_proposals.py` (batch: outdated versions + missing
-default members, recompute/materialize in place, owner kept, `update_log`
-'recalculated', idempotent, dry-run, concurrency limit) + the on-load
-refresh fallback.
+`backend/scripts/refresh_proposals.py` (batch: outdated versions +
+non-current-base scenario pins, recompute + re-base in place, owner kept,
+`update_log` 'recalculated', idempotent, dry-run, concurrency limit) + the
+on-load refresh fallback in WP7's endpoint. *Testable by*: publish under
+current base → move base scenario in test fixtures → batch run assertions
+(re-based scenario_id, update_log rows, summary refresh); on-load fallback
+test.
 
 **WP9 — Compare endpoint** *(after WP7, uses WP8's on-load refresh)*
-`POST /api/proposals/compare`: per-side anchored resolution, ephemeral
-compute for missing coordinates (`published: false`), full sides + KPI
-deltas + structured `views` diff + family context.
+`POST /api/proposals/compare`: per-side resolution (stored vs override →
+ephemeral compute through the cache), full sides + KPI deltas + structured
+`views` diff + fingerprint-based route context. *Testable by*: two
+published fixtures + override sides; `published: false` marking; diff
+assertions.
 
 **WP10 — ONTD integration** *(after WP6; independent of WP7–9)*
 `ontd.route_summaries` projection built in the seed pipeline
-(`backend/db/dev/`); `sources` filter + union in `POST /api/proposals`
-(summaries and map sections); `source` marking throughout.
+(`backend/db/dev/`); `sources` filter + union in `POST /api/proposals`;
+`source` marking throughout. *Testable by*: seeded ONTD rows appearing in
+gallery/map sections with null KPIs.
 
 **WP11 — Timeline endpoint** *(after WP5; small)*
 `GET /api/proposal/<id>/timeline` in `api/proposal_engagement.py` merging
-`update_log` + comments + likes.
+`update_log` + comments + likes. *Testable by*: publish → comment →
+overwrite sequence asserted in order.
 
-**WP12 — Data migration & backfill** *(after WP5)*
-Script (under `backend/scripts/`) migrating existing stored proposals:
-decompose stored `route_body` into sidecars, reduce stored evaluations to
-`models` + `views`, **evaluate route-only proposals** (no half-states
-allowed anymore), compute fingerprints, build summary rows, seed
-`update_log` with synthetic 'published' events, prune historical versions.
-Idempotent; dry-run mode.
-
-**WP13 — Frontend coordination batch (Bjarne)** *(rolling, before staging PR)*
+**WP12 — Frontend coordination batch (Bjarne)** *(rolling; heads-up
+before WP5 lands, full audit before the staging PR)*
 The largest contract change so far: `/api/route/plan` +
 `/api/evaluation/calc` → `/api/proposal/calc` + `/api/proposal/publish`
-(incl. the publish dialog: name, overwrite-vs-new, based_on); client-side draft caching / warn-on-navigate for unsaved
-exploration; restructured `POST /api/proposals` (generic filters, `trip_windows`,
-sections, `scenario_outdated`); `variants` + `?resolve=default` on
-`GET /api/proposal/<id>`; compare (`published: false` sides need a loading
-state) and timeline endpoints; `source` and `demand_kpis_placeholder`
-fields; reconstructed-response note (byte-identity not guaranteed,
-structure identical). Audit `frontend/src/types/api.ts` end to end.
+(incl. the publish dialog: name, overwrite-vs-new, based_on; publish
+re-computes on base if the user explored a what-if); client-side draft
+caching / warn-on-navigate; scenario/composition switching as pure compute
+calls (no variants section); restructured `POST /api/proposals` (generic
+filters, `trip_windows`, sections, `scenario_outdated`); compare
+(`published: false` sides need a loading state) and timeline endpoints;
+`source`, `demand_kpis_placeholder`, `cache_hit` fields;
+reconstructed-response note (byte-identity not guaranteed, structure
+identical). Audit `frontend/src/types/api.ts` end to end.
 
-**WP14 — Compute cache** *(after WP2; independent of WP3–13)*
-Level-1 full-result cache (§2.3): canonical request hashing shared with the
-publish path, `UNLOGGED` PostgreSQL cache table + TTL cleanup, wire-in for
-`POST /api/proposal/calc` and reuse in `POST /api/proposal/publish` once
-WP5 lands; configurable TTL (default 3 h). Verify the key-correctness
-assumption (all evaluation inputs reachable via the scenario pin). Level 2
-(route-stage cache) as a follow-up in the same module if profiling shows
-evaluation-only tweaks matter.
+**WP13 — Compute cache** *(after WP2 + WP4 for the fingerprint;
+independent of WP5–12 — worth doing early, it speeds up every later WP's
+integration tests)*
+The two-map design of §2.3: pointer map (request_hash → result identity,
+holding request-specific parts) + result map (`(fingerprint, scenario_id,
+composition_id)` → route + evaluation core, one entry per distinct
+result); canonical request hashing shared with the publish path; TTL
+cleanup (default 3 h, configurable); flush hook for the version-bump
+procedure (wired into WP8's refresh script once it lands); `cache_hit`
+semantics; wire-in for `POST /api/proposal/calc`, reuse in publish (WP5)
+and compare (WP9) once those land. Verify the key-correctness assumption
+(all evaluation inputs reachable via the scenario pin). *Testable by*:
+`cache_hit` on repeated identical requests; hit via a **different** request
+converging on the same result (pointer→shared result); miss on any
+output-changing field; response `request` echo always matches the actual
+request; TTL expiry; flush empties both maps.

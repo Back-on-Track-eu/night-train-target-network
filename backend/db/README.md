@@ -145,6 +145,27 @@ scenario lineage**, and a partial reseed of `input_params`/`scenario` that
 preserves `proposals` would dangle pinned `scenario_id`s. Reseed = everything
 or nothing.
 
+### The proposals redesign — two-phase migration (in progress)
+
+The `proposals` schema is mid-redesign per
+[`docs/PROPOSALS_DESIGN.md`](../../docs/PROPOSALS_DESIGN.md); see that
+doc's §10 for the full work-package plan. The migration is deliberately
+**two-phase** so the full test suite stays green after every single work
+package instead of only at the end:
+
+- **Phase 1** (`migrations/2026-08-03_proposal_schema_phase1.sql`, WP1) —
+  strictly additive: new sidecar tables, `update_log`,
+  `proposal_summaries`, and the compute cache land alongside the
+  existing persist-on-calc tables/columns, which keep running untouched.
+  Nothing dropped, no constraint the old code violates.
+- **Phase 2** (WP5) — the single cutover migration: drops
+  `route_body`/`evaluation_body`/`is_current`/`change_log`, enforces the
+  final `NOT NULL`s, and lands in the same PR as the code that requires
+  the new shape. Decided data strategy: **drop and recreate, no row
+  migration** — current stored proposals are pre-launch test artifacts,
+  and `update_log`/`likes`/`comments` survive structurally since they
+  already use soft references.
+
 ---
 
 ## Schema overview
@@ -287,6 +308,40 @@ could already both have liked the same proposal, so the guest's copy is
 dropped in that case (the target's own like already counts) before the
 rest are reassigned — the merge never fails on this, it just avoids a
 constraint violation.
+
+**Proposals redesign, schema phase 1 (2026-08-03, additive-only — see the
+two-phase migration note above).** `proposals.proposals` gained two
+nullable columns ahead of the WP5 cutover: `route_fingerprint` (route
+identity fingerprint, informational only) and `compute_request` (resolved
+`POST /api/proposal/calc` request, verbatim — mirrors `route_body`'s
+JSON-not-JSONB key-order rationale). `stop_times` gained a nullable
+`stop_type` column (lossless boarding/alighting/night/both
+classification). None of the three is populated by the current
+persist-on-calc write path — that starts with WP2/WP3/WP5.
+
+The same migration adds ten new, currently-empty tables — nothing writes
+to them yet, existence is all `test_02_db_seed.py` asserts for now:
+
+| Table | Description |
+|---|---|
+| `segments` | One row per `Segment` (`models/route/trip.py`) — the atomic per-stop-pair physics unit of a trip (distance, driving/dynamics/buffer/slack time, energy, per-country shares). Composite PK `(trip_id, segment_sequence)` |
+| `od_pairs` | One row per `ODPair` (`models/params.py`) — demand for one origin-destination pair, one accommodation class, one trip |
+| `parkings` | One row per `Parking` (`models/route/route.py`) — overnight parking location, deduplicated by `stop_id` within the route; `trip_ids` lists every trip that parks there |
+| `shuntings` | One row per `Shunting` (`models/route/route.py`) — one shunting event at a trip terminal; not deduplicated, up to 4 rows per round trip |
+| `timetable_warnings` | One row per `TimetableWarning` (`models/route/trip.py`) — a derived timetable quality annotation, informational only |
+| `seasonal_schedules` | One row per `SeasonalSchedule` (`models/route/route.py`) — operating frequency (daily/three_per_week) per season on a route |
+| `update_log` | Append-only timeline event log (published/overwritten/recalculated/branched_from/branched_to) — preserves state transitions that `proposals.proposals` itself prunes on overwrite |
+| `proposal_summaries` | Derived projection over `proposals.proposals` for the gallery/map — route metrics, financial KPIs, placeholder demand KPIs, simplified PostGIS geometry. Not a source of truth; rebuildable at any time |
+| `compute_cache_pointer` | Compute cache, pointer side — `request_hash` → which result it resolves to, plus request-specific response parts. `UNLOGGED` |
+| `compute_cache_result` | Compute cache, result side — `(route_fingerprint, scenario_id, composition_id)` → the shared route + evaluation payload, stored once per distinct result. `UNLOGGED` |
+
+Segments/od_pairs/timetable_warnings key off `trip_id`; parkings/shuntings/
+seasonal_schedules key off `route_id` — matching where each field lives on
+the `Route`/`Trip` domain objects (route-level vs. trip-level), same
+soft-reference convention as `stop_times.stop_id`. See
+`docs/PROPOSALS_DESIGN.md` §5.2/§4.1/§5.4/§2.3 for the full rationale and
+`migrations/2026-08-03_proposal_schema_phase1.sql` for the DDL and
+column-level comments.
 
 **Seed data.** `db/dev/seed.py` seeds exactly one proposal (`proposal_id=1`
 — the natural first-insert outcome on a fresh DB, no reservation needed —
