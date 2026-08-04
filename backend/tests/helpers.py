@@ -18,6 +18,7 @@ PROPOSAL_URL = "/api/proposal"
 PROPOSAL_CALC_URL = "/api/proposal/calc"
 PROPOSAL_PUBLISH_URL = "/api/proposal/publish"
 PROPOSALS_URL = "/api/proposals"
+PROPOSALS_COMPARE_URL = "/api/proposals/compare"
 FEEDBACK_URL = "/api/feedback"
 FEEDBACK_CATEGORIES_URL = "/api/feedback/categories"
 SCENARIOS_URL = "/api/scenarios"
@@ -112,6 +113,19 @@ def compute(
     body = {"stops": stops, "composition_id": composition_id, **extra}
     resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=timeout)
     assert resp.status_code == 200, f"proposal/calc failed: {resp.text[:300]}"
+    return resp.json()
+
+
+def compare_sides(api_base: str, sides: list[dict], timeout: int = 120) -> dict:
+    """POST /api/proposals/compare (WP9) with the given side specs and
+    return the full response body (sides, diff, route_context). Asserts
+    200 — callers testing error paths (400/404/422) post directly
+    instead. Stateless and unauthenticated like compute(); the generous
+    timeout covers override sides, which run a live compute each."""
+    resp = requests.post(
+        f"{api_base}{PROPOSALS_COMPARE_URL}", json={"sides": sides}, timeout=timeout
+    )
+    assert resp.status_code == 200, f"proposals/compare failed: {resp.text[:300]}"
     return resp.json()
 
 
