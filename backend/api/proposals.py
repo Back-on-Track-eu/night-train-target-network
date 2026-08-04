@@ -21,9 +21,8 @@ import logging
 
 from flask import Blueprint, jsonify, request
 
-from adapters.proposal.repository import outdated_trigger
 from api.helpers.dependencies import get_loader, get_proposal_repository
-from api.helpers.proposal_compute import compute_proposal
+from api.helpers.proposal_load import load_current_container
 from api.helpers.proposal_serialize import (
     map_country_counts_to_geojson,
     map_lines_to_geojson,
@@ -102,19 +101,18 @@ def get_proposal(proposal_id: int):
 
     On-load version-refresh fallback (§4.2, WP8): if the stored proposal
     has fallen behind the running route_builder_version/calc_version or
-    the current base scenario (adapters/proposal/repository.py's
-    outdated_trigger()), it's recomputed and overwritten in place before
-    the response is built — correctness for anything the batch script
-    (scripts/refresh_proposals.py) hasn't reached yet, at the cost of one
-    slow load. Every other load is unaffected (outdated_trigger() is a
-    cheap in-Python check on the row get_container() already fetched, no
-    extra query in the common case).
+    the current base scenario, it's recomputed and overwritten in place
+    before the response is built — correctness for anything the batch
+    script (scripts/refresh_proposals.py) hasn't reached yet, at the cost
+    of one slow load. Lives in api/helpers/proposal_load.py's
+    load_current_container(), shared with POST /api/proposals/compare's
+    per-side resolution (WP9).
 
     Response: identical shape to POST /api/proposal/publish's response
     (api/helpers/proposal_serialize.py's proposal_to_response_dict()).
     """
     repo = get_proposal_repository()
-    container = repo.get_container(proposal_id)
+    container = load_current_container(repo, proposal_id)
     if container is None:
         return (
             jsonify(
@@ -125,23 +123,6 @@ def get_proposal(proposal_id: int):
             ),
             404,
         )
-
-    trigger = outdated_trigger(container)
-    if trigger is not None:
-        # Re-resolve scenario_id fresh against the current base rather
-        # than replaying the stored (possibly stale) one — the whole
-        # point of a refresh is to land back on whatever base is current
-        # NOW, regardless of which of the three triggers actually fired.
-        refresh_request = dict(container["compute_request"])
-        refresh_request["scenario_id"] = None
-        computed = compute_proposal(refresh_request)
-        repo.refresh_proposal(proposal_id, computed, detail=trigger)
-        # refresh_proposal()'s own return dict is deliberately minimal
-        # (identity + timestamps, mirroring publish()'s) — it doesn't
-        # carry user_name/compute_request/evaluation_output the way
-        # get_container() does, so re-fetch rather than hand-assembling
-        # what proposal_to_response_dict()/reconstruct_* need below.
-        container = repo.get_container(proposal_id)
 
     loader = get_loader()
     route = repo.reconstruct_route(

@@ -19,6 +19,7 @@ Endpoints — see api/README.md for full documentation.
   POST /api/proposal/publish
   GET  /api/proposals
   POST /api/proposals
+  POST /api/proposals/compare
   GET  /api/proposal/<id>
   GET    /api/proposal/<id>/likes
   POST   /api/proposal/<id>/likes
@@ -49,6 +50,7 @@ from api import (
     health,
     params,
     proposal_calc,
+    proposal_compare,
     proposal_publish,
     auth,
     feedback,
@@ -87,6 +89,7 @@ def create_app() -> Flask:
     app.register_blueprint(auth.bp, url_prefix="/api/auth")
     app.register_blueprint(feedback.bp, url_prefix="/api")
     app.register_blueprint(proposals.bp, url_prefix="/api")
+    app.register_blueprint(proposal_compare.bp, url_prefix="/api")
     app.register_blueprint(proposal_engagement.bp, url_prefix="/api")
     app.register_blueprint(scenarios.bp, url_prefix="/api")
 
