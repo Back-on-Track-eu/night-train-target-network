@@ -426,6 +426,61 @@ cross-test interference on the shared seed proposal.
 | `test_delete_comment_by_other_user_is_forbidden` | Ownership | DELETE as guest | `403 forbidden` |
 | `test_delete_comment_by_author_soft_deletes` | Soft-delete contract | DELETE as author | `204`; still listed with `is_deleted=true`, `body=""`; further PATCH/DELETE on it → `404` |
 
+## test_52_proposals_gallery_api.py — Gallery + map filters (full §7.1)
+
+WP6/WP6.1 (`docs/PROPOSALS_DESIGN.md` §7.1): the full filter/sort/
+include contract of `POST /api/proposals` on top of WP5-minimal's plain
+list — one representative test per filter kind rather than exhaustive
+column coverage (the filter builder is generic; a kind proven for one
+column holds for every column of that kind). Same publish-and-purge
+module isolation as test_50.
+
+| Test | Pins |
+|---|---|
+| `TestFilterKinds::*` (12 tests) | one filter of each kind: numeric range, list (`composition_ids`, `proposal_ids`), `name` substring, array overlap (`countries`, `stop_ids`), any-vs-all array mode (+ invalid mode → `400`), `created_at`/`updated_at` ranges, removed `route_builder_version`/`calc_version`/`scenario_id` filters → `400`, `sources: ["existing"]` → `400` until WP10 |
+| `TestTripWindows::*` | single-trip timetable match/no-match (GTFS overnight convention) |
+| `TestBbox::*` | `ST_Intersects` viewport hit/miss on `geom_simplified` |
+| `TestSortAndPagination::*` | sort by any filterable column, unknown column → `400`, windowed `total` = filtered count (not page size) |
+| `TestIncludeSections::*` | default `["summaries"]`, `map_lines` corridor GeoJSON (+ thickness via a second proposal on the identical corridor), `map_stop_counts`, `map_country_counts` choropleth features, sections combining, unknown section → `400` |
+| `TestLikesCount::*` | `likes_count` appears in summaries, is filterable and sortable (live-joined, never stored) |
+
+## test_53_proposal_refresh.py — Version-refresh mechanism
+
+WP7/WP8 (`docs/PROPOSALS_DESIGN.md` §4.2): the on-load fallback in
+`GET /api/proposal/<id>` and the batch script
+(`scripts/refresh_proposals.py`), both sharing `outdated_trigger()`.
+Staleness is forced by mutating `proposals.proposals.route_builder_
+version` directly — one trigger's coverage stands in for the mechanism
+(all three triggers run the same code path).
+
+| Test | Pins | Setup | Expectation |
+|---|---|---|---|
+| `TestOnLoadFallback::test_stale_proposal_is_refreshed_on_load` | §4.2 fallback | publish, age the version, `GET` | current version, `proposal_version` 2, `update_log` `'recalculated'` with the right `detail` |
+| `TestOnLoadFallback::test_current_proposal_is_not_refreshed_on_load` | Trigger gates the fallback | fresh publish, `GET` | `proposal_version` stays 1 |
+| `TestBatchScript::test_dry_run_reports_but_does_not_write` | `--dry-run` | aged proposal | stored version unchanged |
+| `TestBatchScript::test_run_refreshes_and_is_idempotent` | Batch run + idempotency | aged proposal, `run()` twice | refreshed once; second run finds nothing outdated |
+| `TestBatchScript::test_list_outdated_agrees_with_outdated_trigger` | SQL filter ≡ Python check | aged proposal | `list_outdated()` row fires `outdated_trigger()` |
+
+## test_54_proposal_compare_api.py — POST /api/proposals/compare
+
+WP9 (`docs/PROPOSALS_DESIGN.md` §7.3): two proposal-anchored sides,
+optional `scenario_id`/`composition_id` overrides (computed ephemerally,
+`published: false`), diff = side B minus side A. Same publish-and-purge
+module isolation as test_50/test_53; the diff-semantics class is pure
+(synthetic sides, no DB/HTTP).
+
+| Test | Pins | Setup | Expectation |
+|---|---|---|---|
+| `TestValidation::*` (4 tests + parametrized side counts) | Request validation | empty body / 0-1-3 sides / unknown side key / wrong types | `400` each, field named in `details` |
+| `TestValidation::test_unknown_anchor_is_404_with_side_index` | Anchor existence | side B → nonexistent id | `404`, message names `sides[1]` |
+| `TestStoredVsStored::*` (5 tests) | Cross-proposal compare | two published fixtures, no overrides | top-level `sides`/`diff`/`route_context` shape; both `published: true` with full §2.1 shape + gallery summary (`likes_count`); summary diff `abs == b - a` and ≠ 0 across compositions; views diff reaches breakdown leaves with the `{a, b, abs, rel}` contract; `composition_id` in `differing_request_fields` |
+| `TestOverrides::test_override_equal_to_stored_is_computed_but_identical` | "Any override → computed side" rule | scenario override = stored value | `published: false`, overrides echoed, projection summary (no `likes_count`/geometry), `route_identical: true`, every delta zero |
+| `TestOverrides::test_scenario_override_changes_costs` | What-if scenario side + ephemerality | historical-scenario override | non-zero cost delta, `differing_request_fields == ["scenario_id"]`; anchor's stored row untouched |
+| `TestOverrides::test_composition_override` | Composition variant side | other composition | `published: false`, override reflected in summary, non-zero cost delta |
+| `TestOverrides::test_unknown_composition_override_is_422_with_side_index` | Domain error mapping | nonsense composition | `422 domain_error`, message names `sides[1]` |
+| `TestOnLoadRefreshInCompare::test_stale_anchor_is_refreshed` | WP8 reuse (§4.2) | publish, age the version, compare it with itself | both sides current, `proposal_version` 2, `update_log` `'recalculated'` |
+| `TestDiffSemantics::*` (2 tests, pure) | Diff contract | synthetic sides | zero base → `rel: null`; float noise absorbed; strings/null-vs-number skipped; one-sided keys collected as dotted paths, never half-diffed |
+
 ## test_60_feedback_api.py — Feedback API
 
 A module-scoped autouse fixture purges rows tagged with the

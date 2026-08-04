@@ -889,16 +889,33 @@ A side without overrides loads the stored proposal. A side **with**
 overrides is computed ephemerally — the anchor's stored `compute_request`
 with the overridden fields, through the ordinary compute function (which
 both reads and feeds the compute cache, §2.3) — never persisted, marked
-`published: false`, no ownership questions. Response per side: full
-compute-response shape (+ summary row for stored sides); plus a `diff`
-section with per-KPI absolute and relative deltas and a structured diff
-over the shared `views` trees (same view keys → per-leaf deltas), so the
-compare view can show *which* cost component moved; plus route context via
-the fingerprints (identical route or not, which inputs differ). Ephemeral
-sides share the compute latency of the editor on a cache miss — the UI
-needs a loading state.
+`published: false`, no ownership questions. Any override key present
+routes the side through the compute path, even if its value equals the
+stored one (deterministic, no equality special-casing). Every side's
+anchor runs the on-load refresh (§4.2) first — for override sides this
+matters just as much as for stored ones, since they replay the anchor's
+stored `compute_request`, whose `scenario_id` only reliably means
+"current base" after the refresh has run.
 
-Two sides for now; the shape allows more later.
+Response per side: full compute-response shape, plus a **summary block on
+both side kinds** — the stored side's gallery row (likes included), the
+computed side's built on the fly by the same projection publish runs
+(geometry and DB-only fields omitted) — so the compare view diffs the
+same headline KPIs the gallery shows, whichever kind the side is. Plus a
+`diff` section, **side B minus side A** throughout: per-KPI `{a, b, abs,
+rel}` deltas over the gallery-KPI columns, and a generic structured diff
+over the shared `views` trees (same view keys → per-leaf deltas across
+every cost category and normalisation; keys present on only one side are
+collected as paths under `views_unmatched` rather than half-diffed), so
+the compare view can show *which* cost component moved; plus route
+context via the fingerprints (identical route or not, which resolved
+request fields differ). Ephemeral sides share the compute latency of the
+editor on a cache miss — the UI needs a loading state.
+
+Two sides for now; the shape allows more later. Bundle-level analysis —
+each side a **set** of proposals — is not a compare extension but its
+own endpoint, `POST /api/proposals/analyze` (§7.7, WP15): compare stays
+the per-pair deep dive the analyze view drills down into.
 
 ### 7.4 No delete API
 
@@ -917,6 +934,153 @@ proposal. Natural home: `api/proposal_engagement.py`.
 `POST /api/proposal/calc` + `POST /api/proposal/publish`. Removal, not
 deprecation — the frontend migrates in the same coordination batch (WP12);
 `test_stub_endpoints_return_501` and the API README change accordingly.
+
+### 7.7 `POST /api/proposals/analyze` — bundle analysis (designed 2026-08-04, WP15)
+
+Compare (§7.3) answers "line vs line". Analyze answers the network-level
+question — "what does this **set** of proposals cost/earn/save under
+scenario X, and how does that change under scenario Y" — which is the
+advocacy question the tool ultimately exists for. It is a **distinct
+endpoint**, deliberately KPI-level: analyze returns bundle and member
+*summaries* plus one aggregated cost tree per side; the full per-pair
+deep dive (complete `views` diff, routes, geometries) stays on
+`/compare`, which the frontend drills down into from an analyze row.
+Compare's contract is unaffected.
+
+**Sides.** One or two. One side = "calculate this bundle" (no diff
+section); two sides = bundle comparison, diff = **side B minus side A**,
+same as compare. Each side:
+
+```jsonc
+{
+  "sides": [
+    {
+      "scenario_id": 4,                 // optional — fixed for ALL members of the side
+      "composition_id": "REF-BAL-9",    // optional side-level override, applies to every member
+      "proposals": [                     // explicit member list …
+        {"proposal_id": 12},
+        {"proposal_id": 17, "composition_id": "REF-BUD-6"}   // member-level wins over side-level
+      ]
+      // … XOR a filter-defined side:
+      // "filter": {"user_ids": [7]}    // any §7.1 filter shape ("all proposals by user 7")
+    },
+    { ... }                              // optional side B
+  ],
+  "parameters": {
+    "subsidy_pooling": "per_line",       // "per_line" (default) | "pooled" — see below
+    "detail": "summaries"                // "summaries" (default) | "full"
+  }
+}
+```
+
+Scenario is a **side-level** property only — one policy world per side,
+never per member. Composition may vary per member (a network is not
+homogeneous rolling stock); member-level `composition_id` overrides the
+side-level one. Member resolution is exactly §7.3's: any effective
+override → ephemeral compute (`published: false`, never persisted,
+through the compute cache §2.3), none → stored load; every anchor runs
+the §4.2 on-load refresh first. Compare is the degenerate case of one
+member per side — internally both endpoints share one member-resolution
+code path.
+
+**Filter-defined sides** are resolved **once at submission** through the
+ordinary gallery machinery (`filter_builder`) into an explicit member
+list — snapshot semantics: proposals published after job submission
+don't join a running job. Member-level overrides are unavailable on a
+filter side (there is no member to address); side-level
+`scenario_id`/`composition_id` still apply to every resolved member. An
+empty resolution is a 422.
+
+**Bundle constraints.** Duplicate `proposal_id` within one side is
+rejected (400) — it would double-count a corridor and break member
+pairing; "one corridor, two service variants in one network" is a
+deferred member-key concept, not v1. Bundle size is capped by server
+configuration (`ANALYZE_MAX_BUNDLE_SIZE`, default **12**, applied after
+filter resolution — 422 with the count when exceeded, telling the caller
+to narrow).
+
+**ONTD is excluded from both compare and analyze** — a political
+decision (2026-08-04): existing-network rows are gallery/map context
+(§5.5, WP10), never a compare/analyze side, even after WP10 lands.
+
+**Aggregation semantics** — the part naive summation gets wrong:
+
+- **Extensive quantities sum** across members: every `per_year` leaf of
+  the route view (cost categories, revenue, net), annual train-km,
+  demand trips / trip-km, CO2 savings. Each side carries one
+  **aggregated route-view cost tree**: the `per_year` normalisation
+  summed leaf-wise across members.
+- **Intensive quantities are re-derived, never averaged**: every
+  `per_train_km` leaf of the aggregated tree = the summed `per_year`
+  leaf / Σ annual train-km; likewise the bundle's
+  cost/revenue/margin-per-train-km headline KPIs and
+  `subsidy_eur_per_t_co2`. Σ annual train-km is derived per member at
+  analyze time from the route dict via the existing model constants
+  (operating days × season weeks × distances) — never back-derived from
+  rounded KPI ratios.
+- **Sets union**: `countries`; `n_stops` = **distinct** stations served
+  (network reach). `avg_speed_kmh` = Σ distance / Σ time (a
+  train-km-weighted network speed — defined, not averaged).
+- `total_distance_km` = Σ member route-km, with a documented caveat that
+  overlapping corridors double-count; *distinct corridor km* via the
+  WP6.1 `map_lines` machinery is a noted v2 candidate, not v1.
+
+**Subsidy pooling is a request parameter** (default `per_line`):
+`per_line` = Σ per-member `max(0, -net)` (each line subsidized
+individually — the per-route PSO-contract world); `pooled` =
+`max(0, -Σ net)` (profitable lines cross-subsidize within the network —
+the one-network-operator world). The response echoes the mode used. The
+gap between the two numbers is itself an advocacy argument; a caller
+wanting both runs the cheap second request (cache-hit for every member).
+
+**Async job pattern.** An override side is one live compute **per
+member** — two sides × 12 members can be tens of computes, minutes not
+seconds. Analyze is therefore a **job**, not a synchronous call:
+
+- `POST /api/proposals/analyze` → validates, resolves filter sides,
+  canonicalizes + hashes the request. `202 {job_id, status}`. Submission
+  is `@require_auth` (guest floor — jobs need an identity to rate-limit
+  against) and **strictly rate-limited** per user (exact quota at
+  implementation; fresh job starts count, dedup/cache returns don't).
+- **Dedup/result cache**: a submission whose canonical hash matches a
+  queued/running job, or a completed one that is still current (same
+  code versions, same base scenario, within TTL), returns that existing
+  `job_id` — idempotent start, results cached.
+- `GET /api/proposals/analyze/<job_id>` →
+  `{status: queued|running|done|failed, progress: {members_done,
+  members_total}, result?, error?}`. Progress advances per member
+  computed. `job_id` is an unguessable UUID; GET is unauthenticated
+  (capability URL — the underlying data is public anyway).
+- Storage: `proposals.analyze_jobs`, `UNLOGGED` + TTL janitor — same
+  ephemeral-and-recomputable reasoning as the compute cache (§2.3).
+  `JSON` not `JSONB` for the stored result (key order, established
+  convention).
+- v1 executor: one in-process background worker, FIFO queue, one job at
+  a time — matches the self-hosted process model; a real queue
+  (RQ/Celery) is the documented escalation path, not v1. Each member
+  compute goes through `compute_proposal()`, so WP13's cache does the
+  heavy lifting for the dominant workflow (toggling scenarios over the
+  same bundle). **WP13 is a hard prerequisite; WP14 (pooling/worker
+  concurrency) helps but doesn't gate.**
+
+**Response (`result`).** Per side: `bundle_summary` (`n_proposals`,
+`total_distance_km`, `annual_train_km`, distinct `n_stops`, `countries`,
+weighted `avg_speed_kmh`, derived cost/revenue/margin per train-km,
+subsidy per chosen pooling + mode echo, summed demand/CO2 KPIs,
+`subsidy_eur_per_t_co2`), per-member §5.4-shaped summaries (`published`
+flags, `overrides` echo — compare's member shape), and the aggregated
+route-view cost tree (`per_year` summed, `per_train_km` derived). With
+two sides additionally `diff`: bundle-summary deltas and aggregated-tree
+deltas in compare's `{a, b, abs, rel}` leaf shape, plus **member-level
+summary diffs paired by anchor `proposal_id`** (same anchor both sides =
+paired, regardless of overrides) with unpaired members listed under
+`members_unmatched: {a_only, b_only}` — §7.3's `views_unmatched`
+symmetry, so "same network, two scenarios" gets full per-line deltas and
+heterogeneous bundles degrade gracefully to aggregate-only.
+`detail: "full"` additionally embeds each member's complete
+compute-response shape (route + evaluation) — a large payload, tolerable
+because results are fetched once from a finished job, but `summaries`
+stays the default.
 
 ---
 
@@ -1034,6 +1198,26 @@ backfill path needed.
 16. Compare takes one proposal anchor per side; overridden sides are
     computed ephemerally (cache-backed), never persisted.
 17. No delete API, no guest-hygiene job.
+18. **Analyze is a distinct, KPI-level endpoint** (§7.7): bundle +
+    member summaries and one aggregated cost tree per side; the per-pair
+    deep dive stays on compare. One or two sides; scenario is side-level
+    only, composition may vary per member; sides are explicit lists XOR
+    §7.1 filters (resolved once at submission).
+19. **Bundle aggregation**: extensive quantities sum, intensive
+    quantities are re-derived from Σ annual train-km (never averaged),
+    sets union; member pairing for diffs by anchor `proposal_id`, with
+    `members_unmatched`; duplicate anchors within a side rejected;
+    bundle size capped by configuration (default 12).
+20. **Subsidy pooling is a request parameter** — `per_line` (default,
+    Σ per-member gaps) vs `pooled` (`max(0, -Σ net)`); the response
+    echoes the mode.
+21. **Analyze is an async job**: `202` + progress polling + cached,
+    deduplicated results (`UNLOGGED` jobs table, TTL); submission is
+    authenticated and strictly rate-limited; WP13 (compute cache) is a
+    hard prerequisite.
+22. **ONTD is excluded from compare and analyze** (political decision,
+    2026-08-04) — existing routes are gallery/map context only, even
+    after WP10.
 
 ---
 
@@ -1303,7 +1487,8 @@ under current base → move base scenario in test fixtures → batch run
 assertions (re-based scenario_id, update_log rows, summary refresh);
 on-load fallback test.
 
-**WP9 — Compare endpoint** *(after WP7, uses WP8's on-load refresh)*
+**WP9 — Compare endpoint** *(after WP7, uses WP8's on-load refresh)* ✅
+*implemented 2026-08-04 — see §15 "WP9 implementation notes" below.*
 `POST /api/proposals/compare`: per-side resolution (stored vs override →
 ephemeral compute through the cache), full sides + KPI deltas + structured
 `views` diff + fingerprint-based route context. *Testable by*: two
@@ -1379,6 +1564,31 @@ exclusively owned by one long-lived object). *Testable by*: concurrent
 integration test issuing a slow `/calc` and a fast `/likes` simultaneously
 against a single worker, asserting the fast one doesn't wait on the slow
 one; connection-pool exhaustion behaviour under load.
+
+**WP15 — Bundle analyze endpoint** *(designed 2026-08-04, §7.7 — parked;
+after WP13 (hard prerequisite: every member compute rides the cache);
+WP14 helps but doesn't gate; independent of WP10–11)*
+`POST /api/proposals/analyze` + `GET /api/proposals/analyze/<job_id>`
+per §7.7 and locked decisions 18–22. Deliverables: `proposals.
+analyze_jobs` migration (`UNLOGGED`, TTL janitor alongside the compute
+cache's); analyze blueprint + helpers **reusing compare's member
+resolver** (one member-resolution/diff code path across §7.3/§7.7 —
+refactor `api/helpers/proposal_compare.py`'s `resolve_side()` into the
+shared member resolver rather than duplicating); an aggregation module
+(extensive sums / derived intensives / set unions, incl. per-member
+annual-train-km derivation from the route dict); filter-side resolution
+via `filter_builder`; the in-process FIFO worker + progress writes;
+auth + rate limit on submission; dedup/result caching by canonical
+request hash; `ANALYZE_MAX_BUNDLE_SIZE` config (default 12);
+`subsidy_pooling`/`detail` parameters. WP12 ledger: new frontend
+contract (job submit/poll flow, progress UI, bundle vs member views,
+drill-down into compare). *Testable by*: single-side bundle calculation
+(aggregates verified against hand-summed member values, intensives
+against Σ train-km, distinct-stop union); two-side diff with pairing +
+`members_unmatched`; per_line vs pooled subsidy on a bundle containing
+one profitable member; duplicate anchor → 400; cap → 422; filter side
+snapshot semantics; job dedup on identical resubmission; progress
+monotonicity; rate limit; ONTD exclusion.
 
 ---
 
@@ -1698,3 +1908,69 @@ assert the version was corrected, `proposal_version` bumped, and an
 `update_log` `'recalculated'` row with the right `detail`) and batch
 script idempotency (`run()` twice against a proposal mutated the same
 way; the second run finds nothing outdated).
+
+---
+
+## 15. WP9 implementation notes (2026-08-04) ✅
+
+Delivers the full §7.3 contract. §7.3 above is updated in place to the
+implemented shape; this section is the changelog, per the convention §13
+set. New files: `api/proposal_compare.py` (thin blueprint),
+`api/helpers/proposal_compare.py` (validation, per-side resolution, diff
+building), `api/helpers/proposal_load.py` (see below);
+`tests/test_54_proposal_compare_api.py`;
+`scripts/test_proposal_compare.py` (seed/demo, same conventions as the
+WP6 gallery script).
+
+- **On-load refresh extracted into a shared helper.** The §4.2 fallback
+  previously lived inline in `GET /api/proposal/<id>`; WP9's "uses WP8's
+  on-load refresh" made it two-caller code, so it moved verbatim into
+  `api/helpers/proposal_load.py`'s `load_current_container()`, used by
+  both the load endpoint and every compare side. **Computed sides
+  refresh too** — an override side replays the anchor's stored
+  `compute_request`, whose `scenario_id` only reliably means "current
+  base" after the refresh has run; this is the concrete reason WP9 was
+  sequenced after WP8.
+- **Summary blocks on computed sides (design amendment).** The original
+  §7.3 text said "+ summary row for stored sides" only; the compare
+  view's requirement to diff the gallery-KPI columns for *every* side
+  kind (user requirement, 2026-08-04) extends this: computed sides get
+  an on-the-fly summary via the same pure
+  `adapters/proposal/projection.py:build_summary_row()` publish runs —
+  identical KPI semantics on both side kinds, minus `geom_simplified`
+  and the DB-only identity/engagement fields. Stored sides fetch their
+  row through `list_summaries(filters={"proposal_ids": [...]})` — the
+  ordinary gallery machinery, so `likes_count` comes via the same CTE as
+  everywhere else, no new SQL.
+- **Diff shape.** Leaves carry `{a, b, abs, rel}` (not deltas alone) so
+  the frontend renders a diff table without cross-referencing the sides;
+  `abs = b - a` rounded to 6dp (absorbs binary-float noise on
+  already-rounded EUR values), `rel = abs / |a|`, `null` on a zero base.
+  The views diff is one generic recursive walk — dicts recurse over
+  shared keys, non-numeric content (descriptions, filter labels,
+  normalisation metadata) is skipped and empty branches pruned, so every
+  cost category / view / normalisation / class key is covered with zero
+  per-field maintenance (demand keys, §8.1, will diff automatically when
+  they land). Keys present on only one side (cross-proposal compares:
+  different trip pairs, countries, ODs, stops) are collected as dotted
+  paths under `views_unmatched` instead of half-diffing. The summary
+  diff runs over an explicit `SUMMARY_KPI_FIELDS` tuple (gallery column
+  order) rather than "every numeric field" — identity/engagement numbers
+  (proposal_id, likes_count, ...) are not KPIs and a delta over them
+  would be noise.
+- **"Any override present → computed side"**, even when the override
+  value equals the stored one — deterministic, no equality
+  special-casing; the result is identical either way, only
+  published/summary provenance differs. Locked-in by a dedicated test
+  (identical fingerprint, every delta zero, `published: false`).
+- **`cache_hit: false` on computed sides** until WP13 — same
+  stable-shape-ahead-of-the-logic-swap rule as `/calc`; the compute goes
+  through `compute_proposal()`, so WP13's cache wires in with zero
+  compare-specific code.
+- **Error mapping**: 400 validation (side count, unknown keys, types),
+  404 unknown anchor (message names the side index), 422 domain error
+  from an override compute (side-index-prefixed), mirroring `/calc`'s
+  vocabulary.
+- **Docs housekeeping found and closed**: `tests/README.md` had never
+  gained its `test_52`/`test_53` sections (WP6/WP7-8 closing gap) —
+  backfilled alongside the new `test_54` section.

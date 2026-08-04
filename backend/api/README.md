@@ -32,6 +32,7 @@ its own example files.
   - [`POST /api/proposal/publish`](#proposal-publish) — publish a computed proposal, the only write path
   - [`GET` / `POST /api/proposals`](#list-proposals) — gallery + map in one endpoint
   - [`GET /api/proposal/<id>`](#get-proposal) — load a proposal
+  - [`POST /api/proposals/compare`](#compare-proposals) — compare two sides, stored or what-if
 - [Proposal Engagement](#proposal-engagement) — likes and comments
   - [`GET` / `POST` / `DELETE /api/proposal/<id>/likes`](#proposal-likes) — like/unlike a proposal
   - [`GET` / `POST /api/proposal/<id>/comments`](#proposal-comments) — read/add comments
@@ -280,6 +281,7 @@ comes into existence through an explicit publish.
 | `GET` | `/api/proposals` | List proposals, newest first |
 | `POST` | `/api/proposals` | Gallery + map: filter/sort/paginate, sectioned response |
 | `GET` | `/api/proposal/<id>` | Load a proposal |
+| `POST` | `/api/proposals/compare` | Compare two sides — stored proposals or what-if overrides |
 
 Every proposal is stored **once**: the route decomposed into GTFS tables
 (`proposals.routes`/`trips`/`stop_times`/`shapes`/`services`/`calendar` +
@@ -582,6 +584,121 @@ No request body.
 }
 ```
 `404 not_found` if the `proposal_id` doesn't exist.
+
+</details>
+
+<a id="compare-proposals"></a>
+
+### `POST /api/proposals/compare`
+
+Compare two sides (`docs/PROPOSALS_DESIGN.md` §7.3, WP9). Each side is
+anchored on one stored proposal and may override `scenario_id` and/or
+`composition_id`. A side **without** overrides is the stored proposal
+as-is (`published: true`); a side **with** any override is computed
+ephemerally — the anchor's stored compute request with the overridden
+fields, never persisted, `published: false`. Same anchor on both sides =
+variant compare on one route (e.g. TAC scenario A vs B); different
+anchors = cross-proposal compare. Overriding never touches the stored
+proposal — publishing remains its own explicit act
+(`POST /api/proposal/publish`, base-scenario rule applies).
+
+Stateless and unauthenticated, same policy as `POST /api/proposal/calc`.
+Each side's anchor runs the on-load refresh (§4.2) first, so stored
+sides — and the stored compute requests that override sides replay —
+are always at the current base scenario and current code versions.
+Override sides run a live compute each (through the same pipeline as
+`/calc` — cache-backed once WP13 lands), so responses can take as long
+as a `/calc` call per overridden side; the UI needs a loading state.
+
+<details>
+<summary>Request &amp; response details</summary>
+
+```json
+{
+  "sides": [
+    {"proposal_id": 123},
+    {"proposal_id": 123, "scenario_id": 4}
+  ]
+}
+```
+
+Exactly 2 sides (the shape allows more later). Per side: `proposal_id`
+(required, the anchor), `scenario_id`/`composition_id` (optional
+overrides) — no other keys. Any override key present routes the side
+through the compute path, even if its value equals the stored one.
+
+The **diff is side B minus side A** (`sides[1] - sides[0]`) throughout.
+
+```json
+{
+  "sides": [
+    {
+      "published": true,
+      "proposal_id": 123, "proposal_version": 1, "user_id": 1, "user_name": "David",
+      "name": "Berlin Hbf – Wien Hbf",
+      "created_at": "...", "updated_at": "...",
+      "route_builder_version": "0.9.13", "calc_version": "0.9.10",
+      "route_fingerprint": "sha256:...",
+      "request": { "...": "the stored resolved compute_request" },
+      "route": { "...": "..." },
+      "evaluation": { "models": {}, "input": {}, "views": {} },
+      "summary": { "...": "the proposal's gallery summary row, likes_count included" }
+    },
+    {
+      "published": false,
+      "proposal_id": 123,
+      "overrides": {"scenario_id": 4},
+      "route_builder_version": "0.9.13", "calc_version": "0.9.10",
+      "route_fingerprint": "sha256:...",
+      "cache_hit": false,
+      "request": { "...": "the anchor's compute_request with the overrides applied, resolved" },
+      "route": { "...": "..." },
+      "evaluation": { "models": {}, "input": {}, "views": {} },
+      "summary": { "...": "built on the fly by the same projection publish runs — no likes_count, no geometry" }
+    }
+  ],
+  "diff": {
+    "summary": {
+      "cost_eur_per_train_km": {"a": 21.4, "b": 19.9, "abs": -1.5, "rel": -0.070093},
+      "...": "every gallery KPI column (§5.4), gallery column order"
+    },
+    "views": {
+      "route": { "data": { "per_year": { "all": { "cost": { "...": "..." } } } } },
+      "...": "per-leaf {a, b, abs, rel} over the shared views trees — every view, every cost category, every normalisation"
+    },
+    "views_unmatched": {
+      "a_only": ["per_trip_pair.data.T3"],
+      "b_only": []
+    }
+  },
+  "route_context": {
+    "fingerprints": ["sha256:...", "sha256:..."],
+    "route_identical": true,
+    "differing_request_fields": ["scenario_id"]
+  }
+}
+```
+
+Each side is the full `POST /api/proposal/calc` response shape (stored
+sides additionally carry the load endpoint's metadata block, computed
+sides the anchor `proposal_id` + applied `overrides`), plus a `summary`
+block so the compare view can render the same headline KPIs as the
+gallery.
+
+Diff semantics: numeric leaves become `{a, b, abs, rel}` with
+`abs = b - a` and `rel = (b - a) / |a|` (`null` on a zero base);
+non-numeric content (descriptions, filter labels, normalisation
+metadata) never diffs; view keys present on only one side —
+cross-proposal compares with different trip pairs, countries, ODs, or
+stops — are collected as dotted paths under `views_unmatched` rather
+than half-diffed. `route_context` states whether the two sides are the
+same physical route (§3.1 fingerprints) and which resolved
+compute-request fields differ.
+
+**Errors:** `400 validation_error` (side count, unknown keys, wrong
+types); `404 not_found` when a side's anchor doesn't exist (the message
+names which side); `422 domain_error` when an override compute fails
+(unknown scenario/composition — message prefixed with the side index).
 
 </details>
 

@@ -181,7 +181,7 @@ Full contract, `--baseline` semantics, and editorial rules:
 | ---- | ------- |
 | `backend/main.py` | Flask app factory, blueprint registration, global JSON error handlers — endpoint list is in its module docstring |
 | `backend/api/helpers/dependencies.py` | Singleton state: `DBDataLoader`, `CountryIndex`, `RailRouter`, `ProposalRepository`, `FeedbackRepository`, all built once at startup; `get_loader()` etc. for route handlers |
-| `backend/api/*.py` | One blueprint file per domain: `health.py`, `params.py`, `proposal_calc.py`, `proposal_publish.py`, `proposals.py`, `proposal_engagement.py`, `auth.py`, `feedback.py`, `scenarios.py` |
+| `backend/api/*.py` | One blueprint file per domain: `health.py`, `params.py`, `proposal_calc.py`, `proposal_publish.py`, `proposals.py`, `proposal_compare.py`, `proposal_engagement.py`, `auth.py`, `feedback.py`, `scenarios.py` |
 | `backend/api/helpers/*_serialize.py` | All `to_dict`/`from_dict` logic, split by domain — see Python conventions above |
 | `backend/models/` | Domain layer (routing, demand, energy, evaluation, pipeline) — no serialization, no monetary values outside `models/evaluation/calc.py`. See `backend/models/README.md` |
 | `backend/db/dev/sql/` | Schema DDL, source of truth for all environments. See `backend/db/README.md` |
@@ -218,6 +218,7 @@ POST /api/proposal/publish         @require_auth — the only user write path
 GET  /api/proposals
 POST /api/proposals
 GET  /api/proposal/<id>
+POST /api/proposals/compare        two sides, stored or what-if overrides, stateless
 GET/POST/DELETE /api/proposal/<id>/likes
 GET/POST /api/proposal/<id>/comments
 PATCH/DELETE /api/proposal/<id>/comments/<cid>
