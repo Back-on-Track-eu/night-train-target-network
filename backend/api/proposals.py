@@ -2,13 +2,14 @@
 proposals.py
 ============
 Proposal listing and loading (PROPOSALS_DESIGN.md §7.1/§7.2). Gallery/map
-filtering is the full WP6 contract; the on-load version-refresh fallback
-is still WP7/WP8.
+filtering is the full WP6/WP6.1 contract.
 
   GET  /api/proposals       — list, no filters, summaries only
   POST /api/proposals       — gallery + map in one endpoint (§7.1): generic
                                filters, sort, pagination, sectioned response
-  GET  /api/proposal/<id>   — load one proposal, reconstructed from GTFS + summary
+  GET  /api/proposal/<id>   — load one proposal, reconstructed from GTFS +
+                               summary; performs the on-load version-refresh
+                               fallback (§4.2, WP8) before returning
 
 There is no save endpoint here — POST /api/proposal/publish
 (api/proposal_publish.py) is the only write path (§2.2). Every user can
@@ -20,7 +21,9 @@ import logging
 
 from flask import Blueprint, jsonify, request
 
+from adapters.proposal.repository import outdated_trigger
 from api.helpers.dependencies import get_loader, get_proposal_repository
+from api.helpers.proposal_compute import compute_proposal
 from api.helpers.proposal_serialize import (
     map_country_counts_to_geojson,
     map_lines_to_geojson,
@@ -57,9 +60,9 @@ def filter_proposals():
     `bbox` a viewport intersection. `include` picks which response
     sections to compute — only the sections asked for run their query.
     `route_builder_version`/`calc_version`/`scenario_id` are not
-    filterable (internal/analytical; every gallery row is always on the
-    current base scenario by construction — scenario_outdated flags the
-    transient exception).
+    filterable (internal/analytical; the system — batch refresh + the
+    load endpoint's on-load fallback — keeps every stored proposal on the
+    current base scenario and current code versions on its own, §4.2).
 
     Request body (all fields optional):
       {
@@ -97,6 +100,16 @@ def get_proposal(proposal_id: int):
     adapters/proposal/gtfs_store.py for what "rebuilt" means for each
     section.
 
+    On-load version-refresh fallback (§4.2, WP8): if the stored proposal
+    has fallen behind the running route_builder_version/calc_version or
+    the current base scenario (adapters/proposal/repository.py's
+    outdated_trigger()), it's recomputed and overwritten in place before
+    the response is built — correctness for anything the batch script
+    (scripts/refresh_proposals.py) hasn't reached yet, at the cost of one
+    slow load. Every other load is unaffected (outdated_trigger() is a
+    cheap in-Python check on the row get_container() already fetched, no
+    extra query in the common case).
+
     Response: identical shape to POST /api/proposal/publish's response
     (api/helpers/proposal_serialize.py's proposal_to_response_dict()).
     """
@@ -112,6 +125,23 @@ def get_proposal(proposal_id: int):
             ),
             404,
         )
+
+    trigger = outdated_trigger(container)
+    if trigger is not None:
+        # Re-resolve scenario_id fresh against the current base rather
+        # than replaying the stored (possibly stale) one — the whole
+        # point of a refresh is to land back on whatever base is current
+        # NOW, regardless of which of the three triggers actually fired.
+        refresh_request = dict(container["compute_request"])
+        refresh_request["scenario_id"] = None
+        computed = compute_proposal(refresh_request)
+        repo.refresh_proposal(proposal_id, computed, detail=trigger)
+        # refresh_proposal()'s own return dict is deliberately minimal
+        # (identity + timestamps, mirroring publish()'s) — it doesn't
+        # carry user_name/compute_request/evaluation_output the way
+        # get_container() does, so re-fetch rather than hand-assembling
+        # what proposal_to_response_dict()/reconstruct_* need below.
+        container = repo.get_container(proposal_id)
 
     loader = get_loader()
     route = repo.reconstruct_route(

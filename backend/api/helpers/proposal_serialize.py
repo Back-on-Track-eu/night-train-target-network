@@ -25,6 +25,16 @@ carrying every proposal that uses it) rather than one feature per
 proposal; map_country_counts now carries each country's border geometry
 alongside its count.
 
+WP7/8 revision (2026-08-04): the per-row `scenario_outdated` flag added
+in WP6/WP6.1 is removed from summary_row_to_dict() and proposal_meta_to_
+dict() — staleness is now handled entirely server-side (batch refresh +
+on-load fallback, adapters/proposal/repository.py's outdated_trigger()),
+so there's no longer a user-facing signal to expose. proposal_meta_to_
+dict() also gains a genuine created_at on every caller now that
+adapters/proposal/repository.py's publish()/refresh_proposal() both
+return one (previously only load's get_container() had it; publish()
+silently omitted it).
+
 Public interface:
   validate_list_body(body)             -> list[str]  (structural check of POST /api/proposals, §7.1)
   proposal_meta_to_dict(record)        -> dict        (metadata block shared by publish/load responses)
@@ -238,9 +248,10 @@ def _validate_include(include) -> list[str]:
 
 def proposal_meta_to_dict(record: dict) -> dict:
     """Metadata block shared by publish and load responses — id, owner,
-    name, versions, timestamps (§7.2). record is either
-    ProposalRepository.publish()'s return value or .get_container()'s row
-    — both carry the same identity fields under the same keys."""
+    name, versions, timestamps (§7.2). record is
+    ProposalRepository.publish()'s or .get_container()'s row — both carry
+    the same identity fields under the same keys, including a real
+    created_at (WP7/8: previously only get_container() had one)."""
     return {
         "proposal_id": record["proposal_id"],
         "proposal_version": record["proposal_version"],
@@ -284,12 +295,12 @@ def summary_row_to_dict(row: dict) -> dict:
     pass-through; the shaping job is casting NUMERIC/Decimal columns to
     plain floats (jsonify() can't serialize Decimal) and formatting
     created_at/updated_at. `source` is always "proposal" here — ontd rows
-    get their own row shape once WP10's union lands. `scenario_outdated`
-    is a derived column repository.py's queries always SELECT alongside
-    the rest (joined against scenario.scenarios, never stored — §4.2)."""
+    get their own row shape once WP10's union lands. No staleness flag
+    here (WP7/8, 2026-08-04 revision) — every proposal is kept current by
+    the system (batch refresh + on-load fallback), so there's nothing for
+    a reader of this row to act on."""
     return {
         "source": "proposal",
-        "scenario_outdated": row["scenario_outdated"],
         "proposal_id": row["proposal_id"],
         "proposal_version": row["proposal_version"],
         "user_id": row["user_id"],

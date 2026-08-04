@@ -484,17 +484,28 @@ Mechanisms, in order of preference:
    proposals with outdated versions or a non-current-base `scenario_id`,
    re-runs the compute pipeline, overwrites in place (owner kept,
    `update_log` 'recalculated' with `user_id NULL`). Run after every
-   version bump / base scenario move; idempotent, resumable, dry-run mode,
-   **configurable concurrency limit** (routing capacity; first beneficiary
-   of a future routing cluster — parked topic).
+   version bump / base scenario move; idempotent, resumable, dry-run mode.
+   The live-routing compute step is parallelized across a configurable
+   `--concurrency` worker threads (each with its own `DBDataLoader` —
+   cheap, no heavy precompute — sharing the one process-wide `RailRouter`,
+   already built for concurrent use); DB writes stay sequential on the
+   single `ProposalRepository` connection, which is not thread-safe (see
+   WP14, §10, for pooling every connection properly).
 2. **On-load fallback**: `GET /api/proposal/<id>` detects an outdated
-   proposal and refreshes before returning — correctness for anything the
-   batch hasn't reached, at the cost of one slow load.
+   proposal (`outdated_trigger()`) and refreshes before returning —
+   correctness for anything the batch hasn't reached, at the cost of one
+   slow load.
 
-Between a base move and a proposal's refresh, gallery and load flag the row
-`scenario_outdated: true` (derived by joining `scenario.scenarios`, not
-stored). A refresh may change the fingerprint (new routing graph, new
-infrastructure) — it simply updates the column.
+Both mechanisms share one staleness check
+(`adapters/proposal/repository.py`'s `outdated_trigger()`, checked in
+priority order `route_builder_version` → `calc_version` →
+`base_scenario_moved`): purely internal, server-side — **no user-facing
+staleness flag exists** (an earlier revision surfaced `scenario_outdated`
+on gallery/load rows; removed, WP7/8, since the system keeps every
+proposal current on its own and there was nothing for a reader of that
+flag to actually do with it). A refresh may change the route fingerprint
+(new routing graph, new infrastructure) — `refresh_proposal()` simply
+stores whatever the recompute produced, same as any other write.
 
 ---
 
@@ -724,8 +735,8 @@ stored proposal; any override → ephemeral compute (cache-backed), marked
 publish (base-scenario rule applies).
 
 *Version bump / base scenario move:* refresh batch recomputes all affected
-proposals in place (§4.2); `scenario_outdated` flags + on-load fallback
-cover the gap.
+proposals in place (§4.2); the on-load fallback covers anything the batch
+hasn't reached yet — both purely server-side, no client-visible flag.
 
 ---
 
@@ -740,13 +751,13 @@ One filter model drives both gallery and map. The response is sectioned;
 the caller picks sections via `include`.
 
 **Every stored proposal is a gallery item**, always representing the
-current base scenario (or flagged `scenario_outdated: true` between a base
-move and its refresh, derived by joining `scenario.scenarios`). There is no
-variant-level mode — scenario browsing happens in compare (§7.3), where
-other scenarios are a first-class dimension. Because every row is always
-on the current base by construction, `scenario_id` is **not** a filter —
-there is essentially only one value to filter on at any moment, and the
-transient exception already has its own flag. `route_builder_version`/
+current base scenario — the system (batch refresh + the load endpoint's
+on-load fallback, §4.2) keeps it that way on its own, so there's no
+transient-state flag to expose here. There is no variant-level mode —
+scenario browsing happens in compare (§7.3), where other scenarios are a
+first-class dimension. Because every row is always on the current base by
+construction, `scenario_id` is **not** a filter — there is essentially
+only one value to filter on at any moment. `route_builder_version`/
 `calc_version` are likewise not filters: internal/analytical version
 tracking, not a gallery-facing dimension.
 
@@ -761,9 +772,8 @@ OR, since a proposal has exactly one value. `countries`/`stop_ids`
 (`TEXT[]` columns — a proposal can carry several) accept either a plain
 list (`mode: "any"`, OR/overlap `&&` — the default) or `{"values": [...],
 "mode": "all"}` (AND/containment `@>`). `name` accepts a case-insensitive
-substring. Every filterable column is sortable, plus the derived
-`scenario_outdated` and `route_fingerprint`. The example below is not
-exhaustive — it shows one filter of each kind:
+substring. Every filterable column is sortable, plus `route_fingerprint`.
+The example below is not exhaustive — it shows one filter of each kind:
 
 ```jsonc
 {
@@ -818,9 +828,8 @@ anyway (below), it becomes relevant only at volumes we do not have yet.
 Response sections:
 
 - `summaries`: paginated summary rows + `total` (windowed count), each row
-  carrying `source: "proposal" | "existing"`, `scenario_outdated`, and
-  `likes_count`. ONTD rows have KPI fields null and no user/engagement
-  metadata.
+  carrying `source: "proposal" | "existing"` and `likes_count`. ONTD rows
+  have KPI fields null and no user/engagement metadata.
 - `map_lines`: GeoJSON FeatureCollection, one feature per distinct
   stop-pair **corridor** (direction-agnostic — outbound and return share a
   corridor) rather than one per proposal, so a client can drive line
@@ -844,12 +853,11 @@ convenience.
 ### 7.2 `GET /api/proposal/<id>` — load
 
 - performs the on-load version-refresh fallback (§4.2), so a load always
-  returns the current-base state (or the freshly refreshed one)
+  returns the current-base, current-version state
 - returns exactly the compute-response shape (§2.1) — reconstructed route
   dict, evaluation with `input.parameters` rebuilt via the scenario pin,
   route appearing once — plus proposal metadata (id, owner, name, versions,
-  timestamps, `scenario_outdated` when the refresh fallback was skipped or
-  deferred)
+  timestamps)
 
 Scenario/composition switching from a loaded proposal is a frontend concern:
 it takes the returned resolved `request`, changes the field, and calls
@@ -1010,8 +1018,10 @@ backfill path needed.
 9. Building on a foreign proposal = loading + ephemeral exploration +
    publish-as-new (`based_on_proposal_id` optional,
    timeline-informational only).
-10. Every stored proposal is a gallery item; `scenario_outdated` flags the
-    window between a base move and the proposal's refresh.
+10. Every stored proposal is a gallery item, always representing the
+    current base scenario — kept that way entirely by the system (see 11),
+    with no client-visible staleness flag (WP7/8 revision: an earlier
+    `scenario_outdated` field was removed as unneeded).
 11. Version bumps and base moves are handled by the system (batch refresh +
     on-load fallback), logged in `update_log`.
 12. Subsidy = gap to target margin (`max(0, -net_eur)`).
@@ -1269,25 +1279,29 @@ untouched.
 
 **WP6 — Gallery/map endpoint (full)** *(after WP5)*
 Extends WP5's minimal list to the full §7.1 contract: generic
-range/list/substring filters over all summary columns,
-`scenario_outdated` derivation, `trip_windows` stop-time filter (GTFS
-overnight-time convention), sorting, windowed count, `include` sections;
-`bbox` optional/deferrable. *Testable by*: endpoint tests over seeded
-published proposals per filter class.
+range/list/substring filters over all summary columns, `trip_windows`
+stop-time filter (GTFS overnight-time convention), sorting, windowed
+count, `include` sections; `bbox` optional/deferrable. *Testable by*:
+endpoint tests over seeded published proposals per filter class.
 
 **WP7 — Load endpoint completion** *(after WP5, parallel to WP6; small)*
-Extends WP5's minimal load to the full §7.2 contract: proposal metadata
-block, `scenario_outdated`, response-contract tests against the §2.1
+✅ *implemented 2026-08-04, combined with WP8.* Extends WP5's minimal load
+to the full §7.2 contract: proposal metadata block (id, owner, name,
+versions, timestamps — including a genuine `created_at` on publish
+responses, previously missing), response-contract tests against the §2.1
 shape. *Testable by*: contract tests on published fixtures.
 
 **WP8 — Version-refresh mechanism** *(after WP5, parallel to WP6/7)*
+✅ *implemented 2026-08-04, combined with WP7 — see §14 "WP7/WP8
+implementation notes" below (not to be confused with the WP14 work
+package above, a different numbering scheme).*
 `backend/scripts/refresh_proposals.py` (batch: outdated versions +
 non-current-base scenario pins, recompute + re-base in place, owner kept,
-`update_log` 'recalculated', idempotent, dry-run, concurrency limit) + the
-on-load refresh fallback in WP7's endpoint. *Testable by*: publish under
-current base → move base scenario in test fixtures → batch run assertions
-(re-based scenario_id, update_log rows, summary refresh); on-load fallback
-test.
+`update_log` 'recalculated', idempotent, dry-run, concurrent compute step)
++ the on-load refresh fallback in WP7's endpoint. *Testable by*: publish
+under current base → move base scenario in test fixtures → batch run
+assertions (re-based scenario_id, update_log rows, summary refresh);
+on-load fallback test.
 
 **WP9 — Compare endpoint** *(after WP7, uses WP8's on-load refresh)*
 `POST /api/proposals/compare`: per-side resolution (stored vs override →
@@ -1315,7 +1329,7 @@ The largest contract change so far: `/api/route/plan` +
 re-computes on base if the user explored a what-if); client-side draft
 caching / warn-on-navigate; scenario/composition switching as pure compute
 calls (no variants section); restructured `POST /api/proposals` (generic
-filters, `trip_windows`, sections, `scenario_outdated`); compare
+filters, `trip_windows`, sections); compare
 (`published: false` sides need a loading state) and timeline endpoints;
 `source`, `demand_kpis_placeholder`, `cache_hit` fields;
 reconstructed-response note (byte-identity not guaranteed, structure
@@ -1337,6 +1351,34 @@ and compare (WP9) once those land. Verify the key-correctness assumption
 converging on the same result (pointer→shared result); miss on any
 output-changing field; response `request` echo always matches the actual
 request; TTL expiry; flush empties both maps.
+
+**WP14 — Connection pooling / intra-worker concurrency** *(independent;
+worth doing once enough endpoints exist to make the tradeoff concrete —
+parked during WP7/8, 2026-08-04)*
+Scoped out of WP7/8 deliberately: those touch proposals specifically,
+this touches the whole app. Today's production process model (`gunicorn
+--workers 4`, `api/helpers/dependencies.py`'s `init()`) already gives
+**inter**-process parallelism for free — every worker is a separate OS
+process with its own `DBDataLoader`/`ProposalRepository`/etc. connection,
+so N concurrent client requests landing on N different workers already
+run fully in parallel with zero code changes; scaling `--workers` scales
+this further, cheaply. What's missing is **intra**-worker concurrency: one
+worker process handles exactly one request at a time (sync worker model),
+so a slow live-routing `/calc` blocks a quick `/likes` toggle that happens
+to land on the same worker. Closing that gap needs: (1) every singleton
+in `dependencies.py` (`DBDataLoader`, `ProposalRepository`,
+`ProposalEngagementRepository`, `FeedbackRepository`, `AuthRepository`)
+switched from "one connection held for the process's life" to a
+**connection pool** (borrow-per-request, return-after); (2) gunicorn's
+worker class switched from sync to `gthread`/`gevent` so a process can
+actually interleave requests while one is blocked on DB/HTTP I/O; (3) an
+audit of every adapter's `_cursor()`/commit/rollback pattern for
+pool-borrowed-connection correctness (today's `self._conn` assumption
+throughout `adapters/*.py` no longer holds once a connection isn't
+exclusively owned by one long-lived object). *Testable by*: concurrent
+integration test issuing a slow `/calc` and a fast `/likes` simultaneously
+against a single worker, asserting the fast one doesn't wait on the slow
+one; connection-pool exhaustion behaviour under load.
 
 ---
 
@@ -1547,3 +1589,112 @@ in place (not just this changelog); §5.4's `CREATE TABLE` example gained
 `created_at`; `api/README.md`'s section rewritten to match, including a
 filterable/sortable column reference table; `db/README.md` gained a
 changelog entry for the new migration.
+
+---
+
+## 14. WP7/WP8 implementation notes (2026-08-04) ✅
+
+Combined into one pass — reviewing WP7's load-endpoint contract surfaced
+that its one real gap (§4.2 staleness) only makes sense alongside the
+mechanism that actually keeps proposals current, so WP8 was pulled
+forward rather than done separately per §10's original split.
+
+**Scope change, decided before implementation**: the original WP6/WP6.1
+design surfaced a per-row `scenario_outdated` flag on gallery and load
+responses. Reconsidered here — the system (batch refresh + on-load
+fallback) keeps every proposal current on its own; nothing in the product
+consumes a staleness signal (the batch script queries the DB directly,
+never the API), so the flag had no reader. **Removed** rather than
+extended to load: `adapters/proposal/repository.py`'s
+`_SCENARIO_OUTDATED_EXPR`/`list_summaries()`, `adapters/proposal/
+filter_builder.py`'s `SORTABLE_COLUMNS`, `api/helpers/proposal_
+serialize.py`'s `summary_row_to_dict()`, `api/README.md`, and `scripts/
+test_proposals_gallery.py` all lost the field; `tests/
+test_52_proposals_gallery_api.py`'s `TestScenarioOutdated` removed.
+§4.2/§6/§7.1/§7.2/§9 (locked decision 10) above are updated in place to
+match — this section is the changelog, per the convention §13 set.
+
+**WP7 — load endpoint**: the gap turned out smaller than scoped —
+`GET /api/proposal/<id>` already returned the full metadata block (id,
+owner, name, versions, timestamps) via the existing `proposal_meta_to_
+dict()`. The one genuine defect: `publish()`'s response never carried
+`created_at` (only `updated_at`) — `_insert_container()`/
+`_update_container()` now `RETURNING created_at, updated_at` instead of
+just the latter, so both callers' return dicts, and therefore both
+publish and load responses, carry a real value. `tests/
+test_50_proposals_api.py` gained a `TestLoad` class: a top-level key-set
+contract test (mirroring `test_35`'s pattern) and a check that both
+timestamp fields are well-formed on publish and load.
+
+**WP8 — refresh mechanism** (§4.2): `adapters/proposal/repository.py`'s
+`publish()` had its "write the state" middle section (prefix rewrite,
+GTFS write, summary upsert) factored out into `_write_state()`, shared
+with the new `refresh_proposal()` — the system-triggered counterpart with
+no ownership check, owner/name kept as stored, `update_log` event
+`'recalculated'` carrying a `detail` dict (`_write_update_log()` gained a
+`detail` parameter for the primary event row, previously only available
+on the `branched_*` pair). `outdated_trigger()` (module-level, pure — no
+DB access) is the one staleness check both the batch script and the
+on-load fallback run, checked in priority order (`route_builder_version`
+→ `calc_version` → `base_scenario_moved`) since a recompute fixes all
+three regardless of which fired; `list_outdated()` is the batch script's
+SQL-level work queue; `get_container()` gained an internal (non-API)
+`current_base_scenario_id` column so the on-load path can call
+`outdated_trigger()` on the row it already fetched, no second query.
+`flush_compute_cache()` TRUNCATEs the (still-empty, pre-WP13)
+`compute_cache_pointer`/`_result` tables per §4.2's "first flushes the
+compute cache" rule — a correct no-op today.
+
+`api/proposals.py`'s `get_proposal()` runs the fallback inline: on a
+trigger, it recomputes via `api/helpers/proposal_compute.py`'s
+`compute_proposal()` (with `scenario_id` forced back to `None` so it
+re-resolves against whatever base is current *now*, regardless of which
+trigger fired — never replays the stored, possibly-stale, scenario_id),
+calls `refresh_proposal()`, then re-fetches the container before building
+the response (`refresh_proposal()`'s return dict is deliberately minimal,
+mirroring `publish()`'s — it doesn't carry the extra fields
+`proposal_to_response_dict()` needs).
+
+`backend/scripts/refresh_proposals.py` (new): direct in-process, not
+HTTP — a refresh has no owner/auth concept, the same reason `db/dev/
+seed.py`'s example-proposal seed talks to `ProposalRepository` directly.
+`--dry-run`/`--limit`/`--concurrency` flags; idempotent by construction
+(`list_outdated()` re-derives the work queue fresh every run). Caught by
+live testing, two rounds: (1) `main.py` never needs host-vs-container
+env handling because it only ever runs inside the API container, where
+Docker Compose's `env_file` already injects the right values; this
+script, meant to also run standalone from the host (a real test run
+surfaced this immediately), doesn't have that luxury. (2)
+`backend/docker/.env` itself was the wrong fix for that — its
+`POSTGRES_HOST=postgres`/`OPENRAILROUTING_URL=http://openrailrouting:8989`
+are Docker Compose **network hostnames**, meaningless (and actively
+wrong) from the host. `run()` instead sets the same host-side defaults
+`tests/conftest.py`'s own `DB_CONFIG` already uses
+(`POSTGRES_HOST=localhost` etc., via `os.environ.setdefault()` — inert
+wherever a container already injected the compose-network values);
+`OPENRAILROUTING_URL` is left alone entirely — `RailRouter` (`models/
+route/routing/rail_router.py`) already falls back to
+`http://localhost:8989` on its own when unset, which is exactly right
+for the host case.
+
+**Concurrency (Option B, scoped down from full WP14)**: only the
+live-routing compute step is parallelized. `api/helpers/proposal_
+compute.py`'s `compute_proposal()` gained optional `loader=`/`router=`
+parameters (defaulting to the existing singletons — every other caller
+is unaffected) so the script can hand each worker thread its own
+`DBDataLoader` (cheap — one `psycopg2` connection, no heavy precompute)
+while sharing the one process-wide `RailRouter`, already built for
+concurrent use (pooled `requests.Session` — see `api/helpers/
+dependencies.py`'s docstring). DB writes (`refresh_proposal()`) stay
+sequential on the main thread against the single `ProposalRepository`
+connection, which is not thread-safe — writes were never the bottleneck.
+Full connection pooling across every adapter, for genuine intra-worker
+request concurrency app-wide, is scoped out as **WP14** (§10) — a
+cross-cutting change well beyond proposals.
+
+**Tests**: `tests/test_53_proposal_refresh.py` (new) — on-load fallback
+(mutate a published proposal's `route_builder_version` directly, `GET`,
+assert the version was corrected, `proposal_version` bumped, and an
+`update_log` `'recalculated'` row with the right `detail`) and batch
+script idempotency (`run()` twice against a proposal mutated the same
+way; the second run finds nothing outdated).

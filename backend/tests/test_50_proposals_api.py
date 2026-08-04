@@ -29,6 +29,8 @@ example proposal seeded at DB init time (db/dev/seed.py,
 proposal_id=_SEED_PROPOSAL_ID).
 """
 
+from datetime import datetime
+
 import pytest
 import requests
 
@@ -335,6 +337,61 @@ def test_seeded_example_proposal_is_queryable(api_base):
     assert body["proposal_id"] == _SEED_PROPOSAL_ID
     per_year = body["evaluation"]["views"]["route"]["data"]["per_year"]["all"]
     assert per_year["total_revenue_eur"] > 0
+
+
+class TestLoad:
+    """Response-contract coverage for GET /api/proposal/<id> (§7.2, WP7):
+    the full compute-response shape (§2.1) plus the metadata block. The
+    round-trip test above already checks specific-field equality against
+    a fresh publish; this class checks the shape itself, independent of
+    any one publish's content."""
+
+    def test_top_level_keys(self, api_base, published):
+        resp = requests.get(
+            f"{api_base}{PROPOSAL_URL}/{published['proposal_id']}", timeout=15
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert set(body) >= {
+            "proposal_id",
+            "proposal_version",
+            "user_id",
+            "user_name",
+            "name",
+            "created_at",
+            "updated_at",
+            "route_builder_version",
+            "calc_version",
+            "route_fingerprint",
+            "request",
+            "route",
+            "evaluation",
+        }
+        assert set(body["evaluation"]) == {"models", "input", "views"}
+
+    def test_timestamps_are_well_formed(self, api_base, published):
+        # published (the publish response) and the load response should
+        # both carry real, parseable timestamps — publish() used to omit
+        # created_at entirely (WP7 fix, §14).
+        for source in (published, self._load(api_base, published["proposal_id"])):
+            assert isinstance(source["created_at"], str)
+            assert isinstance(source["updated_at"], str)
+            datetime.fromisoformat(source["created_at"])
+            datetime.fromisoformat(source["updated_at"])
+
+    def test_load_created_at_matches_publish(self, api_base, published):
+        # A round-trip-specific check the shape test above doesn't cover:
+        # load must report the SAME created_at publish did, not a fresh
+        # timestamp — this is the one field a naive re-select could get
+        # wrong if it weren't excluded from the overwrite's SET list.
+        loaded = self._load(api_base, published["proposal_id"])
+        assert loaded["created_at"] == published["created_at"]
+
+    @staticmethod
+    def _load(api_base, proposal_id):
+        resp = requests.get(f"{api_base}{PROPOSAL_URL}/{proposal_id}", timeout=15)
+        assert resp.status_code == 200
+        return resp.json()
 
 
 # =============================================================================

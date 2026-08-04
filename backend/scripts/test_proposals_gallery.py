@@ -35,12 +35,6 @@ Usage:
     --force : (seed only) republish every seed proposal even if a
               same-named one already exists in the gallery
 
-scenario_outdated is NOT exercised here — flipping it requires directly
-mutating proposal_summaries.scenario_id, which is a database-level setup
-this script deliberately doesn't do (see
-tests/test_52_proposals_gallery_api.py::TestScenarioOutdated for that
-coverage instead).
-
 Pre-flight:
   1. Checks Flask API is reachable
   2. Loads data if not already loaded

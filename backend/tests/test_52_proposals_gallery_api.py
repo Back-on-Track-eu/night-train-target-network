@@ -3,8 +3,8 @@ test_52_proposals_gallery_api.py
 =================================
 POST /api/proposals — the full §7.1 gallery/map filter contract (WP6):
 generic range/list/array/substring filters over proposal_summaries,
-trip_windows, bbox, sort, windowed total, the sectioned `include`
-response, and the derived scenario_outdated flag.
+trip_windows, bbox, sort, windowed total, and the sectioned `include`
+response.
 
 test_50_proposals_api.py keeps the basic sectioned-envelope smoke tests
 (user_ids filter, pagination, unknown-key rejection); this module is the
@@ -452,39 +452,3 @@ class TestLikesCount:
         body = _gallery(api_base, sort=[{"by": "likes_count", "dir": "desc"}])
         values = [p["likes_count"] for p in body["summaries"]["proposals"]]
         assert values == sorted(values, reverse=True)
-
-
-# =============================================================================
-# scenario_outdated — derived flag, joined against scenario.scenarios
-# =============================================================================
-
-
-class TestScenarioOutdated:
-    def test_flag_flips_when_pin_is_not_the_current_base(
-        self, api_base, script_headers, db_conn, historical_scenario
-    ):
-        request = compute(api_base, _STOPS, _COMPOSITION)["request"]
-        outdated = publish(
-            api_base,
-            request,
-            name="Outdated pin (gallery test)",
-            headers=script_headers,
-        )
-        try:
-            cur = db_conn.cursor()
-            cur.execute(
-                "UPDATE proposals.proposal_summaries SET scenario_id = %s "
-                "WHERE proposal_id = %s",
-                (historical_scenario["scenario_id"], outdated["proposal_id"]),
-            )
-            db_conn.commit()
-
-            body = _gallery(api_base, filter={"user_ids": [outdated["user_id"]]})
-            row = next(
-                p
-                for p in body["summaries"]["proposals"]
-                if p["proposal_id"] == outdated["proposal_id"]
-            )
-            assert row["scenario_outdated"] is True
-        finally:
-            db_conn.commit()

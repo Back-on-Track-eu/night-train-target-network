@@ -4,11 +4,14 @@ proposal_compute.py
 Validation + serialization wrapper around models/pipeline.py's
 run_compute() (PROPOSALS_DESIGN.md §2.1) — the single place that turns a
 compute request body into the merged route+evaluation response dict. Used
-by both POST /api/proposal/calc (api/proposal_calc.py) and publish
-(api/helpers/publish_dispatch.py), so the two paths can never drift: a
-publish always stores exactly what a /calc call would have returned for
-the same request. Also the natural wire-in point for WP13's compute
-cache (hash the resolved request, check cache, call this only on a miss).
+by POST /api/proposal/calc (api/proposal_calc.py), publish
+(api/helpers/publish_dispatch.py), the on-load refresh fallback
+(api/proposals.py), and scripts/refresh_proposals.py (§4.2, WP8) — every
+path that turns a compute_request into a stored proposal state goes
+through here, so they can never drift from what a live /calc call would
+have returned for the same request. Also the natural wire-in point for
+WP13's compute cache (hash the resolved request, check cache, call this
+only on a miss).
 
 validate_calc_body() lives here (not in the view module) so both entry
 points import their shared validation from the helper layer — api/*.py
@@ -24,7 +27,7 @@ it stays the caller's concern.
 
 Public interface:
   validate_calc_body(body: dict) -> list[str]
-  compute_proposal(body: dict) -> dict
+  compute_proposal(body: dict, loader=None, router=None) -> dict
 """
 
 from __future__ import annotations
@@ -142,7 +145,7 @@ def validate_calc_body(body: dict) -> list[str]:
     return errors
 
 
-def compute_proposal(body: dict) -> dict:
+def compute_proposal(body: dict, loader=None, router=None) -> dict:
     """Resolve + compute one request body (§2.1's WHAT/HOW fields — stops,
     composition_id, scenario_id, timetable_mode, fixed_night_interval,
     schedule_mode, routing_mode, auto_stop_addition). Callers validate the
@@ -150,12 +153,22 @@ def compute_proposal(body: dict) -> dict:
     already been checked and lets models/pipeline.py's ValueError (domain
     errors) propagate uncaught.
 
+    loader/router default to the process-wide singletons (get_loader()/
+    get_rail_router()) — every Flask caller (/calc, publish, the on-load
+    refresh fallback) relies on this default and passes neither. The
+    override exists for scripts/refresh_proposals.py's concurrent batch
+    mode: DBDataLoader holds one non-thread-safe connection, so each
+    worker thread needs its OWN loader instance, while RailRouter (a
+    pooled requests.Session, explicitly built for concurrent use — see
+    api/helpers/dependencies.py's docstring) stays shared across threads
+    via the ordinary singleton default.
+
     Returns the full §2.1 response shape minus cache_hit:
       {route_builder_version, calc_version, route_fingerprint, request,
        suggested_stops?, route, evaluation}
     """
-    loader = get_loader()
-    router = get_rail_router()
+    loader = loader if loader is not None else get_loader()
+    router = router if router is not None else get_rail_router()
 
     timetable_mode = body.get("timetable_mode", DEFAULT_TIMETABLE_MODE)
     schedule_mode = body.get("schedule_mode", DEFAULT_SCHEDULE_MODE)

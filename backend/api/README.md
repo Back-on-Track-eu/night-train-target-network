@@ -380,14 +380,14 @@ doesn't run its query at all.
 
 **Not filterable**: `route_builder_version`/`calc_version` (internal/
 analytical, not a gallery-facing dimension) and `scenario_id` (every
-gallery row is always on the current base scenario by construction —
-`scenario_outdated` flags the transient exception instead, §4.2).
+gallery row is always on the current base scenario by construction — the
+system keeps it that way on its own, §4.2, with no client-visible flag
+for the transient exception).
 
 **What can be sorted by** — every column in the table above except the
 three "special" rows (`sources`, `trip_windows`, `bbox`, none of which
-are single-valued), plus the derived `scenario_outdated` and
-`route_fingerprint`. `sort` is `[{"by": <column>, "dir": "asc"|"desc"}]`;
-an unsortable `by` 400s.
+are single-valued), plus `route_fingerprint`. `sort` is
+`[{"by": <column>, "dir": "asc"|"desc"}]`; an unsortable `by` 400s.
 
 **Array filter modes** (`countries`/`stop_ids` only — every other list
 filter is OR-only by construction, since a proposal has exactly one
@@ -464,7 +464,7 @@ paginated).
     "total": 12,
     "proposals": [
       {
-        "source": "proposal", "scenario_outdated": false,
+        "source": "proposal",
         "proposal_id": 5, "proposal_version": 2, "user_id": 1,
         "name": "Berlin Hbf – Wien Hbf",
         "route_fingerprint": "sha256:...", "composition_id": "NEW-BAL-7",
@@ -514,10 +514,8 @@ paginated).
 ```
 
 Every `summaries` row is a straight read off `proposals.proposal_summaries`
-(`docs/PROPOSALS_DESIGN.md` §5.4) plus three derived fields: `source`
-(always `"proposal"` until WP10's ONTD union), `scenario_outdated` (`true`
-between a base-scenario move and this proposal's refresh — joined
-against `scenario.scenarios`, never stored, §4.2), and `likes_count`
+(`docs/PROPOSALS_DESIGN.md` §5.4) plus two derived fields: `source`
+(always `"proposal"` until WP10's ONTD union) and `likes_count`
 (live-joined from `proposals.likes`, not a summary column — a like
 changes independently of publish/refresh, so storing it would go stale).
 `demand_*`/`shift_*`/`co2_*` are deterministic placeholder figures
@@ -551,6 +549,16 @@ a malformed range/list/array-mode/trip_windows/bbox shape, or
 Reconstructed compute-response shape (§2.1) plus proposal metadata — the
 route is rebuilt from GTFS + sidecar tables, `evaluation.input.parameters`
 rebuilt fresh via the `scenario_id` pin (never stored verbatim, §5.1).
+
+**On-load refresh** (§4.2): if the stored proposal's `route_builder_
+version`/`calc_version` has fallen behind the running code, or its
+`scenario_id` is no longer the current base scenario, it's recomputed and
+overwritten in place (`proposal_version` bumped, `update_log` gains a
+`'recalculated'` row) before the response is built — transparent to the
+caller beyond a slower response time; the returned proposal is always
+current. `backend/scripts/refresh_proposals.py` (a periodic batch job) is
+the primary mechanism — this fallback only matters for whatever it
+hasn't reached yet.
 
 <details>
 <summary>Request &amp; response details</summary>

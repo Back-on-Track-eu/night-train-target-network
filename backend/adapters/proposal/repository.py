@@ -21,6 +21,21 @@ proposals.proposals / proposal_summaries / update_log rows and the
 transaction boundary around all of it. The prefixed-ID rewrite it applies
 at publish time lives in id_prefix.py (shared with api/helpers/
 proposal_compute.py, which strips the neutral prefix for /calc).
+
+WP7/WP8 (PROPOSALS_DESIGN.md §4.2): publish()'s "write the state" middle
+section (prefix rewrite, GTFS write, summary upsert) is factored into
+_write_state(), shared with the new refresh_proposal() — the system-
+triggered counterpart used by scripts/refresh_proposals.py and the
+on-load fallback (api/proposals.py) to recompute-and-overwrite-in-place
+without publish()'s ownership check or ("published" vs "overwritten")
+event naming. outdated_trigger() (module-level, no DB access) is the
+shared staleness check both callers run per proposal; list_outdated()
+is the batch script's SQL-level work-queue query. Note: an earlier
+revision of this module also surfaced a per-row `scenario_outdated` flag
+on GET/POST /api/proposals for frontend consumption — removed (WP7/8,
+2026-08-04): the system (batch + on-load fallback) keeps every proposal
+current on its own, so no user-facing staleness signal is needed;
+staleness detection now lives here, internally, for that purpose only.
 """
 
 from __future__ import annotations
@@ -41,6 +56,8 @@ from adapters.proposal.gtfs_store import (
 )
 from adapters.proposal.id_prefix import rewrite_id_prefix
 from adapters.proposal.projection import build_summary_row
+from models.evaluation.version import CALC_VERSION
+from models.route.version import ROUTE_BUILDER_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +68,45 @@ logger = logging.getLogger(__name__)
 # gtfs_store.py and route_factory.py), so "R1" is precise, not a
 # loose heuristic: nothing else in a compute response starts with it.
 _STRUCTURAL_ROUTE_PREFIX = "R1"
+
+
+def outdated_trigger(container: dict) -> Optional[dict]:
+    """Whether a stored proposal's version/scenario pin has fallen behind
+    current (§4.2) — the one staleness check shared by scripts/
+    refresh_proposals.py (over list_outdated()'s rows) and the on-load
+    fallback in api/proposals.py (over get_container()'s row); both shapes
+    carry the same four keys this reads: route_builder_version,
+    calc_version, scenario_id, current_base_scenario_id.
+
+    Pure function, no DB access — the current-base lookup already
+    travelled with the row (see get_container()/list_outdated()'s
+    docstrings for why, rather than a second query here).
+
+    Checked in priority order (route_builder_version > calc_version >
+    base_scenario_moved) and returns only the FIRST trigger that applies:
+    a recompute fixes all three at once regardless of which one fired, so
+    update_log only needs to record the one that actually explains why
+    this refresh happened. None if the proposal is fully current.
+    """
+    if container["route_builder_version"] != ROUTE_BUILDER_VERSION:
+        return {
+            "trigger": "route_builder_version",
+            "from": container["route_builder_version"],
+            "to": ROUTE_BUILDER_VERSION,
+        }
+    if container["calc_version"] != CALC_VERSION:
+        return {
+            "trigger": "calc_version",
+            "from": container["calc_version"],
+            "to": CALC_VERSION,
+        }
+    if container["scenario_id"] != container["current_base_scenario_id"]:
+        return {
+            "trigger": "base_scenario_moved",
+            "from": container["scenario_id"],
+            "to": container["current_base_scenario_id"],
+        }
+    return None
 
 
 class ProposalNotFoundError(Exception):
@@ -109,6 +165,83 @@ class ProposalRepository:
     # Publish — §2.2
     # ------------------------------------------------------------------
 
+    def _write_state(
+        self,
+        cur,
+        proposal_id: int,
+        proposal_version: int,
+        user_id: int,
+        name: str,
+        computed: dict,
+        is_new: bool,
+    ) -> dict:
+        """The write-side state transition shared by publish() and
+        refresh_proposal(): prefix rewrite, container row, GTFS + sidecar
+        write, summary upsert. NOT the update_log row or the transaction
+        boundary — callers own those, since they differ (event name,
+        ownership check, based_on handling) between a user publish and a
+        system refresh.
+
+        Returns {prefixed, route_dict, evaluation_full, created_at,
+        updated_at} — everything both callers' own return dicts need.
+        """
+        prefixed = rewrite_id_prefix(
+            computed,
+            _STRUCTURAL_ROUTE_PREFIX,
+            f"P{proposal_id}_V{proposal_version}_{_STRUCTURAL_ROUTE_PREFIX}",
+        )
+        route_dict = prefixed["route"]
+        evaluation_full = prefixed["evaluation"]
+        # §5.1 — only models + views are irreducible/stored; input.parameters
+        # is rebuilt on read via the scenario pin
+        # (gtfs_store.input_parameters_from_scenario()).
+        storage_evaluation = {
+            "models": evaluation_full["models"],
+            "views": evaluation_full["views"],
+        }
+
+        if is_new:
+            timestamps = self._insert_container(
+                cur,
+                proposal_id=proposal_id,
+                proposal_version=proposal_version,
+                user_id=user_id,
+                name=name,
+                prefixed=prefixed,
+                storage_evaluation=storage_evaluation,
+            )
+        else:
+            self._prune_gtfs(cur, proposal_id, proposal_version - 1)
+            timestamps = self._update_container(
+                cur,
+                proposal_id=proposal_id,
+                proposal_version=proposal_version,
+                name=name,
+                prefixed=prefixed,
+                storage_evaluation=storage_evaluation,
+            )
+
+        insert_route_gtfs(cur, route_dict)
+
+        summary = build_summary_row(route_dict, evaluation_full)
+        self._upsert_summary(
+            cur,
+            proposal_id=proposal_id,
+            proposal_version=proposal_version,
+            user_id=user_id,
+            name=name,
+            prefixed=prefixed,
+            summary=summary,
+        )
+
+        return {
+            "prefixed": prefixed,
+            "route_dict": route_dict,
+            "evaluation_full": evaluation_full,
+            "created_at": timestamps["created_at"],
+            "updated_at": timestamps["updated_at"],
+        }
+
     def publish(
         self,
         mode: str,
@@ -156,55 +289,19 @@ class ProposalRepository:
                     new_pid = self._next_proposal_id(cur)
                     new_version = 1
 
-                prefixed = rewrite_id_prefix(
-                    computed,
-                    _STRUCTURAL_ROUTE_PREFIX,
-                    f"P{new_pid}_V{new_version}_{_STRUCTURAL_ROUTE_PREFIX}",
-                )
-                route_dict = prefixed["route"]
-                evaluation_full = prefixed["evaluation"]
-                request_echo = prefixed["request"]
-                # §5.1 — only models + views are irreducible/stored;
-                # input.parameters is rebuilt on read via the scenario pin
-                # (gtfs_store.input_parameters_from_scenario()).
-                storage_evaluation = {
-                    "models": evaluation_full["models"],
-                    "views": evaluation_full["views"],
-                }
-
-                if mode == "overwrite":
-                    self._prune_gtfs(cur, new_pid, new_version - 1)
-                    updated_at = self._update_container(
-                        cur,
-                        proposal_id=new_pid,
-                        proposal_version=new_version,
-                        name=name,
-                        prefixed=prefixed,
-                        storage_evaluation=storage_evaluation,
-                    )
-                else:
-                    updated_at = self._insert_container(
-                        cur,
-                        proposal_id=new_pid,
-                        proposal_version=new_version,
-                        user_id=user_id,
-                        name=name,
-                        prefixed=prefixed,
-                        storage_evaluation=storage_evaluation,
-                    )
-
-                insert_route_gtfs(cur, route_dict)
-
-                summary = build_summary_row(route_dict, evaluation_full)
-                self._upsert_summary(
+                state = self._write_state(
                     cur,
                     proposal_id=new_pid,
                     proposal_version=new_version,
                     user_id=user_id,
                     name=name,
-                    prefixed=prefixed,
-                    summary=summary,
+                    computed=computed,
+                    is_new=(mode == "new"),
                 )
+                prefixed = state["prefixed"]
+                route_dict = state["route_dict"]
+                evaluation_full = state["evaluation_full"]
+                request_echo = prefixed["request"]
 
                 self._write_update_log(
                     cur,
@@ -240,7 +337,85 @@ class ProposalRepository:
             "request": request_echo,
             "route": route_dict,
             "evaluation": evaluation_full,
-            "updated_at": updated_at,
+            "created_at": state["created_at"],
+            "updated_at": state["updated_at"],
+        }
+
+    def refresh_proposal(
+        self,
+        proposal_id: int,
+        computed: dict,
+        detail: dict,
+    ) -> dict:
+        """System-triggered recompute-and-overwrite-in-place (§4.2) — the
+        write-path counterpart to publish(mode="overwrite") used by
+        scripts/refresh_proposals.py and the on-load fallback
+        (api/proposals.py). Differs from publish() in exactly the ways a
+        system refresh needs to: no ownership check (not a user action —
+        proposal_id alone is enough), owner/name kept as stored rather
+        than caller-supplied, update_log event is 'recalculated' (with
+        `detail`, e.g. {"trigger": "calc_version", "from": "0.9.9",
+        "to": "0.9.10"} — see outdated_trigger()) instead of 'overwritten',
+        user_id NULL on the log row (a system event, per §4.1). FOR UPDATE
+        still serializes concurrent writers (another refresh, or a genuine
+        user overwrite-publish racing this one).
+
+        Raises ProposalNotFoundError if proposal_id doesn't exist (a
+        proposal deleted manually between list_outdated() and this call).
+        """
+        try:
+            with self._cursor() as cur:
+                cur.execute(
+                    "SELECT proposal_version, user_id, name "
+                    "FROM proposals.proposals WHERE proposal_id = %s FOR UPDATE",
+                    (proposal_id,),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    raise ProposalNotFoundError(proposal_id)
+                new_version = row["proposal_version"] + 1
+                user_id = row["user_id"]
+                name = row["name"]
+
+                state = self._write_state(
+                    cur,
+                    proposal_id=proposal_id,
+                    proposal_version=new_version,
+                    user_id=user_id,
+                    name=name,
+                    computed=computed,
+                    is_new=False,
+                )
+
+                self._write_update_log(
+                    cur,
+                    proposal_id=proposal_id,
+                    proposal_version=new_version,
+                    user_id=None,
+                    event="recalculated",
+                    based_on_proposal_id=None,
+                    detail=detail,
+                )
+
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
+
+        logger.info(
+            "proposal refresh: proposal_id=%s version=%s trigger=%s",
+            proposal_id,
+            new_version,
+            detail.get("trigger"),
+        )
+        return {
+            "proposal_id": proposal_id,
+            "proposal_version": new_version,
+            "user_id": user_id,
+            "name": name,
+            "route_fingerprint": state["prefixed"]["route_fingerprint"],
+            "created_at": state["created_at"],
+            "updated_at": state["updated_at"],
         }
 
     def _lock_for_overwrite(
@@ -298,7 +473,12 @@ class ProposalRepository:
         name: str,
         prefixed: dict,
         storage_evaluation: dict,
-    ):
+    ) -> dict:
+        """Returns {"created_at", "updated_at"} — both equal on a fresh
+        insert (the row's row-level default), but returned as a pair
+        rather than just updated_at so _write_state()'s result carries a
+        real created_at for every caller (publish AND refresh), not just
+        whatever get_container() happens to re-select afterwards."""
         request_echo = prefixed["request"]
         cur.execute(
             "INSERT INTO proposals.proposals "
@@ -306,7 +486,7 @@ class ProposalRepository:
             " composition_id, scenario_id, route_builder_version, calc_version, "
             " compute_request, evaluation_output) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
-            "RETURNING updated_at",
+            "RETURNING created_at, updated_at",
             (
                 proposal_id,
                 proposal_version,
@@ -321,7 +501,8 @@ class ProposalRepository:
                 Json(storage_evaluation),
             ),
         )
-        return cur.fetchone()["updated_at"]
+        row = cur.fetchone()
+        return {"created_at": row["created_at"], "updated_at": row["updated_at"]}
 
     def _update_container(
         self,
@@ -331,11 +512,14 @@ class ProposalRepository:
         name: str,
         prefixed: dict,
         storage_evaluation: dict,
-    ):
-        """user_id is deliberately not a parameter here — overwrite never
-        changes ownership (that's what "overwrite vs new" already gates),
-        and the caller-supplied user_id was already checked to match the
-        existing row's in _lock_for_overwrite()."""
+    ) -> dict:
+        """user_id is deliberately not a parameter here — an overwrite
+        (user or system-refresh) never changes ownership; the caller
+        already resolved it (publish() via _lock_for_overwrite()'s
+        ownership check, refresh_proposal() by simply reading it back).
+        created_at is untouched by this UPDATE (not in the SET list), so
+        RETURNING it here reports the proposal's original creation time,
+        not this state's — the correct value for both callers."""
         request_echo = prefixed["request"]
         cur.execute(
             "UPDATE proposals.proposals SET "
@@ -344,7 +528,7 @@ class ProposalRepository:
             " calc_version = %s, compute_request = %s, evaluation_output = %s, "
             " updated_at = now() "
             "WHERE proposal_id = %s "
-            "RETURNING updated_at",
+            "RETURNING created_at, updated_at",
             (
                 proposal_version,
                 name,
@@ -358,7 +542,8 @@ class ProposalRepository:
                 proposal_id,
             ),
         )
-        return cur.fetchone()["updated_at"]
+        row = cur.fetchone()
+        return {"created_at": row["created_at"], "updated_at": row["updated_at"]}
 
     def _upsert_summary(
         self,
@@ -421,14 +606,28 @@ class ProposalRepository:
         cur,
         proposal_id: int,
         proposal_version: int,
-        user_id: int,
+        user_id: Optional[int],
         event: str,
         based_on_proposal_id: Optional[int],
+        detail: Optional[dict] = None,
     ) -> None:
+        """detail is for the primary event row itself — e.g. refresh_
+        proposal()'s 'recalculated' event carries {"trigger": ...,
+        "from": ..., "to": ...} (§4.1). based_on_proposal_id's
+        'branched_from'/'branched_to' pair below is unrelated and always
+        NULL-detail-free on the primary row when both are given (publish
+        never combines a branch with a caller-supplied detail)."""
         cur.execute(
             "INSERT INTO proposals.update_log "
-            "(proposal_id, proposal_version, user_id, event) VALUES (%s, %s, %s, %s)",
-            (proposal_id, proposal_version, user_id, event),
+            "(proposal_id, proposal_version, user_id, event, detail) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (
+                proposal_id,
+                proposal_version,
+                user_id,
+                event,
+                Json(detail) if detail is not None else None,
+            ),
         )
         if based_on_proposal_id is not None:
             cur.execute(
@@ -464,14 +663,23 @@ class ProposalRepository:
         evaluation — GET /api/proposal/<id> (api/proposals.py) rebuilds
         those separately via gtfs_store.py, since the container
         alone doesn't carry them (§5.1: route lives in GTFS, evaluation's
-        input.parameters is rebuilt from the scenario pin)."""
+        input.parameters is rebuilt from the scenario pin).
+
+        Also carries current_base_scenario_id — internal only, never
+        surfaced on any API response (api/helpers/proposal_serialize.py's
+        proposal_meta_to_dict() whitelists its own keys, so this just sits
+        unused there) — it exists purely so the on-load refresh fallback
+        (api/proposals.py, §4.2) can call outdated_trigger() on this same
+        row without a second query."""
         with self._cursor() as cur:
             cur.execute(
                 "SELECT p.proposal_id, p.proposal_version, p.user_id, "
                 "       u.display_name AS user_name, p.name, p.route_fingerprint, "
                 "       p.composition_id, p.scenario_id, p.route_builder_version, "
                 "       p.calc_version, p.compute_request, p.evaluation_output, "
-                "       p.created_at, p.updated_at "
+                "       p.created_at, p.updated_at, "
+                "       (SELECT scenario_id FROM scenario.scenarios "
+                "        WHERE is_current_base) AS current_base_scenario_id "
                 "FROM proposals.proposals p "
                 "LEFT JOIN admin.users u USING (user_id) "
                 "WHERE p.proposal_id = %s",
@@ -527,6 +735,50 @@ class ProposalRepository:
         self._conn.rollback()
         return row["user_id"] if row else None
 
+    def flush_compute_cache(self) -> None:
+        """§2.3/§4.2: empties both compute-cache tables — UNLOGGED, never
+        a source of truth, always safe to TRUNCATE. Called by scripts/
+        refresh_proposals.py before every batch run (the design's 'first
+        flushes the compute cache' rule). Currently a no-op in effect
+        (nothing writes to these tables until WP13 lands), but correct as
+        written and needs no revisiting once WP13 ships."""
+        with self._cursor() as cur:
+            cur.execute(
+                "TRUNCATE proposals.compute_cache_pointer, "
+                "proposals.compute_cache_result"
+            )
+        self._conn.commit()
+
+    def list_outdated(self, limit: Optional[int] = None) -> list[dict]:
+        """§4.2's work queue: every proposal whose stored route_builder_
+        version/calc_version has fallen behind the running code, or whose
+        scenario_id is no longer the current base — scripts/
+        refresh_proposals.py's batch job. Filtered at the SQL level
+        (rather than fetching every proposal and checking in Python) since
+        the steady-state case, most of the time, is that nothing is
+        outdated. Returns just enough per row for outdated_trigger() and
+        compute_proposal(): proposal_id, the three stale-checkable
+        columns, current_base_scenario_id (see get_container()'s
+        docstring for why it travels alongside rather than a second
+        query), and compute_request (the recompute input)."""
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT proposal_id, route_builder_version, calc_version, "
+                "       scenario_id, compute_request, "
+                "       (SELECT scenario_id FROM scenario.scenarios "
+                "        WHERE is_current_base) AS current_base_scenario_id "
+                "FROM proposals.proposals "
+                "WHERE route_builder_version != %s OR calc_version != %s "
+                "   OR scenario_id != (SELECT scenario_id FROM scenario.scenarios "
+                "                       WHERE is_current_base) "
+                "ORDER BY proposal_id" + (" LIMIT %s" if limit is not None else ""),
+                (ROUTE_BUILDER_VERSION, CALC_VERSION)
+                + ((limit,) if limit is not None else ()),
+            )
+            rows = cur.fetchall()
+        self._conn.rollback()
+        return [dict(row) for row in rows]
+
     # Every proposal_summaries column the `summaries` section returns.
     _SUMMARY_COLUMNS = (
         "proposal_id, proposal_version, user_id, name, "
@@ -540,15 +792,6 @@ class ProposalRepository:
         "shift_car_trips_per_year, shift_car_trip_km_per_year, "
         "co2_savings_t_per_year, subsidy_eur_per_t_co2, "
         "demand_kpis_placeholder, created_at, updated_at"
-    )
-
-    # scenario_outdated (§4.2): TRUE once a proposal's pinned scenario_id
-    # stops being the live base — joined against scenario.scenarios,
-    # never stored. Every section below that returns proposal rows
-    # carries this same subquery so gallery/map/count all agree.
-    _SCENARIO_OUTDATED_EXPR = (
-        "scenario_id != (SELECT scenario_id FROM scenario.scenarios "
-        "WHERE is_current_base) AS scenario_outdated"
     )
 
     # likes_count is not a proposal_summaries column — a like changes
@@ -593,7 +836,7 @@ class ProposalRepository:
 
             sql = (
                 f"WITH {self._LIKES_CTE} "
-                f"SELECT {self._SUMMARY_COLUMNS}, likes_count, {self._SCENARIO_OUTDATED_EXPR} "
+                f"SELECT {self._SUMMARY_COLUMNS}, likes_count "
                 f"FROM proposal_summaries_with_likes{where_clause} "
                 f"ORDER BY {build_order_by(sort)}"
             )

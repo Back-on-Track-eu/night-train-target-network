@@ -44,8 +44,7 @@ Public interface:
                                                                  ` ORDER BY `
                                                                  keyword)
   SORTABLE_COLUMNS                -> frozenset[str], every filterable
-                                      column plus the derived
-                                      "scenario_outdated"
+                                      column plus "route_fingerprint"
 
 Callers: adapters/proposal/repository.py's list_summaries() /
 map_lines() / map_stop_counts() / map_country_counts(); validated first
@@ -107,16 +106,16 @@ ARRAY_COLUMNS: dict[str, str] = {
 # {filter key: db column} — case-insensitive substring.
 SUBSTRING_COLUMNS: dict[str, str] = {"name": "name"}
 
-# Every filterable column a sort can target, plus the derived
-# scenario_outdated flag (repository.py's queries always SELECT it under
-# this exact alias).
+# Every filterable column a sort can target, plus route_fingerprint
+# (informational/compare context, §3.2 — not itself filterable, but a
+# reasonable sort key).
 SORTABLE_COLUMNS: frozenset[str] = frozenset(
     set(RANGE_COLUMNS.values())
     | set(DATETIME_RANGE_COLUMNS.values())
     | set(LIST_COLUMNS.values())
     | set(ARRAY_COLUMNS.values())
     | set(SUBSTRING_COLUMNS.values())
-    | {"scenario_outdated", "route_fingerprint"}
+    | {"route_fingerprint"}
 )
 
 # The one filter key that isn't a summary-table column at all — it picks
