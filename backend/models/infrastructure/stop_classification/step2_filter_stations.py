@@ -1,13 +1,19 @@
 """Extract railway-related objects from an OSM extract into smaller, filtered PBFs.
 
-Each filter runs in a single shared pass over the input file — selecting several
-filters (or "all") does not re-read the file once per filter, since the input
-is a multi-hour continent-sized extract.
+Only the `station` filter feeds the stop classification pipeline (step 2 in the
+README) — its output contains every station object *with all its tags*, which is
+everything the classification notebook needs. The other filters match their tag
+on ANY object in the input (tram tracks, stop positions, route relations, ...),
+not just on stations: they exist purely for exploratory QGIS analysis of tag
+coverage across Europe and are not pipeline inputs.
+
+Each selected filter runs in a single shared pass over the input file —
+selecting several filters (or "all") does not re-read the file once per filter,
+since the input is a multi-hour continent-sized extract.
 
 Usage:
-    uv run python filter_stations.py data/raw/europe-latest.osm.pbf
-    uv run python filter_stations.py data/raw/europe-latest.osm.pbf --filters station tram
-    uv run python filter_stations.py data/raw/europe-latest.osm.pbf --filters all -o data/raw/eu
+    uv run python step2_filter_stations.py data/raw/europe-latest.osm.pbf -o data/step2_output_eu_stations
+    uv run python step2_filter_stations.py data/raw/europe-latest.osm.pbf --filters all -o data/eu_stations
 """
 
 import argparse
@@ -119,11 +125,22 @@ def input_stem(input_path: Path) -> str:
 def filter_stations(
     input_path: Path, filter_names: list[str], output_prefix: Path
 ) -> None:
+    # A single-filter run (the pipeline default) writes the prefix as-is, e.g.
+    # `-o data/step2_output_eu_stations` -> `step2_output_eu_stations.osm.pbf`.
+    # Multiple filters in one run still need the per-filter suffix so their
+    # outputs don't collide.
+    single_filter = len(filter_names) == 1
+
+    def output_path_for(name: str) -> Path:
+        if single_filter:
+            return output_prefix.with_suffix(".osm.pbf")
+        return output_prefix.parent / f"{output_prefix.name}_{name}.osm.pbf"
+
     runs = [
         FilterRun(
             name=name,
             predicate=FILTER_PREDICATES[name],
-            output_path=output_prefix.parent / f"{output_prefix.name}_{name}.osm.pbf",
+            output_path=output_path_for(name),
         )
         for name in filter_names
     ]
@@ -166,8 +183,11 @@ def parse_args() -> argparse.Namespace:
         "--filters",
         nargs="+",
         choices=[*FILTER_PREDICATES, "all"],
-        default=["all"],
-        help="Filter(s) to run in this pass, or 'all' for every filter at once.",
+        default=["station"],
+        help=(
+            "Filter(s) to run in this pass, or 'all' for every filter at once. "
+            "Default is 'station' — the only filter the pipeline needs."
+        ),
     )
     parser.add_argument(
         "-o",
@@ -175,8 +195,11 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=None,
         help=(
-            "Output prefix (not a full filename). Each filter writes "
-            "<prefix>_<filter>.osm.pbf. Default: <input dir>/<input name>"
+            "Output prefix. For a single filter (the pipeline default), the file "
+            "is written as exactly <prefix>.osm.pbf — pass the full desired name, "
+            "e.g. data/step2_output_eu_stations. For multiple filters, each writes "
+            "<prefix>_<filter>.osm.pbf instead, to keep their outputs apart. "
+            "Default prefix: <input dir>/<input name>."
         ),
     )
     return parser.parse_args()
