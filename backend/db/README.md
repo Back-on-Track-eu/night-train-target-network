@@ -19,14 +19,20 @@ db/
 │   │   ├── create_input_params_schema.sql
 │   │   ├── create_scenario_schema.sql
 │   │   ├── create_proposal_schema.sql
-│   │   └── create_ontd_schema.sql     # separate/optional — see "ontd schema" below
 │   ├── seed.py                 # Seeds admin/input_params/scenario/proposals; operational
 │   │                           # parameters come from models/compositions/calib/seed/*.csv
 │   ├── sql_loader.py           # Loads .sql files from the sql/ folder
-│   ├── ontd_loader.py          # Separate script: loads the ontd schema from the ONTD GitHub snapshot
 │   ├── Dockerfile              # Builds the seeder image
 │   ├── docker-compose.yml      # Standalone stack: postgres + seeder + Mathesar
 │   └── .env.example            # Default credentials for local use (POSTGRES_* only)
+├── ontd/                       # ONTD reference-data ingestion (any environment, not dev-only)
+│   ├── loader.py               # Refreshed ontd tables from the public ONTD Sheets export
+│   ├── composition_loader.py   # One-time import of the curated composition catalog
+│   ├── projection.py           # Rebuilds route_summaries + route_legs (runs at the end of loader.py)
+│   ├── bootstrap.py            # Guarded one-shot load, run by the API container's entrypoint
+│   ├── connection.py           # Shared DB connection + .env loading (aligns env for DBDataLoader)
+│   ├── xlsx_utils.py           # Shared workbook fetch/extraction/coercion
+│   └── sql/create_ontd_schema.sql
 └── README.md                   # This file
 ```
 
@@ -105,7 +111,11 @@ See `backend/DEVELOPMENT.md` for the full backend developer setup guide.
 
 ## The SQL schemas
 
-The files in `db/dev/sql/` are the **source of truth** for the database structure
+The files in `db/dev/sql/` are the **source of truth** for the application
+schemas (`admin`, `input_params`, `scenario`, `proposals`). The `ontd`
+schema is owned separately by `db/ontd/sql/`, since it is dropped and
+rebuilt by its own loader rather than migrated. The rest of this section
+concerns the application schemas
 across all environments — dev, test, and production.
 
 `create_*.sql` + `seed.py` always represent the **latest** schema and are for
@@ -370,7 +380,7 @@ target 2032 timetable year (`ProposalRepository._SERVICE_START`/
 
 ---
 
-## The `ontd` schema (separate, optional)
+## The `ontd` schema (separate, refresh-driven)
 
 `ontd` mirrors the [Open Night Train Database](https://github.com/Back-on-Track-eu)
 — a community-maintained Google Sheet of real-world night train agencies,
@@ -378,17 +388,144 @@ stops, and trips (source of truth: the Sheet, owned by Juri Maier). It is
 **not** created or seeded by `seed.py` — it's a separate concern, loaded on
 demand with:
 
+The ONTD is **seed data**: the API container's entrypoint runs
+`db/ontd/bootstrap.py` after `seed.py`, so a fresh database comes up with
+existing night trains already loaded. The bootstrap is guarded on
+`ontd.route_summaries` being empty, so restarts cost nothing, and it
+never fails the container — the API serves proposals fine without
+existing-route context, so a Drive outage or a not-yet-ready router just
+logs and moves on. `ONTD_BOOTSTRAP=auto|force|off` controls it.
+
+The load runs in the **background**, so the API is serving within
+seconds of the seed finishing; existing routes appear in the gallery once
+the bootstrap completes. Routing is the slow part and runs concurrently —
+`ONTD_ROUTING_WORKERS` (default 8) routes at a time, roughly 8x faster
+than serially. Raise it for a dedicated routing container, lower it if
+the router is shared and under load.
+
+On an existing server database the same command is the migration step —
+it is guarded, so it loads exactly once:
+
 ```bash
-python db/dev/ontd_loader.py                  # fetch the latest snapshot from GitHub
-python db/dev/ontd_loader.py --local /path     # load from a local data/latest/ export
+docker exec night-train-api python db/ontd/bootstrap.py
 ```
 
-`ontd_loader.py` is idempotent (`TRUNCATE ... CASCADE`s all `ontd` tables
-before each load) and never touches `admin`/`input_params`/`scenario`/`proposals`.
+The individual scripts remain available for maintenance:
+
+```bash
+python db/ontd/loader.py                  # fetch the live public Sheets export (default)
+python db/ontd/loader.py --xlsx /path.xlsx # load from a local .xlsx export
+
+# One-time only, AFTER loader.py — route assignments are matched
+# against ontd.routes, so the refreshed tables must exist first:
+python db/ontd/composition_loader.py                 # fetch from Drive
+python db/ontd/composition_loader.py --xlsx ./wb.xlsx # or a local copy
+
+# route_summaries is rebuilt automatically at the end of every
+# loader.py run; standalone after editing curated tables by hand:
+python db/ontd/projection.py                 # routes all active routes
+python db/ontd/projection.py --no-geometry   # metadata only, no router
+```
+
+Routing the active routes uses the same full two-pass routing as the
+live tool (custom model, speed cap, HSR avoidance), so it needs the
+`openrailrouting` container up *and* `input_params` seeded (tracks,
+compositions, country geometries). It takes several minutes — two
+router passes per route. The reference composition whose
+`max_speed_kmh`/`hsr_allowed` apply (the ONTD catalog carries no speed
+data of its own) defaults to the first *refurbished* composition in the
+live catalog — resolved at runtime, since composition ids turn over
+between calibrations — and `--composition-id` overrides it. The chosen
+id, family, speed cap and HSR flag are printed at the start of the run.
+
+The same run also fills `ontd.route_legs`: per-leg router
+driving/dynamics/buffer times and country shares beside the real
+timetable's running time for the same stop pair. That table feeds no
+API — it is the dataset for calibrating country buffer quotas later.
+Both sides exclude dwell, so they are directly comparable; rows are
+written only where routing actually succeeded.
+
+If routing reports `0 with routed geometry` and everything falls back to
+straight lines, the cause is usually environment rather than the router:
+`DBDataLoader` requires all five `POSTGRES_*` variables explicitly, while
+these scripts default host/port. `db/ontd/connection.py` resolves the
+values once and publishes them to `os.environ` so both agree.
+
+It also loads the `.env` files itself, from paths anchored to the repo
+(`backend/docker/.env`, then `backend/db/dev/.env`, then `backend/.env`;
+first value wins, and a real environment variable beats all of them).
+Bare `load_dotenv()` searches upward from the *calling* file, so which
+credentials got loaded depended on where a script happened to live —
+moving these scripts out of `db/dev/` (which has its own `.env`) silently
+dropped `POSTGRES_PASSWORD`.
+
+`backend/docker/.env` is written for *containers*, where `POSTGRES_HOST`
+is the compose service name (`postgres`). That name has no meaning on the
+developer's machine, where the same database is reached through the
+published port on localhost. Since these scripts run both ways (`uv run
+...` and `docker exec ...`), `connection.py` rewrites the host to
+localhost when — and only when — it is not inside a container *and* the
+configured name does not resolve. A real remote host that is merely
+unreachable keeps its name, so a DNS blip cannot silently redirect a load
+into a local database. The same translation is applied to
+`OPENRAILROUTING_URL`, where the published host port
+(`OPENRAILROUTING_HOST_PORT`) is substituted too, since it need not equal
+the container port. Any route the router can't snap falls
+back to straight lines between consecutive stops and is flagged
+`geometry_routed = FALSE`, so a router outage degrades the map rather
+than failing the load — `--no-geometry` skips routing entirely.
+
+Which workbook each loader reads comes from the environment —
+`ONTD_WORKBOOK_ID` / `ONTD_WORKBOOK_KIND` and `ONTD_COMPOSITIONS_ID` /
+`ONTD_COMPOSITIONS_KIND`, documented with their current values in
+`backend/docker/.env.example`, the same place as `GRAPH_CACHE_PATH` and
+`NATURAL_EARTH_COUNTRIES_URL`. `xlsx_utils.workbook_url()` turns an id into a
+URL, picking the endpoint from `*_KIND` (`drive_file` vs `native_sheet`);
+no id is committed anywhere, so there is one place to rotate a link and
+no chance of two copies disagreeing. The routing graph cache's id is the same
+class of value and lives in the same place — `GRAPH_CACHE_FILE_ID`,
+injected into the routing container by compose and read by
+`models/route/routing/docker/entrypoint.sh` (which keeps the current id
+as a fallback for compose stacks that don't inject it yet).
+
+The workbooks can sit behind **different** Google endpoints: the ONTD
+sheet is a native Google Sheet (`/spreadsheets/.../export?format=xlsx`,
+converted on the fly), while the composition workbook is an .xlsx merely
+*uploaded* to Drive (`drive.usercontent.google.com/download?...`,
+served as stored bytes). Both need the file shared as "Anyone with the
+link: Viewer"; if it isn't, the loader gets an HTML page instead of a
+workbook and fails with an explicit message rather than loading nothing.
+Because Drive does not recalculate a binary workbook, its formula values
+are frozen at upload — fine for a one-time import, but it means the
+uploaded file must have been recalculated (opened in Excel or Sheets)
+*before* upload.
+
+
+`db/ontd/loader.py` bootstraps its own DDL (applies `create_ontd_schema.sql`
+at the start of every run — destructive only to refreshed tables) and is
+idempotent: refreshed tables are dropped/recreated and reloaded each
+run; curated tables are never touched by it. It never touches
+`admin`/`input_params`/`scenario`/`proposals`. Before WP10 the schema
+had never been created or loaded in any environment.
 `ontd.stops.stop_id`/`stop_uic_code` are aligned with `input_params.stops.stop_id`
 by convention (agreed Giovanni ↔ David, 2026-06-22), but there's no FK between
-the schemas — `ontd` is reference data for comparison/import tooling, not a
-live dependency of the API.
+the schemas.
+
+Since WP10 (PROPOSALS_DESIGN.md §5.5) the schema splits into two table
+classes: the 11 canonical mirrors plus the derived `route_summaries`
+projection are **refreshed** (truncated + reloaded each half-yearly ONTD
+refresh, projection rebuilt afterwards), while the composition tables
+(`coachtypes`, `coachtype_classes`, `compositions`, `composition_coaches`,
+`route_compositions`) are **curated**: imported once from the
+target-network workbook via `db/ontd/composition_loader.py`, then
+maintained by hand in the DB, never truncated by the refresh, and linked
+to refreshed tables only via soft references. The composition importer
+refuses to touch curated tables that already hold data unless
+`--replace` is passed, so a stray re-run cannot silently discard manual
+curation. `ontd.route_summaries` is
+the one `ontd` table the API reads (the gallery/map `sources:
+["existing"]` union) — everything else remains reference data for
+comparison/import tooling.
 
 ---
 

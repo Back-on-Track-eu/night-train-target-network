@@ -619,3 +619,22 @@ automatically from a utilisation rate and per-km fare.
 - Class axis on route sections uses the builder's exact class cells; other
   views split by calibration shares — composition-level, so all pairs must
   share one composition for route-level class cells to be exact
+---
+
+## summary.py — gallery-summary KPI row
+
+`build_summary_row(route, evaluation)` derives the §5.4 gallery KPI
+columns (route metrics, financial KPIs, placeholder demand KPIs,
+`co2_g_per_pax_km`) as a pure function over the exact dicts
+`POST /api/proposal/calc` returns — no DB, no domain objects. One
+function, every consumer: the calc response's `summary` block
+(`api/helpers/proposal_compute.py`), the compare sides, and the
+publish-time `proposal_summaries` write
+(`adapters/proposal/projection.py: build_summary_db_row()`, which adds
+the DB-only `geom_simplified`). Moved here from
+`adapters/proposal/projection.py` with WP10 step 5 so `api/helpers/`
+never imports calculation code from `adapters/`.
+
+The night-train `co2_g_per_pax_km` is the flat factor from
+[`../emissions/README.md`](../emissions/README.md) (decision 24) until
+the energy-based, country-resolved model enriches it per route.

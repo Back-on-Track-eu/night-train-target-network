@@ -695,15 +695,101 @@ the dependency direction). Route metrics computed as today's
 `views.*.per_train_km` normalisation; annual totals from `per_year`; the
 fingerprint (§3.1) computed here.
 
-### 5.5 ONTD summaries (projection at seed time)
+### 5.5 ONTD integration (revised 2026-08-04, WP10 kickoff)
 
 Existing night train routes stay in the `ontd` schema — deliberately **not**
-the proposals schema. For gallery/map union they get their own thin
-projection, built at seed time (ONTD is script-loaded, so no runtime
-maintenance): `ontd.route_summaries` with the shared *subset* of the summary
-shape — name, stop_ids, countries, total_distance_km, geom_simplified — and
-no financial or demand KPIs (which also implements the "no rating of
-existing routes" policy at schema level, not by convention).
+the proposals schema. WP10 splits the `ontd` schema into two table classes
+with different lifecycles:
+
+**Refreshed tables** — the 11 canonical ONTD mirrors (`agencies`, `stops`,
+`routes`, `trips`, `trip_stop`, `calendar`, `calendar_dates`, `classes`,
+`translations`, `routes_inactive`, `trips_inactive`) plus the derived
+`route_summaries` projection. TRUNCATEd and reloaded on every half-yearly
+ONTD refresh. Note the schema has never been created or loaded in any
+environment before WP10 (`seed.py` deliberately doesn't know it) — the
+loader bootstraps its own DDL by applying `create_ontd_schema.sql` at the
+start of every run, which is destructive only to refreshed tables
+(curated tables are `CREATE TABLE IF NOT EXISTS`, never dropped). The
+loader reads the workbook directly from a public Google link (no API
+key/credentials; link-shared "Viewer") for full traceability. Which workbook is
+configured in `backend/docker/.env` (`ONTD_WORKBOOK_ID` /
+`ONTD_WORKBOOK_KIND`, documented in `.env.example`), resolved by
+`xlsx_utils.workbook_url()`. **Since 2026-08-05 the ONTD source is an uploaded
+.xlsx in Drive rather than the live native sheet**, because the stop
+coordinate fixes were applied to a copy — so a refresh now reads a
+frozen snapshot and no longer picks up the editors' ongoing changes.
+Point the registry back at the native sheet once those fixes are merged
+upstream. There is a
+local `--xlsx` fallback for offline dev. Sheet artifacts handled on
+import: Chatbase/AutoCrat trailer
+columns on `trips`, the leading `train_stop_id` column on `trip_stop`,
+case-insensitive header mapping (`UID`), column-name-intersection mapping
+for the inactive tables (their sheet columns diverge from the active
+twins), and `HH:MM` serialization for duration/time cells that come back
+as timedelta/time objects.
+
+**Curated tables** — `coach_classes`, `coachtypes`, `coachtype_classes`,
+`compositions`, `composition_coaches`, `route_compositions` (route →
+composition assignment). Imported **once** from the target-network
+workbook (`db/ontd/composition_loader.py`), after which the DB is the
+source of truth and updates happen by hand in the DB (new coach material,
+missing data); the importer refuses to overwrite non-empty curated tables
+unless `--replace` is given. `coach_classes` exists because the
+catalog's taxonomy is *not* a finer cut of the refreshed `ontd.classes`
+as first assumed — measured overlap is 7 of 26 ids — so the two lists
+are stored separately and joined only via the coarse `class_main`
+grouping. `occupancy_rate` was dropped from the source workbook before
+the import ran, so it is hand-maintained (NULL on import). Excluded from the refresh TRUNCATE; they reference
+refreshed tables only via **soft references** (route_id, agency_id,
+class_id — no FKs across the lifecycle boundary, same convention as
+input_params soft references), so a refresh can never cascade into
+curation. After each refresh the loader reports assignments whose
+route_id no longer exists.
+
+**`ontd.route_summaries`** — the gallery/map projection, rebuilt by the
+loader after every refresh, one row per **active** route:
+
+- descriptive: name, stop_ids, n_stops, countries, total_distance_km,
+  total_time_h (average over the two directional trips), avg_speed_kmh,
+  composition_id (nullable — only where curated; 151 of 204 active routes
+  at import time),
+- emissions: co2_g_per_pax_km from `ontd.trips.co2_per_km` (296 of 408
+  active trips carry it),
+- `ontd_url`: deep link to the route's public ONTD page
+  (`back-on-track.eu/nighttrains/?route_id=<id>`), so the gallery can
+  point an existing route back at its source record. A GENERATED column,
+  not loader-written — the URL is a pure function of `route_id`, so a
+  stored copy could only drift; and since the table is rebuilt on every
+  refresh, changing the pattern is a DDL edit with no migration.
+- geometry: geom_simplified, produced by routing each active route
+  through OpenRailRouting (`simpleRouting` — no composition physics
+  needed for geometry) at projection-build time, concatenated and
+  simplified like proposal geometries; per-route straight-line fallback
+  between consecutive stops when routing fails (snap failures on exotic
+  stops), flagged via `geometry_routed`.
+
+**`ontd.route_legs`** — a second, separate table: per-leg router output
+(driving / dynamics / buffer split, distance, country time and distance
+shares) beside the real timetable's running time for the same stop pair.
+It is **not** a gallery projection and feeds no API; it is the input
+dataset for calibrating country buffer quotas in a later work package.
+Grain is the stop pair because buffer is calibrated per country — a
+route crosses several, so a route-level total cannot be attributed to
+any of them, while a leg carries `country_time_shares` and sits mostly
+in one country. The two sides are comparable by construction:
+`scheduled_running_min` is departure(from) → arrival(to), i.e. running
+time with no dwell, and the router components are in-motion only, so
+dwell never enters either side (verified: legs + dwell reconcile exactly
+to wall-clock duration). Midnight rollover is resolved by walking the
+stop sequence with a day offset, since ONTD times are HH:MM with no
+date. Written only where routing succeeded — a straight-line fallback
+has no component split, and storing zeros would quietly bias the
+calibration.
+
+**No financial or demand KPIs** — the reduced column set implements the
+"no rating of existing routes" policy at schema level, not by
+convention. Engagement (likes/comments) does not apply to ONTD rows
+either.
 
 ---
 
@@ -1094,6 +1180,7 @@ stays the default.
 | shift air→NT, car→NT (trips, trip-km) | `views.route.per_year` demand values (§8.1) | **placeholder** |
 | CO2 savings per year | `views.route.per_year.co2_savings_t` = shifted trip-km × per-mode emission factors (scenario-versioned params table — details deferred to demand-model work) | **placeholder** |
 | subsidy per t CO2 | subsidy / CO2 savings — the one cross-value ratio, computed in the **projection**, not in views | **placeholder** |
+| GHG g/pax-km by mode (night train + air/car references) | flat per-mode factors in `models/emissions` (single source — also replaces the projection's former placeholder CO2 constants); the proposal night-train value is the flat factor until an energy-based, country-resolved model enriches it (energy_kwh per segment × country grid intensity ÷ sold places). ONTD rows carry their own per-route value from `ontd.trips.co2_per_km` | available now (flat) |
 
 ### 8.1 Where demand outputs live
 
@@ -1192,7 +1279,8 @@ backfill path needed.
 13. Fingerprint identity = resolved stop lists + geometries + exact trip
     schedules; request settings are state.
 14. ONTD stays in its own schema; union at API level with explicit `source`
-    marking and no KPIs for existing routes.
+    marking and no **financial or demand** KPIs for existing routes
+    (amended by 23 — descriptive + emission KPIs are shown).
 15. Demand-dependent KPIs faked with an explicit placeholder flag until the
     demand model exists.
 16. Compare takes one proposal anchor per side; overridden sides are
@@ -1218,6 +1306,37 @@ backfill path needed.
 22. **ONTD is excluded from compare and analyze** (political decision,
     2026-08-04) — existing routes are gallery/map context only, even
     after WP10.
+23. **Existing routes carry a reduced, descriptive KPI set** (WP10,
+    2026-08-04): composition (where curated), duration, distance,
+    average speed, and GHG g/pax-km by mode — never financial, demand,
+    or engagement values.
+24. **Mode emission factors are flat g/pax-km constants in
+    `models/emissions`** — the single source for night-train, air, and
+    car values, replacing the projection's placeholder CO2 constants.
+    The proposal night-train value uses the flat factor until an
+    energy-based, country-resolved model enriches it. Factors migrate
+    into a params table with the WP16 schema split, not before.
+25. **ONTD geometry is routed at import time** (OpenRailRouting).
+    Revised 2026-08-05: **`fullRouting`**, not `simpleRouting` — the
+    same custom model, speed cap and HSR avoidance the live tool uses,
+    because existing routes share the gallery map with proposals and
+    must obey identical routing rules. Straight-line fallback per route
+    on routing failure, flagged in the summary row.
+27. **Router output serves geometry only in the gallery** (2026-08-05):
+    every existing-route KPI comes from ONTD itself, for a uniform
+    appearance alongside proposals. The router's *times* are retained
+    separately in `ontd.route_legs` purely as calibration input — never
+    surfaced as a KPI, since an uncalibrated "router says 11.2 h,
+    timetable says 12.8 h" pair invites questions the model cannot yet
+    answer.
+26. **ONTD imports read the Google Sheets directly** via the public
+    whole-workbook export link (`export?format=xlsx`, no API
+    key/credentials — both sheets link-shared "Viewer") for
+    traceability; the compositions workbook is imported once, then
+    the DB's curated tables are source of truth. Curated tables are
+    excluded from the refresh TRUNCATE and use soft references across
+    the lifecycle boundary; the loader reports orphaned route
+    assignments after each refresh.
 
 ---
 
@@ -1495,11 +1614,274 @@ ephemeral compute through the cache), full sides + KPI deltas + structured
 published fixtures + override sides; `published: false` marking; diff
 assertions.
 
-**WP10 — ONTD integration** *(after WP6; independent of WP7–9)*
-`ontd.route_summaries` projection built in the seed pipeline
-(`backend/db/dev/`); `sources` filter + union in `POST /api/proposals`;
-`source` marking throughout. *Testable by*: seeded ONTD rows appearing in
-gallery/map sections with null KPIs.
+*Open follow-up (found 2026-08-05, deferred to a WP9 follow-up):* the
+`views` diff matches dict keys verbatim, but published trip ids carry
+the `P{proposal_id}_V{version}_` prefix — so the pair-keyed data dicts
+(`per_trip_pair`, `..._per_country`, `..._per_od`, `..._per_section`,
+`per_trip_per_stop`) can never match between two different proposals.
+Their cells fall out into `views_unmatched` on both sides and only the
+`"all"` entry is actually diffed; harmless on a single-pair route, silently
+lossy on a multi-pair one. Fix: strip the prefix on both sides before
+diffing (the same `rewrite_id_prefix()` the calc response already uses) —
+the fingerprint proves the trips correspond.
+
+**WP10 — ONTD integration** *(after WP6; independent of WP7–9;
+scope expanded 2026-08-04 — see §5.5, decisions 23–26)*
+(a) Schema: curated composition tables (`ontd.coachtypes`,
+`coachtype_classes`, `compositions`, `composition_coaches`,
+`route_compositions`), extended `ontd.route_summaries`, and
+`proposal_summaries.co2_g_per_pax_km`.
+(b) `models/emissions`: flat per-mode g/pax-km factors (sourced
+constants), wired into calc response, projection, and the former
+placeholder CO2 constants' call sites.
+(c0) **ONTD is seed data, not a manual chore** (corrected 2026-08-05):
+`db/ontd/bootstrap.py` runs the three loaders in order from the API
+container's entrypoint, right after `seed.py`. Guarded on
+`ontd.route_summaries` being empty so restarts are free; soft-failing so
+a Drive outage or unready router cannot keep the API down;
+`ONTD_BOOTSTRAP=auto|force|off`. Started in the background so the API is up in seconds, with routing inside the projection run concurrently (`ONTD_ROUTING_WORKERS`, default 8 — routes are independent HTTP round-trips, and the DB writes stay single-threaded afterwards so transaction semantics are unchanged). On an existing server database the same command is the migration step. The deploy stacks' Postgres init-script
+mount of `create_ontd_schema.sql` was removed — `loader.py` applies that
+DDL itself, so the mount was a second owner of the same file.
+(c) `db/ontd/loader.py` rework: public whole-workbook export-link source
+(no credentials; + `--xlsx` /
+`--local` fallbacks), sheet-artifact handling, TRUNCATE set excluding
+curated tables, orphaned-assignment report.
+(d) One-time composition importer
+(`db/ontd/composition_loader.py`) from the target-network workbook,
+incl. wide-slot unpivot and dangling-coachtype handling. ✅ Imports 26
+coach classes, 163 coach types (208 class rows), 130 compositions (885
+coach slots) and 151 route assignments — the workbook's other 216
+assignments are target-network routes with no ONTD counterpart and are
+skipped by design. Two source gaps reported, not silently absorbed:
+class `Sleeper (2-berth)` is used but undefined (stored anyway — soft
+reference), coach type `WLABmz (MÁV-START)` is referenced by a
+composition but undefined (slot skipped — real FK).
+Workbook read/coercion shared with `db/ontd/loader.py` via
+`db/ontd/xlsx_utils.py`. Source is the Drive-hosted workbook
+(`drive.usercontent.google.com/download`), *not* the Sheets export
+endpoint: it was uploaded as a binary .xlsx rather than converted to a
+native sheet, so its values are frozen at upload — acceptable because
+this import runs once and the file doubles as the archival record of
+what was imported.
+(e) Projection builder: `route_summaries` rebuild after every load,
+incl. routed geometry (`simpleRouting`, straight-line fallback). ✅
+`db/ontd/projection.py`, invoked at the end of `db/ontd/loader.py` and
+runnable standalone (`--no-geometry` for a metadata-only rebuild).
+Geometry uses the same `RailRouter.route()` path as the live tool —
+**`fullRouting`**, custom model, speed cap and HSR avoidance (decision
+25 revised 2026-08-05). Existing routes and proposals share one gallery
+map, so routing them by different rules would draw the same physical
+night train on different tracks depending on which table it came from.
+Only the shape is kept; the per-leg physics is discarded, since existing
+routes are never evaluated (decision 23). The ONTD catalog carries no
+speed/HSR data of its own (`ontd.compositions` is descriptive — places
+and weight), so one reference composition stands in for every existing
+route; `route()` reads only `max_speed_kmh` and `hsr_allowed` off it.
+That reference is **resolved from the live catalog at runtime**, not
+hardcoded: composition ids are a calibration output and do rot — the id
+still used across `api/README.md` and the `scripts/` comparison tools
+(`STD-7.1`) had already been dropped from the catalog by the time this
+ran. `ROUTING_MATERIAL_STRATEGY = "refurbished"` picks the family that
+matches what existing night trains actually run, taking the first such
+composition by id (deterministic, so successive rebuilds stay
+comparable); `--composition-id` overrides. Infrastructure comes from the
+`is_current_base` scenario at its pinned `track_infra_version`, so
+per-country `hsr_allowed` binds on both the composition and the track
+side — including countries a route only transits. `route_legs` is
+therefore only valid against that version; a base-scenario version move
+means rebuilding before recalibrating (risk accepted, 2026-08-05). Simplified with the same
+Douglas-Peucker tolerance as the proposal projection — both feed one
+map. This reintroduces a params-DB dependency (tracks, compositions,
+country index) that geometry-only routing avoided; the straight-line
+fallback covers an unseeded or unreachable environment.
+Two PK fixes came out of the first real load (2026-08-04): the schema
+had never met data before, and `calendar_dates PRIMARY KEY (service_id,
+date)` rejected 40 of 59 rows (PK columns are implicitly NOT NULL, but
+the sheet legitimately carries `date_from`/`date_until` period
+exceptions with `date` empty) while `translations`' PK on the
+`#REF!`-broken `record_id` rejected 75 of 91. Both now use surrogate
+keys. `translations.record_id` still needs fixing at source before those
+rows can join back to `ontd.stops`.
+(f) `POST /api/proposal/calc` gains an emissions section (CALC_VERSION
+bump); projection writes `co2_g_per_pax_km`; compare KPI deltas
+extended (proposal sides only — decision 22 unchanged). ✅ *implemented
+2026-08-05 (step 5, CALC_VERSION 0.9.11):* `models/emissions/factors.py`
+is the single source (decision 24; EEA TERM 2020 EU-average 2018:
+night train 33 / air 160 / car 143 g CO2e/pax-km, sourced per mode) and
+also hosts the placeholder `MODE_SHIFT_SHARES` (§8.1 — moves to
+`models/demand/` with the real model). The §5.4 KPI derivation
+(`build_summary_row()` + helpers) moved from
+`adapters/proposal/projection.py` to `models/evaluation/summary.py` so
+the calc response, the compare sides, and the publish path share one
+function without `api/helpers/` importing from `adapters/`; the
+projection keeps `route_fingerprint()` and the DB-shaped
+`build_summary_db_row()` (= shared row + `geom_simplified`). The calc
+response gains a `summary` block (between `suggested_stops` and `route`)
+carrying the full proposal gallery KPI set — deliberately **without**
+`geom_simplified` (the response already carries full per-segment
+geometry) — and `evaluation.models` gains an `emissions` entry
+(`factors` instead of `formulas`: sourced constants, the per-mode
+reference values for the gallery's mode comparison). Gallery summary
+rows, the compare summaries, and `SUMMARY_KPI_FIELDS` carry
+`co2_g_per_pax_km`. Placeholder `co2_savings_t_per_year` values shift:
+sourced factors replace the former unsourced ones (air 200/car 70), and
+savings now subtract the night train's own emissions per shifted km.
+
+(g) Gallery union groundwork ✅ *implemented 2026-08-05 (step 6a — ONTD
+side; the union queries themselves are step 6b):* **Interim stop-id
+bridge** — `ontd.stop_mappings` (CURATED lifecycle, like
+route_compositions) maps every active-route ONTD stop to a Target
+Network id, built automatically by `db/ontd/stop_mapping.py` on each
+projection run: coordinate match (≤500 m) against the current base
+scenario's pinned `stop_infrastructures` snapshot first, else a new stop
+is MINTED into that snapshot (curated-style transliteration Ü→UE/ø→OE
+→ `{CC}_{NAME}`, `stop_charge_eur` NULL → country/global default,
+provenance in `change_log`) and becomes an ordinary plannable catalog
+stop. `match_method='manual'`/`verified` rows are never overwritten —
+the table doubles as the seed of the harmonization deliverable
+(Giovanni ↔ David alignment task) and is replaced wholesale by the
+OSM-id stop list (~2 weeks out). Unmapped (documented gap): stops
+without coordinates or in countries outside `input_params.countries`
+(NOT NULL FK) — those keep raw ONTD ids. `route_summaries.stop_ids` now
+stores TN ids. **Corridor pieces** (decision B, option 3) — new
+refreshed `ontd.route_corridors`: per consecutive stop pair of each
+active route, that leg's own router geometry (straight-line fallback
+included), TN ids, direction-collapsed — the exact grain the proposal
+side aggregates `proposals.segments` into, so existing trains and
+proposals thicken shared corridors on one map layer. **Dev bootstrap** —
+seed.py creates the (empty) ontd schema when absent, guarded against
+re-application (the DDL drops refreshed tables), so step 6b's union has
+tables to query in every environment. `test_02`'s stop count became a
+minimum (minting legitimately grows the pinned snapshot). Step 6b
+decisions locked: `sources` DEFAULTS TO BOTH (revises §7.1's
+`["proposal"]` default — no working gallery frontend yet, Bjarne adapts
+once there), timestamps NULL on existing rows with `NULLS LAST`
+ordering, financial/demand filters exclude existing rows via SQL NULL
+semantics.
+
+**Step 6a-fix** ✅ *implemented 2026-08-06, before step 6b started —
+fallout from testing step 6a against real data (517 minted stops,
+574-row catalog vs the 58-row seed everything before this had been
+tested against):*
+
+- **Auto-stop-addition costing made analytic** (`ROUTE_BUILDER_VERSION`
+  0.9.15, `models/route/timetable.py`/`version.py`). The 10x catalog
+  growth turned `auto_stop_addition="add"`'s candidate costing into the
+  dominant cost of planning a route: candidates went from ~1 to ~11 on a
+  3-stop Berlin–Wien request, and each was priced with a real 3-point
+  router mini-reroute (~1.5s), pushing one `test_20_route_content.py`
+  class from 5s to 48s. A first fix (0.9.14, since reverted) batched
+  candidates into fewer multi-stop router calls; measurement showed the
+  batch partition degenerating to one full-trip call per candidate on
+  few-stop requests (13-19s per costing pass, worse than before) — and
+  that every accepted candidate's routed cost resolved to essentially
+  dwell + the dynamics model's own accel/brake pair, i.e. the router
+  re-measuring what the model already knew. 0.9.15 costs analytically
+  instead: `dwell_min()` + `routing/dynamics.py`'s `stop_time_loss_s()`
+  at the host leg's cruise speed + an out-and-back detour term — zero
+  router calls — for candidates within the new `AUTO_STOP_ANALYTIC_DETOUR_M`
+  (100m) of the routed geometry, or already over the trip's detour
+  budget on that analytic lower bound (mode "add" could never accept
+  them regardless, so routing them for precision buys nothing). Only
+  genuinely off-path candidates get a real mini-reroute. `AUTO_STOP_BUFFER_M`
+  widened 3km→10km alongside it, since a real (curated, post-calibration)
+  stop catalog will include stations the initial routing bypasses on
+  parallel/bypass tracks — the search needs the wider net once costing
+  no longer scales with candidate count. Net effect on the same
+  benchmark: 48s → 18s (remaining time is real routing — initial route +
+  final reroute — not costing). **Behavioural consequences, not just
+  performance:** on-path candidate times are model-derived estimates
+  rather than router measurements (identical to the model's own
+  precision elsewhere); `auto_stop_addition="suggest"` no longer
+  guarantees the same stop set as "add" — suggest ignores the detour
+  budget by design, so at the wider buffer it surfaces strictly more
+  candidates than "add" actually inserts (a subset relation, not
+  equality — `test_20_route_content.py` re-pinned accordingly, both
+  docstring and assertion). auto-add selection became measurably
+  composition-dependent (heavier trains cost every candidate more via
+  the mass-dependent accel/brake term, so afford fewer marginal stops
+  within the same 5% budget) — three route-invariance tests
+  (`test_distance_independent_of_composition`,
+  `test_energy_independent_of_composition`, and implicitly the gallery
+  corridor-sharing test) had to pin `auto_stop_addition="off"` to
+  isolate the routing/energy-model property they actually test from the
+  now-legitimately-divergent selection layer above it.
+- **Minting fixed to preserve the full-table-snapshot invariant**
+  (`db/ontd/stop_mapping.py`) — minted stops previously landed only in
+  the base scenario's pinned `stop_infra_version`, silently breaking
+  §3.1's guarantee that every version holds an identical stop set (the
+  historical/HSR snapshots stayed at 58 stops while base grew to 575).
+  Now inserted into every existing version. Caught by
+  `test_02_db_seed.py`'s
+  `test_stop_infrastructure_values_unchanged_by_hsr_scenario` — the
+  first time that test ran against post-minting data.
+- **Transliteration extended to Cyrillic and Greek**
+  (`db/ontd/stop_mapping.py`) — the Latin-diacritic-only table minted
+  ids like `BG_ПОДУЯНЕ` verbatim for Bulgarian/Greek station names
+  instead of folding them into the curated Latin namespace; found via a
+  live-data run (562 coordinate-matched, 0 minted — the mapping was
+  stable, but a stale earlier partial run's Cyrillic-id row surfaced
+  the gap on inspection).
+- **Per-field default-resolution logging demoted WARNING→DEBUG**
+  (`adapters/data_loader_from_db.py`) — `StopInfrastructure[...].stop_charge_eur
+  is None` and the equivalent `TrackInfrastructure[...]` line are the
+  *expected* NULL-resolves-to-default path (§4, decision on
+  provenance), not anomalies, but logging one WARNING per field per
+  entity per catalog build meant ~800 lines per build once 517 stops
+  had NULL charges by construction. This was the actual cause of a
+  reported "everything got slower" — unrelated to routing or auto-stop
+  costing at all: `test_10_params_api.py` (no routing, pure DB reads)
+  dropped from tens of seconds to 0.31s once the log volume was cut.
+  Aggregate counts moved to the existing per-build INFO summary lines
+  (`Built 575 stops (562 charges resolved via defaults)`) instead of
+  being lost. **Lesson for future large-catalog work:** per-entity
+  logging inside a hot loop is invisible at seed scale (58 stops) and a
+  measurable request-latency cost at real scale (575+) — worth an
+  explicit check whenever a WARNING/INFO call sits inside a per-row loop
+  before the next data volume jump (stop calibration, full compositions
+  import).
+(g) `sources` filter + union in `POST /api/proposals`; `source`
+marking + `"existing"` summary row shape; ONTD rows in the map
+sections. ✅ *implemented 2026-08-06 (step 6b):* one `gallery` UNION
+CTE (repository.py) over `proposal_summaries_with_likes` and
+`ontd.route_summaries`, compiled from only the requested
+`filter.sources` branch(es) — a `["proposal"]` request produces exactly
+the pre-6b plan and never touches the ontd schema. Existing rows carry
+NULL in every proposal-only column, which is the entire integration
+mechanism: every generic filter_builder fragment works unchanged
+(financial/likes/timestamp filters exclude existing rows via SQL NULL
+semantics per the locked decision; trip_windows' EXISTS is never true
+for a NULL proposal_id; bbox works because both `geom_simplified`
+columns are the same PostGIS type), and `build_order_by()` appends
+`NULLS LAST` everywhere so the default newest-first keeps the existing
+catalog after every proposal instead of Postgres's DESC-NULLS-FIRST
+floating it on top. Existing summary rows serialize as the reduced
+descriptive shape (route_id, name, ontd composition_id, shared metrics,
+`geometry_routed`, `ontd_url`) with proposal-only keys OMITTED, not
+null-padded. Map sections merged at their natural grains — corridors
+via `ontd.route_corridors` (built at the segment grain for exactly
+this), stops/countries via unnest over the union — and **every map
+section always carries the per-source split AND the total** (decision
+2026-08-06): `proposal_count`/`existing_count`/`total_count` +
+`proposal_ids`/`existing_route_ids` per corridor feature,
+`n_proposals`/`n_existing`/`n` per stop and per country. Corridor
+`avg_margin` stays proposals-only (NULL when only existing trains serve
+it); corridor geometry prefers a proposal shape, falls back to the
+existing corridor's own. Namespace notes carried into api/README.md
+§7.1: `stop_ids` is shared (step 6a), `composition_id` is NOT (curated
+vs ontd ids — a filter matches literally across both). test_52 gained a
+committed-fixture pair of fake existing routes (CI's ontd schema is
+empty — seed.py only creates it) plus a TestSourceUnion class; the
+pre-existing test_52 assertions were audited against the new BOTH
+default and survive because every exact-shape assertion sits behind an
+identity filter that NULL-excludes existing rows.
+(h) Last step: audit `GET /api/params/compositions` against the new
+ontd composition tables (naming/shape drift) and restructure
+`api/README.md` (especially the first table).
+*Testable by*: seeded ONTD rows in gallery/map with the descriptive KPI
+set; `sources` filter combinations; emission KPIs on
+calc/publish/summary/compare; `"existing"` still rejected by
+compare/analyze.
 
 **WP11 — Timeline endpoint** *(after WP5; small)*
 `GET /api/proposal/<id>/timeline` in `api/proposal_engagement.py` merging
@@ -1518,7 +1900,11 @@ filters, `trip_windows`, sections); compare
 (`published: false` sides need a loading state) and timeline endpoints;
 `source`, `demand_kpis_placeholder`, `cache_hit` fields;
 reconstructed-response note (byte-identity not guaranteed, structure
-identical). Audit `frontend/src/types/api.ts` end to end.
+identical). From WP10: the `sources` filter goes live, summary rows come
+in two shapes (`source: "proposal"` vs the reduced `"existing"` shape,
+§5.5), and emission fields land on the calc response, summary rows, and
+compare deltas (per-mode reference values included in the responses).
+Audit `frontend/src/types/api.ts` end to end.
 
 **WP13 — Compute cache** *(after WP2 + WP4 for the fingerprint;
 independent of WP5–12 — worth doing early, it speeds up every later WP's
@@ -1590,6 +1976,14 @@ one profitable member; duplicate anchor → 400; cap → 422; filter side
 snapshot semantics; job dedup on identical resubmission; progress
 monotonicity; rate limit; ONTD exclusion.
 
+**WP16 — input_params schema split** *(independent; noted 2026-08-04
+during WP10 kickoff)*
+Split the `input_params` schema along the `models/` package structure
+(infrastructure, compositions, demand, emissions, …) so params tables
+live next to their model domain. The flat mode emission factors migrate
+from `models/emissions` constants into the emissions params schema at
+that point (decision 24) — until then, constants are the single source.
+
 ---
 
 ## 11. Post-WP5 consolidation pass (2026-08-03) ✅
@@ -1638,10 +2032,13 @@ version-check contract (files under its watch were touched).
   `tests/helpers.py`'s dict-based demand helpers
   (`inject_demand`/`directional_od`/`replicated_od`),
   `scripts/test_evaluation_calc.py` (tombstone) +
-  `scripts/data/tc_1_evaluation_input.json`. Retained deliberately with
-  a note: `adapters/data_loader_from_spreadsheet.py` (basis for the ONTD
-  Google-Sheets import, WP10 — currently bit-rotted against
-  `models/params.py`, needs a rework pass when that work starts).
+  `scripts/data/tc_1_evaluation_input.json`.
+  `adapters/data_loader_from_spreadsheet.py` — retained at the time on
+  the assumption it would become the ONTD import's basis, but removed
+  during WP10 (2026-08-04): its premise (gspread + service-account auth,
+  bit-rotted against `models/params.py`) was superseded by the simpler
+  public-export-link mechanism decision 26 settled on, and it had no
+  callers to preserve.
 - **Tests renumbered** to close the cutover's deletion scars:
   `test_21_route_plan_content.py` → `test_20_route_content.py`,
   `test_31_evaluation_content.py` → `test_30_evaluation_content.py`.

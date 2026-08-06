@@ -4,7 +4,8 @@ This folder contains the domain model for evaluating night train route economics
 
 **Related documentation:** API reference (all endpoints consuming this layer) —
 [`../api/README.md`](../api/README.md) · demand model —
-[`demand/README.md`](demand/README.md) · evaluation model —
+[`demand/README.md`](demand/README.md) · emissions model —
+[`emissions/README.md`](emissions/README.md) · evaluation model —
 [`evaluation/README.md`](evaluation/README.md) · energy model —
 [`energy/README.md`](energy/README.md) · routing engine setup —
 [`route/routing/README.md`](route/routing/README.md) · database layer —
@@ -35,11 +36,15 @@ models/
 ├── energy/
 │   ├── calc_energy_consumption.py   # Per-segment energy model
 │   └── version.py                   # ENERGY_CALC_VERSION
+├── emissions/
+│   ├── factors.py                   # Flat per-mode GHG factors (g CO2e/pax-km) + mode-shift shares
+│   └── README.md                    # Emissions model documentation (sources, consumers, roadmap)
 ├── compositions/
 │   └── calc_indicative_figures.py   # compute_indicative_figures() — PLACEHOLDER, returns dummy figures
 └── evaluation/
     ├── calc.py                      # Cost/revenue evaluation → EvaluationResult
     ├── views.py                     # Breakdown aggregation, allocation, normalisation
+    ├── summary.py                   # build_summary_row() — §5.4 gallery-KPI derivation (calc response + publish projection)
     ├── version.py                   # CALC_VERSION
     └── README.md                    # Evaluation layer documentation
 ```
@@ -72,8 +77,15 @@ plan_route(trip_pair_inputs, loader, router, schedule_mode, proposal_id, proposa
   │     nothing rerouted — suggestions bubble up through plan_route()'s
   │     return value for the API layer to serialize). Search + costing is
   │     shared (timetable.find_and_cost_auto_stop_candidates(), catalog
-  │     prefiltered to route-touched countries). Only ever runs for
-  │     outbound — see below.
+  │     prefiltered to route-touched countries, then to AUTO_STOP_BUFFER_M
+  │     of the routed geometry — 10km, version.py). Costing itself is
+  │     analytic-first (timetable._analytic_added_time_min(): dwell +
+  │     routing/dynamics.py's own accel/brake pair + out-and-back detour
+  │     at cruise speed, ZERO router calls) for candidates within
+  │     AUTO_STOP_ANALYTIC_DETOUR_M (100m) of the geometry or already over
+  │     budget on their analytic lower bound; only genuinely off-path
+  │     candidates get a real 3-point mini-reroute (bounded concurrency).
+  │     Only ever runs for outbound — see below.
   ├── _check_country_coverage(routed_legs, tracks)                 → raises ValueError if any
   │     transited country has no row at all in input_params.track_infrastructures
   │     (defaulted fields on an existing row are fine)
@@ -129,10 +141,16 @@ switch lives with its implementation in `rail_router.py`'s `route()`.
 and per-`TripPair`, not per-trip: `_build_trip_pair()` runs the candidate
 search + costing once, from outbound, and reuses the result (reversed) for
 return, rather than re-running the whole pass for what is physically the
-same corridor reversed — that pass, not routing itself, is the dominant
-cost of planning a route through a dense stop catalog (the search itself
-prefilters the catalog to route-touched countries, read straight off the
-legs' country shares the router already attributed). Return still gets its
+same corridor reversed. This pass was measured as the dominant cost of
+planning a route through the post-ONTD, 575-stop catalog — candidate
+mini-reroutes at ~1.5s of router time each, 13-19s of costing per calc on
+a 3-stop request (2026-08-06, `test_20_route_content.py::TestRouteGeometry`
+went from 5s to 48s once the catalog grew from 58 to 575 stops). Fixed by
+costing analytically wherever the router's own answer is knowable in
+advance (see the pipeline diagram above) rather than by holding fewer
+candidates — the search itself prefilters the catalog to route-touched
+countries, read straight off the legs' country shares the router already
+attributed, then to `AUTO_STOP_BUFFER_M` of the geometry. Return still gets its
 own real routing call for its own (possibly asymmetric) physical path; only
 the decision of *which stops to add* (or *which to suggest*) is shared, not
 the routing. Accepted trade-off: return no longer gets an independent
