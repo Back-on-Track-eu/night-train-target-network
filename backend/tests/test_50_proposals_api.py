@@ -405,10 +405,19 @@ class TestList:
     test_52_proposals_gallery_api.py."""
 
     def test_list_includes_published_and_seed(self, api_base, published):
+        """GET /api/proposals defaults to sources=both (WP10 step 6b) —
+        the plain GET has no body to filter with, so the response mixes
+        in existing (ONTD) rows, which omit proposal_id entirely (the
+        reduced shape, not null-padded). This test is about proposal
+        identity specifically, so it reads only source="proposal" rows."""
         resp = requests.get(f"{api_base}{PROPOSALS_URL}", timeout=15)
         assert resp.status_code == 200
         body = resp.json()
-        ids = {p["proposal_id"] for p in body["summaries"]["proposals"]}
+        ids = {
+            p["proposal_id"]
+            for p in body["summaries"]["proposals"]
+            if p["source"] == "proposal"
+        }
         assert published["proposal_id"] in ids
         assert _SEED_PROPOSAL_ID in ids
 
