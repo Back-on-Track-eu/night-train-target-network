@@ -29,7 +29,7 @@ from dataclasses import dataclass
 # VERSION
 # =============================================================================
 
-CALC_VERSION: str = "0.9.10"
+CALC_VERSION: str = "0.9.11"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -63,6 +63,32 @@ CALC_MODEL_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.11": {
+        "date": "2026-08-05",
+        "author": "david",
+        "changes": "WP10 step 5 — emission KPIs for proposals. ADDITIVE "
+        "response changes, coordinate with Bjarne (WP12 batch): (1) POST "
+        "/api/proposal/calc gains a 'summary' block (between "
+        "suggested_stops and route) carrying the full §5.4 gallery KPI "
+        "row — route metrics, financial KPIs, placeholder demand KPIs, "
+        "co2_g_per_pax_km — built by the same "
+        "models/evaluation/summary.py: build_summary_row() the publish "
+        "projection uses, so calc and gallery cannot drift; deliberately "
+        "NO geom_simplified (the response already carries full "
+        "per-segment geometry). (2) evaluation.models gains an "
+        "'emissions' entry ({version, description, factors} — 'factors' "
+        "instead of 'formulas': sourced per-mode constants, decision 24) "
+        "with the night_train/air/car g CO2e/pax-km reference values "
+        "(EEA TERM 2020: 33/160/143). (3) Gallery summary rows and "
+        "compare summaries/deltas gain co2_g_per_pax_km (flat night-"
+        "train factor until the energy-based, country-resolved model). "
+        "(4) Placeholder co2_savings_t_per_year values shift: the "
+        "former unsourced factors (air 200 g, car 70 g) are replaced by "
+        "the sourced EEA set, and savings now subtract the night "
+        "train's own emissions from each shifted mode "
+        "(shifted_km × (mode − night_train)) — previously the shifted "
+        "modes' gross emissions were counted as savings.",
+    },
     "0.9.10": {
         "date": "2026-07-27",
         "author": "david",

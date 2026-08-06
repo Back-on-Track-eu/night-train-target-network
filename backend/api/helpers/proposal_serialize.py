@@ -105,12 +105,18 @@ def _validate_filters(filters) -> list[str]:
 
     sources = filters.get("sources")
     if sources is not None:
-        unsupported = set(sources) - SUPPORTED_SOURCES
-        if unsupported:
+        if not isinstance(sources, list) or not sources:
             errors.append(
-                f"Unsupported filter.sources value(s): {sorted(unsupported)}. "
-                f"Only {sorted(SUPPORTED_SOURCES)} until ONTD integration (WP10)."
+                "'filter.sources' must be a non-empty list "
+                f"of {sorted(SUPPORTED_SOURCES)}."
             )
+        else:
+            unsupported = set(sources) - SUPPORTED_SOURCES
+            if unsupported:
+                errors.append(
+                    f"Unsupported filter.sources value(s): {sorted(unsupported)}. "
+                    f"Supported: {sorted(SUPPORTED_SOURCES)}."
+                )
 
     for key in RANGE_COLUMNS:
         bounds = filters.get(key)
@@ -290,15 +296,43 @@ def proposal_to_response_dict(record: dict, route: dict, evaluation: dict) -> di
 
 
 def summary_row_to_dict(row: dict) -> dict:
-    """One proposal_summaries row (§5.4) for a list response — column
-    names already match the API field names 1:1, so this is mostly
-    pass-through; the shaping job is casting NUMERIC/Decimal columns to
-    plain floats (jsonify() can't serialize Decimal) and formatting
-    created_at/updated_at. `source` is always "proposal" here — ontd rows
-    get their own row shape once WP10's union lands. No staleness flag
-    here (WP7/8, 2026-08-04 revision) — every proposal is kept current by
-    the system (batch refresh + on-load fallback), so there's nothing for
-    a reader of this row to act on."""
+    """One gallery row for a list response, dispatched on `source`
+    (WP10 step 6b — the repository's union CTE marks every row).
+
+    "proposal" rows: column names already match the API field names
+    1:1, so this is mostly pass-through; the shaping job is casting
+    NUMERIC/Decimal columns to plain floats (jsonify() can't serialize
+    Decimal) and formatting created_at/updated_at. No staleness flag
+    (WP7/8, 2026-08-04 revision) — every proposal is kept current by the
+    system (batch refresh + on-load fallback), so there's nothing for a
+    reader of this row to act on.
+
+    "existing" rows (ONTD catalog, §5.5 decision 23): the reduced,
+    descriptive shape — identity (route_id, name), the shared metric
+    subset, geometry_routed (whether the drawn line is real routing or a
+    straight-line fallback), and ontd_url (deep link to the route's ONTD
+    page). Proposal-only fields (financials, demand, likes, timestamps,
+    user/scenario/version columns) are OMITTED rather than null-padded —
+    a frontend branches on `source`, and 20 always-null keys would only
+    obscure which fields are meaningful. composition_id is the ONTD
+    catalog's own id namespace, not the curated calibration one —
+    documented in api/README.md §7.1."""
+    if row.get("source") == "existing":
+        return {
+            "source": "existing",
+            "route_id": row["route_id"],
+            "name": row["name"],
+            "composition_id": row["composition_id"],
+            "total_distance_km": _to_float(row["total_distance_km"]),
+            "total_time_h": _to_float(row["total_time_h"]),
+            "avg_speed_kmh": _to_float(row["avg_speed_kmh"]),
+            "n_stops": row["n_stops"],
+            "countries": list(row["countries"]),
+            "stop_ids": list(row["stop_ids"]),
+            "co2_g_per_pax_km": _to_float(row["co2_g_per_pax_km"]),
+            "geometry_routed": row["geometry_routed"],
+            "ontd_url": row["ontd_url"],
+        }
     return {
         "source": "proposal",
         "proposal_id": row["proposal_id"],
@@ -329,6 +363,7 @@ def summary_row_to_dict(row: dict) -> dict:
         "co2_savings_t_per_year": _to_float(row["co2_savings_t_per_year"]),
         "subsidy_eur_per_t_co2": _to_float(row["subsidy_eur_per_t_co2"]),
         "demand_kpis_placeholder": row["demand_kpis_placeholder"],
+        "co2_g_per_pax_km": _to_float(row["co2_g_per_pax_km"]),
         "likes_count": row["likes_count"],
         "created_at": _isoformat(row.get("created_at")),
         "updated_at": _isoformat(row.get("updated_at")),
@@ -336,16 +371,21 @@ def summary_row_to_dict(row: dict) -> dict:
 
 
 def map_lines_to_geojson(rows: list[dict]) -> dict:
-    """`map_lines` section (§7.1, WP6.1 revision): GeoJSON
-    FeatureCollection with one feature per distinct stop-pair corridor
-    (`stop_a`/`stop_b`, direction-agnostic — the physical line between
-    two stops, not one feature per trip or proposal), so a frontend can
-    drive line *thickness* off `proposal_count` and look up which
-    proposals share a corridor via `proposal_ids`. `avg_margin_eur_per_
-    train_km` is the mean across exactly those proposals, for optional
-    colouring. geometry arrives pre-serialized JSON
-    (proposals.shapes.geometry is stored as GeoJSON already, no
-    ST_AsGeoJSON needed) — parsed here, not re-queried."""
+    """`map_lines` section (§7.1, WP6.1 revision; existing-route merge
+    WP10 step 6b): GeoJSON FeatureCollection with one feature per
+    distinct stop-pair corridor (`stop_a`/`stop_b`, direction-agnostic —
+    the physical line between two stops, not one feature per trip,
+    proposal, or route). Proposals and existing ONTD trains land on the
+    SAME feature when they share the corridor, so every feature carries
+    the per-source split AND the total — `proposal_count` /
+    `existing_count` / `total_count` (decision 2026-08-06: all three,
+    always) — plus the id lists (`proposal_ids`, `existing_route_ids`)
+    for the assignment. Thickness off `total_count`, colour/toggle by
+    source, no second query. `avg_margin_eur_per_train_km` is the mean
+    across the corridor's proposals only — None on corridors served
+    exclusively by existing trains. geometry arrives pre-serialized JSON
+    (both proposals.shapes.geometry and ontd.route_corridors.geometry
+    are stored GeoJSON) — parsed here, not re-queried."""
     return {
         "type": "FeatureCollection",
         "features": [
@@ -358,7 +398,10 @@ def map_lines_to_geojson(rows: list[dict]) -> dict:
                     "stop_a": row["stop_a"],
                     "stop_b": row["stop_b"],
                     "proposal_count": row["proposal_count"],
+                    "existing_count": row["existing_count"],
+                    "total_count": row["total_count"],
                     "proposal_ids": list(row["proposal_ids"]),
+                    "existing_route_ids": list(row["existing_route_ids"]),
                     "avg_margin_eur_per_train_km": _to_float(
                         row["avg_margin_eur_per_train_km"]
                     ),
@@ -370,13 +413,17 @@ def map_lines_to_geojson(rows: list[dict]) -> dict:
 
 
 def map_stop_counts_to_dict(rows: list[dict]) -> list[dict]:
-    """`map_stop_counts` section (§7.1): routes touching each stop, for
-    the map's per-stop density markers."""
+    """`map_stop_counts` section (§7.1; source union WP10 step 6b):
+    rows touching each stop, for the map's per-stop density markers —
+    per-source split AND total (`n_proposals` / `n_existing` / `n`,
+    decision 2026-08-06: all three, always)."""
     return [
         {
             "stop_id": row["stop_id"],
             "lat": _to_float(row["stop_lat"]),
             "lon": _to_float(row["stop_lon"]),
+            "n_proposals": row["n_proposals"],
+            "n_existing": row["n_existing"],
             "n": row["n"],
         }
         for row in rows
@@ -384,10 +431,11 @@ def map_stop_counts_to_dict(rows: list[dict]) -> list[dict]:
 
 
 def map_country_counts_to_geojson(rows: list[dict]) -> dict:
-    """`map_country_counts` section (§7.1, WP6.1 revision): GeoJSON
-    FeatureCollection for the coverage choropleth — one feature per
-    country touched by the filtered set, carrying both the proposal
-    count and the country's own border geometry (joined from
+    """`map_country_counts` section (§7.1, WP6.1 revision; source union
+    WP10 step 6b): GeoJSON FeatureCollection for the coverage
+    choropleth — one feature per country touched by the filtered set,
+    carrying the per-source split and total (`n_proposals` /
+    `n_existing` / `n`) and the country's own border geometry (joined from
     input_params.countries.country_geom) so the frontend doesn't need a
     second lookup to render it. `geometry` is `None` for a country code
     with no matched border polygon (e.g. "UNK" — an unattributed
@@ -400,7 +448,12 @@ def map_country_counts_to_geojson(rows: list[dict]) -> dict:
                 "geometry": json.loads(row["geom_geojson"])
                 if row["geom_geojson"] is not None
                 else None,
-                "properties": {"country": row["country"], "n": row["n"]},
+                "properties": {
+                    "country": row["country"],
+                    "n_proposals": row["n_proposals"],
+                    "n_existing": row["n_existing"],
+                    "n": row["n"],
+                },
             }
             for row in rows
         ],

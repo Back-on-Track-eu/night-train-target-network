@@ -26,7 +26,7 @@ from dataclasses import dataclass
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.13"
+ROUTE_BUILDER_VERSION: str = "0.9.15"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -41,6 +41,46 @@ ROUTE_BUILDER_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.15": {
+        "date": "2026-08-06",
+        "author": "david",
+        "changes": "auto_stop_addition costing made analytic; 0.9.14's batch "
+        "routing reverted. Measurement (test_20, 575-stop catalog) showed "
+        "the batch partition degenerating to one full-trip router call per "
+        "candidate on few-stop trips (13-19s per costing pass) — and every "
+        "accepted candidate's routed cost resolving to ~dwell + dynamics, "
+        "i.e. the router re-measuring what the model already knows. Now: "
+        "candidates within AUTO_STOP_ANALYTIC_DETOUR_M (new standard "
+        "value, 100m) of the routed geometry are costed as dwell + "
+        "stop_time_loss_s() accel/brake pair + out-and-back detour at the "
+        "host leg's cruise speed — zero router calls; only candidates "
+        "further out AND whose analytic lower bound fits the trip's "
+        "detour budget get a real 3-point mini-reroute (bounded "
+        "concurrency). AUTO_STOP_BUFFER_M widened 3km -> 10km so stations "
+        "the initial routing bypassed on parallel lines enter the "
+        "candidate pool at all. OUTPUT CHANGES: candidate pools grow "
+        "(wider buffer); on-path candidate times are model-derived "
+        "estimates rather than router measurements (identical to model "
+        "precision); over-budget far candidates report their analytic "
+        "lower bound in mode suggest.",
+    },
+    "0.9.14": {
+        "date": "2026-08-06",
+        "author": "david",
+        "changes": "auto_stop_addition costing batched (WP10 step 6a "
+        "follow-up): candidates are priced by 2-3 multi-stop router calls "
+        "whose per-leg times decompose into each candidate's exact added "
+        "time, instead of one 3-point mini-reroute per candidate — router "
+        "calls now scale with per-leg candidate density, not candidate "
+        "count, keeping calc interactive with the ONTD-minted (and future "
+        "calibrated) stop catalog. Decomposition is numerically identical "
+        "to the per-candidate mini-reroutes (same endpoints, via-point "
+        "legs computed independently), so candidate selection is "
+        "unchanged; a failed batch falls back to the per-candidate path "
+        "so one unsnappable stop only excludes itself. Version bumped for "
+        "the CI version-check contract — no computed number changes for "
+        "any given catalog.",
+    },
     "0.9.13": {
         "date": "2026-08-03",
         "author": "david",
@@ -351,10 +391,23 @@ hard block, so a route is still found if high-speed track is genuinely
 the only physical connection."""
 
 # --- auto_stop_addition (candidate search — models/route/timetable.py)
-AUTO_STOP_BUFFER_M: int = 3_000
+AUTO_STOP_BUFFER_M: int = 10_000
 """Max distance (metres) from a stop to the already-routed path for that
 stop to be considered a candidate — covers both stops that sit right on
 the line and ones merely 'close by'."""
+
+AUTO_STOP_ANALYTIC_DETOUR_M: int = 100
+"""Perpendicular distance to the routed geometry under which an
+auto-stop candidate is costed purely analytically (dwell + the dynamics
+model's accel/brake pair + out-and-back detour at cruise speed) with no
+router call — at this distance the stop sits on the routed line and a
+mini-reroute measures the same number at ~1.5s of router time
+(introduced 2026-08-06 after the 575-stop catalog made per-candidate
+routing the dominant calc cost). Candidates further out are refined by
+a real 3-point mini-reroute, since their true track detour can exceed
+the straight-line bound — e.g. a station the initial routing bypassed
+on a parallel line, which is also why AUTO_STOP_BUFFER_M is wide."""
+
 
 AUTO_STOP_MAX_DETOUR_PER: float = 0.05
 """Max allowed increase in full (driving + dynamics + buffer + dwell) trip time, as a

@@ -11,10 +11,10 @@ plus its gallery summary row, marked published: true. A side WITH
 overrides (scenario_id and/or composition_id) is computed ephemerally:
 the anchor's stored compute_request with the overridden fields, through
 the same compute_proposal() every other compute path uses — never
-persisted, marked published: false, its summary built on the fly by the
-same projection publish uses (adapters/proposal/projection.py's
-build_summary_row()), so stored and computed sides diff over identical
-summary semantics.
+persisted, marked published: false, its summary taken straight from the
+calc response's own "summary" block (models/evaluation/summary.py's
+build_summary_row() — the same derivation publish runs), so stored and
+computed sides diff over identical summary semantics.
 
 Both side kinds run the §4.2 on-load refresh first
 (api/helpers/proposal_load.py) — for computed sides this matters just as
@@ -45,7 +45,6 @@ Public interface:
 
 from __future__ import annotations
 
-from adapters.proposal.projection import build_summary_row
 from api.helpers.proposal_compute import compute_proposal, validate_calc_body
 from api.helpers.proposal_load import load_current_container
 from api.helpers.proposal_serialize import (
@@ -78,6 +77,7 @@ SUMMARY_KPI_FIELDS = (
     "shift_car_trip_km_per_year",
     "co2_savings_t_per_year",
     "subsidy_eur_per_t_co2",
+    "co2_g_per_pax_km",
 )
 
 # Deltas are rounded to absorb binary-float noise (two 2dp values can
@@ -190,15 +190,16 @@ def _computed_side(container: dict, overrides: dict) -> dict:
 
     computed = compute_proposal(request)
 
-    # Same projection publish runs (§5.4 semantics), minus what only
-    # exists for stored rows: geom_simplified (map columns don't diff)
-    # and the DB-side identity/engagement fields.
+    # The calc response's own §5.4 KPI block (same build_summary_row()
+    # the publish projection runs — WP10 step 5), minus what only exists
+    # for stored rows: geom_simplified (map columns don't diff) and the
+    # DB-side identity/engagement fields. composition/scenario are echoed
+    # in so both side shapes carry the variant coordinate the same way.
     summary = {
         "composition_id": computed["request"]["composition_id"],
         "scenario_id": computed["request"]["scenario_id"],
-        **build_summary_row(computed["route"], computed["evaluation"]),
+        **computed["summary"],
     }
-    summary.pop("geom_simplified", None)
 
     side = {
         "published": False,

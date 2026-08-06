@@ -44,6 +44,7 @@ def calc():
         "cache_hit": false,            // always false until WP13 wires the real compute cache
         "request": { ... },            // resolved: defaults applied, scenario_id concrete
         "suggested_stops": [ ... ],    // only when auto_stop_addition="suggest"
+        "summary": { ... },            // §5.4 gallery KPIs (no geom_simplified)
         "route": { ... },              // route_to_dict() shape, neutral ids (R1, ...)
         "evaluation": {
           "models": { ... }, "input": { "parameters": { ... } }, "views": { ... }
@@ -87,6 +88,7 @@ def calc():
     }
     if "suggested_stops" in computed:
         payload["suggested_stops"] = computed["suggested_stops"]
+    payload["summary"] = computed["summary"]
     payload["route"] = computed["route"]
     payload["evaluation"] = computed["evaluation"]
 

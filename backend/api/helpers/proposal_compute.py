@@ -34,6 +34,7 @@ from __future__ import annotations
 
 from adapters.proposal.id_prefix import rewrite_id_prefix
 from adapters.proposal.projection import route_fingerprint
+from models.evaluation.summary import build_summary_row
 from api.helpers.dependencies import get_loader, get_rail_router
 from api.helpers.evaluation_serialize import (
     input_to_dict,
@@ -165,7 +166,7 @@ def compute_proposal(body: dict, loader=None, router=None) -> dict:
 
     Returns the full §2.1 response shape minus cache_hit:
       {route_builder_version, calc_version, route_fingerprint, request,
-       suggested_stops?, route, evaluation}
+       suggested_stops?, summary, route, evaluation}
     """
     loader = loader if loader is not None else get_loader()
     router = router if router is not None else get_rail_router()
@@ -232,11 +233,11 @@ def compute_proposal(body: dict, loader=None, router=None) -> dict:
     }
     if auto_stop_addition == "suggest":
         payload["suggested_stops"] = suggested_stops_to_dicts(result.suggestions)
-    payload["route"] = route_dict
-    payload["evaluation"] = {
+    evaluation = {
         "models": models_to_dict(),
-        # include_route=False: the route already appears once above, as a
-        # sibling of "evaluation" — see input_to_dict()'s docstring.
+        # include_route=False: the route already appears once in the
+        # payload, as a sibling of "evaluation" — see input_to_dict()'s
+        # docstring.
         "input": input_to_dict(
             route_dict,
             result.provenance.tracks,
@@ -246,5 +247,14 @@ def compute_proposal(body: dict, loader=None, router=None) -> dict:
         ),
         "views": views_to_dict(result.views, result.route),
     }
+    # §5.4 gallery KPIs, derived from the exact route/evaluation dicts
+    # this response carries — the same build_summary_row() the publish
+    # projection uses, so the calc "summary" and a published gallery row
+    # cannot drift. No geom_simplified here: the response already has the
+    # full per-segment geometry (the gallery row needs the simplified
+    # copy precisely because it has no segments).
+    payload["summary"] = build_summary_row(route_dict, evaluation)
+    payload["route"] = route_dict
+    payload["evaluation"] = evaluation
 
     return rewrite_id_prefix(payload, _NEUTRAL_PREFIX, "")

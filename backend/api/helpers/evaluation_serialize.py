@@ -25,7 +25,8 @@ Public interface:
                                                              route-section cells, None otherwise)
   views_to_dict(views, route)                     → dict  (the full "views" section from a ViewsBundle: description +
                                                              normalisations + data per view, views_meta merged in)
-  models_to_dict()                                 → dict  (version + description + formulas for route_builder / energy / evaluation)
+  models_to_dict()                                 → dict  (version + description + formulas for route_builder / energy / evaluation,
+                                                             + the emissions factor set — constants, not formulas)
   input_to_dict(route_dict, tracks, stop_infra, compositions) → dict  (the posted route + every parameter actually used to cost it)
 """
 
@@ -50,6 +51,11 @@ from models.energy.version import (
     ENERGY_CALC_VERSION,
     ENERGY_MODEL_DESCRIPTION,
     ENERGY_FORMULAS,
+)
+from models.emissions.factors import (
+    EMISSION_FACTORS,
+    EMISSIONS_MODEL_DESCRIPTION,
+    EMISSIONS_MODEL_VERSION,
 )
 from models.route.version import (
     ROUTE_BUILDER_VERSION,
@@ -536,9 +542,15 @@ def _formulas_to_dict(formulas: dict) -> dict:
 def models_to_dict() -> dict:
     """Version + description + formula registry for every model that
     contributes to an evaluation: the route builder (routing/timetable),
-    the energy model (traction energy), and the evaluation model itself
-    (cost/revenue). Static across all evaluations — no route-specific data,
-    safe to call with no arguments."""
+    the energy model (traction energy), the evaluation model itself
+    (cost/revenue), and the emissions model. Static across all
+    evaluations — no route-specific data, safe to call with no arguments.
+
+    The emissions entry carries "factors" instead of "formulas": the
+    model is a set of sourced per-mode constants (decision 24), not
+    calculation steps — these are the per-mode reference values the
+    frontend renders next to a proposal's night-train
+    co2_g_per_pax_km."""
     return {
         "route_builder": {
             "version": ROUTE_BUILDER_VERSION,
@@ -554,6 +566,14 @@ def models_to_dict() -> dict:
             "version": CALC_VERSION,
             "description": CALC_MODEL_DESCRIPTION,
             "formulas": _formulas_to_dict(CALC_FORMULAS),
+        },
+        "emissions": {
+            "version": EMISSIONS_MODEL_VERSION,
+            "description": EMISSIONS_MODEL_DESCRIPTION,
+            "factors": {
+                mode: {"g_per_pax_km": factor.g_per_pax_km, "source": factor.source}
+                for mode, factor in EMISSION_FACTORS.items()
+            },
         },
     }
 

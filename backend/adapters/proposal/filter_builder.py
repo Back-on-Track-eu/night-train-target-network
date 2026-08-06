@@ -46,6 +46,15 @@ Public interface:
   SORTABLE_COLUMNS                -> frozenset[str], every filterable
                                       column plus "route_fingerprint"
 
+Since WP10 step 6b every fragment built here runs against the gallery
+UNION CTE (repository.py's _gallery_cte()) rather than the bare
+proposal_summaries table — the column names are identical, existing
+(ONTD) rows simply carry NULL in proposal-only columns. trip_windows
+keeps working unchanged: its route_id is built from the row's own
+proposal_id/proposal_version, which are NULL on existing rows, so the
+EXISTS is never true for them — existing trains have no stop_times to
+window over.
+
 Callers: adapters/proposal/repository.py's list_summaries() /
 map_lines() / map_stop_counts() / map_country_counts(); validated first
 by api/helpers/proposal_serialize.py's validate_list_body().
@@ -119,10 +128,17 @@ SORTABLE_COLUMNS: frozenset[str] = frozenset(
 )
 
 # The one filter key that isn't a summary-table column at all — it picks
-# which source table(s) to query. WP6 only implements "proposal"; the
-# "existing" (ontd) union is WP10.
+# which UNION branch(es) the gallery CTE is built from (WP10 step 6b:
+# "proposal" = proposals.proposal_summaries, "existing" = the ONTD
+# catalog's ontd.route_summaries). DEFAULT_SOURCES is BOTH (§7.1 revised
+# 2026-08-05) — an omitted `sources` shows existing trains alongside
+# proposals. Existing rows carry NULL in every proposal-only column
+# (financial/demand KPIs, likes_count, timestamps, user/proposal ids),
+# so those filters exclude them via plain SQL NULL semantics — no
+# special-casing anywhere in build_where().
 _SOURCES_KEY = "sources"
-SUPPORTED_SOURCES: frozenset[str] = frozenset({"proposal"})
+SUPPORTED_SOURCES: frozenset[str] = frozenset({"proposal", "existing"})
+DEFAULT_SOURCES: tuple[str, ...] = ("proposal", "existing")
 
 ALL_FILTER_KEYS: frozenset[str] = frozenset(
     set(RANGE_COLUMNS)
@@ -286,11 +302,17 @@ def build_order_by(sort: list[dict] | None) -> str:
     """`sort` is a list of {"by": <sortable column>, "dir": "asc"|"desc"}
     (§7.1) — assumed already validated (validate_list_body() rejects
     unsortable columns and bad directions before this runs). Falls back
-    to newest-first."""
+    to newest-first.
+
+        Every part carries an explicit NULLS LAST: existing (ONTD) rows have
+    NULL timestamps, likes and financial KPIs by construction (WP10 step
+    6b), and Postgres's default of NULLS FIRST for DESC would float the
+    whole existing catalog above every proposal on the default
+    newest-first sort."""
     if not sort:
-        return "updated_at DESC"
+        return "updated_at DESC NULLS LAST"
     parts = []
     for entry in sort:
         direction = "DESC" if entry.get("dir", "asc").lower() == "desc" else "ASC"
-        parts.append(f"{entry['by']} {direction}")
+        parts.append(f"{entry['by']} {direction} NULLS LAST")
     return ", ".join(parts)

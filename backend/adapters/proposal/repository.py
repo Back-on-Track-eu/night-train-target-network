@@ -48,14 +48,18 @@ import psycopg2
 import psycopg2.extras
 from psycopg2.extras import Json
 
-from adapters.proposal.filter_builder import build_order_by, build_where
+from adapters.proposal.filter_builder import (
+    DEFAULT_SOURCES,
+    build_order_by,
+    build_where,
+)
 from adapters.proposal.gtfs_store import (
     input_parameters_from_scenario,
     insert_route_gtfs,
     route_dict_from_gtfs,
 )
 from adapters.proposal.id_prefix import rewrite_id_prefix
-from adapters.proposal.projection import build_summary_row
+from adapters.proposal.projection import build_summary_db_row
 from models.evaluation.version import CALC_VERSION
 from models.route.version import ROUTE_BUILDER_VERSION
 
@@ -223,7 +227,7 @@ class ProposalRepository:
 
         insert_route_gtfs(cur, route_dict)
 
-        summary = build_summary_row(route_dict, evaluation_full)
+        summary = build_summary_db_row(route_dict, evaluation_full)
         self._upsert_summary(
             cur,
             proposal_id=proposal_id,
@@ -556,8 +560,8 @@ class ProposalRepository:
         summary: dict,
     ) -> None:
         """One row per proposal (§5.4) — identity columns from the
-        container write, metrics/KPIs from proposal_projection.
-        build_summary_row(). geom_simplified is the one column needing a
+        container write, metrics/KPIs from adapters/proposal/
+        projection.py's build_summary_db_row(). geom_simplified is the one column needing a
         non-literal SQL expression (ST_GeomFromGeoJSON), and created_at
         the one needing to survive an overwrite untouched (it belongs to
         the proposal's original publish, not this state's) — both handled
@@ -791,7 +795,7 @@ class ProposalRepository:
         "shift_air_trips_per_year, shift_air_trip_km_per_year, "
         "shift_car_trips_per_year, shift_car_trip_km_per_year, "
         "co2_savings_t_per_year, subsidy_eur_per_t_co2, "
-        "demand_kpis_placeholder, created_at, updated_at"
+        "demand_kpis_placeholder, co2_g_per_pax_km, created_at, updated_at"
     )
 
     # likes_count is not a proposal_summaries column — a like changes
@@ -812,6 +816,79 @@ class ProposalRepository:
         ")"
     )
 
+    # The two UNION branches of the gallery (WP10 step 6b). One shared
+    # column list — existing (ONTD) rows carry NULL in every
+    # proposal-only column, which is exactly what makes every generic
+    # filter_builder fragment work unchanged against the union: range
+    # filters on financial KPIs, likes_count, or timestamps exclude
+    # existing rows via SQL NULL semantics, trip_windows' EXISTS is
+    # never true for a NULL proposal_id, and bbox works on both sides
+    # because ontd.route_summaries.geom_simplified is the same PostGIS
+    # geometry type as the proposal projection's. composition_id is a
+    # shared column but a DIFFERENT namespace per source (curated
+    # calibration ids vs ontd catalog ids) — a composition_ids filter
+    # matches across both, documented in api/README.md §7.1.
+    _GALLERY_PROPOSAL_BRANCH = (
+        "SELECT 'proposal'::text AS source, NULL::text AS route_id, "
+        "       proposal_id, proposal_version, user_id, name, "
+        "       route_fingerprint, composition_id, scenario_id, "
+        "       route_builder_version, calc_version, total_distance_km, "
+        "       total_time_h, avg_speed_kmh, n_stops, countries, stop_ids, "
+        "       cost_eur_per_train_km, revenue_eur_per_train_km, "
+        "       margin_eur_per_train_km, subsidy_eur_per_year, "
+        "       demand_trips_per_year, demand_trip_km_per_year, "
+        "       shift_air_trips_per_year, shift_air_trip_km_per_year, "
+        "       shift_car_trips_per_year, shift_car_trip_km_per_year, "
+        "       co2_savings_t_per_year, subsidy_eur_per_t_co2, "
+        "       demand_kpis_placeholder, co2_g_per_pax_km, geom_simplified, "
+        "       likes_count, created_at, updated_at, "
+        "       NULL::boolean AS geometry_routed, NULL::text AS ontd_url "
+        "FROM proposal_summaries_with_likes"
+    )
+    _GALLERY_EXISTING_BRANCH = (
+        "SELECT 'existing'::text AS source, route_id, "
+        "       NULL::int AS proposal_id, NULL::int AS proposal_version, "
+        "       NULL::int AS user_id, name, "
+        "       NULL::text AS route_fingerprint, composition_id, "
+        "       NULL::int AS scenario_id, "
+        "       NULL::text AS route_builder_version, NULL::text AS calc_version, "
+        "       total_distance_km, total_time_h, avg_speed_kmh, n_stops, "
+        "       countries, stop_ids, "
+        "       NULL::numeric AS cost_eur_per_train_km, "
+        "       NULL::numeric AS revenue_eur_per_train_km, "
+        "       NULL::numeric AS margin_eur_per_train_km, "
+        "       NULL::numeric AS subsidy_eur_per_year, "
+        "       NULL::numeric AS demand_trips_per_year, "
+        "       NULL::numeric AS demand_trip_km_per_year, "
+        "       NULL::numeric AS shift_air_trips_per_year, "
+        "       NULL::numeric AS shift_air_trip_km_per_year, "
+        "       NULL::numeric AS shift_car_trips_per_year, "
+        "       NULL::numeric AS shift_car_trip_km_per_year, "
+        "       NULL::numeric AS co2_savings_t_per_year, "
+        "       NULL::numeric AS subsidy_eur_per_t_co2, "
+        "       NULL::boolean AS demand_kpis_placeholder, co2_g_per_pax_km, "
+        "       geom_simplified, "
+        "       NULL::int AS likes_count, "
+        "       NULL::timestamptz AS created_at, NULL::timestamptz AS updated_at, "
+        "       geometry_routed, ontd_url "
+        "FROM ontd.route_summaries"
+    )
+
+    def _gallery_cte(self, filters: Optional[dict]) -> str:
+        """`gallery AS (...)` — built from only the requested source
+        branch(es) (filter.sources, DEFAULT both), so a
+        sources=["proposal"] request compiles to exactly the pre-6b
+        query plan and never touches the ontd schema at all. Must be
+        preceded by _LIKES_CTE in the same WITH (the proposal branch
+        reads proposal_summaries_with_likes)."""
+        sources = (filters or {}).get("sources") or list(DEFAULT_SOURCES)
+        branches = []
+        if "proposal" in sources:
+            branches.append(self._GALLERY_PROPOSAL_BRANCH)
+        if "existing" in sources:
+            branches.append(self._GALLERY_EXISTING_BRANCH)
+        return "gallery AS (" + " UNION ALL ".join(branches) + ")"
+
     def list_summaries(
         self,
         filters: Optional[dict] = None,
@@ -819,25 +896,28 @@ class ProposalRepository:
         limit: Optional[int] = None,
         offset: int = 0,
     ) -> tuple[list[dict], int]:
-        """The full §7.1 `summaries` section (WP6) — every generic filter
-        (adapters/proposal/filter_builder.py), sorted, windowed-counted,
-        paginated. Returns (rows, total_before_pagination)."""
+        """The full §7.1 `summaries` section (WP6; sources union WP10
+        step 6b) — every generic filter
+        (adapters/proposal/filter_builder.py), sorted (NULLS LAST, so
+        existing rows trail proposals on the default newest-first),
+        windowed-counted, paginated over the source union. Returns
+        (rows, total_before_pagination)."""
         where_sql, params = build_where(filters or {})
         where_clause = f" WHERE {where_sql}" if where_sql else ""
+        ctes = f"WITH {self._LIKES_CTE}, {self._gallery_cte(filters)} "
 
         with self._cursor() as cur:
             cur.execute(
-                f"WITH {self._LIKES_CTE} "
-                "SELECT count(*) AS total "
-                f"FROM proposal_summaries_with_likes{where_clause}",
+                f"{ctes}SELECT count(*) AS total FROM gallery{where_clause}",
                 params,
             )
             total = cur.fetchone()["total"]
 
             sql = (
-                f"WITH {self._LIKES_CTE} "
-                f"SELECT {self._SUMMARY_COLUMNS}, likes_count "
-                f"FROM proposal_summaries_with_likes{where_clause} "
+                f"{ctes}"
+                f"SELECT source, route_id, geometry_routed, ontd_url, "
+                f"{self._SUMMARY_COLUMNS}, likes_count "
+                f"FROM gallery{where_clause} "
                 f"ORDER BY {build_order_by(sort)}"
             )
             page_params = list(params)
@@ -850,47 +930,78 @@ class ProposalRepository:
         return [dict(row) for row in rows], total
 
     def map_lines(self, filters: Optional[dict] = None) -> list[dict]:
-        """`map_lines` section (§7.1, WP6.1 revision): one row per
-        distinct stop-pair corridor within the filtered set — not one row
-        per proposal. A corridor is (from_stop_id, to_stop_id) with
-        direction collapsed (LEAST/GREATEST): outbound and return trips
-        traverse the same physical line, and routing between two fixed
-        stops is deterministic regardless of composition/scenario, so
-        grouping this way is exact, not an approximation. Every trip of
-        every filtered proposal is walked via the same
+        """`map_lines` section (§7.1, WP6.1 revision; existing-route
+        merge WP10 step 6b): one row per distinct stop-pair corridor
+        within the filtered set — not one row per proposal or route. A
+        corridor is (stop_a, stop_b) with direction collapsed
+        (LEAST/GREATEST): outbound and return traverse the same physical
+        line. Proposal trips are walked via the
         P{proposal_id}_V{proposal_version}_R1 route_id convention
-        trip_windows uses; geometry comes from one representative
-        proposals.segments.shape_id per corridor (proposals.shapes.geometry
-        is already stored as GeoJSON — no ST_AsGeoJSON needed)."""
+        trip_windows uses; existing routes contribute their
+        ontd.route_corridors pieces — the exact same grain by
+        construction (step 6a built that table to match), and the same
+        Target Network stop-id namespace via ontd.stop_mappings, so a
+        proposal and an existing train over the same two stops land on
+        ONE feature. Corridors whose ONTD endpoints stayed unmapped
+        (raw ONTD ids) group among themselves but can never merge with a
+        proposal — expected, documented in db/ontd/README.md.
+
+        Every corridor carries the per-source split AND the total
+        (proposal_count / existing_count / total_count — decision
+        2026-08-06: all three, always), so the frontend can drive
+        thickness off the total and colour/toggle by source without a
+        second query. avg_margin is proposals-only (existing rows carry
+        no financials) — NULL on corridors served only by existing
+        trains. Geometry prefers a proposal shape (routed with the live
+        tool's exact settings) and falls back to the existing corridor's
+        own geometry — both are stored GeoJSON, min(::text) picks a
+        deterministic representative."""
         where_sql, params = build_where(filters or {})
         where_clause = f" WHERE {where_sql}" if where_sql else ""
         with self._cursor() as cur:
             cur.execute(
-                f"WITH {self._LIKES_CTE}, filtered AS ("
-                "  SELECT proposal_id, proposal_version, margin_eur_per_train_km "
-                f"  FROM proposal_summaries_with_likes{where_clause}"
+                f"WITH {self._LIKES_CTE}, {self._gallery_cte(filters)}, filtered AS ("
+                "  SELECT source, route_id, proposal_id, proposal_version, "
+                "         margin_eur_per_train_km "
+                f"  FROM gallery{where_clause}"
                 "), segs AS ("
-                "  SELECT f.proposal_id, f.margin_eur_per_train_km, "
+                "  SELECT f.source, f.proposal_id, f.route_id, "
+                "         f.margin_eur_per_train_km, "
                 "         LEAST(s.from_stop_id, s.to_stop_id) AS stop_a, "
                 "         GREATEST(s.from_stop_id, s.to_stop_id) AS stop_b, "
-                "         s.shape_id "
+                "         sh.geometry::text AS geometry "
                 "  FROM filtered f "
                 "  JOIN proposals.trips t "
-                "    ON t.route_id = 'P' || f.proposal_id || '_V' || f.proposal_version || '_R1' "
+                "    ON f.source = 'proposal' "
+                "   AND t.route_id = 'P' || f.proposal_id || '_V' || f.proposal_version || '_R1' "
                 "  JOIN proposals.segments s ON s.trip_id = t.trip_id "
-                "  WHERE s.shape_id IS NOT NULL"
-                "), grouped AS ("
-                "  SELECT stop_a, stop_b, "
-                "         array_agg(DISTINCT proposal_id ORDER BY proposal_id) AS proposal_ids, "
-                "         count(DISTINCT proposal_id) AS proposal_count, "
-                "         avg(margin_eur_per_train_km) AS avg_margin_eur_per_train_km, "
-                "         min(shape_id) AS shape_id "
-                "  FROM segs "
-                "  GROUP BY stop_a, stop_b"
+                "  JOIN proposals.shapes sh ON sh.shape_id = s.shape_id "
+                "  WHERE s.shape_id IS NOT NULL "
+                "  UNION ALL "
+                # route_corridors already stores direction-collapsed pairs
+                # (stop_a < stop_b, db/ontd/projection.py) — no
+                # LEAST/GREATEST needed on this branch.
+                "  SELECT f.source, NULL::int, f.route_id, NULL::numeric, "
+                "         rc.stop_a, rc.stop_b, rc.geometry::text "
+                "  FROM filtered f "
+                "  JOIN ontd.route_corridors rc "
+                "    ON f.source = 'existing' AND rc.route_id = f.route_id"
                 ") "
-                "SELECT g.stop_a, g.stop_b, g.proposal_ids, g.proposal_count, "
-                "       g.avg_margin_eur_per_train_km, sh.geometry "
-                "FROM grouped g JOIN proposals.shapes sh ON sh.shape_id = g.shape_id",
+                "SELECT stop_a, stop_b, "
+                "       array_remove(array_agg(DISTINCT proposal_id ORDER BY proposal_id), NULL) "
+                "         AS proposal_ids, "
+                "       array_remove(array_agg(DISTINCT route_id ORDER BY route_id), NULL) "
+                "         AS existing_route_ids, "
+                "       count(DISTINCT proposal_id) AS proposal_count, "
+                "       count(DISTINCT route_id) AS existing_count, "
+                "       count(DISTINCT proposal_id) + count(DISTINCT route_id) "
+                "         AS total_count, "
+                "       avg(margin_eur_per_train_km) AS avg_margin_eur_per_train_km, "
+                "       COALESCE("
+                "         min(geometry) FILTER (WHERE source = 'proposal'), "
+                "         min(geometry) FILTER (WHERE source = 'existing')"
+                "       ) AS geometry "
+                "FROM segs GROUP BY stop_a, stop_b",
                 params,
             )
             rows = cur.fetchall()
@@ -898,18 +1009,29 @@ class ProposalRepository:
         return [dict(row) for row in rows]
 
     def map_stop_counts(self, filters: Optional[dict] = None) -> list[dict]:
-        """`map_stop_counts` section (§7.1): routes touching each stop
-        within the filtered set, joined to the current base scenario's
-        pinned stop_infrastructures snapshot for lat/lon (§3.1's
-        full-snapshot resolution — never inferred)."""
+        """`map_stop_counts` section (§7.1; source union WP10 step 6b):
+        rows/routes touching each stop within the filtered set, joined to
+        the current base scenario's pinned stop_infrastructures snapshot
+        for lat/lon (§3.1's full-snapshot resolution — never inferred).
+        Per stop the per-source split AND the total (n_proposals /
+        n_existing / n — decision 2026-08-06: all three, always). Both
+        sources share the Target Network stop-id namespace via step 6a's
+        mapping; ONTD stops the mapping couldn't cover kept raw ONTD ids,
+        which don't join the catalog and therefore don't get a marker —
+        expected, documented in db/ontd/README.md."""
         where_sql, params = build_where(filters or {})
         where_clause = f" WHERE {where_sql}" if where_sql else ""
         with self._cursor() as cur:
             cur.execute(
-                f"WITH {self._LIKES_CTE} "
-                "SELECT sub.stop_id, si.stop_lat, si.stop_lon, count(*) AS n "
-                "FROM (SELECT unnest(stop_ids) AS stop_id "
-                f"      FROM proposal_summaries_with_likes{where_clause}) sub "
+                f"WITH {self._LIKES_CTE}, {self._gallery_cte(filters)} "
+                "SELECT sub.stop_id, si.stop_lat, si.stop_lon, "
+                "       count(*) FILTER (WHERE sub.source = 'proposal') "
+                "         AS n_proposals, "
+                "       count(*) FILTER (WHERE sub.source = 'existing') "
+                "         AS n_existing, "
+                "       count(*) AS n "
+                "FROM (SELECT source, unnest(stop_ids) AS stop_id "
+                f"      FROM gallery{where_clause}) sub "
                 "JOIN input_params.stop_infrastructures si "
                 "  ON si.stop_id = sub.stop_id "
                 " AND si.stop_infra_version = ("
@@ -923,22 +1045,30 @@ class ProposalRepository:
         return [dict(row) for row in rows]
 
     def map_country_counts(self, filters: Optional[dict] = None) -> list[dict]:
-        """`map_country_counts` section (§7.1, WP6.1 revision): proposal
-        count per country within the filtered set, joined to
+        """`map_country_counts` section (§7.1, WP6.1 revision; source
+        union WP10 step 6b): rows per country within the filtered set —
+        per-source split AND total (n_proposals / n_existing / n —
+        decision 2026-08-06: all three, always) — joined to
         input_params.countries for the border geometry the coverage
-        choropleth needs — no second lookup required on the frontend.
+        choropleth needs, no second lookup required on the frontend.
         LEFT JOIN: a country code with no matched border (e.g. "UNK", an
-        unattributed segment — §5.4) still gets a row, geometry NULL."""
+        unattributed segment — §5.4, or an ONTD country outside the
+        28-country catalog like UA/TR) still gets a row, geometry NULL."""
         where_sql, params = build_where(filters or {})
         where_clause = f" WHERE {where_sql}" if where_sql else ""
         with self._cursor() as cur:
             cur.execute(
-                f"WITH {self._LIKES_CTE} "
-                "SELECT sub.country, count(*) AS n, "
+                f"WITH {self._LIKES_CTE}, {self._gallery_cte(filters)} "
+                "SELECT sub.country, "
+                "       count(*) FILTER (WHERE sub.source = 'proposal') "
+                "         AS n_proposals, "
+                "       count(*) FILTER (WHERE sub.source = 'existing') "
+                "         AS n_existing, "
+                "       count(*) AS n, "
                 "       ST_AsGeoJSON(c.country_geom) AS geom_geojson "
                 "FROM ("
-                "  SELECT unnest(countries) AS country "
-                f"  FROM proposal_summaries_with_likes{where_clause}"
+                "  SELECT source, unnest(countries) AS country "
+                f"  FROM gallery{where_clause}"
                 ") sub "
                 "LEFT JOIN input_params.countries c ON c.country_code = sub.country "
                 "GROUP BY sub.country, c.country_geom",

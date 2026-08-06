@@ -1700,7 +1700,6 @@ COMPOSITION_TYPE_COACHES_RAW = [
 
 def seed_sources(cur, source_ids: dict) -> None:
     ill = source_ids[SRC_ILLUSTRATIVE]
-    exc = source_ids[SRC_EXCEL]
     cal = source_ids[SRC_CALIBRATION]
     cur.execute(
         "UPDATE input_params.track_infrastructure_defaults SET track_tac_src=%s, track_parking_src=%s, track_energy_price_src=%s, track_terrain_src=%s, track_hsr_src=%s, track_min_boarding_src=%s, track_min_alighting_src=%s, track_buffer_src=%s",
@@ -2145,6 +2144,7 @@ def _compute_example_proposal(
     )
     from api.helpers.route_serialize import route_from_dict, route_to_dict
     from adapters.proposal.projection import route_fingerprint
+    from models.evaluation.summary import build_summary_row
     from models.demand.stopgap import distribute_demand
     from models.demand.version import (
         STOPGAP_FARE_PER_KM_BY_CLASS,
@@ -2164,6 +2164,13 @@ def _compute_example_proposal(
     _, views = evaluate_and_build_views(route, tracks, stop_infra)
 
     serialized_route = route_to_dict(route, scenario_id, tracks)
+    evaluation = {
+        "models": models_to_dict(),
+        "input": input_to_dict(
+            serialized_route, tracks, stop_infra, compositions, include_route=False
+        ),
+        "views": views_to_dict(views, route),
+    }
 
     return {
         "route_builder_version": ROUTE_BUILDER_VERSION,
@@ -2179,14 +2186,9 @@ def _compute_example_proposal(
             "routing_mode": "fullRouting",
             "auto_stop_addition": "off",
         },
+        "summary": build_summary_row(serialized_route, evaluation),
         "route": serialized_route,
-        "evaluation": {
-            "models": models_to_dict(),
-            "input": input_to_dict(
-                serialized_route, tracks, stop_infra, compositions, include_route=False
-            ),
-            "views": views_to_dict(views, route),
-        },
+        "evaluation": evaluation,
     }
 
 
@@ -2294,6 +2296,26 @@ def main():
     cur.execute(load_sql("create_input_params_schema.sql"))
     cur.execute(load_sql("create_scenario_schema.sql"))
     cur.execute(load_sql("create_proposal_schema.sql"))
+
+    # ONTD schema bootstrap (WP10 step 6a) — created ONLY when absent, so
+    # the gallery's source union (proposals ∪ ontd.route_summaries) has
+    # tables to query in every environment, empty until db/ontd/loader.py
+    # runs. Guarded because create_ontd_schema.sql DROPs the refreshed
+    # tables: re-applying it on a database that already carries loaded
+    # ONTD data would wipe that data on every reseed.
+    cur.execute(
+        "SELECT EXISTS (SELECT 1 FROM information_schema.schemata "
+        "WHERE schema_name = 'ontd')"
+    )
+    if not cur.fetchone()[0]:
+        print("Bootstrapping empty ontd schema...")
+        ontd_ddl = (
+            Path(__file__).resolve().parent.parent
+            / "ontd"
+            / "sql"
+            / "create_ontd_schema.sql"
+        )
+        cur.execute(ontd_ddl.read_text(encoding="utf-8"))
 
     print("Seeding admin.users...")
     insert_rows(cur, "admin.users", USERS)

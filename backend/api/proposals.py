@@ -71,14 +71,28 @@ def filter_proposals():
         "include": ["summaries", "map_lines", "map_stop_counts", "map_country_counts"]
       }
 
+    filter.sources picks the gallery's source union (WP10 step 6b):
+    ["proposal"], ["existing"] (the ONTD catalog of real night trains),
+    or both — DEFAULT IS BOTH when omitted. Existing rows carry the
+    reduced descriptive shape (source="existing", route_id, ontd_url,
+    geometry_routed, shared metrics — no financials/likes/timestamps)
+    and always sort after proposals on the default newest-first (NULLS
+    LAST).
+
     Response sections, each present iff requested via `include`:
       "summaries":          {"total": int, "proposals": [<summary>, ...]}
+                             — rows are a mix of both source shapes,
+                             discriminated by "source"
       "map_lines":           GeoJSON FeatureCollection, one feature per
-                              stop-pair corridor (proposal_count for line
-                              thickness, proposal_ids for the assignment)
-      "map_stop_counts":    [{"stop_id", "lat", "lon", "n"}, ...]
+                              stop-pair corridor shared across sources
+                              (proposal_count / existing_count /
+                              total_count + proposal_ids /
+                              existing_route_ids per feature)
+      "map_stop_counts":    [{"stop_id", "lat", "lon",
+                              "n_proposals", "n_existing", "n"}, ...]
       "map_country_counts":  GeoJSON FeatureCollection, one feature per
-                              country (border geometry + proposal count)
+                              country (border geometry + n_proposals /
+                              n_existing / n)
     """
     body = request.get_json(silent=True) or {}
     errors = validate_list_body(body)

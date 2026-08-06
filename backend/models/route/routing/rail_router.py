@@ -263,6 +263,29 @@ class RailRouter:
         resp.raise_for_status()
         return resp.json()
 
+    def route_geometry(self, stops: list[StopInput]) -> list[list[float]]:
+        """
+        Return only the routed shape between `stops` as [[lon, lat], ...].
+
+        A deliberately narrow entry point for callers that need a line on a
+        map and nothing else — the ONTD route_summaries projection
+        (PROPOSALS_DESIGN.md §5.5, decision 25). route() cannot serve that
+        case: its per-leg physics needs a Composition and a
+        TrackInfraCollection to apportion country buffer quotas, and
+        existing trains are never evaluated (decision 23), so there is no
+        composition to speak of and nothing would consume the result.
+
+        Always single-pass CH routing, like simpleRouting: no speed cap,
+        no HSR avoidance, no traction dynamics. The shape is the shape.
+        """
+        if len(stops) < 2:
+            raise ValueError("At least 2 stops are required.")
+        raw = self._post_route(self._build_payload(stops, None))
+        paths = raw.get("paths") or []
+        if not paths:
+            raise ValueError("Router returned no path.")
+        return paths[0]["points"]["coordinates"]
+
     def route(
         self,
         stops: list[StopInput],
