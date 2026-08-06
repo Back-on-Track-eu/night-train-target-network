@@ -10,7 +10,7 @@ cases (every timetable/routing mode combination, full breakdown-field
 completeness per view) can still be ported over incrementally.
 
 Response shape (§2.1):
-  route_builder_version, calc_version, request (resolved),
+  route_builder_version, calc_version, request (resolved), summary,
   suggested_stops (only if auto_stop_addition="suggest"),
   route.{...}  (route_to_dict() shape, neutral ids — no P{id}_V{n}_ prefix),
   evaluation.{models, input.{parameters.{...}} (no "route" key — see below),
@@ -61,6 +61,7 @@ class TestResponseStructure:
             "route_fingerprint",
             "cache_hit",
             "request",
+            "summary",
             "route",
             "evaluation",
         }
@@ -92,6 +93,29 @@ class TestResponseStructure:
 
     def test_evaluation_has_models_input_views(self, calc_response):
         assert set(calc_response["evaluation"]) == {"models", "input", "views"}
+
+    def test_models_has_emissions_factors(self, calc_response):
+        """WP10 step 5 (decision 24) — the per-mode reference values the
+        frontend renders next to a proposal's co2_g_per_pax_km."""
+        emissions = calc_response["evaluation"]["models"]["emissions"]
+        assert set(emissions) == {"version", "description", "factors"}
+        assert set(emissions["factors"]) == {"night_train", "air", "car"}
+        for factor in emissions["factors"].values():
+            assert factor["g_per_pax_km"] > 0
+            assert factor["source"]
+
+    def test_summary_carries_gallery_kpis_without_geometry(self, calc_response):
+        """WP10 step 5 — the §5.4 gallery KPI row, minus geom_simplified
+        (the response already carries full per-segment geometry). Value
+        equality with build_summary_row() is asserted in test_37."""
+        summary = calc_response["summary"]
+        assert "geom_simplified" not in summary
+        assert summary["total_distance_km"] > 0
+        assert summary["demand_kpis_placeholder"] is True
+        night_train = calc_response["evaluation"]["models"]["emissions"]["factors"][
+            "night_train"
+        ]
+        assert summary["co2_g_per_pax_km"] == night_train["g_per_pax_km"]
 
     def test_views_has_all_six(self, calc_response):
         assert set(calc_response["evaluation"]["views"]) == {

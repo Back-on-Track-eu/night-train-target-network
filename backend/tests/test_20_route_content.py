@@ -119,7 +119,15 @@ class TestRouteGeometry:
 
     def test_distance_independent_of_composition(self, api_base):
         """Same stops, different compositions with identical routing flags
-        (both STD, hsr_allowed=True) → identical route distance."""
+        (both STD, hsr_allowed=True) → identical route distance.
+
+        auto_stop_addition="off": this pins a ROUTING property, and the
+        auto-add layer on top is legitimately composition-dependent —
+        stop costs include the mass-dependent accel/brake pair, so a
+        heavier composition affords fewer marginal candidates within the
+        same detour budget and the final stop sets (hence distances) can
+        differ by metres. With the selection layer disabled, the same
+        stops through the same profile must route identically."""
         distances = {}
         # Same material family on purpose: REF compositions route differently
         # (hsr_allowed=False, v_max 200) — distance invariance only holds
@@ -129,6 +137,7 @@ class TestRouteGeometry:
                 api_base,
                 STOPS_BERLIN_WIEN,
                 comp_id,
+                auto_stop_addition="off",
             )
             distances[comp_id] = trip_distance_km(trip_by_direction(route, 0))
         assert distances["NEW-BAL-7"] == distances["NEW-BAL-14"]
@@ -229,13 +238,22 @@ class TestEnergyModel:
 
     def test_energy_independent_of_composition(self, api_base):
         """The dummy model ignores composition weight entirely — same stops,
-        different compositions → identical total energy."""
+        different compositions → identical total energy.
+
+        auto_stop_addition="off": this pins the ENERGY model's own
+        property, not the auto-add layer — see
+        TestRouteGeometry.test_distance_independent_of_composition's
+        docstring for why auto-add selection is legitimately
+        composition-dependent (stop costs include the mass-dependent
+        accel/brake pair) and must be disabled to isolate a routing/
+        energy-model invariant from it."""
         energies = {}
         for comp_id in ("NEW-BAL-7", "NEW-BAL-14"):
             route = build_route(
                 api_base,
                 STOPS_BERLIN_WIEN,
                 comp_id,
+                auto_stop_addition="off",
             )
             energies[comp_id] = sum(trip_energy_kwh(t) for t in all_trips(route))
         assert energies["NEW-BAL-7"] == pytest.approx(energies["NEW-BAL-14"], rel=1e-6)
@@ -293,15 +311,29 @@ BASE_REQUEST = {
     "auto_stop_addition": "off",
 }
 
-# The stop list the "add" default actually produces on this corridor:
-# CZ_BRNO_HLN merged in at its geographic position (between Dresden and
-# Wien), everything else the caller's own.
+# The stop list the "add" default actually produces on this corridor
+# (AUTO_STOP_BUFFER_M=10km, AUTO_STOP_ANALYTIC_DETOUR_M=100m — see
+# models/route/version.py 0.9.15) — 8 catalog stops merged in at their
+# geographic positions between Dresden and Wien, everything else the
+# caller's own. Re-derive with the one-off script in the WP10 thread
+# (POST auto_stop_addition="add", read trip_pairs[0].outbound) whenever
+# AUTO_STOP_BUFFER_M, AUTO_STOP_ANALYTIC_DETOUR_M, AUTO_STOP_MAX_DETOUR_PER,
+# or the stop catalog itself changes.
 STOPS_WITH_BRNO = [
     "DE_BERLIN_HBF",
     "DE_DRESDEN_HBF",
+    "DE_BAD_SCHANDAU",
+    "CZ_DECIN_HL_N",
+    "CZ_USTI_NAD_LABEM_HL_N",
+    "CZ_PRAHA_HOLESOVICE",
+    "CZ_KOLIN",
+    "CZ_PARDUBICE_HL_N",
+    "CZ_CESKA_TREBOVA",
     "CZ_BRNO_HLN",
+    "CZ_BRECLAV",
     "AT_WIEN_HBF",
 ]
+
 
 # The merged compute response's top-level envelope (api/proposal_calc.py) —
 # used by the suggest-mode key-set assertion below.
@@ -311,6 +343,7 @@ _CALC_ENVELOPE_KEYS = {
     "route_fingerprint",
     "cache_hit",
     "request",
+    "summary",
     "route",
     "evaluation",
 }
@@ -375,28 +408,27 @@ class TestModeSwitches:
     def test_auto_stop_addition_defaults_to_add_and_inserts_brno(
         self, plan_response_default_add
     ):
-        """With auto_stop_addition omitted (the 'add' default), CZ_BRNO_HLN
-        — ~10m off the routed corridor, comfortably within the detour
-        budget — is inserted at its geographic position between Dresden and
-        Wien, marked auto_added=true, everything else the caller's own.
+        """With auto_stop_addition omitted (the 'add' default), 9 catalog
+        stops along the Dresden-Wien corridor — all within
+        AUTO_STOP_BUFFER_M (10km) and comfortably within the cumulative
+        detour budget — are inserted at their geographic positions,
+        marked auto_added=true, everything else the caller's own (see
+        STOPS_WITH_BRNO's own comment for how to re-derive this list:
+        12 entries total = 2 user stops + 9 auto-added + 1 user stop).
         The return trip carries the same final stop list reversed with the
         same auto_added marking (the search runs once, from outbound — see
         _build_trip_pair() in route_factory.py)."""
         pair = plan_response_default_add["route"]["trip_pairs"][0]
         assert "suggested_stops" not in plan_response_default_add
 
+        expected_added = [False, False] + [True] * 9 + [False]
         outbound = stop_times(pair["outbound"])
         assert [s["stop_id"] for s in outbound] == STOPS_WITH_BRNO
-        assert [s["auto_added"] for s in outbound] == [False, False, True, False]
+        assert [s["auto_added"] for s in outbound] == expected_added
 
         return_stops = stop_times(pair["return_trip"])
         assert [s["stop_id"] for s in return_stops] == list(reversed(STOPS_WITH_BRNO))
-        assert [s["auto_added"] for s in return_stops] == [
-            False,
-            True,
-            False,
-            False,
-        ]
+        assert [s["auto_added"] for s in return_stops] == list(reversed(expected_added))
 
     def test_auto_stop_addition_add_explicit_accepted(self, api_base):
         """Explicit 'add' (the default spelled out) behaves identically to
@@ -426,10 +458,16 @@ class TestModeSwitches:
         """auto_stop_addition='suggest' routes exactly like 'off' (caller's
         own stop list, nothing added, auto_added false throughout) but
         carries a top-level suggested_stops list placed between request and
-        route. On this corridor it contains exactly CZ_BRNO_HLN, with a
-        positive added_time_min — and cross-mode consistency holds: the
-        suggested stop ids equal the ids the 'add' default actually
-        inserted (all candidates fit the budget here)."""
+        route.
+
+        Mode 'suggest' deliberately ignores AUTO_STOP_MAX_DETOUR_PER (see
+        apply_auto_stop_addition()'s docstring), so at the wide
+        AUTO_STOP_BUFFER_M=10km buffer it surfaces MORE candidates than
+        'add' actually inserts — cross-mode consistency is now a subset
+        relation, not equality: every stop 'add' inserted also appears in
+        'suggest' (both start from the same candidate search), but
+        'suggest' additionally surfaces the over-budget candidates 'add'
+        had to stop short of. This corridor: 14 suggested vs 10 inserted."""
         body = {**BASE_REQUEST, "auto_stop_addition": "suggest"}
         resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=90)
         assert resp.status_code == 200
@@ -438,11 +476,29 @@ class TestModeSwitches:
         assert set(payload) == _CALC_ENVELOPE_KEYS | {"suggested_stops"}
         keys = list(payload)
         assert (
-            keys.index("request") < keys.index("suggested_stops") < keys.index("route")
+            keys.index("request")
+            < keys.index("suggested_stops")
+            < keys.index("summary")
+            < keys.index("route")
         )
 
         suggested = payload["suggested_stops"]
-        assert [s["stop_id"] for s in suggested] == ["CZ_BRNO_HLN"]
+        assert [s["stop_id"] for s in suggested] == [
+            "DE_BERLIN_SUEDKREUZ",
+            "DE_DRESDEN_NEUSTADT",
+            "DE_BAD_SCHANDAU",
+            "CZ_DECIN_HL_N",
+            "CZ_USTI_NAD_LABEM_HL_N",
+            "CZ_PRAHA_HLN",
+            "CZ_PRAHA_HOLESOVICE",
+            "CZ_KOLIN",
+            "CZ_PARDUBICE_HL_N",
+            "CZ_CESKA_TREBOVA",
+            "CZ_BRNO_HLN",
+            "CZ_BRECLAV",
+            "AT_WIEN_WESTBF",
+            "AT_WIEN_MEIDLING",
+        ]
         for s in suggested:
             assert set(s) == {
                 "stop_id",
@@ -460,7 +516,8 @@ class TestModeSwitches:
         for stop in stop_times(outbound):
             assert stop["auto_added"] is False
 
-        # Cross-mode consistency with the 'add' default.
+        # Cross-mode consistency: every 'add'-inserted stop is a subset of
+        # 'suggest's fuller candidate list (not equality — see docstring).
         added = {
             s["stop_id"]
             for s in stop_times(
@@ -468,7 +525,7 @@ class TestModeSwitches:
             )
             if s["auto_added"]
         }
-        assert {s["stop_id"] for s in suggested} == added
+        assert added <= {s["stop_id"] for s in suggested}
 
     def test_auto_added_field_false_throughout_when_off(self, plan_response):
         """With auto_stop_addition='off' (the module fixture), every stop is

@@ -1,15 +1,18 @@
 """
 test_37_proposal_projection.py
 ================================
-Pure-function tests for WP4 (docs/PROPOSALS_DESIGN.md §3.1/§5.4):
+Pure-function tests for WP4/WP10 (docs/PROPOSALS_DESIGN.md §3.1/§5.4):
 adapters/proposal/projection.py's route_fingerprint() and
-build_summary_row(), plus the fingerprint's wiring into
-POST /api/proposal/calc's response (route_fingerprint, cache_hit).
+build_summary_db_row(), models/evaluation/summary.py's
+build_summary_row() (the shared §5.4 KPI derivation, WP10 step 5), plus
+their wiring into POST /api/proposal/calc's response (route_fingerprint,
+cache_hit, summary).
 
-The schema-conformance case at the bottom inserts a build_summary_row()
-row directly into proposals.proposal_summaries, keeping this file focused
-purely on the projection functions — endpoint-level coverage of the real
-summary writer (publish()) lives in test_50. No commit happens anywhere
+The schema-conformance case at the bottom inserts a
+build_summary_db_row() row directly into proposals.proposal_summaries,
+keeping this file focused purely on the projection functions —
+endpoint-level coverage of the real summary writer (publish()) lives in
+test_50. No commit happens anywhere
 in this file — the autouse rollback_after_test fixture (conftest.py)
 cleans up after every test.
 """
@@ -18,7 +21,9 @@ import json
 
 import pytest
 
-from adapters.proposal.projection import build_summary_row, route_fingerprint
+from adapters.proposal.projection import build_summary_db_row, route_fingerprint
+from models.emissions.factors import EMISSION_FACTORS
+from models.evaluation.summary import build_summary_row
 from adapters.proposal.repository import ProposalRepository
 from tests.conftest import STOPS_BERLIN_DRESDEN_WIEN, STOPS_BERLIN_WIEN
 from tests.helpers import compute
@@ -109,7 +114,6 @@ class TestSummaryRow:
             "n_stops",
             "countries",
             "stop_ids",
-            "geom_simplified",
             "cost_eur_per_train_km",
             "revenue_eur_per_train_km",
             "margin_eur_per_train_km",
@@ -123,6 +127,7 @@ class TestSummaryRow:
             "co2_savings_t_per_year",
             "subsidy_eur_per_t_co2",
             "demand_kpis_placeholder",
+            "co2_g_per_pax_km",
         }
 
     def test_route_metrics_are_plausible(self, row):
@@ -150,8 +155,33 @@ class TestSummaryRow:
         assert row["demand_trip_km_per_year"] >= 0
         assert row["co2_savings_t_per_year"] >= 0
 
-    def test_geom_simplified_is_valid_multilinestring(self, row):
-        geom = row["geom_simplified"]
+    def test_co2_is_the_flat_night_train_factor(self, row):
+        """Decision 24 — the flat models/emissions factor until the
+        energy-based, country-resolved model enriches it per route."""
+        assert row["co2_g_per_pax_km"] == EMISSION_FACTORS["night_train"].g_per_pax_km
+
+    def test_calc_response_summary_is_the_same_row(self, calc_response, row):
+        """WP10 step 5 — the endpoint's "summary" block is built by the
+        exact same build_summary_row() as this fixture, so the two must
+        agree value for value (and neither carries geom_simplified)."""
+        assert calc_response["summary"] == row
+
+
+class TestSummaryDbRow:
+    """build_summary_db_row() — the shared KPI row plus the DB-only
+    geom_simplified (adapters/proposal/projection.py)."""
+
+    @pytest.fixture(scope="class")
+    def db_row(self, calc_response):
+        return build_summary_db_row(calc_response["route"], calc_response["evaluation"])
+
+    def test_is_kpi_row_plus_geometry(self, calc_response, db_row):
+        kpi_row = build_summary_row(calc_response["route"], calc_response["evaluation"])
+        assert set(db_row) == set(kpi_row) | {"geom_simplified"}
+        assert {k: v for k, v in db_row.items() if k != "geom_simplified"} == kpi_row
+
+    def test_geom_simplified_is_valid_multilinestring(self, db_row):
+        geom = db_row["geom_simplified"]
         assert geom["type"] == "MultiLineString"
         assert len(geom["coordinates"]) >= 1
         for line in geom["coordinates"]:
@@ -159,13 +189,13 @@ class TestSummaryRow:
 
 
 class TestSummaryRowSchemaConformance:
-    """Inserts a build_summary_row() row directly into
-    proposals.proposal_summaries (WP1's still-empty table) — proves the
-    row shape actually satisfies the schema's NOT NULLs/types ahead of
-    WP5 wiring the real publish path."""
+    """Inserts a build_summary_db_row() row directly into
+    proposals.proposal_summaries — proves the row shape actually
+    satisfies the schema's NOT NULLs/types independently of the real
+    publish path."""
 
     def test_row_inserts_cleanly(self, db_cur, calc_response):
-        row = build_summary_row(calc_response["route"], calc_response["evaluation"])
+        row = build_summary_db_row(calc_response["route"], calc_response["evaluation"])
         proposal_id = ProposalRepository._next_proposal_id(db_cur)
 
         params = {
@@ -195,7 +225,7 @@ class TestSummaryRowSchemaConformance:
                 shift_air_trips_per_year, shift_air_trip_km_per_year,
                 shift_car_trips_per_year, shift_car_trip_km_per_year,
                 co2_savings_t_per_year, subsidy_eur_per_t_co2,
-                demand_kpis_placeholder
+                demand_kpis_placeholder, co2_g_per_pax_km
             ) VALUES (
                 %(proposal_id)s, %(proposal_version)s, %(user_id)s, %(route_fingerprint)s,
                 %(composition_id)s, %(scenario_id)s, %(name)s, %(route_builder_version)s,
@@ -208,7 +238,7 @@ class TestSummaryRowSchemaConformance:
                 %(shift_air_trips_per_year)s, %(shift_air_trip_km_per_year)s,
                 %(shift_car_trips_per_year)s, %(shift_car_trip_km_per_year)s,
                 %(co2_savings_t_per_year)s, %(subsidy_eur_per_t_co2)s,
-                %(demand_kpis_placeholder)s
+                %(demand_kpis_placeholder)s, %(co2_g_per_pax_km)s
             )
             """,
             params,

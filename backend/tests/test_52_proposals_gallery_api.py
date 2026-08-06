@@ -56,6 +56,69 @@ def published(api_base, script_headers, computed):
     )
 
 
+_EXISTING_ROUTE_IDS = ["TEST-GALLERY-E1", "TEST-GALLERY-E2"]
+
+
+@pytest.fixture(scope="module")
+def existing_routes(db_conn):
+    """Two fake ontd.route_summaries rows (+ one corridor each) so the
+    step-6b union has existing rows to return even where the ONTD
+    bootstrap has never run (CI: seed.py only creates the empty schema).
+    E1 shares the Berlin–Wien stop namespace with `published` so
+    corridor/stop merging is observable; E2 is disjoint (FR). Committed
+    (the API reads through its own connection) and deleted on teardown —
+    same lifecycle pattern as purge_saved_proposals. geom_simplified is
+    a real PostGIS geometry, matching the proposal projection's type."""
+    with db_conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO ontd.route_summaries (
+                route_id, name, stop_ids, n_stops, countries,
+                total_distance_km, total_time_h, avg_speed_kmh,
+                co2_g_per_pax_km, geom_simplified, geometry_routed
+            ) VALUES
+            (%s, 'Gallery test existing Berlin–Wien',
+             ARRAY['DE_BERLIN_HBF','AT_WIEN_HBF'], 2, ARRAY['DE','AT'],
+             700.0, 9.5, 74.0, 33.0,
+             ST_SetSRID(ST_GeomFromGeoJSON(
+               '{"type":"MultiLineString","coordinates":[[[13.37,52.52],[16.37,48.19]]]}'
+             ), 4326), FALSE),
+            (%s, 'Gallery test existing FR',
+             ARRAY['FR_PARIS_AUSTERLITZ','FR_TOULOUSE_MATABIAU'], 2, ARRAY['FR'],
+             680.0, 7.0, 97.0, 33.0,
+             ST_SetSRID(ST_GeomFromGeoJSON(
+               '{"type":"MultiLineString","coordinates":[[[2.36,48.84],[1.45,43.61]]]}'
+             ), 4326), FALSE)
+            ON CONFLICT (route_id) DO NOTHING
+            """,
+            _EXISTING_ROUTE_IDS,
+        )
+        cur.execute(
+            """
+            INSERT INTO ontd.route_corridors (route_id, stop_a, stop_b, geometry)
+            VALUES
+            (%s, 'AT_WIEN_HBF', 'DE_BERLIN_HBF',
+             '{"type":"LineString","coordinates":[[13.37,52.52],[16.37,48.19]]}'::jsonb),
+            (%s, 'FR_PARIS_AUSTERLITZ', 'FR_TOULOUSE_MATABIAU',
+             '{"type":"LineString","coordinates":[[2.36,48.84],[1.45,43.61]]}'::jsonb)
+            ON CONFLICT (route_id, stop_a, stop_b) DO NOTHING
+            """,
+            _EXISTING_ROUTE_IDS,
+        )
+    db_conn.commit()
+    yield _EXISTING_ROUTE_IDS
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "DELETE FROM ontd.route_corridors WHERE route_id = ANY(%s)",
+            (_EXISTING_ROUTE_IDS,),
+        )
+        cur.execute(
+            "DELETE FROM ontd.route_summaries WHERE route_id = ANY(%s)",
+            (_EXISTING_ROUTE_IDS,),
+        )
+    db_conn.commit()
+
+
 def _gallery(api_base, **body):
     resp = requests.post(f"{api_base}{PROPOSALS_URL}", json=body, timeout=15)
     assert resp.status_code == 200, resp.text[:300]
@@ -63,7 +126,11 @@ def _gallery(api_base, **body):
 
 
 def _proposal_ids(gallery_response) -> set[int]:
-    return {p["proposal_id"] for p in gallery_response["summaries"]["proposals"]}
+    return {
+        p["proposal_id"]
+        for p in gallery_response["summaries"]["proposals"]
+        if p["source"] == "proposal"
+    }
 
 
 # =============================================================================
@@ -207,13 +274,156 @@ class TestFilterKinds:
             )
             assert resp.status_code == 400, key
 
-    def test_sources_existing_rejected(self, api_base):
+    def test_sources_unknown_rejected(self, api_base):
         resp = requests.post(
             f"{api_base}{PROPOSALS_URL}",
-            json={"filter": {"sources": ["existing"]}},
+            json={"filter": {"sources": ["archive"]}},
             timeout=15,
         )
         assert resp.status_code == 400
+
+    def test_sources_empty_rejected(self, api_base):
+        resp = requests.post(
+            f"{api_base}{PROPOSALS_URL}",
+            json={"filter": {"sources": []}},
+            timeout=15,
+        )
+        assert resp.status_code == 400
+
+
+# =============================================================================
+# Source union (WP10 step 6b)
+# =============================================================================
+
+
+class TestSourceUnion:
+    """The gallery's proposal/existing union: sources filter, default
+    BOTH, the reduced existing row shape, NULL-semantics exclusion, and
+    the per-source + total counts on every map section."""
+
+    def test_sources_existing_only(self, api_base, existing_routes):
+        # name filter isolates the fixture rows deterministically — the
+        # real ONTD catalog has ~200 existing rows, all NULL updated_at
+        # (arbitrary tie order), so an unfiltered default-limit page
+        # isn't guaranteed to contain any particular route_id.
+        body = _gallery(
+            api_base,
+            filter={"sources": ["existing"], "name": "Gallery test existing"},
+        )
+        rows = body["summaries"]["proposals"]
+        assert body["summaries"]["total"] >= 2
+        assert all(r["source"] == "existing" for r in rows)
+        by_id = {r["route_id"]: r for r in rows}
+        assert set(existing_routes) <= set(by_id)
+        row = by_id[existing_routes[0]]
+        # Reduced descriptive shape — proposal-only keys OMITTED, not null.
+        assert set(row) == {
+            "source",
+            "route_id",
+            "name",
+            "composition_id",
+            "total_distance_km",
+            "total_time_h",
+            "avg_speed_kmh",
+            "n_stops",
+            "countries",
+            "stop_ids",
+            "co2_g_per_pax_km",
+            "geometry_routed",
+            "ontd_url",
+        }
+        assert row["geometry_routed"] is False
+        assert row["ontd_url"].endswith(row["route_id"])
+
+    def test_sources_default_is_both(self, api_base, existing_routes, published):
+        body = _gallery(api_base)
+        sources = {r["source"] for r in body["summaries"]["proposals"]}
+        assert sources == {"proposal", "existing"}
+        # Existing rows have NULL updated_at — NULLS LAST puts every
+        # proposal before every existing row on the default sort.
+        row_sources = [r["source"] for r in body["summaries"]["proposals"]]
+        assert row_sources.index("existing") == row_sources.count("proposal")
+
+    def test_sources_proposal_only_unchanged(self, api_base, existing_routes):
+        body = _gallery(api_base, filter={"sources": ["proposal"]})
+        assert all(r["source"] == "proposal" for r in body["summaries"]["proposals"])
+
+    def test_financial_filter_excludes_existing(self, api_base, existing_routes):
+        """Existing rows carry NULL financials — a margin range filter
+        must exclude them via SQL NULL semantics, with no sources filter
+        needed."""
+        body = _gallery(
+            api_base,
+            filter={"margin_eur_per_train_km": {"min": -1_000_000}},
+        )
+        assert all(r["source"] == "proposal" for r in body["summaries"]["proposals"])
+
+    def test_stop_ids_filter_spans_sources(self, api_base, existing_routes, published):
+        """stop_ids is a shared Target Network namespace (step 6a) —
+        one filter matches proposals AND existing routes over the same
+        stop."""
+        body = _gallery(api_base, filter={"stop_ids": ["DE_BERLIN_HBF"]})
+        sources = {r["source"] for r in body["summaries"]["proposals"]}
+        assert sources == {"proposal", "existing"}
+
+    def test_map_lines_triple_counts_and_merge(
+        self, api_base, existing_routes, published
+    ):
+        """The Berlin–Wien direct corridor is served by `published`'s
+        endpoints AND fake existing route E1 — but a proposal's segments
+        run between consecutive stops (incl. auto-added ones), so the
+        merge assertion targets the count invariants on every feature
+        and E1's corridor being present with its existing_count."""
+        body = _gallery(api_base, include=["map_lines"])
+        features = body["map_lines"]["features"]
+        assert features
+        for f in features:
+            props = f["properties"]
+            assert (
+                props["total_count"]
+                == props["proposal_count"] + props["existing_count"]
+            )
+            assert len(props["proposal_ids"]) == props["proposal_count"]
+            assert len(props["existing_route_ids"]) == props["existing_count"]
+        e1_features = [
+            f
+            for f in features
+            if existing_routes[0] in f["properties"]["existing_route_ids"]
+        ]
+        assert len(e1_features) == 1
+        assert e1_features[0]["properties"]["existing_count"] >= 1
+        # Existing-only corridors carry no margin.
+        fr = [
+            f
+            for f in features
+            if existing_routes[1] in f["properties"]["existing_route_ids"]
+        ]
+        assert fr and fr[0]["properties"]["avg_margin_eur_per_train_km"] is None
+
+    def test_map_stop_counts_triple(self, api_base, existing_routes, published):
+        body = _gallery(api_base, include=["map_stop_counts"])
+        rows = {r["stop_id"]: r for r in body["map_stop_counts"]}
+        for row in rows.values():
+            assert row["n"] == row["n_proposals"] + row["n_existing"]
+        berlin = rows["DE_BERLIN_HBF"]
+        assert berlin["n_proposals"] >= 1 and berlin["n_existing"] >= 1
+
+    def test_map_country_counts_triple(self, api_base, existing_routes, published):
+        """n == n_proposals + n_existing everywhere, and both sources
+        contribute somewhere. Doesn't assert FR's n_proposals is exactly
+        0 — other tests in the full suite run may have published
+        proposals through France independently of this fixture; the
+        merge invariant (the sum) is what step 6b actually guarantees,
+        not the absence of unrelated test data."""
+        body = _gallery(api_base, include=["map_country_counts"])
+        props = {
+            f["properties"]["country"]: f["properties"]
+            for f in body["map_country_counts"]["features"]
+        }
+        for entry in props.values():
+            assert entry["n"] == entry["n_proposals"] + entry["n_existing"]
+        assert props["DE"]["n_existing"] >= 1 and props["DE"]["n_proposals"] >= 1
+        assert props["FR"]["n_existing"] >= 1
 
 
 # =============================================================================
@@ -449,6 +659,13 @@ class TestLikesCount:
         assert published["proposal_id"] not in _proposal_ids(miss)
 
     def test_sort_by_likes_count(self, api_base):
-        body = _gallery(api_base, sort=[{"by": "likes_count", "dir": "desc"}])
+        """likes_count is a proposal-only concept — existing rows omit
+        the key entirely (WP10 step 6b's reduced shape), so this sorts
+        within sources=["proposal"] rather than the default union."""
+        body = _gallery(
+            api_base,
+            filter={"sources": ["proposal"]},
+            sort=[{"by": "likes_count", "dir": "desc"}],
+        )
         values = [p["likes_count"] for p in body["summaries"]["proposals"]]
         assert values == sorted(values, reverse=True)

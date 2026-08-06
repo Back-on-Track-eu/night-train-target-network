@@ -44,7 +44,10 @@ EXPECTED_ROW_COUNTS = {
     "input_params.track_infrastructure_defaults": 3,  # 1 per scenario
     "input_params.track_infrastructures": 84,  # 3 full-table snapshots × 28 countries
     "input_params.stop_infrastructure_defaults": 3,  # 1 per scenario
-    "input_params.stop_infrastructures": 174,  # 3 full-table snapshots × 58 stops
+    # 3 full-table snapshots × 58 seeded stops. A minimum, not an exact
+    # count: db/ontd/stop_mapping.py (WP10 step 6a) mints additional
+    # stops into the pinned snapshot once the ONTD pipeline has run.
+    "input_params.stop_infrastructures": 174,
     "scenario.scenarios": 3,  # 2026-baseline + base + 2032-baseline-hsr-allowed
     "proposals.proposals": 1,  # one real saved example proposal — see seed_example_proposal()
     "proposals.routes": 1,
