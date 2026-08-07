@@ -1213,7 +1213,7 @@ class DBDataLoader:
                 # expected resolution path, and this fires per field per
                 # country per catalog build — at WARNING it was ~210
                 # synchronous stderr lines per build, a measurable share
-                # of request latency once the ONTD-minted stops grew the
+                # of request latency once the ONTD-derived stops grew the
                 # catalog (2026-08-06). Aggregate counts land in the
                 # per-build INFO summary instead.
                 logger.debug(
@@ -1492,7 +1492,7 @@ class DBDataLoader:
             if raw is None:
                 # DEBUG, not WARNING — same reasoning as _row_to_track()'s
                 # resolve(): expected path, fires per stop per build, and
-                # the ONTD-minted stops (NULL charge by design) made this
+                # the ONTD-derived stops (NULL charge by design) made this
                 # ~575 lines per catalog build at WARNING level. The
                 # per-build INFO summary carries the count.
                 logger.debug(

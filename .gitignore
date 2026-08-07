@@ -91,6 +91,7 @@ backend/models/route/routing/countries.geojson
 # Scratch files
 git_status.txt
 test_output.txt
+backend/db/dev/data/*.csv
 
 # Credentials
 credentials/

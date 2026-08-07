@@ -1,6 +1,6 @@
 """
 Build ontd.route_summaries — the gallery/map projection over the ONTD
-tables (PROPOSALS_DESIGN.md §5.5, decisions 23/25).
+tables (adapters/proposal/README.md §5.5, decisions 23/25).
 
 One row per ACTIVE route, carrying only descriptive and emission KPIs:
 composition (where curated), duration, distance, average speed, stop
@@ -353,7 +353,7 @@ def _build_routing_context(composition_id: Optional[str]):
     Existing routes are drawn on the same gallery map as proposals, so
     they must be routed by the same rules — full two-pass routing with
     the custom model, the composition's speed cap and HSR avoidance
-    (PROPOSALS_DESIGN.md decision 25, revised). Anything less would draw
+    (adapters/proposal/README.md decision 25, revised). Anything less would draw
     the same physical night train on different tracks depending on which
     table it came from.
 
@@ -553,10 +553,11 @@ def build_summaries(
         else {}
     )
 
-    # ONTD → Target Network stop translation (WP10 step 6a): built (and
-    # missing TN stops minted) before anything is written, so
-    # route_summaries.stop_ids and route_corridors come out in the
-    # proposal side's namespace.
+    # ONTD → Target Network stop translation (WP10 step 6a): built
+    # before anything is written, so route_summaries.stop_ids and
+    # route_corridors come out in the proposal side's namespace. Matching
+    # only — the catalog is complete at seed time (stop_mapping.py's
+    # module docstring); unmatched stops are reported and keep raw ids.
     mapping = build_stop_mappings(cur)
 
     cur.execute("TRUNCATE ontd.route_corridors")

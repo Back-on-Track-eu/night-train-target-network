@@ -1,24 +1,33 @@
 """
 stop_mapping.py
 ===============
-Interim ONTD ↔ Target Network stop-id bridge (PROPOSALS_DESIGN.md §5.5,
+Interim ONTD ↔ Target Network stop-id bridge (adapters/proposal/README.md §5.5,
 WP10 step 6a) — the mechanism that lets ONTD gallery rows share one stop
 namespace with proposals until the real harmonized stop list (numeric
 OSM-based identifiers, expected ~2 weeks out) replaces both id schemes.
 
-Two-pass resolution per ONTD stop appearing on an active route:
+One-pass resolution per ONTD stop appearing on an active route:
+COORDINATE MATCH — nearest stop_infrastructures row of the current base
+scenario's pinned snapshot within MATCH_RADIUS_M. Names are deliberately
+not the matcher (ONTD says "Bruxelles-Midi", the curated row says
+"Brussels Midi"); coordinates are what both sides agree on.
 
-  1. COORDINATE MATCH — nearest stop_infrastructures row of the current
-     base scenario's pinned snapshot within MATCH_RADIUS_M. Names are
-     deliberately not the matcher (ONTD says "Bruxelles-Midi", the
-     curated row says "Brussels Midi"); coordinates are what both sides
-     agree on.
-  2. MINT — no curated stop nearby: a new stop_infrastructures row is
-     created at the pinned version, id derived as
-     {country}_{TRANSLITERATED_NAME} in the curated style (Ü→UE, ø→OE,
-     ...), stop_charge_eur NULL (resolved against the country/global
-     default like any other stop), change_log marking the provenance.
-     Minted stops are ordinary catalog entries — plannable in proposals.
+The catalog is COMPLETE AT SEED TIME (revised 2026-08-07): every stop the
+ONTD snapshot needs is part of db/dev/seed.py's stop data, derived once by
+scripts/export_ontd_stop_seed.py into the Drive-hosted
+ontd_seed_stops.csv (downloaded to db/dev/data/ at seed time when absent)
+using this module's own id convention ({country}_{TRANSLITERATED_NAME},
+Ü→UE, ø→OE, ...). This replaces the earlier runtime MINT pass, which
+inserted missing stops into input_params.stop_infrastructures during the
+bootstrap — mutating pinned snapshot versions at runtime, which (a) broke
+the compute cache's scenario-pin key invariant
+(adapters/proposal/README.md §2.3: a cached
+result computed pre-mint kept being served post-mint) and (b) never
+survived a container restart anyway (seed.py DROPs input_params while the
+guarded ontd schema keeps the bootstrap from re-running). An ONTD stop
+that matches nothing is now REPORTED and left unmapped — expected to be
+rare; the remedy is regenerating the seed CSV and reseeding, not a
+runtime write.
 
 Results are upserted into ontd.stop_mappings (a CURATED table — survives
 the half-yearly refresh TRUNCATE, same lifecycle as route_compositions).
@@ -28,18 +37,22 @@ corrected. The table is also exactly the harmonization deliverable the
 alignment task (Giovanni ↔ David, 2026-06-22) needs as its seed.
 
 Deliberately unmapped (absent from the table, route_summaries keeps the
-raw ONTD id): stops without coordinates (nothing to match or mint a
-NOT NULL lat/lon from) and stops in countries outside
-input_params.countries (the NOT NULL FK cannot hold them) — both
-queryable as the gap between active ONTD stops and mapping rows.
+raw ONTD id): stops without coordinates (nothing to match on) and stops
+with no catalog row within MATCH_RADIUS_M (seed CSV out of date, or a
+country outside input_params.countries that the exporter could not seed)
+— all reported by build_stop_mappings() and queryable as the gap between
+active ONTD stops and mapping rows.
 
 Public interface:
   build_stop_mappings(cur)  → dict[str, str]  (ontd_stop_id → tn_stop_id
                                                 for every mapped stop;
-                                                writes mappings + minted
-                                                stops through `cur`,
-                                                commit is the caller's)
-  mint_tn_stop_id(country_code, stop_name) → str
+                                                writes mappings through
+                                                `cur`, commit is the
+                                                caller's)
+  mint_tn_stop_id(country_code, stop_name) → str  (id convention — used
+                                                by the seed-CSV exporter,
+                                                scripts/
+                                                export_ontd_stop_seed.py)
   transliterate(name) → str
 
 Callers: db/ontd/projection.py's build_summaries() (before writing
@@ -252,18 +265,14 @@ def _active_ontd_stops(cur) -> list[dict[str, Any]]:
     return [dict(row) for row in cur.fetchall()]
 
 
-def _pinned_catalog(cur) -> tuple[int, list[dict[str, Any]], list[int]]:
-    """(pinned version, stop rows of that version, every existing
-    snapshot version). The pinned base-scenario version is the match
-    target set (what a candidate is compared against); minted rows are
-    inserted into EVERY existing version, not only the pinned one —
-    stop_infrastructures is a full-table-snapshot table (§3.1: a version
-    holds an identical stop set to every other version, resolution is
-    always an exact version match), so minting into one version alone
-    would silently break that invariant for the historical/HSR
-    snapshots (caught by test_02's
-    test_stop_infrastructure_values_unchanged_by_hsr_scenario,
-    2026-08-06)."""
+def _pinned_catalog(cur) -> list[dict[str, Any]]:
+    """Stop rows of the current base scenario's pinned snapshot — the
+    match target set. Since the ONTD-derived stops are part of the seed
+    (db/dev/data/ontd_seed_stops.csv), this catalog already contains
+    every stop the mapping should resolve to; the snapshot versions all
+    hold identical stop sets by construction (seed.py builds each version
+    from the same list — asserted by test_02's snapshot-invariant
+    test)."""
     cur.execute(
         "SELECT stop_infrastructures_version FROM scenario.scenarios "
         "WHERE is_current_base"
@@ -274,15 +283,13 @@ def _pinned_catalog(cur) -> tuple[int, list[dict[str, Any]], list[int]]:
         "FROM input_params.stop_infrastructures WHERE stop_infra_version = %s",
         (pinned_version,),
     )
-    catalog = [dict(row) for row in cur.fetchall()]
-    cur.execute(
-        "SELECT DISTINCT stop_infra_version FROM input_params.stop_infrastructures"
-    )
-    all_versions = [row["stop_infra_version"] for row in cur.fetchall()]
-    return pinned_version, catalog, all_versions
+    return [dict(row) for row in cur.fetchall()]
 
 
 def _known_countries(cur) -> set[str]:
+    """Kept for scripts/export_ontd_stop_seed.py — the seed exporter needs
+    it to honour the NOT NULL FK into input_params.countries; the mapping
+    itself no longer branches on country."""
     cur.execute("SELECT country_code FROM input_params.countries")
     return {row["country_code"] for row in cur.fetchall()}
 
@@ -310,97 +317,45 @@ def _nearest(
 
 
 def build_stop_mappings(cur) -> dict[str, str]:
-    """Rebuild the automatic half of ontd.stop_mappings and mint any
-    missing Target Network stops; return the full ontd→TN translation
-    dict (protected manual rows included). Writes through `cur` without
+    """Rebuild the automatic half of ontd.stop_mappings against the
+    seeded stop catalog; return the full ontd→TN translation dict
+    (protected manual rows included). Writes through `cur` without
     committing — transaction control stays with the caller, same as
-    every other projection stage."""
+    every other projection stage. Never writes to input_params: the
+    catalog is complete at seed time (module docstring), so an ONTD stop
+    without a match is a reported gap, not a trigger to create one."""
     ontd_stops = _active_ontd_stops(cur)
-    version, catalog, all_versions = _pinned_catalog(cur)
-    known_countries = _known_countries(cur)
+    catalog = _pinned_catalog(cur)
     protected = _protected_mappings(cur)
-    catalog_ids = {stop["stop_id"] for stop in catalog}
 
     mapping: dict[str, str] = dict(protected)
-    minted = matched = skipped = 0
+    matched = no_coords = 0
+    # (ontd_id, name, nearest catalog distance in m) per unmatched stop —
+    # printed below so a stale seed CSV is visible in the bootstrap log,
+    # not just as quietly untranslated gallery ids.
+    unmatched: list[tuple[str, str, float]] = []
 
     for stop in ontd_stops:
         ontd_id = stop["stop_id"]
         if ontd_id in protected:
             continue
         if stop["stop_lat"] is None or stop["stop_lon"] is None:
-            skipped += 1
+            no_coords += 1
             continue
 
         lat, lon = float(stop["stop_lat"]), float(stop["stop_lon"])
         nearest, distance = _nearest(lat, lon, catalog)
-        if nearest is not None and distance <= MATCH_RADIUS_M:
-            tn_id, method, match_distance = nearest["stop_id"], "coordinate", distance
-        else:
-            country = (stop["stop_country"] or "").strip().upper()
-            if country not in known_countries:
-                # The NOT NULL FK into input_params.countries cannot hold
-                # this stop — left unmapped rather than minted into a
-                # wrong country. Queryable as the gap between active ONTD
-                # stops and mapping rows.
-                skipped += 1
-                continue
-            tn_id = mint_tn_stop_id(country, stop["stop_name"])
-            # Same-name-different-station collision (two distinct minted
-            # stops, or a curated id whose station is verifiably >500 m
-            # away): suffix rather than merge — a wrong merge corrupts
-            # corridors, a suffix is merely ugly for two weeks.
-            base_id, suffix = tn_id, 2
-            while tn_id in catalog_ids or tn_id in mapping.values():
-                tn_id = f"{base_id}_{suffix}"
-                suffix += 1
-            # Every existing snapshot version, not just the pinned one —
-            # see _pinned_catalog()'s docstring for why.
-            for insert_version in all_versions:
-                cur.execute(
-                    """
-                    INSERT INTO input_params.stop_infrastructures (
-                        stop_id, stop_name, country_code, stop_timezone,
-                        stop_lat, stop_lon, stop_charge_eur, change_log,
-                        stop_infra_version
-                    ) VALUES (%s, %s, %s, %s, %s, %s, NULL, %s, %s)
-                    ON CONFLICT (stop_id, stop_infra_version) DO NOTHING
-                    """,
-                    (
-                        tn_id,
-                        stop["stop_name"],
-                        country,
-                        stop["stop_timezone"] or "Europe/Brussels",
-                        lat,
-                        lon,
-                        "minted from ONTD (db/ontd/stop_mapping.py) — interim "
-                        "until the harmonized stop list lands; charge resolves "
-                        "via country/global default",
-                        insert_version,
-                    ),
-                )
-            catalog_ids.add(tn_id)
-            # Minted rows must also be match targets for later ONTD stops
-            # (two ONTD ids for one physical station map to one TN stop).
-            catalog.append(
-                {
-                    "stop_id": tn_id,
-                    "stop_name": stop["stop_name"],
-                    "stop_lat": lat,
-                    "stop_lon": lon,
-                }
-            )
-            method, match_distance = "minted", None
-            minted += 1
+        if nearest is None or distance > MATCH_RADIUS_M:
+            unmatched.append((ontd_id, stop["stop_name"], distance))
+            continue
 
-        if method == "coordinate":
-            matched += 1
-        mapping[ontd_id] = tn_id
+        matched += 1
+        mapping[ontd_id] = nearest["stop_id"]
         cur.execute(
             """
             INSERT INTO ontd.stop_mappings (
                 ontd_stop_id, tn_stop_id, match_method, distance_m
-            ) VALUES (%s, %s, %s, %s)
+            ) VALUES (%s, %s, 'coordinate', %s)
             ON CONFLICT (ontd_stop_id) DO UPDATE SET
                 tn_stop_id = EXCLUDED.tn_stop_id,
                 match_method = EXCLUDED.match_method,
@@ -408,17 +363,22 @@ def build_stop_mappings(cur) -> dict[str, str]:
             WHERE NOT ontd.stop_mappings.verified
               AND ontd.stop_mappings.match_method != 'manual'
             """,
-            (
-                ontd_id,
-                tn_id,
-                method,
-                round(match_distance, 1) if match_distance is not None else None,
-            ),
+            (ontd_id, nearest["stop_id"], round(distance, 1)),
         )
 
     print(
-        f"  stop mappings: {matched} coordinate-matched, {minted} minted, "
-        f"{skipped} unmapped (no coords / country outside input_params), "
+        f"  stop mappings: {matched} coordinate-matched, "
+        f"{len(unmatched)} unmatched, {no_coords} without coordinates, "
         f"{len(protected)} manual/verified preserved"
     )
+    if unmatched:
+        print(
+            "  UNMATCHED ONTD STOPS — no catalog row within "
+            f"{MATCH_RADIUS_M:.0f} m; route_summaries keeps their raw ONTD "
+            "ids. If these are legitimate stations, regenerate the seed "
+            "CSV (backend/scripts/export_ontd_stop_seed.py) and reseed:"
+        )
+        for ontd_id, name, distance in unmatched:
+            print(f"    {ontd_id}  {name!r}  (nearest {distance:.0f} m)")
+
     return mapping
