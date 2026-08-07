@@ -1,10 +1,10 @@
 """
-Unit tests for db/ontd/stop_mapping.py's pure functions (WP10 step 6a) —
-transliteration, id minting, and the distance approximation. No DB, no
-Docker: the integration path (coordinate match, minting into the pinned
-snapshot, manual-row protection) is exercised in test_52's union tests
-once WP10 step 6b lands, against the seeded (empty-until-loaded) ontd
-schema.
+Unit tests for db/ontd/stop_mapping.py's pure functions —
+transliteration, the stop-id convention (now consumed by
+scripts/export_ontd_stop_seed.py, which derives the committed seed CSV),
+and the distance approximation. No DB, no Docker: the integration path
+(coordinate match against the seeded catalog, manual-row protection) is
+exercised in test_52's union tests against the loaded ontd schema.
 """
 
 import sys

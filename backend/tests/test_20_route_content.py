@@ -467,7 +467,19 @@ class TestModeSwitches:
         relation, not equality: every stop 'add' inserted also appears in
         'suggest' (both start from the same candidate search), but
         'suggest' additionally surfaces the over-budget candidates 'add'
-        had to stop short of. This corridor: 14 suggested vs 10 inserted."""
+        had to stop short of. This corridor: 14 suggested vs 10 inserted.
+
+        The final pair (AT_WIEN_WESTBF / AT_WIEN_MEIDLING) is asserted as
+        a set, not a strict order: both sit close together near the
+        route's Vienna approach, so suggest_auto_stops()'s
+        (leg_index, along_leg_fraction) sort assigns them to the routed
+        polyline geometrically, not topologically — which one gets the
+        smaller fraction can flip with the router's own path geometry
+        (graph version, internal tie-breaking) even though both stops'
+        coordinates are fixed and unchanged. Asserting a strict order for
+        a genuinely near-tied pair over-specifies the router, not the
+        auto-stop logic this test targets; every other candidate here is
+        well-separated and keeps a strict order."""
         body = {**BASE_REQUEST, "auto_stop_addition": "suggest"}
         resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=90)
         assert resp.status_code == 200
@@ -483,7 +495,8 @@ class TestModeSwitches:
         )
 
         suggested = payload["suggested_stops"]
-        assert [s["stop_id"] for s in suggested] == [
+        suggested_ids = [s["stop_id"] for s in suggested]
+        assert suggested_ids[:-2] == [
             "DE_BERLIN_SUEDKREUZ",
             "DE_DRESDEN_NEUSTADT",
             "DE_BAD_SCHANDAU",
@@ -496,9 +509,8 @@ class TestModeSwitches:
             "CZ_CESKA_TREBOVA",
             "CZ_BRNO_HLN",
             "CZ_BRECLAV",
-            "AT_WIEN_WESTBF",
-            "AT_WIEN_MEIDLING",
         ]
+        assert set(suggested_ids[-2:]) == {"AT_WIEN_WESTBF", "AT_WIEN_MEIDLING"}
         for s in suggested:
             assert set(s) == {
                 "stop_id",

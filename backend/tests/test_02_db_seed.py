@@ -14,13 +14,22 @@ Covers:
   - All three seeded scenarios (2026 Base Line / 2032 Base Line / 2032 Base
     Line + HSR allowed) are present and consistent
   - Proposals redesign, schema phase 1 (2026-08-03, additive-only — see
-    docs/PROPOSALS_DESIGN.md §10 WP1): new sidecar/update_log/
+    adapters/proposal/README.md §5.2): new sidecar/update_log/
     proposal_summaries/compute-cache tables exist, the new columns on
     proposals.proposals/stop_times exist and are still nullable, the
     PostGIS geometry column and UNLOGGED cache tables are set up correctly
 """
 
 import pytest
+
+# The curated canonical stop list in db/dev/seed.py — the literal must
+# move with seed.py's _STOP_INFRASTRUCTURES_CANONICAL (same maintenance
+# contract the old hardcoded 174 row floor already had). The rest of the
+# catalog comes from the Drive-hosted ONTD seed CSV, whose size isn't
+# knowable here (the file lives inside the container in CI) — its
+# presence is asserted via the change_log provenance marker instead.
+N_CURATED_SEED_STOPS = 58
+ONTD_SEED_CHANGE_LOG_PREFIX = "seeded from ONTD snapshot"
 
 # =============================================================================
 # Expectations after seeding — see db/dev/seed.py
@@ -44,9 +53,10 @@ EXPECTED_ROW_COUNTS = {
     "input_params.track_infrastructure_defaults": 3,  # 1 per scenario
     "input_params.track_infrastructures": 84,  # 3 full-table snapshots × 28 countries
     "input_params.stop_infrastructure_defaults": 3,  # 1 per scenario
-    # 3 full-table snapshots × 58 seeded stops. A minimum, not an exact
-    # count: db/ontd/stop_mapping.py (WP10 step 6a) mints additional
-    # stops into the pinned snapshot once the ONTD pipeline has run.
+    # Floor: 3 full-table snapshots × 58 curated stops. The real total
+    # includes the ONTD-derived stops seeded from db/dev/data/
+    # ontd_seed_stops.csv — the exact count and the snapshot-set
+    # invariant are asserted by test_stop_catalog_snapshots below.
     "input_params.stop_infrastructures": 174,
     "scenario.scenarios": 3,  # 2026-baseline + base + 2032-baseline-hsr-allowed
     "proposals.proposals": 1,  # one real saved example proposal — see seed_example_proposal()
@@ -56,7 +66,7 @@ EXPECTED_ROW_COUNTS = {
 }
 
 # Tables added by the proposals redesign, schema phase 1 (2026-08-03,
-# additive-only — see docs/PROPOSALS_DESIGN.md §10 WP1 and
+# additive-only — see adapters/proposal/README.md §5 and
 # migrations/2026-08-03_proposal_schema_phase1.sql). Existence-only checks:
 # nothing seeds them yet, since the compute/publish endpoints that would
 # write to them don't exist until later WPs.
@@ -128,6 +138,44 @@ def test_table_row_count(db_cur, table, min_rows):
     assert count >= min_rows, f"{table}: expected >= {min_rows} rows, got {count}"
 
 
+def test_stop_catalog_snapshots(db_cur):
+    """The stop catalog is complete at seed time and version-immutable:
+    every stop_infra_version carries the identical stop set (the
+    full-table-snapshot invariant the retired runtime mint used to
+    violate — see db/ontd/stop_mapping.py's module docstring), and the
+    ONTD-derived share is actually present — a missing share means the
+    seed's Drive download of ontd_seed_stops.csv failed (its warning
+    banner is in the container log) and downstream failures like
+    test_20's auto-stop expectations would otherwise be baffling."""
+    db_cur.execute(
+        "SELECT stop_infra_version, array_agg(stop_id ORDER BY stop_id) AS ids, "
+        "       count(*) FILTER (WHERE change_log LIKE %s) AS n_ontd "
+        "FROM input_params.stop_infrastructures GROUP BY stop_infra_version",
+        (f"{ONTD_SEED_CHANGE_LOG_PREFIX}%",),
+    )
+    rows = db_cur.fetchall()
+    snapshots = {row["stop_infra_version"]: row["ids"] for row in rows}
+    assert set(snapshots) == {1, 2, 3}
+    for row in rows:
+        version, ids = row["stop_infra_version"], row["ids"]
+        assert len(ids) == len(set(ids)), f"duplicate stop_ids in version {version}"
+        assert row["n_ontd"] > 0, (
+            f"version {version}: no ONTD-derived stops — the seed's Drive "
+            "download of ontd_seed_stops.csv failed (see the container "
+            "log's warning banner) or the CSV is empty"
+        )
+        assert len(ids) == N_CURATED_SEED_STOPS + row["n_ontd"], (
+            f"version {version}: {len(ids)} stops != {N_CURATED_SEED_STOPS} "
+            f"curated + {row['n_ontd']} ONTD-derived — an unmarked writer "
+            "touched the catalog"
+        )
+    assert snapshots[1] == snapshots[2] == snapshots[3], (
+        "stop snapshots differ between versions — the seed is the only "
+        "writer and builds every version from one list, so this points at "
+        "a runtime write into input_params.stop_infrastructures"
+    )
+
+
 @pytest.mark.parametrize("table,columns", REQUIRED_COLUMNS.items())
 def test_required_columns_not_null(db_cur, table, columns):
     """Required columns contain no NULL values in any row."""
@@ -194,7 +242,7 @@ def test_proposal_summaries_geom_is_postgis_geometry(db_cur):
 
 
 def test_compute_cache_tables_are_unlogged(db_cur):
-    """Both compute cache tables are UNLOGGED (docs/PROPOSALS_DESIGN.md
+    """Both compute cache tables are UNLOGGED (adapters/proposal/README.md
     §2.3) — a disposable performance layer, no WAL overhead, safe to lose
     on crash."""
     db_cur.execute(
