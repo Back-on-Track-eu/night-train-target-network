@@ -10,23 +10,33 @@ A CountryIndex (country border geometries, for routing/HSR-avoidance) is
 built once at the same time — input_params.countries is static reference
 data, not one of the scenario-versioned tables, so there's no need to
 re-query it per request. Route handlers call get_country_index() to access
-it.
+it. A RailRouter is built on top of it, also once: it holds a
+requests.Session with a warm connection pool sized for concurrent routing
+calls (see rail_router.py), and Session is safe for concurrent use — a
+per-request RailRouter would start every compute on a cold pool for no
+gain. Handlers call get_rail_router().
 
-A ProposalRepository (write path for saved proposals) and a
-FeedbackRepository (write path for feedback submissions) are created
-alongside them — each holds its own connection to the same database,
-keeping DBDataLoader strictly read-only. Route handlers call
-get_proposal_repository() / get_feedback_repository() to access them.
+A ProposalRepository (write path for saved proposals), a
+FeedbackRepository (write path for feedback submissions), a
+ProposalEngagementRepository (write path for proposal likes/comments),
+and a ComputeCacheRepository (the §2.3 compute cache, WP13) are
+created alongside them — each holds its own connection to the same
+database, keeping DBDataLoader strictly read-only. Route handlers call
+get_proposal_repository() / get_feedback_repository() /
+get_proposal_engagement_repository() to access them.
 
 State
 -----
-  _loader        : DBDataLoader instance (created at startup)
-  _country_index : CountryIndex instance (built at startup from the loader)
-  _proposal_repo : ProposalRepository instance (created at startup)
-  _feedback_repo : FeedbackRepository instance (created at startup)
-  _loaded        : bool — True after successful DB connection
-  _loaded_at     : datetime | None — UTC timestamp of startup
-  _load_error    : str | None — error message if startup failed
+  _loader          : DBDataLoader instance (created at startup)
+  _country_index   : CountryIndex instance (built at startup from the loader)
+  _rail_router     : RailRouter instance (built at startup on the CountryIndex)
+  _proposal_repo   : ProposalRepository instance (created at startup)
+  _feedback_repo   : FeedbackRepository instance (created at startup)
+  _engagement_repo : ProposalEngagementRepository instance (created at startup)
+  _compute_cache   : ComputeCacheRepository instance (created at startup)
+  _loaded          : bool — True after successful DB connection
+  _loaded_at       : datetime | None — UTC timestamp of startup
+  _load_error      : str | None — error message if startup failed
 """
 
 from __future__ import annotations
@@ -42,9 +52,12 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 _loader = None
 _country_index = None
+_rail_router = None
 _proposal_repo = None
 _feedback_repo = None
+_engagement_repo = None
 _auth_repo = None
+_compute_cache = None
 _loaded: bool = False
 _loaded_at: Optional[datetime] = None
 _load_error: Optional[str] = None
@@ -69,27 +82,35 @@ def init() -> None:
     global \
         _loader, \
         _country_index, \
+        _rail_router, \
         _proposal_repo, \
         _feedback_repo, \
+        _engagement_repo, \
         _auth_repo, \
+        _compute_cache, \
         _loaded, \
         _loaded_at, \
         _load_error
 
     from adapters.data_loader_from_db import DBDataLoader
-    from adapters.proposal_repository import ProposalRepository
+    from adapters.proposal.repository import ProposalRepository
     from adapters.feedback_repository import FeedbackRepository
+    from adapters.proposal.engagement_repository import ProposalEngagementRepository
     from adapters.auth_repository import AuthRepository
-    from models.route.routing.rail_router import CountryIndex
+    from adapters.proposal.compute_cache import ComputeCacheRepository
+    from models.route.routing.rail_router import CountryIndex, RailRouter
 
     logger.info("Connecting to database...")
 
     try:
         _loader = DBDataLoader()
         _country_index = CountryIndex(_loader.get_country_geometries())
+        _rail_router = RailRouter(_country_index)
         _proposal_repo = ProposalRepository()
         _feedback_repo = FeedbackRepository()
+        _engagement_repo = ProposalEngagementRepository()
         _auth_repo = AuthRepository()
+        _compute_cache = ComputeCacheRepository()
         _loaded = True
         _loaded_at = datetime.now(timezone.utc)
         _load_error = None
@@ -121,6 +142,16 @@ def get_country_index():
     return _country_index
 
 
+def get_rail_router():
+    """
+    Return the singleton RailRouter.
+    Raises DataNotLoadedError if init() has not completed successfully.
+    """
+    if not _loaded or _rail_router is None:
+        raise DataNotLoadedError("Data not loaded. Call POST /api/data/load first.")
+    return _rail_router
+
+
 def get_proposal_repository():
     """
     Return the singleton ProposalRepository.
@@ -139,6 +170,26 @@ def get_feedback_repository():
     if not _loaded or _feedback_repo is None:
         raise DataNotLoadedError("Data not loaded. Call POST /api/data/load first.")
     return _feedback_repo
+
+
+def get_proposal_engagement_repository():
+    """
+    Return the singleton ProposalEngagementRepository.
+    Raises DataNotLoadedError if init() has not completed successfully.
+    """
+    if not _loaded or _engagement_repo is None:
+        raise DataNotLoadedError("Data not loaded. Call POST /api/data/load first.")
+    return _engagement_repo
+
+
+def get_compute_cache():
+    """
+    Return the singleton ComputeCacheRepository (§2.3 compute cache).
+    Raises DataNotLoadedError if init() has not completed successfully.
+    """
+    if not _loaded or _compute_cache is None:
+        raise DataNotLoadedError("Data not loaded. Call POST /api/data/load first.")
+    return _compute_cache
 
 
 def get_auth_repository():

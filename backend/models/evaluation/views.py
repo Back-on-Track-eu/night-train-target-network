@@ -40,9 +40,6 @@ from models.evaluation.version import (
 from models.evaluation.calc import (
     EvaluationResult,
     SegmentPassengerLoad,
-    ODSegmentLoad,
-    ParkingCost,
-    ShuntingCost,
 )
 
 # =============================================================================
@@ -1707,6 +1704,46 @@ def build_breakdown_per_trip_per_stop(
 
 
 # =============================================================================
+# ALL VIEWS — one bundle per evaluation
+# =============================================================================
+
+
+@dataclass
+class ViewsBundle:
+    """Every breakdown view one evaluation produces, built together —
+    the single unit the pipeline, the seed, and model-layer tests all
+    consume (api/helpers/evaluation_serialize.views_to_dict() serializes
+    it wholesale)."""
+
+    bd_all: Breakdown
+    bd_per_pair: dict[str, Breakdown]
+    matrix_country: dict[tuple[str, str], Breakdown]
+    matrix_od: dict[tuple[str, str], Breakdown]
+    matrix_section: dict[tuple[str, str], Breakdown]
+    section_scopes: dict[tuple[str, str], NormalisationScope]
+    matrix_stop: dict[tuple[str, str], Breakdown]
+
+
+def build_all_views(route: Route, result: EvaluationResult) -> ViewsBundle:
+    """Build the six breakdown views for one evaluated route — the fixed
+    set every compute path needs. Extracted so no caller re-assembles the
+    six build_* calls by hand (they were previously duplicated across the
+    pipeline, the DB seed, and the test helpers)."""
+    matrix_section, section_scopes = build_breakdown_per_trip_pair_per_section(
+        route, result
+    )
+    return ViewsBundle(
+        bd_all=build_breakdown(route, result),
+        bd_per_pair=build_breakdown_per_trip_pair(route, result),
+        matrix_country=build_breakdown_per_trip_pair_per_country(route, result),
+        matrix_od=build_breakdown_per_trip_pair_per_od(route, result),
+        matrix_section=matrix_section,
+        section_scopes=section_scopes,
+        matrix_stop=build_breakdown_per_trip_per_stop(route, result),
+    )
+
+
+# =============================================================================
 # LAYER 3 — NORMALISERS
 # =============================================================================
 
@@ -2217,9 +2254,10 @@ def _train_km_divisor(
 #
 # Documents, once per view × normalisation combination, what filter/scope
 # stage(s) produced that number and what it was divided by. Consumed by
-# api/evaluation.py to build a single "views_meta" block in the response —
-# not repeated per data point, since the same 25 descriptions apply
-# identically to every pair/country/OD/stop key in "views".
+# api/helpers/evaluation_serialize.py, which merges each view's metadata
+# into that view's own response section — not repeated per data point,
+# since the same descriptions apply identically to every pair/country/OD/
+# stop key in "views".
 
 _VIEW_FILTER_STAGES: dict[str, list[str]] = {
     "route": ["all trip pairs", "all segments/stops/OD pairs"],

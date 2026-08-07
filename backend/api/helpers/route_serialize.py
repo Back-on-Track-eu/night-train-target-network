@@ -16,11 +16,13 @@ endpoints. Keeps each file scoped to one domain rather than one large file
 mixing route, evaluation, and params concerns.
 
 Public interface:
-  validate_route_dict(data)                     → list[str]  (structural check before deserializing)
-  route_to_dict(route, scenario_id, tracks)      → dict       (for POST /api/route response)
-  route_from_dict(data, loader, scenario_id)     → (Route, CompositionCollection)  (for POST /api/evaluation/calc)
-  suggested_stops_to_dicts(suggestions)          → list[dict] (for POST /api/route/plan's
-                                                    suggested_stops section, auto_stop_addition="suggest")
+  route_to_dict(route, scenario_id, tracks)      → dict       (the "route" section of the merged
+                                                    compute response and of stored/loaded proposals)
+  route_from_dict(data, loader, scenario_id)     → (Route, CompositionCollection)  (rebuilds domain
+                                                    objects from a route dict — model-layer test
+                                                    evaluations, db/dev/seed.py's example proposal)
+  suggested_stops_to_dicts(suggestions)          → list[dict] (the suggested_stops section,
+                                                    auto_stop_addition="suggest")
 """
 
 from __future__ import annotations
@@ -39,41 +41,6 @@ from models.route.route import (
 from models.route.trip import Stop, StopType, Segment, Trip, TimetableWarning
 from models.route.timetable import AutoStopSuggestion
 from models.params import Composition, TrackInfraCollection, CompositionCollection
-
-# =============================================================================
-# ROUTE — validate
-# =============================================================================
-
-
-def validate_route_dict(data: dict) -> list[str]:
-    """Structural validation of a route_to_dict() payload before deserialization.
-    Returns a list of error messages, empty if valid."""
-    errors = []
-    if not isinstance(data.get("route_id"), str):
-        errors.append("route.route_id must be a string.")
-    schedule = data.get("schedule")
-    if not isinstance(schedule, dict) or not isinstance(
-        schedule.get("seasonal_schedules"), list
-    ):
-        errors.append("route.schedule.seasonal_schedules must be a list.")
-    trip_pairs = data.get("trip_pairs")
-    if not isinstance(trip_pairs, list) or len(trip_pairs) == 0:
-        errors.append("route.trip_pairs must be a non-empty list.")
-    else:
-        for i, tp in enumerate(trip_pairs):
-            prefix = f"route.trip_pairs[{i}]"
-            if not isinstance(tp.get("composition_id"), str):
-                errors.append(f"{prefix}.composition_id must be a string.")
-            for direction in ("outbound", "return_trip"):
-                trip = tp.get(direction)
-                if not isinstance(trip, dict):
-                    errors.append(f"{prefix}.{direction} must be an object.")
-                elif not isinstance(trip.get("segments"), list):
-                    errors.append(f"{prefix}.{direction}.segments must be a list.")
-    if "geometries" in data and not isinstance(data["geometries"], list):
-        errors.append("route.geometries must be a list if present.")
-    return errors
-
 
 # =============================================================================
 # ROUTE — serialize
@@ -194,10 +161,15 @@ def _composition_to_dict(comp: Composition) -> dict:
     (driver_costs_eur_h, purchase_coach_eur, etc.); this endpoint is
     physics-only (see route.py's module docstring), so every *_eur*/*_per
     cost field and driver_factor (a crew-cost input only) are deliberately
-    excluded here. Full cost breakdown lives in POST /api/evaluation/calc."""
+    excluded here. The full cost breakdown lives in the merged compute
+    response's "evaluation" block."""
     return {
-        "comp_id": comp.comp_id,
-        "comp_description": comp.comp_description,
+        # composition_id/description, not the domain's comp_id/
+        # comp_description: the enclosing trip_pair already keys this
+        # object by "composition_id", and the two sat one level apart
+        # under different names until 2026-08-07.
+        "composition_id": comp.comp_id,
+        "description": comp.comp_description,
         "operator_id": comp.operator_id,
         "max_speed_kmh": comp.max_speed_kmh,
         "hsr_allowed": comp.hsr_allowed,
@@ -445,7 +417,7 @@ def route_from_dict(
 
     Returns (Route, CompositionCollection) — the collection is returned
     alongside the Route (rather than just the Route, as before 2026-07-06)
-    so callers like api/evaluation.py can reuse it to document the actual
+    so callers (api/helpers/proposal_compute.py, tests) can reuse it to document the actual
     composition/operator parameters an evaluation was costed with, without
     a second DB round-trip.
     """

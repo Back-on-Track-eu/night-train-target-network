@@ -72,15 +72,12 @@ ID convention
   models/route/version.py. Not started here.
 
   proposal_id/version are always concrete ints by the time they reach here
-  — for a brand new proposal (no DB row yet), api/route.py assigns a random
-  placeholder proposal_id above one billion (Postgres SERIAL for
-  proposals.proposals starts at 1 and won't realistically reach that range)
-  and proposal_version=1, rather than this module having to know about or
-  branch on a "not saved yet" state. That assignment is a stand-in for a
-  future scenarios/proposals module that will own draft-vs-saved handling
-  properly; api/route.py is just the simplest place to put it until that
-  module exists. Either way, route_factory.py only ever sees real ints and
-  always uses the one ID format.
+  — ephemeral compute (POST /api/proposal/calc) passes the fixed neutral
+  placeholders NEUTRAL_PROPOSAL_ID/VERSION (models/route/version.py, both
+  0) and publish later rewrites the resulting bare structural ids up to
+  the real P{proposal_id}_V{version}_ prefix (adapters/proposal/
+  repository.py). Either way, route_factory.py only ever sees real ints
+  and always uses the one ID format.
 """
 
 from __future__ import annotations
@@ -91,14 +88,13 @@ from dataclasses import dataclass
 from models.params import (
     ModelVersions,
     ParamVersions,
-    ODPair,
     TrackInfraCollection,
     StopInfraCollection,
     Composition,
     CompositionCollection,
 )
 from models.route.trip import Stop, StopType, Segment, Trip, TimetableWarning
-from models.route.route import Route, TripPair, Parking, Shunting, Schedule
+from models.route.route import Route, TripPair, Parking, Shunting
 from models.route.routing.rail_router import RailRouter, RoutedLeg, build_router_stops
 from models.route.timetable import (
     simple_automatic_timetable,
@@ -129,16 +125,29 @@ class RouteProvenance:
     scenario_id: int
     """Concrete scenario_id used to build this Route — never None here, even
     if the caller passed None (meaning "use the live base"): resolved once
-    to a concrete id at the top of plan_route()/adjust_route() so a saved
+    to a concrete id at the top of plan_route() so a saved
     Route stays reproducible even after the base scenario moves on."""
     tracks: TrackInfraCollection
     """All countries' track infrastructure for this scenario — not just the
     ones this particular route touches. Same object regardless of which
     TripPair it was loaded for (all pairs share one scenario_id), so
     plan_route() just keeps whichever pair's copy loaded last. Exists here
-    so api/route.py can pass it to route_to_dict() for the response's
+    so the API layer can pass it to route_to_dict() for the response's
     track_infrastructure block — Route itself never stores it (physics-only,
     per the project's separation-of-concerns rule)."""
+    compositions: CompositionCollection
+    """The full composition catalog for this scenario, built once in
+    plan_route() (below) and otherwise discarded after use. Threaded
+    through here (2026-08-03, adapters/proposal/README.md efficiency note) so
+    api/proposal_calc.py's merged evaluate step doesn't have to reload it a
+    second time via loader.build_all_compositions() — the same efficiency
+    rationale as tracks above, not a new one."""
+    stop_infra: StopInfraCollection
+    """All stop infrastructure for this scenario, built once in
+    plan_route() (for parkings) and otherwise discarded after use.
+    Threaded through for the same reason as compositions above — avoids
+    api/proposal_calc.py's evaluate step reloading it via
+    loader.build_all_stops() a second time."""
 
 
 @dataclass
@@ -147,7 +156,7 @@ class TripPairInput:
     pairs share one schedule, passed to plan_route() directly.
 
     No field here has a default — mode/flag defaulting is an API-boundary
-    concern (see api/route.py), not something route_factory.py or its
+    concern (see api/helpers/proposal_compute.py), not something route_factory.py or its
     callers should need to know about. Every field must be explicitly
     supplied by the caller."""
 
@@ -204,9 +213,7 @@ def _build_trip_stops_and_legs(
 
     auto_added_stop_ids: stop_ids that auto_stop_addition inserted beyond
     what the caller originally supplied — stamped onto the matching Stop's
-    auto_added field. Empty by default; adjust_route() passes through
-    whichever stops were already flagged on the trip it's rebuilding from,
-    so the marker survives schedule-only adjustments.
+    auto_added field. Empty by default.
 
     slack_per_leg: fixed-night stretch minutes per leg (see
     simple_automatic_fixed_night_timetable) — stamped onto each Segment's
@@ -332,7 +339,7 @@ def _check_country_coverage(
     """Every country a route's legs pass through must have a row in
     input_params.track_infrastructures — no silent EU-average substitution
     for a country that was never seeded at all. Raises ValueError naming
-    whatever's missing, surfaced by api/route.py as a 422 domain_error.
+    whatever's missing, surfaced by api/proposal_calc.py as a 422 domain_error.
 
     Individual fields on that row being None (and therefore resolved from
     track_infrastructure_defaults) is fine and expected — that's exactly
@@ -418,9 +425,9 @@ def _build_trip(
     # returns routed_legs matching whatever stop_ids it hands back
     # (unchanged for "off"/"suggest"), so no separate re-route is ever
     # needed after this block regardless of which branch ran.
-    # VALID_AUTO_STOP_ADDITION_MODES is the same set api/route.py validates
-    # the request against, so an unknown mode can only reach here if that
-    # validation was bypassed.
+    # VALID_AUTO_STOP_ADDITION_MODES is the same set the compute request
+    # validation checks against, so an unknown mode can only reach here if
+    # that validation was bypassed.
     suggestions: list[AutoStopSuggestion] = []
     if known_auto_added_stop_ids is not None:
         auto_added_stop_ids = known_auto_added_stop_ids
@@ -459,7 +466,7 @@ def _build_trip(
 
     # timetable_mode SWITCH — which named strategy computes departure time
     # + stop classification for this direction. VALID_TIMETABLE_MODES is the
-    # same set api/route.py validates the request against, so an unknown
+    # same set the compute request validation (api/helpers/proposal_compute.py) checks against, so an unknown
     # mode can only reach here if that validation was bypassed. Only the
     # fixed-night strategy produces slack; every other mode gets zeros.
     if timetable_mode == "simpleAutomatic":
@@ -641,7 +648,7 @@ def _build_trip_pair(
         outbound=outbound,
         return_trip=return_trip,
         composition=composition,
-        od_pairs=[],  # populated later by distribute_demand()
+        od_pairs=[],  # populated later by models/demand (stopgap.distribute_demand())
     )
     return pair, suggestions, param_versions, tracks
 
@@ -664,14 +671,15 @@ def plan_route(
     Build a Route from scratch. One TripPair per entry in trip_pair_inputs
     (Y-shaped routes pass several, each with its own composition).
     All pairs share the route-level schedule.
-    Demand is not set here — call distribute_demand() after plan_route()
-    to populate od_pairs on each TripPair.
+    Demand is not set here — call models/demand's
+    stopgap.distribute_demand() after plan_route() to populate od_pairs on
+    each TripPair.
 
     Returns (Route, RouteProvenance, suggestions). suggestions is only
     non-empty for auto_stop_addition="suggest" — the costed candidate
     stops the search found near each pair's outbound corridor, concatenated
     across pairs (a Y-shaped route contributes each branch's suggestions in
-    pair order), for api/route.py to serialize into the response. Not part
+    pair order), for the API layer to serialize into the response. Not part
     of the Route itself — nothing was added to any trip.
 
     No parameter here has a default and none is Optional — all resolution
@@ -688,9 +696,9 @@ def plan_route(
     reproducible even if the live base scenario later moves on.
     """
     # schedule_mode SWITCH — which named strategy builds this route's
-    # Schedule. VALID_SCHEDULE_MODES is the same set api/route.py validates
-    # the request against, so an unknown mode can only reach here if that
-    # validation was bypassed.
+    # Schedule. VALID_SCHEDULE_MODES is the same set the compute request
+    # validation checks against, so an unknown mode can only reach here if
+    # that validation was bypassed.
     if schedule_mode == "alwaysDaily":
         schedule = always_daily_schedule()
     else:
@@ -768,266 +776,8 @@ def plan_route(
             param_versions=merged_param_versions,
             scenario_id=scenario_id,
             tracks=tracks_used,
+            compositions=compositions,
+            stop_infra=stop_infra,
         ),
         suggestions,
     )
-
-
-# =============================================================================
-# ADJUST ROUTE — schedule changes only, no rerouting
-# =============================================================================
-
-
-def adjust_route(
-    existing_route: Route,
-    existing_provenance: RouteProvenance,
-    proposal_id: int,
-    proposal_version: int,
-    schedule: Schedule | None = None,
-    departure_time_min: int | None = None,
-    stop_type_changes: dict[str, StopType] | None = None,
-    od_pairs: list[ODPair] | None = None,
-    loader=None,
-    tracks: TrackInfraCollection | None = None,
-) -> tuple[Route, RouteProvenance]:
-    """
-    Create a new Route version with schedule or timetable changes — no
-    rerouting, segment physics copied unchanged. Provenance carries over
-    unchanged since no recalculation happens.
-
-    schedule: new Schedule for the route, or None to keep existing.
-    departure_time_min: applied to every TripPair, or None to keep existing.
-    stop_type_changes: {stop_id: StopType} overrides, or None to keep existing.
-    """
-    rid = _route_id(proposal_id, proposal_version)
-    logger.info(
-        "adjust_route: id=%s from=%s scenario_id=%d",
-        rid,
-        existing_route.route_id,
-        existing_provenance.scenario_id,
-    )
-
-    # _build_trip_stops_and_legs() below always needs tracks whenever segments are being
-    # rebuilt — which happens for EITHER stop_type_changes OR a departure
-    # time change (dwell times, buffer times etc. are re-derived either
-    # way). The old condition here only loaded tracks for stop_type_changes,
-    # leaving a departure-time-only adjust to hit _build_trip_stops_and_legs() with
-    # tracks=None → AttributeError on tracks.get().
-    rebuilding_segments = stop_type_changes or departure_time_min is not None
-    if rebuilding_segments and tracks is None and loader is not None:
-        tracks = loader.build_all_tracks(existing_provenance.scenario_id)
-        stop_infra = loader.build_all_stops(existing_provenance.scenario_id)
-    else:
-        stop_infra = (
-            loader.build_all_stops(existing_provenance.scenario_id) if loader else None
-        )
-
-    new_pairs: list[TripPair] = []
-
-    for pair_index, pair in enumerate(existing_route.trip_pairs, start=1):
-        new_trips: dict[int, Trip] = {}
-
-        for existing_trip in pair.trips:
-            new_dep = (
-                departure_time_min
-                if departure_time_min is not None
-                else existing_trip.departure_time_min
-            )
-            new_tid = _trip_id(
-                proposal_id, proposal_version, existing_trip.direction, pair_index
-            )
-
-            if stop_type_changes or departure_time_min is not None:
-                stop_inputs = [
-                    (
-                        s.stop_id,
-                        (
-                            stop_type_changes.get(s.stop_id, s.stop_type)
-                            if stop_type_changes
-                            else s.stop_type
-                        ),
-                    )
-                    for s in existing_trip.stops
-                ]
-                routed_legs = [
-                    RoutedLeg(
-                        geometry=seg.geometry,
-                        distance_m=seg.distance_m,
-                        driving_time_min=seg.driving_time_min,
-                        dynamics_time_min=seg.dynamics_time_min,
-                        buffer_time_min=seg.buffer_time_min,
-                        energy_kwh=seg.energy_kwh,
-                        country_distance_shares=seg.country_distance_shares,
-                        country_time_shares=seg.country_time_shares,
-                    )
-                    for seg in existing_trip.segments
-                ]
-                # No rerouting happens here, so which stops were originally
-                # auto-added doesn't change — carry the marker forward
-                # rather than silently losing it on a schedule-only adjust.
-                auto_added_stop_ids = frozenset(
-                    s.stop_id for s in existing_trip.stops if s.auto_added
-                )
-                # Fixed-night slack is likewise a decision already made
-                # (RoutedLeg carries physics only) — carried forward per
-                # leg so a schedule-only adjust keeps the stretched times.
-                slack_per_leg = [seg.slack_time_min for seg in existing_trip.segments]
-                new_segments = _build_trip_stops_and_legs(
-                    stop_inputs=stop_inputs,
-                    routed_legs=routed_legs,
-                    composition=pair.composition,
-                    tracks=tracks,
-                    stop_infra=stop_infra,
-                    departure_time_min=new_dep,
-                    auto_added_stop_ids=auto_added_stop_ids,
-                    slack_per_leg=slack_per_leg,
-                )
-            else:
-                new_segments = existing_trip.segments
-
-            # Warnings were derived under the fixed-night interval, which
-            # isn't stored on the Route — carried forward as-is (a pure
-            # departure shift doesn't change interval speeds; a stop_type
-            # change can shift dwell by a few minutes, accepted drift).
-            new_trips[existing_trip.direction] = Trip._create(
-                trip_id=new_tid,
-                direction=existing_trip.direction,
-                segments=new_segments,
-                timetable_warnings=list(existing_trip.timetable_warnings),
-            )
-
-        new_pairs.append(
-            TripPair(
-                outbound=new_trips[0],
-                return_trip=new_trips[1],
-                composition=pair.composition,
-                od_pairs=pair.od_pairs,  # carry over existing demand
-            )
-        )
-
-    parking = (
-        _parkings(
-            [t for pair in new_pairs for t in pair.trips],
-            stop_infra,
-        )
-        if stop_infra
-        else existing_route.parkings
-    )
-
-    route = Route._create(
-        route_id=rid,
-        schedule=schedule if schedule is not None else existing_route.schedule,
-        trip_pairs=new_pairs,
-        parkings=parking,
-        shuntings=_shuntings([t for pair in new_pairs for t in pair.trips]),
-    )
-
-    logger.info("adjust_route done: id=%s pairs=%d", rid, len(route.trip_pairs))
-    return route, existing_provenance
-
-
-# =============================================================================
-# DEMAND DISTRIBUTION
-# =============================================================================
-
-
-def distribute_demand(
-    route: Route,
-    utilization_per: float,
-    fare_per_km_by_class: dict[str, float],
-) -> Route:
-    """
-    Proxy demand model: distributes uniform demand across all valid OD pairs
-    for each trip pair, based on a target utilization and per-km fare.
-
-    This is a placeholder until a proper demand model is built. Assumptions:
-    - A night train place is sold at most once per night (no double-selling),
-      so each place contributes to exactly one OD pair per trip.
-    - Demand is spread uniformly across all valid OD pairs within each class.
-    - Valid OD pair: origin.stop_type in {BOARDING, BOTH} and
-      destination.stop_type in {ALIGHTING, BOTH} and origin precedes
-      destination in the trip's stop sequence. Stops that are boarding-only
-      (e.g. pre-midnight city stops) cannot be destinations; stops that are
-      alighting-only (e.g. early-morning terminus) cannot be origins.
-    - avg_price per OD pair is derived as fare_per_km_by_class[class] ×
-      distance_km between origin and destination stop (sum of segment
-      distances between those stop indices in the outbound trip).
-    - places_sold per OD pair (annual) = floor(
-          composition_places_by_class[class] × utilization_per
-          / n_valid_od_pairs_for_class
-      ) × operating_days_per_year
-    - Demand is set on the outbound trip only. The return trip gets a
-      mirrored set of OD pairs with origin/destination swapped and the
-      same utilization applied to return direction capacity.
-
-    Returns the route with each TripPair's od_pairs populated.
-    Replaces any existing od_pairs on the trip pairs.
-
-    TODO: replace with a proper demand model that accounts for asymmetric
-    directional demand, price elasticity, and competition from other modes.
-    """
-    operating_days = route.schedule.operating_days_per_year
-
-    for pair in route.trip_pairs:
-        od_pairs: list[ODPair] = []
-
-        for trip in pair.trips:
-            stops = trip.stops
-
-            # Build segment distance lookup: cumulative distance up to each stop index
-            # so distance between stop[i] and stop[j] = cumulative[j] - cumulative[i]
-            cumulative_km: list[float] = [0.0]
-            for segment in trip.segments:
-                cumulative_km.append(cumulative_km[-1] + segment.distance_m / 1000.0)
-
-            # Find valid (origin_idx, destination_idx) pairs. NIGHT stops
-            # are deliberately on neither side — demand-quiet by definition
-            # (the whole point of the classification); they still dwell and
-            # cost like BOTH, they just sell no places in this stopgap.
-            valid_pairs: list[tuple[int, int]] = [
-                (i, j)
-                for i in range(len(stops))
-                for j in range(i + 1, len(stops))
-                if stops[i].stop_type in (StopType.BOARDING, StopType.BOTH)
-                and stops[j].stop_type in (StopType.ALIGHTING, StopType.BOTH)
-            ]
-
-            if not valid_pairs:
-                continue
-
-            # Distribute demand per class
-            places_by_class = pair.composition.places_by_class
-            for class_main, total_places in places_by_class.items():
-                fare_per_km = fare_per_km_by_class.get(class_main, 0.0)
-                n_pairs = len(valid_pairs)
-                if n_pairs == 0 or fare_per_km == 0.0:
-                    continue
-
-                # Annual places sold per OD pair: distribute uniformly.
-                # Floor ensures we never exceed physical capacity.
-                places_per_od = int(
-                    (total_places * utilization_per / n_pairs) * operating_days
-                )
-
-                for origin_idx, dest_idx in valid_pairs:
-                    origin = stops[origin_idx]
-                    destination = stops[dest_idx]
-                    distance_km = cumulative_km[dest_idx] - cumulative_km[origin_idx]
-                    avg_price = fare_per_km * distance_km
-
-                    od_pairs.append(
-                        ODPair(
-                            origin_stop_id=origin.stop_id,
-                            destination_stop_id=destination.stop_id,
-                            class_main=class_main,
-                            trip_id=trip.trip_id,
-                            places_sold=places_per_od,
-                            avg_price=avg_price,
-                        )
-                    )
-
-        # TripPair isn't frozen — plain reassignment replaces any od_pairs
-        # the pair may already have (e.g. from a prior distribute_demand() call).
-        pair.od_pairs = od_pairs
-
-    return route

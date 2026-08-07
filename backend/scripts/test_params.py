@@ -119,7 +119,7 @@ def test_params(endpoint: str, scenario_id: int | None):
             print(f"\n--- COMPOSITIONS ({len(comps)}) ---")
             if comps:
                 c = comps[0]
-                print(f"  first: {c['comp_id']} ({c['description']})")
+                print(f"  first: {c['composition_id']} ({c['description']})")
         elif endpoint == "tracks":
             tracks = response_body["track_infrastructures"]
             print(f"\n--- TRACK INFRASTRUCTURES ({len(tracks)}) ---")
@@ -127,7 +127,7 @@ def test_params(endpoint: str, scenario_id: int | None):
                 t = tracks[0]
                 print(f"  first: {t['country_code']}")
     else:
-        print(f"\nError response:")
+        print("\nError response:")
         print(json.dumps(response_body, indent=2))
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)

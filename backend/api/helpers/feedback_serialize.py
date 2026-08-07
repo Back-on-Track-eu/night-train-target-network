@@ -276,9 +276,9 @@ def _breakdown_leaf_fields() -> list[dict]:
 
 
 def _evaluation_view_sub_categories() -> list[dict]:
-    """The output views POST /api/evaluation/calc actually produces — the
-    same VIEW_META api/helpers/evaluation_serialize.py builds each view's
-    response section from, not a separately hand-maintained list."""
+    """The output views the merged compute response actually produces —
+    the same VIEW_META api/helpers/evaluation_serialize.py builds each
+    view's response section from, not a separately hand-maintained list."""
     return [
         {
             "parameter": view,

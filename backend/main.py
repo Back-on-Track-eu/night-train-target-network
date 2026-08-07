@@ -15,16 +15,27 @@ Endpoints — see api/README.md for full documentation.
   POST /api/auth/guest
   POST /api/feedback
   GET  /api/feedback/categories
-  POST /api/proposal
+  POST /api/proposal/calc
+  POST /api/proposal/publish
   GET  /api/proposals
   POST /api/proposals
+  POST /api/proposals/compare
   GET  /api/proposal/<id>
+  GET    /api/proposal/<id>/likes
+  POST   /api/proposal/<id>/likes
+  DELETE /api/proposal/<id>/likes
+  GET    /api/proposal/<id>/comments
+  POST   /api/proposal/<id>/comments
+  PATCH  /api/proposal/<id>/comments/<cid>
+  DELETE /api/proposal/<id>/comments/<cid>
   GET  /api/params/StopInfrastructures
   GET  /api/params/compositions
   GET  /api/params/TrackInfrastructures
   GET  /api/scenarios
-  POST /api/route/plan
-  POST /api/evaluation/calc
+
+POST /api/proposal/calc is the merged ephemeral compute endpoint and
+POST /api/proposal/publish the only user write path (adapters/proposal/README.md
+§2).
 """
 
 import logging
@@ -35,7 +46,18 @@ from flask_cors import CORS
 from api.auth_utils import check_auth_config
 from api.helpers.dependencies import DataNotLoadedError, init
 from api.limiter import limiter
-from api import health, params, route, evaluation, auth, feedback, proposals, scenarios
+from api import (
+    health,
+    params,
+    proposal_calc,
+    proposal_compare,
+    proposal_publish,
+    auth,
+    feedback,
+    proposals,
+    proposal_engagement,
+    scenarios,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -60,11 +82,15 @@ def create_app() -> Flask:
     # --- blueprints ---
     app.register_blueprint(health.bp, url_prefix="/api")
     app.register_blueprint(params.bp, url_prefix="/api/params")
-    app.register_blueprint(route.bp, url_prefix="/api/route")
-    app.register_blueprint(evaluation.bp, url_prefix="/api/evaluation")
+    # Merged ephemeral compute (calc) + the only user write path
+    # (publish) — adapters/proposal/README.md §2.
+    app.register_blueprint(proposal_calc.bp, url_prefix="/api/proposal")
+    app.register_blueprint(proposal_publish.bp, url_prefix="/api/proposal")
     app.register_blueprint(auth.bp, url_prefix="/api/auth")
     app.register_blueprint(feedback.bp, url_prefix="/api")
     app.register_blueprint(proposals.bp, url_prefix="/api")
+    app.register_blueprint(proposal_compare.bp, url_prefix="/api")
+    app.register_blueprint(proposal_engagement.bp, url_prefix="/api")
     app.register_blueprint(scenarios.bp, url_prefix="/api")
 
     # --- settings ---

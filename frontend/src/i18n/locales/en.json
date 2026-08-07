@@ -89,7 +89,6 @@
         "trip": "All trips",
         "stop": "All stops"
       },
-      "calculating": "Calculating…",
       "noData": "No data for this selection.",
       "showRaw": "Raw JSON",
       "calcVersion": "calc version",

@@ -26,12 +26,12 @@ from dataclasses import dataclass
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.12"
+ROUTE_BUILDER_VERSION: str = "0.9.16"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
 # Short, plain-English summary of what this model computes — embedded as-is
-# in the "models" section of POST /api/evaluation/calc's response, alongside
+# in the "models" section of the merged compute response, alongside
 # ROUTE_BUILDER_VERSION and ROUTE_FORMULAS.
 ROUTE_BUILDER_DESCRIPTION: str = (
     "Route/timetable builder: turns a list of stops, a composition, and "
@@ -41,6 +41,66 @@ ROUTE_BUILDER_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.16": {
+        "date": "2026-08-07",
+        "author": "david",
+        "changes": "Comment-only: stale references to the retired ONTD "
+        "runtime stop-minting (db/ontd/stop_mapping.py, superseded by "
+        "seed-time stop catalog loading) corrected in route_factory.py "
+        "and rail_router.py. No behavior change, no Trip output change — "
+        "bumped only because CI's version-check gate fires on any diff "
+        "to these files regardless of content.",
+    },
+    "0.9.15": {
+        "date": "2026-08-06",
+        "author": "david",
+        "changes": "auto_stop_addition costing made analytic; 0.9.14's batch "
+        "routing reverted. Measurement (test_20, 575-stop catalog) showed "
+        "the batch partition degenerating to one full-trip router call per "
+        "candidate on few-stop trips (13-19s per costing pass) — and every "
+        "accepted candidate's routed cost resolving to ~dwell + dynamics, "
+        "i.e. the router re-measuring what the model already knows. Now: "
+        "candidates within AUTO_STOP_ANALYTIC_DETOUR_M (new standard "
+        "value, 100m) of the routed geometry are costed as dwell + "
+        "stop_time_loss_s() accel/brake pair + out-and-back detour at the "
+        "host leg's cruise speed — zero router calls; only candidates "
+        "further out AND whose analytic lower bound fits the trip's "
+        "detour budget get a real 3-point mini-reroute (bounded "
+        "concurrency). AUTO_STOP_BUFFER_M widened 3km -> 10km so stations "
+        "the initial routing bypassed on parallel lines enter the "
+        "candidate pool at all. OUTPUT CHANGES: candidate pools grow "
+        "(wider buffer); on-path candidate times are model-derived "
+        "estimates rather than router measurements (identical to model "
+        "precision); over-budget far candidates report their analytic "
+        "lower bound in mode suggest.",
+    },
+    "0.9.14": {
+        "date": "2026-08-06",
+        "author": "david",
+        "changes": "auto_stop_addition costing batched (WP10 step 6a "
+        "follow-up): candidates are priced by 2-3 multi-stop router calls "
+        "whose per-leg times decompose into each candidate's exact added "
+        "time, instead of one 3-point mini-reroute per candidate — router "
+        "calls now scale with per-leg candidate density, not candidate "
+        "count, keeping calc interactive with the ONTD-minted (and future "
+        "calibrated) stop catalog. Decomposition is numerically identical "
+        "to the per-candidate mini-reroutes (same endpoints, via-point "
+        "legs computed independently), so candidate selection is "
+        "unchanged; a failed batch falls back to the per-candidate path "
+        "so one unsnappable stop only excludes itself. Version bumped for "
+        "the CI version-check contract — no computed number changes for "
+        "any given catalog.",
+    },
+    "0.9.13": {
+        "date": "2026-08-03",
+        "author": "david",
+        "changes": "Pure refactor, outputs unchanged: adjust_route() removed "
+        "(unreachable since WP5's cutover); the stopgap demand model "
+        "(distribute_demand() + STOPGAP_* standard values and the "
+        "demand_model TODO) moved out to the new models/demand/ package "
+        "ahead of the real demand model landing there. Version bumped for "
+        "the CI version-check contract only — no computed number changes.",
+    },
     "0.9.12": {
         "date": "2026-07-21",
         "author": "david",
@@ -273,7 +333,7 @@ CHANGELOG: dict = {
 # change and warrants a version bump above.
 # =============================================================================
 
-# --- API request defaults (applied once, at the API boundary — api/route.py)
+# --- API request defaults (applied once, at the API boundary — api/helpers/proposal_compute.py)
 DEFAULT_TIMETABLE_MODE: str = "simpleAutomatic"
 DEFAULT_SCHEDULE_MODE: str = "alwaysDaily"
 DEFAULT_ROUTING_MODE: str = "fullRouting"
@@ -341,10 +401,23 @@ hard block, so a route is still found if high-speed track is genuinely
 the only physical connection."""
 
 # --- auto_stop_addition (candidate search — models/route/timetable.py)
-AUTO_STOP_BUFFER_M: int = 3_000
+AUTO_STOP_BUFFER_M: int = 10_000
 """Max distance (metres) from a stop to the already-routed path for that
 stop to be considered a candidate — covers both stops that sit right on
 the line and ones merely 'close by'."""
+
+AUTO_STOP_ANALYTIC_DETOUR_M: int = 100
+"""Perpendicular distance to the routed geometry under which an
+auto-stop candidate is costed purely analytically (dwell + the dynamics
+model's accel/brake pair + out-and-back detour at cruise speed) with no
+router call — at this distance the stop sits on the routed line and a
+mini-reroute measures the same number at ~1.5s of router time
+(introduced 2026-08-06 after the 575-stop catalog made per-candidate
+routing the dominant calc cost). Candidates further out are refined by
+a real 3-point mini-reroute, since their true track detour can exceed
+the straight-line bound — e.g. a station the initial routing bypassed
+on a parallel line, which is also why AUTO_STOP_BUFFER_M is wide."""
+
 
 AUTO_STOP_MAX_DETOUR_PER: float = 0.05
 """Max allowed increase in full (driving + dynamics + buffer + dwell) trip time, as a
@@ -374,27 +447,18 @@ deceleration); 0.5 m/s² is a comfortable service value appropriate for
 sleeping passengers — full emergency capability is far higher and
 irrelevant for timetabling."""
 
-# --- Stopgap demand (distribute_demand() inputs — see OPEN_TODOS)
-STOPGAP_UTILIZATION_PER: float = 0.7
-"""Placeholder scalar utilization applied uniformly to every class until a
-real demand model lands."""
-
-STOPGAP_FARE_PER_KM_BY_CLASS: dict[str, float] = {
-    "Seat": 0.10,
-    "Couchette": 0.13,
-    "Sleeper": 0.18,
-    "Capsule": 0.12,
-    "Catering": 0.0,
-}
-"""Placeholder flat per-km fares by class_main — same caveat as above."""
-
-# --- Draft proposal placeholder ids (api/route.py)
-DRAFT_PROPOSAL_ID_MIN: int = 1_000_000_000
-DRAFT_PROPOSAL_ID_MAX: int = 2_147_483_647
-"""Random placeholder proposal_id range for a route that hasn't been saved
-as a proposal yet. proposals.proposals.proposal_id is a SERIAL int4
-starting at 1, so a value above one billion won't realistically collide
-with a real one (upper bound = postgres int4 max). See OPEN_TODOS."""
+# --- Neutral placeholder ids (api/helpers/proposal_compute.py, adapters/proposal/README.md §2.1)
+NEUTRAL_PROPOSAL_ID: int = 0
+NEUTRAL_PROPOSAL_VERSION: int = 0
+"""Fixed (not random) placeholder used only to satisfy plan_route()'s
+id-building signature for POST /api/proposal/calc. Never risks colliding
+with anything: /api/proposal/calc never persists, so its P{id}_V{version}_
+prefix exists only for the instant it takes rewrite_id_prefix() (adapters/
+proposal/id_prefix.py) to strip it back off into the neutral R1/T.../
+structural IDs §2.1 specifies. A fixed value keeps that round trip
+deterministic and easy to assert on in tests. Publish (WP5) then rewrites
+those same bare structural ids up to the real P{proposal_id}_V{version}_
+prefix — see adapters/proposal/repository.py's _STRUCTURAL_ROUTE_PREFIX."""
 
 
 # =============================================================================
@@ -416,14 +480,6 @@ OPEN_TODOS: dict[str, str] = {
         "ODPair.trip_id, route_to_dict()/route_from_dict(), and every test "
         "fixture hardcoding IDs — needs its own scoped pass across "
         "route_factory.py, route.py, route_serialize.py, and tests/."
-    ),
-    "demand_model": (
-        "Replace distribute_demand()'s stopgap inputs (STOPGAP_UTILIZATION_"
-        "PER, STOPGAP_FARE_PER_KM_BY_CLASS above) and its uniform-"
-        "distribution proxy with a real demand model accounting for "
-        "asymmetric directional demand, price elasticity, and competition "
-        "from other modes — likely with per-scenario parameters. Target "
-        "module: models/demand/."
     ),
     "auto_stop_nuts1_prefilter": (
         "Candidate search prefilters the stop catalog to countries the "
@@ -464,17 +520,6 @@ OPEN_TODOS: dict[str, str] = {
         "_shuntings() creates one Shunting per trip terminal with no "
         "deduplication; Y/X-shaped routes with shared terminals may need "
         "fewer coupling/uncoupling events."
-    ),
-    "draft_proposal_module": (
-        "The random draft proposal_id (DRAFT_PROPOSAL_ID_MIN/MAX above, "
-        "minted in api/route.py) is a stand-in for a future scenarios/"
-        "proposals module that will own draft-vs-saved handling properly "
-        "and hand back whatever id it thinks is appropriate."
-    ),
-    "adjust_route_unreachable": (
-        "route_factory.adjust_route() (schedule-only changes, no rerouting) "
-        "exists but is not reachable from any API endpoint — kept for a "
-        "future save/versioning flow."
     ),
 }
 

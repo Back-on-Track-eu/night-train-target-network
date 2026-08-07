@@ -130,7 +130,7 @@ function buildCtx(input: EvaluationInput, routeStops: { stop_id: string; name: s
   const usedCountries = input.route.track_infrastructure.map((t) => t.country_code)
   const usedCompIds = new Set(input.route.trip_pairs.map((tp) => tp.composition_id))
   const usedComps = input.parameters.compositions.compositions.filter((c) =>
-    usedCompIds.has(c.comp_id),
+    usedCompIds.has(c.composition_id),
   )
   const usedOpIds = new Set(usedComps.map((c) => c.operator_id))
   const usedOps = input.parameters.compositions.operators.filter((o) =>
@@ -188,7 +188,7 @@ function compRows(
   const { text, unit } = splitUnit(comp.descriptions.compositions[section]?.[descKey])
   return ctx.usedComps.map((c) => ({
     id,
-    scope: ctx.usedComps.length > 1 ? c.comp_id : null,
+    scope: ctx.usedComps.length > 1 ? c.composition_id : null,
     value: get(c),
     unit,
     description: text,

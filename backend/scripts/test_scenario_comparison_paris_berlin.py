@@ -21,7 +21,8 @@ track hsr_allowed, transited-only countries included).
 So the two scenarios can legitimately produce different routed paths
 (distance/time), not just different tac_eur figures. This script surfaces
 both: the routing-level diff (distance, driving time, per-country
-hsr_allowed) and the cost-level diff (POST /api/evaluation/calc).
+hsr_allowed) and the cost-level diff — both via one POST
+/api/proposal/calc per scenario (route + evaluation in one call).
 
 The 2026 Base Line ("2026-baseline") is deliberately excluded — it's a
 deprecated historical reference, not a live policy comparison.
@@ -32,7 +33,7 @@ Usage:
 
 Writes raw route/evaluation responses, a comparison summary, and per-scenario
 GeoJSON layers (routed lines + stops) to scripts/data/ (tc_2_paris_berlin_*).
-Same GeoJSON shape/logic as scripts/test_route_plan.py's route_to_geojson()
+Same GeoJSON shape/logic as scripts/test_proposal_calc.py's route_to_geojson()
 — kept in sync deliberately so outputs from both scripts drag into the same
 QGIS project consistently (Layer > Add Layer > Add Vector Layer) to compare
 routed paths visually. Pre-flight:
@@ -173,7 +174,10 @@ def fetch_scenario(scenario_key: str) -> dict:
 # =============================================================================
 
 
-def build_route(scenario_id: int) -> dict:
+def compute(scenario_id: int) -> dict:
+    """POST /api/proposal/calc — route + evaluation in one call. Same scenario
+    for build and cost (this script never needed the old evaluation/calc's
+    override-to-a-different-scenario capability), so the merge is exact."""
     body = {
         "scenario_id": scenario_id,
         "stops": STOPS,
@@ -185,19 +189,10 @@ def build_route(scenario_id: int) -> dict:
         # itself changes (routing/parameters), not auto-added stops.
         "auto_stop_addition": "off",
     }
-    resp = requests.post(f"{API_BASE}/api/route/plan", json=body, timeout=90)
-    if resp.status_code != 200:
-        print(f"[✗] route/plan failed for scenario_id={scenario_id}: {resp.text[:300]}")
-        sys.exit(1)
-    return resp.json()["route"]
-
-
-def evaluate_route(route: dict, scenario_id: int) -> dict:
-    body = {"route": route, "scenario_id": scenario_id}
-    resp = requests.post(f"{API_BASE}/api/evaluation/calc", json=body, timeout=60)
+    resp = requests.post(f"{API_BASE}/api/proposal/calc", json=body, timeout=90)
     if resp.status_code != 200:
         print(
-            f"[✗] evaluation/calc failed for scenario_id={scenario_id}: {resp.text[:300]}"
+            f"[✗] proposal/calc failed for scenario_id={scenario_id}: {resp.text[:300]}"
         )
         sys.exit(1)
     return resp.json()
@@ -306,22 +301,28 @@ def compare(scenario_a: dict, scenario_b: dict) -> None:
     print(f"  B: {label_b}  [scenario_id={scenario_b['scenario_id']}]")
     print("-" * 72)
 
-    route_a = build_route(scenario_a["scenario_id"])
-    route_b = build_route(scenario_b["scenario_id"])
-    eval_a = evaluate_route(route_a, scenario_a["scenario_id"])
-    eval_b = evaluate_route(route_b, scenario_b["scenario_id"])
+    result_a = compute(scenario_a["scenario_id"])
+    result_b = compute(scenario_b["scenario_id"])
+    route_a = result_a["route"]
+    route_b = result_b["route"]
+    eval_a = result_a["evaluation"]
+    eval_b = result_b["evaluation"]
 
     trip_a = outbound_trip_summary(route_a)
     trip_b = outbound_trip_summary(route_b)
     hsr_a = track_hsr_flags(route_a)
     hsr_b = track_hsr_flags(route_b)
 
-    bd_a = eval_a["views"]["route"]["data"]["per_year"]
-    bd_b = eval_b["views"]["route"]["data"]["per_year"]
+    # Every normalisation is class-keyed since CALC 0.9.9
+    # ({"all": <breakdown>, class_main: <breakdown>, ...}) — index into
+    # "all" for the whole-route, all-classes figure. See
+    # models/evaluation/README.md's "Class axis" section.
+    bd_a = eval_a["views"]["route"]["data"]["per_year"]["all"]
+    bd_b = eval_b["views"]["route"]["data"]["per_year"]["all"]
     tac_a = bd_a["cost"]["infrastructure"]["tac_eur"]
     tac_b = bd_b["cost"]["infrastructure"]["tac_eur"]
 
-    print(f"\n--- ROUTING ---")
+    print("\n--- ROUTING ---")
     print(f"  {'':20}{'A':>18}{'B':>18}{'delta':>14}")
     print(f"  {'route_id':20}{route_a['route_id']:>18}{route_b['route_id']:>18}")
     print(
@@ -338,14 +339,14 @@ def compare(scenario_a: dict, scenario_b: dict) -> None:
         f"  {'segment_count':20}{trip_a['segment_count']:>18}{trip_b['segment_count']:>18}"
     )
 
-    print(f"\n--- track_hsr_allowed per transited country ---")
+    print("\n--- track_hsr_allowed per transited country ---")
     for cc in sorted(set(hsr_a) | set(hsr_b)):
         flag_a = hsr_a.get(cc)
         flag_b = hsr_b.get(cc)
         marker = "  <-- differs" if flag_a != flag_b else ""
         print(f"  {cc}: A={flag_a!s:<6} B={flag_b!s:<6}{marker}")
 
-    print(f"\n--- COST (per_year, EUR) ---")
+    print("\n--- COST (per_year, EUR) ---")
     print(f"  {'':22}{'A':>16}{'B':>16}{'delta':>14}")
     for field in ("total_cost_eur", "total_revenue_eur", "net_eur"):
         va, vb = bd_a[field], bd_b[field]

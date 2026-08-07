@@ -10,7 +10,12 @@ set -e
 
 GRAPH_CACHE_DIR="/app/graph-cache"
 GRAPH_CACHE_MARKER="${GRAPH_CACHE_DIR}/properties.txt"
-GDRIVE_FILE_ID="1tWt1OX7mzPA7Ylo9KqmTK6YluRXEtt8z"
+# Configured via GRAPH_CACHE_FILE_ID in backend/docker/.env (see
+# .env.example), alongside the ONTD workbook ids — same class of value,
+# same place. The literal below is only a fallback for compose stacks
+# that do not inject it yet; there is no reason for this id to live in
+# two places once they all do.
+GDRIVE_FILE_ID="${GRAPH_CACHE_FILE_ID:-1tWt1OX7mzPA7Ylo9KqmTK6YluRXEtt8z}"
 # Use the newer usercontent endpoint with confirm=t to bypass the virus-scan warning page
 DOWNLOAD_URL="https://drive.usercontent.google.com/download?id=${GDRIVE_FILE_ID}&export=download&confirm=t"
 ZIP_PATH="/tmp/graph-cache.zip"
@@ -18,7 +23,7 @@ ZIP_PATH="/tmp/graph-cache.zip"
 if [ -f "$GRAPH_CACHE_MARKER" ]; then
     echo "[entrypoint] Graph cache found — skipping download."
 else
-    echo "[entrypoint] Graph cache not found — downloading from Google Drive..."
+    echo "[entrypoint] Graph cache not found — downloading from Google Drive (id ${GDRIVE_FILE_ID})..."
     curl -L "$DOWNLOAD_URL" -o "$ZIP_PATH"
 
     # Sanity-check: unzip rejects HTML pages immediately, so this also catches auth failures

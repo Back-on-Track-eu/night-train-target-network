@@ -183,6 +183,13 @@ jobs:
             echo "AUTH_EMAIL_DEV_MODE=true"
             echo "TESTING=true"
           } >> .env
+          # CI loads ONTD as an explicit, ORDERED step below instead of
+          # the entrypoint's background load — the background load races
+          # the test suite (mid-run catalog/projection changes skewed
+          # whichever tests it overtook). sed, not append: the key
+          # already exists in .env.example, and one unambiguous value
+          # beats relying on last-occurrence-wins semantics.
+          sed -i 's/^ONTD_BOOTSTRAP=.*/ONTD_BOOTSTRAP=off/' .env
           docker compose up -d --build
         env:
           POSTGRES_USER:     bot_admin
@@ -204,6 +211,19 @@ jobs:
             sleep 2
           done
           echo "API is healthy."
+
+      # ------------------------------------------------------------------
+      # Load ONTD reference data — explicit and ordered
+      # ------------------------------------------------------------------
+      # In production the entrypoint runs this in the background
+      # (soft-fail, API up in seconds — the right trade there). In CI the
+      # opposite is right: tests like test_52's sources=["existing"]
+      # union need ontd.route_summaries populated BEFORE pytest starts,
+      # and a load failure should fail the build loudly, not skew
+      # results. --force overrides the stack's ONTD_BOOTSTRAP=off;
+      # --strict makes step failure exit non-zero.
+      - name: Load ONTD reference data
+        run: docker exec night-train-api python /app/db/ontd/bootstrap.py --force --strict
 
       # ------------------------------------------------------------------
       # Set up Python and run tests

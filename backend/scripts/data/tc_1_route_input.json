@@ -7,7 +7,7 @@
     "DE_DRESDEN_HBF",
     "AT_WIEN_HBF"
   ],
-  "composition_id": "STD-7.1",
+  "composition_id": "REF-COUCH-10",
   "routing_mode": "fullRouting",
   "timetable_mode": "simpleAutomatic",
   "schedule_mode": "alwaysDaily",

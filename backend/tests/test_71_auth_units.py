@@ -2,9 +2,10 @@
 test_71_auth_units.py
 =====================
 Pure unit tests for the auth building blocks — no Docker stack, no DB:
-auth_utils (OTP, display names, local HS256 JWTs) and auth_oidc (plane
+auth_utils (OTP, display names, local HS256 JWTs), auth_oidc (plane
 routing + Keycloak-token verification against a locally generated RSA
-key). The only file in the suite runnable standalone:
+key), and the rate-limit strings in api/config.py. The only file in the suite
+runnable standalone:
 
     uv run --extra dev pytest tests/test_71_auth_units.py -v
 """
@@ -13,8 +14,9 @@ import datetime
 
 import jwt as pyjwt
 import pytest
+from limits import parse_many
 
-from api import auth_oidc
+from api import auth_oidc, config
 from api.auth_utils import (
     AuthError,
     GUEST_PREFIX,
@@ -119,7 +121,7 @@ _CLIENT = "target-network"
 
 @pytest.fixture()
 def rsa_key():
-    cryptography = pytest.importorskip("cryptography")  # pyjwt[crypto]
+    pytest.importorskip("cryptography")  # pyjwt[crypto]
     from cryptography.hazmat.primitives.asymmetric import rsa
 
     return rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -215,3 +217,31 @@ def test_oidc_verify_rejections(monkeypatch, rsa_key, overrides):
         assert not auth_oidc.is_oidc_token(bad)
     with pytest.raises(AuthError):
         auth_oidc.verify(bad)
+
+
+# =============================================================================
+# api/config.py — operational limits (WP11)
+# =============================================================================
+
+
+class TestRateLimitConfig:
+    """The limiter is disabled under TESTING=true (api/limiter.py), so an
+    unparseable limit string would otherwise only surface in production,
+    at import of the first decorated endpoint. These assert the strings
+    themselves rather than the enforcement."""
+
+    @pytest.mark.parametrize(
+        "limit",
+        [
+            config.COMMENT_RATE_LIMIT,
+            config.COMMENT_EDIT_RATE_LIMIT,
+            config.LIKE_RATE_LIMIT,
+            config.AUTH_REQUEST_CODE_RATE_LIMIT,
+            config.AUTH_GUEST_RATE_LIMIT,
+        ],
+    )
+    def test_limit_string_parses(self, limit):
+        assert parse_many(limit)
+
+    def test_comment_body_cap_is_positive(self):
+        assert config.COMMENT_BODY_MAX_LEN > 0

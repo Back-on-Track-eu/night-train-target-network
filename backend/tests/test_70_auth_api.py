@@ -22,7 +22,7 @@ import pytest
 import requests
 
 from api.auth_utils import hash_otp
-from tests.helpers import PROPOSAL_URL, evaluate
+from tests.helpers import PROPOSAL_URL, comment_url, like_url, publish
 
 _TIMEOUT = 15
 
@@ -319,12 +319,25 @@ def test_verify_with_guest_bearer_merges_guest_assets(api_base, db_cur, db_conn)
     guest = resp.json()
     guest_headers = {"Authorization": f"Bearer {guest['token']}"}
 
-    seed_route = requests.get(
+    # WP5: the old "evaluate a foreign, not-yet-evaluated proposal ->
+    # branches it" mechanic no longer exists (POST /api/evaluation/calc is
+    # gone). The equivalent under the new design (§6 "build on foreign")
+    # is: load the foreign proposal (read-only), then publish as new
+    # under the guest, optionally with based_on_proposal_id — a guest
+    # publish is exactly "owns something" for this test's purposes.
+    seed = requests.get(
         f"{api_base}{PROPOSAL_URL}/{_SEED_PROPOSAL_ID}", timeout=10
-    ).json()["route_body"]["route"]
-    branched = evaluate(api_base, seed_route, headers=guest_headers, timeout=90)
-    branch_pid = branched["proposal"]["proposal_id"]
-    assert branched["proposal"]["action"] == "branched"
+    ).json()
+    branched = publish(
+        api_base,
+        seed["request"],
+        name="Branched from seed (guest)",
+        mode="new",
+        based_on_proposal_id=_SEED_PROPOSAL_ID,
+        headers=guest_headers,
+        timeout=90,
+    )
+    branch_pid = branched["proposal_id"]
 
     try:
         # --- register with the guest bearer attached ---
@@ -350,12 +363,15 @@ def test_verify_with_guest_bearer_merges_guest_assets(api_base, db_cur, db_conn)
             "guest_user_id": guest["user_id"],
             "proposals_claimed": 1,
             "feedback_claimed": 0,
+            "likes_claimed": 0,
+            "comments_claimed": 0,
         }
 
         # --- the proposal changed hands; the guest row is marked ---
+        # WP5: proposals.proposals is now one row per proposal (is_current
+        # dropped) — no AND is_current needed.
         db_cur.execute(
-            "SELECT user_id FROM proposals.proposals "
-            "WHERE proposal_id = %s AND is_current",
+            "SELECT user_id FROM proposals.proposals WHERE proposal_id = %s",
             (branch_pid,),
         )
         assert db_cur.fetchone()["user_id"] == user_id
@@ -367,8 +383,13 @@ def test_verify_with_guest_bearer_merges_guest_assets(api_base, db_cur, db_conn)
         db_conn.rollback()
 
         # --- the old guest token now fails loudly, everywhere ---
+        # WP5: POST /api/evaluation/calc is gone; POST /api/proposal/
+        # publish is the remaining @require_auth write endpoint, so it's
+        # what actually exercises the merged-token rejection (the auth
+        # decorator runs before body validation, so an empty body still
+        # hits the 401 first).
         resp = requests.post(
-            f"{api_base}/api/evaluation/calc",
+            f"{api_base}{PROPOSAL_URL}/publish",
             json={},
             headers=guest_headers,
             timeout=10,
@@ -401,6 +422,103 @@ def test_verify_with_guest_bearer_merges_guest_assets(api_base, db_cur, db_conn)
             )
         cur.execute(
             "DELETE FROM proposals.proposals WHERE proposal_id = %s", (branch_pid,)
+        )
+        db_conn.commit()
+        cur.close()
+
+
+@pytest.mark.timeout(60)
+def test_verify_with_guest_bearer_merges_likes_and_comments(api_base, db_cur, db_conn):
+    """Likes and comments follow a guest into their verified account too
+    (2026-07-29, adapters/auth_repository.py: merge_guest_into). Exercises
+    both paths in one flow: a plain comment reassignment, and the one case
+    that needs special handling — the guest and the target account having
+    both already liked the same proposal, where UNIQUE(proposal_id, user_id)
+    means the guest's copy must be dropped rather than reassigned. Targets
+    the permanent seed proposal, no route build needed."""
+    # --- a registered target account, with its own like already in place ---
+    email, name, target_otp = _unique_email(), _unique_name(), "112358"
+    db_cur.execute(
+        "INSERT INTO admin.users (email, display_name, is_verified) "
+        "VALUES (%s, %s, FALSE) RETURNING user_id",
+        (email, name),
+    )
+    target_user_id = db_cur.fetchone()["user_id"]
+    db_conn.commit()
+    _fresh_otp_for(db_cur, db_conn, target_user_id, target_otp)
+
+    resp = requests.post(
+        f"{api_base}/api/auth/verify",
+        json={"email": email, "code": target_otp},
+        timeout=10,
+    )
+    assert resp.status_code == 200
+    target_headers = {"Authorization": f"Bearer {resp.json()['token']}"}
+    requests.post(
+        f"{api_base}{like_url(_SEED_PROPOSAL_ID)}", headers=target_headers, timeout=10
+    )
+
+    # --- a guest who independently likes and comments on the same proposal ---
+    resp = requests.post(f"{api_base}/api/auth/guest", timeout=10)
+    _skip_if_rate_limited(resp)
+    guest = resp.json()
+    guest_headers = {"Authorization": f"Bearer {guest['token']}"}
+    requests.post(
+        f"{api_base}{like_url(_SEED_PROPOSAL_ID)}", headers=guest_headers, timeout=10
+    )
+    resp = requests.post(
+        f"{api_base}{comment_url(_SEED_PROPOSAL_ID)}",
+        json={"body": "Merge me into the registered account."},
+        headers=guest_headers,
+        timeout=10,
+    )
+    assert resp.status_code == 201
+    comment_id = resp.json()["comment_id"]
+
+    try:
+        # --- log back in as the target, with the guest bearer attached ---
+        _fresh_otp_for(db_cur, db_conn, target_user_id, "271828")
+        resp = requests.post(
+            f"{api_base}/api/auth/verify",
+            json={"email": email, "code": "271828"},
+            headers=guest_headers,
+            timeout=10,
+        )
+        assert resp.status_code == 200
+        merged = resp.json()["merged_guest"]
+        # likes_claimed=0: the guest's like collided with the target's own
+        # pre-existing like and was dropped, not reassigned.
+        assert merged == {
+            "guest_user_id": guest["user_id"],
+            "proposals_claimed": 0,
+            "feedback_claimed": 0,
+            "likes_claimed": 0,
+            "comments_claimed": 1,
+        }
+
+        # --- exactly one like remains, still the target's original row ---
+        db_cur.execute(
+            "SELECT user_id FROM proposals.likes WHERE proposal_id = %s",
+            (_SEED_PROPOSAL_ID,),
+        )
+        rows = db_cur.fetchall()
+        assert [r["user_id"] for r in rows] == [target_user_id]
+
+        # --- the comment changed hands ---
+        db_cur.execute(
+            "SELECT user_id FROM proposals.comments WHERE comment_id = %s",
+            (comment_id,),
+        )
+        assert db_cur.fetchone()["user_id"] == target_user_id
+        db_conn.rollback()
+    finally:
+        cur = db_conn.cursor()
+        cur.execute(
+            "DELETE FROM proposals.likes WHERE proposal_id = %s AND user_id = %s",
+            (_SEED_PROPOSAL_ID, target_user_id),
+        )
+        cur.execute(
+            "DELETE FROM proposals.comments WHERE comment_id = %s", (comment_id,)
         )
         db_conn.commit()
         cur.close()

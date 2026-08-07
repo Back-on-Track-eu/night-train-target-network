@@ -2,7 +2,7 @@
 feedback_repository.py
 =======================
 Write-path database adapter for feedback submissions — mirrors
-ProposalRepository (adapters/proposal_repository.py): its own connection
+ProposalRepository (adapters/proposal/repository.py): its own connection
 to the same database, so DBDataLoader stays strictly read-only. See
 db/dev/sql/create_admin_schema.sql for the admin.feedback schema this
 module writes to.
@@ -68,11 +68,11 @@ class FeedbackRepository:
     # ------------------------------------------------------------------
 
     def get_user(self, user_id: int) -> Optional[dict]:
-        """admin.users row for user_id, or None. Duplicated from
-        ProposalRepository.get_user() rather than shared — the two
-        repositories deliberately hold independent connections (see module
-        docstring), and this query is a single indexed lookup, not worth
-        threading a cross-repository dependency for."""
+        """admin.users row for user_id, or None — the one shared user
+        read the API layer needs (api/feedback.py). Kept on this
+        repository (not a cross-repository dependency) because every
+        repository deliberately holds its own connection (see module
+        docstring) and the query is a single indexed lookup."""
         with self._cursor() as cur:
             cur.execute(
                 # display_name aliased to user_name: the API response field
