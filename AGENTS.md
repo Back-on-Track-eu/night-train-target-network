@@ -49,6 +49,16 @@ files describing the same three backend services, kept manually in sync:
   grouped in the `adapters/proposal/` package (`repository.py`,
   `gtfs_store.py`, `projection.py`, `engagement_repository.py`,
   `id_prefix.py`)
+- A hard-coded parameter lives with the code that **enforces** it, never
+  as a bare literal at the use site. HTTP-shaping limits (rate limits,
+  body caps, page caps) → `backend/api/config.py`; an adapter's or
+  script's own knob (cache TTL, batch worker count) → next to that
+  implementation; domain assumptions not yet in the DB → the owning
+  model's `version.py` STANDARD VALUES, so they version with the model;
+  calibrated domain/economic parameters → the DB params tables; secrets
+  and service wiring → `os.environ` at the point of use.
+  `backend/docker/.env.example` documents every per-environment override,
+  grouped by the module that reads it
 - Meaningful but sparse comments; longer explanations go in module
   docstrings or READMEs, not inline blocks
 
@@ -183,6 +193,7 @@ Full contract, `--baseline` semantics, and editorial rules:
 | `backend/api/helpers/dependencies.py` | Singleton state: `DBDataLoader`, `CountryIndex`, `RailRouter`, `ProposalRepository`, `FeedbackRepository`, all built once at startup; `get_loader()` etc. for route handlers |
 | `backend/api/*.py` | One blueprint file per domain: `health.py`, `params.py`, `proposal_calc.py`, `proposal_publish.py`, `proposals.py`, `proposal_compare.py`, `proposal_engagement.py`, `auth.py`, `feedback.py`, `scenarios.py` |
 | `backend/api/helpers/*_serialize.py` | All `to_dict`/`from_dict` logic, split by domain — see Python conventions above |
+| `backend/api/config.py` | API-layer operational limits (rate limits, body caps), env-overridable. Not secrets (env at point of use), not domain parameters (DB or `models/*/version.py`) |
 | `backend/models/` | Domain layer (routing, demand, energy, evaluation, pipeline) — no serialization, no monetary values outside `models/evaluation/calc.py`. See `backend/models/README.md` |
 | `backend/db/dev/sql/` | Schema DDL, source of truth for all environments. See `backend/db/README.md` |
 | `backend/tests/` | Integration test suite, numbered by layer. See `backend/tests/README.md` |
@@ -219,9 +230,10 @@ GET  /api/proposals
 POST /api/proposals
 GET  /api/proposal/<id>
 POST /api/proposals/compare        two sides, stored or what-if overrides, stateless
-GET/POST/DELETE /api/proposal/<id>/likes
-GET/POST /api/proposal/<id>/comments
-PATCH/DELETE /api/proposal/<id>/comments/<cid>
+GET  /api/proposal/<id>/engagements likes + comments + event timeline
+POST/DELETE /api/proposal/<id>/like
+POST /api/proposal/<id>/comment
+PATCH/DELETE /api/proposal/<id>/comment/<cid>
 GET  /api/params/StopInfrastructures
 GET  /api/params/compositions
 GET  /api/params/TrackInfrastructures

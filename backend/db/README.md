@@ -289,7 +289,7 @@ side is `route_dict_from_gtfs()` plus the stored `evaluation_output`.
 | `stop_times` | GTFS stop_times.txt — ordered stop sequence per trip (times as INTERVAL) |
 | `proposals` | Container — one row per proposal, always current (PK `proposal_id`, §5.3), no version history. `proposal_version` is an internal state counter bumped on every overwrite-publish/refresh, embedded in every row-ID prefix. Carries `name`, `route_fingerprint`, `composition_id`, `scenario_id`, model versions, the resolved `compute_request` (JSON), and `evaluation_output` (JSON, models+views only — no half-states: every proposal has route AND evaluation) |
 | `likes` | Thumbs-up on a proposal, one per user (`UNIQUE(proposal_id, user_id)`), no down-vote. Keys on the stable `proposal_id`, not a specific version — see below |
-| `comments` | Flat (non-threaded) discussion per proposal. Soft-deleted (`is_deleted`, body cleared server-side) rather than removed, so the thread stays chronologically intact |
+| `comments` | Flat (non-threaded) discussion per proposal. Deleted comments are soft-deleted (`is_deleted`, body cleared server-side) so `comment_id` stays stable, but the tombstone is returned by nothing — see below |
 
 `likes`/`comments` (2026-07-29, `api/proposal_engagement.py`) key on
 `proposal_id` alone rather than `(proposal_id, proposal_version)` — a like
@@ -300,10 +300,24 @@ version. Because `proposal_id` alone isn't unique on `proposals.proposals`
 both tables carry it as a **soft reference**, the same convention already
 used for `stop_times.stop_id` and `trips.composition_type_id` —
 existence is checked at the API layer
-(`adapters/proposal_engagement_repository.py`) instead of by a DB
+(`adapters/proposal/engagement_repository.py`) instead of by a DB
 constraint. Each row also stamps the `proposal_version` that was current
 at the moment of the like/comment, as read-only context — it is never
 re-derived if the proposal is later versioned.
+
+**Engagement is read as one aggregate (WP11, 2026-08-06).** Both tables
+plus `update_log` are merged by `GET /api/proposal/<id>/engagements`
+into like summary + comment thread + event timeline; the gallery
+(`POST /api/proposals`) live-joins `likes_count` and `comments_count`
+onto every summary row so a list view needs no per-row call. Two
+consequences for what is stored versus what is visible: unliking is a
+hard `DELETE` (so a withdrawn like leaves no timeline trace), and
+`is_deleted` became a purely internal tombstone — a deleted comment is
+excluded from the thread, from `comments_count`, and from the timeline.
+The timeline is therefore a **projection of current state** merged with
+the genuinely append-only `update_log`, not an audit trail; an edited
+comment appears at its `updated_at`, not its `created_at`. See
+`docs/PROPOSALS_DESIGN.md` §7.5 and locked decision 28.
 
 Both tables' `user_id` is reassigned on a guest→registered merge
 (`adapters/auth_repository.py: merge_guest_into()`, see `api/README.md`'s
@@ -347,7 +361,7 @@ cutover. The sidecars are written/read by
 | `shuntings` | One row per `Shunting` (`models/route/route.py`) — one shunting event at a trip terminal; not deduplicated, up to 4 rows per round trip |
 | `timetable_warnings` | One row per `TimetableWarning` (`models/route/trip.py`) — a derived timetable quality annotation, informational only |
 | `seasonal_schedules` | One row per `SeasonalSchedule` (`models/route/route.py`) — operating frequency (daily/three_per_week) per season on a route |
-| `update_log` | Append-only timeline event log (published/overwritten/recalculated/branched_from/branched_to) — preserves state transitions that `proposals.proposals` itself prunes on overwrite. Written by `publish()` |
+| `update_log` | Append-only timeline event log (published/overwritten/recalculated/branched_from/branched_to) — preserves state transitions that `proposals.proposals` itself prunes on overwrite. Written by `publish()`/`refresh_proposal()` (`adapters/proposal/repository.py`), read as the third timeline source by `adapters/proposal/engagement_repository.py`. A NULL `user_id` marks a system event, which is what distinguishes a refresh from a user overwrite |
 | `proposal_summaries` | Derived projection over `proposals.proposals` for the gallery/map — route metrics, financial KPIs, placeholder demand KPIs, simplified PostGIS geometry. Not a source of truth; rebuildable at any time. Row-building logic: `adapters/proposal/projection.py`'s `build_summary_row()` (WP4, `tests/test_37_proposal_projection.py`); upserted by `publish()`, one row per proposal |
 | `compute_cache_pointer` | Compute cache, pointer side — `request_hash` → which result it resolves to, plus request-specific response parts. `UNLOGGED`. Still unpopulated — lands with WP13 |
 | `compute_cache_result` | Compute cache, result side — `(route_fingerprint, scenario_id, composition_id)` → the shared route + evaluation payload, stored once per distinct result. `UNLOGGED`. Still unpopulated — lands with WP13 |

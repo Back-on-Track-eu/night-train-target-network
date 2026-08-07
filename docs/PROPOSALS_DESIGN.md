@@ -459,7 +459,10 @@ Rows are written inside the same transaction as the publish. The
 **purely informational timeline content** ("user X built on this"); nothing
 in the system navigates from a proposal to its source. The frontend
 timeline is the chronological merge of `update_log` + `comments` + `likes`
-(§7.5).
+served by `GET /api/proposal/<id>/engagements` (§7.5). `update_log` is the
+only append-only source of the three: likes and comments contribute their
+*current* rows, so this table is what keeps a superseded state's history
+alive at all.
 
 ### 4.2 Version refresh — proposals always at the newest calculation state
 
@@ -1009,10 +1012,75 @@ With one stored state per artifact there is no in-flow removal at all;
 cleanup is manual/script work directly on the database. (Guest-hygiene
 retention job: not needed — ephemeral compute leaves no drafts behind.)
 
-### 7.5 `GET /api/proposal/<id>/timeline`
+### 7.5 Engagement — one aggregate read, singular writes
 
-Chronological merge of `update_log`, `comments`, and `likes` for one
-proposal. Natural home: `api/proposal_engagement.py`.
+Restructured in WP11 (2026-08-06). The engagement surface is one read
+endpoint and five writes, all in `api/proposal_engagement.py`:
+
+```
+GET    /api/proposal/<id>/engagements     likes + comments + timeline
+POST   /api/proposal/<id>/like            @require_auth, idempotent
+DELETE /api/proposal/<id>/like            @require_auth, idempotent
+POST   /api/proposal/<id>/comment         @require_auth
+PATCH  /api/proposal/<id>/comment/<cid>   @require_auth, author-only
+DELETE /api/proposal/<id>/comment/<cid>   @require_auth, author-only
+```
+
+This replaces the earlier `GET/POST/DELETE …/likes`,
+`GET/POST …/comments`, `PATCH/DELETE …/comments/<cid>` set *and* the
+`GET …/timeline` endpoint this section originally specified — the
+timeline was never built separately, because the aggregate read
+subsumes it. Removal, not deprecation (same treatment as §7.6).
+
+`engagements` returns three sections: `likes` (`{count, liked_by_me}`),
+`comments` (`{count, items}`, oldest first), and `timeline` — the
+chronological merge of `update_log` + `likes` + live `comments`, built
+as one `UNION ALL` in `adapters/proposal/engagement_repository.py` so
+the database does the merge and the ordering. Each event carries
+`event`, `at`, `proposal_version` (the state counter *after* it),
+`actor`, and an event-specific `detail`.
+
+`actor: null` means the **system** acted — a version bump or base
+scenario move (§4.2). That is what separates a system `recalculated`
+from a user `overwritten`, and it is why `update_log.user_id` being
+nullable matters. A deleted account is not a system event: it renders
+as `{"user_id": null, "user_name": "[deleted]"}`, the same placeholder
+the comment thread uses.
+
+**The timeline is a projection of current state, not an audit trail**
+(locked decision 28). Only `update_log` is genuinely append-only.
+Engagement contributes its *current* rows:
+
+- unliking is a hard `DELETE`, so a withdrawn like leaves no trace;
+- a deleted comment is excluded everywhere — thread, `comments.count`,
+  and timeline. `comments.is_deleted` survives as an internal tombstone
+  only, so `comment_id` stays stable and a second `PATCH`/`DELETE`
+  answers `404` rather than resurrecting the row;
+- an edited comment appears at its `updated_at` with
+  `detail.edited: true`, not at its post time.
+
+So the sequence a reader sees can change retroactively. That is the
+right trade for a discussion feed and the wrong one for an audit log —
+which is exactly why the publish/refresh events live in their own
+append-only table rather than being derived from current state too.
+
+No pagination: an unbounded merge was accepted deliberately (the
+per-proposal row counts are small, and a `limit` parameter would
+complicate the frontend's "full aggregate" model for no present gain).
+Revisit if a proposal ever accumulates thousands of likes.
+
+**Counts on gallery rows.** `likes_count` and `comments_count` are
+live-joined onto every `POST /api/proposals` summary row (§7.1) so a
+list view never calls this endpoint per row; bodies and the timeline
+stay here. Both are ordinary `RANGE_COLUMNS` entries in
+`filter_builder.py`, hence filterable and sortable like any numeric
+column, and both are `NULL` on ONTD rows (locked decision 23).
+
+**Rate limiting.** Writes are limited per authenticated user
+(`api/config.py` holds the numbers, `api/auth_middleware.py`'s
+`rate_limit_key()` the bucket key — Flask-Limiter evaluates the key
+function in a `before_request` hook, before `@require_auth` has set
+`g.user_id`, so the token is resolved there instead).
 
 ### 7.6 Replaced endpoints
 
@@ -1329,6 +1397,17 @@ backfill path needed.
     surfaced as a KPI, since an uncalibrated "router says 11.2 h,
     timetable says 12.8 h" pair invites questions the model cannot yet
     answer.
+28. **Engagement is one aggregate read plus singular writes**
+    (WP11, 2026-08-06): `GET /api/proposal/<id>/engagements` returns
+    likes, comments and the merged timeline together; writes are
+    `POST/DELETE …/like` and `POST/PATCH/DELETE …/comment[/<cid>]`.
+    The timeline is a **projection of current state** merged with the
+    append-only `update_log`, not an audit trail — withdrawn likes and
+    deleted comments vanish, an edited comment moves to its edit time,
+    and `actor: null` means the system acted. Gallery rows carry
+    `likes_count` + `comments_count`; bodies and events do not. Comment
+    writes are rate limited per authenticated user, with the limits (and
+    every other HTTP-shaping limit) in `api/config.py`.
 26. **ONTD imports read the Google Sheets directly** via the public
     whole-workbook export link (`export?format=xlsx`, no API
     key/credentials — both sheets link-shared "Viewer") for
@@ -1883,10 +1962,15 @@ set; `sources` filter combinations; emission KPIs on
 calc/publish/summary/compare; `"existing"` still rejected by
 compare/analyze.
 
-**WP11 — Timeline endpoint** *(after WP5; small)*
-`GET /api/proposal/<id>/timeline` in `api/proposal_engagement.py` merging
-`update_log` + comments + likes. *Testable by*: publish → comment →
-overwrite sequence asserted in order.
+**WP11 — Engagement restructure + timeline** ✅ *(after WP5; done
+2026-08-06 — grew past "small": the timeline endpoint became a full
+restructure of the engagement surface, see §16)*
+One aggregate read (`GET /api/proposal/<id>/engagements`) replacing the
+two GETs and the separately-planned `/timeline`, singular write paths,
+`comments_count` on gallery rows, per-user rate limits, and
+`api/config.py`. *Tested by*: publish → comment → like → overwrite →
+refresh asserted in order, with actor and detail distinguishing the user
+overwrite from the system recalculation.
 
 **WP12 — Frontend coordination batch (Bjarne)** *(rolling; heads-up
 before WP5 lands, full audit before the staging PR)*
@@ -1904,6 +1988,22 @@ identical). From WP10: the `sources` filter goes live, summary rows come
 in two shapes (`source: "proposal"` vs the reduced `"existing"` shape,
 §5.5), and emission fields land on the calc response, summary rows, and
 compare deltas (per-mode reference values included in the responses).
+From WP11, the largest **path** change so far — five engagement
+endpoints moved and two disappeared:
+
+| Was | Is |
+|-----|-----|
+| `GET /api/proposal/<id>/likes` | *removed* → `GET …/engagements` |
+| `POST`/`DELETE /api/proposal/<id>/likes` | `POST`/`DELETE …/like` |
+| `GET /api/proposal/<id>/comments` | *removed* → `GET …/engagements` |
+| `POST /api/proposal/<id>/comments` | `POST …/comment` |
+| `PATCH`/`DELETE …/comments/<cid>` | `PATCH`/`DELETE …/comment/<cid>` |
+
+plus: the comment shape drops `is_deleted` (a deleted comment is now
+returned by nothing, so the flag was always `false` on the wire);
+`comments.count` and the new `comments_count` gallery field; the
+`timeline` array and its event vocabulary (`actor: null` = system);
+`429` becomes a possible response on every engagement write.
 Audit `frontend/src/types/api.ts` end to end.
 
 **WP13 — Compute cache** *(after WP2 + WP4 for the fingerprint;
@@ -2371,3 +2471,126 @@ WP6 gallery script).
 - **Docs housekeeping found and closed**: `tests/README.md` had never
   gained its `test_52`/`test_53` sections (WP6/WP7-8 closing gap) —
   backfilled alongside the new `test_54` section.
+
+---
+
+## 16. WP11 implementation notes (2026-08-06) ✅
+
+Scoped as "small — a timeline endpoint" in §10 and delivered as a
+restructure of the whole engagement surface, on the user's direction: one
+aggregate read replacing two GETs and the never-built `/timeline`,
+singular write paths, engagement counts on gallery rows, per-user rate
+limits, and a new home for operational parameters.
+
+**API surface** (§7.5 has the full contract). Five paths moved, two
+disappeared; the WP12 ledger carries the before/after table. `GET
+…/engagements` is `@optional_auth` (it needs `liked_by_me`), every write
+`@require_auth` at the `TRUST_GUEST` floor as before.
+
+**Timeline semantics — the one genuinely new decision.** Making
+withdrawn likes and deleted comments disappear, and moving edited
+comments to their edit time, turns the timeline into a projection of
+current state rather than an audit trail. Accepted deliberately (locked
+decision 28): the visible consequence is that event *ordering can change
+retroactively*, which is right for a discussion feed and would be wrong
+for a history. `update_log` stays append-only precisely so the
+publish/refresh spine survives that.
+
+Follow-on effect worth recording: `comments.is_deleted` no longer
+surfaces anywhere. It was previously returned as a tombstone with the
+body cleared, on a rationale borrowed from threaded systems ("keep the
+thread chronologically intact") that a flat thread doesn't need. It is
+now a storage-level tombstone only — kept so `comment_id` stays stable
+and a second `PATCH`/`DELETE` answers `404` instead of resurrecting the
+row — and `is_deleted` was dropped from the comment API shape, where it
+could only ever have been `false`.
+
+**Implementation notes**
+
+- **One `UNION ALL`, not three queries.** The timeline merges
+  `update_log` + `likes` + live `comments` in SQL, ordered by
+  `occurred_at, source, ref_id`. `source` earns its place twice: it is
+  the only thing separating the two meanings of a `NULL user_id`
+  (system event on `update_log`, deleted account on a comment), and it
+  is the ordering tiebreak for the `branched_*` pair a publish writes in
+  one transaction, where `ref_id` (`log_id`, insertion order) then puts
+  them behind the publish event itself.
+- **`occurred_at`, not `at`, as the SQL alias.** `AT` is a Postgres
+  keyword (`AT TIME ZONE`); non-reserved and legal as a column name, but
+  not worth the ambiguity. The API field is `at`; the serializer maps.
+- **No index was added.** The original plan proposed widening
+  `idx_likes_proposal` to `(proposal_id, created_at)` "so the union
+  orders without a sort" — wrong: a `UNION ALL` under an outer
+  `ORDER BY` sorts regardless, and the per-proposal row counts are
+  small. The migration is comment-only.
+- **`_LIKES_CTE` → `_ENGAGEMENT_CTE`.** `comments_count` joins in beside
+  `likes_count` (excluding soft-deleted rows) in the CTE every gallery
+  query already builds on, so adding it to `filter_builder`'s
+  `RANGE_COLUMNS` was a one-line change that made it filterable and
+  sortable with no per-query special-casing — the payoff of WP6's
+  registry design. `NULL` on ONTD rows, consistent with decision 23.
+- **Rate-limit key.** Flask-Limiter evaluates its key function in a
+  `before_request` hook, *before* `@require_auth` populates `g.user_id`
+  — the obvious `lambda: g.user_id` would silently bucket every request
+  under `None`. `rate_limit_key()` resolves the bearer token itself
+  (local plane only: an HS256 signature check; OIDC falls through to the
+  address bucket rather than pay JWKS verification per request) and
+  lives in `api/auth_middleware.py`, not `api/limiter.py`, so the latter
+  keeps the zero-import property its docstring exists to protect.
+
+**`backend/api/config.py`** — new, and the answer to "where do
+operational parameters live". First drafted as a backend-root
+`config.py`, then moved into `api/` on review (2026-08-06): every value
+in it shapes HTTP behaviour and every consumer is a blueprint or a
+request validator, so the root placement was a cross-layer module with
+no cross-layer content. The rule it encodes instead:
+
+> A hard-coded parameter lives with the code that **enforces** it. The
+> only reason to centralise is a value enforced in more than one place.
+
+Applied across the project, that gives five homes, four of which already
+existed:
+
+| Kind | Home |
+|------|------|
+| Secrets, service wiring | `os.environ` at the point of use |
+| Calibrated domain/economic parameters | `input_params` / `scenario` tables |
+| Domain assumptions not yet in the DB | the owning model's `version.py` STANDARD VALUES |
+| HTTP-shaping limits | `api/config.py` |
+| An adapter's or script's own knob | next to that implementation |
+
+The third row is the one that keeps `config.py` from sprawling:
+`STOPGAP_UTILIZATION_PER` belongs in `models/demand/version.py` because
+changing it *should* bump a model version, whereas retuning a rate limit
+should not. That distinction — versioned-with-the-model vs. tunable
+per-deployment — is the actual line, not "constant vs. env var".
+
+The earlier draft's "not yet migrated" list (`ONTD_ROUTING_WORKERS`,
+`OPENRAILROUTING_TIMEOUT`) dissolved under this rule: they are not
+stragglers awaiting a central home, they are already correctly placed as
+point-of-use env reads, exactly like `SMTP_PORT` in `adapters/mailer.py`.
+Nothing needs to migrate anywhere. WP13's cache TTL should likewise land
+beside the cache implementation, not here; WP15's bundle cap is request
+validation and does belong here.
+
+Deployment-facing counterpart: `backend/docker/.env.example`, which
+already described itself as the single source of truth for backend
+configuration and groups every variable by the module that reads it. It
+gained a commented block for the six new overrides — commented because
+an unset value is the supported case, the defaults living in code.
+
+Seeded with the engagement limits, the comment body cap (previously a
+literal in the serializer) and auth's two limit strings (previously
+literals in `auth.py`).
+
+**Test-suite bug found and fixed.** `purge_saved_proposals()` never
+deleted `proposals.update_log`. Harmless while nothing read that table —
+but `proposal_id` there is a soft reference, so its rows outlive the
+proposals they describe, and the first run of a timeline assertion would
+have been the last one to pass. Now cleared unconditionally alongside
+likes and comments.
+
+**Also closed:** two long-standing `ruff check` findings unrelated to
+this work (an unused `min_to_h` import in `api/helpers/params_serialize.py`,
+an unused `cryptography` binding in `test_71_auth_units.py`). CI only runs
+`ruff format --check`, which is why they had survived.

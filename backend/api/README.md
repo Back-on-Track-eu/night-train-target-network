@@ -37,10 +37,11 @@ its own example files.
   - [`GET` / `POST /api/proposals`](#list-proposals) — filter/sort/paginate + map sections, proposals ∪ ONTD existing routes
 - [Analytics](#analytics)
   - [`POST /api/proposals/compare`](#compare-proposals) — compare two sides, stored or what-if
-- [Engagement](#engagement) — likes and comments
-  - [`GET` / `POST` / `DELETE /api/proposal/<id>/likes`](#proposal-likes) — like/unlike a proposal
-  - [`GET` / `POST /api/proposal/<id>/comments`](#proposal-comments) — read/add comments
-  - [`PATCH` / `DELETE /api/proposal/<id>/comments/<cid>`](#proposal-comment-item) — edit/delete own comment
+- [Engagement](#engagement) — likes, comments and the event timeline
+  - [`GET /api/proposal/<id>/engagements`](#proposal-engagements) — likes + comments + timeline
+  - [`POST` / `DELETE /api/proposal/<id>/like`](#proposal-like) — like/unlike a proposal
+  - [`POST /api/proposal/<id>/comment`](#proposal-comment) — add a comment
+  - [`PATCH` / `DELETE /api/proposal/<id>/comment/<cid>`](#proposal-comment-item) — edit/delete own comment
 - [Feedback](#feedback)
   - [`POST /api/feedback`](#post-feedback) — submit feedback
   - [`GET /api/feedback/categories`](#feedback-categories) — suggested category/sub_category values
@@ -456,7 +457,7 @@ Five things worth calling out explicitly (`docs/PROPOSALS_DESIGN.md` §2.1):
    per-segment geometry under `route.geometries`; the gallery row needs
    the simplified copy precisely because it has no segments) and none of
    the DB-side identity/engagement fields (`proposal_id`, `name`,
-   `likes_count`, timestamps).
+   `likes_count`, `comments_count`, timestamps).
 
 **Errors:** `400 bad_request` / `400 validation_error` (see
 [Error responses](#error-responses)), `422 domain_error` (route or
@@ -862,7 +863,7 @@ doesn't run its query at all.
 | `total_distance_km`, `total_time_h`, `avg_speed_kmh`, `n_stops` | same | range | `{"min": num, "max": num}` |
 | `cost_eur_per_train_km`, `revenue_eur_per_train_km`, `margin_eur_per_train_km`, `subsidy_eur_per_year` | same | range | `{"min": num, "max": num}` |
 | `demand_trips_per_year`, `demand_trip_km_per_year`, `shift_air_trips_per_year`, `shift_air_trip_km_per_year`, `shift_car_trips_per_year`, `shift_car_trip_km_per_year`, `co2_savings_t_per_year`, `subsidy_eur_per_t_co2` | same | range | `{"min": num, "max": num}` |
-| `likes_count` | live-joined from `proposals.likes` | range | `{"min": num, "max": num}` |
+| `likes_count`, `comments_count` | live-joined from `proposals.likes` / `proposals.comments` | range | `{"min": num, "max": num}` |
 | `created_at`, `updated_at` | same | range | `{"min": iso8601, "max": iso8601}` |
 | `trip_windows` | reaches into `stop_times` | special | see below |
 | `bbox` | `geom_simplified` | special | `[west, south, east, north]` |
@@ -1021,9 +1022,14 @@ paginated).
 step 6b — the gallery is a UNION of `proposals.proposal_summaries` and
 the ONTD catalog's `ontd.route_summaries`, defaulting to both).
 `"proposal"` rows are a straight read off `proposals.proposal_summaries`
-(`docs/PROPOSALS_DESIGN.md` §5.4) plus `likes_count` (live-joined from
-`proposals.likes`, not a summary column — a like changes independently
-of publish/refresh, so storing it would go stale). `"existing"` rows
+(`docs/PROPOSALS_DESIGN.md` §5.4) plus `likes_count` and
+`comments_count` (live-joined from `proposals.likes` /
+`proposals.comments`, not summary columns — engagement changes
+independently of publish/refresh, so storing it would go stale;
+`comments_count` excludes deleted comments, matching
+[`GET /api/proposal/<id>/engagements`](#proposal-engagements)).
+The counts are here so a gallery card can show them without one
+engagements call per row; comment bodies and the timeline are not. `"existing"` rows
 carry the **reduced descriptive shape** shown above — identity, the
 shared metric subset, `geometry_routed` (whether the drawn line is real
 routing or a straight-line fallback), and `ontd_url` (deep link to the
@@ -1034,7 +1040,7 @@ mapping couldn't cover keep raw ONTD ids), while `composition_id` is
 **not** shared — proposal rows carry curated calibration ids, existing
 rows carry the ONTD catalog's own ids, so a `composition_ids` filter
 matches literally across both. Existing rows have NULL financials,
-likes, and timestamps — every range filter on those columns excludes
+engagement counts, and timestamps — every range filter on those columns excludes
 them via plain SQL NULL semantics (no `sources` filter needed), and the
 default `updated_at DESC` sort places them after every proposal
 (`NULLS LAST`).
@@ -1218,37 +1224,122 @@ the gallery/map endpoint keeps returning an orphaned row for it.
 
 ## Engagement
 
-Thumbs-up likes and a flat comment thread per proposal. Both key on the
-stable `proposal_id`, not a specific `proposal_version` — a like or a
-comment is about the proposal as an ongoing discussion and survives it
-being edited into a new version (see `db/README.md` for the soft-reference
-rationale). `GET`s are open, same as loading a proposal; writes need at
-least a guest token (`@require_auth`, `TRUST_GUEST`) — the same floor a
-guest already clears to save a proposal.
+Thumbs-up likes, a flat comment thread, and the event timeline for one
+proposal. All three key on the stable `proposal_id`, not a specific
+`proposal_version` — engagement is about the proposal as an ongoing
+discussion and survives it being overwritten or refreshed into a new
+state (see `db/README.md` for the soft-reference rationale).
+
+Reading is one endpoint. `GET` is open, same as loading a proposal;
+every write needs at least a guest token (`@require_auth`,
+`TRUST_GUEST`) — the same floor a guest already clears to save a
+proposal — and is rate limited per authenticated user (limits in
+`api/config.py`; the per-user bucket key in `api/auth_middleware.py`,
+falling back to the client address for anonymous or Keycloak callers).
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/proposal/<id>/likes` | Like count + whether the caller liked it |
-| `POST` | `/api/proposal/<id>/likes` | Like (idempotent) |
-| `DELETE` | `/api/proposal/<id>/likes` | Unlike (idempotent) |
-| `GET` | `/api/proposal/<id>/comments` | Flat comment thread, oldest first |
-| `POST` | `/api/proposal/<id>/comments` | Add a comment |
-| `PATCH` | `/api/proposal/<id>/comments/<cid>` | Edit own comment |
-| `DELETE` | `/api/proposal/<id>/comments/<cid>` | Soft-delete own comment |
+| `GET` | `/api/proposal/<id>/engagements` | Likes, comments and the merged event timeline |
+| `POST` | `/api/proposal/<id>/like` | Like (idempotent) |
+| `DELETE` | `/api/proposal/<id>/like` | Unlike (idempotent) |
+| `POST` | `/api/proposal/<id>/comment` | Add a comment |
+| `PATCH` | `/api/proposal/<id>/comment/<cid>` | Edit own comment |
+| `DELETE` | `/api/proposal/<id>/comment/<cid>` | Delete own comment |
 
-<a id="proposal-likes"></a>
+For a list view, `likes_count` and `comments_count` come with every
+gallery row on [`POST /api/proposals`](#list-proposals) — don't call this
+endpoint per row.
 
-### `GET` / `POST` / `DELETE /api/proposal/<id>/likes`
+<a id="proposal-engagements"></a>
+
+### `GET /api/proposal/<id>/engagements`
 
 <details>
 <summary>Request &amp; response details</summary>
 
-No request body on any of the three. `liked_by_me` reflects the caller's
-own token — always `false` for an unauthenticated `GET`. `POST`/`DELETE`
-are idempotent: liking twice or unliking when no like exists both just
-return the current state rather than erroring.
+No request body. `liked_by_me` reflects the caller's own token — always
+`false` for an unauthenticated read. `404 not_found` if `proposal_id`
+doesn't exist.
 
-**Response** (all three)
+**Response**
+```json
+{
+  "proposal_id": 5,
+  "likes": { "count": 4, "liked_by_me": true },
+  "comments": {
+    "count": 1,
+    "items": [
+      {
+        "comment_id": 12, "proposal_id": 5, "proposal_version": 2,
+        "user_id": 3, "user_name": "Bjarne",
+        "body": "This routing through Zürich adds a lot of dwell time.",
+        "created_at": "2026-07-29T09:12:00+00:00",
+        "updated_at": "2026-07-29T09:12:00+00:00"
+      }
+    ]
+  },
+  "timeline": [
+    { "event": "published", "at": "2026-07-28T14:03:11+00:00",
+      "proposal_version": 1,
+      "actor": { "user_id": 3, "user_name": "David" }, "detail": null },
+    { "event": "commented", "at": "2026-07-29T09:12:00+00:00",
+      "proposal_version": 2,
+      "actor": { "user_id": 7, "user_name": "Bjarne" },
+      "detail": { "comment_id": 12, "edited": false } },
+    { "event": "recalculated", "at": "2026-08-01T02:00:00+00:00",
+      "proposal_version": 3, "actor": null,
+      "detail": { "trigger": "calc_version", "from": "0.9.10", "to": "0.9.11" } }
+  ]
+}
+```
+
+`comments.items` is the flat thread, oldest first, and `comments.count`
+its length. `proposal_version` on a comment is a context stamp — the
+state that was current when it was posted, not re-derived later.
+`user_name` is `"[deleted]"` when `user_id` is `null` (the author's
+account was deleted).
+
+**Timeline events**, oldest first:
+
+| `event` | Source | `detail` |
+|---------|--------|----------|
+| `published` | publish, `mode: "new"` | `null` |
+| `overwritten` | publish, `mode: "overwrite"` | `null` |
+| `recalculated` | system refresh | `{"trigger": "calc_version"\|"route_builder_version"\|"base_scenario_moved", "from": …, "to": …}` |
+| `branched_from` | publish with `based_on_proposal_id` | `{"source_proposal_id": int}` — on the new proposal |
+| `branched_to` | publish with `based_on_proposal_id` | `{"source_proposal_id": int}` — on the proposal it was built from |
+| `liked` | a standing like | `null` |
+| `commented` | a live comment | `{"comment_id": int, "edited": bool}` |
+
+`proposal_version` on every event is the state counter **after** it.
+`actor` is `null` **only** for a system event (a version-bump or
+base-scenario refresh, `docs/PROPOSALS_DESIGN.md` §4.2) — that is what
+separates a system recalculation from a user overwrite. A deleted
+account is not a system event: it renders as
+`{"user_id": null, "user_name": "[deleted]"}`.
+
+**The timeline is a projection of current state, not an audit trail.**
+A withdrawn like and a deleted comment leave no trace, and an edited
+comment appears at its edit time (`edited: true`) rather than its post
+time — so the sequence a reader sees can change retroactively. Only the
+publish/refresh events are genuinely append-only, which is what makes
+"commented on state 3, route overwritten afterwards, then recalculated
+on a new calc version" reconstructible at all.
+
+</details>
+
+<a id="proposal-like"></a>
+
+### `POST` / `DELETE /api/proposal/<id>/like`
+
+<details>
+<summary>Request &amp; response details</summary>
+
+No request body on either. Both are idempotent: liking twice or unliking
+when no like exists returns the current state rather than erroring.
+Unliking is a hard delete — the like leaves the timeline with it.
+
+**Response** (both)
 ```json
 {"count": 4, "liked_by_me": true}
 ```
@@ -1257,63 +1348,47 @@ return the current state rather than erroring.
 
 </details>
 
-<a id="proposal-comments"></a>
+<a id="proposal-comment"></a>
 
-### `GET` / `POST /api/proposal/<id>/comments`
+### `POST /api/proposal/<id>/comment`
 
 <details>
 <summary>Request &amp; response details</summary>
 
-**Request body** (`POST` only)
+**Request body**
 ```json
 {"body": "This routing through Zürich adds a lot of dwell time — have you compared the Basel alternative?"}
 ```
-`body` is required, non-empty, max 4000 characters.
+`body` is required, non-empty, and capped at
+`config.COMMENT_BODY_MAX_LEN` characters (default 4000).
 
-**Response** (`GET`)
-```json
-{
-  "proposal_id": 5,
-  "comments": [
-    {
-      "comment_id": 12, "proposal_id": 5, "proposal_version": 2,
-      "user_id": 3, "user_name": "Bjarne",
-      "body": "This routing through Zürich adds a lot of dwell time — have you compared the Basel alternative?",
-      "is_deleted": false,
-      "created_at": "2026-07-29T09:12:00+00:00",
-      "updated_at": "2026-07-29T09:12:00+00:00"
-    }
-  ]
-}
-```
-`proposal_version` is a context stamp — the version that was current when
-the comment was posted, not re-derived on later versions. A soft-deleted
-comment (`is_deleted: true`) keeps its place in the list with `body`
-cleared server-side. `user_name` is `"[deleted]"` when `user_id` is
-`null` (the author's account was later deleted). `POST` returns the new
-comment (`201`); `404 not_found` if `proposal_id` doesn't exist.
+Returns the new comment (`201`) in the same shape `comments.items`
+uses above. `404 not_found` if `proposal_id` doesn't exist.
 
 </details>
 
 <a id="proposal-comment-item"></a>
 
-### `PATCH` / `DELETE /api/proposal/<id>/comments/<cid>`
+### `PATCH` / `DELETE /api/proposal/<id>/comment/<cid>`
 
 <details>
 <summary>Request &amp; response details</summary>
 
 Author-only — `403 forbidden` if the caller didn't write the comment.
 `404 not_found` if `comment_id` doesn't exist under that `proposal_id`,
-or is already soft-deleted.
+or was already deleted.
 
 **Request body** (`PATCH` only)
 ```json
 {"body": "Updated: compared both, Basel is 12 min faster."}
 ```
-Same validation as `POST`. Returns the updated comment (`200`).
+Same validation as `POST`. Returns the updated comment (`200`); its
+timeline event moves to the edit time.
 
-`DELETE` soft-deletes (clears `body`, sets `is_deleted`) and returns `204`
-with no body.
+`DELETE` returns `204` with no body. The comment disappears from both
+the thread and the timeline. Storage keeps a tombstone row so
+`comment_id` stays stable, which is why a second `PATCH`/`DELETE` on it
+is a `404` rather than a resurrection — but nothing surfaces it.
 
 </details>
 

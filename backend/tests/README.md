@@ -60,8 +60,8 @@ Shared code:
   `add_directional_domain_demand()`, and runs
   `models.pipeline.evaluate_and_build_views()`), route-JSON navigation
   (`all_trips`, `stop_times`, `country_km`, `trip_distance_km`,
-  `operating_days`, …), and endpoint URL helpers (`likes_url`,
-  `comments_url`). Everything is derived strictly from data present in the
+  `operating_days`, …), and endpoint URL helpers (`like_url`,
+  `comment_url`, `engagements_url`). Everything is derived strictly from data present in the
   API responses — nothing is fabricated. `purge_saved_proposals` also
   unconditionally clears `proposals.likes`/`proposals.comments` (no
   permanent seed data lives there), so engagement tests can safely target
