@@ -184,7 +184,10 @@ one entry per country: `country_code` plus a field object for each of
 
 **`compositions`** returns `compositions`, `operators`, `classes` and
 `coach_types` (redesigned 2026-07-22 — real-coach catalog, see
-`models/compositions/calib/CALIBRATION.md`). Composition fields are
+`models/compositions/calib/CALIBRATION.md`). Each composition is
+identified by **`composition_id`** — the same name the calc request,
+gallery rows, `composition_ids` filter and compare overrides use
+(renamed from `comp_id` 2026-08-07). Composition fields are
 grouped by concern:
 `routing` (weight, **total_length_m**, speed, HSR, dwell minima,
 **n_locos**), `staff` (driver/crew factors incl. the
@@ -344,7 +347,7 @@ stop list.
   "route_builder_version": "0.9.13",
   "calc_version": "0.9.11",
   "route_fingerprint": "sha256:3f9a1c...",
-  "cache_hit": false,
+  "cache_hit": false,            // true when served from the compute cache (§2.3)
   "request": {
     "stops": ["DE_BERLIN_HBF", "DE_DRESDEN_HBF", "AT_WIEN_HBF"],
     "composition_id": "NEW-BAL-7",
@@ -445,9 +448,13 @@ Five things worth calling out explicitly (`docs/PROPOSALS_DESIGN.md` §2.1):
    `adapters/proposal/projection.py`; it agrees between ephemeral and
    published forms of the identical route by construction (the canonical
    extract never reads `route_id`/`trip_id`/`geometry_id`). `cache_hit`
-   is always `false` for now — no compute cache exists yet (WP13 wires
-   the real lookup; the field is added early so that lands as a pure
-   logic swap, not a response-shape change).
+   is `true` when the response was served from the §2.3 compute cache
+   (WP13): identical resolved requests within the cache TTL (default
+   3 h) skip routing and evaluation entirely and return the byte-
+   identical stored result. The cache is invisible otherwise — a hit and
+   the compute it replays differ in no other field. Every compute path
+   shares it (`/calc`, both compare sides, publish, the on-load refresh),
+   so e.g. comparing warms the editor and vice versa.
 5. **`summary` is the gallery row's KPI set** (WP10 step 5) — built by
    the exact same `models/evaluation/summary.py: build_summary_row()`
    the publish projection uses, so everything a `source: "proposal"`
@@ -482,7 +489,7 @@ excluded — see the `evaluation` block below for those):
 
 | Field | Description |
 |---|---|
-| `comp_id`, `comp_description`, `operator_id` | Identity |
+| `composition_id`, `description`, `operator_id` | Identity (renamed from `comp_id`/`comp_description` 2026-08-07 — one wire name across the whole API; the enclosing `trip_pairs[]` entry already keys this object by `composition_id`) |
 | `max_speed_kmh`, `hsr_allowed` | Routing inputs |
 | `min_boarding_time_min`, `min_alighting_time_min` | Dwell time inputs |
 | `energy_factor_weight`, `energy_factor_speed`, `energy_factor_terrain` | Energy model inputs |
@@ -1039,7 +1046,12 @@ Network namespace on both sides (step 6a's mapping — ONTD stops the
 mapping couldn't cover keep raw ONTD ids), while `composition_id` is
 **not** shared — proposal rows carry curated calibration ids, existing
 rows carry the ONTD catalog's own ids, so a `composition_ids` filter
-matches literally across both. Existing rows have NULL financials,
+matches literally across both — filtering by a proposal composition id
+therefore excludes every existing route from the list AND the map, with
+no other signal. An existing row's `composition_id` is an **opaque
+label**: no endpoint resolves it (`/api/params/compositions` serves the
+curated calibration catalog only), by decision — see
+`PROPOSALS_DESIGN.md` §10 WP10(h). Existing rows have NULL financials,
 engagement counts, and timestamps — every range filter on those columns excludes
 them via plain SQL NULL semantics (no `sources` filter needed), and the
 default `updated_at DESC` sort places them after every proposal
@@ -1157,7 +1169,7 @@ The **diff is side B minus side A** (`sides[1] - sides[0]`) throughout.
       "overrides": {"scenario_id": 4},
       "route_builder_version": "0.9.13", "calc_version": "0.9.10",
       "route_fingerprint": "sha256:...",
-      "cache_hit": false,
+      "cache_hit": false,   // true when this side rode the §2.3 compute cache
       "request": { "...": "the anchor's compute_request with the overrides applied, resolved" },
       "route": { "...": "..." },
       "evaluation": { "models": {}, "input": {}, "views": {} },
@@ -1195,12 +1207,20 @@ gallery.
 Diff semantics: numeric leaves become `{a, b, abs, rel}` with
 `abs = b - a` and `rel = (b - a) / |a|` (`null` on a zero base);
 non-numeric content (descriptions, filter labels, normalisation
-metadata) never diffs; view keys present on only one side —
-cross-proposal compares with different trip pairs, countries, ODs, or
-stops — are collected as dotted paths under `views_unmatched` rather
-than half-diffed. `route_context` states whether the two sides are the
-same physical route (§3.1 fingerprints) and which resolved
-compute-request fields differ.
+metadata) never diffs. The diff runs on **structural ids**: a published
+side's trip-keyed views (`per_trip_pair`, `..._per_country`,
+`..._per_od`, `..._per_section`, `per_trip_per_stop`) are keyed by that
+proposal's own `P{id}_V{n}_` prefix, so both sides are neutralised to
+the bare `T1` form before diffing — otherwise no trip-keyed view could
+match across two proposals. The sides themselves keep their real
+prefixed ids; only the diff tree (and the `views_unmatched` paths) is
+structural. Keys still present on only one side after that — genuinely
+different countries, ODs, stops, trip counts, or **coach classes**
+(comparing two different compositions puts each one's coach types here)
+— are collected as dotted paths under `views_unmatched` rather than
+half-diffed. `route_context` states whether the two sides are the same
+physical route (§3.1 fingerprints) and which resolved compute-request
+fields differ.
 
 **Errors:** `400 validation_error` (side count, unknown keys, wrong
 types); `404 not_found` when a side's anchor doesn't exist (the message

@@ -291,9 +291,15 @@ off a `proposals.proposals` row, so the usual logged/unlogged FK
 restriction doesn't come up. The `created_at` indexes exist for the
 cleanup sweep below, not for lookups.
 
-**Read path.** Canonicalize the resolved compute request (sorted keys,
-stable number formatting) → `request_hash`. Look up
-`compute_cache_pointer`:
+**Read path** *(revised 2026-08-07, WP13)*. Canonicalize the resolved
+compute request (sorted keys, stable number formatting) → `request_hash`.
+Look up `compute_cache_pointer`, **TTL-filtered on both rows** — an
+expired-but-not-yet-swept row reads as a miss, never as a stale hit, so
+correctness never depends on the sweep having run (the sweep below is
+disk hygiene only). A hit additionally requires the stored payload's
+version constants to match the running `ROUTE_BUILDER_VERSION`/
+`CALC_VERSION` — defense in depth for a forgotten version-bump flush; a
+mismatch reads as a miss and the recompute overwrites the stale rows.
 - **miss** → run the compute pipeline, which yields `(fingerprint,
   scenario_id, composition_id, payload)`
 - **hit** → fetch `compute_cache_result` by the pointer row's
@@ -302,27 +308,34 @@ stable number formatting) → `request_hash`. Look up
   request-specific `resolved_request`/`suggested_stops`; set
   `cache_hit: true`
 
-**Write path**, both inserts after a successful compute, result before
+**Write path** *(revised 2026-08-07, WP13 — upsert, not the original
+`DO NOTHING`)*, both writes after a successful compute, result before
 pointer:
 
 ```sql
 INSERT INTO compute_cache_result (route_fingerprint, scenario_id, composition_id, payload)
 VALUES (...)
-ON CONFLICT (route_fingerprint, scenario_id, composition_id) DO NOTHING;
+ON CONFLICT (route_fingerprint, scenario_id, composition_id)
+DO UPDATE SET payload = EXCLUDED.payload, created_at = now();
 
 INSERT INTO compute_cache_pointer (request_hash, route_fingerprint, scenario_id, composition_id, resolved_request, suggested_stops)
 VALUES (...)
-ON CONFLICT (request_hash) DO NOTHING;
+ON CONFLICT (request_hash)
+DO UPDATE SET route_fingerprint = EXCLUDED.route_fingerprint, ...,
+              created_at = now();
 ```
 
-`DO NOTHING` on the result insert is what makes "stored once per distinct
-result" hold under concurrency: two requests converging on the same route
-at nearly the same time just have the second write no-op rather than
-duplicate or error. Result rows are write-once — a cache **hit** never
-touches `created_at` again (no LRU-style refresh-on-read); a hot result
-that ages past the TTL is simply recomputed and re-written cheaply by the
-next miss. This keeps the write path free of any read-then-update
-branching.
+The original draft said `DO NOTHING` on both; the read-side TTL filter
+above forced the revision: with `DO NOTHING`, an expired row would
+permanently block its own key — every recompute's write would no-op
+against it, so that request/result could never re-prime until a sweep
+happened to delete the corpse. `DO UPDATE` refreshing `created_at` fixes
+that and is equally race-safe under concurrent identical computes (last
+write wins with identical content). The design's essential property is
+preserved: **no refresh-on-READ** — a cache hit never touches
+`created_at` (no LRU semantics); only a write after a miss does. A hot
+result that ages past the TTL is simply recomputed and re-primed by the
+next miss, keeping the read path free of any read-then-update branching.
 
 **TTL cleanup — opportunistic, not a scheduled job.** Attached to the
 write path, run probabilistically on **1% of writes** (not every write, to
@@ -1693,16 +1706,19 @@ ephemeral compute through the cache), full sides + KPI deltas + structured
 published fixtures + override sides; `published: false` marking; diff
 assertions.
 
-*Open follow-up (found 2026-08-05, deferred to a WP9 follow-up):* the
-`views` diff matches dict keys verbatim, but published trip ids carry
-the `P{proposal_id}_V{version}_` prefix — so the pair-keyed data dicts
+*Follow-up (found 2026-08-05) — ✅ fixed 2026-08-07:* the `views` diff
+matched dict keys verbatim, but published trip ids carry the
+`P{proposal_id}_V{version}_` prefix — so the pair-keyed data dicts
 (`per_trip_pair`, `..._per_country`, `..._per_od`, `..._per_section`,
-`per_trip_per_stop`) can never match between two different proposals.
-Their cells fall out into `views_unmatched` on both sides and only the
-`"all"` entry is actually diffed; harmless on a single-pair route, silently
-lossy on a multi-pair one. Fix: strip the prefix on both sides before
-diffing (the same `rewrite_id_prefix()` the calc response already uses) —
-the fingerprint proves the trips correspond.
+`per_trip_per_stop`) could never match between two different proposals.
+Their cells fell out into `views_unmatched` on both sides and only the
+`"all"` entry was actually diffed; harmless on a single-pair route,
+silently lossy on a multi-pair one. Fixed as designed:
+`proposal_compare.py`'s `_structural_views()` strips each side's own
+prefix (the same `rewrite_id_prefix()` the calc response uses) before
+`build_diff()` runs — the fingerprint proves the trips correspond.
+Diff-tree keys and `views_unmatched` paths are therefore structural,
+while the sides themselves still carry their real prefixed ids.
 
 **WP10 — ONTD integration** *(after WP6; independent of WP7–9;
 scope expanded 2026-08-04 — see §5.5, decisions 23–26)*
@@ -1957,6 +1973,59 @@ identity filter that NULL-excludes existing rows.
 (h) Last step: audit `GET /api/params/compositions` against the new
 ontd composition tables (naming/shape drift) and restructure
 `api/README.md` (especially the first table).
+*Audit done 2026-08-07 — outcome:*
+- **No shape drift; the endpoint stays proposal-only.** The two
+  catalogs are deliberately different models, as their DDL comments
+  already state: `ontd.coachtypes` is a descriptive real-world catalog
+  (`purchase_price_eur`, `write_off_years`, `remarks`),
+  `input_params` the calibrated blueprint; `ontd.coach_classes` is
+  likewise deliberately separate from `ontd.classes`. Nothing to
+  reconcile.
+- **Naming drift found and fixed:** the composition identifier was
+  serialized as `comp_id` in `params_serialize.py` and
+  `route_serialize.py` while every other contract surface — calc
+  request, gallery rows (both sources), `composition_ids` filter,
+  compare overrides, publish, and the ONTD columns — used
+  `composition_id`; `evaluation.input.trip_pairs[]` carried BOTH, one
+  level apart. Wire keys renamed to `composition_id`/`description`
+  (also `comp_description` → `description`). The domain attribute
+  `Composition.comp_id` is unchanged: normalising at the serialization
+  boundary is what that boundary is for. Done now precisely because
+  the frontend is mid-rewrite (WP12) — after that it would be a
+  breaking change to working code and would never be worth doing.
+- **ONTD compositions stay unresolvable, by decision.** An existing
+  gallery row's `composition_id` is an opaque label: no endpoint serves
+  `ontd.compositions`, and none is being built (decision 23 keeps
+  existing routes descriptive-only, and no UI needs it). If the gallery
+  ever wants "12 coaches, 380 places" on an existing card, the cheap
+  path is folding `passenger_total`/`lying_total`/`weight_gross_t` into
+  `route_summaries` rather than a new endpoint. Documented in
+  `api/README.md` §7.1 so it is a stated decision, not a discovery.
+- **The `composition_ids` cross-namespace trap is accepted as-is.**
+  Filtering by a proposal composition id silently excludes every
+  existing route from list and map. Behaviour unchanged; README wording
+  sharpened, and it goes in the WP12 ledger so the frontend handles it
+  deliberately.
+- Minor, left alone: `coach_type_id` on the wire vs `coachtype_id` in
+  the domain and the ONTD DB. Self-consistent within the API and never
+  two names in one response.
+
+*No data migration, but flush the compute cache on deploy.* Nothing
+stored carries the old key: `evaluation_output` holds models/views only
+(input is rebuilt from the scenario pin, §5.1), and a stored route goes
+through GTFS with `composition_type_id`, its composition object rebuilt
+via the loader — `route_from_dict()` reads the OUTER
+`trip_pairs[].composition_id`, which never changed. The one exception is
+WP13's compute cache, whose stored payloads embed the serialized route:
+entries written before the rename would be served with `comp_id`
+afterwards, and the version guard won't catch it because no version
+constant changes (correctly — this is an API shape change, not a model
+output change; bumping `ROUTE_BUILDER_VERSION` would trigger a pointless
+mass recompute of every published proposal). TTL makes it self-heal
+within 3 h, but the deploy step is a one-line
+`ComputeCacheRepository.flush()`. Generalises: **any change to a
+serializer that feeds a cached payload needs a cache flush at deploy,
+independent of version bumps.**
 *Testable by*: seeded ONTD rows in gallery/map with the descriptive KPI
 set; `sources` filter combinations; emission KPIs on
 calc/publish/summary/compare; `"existing"` still rejected by
@@ -2008,7 +2077,8 @@ Audit `frontend/src/types/api.ts` end to end.
 
 **WP13 — Compute cache** *(after WP2 + WP4 for the fingerprint;
 independent of WP5–12 — worth doing early, it speeds up every later WP's
-integration tests)*
+integration tests)* ✅ *implemented 2026-08-07 — see §17 "WP13
+implementation notes" below.*
 The two-map design of §2.3: pointer map (request_hash → result identity,
 holding request-specific parts) + result map (`(fingerprint, scenario_id,
 composition_id)` → route + evaluation core, one entry per distinct
@@ -2448,9 +2518,13 @@ WP6 gallery script).
   normalisation metadata) is skipped and empty branches pruned, so every
   cost category / view / normalisation / class key is covered with zero
   per-field maintenance (demand keys, §8.1, will diff automatically when
-  they land). Keys present on only one side (cross-proposal compares:
-  different trip pairs, countries, ODs, stops) are collected as dotted
-  paths under `views_unmatched` instead of half-diffing. The summary
+  they land). Both sides are first neutralised to structural trip ids
+  (`_structural_views()`, 2026-08-07) so trip-keyed views can match
+  across two published proposals at all. Keys present on only one side
+  after that (genuinely different countries, ODs, stops, trip counts,
+  or coach classes — two different compositions contribute each one's
+  coach types) are collected as dotted paths under `views_unmatched`
+  instead of half-diffing. The summary
   diff runs over an explicit `SUMMARY_KPI_FIELDS` tuple (gallery column
   order) rather than "every numeric field" — identity/engagement numbers
   (proposal_id, likes_count, ...) are not KPIs and a delta over them
@@ -2594,3 +2668,98 @@ likes and comments.
 this work (an unused `min_to_h` import in `api/helpers/params_serialize.py`,
 an unused `cryptography` binding in `test_71_auth_units.py`). CI only runs
 `ruff format --check`, which is why they had survived.
+
+---
+
+## 17. WP13 implementation notes (2026-08-07) ✅
+
+The §2.3 compute cache, landed as a pure logic swap onto the WP1 tables
+and the WP2/WP4 response shape — `cache_hit` was already on the wire, so
+no response-shape change anywhere. New adapter
+`adapters/proposal/compute_cache.py` (`ComputeCacheRepository`: `lookup`,
+`store`, `sweep`, `flush`), wired as a `dependencies.py` singleton; the
+read-or-compute orchestration lives in
+`api/helpers/proposal_compute.py`'s `compute_proposal()` — the insertion
+point WP5 left ready — so `/calc`, both compare sides, publish, and the
+on-load refresh all ride it through the one code path they already
+shared. "Canonical request hashing shared with the publish path" is
+satisfied structurally: there is only one hash site.
+
+**Deviations/decisions, none changing the locked §2.3 design intent, two
+amending its draft text (both folded into §2.3 with dated revision
+markers):**
+
+1. **Read-side TTL filter.** `lookup()` only matches rows within the
+   TTL, so an expired-but-unswept row is a miss, never a stale hit —
+   correctness is independent of the opportunistic sweep, which becomes
+   pure disk hygiene. Also what makes the TTL-expiry test deterministic
+   (backdate `created_at`, no waiting, no env restart).
+2. **Upsert, not `DO NOTHING`** (§2.3 write path revised): forced by
+   deviation 1 — under `DO NOTHING`, an expired row would permanently
+   block its own key from re-priming. `ON CONFLICT DO UPDATE`
+   refreshing `created_at` is equally race-safe and preserves the
+   essential no-refresh-on-READ property (hits never touch
+   `created_at`; only writes after a miss do).
+3. **Version guard on hits.** The stored payload carries the
+   `ROUTE_BUILDER_VERSION`/`CALC_VERSION` it was computed under; a hit
+   requires both to match the running constants, else it reads as a
+   miss and the recompute overwrites the rows. Defense in depth for a
+   forgotten version-bump flush: the failure mode degrades from
+   "silently serves results computed under old formulas" to "cache
+   momentarily cold". The guard lives in `proposal_compute.py`, not the
+   adapter — version constants are model-layer knowledge and the
+   adapter stays models-free.
+4. **`compute_proposal()` returns `(payload, cache_hit)`.** The
+   alternative — a `cache_hit` key inside the payload — would have
+   leaked into persisted state via publish/refresh (both hand the dict
+   straight to the repository). `/calc` and compare stamp the flag into
+   their responses; publish and the refresh paths unpack and ignore it.
+5. **`flush()` moved to the cache adapter.**
+   `ProposalRepository.flush_compute_cache()` (a WP8-era placeholder,
+   correct but ownerless) is deleted; `scripts/refresh_proposals.py`
+   now calls `dependencies.get_compute_cache().flush()`. The tables
+   have exactly one owning adapter.
+6. **The batch refresh script computes with `use_cache=False`.** It
+   flushes first and computes each outdated proposal exactly once, so
+   hits are impossible there — and skipping the cache keeps the
+   singleton cache connection off the script's worker threads (the
+   same one-connection-per-thread rule that gives each worker its own
+   `DBDataLoader`). The single-threaded on-load refresh keeps the cache
+   on.
+7. **What the two maps store, concretely.** Result payload =
+   `{route_builder_version, calc_version, summary, route, evaluation}`
+   — every request-independent response part, stored post-prefix-strip
+   so a hit needs zero post-processing. Pointer = the identity triple +
+   `resolved_request` + `suggested_stops` (SQL `NULL` for non-suggest
+   requests — distinct from a suggest run that found none). A hit is
+   byte-identical to the compute it replays; `cache_hit` is the single
+   differing response field, asserted directly in `test_39`.
+8. **Knob placement per the §16 rule.** `COMPUTE_CACHE_TTL_HOURS`
+   (default 3) and `COMPUTE_CACHE_CLEANUP_PROBABILITY` (default 0.01)
+   live beside the implementation in `compute_cache.py`
+   (env-overridable, documented as a commented block in
+   `backend/docker/.env.example`; constructor params for tests) — not
+   in `api/config.py`, exactly as §16 already called.
+9. **Cache errors propagate** rather than degrade to a silent bypass:
+   the tables live in the same database every compute already depends
+   on, so a failure here means the request was doomed regardless — and
+   swallowing would hide a missing migration forever.
+10. **Pre-existing `cache_hit is False` assertions relaxed to
+    shape-only** (`test_35`, `test_37`, `test_54`): with a real cache,
+    their fixtures' flags legitimately depend on suite ordering —
+    conftest's session route fixtures warm the cache for `test_35`'s
+    request, and `test_54`'s override side replays the anchor's own
+    just-published compute_request ("comparing warms the editor").
+    Hit/miss VALUE semantics live exclusively in
+    `tests/test_39_compute_cache.py`, behind its own per-test cache
+    flush.
+
+**Chore alongside (unrelated to caching):** the Douglas-Peucker simplify
+tolerance was defined twice — `adapters/proposal/projection.py` and
+`db/ontd/projection.py`, equal by comment only despite their equality
+being load-bearing (§5.5: both feed one gallery map). Now single-owned:
+public `GEOM_SIMPLIFY_TOLERANCE_DEG` in the proposal projection,
+imported by the ONTD projection.
+
+No version bumps: cache hits are byte-identical replays, so no
+`ROUTE_BUILDER_VERSION`/`CALC_VERSION` output change exists to record.

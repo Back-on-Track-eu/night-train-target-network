@@ -31,6 +31,7 @@ built on top of it:
 | `test_35` | `POST /api/proposal/calc` — the merged compute endpoint (contract) |
 | `test_36` | GTFS+sidecar round-trip (`adapters/proposal/gtfs_store.py`) — the write path `publish()` calls |
 | `test_37` | Fingerprint + gallery-summary projection (`adapters/proposal/projection.py`) |
+| `test_39` | The §2.3 compute cache (`adapters/proposal/compute_cache.py`, WP13) |
 | `test_40` | End-to-end pipeline smoke |
 | `test_50` | `POST /api/proposal/publish` + proposals list/load (the only write path) |
 | `test_51` | Proposal engagement — likes + comments |
@@ -336,9 +337,30 @@ the pre-storage floating-point value.
 | `TestFingerprint::test_differs_for_a_different_route` | Sensitivity | different stop list | different fingerprint |
 | `TestFingerprint::test_matches_direct_call_on_route_dict` | Wiring = direct function call | response route dict | `route_fingerprint()` matches response field |
 | `TestFingerprint::test_ignores_id_prefix` | Prefix independence by construction | prefixed vs bare route dict | identical fingerprints |
-| `TestCacheHitPlaceholder::test_always_false` | WP13 placeholder semantics | calc response | `cache_hit == false` |
+| `TestCacheHitFlag::test_is_bool` | Flag shape (semantics live in `test_39`) | calc response | `cache_hit` is a bool |
 | `TestSummaryRow::*` | Every non-identity summary column present, metrics plausible, KPIs match the evaluation views, demand KPIs flagged placeholder, valid simplified MultiLineString | calc response | see file |
 | `TestSummaryRowSchemaConformance::test_row_inserts_cleanly` | Row shape matches `proposal_summaries` DDL | direct INSERT | insert succeeds (rolled back) |
+
+## test_39_compute_cache.py — The §2.3 compute cache (WP13)
+
+Hit/miss semantics of the two-map compute cache, exercised through live
+`POST /api/proposal/calc` calls plus direct `ComputeCacheRepository`
+access for flush/sweep. Every test starts behind its own cache TRUNCATE
+(autouse fixture), which is why cache_hit VALUE assertions live only
+here — the other suites (`test_35`/`test_37`/`test_54`) assert shape
+only, since session fixtures may have warmed the cache in any order.
+
+| Test | Purpose | Input | Expected |
+|---|---|---|---|
+| `TestHitMiss::test_repeat_request_hits_and_is_identical` | Basic hit + byte-identity | same request twice | miss then hit; responses equal minus `cache_hit` |
+| `TestHitMiss::test_miss_on_each_output_changing_field` | Key sensitivity | stops order / composition / routing_mode varied | each a miss; base entry survives |
+| `TestHitMiss::test_convergent_requests_share_one_result_row` | §2.3 storage dedup | `off` vs `suggest` twin requests | 2 pointer rows, 1 result row; `suggested_stops` only on the suggest hit |
+| `TestHitMiss::test_omitted_field_and_explicit_default_share_one_entry` | Hash over the RESOLVED request | default omitted vs posted | one entry; second call hits; echo identical |
+| `TestExpiryAndFlush::test_ttl_expiry_is_a_miss_then_reprimes` | Read-side TTL filter + upsert re-prime | backdated rows | miss, then hit again |
+| `TestExpiryAndFlush::test_stale_version_payload_is_a_miss` | Version guard (forgotten-flush backstop) | payload's `calc_version` mutated | miss; recompute re-primes |
+| `TestExpiryAndFlush::test_flush_empties_both_maps` | `flush()` | primed cache | both tables empty; next call a miss |
+| `TestSweep::test_sweep_deletes_only_expired_rows` | Standalone sweep | synthetic old + fresh rows | only expired rows deleted |
+| `TestSweep::test_sweep_rides_the_write_path` | §2.3 opportunistic cleanup | `cleanup_probability=1.0` + one `store()` | expired rows gone after the write |
 
 ## test_40_pipeline.py — End-to-end smoke
 
@@ -474,12 +496,15 @@ module isolation as test_50/test_53; the diff-semantics class is pure
 | `TestValidation::*` (4 tests + parametrized side counts) | Request validation | empty body / 0-1-3 sides / unknown side key / wrong types | `400` each, field named in `details` |
 | `TestValidation::test_unknown_anchor_is_404_with_side_index` | Anchor existence | side B → nonexistent id | `404`, message names `sides[1]` |
 | `TestStoredVsStored::*` (5 tests) | Cross-proposal compare | two published fixtures, no overrides | top-level `sides`/`diff`/`route_context` shape; both `published: true` with full §2.1 shape + gallery summary (`likes_count`); summary diff `abs == b - a` and ≠ 0 across compositions; views diff reaches breakdown leaves with the `{a, b, abs, rel}` contract; `composition_id` in `differing_request_fields` |
+| `TestStoredVsStored::test_pair_keyed_views_diff_across_two_proposals` | The §7.3 prefix regression (fixed 2026-08-07) | same two published fixtures | all five trip-keyed views diff at least one REAL per-pair cell (not just their `"all"` aggregate — that matched even under the bug); no `views_unmatched` path carries a `P{id}_V{n}_` prefix (coach-class keys legitimately remain, since the fixtures' compositions differ); diff keys structural while each side's non-`"all"` keys keep its own prefix |
 | `TestOverrides::test_override_equal_to_stored_is_computed_but_identical` | "Any override → computed side" rule | scenario override = stored value | `published: false`, overrides echoed, projection summary (no `likes_count`/geometry), `route_identical: true`, every delta zero |
 | `TestOverrides::test_scenario_override_changes_costs` | What-if scenario side + ephemerality | historical-scenario override | non-zero cost delta, `differing_request_fields == ["scenario_id"]`; anchor's stored row untouched |
 | `TestOverrides::test_composition_override` | Composition variant side | other composition | `published: false`, override reflected in summary, non-zero cost delta |
 | `TestOverrides::test_unknown_composition_override_is_422_with_side_index` | Domain error mapping | nonsense composition | `422 domain_error`, message names `sides[1]` |
 | `TestOnLoadRefreshInCompare::test_stale_anchor_is_refreshed` | WP8 reuse (§4.2) | publish, age the version, compare it with itself | both sides current, `proposal_version` 2, `update_log` `'recalculated'` |
 | `TestDiffSemantics::*` (2 tests, pure) | Diff contract | synthetic sides | zero base → `rel: null`; float noise absorbed; strings/null-vs-number skipped; one-sided keys collected as dotted paths, never half-diffed |
+| `TestDiffSemantics::test_published_prefixes_are_neutralised_before_diffing` | Prefix neutralisation (pure) | two published synthetic sides, different prefixes | trip keys match on the structural id, nothing unmatched |
+| `TestDiffSemantics::test_published_and_computed_sides_diff_against_each_other` | Mixed published/override case (pure) | prefixed side vs structural side | asymmetry doesn't reintroduce a mismatch |
 
 ## test_60_feedback_api.py — Feedback API
 
