@@ -26,7 +26,7 @@ from dataclasses import dataclass
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.15"
+ROUTE_BUILDER_VERSION: str = "0.9.16"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -41,6 +41,16 @@ ROUTE_BUILDER_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.16": {
+        "date": "2026-08-07",
+        "author": "david",
+        "changes": "Comment-only: stale references to the retired ONTD "
+        "runtime stop-minting (db/ontd/stop_mapping.py, superseded by "
+        "seed-time stop catalog loading) corrected in route_factory.py "
+        "and rail_router.py. No behavior change, no Trip output change — "
+        "bumped only because CI's version-check gate fires on any diff "
+        "to these files regardless of content.",
+    },
     "0.9.15": {
         "date": "2026-08-06",
         "author": "david",
