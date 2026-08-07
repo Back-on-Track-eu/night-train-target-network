@@ -1,7 +1,7 @@
 """
 compute_cache.py
 =================
-The WP13 compute cache (PROPOSALS_DESIGN.md §2.3): a server-side,
+The compute cache (README.md §2.3): a server-side,
 TTL-bounded cache over merged compute results, shared across gunicorn
 workers via two UNLOGGED Postgres tables (created in WP1's phase-1
 migration). Strictly a performance layer — never a source of truth, safe

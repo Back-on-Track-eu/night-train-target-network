@@ -594,7 +594,7 @@ def input_to_dict(
 
     route: the route dict this evaluation costed — included verbatim.
     include_route=False for POST /api/proposal/calc (api/helpers/
-    proposal_compute.py, PROPOSALS_DESIGN.md §2.1): the merged response
+    proposal_compute.py, adapters/proposal/README.md §2.1): the merged response
     already carries the route once, as a sibling key of "evaluation" — a
     second copy under evaluation.input would violate the "route appears
     exactly once" rule. include_route=True is the model-layer default

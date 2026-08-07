@@ -1,7 +1,7 @@
 """
 proposal_load.py
 =================
-The on-load version-refresh fallback (PROPOSALS_DESIGN.md §4.2, WP8) as a
+The on-load version-refresh fallback (adapters/proposal/README.md §4.2) as a
 shared helper: load a proposal's container row and, if it has fallen
 behind the running route_builder_version/calc_version or the current base
 scenario, recompute and overwrite it in place before returning — so every

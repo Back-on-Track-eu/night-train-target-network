@@ -3,7 +3,7 @@ proposal_publish.py
 ====================
 POST /api/proposal/publish
 
-The only user write path for proposals (PROPOSALS_DESIGN.md §2.2, WP5).
+The only user write path for proposals (adapters/proposal/README.md §2.2).
 Thin view: validate the envelope, delegate to
 api/helpers/publish_dispatch.py, shape the result via
 api/helpers/proposal_serialize.py, return it in the same shape
@@ -36,7 +36,7 @@ bp = Blueprint("proposal_publish", __name__)
 @require_auth
 def publish():
     """
-    Publish a computed proposal — see PROPOSALS_DESIGN.md §2.2 for the
+    Publish a computed proposal — see adapters/proposal/README.md §2.2 for the
     full request/response contract.
 
     Request body:

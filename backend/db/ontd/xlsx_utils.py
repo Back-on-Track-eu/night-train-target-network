@@ -39,7 +39,7 @@ _BOOL_FALSE = {"FALSE", "NO", "N", "F", "0", ""}
 def sheets_export_url(sheet_id: str) -> str:
     """Whole-workbook export of a NATIVE Google Sheet — no API key or
     credentials, the sheet only has to be link-shared
-    (PROPOSALS_DESIGN.md decision 26). Native sheet ids are 44 chars.
+    (adapters/proposal/README.md decision 26). Native sheet ids are 44 chars.
 
     This endpoint converts a live sheet to .xlsx on the fly; it does NOT
     serve .xlsx files merely stored in Drive — see drive_download_url.

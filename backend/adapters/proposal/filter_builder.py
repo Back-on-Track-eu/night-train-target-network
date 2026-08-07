@@ -2,7 +2,7 @@
 filter_builder.py
 ==================
 The generic filter/sort SQL builder behind POST /api/proposals
-(PROPOSALS_DESIGN.md §7.1, WP6). One column-kind registry drives both
+(adapters/proposal/README.md §7.1). One column-kind registry drives both
 structural validation (api/helpers/proposal_serialize.py's
 validate_list_body()) and SQL generation here, so a column's filter
 behaviour is declared once rather than duplicated between the two.

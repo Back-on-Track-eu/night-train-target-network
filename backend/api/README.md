@@ -8,11 +8,15 @@ responses themselves: `route_builder_version` (`models/route/version.py`),
 inside `models.energy` (`models/energy/version.py`). Each `version.py` carries
 its own changelog.
 
-**Related documentation:** domain model & pipeline —
-[`../models/README.md`](../models/README.md) · evaluation model, views &
-allocation — [`../models/evaluation/README.md`](../models/evaluation/README.md)
-· database schemas & versioning — [`../db/README.md`](../db/README.md) ·
-integration tests per endpoint — [`../tests/README.md`](../tests/README.md)
+**Related documentation:** proposals architecture, storage & locked design
+decisions — [`../adapters/proposal/README.md`](../adapters/proposal/README.md)
+· domain model & pipeline — [`../models/README.md`](../models/README.md) ·
+evaluation model, views & allocation —
+[`../models/evaluation/README.md`](../models/evaluation/README.md) · database
+schemas & versioning — [`../db/README.md`](../db/README.md) · integration tests
+per endpoint — [`../tests/README.md`](../tests/README.md) · frontend migration
+guide —
+[`../../docs/FRONTEND_API_HANDOVER_2026-08-07.md`](../../docs/FRONTEND_API_HANDOVER_2026-08-07.md)
 
 **Worked examples:** request fixtures for the main endpoints are checked
 in under [`../scripts/data/`](../scripts/data/); the matching
@@ -235,13 +239,13 @@ database is documented in [`../db/README.md`](../db/README.md).
 
 ### `POST /api/proposal/calc`
 
-The merged compute endpoint (`docs/PROPOSALS_DESIGN.md` §2.1, WP2). One
+The merged compute endpoint (`adapters/proposal/README.md` §2.1). One
 request → route + evaluation, one response, no side effects: it never
 writes to the database and never touches `admin.users` identity, so
 there is no `proposal` block in the response and no auth header has any
 effect. This is the sole route-planning-and-costing entry point —
 the former two-call `POST /api/route/plan` + `POST /api/evaluation/calc`
-pair was removed in the WP5 cutover (`docs/PROPOSALS_DESIGN.md` §10).
+pair was removed in the 2026-08-03 cutover.
 
 To persist a computed result as a proposal, take this endpoint's
 `request` block unchanged and post it as `compute_request` to
@@ -429,7 +433,7 @@ custom demand through this endpoint — it always builds fresh from
 `stops`/`composition_id` and runs the stopgap model internally. `route_id`/`trip_id`
 carry no `P{proposal_id}_V{version}_` prefix here — see point 2 below.
 
-Five things worth calling out explicitly (`docs/PROPOSALS_DESIGN.md` §2.1):
+Five things worth calling out explicitly (`adapters/proposal/README.md` §2.1):
 
 1. **`request` is resolved, not echoed raw** — every optional field is
    present with its default applied and `scenario_id` is always a
@@ -709,7 +713,7 @@ rows only if the database is not correctly seeded.
 ## Proposals
 
 Publish and load night train proposals — the public proposal tool's
-storage layer (`docs/PROPOSALS_DESIGN.md` §2.2, §7). Computing
+storage layer (`adapters/proposal/README.md` §2.2, §7). Computing
 (`POST /api/proposal/calc`, above) never writes anything; a proposal only
 comes into existence through an explicit publish. Browsing lives in the
 [Gallery](#gallery) section, comparison in [Analytics](#analytics).
@@ -727,7 +731,7 @@ sidecar tables), the evaluation's `models`+`views` as JSON
 route and an evaluation. There is exactly one state per proposal at any
 time — publishing again (`mode: "overwrite"`) replaces it in place; the
 previous state is hard-deleted in the same transaction. See
-`db/README.md` and `docs/PROPOSALS_DESIGN.md` §5 for the full storage
+`db/README.md` and `adapters/proposal/README.md` §5 for the full storage
 design.
 
 <a id="proposal-publish"></a>
@@ -833,7 +837,7 @@ No request body.
 
 The browse surface of the proposal tool: one endpoint serving the
 proposal list AND the map layers, over a union of user proposals and the
-ONTD catalog of real, existing night trains (`docs/PROPOSALS_DESIGN.md`
+ONTD catalog of real, existing night trains (`adapters/proposal/README.md`
 §7.1; WP10 step 6b).
 
 | Method | Endpoint | Description |
@@ -845,7 +849,7 @@ ONTD catalog of real, existing night trains (`docs/PROPOSALS_DESIGN.md`
 
 ### `GET` / `POST /api/proposals`
 
-The gallery + map contract in one endpoint (`docs/PROPOSALS_DESIGN.md`
+The gallery + map contract in one endpoint (`adapters/proposal/README.md`
 §7.1). `GET` returns every proposal as a summary, newest first — the
 empty-filter convenience case of `POST` below. `POST` accepts a generic
 filter/sort/pagination model plus an `include` list that picks which
@@ -1029,7 +1033,7 @@ paginated).
 step 6b — the gallery is a UNION of `proposals.proposal_summaries` and
 the ONTD catalog's `ontd.route_summaries`, defaulting to both).
 `"proposal"` rows are a straight read off `proposals.proposal_summaries`
-(`docs/PROPOSALS_DESIGN.md` §5.4) plus `likes_count` and
+(`adapters/proposal/README.md` §5.4) plus `likes_count` and
 `comments_count` (live-joined from `proposals.likes` /
 `proposals.comments`, not summary columns — engagement changes
 independently of publish/refresh, so storing it would go stale;
@@ -1051,7 +1055,7 @@ therefore excludes every existing route from the list AND the map, with
 no other signal. An existing row's `composition_id` is an **opaque
 label**: no endpoint resolves it (`/api/params/compositions` serves the
 curated calibration catalog only), by decision — see
-`PROPOSALS_DESIGN.md` §10 WP10(h). Existing rows have NULL financials,
+`db/ontd/README.md`. Existing rows have NULL financials,
 engagement counts, and timestamps — every range filter on those columns excludes
 them via plain SQL NULL semantics (no `sources` filter needed), and the
 default `updated_at DESC` sort places them after every proposal
@@ -1110,7 +1114,7 @@ a malformed range/list/array-mode/trip_windows/bbox shape, an unknown
 
 ### `POST /api/proposals/compare`
 
-Compare two sides (`docs/PROPOSALS_DESIGN.md` §7.3, WP9). Each side is
+Compare two sides (`adapters/proposal/README.md` §7.3). Each side is
 anchored on one stored proposal and may override `scenario_id` and/or
 `composition_id`. A side **without** overrides is the stored proposal
 as-is (`published: true`); a side **with** any override is computed
@@ -1229,7 +1233,7 @@ names which side); `422 domain_error` when an override compute fails
 
 </details>
 
-No delete endpoint (`docs/PROPOSALS_DESIGN.md` §7.4) — proposals are
+No delete endpoint (`adapters/proposal/README.md` §7.4) — proposals are
 removed manually in the database if ever needed. `proposal_summaries` has
 no FK to `proposals.proposals` (§5.4 — a derived, rebuildable
 projection, not authoritative data), so nothing cascades a manual
@@ -1333,7 +1337,7 @@ account was deleted).
 
 `proposal_version` on every event is the state counter **after** it.
 `actor` is `null` **only** for a system event (a version-bump or
-base-scenario refresh, `docs/PROPOSALS_DESIGN.md` §4.2) — that is what
+base-scenario refresh, `adapters/proposal/README.md` §4.2) — that is what
 separates a system recalculation from a user overwrite. A deleted
 account is not a system event: it renders as
 `{"user_id": null, "user_name": "[deleted]"}`.

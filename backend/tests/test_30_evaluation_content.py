@@ -12,7 +12,7 @@ add_directional_domain_demand() -> models.pipeline.
 evaluate_and_build_views() -> views), skipping HTTP for the compute step
 entirely; only route_berlin_wien/route_berlin_dresden_wien themselves
 still come from a live POST /api/proposal/calc (session-scoped fixtures,
-conftest.py). See docs/PROPOSALS_DESIGN.md's WP5 entry for the decision.
+conftest.py). See adapters/proposal/README.md for the decision.
 
 The core idea: recompute cost components BY HAND from (a) the physics in the
 posted route JSON and (b) the parameter values served by /api/params/*, then

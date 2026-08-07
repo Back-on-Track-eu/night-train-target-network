@@ -36,4 +36,4 @@ shift model's **log-additive factor form**, analyzed and found compatible
 with the existing test suite. When it lands here, the second replacement
 site is the placeholder demand KPIs in
 `adapters/proposal/projection.py` (`_PLACEHOLDER_*` constants,
-`docs/PROPOSALS_DESIGN.md` §8.1).
+`adapters/proposal/README.md` §8.1).

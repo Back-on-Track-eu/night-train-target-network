@@ -225,7 +225,7 @@ def operating_days(route: dict) -> int:
 # tests that need custom demand therefore call the model layer directly
 # (route_from_dict -> add_directional_domain_demand ->
 # models.pipeline.evaluate_and_build_views -> views_to_dict), skipping
-# HTTP entirely — see docs/PROPOSALS_DESIGN.md's WP5 entry for the
+# HTTP entirely — see adapters/proposal/README.md for the
 # decision.
 
 

@@ -108,7 +108,7 @@ def test_scenarios():
         for group_name in GROUPS:
             _print_group(group_name, response_body[group_name])
     else:
-        print(f"\nError response:")
+        print("\nError response:")
         print(json.dumps(response_body, indent=2))
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)

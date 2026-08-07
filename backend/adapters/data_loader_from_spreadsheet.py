@@ -7,7 +7,7 @@ objects consumed by both the router and the cost model.
 
 Currently has no callers — retained deliberately: the existing night
 train database (ONTD) lives fully in Google Spreadsheets, and this loader
-is the planned basis for importing it (PROPOSALS_DESIGN.md, WP10). Do not
+is the planned basis for importing it (adapters/proposal/README.md). Do not
 remove as dead code. NOTE it has bit-rotted against models/params.py
 (imports names that no longer exist, e.g. CompositionParams) — it will
 need a rework pass when the ONTD import work starts.

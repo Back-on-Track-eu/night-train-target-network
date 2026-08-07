@@ -150,7 +150,7 @@ COMMENT ON COLUMN proposals.stop_times.auto_added     IS 'Mirrors models.route.t
 -- ---------------------------------------------------------------
 -- proposals  (not GTFS — project-specific version container)
 --
--- WP5 (proposals redesign cutover, 2026-08-04, docs/PROPOSALS_DESIGN.md
+-- Proposals redesign cutover (2026-08-04, backend/adapters/proposal/README.md
 -- §5.3): one row per proposal, always current — no version history.
 -- proposal_version is an internal state counter bumped on every
 -- overwrite-publish or system refresh (§4); the previous state is
@@ -261,12 +261,12 @@ COMMENT ON COLUMN proposals.comments.proposal_version IS 'proposal_version that 
 COMMENT ON COLUMN proposals.comments.user_id          IS 'admin.users identity of the author. SET NULL on account deletion (same pattern as admin.feedback.user_id) so the comment text survives; the API renders a null user_id as a deleted-user placeholder.';
 COMMENT ON COLUMN proposals.comments.body             IS 'Comment text. Cleared server-side (empty string) when is_deleted is set — the API never trusts a client-supplied deleted body.';
 COMMENT ON COLUMN proposals.comments.is_deleted       IS 'Soft-delete flag, settable only by the comment''s own author. Storage-level tombstone: the row is kept so comment_id stays stable, but TRUE rows are returned by nothing — neither the thread nor the timeline (WP11).';
-COMMENT ON COLUMN proposals.comments.updated_at       IS 'Bumped on edit and on soft-delete. Also the comment''s position in the timeline — an edited comment moves to its edit time (docs/PROPOSALS_DESIGN.md §7.5).';
+COMMENT ON COLUMN proposals.comments.updated_at       IS 'Bumped on edit and on soft-delete. Also the comment''s position in the timeline — an edited comment moves to its edit time (backend/adapters/proposal/README.md §7.5).';
 
 -- ============================================================
 -- Proposals redesign — schema phase 1 (2026-08-03, additive)
 -- New GTFS sidecar tables, update_log, proposal_summaries, and the
--- compute cache. See docs/PROPOSALS_DESIGN.md and
+-- compute cache. See backend/adapters/proposal/README.md and
 -- migrations/2026-08-03_proposal_schema_phase1.sql (this block is a
 -- verbatim copy of that migration's CREATE TABLE statements — the two
 -- new columns on proposals.proposals/stop_times above are the ALTER

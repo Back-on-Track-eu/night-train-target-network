@@ -127,7 +127,7 @@ def test_params(endpoint: str, scenario_id: int | None):
                 t = tracks[0]
                 print(f"  first: {t['country_code']}")
     else:
-        print(f"\nError response:")
+        print("\nError response:")
         print(json.dumps(response_body, indent=2))
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)

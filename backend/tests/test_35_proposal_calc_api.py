@@ -2,7 +2,7 @@
 test_35_proposal_calc_api.py
 =============================
 Contract tests for POST /api/proposal/calc — the merged compute endpoint
-(PROPOSALS_DESIGN.md §2.1, WP2). Response-structure and
+(adapters/proposal/README.md §2.1). Response-structure and
 request-validation coverage for the single merged response shape;
 content-logic coverage lives in test_20_route_content.py (route side) and
 test_30_evaluation_content.py (evaluation side). Deeper content-parity

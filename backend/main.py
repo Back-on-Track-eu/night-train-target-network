@@ -34,7 +34,7 @@ Endpoints — see api/README.md for full documentation.
   GET  /api/scenarios
 
 POST /api/proposal/calc is the merged ephemeral compute endpoint and
-POST /api/proposal/publish the only user write path (PROPOSALS_DESIGN.md
+POST /api/proposal/publish the only user write path (adapters/proposal/README.md
 §2).
 """
 
@@ -83,7 +83,7 @@ def create_app() -> Flask:
     app.register_blueprint(health.bp, url_prefix="/api")
     app.register_blueprint(params.bp, url_prefix="/api/params")
     # Merged ephemeral compute (calc) + the only user write path
-    # (publish) — PROPOSALS_DESIGN.md §2.
+    # (publish) — adapters/proposal/README.md §2.
     app.register_blueprint(proposal_calc.bp, url_prefix="/api/proposal")
     app.register_blueprint(proposal_publish.bp, url_prefix="/api/proposal")
     app.register_blueprint(auth.bp, url_prefix="/api/auth")

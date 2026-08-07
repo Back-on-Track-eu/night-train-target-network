@@ -3,7 +3,7 @@ proposal_compare.py
 ====================
 POST /api/proposals/compare
 
-The compare endpoint (PROPOSALS_DESIGN.md §7.3, WP9). Two sides, each
+The compare endpoint (adapters/proposal/README.md §7.3). Two sides, each
 anchored on one stored proposal, each optionally overriding
 scenario_id/composition_id — an override side is computed ephemerally
 (never persisted, published: false), a bare side is the stored proposal
@@ -37,7 +37,7 @@ bp = Blueprint("proposal_compare", __name__)
 @bp.post("/proposals/compare")
 def compare():
     """
-    Compare two proposal-anchored sides — see PROPOSALS_DESIGN.md §7.3
+    Compare two proposal-anchored sides — see adapters/proposal/README.md §7.3
     and api/README.md for the full contract. The diff is side B minus
     side A (sides[1] - sides[0]).
 

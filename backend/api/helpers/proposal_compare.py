@@ -2,7 +2,7 @@
 proposal_compare.py
 ====================
 Per-side resolution and diff building for POST /api/proposals/compare
-(PROPOSALS_DESIGN.md §7.3, WP9).
+(adapters/proposal/README.md §7.3).
 
 Each compare side is anchored on one stored proposal. A side without
 overrides IS that proposal — reconstructed exactly like GET

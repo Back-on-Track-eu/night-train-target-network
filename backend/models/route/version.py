@@ -437,7 +437,7 @@ deceleration); 0.5 m/s² is a comfortable service value appropriate for
 sleeping passengers — full emergency capability is far higher and
 irrelevant for timetabling."""
 
-# --- Neutral placeholder ids (api/helpers/proposal_compute.py, PROPOSALS_DESIGN.md §2.1)
+# --- Neutral placeholder ids (api/helpers/proposal_compute.py, adapters/proposal/README.md §2.1)
 NEUTRAL_PROPOSAL_ID: int = 0
 NEUTRAL_PROPOSAL_VERSION: int = 0
 """Fixed (not random) placeholder used only to satisfy plan_route()'s

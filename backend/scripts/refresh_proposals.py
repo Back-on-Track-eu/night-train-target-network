@@ -1,7 +1,7 @@
 """
 refresh_proposals.py
 =====================
-Batch job (PROPOSALS_DESIGN.md §4.2): recompute + overwrite in place every
+Batch job (adapters/proposal/README.md §4.2): recompute + overwrite in place every
 published proposal whose stored route_builder_version/calc_version has
 fallen behind the running code, or whose scenario_id is no longer the
 current base scenario. Run manually after every version bump or base-
@@ -36,7 +36,7 @@ models/route/routing/rail_router.py's RailRouter already falls back to
 http://localhost:8989 on its own when OPENRAILROUTING_URL is unset, so
 nothing extra is needed there as long as this script leaves it alone.
 
-Concurrency (WP14 context — see docs/PROPOSALS_DESIGN.md §10): only the
+Concurrency (see docs/PARKED_WORK.md): only the
 live-routing compute step is parallelized across --concurrency worker
 threads, each with its own DBDataLoader (cheap — one psycopg2 connection,
 no heavy precompute) sharing the one process-wide RailRouter, which is

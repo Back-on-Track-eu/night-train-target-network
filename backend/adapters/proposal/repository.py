@@ -5,13 +5,13 @@ Write-path database adapter for published proposals — the persistence
 counterpart to adapters/data_loader_from_db.py (which stays strictly
 read-only for parameter data).
 
-WP5 cutover (PROPOSALS_DESIGN.md §2.2/§5): replaces the old persist-on-
+The 2026-08-03 cutover (README.md §2.2/§5): replaces the old persist-on-
 calc world (save()/attach_evaluation()/get_version(), route_body/
 evaluation_body JSON blobs, is_current/change_log) with the slimmed
 schema's single-transaction publish. A proposal has exactly one stored
 state at any time — publish() either inserts a brand-new row (mode="new")
 or updates the existing one in place (mode="overwrite", previous GTFS/
-sidecar rows pruned in the same transaction). See docs/PROPOSALS_DESIGN.md
+sidecar rows pruned in the same transaction). See adapters/proposal/README.md
 §2.2 for the full new/overwrite contract this module implements.
 
 The actual GTFS + sidecar writing is NOT here — gtfs_store.py's
@@ -22,7 +22,7 @@ transaction boundary around all of it. The prefixed-ID rewrite it applies
 at publish time lives in id_prefix.py (shared with api/helpers/
 proposal_compute.py, which strips the neutral prefix for /calc).
 
-WP7/WP8 (PROPOSALS_DESIGN.md §4.2): publish()'s "write the state" middle
+Version refresh (README.md §4.2): publish()'s "write the state" middle
 section (prefix rewrite, GTFS write, summary upsert) is factored into
 _write_state(), shared with the new refresh_proposal() — the system-
 triggered counterpart used by scripts/refresh_proposals.py and the

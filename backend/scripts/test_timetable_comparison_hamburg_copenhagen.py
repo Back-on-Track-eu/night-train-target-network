@@ -313,7 +313,7 @@ def compare(scenario: dict, interval: list[str]) -> None:
         f"  scenario: {scenario['scenario_key']} ({scenario['scenario_name']}) "
         f"[scenario_id={scenario['scenario_id']}]"
     )
-    print(f"  A: simpleAutomatic (mirror full trip around 02:30)")
+    print("  A: simpleAutomatic (mirror full trip around 02:30)")
     print(f"  B: simpleAutomaticWithFixedNight, interval {interval}")
     print("-" * 72)
 

@@ -536,7 +536,7 @@ carries one class_main), so its class axis is the identity: `"all"` and
 ## API integration
 
 The evaluation pipeline is called by `POST /api/proposal/calc`
-(`docs/PROPOSALS_DESIGN.md` §2.1) via `models/pipeline.py`'s
+(`adapters/proposal/README.md` §2.1) via `models/pipeline.py`'s
 `run_compute()`, which runs it immediately after building the route in
 the same request: `evaluate_route()` is called directly on the `Route`
 object `plan_route()` just returned (no deserialize step), reusing

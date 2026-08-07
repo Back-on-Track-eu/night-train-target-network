@@ -1,7 +1,7 @@
 """
 test_53_proposal_refresh.py
 ============================
-Version-refresh mechanism (PROPOSALS_DESIGN.md §4.2, WP7/WP8 combined,
+Version-refresh mechanism (adapters/proposal/README.md §4.2,
 2026-08-04): the on-load fallback in GET /api/proposal/<id>
 (api/proposals.py) and the batch script (scripts/refresh_proposals.py).
 Both share one staleness check — adapters/proposal/repository.py's

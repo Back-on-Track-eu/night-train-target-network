@@ -2,7 +2,7 @@
 
 Flat per-mode GHG intensity factors (g CO2e per passenger-km) — the
 single source for the night-train, air, and car values across the
-platform (`docs/PROPOSALS_DESIGN.md` decision 24).
+platform (`adapters/proposal/README.md` decision 24).
 
 **Related documentation:** model layer overview —
 [`../README.md`](../README.md) · evaluation model (summary KPI

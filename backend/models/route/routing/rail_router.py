@@ -269,7 +269,7 @@ class RailRouter:
 
         A deliberately narrow entry point for callers that need a line on a
         map and nothing else — the ONTD route_summaries projection
-        (PROPOSALS_DESIGN.md §5.5, decision 25). route() cannot serve that
+        (adapters/proposal/README.md §5.5, decision 25). route() cannot serve that
         case: its per-leg physics needs a Composition and a
         TrackInfraCollection to apportion country buffer quotas, and
         existing trains are never evaluated (decision 23), so there is no

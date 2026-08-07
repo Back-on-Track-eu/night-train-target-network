@@ -40,9 +40,6 @@ from models.evaluation.version import (
 from models.evaluation.calc import (
     EvaluationResult,
     SegmentPassengerLoad,
-    ODSegmentLoad,
-    ParkingCost,
-    ShuntingCost,
 )
 
 # =============================================================================

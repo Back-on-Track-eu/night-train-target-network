@@ -1,8 +1,7 @@
 """
 publish_dispatch.py
 ====================
-POST /api/proposal/publish's case-dispatch (PROPOSALS_DESIGN.md §2.2,
-WP5). All persisting case distinctions in one small component: validate
+POST /api/proposal/publish's case-dispatch (adapters/proposal/README.md §2.2). All persisting case distinctions in one small component: validate
 the publish envelope, enforce the base-scenario rule, compute (never
 trust a client-supplied result), and hand off to
 adapters/proposal/repository.py's publish() for the actual write.

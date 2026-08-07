@@ -2,7 +2,7 @@
 proposal_compute.py
 ====================
 Validation + serialization wrapper around models/pipeline.py's
-run_compute() (PROPOSALS_DESIGN.md §2.1) — the single place that turns a
+run_compute() (adapters/proposal/README.md §2.1) — the single place that turns a
 compute request body into the merged route+evaluation response dict. Used
 by POST /api/proposal/calc (api/proposal_calc.py), publish
 (api/helpers/publish_dispatch.py), the on-load refresh fallback

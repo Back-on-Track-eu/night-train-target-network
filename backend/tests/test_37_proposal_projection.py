@@ -1,7 +1,7 @@
 """
 test_37_proposal_projection.py
 ================================
-Pure-function tests for WP4/WP10 (docs/PROPOSALS_DESIGN.md §3.1/§5.4):
+Pure-function tests (adapters/proposal/README.md §3.1/§5.4):
 adapters/proposal/projection.py's route_fingerprint() and
 build_summary_db_row(), models/evaluation/summary.py's
 build_summary_row() (the shared §5.4 KPI derivation, WP10 step 5), plus

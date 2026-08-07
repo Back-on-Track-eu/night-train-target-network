@@ -6,7 +6,7 @@ api/helpers/route_serialize.py's route_to_dict()/route_from_dict(), against
 proposals.{routes,trips,stop_times,shapes,services,calendar} + the WP1
 sidecar tables (proposals.segments, od_pairs, parkings, shuntings,
 timetable_warnings, seasonal_schedules) instead of a JSON blob
-(PROPOSALS_DESIGN.md §5.1/§5.2, WP3). Lives under adapters/ — it
+(adapters/proposal/README.md §5.1/§5.2). Lives under adapters/ — it
 executes SQL, and the project's layering keeps all DB access in adapters/;
 the pure dict↔domain serializers it delegates to stay in api/helpers/
 (Flask-free by design, importable from here — see AGENTS.md's layering

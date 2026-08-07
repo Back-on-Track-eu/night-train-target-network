@@ -5,7 +5,7 @@ Fills the CURATED half of the ontd schema — coach_classes, coachtypes,
 coachtype_classes, compositions, composition_coaches, route_compositions
 — from the target-network workbook. After this runs, the DB is the
 source of truth: new coach material and missing data are maintained by
-hand in the tables, not by re-importing (PROPOSALS_DESIGN.md §5.5,
+hand in the tables, not by re-importing (adapters/proposal/README.md §5.5,
 decision 26). Nothing here is part of the half-yearly ONTD refresh, and
 db/ontd/loader.py never truncates these tables.
 

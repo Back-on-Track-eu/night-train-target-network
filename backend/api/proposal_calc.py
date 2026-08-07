@@ -3,7 +3,7 @@ proposal_calc.py
 =================
 POST /api/proposal/calc
 
-The merged compute endpoint (PROPOSALS_DESIGN.md §2.1, WP2). One stateless
+The merged compute endpoint (adapters/proposal/README.md §2.1). One stateless
 request -> route + evaluation, no side effects.
 
 The actual pipeline lives two layers down — domain orchestration in
@@ -26,14 +26,14 @@ bp = Blueprint("proposal_calc", __name__)
 @bp.post("/calc")
 def calc():
     """
-    Plan a route and evaluate it in one call — see PROPOSALS_DESIGN.md
+    Plan a route and evaluate it in one call — see adapters/proposal/README.md
     §2.1 for the full request/response contract. Stateless: no
     persistence, no proposal_id/proposal_version in the request, no auth.
 
     Request body: identical to §2.1's WHAT/HOW fields (stops,
     composition_id, scenario_id, timetable_mode, fixed_night_interval,
     schedule_mode, routing_mode, auto_stop_addition) — see
-    validate_calc_body() and docs/PROPOSALS_DESIGN.md §2.1 for field
+    validate_calc_body() and adapters/proposal/README.md §2.1 for field
     semantics.
 
     Response:

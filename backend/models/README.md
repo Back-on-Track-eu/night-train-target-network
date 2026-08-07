@@ -9,7 +9,8 @@ This folder contains the domain model for evaluating night train route economics
 [`evaluation/README.md`](evaluation/README.md) · energy model —
 [`energy/README.md`](energy/README.md) · routing engine setup —
 [`route/routing/README.md`](route/routing/README.md) · database layer —
-[`../db/README.md`](../db/README.md)
+[`../db/README.md`](../db/README.md) · proposals architecture & storage —
+[`../adapters/proposal/README.md`](../adapters/proposal/README.md)
 
 ---
 
@@ -245,7 +246,7 @@ e.g. P1_V1_R1       — route for proposal 1, version 1
 `proposal_id` is stable across versions. `proposal_version` increments on every change.
 
 `route_factory.py` itself only ever sees concrete ints for both.
-Ephemeral compute (`POST /api/proposal/calc`, `docs/PROPOSALS_DESIGN.md`
+Ephemeral compute (`POST /api/proposal/calc`, `adapters/proposal/README.md`
 §2.1) passes the fixed neutral placeholders `NEUTRAL_PROPOSAL_ID`/
 `NEUTRAL_PROPOSAL_VERSION` (both `0`, `models/route/version.py`): that
 endpoint never persists, so there's no collision risk — the `P0_V0_`

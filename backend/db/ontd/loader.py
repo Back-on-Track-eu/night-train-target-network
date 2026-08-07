@@ -2,7 +2,7 @@
 Load ONTD (Open Night Train Database) into the ontd schema.
 
 Fetches the whole ONTD workbook via its public export link (Sheets
-export?format=xlsx — no API key/credentials, see PROPOSALS_DESIGN.md §5.5,
+export?format=xlsx — no API key/credentials, see adapters/proposal/README.md §5.5,
 decision 26) and inserts the 11 canonical tables into the REFRESHED half
 of the ontd schema. The CURATED tables (composition catalog — see
 composition_loader.py) are never touched here.

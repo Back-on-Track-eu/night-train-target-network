@@ -1,7 +1,7 @@
 """
 proposals.py
 ============
-Proposal listing and loading (PROPOSALS_DESIGN.md §7.1/§7.2). Gallery/map
+Proposal listing and loading (adapters/proposal/README.md §7.1/§7.2). Gallery/map
 filtering is the full WP6/WP6.1 contract.
 
   GET  /api/proposals       — list, no filters, summaries only

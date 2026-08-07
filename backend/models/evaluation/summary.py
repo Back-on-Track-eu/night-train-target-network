@@ -1,7 +1,7 @@
 """
 summary.py
 ==========
-Gallery-summary KPI derivation (PROPOSALS_DESIGN.md §5.4) — pure
+Gallery-summary KPI derivation (adapters/proposal/README.md §5.4) — pure
 functions over the same dicts POST /api/proposal/calc returns
 (route_to_dict() shape + the evaluation "views" block). No DB access, no
 domain-object construction, and no geometry: the simplified gallery-map

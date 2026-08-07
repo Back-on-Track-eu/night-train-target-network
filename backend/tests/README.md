@@ -7,7 +7,9 @@ there are no mocks.
 **Related documentation:** endpoints under test —
 [`../api/README.md`](../api/README.md) · backend dev workflow —
 [`../DEVELOPMENT.md`](../DEVELOPMENT.md) · database seed the suite asserts
-against — [`../db/README.md`](../db/README.md)
+against — [`../db/README.md`](../db/README.md) · proposals architecture &
+locked design decisions —
+[`../adapters/proposal/README.md`](../adapters/proposal/README.md)
 
 ```bash
 # 1. Start the stack
@@ -259,7 +261,7 @@ Standard input: `eval_standard` (3-stop route, directional demand 40 Couchette
 
 ## test_35_proposal_calc_api.py — POST /api/proposal/calc contract (merged)
 
-The merged compute endpoint (`docs/PROPOSALS_DESIGN.md` §2.1, WP2) — one
+The merged compute endpoint (`adapters/proposal/README.md` §2.1) — one
 call, route + evaluation, no persistence. Covers response-structure and
 validation, plus assertions specific to the merge itself (resolved
 request, neutral IDs, no duplicate route under `evaluation.input`,
@@ -292,7 +294,7 @@ formulas) — rather than being duplicated here.
 
 `adapters/proposal/gtfs_store.py`'s `insert_route_gtfs()` (write) and
 `route_dict_from_gtfs()` (read) — the GTFS+sidecar persistence path
-(`docs/PROPOSALS_DESIGN.md` §5.1/§5.2) that `adapters/proposal/
+(`adapters/proposal/README.md` §5.1/§5.2) that `adapters/proposal/
 repository.py`'s `publish()` and `GET /api/proposal/<id>`
 (`api/proposals.py`) call directly. This file still tests the two functions standalone
 (writing real `POST /api/proposal/calc` responses into the DB under real
@@ -378,7 +380,7 @@ The "cost" half runs at the model layer (`compute_evaluation_domain()`)
 
 ## test_50_proposals_api.py — POST /api/proposal/publish + proposals read endpoints
 
-WP5 (`docs/PROPOSALS_DESIGN.md` §2.2): `POST /api/proposal/publish` is
+(`adapters/proposal/README.md` §2.2): `POST /api/proposal/publish` is
 now the only user write path — the old persist-on-calc contract
 (created/unchanged/versioned/branched on plan; filled/unchanged/
 versioned/branched on evaluate) is gone along with `POST /api/route/plan`
@@ -450,7 +452,7 @@ cross-test interference on the shared seed proposal.
 
 ## test_52_proposals_gallery_api.py — Gallery + map filters (full §7.1)
 
-WP6/WP6.1 (`docs/PROPOSALS_DESIGN.md` §7.1): the full filter/sort/
+(`adapters/proposal/README.md` §7.1): the full filter/sort/
 include contract of `POST /api/proposals` on top of WP5-minimal's plain
 list — one representative test per filter kind rather than exhaustive
 column coverage (the filter builder is generic; a kind proven for one
@@ -468,7 +470,7 @@ module isolation as test_50.
 
 ## test_53_proposal_refresh.py — Version-refresh mechanism
 
-WP7/WP8 (`docs/PROPOSALS_DESIGN.md` §4.2): the on-load fallback in
+(`adapters/proposal/README.md` §4.2): the on-load fallback in
 `GET /api/proposal/<id>` and the batch script
 (`scripts/refresh_proposals.py`), both sharing `outdated_trigger()`.
 Staleness is forced by mutating `proposals.proposals.route_builder_
@@ -485,7 +487,7 @@ version` directly — one trigger's coverage stands in for the mechanism
 
 ## test_54_proposal_compare_api.py — POST /api/proposals/compare
 
-WP9 (`docs/PROPOSALS_DESIGN.md` §7.3): two proposal-anchored sides,
+(`adapters/proposal/README.md` §7.3): two proposal-anchored sides,
 optional `scenario_id`/`composition_id` overrides (computed ephemerally,
 `published: false`), diff = side B minus side A. Same publish-and-purge
 module isolation as test_50/test_53; the diff-semantics class is pure

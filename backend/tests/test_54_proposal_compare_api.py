@@ -1,7 +1,7 @@
 """
 test_54_proposal_compare_api.py
 ================================
-POST /api/proposals/compare (PROPOSALS_DESIGN.md §7.3, WP9).
+POST /api/proposals/compare (adapters/proposal/README.md §7.3).
 
 Covers:
   - request validation (400): side count, unknown keys, wrong types

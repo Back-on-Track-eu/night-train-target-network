@@ -1,7 +1,7 @@
 """
 projection.py
 =============
-Fingerprint + DB-shaped summary assembly (PROPOSALS_DESIGN.md §3.1/§5.4,
+Fingerprint + DB-shaped summary assembly (adapters/proposal/README.md §3.1/§5.4,
 WP4; slimmed with WP10 step 5). Pure functions over the same dicts
 POST /api/proposal/calc already returns (route_to_dict() shape + the
 evaluation "views" block) — no DB access, no domain-object construction.

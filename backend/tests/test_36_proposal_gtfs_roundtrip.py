@@ -1,7 +1,7 @@
 """
 test_36_proposal_gtfs_roundtrip.py
 ====================================
-Round-trip tests for WP3 (docs/PROPOSALS_DESIGN.md §5.1/§5.2):
+Round-trip tests (adapters/proposal/README.md §5.1/§5.2):
 adapters/proposal/gtfs_store.py's insert_route_gtfs() +
 route_dict_from_gtfs() must deep-equal the original POST /api/proposal/calc
 (WP2) route it was given, and input_parameters_from_scenario() must
@@ -206,7 +206,7 @@ class TestRouteRoundtrip:
 
 
 class TestFingerprintRoundtrip:
-    """WP4's 'testable by' clause (docs/PROPOSALS_DESIGN.md §3.1): the
+    """The 'testable by' clause (adapters/proposal/README.md §3.1): the
     fingerprint of a reconstructed route must equal the fingerprint of the
     original compute result, in both its ephemeral (neutral-id) and
     published (prefixed) forms."""

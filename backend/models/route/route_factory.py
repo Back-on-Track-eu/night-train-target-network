@@ -138,7 +138,7 @@ class RouteProvenance:
     compositions: CompositionCollection
     """The full composition catalog for this scenario, built once in
     plan_route() (below) and otherwise discarded after use. Threaded
-    through here (2026-08-03, WP2/PROPOSALS_DESIGN.md efficiency note) so
+    through here (2026-08-03, adapters/proposal/README.md efficiency note) so
     api/proposal_calc.py's merged evaluate step doesn't have to reload it a
     second time via loader.build_all_compositions() — the same efficiency
     rationale as tracks above, not a new one."""

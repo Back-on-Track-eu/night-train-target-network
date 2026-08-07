@@ -16,7 +16,7 @@
 -- source of truth for the canonical tables until a decision is made to
 -- migrate editorial tooling off Google (deferred to later in 2026).
 --
--- Two table classes (PROPOSALS_DESIGN.md §5.5, WP10):
+-- Two table classes (backend/adapters/proposal/README.md §5.5, WP10):
 --   REFRESHED — the 11 canonical mirrors below + route_summaries:
 --     TRUNCATEd and reloaded on every half-yearly ONTD refresh.
 --   CURATED   — coachtypes / coachtype_classes / compositions /
@@ -250,7 +250,7 @@ CREATE INDEX ON ontd.stops     (stop_uic_code);
 
 -- =============================================================================
 -- WP10 — curated composition tables + route_summaries projection
--- (PROPOSALS_DESIGN.md §5.5). This file is the ONLY home of the ontd DDL —
+-- (backend/adapters/proposal/README.md §5.5). This file is the ONLY home of the ontd DDL —
 -- the WP10 migration carries just the proposals-schema ALTER and points
 -- here for the ontd bootstrap.
 -- =============================================================================

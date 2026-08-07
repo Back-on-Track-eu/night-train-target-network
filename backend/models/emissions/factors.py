@@ -1,7 +1,7 @@
 """
 factors.py
 ==========
-Flat per-mode GHG intensity factors (docs/PROPOSALS_DESIGN.md decision
+Flat per-mode GHG intensity factors (adapters/proposal/README.md decision
 24) — the single source for the night-train, air, and car
 g CO2e/pax-km values used across the platform:
 `proposals.proposal_summaries.co2_g_per_pax_km`, the "summary" block of

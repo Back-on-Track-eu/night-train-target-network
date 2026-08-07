@@ -322,7 +322,7 @@ def compare(scenario_a: dict, scenario_b: dict) -> None:
     tac_a = bd_a["cost"]["infrastructure"]["tac_eur"]
     tac_b = bd_b["cost"]["infrastructure"]["tac_eur"]
 
-    print(f"\n--- ROUTING ---")
+    print("\n--- ROUTING ---")
     print(f"  {'':20}{'A':>18}{'B':>18}{'delta':>14}")
     print(f"  {'route_id':20}{route_a['route_id']:>18}{route_b['route_id']:>18}")
     print(
@@ -339,14 +339,14 @@ def compare(scenario_a: dict, scenario_b: dict) -> None:
         f"  {'segment_count':20}{trip_a['segment_count']:>18}{trip_b['segment_count']:>18}"
     )
 
-    print(f"\n--- track_hsr_allowed per transited country ---")
+    print("\n--- track_hsr_allowed per transited country ---")
     for cc in sorted(set(hsr_a) | set(hsr_b)):
         flag_a = hsr_a.get(cc)
         flag_b = hsr_b.get(cc)
         marker = "  <-- differs" if flag_a != flag_b else ""
         print(f"  {cc}: A={flag_a!s:<6} B={flag_b!s:<6}{marker}")
 
-    print(f"\n--- COST (per_year, EUR) ---")
+    print("\n--- COST (per_year, EUR) ---")
     print(f"  {'':22}{'A':>16}{'B':>16}{'delta':>14}")
     for field in ("total_cost_eur", "total_revenue_eur", "net_eur"):
         va, vb = bd_a[field], bd_b[field]

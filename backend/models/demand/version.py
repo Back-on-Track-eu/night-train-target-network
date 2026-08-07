@@ -47,7 +47,7 @@ OPEN_TODOS: dict[str, str] = {
         "structure identified: the French open-source night train shift "
         "model's log-additive factor form (compatible with the existing "
         "test suite). The placeholder demand KPIs in adapters/proposal/"
-        "projection.py (_PLACEHOLDER_* constants, PROPOSALS_DESIGN.md §8.1) "
+        "projection.py (_PLACEHOLDER_* constants, adapters/proposal/README.md §8.1) "
         "are the second replacement site once this lands."
     ),
 }
