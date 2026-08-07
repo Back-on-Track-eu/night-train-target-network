@@ -1889,9 +1889,17 @@ _EXPOSED_TRACK_FIELDS = (
 
 
 def _composition_physics_dict(comp) -> dict:
+    """Local mirror of route_serialize._composition_to_dict()'s shape,
+    for the draft route dict fed to route_from_dict() below. The nested
+    object is inert on that path — route_from_dict() resolves the
+    composition from the OUTER trip_pairs[].composition_id via the
+    loader and ignores this — but the keys are kept in step with the
+    real serializer so nobody reads this as the wire contract
+    (composition_id/description since 2026-08-07, was comp_id/
+    comp_description)."""
     return {
-        "comp_id": comp.comp_id,
-        "comp_description": comp.comp_description,
+        "composition_id": comp.comp_id,
+        "description": comp.comp_description,
         "operator_id": comp.operator_id,
         "max_speed_kmh": comp.max_speed_kmh,
         "hsr_allowed": comp.hsr_allowed,

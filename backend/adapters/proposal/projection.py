@@ -52,7 +52,7 @@ from models.evaluation.summary import build_summary_row, ordered_stops
 # placeholder pending real tuning against gallery-map zoom levels (§5.4's
 # own wording: "tolerance tuned for gallery-map zoom levels"). ~0.0005° is
 # roughly 50m at mid-European latitudes.
-_GEOM_SIMPLIFY_TOLERANCE_DEG = 0.0005
+GEOM_SIMPLIFY_TOLERANCE_DEG = 0.0005
 
 
 # =============================================================================
@@ -140,7 +140,7 @@ def _geom_simplified(route: dict) -> dict:
                 lines.append(LineString(coords))
 
     simplified = MultiLineString(lines).simplify(
-        _GEOM_SIMPLIFY_TOLERANCE_DEG, preserve_topology=False
+        GEOM_SIMPLIFY_TOLERANCE_DEG, preserve_topology=False
     )
     # simplify() on a MultiLineString collapses to a plain LineString when
     # only one line survives — normalize back so geom_simplified always

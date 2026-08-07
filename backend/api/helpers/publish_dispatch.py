@@ -94,8 +94,11 @@ def dispatch_publish(body: dict, user_id: int) -> dict:
 
     # Integrity rule (§2.2, locked decision 5): the server never persists
     # a client-supplied result — compute_request carries inputs only, the
-    # result stored below is always freshly computed here.
-    computed = compute_proposal(compute_request)
+    # result stored below always comes from compute_proposal(). A §2.3
+    # cache hit satisfies the rule the same way a fresh compute does
+    # (cached payloads are exclusively server-written), so the cache_hit
+    # flag is irrelevant here — publish never exposes it.
+    computed, _ = compute_proposal(compute_request)
 
     repo = get_proposal_repository()
     return repo.publish(

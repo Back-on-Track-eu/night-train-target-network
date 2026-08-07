@@ -119,7 +119,7 @@ def test_params(endpoint: str, scenario_id: int | None):
             print(f"\n--- COMPOSITIONS ({len(comps)}) ---")
             if comps:
                 c = comps[0]
-                print(f"  first: {c['comp_id']} ({c['description']})")
+                print(f"  first: {c['composition_id']} ({c['description']})")
         elif endpoint == "tracks":
             tracks = response_body["track_infrastructures"]
             print(f"\n--- TRACK INFRASTRUCTURES ({len(tracks)}) ---")

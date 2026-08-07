@@ -41,7 +41,7 @@ def calc():
         "route_builder_version": "...",
         "calc_version": "...",
         "route_fingerprint": "sha256:...",  // §3.1
-        "cache_hit": false,            // always false until WP13 wires the real compute cache
+        "cache_hit": false,            // true when served from the §2.3 compute cache
         "request": { ... },            // resolved: defaults applied, scenario_id concrete
         "suggested_stops": [ ... ],    // only when auto_stop_addition="suggest"
         "summary": { ... },            // §5.4 gallery KPIs (no geom_simplified)
@@ -64,7 +64,7 @@ def calc():
         return jsonify({"error": "validation_error", "details": errors}), 400
 
     try:
-        computed = compute_proposal(body)
+        computed, cache_hit = compute_proposal(body)
     except ValueError as e:
         logger.warning("proposal/calc failed (domain error): %s", e)
         return jsonify({"error": "domain_error", "message": str(e)}), 422
@@ -75,15 +75,12 @@ def calc():
     # Re-keyed (not just .update()) so cache_hit lands in its documented
     # §2.1 position between route_fingerprint and request rather than at
     # the end — app.json.sort_keys=False (main.py) means dict insertion
-    # order is exactly the wire order. No compute cache yet (WP13) — every
-    # call is necessarily a fresh compute, so this is always false rather
-    # than absent, keeping the response shape stable ahead of WP13's logic
-    # swap.
+    # order is exactly the wire order.
     payload = {
         "route_builder_version": computed["route_builder_version"],
         "calc_version": computed["calc_version"],
         "route_fingerprint": computed["route_fingerprint"],
-        "cache_hit": False,
+        "cache_hit": cache_hit,
         "request": computed["request"],
     }
     if "suggested_stops" in computed:

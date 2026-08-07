@@ -17,8 +17,9 @@ per-request RailRouter would start every compute on a cold pool for no
 gain. Handlers call get_rail_router().
 
 A ProposalRepository (write path for saved proposals), a
-FeedbackRepository (write path for feedback submissions), and a
-ProposalEngagementRepository (write path for proposal likes/comments) are
+FeedbackRepository (write path for feedback submissions), a
+ProposalEngagementRepository (write path for proposal likes/comments),
+and a ComputeCacheRepository (the §2.3 compute cache, WP13) are
 created alongside them — each holds its own connection to the same
 database, keeping DBDataLoader strictly read-only. Route handlers call
 get_proposal_repository() / get_feedback_repository() /
@@ -32,6 +33,7 @@ State
   _proposal_repo   : ProposalRepository instance (created at startup)
   _feedback_repo   : FeedbackRepository instance (created at startup)
   _engagement_repo : ProposalEngagementRepository instance (created at startup)
+  _compute_cache   : ComputeCacheRepository instance (created at startup)
   _loaded          : bool — True after successful DB connection
   _loaded_at       : datetime | None — UTC timestamp of startup
   _load_error      : str | None — error message if startup failed
@@ -55,6 +57,7 @@ _proposal_repo = None
 _feedback_repo = None
 _engagement_repo = None
 _auth_repo = None
+_compute_cache = None
 _loaded: bool = False
 _loaded_at: Optional[datetime] = None
 _load_error: Optional[str] = None
@@ -84,6 +87,7 @@ def init() -> None:
         _feedback_repo, \
         _engagement_repo, \
         _auth_repo, \
+        _compute_cache, \
         _loaded, \
         _loaded_at, \
         _load_error
@@ -93,6 +97,7 @@ def init() -> None:
     from adapters.feedback_repository import FeedbackRepository
     from adapters.proposal.engagement_repository import ProposalEngagementRepository
     from adapters.auth_repository import AuthRepository
+    from adapters.proposal.compute_cache import ComputeCacheRepository
     from models.route.routing.rail_router import CountryIndex, RailRouter
 
     logger.info("Connecting to database...")
@@ -105,6 +110,7 @@ def init() -> None:
         _feedback_repo = FeedbackRepository()
         _engagement_repo = ProposalEngagementRepository()
         _auth_repo = AuthRepository()
+        _compute_cache = ComputeCacheRepository()
         _loaded = True
         _loaded_at = datetime.now(timezone.utc)
         _load_error = None
@@ -174,6 +180,16 @@ def get_proposal_engagement_repository():
     if not _loaded or _engagement_repo is None:
         raise DataNotLoadedError("Data not loaded. Call POST /api/data/load first.")
     return _engagement_repo
+
+
+def get_compute_cache():
+    """
+    Return the singleton ComputeCacheRepository (§2.3 compute cache).
+    Raises DataNotLoadedError if init() has not completed successfully.
+    """
+    if not _loaded or _compute_cache is None:
+        raise DataNotLoadedError("Data not loaded. Call POST /api/data/load first.")
+    return _compute_cache
 
 
 def get_auth_repository():

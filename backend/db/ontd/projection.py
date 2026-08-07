@@ -56,11 +56,11 @@ _BACKEND_ROOT = Path(__file__).resolve().parents[2]
 if str(_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(_BACKEND_ROOT))
 
-# Same Douglas-Peucker tolerance as the proposal projection
-# (adapters/proposal/projection.py) — both feed the same gallery map, so
-# they must simplify to the same visual fidelity. ~0.0005° ≈ 50 m at
-# mid-European latitudes.
-GEOM_SIMPLIFY_TOLERANCE_DEG = 0.0005
+# Same Douglas-Peucker tolerance as the proposal projection — both feed
+# the same gallery map, so they must simplify to the same visual
+# fidelity. Imported (single owner) rather than redefined, so the two
+# can never drift apart; needs the sys.path insert above.
+from adapters.proposal.projection import GEOM_SIMPLIFY_TOLERANCE_DEG  # noqa: E402
 
 # Reference composition for routing existing routes. The ONTD catalog has
 # no speed/HSR data of its own, and route() needs max_speed_kmh and

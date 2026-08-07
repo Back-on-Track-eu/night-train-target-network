@@ -27,10 +27,16 @@ The diff is side B minus side A (sides[1] - sides[0]) throughout:
 - "summary": the gallery-KPI columns (§5.4), each {a, b, abs, rel}
 - "views": a generic recursive numeric diff over the two
   evaluation.views trees — every cost category, every view, every
-  normalisation, every class key, with no per-field maintenance. Keys
-  present on only one side (cross-proposal compares: different trip
-  pairs, countries, ODs, stops) are collected as dotted paths under
-  "views_unmatched" rather than half-diffed.
+  normalisation, every class key, with no per-field maintenance.
+  Diffed on STRUCTURAL ids: a published side's views are keyed by its
+  own P{id}_V{n}_-prefixed trip ids, so both sides are neutralised to
+  the bare R1/T1 form first (_structural_views() below) — otherwise no
+  trip-keyed view could ever match across two proposals. Keys still
+  present on only one side after that (genuinely different countries,
+  ODs, stops, or different trip counts) are collected as dotted paths
+  under "views_unmatched" rather than half-diffed; those paths are
+  structural too, so they read the same whichever sides produced
+  them.
 - route context: fingerprints, route_identical, and which resolved
   compute-request fields differ (§7.3's "identical route, different
   composition/scenario" statement).
@@ -45,6 +51,7 @@ Public interface:
 
 from __future__ import annotations
 
+from adapters.proposal.id_prefix import rewrite_id_prefix
 from api.helpers.proposal_compute import compute_proposal, validate_calc_body
 from api.helpers.proposal_load import load_current_container
 from api.helpers.proposal_serialize import (
@@ -181,15 +188,16 @@ def _computed_side(container: dict, overrides: dict) -> dict:
     """The POST /api/proposal/calc response shape plus published: false,
     the anchor proposal_id, the applied overrides, and an on-the-fly
     summary. Nothing is persisted — the compute goes through the same
-    compute_proposal() as /calc, publish, and the refresh paths (and
-    therefore through WP13's compute cache once that lands)."""
+    compute_proposal() as /calc, publish, and the refresh paths, and
+    therefore through the §2.3 compute cache: comparing warms the editor
+    and vice versa."""
     request = dict(container["compute_request"])
     request.update(overrides)
     errors = validate_calc_body(request)
     if errors:
         raise ValueError(" ".join(errors))
 
-    computed = compute_proposal(request)
+    computed, cache_hit = compute_proposal(request)
 
     # The calc response's own §5.4 KPI block (same build_summary_row()
     # the publish projection runs — WP10 step 5), minus what only exists
@@ -209,9 +217,7 @@ def _computed_side(container: dict, overrides: dict) -> dict:
         "route_builder_version": computed["route_builder_version"],
         "calc_version": computed["calc_version"],
         "route_fingerprint": computed["route_fingerprint"],
-        # Always false until WP13 wires the real compute cache — same
-        # stable-shape-ahead-of-the-logic-swap rule as /calc.
-        "cache_hit": False,
+        "cache_hit": cache_hit,
         "request": computed["request"],
     }
     if "suggested_stops" in computed:
@@ -227,13 +233,37 @@ def _computed_side(container: dict, overrides: dict) -> dict:
 # =============================================================================
 
 
+def _structural_views(side: dict) -> dict:
+    """A side's evaluation.views keyed by structural ids (R1, T1, ...)
+    rather than the published P{id}_V{n}_ form.
+
+    Trip ids appear as dict KEYS in the pair-keyed views
+    (per_trip_pair, ..._per_country, ..._per_od, ..._per_section,
+    per_trip_per_stop), and a published side carries its own proposal's
+    prefix there. Diffing two published sides verbatim therefore matched
+    nothing below the route view — every pair-keyed subtree fell into
+    views_unmatched, silently, however similar the two routes were.
+    Neutralising both sides first makes the diff compare like with like.
+
+    Computed sides are already structural (compute_proposal() strips the
+    neutral prefix), so only published sides need rewriting. The side's
+    own views are left untouched — the response still shows each side's
+    real prefixed ids, per §2.2's ID convention; only the diff input is
+    neutralised."""
+    views = side["evaluation"]["views"]
+    if not side["published"]:
+        return views
+    prefix = f"P{side['proposal_id']}_V{side['proposal_version']}_"
+    return rewrite_id_prefix(views, prefix, "")
+
+
 def build_diff(side_a: dict, side_b: dict) -> dict:
     """The §7.3 diff section: per-KPI summary deltas plus the structured
     diff over the two evaluation.views trees. B - A throughout."""
     only_a: list[str] = []
     only_b: list[str] = []
     views = _diff_tree(
-        side_a["evaluation"]["views"], side_b["evaluation"]["views"], "", only_a, only_b
+        _structural_views(side_a), _structural_views(side_b), "", only_a, only_b
     )
     return {
         "summary": _diff_summary(side_a["summary"], side_b["summary"]),

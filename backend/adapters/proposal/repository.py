@@ -739,20 +739,6 @@ class ProposalRepository:
         self._conn.rollback()
         return row["user_id"] if row else None
 
-    def flush_compute_cache(self) -> None:
-        """§2.3/§4.2: empties both compute-cache tables — UNLOGGED, never
-        a source of truth, always safe to TRUNCATE. Called by scripts/
-        refresh_proposals.py before every batch run (the design's 'first
-        flushes the compute cache' rule). Currently a no-op in effect
-        (nothing writes to these tables until WP13 lands), but correct as
-        written and needs no revisiting once WP13 ships."""
-        with self._cursor() as cur:
-            cur.execute(
-                "TRUNCATE proposals.compute_cache_pointer, "
-                "proposals.compute_cache_result"
-            )
-        self._conn.commit()
-
     def list_outdated(self, limit: Optional[int] = None) -> list[dict]:
         """§4.2's work queue: every proposal whose stored route_builder_
         version/calc_version has fallen behind the running code, or whose

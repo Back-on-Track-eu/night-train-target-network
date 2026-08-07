@@ -164,8 +164,12 @@ def _composition_to_dict(comp: Composition) -> dict:
     excluded here. The full cost breakdown lives in the merged compute
     response's "evaluation" block."""
     return {
-        "comp_id": comp.comp_id,
-        "comp_description": comp.comp_description,
+        # composition_id/description, not the domain's comp_id/
+        # comp_description: the enclosing trip_pair already keys this
+        # object by "composition_id", and the two sat one level apart
+        # under different names until 2026-08-07.
+        "composition_id": comp.comp_id,
+        "description": comp.comp_description,
         "operator_id": comp.operator_id,
         "max_speed_kmh": comp.max_speed_kmh,
         "hsr_allowed": comp.hsr_allowed,

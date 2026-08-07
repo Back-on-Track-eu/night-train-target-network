@@ -49,11 +49,13 @@ means only one FOR UPDATE lock is ever held at a time.
 
 Compute-cache flush: §4.2 calls for flushing the compute cache first on
 every version bump / base move so stale cached results can't leak back
-into a fresh /calc — ProposalRepository.flush_compute_cache() (called
-below before processing starts). WP13 (the cache's actual read/write
-logic) hasn't landed yet, so proposals.compute_cache_pointer/_result are
-always empty today — the flush is a correct no-op now and needs no
-revisiting once WP13 ships.
+into a fresh /calc — ComputeCacheRepository.flush() (called below before
+processing starts). The compute calls themselves run with
+use_cache=False: the flush just emptied both maps and each outdated
+proposal is computed exactly once, so hits are impossible here — and
+skipping the cache also keeps the singleton cache connection off the
+worker threads (the same one-connection-per-thread rule that gives each
+worker its own DBDataLoader).
 
 Usage:
     uv run --extra dev python -m scripts.refresh_proposals [--dry-run] [--limit N] [--concurrency N]
@@ -97,10 +99,11 @@ def _compute_one(row: dict) -> tuple[dict, dict]:
         # fired (see api/proposals.py's on-load fallback for the same
         # rule applied on the read path).
         refresh_request["scenario_id"] = None
-        computed = compute_proposal(
+        computed, _ = compute_proposal(
             refresh_request,
             loader=thread_loader,
             router=dependencies.get_rail_router(),
+            use_cache=False,
         )
     finally:
         thread_loader.close()
@@ -146,7 +149,7 @@ def run(
             )
         return 0
 
-    repo.flush_compute_cache()
+    dependencies.get_compute_cache().flush()
 
     failures = 0
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
