@@ -195,7 +195,18 @@ def _ensure_calib_seed_csvs() -> None:
                 r"^\s*(?:import|from)\s+(?:pandas|matplotlib)", src, _re.M
             ) or _re.search(r"\bpd\.|\bplt\.", src):
                 continue
-            exec(compile(src, "<02_calibration>", "exec"), ns)
+            try:
+                exec(compile(src, "<02_calibration>", "exec"), ns)
+            except Exception as e:
+                first_line = src.strip().splitlines()[0][:60]
+                raise AssertionError(
+                    f"02_calibration.ipynb cell starting {first_line!r} "
+                    f"raised {type(e).__name__}: {e} — the compute/export "
+                    "cells must stay stdlib-only AND self-contained "
+                    "(merging their imports into a pandas cell makes the "
+                    "filter skip them; see the notebook's stdlib-imports "
+                    "cell comment)"
+                ) from e
     finally:
         _os.chdir(cwd)
     missing = [f for f in _CALIB_SEED_CSVS if not (CALIB_SEED_DIR / f).is_file()]
