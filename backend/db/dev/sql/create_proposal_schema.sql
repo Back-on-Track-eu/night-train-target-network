@@ -233,7 +233,7 @@ CREATE TABLE proposals.likes (
 
 CREATE INDEX idx_likes_proposal ON proposals.likes (proposal_id);
 
-COMMENT ON TABLE  proposals.likes                  IS 'Thumbs-up on a proposal, one per user. Toggled via POST/DELETE /api/proposal/<id>/likes.';
+COMMENT ON TABLE  proposals.likes                  IS 'Thumbs-up on a proposal, one per user. Toggled via POST/DELETE /api/proposal/<id>/like; read (with comments and the timeline) via GET /api/proposal/<id>/engagements.';
 COMMENT ON COLUMN proposals.likes.proposal_id      IS 'Soft reference to proposals.proposals.proposal_id — validated at the API layer (see module docstring), not a DB constraint.';
 COMMENT ON COLUMN proposals.likes.proposal_version IS 'proposal_version that was current at the moment of liking — a context stamp only, not re-derived if the proposal is later versioned.';
 COMMENT ON COLUMN proposals.likes.user_id          IS 'admin.users identity of the liker. CASCADE: a deleted account takes its likes with it, since an anonymous like would break the one-per-user constraint''s meaning.';
@@ -255,13 +255,13 @@ CREATE TABLE proposals.comments (
 
 CREATE INDEX idx_comments_proposal ON proposals.comments (proposal_id, created_at);
 
-COMMENT ON TABLE  proposals.comments                  IS 'Flat (non-threaded) comment thread per proposal. Soft-deleted rows keep their place in the list with the body cleared, rather than being removed outright.';
+COMMENT ON TABLE  proposals.comments                  IS 'Flat (non-threaded) comment thread per proposal. Written via POST/PATCH/DELETE /api/proposal/<id>/comment[/<cid>], read via GET /api/proposal/<id>/engagements.';
 COMMENT ON COLUMN proposals.comments.proposal_id      IS 'Soft reference to proposals.proposals.proposal_id — same convention as proposals.likes.proposal_id.';
 COMMENT ON COLUMN proposals.comments.proposal_version IS 'proposal_version that was current at the moment of commenting — a context stamp only, not re-derived on later versions.';
 COMMENT ON COLUMN proposals.comments.user_id          IS 'admin.users identity of the author. SET NULL on account deletion (same pattern as admin.feedback.user_id) so the comment text survives; the API renders a null user_id as a deleted-user placeholder.';
 COMMENT ON COLUMN proposals.comments.body             IS 'Comment text. Cleared server-side (empty string) when is_deleted is set — the API never trusts a client-supplied deleted body.';
-COMMENT ON COLUMN proposals.comments.is_deleted       IS 'Soft-delete flag, settable only by the comment''s own author. TRUE rows are still returned by GET (with body cleared) so the thread stays chronologically intact.';
-COMMENT ON COLUMN proposals.comments.updated_at       IS 'Bumped on edit and on soft-delete.';
+COMMENT ON COLUMN proposals.comments.is_deleted       IS 'Soft-delete flag, settable only by the comment''s own author. Storage-level tombstone: the row is kept so comment_id stays stable, but TRUE rows are returned by nothing — neither the thread nor the timeline (WP11).';
+COMMENT ON COLUMN proposals.comments.updated_at       IS 'Bumped on edit and on soft-delete. Also the comment''s position in the timeline — an edited comment moves to its edit time (docs/PROPOSALS_DESIGN.md §7.5).';
 
 -- ============================================================
 -- Proposals redesign — schema phase 1 (2026-08-03, additive)
@@ -441,10 +441,10 @@ CREATE TABLE proposals.update_log (
 
 CREATE INDEX idx_update_log_proposal ON proposals.update_log (proposal_id, created_at);
 
-COMMENT ON TABLE  proposals.update_log                  IS 'Append-only timeline event log for proposals. Unlike proposals.proposals (one row per proposal, previous states hard-deleted on overwrite), this preserves every state transition for the frontend timeline (§7.5, chronological merge with comments + likes).';
+COMMENT ON TABLE  proposals.update_log                  IS 'Append-only timeline event log for proposals. Unlike proposals.proposals (one row per proposal, previous states hard-deleted on overwrite), this preserves every state transition for the frontend timeline (§7.5, merged with comments + likes by GET /api/proposal/<id>/engagements). Written by adapters/proposal/repository.py inside the publish/refresh transaction, read by adapters/proposal/engagement_repository.py.';
 COMMENT ON COLUMN proposals.update_log.proposal_id      IS 'Soft reference to proposals.proposals.proposal_id — same convention as likes/comments.';
 COMMENT ON COLUMN proposals.update_log.proposal_version IS 'State counter AFTER the event.';
-COMMENT ON COLUMN proposals.update_log.user_id          IS 'Acting user; NULL for system events (version-bump/base-scenario refresh).';
+COMMENT ON COLUMN proposals.update_log.user_id          IS 'Acting user; NULL for system events (version-bump/base-scenario refresh) — the timeline renders a NULL here as actor: null, which is what distinguishes a system recalculation from a user overwrite.';
 COMMENT ON COLUMN proposals.update_log.event            IS 'One of: published, overwritten, recalculated, branched_from, branched_to.';
 COMMENT ON COLUMN proposals.update_log.detail           IS 'Event-specific context. branched_*: {"source_proposal_id": …}. recalculated: {"trigger": "calc_version"|"route_builder_version"|"base_scenario_moved", "from": …, "to": …}.';
 

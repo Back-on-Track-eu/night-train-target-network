@@ -24,13 +24,14 @@ Column kinds, mapped onto proposals.proposal_summaries (§5.4):
 
 trip_windows and bbox reach past proposal_summaries (into stop_times and
 geom_simplified respectively) and are built separately, since they don't
-fit the generic per-column shape. likes_count is also not a
-proposal_summaries column — repository.py joins it in live from
-proposals.likes (a like count changes independently of publish/refresh,
-so storing it on the summary projection would go stale) — but it's
-declared here as an ordinary RANGE_COLUMNS entry because, once the
-repository's query aliases the joined count under that name, it behaves
-exactly like any other numeric column for filtering/sorting purposes.
+fit the generic per-column shape. likes_count and comments_count are also
+not proposal_summaries columns — repository.py joins them in live from
+proposals.likes / proposals.comments (both change independently of
+publish/refresh, so storing them on the summary projection would go
+stale) — but they're declared here as ordinary RANGE_COLUMNS entries
+because, once the repository's query aliases the joined counts under
+those names, they behave exactly like any other numeric column for
+filtering/sorting purposes.
 route_builder_version/calc_version/scenario_id are NOT filterable — every gallery row already carries the
 current base scenario by construction (§7.1's "every stored proposal ...
 always representing the current base scenario"), and the two version
@@ -87,6 +88,7 @@ RANGE_COLUMNS: dict[str, str] = {
     "co2_savings_t_per_year": "co2_savings_t_per_year",
     "subsidy_eur_per_t_co2": "subsidy_eur_per_t_co2",
     "likes_count": "likes_count",
+    "comments_count": "comments_count",
 }
 
 # {filter key: db column} — timestamptz columns, same {"min", "max"} shape
@@ -133,7 +135,7 @@ SORTABLE_COLUMNS: frozenset[str] = frozenset(
 # catalog's ontd.route_summaries). DEFAULT_SOURCES is BOTH (§7.1 revised
 # 2026-08-05) — an omitted `sources` shows existing trains alongside
 # proposals. Existing rows carry NULL in every proposal-only column
-# (financial/demand KPIs, likes_count, timestamps, user/proposal ids),
+# (financial/demand KPIs, engagement counts, timestamps, ids),
 # so those filters exclude them via plain SQL NULL semantics — no
 # special-casing anywhere in build_where().
 _SOURCES_KEY = "sources"

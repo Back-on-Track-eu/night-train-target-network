@@ -798,21 +798,29 @@ class ProposalRepository:
         "demand_kpis_placeholder, co2_g_per_pax_km, created_at, updated_at"
     )
 
-    # likes_count is not a proposal_summaries column — a like changes
-    # independently of publish/refresh, so storing it there would go
-    # stale. Every filterable/sortable query below is built on top of
-    # this CTE instead of the bare table, so filter_builder's generic
-    # `likes_count >= %s` (etc.) resolves against a real column of the
-    # CTE's output rather than needing special-casing per query.
-    # COALESCE covers proposals with zero likes (no matching row to join).
-    _LIKES_CTE = (
-        "proposal_summaries_with_likes AS ("
-        "  SELECT ps.*, COALESCE(l.likes_count, 0)::int AS likes_count "
+    # Neither engagement count is a proposal_summaries column — both
+    # change independently of publish/refresh, so storing them there
+    # would go stale. Every filterable/sortable query below is built on
+    # top of this CTE instead of the bare table, so filter_builder's
+    # generic `likes_count >= %s` (etc.) resolves against a real column
+    # of the CTE's output rather than needing special-casing per query.
+    # COALESCE covers proposals with no engagement (no row to join).
+    # comments_count excludes soft-deleted rows, matching what
+    # GET /api/proposal/<id>/engagements returns (WP11).
+    _ENGAGEMENT_CTE = (
+        "proposal_summaries_with_engagement AS ("
+        "  SELECT ps.*, "
+        "         COALESCE(l.likes_count, 0)::int AS likes_count, "
+        "         COALESCE(c.comments_count, 0)::int AS comments_count "
         "  FROM proposals.proposal_summaries ps "
         "  LEFT JOIN ("
         "    SELECT proposal_id, count(*) AS likes_count "
         "    FROM proposals.likes GROUP BY proposal_id"
-        "  ) l ON l.proposal_id = ps.proposal_id"
+        "  ) l ON l.proposal_id = ps.proposal_id "
+        "  LEFT JOIN ("
+        "    SELECT proposal_id, count(*) AS comments_count "
+        "    FROM proposals.comments WHERE NOT is_deleted GROUP BY proposal_id"
+        "  ) c ON c.proposal_id = ps.proposal_id"
         ")"
     )
 
@@ -841,9 +849,9 @@ class ProposalRepository:
         "       shift_car_trips_per_year, shift_car_trip_km_per_year, "
         "       co2_savings_t_per_year, subsidy_eur_per_t_co2, "
         "       demand_kpis_placeholder, co2_g_per_pax_km, geom_simplified, "
-        "       likes_count, created_at, updated_at, "
+        "       likes_count, comments_count, created_at, updated_at, "
         "       NULL::boolean AS geometry_routed, NULL::text AS ontd_url "
-        "FROM proposal_summaries_with_likes"
+        "FROM proposal_summaries_with_engagement"
     )
     _GALLERY_EXISTING_BRANCH = (
         "SELECT 'existing'::text AS source, route_id, "
@@ -868,7 +876,7 @@ class ProposalRepository:
         "       NULL::numeric AS subsidy_eur_per_t_co2, "
         "       NULL::boolean AS demand_kpis_placeholder, co2_g_per_pax_km, "
         "       geom_simplified, "
-        "       NULL::int AS likes_count, "
+        "       NULL::int AS likes_count, NULL::int AS comments_count, "
         "       NULL::timestamptz AS created_at, NULL::timestamptz AS updated_at, "
         "       geometry_routed, ontd_url "
         "FROM ontd.route_summaries"
@@ -879,8 +887,8 @@ class ProposalRepository:
         branch(es) (filter.sources, DEFAULT both), so a
         sources=["proposal"] request compiles to exactly the pre-6b
         query plan and never touches the ontd schema at all. Must be
-        preceded by _LIKES_CTE in the same WITH (the proposal branch
-        reads proposal_summaries_with_likes)."""
+        preceded by _ENGAGEMENT_CTE in the same WITH (the proposal
+        branch reads proposal_summaries_with_engagement)."""
         sources = (filters or {}).get("sources") or list(DEFAULT_SOURCES)
         branches = []
         if "proposal" in sources:
@@ -904,7 +912,7 @@ class ProposalRepository:
         (rows, total_before_pagination)."""
         where_sql, params = build_where(filters or {})
         where_clause = f" WHERE {where_sql}" if where_sql else ""
-        ctes = f"WITH {self._LIKES_CTE}, {self._gallery_cte(filters)} "
+        ctes = f"WITH {self._ENGAGEMENT_CTE}, {self._gallery_cte(filters)} "
 
         with self._cursor() as cur:
             cur.execute(
@@ -916,7 +924,7 @@ class ProposalRepository:
             sql = (
                 f"{ctes}"
                 f"SELECT source, route_id, geometry_routed, ontd_url, "
-                f"{self._SUMMARY_COLUMNS}, likes_count "
+                f"{self._SUMMARY_COLUMNS}, likes_count, comments_count "
                 f"FROM gallery{where_clause} "
                 f"ORDER BY {build_order_by(sort)}"
             )
@@ -960,7 +968,7 @@ class ProposalRepository:
         where_clause = f" WHERE {where_sql}" if where_sql else ""
         with self._cursor() as cur:
             cur.execute(
-                f"WITH {self._LIKES_CTE}, {self._gallery_cte(filters)}, filtered AS ("
+                f"WITH {self._ENGAGEMENT_CTE}, {self._gallery_cte(filters)}, filtered AS ("
                 "  SELECT source, route_id, proposal_id, proposal_version, "
                 "         margin_eur_per_train_km "
                 f"  FROM gallery{where_clause}"
@@ -1023,7 +1031,7 @@ class ProposalRepository:
         where_clause = f" WHERE {where_sql}" if where_sql else ""
         with self._cursor() as cur:
             cur.execute(
-                f"WITH {self._LIKES_CTE}, {self._gallery_cte(filters)} "
+                f"WITH {self._ENGAGEMENT_CTE}, {self._gallery_cte(filters)} "
                 "SELECT sub.stop_id, si.stop_lat, si.stop_lon, "
                 "       count(*) FILTER (WHERE sub.source = 'proposal') "
                 "         AS n_proposals, "
@@ -1058,7 +1066,7 @@ class ProposalRepository:
         where_clause = f" WHERE {where_sql}" if where_sql else ""
         with self._cursor() as cur:
             cur.execute(
-                f"WITH {self._LIKES_CTE}, {self._gallery_cte(filters)} "
+                f"WITH {self._ENGAGEMENT_CTE}, {self._gallery_cte(filters)} "
                 "SELECT sub.country, "
                 "       count(*) FILTER (WHERE sub.source = 'proposal') "
                 "         AS n_proposals, "

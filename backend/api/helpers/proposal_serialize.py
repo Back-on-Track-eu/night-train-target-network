@@ -311,7 +311,8 @@ def summary_row_to_dict(row: dict) -> dict:
     descriptive shape — identity (route_id, name), the shared metric
     subset, geometry_routed (whether the drawn line is real routing or a
     straight-line fallback), and ontd_url (deep link to the route's ONTD
-    page). Proposal-only fields (financials, demand, likes, timestamps,
+    page). Proposal-only fields (financials, demand, engagement counts,
+    timestamps,
     user/scenario/version columns) are OMITTED rather than null-padded —
     a frontend branches on `source`, and 20 always-null keys would only
     obscure which fields are meaningful. composition_id is the ONTD
@@ -365,6 +366,7 @@ def summary_row_to_dict(row: dict) -> dict:
         "demand_kpis_placeholder": row["demand_kpis_placeholder"],
         "co2_g_per_pax_km": _to_float(row["co2_g_per_pax_km"]),
         "likes_count": row["likes_count"],
+        "comments_count": row["comments_count"],
         "created_at": _isoformat(row.get("created_at")),
         "updated_at": _isoformat(row.get("updated_at")),
     }

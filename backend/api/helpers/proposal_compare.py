@@ -58,7 +58,8 @@ _SIDE_KEYS = frozenset({"proposal_id", *_OVERRIDE_KEYS})
 # The §5.4 gallery-KPI columns the "summary" diff runs over, in gallery
 # column order — deliberately an explicit list rather than "every numeric
 # summary field": identity/engagement numbers (proposal_id, user_id,
-# scenario_id, likes_count, ...) are not KPIs and a delta over them would
+# scenario_id, likes_count, comments_count, ...) are not KPIs and a delta
+# over them would
 # be meaningless.
 SUMMARY_KPI_FIELDS = (
     "total_distance_km",
@@ -155,7 +156,7 @@ def resolve_side(index: int, side: dict, repo, loader) -> dict:
 
 def _stored_side(container: dict, repo, loader) -> dict:
     """The GET /api/proposal/<id> response shape plus published: true and
-    the proposal's gallery summary row (likes_count included)."""
+    the proposal's gallery summary row (engagement counts included)."""
     route = repo.reconstruct_route(
         container["proposal_id"],
         container["proposal_version"],
@@ -164,7 +165,7 @@ def _stored_side(container: dict, repo, loader) -> dict:
     )
     evaluation = repo.reconstruct_evaluation(container, loader)
     # Summary fetched through the ordinary gallery machinery so the row
-    # carries exactly the §5.4 shape incl. likes_count. publish() writes
+    # carries exactly the §5.4 shape incl. engagement counts. publish() writes
     # container + summary in one transaction, so the row always exists.
     rows, _ = repo.list_summaries(filters={"proposal_ids": [container["proposal_id"]]})
 
