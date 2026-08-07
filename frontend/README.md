@@ -78,13 +78,22 @@ frontend/
     │   └── locales/
     │       └── en.json      # English strings (add de.json etc. here)
     ├── stores/
-    │   └── store.ts     # Pinia store
+    │   └── store.ts         # Pinia store
+    ├── lib/
+    │   ├── costFactorRates.ts  # Cost factor → per-unit-rate resolution (popover)
+    │   └── feedbackApi.ts      # Thin client for POST /api/feedback
+    ├── utils/
+    │   └── octilinear.ts    # Octilinear map-line layout helpers
     └── components/
         ├── AppIcon.vue               # Tree-shakeable @mdi/js icon wrapper
         ├── CompositionSelectCard.vue # Composition picker card
+        ├── EvaluationPanel.vue       # Cost/revenue evaluation cube explorer
         ├── MapView.vue               # MapLibre route/stop map
         ├── ProposalViewport.vue      # Proposal build/evaluate workspace
-        └── StopSelect.vue            # Stop search/select control
+        ├── RouteSectionSlider.vue    # OD-range slider for the evaluation panel
+        ├── RouteStatsCard.vue        # Headline distance/speed/frequency card
+        ├── StopSelect.vue            # Stop search/select control
+        └── StopSuggestionOverlay.vue # Suggested-stop selection prompt
 ```
 
 ---

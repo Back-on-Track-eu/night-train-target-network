@@ -25,17 +25,12 @@ export const useStore = defineStore('store', () => {
   const compositionsError = ref<string | null>(null)
 
   // Base + current scenarios only (historical/superseded are hidden). The
-  // selected id threads into route/plan and evaluation/calc so routing and cost
+  // selected id threads into the merged proposal/calc call so routing and cost
   // always reflect one scenario.
   const scenarios = ref<Scenario[]>([])
   const scenariosStatus = ref<LoadStatus>('idle')
   const scenariosError = ref<string | null>(null)
   const selectedScenarioId = ref<number | null>(null)
-
-  function scenarioById(id: number | null): Scenario | undefined {
-    if (id === null) return undefined
-    return scenarios.value.find((s) => s.scenario_id === id)
-  }
 
   async function fetchStops(): Promise<void> {
     stopsStatus.value = 'loading'
@@ -113,7 +108,6 @@ export const useStore = defineStore('store', () => {
     scenariosStatus,
     scenariosError,
     selectedScenarioId,
-    scenarioById,
     fetchStops,
     fetchCompositions,
     fetchScenarios,
