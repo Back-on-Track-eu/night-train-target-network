@@ -35,6 +35,7 @@ from datetime import datetime, timedelta, timezone
 from flask import Blueprint, jsonify, request
 
 from adapters import mailer
+from api import config
 from api.auth_utils import (
     AuthError,
     create_jwt,
@@ -65,7 +66,7 @@ _MAX_GUEST_NAME_ATTEMPTS = 10
 
 
 @bp.post("/request-code")
-@limiter.limit("5 per hour")
+@limiter.limit(config.AUTH_REQUEST_CODE_RATE_LIMIT)
 def request_code():
     """
     Register a new user or log in an existing one.
@@ -298,7 +299,7 @@ def verify():
 
 
 @bp.post("/guest")
-@limiter.limit("20 per hour")
+@limiter.limit(config.AUTH_GUEST_RATE_LIMIT)
 def guest():
     """
     Create an anonymous guest session.
