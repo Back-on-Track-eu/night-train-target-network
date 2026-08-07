@@ -24,7 +24,6 @@ from models.params import (
     TRACK_INFRA_FIELD_NAMES,
     CompositionCollection,
 )
-from models.utils import min_to_h
 from models.evaluation.views import build_class_main_shares
 
 # =============================================================================
