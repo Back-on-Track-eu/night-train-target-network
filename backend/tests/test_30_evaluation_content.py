@@ -79,10 +79,10 @@ def stop_charges(api_base):
 
 @pytest.fixture(scope="module")
 def maint_rates(api_base):
-    """{comp_id: coach_maint_eur_km} from GET /api/params/compositions."""
+    """{composition_id: coach_maint_eur_km} from GET /api/params/compositions."""
     body = requests.get(f"{api_base}/api/params/compositions", timeout=15).json()
     return {
-        c["comp_id"]: c["variable_km"]["coach_maint_eur_km"]
+        c["composition_id"]: c["variable_km"]["coach_maint_eur_km"]
         for c in body["compositions"]
     }
 

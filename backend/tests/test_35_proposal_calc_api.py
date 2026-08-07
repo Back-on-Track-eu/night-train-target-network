@@ -75,10 +75,12 @@ class TestResponseStructure:
         fp = calc_response["route_fingerprint"]
         assert re.fullmatch(r"sha256:[0-9a-f]{64}", fp)
 
-    def test_cache_hit_is_false(self, calc_response):
-        """No compute cache exists yet (WP13) — every /calc call is a
-        fresh compute."""
-        assert calc_response["cache_hit"] is False
+    def test_cache_hit_is_bool(self, calc_response):
+        """Shape only — either value is legitimate here, since conftest's
+        session route fixtures may already have warmed the §2.3 cache
+        with this exact request. Hit/miss SEMANTICS live in
+        test_39_compute_cache.py, behind its own cache flush."""
+        assert isinstance(calc_response["cache_hit"], bool)
 
     def test_calc_version_is_semver(self, calc_response):
         assert re.fullmatch(r"\d+\.\d+\.\d+", calc_response["calc_version"])

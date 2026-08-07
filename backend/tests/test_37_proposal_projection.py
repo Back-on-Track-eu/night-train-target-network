@@ -89,11 +89,11 @@ class TestFingerprint:
         assert route_fingerprint(prefixed) == calc_response["route_fingerprint"]
 
 
-class TestCacheHitPlaceholder:
-    def test_always_false(self, calc_response):
-        """No compute cache exists yet (WP13) — every call is a fresh
-        compute, so cache_hit is always false rather than absent."""
-        assert calc_response["cache_hit"] is False
+class TestCacheHitFlag:
+    def test_is_bool(self, calc_response):
+        """Shape only — hit/miss semantics live in
+        test_39_compute_cache.py, behind its own cache flush."""
+        assert isinstance(calc_response["cache_hit"], bool)
 
 
 # =============================================================================

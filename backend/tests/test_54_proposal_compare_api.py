@@ -19,12 +19,16 @@ Covers:
     non-zero cost deltas, scenario_id in differing_request_fields
   - on-load refresh of a stale anchor inside compare (WP8 reuse)
   - pure diff semantics on synthetic sides: rel on zero base,
-    non-numeric skipping, unmatched-path collection
+    non-numeric skipping, unmatched-path collection, and the
+    published-prefix neutralisation that lets trip-keyed views match
+    across two proposals
 
 Isolation: same discipline as test_50/test_53 — publishing commits
 outside the suite's per-test rollback, so this module purges published
 proposals before and after itself.
 """
+
+import re
 
 import pytest
 import requests
@@ -209,6 +213,63 @@ class TestStoredVsStored:
         assert set(leaf) == {"a", "b", "abs", "rel"}
         assert leaf["abs"] == pytest.approx(leaf["b"] - leaf["a"], abs=1e-6)
 
+    def test_pair_keyed_views_diff_across_two_proposals(self, result):
+        """The regression this pairs with: both sides are published, so
+        their per-trip views are keyed by different P{id}_V{n}_ prefixes.
+        Before neutralisation every pair-keyed view fell wholesale into
+        views_unmatched — the diff silently covered only the route view.
+        A and B share stops and schedule mode, so every trip key must now
+        match."""
+        for view in (
+            "per_trip_pair",
+            "per_trip_pair_per_country",
+            "per_trip_pair_per_od",
+            "per_trip_pair_per_section",
+            "per_trip_per_stop",
+        ):
+            data = result["diff"]["views"].get(view, {}).get("data", {})
+            # Not just "the view diffed at all": under the old bug the
+            # "all" aggregate still matched, so a truthy view proved
+            # nothing. At least one REAL per-trip cell must be present.
+            assert [key for key in data if key != "all"], (
+                f"{view} diffed only its 'all' aggregate — per-trip cells unmatched"
+            )
+
+        # NOT "views_unmatched is empty": A and B run different
+        # compositions, so their coach-class keys legitimately differ and
+        # land here (e.g. "route.data.per_year.Capsule") — that's the
+        # generic diff working as designed. What must never appear again
+        # is an unmatched path caused by a PROPOSAL PREFIX, which is
+        # exactly what this fix removed.
+        unmatched = result["diff"]["views_unmatched"]
+        prefixed = [
+            path
+            for path in unmatched["a_only"] + unmatched["b_only"]
+            if re.search(r"P\d+_V\d+_", path)
+        ]
+        assert prefixed == [], f"prefix leaked into unmatched paths: {prefixed[:5]}"
+
+        # Diff keys are structural — neither proposal's prefix leaks into
+        # the diff tree, though the sides themselves still carry theirs.
+        # Every trip-keyed view also carries an "all" aggregate key
+        # alongside its per-pair keys; that one is prefix-free on both
+        # sides by construction, and it is precisely why the old bug was
+        # invisible on a single-pair route — "all" matched, so the diff
+        # looked populated while every real pair cell was unmatched.
+        pair_keys = list(result["diff"]["views"]["per_trip_pair"]["data"])
+        assert pair_keys and not any(re.match(r"P\d+_V\d+_", key) for key in pair_keys)
+        for side in result["sides"]:
+            prefix = f"P{side['proposal_id']}_V{side['proposal_version']}_"
+            trip_keys = [
+                key
+                for key in side["evaluation"]["views"]["per_trip_pair"]["data"]
+                if key != "all"
+            ]
+            assert trip_keys, "side has no per-pair keys to check"
+            assert all(key.startswith(prefix) for key in trip_keys), (
+                f"side {side['proposal_id']} keys not all prefixed: {trip_keys}"
+            )
+
     def test_route_context_names_the_composition(self, result):
         context = result["route_context"]
         assert "composition_id" in context["differing_request_fields"]
@@ -244,7 +305,11 @@ class TestOverrides:
         side_b = result["sides"][1]
         assert side_b["published"] is False
         assert side_b["overrides"] == {"scenario_id": stored_scenario_id}
-        assert side_b["cache_hit"] is False
+        # A bool either way: this side replays the anchor's own stored
+        # compute_request, which publish itself just computed — so within
+        # the cache TTL this is typically a HIT ("comparing warms the
+        # editor and vice versa", §2.3). Semantics in test_39.
+        assert isinstance(side_b["cache_hit"], bool)
         # Computed summaries are projection-built, not DB rows — no
         # engagement fields, no geometry.
         assert "likes_count" not in side_b["summary"]
@@ -376,9 +441,23 @@ class TestOnLoadRefreshInCompare:
 
 
 def _synthetic_side(
-    views: dict, summary: dict, fingerprint: str, request: dict
+    views: dict,
+    summary: dict,
+    fingerprint: str,
+    request: dict,
+    published: bool = False,
+    proposal_id: int = 0,
+    proposal_version: int = 0,
 ) -> dict:
+    """published defaults to False — an unpublished side's views are
+    already structural, so most cases here can state their trip keys as
+    plain T1/T3. The published variant (with proposal_id/version) exists
+    for the prefix-neutralisation case, where the whole point is that
+    the two sides carry DIFFERENT prefixes."""
     return {
+        "published": published,
+        "proposal_id": proposal_id,
+        "proposal_version": proposal_version,
         "evaluation": {"views": views},
         "summary": summary,
         "route_fingerprint": fingerprint,
@@ -430,6 +509,56 @@ class TestDiffSemantics:
         context = build_route_context(side_a, side_b)
         assert context["route_identical"] is False
         assert context["differing_request_fields"] == ["scenario_id"]
+
+    def test_published_prefixes_are_neutralised_before_diffing(self):
+        """Two published proposals key their trip views by their OWN
+        P{id}_V{n}_ prefix. Diffed verbatim, nothing below the route view
+        could ever match — so both sides are neutralised to structural
+        ids first, and the resulting paths are structural too."""
+        side_a = _synthetic_side(
+            views={"per_trip_pair": {"data": {"P12_V3_T1": {"x": 1.0}}}},
+            summary={},
+            fingerprint="sha256:aa",
+            request={},
+            published=True,
+            proposal_id=12,
+            proposal_version=3,
+        )
+        side_b = _synthetic_side(
+            views={"per_trip_pair": {"data": {"P15_V1_T1": {"x": 1.5}}}},
+            summary={},
+            fingerprint="sha256:aa",
+            request={},
+            published=True,
+            proposal_id=15,
+            proposal_version=1,
+        )
+        diff = build_diff(side_a, side_b)
+        assert diff["views"]["per_trip_pair"]["data"]["T1"]["x"]["abs"] == 0.5
+        assert diff["views_unmatched"] == {"a_only": [], "b_only": []}
+
+    def test_published_and_computed_sides_diff_against_each_other(self):
+        """The mixed case: a published side (prefixed) against an
+        override side (already structural) — the asymmetry must not
+        reintroduce a mismatch."""
+        side_a = _synthetic_side(
+            views={"per_trip_pair": {"data": {"P12_V3_T1": {"x": 2.0}}}},
+            summary={},
+            fingerprint="sha256:aa",
+            request={},
+            published=True,
+            proposal_id=12,
+            proposal_version=3,
+        )
+        side_b = _synthetic_side(
+            views={"per_trip_pair": {"data": {"T1": {"x": 3.0}}}},
+            summary={},
+            fingerprint="sha256:aa",
+            request={},
+        )
+        diff = build_diff(side_a, side_b)
+        assert diff["views"]["per_trip_pair"]["data"]["T1"]["x"]["abs"] == 1.0
+        assert diff["views_unmatched"] == {"a_only": [], "b_only": []}
 
     def test_unmatched_keys_are_collected_not_half_diffed(self):
         side_a = _synthetic_side(
