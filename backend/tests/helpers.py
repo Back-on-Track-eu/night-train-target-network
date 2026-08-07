@@ -24,13 +24,17 @@ FEEDBACK_CATEGORIES_URL = "/api/feedback/categories"
 SCENARIOS_URL = "/api/scenarios"
 
 
-def likes_url(proposal_id: int) -> str:
-    return f"{PROPOSAL_URL}/{proposal_id}/likes"
+def like_url(proposal_id: int) -> str:
+    return f"{PROPOSAL_URL}/{proposal_id}/like"
 
 
-def comments_url(proposal_id: int, comment_id: int | None = None) -> str:
-    base = f"{PROPOSAL_URL}/{proposal_id}/comments"
+def comment_url(proposal_id: int, comment_id: int | None = None) -> str:
+    base = f"{PROPOSAL_URL}/{proposal_id}/comment"
     return base if comment_id is None else f"{base}/{comment_id}"
+
+
+def engagements_url(proposal_id: int) -> str:
+    return f"{PROPOSAL_URL}/{proposal_id}/engagements"
 
 
 # Mirrors models/route/version.py: DAYS_PER_OPERATING_WEEK / WEEKS_PER_SEASON.
@@ -356,16 +360,21 @@ def purge_saved_proposals(conn, keep_route_id: str = "P1_V1_R1") -> None:
     then counts and returns — a real, previously-undetected leak this
     purge left every prior test run.
 
-    proposals.likes/proposals.comments are cleared unconditionally (not
-    keyed off keep_route_id) — db/dev/seed.py seeds no engagement rows on
-    any proposal, including the permanent example, so there is nothing to
-    preserve there. This lets engagement tests exercise the permanent seed
-    proposal directly without ever leaving state behind. Commits.
+    proposals.likes/comments/update_log are cleared unconditionally (not
+    keyed off keep_route_id) — db/dev/seed.py seeds no engagement or
+    timeline rows on any proposal, including the permanent example, so
+    there is nothing to preserve there. This lets engagement tests
+    exercise the permanent seed proposal directly without ever leaving
+    state behind. update_log matters as much as the other two since WP11:
+    it is a soft reference, so its rows outlive the proposals they
+    describe, and a run that left them behind would seed the next run's
+    timeline with stale events. Commits.
     """
     keep_pid = int(keep_route_id.split("_")[0][1:])
     cur = conn.cursor()
     cur.execute("DELETE FROM proposals.likes")
     cur.execute("DELETE FROM proposals.comments")
+    cur.execute("DELETE FROM proposals.update_log")
     cur.execute(
         f"DELETE FROM proposals.routes WHERE route_id ~ '^P' "
         f"AND route_id !~ '^{keep_route_id}'"

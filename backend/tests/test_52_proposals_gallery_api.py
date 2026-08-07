@@ -20,8 +20,9 @@ import requests
 
 from tests.helpers import (
     PROPOSALS_URL,
+    comment_url,
     compute,
-    likes_url,
+    like_url,
     publish,
     purge_saved_proposals,
     stop_times,
@@ -131,6 +132,13 @@ def _proposal_ids(gallery_response) -> set[int]:
         for p in gallery_response["summaries"]["proposals"]
         if p["source"] == "proposal"
     }
+
+
+def _summary_row(api_base, published) -> dict:
+    """The gallery row for one published proposal, fetched through the
+    ordinary filter path (no dedicated by-id endpoint exists)."""
+    body = _gallery(api_base, filter={"proposal_ids": [published["proposal_id"]]})
+    return body["summaries"]["proposals"][0]
 
 
 # =============================================================================
@@ -629,28 +637,23 @@ class TestIncludeSections:
 
 
 # =============================================================================
-# likes_count — live-joined from proposals.likes, not a summary column
+# Engagement counts — live-joined from proposals.likes / proposals.comments,
+# neither one a summary column
 # =============================================================================
 
 
-class TestLikesCount:
+class TestEngagementCounts:
     def test_likes_count_appears_in_summary_and_is_filterable(
         self, api_base, script_headers, published
     ):
         resp = requests.post(
-            f"{api_base}{likes_url(published['proposal_id'])}",
+            f"{api_base}{like_url(published['proposal_id'])}",
             timeout=10,
             headers=script_headers,
         )
         assert resp.status_code == 200
 
-        body = _gallery(api_base, filter={"user_ids": [published["user_id"]]})
-        row = next(
-            p
-            for p in body["summaries"]["proposals"]
-            if p["proposal_id"] == published["proposal_id"]
-        )
-        assert row["likes_count"] >= 1
+        assert _summary_row(api_base, published)["likes_count"] >= 1
 
         hit = _gallery(api_base, filter={"likes_count": {"min": 1}})
         assert published["proposal_id"] in _proposal_ids(hit)
@@ -669,3 +672,59 @@ class TestLikesCount:
         )
         values = [p["likes_count"] for p in body["summaries"]["proposals"]]
         assert values == sorted(values, reverse=True)
+
+    def test_comments_count_appears_in_summary_and_is_filterable(
+        self, api_base, script_headers, published
+    ):
+        """WP11: the gallery carries the comment count so a card can show
+        it without one engagements call per row. Deleted comments are
+        excluded, matching GET /api/proposal/<id>/engagements."""
+        pid = published["proposal_id"]
+        posted = [
+            requests.post(
+                f"{api_base}{comment_url(pid)}",
+                json={"body": body},
+                timeout=10,
+                headers=script_headers,
+            )
+            for body in ("First thought.", "Second thought.")
+        ]
+        assert [r.status_code for r in posted] == [201, 201]
+
+        row = _summary_row(api_base, published)
+        assert row["comments_count"] == 2
+
+        hit = _gallery(api_base, filter={"comments_count": {"min": 2}})
+        assert pid in _proposal_ids(hit)
+
+        miss = _gallery(api_base, filter={"comments_count": {"min": 999}})
+        assert pid not in _proposal_ids(miss)
+
+        resp = requests.delete(
+            f"{api_base}{comment_url(pid, posted[0].json()['comment_id'])}",
+            timeout=10,
+            headers=script_headers,
+        )
+        assert resp.status_code == 204
+        assert _summary_row(api_base, published)["comments_count"] == 1
+
+    def test_sort_by_comments_count(self, api_base):
+        """Proposal-only, same as likes_count — sorted within
+        sources=["proposal"] rather than the default union."""
+        body = _gallery(
+            api_base,
+            filter={"sources": ["proposal"]},
+            sort=[{"by": "comments_count", "dir": "desc"}],
+        )
+        values = [p["comments_count"] for p in body["summaries"]["proposals"]]
+        assert values == sorted(values, reverse=True)
+
+    def test_existing_rows_omit_both_counts(self, api_base, existing_routes):
+        """Engagement is a proposal-only concept (locked decision 23) —
+        an existing route carries neither key."""
+        body = _gallery(api_base, filter={"sources": ["existing"]})
+        rows = body["summaries"]["proposals"]
+        assert rows, "expected at least one existing row"
+        for row in rows:
+            assert "likes_count" not in row
+            assert "comments_count" not in row

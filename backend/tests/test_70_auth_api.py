@@ -22,7 +22,7 @@ import pytest
 import requests
 
 from api.auth_utils import hash_otp
-from tests.helpers import PROPOSAL_URL, comments_url, likes_url, publish
+from tests.helpers import PROPOSAL_URL, comment_url, like_url, publish
 
 _TIMEOUT = 15
 
@@ -455,7 +455,7 @@ def test_verify_with_guest_bearer_merges_likes_and_comments(api_base, db_cur, db
     assert resp.status_code == 200
     target_headers = {"Authorization": f"Bearer {resp.json()['token']}"}
     requests.post(
-        f"{api_base}{likes_url(_SEED_PROPOSAL_ID)}", headers=target_headers, timeout=10
+        f"{api_base}{like_url(_SEED_PROPOSAL_ID)}", headers=target_headers, timeout=10
     )
 
     # --- a guest who independently likes and comments on the same proposal ---
@@ -464,10 +464,10 @@ def test_verify_with_guest_bearer_merges_likes_and_comments(api_base, db_cur, db
     guest = resp.json()
     guest_headers = {"Authorization": f"Bearer {guest['token']}"}
     requests.post(
-        f"{api_base}{likes_url(_SEED_PROPOSAL_ID)}", headers=guest_headers, timeout=10
+        f"{api_base}{like_url(_SEED_PROPOSAL_ID)}", headers=guest_headers, timeout=10
     )
     resp = requests.post(
-        f"{api_base}{comments_url(_SEED_PROPOSAL_ID)}",
+        f"{api_base}{comment_url(_SEED_PROPOSAL_ID)}",
         json={"body": "Merge me into the registered account."},
         headers=guest_headers,
         timeout=10,
