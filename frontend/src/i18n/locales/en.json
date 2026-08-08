@@ -11,6 +11,8 @@
     "noStopsFound": "No stops found",
     "minStopsTooltip": "Two stops per route minimum.",
     "loading": "Fetching data…",
+    "saved": "Proposal was saved.",
+    "publishError": "The proposal could not be saved. Please try again later.",
     "suggestions": {
       "title": "Add stops along the way?",
       "subtitle": "We found stops on your route. Pick any you'd like to include.",
@@ -167,7 +169,7 @@
       "existing": "Existing service ↗",
       "km": "{value} km"
     },
-    "back": "Back to gallery",
+    "back": "Gallery",
     "cta": {
       "create": "Suggest a new route"
     },

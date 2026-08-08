@@ -580,6 +580,31 @@ export interface ProposalsResponse {
   summaries?: ProposalsSummariesSection
 }
 
+// --- POST /api/proposal/publish ---------------------------------------------
+// Backend: api/proposal_publish.py (@require_auth, guest token is enough). The
+// server RECOMPUTES from compute_request — never send the route/evaluation. A
+// non-base scenario_id 422s, so publish sends scenario_id: null. There is no
+// dedup: mode "new" always creates a proposal; the returned proposal_id is then
+// adopted so later saves "overwrite" it.
+export interface PublishRequest {
+  mode: 'new' | 'overwrite'
+  // Non-empty (backend rejects blank). Auto-derived "Origin – Destination".
+  name: string
+  // The resolved `request` echo from a /calc response (with scenario_id nulled).
+  compute_request: Record<string, unknown>
+  // Required for mode "overwrite" (the owned proposal to replace); omitted for "new".
+  proposal_id?: number
+  based_on_proposal_id?: number
+}
+
+// The published proposal, full shape mirrors GET /api/proposal/<id>. Only the
+// fields the frontend consumes are typed here.
+export interface PublishResponse {
+  proposal_id: number
+  proposal_version: number
+  name: string
+}
+
 // --- GET /api/proposal/<id> -------------------------------------------------
 // The full stored envelopes. The gallery map only needs the route geometry and
 // the endpoint stops, so we type just those fields (the route object carries

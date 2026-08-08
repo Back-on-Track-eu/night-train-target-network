@@ -8,6 +8,8 @@ import type {
   ProposalsResponse,
   ProposalsSummariesSection,
   ProposalDetailResponse,
+  PublishRequest,
+  PublishResponse,
 } from '@/types/api'
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5050'
@@ -85,4 +87,38 @@ export async function fetchProposalRoute(id: number): Promise<ProposalDetailResp
     throw new ProposalsError(extractErrorMessage(parsed, response.status))
   }
   return parsed as ProposalDetailResponse
+}
+
+/**
+ * Publish (persist) a proposal — the only write path. Requires an auth header
+ * (a guest token is enough); the caller passes `store.authHeaders()`. The server
+ * recomputes from `body.compute_request`. Rejects with a ProposalsError carrying
+ * a readable message on any network or non-2xx failure.
+ */
+export async function publishProposal(
+  body: PublishRequest,
+  authHeaders: Record<string, string>,
+): Promise<PublishResponse> {
+  let response: Response
+  try {
+    response = await fetch(`${BASE_URL}/api/proposal/publish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
+      body: JSON.stringify(body),
+    })
+  } catch (err) {
+    throw new ProposalsError(err instanceof Error ? err.message : 'Network error')
+  }
+
+  let parsed: unknown = null
+  try {
+    parsed = await response.json()
+  } catch {
+    // Non-JSON body (unexpected) — fall through to the status-based message.
+  }
+
+  if (!response.ok) {
+    throw new ProposalsError(extractErrorMessage(parsed, response.status))
+  }
+  return parsed as PublishResponse
 }

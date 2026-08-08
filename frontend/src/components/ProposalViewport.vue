@@ -6,9 +6,11 @@ import type {
   EvaluationResponse,
   MapScope,
   ProposalCalcResponse,
+  PublishRequest,
   Stop,
   SuggestedStop,
 } from '@/types/api'
+import { publishProposal, ProposalsError } from '@/lib/proposalsApi'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Skeleton from 'primevue/skeleton'
@@ -19,7 +21,15 @@ import CompositionSelectCard from '@/components/CompositionSelectCard.vue'
 import RouteStatsCard from '@/components/RouteStatsCard.vue'
 import EvaluationPanel from '@/components/EvaluationPanel.vue'
 import MapView from '@/components/MapView.vue'
-import { mdiArrowLeft, mdiClose, mdiPencil, mdiPlus, mdiSwapVertical, mdiTrashCan } from '@mdi/js'
+import {
+  mdiArrowLeft,
+  mdiCheckCircle,
+  mdiClose,
+  mdiPencil,
+  mdiPlus,
+  mdiSwapVertical,
+  mdiTrashCan,
+} from '@mdi/js'
 
 const props = defineProps<{ mode: 'edit' | 'loading' | 'display' }>()
 const emit = defineEmits<{ back: [] }>()
@@ -52,6 +62,19 @@ const evalScope = ref<MapScope>({ kind: 'all' })
 const suggestedStops = ref<SuggestedStop[]>([])
 const showStopOverlay = ref(false)
 const basePlan = ref<CalcResponse | null>(null)
+
+// --- Publish (persist) state ----------------------------------------------
+// The resolved compute request from the last applied calc — sent verbatim to
+// publish (the server recomputes from it). Null until the first successful calc.
+const publishRequest = ref<Record<string, unknown> | null>(null)
+// proposal_id adopted after the first publish; later saves "overwrite" it, so a
+// building session yields one proposal rather than a duplicate per re-evaluation.
+const publishedProposalId = ref<number | null>(null)
+// Set when a calc finished but the user still has to pick an identity in the
+// gate — the authChoice watcher publishes once they do.
+const pendingPublish = ref(false)
+const saved = ref(false)
+const publishError = ref<string | null>(null)
 
 interface StopTimeFmt {
   stop_id: string
@@ -340,7 +363,10 @@ const routeStats = computed(() => {
 // the planned route (so the builder reflects what's actually on the map —
 // including any stops the user chose to add) and commit it as the clean state
 // so the builder isn't "dirty" and Cancel Edit can restore exactly this.
-function applyPlan(json: CalcResponse) {
+// `publish` is true only for user-initiated evaluations (Evaluate button, stop
+// selection) — a passive scenario-switch recompute passes false so it never
+// creates or overwrites a proposal.
+function applyPlan(json: CalcResponse, publish = false) {
   rawRoute.value = json.route
   // Assemble the panel-facing EvaluationResponse from the merged response:
   // calc_version/route_id lifted from their new positions, input.route
@@ -353,6 +379,8 @@ function applyPlan(json: CalcResponse) {
     input: { route: json.route, parameters: json.evaluation.input.parameters },
     views: json.evaluation.views,
   }
+  // Keep the resolved request so publish can send it verbatim (server recomputes).
+  publishRequest.value = json.request
   const route = adaptRoute(json.route)
   routeResult.value = route
   selectedTripId.value =
@@ -361,14 +389,51 @@ function applyPlan(json: CalcResponse) {
   committedItinerary.value = itinerary.value.map((s) => ({ ...s }))
   committedCompId.value = selectedCompositionId.value
   currentMode.value = 'display'
-  // Evaluation done — a not-yet-decided visitor now gets the register/guest
-  // prompt, carrying the real CO₂ savings for the headline line.
+  if (!publish) return
+  // Persist. An authenticated visitor (guest or registered) publishes right
+  // away; a not-yet-decided one gets the register/guest gate first and the
+  // authChoice watcher publishes once they choose.
   if (store.authChoice === 'none') {
+    pendingPublish.value = true
     store.openAuthModal({
       phase: 'choose',
       context: 'evaluation',
       co2SavingsT: json.summary?.co2_savings_t_per_year ?? null,
     })
+  } else {
+    doPublish()
+  }
+}
+
+// "Origin – Destination" from the outbound route — publish requires a non-empty
+// name and there is no name field in the builder.
+function derivedName(): string {
+  const s = sectionStops.value
+  if (s.length >= 2) return `${s[0].name} – ${s[s.length - 1].name}`
+  if (s.length === 1) return s[0].name
+  return 'Untitled route'
+}
+
+// Persist the just-computed proposal. First publish is "new" and its id is
+// adopted; later saves in the same session "overwrite" it. scenario_id is nulled
+// so the server stores the current base (proposals represent the base; a
+// non-base scenario would 422).
+async function doPublish() {
+  const req = publishRequest.value
+  if (!req) return
+  publishError.value = null
+  const body: PublishRequest = {
+    mode: publishedProposalId.value ? 'overwrite' : 'new',
+    name: derivedName(),
+    compute_request: { ...req, scenario_id: null },
+  }
+  if (publishedProposalId.value) body.proposal_id = publishedProposalId.value
+  try {
+    const resp = await publishProposal(body, store.authHeaders())
+    publishedProposalId.value = resp.proposal_id
+    saved.value = true
+  } catch (err) {
+    publishError.value = err instanceof ProposalsError ? err.message : t('proposal.publishError')
   }
 }
 
@@ -377,6 +442,8 @@ async function evaluate() {
   if (validStops.length < 2 || !selectedCompositionId.value) return
   currentMode.value = 'loading'
   evaluateError.value = null
+  saved.value = false
+  publishError.value = null
   // Auth gate: a visitor who hasn't chosen yet sees the "Evaluating proposal …"
   // popup while the calc runs; it flips to the register/guest prompt in
   // applyPlan(). The calc itself runs tokenless (compute-only) regardless.
@@ -403,7 +470,7 @@ async function evaluate() {
     suggestedStops.value = suggestions
     showStopOverlay.value = true
   } else {
-    applyPlan(json)
+    applyPlan(json, true)
   }
 }
 
@@ -424,7 +491,7 @@ async function confirmStopSelection(selectedIds: string[]) {
     return
   }
   if (chosen.length === 0) {
-    applyPlan(base) // opens the choose-phase gate for a no-choice visitor
+    applyPlan(base, true) // opens the choose-phase gate for a no-choice visitor
     return
   }
   for (const s of chosen) insertSuggestedStop(s)
@@ -439,7 +506,7 @@ async function confirmStopSelection(selectedIds: string[]) {
     store.closeAuthModal()
     return
   }
-  applyPlan(json)
+  applyPlan(json, true)
 }
 
 // User dismissed the overlay without choosing — abandon this evaluation and
@@ -484,6 +551,19 @@ watch(
     evaluateError.value = null
     const json = await requestCalc(stopIds, 'off')
     if (json) applyPlan(json)
+  },
+)
+
+// Publish-after-auth: a no-choice visitor whose calc finished picks an identity
+// in the gate; the moment they do (authChoice leaves 'none'), persist. The gate
+// has no completion callback, so the store's auth state is the signal.
+watch(
+  () => store.authChoice,
+  (choice) => {
+    if (pendingPublish.value && choice !== 'none') {
+      pendingPublish.value = false
+      doPublish()
+    }
   },
 )
 
@@ -1230,6 +1310,15 @@ onMounted(async () => {
             />
           </button>
           <p v-if="evaluateError" class="text-xs text-red-400">{{ evaluateError }}</p>
+        </div>
+
+        <!-- Publish status: saved confirmation (display) / publish error -->
+        <div v-if="(saved && !isDirty) || publishError" class="flex flex-col items-center gap-1">
+          <p v-if="saved && !isDirty" class="flex items-center gap-1.5 text-sm text-primary-50/70">
+            <AppIcon :path="mdiCheckCircle" :size="16" />
+            {{ t('proposal.saved') }}
+          </p>
+          <p v-if="publishError" class="text-xs text-red-400">{{ publishError }}</p>
         </div>
       </div>
 
