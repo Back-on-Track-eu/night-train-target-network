@@ -361,6 +361,15 @@ function applyPlan(json: CalcResponse) {
   committedItinerary.value = itinerary.value.map((s) => ({ ...s }))
   committedCompId.value = selectedCompositionId.value
   currentMode.value = 'display'
+  // Evaluation done — a not-yet-decided visitor now gets the register/guest
+  // prompt, carrying the real CO₂ savings for the headline line.
+  if (store.authChoice === 'none') {
+    store.openAuthModal({
+      phase: 'choose',
+      context: 'evaluation',
+      co2SavingsT: json.summary?.co2_savings_t_per_year ?? null,
+    })
+  }
 }
 
 async function evaluate() {
@@ -368,17 +377,28 @@ async function evaluate() {
   if (validStops.length < 2 || !selectedCompositionId.value) return
   currentMode.value = 'loading'
   evaluateError.value = null
+  // Auth gate: a visitor who hasn't chosen yet sees the "Evaluating proposal …"
+  // popup while the calc runs; it flips to the register/guest prompt in
+  // applyPlan(). The calc itself runs tokenless (compute-only) regardless.
+  if (store.authChoice === 'none') {
+    store.openAuthModal({ phase: 'evaluating', context: 'evaluation', co2SavingsT: null })
+  }
   // First pass: "suggest" routes exactly the caller's stops and reports the
   // candidate stops along the way, without adding any automatically.
   const json = await requestCalc(
     validStops.map((s) => s.selectedStop!.stop_id),
     'suggest',
   )
-  if (!json) return
+  if (!json) {
+    store.closeAuthModal() // calc failed (mode already back to 'edit')
+    return
+  }
   const suggestions = json.suggested_stops ?? []
   if (suggestions.length > 0) {
     // Hand the choice to the user; the map keeps its loading spinner behind the
-    // overlay until they confirm.
+    // overlay until they confirm. Yield the gate so the two modals don't stack —
+    // it reopens in confirmStopSelection().
+    store.closeAuthModal()
     basePlan.value = json
     suggestedStops.value = suggestions
     showStopOverlay.value = true
@@ -400,17 +420,25 @@ async function confirmStopSelection(selectedIds: string[]) {
   basePlan.value = null
   if (!base) {
     currentMode.value = 'edit'
+    store.closeAuthModal()
     return
   }
   if (chosen.length === 0) {
-    applyPlan(base)
+    applyPlan(base) // opens the choose-phase gate for a no-choice visitor
     return
   }
   for (const s of chosen) insertSuggestedStop(s)
   currentMode.value = 'loading'
+  // Re-entering the loading window — reopen the gate's "evaluating" phase.
+  if (store.authChoice === 'none') {
+    store.openAuthModal({ phase: 'evaluating', context: 'evaluation', co2SavingsT: null })
+  }
   const stopIds = itinerary.value.filter((s) => s.selectedStop).map((s) => s.selectedStop!.stop_id)
   const json = await requestCalc(stopIds, 'off')
-  if (!json) return
+  if (!json) {
+    store.closeAuthModal()
+    return
+  }
   applyPlan(json)
 }
 
@@ -421,6 +449,7 @@ function cancelStopSelection() {
   suggestedStops.value = []
   basePlan.value = null
   currentMode.value = 'edit'
+  store.closeAuthModal()
 }
 
 // Turn a suggested stop into a full Stop record (preferring the loaded stop

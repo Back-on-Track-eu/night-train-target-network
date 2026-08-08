@@ -384,6 +384,13 @@ export interface EvaluationResponse {
 // PROPOSALS_DESIGN.md §2.1). TRoute stays generic — the route shape is typed
 // where it is consumed (ProposalViewport's BackendRoute), only the fields the
 // frontend reads.
+// Gallery KPI summary block of the calc response. Only co2_savings_t_per_year
+// is read by the builder (the auth gate); the rest passes through untyped.
+export interface ProposalCalcSummary {
+  co2_savings_t_per_year: number | null
+  [key: string]: unknown
+}
+
 export interface ProposalCalcResponse<TRoute = unknown> {
   route_builder_version: string
   calc_version: string
@@ -394,8 +401,9 @@ export interface ProposalCalcResponse<TRoute = unknown> {
   request: Record<string, unknown>
   // Only present when the request used auto_stop_addition="suggest".
   suggested_stops?: SuggestedStop[]
-  // Gallery KPI summary — not consumed by the proposal builder.
-  summary: Record<string, unknown>
+  // Gallery KPI summary — mostly unused by the builder; the auth gate reads
+  // co2_savings_t_per_year for the "CO₂ saved" line.
+  summary: ProposalCalcSummary
   route: TRoute
   evaluation: {
     models: EvaluationModels
@@ -422,6 +430,40 @@ export interface GuestSessionResponse {
   user_id: number
   display_name: string
   is_guest: boolean
+}
+
+// --- POST /api/auth/verify --------------------------------------------------
+// Backend: api/auth.py::verify(). OTP -> JWT. `merged_guest` is non-null when a
+// guest token was sent as the Bearer and that guest's work was reassigned to the
+// account (the guest→account merge).
+export interface VerifyResponse {
+  token: string
+  user_id: number
+  display_name: string
+  is_guest: false
+  merged_guest: null | {
+    guest_user_id: number
+    proposals_claimed: number
+    feedback_claimed: number
+    likes_claimed: number
+    comments_claimed: number
+  }
+}
+
+// verify's alternate 200: a first-time (never-verified) account must pick a
+// display name as a second step, after the code. The code is left unconsumed,
+// so the client re-submits the same code together with the chosen name.
+export interface VerifyNeedsNameResponse {
+  needs_display_name: true
+}
+
+// The persisted auth cookie payload (lib/authCookie.ts). Not a wire shape —
+// assembled from a guest or verify response and read back on boot.
+export interface StoredAuth {
+  token: string
+  is_guest: boolean
+  display_name: string
+  user_id: number
 }
 
 // --- POST /api/proposals ----------------------------------------------------

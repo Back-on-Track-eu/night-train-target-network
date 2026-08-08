@@ -121,8 +121,8 @@ blocks the verification itself (`merged_guest` is simply `null`).
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/auth/request-code` | Register/login: send OTP to email (`5/hour` per IP) |
-| `POST` | `/api/auth/verify` | Verify OTP → `{token, user_id, display_name, is_guest, merged_guest}` — guest bearer attached triggers the merge (see above) |
+| `POST` | `/api/auth/request-code` | Register/login: send OTP to email (`5/hour` per IP). No display name here — a new email creates a pending, unverified account (placeholder name) and the name is chosen at verify |
+| `POST` | `/api/auth/verify` | Verify OTP → `{token, user_id, display_name, is_guest, merged_guest}` — guest bearer attached triggers the merge (see above). A first-time (never-verified) account must send `display_name` as a second step: verify without one replies `200 {"needs_display_name": true}` and leaves the code unconsumed, so the client re-submits the same code with the chosen name |
 | `POST` | `/api/auth/guest` | Anonymous guest session → guest JWT (`20/hour` per IP) |
 
 Config (see `docker/.env.example`): `JWT_SECRET` (required),

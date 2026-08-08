@@ -51,7 +51,7 @@
       "kpi": {
         "revenue": "Revenue",
         "cost": "Cost",
-        "net": "Net"
+        "subsidies": "Necessary Subsidies"
       },
       "groups": {
         "cost": "Cost",
@@ -176,5 +176,34 @@
     "loadingMore": "Loading more…",
     "end": "That's all {count} proposals.",
     "error": "Could not load proposals."
+  },
+  "user": {
+    "guest": "Guest",
+    "logout": "Log out",
+    "login": "Log in / Register"
+  },
+  "auth": {
+    "evaluating": "Evaluating proposal …",
+    "completed": "Evaluation completed",
+    "loginTitle": "Log in or register",
+    "verifyTitle": "Please verify your mail address",
+    "nameTitle": "Choose a display name",
+    "emailIncorrect": "Change mail address",
+    "co2Savings": "This connection saves about {value} t CO₂ per year.",
+    "register": " Register to keep track of your proposal's impact on our research towards the EU target network 2032!",
+    "email": "E-Mail Address",
+    "displayName": "Display name",
+    "displayNameRequired": "New here? Choose a display name to register.",
+    "continue": "Continue",
+    "continueGuest": "Continue as guest",
+    "or": "OR",
+    "codeSent": "We e-mailed a 6-digit code to {email}.",
+    "code": "Verification code",
+    "verify": "Verify",
+    "back": "Back",
+    "close": "Close",
+    "emailFailed": "Could not send the code. Please try again.",
+    "invalidCode": "Invalid or expired code. Please request a new one.",
+    "guestFailed": "Could not start a guest session. Please try again."
   }
 }

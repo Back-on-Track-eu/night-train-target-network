@@ -670,14 +670,6 @@ function formatShare(share: number | null): string {
   return share === null ? '' : fmtPct.format(share)
 }
 
-// --- Raw JSON fallback (lazily stringified, only when opened) --------------
-const rawOpen = ref(false)
-const rawJson = computed(() => (rawOpen.value ? JSON.stringify(props.result, null, 2) : ''))
-
-function onRawToggle(event: Event) {
-  rawOpen.value = (event.target as HTMLDetailsElement).open
-}
-
 // Shared pill styling for the unstyled Selects — same pass-through classes as
 // the trip selector in ProposalViewport.vue.
 const selectPt = {
@@ -818,13 +810,10 @@ const scenarioSelectPt = {
         </div>
         <div class="flex flex-col items-center gap-1">
           <span class="text-xs tracking-wide text-primary-50/50 uppercase">
-            {{ t('proposal.evaluation.kpi.net') }}
+            {{ t('proposal.evaluation.kpi.subsidies') }}
           </span>
-          <span
-            class="text-xl font-bold tabular-nums"
-            :class="currentBreakdown.net_eur >= 0 ? 'text-green-400' : 'text-red-400'"
-          >
-            {{ formatEur(currentBreakdown.net_eur) }}
+          <span class="text-xl font-bold text-primary-50 tabular-nums">
+            {{ formatEur(-currentBreakdown.net_eur) }}
           </span>
         </div>
       </div>
@@ -905,38 +894,6 @@ const scenarioSelectPt = {
               </span>
             </div>
           </div>
-
-          <div class="rounded-xl bg-primary-50/5 p-4">
-            <div
-              class="mb-2 flex items-baseline justify-between border-b border-primary-50/10 pb-2"
-            >
-              <span class="font-semibold text-primary-50">
-                {{ t('proposal.evaluation.groups.margin') }}
-              </span>
-              <span class="font-semibold text-primary-50 tabular-nums">
-                −{{ formatEur(currentBreakdown.margin.total_eur) }}
-              </span>
-            </div>
-            <div class="flex items-center justify-between py-1">
-              <span class="flex items-center gap-1 text-sm text-primary-50/70">
-                {{ t('proposal.evaluation.fields.ebit_margin') }}
-                <button
-                  v-if="hasInfo('ebit_margin')"
-                  type="button"
-                  class="flex cursor-pointer text-primary-50/40 transition hover:text-primary-50"
-                  :aria-label="t('proposal.evaluation.info.iconLabel')"
-                  @mouseenter="openInfo('ebit_margin', $event)"
-                  @mouseleave="scheduleClose"
-                  @click="openInfo('ebit_margin', $event)"
-                >
-                  <AppIcon :path="mdiInformationOutline" :size="14" />
-                </button>
-              </span>
-              <span class="text-sm text-primary-50 tabular-nums">
-                −{{ formatEur(currentBreakdown.margin.ebit_margin_eur) }}
-              </span>
-            </div>
-          </div>
         </div>
       </div>
     </template>
@@ -944,19 +901,9 @@ const scenarioSelectPt = {
       {{ t('proposal.evaluation.noData') }}
     </div>
 
-    <!-- Footer: calc version + raw JSON fallback -->
+    <!-- Footer: calc version -->
     <div class="flex flex-col gap-1 text-xs text-primary-50/40">
       <span>{{ t('proposal.evaluation.calcVersion') }} {{ result.calc_version }}</span>
-      <details @toggle="onRawToggle">
-        <summary class="cursor-pointer select-none">
-          {{ t('proposal.evaluation.showRaw') }}
-        </summary>
-        <pre
-          v-if="rawOpen"
-          class="mt-2 max-h-96 overflow-auto rounded-lg bg-black/20 p-3 text-primary-50/60"
-          >{{ rawJson }}</pre
-        >
-      </details>
     </div>
 
     <!-- Cost-factor detail popover: title · explanation · formula · rates -->
