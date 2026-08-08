@@ -218,14 +218,18 @@ class TestCompositions:
         }
         for comp in compositions_body["compositions"]:
             missing = sections - set(comp)
-            assert missing == set(), f"{comp['comp_id']} missing sections: {missing}"
-            assert "energy" not in comp, f"{comp['comp_id']}: unexpected 'energy' key"
+            assert missing == set(), (
+                f"{comp['composition_id']} missing sections: {missing}"
+            )
+            assert "energy" not in comp, (
+                f"{comp['composition_id']}: unexpected 'energy' key"
+            )
 
     def test_service_areas_reduce_wo_service_totals(self, compositions_body):
         """REF-PREM-12 carries a dining car: wo_service totals must be
         strictly smaller than full totals; pure-revenue compositions are
         equal both ways."""
-        comps = {c["comp_id"]: c for c in compositions_body["compositions"]}
+        comps = {c["composition_id"]: c for c in compositions_body["compositions"]}
         # the dining car carries zero revenue space — visible in the
         # coach_types catalog (composition wo_service totals are internal)
         ark = compositions_body["coach_types"]["ARkimmbz"]
@@ -273,15 +277,15 @@ class TestCompositions:
         positive place count and positive density."""
         for comp in compositions_body["compositions"]:
             assert len(comp["capacity"]["by_class"]) > 0, (
-                f"{comp['comp_id']} has empty capacity"
+                f"{comp['composition_id']} has empty capacity"
             )
             for cls, cap in comp["capacity"]["by_class"].items():
-                assert cap["places"] > 0, f"{comp['comp_id']}.{cls}: places <= 0"
+                assert cap["places"] > 0, f"{comp['composition_id']}.{cls}: places <= 0"
                 assert cap["density_length_m_per_place"] > 0, (
-                    f"{comp['comp_id']}.{cls}: length density <= 0"
+                    f"{comp['composition_id']}.{cls}: length density <= 0"
                 )
                 assert cap["density_weight_t_per_place"] > 0, (
-                    f"{comp['comp_id']}.{cls}: weight density <= 0"
+                    f"{comp['composition_id']}.{cls}: weight density <= 0"
                 )
 
     def test_coach_list_matches_count(self, compositions_body):
@@ -292,7 +296,7 @@ class TestCompositions:
             assert coaches["count"] == len(coaches["list"])
             positions = [c["position"] for c in coaches["list"]]
             assert len(positions) == len(set(positions)), (
-                f"{comp['comp_id']}: duplicate coach positions"
+                f"{comp['composition_id']}: duplicate coach positions"
             )
 
     def test_operators_referenced_by_compositions(self, compositions_body):
@@ -301,7 +305,7 @@ class TestCompositions:
         operators = {o["operator_id"]: o for o in compositions_body["operators"]}
         for comp in compositions_body["compositions"]:
             op = operators.get(comp["operator_id"])
-            assert op is not None, f"{comp['comp_id']}: unknown operator"
+            assert op is not None, f"{comp['composition_id']}: unknown operator"
             assert op["driver_costs_eur_h"] > 0
             assert op["crew_costs_eur_h"] > 0
 
@@ -309,7 +313,7 @@ class TestCompositions:
         """Indicative block carries the seeded calibration KPIs (per-train-km
         and ct-per-place-km) plus the reference profile; the per-class
         placeholder breakdown is gone since CALC_VERSION 0.9.7."""
-        comps = {c["comp_id"]: c for c in compositions_body["compositions"]}
+        comps = {c["composition_id"]: c for c in compositions_body["compositions"]}
         with_ind = [c for c in comps.values() if c.get("indicative")]
         assert with_ind, "no composition returned indicative KPIs"
         for c in with_ind:

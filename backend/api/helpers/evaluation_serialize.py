@@ -3,7 +3,8 @@ evaluation_serialize.py
 ========================
 Serialization (domain → dict) for the cost/revenue evaluation pipeline —
 Breakdown trees, matrix views, and the "models" / "input" documentation
-sections of POST /api/evaluation/calc's response.
+sections of the merged POST /api/proposal/calc response's "evaluation"
+block (api/helpers/proposal_compute.py).
 
 Split out of the former serialize.py (2026-07-06) into two domain files —
 this one for evaluation output, route_serialize.py for Route (de)serialization
@@ -22,11 +23,10 @@ Public interface:
                                                     → dict  (all normalisations of one Breakdown, each class-keyed with 'all' —
                                                              CALC 0.9.9; scope = a cell's own annual denominators for
                                                              route-section cells, None otherwise)
-  views_to_dict(bd_all, bd_per_pair, matrix_country, matrix_od, matrix_section,
-                section_scopes, matrix_stop, route, trip_pair_by_key)
-                                                    → dict  (the full "views" section: description + normalisations +
-                                                             data per view, views_meta merged in — see views_to_dict())
-  models_to_dict()                                 → dict  (version + description + formulas for route_builder / energy / evaluation)
+  views_to_dict(views, route)                     → dict  (the full "views" section from a ViewsBundle: description +
+                                                             normalisations + data per view, views_meta merged in)
+  models_to_dict()                                 → dict  (version + description + formulas for route_builder / energy / evaluation,
+                                                             + the emissions factor set — constants, not formulas)
   input_to_dict(route_dict, tracks, stop_infra, compositions) → dict  (the posted route + every parameter actually used to cost it)
 """
 
@@ -36,6 +36,7 @@ from models.route.route import Route, TripPair
 from models.evaluation.views import (
     Breakdown,
     NormalisationScope,
+    ViewsBundle,
     build_class_keyed_normalisations,
     build_class_main_shares,
     revenue_by_class_main,
@@ -50,6 +51,11 @@ from models.energy.version import (
     ENERGY_CALC_VERSION,
     ENERGY_MODEL_DESCRIPTION,
     ENERGY_FORMULAS,
+)
+from models.emissions.factors import (
+    EMISSION_FACTORS,
+    EMISSIONS_MODEL_DESCRIPTION,
+    EMISSIONS_MODEL_VERSION,
 )
 from models.route.version import (
     ROUTE_BUILDER_VERSION,
@@ -444,44 +450,38 @@ def _per_trip_pair_per_section_view_to_dict(
     }
 
 
-def views_to_dict(
-    bd_all: Breakdown,
-    bd_per_pair: dict[str, Breakdown],
-    matrix_country: dict[tuple[str, str], Breakdown],
-    matrix_od: dict[tuple[str, str], Breakdown],
-    matrix_section: dict[tuple[str, str], Breakdown],
-    section_scopes: dict[tuple[str, str], NormalisationScope],
-    matrix_stop: dict[tuple[str, str], Breakdown],
-    route: Route,
-    trip_pair_by_key: dict[str, TripPair],
-) -> dict:
+def views_to_dict(views: ViewsBundle, route: Route) -> dict:
     """The full "views" section of the response — description, normalisation
     documentation (formerly a separate top-level "views_meta"), and data,
     together per view rather than in two places the frontend has to
-    cross-reference. Every data point with a dimension to filter on (all
-    views except "route") carries a human-readable "filter" — a dict, one
-    entry per filter dimension, keyed by dimension name — alongside its
-    "values". E.g. per_trip_pair: {"trip_pair": "Muenchen Hbf \u2194 Wien Hbf"}
+    cross-reference. Takes the ViewsBundle build_all_views() produces
+    (models/evaluation/views.py) plus the Route the views were built from
+    (for labels/filter strings). Every data point with a dimension to
+    filter on (all views except "route") carries a human-readable "filter"
+    — a dict, one entry per filter dimension, keyed by dimension name —
+    alongside its "values". E.g. per_trip_pair:
+    {"trip_pair": "Muenchen Hbf \u2194 Wien Hbf"}
     (\u2194 — a trip pair is always both directions). per_trip_pair_per_od:
     {"trip_pair": "Muenchen Hbf \u2194 Wien Hbf",
      "od_pair": "Muenchen Hbf \u2192 Wien Hbf (seat (reclining))"}
     (\u2192 for the OD pair itself — a ticket is genuinely one-way)."""
+    trip_pair_by_key = {p.outbound.trip_id: p for p in route.trip_pairs}
     return {
-        "route": _route_view_to_dict(bd_all, route),
+        "route": _route_view_to_dict(views.bd_all, route),
         "per_trip_pair": _per_trip_pair_view_to_dict(
-            bd_per_pair, route, trip_pair_by_key
+            views.bd_per_pair, route, trip_pair_by_key
         ),
         "per_trip_pair_per_country": _per_trip_pair_per_country_view_to_dict(
-            matrix_country, route, trip_pair_by_key
+            views.matrix_country, route, trip_pair_by_key
         ),
         "per_trip_pair_per_od": _per_trip_pair_per_od_view_to_dict(
-            matrix_od, route, trip_pair_by_key
+            views.matrix_od, route, trip_pair_by_key
         ),
         "per_trip_pair_per_section": _per_trip_pair_per_section_view_to_dict(
-            matrix_section, section_scopes, route, trip_pair_by_key
+            views.matrix_section, views.section_scopes, route, trip_pair_by_key
         ),
         "per_trip_per_stop": _per_trip_per_stop_view_to_dict(
-            matrix_stop, route, trip_pair_by_key
+            views.matrix_stop, route, trip_pair_by_key
         ),
     }
 
@@ -542,9 +542,15 @@ def _formulas_to_dict(formulas: dict) -> dict:
 def models_to_dict() -> dict:
     """Version + description + formula registry for every model that
     contributes to an evaluation: the route builder (routing/timetable),
-    the energy model (traction energy), and the evaluation model itself
-    (cost/revenue). Static across all evaluations — no route-specific data,
-    safe to call with no arguments."""
+    the energy model (traction energy), the evaluation model itself
+    (cost/revenue), and the emissions model. Static across all
+    evaluations — no route-specific data, safe to call with no arguments.
+
+    The emissions entry carries "factors" instead of "formulas": the
+    model is a set of sourced per-mode constants (decision 24), not
+    calculation steps — these are the per-mode reference values the
+    frontend renders next to a proposal's night-train
+    co2_g_per_pax_km."""
     return {
         "route_builder": {
             "version": ROUTE_BUILDER_VERSION,
@@ -561,6 +567,14 @@ def models_to_dict() -> dict:
             "description": CALC_MODEL_DESCRIPTION,
             "formulas": _formulas_to_dict(CALC_FORMULAS),
         },
+        "emissions": {
+            "version": EMISSIONS_MODEL_VERSION,
+            "description": EMISSIONS_MODEL_DESCRIPTION,
+            "factors": {
+                mode: {"g_per_pax_km": factor.g_per_pax_km, "source": factor.source}
+                for mode, factor in EMISSION_FACTORS.items()
+            },
+        },
     }
 
 
@@ -574,12 +588,18 @@ def input_to_dict(
     tracks: TrackInfraCollection,
     stop_infra: StopInfraCollection,
     compositions: CompositionCollection,
+    include_route: bool = True,
 ) -> dict:
     """Everything that went into this evaluation.
 
-    route: the route JSON exactly as posted to POST /api/evaluation/calc —
-    included verbatim (not re-serialized from the reconstructed Route) so
-    it's a faithful record of the actual request body.
+    route: the route dict this evaluation costed — included verbatim.
+    include_route=False for POST /api/proposal/calc (api/helpers/
+    proposal_compute.py, adapters/proposal/README.md §2.1): the merged response
+    already carries the route once, as a sibling key of "evaluation" — a
+    second copy under evaluation.input would violate the "route appears
+    exactly once" rule. include_route=True is the model-layer default
+    (tests/helpers.py's controlled-demand evaluations keep the old
+    input.route contract).
 
     parameters: every track/stop/composition parameter actually loaded to
     cost this route, reusing the same params_serialize.py functions the
@@ -587,11 +607,11 @@ def input_to_dict(
     own description, source, and is_default flag (see params_serialize.py),
     so there's no separate description/source scheme to maintain here.
     """
-    return {
-        "route": route_dict,
-        "parameters": {
-            "track_infrastructures": track_infra_to_dict(tracks),
-            "stop_infrastructures": stop_infra_to_dict(stop_infra),
-            "compositions": composition_collection_to_dict(compositions),
-        },
+    parameters = {
+        "track_infrastructures": track_infra_to_dict(tracks),
+        "stop_infrastructures": stop_infra_to_dict(stop_infra),
+        "compositions": composition_collection_to_dict(compositions),
     }
+    if not include_route:
+        return {"parameters": parameters}
+    return {"route": route_dict, "parameters": parameters}

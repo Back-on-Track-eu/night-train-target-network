@@ -24,7 +24,6 @@ from models.params import (
     TRACK_INFRA_FIELD_NAMES,
     CompositionCollection,
 )
-from models.utils import min_to_h
 from models.evaluation.views import build_class_main_shares
 
 # =============================================================================
@@ -287,7 +286,12 @@ def composition_collection_to_dict(compositions: CompositionCollection) -> dict:
         result.append(
             {
                 # --- identity ---
-                "comp_id": c.comp_id,
+                # Wire name is composition_id everywhere in the API (calc
+                # request, gallery rows, filters, compare overrides, the
+                # ONTD columns) — the domain attribute stays comp_id;
+                # normalising at the serialization boundary is the point
+                # of having one.
+                "composition_id": c.comp_id,
                 "description": c.comp_description,
                 "material_strategy": c.material_strategy,
                 "operator_id": c.operator_id,
@@ -504,7 +508,7 @@ def composition_collection_to_dict(compositions: CompositionCollection) -> dict:
     for lst in classes_by_main.values():
         lst.sort(key=lambda x: x["class_id"])
 
-    result.sort(key=lambda x: x["comp_id"])
+    result.sort(key=lambda x: x["composition_id"])
     operators = sorted(operators_by_id.values(), key=lambda x: x["operator_id"])
 
     return {

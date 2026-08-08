@@ -13,9 +13,23 @@ Covers:
     track infra version, defaults rows exist)
   - All three seeded scenarios (2026 Base Line / 2032 Base Line / 2032 Base
     Line + HSR allowed) are present and consistent
+  - Proposals redesign, schema phase 1 (2026-08-03, additive-only — see
+    adapters/proposal/README.md §5.2): new sidecar/update_log/
+    proposal_summaries/compute-cache tables exist, the new columns on
+    proposals.proposals/stop_times exist and are still nullable, the
+    PostGIS geometry column and UNLOGGED cache tables are set up correctly
 """
 
 import pytest
+
+# The curated canonical stop list in db/dev/seed.py — the literal must
+# move with seed.py's _STOP_INFRASTRUCTURES_CANONICAL (same maintenance
+# contract the old hardcoded 174 row floor already had). The rest of the
+# catalog comes from the Drive-hosted ONTD seed CSV, whose size isn't
+# knowable here (the file lives inside the container in CI) — its
+# presence is asserted via the change_log provenance marker instead.
+N_CURATED_SEED_STOPS = 58
+ONTD_SEED_CHANGE_LOG_PREFIX = "seeded from ONTD snapshot"
 
 # =============================================================================
 # Expectations after seeding — see db/dev/seed.py
@@ -39,12 +53,43 @@ EXPECTED_ROW_COUNTS = {
     "input_params.track_infrastructure_defaults": 3,  # 1 per scenario
     "input_params.track_infrastructures": 84,  # 3 full-table snapshots × 28 countries
     "input_params.stop_infrastructure_defaults": 3,  # 1 per scenario
-    "input_params.stop_infrastructures": 174,  # 3 full-table snapshots × 58 stops
+    # Floor: 3 full-table snapshots × 58 curated stops. The real total
+    # includes the ONTD-derived stops seeded from db/dev/data/
+    # ontd_seed_stops.csv — the exact count and the snapshot-set
+    # invariant are asserted by test_stop_catalog_snapshots below.
+    "input_params.stop_infrastructures": 174,
     "scenario.scenarios": 3,  # 2026-baseline + base + 2032-baseline-hsr-allowed
     "proposals.proposals": 1,  # one real saved example proposal — see seed_example_proposal()
     "proposals.routes": 1,
     "proposals.trips": 2,  # both directions of the one seeded proposal
     "proposals.stop_times": 6,  # 3 stops x 2 directions
+}
+
+# Tables added by the proposals redesign, schema phase 1 (2026-08-03,
+# additive-only — see adapters/proposal/README.md §5 and
+# migrations/2026-08-03_proposal_schema_phase1.sql). Existence-only checks:
+# nothing seeds them yet, since the compute/publish endpoints that would
+# write to them don't exist until later WPs.
+EXPECTED_PHASE1_TABLES = {
+    "proposals.segments",
+    "proposals.od_pairs",
+    "proposals.parkings",
+    "proposals.shuntings",
+    "proposals.timetable_warnings",
+    "proposals.seasonal_schedules",
+    "proposals.update_log",
+    "proposals.proposal_summaries",
+    "proposals.compute_cache_pointer",
+    "proposals.compute_cache_result",
+}
+
+# Columns WP5's finalizing migration (2026-08-04_proposal_schema_phase2_
+# cutover.sql) enforces NOT NULL on, now that the sole write path
+# (ProposalRepository.publish() / gtfs_store.insert_route_gtfs())
+# always sets them — no half-states, no unpopulated rows possible anymore.
+EXPECTED_PHASE2_NOT_NULL_COLUMNS = {
+    "proposals.proposals": ["route_fingerprint", "compute_request"],
+    "proposals.stop_times": ["stop_type"],
 }
 
 # Columns that must never be NULL. Every other track_infrastructures column
@@ -93,6 +138,44 @@ def test_table_row_count(db_cur, table, min_rows):
     assert count >= min_rows, f"{table}: expected >= {min_rows} rows, got {count}"
 
 
+def test_stop_catalog_snapshots(db_cur):
+    """The stop catalog is complete at seed time and version-immutable:
+    every stop_infra_version carries the identical stop set (the
+    full-table-snapshot invariant the retired runtime mint used to
+    violate — see db/ontd/stop_mapping.py's module docstring), and the
+    ONTD-derived share is actually present — a missing share means the
+    seed's Drive download of ontd_seed_stops.csv failed (its warning
+    banner is in the container log) and downstream failures like
+    test_20's auto-stop expectations would otherwise be baffling."""
+    db_cur.execute(
+        "SELECT stop_infra_version, array_agg(stop_id ORDER BY stop_id) AS ids, "
+        "       count(*) FILTER (WHERE change_log LIKE %s) AS n_ontd "
+        "FROM input_params.stop_infrastructures GROUP BY stop_infra_version",
+        (f"{ONTD_SEED_CHANGE_LOG_PREFIX}%",),
+    )
+    rows = db_cur.fetchall()
+    snapshots = {row["stop_infra_version"]: row["ids"] for row in rows}
+    assert set(snapshots) == {1, 2, 3}
+    for row in rows:
+        version, ids = row["stop_infra_version"], row["ids"]
+        assert len(ids) == len(set(ids)), f"duplicate stop_ids in version {version}"
+        assert row["n_ontd"] > 0, (
+            f"version {version}: no ONTD-derived stops — the seed's Drive "
+            "download of ontd_seed_stops.csv failed (see the container "
+            "log's warning banner) or the CSV is empty"
+        )
+        assert len(ids) == N_CURATED_SEED_STOPS + row["n_ontd"], (
+            f"version {version}: {len(ids)} stops != {N_CURATED_SEED_STOPS} "
+            f"curated + {row['n_ontd']} ONTD-derived — an unmarked writer "
+            "touched the catalog"
+        )
+    assert snapshots[1] == snapshots[2] == snapshots[3], (
+        "stop snapshots differ between versions — the seed is the only "
+        "writer and builds every version from one list, so this points at "
+        "a runtime write into input_params.stop_infrastructures"
+    )
+
+
 @pytest.mark.parametrize("table,columns", REQUIRED_COLUMNS.items())
 def test_required_columns_not_null(db_cur, table, columns):
     """Required columns contain no NULL values in any row."""
@@ -101,6 +184,76 @@ def test_required_columns_not_null(db_cur, table, columns):
         db_cur.execute(f"SELECT COUNT(*) AS n FROM {schema}.{tbl} WHERE {col} IS NULL")
         nulls = db_cur.fetchone()["n"]
         assert nulls == 0, f"{table}.{col} has {nulls} NULL values"
+
+
+# =============================================================================
+# Proposals redesign — schema phase 1 (2026-08-03, additive-only)
+# =============================================================================
+
+
+@pytest.mark.parametrize("table", sorted(EXPECTED_PHASE1_TABLES))
+def test_phase1_table_exists(db_cur, table):
+    """Every table the phase-1 migration adds is present. Existence only —
+    the tables are empty until later WPs wire up writers (WP5 for
+    update_log/proposal_summaries, WP13 for the compute cache)."""
+    schema, tbl = table.split(".")
+    db_cur.execute(
+        "SELECT COUNT(*) AS n FROM information_schema.tables "
+        "WHERE table_schema = %s AND table_name = %s",
+        (schema, tbl),
+    )
+    assert db_cur.fetchone()["n"] == 1, f"{table}: table not found"
+
+
+@pytest.mark.parametrize(
+    "table,columns",
+    EXPECTED_PHASE2_NOT_NULL_COLUMNS.items(),
+)
+def test_phase2_not_null_columns_enforced(db_cur, table, columns):
+    """WP5's finalizing migration enforces NOT NULL on these columns —
+    every proposal is now always fully populated (no half-states, §2.4),
+    so a nullable column here would mean the migration didn't apply."""
+    schema, tbl = table.split(".")
+    for col in columns:
+        db_cur.execute(
+            "SELECT is_nullable FROM information_schema.columns "
+            "WHERE table_schema = %s AND table_name = %s AND column_name = %s",
+            (schema, tbl, col),
+        )
+        row = db_cur.fetchone()
+        assert row is not None, f"{table}.{col}: column not found"
+        assert row["is_nullable"] == "NO", f"{table}.{col}: expected NOT NULL"
+
+
+def test_proposal_summaries_geom_is_postgis_geometry(db_cur):
+    """proposal_summaries.geom_simplified is a PostGIS geometry column, not
+    a plain type — information_schema doesn't expose the (MultiLineString,
+    4326) type modifier, so this only asserts the underlying udt_name;
+    the full type constraint is exercised once WP5/WP6 start writing and
+    querying real geometries."""
+    db_cur.execute(
+        "SELECT udt_name FROM information_schema.columns "
+        "WHERE table_schema = 'proposals' AND table_name = 'proposal_summaries' "
+        "AND column_name = 'geom_simplified'"
+    )
+    row = db_cur.fetchone()
+    assert row is not None, "proposal_summaries.geom_simplified: column not found"
+    assert row["udt_name"] == "geometry"
+
+
+def test_compute_cache_tables_are_unlogged(db_cur):
+    """Both compute cache tables are UNLOGGED (adapters/proposal/README.md
+    §2.3) — a disposable performance layer, no WAL overhead, safe to lose
+    on crash."""
+    db_cur.execute(
+        "SELECT relname, relpersistence FROM pg_class "
+        "WHERE relname IN ('compute_cache_pointer', 'compute_cache_result')"
+    )
+    persistence = {row["relname"]: row["relpersistence"] for row in db_cur.fetchall()}
+    assert persistence == {
+        "compute_cache_pointer": "u",
+        "compute_cache_result": "u",
+    }
 
 
 # =============================================================================

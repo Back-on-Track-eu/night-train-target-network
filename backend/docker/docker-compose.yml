@@ -39,6 +39,8 @@ services:
       dockerfile: Dockerfile
     image: docker-openrailrouting
     container_name: openrailrouting
+    environment:
+      GRAPH_CACHE_FILE_ID: ${GRAPH_CACHE_FILE_ID}
     ports:
       - "${OPENRAILROUTING_HOST_PORT:-8989}:${OPENRAILROUTING_CONTAINER_PORT:-8989}"
     volumes:

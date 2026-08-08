@@ -13,6 +13,11 @@ two auth planes meet and normalize:
                            invalid* token is still a 401, not ignored
   @require_trust(level)  — valid token AND g.trust_level >= level
 
+It also owns rate_limit_key(), the per-user bucket key the rate-limited
+endpoints pass to @limiter.limit — identity resolution is this module's
+job, and putting it here keeps api/limiter.py import-free (see its
+docstring for why that matters).
+
 Flask g context set by all decorators
 --------------------------------------
     g.user_id      : int | None   — admin.users identity (both planes)
@@ -29,6 +34,7 @@ import logging
 from functools import wraps
 
 from flask import g, jsonify, request
+from flask_limiter.util import get_remote_address
 
 from api import auth_oidc
 from api.auth_utils import (
@@ -55,7 +61,12 @@ def _bearer_token() -> str | None:
         return None
 
     parts = auth_header.split()
-    if len(parts) != 2 or parts[0].lower() != "bearer":
+    if parts and parts[0].lower() != "bearer":
+        # A different auth scheme (e.g. "Basic ..." injected by the browser
+        # behind the staging basic-auth wall) is not ours to validate —
+        # treat the request as anonymous instead of rejecting it.
+        return None
+    if len(parts) != 2:
         raise AuthError("Invalid Authorization header format. Expected: Bearer <token>")
     return parts[1]
 
@@ -135,6 +146,33 @@ def _clear_g() -> None:
 
 def _unauthorized(message: str):
     return jsonify({"error": "unauthorized", "message": message}), 401
+
+
+# ---------------------------------------------------------------------------
+# Rate-limit bucket key
+# ---------------------------------------------------------------------------
+
+
+def rate_limit_key() -> str:
+    """Which bucket the current request counts against: the authenticated
+    user where one can be established cheaply, the client address
+    otherwise.
+
+    Flask-Limiter evaluates this in a before_request hook — BEFORE
+    @require_auth has run — so g.user_id is not set yet and the token has
+    to be read here. Only the local plane is resolved: that is a
+    signature check on a small HS256 JWT and nothing more. OIDC tokens
+    deliberately fall through to the address bucket rather than pay a
+    JWKS verification on every request; operators are few, trusted, and
+    not the abuse vector these limits exist for.
+    """
+    try:
+        token = _bearer_token()
+        if token is not None and not auth_oidc.is_oidc_token(token):
+            return f"user:{decode_jwt(token)['sub']}"
+    except AuthError:
+        pass
+    return get_remote_address()
 
 
 # ---------------------------------------------------------------------------

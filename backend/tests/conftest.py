@@ -10,7 +10,7 @@ Start the stack before running:
 Run tests from backend/:
     uv run --extra dev pytest tests/ -v
 
-Expensive route builds (a POST /api/route/plan can take tens of seconds
+Expensive route builds (a POST /api/proposal/calc can take tens of seconds
 against live OpenRailRouting) are session-scoped here and shared across
 files — a test that only reads a route must use one of these fixtures
 instead of building its own.
@@ -24,11 +24,9 @@ import pytest
 import requests
 
 from tests.helpers import (
-    ROUTE_URL,
+    PROPOSAL_CALC_URL,
     build_route,
-    directional_od,
-    evaluate,
-    inject_demand,
+    compute_evaluation_domain,
     purge_saved_proposals,
 )
 
@@ -110,17 +108,14 @@ def rollback_after_test():
 
 
 # =============================================================================
-# Script identity — the user the suite persists as (persist-on-calc)
+# Script identity — the user the suite publishes as
 # =============================================================================
 #
-# POST /api/route/plan and /api/evaluation/calc persist their responses for
-# any authenticated caller. The suite authenticates as the seeded
-# 'test_script' user so persisted rows from test runs are identifiable (and
-# purgeable) by owner. The session route fixtures below deliberately stay
-# TOKENLESS: they compute only, keep their draft placeholder IDs, and leave
-# no rows — so every pre-existing test sees unchanged behaviour, and
-# persistence is exercised solely by the dedicated tests (test_50, test_70)
-# through these fixtures.
+# The suite authenticates as the seeded 'test_script' user so published
+# rows from test runs are identifiable (and purgeable) by owner. The
+# session route fixtures below are TOKENLESS: POST /api/proposal/calc is
+# stateless and leaves no rows — persistence is exercised solely by the
+# dedicated publish tests (test_50, test_70).
 
 
 @pytest.fixture(scope="session")
@@ -243,17 +238,16 @@ def hsr_scenario(db_cur):
 
 
 # All fixtures pin auto_stop_addition="off": these are fixed-corridor
-# physics fixtures whose stop lists downstream tests (test_21 content
+# physics fixtures whose stop lists downstream tests (test_20 content
 # math, test_50 GTFS decomposition) rely on being exactly as requested —
 # the seeded CZ_BRNO_HLN would otherwise be auto-added to any corridor
 # passing through Brno. The add/suggest behaviour has its own dedicated
-# tests in test_20's TestModeSwitches.
+# tests in test_35's TestSuggestMode / TestModeSwitches-equivalent classes.
 #
-# proposal_id range convention (avoids collisions between real saved data
-# and test fixtures across the whole suite):
-#   1-99     seed_example_proposal() in db/dev/seed.py (currently just id=1)
-#   100-999  draft placeholders for THIS file's session-scoped route fixtures
-#   1000+    tests/test_50_proposals_api.py's own dynamically-saved proposals
+# WP5: these are now built via POST /api/proposal/calc (stateless,
+# neutral structural ids) — proposal_id/proposal_version no longer exist
+# as request fields (those are publish-only concerns, §2.1), so the old
+# draft-placeholder-id range convention that used to live here is gone.
 @pytest.fixture(scope="session")
 def route_berlin_wien(api_base):
     """2-stop, 2-country route: Berlin → Wien (DE, AT), NEW-BAL-7."""
@@ -261,8 +255,6 @@ def route_berlin_wien(api_base):
         api_base,
         STOPS_BERLIN_WIEN,
         DEFAULT_COMPOSITION,
-        proposal_id=101,
-        proposal_version=1,
         auto_stop_addition="off",
     )
 
@@ -274,8 +266,6 @@ def route_berlin_dresden_wien(api_base):
         api_base,
         STOPS_BERLIN_DRESDEN_WIEN,
         DEFAULT_COMPOSITION,
-        proposal_id=102,
-        proposal_version=1,
         auto_stop_addition="off",
     )
 
@@ -287,8 +277,6 @@ def route_berlin_zuerich_wien(api_base):
         api_base,
         STOPS_BERLIN_ZUERICH_WIEN,
         DEFAULT_COMPOSITION,
-        proposal_id=103,
-        proposal_version=1,
         auto_stop_addition="off",
     )
 
@@ -308,11 +296,9 @@ def route_copenhagen_stockholm(api_base):
     body = {
         "stops": STOPS_COPENHAGEN_STOCKHOLM,
         "composition_id": DEFAULT_COMPOSITION,
-        "proposal_id": 104,
-        "proposal_version": 1,
         "auto_stop_addition": "off",
     }
-    resp = requests.post(f"{api_base}{ROUTE_URL}", json=body, timeout=90)
+    resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=90)
     if resp.status_code != 200:
         pytest.skip(
             "Copenhagen→Stockholm did not build "
@@ -334,12 +320,10 @@ STANDARD_DEMAND = [("Couchette", 40, 89.0), ("Seat", 30, 49.0)]
 
 
 @pytest.fixture(scope="session")
-def eval_standard(api_base, route_berlin_dresden_wien):
+def eval_standard(loader, route_berlin_dresden_wien):
     """Evaluation of route_berlin_dresden_wien under STANDARD_DEMAND.
-    Returns (costed_route_dict_as_posted, evaluation_response)."""
-    route = route_berlin_dresden_wien
-    ods = []
-    for class_main, places, price in STANDARD_DEMAND:
-        ods += directional_od(route, class_main, places, price)
-    costed = inject_demand(route, ods)
-    return costed, evaluate(api_base, costed)
+    Returns (costed_route_dict, evaluation_response), computed at the
+    model layer — see tests/helpers.py:compute_evaluation_domain()."""
+    return compute_evaluation_domain(
+        route_berlin_dresden_wien, loader, demand=STANDARD_DEMAND
+    )

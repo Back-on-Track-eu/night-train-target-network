@@ -2,7 +2,13 @@
 import { onMounted, ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useStore } from '@/stores/store'
-import type { EvaluationResponse, MapScope, Stop, SuggestedStop } from '@/types/api'
+import type {
+  EvaluationResponse,
+  MapScope,
+  ProposalCalcResponse,
+  Stop,
+  SuggestedStop,
+} from '@/types/api'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Skeleton from 'primevue/skeleton'
@@ -27,17 +33,17 @@ const currentMode = ref<'edit' | 'loading' | 'display'>(props.mode)
 const selectedCompositionId = ref<string | null>(null)
 const evaluateError = ref<string | null>(null)
 
-// Raw route as returned by /api/route/plan (before adaptRoute()). The cost/
-// revenue endpoint needs this un-adapted object, so we keep it around.
+// Raw route as returned by POST /api/proposal/calc (before adaptRoute()) —
+// the map segment/highlight logic below reads it directly.
 const rawRoute = ref<BackendRoute | null>(null)
-// Result of POST /api/evaluation/calc — rendered by EvaluationPanel.
+// Evaluation bundle rendered by EvaluationPanel — assembled in applyPlan()
+// from the same merged calc response the route came from.
 const calcResult = ref<EvaluationResponse | null>(null)
-const calcError = ref<string | null>(null)
 // Which part of the route the evaluation panel is currently scoped to — drives
 // the map's highlight/dim. 'all' = whole route.
 const evalScope = ref<MapScope>({ kind: 'all' })
 
-// Stop-suggestion overlay state. evaluate() first plans with
+// Stop-suggestion overlay state. evaluate() first computes with
 // auto_stop_addition="suggest": the backend routes exactly the caller's stops
 // but returns the candidate stops along the way. If any come back, we prompt
 // the user to pick which to include (default: none) instead of adding them
@@ -45,7 +51,7 @@ const evalScope = ref<MapScope>({ kind: 'all' })
 // reused directly when the user adds nothing.
 const suggestedStops = ref<SuggestedStop[]>([])
 const showStopOverlay = ref(false)
-const basePlan = ref<{ route: BackendRoute } | null>(null)
+const basePlan = ref<CalcResponse | null>(null)
 
 interface StopTimeFmt {
   stop_id: string
@@ -70,8 +76,8 @@ interface RouteResult {
   trips: TripResult[]
 }
 
-// --- Shapes returned by POST /api/route/plan, before adapting into the
-//     RouteResult/TripResult/StopTimeFmt shape the rest of this component
+// --- Shapes of POST /api/proposal/calc's "route" key, before adapting into
+//     the RouteResult/TripResult/StopTimeFmt shape the rest of this component
 //     already renders against. Kept minimal — only the fields used below. ---
 interface BackendStop {
   stop_id: string
@@ -107,6 +113,7 @@ interface BackendTripSide {
 }
 
 interface BackendTripPair {
+  composition_id: string
   outbound: BackendTripSide
   return_trip: BackendTripSide
 }
@@ -127,7 +134,13 @@ interface BackendRoute {
   trip_pairs: BackendTripPair[]
   geometries: BackendGeometry[]
   schedule: { seasonal_schedules: BackendSeasonalSchedule[] }
+  // Countries the route runs through — feeds evaluation rate scoping
+  // (costFactorRates reads it via calcResult.input.route).
+  track_infrastructure: { country_code: string }[]
 }
+
+// The merged calc response with its route key concretely typed.
+type CalcResponse = ProposalCalcResponse<BackendRoute>
 
 // Minutes-since-midnight (as returned by the API) -> "HH:MM" for display.
 // Wraps values outside 0-1439 (the mirror-around-02:30 timetable can produce
@@ -206,7 +219,7 @@ function toTripResult(
   }
 }
 
-// Adapts a POST /api/route/plan "route" object (trip_pairs[] of
+// Adapts a calc response "route" object (trip_pairs[] of
 // outbound/return_trip, each with segments[], plus a flat geometries[]) into
 // the RouteResult shape this component was already built around.
 function adaptRoute(backendRoute: BackendRoute): RouteResult {
@@ -251,24 +264,24 @@ const sectionStops = computed(() => {
 // a single-element list hides the card's navigation (arrows/dots).
 const compositionCards = computed(() => {
   if (currentMode.value === 'display' && selectedCompositionId.value) {
-    const sel = store.compositions.filter((c) => c.comp_id === selectedCompositionId.value)
+    const sel = store.compositions.filter((c) => c.composition_id === selectedCompositionId.value)
     if (sel.length > 0) return sel
   }
   return store.compositions
 })
 
-// POST /api/route/plan for the given stop ids and auto_stop_addition mode.
-// Returns the parsed response, or null on error (having set evaluateError and
-// dropped back to edit mode). proposal_id/proposal_version are omitted — this
-// is always a brand new plan from this screen, and the API mints its own draft
-// id/version. Per-stop stop_type is gone too: boarding/alighting is derived
-// automatically from the timetable.
-async function requestPlan(
+// POST /api/proposal/calc for the given stop ids and auto_stop_addition mode
+// — the merged, stateless compute endpoint: one call returns route AND
+// evaluation (no more separate plan + evaluation round trips). Returns the
+// parsed response, or null on error (having set evaluateError and dropped back
+// to edit mode). proposal_id/proposal_version don't exist on this request —
+// persistence is publish's concern, not compute's.
+async function requestCalc(
   stopIds: string[],
   autoStopAddition: 'off' | 'suggest',
-): Promise<{ route: BackendRoute; suggested_stops?: SuggestedStop[] } | null> {
+): Promise<CalcResponse | null> {
   try {
-    const response = await fetch(`${BASE_URL}/api/route/plan`, {
+    const response = await fetch(`${BASE_URL}/api/proposal/calc`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...store.authHeaders() },
       body: JSON.stringify({
@@ -307,8 +320,8 @@ const selectedBackendTrip = computed<BackendTripSide | null>(() => {
 })
 
 // Distance / duration / average speed for the displayed trip plus the route's
-// operating frequency — all straight from /api/route/plan. Null until a route
-// has been planned.
+// operating frequency — all straight from the calc response's route. Null
+// until a route has been planned.
 const routeStats = computed(() => {
   const trip = selectedBackendTrip.value
   const rr = rawRoute.value
@@ -322,13 +335,24 @@ const routeStats = computed(() => {
   }
 })
 
-// Wire a successful plan response into the display: adapt the route, select the
-// outbound trip, rebuild the itinerary from the planned route (so the builder
-// reflects what's actually on the map — including any stops the user chose to
-// add) and commit it as the clean state so the builder isn't "dirty" and Cancel
-// Edit can restore exactly this.
-function applyPlan(json: { route: BackendRoute }) {
+// Wire a successful calc response into the display: adapt the route, publish
+// the evaluation bundle, select the outbound trip, rebuild the itinerary from
+// the planned route (so the builder reflects what's actually on the map —
+// including any stops the user chose to add) and commit it as the clean state
+// so the builder isn't "dirty" and Cancel Edit can restore exactly this.
+function applyPlan(json: CalcResponse) {
   rawRoute.value = json.route
+  // Assemble the panel-facing EvaluationResponse from the merged response:
+  // calc_version/route_id lifted from their new positions, input.route
+  // re-attached from the top-level route key (the wire carries the route
+  // exactly once — costFactorRates scopes rates through input.route).
+  calcResult.value = {
+    calc_version: json.calc_version,
+    route_id: json.route.route_id,
+    models: json.evaluation.models,
+    input: { route: json.route, parameters: json.evaluation.input.parameters },
+    views: json.evaluation.views,
+  }
   const route = adaptRoute(json.route)
   routeResult.value = route
   selectedTripId.value =
@@ -337,9 +361,6 @@ function applyPlan(json: { route: BackendRoute }) {
   committedItinerary.value = itinerary.value.map((s) => ({ ...s }))
   committedCompId.value = selectedCompositionId.value
   currentMode.value = 'display'
-  // Fire-and-forget — let cost/revenue results fill in underneath without
-  // blocking the route/map render.
-  runCalc()
 }
 
 async function evaluate() {
@@ -349,7 +370,7 @@ async function evaluate() {
   evaluateError.value = null
   // First pass: "suggest" routes exactly the caller's stops and reports the
   // candidate stops along the way, without adding any automatically.
-  const json = await requestPlan(
+  const json = await requestCalc(
     validStops.map((s) => s.selectedStop!.stop_id),
     'suggest',
   )
@@ -367,10 +388,10 @@ async function evaluate() {
 }
 
 // User confirmed the suggestion overlay. With no stops chosen, the first
-// "suggest" plan already routed exactly the caller's stops, so reuse it
+// "suggest" response already routed exactly the caller's stops, so reuse it
 // directly. Otherwise insert the chosen stops into the itinerary (by proximity)
-// and re-plan with auto_stop_addition="off" — the caller has made the selection,
-// so no further suggestions are wanted.
+// and recompute with auto_stop_addition="off" — the caller has made the
+// selection, so no further suggestions are wanted.
 async function confirmStopSelection(selectedIds: string[]) {
   showStopOverlay.value = false
   const base = basePlan.value
@@ -388,7 +409,7 @@ async function confirmStopSelection(selectedIds: string[]) {
   for (const s of chosen) insertSuggestedStop(s)
   currentMode.value = 'loading'
   const stopIds = itinerary.value.filter((s) => s.selectedStop).map((s) => s.selectedStop!.stop_id)
-  const json = await requestPlan(stopIds, 'off')
+  const json = await requestCalc(stopIds, 'off')
   if (!json) return
   applyPlan(json)
 }
@@ -417,59 +438,23 @@ function insertSuggestedStop(s: SuggestedStop) {
   addStop(stop)
 }
 
-// Cost/revenue evaluation for the completed routing. Posts the raw route to
-// the backend calc endpoint (single source of truth — see plan). For now we
-// just log the JSON and dump it into a panel under the viewport.
-async function runCalc(scenarioOverride?: number) {
-  if (!rawRoute.value) return
-  calcError.value = null
-  calcResult.value = null
-  try {
-    const res = await fetch(`${BASE_URL}/api/evaluation/calc`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...store.authHeaders() },
-      // Without an override the route JSON carries its own scenario. When the
-      // user switches to a cost-only scenario we re-run calc alone and pass the
-      // new scenario_id to override the route's embedded one.
-      body: JSON.stringify(
-        scenarioOverride === undefined
-          ? { route: rawRoute.value }
-          : { route: rawRoute.value, scenario_id: scenarioOverride },
-      ),
-    })
-    const json = await res.json()
-    if (!res.ok) {
-      calcError.value = json.message ?? json.error ?? `HTTP ${res.status}`
-    } else {
-      calcResult.value = json as EvaluationResponse
-      console.log('[calc] /api/evaluation/calc result:', json)
-    }
-  } catch (err) {
-    calcError.value = err instanceof Error ? err.message : 'Unknown network error'
-  }
-}
-
-// Keep the displayed route and cost calc on the same scenario. When the user
-// switches scenarios: if it only changes cost-relevant params (the two track
-// version pointers are unchanged, so routing is guaranteed identical) we skip
-// the reroute and re-run calc alone; otherwise we replan (which chains calc).
+// Keep the displayed route and evaluation on the same scenario. A scenario
+// switch is one merged /calc call with auto_stop_addition="off": the stops
+// were settled by the last evaluation, so no re-prompting for suggestions,
+// and the server-side compute cache makes repeat scenarios cheap. The former
+// cost-only shortcut (re-running evaluation alone when the track versions
+// matched) went away with the separate evaluation endpoint.
 watch(
   () => store.selectedScenarioId,
-  (newId, oldId) => {
+  async (newId, oldId) => {
     if (!rawRoute.value || currentMode.value === 'loading') return
     if (newId == null || newId === oldId) return
-    const routed = store.scenarioById(rawRoute.value.scenario_id)
-    const next = store.scenarioById(newId)
-    const routingIdentical =
-      routed != null &&
-      next != null &&
-      routed.track_infrastructures_version === next.track_infrastructures_version &&
-      routed.track_infrastructure_defaults_version === next.track_infrastructure_defaults_version
-    if (routingIdentical) {
-      runCalc(newId)
-    } else {
-      evaluate()
-    }
+    const stopIds = currentStopIds.value
+    if (stopIds.length < 2 || !selectedCompositionId.value) return
+    currentMode.value = 'loading'
+    evaluateError.value = null
+    const json = await requestCalc(stopIds, 'off')
+    if (json) applyPlan(json)
   },
 )
 
@@ -1247,18 +1232,14 @@ onMounted(async () => {
       class="w-full transition-opacity duration-200"
       :class="isDirty ? 'pointer-events-none opacity-40' : ''"
     >
-      <div v-if="calcError" class="rounded-xl bg-primary-50/5 p-4 text-sm text-red-400">
-        {{ calcError }}
-      </div>
+      <!-- Route and evaluation arrive in the same calc response, so calcResult
+           is always set by the time this section shows. -->
       <EvaluationPanel
-        v-else-if="calcResult"
+        v-if="calcResult"
         :result="calcResult"
         :stops="sectionStops"
         @scope-change="onScopeChange"
       />
-      <div v-else class="rounded-xl bg-primary-50/5 p-4 text-sm text-primary-50/60">
-        {{ t('proposal.evaluation.calculating') }}
-      </div>
     </div>
 
     <!-- Prompt to pick which stops along the route to include. Shown only when

@@ -65,7 +65,7 @@ living in route_factory.py:
 
 VALID_TIMETABLE_MODES / VALID_SCHEDULE_MODES / VALID_AUTO_STOP_ADDITION_MODES
 stay here as the single source of truth for the allowed strings —
-api/route.py's request validation and route_factory.py's dispatch both read
+the compute request validation (api/helpers/proposal_compute.py) and route_factory.py's dispatch both read
 from them, so a new mode is added in exactly one place (plus the function
 implementing it and the route_factory branch that calls it).
 
@@ -91,12 +91,14 @@ from dataclasses import dataclass
 from models.params import Composition, TrackInfraCollection, StopInfraCollection
 from models.route.trip import Segment, StopType, TimetableWarning
 from models.route.route import Schedule, SeasonalSchedule, Season, Frequency
+from models.route.routing.dynamics import TRACTION_LOCO_WEIGHT_T, stop_time_loss_s
 from models.route.routing.rail_router import RailRouter, RoutedLeg, build_router_stops
 from models.route.version import (
     MIRROR_MIN,
     NIGHT_START_MIN,
     NIGHT_END_MIN,
     FIXED_NIGHT_MIN_SPEED_RATIO,
+    AUTO_STOP_ANALYTIC_DETOUR_M,
     AUTO_STOP_BUFFER_M,
     AUTO_STOP_MAX_DETOUR_PER,
 )
@@ -324,7 +326,7 @@ def simple_automatic_fixed_night_timetable(
 
 def _interval_index(stop_ids: list[str], stop_id: str, role: str) -> int:
     """Index of a fixed_night_interval endpoint in stop_ids, with a domain
-    error naming the missing endpoint — api/route.py validates against the
+    error naming the missing endpoint — api/helpers/proposal_compute.py validates against the
     caller's own stops, this re-checks against the possibly auto-extended
     final list (auto_stop_addition only ever inserts, so a miss here means
     the request validation was bypassed)."""
@@ -428,10 +430,10 @@ def fixed_night_speed_warning(
 
 VALID_TIMETABLE_MODES = frozenset({"simpleAutomatic", "simpleAutomaticWithFixedNight"})
 """Single source of truth for allowed timetable_mode strings — read by both
-api/route.py's request validation and route_factory._build_trip()'s switch.
+the compute request validation (api/helpers/proposal_compute.py) and route_factory._build_trip()'s switch.
 Adding a mode means: add its function above, add it to this set, add a
 branch in _build_trip(). "simpleAutomaticWithFixedNight" additionally
-requires the request's fixed_night_interval, validated in api/route.py and
+requires the request's fixed_night_interval, validated in api/helpers/proposal_compute.py and
 threaded through TripPairInput."""
 
 
@@ -456,7 +458,7 @@ def always_daily_schedule() -> Schedule:
 
 VALID_SCHEDULE_MODES = frozenset({"alwaysDaily"})
 """Single source of truth for allowed schedule_mode strings — read by both
-api/route.py's request validation and route_factory.plan_route()'s switch.
+the compute request validation (api/helpers/proposal_compute.py) and route_factory.plan_route()'s switch.
 Reserved: a future demand-aware mode can be added here (new function + this
 set + a plan_route() branch) without changing the request shape."""
 
@@ -469,7 +471,7 @@ set + a plan_route() branch) without changing the request shape."""
 
 VALID_AUTO_STOP_ADDITION_MODES = frozenset({"off", "add", "suggest"})
 """Single source of truth for allowed auto_stop_addition strings — read by
-both api/route.py's request validation and route_factory._build_trip()'s
+both the compute request validation (api/helpers/proposal_compute.py) and route_factory._build_trip()'s
 switch. "off": caller's stop list returned unmodified, no search. "add":
 search + cost + greedy addition within the detour budget. "suggest":
 search + cost like "add", but nothing is added — every costed candidate is
@@ -713,6 +715,45 @@ def _candidate_added_time_min(
     return detour_time_min + dwell_time_min
 
 
+def _analytic_added_time_min(
+    candidate: _AutoStopCandidate,
+    routed_legs: list[RoutedLeg],
+    composition: Composition,
+    tracks: TrackInfraCollection,
+    stop_infra: StopInfraCollection,
+) -> float:
+    """
+    One candidate's added trip time WITHOUT touching the router:
+
+        dwell + accel/brake pair + out-and-back detour at cruise speed
+
+    The dwell is the same dwell_min() every costing path uses; the
+    accel/brake pair is the exact stop_time_loss_s() physics the router
+    pipeline itself applies per stop (routing/dynamics.py) at the host
+    leg's own cruise speed and the composition's train mass; the detour
+    term is 2 x the already-measured perpendicular distance at cruise
+    speed. For candidates within AUTO_STOP_ANALYTIC_DETOUR_M of the
+    routed geometry the detour term is near zero and this is, to the
+    model's own precision, the same number a 3-point mini-reroute
+    measures (2026-08-06: routed costing re-derived ~dwell + dynamics
+    for every on-path candidate at ~1.5s of router time each). For
+    candidates further out it is a LOWER BOUND — straight-line out and
+    back can only understate real track geometry.
+    """
+    leg = routed_legs[candidate.leg_index]
+    if leg.distance_m > 0 and leg.driving_time_min > 0:
+        cruise_speed_ms = leg.distance_m / (leg.driving_time_min * 60)
+    else:
+        cruise_speed_ms = composition.max_speed_kmh / 3.6
+    mass_kg = (composition.total_weight_t + TRACTION_LOCO_WEIGHT_T) * 1_000
+
+    dynamics_min = stop_time_loss_s(cruise_speed_ms, mass_kg) / 60
+    detour_min = (2 * candidate.detour_distance_m / cruise_speed_ms) / 60
+    country_code = stop_infra.get(candidate.stop_id).stop_country_code
+    dwell_time_min = dwell_min(StopType.BOTH, country_code, composition, tracks)
+    return dwell_time_min + dynamics_min + detour_min
+
+
 def find_and_cost_auto_stop_candidates(
     stop_ids: list[str],
     routed_legs: list[RoutedLeg],
@@ -727,13 +768,17 @@ def find_and_cost_auto_stop_candidates(
       1. Find every catalog stop within AUTO_STOP_BUFFER_M of routed_legs'
          geometry (_find_nearby_candidates — prefiltered to route-touched
          countries, see that function).
-      2. Cost every candidate CONCURRENTLY: a 3-point mini-reroute of just
-         its own leg (_candidate_added_time_min) rather than a sequential
-         whole-trip reroute per candidate — with up to ~50 candidates in
-         practice, sequential whole-trip reroutes would be far too slow
-         for an interactive request. One thread per candidate; RailRouter's
-         underlying requests.Session/connection pool is sized for this
-         (see rail_router.py's _CONNECTION_POOL_SIZE).
+      2. Cost candidates ANALYTICALLY first (_analytic_added_time_min:
+         dwell + the dynamics model's own accel/brake pair + out-and-back
+         detour at cruise speed) — zero router calls. The router is asked
+         only to REFINE candidates whose perpendicular detour exceeds
+         AUTO_STOP_ANALYTIC_DETOUR_M (their true track detour can differ
+         from the straight-line bound, e.g. a stop the initial routing
+         bypassed) AND whose analytic lower bound still fits the trip's
+         detour budget — anything already over budget keeps its estimate,
+         since mode "add" could never accept it anyway. Refinements run
+         concurrently on a bounded pool; a failed mini-reroute excludes
+         only its own candidate.
 
     Returns (candidate, added_time_min) pairs, unsorted — candidates whose
     mini-reroute failed are excluded. Selection order (cheapest-first for
@@ -744,32 +789,64 @@ def find_and_cost_auto_stop_candidates(
         return []
 
     costing_start = time.monotonic()
-    with ThreadPoolExecutor(max_workers=len(candidates)) as pool:
-        added_times = list(
-            pool.map(
-                lambda c: _candidate_added_time_min(
-                    c,
-                    stop_ids,
-                    routed_legs,
-                    composition,
-                    tracks,
-                    stop_infra,
-                    router,
-                    routing_mode,
-                ),
-                candidates,
-            )
+    added_by_stop: dict[str, float] = {}
+    to_route: list[tuple[_AutoStopCandidate, float]] = []
+
+    # Exact-prune bound for the routed refinement: a candidate whose
+    # analytic LOWER BOUND already exceeds the whole trip's detour budget
+    # can never be accepted by mode "add", so measuring it precisely buys
+    # nothing — its estimate is kept as the reported figure instead.
+    budget_min = (
+        _estimate_full_trip_time_min(
+            stop_ids, routed_legs, composition, tracks, stop_infra
         )
+        * AUTO_STOP_MAX_DETOUR_PER
+    )
+
+    for candidate in candidates:
+        estimate = _analytic_added_time_min(
+            candidate, routed_legs, composition, tracks, stop_infra
+        )
+        if candidate.detour_distance_m <= AUTO_STOP_ANALYTIC_DETOUR_M:
+            added_by_stop[candidate.stop_id] = estimate
+        elif estimate > budget_min:
+            added_by_stop[candidate.stop_id] = estimate
+        else:
+            to_route.append((candidate, estimate))
+
+    if to_route:
+        with ThreadPoolExecutor(max_workers=min(len(to_route), 8)) as pool:
+            routed_times = list(
+                pool.map(
+                    lambda pair: _candidate_added_time_min(
+                        pair[0],
+                        stop_ids,
+                        routed_legs,
+                        composition,
+                        tracks,
+                        stop_infra,
+                        router,
+                        routing_mode,
+                    ),
+                    to_route,
+                )
+            )
+        for (candidate, _), added_time_min in zip(to_route, routed_times):
+            if added_time_min is not None:
+                added_by_stop[candidate.stop_id] = added_time_min
+
     logger.info(
-        "find_and_cost_auto_stop_candidates: costed %d candidate(s) "
-        "concurrently in %.2fs.",
+        "find_and_cost_auto_stop_candidates: costed %d candidate(s) — "
+        "%d analytic, %d router-refined — in %.2fs.",
         len(candidates),
+        len(candidates) - len(to_route),
+        len(to_route),
         time.monotonic() - costing_start,
     )
     return [
-        (candidate, added_time_min)
-        for candidate, added_time_min in zip(candidates, added_times)
-        if added_time_min is not None
+        (candidate, added_by_stop[candidate.stop_id])
+        for candidate in candidates
+        if candidate.stop_id in added_by_stop
     ]
 
 

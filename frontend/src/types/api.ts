@@ -8,7 +8,7 @@ export interface Stop {
 }
 
 export interface Composition {
-  comp_id: string
+  composition_id: string
   description: string
   operator_id: string
   routing: {
@@ -40,9 +40,9 @@ export interface StopsResponse {
   stops: Stop[]
 }
 
-// One candidate stop along the routed path, returned by POST /api/route/plan
-// only when auto_stop_addition="suggest". added_time_min is the full trip-time
-// increase (detour + dwell) the stop would cost if added.
+// One candidate stop along the routed path, returned by POST
+// /api/proposal/calc only when auto_stop_addition="suggest". added_time_min is
+// the full trip-time increase (detour + dwell) the stop would cost if added.
 export interface SuggestedStop {
   stop_id: string
   stop_name: string
@@ -108,10 +108,12 @@ export interface CompositionsResponse {
   >
 }
 
-// --- POST /api/evaluation/calc ----------------------------------------------
-// Response shapes as produced by backend/api/helpers/evaluation_serialize.py.
-// The response is a cube: view (grouping) × filter selection (drill-down keys)
-// × normalisation (unit) → one Breakdown per cell.
+// --- POST /api/proposal/calc : "evaluation" block ---------------------------
+// Response shapes as produced by backend/api/helpers/evaluation_serialize.py,
+// carried under the merged calc response's "evaluation" key (see
+// ProposalCalcResponse below). The evaluation is a cube: view (grouping) ×
+// filter selection (drill-down keys) × normalisation (unit) → one Breakdown
+// per cell.
 
 export const VIEW_KEYS = [
   'route',
@@ -287,7 +289,7 @@ export interface StopInfraParam {
 /** compositions[] — composition-level rates are plain numbers (sourced at the
  *  entity level via source_ids, not per field). */
 export interface CompositionParam {
-  comp_id: string
+  composition_id: string
   operator_id: string
   fixed_costs: {
     purchase_coach_eur: number
@@ -351,8 +353,11 @@ export interface EvaluationParameters {
   compositions: CompositionsSection
 }
 
-/** The subset of the posted route we read to scope rates to the entities the
- *  route actually uses (countries it runs through, composition per trip pair). */
+/** The subset of the route we read to scope rates to the entities the route
+ *  actually uses (countries it runs through, composition per trip pair). The
+ *  merged calc response carries the route once, as a top-level sibling of
+ *  "evaluation" — ProposalViewport re-attaches it here when assembling the
+ *  EvaluationResponse the panel renders. */
 export interface EvaluationInputRoute {
   track_infrastructure: { country_code: string }[]
   trip_pairs: { composition_id: string }[]
@@ -363,12 +368,40 @@ export interface EvaluationInput {
   parameters: EvaluationParameters
 }
 
+// Panel-facing evaluation bundle. Not a wire shape: ProposalViewport assembles
+// it from one ProposalCalcResponse (calc_version and route_id lifted from the
+// top level / route, input.route re-attached from the response's route key).
 export interface EvaluationResponse {
   calc_version: string
   route_id: string
   models: EvaluationModels
   input: EvaluationInput
   views: EvaluationViews
+}
+
+// --- POST /api/proposal/calc : full wire response ----------------------------
+// The merged compute endpoint (route + evaluation in one stateless call,
+// PROPOSALS_DESIGN.md §2.1). TRoute stays generic — the route shape is typed
+// where it is consumed (ProposalViewport's BackendRoute), only the fields the
+// frontend reads.
+export interface ProposalCalcResponse<TRoute = unknown> {
+  route_builder_version: string
+  calc_version: string
+  route_fingerprint: string
+  // True when served from the server-side compute cache.
+  cache_hit: boolean
+  // Resolved request echo — defaults applied, scenario_id concrete.
+  request: Record<string, unknown>
+  // Only present when the request used auto_stop_addition="suggest".
+  suggested_stops?: SuggestedStop[]
+  // Gallery KPI summary — not consumed by the proposal builder.
+  summary: Record<string, unknown>
+  route: TRoute
+  evaluation: {
+    models: EvaluationModels
+    input: { parameters: EvaluationParameters }
+    views: EvaluationViews
+  }
 }
 
 // The geographic scope currently selected in the evaluation panel — emitted so

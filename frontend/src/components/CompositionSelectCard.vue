@@ -32,7 +32,7 @@ const count = computed(() => props.compositions.length)
 // index can never drift out of range.
 const currentIndex = computed(() => {
   if (props.selectedId) {
-    const i = props.compositions.findIndex((c) => c.comp_id === props.selectedId)
+    const i = props.compositions.findIndex((c) => c.composition_id === props.selectedId)
     if (i >= 0) return i
   }
   return 0
@@ -43,7 +43,7 @@ function navigate(dir: 'prev' | 'next') {
   const n = count.value
   if (n === 0) return
   const next = dir === 'next' ? (currentIndex.value + 1) % n : (currentIndex.value - 1 + n) % n
-  emit('select', props.compositions[next].comp_id)
+  emit('select', props.compositions[next].composition_id)
 }
 
 const current = computed(() => props.compositions[currentIndex.value])
@@ -73,8 +73,9 @@ watch(
   () => [props.compositions, props.selectedId] as const,
   () => {
     if (props.compositions.length === 0) return
-    const valid = props.selectedId && props.compositions.some((c) => c.comp_id === props.selectedId)
-    if (!valid) emit('select', props.compositions[0].comp_id)
+    const valid =
+      props.selectedId && props.compositions.some((c) => c.composition_id === props.selectedId)
+    if (!valid) emit('select', props.compositions[0].composition_id)
   },
   { immediate: true },
 )
@@ -92,7 +93,7 @@ watch(
         >
           <AppIcon :path="mdiChevronLeft" :size="20" />
         </button>
-        <p class="text-base font-bold text-primary-50">{{ current.comp_id }}</p>
+        <p class="text-base font-bold text-primary-50">{{ current.composition_id }}</p>
         <button
           v-if="count > 1"
           class="shrink-0 cursor-pointer text-primary-50/40 transition hover:text-primary-50"
@@ -119,7 +120,7 @@ watch(
 
       <!-- Animated: capacity + physical specs -->
       <Transition :name="transitionName" mode="out-in">
-        <div :key="current?.comp_id" class="flex flex-col items-center gap-4 mt-4">
+        <div :key="current?.composition_id" class="flex flex-col items-center gap-4 mt-4">
           <!-- Capacity -->
           <div v-if="capacityStats.length > 0" class="flex justify-center gap-8">
             <div

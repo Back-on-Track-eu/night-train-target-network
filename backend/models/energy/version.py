@@ -30,7 +30,7 @@ ENERGY_CALC_VERSION: str = "0.9.0"
 GIT_SHA: str = "unknown"  # injected by CI
 
 # Short, plain-English summary of what this model computes — embedded as-is
-# in the "models" section of POST /api/evaluation/calc's response, alongside
+# in the "models" section of POST /api/proposal/calc's response, alongside
 # ENERGY_CALC_VERSION and ENERGY_FORMULAS.
 ENERGY_MODEL_DESCRIPTION: str = (
     "Traction energy consumption model: estimates kWh consumed per route "

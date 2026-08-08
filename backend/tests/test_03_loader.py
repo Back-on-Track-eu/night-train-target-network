@@ -23,7 +23,12 @@ import pytest
 
 
 def _parse_schema_columns() -> dict[str, set[str]]:
-    """Parse CREATE TABLE blocks in db/dev/sql/*.sql into {table: {columns}}."""
+    """Parse CREATE TABLE blocks in db/dev/sql/*.sql into {table: {columns}}.
+
+    Deliberately only dev/sql: that is the DDL the application schemas
+    live in. The ontd schema (db/ontd/sql/) is reference data that
+    DBDataLoader never reads, so it has no loader columns to check.
+    """
     sql_dir = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "db", "dev", "sql"
     )

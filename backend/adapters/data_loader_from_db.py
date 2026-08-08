@@ -50,9 +50,10 @@ from datetime import timedelta
 import psycopg2
 import psycopg2.extras
 
+from typing import Optional
+
 from models.params import (
     ParamsSource,
-    ParamVersionEntry,
     IndicativeFigures,
     ParamVersions,
     ServiceClass,
@@ -1174,9 +1175,12 @@ class DBDataLoader:
             synthesized += 1
 
         logger.info(
-            "Built track infrastructure for %d countries (%d synthesized entirely from defaults).",
+            "Built track infrastructure for %d countries "
+            "(%d synthesized entirely from defaults, "
+            "%d individual fields resolved via defaults).",
             len(result),
             synthesized,
+            sum(sum(track.field_is_default.values()) for track in result.values()),
         )
         return TrackInfraCollection(result, param_versions, default, descriptions)
 
@@ -1189,7 +1193,8 @@ class DBDataLoader:
     ) -> tuple[TrackInfrastructure, dict[str, Optional[ParamsSource]]]:
         """
         Map one infrastructure DB row to a TrackInfrastructure.
-        Substitutes None fields with default values and logs a WARNING each time.
+        Substitutes None fields with default values (logged at DEBUG —
+        expected resolution, counted in build_all_tracks()'s summary).
         psycopg2 RealDictCursor handles type mapping — Decimal, bool, timedelta
         are returned natively; only NULL becomes Python None.
 
@@ -1204,7 +1209,14 @@ class DBDataLoader:
         def resolve(field, raw, default_val) -> tuple:
             """Returns (value, is_default)."""
             if raw is None:
-                logger.warning(
+                # DEBUG, not WARNING: NULL → default is the documented,
+                # expected resolution path, and this fires per field per
+                # country per catalog build — at WARNING it was ~210
+                # synchronous stderr lines per build, a measurable share
+                # of request latency once the ONTD-derived stops grew the
+                # catalog (2026-08-06). Aggregate counts land in the
+                # per-build INFO summary instead.
+                logger.debug(
                     "TrackInfrastructure[%s].%s is None — using EU default.",
                     country_code,
                     field,
@@ -1404,6 +1416,7 @@ class DBDataLoader:
 
         result: dict[str, StopInfrastructure] = {}
         param_versions = ParamVersions()
+        default_charge_count = 0
         for row in stop_rows:
             try:
                 country_cc = row.get("country_code", "")
@@ -1411,6 +1424,7 @@ class DBDataLoader:
                 stop, loc_src, charge_src, charge_is_default = self._row_to_stop(
                     row, fallback, sources, country_cc in defaults
                 )
+                default_charge_count += charge_is_default
                 result[row["stop_id"]] = stop
 
                 # register one ParamVersions entry per stop field — source,
@@ -1442,7 +1456,11 @@ class DBDataLoader:
             except Exception as e:
                 logger.warning("Skipping stop '%s': %s", row.get("stop_id"), e)
 
-        logger.info("Built %d stops.", len(result))
+        logger.info(
+            "Built %d stops (%d charges resolved via defaults).",
+            len(result),
+            default_charge_count,
+        )
         return StopInfraCollection(result, param_versions, defaults, descriptions)
 
     def _row_to_stop(
@@ -1457,7 +1475,8 @@ class DBDataLoader:
         """
         Map one stop DB row to a StopInfrastructure.
         Substitutes None stop_charge_eur with the country or global default
-        and logs a WARNING. Same resolve() pattern as _row_to_track().
+        (logged at DEBUG, counted in build_all_stops()'s summary). Same
+        resolve() pattern as _row_to_track().
         psycopg2 RealDictCursor handles type mapping natively.
 
         Returns (stop, loc_src, charge_src, charge_is_default) — the three
@@ -1471,7 +1490,12 @@ class DBDataLoader:
         def resolve(field, raw, default_val) -> tuple:
             """Returns (value, is_default)."""
             if raw is None:
-                logger.warning(
+                # DEBUG, not WARNING — same reasoning as _row_to_track()'s
+                # resolve(): expected path, fires per stop per build, and
+                # the ONTD-derived stops (NULL charge by design) made this
+                # ~575 lines per catalog build at WARNING level. The
+                # per-build INFO summary carries the count.
+                logger.debug(
                     "StopInfrastructure[%s].%s is None — using %s default.",
                     stop_id,
                     field,

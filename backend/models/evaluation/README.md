@@ -7,7 +7,7 @@ It is the mathematical core of the project — everything that produces a EUR nu
 [`../../api/README.md`](../../api/README.md#evaluation) · model layer overview —
 [`../README.md`](../README.md) · energy model (feeds `energy_kwh`) —
 [`../energy/README.md`](../energy/README.md) · tests
-(`test_30`/`test_31`) — [`../../tests/README.md`](../../tests/README.md)
+(`test_30`/`test_35`) — [`../../tests/README.md`](../../tests/README.md)
 
 ```
 models/evaluation/
@@ -104,8 +104,8 @@ All nodes support `+=` via `__iadd__` for accumulation. All 17 leaves are €/ye
 `build_breakdown_per_trip_pair(route, result)` — `dict[str, Breakdown]` keyed by
 outbound `trip_id`, plus `"all"` for the whole route.
 
-Currently every route holds exactly **one** trip pair (`api/route.py` builds a
-single `TripPairInput` from the posted stop list), so this matrix has one real
+Currently every route holds exactly **one** trip pair (the compute pipeline
+builds a single `TripPairInput` from the posted stop list), so this matrix has one real
 key and `"all"`, both with the same values as the whole-route Breakdown. The
 per-pair dimension exists for the planned X/Y-shaped routes, where several
 pairs share a trunk — the code and response shape are already
@@ -355,8 +355,8 @@ Every dimension additionally carries an `"all"` key — the aggregate across
 that dimension — so a filter set to "all countries" reads the same view, key
 `"all"`, rather than falling back to a different view.
 
-> **Note — one trip pair per route today.** `POST /api/route/plan` currently
-> builds exactly one `TripPair` from the posted stop list, so
+> **Note — one trip pair per route today.** `POST /api/proposal/calc`
+> currently builds exactly one `TripPair` from the posted stop list, so
 > `per_trip_pair` (and the pair dimension in every other view) holds a
 > single pair key plus `"all"`, with identical numbers. The frontend should
 > still wire the pair filter now — it becomes meaningful once X/Y-shaped
@@ -403,11 +403,11 @@ from keys.
 
 ### Three concrete filter settings and their JSON
 
-Values below are illustrative; the structure is exact. A full real response
-is checked in at
-[`../../scripts/data/tc_1_evaluation_input_output.json`](../../scripts/data/tc_1_evaluation_input_output.json)
-(produced by [`../../scripts/test_evaluation_calc.py`](../../scripts/test_evaluation_calc.py)
-from [`tc_1_evaluation_input.json`](../../scripts/data/tc_1_evaluation_input.json)).
+Values below are illustrative; the structure is exact. A full real
+`evaluation.views` block can be produced locally by running
+[`../../scripts/test_proposal_calc.py`](../../scripts/test_proposal_calc.py)
+against `POST /api/proposal/calc` (the `*_output.json` it writes contains
+the complete merged response).
 
 **1. No filter — whole route, annual totals.** UI state: nothing selected,
 unit = €/year, class = all. Read `views.route.data.per_year.all` (the
@@ -535,35 +535,37 @@ carries one class_main), so its class axis is the identity: `"all"` and
 
 ## API integration
 
-The evaluation pipeline is called by `POST /api/evaluation/calc` in `api/evaluation.py`.
-A complete worked example — real request and full response — is checked in
-under [`../../scripts/data/`](../../scripts/data/):
-`tc_1_evaluation_input.json` (request) and
-`tc_1_evaluation_input_output.json` (response), produced by the manual test
-script [`../../scripts/test_evaluation_calc.py`](../../scripts/test_evaluation_calc.py).
-Serialization and deserialization are handled exclusively by
-`api/helpers/route_serialize.py` (route in/out) and
-`api/helpers/evaluation_serialize.py` (breakdown/views out, `models`/`input` docs).
-Domain objects have no `to_dict()` or `from_dict()` methods.
+The evaluation pipeline is called by `POST /api/proposal/calc`
+(`adapters/proposal/README.md` §2.1) via `models/pipeline.py`'s
+`run_compute()`, which runs it immediately after building the route in
+the same request: `evaluate_route()` is called directly on the `Route`
+object `plan_route()` just returned (no deserialize step), reusing
+`RouteProvenance.tracks`/`.stop_infra`/`.compositions` instead of fresh
+loader calls. Model-layer tests and the DB seed run the same
+evaluate-and-views half through
+`models.pipeline.evaluate_and_build_views()` on a `Route` they built
+another way. Serialization is handled exclusively by
+`api/helpers/route_serialize.py` (route out) and
+`api/helpers/evaluation_serialize.py` (breakdown/views out,
+`models`/`input` docs — `input_to_dict()` takes an `include_route` flag,
+`False` for the merged response to avoid a duplicate route copy under
+`evaluation.input`). Domain objects have no `to_dict()` or `from_dict()`
+methods.
 
-### Request flow
+### Request flow (evaluation half of POST /api/proposal/calc)
 
 ```
-POST /api/evaluation/calc
+run_compute()  [models/pipeline.py, after plan_route() + stopgap demand]
   │
-  ├── [1/5] Validate body + route_from_dict(body["route"], loader)
-  │          route_serialize.py: deserializes Route JSON → Route domain object
-  │          loader.build_all_compositions() reloads cost params from DB
-  │
-  ├── [2/5] loader.build_all_tracks() + loader.build_all_stops()
-  │
-  ├── [3/5] evaluate_route(route, tracks, stop_infra) → EvaluationResult
+  ├── [1/3] evaluate_route(route, tracks, stop_infra) → EvaluationResult
   │          calc.py: all per-event cost/revenue computation
+  │          (tracks/stop_infra reused from RouteProvenance)
   │
-  ├── [4/5] build_breakdown* functions → Breakdown matrices
-  │          views.py: aggregation, allocation, normalisation
+  ├── [2/3] build_all_views(route, result) → ViewsBundle
+  │          views.py: aggregation, allocation, normalisation — the six
+  │          breakdown views built together
   │
-  └── [5/5] views_to_dict → JSON response
+  └── [3/3] views_to_dict(views, route) → "views" JSON block
              evaluation_serialize.py: converts every Breakdown matrix to the
              views block — per view: description + normalisations (VIEW_META)
              + data, all 5 normalisations included per cell
@@ -602,9 +604,9 @@ Serialization lives in `api/helpers/evaluation_serialize.py`
 
 Demand is embedded in the route JSON under `trip_pairs[].od_pairs`. Each OD pair
 specifies `trip_id`, `origin_stop_id`, `destination_stop_id`, `class_main`,
-`places_sold` (annual), and `avg_price` (EUR). The proxy demand model
-(`route_factory.distribute_demand()`) can populate these automatically from a
-utilisation rate and per-km fare.
+`places_sold` (annual), and `avg_price` (EUR). The stopgap demand model
+(`models/demand/stopgap.py`'s `distribute_demand()`) populates these
+automatically from a utilisation rate and per-km fare.
 
 ---
 
@@ -617,3 +619,22 @@ utilisation rate and per-km fare.
 - Class axis on route sections uses the builder's exact class cells; other
   views split by calibration shares — composition-level, so all pairs must
   share one composition for route-level class cells to be exact
+---
+
+## summary.py — gallery-summary KPI row
+
+`build_summary_row(route, evaluation)` derives the §5.4 gallery KPI
+columns (route metrics, financial KPIs, placeholder demand KPIs,
+`co2_g_per_pax_km`) as a pure function over the exact dicts
+`POST /api/proposal/calc` returns — no DB, no domain objects. One
+function, every consumer: the calc response's `summary` block
+(`api/helpers/proposal_compute.py`), the compare sides, and the
+publish-time `proposal_summaries` write
+(`adapters/proposal/projection.py: build_summary_db_row()`, which adds
+the DB-only `geom_simplified`). Moved here from
+`adapters/proposal/projection.py` with WP10 step 5 so `api/helpers/`
+never imports calculation code from `adapters/`.
+
+The night-train `co2_g_per_pax_km` is the flat factor from
+[`../emissions/README.md`](../emissions/README.md) (decision 24) until
+the energy-based, country-resolved model enriches it per route.
