@@ -21,6 +21,7 @@ import { fetchProposals, fetchProposalRoute, ProposalsError } from '@/lib/propos
 import type {
   Stop,
   ProposalSummary,
+  ProposalSummaryProposal,
   ProposalsRequest,
   ProposalsFilter,
   ProposalSort,
@@ -46,7 +47,7 @@ const countryCode = ref<string | null>(null)
 
 // Sort as a field + direction. The field Select shows only field names; the
 // direction is an icon toggle (ascending/descending).
-const sortField = ref<ProposalSortKey>('margin_eur')
+const sortField = ref<ProposalSortKey>('margin_eur_per_train_km')
 const sortDir = ref<'asc' | 'desc'>('desc')
 
 // Result list (accumulated across pages) + pagination bookkeeping.
@@ -64,10 +65,10 @@ const tabs = computed(() => [
   { value: 'byCountry' as const, label: t('gallery.tabs.byCountry'), icon: mdiEarth },
 ])
 
-const sortFieldOptions = computed(() => [
-  { value: 'margin_eur', label: t('gallery.sort.margin') },
-  { value: 'total_revenue_eur', label: t('gallery.sort.revenue') },
-  { value: 'total_cost_eur', label: t('gallery.sort.cost') },
+const sortFieldOptions = computed<{ value: ProposalSortKey; label: string }[]>(() => [
+  { value: 'margin_eur_per_train_km', label: t('gallery.sort.margin') },
+  { value: 'revenue_eur_per_train_km', label: t('gallery.sort.revenue') },
+  { value: 'cost_eur_per_train_km', label: t('gallery.sort.cost') },
   { value: 'created_at', label: t('gallery.sort.date') },
   { value: 'total_distance_km', label: t('gallery.sort.distance') },
   { value: 'total_time_h', label: t('gallery.sort.duration') },
@@ -157,9 +158,13 @@ function onSentinel(): void {
 
 // --- Map: draw every result's route --------------------------------------
 // Summaries carry no geometry (stripped server-side), so each proposal's route
-// is fetched once via GET /api/proposal/<id> and cached by id+version. The map
-// shows the routes for whatever is currently loaded, growing with the list.
-const proposalKey = (p: ProposalSummary) => `${p.proposal_id}-${p.proposal_version}`
+// is fetched once via GET /api/proposal/<id> and cached by key. The map shows
+// the routes for whatever is currently loaded, growing with the list. Existing
+// (ONTD) rows have no per-row geometry endpoint and are not drawn on the map
+// yet — they still appear as cards (map geometry for them would come from the
+// list response's `map_lines` section, a separate change).
+const proposalKey = (p: ProposalSummary): string =>
+  p.source === 'existing' ? `e-${p.route_id}` : `p-${p.proposal_id}-${p.proposal_version}`
 // `routed` separates a real routed geometry (many points per leg) from a
 // straight-line stand-in (e.g. the seed proposal) — only routed ones map.
 // `orderedCountries` lists the countries in itinerary order (the summary's own
@@ -173,12 +178,17 @@ const mapRoutes = computed(() =>
 )
 
 async function ensureRoutes(list: ProposalSummary[]): Promise<void> {
-  const missing = list.filter((p) => !routeCache.value[proposalKey(p)])
+  // Only proposal rows have a per-id route endpoint; existing (ONTD) rows are
+  // skipped (see the map note above).
+  const missing = list.filter(
+    (p): p is ProposalSummaryProposal =>
+      p.source === 'proposal' && !routeCache.value[proposalKey(p)],
+  )
   if (!missing.length) return
   const loaded = await Promise.all(
     missing.map(async (p) => {
       try {
-        const { route } = (await fetchProposalRoute(p.proposal_id)).route_body
+        const { route } = await fetchProposalRoute(p.proposal_id)
         // Every stop along the route, in order — each segment's origin, then the
         // final segment's destination. The gallery map dedupes the boundary
         // repeats when it draws the bubbles.
@@ -306,8 +316,8 @@ const iconBtnClass =
           class="flex cursor-pointer items-center gap-1.5 px-4 py-2 text-sm leading-none transition"
           :class="
             mode === tab.value
-              ? 'bg-primary-50/20 text-primary-50'
-              : 'text-primary-50/60 hover:bg-primary-50/10'
+              ? 'text-primary-50 font-bold'
+              : 'text-primary-50/60 hover:text-primary-50/100'
           "
           @click="mode = tab.value"
         >

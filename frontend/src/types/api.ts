@@ -425,42 +425,82 @@ export interface GuestSessionResponse {
 }
 
 // --- POST /api/proposals ----------------------------------------------------
-// Backend: api/proposals.py + api/helpers/proposal_serialize.py. Read-only list
-// of saved proposals (every user sees every proposal). Filtering/sorting is done
-// server-side; the four financial fields are null for proposals saved without an
-// evaluation snapshot.
+// Backend: api/proposals.py + api/helpers/proposal_serialize.py::summary_row_to_dict().
+// Read-only gallery list (every user sees every row). Rows are a mix of two
+// shapes discriminated by `source` (WP10 step 6b): "proposal" (a saved
+// user proposal, with financial/demand/engagement KPIs) and "existing" (a
+// real night train from the ONTD catalog — a reduced descriptive shape, no
+// financials). Financial/demand KPIs are per-train-km and null when a
+// proposal was saved without an evaluation snapshot.
 
-// One proposal, as produced by proposal_summary_to_dict(). snake_case mirrors
-// the backend JSON verbatim.
-export interface ProposalSummary {
-  proposal_id: number
-  proposal_version: number
-  is_current: boolean
-  user_id: number
-  user_name: string | null
-  change_log: string | null
-  created_at: string
+// Fields shared by both source shapes.
+interface ProposalSummaryShared {
   name: string
+  composition_id: string
   total_distance_km: number
-  total_driving_time_h: number
   total_time_h: number
+  avg_speed_kmh: number
+  n_stops: number
+  // countries alphabetical; stop_ids in travel order ([0] = origin, last =
+  // destination — backend models/evaluation/summary.py::ordered_stops()).
   countries: string[]
-  stops: { stop_id: string; stop_name: string }[]
-  total_revenue_eur: number | null
-  total_cost_eur: number | null
-  margin_eur: number | null
-  margin_per: number | null
+  stop_ids: string[]
+  co2_g_per_pax_km: number | null
 }
 
-// Sortable keys accepted by the backend (SORT_KEYS in proposal_serialize.py).
-// Note margin_per is deliberately NOT sortable server-side.
+// source === "proposal": a saved user proposal.
+export interface ProposalSummaryProposal extends ProposalSummaryShared {
+  source: 'proposal'
+  proposal_id: number
+  proposal_version: number
+  user_id: number
+  route_fingerprint: string
+  scenario_id: number
+  route_builder_version: string
+  calc_version: string
+  // Financial KPIs, per train-km; null without an evaluation snapshot.
+  cost_eur_per_train_km: number | null
+  revenue_eur_per_train_km: number | null
+  margin_eur_per_train_km: number | null
+  subsidy_eur_per_year: number | null
+  demand_trips_per_year: number | null
+  demand_trip_km_per_year: number | null
+  shift_air_trips_per_year: number | null
+  shift_air_trip_km_per_year: number | null
+  shift_car_trips_per_year: number | null
+  shift_car_trip_km_per_year: number | null
+  co2_savings_t_per_year: number | null
+  subsidy_eur_per_t_co2: number | null
+  demand_kpis_placeholder: unknown
+  likes_count: number
+  comments_count: number
+  created_at: string
+  updated_at: string
+}
+
+// source === "existing": a real night train from the ONTD catalog. Reduced
+// shape — proposal-only fields (financials, demand, engagement, versions,
+// timestamps, proposal/user ids) are omitted rather than null-padded.
+export interface ProposalSummaryExisting extends ProposalSummaryShared {
+  source: 'existing'
+  route_id: string
+  // Whether the drawn line is real routing or a straight-line fallback.
+  geometry_routed: boolean
+  ontd_url: string
+}
+
+export type ProposalSummary = ProposalSummaryProposal | ProposalSummaryExisting
+
+// Sortable keys accepted by the backend, restricted to the subset the gallery
+// UI offers. Validated server-side against filter_builder.py's
+// SORTABLE_COLUMNS; an unlisted column 400s.
 export const PROPOSAL_SORT_KEYS = [
   'created_at',
   'total_distance_km',
   'total_time_h',
-  'total_revenue_eur',
-  'total_cost_eur',
-  'margin_eur',
+  'margin_eur_per_train_km',
+  'revenue_eur_per_train_km',
+  'cost_eur_per_train_km',
 ] as const
 export type ProposalSortKey = (typeof PROPOSAL_SORT_KEYS)[number]
 
@@ -483,11 +523,19 @@ export interface ProposalsRequest {
   offset?: number
 }
 
-export interface ProposalsResponse {
+// The `summaries` section of the sectioned list response (default `include`).
+export interface ProposalsSummariesSection {
   // Count after filtering, before pagination — what infinite scroll compares
   // loaded length against.
   total: number
   proposals: ProposalSummary[]
+}
+
+// POST /api/proposals returns a SECTIONED response (proposals.py::_list_response):
+// each key is present only if named in the request's `include` (default
+// ["summaries"]). The gallery requests summaries only.
+export interface ProposalsResponse {
+  summaries?: ProposalsSummariesSection
 }
 
 // --- GET /api/proposal/<id> -------------------------------------------------
@@ -501,23 +549,25 @@ export interface ProposalRouteStopPoint {
   lon: number
 }
 
+// GET /api/proposal/<id> — flat compute-response shape
+// (proposal_serialize.py::proposal_to_response_dict): `route`/`evaluation` at
+// the top level, plus metadata. The gallery map only reads the route geometry
+// and endpoint stops, so only those are typed here.
 export interface ProposalDetailResponse {
-  route_body: {
-    route: {
-      geometries: { id: string; coords: [number, number][] }[]
-      trip_pairs: {
-        outbound: {
-          segments: {
-            from_stop: ProposalRouteStopPoint
-            to_stop: ProposalRouteStopPoint
-            // Country codes in the order the segment traverses them.
-            country_distance_shares: Record<string, number>
-          }[]
-        }
-      }[]
-    }
+  route: {
+    geometries: { id: string; coords: [number, number][] }[]
+    trip_pairs: {
+      outbound: {
+        segments: {
+          from_stop: ProposalRouteStopPoint
+          to_stop: ProposalRouteStopPoint
+          // Country codes in the order the segment traverses them.
+          country_distance_shares: Record<string, number>
+        }[]
+      }
+    }[]
   }
-  evaluation_body: unknown | null
+  evaluation: unknown | null
 }
 
 // A proposal reduced to what the gallery map draws: its routed line geometry

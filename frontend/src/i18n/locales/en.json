@@ -142,13 +142,13 @@
     },
     "search": {
       "from": "From",
-      "fromPlaceholder": "Origin station",
+      "fromPlaceholder": "Click to select station",
       "to": "To",
-      "toPlaceholder": "Destination station",
+      "toPlaceholder": "Click to select station",
       "station": "Station",
-      "stationPlaceholder": "Any station",
+      "stationPlaceholder": "Click to select station",
       "country": "Country",
-      "countryPlaceholder": "Any country",
+      "countryPlaceholder": "Click to select country",
       "noCountries": "No countries found",
       "button": "Search"
     },
@@ -164,13 +164,14 @@
     "card": {
       "distance": "Distance",
       "proposedBy": "Proposed by {name}",
+      "existing": "Existing service ↗",
       "km": "{value} km"
     },
     "back": "Back to gallery",
     "cta": {
-      "create": "Plan a new route"
+      "create": "Suggest a new route"
     },
-    "empty": "No proposals yet. Plan and evaluate a route to get started.",
+    "empty": "No proposals have been found for this filter. Be the first to make one!",
     "loading": "Loading proposals…",
     "loadingMore": "Loading more…",
     "end": "That's all {count} proposals.",

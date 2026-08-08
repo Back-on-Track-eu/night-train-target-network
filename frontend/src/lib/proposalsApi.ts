@@ -3,7 +3,12 @@
 // so this mirrors the store's fetch pattern (stores/store.ts) and feedbackApi.ts.
 // The list endpoint is public (no auth needed).
 
-import type { ProposalsRequest, ProposalsResponse, ProposalDetailResponse } from '@/types/api'
+import type {
+  ProposalsRequest,
+  ProposalsResponse,
+  ProposalsSummariesSection,
+  ProposalDetailResponse,
+} from '@/types/api'
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5050'
 
@@ -26,11 +31,12 @@ function extractErrorMessage(body: unknown, status: number): string {
 }
 
 /**
- * Fetch one page of proposals. Resolves with { total, proposals } on success;
- * rejects with a ProposalsError carrying a readable message on any network or
- * non-2xx failure.
+ * Fetch one page of proposals. The list response is sectioned; the gallery
+ * only requests summaries, so this unwraps and resolves with the `summaries`
+ * section ({ total, proposals }). Rejects with a ProposalsError carrying a
+ * readable message on any network or non-2xx failure.
  */
-export async function fetchProposals(body: ProposalsRequest): Promise<ProposalsResponse> {
+export async function fetchProposals(body: ProposalsRequest): Promise<ProposalsSummariesSection> {
   let response: Response
   try {
     response = await fetch(`${BASE_URL}/api/proposals`, {
@@ -52,7 +58,7 @@ export async function fetchProposals(body: ProposalsRequest): Promise<ProposalsR
   if (!response.ok) {
     throw new ProposalsError(extractErrorMessage(parsed, response.status))
   }
-  return parsed as ProposalsResponse
+  return (parsed as ProposalsResponse).summaries ?? { total: 0, proposals: [] }
 }
 
 /**

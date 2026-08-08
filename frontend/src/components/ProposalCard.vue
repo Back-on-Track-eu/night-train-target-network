@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Avatar from 'primevue/avatar'
 import AvatarGroup from 'primevue/avatargroup'
+import { useStore } from '@/stores/store'
 import type { ProposalSummary } from '@/types/api'
 
 const props = defineProps<{
@@ -13,11 +14,31 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const store = useStore()
 
-const stops = computed(() => props.proposal.stops)
-const origin = computed(() => stops.value[0]?.stop_name ?? '')
-const destination = computed(() => stops.value[stops.value.length - 1]?.stop_name ?? '')
-const intermediateStops = computed(() => stops.value.slice(1, -1))
+// Summaries carry stop_ids only (in travel order); resolve display names from
+// the loaded stop list, falling back to the id (existing/ONTD rows may carry
+// stop ids outside the curated list).
+const nameById = computed(() => new Map(store.stops.map((s) => [s.stop_id, s.name])))
+const stopName = (id: string): string => nameById.value.get(id) ?? id
+
+const stopIds = computed(() => props.proposal.stop_ids)
+const origin = computed(() => (stopIds.value.length ? stopName(stopIds.value[0]) : ''))
+const destination = computed(() =>
+  stopIds.value.length ? stopName(stopIds.value[stopIds.value.length - 1]) : '',
+)
+const intermediateStops = computed(() =>
+  stopIds.value.slice(1, -1).map((id) => ({ stop_id: id, stop_name: stopName(id) })),
+)
+
+// Footer differs by source: a user proposal shows its proposer; an existing
+// (ONTD) train links out to its catalog page.
+const ontdUrl = computed(() =>
+  props.proposal.source === 'existing' ? props.proposal.ontd_url : null,
+)
+const proposerLabel = computed(() =>
+  props.proposal.source === 'proposal' ? `#${props.proposal.user_id}` : null,
+)
 
 // Flags shown in itinerary order when available (the summary's own list is
 // alphabetical).
@@ -90,8 +111,17 @@ function avatarPt(code: string) {
           t('gallery.card.km', { value: proposal.total_distance_km })
         }}</span>
       </div>
-      <span class="text-xs text-primary-50/40">
-        {{ t('gallery.card.proposedBy', { name: proposal.user_name ?? `#${proposal.user_id}` }) }}
+      <a
+        v-if="ontdUrl"
+        :href="ontdUrl"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="text-xs text-primary-50/60 underline-offset-2 hover:underline"
+      >
+        {{ t('gallery.card.existing') }}
+      </a>
+      <span v-else class="text-xs text-primary-50/40">
+        {{ t('gallery.card.proposedBy', { name: proposerLabel }) }}
       </span>
     </div>
   </article>
