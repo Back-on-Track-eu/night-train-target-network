@@ -29,7 +29,7 @@ import type {
   GalleryMapRoute,
 } from '@/types/api'
 
-const emit = defineEmits<{ create: [] }>()
+const emit = defineEmits<{ create: []; open: [proposalId: number] }>()
 
 const { t } = useI18n()
 const store = useStore()
@@ -44,6 +44,18 @@ const fromStop = ref<Stop | null>(null)
 const toStop = ref<Stop | null>(null)
 const stationStop = ref<Stop | null>(null)
 const countryCode = ref<string | null>(null)
+
+// Stops the active search targeted — handed to each card so it can pin the
+// matched stop(s) as itinerary anchors. Empty for by-country search.
+const highlightStopIds = computed(() => {
+  if (mode.value === 'aToB') {
+    return [fromStop.value?.stop_id, toStop.value?.stop_id].filter((id): id is string => !!id)
+  }
+  if (mode.value === 'byStation') {
+    return stationStop.value ? [stationStop.value.stop_id] : []
+  }
+  return []
+})
 
 // Sort as a field + direction. The field Select shows only field names; the
 // direction is an icon toggle (ascending/descending).
@@ -438,6 +450,8 @@ const iconBtnClass =
               :proposal="p"
               :flash="flashedKey === proposalKey(p)"
               :ordered-countries="routeCache[proposalKey(p)]?.orderedCountries"
+              :highlight-stop-ids="highlightStopIds"
+              @select="emit('open', $event)"
             />
           </div>
         </div>

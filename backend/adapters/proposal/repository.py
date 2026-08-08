@@ -796,9 +796,12 @@ class ProposalRepository:
     _ENGAGEMENT_CTE = (
         "proposal_summaries_with_engagement AS ("
         "  SELECT ps.*, "
+        "         u.display_name, "
+        "         starts_with(u.display_name, 'guest_') AS is_guest, "
         "         COALESCE(l.likes_count, 0)::int AS likes_count, "
         "         COALESCE(c.comments_count, 0)::int AS comments_count "
         "  FROM proposals.proposal_summaries ps "
+        "  LEFT JOIN admin.users u ON u.user_id = ps.user_id "
         "  LEFT JOIN ("
         "    SELECT proposal_id, count(*) AS likes_count "
         "    FROM proposals.likes GROUP BY proposal_id"
@@ -835,7 +838,8 @@ class ProposalRepository:
         "       shift_car_trips_per_year, shift_car_trip_km_per_year, "
         "       co2_savings_t_per_year, subsidy_eur_per_t_co2, "
         "       demand_kpis_placeholder, co2_g_per_pax_km, geom_simplified, "
-        "       likes_count, comments_count, created_at, updated_at, "
+        "       likes_count, comments_count, display_name, is_guest, "
+        "       created_at, updated_at, "
         "       NULL::boolean AS geometry_routed, NULL::text AS ontd_url "
         "FROM proposal_summaries_with_engagement"
     )
@@ -863,6 +867,7 @@ class ProposalRepository:
         "       NULL::boolean AS demand_kpis_placeholder, co2_g_per_pax_km, "
         "       geom_simplified, "
         "       NULL::int AS likes_count, NULL::int AS comments_count, "
+        "       NULL::text AS display_name, NULL::boolean AS is_guest, "
         "       NULL::timestamptz AS created_at, NULL::timestamptz AS updated_at, "
         "       geometry_routed, ontd_url "
         "FROM ontd.route_summaries"
@@ -910,7 +915,8 @@ class ProposalRepository:
             sql = (
                 f"{ctes}"
                 f"SELECT source, route_id, geometry_routed, ontd_url, "
-                f"{self._SUMMARY_COLUMNS}, likes_count, comments_count "
+                f"{self._SUMMARY_COLUMNS}, likes_count, comments_count, "
+                f"display_name, is_guest "
                 f"FROM gallery{where_clause} "
                 f"ORDER BY {build_order_by(sort)}"
             )

@@ -166,8 +166,13 @@
     "card": {
       "distance": "Distance",
       "proposedBy": "Proposed by {name}",
+      "guest": "Guest",
       "existing": "Existing service ↗",
-      "km": "{value} km"
+      "km": "{value} km",
+      "stops": "({count} stop) | ({count} stops)",
+      "co2PerYear": "{value} t CO₂/yr",
+      "notImplemented": "Not implemented yet",
+      "like": "Like"
     },
     "back": "Gallery",
     "cta": {

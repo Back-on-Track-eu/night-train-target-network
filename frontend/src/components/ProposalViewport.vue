@@ -31,7 +31,13 @@ import {
   mdiTrashCan,
 } from '@mdi/js'
 
-const props = defineProps<{ mode: 'edit' | 'loading' | 'display' }>()
+const props = defineProps<{
+  mode: 'edit' | 'loading' | 'display'
+  // Set when opened from a gallery card to view a stored proposal. The
+  // load-by-id path is not wired yet (see onMounted #TODO); until it is, a
+  // display-mode mount with a proposalId just shows the loading skeleton.
+  proposalId?: number | null
+}>()
 const emit = defineEmits<{ back: [] }>()
 
 const { t } = useI18n()
@@ -1002,6 +1008,19 @@ const mapSegments = computed<MapSegment[] | null>(() => {
 })
 
 onMounted(async () => {
+  // #TODO: load a stored proposal by id and populate display mode — NOT
+  // IMPLEMENTED YET. When opened from a gallery card (mode="display" +
+  // proposalId), fetch GET /api/proposal/<id> (fetchProposalRoute in
+  // lib/proposalsApi.ts) and hydrate rawRoute/calcResult/selectedCompositionId
+  // the way applyPlan() does after a calc. Until then, hold on the loading
+  // skeleton instead of falling through to the edit seeding below (which would
+  // render a random editable itinerary — wrong for a "view this proposal"
+  // intent).
+  if (props.mode === 'display' && props.proposalId != null) {
+    currentMode.value = 'loading'
+    return
+  }
+
   // App.vue loads this reference data at startup; only fetch if we arrived here
   // before it finished (or a fetch errored).
   if (store.stopsStatus !== 'success') await store.fetchStops()
