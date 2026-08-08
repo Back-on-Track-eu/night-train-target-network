@@ -9,6 +9,21 @@ const { t } = useI18n()
 const store = useStore()
 
 const view = ref<'gallery' | 'viewport'>('gallery')
+// Which flavour of the viewport to open: 'edit' for "suggest a new route",
+// 'display' for opening an existing proposal (identified by selectedProposalId).
+const viewportMode = ref<'edit' | 'display'>('edit')
+const selectedProposalId = ref<number | null>(null)
+
+function openCreate() {
+  viewportMode.value = 'edit'
+  selectedProposalId.value = null
+  view.value = 'viewport'
+}
+function openProposal(proposalId: number) {
+  viewportMode.value = 'display'
+  selectedProposalId.value = proposalId
+  view.value = 'viewport'
+}
 
 onMounted(async () => {
   // Guest stopgap: acquire an identity first so persist-on-calc saves what the
@@ -27,7 +42,18 @@ onMounted(async () => {
     <h1 class="mb-10 text-center text-4xl font-light text-white">
       {{ t('proposal.heading') }}
     </h1>
-    <Gallery v-if="view === 'gallery'" class="w-full max-w-6xl" @create="view = 'viewport'" />
-    <ProposalViewport v-else mode="edit" class="w-full max-w-6xl" @back="view = 'gallery'" />
+    <Gallery
+      v-if="view === 'gallery'"
+      class="w-full max-w-6xl"
+      @create="openCreate"
+      @open="openProposal"
+    />
+    <ProposalViewport
+      v-else
+      :mode="viewportMode"
+      :proposal-id="selectedProposalId"
+      class="w-full max-w-6xl"
+      @back="view = 'gallery'"
+    />
   </div>
 </template>

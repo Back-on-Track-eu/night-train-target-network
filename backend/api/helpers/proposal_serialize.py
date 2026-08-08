@@ -367,6 +367,8 @@ def summary_row_to_dict(row: dict) -> dict:
         "co2_g_per_pax_km": _to_float(row["co2_g_per_pax_km"]),
         "likes_count": row["likes_count"],
         "comments_count": row["comments_count"],
+        "display_name": row["display_name"],
+        "is_guest": row["is_guest"],
         "created_at": _isoformat(row.get("created_at")),
         "updated_at": _isoformat(row.get("updated_at")),
     }

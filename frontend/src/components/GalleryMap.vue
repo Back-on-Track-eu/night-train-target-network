@@ -262,5 +262,9 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div ref="mapContainer" style="width: 100%; height: 100%; min-height: 480px" />
+  <div
+    ref="mapContainer"
+    class="overflow-hidden rounded-xl"
+    style="width: 100%; height: 100%; min-height: 480px"
+  />
 </template>

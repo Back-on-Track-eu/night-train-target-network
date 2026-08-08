@@ -980,6 +980,7 @@ paginated).
         "co2_savings_t_per_year": 210.4, "subsidy_eur_per_t_co2": null,
         "demand_kpis_placeholder": true, "co2_g_per_pax_km": 33.0,
         "likes_count": 3,
+        "display_name": "David", "is_guest": false,
         "created_at": "2026-08-01T09:00:00+00:00",
         "updated_at": "2026-08-04T12:00:00+00:00"
       },
@@ -1040,7 +1041,11 @@ independently of publish/refresh, so storing it would go stale;
 `comments_count` excludes deleted comments, matching
 [`GET /api/proposal/<id>/engagements`](#proposal-engagements)).
 The counts are here so a gallery card can show them without one
-engagements call per row; comment bodies and the timeline are not. `"existing"` rows
+engagements call per row; comment bodies and the timeline are not. The
+proposer's `display_name` and an `is_guest` flag (derived from the
+reserved `guest_` display-name prefix) are also live-joined from
+`admin.users` so a card can label who proposed the route without a
+second lookup. `"existing"` rows
 carry the **reduced descriptive shape** shown above — identity, the
 shared metric subset, `geometry_routed` (whether the drawn line is real
 routing or a straight-line fallback), and `ontd_url` (deep link to the

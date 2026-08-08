@@ -474,6 +474,11 @@ export interface ProposalSummaryProposal extends ProposalSummaryShared {
   demand_kpis_placeholder: unknown
   likes_count: number
   comments_count: number
+  // Proposer identity, live-joined from admin.users. is_guest is derived
+  // server-side from the reserved "guest_" display-name prefix; the card
+  // shows a generic "Guest" label instead of the raw guest_… name.
+  display_name: string
+  is_guest: boolean
   created_at: string
   updated_at: string
 }
