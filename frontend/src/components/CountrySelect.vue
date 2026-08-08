@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed, nextTick, watch } from 'vue'
 import Popover from 'primevue/popover'
 import AppIcon from './AppIcon.vue'
 import { mdiMagnify } from '@mdi/js'
@@ -17,7 +17,11 @@ const emit = defineEmits<{ select: [code: string] }>()
 const { t } = useI18n()
 const popoverRef = ref<InstanceType<typeof Popover> | null>(null)
 const inputRef = ref<HTMLInputElement | null>(null)
+const listRef = ref<HTMLElement | null>(null)
 const filterQuery = ref('')
+// Index of the keyboard-highlighted row in `filtered`; drives the same
+// background the mouse hover uses, so both share one highlight.
+const activeIndex = ref(0)
 
 const filtered = computed(() =>
   props.countries.filter(
@@ -36,14 +40,36 @@ function pick(country: Country) {
   popoverRef.value?.hide()
 }
 
+function scrollActiveIntoView() {
+  nextTick(() => {
+    listRef.value?.querySelectorAll('button')[activeIndex.value]?.scrollIntoView({
+      block: 'nearest',
+    })
+  })
+}
+
+// Move the highlight by `delta`, wrapping around.
+function move(delta: number) {
+  const n = filtered.value.length
+  if (!n) return
+  activeIndex.value = (activeIndex.value + delta + n) % n
+  scrollActiveIntoView()
+}
+
 function onEnter() {
-  const first = filtered.value[0]
-  if (first) pick(first)
+  const c = filtered.value[activeIndex.value]
+  if (c) pick(c)
 }
 
 function onShow() {
+  activeIndex.value = 0
   nextTick(() => inputRef.value?.focus())
 }
+
+// Reset the highlight to the top whenever the filter changes.
+watch(filtered, () => {
+  activeIndex.value = 0
+})
 </script>
 
 <template>
@@ -85,9 +111,12 @@ function onShow() {
           font-family: inherit;
         "
         @keydown.enter.prevent="onEnter"
+        @keydown.down.prevent="move(1)"
+        @keydown.up.prevent="move(-1)"
       />
     </div>
     <div
+      ref="listRef"
       class="overflow-y-auto p-1.5"
       style="
         max-height: 20rem;
@@ -99,9 +128,11 @@ function onShow() {
         {{ t('gallery.search.noCountries') }}
       </p>
       <button
-        v-for="c in filtered"
+        v-for="(c, i) in filtered"
         :key="c.code"
-        class="block w-full cursor-pointer rounded-lg px-4 py-3 text-left text-base text-primary-50 transition-colors hover:bg-[#2b2e4a]"
+        class="block w-full cursor-pointer rounded-lg px-4 py-3 text-left text-base text-primary-50 transition-colors"
+        :class="i === activeIndex ? 'bg-[#2b2e4a]' : ''"
+        @mouseenter="activeIndex = i"
         @click="pick(c)"
       >
         {{ c.name }}

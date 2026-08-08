@@ -17,11 +17,11 @@
       "title": "Add stops along the way?",
       "subtitle": "We found stops on your route. Pick any you'd like to include.",
       "addedTime": "+{minutes} min",
-      "none": "No stops selected",
-      "selectedCount": "{count} selected | {count} selected",
-      "skip": "Skip",
-      "confirm": "Add {count} stop | Add {count} stops",
-      "confirmNone": "Continue without stops"
+      "backToEdit": "Back to edit",
+      "continue": "Continue with {count} additional stop | Continue with {count} additional stops",
+      "continueNone": "Continue without additional stops",
+      "addAria": "Add {name} to the route",
+      "removeAria": "Remove {name} from the route"
     },
     "frequency": {
       "daily": "Daily",
@@ -144,13 +144,13 @@
     },
     "search": {
       "from": "From",
-      "fromPlaceholder": "Click to select station",
+      "fromPlaceholder": "Click to select a station",
       "to": "To",
-      "toPlaceholder": "Click to select station",
+      "toPlaceholder": "Click to select a station",
       "station": "Station",
-      "stationPlaceholder": "Click to select station",
+      "stationPlaceholder": "Click to select a station",
       "country": "Country",
-      "countryPlaceholder": "Click to select country",
+      "countryPlaceholder": "Click to select a country",
       "noCountries": "No countries found",
       "button": "Search"
     },

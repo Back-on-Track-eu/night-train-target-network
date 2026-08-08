@@ -92,8 +92,7 @@ frontend/
         ├── ProposalViewport.vue      # Proposal build/evaluate workspace
         ├── RouteSectionSlider.vue    # OD-range slider for the evaluation panel
         ├── RouteStatsCard.vue        # Headline distance/speed/frequency card
-        ├── StopSelect.vue            # Stop search/select control
-        └── StopSuggestionOverlay.vue # Suggested-stop selection prompt
+        └── StopSelect.vue            # Stop search/select control
 ```
 
 ---

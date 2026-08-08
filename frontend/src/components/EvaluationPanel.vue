@@ -432,6 +432,9 @@ const costTree = computed<CostNode[]>(() => {
             { key: 'shunting', label: f('shunting'), value: x.shunting_eur },
           ],
         },
+        // Target EBIT margin — shown as a point under Operator (the profit the
+        // fare must cover on top of operator costs), not a cost line itself.
+        { key: 'ebit_margin', label: f('ebit_margin'), value: b.margin.ebit_margin_eur },
       ],
     },
     {
@@ -818,7 +821,7 @@ const scenarioSelectPt = {
         </div>
       </div>
 
-      <!-- Cost tree (left) | Revenue + Expected Margin (right) -->
+      <!-- Cost tree (left, EBIT margin is a point under Operator) | Revenue (right) -->
       <div class="flex items-start gap-4">
         <div class="w-1/2 rounded-xl bg-primary-50/5 p-4">
           <div class="mb-2 flex items-center gap-1 border-b border-primary-50/10 pb-2">

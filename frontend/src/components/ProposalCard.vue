@@ -68,9 +68,7 @@ const itinerary = computed(() => {
   const segments: { stop_id: string; stop_name: string }[][] = []
   for (let k = 0; k < idxs.length - 1; k++) {
     segments.push(
-      ids
-        .slice(idxs[k] + 1, idxs[k + 1])
-        .map((id) => ({ stop_id: id, stop_name: stopName(id) })),
+      ids.slice(idxs[k] + 1, idxs[k + 1]).map((id) => ({ stop_id: id, stop_name: stopName(id) })),
     )
   }
   return { anchors, segments }
@@ -88,7 +86,10 @@ const co2Fmt = new Intl.NumberFormat('en', { maximumFractionDigits: 0 })
 const stats = computed(() => {
   const p = props.proposal
   const list = [
-    { icon: mdiArrowLeftRight, value: t('gallery.card.km', { value: Math.round(p.total_distance_km) }) },
+    {
+      icon: mdiArrowLeftRight,
+      value: t('gallery.card.km', { value: Math.round(p.total_distance_km) }),
+    },
     { icon: mdiSpeedometerMedium, value: `${Math.round(p.avg_speed_kmh)} km/h` },
     { icon: mdiTrainCarPassenger, value: compositionLabel.value },
   ]
