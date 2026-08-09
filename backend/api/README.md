@@ -784,6 +784,13 @@ server-assigned `proposal_id` and prefixed row IDs
 as its loaded proposal, so a follow-up save is an ordinary `overwrite`
 against it.
 
+**Self-like**: a logged-in (non-guest) publisher automatically likes their
+own just-published proposal — the same idempotent `add_like()` behind
+`POST /api/proposal/<id>/like`. Guests are skipped (no persistent identity
+to attach a like to across a merge). Best-effort: the proposal is already
+committed by this point, so a like failure is logged, not surfaced as a
+publish error.
+
 **Errors:**
 
 | Status | `error` key | Meaning |
