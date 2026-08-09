@@ -14,6 +14,7 @@ import type {
 } from '@/types/api'
 import { publishProposal, fetchProposalRoute, ProposalsError } from '@/lib/proposalsApi'
 import { resolvePrefillStops, type GallerySearchSeed } from '@/lib/proposalPrefill'
+import { readDraft, writeDraft, clearDraft } from '@/lib/proposalDraftStorage'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Skeleton from 'primevue/skeleton'
@@ -461,6 +462,7 @@ async function doPublish() {
     const resp = await publishProposal(body, store.authHeaders())
     publishedProposalId.value = resp.proposal_id
     saved.value = true
+    clearDraft()
     toastStore.addToast('success', t('proposal.saved'))
     if (isFirstPublish) emit('published', resp.proposal_id)
   } catch (err) {
@@ -494,6 +496,32 @@ async function evaluate() {
     currentMode.value = 'suggest'
   } else {
     applyPlan(json, true)
+  }
+}
+
+// Mount-time counterpart to evaluate()'s "suggest" pass, used to restore a
+// persisted draft that was mid suggest-flow. Deliberately NOT a call to
+// evaluate() itself: its zero-suggestions branch calls applyPlan(json, true),
+// which auto-publishes (or opens the auth gate) — reusing it here would risk
+// a silent auto-publish if the backend happens to return no suggestions this
+// time. On zero suggestions this just degrades to plain 'edit' instead.
+async function restoreSuggestState(selectedIds: string[]) {
+  const stopIds = currentStopIds.value
+  if (stopIds.length < 2 || !selectedCompositionId.value) return
+  currentMode.value = 'loading'
+  evaluateError.value = null
+  const json = await requestCalc(stopIds, 'suggest')
+  if (!json) return // requestCalc already reset currentMode to 'edit' and set evaluateError
+  const suggestions = json.suggested_stops ?? []
+  if (suggestions.length > 0) {
+    basePlan.value = json
+    suggestedStops.value = suggestions
+    suggestSelected.value = new Set(
+      selectedIds.filter((id) => suggestions.some((s) => s.stop_id === id)),
+    )
+    currentMode.value = 'suggest'
+  } else {
+    currentMode.value = 'edit'
   }
 }
 
@@ -622,6 +650,41 @@ const currentStopIds = computed(() =>
   itinerary.value.filter((s) => s.selectedStop).map((s) => s.selectedStop!.stop_id),
 )
 
+// Guards the persistence watcher below against a mount-time race: while
+// onMounted is still awaiting fetchStops() to restore a draft (itinerary
+// still empty), CompositionPanel can already mount off the faster
+// compositions fetch and force-select compositions[0] (its own "keep a valid
+// selection" watch) — which, unguarded, the watcher below would read as "the
+// user cleared everything" and clearDraft() the very draft still being
+// restored. Flipped true once onMounted's initial restore/prefill decision is
+// finalized, whichever branch it takes.
+const draftHydrated = ref(false)
+
+// Persist the in-progress draft (itinerary, composition, and — mid
+// suggest-flow — the opted-in candidate stops) so a reload can resume it.
+// Only ever active for a fresh, unpublished /proposal-builder session
+// (mode==='edit'); a /proposal/:id instance, or this same instance once
+// router.replace flips props.mode to 'display' post-publish, never writes.
+// deep: true is required, not just defensive — removeStop()/onStopSelect()
+// mutate `itinerary` in place rather than reassigning it.
+watch(
+  [itinerary, selectedCompositionId, currentMode, suggestSelected],
+  () => {
+    if (!draftHydrated.value || props.mode !== 'edit' || currentMode.value === 'loading') return
+    const stopIds = currentStopIds.value
+    if (stopIds.length === 0) {
+      clearDraft()
+      return
+    }
+    writeDraft({
+      stopIds,
+      compositionId: selectedCompositionId.value,
+      suggestSelectedIds: currentMode.value === 'suggest' ? [...suggestSelected.value] : null,
+    })
+  },
+  { deep: true },
+)
+
 // The builder is "dirty" once it diverges from the last evaluated state: a
 // different composition, or a different set/order of stops. Fresh (never
 // evaluated) is not dirty — there's nothing to diverge from yet. A pure
@@ -705,6 +768,20 @@ function itineraryFromRoute(rr: RouteResult): ItineraryStop[] {
       stop_charge_eur: { value: 0, is_default: true },
     },
   }))
+}
+
+// Restores an itinerary from a persisted draft's bare stop ids (see
+// proposalDraftStorage.ts). Unlike itineraryFromRoute()/insertSuggestedStop(),
+// there's no synthesized-fallback data to fall back on for an id no longer in
+// the catalogue — such ids are simply dropped.
+function itineraryFromStopIds(stopIds: string[]): ItineraryStop[] {
+  const byId = new Map(store.stops.map((s) => [s.stop_id, s]))
+  const rows: ItineraryStop[] = []
+  for (const id of stopIds) {
+    const stop = byId.get(id)
+    if (stop) rows.push({ id: _nextId++, name: stop.name, selectedStop: stop })
+  }
+  return rows
 }
 
 // Computed times for an itinerary row, looked up from the selected trip by stop
@@ -1194,7 +1271,23 @@ onMounted(async () => {
 
   if (props.mode === 'display' && props.proposalId != null) {
     await loadStoredProposal(props.proposalId)
+    draftHydrated.value = true
     return
+  }
+
+  // An explicit Gallery seed always wins over a stale persisted draft — it's
+  // a clear "start fresh" signal. Otherwise, resume a persisted draft if one
+  // resolves to a usable itinerary; only then fall back to the random pair.
+  if (!props.searchSeed) {
+    const draft = readDraft()
+    const restored = draft ? itineraryFromStopIds(draft.stopIds) : []
+    if (restored.length >= 2) {
+      itinerary.value = restored
+      selectedCompositionId.value = draft!.compositionId
+      if (draft!.suggestSelectedIds !== null) await restoreSuggestState(draft!.suggestSelectedIds)
+      draftHydrated.value = true
+      return
+    }
   }
 
   const pair = resolvePrefillStops(props.searchSeed ?? null, store.stops)
@@ -1205,6 +1298,7 @@ onMounted(async () => {
       { id: _nextId++, name: b.name, selectedStop: b },
     ]
   }
+  draftHydrated.value = true
 })
 </script>
 

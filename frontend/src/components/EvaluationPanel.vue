@@ -11,7 +11,7 @@ import type { Breakdown, EvaluationResponse, MapScope, ProposalCalcSummary } fro
 // class/normalisation) lives in ViewRow, which resolves it against
 // `result.views` and reports back the landed Breakdown (for
 // CostBreakdownPanel) and the geographic scope (forwarded to the map).
-const props = defineProps<{
+defineProps<{
   result: EvaluationResponse
   // Ordered stops (outbound) backing the "route section" slider.
   stops: { stop_id: string; name: string }[]

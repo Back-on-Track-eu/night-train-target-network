@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
-import { useStore } from '@/stores/store'
 import LanguageSwitch from '@/components/LanguageSwitch.vue'
 import UserMenu from '@/components/UserMenu.vue'
 import logo from '@/assets/B-o-T_Logo_4c_inverted.png'
 import headerBg from '@/assets/header-background.jpg'
 
 const { t } = useI18n()
-const store = useStore()
 </script>
 
 <template>
