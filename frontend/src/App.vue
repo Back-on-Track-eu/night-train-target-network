@@ -6,6 +6,7 @@ import Gallery from '@/components/Gallery.vue'
 import ProposalViewport from '@/components/ProposalViewport.vue'
 import AppHeader from '@/components/AppHeader.vue'
 import AuthModal from '@/components/AuthModal.vue'
+import ToastContainer from '@/components/ToastContainer.vue'
 
 const { t } = useI18n()
 const store = useStore()
@@ -61,5 +62,6 @@ onMounted(() => {
       />
       <AuthModal v-if="store.authModal.open" />
     </div>
+    <ToastContainer />
   </div>
 </template>

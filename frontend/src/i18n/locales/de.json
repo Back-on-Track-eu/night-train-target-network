@@ -224,5 +224,15 @@
     "emailFailed": "Der Code konnte nicht gesendet werden. Bitte versuche es erneut.",
     "invalidCode": "Ungültiger oder abgelaufener Code. Bitte fordere einen neuen an.",
     "guestFailed": "Gastsitzung konnte nicht gestartet werden. Bitte versuche es erneut."
+  },
+  "toast": {
+    "dismiss": "Schließen",
+    "loginSuccess": "Erfolgreich angemeldet.",
+    "registerSuccess": "Willkommen! Dein Konto wurde erstellt.",
+    "guestSuccess": "Weiter als Gast.",
+    "logoutSuccess": "Du wurdest abgemeldet.",
+    "guestFailed": "Gastsitzung konnte nicht gestartet werden. Bitte versuche es erneut.",
+    "invalidCode": "Ungültiger oder abgelaufener Code. Bitte fordere einen neuen an.",
+    "emailFailed": "Der Code konnte nicht gesendet werden. Bitte versuche es erneut."
   }
 }

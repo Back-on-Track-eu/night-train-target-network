@@ -2,12 +2,14 @@
 import { ref, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useStore } from '@/stores/store'
+import { useToastStore } from '@/stores/toastStore'
 import AppIcon from '@/components/AppIcon.vue'
 import { useLocaleFormat } from '@/composables/useLocaleFormat'
-import { mdiCheckCircle, mdiArrowRight } from '@mdi/js'
+import { mdiCheckCircle, mdiArrowRight, mdiClose } from '@mdi/js'
 
 const { t } = useI18n()
 const store = useStore()
+const toastStore = useToastStore()
 const { formatInt } = useLocaleFormat()
 
 const modal = computed(() => store.authModal)
@@ -44,9 +46,10 @@ const co2Text = computed(() => {
   return t('auth.co2Savings', { value: formatInt(v) })
 })
 const showRegisterBlurb = computed(() => isEvaluation.value && step.value === 'email')
-// "Continue as guest" only makes sense before any choice is made — hide it once
-// the user is already a guest (e.g. opening login from the guest chip).
-const showGuestOption = computed(() => store.authChoice === 'none')
+// "Continue as guest" only makes sense before any choice is made, and only on
+// the evaluation gate (first proposal prompt) — opening "Log in / Register"
+// from the user menu is an explicit choice to log in, not a guest fork.
+const showGuestOption = computed(() => isEvaluation.value && store.authChoice === 'none')
 
 function dismiss() {
   store.closeAuthModal()
@@ -58,8 +61,10 @@ async function onGuest() {
   try {
     await store.continueAsGuest()
     dismiss()
+    toastStore.addToast('success', t('toast.guestSuccess'))
   } catch {
     error.value = t('auth.guestFailed')
+    toastStore.addToast('error', t('toast.guestFailed'))
     loading.value = false
   }
 }
@@ -92,8 +97,10 @@ async function onVerify() {
       return
     }
     dismiss()
+    toastStore.addToast('success', t('toast.loginSuccess'))
   } catch {
     error.value = t('auth.invalidCode')
+    toastStore.addToast('error', t('toast.invalidCode'))
     loading.value = false
   }
 }
@@ -116,8 +123,10 @@ async function onNameContinue() {
       return
     }
     dismiss()
+    toastStore.addToast('success', t('toast.registerSuccess'))
   } catch (e) {
     error.value = e instanceof Error ? e.message : t('auth.invalidCode')
+    toastStore.addToast('error', t('toast.invalidCode'))
     loading.value = false
   }
 }

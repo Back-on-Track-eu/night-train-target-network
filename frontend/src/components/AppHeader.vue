@@ -23,10 +23,12 @@ const store = useStore()
              The account badge is pushed just past that edge, into the outer
              gutter to its right, so it never shifts the languages inward. -->
         <LanguageSwitch />
-        <div
-          v-if="store.authChoice !== 'none'"
-          class="absolute left-full top-1/2 ml-4 -translate-y-1/2"
-        >
+        <!-- Always visible: reads "Guest" until the user logs in. `z-50` lifts
+             this wrapper's stacking context above UserMenu's click-away catcher
+             (teleported to body at z-30) — without it the transform here
+             (-translate-y-1/2) traps the z-50 dropdown below the catcher, so
+             clicks on the menu hit the catcher and it just closes. -->
+        <div class="absolute left-full top-1/2 z-50 ml-4 -translate-y-1/2">
           <UserMenu />
         </div>
       </div>

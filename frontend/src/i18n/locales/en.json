@@ -224,5 +224,15 @@
     "emailFailed": "Could not send the code. Please try again.",
     "invalidCode": "Invalid or expired code. Please request a new one.",
     "guestFailed": "Could not start a guest session. Please try again."
+  },
+  "toast": {
+    "dismiss": "Dismiss",
+    "loginSuccess": "Logged in successfully.",
+    "registerSuccess": "Welcome! Your account was created.",
+    "guestSuccess": "Continuing as guest.",
+    "logoutSuccess": "You have been logged out.",
+    "guestFailed": "Could not start a guest session. Please try again.",
+    "invalidCode": "Invalid or expired code. Please request a new one.",
+    "emailFailed": "Could not send the code. Please try again."
   }
 }

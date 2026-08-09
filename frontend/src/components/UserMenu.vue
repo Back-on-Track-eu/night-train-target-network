@@ -2,11 +2,13 @@
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useStore } from '@/stores/store'
+import { useToastStore } from '@/stores/toastStore'
 import AppIcon from '@/components/AppIcon.vue'
 import { mdiAccountCircle } from '@mdi/js'
 
 const { t } = useI18n()
 const store = useStore()
+const toastStore = useToastStore()
 
 const open = ref(false)
 
@@ -15,6 +17,7 @@ function close() {
 }
 function onLogout() {
   store.logout()
+  toastStore.addToast('success', t('toast.logoutSuccess'))
   close()
 }
 function onLogin() {
@@ -31,11 +34,11 @@ function onLogin() {
   <div class="relative">
     <button
       type="button"
-      class="flex items-center gap-2 rounded-full bg-primary-50/5 px-3 py-1.5 text-primary-50 transition hover:bg-primary-50/10"
+      class="flex cursor-pointer items-center gap-2 rounded-full bg-primary-50/5 px-3 py-1.5 text-primary-50 transition hover:bg-primary-50/10"
       @click="open = !open"
     >
       <span class="text-sm font-semibold leading-none">
-        {{ store.isGuest ? t('user.guest') : store.username }}
+        {{ store.authChoice === 'user' ? store.username : t('user.guest') }}
       </span>
       <AppIcon :path="mdiAccountCircle" :size="22" />
     </button>
@@ -49,10 +52,10 @@ function onLogin() {
       v-if="open"
       class="user-menu absolute right-0 z-50 mt-2 flex min-w-40 flex-col overflow-hidden rounded-xl shadow-xl"
     >
-      <!-- A guest has nothing to log out of — only offer login/register.
-           A registered user only gets log out. -->
+      <!-- Not-yet-decided and guest visitors have nothing to log out of — only
+           offer login/register. A registered user only gets log out. -->
       <button
-        v-if="store.isGuest"
+        v-if="store.authChoice !== 'user'"
         type="button"
         class="cursor-pointer px-4 py-2.5 text-left text-sm text-primary-50 transition hover:bg-primary-50/10"
         @click="onLogin"
