@@ -266,8 +266,8 @@ export const useStore = defineStore('store', () => {
   function restoreLocale(): void {
     const stored = readLocale()
     // Multi-language is disabled for now — the app runs in English only, even
-    // if an earlier session persisted a different choice. de.json (and the
-    // setLocale/writeLocale machinery) stay for when the LanguageSwitch is
+    // if an earlier session persisted a different choice. The
+    // setLocale/writeLocale machinery stays for when the LanguageSwitch is
     // re-enabled; drop this guard then.
     if (stored === 'en') locale.value = stored
   }

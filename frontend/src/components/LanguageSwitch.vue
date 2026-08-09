@@ -5,8 +5,7 @@ import { useStore } from '@/stores/store'
 // language (endonyms — never translated). Multi-language is disabled for now:
 // only English is active and underlined; the rest are shown for visual parity.
 // Clicking has no effect, but hovering still behaves like BoT (hand cursor +
-// green), so it reads as a real switcher. de.json is kept for when it's
-// re-enabled.
+// green), so it reads as a real switcher.
 const LANGUAGES = [
   { code: 'en', name: 'English' },
   { code: 'fr', name: 'Français' },

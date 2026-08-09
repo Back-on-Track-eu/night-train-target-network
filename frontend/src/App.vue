@@ -7,6 +7,7 @@ import ProposalViewport from '@/components/ProposalViewport.vue'
 import AppHeader from '@/components/AppHeader.vue'
 import AuthModal from '@/components/AuthModal.vue'
 import ToastContainer from '@/components/ToastContainer.vue'
+import type { GallerySearchSeed } from '@/lib/proposalPrefill'
 
 const { t } = useI18n()
 const store = useStore()
@@ -16,10 +17,14 @@ const view = ref<'gallery' | 'viewport'>('gallery')
 // 'display' for opening an existing proposal (identified by selectedProposalId).
 const viewportMode = ref<'edit' | 'display'>('edit')
 const selectedProposalId = ref<number | null>(null)
+// The gallery search bar's state at the moment "Suggest a new route" was
+// clicked — lets the new proposal's itinerary prefill from it.
+const createSeed = ref<GallerySearchSeed | null>(null)
 
-function openCreate() {
+function openCreate(seed: GallerySearchSeed) {
   viewportMode.value = 'edit'
   selectedProposalId.value = null
+  createSeed.value = seed
   view.value = 'viewport'
 }
 function openProposal(proposalId: number) {
@@ -57,6 +62,7 @@ onMounted(() => {
         v-else
         :mode="viewportMode"
         :proposal-id="selectedProposalId"
+        :search-seed="createSeed"
         class="w-full max-w-6xl"
         @back="view = 'gallery'"
       />

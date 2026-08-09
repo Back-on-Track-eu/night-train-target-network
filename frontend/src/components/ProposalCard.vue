@@ -1,16 +1,19 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Avatar from 'primevue/avatar'
 import AvatarGroup from 'primevue/avatargroup'
 import AppIcon from '@/components/AppIcon.vue'
 import { useStore } from '@/stores/store'
+import { useToastStore } from '@/stores/toastStore'
 import { useLocaleFormat } from '@/composables/useLocaleFormat'
+import { likeProposal, unlikeProposal, ProposalsError } from '@/lib/proposalsApi'
 import type { ProposalSummary } from '@/types/api'
 import {
   mdiArrowLeftRight,
   mdiLeaf,
   mdiSpeedometerMedium,
+  mdiThumbUp,
   mdiThumbUpOutline,
   mdiTrainCarPassenger,
 } from '@mdi/js'
@@ -121,19 +124,40 @@ function onCardClick() {
   if (props.proposal.source === 'proposal') emit('select', props.proposal.proposal_id)
 }
 
-// #TODO: wire the like button to POST/DELETE /api/proposal/<id>/like — NOT
-// IMPLEMENTED YET. For now a click only surfaces a transient "not implemented"
-// hint and fires no network request.
-const likeHintVisible = ref(false)
-let likeHintTimer: ReturnType<typeof setTimeout> | null = null
-function onLikeClick() {
-  likeHintVisible.value = true
-  if (likeHintTimer) clearTimeout(likeHintTimer)
-  likeHintTimer = setTimeout(() => (likeHintVisible.value = false), 1800)
+// Liking requires a registered account (not guest, not logged out) — an info
+// toast explains why otherwise. Initial liked-by-me state is unknown without
+// an extra per-card fetch (the gallery list only carries the total count), so
+// it starts false and self-corrects from the server's response on first
+// click — an already-liked proposal's first click just re-confirms the like
+// (idempotent) and syncs the icon, rather than actually toggling it off.
+const toastStore = useToastStore()
+const likeCount = ref(props.proposal.source === 'proposal' ? props.proposal.likes_count : 0)
+const likedByMe = ref(false)
+const likeBusy = ref(false)
+
+async function onLikeClick() {
+  if (props.proposal.source !== 'proposal') return
+  if (store.authChoice !== 'user') {
+    toastStore.addToast('info', t('gallery.card.loginToLike'))
+    return
+  }
+  if (likeBusy.value) return
+  likeBusy.value = true
+  try {
+    const result = likedByMe.value
+      ? await unlikeProposal(props.proposal.proposal_id, store.authHeaders())
+      : await likeProposal(props.proposal.proposal_id, store.authHeaders())
+    likeCount.value = result.count
+    likedByMe.value = result.liked_by_me
+  } catch (err) {
+    toastStore.addToast(
+      'error',
+      err instanceof ProposalsError ? err.message : t('gallery.card.likeFailed'),
+    )
+  } finally {
+    likeBusy.value = false
+  }
 }
-onBeforeUnmount(() => {
-  if (likeHintTimer) clearTimeout(likeHintTimer)
-})
 
 // Flags shown in itinerary order when available (the summary's own list is
 // alphabetical).
@@ -148,12 +172,17 @@ const failedFlags = ref(new Set<string>())
 function markFailed(code: string) {
   failedFlags.value = new Set(failedFlags.value).add(code)
 }
-function avatarPt(code: string) {
+// Border matches the card's own background (bg-primary-50/5 over the page's
+// sapphire) so overlapping flags read as cleanly "cut out" rather than
+// outlined in a mismatched color. Earlier (leftmost) flags stack above later
+// ones — reversed z-index, since AvatarGroup's own negative-margin overlap
+// would otherwise put the rightmost flag on top.
+const FLAG_BORDER_COLOR = 'color-mix(in srgb, var(--p-primary-50) 5%, var(--color-sapphire))'
+function avatarPt(code: string, index: number) {
   return {
     root: {
       class: 'overflow-hidden rounded-full',
-      style:
-        'width:1.55rem;height:1.55rem;border:2px solid #1e2038;font-size:0.65rem;background:#2b2e4a;color:var(--p-primary-50);',
+      style: `width:1.55rem;height:1.55rem;border:2px solid ${FLAG_BORDER_COLOR};font-size:0.65rem;background:#2b2e4a;color:var(--p-primary-50);position:relative;z-index:${flagCountries.value.length - index};`,
     },
     image: { onError: () => markFailed(code) },
   }
@@ -207,27 +236,30 @@ function avatarPt(code: string) {
       <div class="flex flex-col items-end gap-2">
         <AvatarGroup class="flag-group">
           <Avatar
-            v-for="c in flagCountries"
+            v-for="(c, index) in flagCountries"
             :key="c"
             :image="failedFlags.has(c) ? undefined : flagUrl(c)"
             :label="failedFlags.has(c) ? c : undefined"
             shape="circle"
-            :pt="avatarPt(c)"
+            :pt="avatarPt(c, index)"
           />
         </AvatarGroup>
 
-        <!-- Like button — proposal-only, not yet wired (see #TODO above). -->
-        <div v-if="proposal.source === 'proposal'" class="flex items-center gap-2">
-          <span v-if="likeHintVisible" class="whitespace-nowrap text-xs text-primary-50/50">{{
-            t('gallery.card.notImplemented')
+        <!-- Like button — proposal-only. Count sits left of the thumb; the
+             icon fills in once the current user has liked it. -->
+        <div v-if="proposal.source === 'proposal'" class="flex items-center gap-1.5">
+          <span v-if="likeCount > 0" class="text-sm font-semibold text-primary-50/70">{{
+            likeCount
           }}</span>
           <button
             type="button"
+            :disabled="likeBusy"
             :aria-label="t('gallery.card.like')"
-            class="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full text-primary-50/70 transition hover:bg-primary-50/10 hover:text-primary-50"
+            class="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full transition hover:bg-primary-50/10 disabled:cursor-not-allowed"
+            :class="likedByMe ? 'text-primary-50' : 'text-primary-50/70 hover:text-primary-50'"
             @click.stop="onLikeClick"
           >
-            <AppIcon :path="mdiThumbUpOutline" :size="22" />
+            <AppIcon :path="likedByMe ? mdiThumbUp : mdiThumbUpOutline" :size="22" />
           </button>
         </div>
 
@@ -250,11 +282,15 @@ function avatarPt(code: string) {
 </template>
 
 <style>
-/* Circular flag images fill their avatar disc; AvatarGroup keeps its default
-   horizontal overlap. */
+/* Circular flag images fill their avatar disc. PrimeVue's Lara preset (unlike
+   some other presets) doesn't give AvatarGroup any built-in overlap, so it's
+   applied explicitly here; z-index (avatarPt, above) puts earlier flags on top. */
 .flag-group .p-avatar img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+.flag-group .p-avatar + .p-avatar {
+  margin-left: -0.6rem;
 }
 </style>

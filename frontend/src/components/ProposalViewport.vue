@@ -7,11 +7,13 @@ import type {
   EvaluationResponse,
   MapScope,
   ProposalCalcResponse,
+  ProposalCalcSummary,
   PublishRequest,
   Stop,
   SuggestedStop,
 } from '@/types/api'
-import { publishProposal, ProposalsError } from '@/lib/proposalsApi'
+import { publishProposal, fetchProposalRoute, ProposalsError } from '@/lib/proposalsApi'
+import { resolvePrefillStops, type GallerySearchSeed } from '@/lib/proposalPrefill'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Skeleton from 'primevue/skeleton'
@@ -32,10 +34,11 @@ import {
 
 const props = defineProps<{
   mode: 'edit' | 'loading' | 'display'
-  // Set when opened from a gallery card to view a stored proposal. The
-  // load-by-id path is not wired yet (see onMounted #TODO); until it is, a
-  // display-mode mount with a proposalId just shows the loading skeleton.
+  // Set when opened from a gallery card, to load and view a stored proposal.
   proposalId?: number | null
+  // The gallery search bar's state when "Suggest a new route" was clicked —
+  // seeds the itinerary in fresh 'edit' mode (mode='edit', proposalId=null).
+  searchSeed?: GallerySearchSeed | null
 }>()
 const emit = defineEmits<{ back: [] }>()
 
@@ -55,6 +58,10 @@ const rawRoute = ref<BackendRoute | null>(null)
 // Evaluation bundle rendered by EvaluationPanel — assembled in applyPlan()
 // from the same merged calc response the route came from.
 const calcResult = ref<EvaluationResponse | null>(null)
+// Gallery KPI summary block of the same calc response — route-level demand /
+// modal-shift / emissions figures the EvaluationPanel renders alongside the
+// financial KPIs (currently placeholder values; see summary.py).
+const calcSummary = ref<ProposalCalcSummary | null>(null)
 // Which part of the route the evaluation panel is currently scoped to — drives
 // the map's highlight/dim. 'all' = whole route.
 const evalScope = ref<MapScope>({ kind: 'all' })
@@ -400,6 +407,7 @@ function applyPlan(json: CalcResponse, publish = false) {
     input: { route: json.route, parameters: json.evaluation.input.parameters },
     views: json.evaluation.views,
   }
+  calcSummary.value = json.summary ?? null
   // Keep the resolved request so publish can send it verbatim (server recomputes).
   publishRequest.value = json.request
   const route = adaptRoute(json.route)
@@ -1144,32 +1152,57 @@ const mapSegments = computed<MapSegment[] | null>(() => {
   return out
 })
 
+// Load a stored proposal by id and populate display mode — same wire shape
+// as POST /api/proposal/calc (see types/api.ts's ProposalDetailResponse), so
+// applyPlan() can hydrate rawRoute/calcResult/itinerary from it exactly like
+// a fresh calc. selectedCompositionId is set first so CompositionSelectCard
+// locks onto the composition the stored route actually used, rather than
+// defaulting to the first one in the full catalogue.
+async function loadStoredProposal(proposalId: number) {
+  currentMode.value = 'loading'
+  try {
+    const detail = await fetchProposalRoute<BackendRoute>(proposalId)
+    publishedProposalId.value = detail.proposal_id
+    selectedCompositionId.value = detail.route.trip_pairs[0]?.composition_id ?? null
+    applyPlan(
+      {
+        route_builder_version: detail.route_builder_version,
+        calc_version: detail.calc_version,
+        route_fingerprint: detail.route_fingerprint,
+        request: detail.request,
+        summary: detail.summary,
+        route: detail.route,
+        evaluation: detail.evaluation,
+      },
+      false,
+    )
+  } catch (err) {
+    evaluateError.value = err instanceof ProposalsError ? err.message : t('proposal.publishError')
+    currentMode.value = 'edit'
+  }
+}
+
 onMounted(async () => {
-  // #TODO: load a stored proposal by id and populate display mode — NOT
-  // IMPLEMENTED YET. When opened from a gallery card (mode="display" +
-  // proposalId), fetch GET /api/proposal/<id> (fetchProposalRoute in
-  // lib/proposalsApi.ts) and hydrate rawRoute/calcResult/selectedCompositionId
-  // the way applyPlan() does after a calc. Until then, hold on the loading
-  // skeleton instead of falling through to the edit seeding below (which would
-  // render a random editable itinerary — wrong for a "view this proposal"
-  // intent).
+  // App.vue loads this reference data at startup; only fetch if we arrived here
+  // before it finished (or a fetch errored). The stop catalogue is needed both
+  // to load a stored proposal's composition/stop names and to seed a fresh one.
+  if (store.stopsStatus !== 'success') await store.fetchStops()
+  if (store.compositionsStatus !== 'success') store.fetchCompositions()
+  if (store.scenariosStatus !== 'success') store.fetchScenarios()
+
   if (props.mode === 'display' && props.proposalId != null) {
-    currentMode.value = 'loading'
+    await loadStoredProposal(props.proposalId)
     return
   }
 
-  // App.vue loads this reference data at startup; only fetch if we arrived here
-  // before it finished (or a fetch errored).
-  if (store.stopsStatus !== 'success') await store.fetchStops()
-  if (store.stops.length >= 2) {
-    const shuffled = [...store.stops].sort(() => Math.random() - 0.5)
+  const pair = resolvePrefillStops(props.searchSeed ?? null, store.stops)
+  if (pair) {
+    const [a, b] = pair
     itinerary.value = [
-      { id: _nextId++, name: shuffled[0].name, selectedStop: shuffled[0] },
-      { id: _nextId++, name: shuffled[1].name, selectedStop: shuffled[1] },
+      { id: _nextId++, name: a.name, selectedStop: a },
+      { id: _nextId++, name: b.name, selectedStop: b },
     ]
   }
-  if (store.compositionsStatus !== 'success') store.fetchCompositions()
-  if (store.scenariosStatus !== 'success') store.fetchScenarios()
 })
 </script>
 
@@ -1477,12 +1510,15 @@ onMounted(async () => {
             </Column>
           </DataTable>
 
-          <!-- Itinerary controls: Back to edit / Edit + Swap on the left (suggest
-               / display), Cancel Edit on the right (re-edit). In edit mode, Add
-               Stop + Swap move into the centered middle group instead, so they
-               sit centered under the itinerary rather than pinned left. -->
+          <!-- Itinerary controls, always centered as a group under the itinerary:
+               Back to edit (suggest) / Edit (display) / Add Stop (edit) + Swap in
+               the middle; Cancel Edit (re-edit) on the right. The two flex-1
+               spacers keep the middle group centered regardless of which side
+               buttons are present. -->
           <div v-if="currentMode !== 'loading'" class="flex items-center gap-2">
-            <div class="flex flex-1 items-center gap-2">
+            <div class="flex flex-1 items-center gap-2" />
+
+            <div class="flex items-center gap-2">
               <!-- Back to edit (suggest) — abandon the suggestion step, itinerary
                    untouched. -->
               <button
@@ -1500,26 +1536,20 @@ onMounted(async () => {
                 {{ t('proposal.edit') }}
               </button>
 
-              <!-- Swap direction (suggest / display — edit mode's swap sits in
-                   the centered group below, beside Add Stop). -->
-              <button
-                v-if="showSwap && currentMode !== 'edit'"
-                :class="pillClass"
-                @click="swapDirection"
+              <!-- Add Stop (edit + re-edit) -->
+              <StopSelect
+                v-if="currentMode === 'edit'"
+                :stops="store.stops"
+                :disabled-ids="usedStopIds"
+                @select="addStop"
               >
-                <AppIcon :path="mdiSwapVertical" :size="16" />
-              </button>
-            </div>
-
-            <!-- Add Stop + Swap, centered as a pair under the itinerary. -->
-            <div v-if="currentMode === 'edit'" class="flex items-center gap-2">
-              <StopSelect :stops="store.stops" :disabled-ids="usedStopIds" @select="addStop">
                 <button :class="pillClass">
                   <AppIcon :path="mdiPlus" :size="16" />
                   {{ t('proposal.addStop') }}
                 </button>
               </StopSelect>
 
+              <!-- Swap direction (all modes where applicable) -->
               <button v-if="showSwap" :class="pillClass" @click="swapDirection">
                 <AppIcon :path="mdiSwapVertical" :size="16" />
               </button>
@@ -1624,9 +1654,16 @@ onMounted(async () => {
       </div>
 
       <!-- Right panel: map with loading overlay. `isolate` makes this wrapper a
-           stacking context (as GalleryMap's sticky wrapper is), which lets its
-           rounded overflow clip MapLibre's composited canvas. -->
-      <div class="relative isolate flex-1 overflow-hidden rounded-xl">
+           stacking context (as GalleryMap's sticky wrapper is), and the border
+           gives the rounded edge the same visible definition as GalleryMap's
+           sticky wrapper. `clip-path` (not just overflow-hidden + rounded-xl)
+           is needed because the loading overlay's `backdrop-blur` is GPU
+           composited like MapLibre's canvas (see MapView.vue) and would
+           otherwise escape the rounded corners while loading. -->
+      <div
+        class="relative isolate flex-1 overflow-hidden rounded-xl border border-primary-50/10"
+        style="clip-path: inset(0 round 0.75rem)"
+      >
         <MapView
           :stops="mapStops"
           :shape="mapShape"
@@ -1660,6 +1697,7 @@ onMounted(async () => {
       <EvaluationPanel
         v-if="calcResult"
         :result="calcResult"
+        :summary="calcSummary"
         :stops="sectionStops"
         @scope-change="onScopeChange"
       />

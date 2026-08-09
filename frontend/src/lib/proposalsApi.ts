@@ -8,8 +8,10 @@ import type {
   ProposalsResponse,
   ProposalsSummariesSection,
   ProposalDetailResponse,
+  GalleryRouteShape,
   PublishRequest,
   PublishResponse,
+  LikeResponse,
 } from '@/types/api'
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5050'
@@ -64,11 +66,16 @@ export async function fetchProposals(body: ProposalsRequest): Promise<ProposalsS
 }
 
 /**
- * Load one proposal's current version (route geometry + evaluation). Used by
- * the gallery map to draw the routes behind the search results. Rejects with a
- * ProposalsError on any network or non-2xx failure.
+ * Load one proposal's current version (route + evaluation + metadata) —
+ * identical wire shape to POST /api/proposal/publish's response. Used by the
+ * gallery map (route geometry only, the default TRoute) and by
+ * ProposalViewport (the full route, via an explicit TRoute) to open a stored
+ * proposal in display mode. Rejects with a ProposalsError on any network or
+ * non-2xx failure.
  */
-export async function fetchProposalRoute(id: number): Promise<ProposalDetailResponse> {
+export async function fetchProposalRoute<TRoute = GalleryRouteShape>(
+  id: number,
+): Promise<ProposalDetailResponse<TRoute>> {
   let response: Response
   try {
     response = await fetch(`${BASE_URL}/api/proposal/${id}`)
@@ -86,7 +93,7 @@ export async function fetchProposalRoute(id: number): Promise<ProposalDetailResp
   if (!response.ok) {
     throw new ProposalsError(extractErrorMessage(parsed, response.status))
   }
-  return parsed as ProposalDetailResponse
+  return parsed as ProposalDetailResponse<TRoute>
 }
 
 /**
@@ -121,4 +128,53 @@ export async function publishProposal(
     throw new ProposalsError(extractErrorMessage(parsed, response.status))
   }
   return parsed as PublishResponse
+}
+
+/**
+ * Like/unlike a proposal. Both require an auth header (a guest token is
+ * accepted by the backend, but the like button only offers this to logged-in
+ * accounts — see ProposalCard.vue). Both resolve with the resulting
+ * {count, liked_by_me} directly, no client-side toggle math needed. Rejects
+ * with a ProposalsError on any network or non-2xx failure.
+ */
+async function sendLike(
+  method: 'POST' | 'DELETE',
+  proposalId: number,
+  authHeaders: Record<string, string>,
+): Promise<LikeResponse> {
+  let response: Response
+  try {
+    response = await fetch(`${BASE_URL}/api/proposal/${proposalId}/like`, {
+      method,
+      headers: { ...authHeaders },
+    })
+  } catch (err) {
+    throw new ProposalsError(err instanceof Error ? err.message : 'Network error')
+  }
+
+  let parsed: unknown = null
+  try {
+    parsed = await response.json()
+  } catch {
+    // Non-JSON body (unexpected) — fall through to the status-based message.
+  }
+
+  if (!response.ok) {
+    throw new ProposalsError(extractErrorMessage(parsed, response.status))
+  }
+  return parsed as LikeResponse
+}
+
+export function likeProposal(
+  proposalId: number,
+  authHeaders: Record<string, string>,
+): Promise<LikeResponse> {
+  return sendLike('POST', proposalId, authHeaders)
+}
+
+export function unlikeProposal(
+  proposalId: number,
+  authHeaders: Record<string, string>,
+): Promise<LikeResponse> {
+  return sendLike('DELETE', proposalId, authHeaders)
 }
