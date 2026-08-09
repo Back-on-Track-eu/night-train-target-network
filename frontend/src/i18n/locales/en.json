@@ -20,6 +20,7 @@
       "backToEdit": "Back to edit",
       "continue": "Continue with {count} additional stop | Continue with {count} additional stops",
       "continueNone": "Continue without additional stops",
+      "adoptAll": "Adopt all suggested stops and continue",
       "addAria": "Add {name} to the route",
       "removeAria": "Remove {name} from the route"
     },
@@ -202,7 +203,6 @@
     "switchLanguageAria": "Switch language to {language}"
   },
   "auth": {
-    "evaluating": "Evaluating proposal …",
     "completed": "Evaluation completed",
     "loginTitle": "Log in or register",
     "verifyTitle": "Please verify your mail address",

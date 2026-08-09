@@ -58,10 +58,9 @@ export const useStore = defineStore('store', () => {
   // standalone.
   const authModal = ref<{
     open: boolean
-    phase: 'evaluating' | 'choose'
     co2SavingsT: number | null
     context: 'evaluation' | 'standalone'
-  }>({ open: false, phase: 'choose', co2SavingsT: null, context: 'standalone' })
+  }>({ open: false, co2SavingsT: null, context: 'standalone' })
 
   function openAuthModal(partial: Partial<Omit<typeof authModal.value, 'open'>>): void {
     authModal.value = { ...authModal.value, ...partial, open: true }

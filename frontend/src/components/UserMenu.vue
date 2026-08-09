@@ -22,7 +22,7 @@ function onLogout() {
 }
 function onLogin() {
   // Reuse the shared modal in standalone (non-evaluation) mode.
-  store.openAuthModal({ phase: 'choose', context: 'standalone' })
+  store.openAuthModal({ context: 'standalone' })
   close()
 }
 </script>

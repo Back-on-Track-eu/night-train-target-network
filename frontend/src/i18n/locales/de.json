@@ -20,6 +20,7 @@
       "backToEdit": "Zurück zur Bearbeitung",
       "continue": "Mit {count} zusätzlichen Stopp fortfahren | Mit {count} zusätzlichen Stopps fortfahren",
       "continueNone": "Ohne zusätzliche Stopps fortfahren",
+      "adoptAll": "Alle vorgeschlagenen Stopps übernehmen und fortfahren",
       "addAria": "{name} zur Route hinzufügen",
       "removeAria": "{name} von der Route entfernen"
     },
@@ -202,7 +203,6 @@
     "switchLanguageAria": "Sprache auf {language} umstellen"
   },
   "auth": {
-    "evaluating": "Vorschlag wird evaluiert …",
     "completed": "Bewertung abgeschlossen",
     "loginTitle": "Anmelden oder registrieren",
     "verifyTitle": "Bitte bestätige deine E-Mail-Adresse",

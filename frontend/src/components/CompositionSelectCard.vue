@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { Composition } from '@/types/api'
 import AppIcon from '@/components/AppIcon.vue'
 import { useLocaleFormat } from '@/composables/useLocaleFormat'
@@ -12,17 +13,25 @@ import {
   mdiSpeedometer,
   mdiChevronLeft,
   mdiChevronRight,
+  mdiTrainCarPassenger,
+  mdiArrowLeftRight,
+  mdiSpeedometerMedium,
+  mdiCalendarSync,
 } from '@mdi/js'
 
 // compact: display mode — show only the name and capacities, hiding the
-// description and physical specs (weight / max. speed).
+// description and physical specs (weight / max. speed). routeStats: the
+// headline route figures (distance/speed/frequency) merged in alongside the
+// composition, shown only once a route exists (compact mode).
 const props = defineProps<{
   compositions: Composition[]
   selectedId?: string | null
   compact?: boolean
+  routeStats?: { distanceKm: number; avgSpeedKmh: number; frequencies: string[] } | null
 }>()
 const emit = defineEmits<{ select: [compId: string] }>()
 
+const { t, te } = useI18n()
 const { formatInt } = useLocaleFormat()
 
 const direction = ref<'forward' | 'backward'>('forward')
@@ -67,6 +76,23 @@ const capacityStats = computed(() => {
   return stats
 })
 
+// Merged in from the former RouteStatsCard — headline route figures shown
+// below the composition once a route exists (display mode only).
+const frequencyLabel = computed(() =>
+  (props.routeStats?.frequencies ?? [])
+    .map((f) => (te(`proposal.frequency.${f}`) ? t(`proposal.frequency.${f}`) : f))
+    .join(', '),
+)
+const routeStatRows = computed(() => {
+  const rs = props.routeStats
+  if (!rs) return []
+  return [
+    { icon: mdiArrowLeftRight, value: `${formatInt(rs.distanceKm)} km` },
+    { icon: mdiSpeedometerMedium, value: `${formatInt(rs.avgSpeedKmh)} km/h` },
+    { icon: mdiCalendarSync, value: frequencyLabel.value },
+  ]
+})
+
 const transitionName = computed(() => `slide-${direction.value}`)
 
 // Keep the parent holding a valid selection: emit a default whenever the list
@@ -96,7 +122,10 @@ watch(
         >
           <AppIcon :path="mdiChevronLeft" :size="20" />
         </button>
-        <p class="text-base font-bold text-primary-50">{{ current.composition_id }}</p>
+        <span class="flex items-center gap-2">
+          <AppIcon :path="mdiTrainCarPassenger" :size="18" color="var(--p-primary-50)" />
+          <p class="text-base font-bold text-primary-50">{{ current.composition_id }}</p>
+        </span>
         <button
           v-if="count > 1"
           class="shrink-0 cursor-pointer text-primary-50/40 transition hover:text-primary-50"
@@ -123,7 +152,7 @@ watch(
 
       <!-- Animated: capacity + physical specs -->
       <Transition :name="transitionName" mode="out-in">
-        <div :key="current?.composition_id" class="flex flex-col items-center gap-4 mt-4">
+        <div :key="current?.composition_id" class="flex flex-col items-center gap-4">
           <!-- Capacity -->
           <div v-if="capacityStats.length > 0" class="flex justify-center gap-8">
             <div
@@ -149,6 +178,17 @@ watch(
               <span class="text-base font-semibold"
                 >max. {{ formatInt(current.routing.max_speed_kmh) }} km/h</span
               >
+            </div>
+          </div>
+
+          <!-- Route stats (merged in from RouteStatsCard, display mode only) -->
+          <div
+            v-if="routeStatRows.length > 0"
+            class="flex flex-wrap justify-center gap-x-8 gap-y-4 text-primary-50/70"
+          >
+            <div v-for="stat in routeStatRows" :key="stat.icon" class="flex items-center gap-2">
+              <AppIcon :path="stat.icon" :size="20" />
+              <span class="text-base font-semibold">{{ stat.value }}</span>
             </div>
           </div>
         </div>

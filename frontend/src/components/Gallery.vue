@@ -339,22 +339,28 @@ const iconBtnClass =
         <!-- From A to B: two stop inputs -->
         <template v-if="mode === 'aToB'">
           <StopSelect :stops="store.stops" @select="fromStop = $event">
-            <div class="flex flex-col rounded-full px-4 py-1.5 hover:bg-primary-50/10">
+            <div class="flex flex-col rounded-full px-4 py-1.5">
               <span class="text-xs font-semibold text-primary-50">{{
                 t('gallery.search.from')
               }}</span>
-              <span class="text-sm" :class="fromStop ? 'text-primary-50' : 'text-primary-50/40'">
+              <span
+                class="text-sm hover:text-primary-50/80"
+                :class="fromStop ? 'text-primary-50' : 'text-primary-50/40'"
+              >
                 {{ fromStop?.name ?? t('gallery.search.fromPlaceholder') }}
               </span>
             </div>
           </StopSelect>
           <div class="h-8 w-px bg-primary-50/15"></div>
           <StopSelect :stops="store.stops" @select="toStop = $event">
-            <div class="flex flex-col rounded-full px-4 py-1.5 hover:bg-primary-50/10">
+            <div class="flex flex-col rounded-full px-4 py-1.5">
               <span class="text-xs font-semibold text-primary-50">{{
                 t('gallery.search.to')
               }}</span>
-              <span class="text-sm" :class="toStop ? 'text-primary-50' : 'text-primary-50/40'">
+              <span
+                class="text-sm hover:text-primary-50/80"
+                :class="toStop ? 'text-primary-50' : 'text-primary-50/40'"
+              >
                 {{ toStop?.name ?? t('gallery.search.toPlaceholder') }}
               </span>
             </div>
@@ -364,11 +370,14 @@ const iconBtnClass =
         <!-- By Station: one stop input -->
         <template v-else-if="mode === 'byStation'">
           <StopSelect :stops="store.stops" @select="stationStop = $event">
-            <div class="flex flex-col rounded-full px-4 py-1.5 hover:bg-primary-50/10">
+            <div class="flex flex-col rounded-full px-4 py-1.5">
               <span class="text-xs font-semibold text-primary-50">{{
                 t('gallery.search.station')
               }}</span>
-              <span class="text-sm" :class="stationStop ? 'text-primary-50' : 'text-primary-50/40'">
+              <span
+                class="text-sm hover:text-primary-50/80"
+                :class="stationStop ? 'text-primary-50' : 'text-primary-50/40'"
+              >
                 {{ stationStop?.name ?? t('gallery.search.stationPlaceholder') }}
               </span>
             </div>
@@ -378,11 +387,14 @@ const iconBtnClass =
         <!-- By Country: same picker style as the stop selection -->
         <template v-else>
           <CountrySelect :countries="countryOptions" @select="countryCode = $event">
-            <div class="flex flex-col rounded-full px-4 py-1.5 hover:bg-primary-50/10">
+            <div class="flex flex-col rounded-full px-4 py-1.5">
               <span class="text-xs font-semibold text-primary-50">{{
                 t('gallery.search.country')
               }}</span>
-              <span class="text-sm" :class="countryCode ? 'text-primary-50' : 'text-primary-50/40'">
+              <span
+                class="text-sm hover:text-primary-50/80"
+                :class="countryCode ? 'text-primary-50' : 'text-primary-50/40'"
+              >
                 {{ selectedCountryName ?? t('gallery.search.countryPlaceholder') }}
               </span>
             </div>

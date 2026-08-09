@@ -2,6 +2,7 @@
 import { onMounted, ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useStore } from '@/stores/store'
+import { useToastStore } from '@/stores/toastStore'
 import type {
   EvaluationResponse,
   MapScope,
@@ -17,7 +18,6 @@ import Skeleton from 'primevue/skeleton'
 import AppIcon from '@/components/AppIcon.vue'
 import StopSelect from '@/components/StopSelect.vue'
 import CompositionSelectCard from '@/components/CompositionSelectCard.vue'
-import RouteStatsCard from '@/components/RouteStatsCard.vue'
 import EvaluationPanel from '@/components/EvaluationPanel.vue'
 import MapView from '@/components/MapView.vue'
 import {
@@ -41,6 +41,7 @@ const emit = defineEmits<{ back: [] }>()
 
 const { t } = useI18n()
 const store = useStore()
+const toastStore = useToastStore()
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5050'
 
@@ -416,7 +417,6 @@ function applyPlan(json: CalcResponse, publish = false) {
   if (store.authChoice === 'none') {
     pendingPublish.value = true
     store.openAuthModal({
-      phase: 'choose',
       context: 'evaluation',
       co2SavingsT: json.summary?.co2_savings_t_per_year ?? null,
     })
@@ -452,6 +452,7 @@ async function doPublish() {
     const resp = await publishProposal(body, store.authHeaders())
     publishedProposalId.value = resp.proposal_id
     saved.value = true
+    toastStore.addToast('success', t('proposal.saved'))
   } catch (err) {
     publishError.value = err instanceof ProposalsError ? err.message : t('proposal.publishError')
   }
@@ -464,28 +465,18 @@ async function evaluate() {
   evaluateError.value = null
   saved.value = false
   publishError.value = null
-  // Auth gate: a visitor who hasn't chosen yet sees the "Evaluating proposal …"
-  // popup while the calc runs; it flips to the register/guest prompt in
-  // applyPlan(). The calc itself runs tokenless (compute-only) regardless.
-  if (store.authChoice === 'none') {
-    store.openAuthModal({ phase: 'evaluating', context: 'evaluation', co2SavingsT: null })
-  }
   // First pass: "suggest" routes exactly the caller's stops and reports the
-  // candidate stops along the way, without adding any automatically.
+  // candidate stops along the way, without adding any automatically. The calc
+  // itself runs tokenless (compute-only); the register/guest prompt only
+  // appears once a result is ready, in applyPlan().
   const json = await requestCalc(
     validStops.map((s) => s.selectedStop!.stop_id),
     'suggest',
   )
-  if (!json) {
-    store.closeAuthModal() // calc failed (mode already back to 'edit')
-    return
-  }
+  if (!json) return
   const suggestions = json.suggested_stops ?? []
   if (suggestions.length > 0) {
     // Hand the choice to the user inline (suggest mode) rather than a modal.
-    // Close the auth "evaluating" gate — the choose-phase gate reopens later via
-    // applyPlan() when they Continue.
-    store.closeAuthModal()
     basePlan.value = json
     suggestedStops.value = suggestions
     suggestSelected.value = new Set()
@@ -528,17 +519,16 @@ async function confirmStopSelection(selectedIds: string[]) {
   }
   for (const s of chosen) insertSuggestedStop(s)
   currentMode.value = 'loading'
-  // Re-entering the loading window — reopen the gate's "evaluating" phase.
-  if (store.authChoice === 'none') {
-    store.openAuthModal({ phase: 'evaluating', context: 'evaluation', co2SavingsT: null })
-  }
   const stopIds = itinerary.value.filter((s) => s.selectedStop).map((s) => s.selectedStop!.stop_id)
   const json = await requestCalc(stopIds, 'off')
-  if (!json) {
-    store.closeAuthModal()
-    return
-  }
+  if (!json) return
   applyPlan(json, true)
+}
+
+// "Adopt all suggested stops and continue" — same path as confirming a manual
+// selection, just pre-filled with every candidate's id.
+function adoptAllSuggested() {
+  confirmStopSelection(suggestedStops.value.map((s) => s.stop_id))
 }
 
 // User backed out of suggest mode without continuing — abandon this evaluation
@@ -1317,91 +1307,101 @@ onMounted(async () => {
             </h3>
             <p class="text-sm text-primary-50/60">{{ t('proposal.suggestions.subtitle') }}</p>
           </div>
-          <DataTable
-            v-if="currentMode === 'suggest'"
-            :value="suggestRows"
-            data-key="stopId"
-            :pt="{
-              table: { class: 'w-full border-collapse' },
-              thead: { class: 'hidden' },
-              row: { class: '!bg-transparent border-0' },
-              bodyCell: { class: '!bg-transparent border-0 !p-0' },
-            }"
-            class="mb-4"
-          >
-            <!-- Timeline bubble: plain dot for confirmed stops, a clickable
-                 plus/close bubble for proposed ones. -->
-            <Column style="width: 2.5rem" :pt="{ bodyCell: { class: 'timeline-col !p-0' } }">
-              <template #body="{ data: row, index }">
-                <div class="absolute inset-0 flex items-center justify-center">
-                  <div
-                    class="absolute left-1/2 w-0.5 -translate-x-1/2 bg-primary-50/30"
-                    :class="[
-                      index === 0 ? 'top-1/2' : 'top-0',
-                      index === suggestRows.length - 1 ? 'bottom-1/2' : 'bottom-0',
-                    ]"
-                  />
-                  <div
-                    v-if="row.kind === 'confirmed'"
-                    class="relative z-10 rounded-full bg-primary-50"
-                    :class="
-                      index === suggestEndpointIdx.first || index === suggestEndpointIdx.last
-                        ? 'h-4 w-4'
-                        : 'h-3 w-3'
-                    "
-                  />
-                  <button
-                    v-else
-                    type="button"
-                    class="relative z-10 flex h-5 w-5 cursor-pointer items-center justify-center rounded-full transition-colors"
-                    :class="
-                      row.selected ? 'bg-primary-50' : 'bg-primary-50/30 hover:bg-primary-50/50'
-                    "
-                    :aria-label="
-                      row.selected
-                        ? t('proposal.suggestions.removeAria', { name: row.name })
-                        : t('proposal.suggestions.addAria', { name: row.name })
-                    "
-                    @click="toggleSuggested(row.stopId)"
-                  >
-                    <AppIcon
-                      :path="row.selected ? mdiClose : mdiPlus"
-                      :size="14"
-                      :color="row.selected ? '#23263d' : 'var(--p-primary-50)'"
+          <!-- Capped to ~7 visible rows so a long candidate list doesn't push the
+               Continue button off-screen; the bottom fade signals there's more
+               to scroll to, so picks below the fold aren't missed. -->
+          <div v-if="currentMode === 'suggest'" class="relative mb-4">
+            <DataTable
+              :value="suggestRows"
+              data-key="stopId"
+              :pt="{
+                table: { class: 'w-full border-collapse' },
+                thead: { class: 'hidden' },
+                row: { class: '!bg-transparent border-0' },
+                bodyCell: { class: '!bg-transparent border-0 !p-0' },
+              }"
+              class="max-h-[16rem] overflow-y-auto"
+            >
+              <!-- Timeline bubble: plain dot for confirmed stops, a clickable
+                   plus/close bubble for proposed ones. -->
+              <Column style="width: 2.5rem" :pt="{ bodyCell: { class: 'timeline-col !p-0' } }">
+                <template #body="{ data: row, index }">
+                  <div class="absolute inset-0 flex items-center justify-center">
+                    <div
+                      class="absolute left-1/2 w-0.5 -translate-x-1/2 bg-primary-50/30"
+                      :class="[
+                        index === 0 ? 'top-1/2' : 'top-0',
+                        index === suggestRows.length - 1 ? 'bottom-1/2' : 'bottom-0',
+                      ]"
                     />
-                  </button>
-                </div>
-              </template>
-            </Column>
+                    <div
+                      v-if="row.kind === 'confirmed'"
+                      class="relative z-10 rounded-full bg-primary-50"
+                      :class="
+                        index === suggestEndpointIdx.first || index === suggestEndpointIdx.last
+                          ? 'h-4 w-4'
+                          : 'h-3 w-3'
+                      "
+                    />
+                    <button
+                      v-else
+                      type="button"
+                      class="relative z-10 flex h-5 w-5 cursor-pointer items-center justify-center rounded-full transition-colors"
+                      :class="
+                        row.selected ? 'bg-primary-50' : 'bg-primary-50/30 hover:bg-primary-50/50'
+                      "
+                      :aria-label="
+                        row.selected
+                          ? t('proposal.suggestions.removeAria', { name: row.name })
+                          : t('proposal.suggestions.addAria', { name: row.name })
+                      "
+                      @click="toggleSuggested(row.stopId)"
+                    >
+                      <AppIcon
+                        :path="row.selected ? mdiClose : mdiPlus"
+                        :size="14"
+                        :color="row.selected ? '#23263d' : 'var(--p-primary-50)'"
+                      />
+                    </button>
+                  </div>
+                </template>
+              </Column>
 
-            <!-- Stop name (+ added time for proposals) -->
-            <Column>
-              <template #body="{ data: row, index }">
-                <div class="flex items-center gap-2 px-3 py-2">
-                  <span
-                    class="leading-tight"
-                    :class="
-                      row.kind === 'confirmed'
-                        ? index === suggestEndpointIdx.first || index === suggestEndpointIdx.last
-                          ? 'text-2xl font-bold text-primary-50'
-                          : 'text-lg font-semibold text-primary-50'
-                        : row.selected
-                          ? 'text-lg font-semibold text-primary-50'
-                          : 'text-lg text-primary-50/40'
-                    "
-                    >{{ row.name }}</span
-                  >
-                  <span
-                    v-if="row.kind === 'suggested' && row.addedMin != null"
-                    class="text-xs tabular-nums"
-                    :class="row.selected ? 'text-primary-50/70' : 'text-primary-50/30'"
-                  >
-                    {{ t('proposal.suggestions.addedTime', { minutes: Math.round(row.addedMin) }) }}
-                  </span>
-                </div>
-              </template>
-            </Column>
-          </DataTable>
+              <!-- Stop name (+ added time for proposals) -->
+              <Column>
+                <template #body="{ data: row, index }">
+                  <div class="flex items-center gap-2 px-3 py-2">
+                    <span
+                      class="leading-tight"
+                      :class="
+                        row.kind === 'confirmed'
+                          ? index === suggestEndpointIdx.first || index === suggestEndpointIdx.last
+                            ? 'text-2xl font-bold text-primary-50'
+                            : 'text-lg font-semibold text-primary-50'
+                          : row.selected
+                            ? 'text-lg font-semibold text-primary-50'
+                            : 'text-lg text-primary-50/40'
+                      "
+                      >{{ row.name }}</span
+                    >
+                    <span
+                      v-if="row.kind === 'suggested' && row.addedMin != null"
+                      class="text-xs tabular-nums"
+                      :class="row.selected ? 'text-primary-50/70' : 'text-primary-50/30'"
+                    >
+                      {{
+                        t('proposal.suggestions.addedTime', { minutes: Math.round(row.addedMin) })
+                      }}
+                    </span>
+                  </div>
+                </template>
+              </Column>
+            </DataTable>
+            <div
+              v-if="suggestRows.length > 7"
+              class="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-sapphire to-transparent"
+            />
+          </div>
 
           <!-- Display / Loading mode table -->
           <DataTable
@@ -1477,10 +1477,12 @@ onMounted(async () => {
             </Column>
           </DataTable>
 
-          <!-- Itinerary controls: Add Stop / Edit + Swap on the left, Cancel
-               Edit on the right. -->
-          <div v-if="currentMode !== 'loading'" class="flex items-center justify-between gap-2">
-            <div class="flex items-center gap-2">
+          <!-- Itinerary controls: Back to edit / Edit + Swap on the left (suggest
+               / display), Cancel Edit on the right (re-edit). In edit mode, Add
+               Stop + Swap move into the centered middle group instead, so they
+               sit centered under the itinerary rather than pinned left. -->
+          <div v-if="currentMode !== 'loading'" class="flex items-center gap-2">
+            <div class="flex flex-1 items-center gap-2">
               <!-- Back to edit (suggest) — abandon the suggestion step, itinerary
                    untouched. -->
               <button
@@ -1492,41 +1494,50 @@ onMounted(async () => {
                 {{ t('proposal.suggestions.backToEdit') }}
               </button>
 
-              <!-- Add Stop (edit + re-edit) -->
-              <StopSelect
-                v-if="currentMode === 'edit'"
-                :stops="store.stops"
-                :disabled-ids="usedStopIds"
-                @select="addStop"
-              >
-                <button :class="pillClass">
-                  <AppIcon :path="mdiPlus" :size="16" />
-                  {{ t('proposal.addStop') }}
-                </button>
-              </StopSelect>
-
               <!-- Edit (display) -->
               <button v-if="currentMode === 'display'" :class="pillClass" @click="startEdit">
                 <AppIcon :path="mdiPencil" :size="16" />
                 {{ t('proposal.edit') }}
               </button>
 
-              <!-- Swap direction (both modes) -->
+              <!-- Swap direction (suggest / display — edit mode's swap sits in
+                   the centered group below, beside Add Stop). -->
+              <button
+                v-if="showSwap && currentMode !== 'edit'"
+                :class="pillClass"
+                @click="swapDirection"
+              >
+                <AppIcon :path="mdiSwapVertical" :size="16" />
+              </button>
+            </div>
+
+            <!-- Add Stop + Swap, centered as a pair under the itinerary. -->
+            <div v-if="currentMode === 'edit'" class="flex items-center gap-2">
+              <StopSelect :stops="store.stops" :disabled-ids="usedStopIds" @select="addStop">
+                <button :class="pillClass">
+                  <AppIcon :path="mdiPlus" :size="16" />
+                  {{ t('proposal.addStop') }}
+                </button>
+              </StopSelect>
+
               <button v-if="showSwap" :class="pillClass" @click="swapDirection">
                 <AppIcon :path="mdiSwapVertical" :size="16" />
               </button>
             </div>
 
-            <!-- Cancel Edit (re-edit) -->
-            <button v-if="showCancelEdit" :class="pillClass" @click="cancelEdit">
-              <AppIcon :path="mdiClose" :size="16" />
-              {{ t('proposal.cancelEdit') }}
-            </button>
+            <div class="flex flex-1 items-center justify-end gap-2">
+              <!-- Cancel Edit (re-edit) -->
+              <button v-if="showCancelEdit" :class="pillClass" @click="cancelEdit">
+                <AppIcon :path="mdiClose" :size="16" />
+                {{ t('proposal.cancelEdit') }}
+              </button>
+            </div>
           </div>
         </div>
 
         <!-- Composition card — switchable in edit, locked to the used one in
-             display (where it's also collapsed to name + capacities only) -->
+             display (where it also merges in the headline route figures,
+             once a route exists) -->
         <div
           v-if="store.compositionsStatus === 'success' && store.compositions.length > 0"
           class="flex flex-col gap-6"
@@ -1535,14 +1546,8 @@ onMounted(async () => {
             :compositions="compositionCards"
             :selected-id="selectedCompositionId"
             :compact="currentMode === 'display' || currentMode === 'suggest'"
+            :route-stats="currentMode === 'display' ? routeStats : null"
             @select="(id) => (selectedCompositionId = id)"
-          />
-          <!-- Headline route figures — display mode only, once a route exists -->
-          <RouteStatsCard
-            v-if="currentMode === 'display' && routeStats"
-            :distance-km="routeStats.distanceKm"
-            :avg-speed-kmh="routeStats.avgSpeedKmh"
-            :frequencies="routeStats.frequencies"
           />
         </div>
         <div
@@ -1585,7 +1590,8 @@ onMounted(async () => {
         </div>
 
         <!-- Continue button (suggest mode) — replaces Evaluate; carries the count
-             of proposed stops the user opted in. -->
+             of proposed stops the user opted in. Adopt-all is a tertiary shortcut
+             beside it for taking every candidate without picking one by one. -->
         <div v-if="currentMode === 'suggest'" class="flex flex-col items-center gap-2">
           <button
             class="flex cursor-pointer items-center gap-2 rounded-full bg-primary-50/10 px-6 py-2 text-md text-primary-50 transition hover:bg-primary-50/20"
@@ -1597,6 +1603,13 @@ onMounted(async () => {
                 : t('proposal.suggestions.continue', suggestSelectedCount)
             }}
             <span>→</span>
+          </button>
+          <button
+            type="button"
+            class="cursor-pointer text-sm text-primary-50/50 underline-offset-2 transition hover:text-primary-50/80 hover:underline"
+            @click="adoptAllSuggested"
+          >
+            {{ t('proposal.suggestions.adoptAll') }}
           </button>
         </div>
 
