@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import json
 
+from models.evaluation.summary import build_summary_row
 from adapters.proposal.filter_builder import (
     ALL_FILTER_KEYS,
     ARRAY_COLUMNS,
@@ -290,6 +291,11 @@ def proposal_to_response_dict(record: dict, route: dict, evaluation: dict) -> di
         "calc_version": record["calc_version"],
         "route_fingerprint": record["route_fingerprint"],
         "request": request,
+        # §5.4 gallery KPIs, from the exact route/evaluation this response
+        # carries — the same build_summary_row() the calc endpoint and the
+        # publish projection use, so a loaded proposal's demand/modal-shift
+        # figures match what /calc showed when it was built.
+        "summary": build_summary_row(route, evaluation),
         "route": route,
         "evaluation": evaluation,
     }

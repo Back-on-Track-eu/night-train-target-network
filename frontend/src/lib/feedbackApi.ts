@@ -5,10 +5,12 @@
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5050'
 
-/** Request body for a cost-factor feedback submission (anonymous path). */
+/** Request body for a cost-factor feedback submission. */
 export interface FeedbackPayload {
-  /** Reply-to address for the anonymous submitter (backend requires it). */
-  email: string
+  /** Reply-to address for an anonymous submitter. Omitted when submitting as
+   * a logged-in user — the backend derives the account's email from the
+   * bearer token instead (see `authHeaders` on `submitFeedback`). */
+  email?: string
   /** Auto-generated subject line, max 200 chars (backend-enforced). */
   subject: string
   /** Free-text category taxonomy value (protocol constant). */
@@ -49,12 +51,15 @@ function extractErrorMessage(body: unknown, status: number): string {
  * FeedbackError carrying a readable message (backend `details`/`message`
  * where present) on any network or non-2xx failure.
  */
-export async function submitFeedback(payload: FeedbackPayload): Promise<FeedbackSuccess> {
+export async function submitFeedback(
+  payload: FeedbackPayload,
+  authHeaders: Record<string, string> = {},
+): Promise<FeedbackSuccess> {
   let response: Response
   try {
     response = await fetch(`${BASE_URL}/api/feedback`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify(payload),
     })
   } catch (err) {

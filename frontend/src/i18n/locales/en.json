@@ -41,7 +41,7 @@
         "route": "Full Route",
         "per_trip_pair": "By trip pair",
         "per_trip_pair_per_country": "By country",
-        "per_trip_pair_per_od": "By route section",
+        "per_trip_pair_per_section": "By route section",
         "per_trip_per_stop": "By stop"
       },
       "norms": {
@@ -55,6 +55,23 @@
         "revenue": "Revenue",
         "cost": "Cost",
         "subsidies": "Necessary Subsidies"
+      },
+      "demand": {
+        "estimate": "Mock Data",
+        "estimateHint": "Placeholder figures derived from route metrics — not yet from a demand model.",
+        "trips": "Passenger trips",
+        "fromAir": "Shifted from air",
+        "fromCar": "Shifted from car",
+        "co2Saved": "CO₂ saved",
+        "co2Intensity": "CO₂ intensity",
+        "subsidyPerCo2": "Subsidy per t CO₂",
+        "units": {
+          "tripsPerYear": "trips / year",
+          "paxKm": "pax·km",
+          "tCo2PerYear": "t CO₂ / year",
+          "gPerPaxKm": "g CO₂ / pax·km",
+          "eurPerTCo2": "€ / t CO₂"
+        }
       },
       "groups": {
         "cost": "Cost",
@@ -180,8 +197,9 @@
       "km": "{value} km",
       "stops": "({count} stop) | ({count} stops)",
       "co2PerYear": "{value} t CO₂/yr",
-      "notImplemented": "Not implemented yet",
-      "like": "Like"
+      "like": "Like",
+      "loginToLike": "Log in with an account to like proposals.",
+      "likeFailed": "Could not update your like. Please try again."
     },
     "back": "Gallery",
     "cta": {

@@ -19,6 +19,7 @@ import GalleryMap from '@/components/GalleryMap.vue'
 import { useStore } from '@/stores/store'
 import { useLocaleFormat } from '@/composables/useLocaleFormat'
 import { fetchProposals, fetchProposalRoute, ProposalsError } from '@/lib/proposalsApi'
+import type { GallerySearchSeed } from '@/lib/proposalPrefill'
 import type {
   Stop,
   ProposalSummary,
@@ -30,7 +31,7 @@ import type {
   GalleryMapRoute,
 } from '@/types/api'
 
-const emit = defineEmits<{ create: []; open: [proposalId: number] }>()
+const emit = defineEmits<{ create: [seed: GallerySearchSeed]; open: [proposalId: number] }>()
 
 const { t } = useI18n()
 const store = useStore()
@@ -46,6 +47,17 @@ const fromStop = ref<Stop | null>(null)
 const toStop = ref<Stop | null>(null)
 const stationStop = ref<Stop | null>(null)
 const countryCode = ref<string | null>(null)
+
+// Current search-bar state, handed to "Suggest a new route" so the new
+// proposal's itinerary can be prefilled from whatever the user was searching
+// for instead of two arbitrary stops.
+const searchSeed = computed<GallerySearchSeed>(() => ({
+  mode: mode.value,
+  fromStop: fromStop.value,
+  toStop: toStop.value,
+  stationStop: stationStop.value,
+  countryCode: countryCode.value,
+}))
 
 // Stops the active search targeted — handed to each card so it can pin the
 // matched stop(s) as itinerary anchors. Empty for by-country search.
@@ -242,12 +254,21 @@ async function ensureRoutes(list: ProposalSummary[]): Promise<void> {
 }
 
 // Hovering a route on the map scrolls its card into view and flashes its
-// background briefly. Deduped so the continuous mousemove stream over one route
-// only fires once (until the pointer leaves and re-enters).
+// background briefly. Scrolled manually (not via scrollIntoView) so the
+// target lands relative to the sticky map's own bounds rather than the raw
+// window edge: the first card's top aligns with the map's top, the last
+// card's bottom aligns with the map's bottom, and everything in between is
+// just centered in the viewport — mirroring where the hovered route sits
+// within the map itself (near the top edge, near the bottom edge, or
+// somewhere in the middle). Deduped so the continuous mousemove stream over
+// one route only fires once (until the pointer leaves and re-enters).
 const cardsContainer = ref<HTMLElement | null>(null)
 const flashedKey = ref<string | null>(null)
 // Set while a card is hovered; drives the map's route highlight (card → map).
 const cardHoverKey = ref<string | null>(null)
+// Keep in sync with the sticky map wrapper's `top-6` class below — its top and
+// bottom gaps from the viewport are equal (top-6 + h-[calc(100vh-3rem)]).
+const MAP_EDGE_OFFSET_PX = 24
 let lastScrolledKey: string | null = null
 let flashTimer: number | undefined
 function onHoverRoute(key: string | null): void {
@@ -257,9 +278,20 @@ function onHoverRoute(key: string | null): void {
   }
   if (key === lastScrolledKey) return
   lastScrolledKey = key
-  cardsContainer.value
-    ?.querySelector<HTMLElement>(`[data-proposal="${key}"]`)
-    ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  const card = cardsContainer.value?.querySelector<HTMLElement>(`[data-proposal="${key}"]`)
+  if (card) {
+    const index = proposals.value.findIndex((p) => proposalKey(p) === key)
+    const rect = card.getBoundingClientRect()
+    let desiredViewportTop: number
+    if (index === 0) {
+      desiredViewportTop = MAP_EDGE_OFFSET_PX
+    } else if (index === proposals.value.length - 1) {
+      desiredViewportTop = window.innerHeight - MAP_EDGE_OFFSET_PX - rect.height
+    } else {
+      desiredViewportTop = (window.innerHeight - rect.height) / 2
+    }
+    window.scrollTo({ top: window.scrollY + rect.top - desiredViewportTop, behavior: 'smooth' })
+  }
   flashedKey.value = key
   if (flashTimer) clearTimeout(flashTimer)
   flashTimer = window.setTimeout(() => {
@@ -433,15 +465,21 @@ const iconBtnClass =
           <AppIcon :path="sortDir === 'asc' ? mdiSortAscending : mdiSortDescending" :size="18" />
         </button>
       </div>
-      <button type="button" :class="[ctaClass, 'ml-auto']" @click="emit('create')">
+      <button type="button" :class="[ctaClass, 'ml-auto']" @click="emit('create', searchSeed)">
         <AppIcon :path="mdiPlus" :size="18" />
         {{ t('gallery.cta.create') }}
       </button>
     </div>
 
-    <!-- Results: one column of cards (left) + a browser-height sticky map (right) -->
+    <!-- Results: one column of cards (left) + a browser-height sticky map (right).
+         The left column's trailing pb-[calc(100vh-3rem)] matches the map's own
+         height so a sticky element's unavoidable "catch up and rise" as it nears
+         its containing block's bottom happens entirely within that empty
+         padding, after the last real card/CTA — not while real content is still
+         on screen. Without it, the map visibly detaches and creeps upward while
+         the trailing CTA is still visible, well before the column truly ends. -->
     <div class="flex gap-6">
-      <div class="flex w-96 shrink-0 flex-col gap-4">
+      <div class="flex w-96 shrink-0 flex-col gap-4 pb-[calc(100vh-3rem)]">
         <p v-if="errorMsg" class="text-sm text-red-400">{{ errorMsg }}</p>
 
         <div v-if="proposals.length" ref="cardsContainer" class="flex flex-col gap-4">
@@ -474,7 +512,7 @@ const iconBtnClass =
 
         <!-- Trailing CTA -->
         <div class="flex justify-center pb-4">
-          <button type="button" :class="ctaClass" @click="emit('create')">
+          <button type="button" :class="ctaClass" @click="emit('create', searchSeed)">
             <AppIcon :path="mdiPlus" :size="18" />
             {{ t('gallery.cta.create') }}
           </button>

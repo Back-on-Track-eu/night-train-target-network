@@ -119,7 +119,13 @@ export const VIEW_KEYS = [
   'route',
   'per_trip_pair',
   'per_trip_pair_per_country',
-  'per_trip_pair_per_od',
+  // "By route section" — backed by the backend's physical-section view
+  // (per_trip_pair_per_section), NOT the OD ticket-relation view. The section
+  // cells are pre-aggregated and normalised against their own section physics,
+  // so the panel reads them straight (no client-side summing). The OD view is
+  // still served (per_trip_pair_per_od on EvaluationViews) but no longer shown
+  // as a tab.
+  'per_trip_pair_per_section',
   'per_trip_per_stop',
 ] as const
 export type ViewKey = (typeof VIEW_KEYS)[number]
@@ -412,6 +418,18 @@ export interface EvaluationResponse {
 // is read by the builder (the auth gate); the rest passes through untyped.
 export interface ProposalCalcSummary {
   co2_savings_t_per_year: number | null
+  // Demand & modal-shift KPIs — route-level, annual. PLACEHOLDER values
+  // (deterministic fakes derived from route metrics) until models/demand/
+  // lands; demand_kpis_placeholder stays true, so the UI must present these as
+  // estimates. Source: backend models/evaluation/summary.py.
+  demand_trips_per_year?: number
+  shift_air_trips_per_year?: number
+  shift_air_trip_km_per_year?: number
+  shift_car_trips_per_year?: number
+  shift_car_trip_km_per_year?: number
+  subsidy_eur_per_t_co2?: number | null
+  co2_g_per_pax_km?: number
+  demand_kpis_placeholder?: boolean
   [key: string]: unknown
 }
 
@@ -419,15 +437,19 @@ export interface ProposalCalcResponse<TRoute = unknown> {
   route_builder_version: string
   calc_version: string
   route_fingerprint: string
-  // True when served from the server-side compute cache.
-  cache_hit: boolean
+  // True when served from the server-side compute cache. Only present on a
+  // fresh calc — a proposal hydrated from GET /api/proposal/<id> (same shape,
+  // reused by ProposalViewport's applyPlan()) has no cache concept.
+  cache_hit?: boolean
   // Resolved request echo — defaults applied, scenario_id concrete.
   request: Record<string, unknown>
   // Only present when the request used auto_stop_addition="suggest".
   suggested_stops?: SuggestedStop[]
-  // Gallery KPI summary — mostly unused by the builder; the auth gate reads
-  // co2_savings_t_per_year for the "CO₂ saved" line.
-  summary: ProposalCalcSummary
+  // Gallery KPI summary — read by the auth gate (co2_savings_t_per_year) and
+  // the EvaluationPanel's demand/modal-shift box. Also returned by GET
+  // /api/proposal/<id> (see ProposalDetailResponse), so a loaded proposal
+  // populates the same box.
+  summary?: ProposalCalcSummary
   route: TRoute
   evaluation: {
     models: EvaluationModels
@@ -634,6 +656,13 @@ export interface PublishResponse {
   name: string
 }
 
+// POST/DELETE /api/proposal/<id>/like — both return the resulting state
+// directly (no need to compute the toggle client-side).
+export interface LikeResponse {
+  count: number
+  liked_by_me: boolean
+}
+
 // --- GET /api/proposal/<id> -------------------------------------------------
 // The full stored envelopes. The gallery map only needs the route geometry and
 // the endpoint stops, so we type just those fields (the route object carries
@@ -645,25 +674,53 @@ export interface ProposalRouteStopPoint {
   lon: number
 }
 
+// The gallery map only reads the route geometry and endpoint stops — this is
+// the default TRoute for callers (like Gallery.vue) that don't need more.
+// A caller needing the full route (ProposalViewport.vue, to reuse the same
+// applyPlan() the calc endpoint feeds) passes its own richer route type as
+// ProposalDetailResponse<TRoute> instead — the wire shape is identical to
+// POST /api/proposal/calc's `route` either way (see proposal_serialize.py's
+// proposal_to_response_dict docstring).
+export interface GalleryRouteShape {
+  geometries: { id: string; coords: [number, number][] }[]
+  trip_pairs: {
+    outbound: {
+      segments: {
+        from_stop: ProposalRouteStopPoint
+        to_stop: ProposalRouteStopPoint
+        // Country codes in the order the segment traverses them.
+        country_distance_shares: Record<string, number>
+      }[]
+    }
+  }[]
+}
+
 // GET /api/proposal/<id> — flat compute-response shape
 // (proposal_serialize.py::proposal_to_response_dict): `route`/`evaluation` at
-// the top level, plus metadata. The gallery map only reads the route geometry
-// and endpoint stops, so only those are typed here.
-export interface ProposalDetailResponse {
-  route: {
-    geometries: { id: string; coords: [number, number][] }[]
-    trip_pairs: {
-      outbound: {
-        segments: {
-          from_stop: ProposalRouteStopPoint
-          to_stop: ProposalRouteStopPoint
-          // Country codes in the order the segment traverses them.
-          country_distance_shares: Record<string, number>
-        }[]
-      }
-    }[]
+// the top level, plus proposal metadata (identical to POST
+// /api/proposal/publish's response).
+export interface ProposalDetailResponse<TRoute = GalleryRouteShape> {
+  proposal_id: number
+  proposal_version: number
+  user_id: number | null
+  user_name: string | null
+  name: string
+  created_at: string | null
+  updated_at: string | null
+  route_builder_version: string
+  calc_version: string
+  route_fingerprint: string
+  request: Record<string, unknown>
+  // §5.4 gallery KPIs (demand / modal shift / emissions) — recomputed from the
+  // route + evaluation this response carries, so a loaded proposal shows the
+  // same figures /calc did.
+  summary?: ProposalCalcSummary
+  route: TRoute
+  evaluation: {
+    models: EvaluationModels
+    input: { parameters: EvaluationParameters }
+    views: EvaluationViews
   }
-  evaluation: unknown | null
 }
 
 // A proposal reduced to what the gallery map draws: its routed line geometry

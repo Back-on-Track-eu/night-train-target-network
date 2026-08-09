@@ -76,7 +76,7 @@ frontend/
     ├── i18n/
     │   ├── index.ts         # vue-i18n setup
     │   └── locales/
-    │       └── en.json      # English strings (add de.json etc. here)
+    │       └── en.json      # English strings
     ├── stores/
     │   └── store.ts         # Pinia store
     ├── lib/
