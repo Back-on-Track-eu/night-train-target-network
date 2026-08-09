@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import Select from 'primevue/select'
 import {
   mdiArrowLeftRight,
@@ -19,23 +20,29 @@ import GalleryMap from '@/components/GalleryMap.vue'
 import { useStore } from '@/stores/store'
 import { useLocaleFormat } from '@/composables/useLocaleFormat'
 import { fetchProposals, fetchProposalRoute, ProposalsError } from '@/lib/proposalsApi'
-import type { GallerySearchSeed } from '@/lib/proposalPrefill'
-import type {
-  Stop,
-  ProposalSummary,
-  ProposalSummaryProposal,
-  ProposalsRequest,
-  ProposalsFilter,
-  ProposalSort,
-  ProposalSortKey,
-  GalleryMapRoute,
+import {
+  seedToQuery,
+  seedFromQuery,
+  queryString,
+  type GallerySearchSeed,
+} from '@/lib/proposalPrefill'
+import {
+  PROPOSAL_SORT_KEYS,
+  type Stop,
+  type ProposalSummary,
+  type ProposalSummaryProposal,
+  type ProposalsRequest,
+  type ProposalsFilter,
+  type ProposalSort,
+  type ProposalSortKey,
+  type GalleryMapRoute,
 } from '@/types/api'
-
-const emit = defineEmits<{ create: [seed: GallerySearchSeed]; open: [proposalId: number] }>()
 
 const { t } = useI18n()
 const store = useStore()
 const { countryName } = useLocaleFormat()
+const route = useRoute()
+const router = useRouter()
 
 const LIMIT = 20
 
@@ -299,11 +306,51 @@ function onHoverRoute(key: string | null): void {
   }, 900)
 }
 
-watch([mode, fromStop, toStop, stationStop, countryCode, sortField, sortDir], resetAndLoad)
+// --- URL <-> search-bar sync -------------------------------------------
+// Reflects the whole search bar (filters + sort) in /gallery's query string
+// so results are shareable, reload-safe, and back/forward-navigable.
+// Suppressed during the initial hydration in onMounted below — otherwise
+// each ref assignment there would fire its own resetAndLoad()/router.replace
+// before the async stop-id resolution finishes, flashing unfiltered results.
+let hydrating = true
+
+function currentSearchQuery(): LocationQueryRaw {
+  return {
+    ...seedToQuery({
+      mode: mode.value,
+      fromStop: fromStop.value,
+      toStop: toStop.value,
+      stationStop: stationStop.value,
+      countryCode: countryCode.value,
+    }),
+    sort: sortField.value,
+    dir: sortDir.value,
+  }
+}
+
+watch([mode, fromStop, toStop, stationStop, countryCode, sortField, sortDir], () => {
+  if (hydrating) return
+  resetAndLoad()
+  router.replace({ query: currentSearchQuery() })
+})
 watch(proposals, ensureRoutes)
 
+// Navigate to a saved proposal's detail route (ProposalCard's @select, only
+// fired for source==='proposal' rows — see ProposalCard.vue).
+function openProposal(proposalId: number): void {
+  router.push({ name: 'proposal', params: { id: proposalId } })
+}
+
+// "Suggest a new route" — hand the current search bar to the builder route as
+// its prefill seed, off-URL via the store (see pendingProposalSeed) so it
+// doesn't show up in /proposal-builder's address bar.
+function createProposal(): void {
+  store.pendingProposalSeed = searchSeed.value
+  router.push({ name: 'proposal-builder' })
+}
+
 let observer: IntersectionObserver | null = null
-onMounted(() => {
+onMounted(async () => {
   observer = new IntersectionObserver(
     (entries) => {
       if (entries[0]?.isIntersecting) onSentinel()
@@ -311,7 +358,27 @@ onMounted(() => {
     { rootMargin: '300px' },
   )
   if (sentinel.value) observer.observe(sentinel.value)
+
+  // Hydrate the search bar from the URL before the first query fires, so a
+  // shared or reloaded /gallery?... link reproduces the exact same results.
+  const hasStopParams = ['from', 'to', 'station'].some((k) => queryString(route.query[k]))
+  if (hasStopParams && store.stopsStatus !== 'success') await store.fetchStops()
+  const seed = seedFromQuery(route.query, store.stops)
+  mode.value = seed.mode
+  fromStop.value = seed.fromStop
+  toStop.value = seed.toStop
+  stationStop.value = seed.stationStop
+  countryCode.value = seed.countryCode
+  const sortParam = queryString(route.query.sort)
+  if (sortParam && (PROPOSAL_SORT_KEYS as readonly string[]).includes(sortParam)) {
+    sortField.value = sortParam as ProposalSortKey
+  }
+  const dirParam = queryString(route.query.dir)
+  if (dirParam === 'asc' || dirParam === 'desc') sortDir.value = dirParam
+
+  hydrating = false
   resetAndLoad()
+  router.replace({ query: currentSearchQuery() })
 })
 onBeforeUnmount(() => observer?.disconnect())
 
@@ -342,7 +409,7 @@ const iconBtnClass =
 </script>
 
 <template>
-  <div class="flex w-full flex-col gap-6">
+  <div class="flex w-full max-w-6xl flex-col gap-6">
     <!-- Search bar -->
     <div class="flex flex-col items-center gap-4">
       <!-- Category tabs -->
@@ -465,7 +532,7 @@ const iconBtnClass =
           <AppIcon :path="sortDir === 'asc' ? mdiSortAscending : mdiSortDescending" :size="18" />
         </button>
       </div>
-      <button type="button" :class="[ctaClass, 'ml-auto']" @click="emit('create', searchSeed)">
+      <button type="button" :class="[ctaClass, 'ml-auto']" @click="createProposal">
         <AppIcon :path="mdiPlus" :size="18" />
         {{ t('gallery.cta.create') }}
       </button>
@@ -495,7 +562,7 @@ const iconBtnClass =
               :flash="flashedKey === proposalKey(p)"
               :ordered-countries="routeCache[proposalKey(p)]?.orderedCountries"
               :highlight-stop-ids="highlightStopIds"
-              @select="emit('open', $event)"
+              @select="openProposal"
             />
           </div>
         </div>
@@ -512,7 +579,7 @@ const iconBtnClass =
 
         <!-- Trailing CTA -->
         <div class="flex justify-center pb-4">
-          <button type="button" :class="ctaClass" @click="emit('create', searchSeed)">
+          <button type="button" :class="ctaClass" @click="createProposal">
             <AppIcon :path="mdiPlus" :size="18" />
             {{ t('gallery.cta.create') }}
           </button>

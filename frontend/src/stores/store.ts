@@ -15,6 +15,7 @@ import type {
 import { readAuthCookie, writeAuthCookie, clearAuthCookie } from '@/lib/authCookie'
 import { readLocale, writeLocale, type Locale } from '@/lib/localeStorage'
 import { i18n } from '@/i18n'
+import type { GallerySearchSeed } from '@/lib/proposalPrefill'
 
 export type LoadStatus = 'idle' | 'loading' | 'success' | 'error'
 
@@ -38,6 +39,13 @@ export const useStore = defineStore('store', () => {
   const scenariosStatus = ref<LoadStatus>('idle')
   const scenariosError = ref<string | null>(null)
   const selectedScenarioId = ref<number | null>(null)
+
+  // Gallery's search-bar state at the moment "Suggest a new route" was
+  // clicked, handed to ProposalWorkspace/ProposalViewport off-URL so a fresh
+  // proposal's prefill doesn't leak into /proposal-builder's address bar.
+  // Set right before the router.push to 'proposal-builder'; read once by
+  // ProposalViewport's searchSeed prop.
+  const pendingProposalSeed = ref<GallerySearchSeed | null>(null)
 
   // --- Auth ----------------------------------------------------------------
   // Identity is tri-state and DERIVED from the token (see authChoice): the app
@@ -283,6 +291,7 @@ export const useStore = defineStore('store', () => {
     scenariosStatus,
     scenariosError,
     selectedScenarioId,
+    pendingProposalSeed,
     fetchStops,
     fetchCompositions,
     fetchScenarios,

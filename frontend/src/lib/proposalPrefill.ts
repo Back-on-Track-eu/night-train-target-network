@@ -3,6 +3,8 @@ import { majorStops, capitalStopForCountry } from './majorStops'
 
 export type GallerySearchMode = 'aToB' | 'byStation' | 'byCountry'
 
+const SEARCH_MODES: GallerySearchMode[] = ['aToB', 'byStation', 'byCountry']
+
 /** The Gallery search bar's state at the moment "Suggest a new route" is
  * clicked — used to prefill the new proposal's itinerary instead of two
  * arbitrary stops. */
@@ -12,6 +14,47 @@ export interface GallerySearchSeed {
   toStop: Stop | null
   stationStop: Stop | null
   countryCode: string | null
+}
+
+// Query-string shape for Gallery's own URL sync (?mode&from&to&station&
+// country[&sort&dir]) — /proposal-builder's prefill seed travels off-URL via
+// store.pendingProposalSeed instead (see ProposalWorkspace.vue), so these
+// only round-trip Gallery's own search bar now.
+type SeedQuery = Partial<Record<'mode' | 'from' | 'to' | 'station' | 'country', string>>
+
+export function seedToQuery(seed: GallerySearchSeed): SeedQuery {
+  const query: SeedQuery = { mode: seed.mode }
+  if (seed.fromStop) query.from = seed.fromStop.stop_id
+  if (seed.toStop) query.to = seed.toStop.stop_id
+  if (seed.stationStop) query.station = seed.stationStop.stop_id
+  if (seed.countryCode) query.country = seed.countryCode
+  return query
+}
+
+// Reads a single query value regardless of vue-router normalizing repeated
+// keys into an array — only the first occurrence is meaningful here. Exported
+// for Gallery's own URL sync (sort/dir query params, outside the seed shape).
+export function queryString(value: unknown): string | null {
+  if (Array.isArray(value)) return typeof value[0] === 'string' ? value[0] : null
+  return typeof value === 'string' ? value : null
+}
+
+export function seedFromQuery(query: Record<string, unknown>, stops: Stop[]): GallerySearchSeed {
+  const modeParam = queryString(query.mode)
+  const mode: GallerySearchMode = SEARCH_MODES.includes(modeParam as GallerySearchMode)
+    ? (modeParam as GallerySearchMode)
+    : 'aToB'
+  const byId = new Map(stops.map((s) => [s.stop_id, s]))
+  const fromId = queryString(query.from)
+  const toId = queryString(query.to)
+  const stationId = queryString(query.station)
+  return {
+    mode,
+    fromStop: fromId ? (byId.get(fromId) ?? null) : null,
+    toStop: toId ? (byId.get(toId) ?? null) : null,
+    stationStop: stationId ? (byId.get(stationId) ?? null) : null,
+    countryCode: queryString(query.country),
+  }
 }
 
 function pickRandom<T>(pool: T[]): T | null {

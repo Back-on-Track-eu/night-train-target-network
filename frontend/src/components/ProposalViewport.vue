@@ -40,7 +40,7 @@ const props = defineProps<{
   // seeds the itinerary in fresh 'edit' mode (mode='edit', proposalId=null).
   searchSeed?: GallerySearchSeed | null
 }>()
-const emit = defineEmits<{ back: [] }>()
+const emit = defineEmits<{ back: []; published: [proposalId: number] }>()
 
 const { t } = useI18n()
 const store = useStore()
@@ -455,12 +455,14 @@ async function doPublish() {
     name: derivedName(),
     compute_request: { ...req, scenario_id: null },
   }
+  const isFirstPublish = publishedProposalId.value === null
   if (publishedProposalId.value) body.proposal_id = publishedProposalId.value
   try {
     const resp = await publishProposal(body, store.authHeaders())
     publishedProposalId.value = resp.proposal_id
     saved.value = true
     toastStore.addToast('success', t('proposal.saved'))
+    if (isFirstPublish) emit('published', resp.proposal_id)
   } catch (err) {
     publishError.value = err instanceof ProposalsError ? err.message : t('proposal.publishError')
   }
