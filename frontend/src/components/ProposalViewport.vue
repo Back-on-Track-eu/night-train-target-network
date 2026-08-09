@@ -19,7 +19,7 @@ import Column from 'primevue/column'
 import Skeleton from 'primevue/skeleton'
 import AppIcon from '@/components/AppIcon.vue'
 import StopSelect from '@/components/StopSelect.vue'
-import CompositionSelectCard from '@/components/CompositionSelectCard.vue'
+import CompositionPanel from '@/components/CompositionPanel.vue'
 import EvaluationPanel from '@/components/EvaluationPanel.vue'
 import MapView from '@/components/MapView.vue'
 import {
@@ -1157,7 +1157,7 @@ const mapSegments = computed<MapSegment[] | null>(() => {
 // Load a stored proposal by id and populate display mode — same wire shape
 // as POST /api/proposal/calc (see types/api.ts's ProposalDetailResponse), so
 // applyPlan() can hydrate rawRoute/calcResult/itinerary from it exactly like
-// a fresh calc. selectedCompositionId is set first so CompositionSelectCard
+// a fresh calc. selectedCompositionId is set first so CompositionPanel
 // locks onto the composition the stored route actually used, rather than
 // defaulting to the first one in the full catalogue.
 async function loadStoredProposal(proposalId: number) {
@@ -1217,9 +1217,11 @@ onMounted(async () => {
       </button>
     </div>
     <div class="flex gap-6">
-      <!-- Left panel -->
-      <div class="flex w-1/2 flex-col justify-center gap-12">
-        <div class="itinerary-table px-32">
+      <!-- Left panel: shrink-wrapped to its content's natural width (itinerary
+           text + composition card) rather than a fixed share of the row, so
+           MapView gets whatever width is left over. -->
+      <div class="flex w-fit shrink-0 flex-col justify-center gap-12">
+        <div class="itinerary-table max-w-sm">
           <!-- Edit mode table -->
           <!-- border-collapse (set in pt.table) removes default cell spacing so
                the timeline line segments in consecutive rows connect seamlessly. -->
@@ -1574,7 +1576,7 @@ onMounted(async () => {
           v-if="store.compositionsStatus === 'success' && store.compositions.length > 0"
           class="flex flex-col gap-6"
         >
-          <CompositionSelectCard
+          <CompositionPanel
             :compositions="compositionCards"
             :selected-id="selectedCompositionId"
             :compact="currentMode === 'display' || currentMode === 'suggest'"
@@ -1655,35 +1657,45 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- Right panel: map with loading overlay. `isolate` makes this wrapper a
-           stacking context (as GalleryMap's sticky wrapper is), and the border
-           gives the rounded edge the same visible definition as GalleryMap's
-           sticky wrapper. `clip-path` (not just overflow-hidden + rounded-xl)
-           is needed because the loading overlay's `backdrop-blur` is GPU
-           composited like MapLibre's canvas (see MapView.vue) and would
-           otherwise escape the rounded corners while loading. -->
-      <div
-        class="relative isolate flex-1 overflow-hidden rounded-xl border border-primary-50/10"
-        style="clip-path: inset(0 round 0.75rem)"
-      >
-        <MapView
-          :stops="mapStops"
-          :shape="mapShape"
-          :segments="mapSegments"
-          :suggested="mapSuggested"
-          class="w-full h-full"
-          @toggle-suggested="toggleSuggested"
-        />
-        <Transition name="fade">
-          <div
-            v-if="currentMode === 'loading'"
-            class="absolute inset-0 flex items-center justify-center rounded-xl bg-black/20 backdrop-blur-sm"
-          >
+      <!-- Right panel: map with loading overlay. The outer flex-1 div is
+           stretched (default align-items:stretch) to the row's height, i.e.
+           the left panel's natural content height; the inner div then reads
+           that back via h-full and clamps it with max-h, so the map is
+           exactly as tall as the itinerary when that's short, and capped to
+           the viewport (sticky, scrolling in place until the left panel's
+           extra height runs out) when it's long — a maximum, not a fixed
+           height, unlike GalleryMap's browser-height map. `isolate` makes the
+           inner wrapper a stacking context (as GalleryMap's sticky wrapper
+           is), and the border gives the rounded edge the same visible
+           definition as GalleryMap's sticky wrapper. `clip-path` (not just
+           overflow-hidden + rounded-xl) is needed because the loading
+           overlay's `backdrop-blur` is GPU composited like MapLibre's canvas
+           (see MapView.vue) and would otherwise escape the rounded corners
+           while loading. -->
+      <div class="flex-1">
+        <div
+          class="sticky top-6 relative isolate h-full max-h-[calc(100vh-3rem)] overflow-hidden rounded-xl border border-primary-50/10"
+          style="clip-path: inset(0 round 0.75rem)"
+        >
+          <MapView
+            :stops="mapStops"
+            :shape="mapShape"
+            :segments="mapSegments"
+            :suggested="mapSuggested"
+            class="w-full h-full"
+            @toggle-suggested="toggleSuggested"
+          />
+          <Transition name="fade">
             <div
-              class="h-10 w-10 animate-spin rounded-full border-4 border-primary-50/30 border-t-primary-50"
-            />
-          </div>
-        </Transition>
+              v-if="currentMode === 'loading'"
+              class="absolute inset-0 flex items-center justify-center rounded-xl bg-black/20 backdrop-blur-sm"
+            >
+              <div
+                class="h-10 w-10 animate-spin rounded-full border-4 border-primary-50/30 border-t-primary-50"
+              />
+            </div>
+          </Transition>
+        </div>
       </div>
     </div>
 

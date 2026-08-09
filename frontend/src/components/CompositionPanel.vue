@@ -111,7 +111,7 @@ watch(
 </script>
 
 <template>
-  <div class="overflow-hidden rounded-xl bg-primary-50/5 mx-16 py-5">
+  <div class="max-w-md overflow-hidden rounded-xl bg-primary-50/5 mr-16 py-5 px-12">
     <div class="flex flex-col items-center gap-4 text-center">
       <!-- Name row with inline arrows -->
       <div class="flex items-center gap-2">

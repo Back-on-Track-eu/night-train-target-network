@@ -86,7 +86,7 @@ frontend/
     │   └── octilinear.ts    # Octilinear map-line layout helpers
     └── components/
         ├── AppIcon.vue               # Tree-shakeable @mdi/js icon wrapper
-        ├── CompositionSelectCard.vue # Composition picker card
+        ├── CompositionPanel.vue      # Composition picker card
         ├── EvaluationPanel.vue       # Cost/revenue evaluation cube explorer
         ├── MapView.vue               # MapLibre route/stop map
         ├── ProposalViewport.vue      # Proposal build/evaluate workspace
