@@ -5,6 +5,7 @@ import Avatar from 'primevue/avatar'
 import AvatarGroup from 'primevue/avatargroup'
 import AppIcon from '@/components/AppIcon.vue'
 import { useStore } from '@/stores/store'
+import { useLocaleFormat } from '@/composables/useLocaleFormat'
 import type { ProposalSummary } from '@/types/api'
 import {
   mdiArrowLeftRight,
@@ -29,6 +30,7 @@ const emit = defineEmits<{ select: [proposalId: number] }>()
 
 const { t } = useI18n()
 const store = useStore()
+const { formatInt } = useLocaleFormat()
 
 // Summaries carry stop_ids only (in travel order); resolve display names from
 // the loaded stop list, falling back to the id (existing/ONTD rows may carry
@@ -81,23 +83,21 @@ const compositionLabel = computed(
       ?.composition_id ?? props.proposal.composition_id,
 )
 
-const co2Fmt = new Intl.NumberFormat('en', { maximumFractionDigits: 0 })
-
 const stats = computed(() => {
   const p = props.proposal
   const list = [
     {
       icon: mdiArrowLeftRight,
-      value: t('gallery.card.km', { value: Math.round(p.total_distance_km) }),
+      value: t('gallery.card.km', { value: formatInt(p.total_distance_km) }),
     },
-    { icon: mdiSpeedometerMedium, value: `${Math.round(p.avg_speed_kmh)} km/h` },
+    { icon: mdiSpeedometerMedium, value: `${formatInt(p.avg_speed_kmh)} km/h` },
     { icon: mdiTrainCarPassenger, value: compositionLabel.value },
   ]
   // co2 savings is a proposal-only KPI and null without an evaluation snapshot.
   if (p.source === 'proposal' && p.co2_savings_t_per_year != null) {
     list.push({
       icon: mdiLeaf,
-      value: t('gallery.card.co2PerYear', { value: co2Fmt.format(p.co2_savings_t_per_year) }),
+      value: t('gallery.card.co2PerYear', { value: formatInt(p.co2_savings_t_per_year) }),
     })
   }
   return list

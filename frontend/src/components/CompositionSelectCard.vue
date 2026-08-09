@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import type { Composition } from '@/types/api'
 import AppIcon from '@/components/AppIcon.vue'
+import { useLocaleFormat } from '@/composables/useLocaleFormat'
 import {
   mdiSeatPassenger,
   mdiBunkBed,
@@ -21,6 +22,8 @@ const props = defineProps<{
   compact?: boolean
 }>()
 const emit = defineEmits<{ select: [compId: string] }>()
+
+const { formatInt } = useLocaleFormat()
 
 const direction = ref<'forward' | 'backward'>('forward')
 
@@ -138,13 +141,13 @@ watch(
             <div class="flex items-center gap-2">
               <AppIcon :path="mdiWeight" :size="20" />
               <span class="text-base font-semibold"
-                >{{ Math.round(current.routing.total_weight_t) }} t</span
+                >{{ formatInt(current.routing.total_weight_t) }} t</span
               >
             </div>
             <div class="flex items-center gap-2">
               <AppIcon :path="mdiSpeedometer" :size="20" />
               <span class="text-base font-semibold"
-                >max. {{ current.routing.max_speed_kmh }} km/h</span
+                >max. {{ formatInt(current.routing.max_speed_kmh) }} km/h</span
               >
             </div>
           </div>

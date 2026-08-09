@@ -25,18 +25,17 @@ function onLogin() {
 </script>
 
 <template>
-  <!-- No `relative` here: the consumer positions this with `fixed` (App.vue),
-       which already establishes the positioning context the dropdown anchors
-       to. Adding `relative` would collide with that `fixed` and drop the chip
-       back into normal flow. -->
-  <div>
+  <!-- `relative` establishes the positioning context for the dropdown's
+       `absolute right-0` below — this chip now sits inline in AppHeader's
+       flex row rather than being `fixed`-positioned by its consumer. -->
+  <div class="relative">
     <button
       type="button"
-      class="flex items-center gap-2 rounded-full border border-primary-50/20 bg-primary-50/5 px-3 py-1.5 text-primary-50 transition hover:bg-primary-50/10"
+      class="flex items-center gap-2 rounded-full bg-primary-50/5 px-3 py-1.5 text-primary-50 transition hover:bg-primary-50/10"
       @click="open = !open"
     >
       <span class="text-sm font-semibold leading-none">
-        {{ store.isGuest ? t('user.guest') : store.displayName }}
+        {{ store.isGuest ? t('user.guest') : store.username }}
       </span>
       <AppIcon :path="mdiAccountCircle" :size="22" />
     </button>

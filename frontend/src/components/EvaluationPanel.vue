@@ -14,11 +14,13 @@ import { mdiChevronDown, mdiChevronRight, mdiInformationOutline } from '@mdi/js'
 import { resolveFactorRates, resolveFactorSubCategory, type RateRow } from '@/lib/costFactorRates'
 import { submitFeedback, FeedbackError } from '@/lib/feedbackApi'
 import { useStore } from '@/stores/store'
+import { useLocaleFormat } from '@/composables/useLocaleFormat'
 import type {
   Breakdown,
   ClassKeyedBreakdowns,
   EvaluationResponse,
   FilteredCell,
+  FilterValue,
   MapScope,
   Normalisations,
   NormKey,
@@ -33,8 +35,9 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ scopeChange: [scope: MapScope] }>()
 
-const { t, te } = useI18n()
+const { t, te, locale } = useI18n()
 const store = useStore()
+const { countryName } = useLocaleFormat()
 
 // --- Selection state: the four axes of the result cube --------------------
 // view (grouping) × drill-down keys (sel1/sel2) × normalisation (unit) ×
@@ -109,20 +112,32 @@ function allLabel(dim: string): string {
   return te(key) ? t(key) : t('proposal.evaluation.filters.default')
 }
 
-// Country dimension keys are ISO codes ("CZ"); show the full name instead.
-const regionNames = new Intl.DisplayNames(['en'], { type: 'region' })
-function countryName(code: string): string {
-  try {
-    return regionNames.of(code.toUpperCase()) ?? code
-  } catch {
-    return code
-  }
+// Accommodation-class keys ("Seat", "Couchette", "Sleeper", "Capsule") arrive
+// as English class_main values from the backend; translate them, falling back
+// to the raw key when no translation exists.
+function classLabel(key: string): string {
+  const k = `proposal.evaluation.classes.${key}`
+  return te(k) ? t(k) : key
 }
 
-function optionLabel(key: string, backendLabel: string | undefined, dim: string): string {
+// Compose (and localise) a drill-down option label from its backend filter
+// value. Proper-noun dims (trip_pair, stop) arrive as ready strings; country
+// codes and the translatable trip/OD/section parts are localised here.
+function optionLabel(key: string, value: FilterValue | undefined, dim: string): string {
   if (key === 'all') return allLabel(dim)
   if (dim === 'country') return countryName(key)
-  return backendLabel ?? key
+  if (value && typeof value === 'object') {
+    if ('direction' in value) {
+      const dir = t(`proposal.evaluation.direction.${value.direction}`)
+      return `${value.origin} → ${value.destination} (${dir})`
+    }
+    const cls =
+      value.class_main === 'all'
+        ? t('proposal.evaluation.classes.all')
+        : classLabel(value.class_main)
+    return `${value.origin} → ${value.destination} (${cls})`
+  }
+  return typeof value === 'string' ? value : key
 }
 
 const level1 = computed<DrillLevel | null>(() => {
@@ -357,7 +372,7 @@ const classOptions = computed(() => {
   const ordered = keys.includes('all') ? ['all', ...keys.filter((k) => k !== 'all')] : keys
   return ordered.map((k) => ({
     value: k,
-    label: k === 'all' ? t('proposal.evaluation.classes.all') : k,
+    label: k === 'all' ? t('proposal.evaluation.classes.all') : classLabel(k),
   }))
 })
 watch(
@@ -558,13 +573,13 @@ const activeFactor = computed(() => {
   }
 })
 
-const fmtRate = new Intl.NumberFormat('en', { maximumFractionDigits: 4 })
+const fmtRate = computed(() => new Intl.NumberFormat(locale.value, { maximumFractionDigits: 4 }))
 
 // Quota fields are stored as fractions (0.1) but described in "%" — render
 // them as a percentage for readability; other units are shown verbatim.
 function formatRateValue(row: RateRow): string {
   const value = row.unit.startsWith('%') ? row.value * 100 : row.value
-  return fmtRate.format(value)
+  return fmtRate.value.format(value)
 }
 
 // --- Cost-factor feedback form (right column of the detail popover) ----------
@@ -657,20 +672,26 @@ async function onSubmitFeedback() {
 }
 
 // --- Formatting -------------------------------------------------------------
-const fmtCompact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 2 })
-const fmtInt = new Intl.NumberFormat('en', { maximumFractionDigits: 0 })
-const fmtSmall = new Intl.NumberFormat('en', { maximumSignificantDigits: 3 })
-const fmtPct = new Intl.NumberFormat('en', { style: 'percent', maximumFractionDigits: 1 })
+const fmtCompact = computed(
+  () => new Intl.NumberFormat(locale.value, { notation: 'compact', maximumFractionDigits: 2 }),
+)
+const fmtInt = computed(() => new Intl.NumberFormat(locale.value, { maximumFractionDigits: 0 }))
+const fmtSmall = computed(
+  () => new Intl.NumberFormat(locale.value, { maximumSignificantDigits: 3 }),
+)
+const fmtPct = computed(
+  () => new Intl.NumberFormat(locale.value, { style: 'percent', maximumFractionDigits: 1 }),
+)
 
 function formatEur(value: number): string {
   const abs = Math.abs(value)
-  if (abs >= 100_000) return `${fmtCompact.format(value)} €`
-  if (abs >= 100) return `${fmtInt.format(value)} €`
-  return `${fmtSmall.format(value)} €`
+  if (abs >= 100_000) return `${fmtCompact.value.format(value)} €`
+  if (abs >= 100) return `${fmtInt.value.format(value)} €`
+  return `${fmtSmall.value.format(value)} €`
 }
 
 function formatShare(share: number | null): string {
-  return share === null ? '' : fmtPct.format(share)
+  return share === null ? '' : fmtPct.value.format(share)
 }
 
 // Shared pill styling for the unstyled Selects — same pass-through classes as

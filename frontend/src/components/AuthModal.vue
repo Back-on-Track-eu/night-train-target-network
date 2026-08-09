@@ -3,10 +3,12 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useStore } from '@/stores/store'
 import AppIcon from '@/components/AppIcon.vue'
+import { useLocaleFormat } from '@/composables/useLocaleFormat'
 import { mdiCheckCircle, mdiArrowRight } from '@mdi/js'
 
 const { t } = useI18n()
 const store = useStore()
+const { formatInt } = useLocaleFormat()
 
 const modal = computed(() => store.authModal)
 const isEvaluation = computed(() => modal.value.context === 'evaluation')
@@ -19,7 +21,7 @@ const canDismiss = computed(() => modal.value.context === 'standalone')
 type Step = 'email' | 'name' | 'code'
 const step = ref<Step>('email')
 const email = ref('')
-const displayName = ref('')
+const username = ref('')
 const digits = ref<string[]>(['', '', '', '', '', ''])
 const codeBoxes = ref<HTMLElement | null>(null)
 const loading = ref(false)
@@ -39,7 +41,7 @@ const co2Text = computed(() => {
   if (!isEvaluation.value || step.value !== 'email') return null
   const v = modal.value.co2SavingsT
   if (v == null) return null
-  return t('auth.co2Savings', { value: Math.round(v).toLocaleString() })
+  return t('auth.co2Savings', { value: formatInt(v) })
 })
 const showRegisterBlurb = computed(() => isEvaluation.value && step.value === 'email')
 // "Continue as guest" only makes sense before any choice is made — hide it once
@@ -83,8 +85,8 @@ async function onVerify() {
   try {
     // First-time registration: the backend asks for a display name (code left
     // unconsumed) — advance to the name step, keeping the same code.
-    const { needsDisplayName } = await store.verifyCode(email.value.trim(), code.value)
-    if (needsDisplayName) {
+    const { needsUsername } = await store.verifyCode(email.value.trim(), code.value)
+    if (needsUsername) {
       step.value = 'name'
       loading.value = false
       return
@@ -97,19 +99,19 @@ async function onVerify() {
 }
 
 async function onNameContinue() {
-  if (!displayName.value.trim()) return
+  if (!username.value.trim()) return
   loading.value = true
   error.value = null
   try {
     // Re-submit the same code together with the chosen name to complete
     // registration. A taken/invalid name throws with the backend message.
-    const { needsDisplayName } = await store.verifyCode(
+    const { needsUsername } = await store.verifyCode(
       email.value.trim(),
       code.value,
-      displayName.value.trim(),
+      username.value.trim(),
     )
-    if (needsDisplayName) {
-      error.value = t('auth.displayNameRequired')
+    if (needsUsername) {
+      error.value = t('auth.usernameRequired')
       loading.value = false
       return
     }
@@ -251,10 +253,10 @@ watch(
             <template v-else-if="step === 'name'">
               <div class="flex flex-col gap-1.5">
                 <label class="text-sm font-semibold text-primary-50">{{
-                  t('auth.displayName')
+                  t('auth.username')
                 }}</label>
                 <input
-                  v-model="displayName"
+                  v-model="username"
                   type="text"
                   class="auth-input rounded-xl px-4 py-2.5 outline-none"
                   @keyup.enter="onNameContinue"
@@ -271,7 +273,7 @@ watch(
                 </button>
                 <button
                   type="button"
-                  :disabled="loading || !displayName.trim()"
+                  :disabled="loading || !username.trim()"
                   class="auth-primary flex items-center gap-2 rounded-full px-6 py-2.5 text-sm"
                   @click="onNameContinue"
                 >

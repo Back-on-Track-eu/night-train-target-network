@@ -13,6 +13,8 @@ import type {
   StoredAuth,
 } from '@/types/api'
 import { readAuthCookie, writeAuthCookie, clearAuthCookie } from '@/lib/authCookie'
+import { readLocale, writeLocale, type Locale } from '@/lib/localeStorage'
+import { i18n } from '@/i18n'
 
 export type LoadStatus = 'idle' | 'loading' | 'success' | 'error'
 
@@ -44,7 +46,7 @@ export const useStore = defineStore('store', () => {
   // (lib/authCookie.ts) and restored on boot via restoreAuth().
   const authToken = ref<string | null>(null)
   const isGuest = ref(false)
-  const displayName = ref<string | null>(null)
+  const username = ref<string | null>(null)
   const userId = ref<number | null>(null)
 
   const authChoice = computed<'none' | 'guest' | 'user'>(() =>
@@ -137,7 +139,7 @@ export const useStore = defineStore('store', () => {
   function setAuth(a: StoredAuth): void {
     authToken.value = a.token
     isGuest.value = a.is_guest
-    displayName.value = a.display_name
+    username.value = a.display_name
     userId.value = a.user_id
   }
 
@@ -166,7 +168,7 @@ export const useStore = defineStore('store', () => {
 
   // Request an OTP (api/auth.py::request_code). The backend always answers 200
   // (no user-existence leak) EXCEPT a 400 when a new account is created without
-  // a display name — surfaced as { needsDisplayName: true } so the modal reveals
+  // a display name — surfaced as { needsUsername: true } so the modal reveals
   // the field and resends. Any other non-2xx throws.
   async function requestCode(email: string): Promise<void> {
     console.debug('[auth] request-code → POST /api/auth/request-code', { email })
@@ -195,18 +197,18 @@ export const useStore = defineStore('store', () => {
   async function verifyCode(
     email: string,
     code: string,
-    displayNameInput?: string,
-  ): Promise<{ needsDisplayName: boolean }> {
+    usernameInput?: string,
+  ): Promise<{ needsUsername: boolean }> {
     console.debug('[auth] verify → POST /api/auth/verify', {
       email,
       codeLength: code.length,
-      hasDisplayName: !!displayNameInput,
+      hasUsername: !!usernameInput,
     })
     const response = await fetch(`${BASE_URL}/api/auth/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(
-        displayNameInput ? { email, code, display_name: displayNameInput } : { email, code },
+        usernameInput ? { email, code, display_name: usernameInput } : { email, code },
       ),
     })
     console.debug('[auth] verify ←', response.status)
@@ -219,7 +221,7 @@ export const useStore = defineStore('store', () => {
     // a token (code left unconsumed) — the caller shows the name step.
     if ((json as VerifyNeedsNameResponse).needs_display_name) {
       console.debug('[auth] verify: display name required (first-time registration)')
-      return { needsDisplayName: true }
+      return { needsUsername: true }
     }
     const v = json as VerifyResponse
     console.debug('[auth] verified — merged_guest:', v.merged_guest)
@@ -231,14 +233,14 @@ export const useStore = defineStore('store', () => {
     }
     setAuth(stored)
     writeAuthCookie(stored)
-    return { needsDisplayName: false }
+    return { needsUsername: false }
   }
 
   // Forget the choice: back to 'none'.
   function logout(): void {
     authToken.value = null
     isGuest.value = false
-    displayName.value = null
+    username.value = null
     userId.value = null
     clearAuthCookie()
     closeAuthModal()
@@ -248,6 +250,27 @@ export const useStore = defineStore('store', () => {
   // compute-only, nothing persists). Spread into a fetch headers object.
   function authHeaders(): Record<string, string> {
     return authToken.value ? { Authorization: `Bearer ${authToken.value}` } : {}
+  }
+
+  // --- Locale ----------------------------------------------------------------
+  // Reuse vue-i18n's own reactive locale ref as the single source of truth
+  // instead of duplicating it in a second ref.
+  const locale = i18n.global.locale
+
+  function setLocale(lang: Locale): void {
+    locale.value = lang
+    writeLocale(lang)
+  }
+
+  // Restore a remembered language — sync, no network. Called once on app boot
+  // (App.vue), alongside restoreAuth().
+  function restoreLocale(): void {
+    const stored = readLocale()
+    // Multi-language is disabled for now — the app runs in English only, even
+    // if an earlier session persisted a different choice. de.json (and the
+    // setLocale/writeLocale machinery) stay for when the LanguageSwitch is
+    // re-enabled; drop this guard then.
+    if (stored === 'en') locale.value = stored
   }
 
   return {
@@ -267,7 +290,7 @@ export const useStore = defineStore('store', () => {
     // auth
     authToken,
     isGuest,
-    displayName,
+    username,
     userId,
     authChoice,
     authModal,
@@ -279,5 +302,9 @@ export const useStore = defineStore('store', () => {
     verifyCode,
     logout,
     authHeaders,
+    // locale
+    locale,
+    setLocale,
+    restoreLocale,
   }
 })

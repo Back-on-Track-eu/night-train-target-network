@@ -17,6 +17,7 @@ import CountrySelect from '@/components/CountrySelect.vue'
 import ProposalCard from '@/components/ProposalCard.vue'
 import GalleryMap from '@/components/GalleryMap.vue'
 import { useStore } from '@/stores/store'
+import { useLocaleFormat } from '@/composables/useLocaleFormat'
 import { fetchProposals, fetchProposalRoute, ProposalsError } from '@/lib/proposalsApi'
 import type {
   Stop,
@@ -33,6 +34,7 @@ const emit = defineEmits<{ create: []; open: [proposalId: number] }>()
 
 const { t } = useI18n()
 const store = useStore()
+const { countryName } = useLocaleFormat()
 
 const LIMIT = 20
 
@@ -86,16 +88,8 @@ const sortFieldOptions = computed<{ value: ProposalSortKey; label: string }[]>((
   { value: 'total_time_h', label: t('gallery.sort.duration') },
 ])
 
-// Country codes present in the loaded stops, resolved to full names. Intl gives
-// display names with no bundled data; unknown codes fall back to the code.
-const regionNames = new Intl.DisplayNames(['en'], { type: 'region' })
-function countryName(code: string): string {
-  try {
-    return regionNames.of(code) ?? code
-  } catch {
-    return code
-  }
-}
+// Country codes present in the loaded stops, resolved to full names in the
+// active locale (unknown codes fall back to the raw code).
 const countryOptions = computed(() =>
   [...new Set(store.stops.map((s) => s.country_code))]
     .map((code) => ({ code, name: countryName(code) }))
@@ -463,9 +457,6 @@ const iconBtnClass =
         <div ref="sentinel" class="flex h-8 items-center justify-center text-sm text-primary-50/40">
           <span v-if="loading">{{
             initialized ? t('gallery.loadingMore') : t('gallery.loading')
-          }}</span>
-          <span v-else-if="reachedEnd && proposals.length">{{
-            t('gallery.end', { count: total })
           }}</span>
         </div>
 

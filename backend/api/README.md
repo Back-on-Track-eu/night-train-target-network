@@ -587,6 +587,18 @@ dimension — it's the whole-route aggregate); the other five views nest a
 breakdown shape, plus an `"all"` entry aggregating across that view's
 dimension. `od_key` format: `"{origin_stop_id}__{destination_stop_id}__{class_main}"`.
 
+**`filter` values.** One entry per drill dimension. Proper-noun dimensions are
+ready-to-display strings: `trip_pair` (`"Berlin ↔ Wien"`), `stop` (a stop
+name), `country` (an ISO code — the frontend resolves the localised name),
+`class_main` (a class code). The dimensions carrying a translatable token are
+sent **structured** so the client composes and localises them itself, rather
+than the backend baking English words into the string:
+
+- `trip` → `{"origin", "destination", "direction"}`, `direction ∈ {"outbound", "return"}` → client renders `"origin → destination (localised direction)"`
+- `od_pair` / `section` → `{"origin", "destination", "class_main"}` (`class_main` may be `"all"`) → client renders `"origin → destination (localised class)"`
+
+Every dimension still sends the literal string `"all"` for its wildcard cell.
+
 Each cell contains the same breakdown under five **normalisations** (not to be confused with the six *views* above — a view selects *what scope* the money belongs to, a normalisation selects *what unit* it is expressed in). All per-unit denominators are annual, matching the €/year leaves; route-section cells divide by the section's own annual physics:
 
 | Key | Unit | Description |

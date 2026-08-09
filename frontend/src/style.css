@@ -20,6 +20,17 @@ body {
   font-style: normal;
 }
 
+/* Regular-only alias: the language switcher renders this at weight 700 so the
+   browser SYNTHESISES the bold (there is no 700 face in this family), exactly
+   like back-on-track.eu — which uses "Mark Pro Regular" faux-bolded, lighter
+   than our true "Mark Pro Bold". */
+@font-face {
+  font-family: 'Mark Pro Regular';
+  src: url('@/assets/fonts/Mark Pro.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+}
+
 @theme {
   --font-sans: 'Mark Pro', ui-sans-serif, system-ui, sans-serif;
 

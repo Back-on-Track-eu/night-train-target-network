@@ -132,7 +132,15 @@
         "invalidEmail": "Please enter a valid e-mail address."
       },
       "classes": {
-        "all": "All Classes"
+        "all": "All Classes",
+        "Seat": "Seat",
+        "Couchette": "Couchette",
+        "Sleeper": "Sleeper",
+        "Capsule": "Capsule"
+      },
+      "direction": {
+        "outbound": "outbound",
+        "return": "return"
       }
     }
   },
@@ -189,18 +197,22 @@
     "logout": "Log out",
     "login": "Log in / Register"
   },
+  "header": {
+    "logoAlt": "Night Train Target Network",
+    "switchLanguageAria": "Switch language to {language}"
+  },
   "auth": {
     "evaluating": "Evaluating proposal …",
     "completed": "Evaluation completed",
     "loginTitle": "Log in or register",
     "verifyTitle": "Please verify your mail address",
-    "nameTitle": "Choose a display name",
+    "nameTitle": "Choose a username",
     "emailIncorrect": "Change mail address",
     "co2Savings": "This connection saves about {value} t CO₂ per year.",
     "register": " Register to keep track of your proposal's impact on our research towards the EU target network 2032!",
     "email": "E-Mail Address",
-    "displayName": "Display name",
-    "displayNameRequired": "New here? Choose a display name to register.",
+    "username": "Username",
+    "usernameRequired": "New here? Choose a username to register.",
     "continue": "Continue",
     "continueGuest": "Continue as guest",
     "or": "OR",

@@ -190,10 +190,34 @@ export interface Breakdown {
  *  per_sold when the cell has no sold place-km at all. */
 export type Normalisations = Record<NormKey, ClassKeyedBreakdowns>
 
-/** One filtered data point: human-readable filter labels (one entry per
- *  dimension, backend-provided) alongside the values. */
+/** A trip filter value — a single direction of a trip pair. The frontend
+ *  composes "origin → destination (localised direction)". */
+export interface TripFilterValue {
+  origin: string
+  destination: string
+  direction: 'outbound' | 'return'
+}
+
+/** An OD / section filter value — origin, destination and the accommodation
+ *  class (class_main may be "all"). The frontend composes
+ *  "origin → destination (localised class)". */
+export interface ClassFilterValue {
+  origin: string
+  destination: string
+  class_main: string
+}
+
+/** One filter dimension value. Proper-noun dimensions (trip_pair, stop,
+ *  country code, class_main code) stay plain strings — the frontend localises
+ *  country codes / class codes itself; the translatable ones (trip direction,
+ *  OD/section class) arrive structured so the frontend can compose + translate.
+ *  "all" wildcard cells send the literal string "all". */
+export type FilterValue = string | TripFilterValue | ClassFilterValue
+
+/** One filtered data point: per-dimension filter values (backend-provided)
+ *  alongside the values. See FilterValue for why some are structured. */
 export interface FilteredCell {
-  filter: Record<string, string>
+  filter: Record<string, FilterValue>
   values: Normalisations
 }
 
