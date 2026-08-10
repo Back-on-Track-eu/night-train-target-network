@@ -41,7 +41,7 @@ diacritics, Cyrillic, and Greek all fold to the same Latin id namespace,
 `transliterate()`; `stop_charge_eur` NULL so the country/global default
 resolves, provenance in `change_log`). These are ordinary catalog
 entries — plannable in proposals, and (per `AUTO_STOP_BUFFER_M`/
-`AUTO_STOP_ANALYTIC_DETOUR_M`, `models/route/version.py`)
+`AUTO_STOP_ANALYTIC_DETOUR_M`, `models/route/model.py`)
 auto-insertable by `auto_stop_addition`.
 
 This replaces the earlier **runtime mint**, which inserted missing stops

@@ -328,7 +328,7 @@ and do a visual pass in QGIS either way.
 
 - Platform length check from OSM platform geometry (night trains are long;
   OSM data too patchy today). Add `OPEN_TODOS["stop_classification_platform_length"]`
-  to `version.py` when starting implementation.
+  to `model.py` when starting implementation.
 - More country adapters beyond Germany.
 - Re-run strategy when OSM/GTFS sources update; record source timestamps in a
   small metadata sidecar file.

@@ -6,6 +6,8 @@
 
 An open-source initiative by [Back-on-Track.eu](https://back-on-track.eu) to design and evaluate a European night train target network that could realistically be implemented by 2032.
 
+**Full calculation model documentation** — every formula, parameter, and assumption, fully cross-linked: [docs/MODEL.md](docs/MODEL.md)
+
 ## Vision
 
 Back-on-Track wants to put a serious, evidence-based night train network proposal in front of the European Commission (DG MOVE) and other key political stakeholders. The study needs to answer three core questions:

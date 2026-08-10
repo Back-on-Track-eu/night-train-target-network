@@ -16,10 +16,8 @@ proposals storage design & rationale —
 ```
 db/
 ├── dev/                        # Dev/test database — not used in production
-│   ├── sql/                    # Schema DDL — source of truth for all environments
+│   ├── sql/                    # Schema DDL for the application-plumbing schemas
 │   │   ├── create_admin_schema.sql
-│   │   ├── create_input_params_schema.sql
-│   │   ├── create_scenario_schema.sql
 │   │   ├── create_proposal_schema.sql
 │   ├── seed.py                 # Seeds admin/input_params/scenario/proposals; operational
 │   │                           # parameters come from models/compositions/calib/seed/*.csv
@@ -38,6 +36,9 @@ db/
 │   ├── connection.py           # Shared DB connection + .env loading (aligns env for DBDataLoader)
 │   ├── xlsx_utils.py           # Shared workbook fetch/extraction/coercion
 │   └── sql/create_ontd_schema.sql
+├── schema.py                   # Declarative input_params + scenario schema — every
+│                               # parameter column with type, description, and unit;
+│                               # seed.py renders it to DDL via build_ddl()
 └── README.md                   # This file
 ```
 
@@ -94,7 +95,7 @@ never edit seed.py or the CSVs by hand.
 The 2026-07-22 schema redesign (real coach types, per-section class
 entries with geometry, composition crew/loco/allocation columns,
 retirement of `service_class_density`) is documented column-by-column in
-the DDL comments (`sql/create_input_params_schema.sql`) and in the
+the column descriptions (`db/schema.py`) and in the
 migration `sql/migrations/2026-07-22_composition_redesign.sql`.
 
 ---
@@ -146,8 +147,14 @@ See `backend/DEVELOPMENT.md` for the full backend developer setup guide.
 
 ## The SQL schemas
 
-The files in `db/dev/sql/` are the **source of truth** for the application
-schemas (`admin`, `input_params`, `scenario`, `proposals`). The `ontd`
+`db/schema.py` is the **source of truth** for the `input_params` and
+`scenario` schemas: one reviewable Python file defining every parameter
+column with its type, a plain-language description, and its unit —
+`seed.py` renders it to DDL (`build_ddl()`), and the descriptions become
+the `COMMENT ON` texts visible in Mathesar. Reviewing a parameter change
+means reviewing this one file. The files in `db/dev/sql/` remain the
+source of truth for the application-plumbing schemas (`admin`,
+`proposals`)s (`admin`, `input_params`, `scenario`, `proposals`). The `ontd`
 schema is owned separately by `db/ontd/sql/`, since it is dropped and
 rebuilt by its own loader rather than migrated. The rest of this section
 concerns the application schemas
@@ -289,7 +296,7 @@ rows with another scenario):
   (`is_current_scenario = TRUE`, `is_current_base = FALSE`). Identical to
   `"base"` in every field except `track_hsr_allowed = TRUE` everywhere.
 
-See `create_scenario_schema.sql` for the full column-level rationale.
+See `db/schema.py` (scenario.scenarios) for the column-level definitions.
 
 ### `proposals`
 

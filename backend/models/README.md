@@ -18,35 +18,41 @@ This folder contains the domain model for evaluating night train route economics
 
 ```
 models/
+├── formula.py                       # Shared Formula/FormulaParam dataclasses (LaTeX + description + input/output legend
+│                                    # incl. 'ref' source pointers — rendered into docs/MODEL.md by scripts/generate_model_docs.py)
 ├── params.py                        # Shared parameter dataclasses (loaded from DB)
 ├── pipeline.py                      # run_compute() / evaluate_and_build_views() — domain-level pipeline dispatch
 ├── utils.py                         # Shared unit conversion utilities
 ├── demand/
 │   ├── stopgap.py                   # distribute_demand() — stopgap uniform-distribution proxy
-│   ├── version.py                   # DEMAND_MODEL_VERSION + stopgap standard values & open TODOs
+│   ├── model.py                     # DEMAND_MODEL_VERSION + stopgap standard values & open TODOs
 │   └── README.md                    # Demand model documentation (incl. incoming real-model design)
 ├── route/
 │   ├── trip.py                      # Stop, Segment, Trip — physics domain objects
 │   ├── route.py                     # Route, TripPair, Parking, Shunting, ODPair, Schedule
 │   ├── route_factory.py             # plan_route() — sole Trip/TripPair/Route constructor
 │   ├── timetable.py                 # Pluggable timetable_mode / schedule_mode / auto_stop_addition strategies
-│   ├── version.py                   # ROUTE_BUILDER_VERSION + all standard values & open TODOs of the route model
+│   ├── model.py                     # ROUTE_BUILDER_VERSION + all standard values & open TODOs of the route model
 │   └── routing/                     # rail_router.py (GraphHopper wrapper) + dynamics.py (per-stop accel/brake time loss)
 │       ├── rail_router.py           # OpenRailRouting (GraphHopper) wrapper
 │       └── docker/                  # Self-hosted routing engine Docker setup
 ├── energy/
 │   ├── calc_energy_consumption.py   # Per-segment energy model
-│   └── version.py                   # ENERGY_CALC_VERSION
+│   └── model.py                     # ENERGY_CALC_VERSION
 ├── emissions/
-│   ├── factors.py                   # Flat per-mode GHG factors (g CO2e/pax-km) + mode-shift shares
+│   ├── model.py                     # EMISSIONS_MODEL_VERSION + flat per-mode GHG factors + mode-shift shares
 │   └── README.md                    # Emissions model documentation (sources, consumers, roadmap)
 ├── compositions/
-│   └── calc_indicative_figures.py   # compute_indicative_figures() — PLACEHOLDER, returns dummy figures
+│   ├── model.py                     # COMPOSITIONS_MODEL_VERSION — cost calibration anchor (calib/CALIBRATION.md)
+│   └── calib/                       # Calibration notebooks, data, and CALIBRATION.md
+├── infrastructure/
+│   ├── model.py                     # INFRA_MODEL_VERSION — infrastructure parameter anchor
+│   └── STOP_CLASSIFICATION.md       # Stop catalog classification pipeline
 └── evaluation/
     ├── calc.py                      # Cost/revenue evaluation → EvaluationResult
     ├── views.py                     # Breakdown aggregation, allocation, normalisation
     ├── summary.py                   # build_summary_row() — §5.4 gallery-KPI derivation (calc response + publish projection)
-    ├── version.py                   # CALC_VERSION
+    ├── model.py                     # CALC_VERSION
     └── README.md                    # Evaluation layer documentation
 ```
 
@@ -79,7 +85,7 @@ plan_route(trip_pair_inputs, loader, router, schedule_mode, proposal_id, proposa
   │     return value for the API layer to serialize). Search + costing is
   │     shared (timetable.find_and_cost_auto_stop_candidates(), catalog
   │     prefiltered to route-touched countries, then to AUTO_STOP_BUFFER_M
-  │     of the routed geometry — 10km, version.py). Costing itself is
+  │     of the routed geometry — 10km, model.py). Costing itself is
   │     analytic-first (timetable._analytic_added_time_min(): dwell +
   │     routing/dynamics.py's own accel/brake pair + out-and-back detour
   │     at cruise speed, ZERO router calls) for candidates within
@@ -95,7 +101,7 @@ plan_route(trip_pair_inputs, loader, router, schedule_mode, proposal_id, proposa
   │     ("simpleAutomaticWithFixedNight", per-leg slack for a stretched night
   │     interval) → stop_inputs, departure_time_min[, slack_per_leg];
   │     both classify stops boarding/night/alighting via the shared
-  │     NIGHT_START_MIN/NIGHT_END_MIN rule (version.py)
+  │     NIGHT_START_MIN/NIGHT_END_MIN rule (model.py)
   ├── calc_energy_consumption(legs, composition)                   → enriches RoutedLeg.energy_kwh
   ├── timetable.build_final_timetable()                            → exact per-stop arrival/departure
   ├── _build_trip_stops_and_legs(...)                              → list[Segment]
@@ -156,7 +162,7 @@ own real routing call for its own (possibly asymmetric) physical path; only
 the decision of *which stops to add* (or *which to suggest*) is shared, not
 the routing. Accepted trade-off: return no longer gets an independent
 detour-budget check against its own baseline trip time (see
-`OPEN_TODOS["return_detour_budget"]` in `route/version.py`). `timetable.py`
+`OPEN_TODOS["return_detour_budget"]` in `route/model.py`). `timetable.py`
 holds one function per named behaviour and never branches on the mode/flag
 itself — see that module's docstring. `VALID_TIMETABLE_MODES` /
 `VALID_SCHEDULE_MODES` / `VALID_AUTO_STOP_ADDITION_MODES` in `timetable.py`
@@ -165,9 +171,9 @@ truth both the compute request validation
 (`api/helpers/proposal_compute.py`) and the switches read from. Every
 standard value the route model assumes (mode defaults, mirror time,
 auto-stop thresholds, schedule constants) and every open TODO on the route
-model are consolidated in `route/version.py` (`STANDARD VALUES` /
+model are consolidated in `route/model.py` (`STANDARD VALUES` /
 `OPEN_TODOS`); the stopgap demand parameters live in
-`demand/version.py`.
+`demand/model.py`.
 
 ---
 
@@ -248,7 +254,7 @@ e.g. P1_V1_R1       — route for proposal 1, version 1
 `route_factory.py` itself only ever sees concrete ints for both.
 Ephemeral compute (`POST /api/proposal/calc`, `adapters/proposal/README.md`
 §2.1) passes the fixed neutral placeholders `NEUTRAL_PROPOSAL_ID`/
-`NEUTRAL_PROPOSAL_VERSION` (both `0`, `models/route/version.py`): that
+`NEUTRAL_PROPOSAL_VERSION` (both `0`, `models/route/model.py`): that
 endpoint never persists, so there's no collision risk — the `P0_V0_`
 prefix exists only for the instant it takes `rewrite_id_prefix()`
 (`adapters/proposal/id_prefix.py`) to strip it back off into the neutral
