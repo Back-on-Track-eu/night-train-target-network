@@ -152,6 +152,26 @@ jobs:
             "backend/models/demand/model.py" \
             "DEMAND_MODEL_VERSION"
 
+          # Route/evaluation/energy model.py self-gates: these three carry
+          # the formula registries (LaTeX + description + I/O legend) and
+          # can change on their own — e.g. rewording a description — with
+          # no implementation file touched, which the implementation-file
+          # pairings above would not catch. Self-gate closes that gap.
+          check_version \
+            "backend/models/route/model.py" \
+            "backend/models/route/model.py" \
+            "ROUTE_BUILDER_VERSION"
+
+          check_version \
+            "backend/models/evaluation/model.py" \
+            "backend/models/evaluation/model.py" \
+            "CALC_VERSION"
+
+          check_version \
+            "backend/models/energy/model.py" \
+            "backend/models/energy/model.py" \
+            "ENERGY_CALC_VERSION"
+
           if [ $FAIL -ne 0 ]; then
             echo ""
             echo "One or more model files were changed without bumping the version."
