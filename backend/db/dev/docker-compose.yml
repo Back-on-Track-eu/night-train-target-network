@@ -7,14 +7,25 @@
 # This stack spins up postgres, seeds it with test data, and starts Mathesar
 # for visual schema inspection — independently of the rest of the backend.
 #
+# Configuration comes from the shared backend/docker/.env (the one file that
+# configures every dev stack). This directory has no .env of its own.
+#
 # Usage:
+#   cp backend/docker/.env.example backend/docker/.env   # first time only
 #   cd backend/db/dev
-#   cp .env.example .env        # already has default values, no changes needed
 #   docker-compose up -d
-#   open http://localhost:8000   # Mathesar UI
+#   open http://localhost:8000   # Mathesar UI (MATHESAR_HOST_PORT)
 #
 # The seeder runs once on startup and exits. Postgres persists via a volume.
 # To reset: docker-compose down -v && docker-compose up -d
+#
+# Shares the postgres container name and host port with backend/docker's
+# stack, so the two are mutually exclusive by design — run one or the other.
+#
+# NOTE on ports: compose interpolates ${...} from THIS directory, which has
+# no .env — so the ${VAR:-default} port fallbacks below always resolve to
+# their defaults unless you pass `--env-file ../../docker/.env`. Container
+# environment (credentials) always comes from the shared file via env_file.
 
 services:
 
@@ -22,16 +33,19 @@ services:
     image: postgis/postgis:16-3.4-alpine
     container_name: night_train_postgres
     restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+    # env_file, not ${...} interpolation, for the credentials: interpolation
+    # would silently yield empty strings here (no local .env) and postgres
+    # would refuse to initialise. $$ escapes compose interpolation so the
+    # container expands the variable itself. Same pattern as the
+    # devcontainer overlay.
+    env_file:
+      - ../../docker/.env
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -44,12 +58,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    env_file:
+      - ../../docker/.env
     environment:
+      # In-network overrides: service name as host, container port.
       POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_PORT: "5432"
     restart: "no"
 
   mathesar:
@@ -59,9 +73,10 @@ services:
       postgres:
         condition: service_healthy
     environment:
+      # Local inspection UI only — never exposed beyond localhost.
       SECRET_KEY: change-this-later
     ports:
-      - "8000:8000"
+      - "${MATHESAR_HOST_PORT:-8000}:8000"
     restart: unless-stopped
 
 volumes:

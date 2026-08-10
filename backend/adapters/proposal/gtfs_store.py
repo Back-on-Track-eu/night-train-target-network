@@ -62,22 +62,12 @@ from models.route.route import (
     Shunting,
 )
 from models.route.trip import Stop, StopType, Segment, Trip, TimetableWarning
+from models.route.version import GTFS_SERVICE_END, GTFS_SERVICE_START
 from models.params import ODPair
 from models.utils import min_to_interval as _min_to_interval
 
 _TRIP_SUFFIX_PATTERN = re.compile(r"_D(\d+)_T(\d+)$")
 
-# Nominal GTFS calendar window for persisted services — the project's
-# target timetable year, 2032 (per the December-to-December European
-# rail timetable-change convention: 2nd Sunday of December through the
-# day before the following year's 2nd Sunday). GTFS requires concrete
-# dates; the model itself only knows seasonal frequencies, so every saved
-# service is pinned to this window until real timetable-year handling
-# exists. If "2032" means the timetable period covering most of calendar
-# year 2032 (starting Dec 2031) rather than the one starting Dec 2032,
-# swap these two lines for "2031-12-14" / "2032-12-11".
-_SERVICE_START = "2032-12-12"
-_SERVICE_END = "2033-12-10"
 
 _WEEKDAYS = (
     "monday",
@@ -203,7 +193,7 @@ def _insert_service(cur, service_id: str, schedule: dict) -> None:
     cur.execute(
         f"INSERT INTO proposals.calendar (service_id, {columns}, start_date, end_date) "
         f"VALUES (%s, {flags}, %s, %s)",
-        (service_id, _SERVICE_START, _SERVICE_END),
+        (service_id, GTFS_SERVICE_START, GTFS_SERVICE_END),
     )
 
 

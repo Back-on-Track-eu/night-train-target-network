@@ -26,7 +26,7 @@ from dataclasses import dataclass
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.16"
+ROUTE_BUILDER_VERSION: str = "0.9.17"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -41,6 +41,18 @@ ROUTE_BUILDER_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.17": {
+        "date": "2026-08-10",
+        "author": "david",
+        "changes": "Constant relocation only: the persisted-GTFS calendar "
+        "window (_SERVICE_START/_SERVICE_END in "
+        "adapters/proposal/gtfs_store.py) moved into STANDARD VALUES as "
+        "GTFS_SERVICE_START/GTFS_SERVICE_END, values unchanged "
+        "(2032-12-12 .. 2033-12-10). It pins every saved service's "
+        "calendar, i.e. it is a fixed model assumption — sitting in an "
+        "adapter it could change without a version bump. No Trip output "
+        "change.",
+    },
     "0.9.16": {
         "date": "2026-08-07",
         "author": "david",
@@ -338,6 +350,19 @@ DEFAULT_TIMETABLE_MODE: str = "simpleAutomatic"
 DEFAULT_SCHEDULE_MODE: str = "alwaysDaily"
 DEFAULT_ROUTING_MODE: str = "fullRouting"
 DEFAULT_AUTO_STOP_ADDITION: str = "add"
+
+# --- Persisted GTFS calendar window (adapters/proposal/gtfs_store.py)
+GTFS_SERVICE_START: str = "2032-12-12"
+GTFS_SERVICE_END: str = "2033-12-10"
+"""Nominal GTFS calendar window for persisted services — the project's
+target timetable year, 2032 (per the December-to-December European rail
+timetable-change convention: 2nd Sunday of December through the day before
+the following year's 2nd Sunday). GTFS requires concrete dates; the model
+itself only knows seasonal frequencies, so every saved service is pinned to
+this window until real timetable-year handling exists. Changing it changes
+persisted GTFS calendars, hence a version bump. If "2032" means the
+timetable period covering most of calendar year 2032 (starting Dec 2031)
+rather than the one starting Dec 2032, use "2031-12-14" / "2032-12-11"."""
 
 # --- Timetable (timetable_mode="simpleAutomatic")
 MIRROR_MIN: int = 26 * 60 + 30

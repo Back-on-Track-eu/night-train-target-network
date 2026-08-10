@@ -18,9 +18,12 @@ export default defineConfig({
   },
   server: {
     host: '0.0.0.0',
-    port: 5173,
+    // Ports come from backend/docker/.env via the devcontainer compose
+    // overlay (FRONTEND_CONTAINER_PORT / FRONTEND_HOST_PORT); the
+    // fallbacks mirror .env.example and must stay equal to it.
+    port: Number(process.env.FRONTEND_CONTAINER_PORT ?? 5173),
     hmr: {
-      clientPort: 5173,
+      clientPort: Number(process.env.FRONTEND_HOST_PORT ?? 5173),
     },
     watch: {
       usePolling: true,

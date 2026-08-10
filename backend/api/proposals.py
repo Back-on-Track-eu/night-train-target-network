@@ -23,7 +23,9 @@ from flask import Blueprint, jsonify, request
 
 from api.helpers.dependencies import get_loader, get_proposal_repository
 from api.helpers.proposal_load import load_current_container
+from api import config
 from api.helpers.proposal_serialize import (
+    DEFAULT_INCLUDE,
     map_country_counts_to_geojson,
     map_lines_to_geojson,
     map_stop_counts_to_dict,
@@ -34,9 +36,6 @@ from api.helpers.proposal_serialize import (
 
 logger = logging.getLogger(__name__)
 bp = Blueprint("proposals", __name__)
-
-_DEFAULT_LIMIT = 50
-_DEFAULT_INCLUDE = ["summaries"]
 
 
 @bp.get("/proposals")
@@ -159,14 +158,14 @@ def _list_response(body: dict):
     same `filters` dict, so every section reflects the same filter)."""
     repo = get_proposal_repository()
     filters = body.get("filter", {})
-    include = body.get("include") or _DEFAULT_INCLUDE
+    include = body.get("include") or DEFAULT_INCLUDE
 
     response = {}
     if "summaries" in include:
         rows, total = repo.list_summaries(
             filters=filters,
             sort=body.get("sort"),
-            limit=body.get("limit", _DEFAULT_LIMIT),
+            limit=body.get("limit", config.PROPOSALS_DEFAULT_LIMIT),
             offset=body.get("offset", 0),
         )
         response["summaries"] = {

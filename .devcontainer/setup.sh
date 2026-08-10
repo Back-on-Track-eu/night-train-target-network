@@ -12,7 +12,9 @@ pre-commit install
 cd /workspace/frontend
 npm install
 
-until curl -sf http://localhost:5000/api/health; do
+# Runs inside the api container, so the container-side port applies
+# (env from backend/docker/.env via env_file).
+until curl -sf "http://localhost:${API_CONTAINER_PORT:-5000}/api/health"; do
   sleep 2
 done
 

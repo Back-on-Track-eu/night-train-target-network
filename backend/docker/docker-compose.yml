@@ -11,7 +11,15 @@
 #   cp .env.example .env
 #   docker-compose up -d
 #
-# All configuration lives in .env — see .env.example for reference.
+# All configuration lives in .env — see .env.example for reference. Port
+# fallbacks below (${VAR:-value}) are sanctioned mirrors of .env.example and
+# must stay equal to it (AGENTS.md "Parameter placement").
+#
+# The devcontainer runs THIS stack plus a frontend, as a compose overlay —
+# see .devcontainer/docker-compose.yml. The explicit project name keeps both
+# entry points on one project (same containers, same volumes).
+
+name: night_train
 
 services:
 
@@ -24,7 +32,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB:       ${POSTGRES_DB}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -40,7 +48,7 @@ services:
     image: docker-openrailrouting
     container_name: openrailrouting
     environment:
-      GRAPH_CACHE_FILE_ID: ${GRAPH_CACHE_FILE_ID}
+      GRAPH_CACHE_FILE_ID: ${GRAPH_CACHE_FILE_ID:-}
     ports:
       - "${OPENRAILROUTING_HOST_PORT:-8989}:${OPENRAILROUTING_CONTAINER_PORT:-8989}"
     volumes:
@@ -60,15 +68,15 @@ services:
       dockerfile: docker/Dockerfile
     image: docker-api
     container_name: night-train-api
-    # Host side is 5050, not 5000 — matches .devcontainer/docker-compose.yml
-    # (macOS AirPlay Receiver squats on 5000). Container always binds 5000.
     ports:
-      - "5050:5000"
+      - "${API_HOST_PORT:-5050}:${API_CONTAINER_PORT:-5000}"
     env_file:
       - .env
     environment:
-      # Override for inter-container networking — always use service name as host
+      # Overrides for inter-container networking — service name as host, and
+      # the container-side ports regardless of what the host publishes.
       POSTGRES_HOST:        postgres
+      POSTGRES_PORT:        "5432"
       OPENRAILROUTING_URL:  http://openrailrouting:${OPENRAILROUTING_CONTAINER_PORT:-8989}
     depends_on:
       postgres:
