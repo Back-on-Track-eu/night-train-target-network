@@ -148,7 +148,10 @@ jobs:
         if: steps.cache-graph.outputs.cache-hit != 'true'
         run: |
           mkdir -p backend/models/route/routing/docker/graph-cache
-          FILE_ID="1tWt1OX7mzPA7Ylo9KqmTK6YluRXEtt8z"
+          # The id's one home is the routing container's entrypoint default
+          # (AGENTS.md "Parameter placement") — read it from there.
+          FILE_ID=$(grep -oP 'GRAPH_CACHE_FILE_ID:-\K[^}]+' \
+            backend/models/route/routing/docker/entrypoint.sh)
           URL="https://drive.usercontent.google.com/download?id=${FILE_ID}&export=download&confirm=t"
           curl -L "$URL" -o /tmp/graph-cache.zip
           unzip -o /tmp/graph-cache.zip -d backend/models/route/routing/docker/graph-cache
@@ -200,8 +203,9 @@ jobs:
       - name: Wait for API to be healthy
         run: |
           echo "Waiting for API..."
+          API_HOST_PORT=$(grep -oP '^API_HOST_PORT=\K.*' backend/docker/.env)
           attempts=0
-          until curl -sf http://localhost:5050/api/health > /dev/null; do
+          until curl -sf "http://localhost:${API_HOST_PORT:-5050}/api/health" > /dev/null; do
             attempts=$((attempts + 1))
             if [ $attempts -ge 60 ]; then
               echo "API did not become healthy after 2 minutes"
@@ -243,6 +247,8 @@ jobs:
 
       - name: Run integration tests
         run: |
+          API_HOST_PORT=$(grep -oP '^API_HOST_PORT=\K.*' backend/docker/.env)
+          export API_BASE_URL="http://localhost:${API_HOST_PORT:-5050}"
           cd backend
           uv run --extra dev pytest tests/ -v --timeout=60
         env:
@@ -251,7 +257,6 @@ jobs:
           POSTGRES_DB:       target_network_test_db
           POSTGRES_USER:     bot_admin
           POSTGRES_PASSWORD: devpassword
-          API_BASE_URL:      http://localhost:5050
 
       # ------------------------------------------------------------------
       # Always print logs on failure

@@ -26,7 +26,7 @@ Usage:
                  --email, so it exercises actual mail delivery. The script
                  pauses and asks you to paste the code you received by
                  email. If AUTH_EMAIL_DEV_MODE=true is set instead, it will
-                 try to read the code from the backend-api container logs
+                 try to read the code from the API container logs
                  automatically (no real mail sent) — otherwise it always
                  falls back to a manual prompt.
   guest          POST /api/auth/guest only — prints the guest token/identity.
@@ -72,10 +72,19 @@ import subprocess
 import sys
 import time
 
+from pathlib import Path
+
 import requests
 
-API_BASE = os.environ.get("API_BASE_URL", "http://localhost:5050")
-CONTAINER_NAME = "backend-api"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from dev_env import api_base_url, api_container_name  # noqa: E402
+
+API_BASE = api_base_url()
+# Both dev stacks (backend/docker and the devcontainer overlay) run one
+# compose project, so there is a single API container name; override via
+# API_CONTAINER_NAME for anything non-standard.
+CONTAINER_NAME = api_container_name()
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "data")
 
 SUBJECT_PREFIX = "MANUAL_TEST_AUTH_CHAIN_"
@@ -117,7 +126,7 @@ def check_smtp_configured(email: str):
     if dev_mode:
         print(
             "[i] AUTH_EMAIL_DEV_MODE=true in THIS shell's env — but what "
-            "matters is the backend-api container's own .env. If that "
+            "matters is the API container's own .env. If that "
             "container has dev mode on, no real email will be sent even "
             "though --email looks like a real address."
         )
@@ -138,7 +147,7 @@ def check_smtp_configured(email: str):
 def _otp_from_logs(email: str) -> str | None:
     """
     Best-effort: read the most recent AUTH_EMAIL_DEV_MODE log line for this
-    email out of `docker logs backend-api`. Returns None if the container
+    email out of the API container's docker logs. Returns None if the container
     isn't reachable via the Docker CLI or no matching line is found — the
     caller falls back to a manual prompt either way, so this is pure
     convenience, not a hard dependency.
@@ -174,7 +183,7 @@ def _otp_from_logs(email: str) -> str | None:
 def get_otp(email: str) -> str:
     """
     Ask for the code the person just received by real email. Also tries
-    the backend-api container logs first, purely as a convenience for the
+    the API container logs first, purely as a convenience for the
     case AUTH_EMAIL_DEV_MODE turned out to be on after all (no real mail
     sent) — if that produces nothing, falls through to the manual prompt,
     which is the expected path when testing real SMTP delivery.
@@ -183,7 +192,7 @@ def get_otp(email: str) -> str:
     code = _otp_from_logs(email)
     if code:
         print(
-            f"[i] Found an OTP in backend-api logs ({code}) — "
+            f"[i] Found an OTP in API container logs ({code}) — "
             "AUTH_EMAIL_DEV_MODE is likely on for that container, so no "
             "real email was sent. Using it, but this doesn't test mail "
             "delivery; turn dev mode off in backend/docker/.env to test "

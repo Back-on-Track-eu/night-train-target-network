@@ -49,10 +49,16 @@ import subprocess
 import sys
 import time
 
+from pathlib import Path
+
 import requests
 
-API_BASE = os.environ.get("API_BASE_URL", "http://localhost:5050")
-ROUTING_URL = "http://localhost:8989"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from dev_env import api_base_url, routing_base_url  # noqa: E402
+
+API_BASE = api_base_url()
+ROUTING_URL = routing_base_url()
 CONTAINER_NAME = "openrailrouting"
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "data")

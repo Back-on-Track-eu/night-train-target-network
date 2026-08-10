@@ -11,12 +11,10 @@ Covers:
   - Phase 5 stub endpoints (auth) returning 501
 """
 
-import os
-
 import pytest
 import requests
 
-OPENRAILROUTING_PORT = os.environ.get("OPENRAILROUTING_HOST_PORT", "8989")
+from dev_env import routing_base_url
 
 
 @pytest.mark.timeout(10)
@@ -43,7 +41,7 @@ def test_data_status_loaded(api_base):
 def test_openrailrouting_health():
     """OpenRailRouting's own health endpoint is reachable on the host port —
     routing requests from the API have somewhere to go."""
-    resp = requests.get(f"http://localhost:{OPENRAILROUTING_PORT}/health")
+    resp = requests.get(f"{routing_base_url()}/health")
     assert resp.status_code == 200
 
 

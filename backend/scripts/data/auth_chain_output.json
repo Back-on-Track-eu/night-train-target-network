@@ -1,0 +1,14 @@
+{
+  "auth": {
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0IiwiZW1haWwiOiJkYXZpZGoud2VkZWtpbmRAZ21haWwuY29tIiwiZGlzcGxheV9uYW1lIjoicmFpbGZhbjEwNTg5IiwiaXNfZ3Vlc3QiOmZhbHNlLCJpYXQiOjE3ODYyMjMwMjAsImV4cCI6MTc4NjgyNzgyMCwianRpIjoiZWMzOTJlNzc1YjllMmVhN2ZhYWI2Yzg2MTVlMTllYzAifQ.Y1rlXvQBX5cpVyowCCHwlodH8L1zYsdZZfI2qW-kYbg",
+    "user_id": 4,
+    "display_name": "railfan10589",
+    "is_guest": false,
+    "merged_guest": null
+  },
+  "feedback": {
+    "feedback_id": 1,
+    "created_at": "2026-08-08T21:03:40.499896+00:00",
+    "email_sent": true
+  }
+}
