@@ -26,7 +26,7 @@ import requests
 
 from adapters.proposal.repository import outdated_trigger
 from api.helpers import dependencies
-from models.route.version import ROUTE_BUILDER_VERSION
+from models.route.model import ROUTE_BUILDER_VERSION
 from scripts.refresh_proposals import run as run_refresh
 from tests.helpers import PROPOSAL_URL, compute, publish, purge_saved_proposals
 

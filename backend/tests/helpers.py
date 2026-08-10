@@ -286,7 +286,7 @@ def compute_evaluation_domain(
         views_to_dict,
     )
     from api.helpers.route_serialize import route_from_dict, route_to_dict
-    from models.evaluation.version import CALC_VERSION
+    from models.evaluation.model import CALC_VERSION
     from models.pipeline import evaluate_and_build_views
 
     resolved_scenario_id = (

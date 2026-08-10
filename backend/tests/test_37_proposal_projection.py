@@ -22,7 +22,7 @@ import json
 import pytest
 
 from adapters.proposal.projection import build_summary_db_row, route_fingerprint
-from models.emissions.factors import EMISSION_FACTORS
+from models.emissions.model import EMISSION_FACTORS
 from models.evaluation.summary import build_summary_row
 from adapters.proposal.repository import ProposalRepository
 from tests.conftest import STOPS_BERLIN_DRESDEN_WIEN, STOPS_BERLIN_WIEN
