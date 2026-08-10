@@ -33,7 +33,7 @@ import re
 import pytest
 import requests
 
-from models.route.version import ROUTE_BUILDER_VERSION
+from models.route.model import ROUTE_BUILDER_VERSION
 from api.helpers.proposal_compare import build_diff, build_route_context
 from tests.helpers import (
     PROPOSALS_COMPARE_URL,

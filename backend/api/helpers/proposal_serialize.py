@@ -61,7 +61,9 @@ from adapters.proposal.filter_builder import (
 )
 
 _INCLUDE_SECTIONS = {"summaries", "map_lines", "map_stop_counts", "map_country_counts"}
-_DEFAULT_INCLUDE = ["summaries"]
+# The one home for the default "include" sections — api/proposals.py
+# imports it for the empty-body listing path.
+DEFAULT_INCLUDE = ["summaries"]
 _ARRAY_FILTER_MODES = {"any", "all"}
 
 

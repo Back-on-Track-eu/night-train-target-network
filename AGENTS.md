@@ -49,16 +49,9 @@ files describing the same three backend services, kept manually in sync:
   grouped in the `adapters/proposal/` package (`repository.py`,
   `gtfs_store.py`, `projection.py`, `engagement_repository.py`,
   `id_prefix.py`)
-- A hard-coded parameter lives with the code that **enforces** it, never
-  as a bare literal at the use site. HTTP-shaping limits (rate limits,
-  body caps, page caps) → `backend/api/config.py`; an adapter's or
-  script's own knob (cache TTL, batch worker count) → next to that
-  implementation; domain assumptions not yet in the DB → the owning
-  model's `version.py` STANDARD VALUES, so they version with the model;
-  calibrated domain/economic parameters → the DB params tables; secrets
-  and service wiring → `os.environ` at the point of use.
-  `backend/docker/.env.example` documents every per-environment override,
-  grouped by the module that reads it
+- Every parameter has exactly ONE home — see the "Parameter placement"
+  section below for the full ruleset. Never restate a value outside its
+  home; documentation names the variable and its home, not the value
 - Meaningful but sparse comments; longer explanations go in module
   docstrings or READMEs, not inline blocks
 
@@ -98,17 +91,75 @@ files describing the same three backend services, kept manually in sync:
 
 ---
 
+
+## Parameter placement
+
+Two axes decide where a value lives: its **home** (five questions, first
+"yes" wins) and its **lifecycle** (may it have a default at all).
+
+**Gate first — parameter or contract?** If changing the value would break
+a caller, invalidate stored data, or redefine a vocabulary (regexes, SQL,
+column maps, enum vocabularies, trust levels, `_JWT_ALGORITHM`,
+`_NAME_MAX_LEN` on persisted keys), it is a contract: it stays beside its
+use, and none of the below applies. Only tunables continue.
+
+1. **Differs between laptop / CI / staging / production?** → `.env`, read
+   via `os.environ` at the point of use.
+   - *Secrets and wiring* (`JWT_SECRET`, `POSTGRES_*`, `SMTP_PASSWORD`,
+     URLs, ports, container names): **no code default** — missing means a
+     loud failure. A default here cannot rescue a misconfiguration, only
+     turn a startup crash into a silent wrong answer. Dev-side exception:
+     `backend/dev_env.py` is the ONE place host-run tooling defaults are
+     defined.
+   - *Mode switches and data identity* (`AUTH_EMAIL_DEV_MODE`,
+     `ONTD_BOOTSTRAP`, `TESTING`, Drive file ids): one code default, the
+     safe/canonical value. Dev opts in to the unsafe one.
+2. **Calibrated from real-world data, needs provenance + versioning?** →
+   DB tables (`input_params`, `scenario`).
+3. **Changing it changes model output?** → the owning model's
+   `version.py` STANDARD VALUES — because changing it must bump that
+   model's version. Request-body defaults applied at the API boundary
+   (`DEFAULT_TIMETABLE_MODE` etc.) and the persisted-GTFS calendar window
+   live here.
+4. **Only shapes the HTTP request/response cycle?** → `backend/api/config.py`
+   (rate limits, body/subject caps, page sizes, session TTLs). For caps
+   on user input the tiebreak is: relaxing it invalidates stored data →
+   contract, stays local; otherwise → `api/config.py`.
+5. **Otherwise** → module constant beside the one implementation that
+   uses it (`COMPUTE_CACHE_TTL_HOURS`, `ONTD_ROUTING_WORKERS`).
+
+**One home per value.** `backend/docker/.env.example` lists every
+per-environment variable; variables whose default lives in code appear
+there commented out, name-only. The single sanctioned restatement:
+compose files may mirror port defaults as `${VAR:-value}` fallbacks,
+which must stay equal to `.env.example`.
+
+**One dev-side `.env`.** `backend/docker/.env` configures the main stack,
+the devcontainer overlay, the standalone db/dev stack, and (via
+`backend/dev_env.py`) all host-run scripts, tests, and ontd loaders.
+Server deployments in `deploy/` intentionally do NOT read it — they
+enumerate their environment explicitly.
+
+At boot, `api/config.py::log_effective_config()` logs every resolved
+non-secret setting, so a deployment's effective configuration is
+answered by `docker logs`.
+
 ## How to Run
 
 ### Full stack (recommended, VS Code / frontend work)
 
 ```bash
-docker compose -f .devcontainer/docker-compose.yml up --build
+docker compose -f backend/docker/docker-compose.yml \
+               -f .devcontainer/docker-compose.yml up --build
 ```
 
-- Frontend: http://localhost:5173 (Vite HMR — edits reflect instantly)
-- Backend API: http://localhost:5050 (host side moved off 5000 — macOS AirPlay Receiver squats there; container still binds 5000 internally)
-- OpenRailRouting: http://localhost:8989 (admin/metrics on 8990)
+(The devcontainer file is an overlay on the backend stack — ports and all
+other wiring come from `backend/docker/.env`; values below are the
+defaults.)
+
+- Frontend: http://localhost:5173 (`FRONTEND_HOST_PORT`; Vite HMR — edits reflect instantly)
+- Backend API: http://localhost:5050 (`API_HOST_PORT` — host side moved off 5000, macOS AirPlay Receiver squats there; container binds `API_CONTAINER_PORT`, 5000)
+- OpenRailRouting: http://localhost:8989 (`OPENRAILROUTING_HOST_PORT`; admin/metrics on `OPENRAILROUTING_ADMIN_HOST_PORT`, 8990)
 
 ### Backend stack only (PyCharm / backend work)
 

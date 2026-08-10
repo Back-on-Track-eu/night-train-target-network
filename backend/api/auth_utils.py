@@ -40,6 +40,8 @@ from datetime import datetime, timedelta, timezone
 
 import jwt
 
+from api import config
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -47,8 +49,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _JWT_ALGORITHM = "HS256"
-_JWT_TTL_DAYS = 7  # logged-in users
-_GUEST_TTL_DAYS = 30  # guests — longer window so proposals stay accessible
 _OTP_DIGITS = 6
 _GUEST_SUFFIX_CHARS = string.ascii_lowercase + string.digits
 
@@ -256,7 +256,7 @@ def create_jwt(
     jti          : str            — unique token ID (enables revocation later)
     """
     now = datetime.now(timezone.utc)
-    ttl = _GUEST_TTL_DAYS if is_guest else _JWT_TTL_DAYS
+    ttl = config.GUEST_TTL_DAYS if is_guest else config.JWT_TTL_DAYS
 
     payload = {
         "sub": str(user_id),

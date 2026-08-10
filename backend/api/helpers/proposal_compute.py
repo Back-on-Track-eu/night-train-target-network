@@ -49,7 +49,7 @@ from api.helpers.evaluation_serialize import (
     views_to_dict,
 )
 from api.helpers.route_serialize import route_to_dict, suggested_stops_to_dicts
-from models.evaluation.version import CALC_VERSION
+from models.evaluation.model import CALC_VERSION
 from models.pipeline import run_compute
 from models.route.timetable import (
     VALID_AUTO_STOP_ADDITION_MODES,
@@ -57,7 +57,7 @@ from models.route.timetable import (
     VALID_TIMETABLE_MODES,
 )
 from models.route.routing.rail_router import VALID_ROUTING_MODES
-from models.route.version import (
+from models.route.model import (
     DEFAULT_AUTO_STOP_ADDITION,
     DEFAULT_ROUTING_MODE,
     DEFAULT_SCHEDULE_MODE,

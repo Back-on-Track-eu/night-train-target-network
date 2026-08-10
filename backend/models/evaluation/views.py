@@ -33,7 +33,7 @@ from __future__ import annotations
 import dataclasses
 from dataclasses import dataclass, field
 from models.route.route import Route, TripPair
-from models.evaluation.version import (
+from models.evaluation.model import (
     BREAKDOWN_TOTAL_NDIGITS,
     NORMALISATION_NDIGITS,
 )

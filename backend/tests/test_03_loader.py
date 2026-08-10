@@ -4,9 +4,11 @@ test_03_loader.py
 Verifies the DBDataLoader produces correct domain objects.
 
 Two levels:
-  Static  — the SQL schema files contain every column the loader reads
-            (catches a rename in SQL that the loader wasn't updated for,
-            without needing a live DB round-trip per column).
+  Static  — the schema definition contains every column the loader reads
+            (catches a rename that the loader wasn't updated for, without
+            needing a live DB round-trip per column). Sources: the
+            declarative db/schema.py (input_params + scenario) plus the
+            CREATE TABLE blocks in db/dev/sql/*.sql (admin, proposals).
   Runtime — loader output matches raw DB values for known seeded rows,
             including the aggregations (capacity, weight) and the density
             values the evaluation model depends on.
@@ -23,16 +25,24 @@ import pytest
 
 
 def _parse_schema_columns() -> dict[str, set[str]]:
-    """Parse CREATE TABLE blocks in db/dev/sql/*.sql into {table: {columns}}.
+    """{table: {columns}} across both schema sources: the declarative
+    db/schema.py tables (input_params + scenario, read directly from the
+    dataclasses — no SQL parsing) and the CREATE TABLE blocks in
+    db/dev/sql/*.sql (admin, proposals).
 
-    Deliberately only dev/sql: that is the DDL the application schemas
-    live in. The ontd schema (db/ontd/sql/) is reference data that
-    DBDataLoader never reads, so it has no loader columns to check.
+    Deliberately only the application schemas: the ontd schema
+    (db/ontd/sql/) is reference data that DBDataLoader never reads, so it
+    has no loader columns to check.
     """
+    from db.schema import INPUT_PARAMS_TABLES, SCENARIO_TABLES
+
+    tables: dict[str, set[str]] = {
+        f"{t.schema}.{t.name}".lower(): {c.name for c in t.columns}
+        for t in INPUT_PARAMS_TABLES + SCENARIO_TABLES
+    }
     sql_dir = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "db", "dev", "sql"
     )
-    tables: dict[str, set[str]] = {}
     for fname in os.listdir(sql_dir):
         if not fname.endswith(".sql"):
             continue
@@ -110,10 +120,10 @@ LOADER_READ_COLUMNS = [
 
 @pytest.mark.parametrize("table,column", LOADER_READ_COLUMNS)
 def test_column_exists_in_schema(table, column):
-    """Every column the loader reads exists in the SQL schema files."""
+    """Every column the loader reads exists in the schema definition."""
     table_lower = table.lower()
     assert table_lower in SCHEMA_COLUMNS, (
-        f"Table {table} not found in schema files. Found: {sorted(SCHEMA_COLUMNS)}"
+        f"Table {table} not found in schema definition. Found: {sorted(SCHEMA_COLUMNS)}"
     )
     assert column in SCHEMA_COLUMNS[table_lower], (
         f"Column {table}.{column} not found in schema"

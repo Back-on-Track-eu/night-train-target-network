@@ -1219,7 +1219,7 @@ class Scenario:
     """
     One row of scenario.scenarios — a container pinning one version of
     each versioned infrastructure table. See
-    db/dev/sql/create_scenario_schema.sql for the full versioning
+    db/schema.py (scenario.scenarios) and db/README.md for the full versioning
     contract; summarized here for the fields this object carries:
 
     is_current_base: TRUE for exactly one row in the whole table — the

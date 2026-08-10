@@ -35,7 +35,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from models.demand.stopgap import distribute_demand
-from models.demand.version import (
+from models.demand.model import (
     STOPGAP_FARE_PER_KM_BY_CLASS,
     STOPGAP_UTILIZATION_PER,
 )

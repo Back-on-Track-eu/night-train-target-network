@@ -1,97 +1,55 @@
-name: bot_target_network
-
-# Self-contained devcontainer stack for VS Code / frontend development.
-# Duplicates postgres and openrailrouting from backend/docker/docker-compose.yml
-# so we avoid include: merge validation issues. Keep in sync if base services change.
+# =============================================================================
+# Devcontainer OVERLAY on backend/docker/docker-compose.yml
+# =============================================================================
+# Loaded as the SECOND file in devcontainer.json's dockerComposeFile array —
+# the base stack (postgres, openrailrouting, api) comes entirely from
+# backend/docker/docker-compose.yml. This file only ADDS what VS Code /
+# frontend development needs: the workspace mount on the api service, the
+# routing admin port, and the Vite frontend.
+#
+# One stack, two entry points: the compose project directory is the FIRST
+# file's directory (backend/docker/), so its .env feeds ${...} interpolation
+# for both files, and `docker compose` from backend/docker and the
+# devcontainer share the same project, containers and volumes.
+#
+# PATHS: with multiple compose files, relative paths resolve against the
+# FIRST file's directory — backend/docker/. Hence ../.. for the repo root.
+#
+# Plain-Docker equivalent of the devcontainer (from the repo root):
+#   docker compose -f backend/docker/docker-compose.yml \
+#                  -f .devcontainer/docker-compose.yml up --build
 
 services:
 
-  postgres:
-    image: postgis/postgis:16-3.4-alpine
-    container_name: night_train_postgres
-    restart: unless-stopped
-    # Deliberately differs from backend/docker/docker-compose.yml: there, the
-    # compose project directory *is* backend/docker/, so ${POSTGRES_*} is
-    # interpolated from its .env. Here the project directory is .devcontainer/,
-    # which has no .env — interpolation would silently yield empty strings and
-    # postgres would refuse to initialise. So load the shared file with
-    # env_file, and let the healthcheck expand the vars inside the container
-    # ($$ escapes compose interpolation).
-    env_file:
-      - ../backend/docker/.env
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
   openrailrouting:
-    build:
-      context: ../backend/models/route/routing/docker
-      dockerfile: Dockerfile
-    image: docker-openrailrouting
-    container_name: openrailrouting
     ports:
-      - "${OPENRAILROUTING_HOST_PORT:-8989}:${OPENRAILROUTING_CONTAINER_PORT:-8989}"
-      - "8990:8990"
-    volumes:
-      - ../backend/models/route/routing/docker/data:/app/data
-      - ../backend/models/route/routing/docker/graph-cache:/app/graph-cache
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${OPENRAILROUTING_CONTAINER_PORT:-8989}/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 120s
+      # Admin/metrics endpoint, dev only. Container side 8990 mirrors the
+      # engine's own config.yml (see .env.example's Ports section).
+      - "${OPENRAILROUTING_ADMIN_HOST_PORT:-8990}:8990"
 
-  backend-api:
-    build:
-      context: ../backend
-      dockerfile: docker/Dockerfile
-    container_name: backend-api
-    # Host side is 5050, not 5000: macOS's AirPlay Receiver squats on 5000.
-    # Container always binds 5000 (see backend/docker/entrypoint.sh).
-    ports:
-      - "5050:5000"
-    env_file:
-      - ../backend/docker/.env
-    environment:
-      POSTGRES_HOST: postgres
-      OPENRAILROUTING_URL: http://openrailrouting:${OPENRAILROUTING_CONTAINER_PORT:-8989}
+  api:
     volumes:
-      - ..:/workspace:cached
+      - ../..:/workspace:cached
       - ~/.ssh:/root/.ssh:ro
-    depends_on:
-      postgres:
-        condition: service_healthy
-      openrailrouting:
-        condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:${API_CONTAINER_PORT:-5000}/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
-    restart: unless-stopped
 
   frontend:
     build:
-      context: ../frontend
+      context: ../../frontend
       dockerfile: Dockerfile
     container_name: night-train-frontend
     ports:
-      - "5173:5173"
+      - "${FRONTEND_HOST_PORT:-5173}:${FRONTEND_CONTAINER_PORT:-5173}"
     environment:
-      VITE_API_BASE_URL: http://localhost:5050
+      VITE_API_BASE_URL: http://localhost:${API_HOST_PORT:-5050}
+      FRONTEND_CONTAINER_PORT: ${FRONTEND_CONTAINER_PORT:-5173}
+      FRONTEND_HOST_PORT: ${FRONTEND_HOST_PORT:-5173}
     volumes:
-      - ../frontend:/app
+      - ../../frontend:/app
       - /app/node_modules
     restart: unless-stopped
-
-volumes:
-  pgdata:

@@ -67,7 +67,7 @@ from models.params import (
 )
 from models.route.trip import StopType
 from models.route.routing.dynamics import apply_traction_dynamics
-from models.route.version import (
+from models.route.model import (
     HSR_TRACK_SPEED_THRESHOLD_KMH,
     HSR_TRACK_SPEED_SANITY_MAX_KMH,
     HSR_AVOIDANCE_PRIORITY_FACTOR,

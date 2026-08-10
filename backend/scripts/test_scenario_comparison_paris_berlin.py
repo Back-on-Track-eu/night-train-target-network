@@ -15,7 +15,7 @@ By default this compares the two *current* scenarios:
 
 track_hsr_allowed feeds directly into route PLANNING, not just cost —
 rail_router.py penalizes track segments whose permitted speed exceeds
-HSR_TRACK_SPEED_THRESHOLD_KMH (models/route/version.py) in every country
+HSR_TRACK_SPEED_THRESHOLD_KMH (models/route/model.py) in every country
 where HSR is not allowed (composition.hsr_allowed AND that country's
 track hsr_allowed, transited-only countries included).
 So the two scenarios can legitimately produce different routed paths
@@ -49,10 +49,16 @@ import subprocess
 import sys
 import time
 
+from pathlib import Path
+
 import requests
 
-API_BASE = os.environ.get("API_BASE_URL", "http://localhost:5050")
-ROUTING_URL = "http://localhost:8989"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from dev_env import api_base_url, routing_base_url  # noqa: E402
+
+API_BASE = api_base_url()
+ROUTING_URL = routing_base_url()
 CONTAINER_NAME = "openrailrouting"
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "data")

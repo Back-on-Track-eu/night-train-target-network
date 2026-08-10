@@ -43,6 +43,7 @@ import logging
 from flask import Flask, jsonify
 from flask_cors import CORS
 
+from api import config
 from api.auth_utils import check_auth_config
 from api.helpers.dependencies import DataNotLoadedError, init
 from api.limiter import limiter
@@ -71,6 +72,9 @@ def create_app() -> Flask:
     # configured; validates the optional Keycloak OIDC config (dormant
     # until KEYCLOAK_ISSUER_URL is set — see api/auth_oidc.py).
     check_auth_config()
+    # One INFO line per resolved non-secret setting, so "what is this
+    # deployment actually running with" is answered by the boot log.
+    config.log_effective_config()
     init()
 
     app = Flask(__name__)
@@ -143,5 +147,11 @@ def create_app() -> Flask:
 
 
 if __name__ == "__main__":
+    import os
+
     app = create_app()
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(
+        host="0.0.0.0",
+        port=int(os.environ.get("API_CONTAINER_PORT", "5000")),
+        debug=True,
+    )

@@ -676,7 +676,7 @@ No request body, no query params — always returns every row of
 (produced by [`../scripts/test_scenarios.py`](../scripts/test_scenarios.py)).
 
 `scenario.scenarios` carries two independent "current" flags (see
-`db/dev/sql/create_scenario_schema.sql` and [`../db/README.md`](../db/README.md)): `is_current_base` (exactly one
+`db/schema.py` (scenario.scenarios) and [`../db/README.md`](../db/README.md)): `is_current_base` (exactly one
 row in the whole table — the live default used when an API call omits
 `scenario_id`) and `is_current_scenario` (exactly one row per
 `scenario_key` — the head of that what-if lineage). A flat

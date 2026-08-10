@@ -1,9 +1,9 @@
 """
-version.py
-==========
-Version constant, standard values, and open TODOs for the demand model —
-same single-place convention as models/route/version.py and
-models/evaluation/version.py: every standard assumption the model makes
+model.py
+========
+Version constant, description, changelog, standard values, and open
+TODOs for the demand model — same single-anchor convention as every
+other model.py under models/: every standard assumption the model makes
 lives here, and modules using a value import it from here.
 
 The demand model is currently the stopgap uniform-distribution proxy
@@ -12,7 +12,35 @@ The demand model is currently the stopgap uniform-distribution proxy
 reported in API responses; that wiring lands with the real model.
 """
 
-DEMAND_MODEL_VERSION: str = "0.0.1"
+DEMAND_MODEL_VERSION: str = "0.0.2"
+
+DEMAND_MODEL_DESCRIPTION: str = (
+    "Demand model (placeholder): assumes every accommodation class is "
+    "70% booked at a flat per-kilometre fare, spread evenly across all "
+    "connections — a stand-in until a real demand model with directional "
+    "demand, price sensitivity, and competition from other modes "
+    "replaces it."
+)
+
+CHANGELOG: dict = {
+    "0.0.2": {
+        "date": "2026-08-10",
+        "author": "david",
+        "changes": "version.py renamed to model.py (every model now anchors "
+        "version, description, and changelog in a model.py); "
+        "DEMAND_MODEL_DESCRIPTION and CHANGELOG added. Standard values "
+        "and behaviour unchanged.",
+    },
+    "0.0.1": {
+        "date": "2026-08-03",
+        "author": "david",
+        "changes": "Stopgap demand model moved out of models/route/ into its "
+        "own models/demand/ package (route builder 0.9.13): "
+        "distribute_demand() uniform-distribution proxy plus the "
+        "STOPGAP_* standard values, ahead of the real demand model "
+        "landing here.",
+    },
+}
 
 
 # =============================================================================

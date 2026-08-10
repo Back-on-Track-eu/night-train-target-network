@@ -16,7 +16,7 @@ and the same scenario:
        so the German feeder (München/Berlin/Hamburg) keeps evening
        departures. The interval must depart Hamburg by 23:59 and arrive
        København at 05:00 or later (NIGHT_START_MIN / NIGHT_END_MIN in
-       models/route/version.py); a naturally shorter interval is stretched
+       models/route/model.py); a naturally shorter interval is stretched
        with per-segment slack_time_min, and an over-stretched one carries a
        fixed_night_stretch_slow entry in general_parameters.
        timetable_warnings.
@@ -46,10 +46,16 @@ import subprocess
 import sys
 import time
 
+from pathlib import Path
+
 import requests
 
-API_BASE = os.environ.get("API_BASE_URL", "http://localhost:5050")
-ROUTING_URL = "http://localhost:8989"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from dev_env import api_base_url, routing_base_url  # noqa: E402
+
+API_BASE = api_base_url()
+ROUTING_URL = routing_base_url()
 CONTAINER_NAME = "openrailrouting"
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "data")
@@ -60,7 +66,7 @@ COMPOSITION_ID = "STD-7.1"
 DEFAULT_INTERVAL = ["DE_HAMBURG_HBF", "DK_COPENHAGEN"]
 DEFAULT_SCENARIO = "base"
 
-# Mirrors NIGHT_START_MIN / NIGHT_END_MIN in models/route/version.py —
+# Mirrors NIGHT_START_MIN / NIGHT_END_MIN in models/route/model.py —
 # restated as literals: this script observes the API contract from outside,
 # same as the test suite.
 NIGHT_START = 24 * 60  # 00:00 (+1)

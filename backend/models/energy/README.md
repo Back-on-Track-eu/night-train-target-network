@@ -129,7 +129,7 @@ In a Jupyter notebook:
 
 - [ ] Enter the calibrated coefficients into `seed.py` for the relevant composition types
 - [ ] Replace the dummy implementation in `calc_energy_consumption.py` with the regression formula
-- [ ] Bump `ENERGY_CALC_VERSION` in `version.py` and add a changelog entry
+- [ ] Bump `ENERGY_CALC_VERSION` in `model.py` and add a changelog entry
 - [ ] Run `uv run --extra dev pytest tests/ -v` to confirm all tests still pass
 - [ ] Open a PR to `backend-dev` — tag David for review
 
@@ -178,7 +178,7 @@ uv run python scripts/calibrate_energy.py
 | File | Description |
 |---|---|
 | `calc_energy_consumption.py` | Main function called by `route_factory.py` — currently dummy, to be replaced |
-| `version.py` | Version constant — bump when implementation changes |
+| `model.py` | Version constant, formulas, changelog — bump when implementation changes |
 
 ## Related files
 

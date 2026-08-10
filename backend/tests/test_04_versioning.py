@@ -171,9 +171,9 @@ def test_git_sha_injected_in_ci():
     if not os.environ.get("GITHUB_SHA"):
         pytest.skip("Not running in CI — GIT_SHA injection not required locally")
 
-    from models.energy.version import GIT_SHA as ENERGY_SHA
-    from models.evaluation.version import GIT_SHA as CALC_SHA
-    from models.route.version import GIT_SHA as ROUTE_SHA
+    from models.energy.model import GIT_SHA as ENERGY_SHA
+    from models.evaluation.model import GIT_SHA as CALC_SHA
+    from models.route.model import GIT_SHA as ROUTE_SHA
 
     expected = os.environ["GITHUB_SHA"]
     assert ROUTE_SHA == expected, (

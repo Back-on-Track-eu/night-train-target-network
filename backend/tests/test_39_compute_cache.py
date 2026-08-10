@@ -28,7 +28,7 @@ import os
 import pytest
 
 from adapters.proposal.compute_cache import ComputeCacheRepository
-from models.route.version import DEFAULT_SCHEDULE_MODE
+from models.route.model import DEFAULT_SCHEDULE_MODE
 from tests.conftest import DB_CONFIG, STOPS_BERLIN_WIEN
 from tests.helpers import compute
 

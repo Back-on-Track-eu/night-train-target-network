@@ -18,10 +18,9 @@ import logging
 
 from models.params import Composition
 from models.route.routing.rail_router import RoutedLeg
+from models.energy.model import ENERGY_FLAT_FACTOR_KWH_KM
 
 logger = logging.getLogger(__name__)
-
-_DUMMY_KWH_PER_KM: float = 28.0
 
 
 def calc_energy_consumption(
@@ -32,7 +31,7 @@ def calc_energy_consumption(
     unused — reserved for the real model."""
     logger.warning(
         "calc_energy_consumption: using DUMMY flat factor %.1f kWh/km.",
-        _DUMMY_KWH_PER_KM,
+        ENERGY_FLAT_FACTOR_KWH_KM,
     )
     for leg in routed_legs:
-        leg.energy_kwh = _DUMMY_KWH_PER_KM * (leg.distance_m / 1000.0)
+        leg.energy_kwh = ENERGY_FLAT_FACTOR_KWH_KM * (leg.distance_m / 1000.0)
