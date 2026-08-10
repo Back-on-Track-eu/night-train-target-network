@@ -15,7 +15,7 @@ By default this compares the two *current* scenarios:
 
 track_hsr_allowed feeds directly into route PLANNING, not just cost —
 rail_router.py penalizes track segments whose permitted speed exceeds
-HSR_TRACK_SPEED_THRESHOLD_KMH (models/route/version.py) in every country
+HSR_TRACK_SPEED_THRESHOLD_KMH (models/route/model.py) in every country
 where HSR is not allowed (composition.hsr_allowed AND that country's
 track hsr_allowed, transited-only countries included).
 So the two scenarios can legitimately produce different routed paths

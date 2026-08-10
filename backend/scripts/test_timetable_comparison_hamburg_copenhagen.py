@@ -16,7 +16,7 @@ and the same scenario:
        so the German feeder (München/Berlin/Hamburg) keeps evening
        departures. The interval must depart Hamburg by 23:59 and arrive
        København at 05:00 or later (NIGHT_START_MIN / NIGHT_END_MIN in
-       models/route/version.py); a naturally shorter interval is stretched
+       models/route/model.py); a naturally shorter interval is stretched
        with per-segment slack_time_min, and an over-stretched one carries a
        fixed_night_stretch_slow entry in general_parameters.
        timetable_warnings.
@@ -66,7 +66,7 @@ COMPOSITION_ID = "STD-7.1"
 DEFAULT_INTERVAL = ["DE_HAMBURG_HBF", "DK_COPENHAGEN"]
 DEFAULT_SCENARIO = "base"
 
-# Mirrors NIGHT_START_MIN / NIGHT_END_MIN in models/route/version.py —
+# Mirrors NIGHT_START_MIN / NIGHT_END_MIN in models/route/model.py —
 # restated as literals: this script observes the API contract from outside,
 # same as the test suite.
 NIGHT_START = 24 * 60  # 00:00 (+1)

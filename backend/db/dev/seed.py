@@ -25,7 +25,7 @@ Versioning note
 Only the four infrastructure input_params tables (track_infrastructures,
 track_infrastructure_defaults, stop_infrastructures,
 stop_infrastructure_defaults) are versioned — "current" is entirely a
-scenario.scenarios concept for these (see create_scenario_schema.sql). A
+scenario.scenarios concept for these (see db/schema.py and db/README.md). A
 version bump is a FULL-TABLE SNAPSHOT: editing one row duplicates every
 other row of that table forward into the new version number.
 
@@ -56,10 +56,12 @@ test_31_evaluation_content.py for the pattern.
 NOT versioned — they're a catalog you add to, not history you edit. Each
 row's natural id (operator_id, coach_type_id, composition_type_id) is
 permanent; changing a value means seeding a new id, never editing a row
-in place. See create_input_params_schema.sql for the rationale.
+in place. See db/schema.py for the rationale.
 """
 
 import os
+import sys
+from pathlib import Path
 from datetime import timedelta
 from decimal import Decimal
 import json
@@ -70,6 +72,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from sql_loader import load_sql
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from db.schema import build_ddl
 
 DB_HOST = os.environ["POSTGRES_HOST"]
 DB_PORT = os.environ["POSTGRES_PORT"]
@@ -523,7 +528,7 @@ COACH_TYPE_CLASSES_RAW = [
 #   version 3 — 2032 Base Line + Night Trains on HSR allowed: identical to
 #     version 2 except track_hsr_allowed=True everywhere.
 # A scenario pins one version NUMBER for the whole table, never a
-# per-country flag — see create_scenario_schema.sql.
+# per-country flag — see db/schema.py (scenario.scenarios).
 
 # 2032 default row. track_hsr_allowed is set per-version below (see
 # _build_track_infra_defaults) rather than baked in here.
@@ -1950,7 +1955,7 @@ def seed_composition_type_coaches(cur):
 # pin, no NULLs, and no table is shared/inherited between scenarios (see
 # the versioning note at the top of this file). Compositions/coach
 # types/operators/composition references aren't part of a scenario at
-# all — see create_scenario_schema.sql.
+# all — see db/schema.py (scenario.scenarios).
 #
 # Three scenarios, one scenario_key each (three independent lineages, not
 # forks of one another):
@@ -2299,13 +2304,13 @@ def _compute_example_proposal(
     from adapters.proposal.projection import route_fingerprint
     from models.evaluation.summary import build_summary_row
     from models.demand.stopgap import distribute_demand
-    from models.demand.version import (
+    from models.demand.model import (
         STOPGAP_FARE_PER_KM_BY_CLASS,
         STOPGAP_UTILIZATION_PER,
     )
-    from models.evaluation.version import CALC_VERSION
+    from models.evaluation.model import CALC_VERSION
     from models.pipeline import evaluate_and_build_views
-    from models.route.version import ROUTE_BUILDER_VERSION
+    from models.route.model import ROUTE_BUILDER_VERSION
 
     route, compositions = route_from_dict(route_dict, loader, scenario_id=scenario_id)
     distribute_demand(
@@ -2446,8 +2451,7 @@ def main():
 
     print("Creating schemas...")
     cur.execute(load_sql("create_admin_schema.sql"))
-    cur.execute(load_sql("create_input_params_schema.sql"))
-    cur.execute(load_sql("create_scenario_schema.sql"))
+    cur.execute(build_ddl())  # input_params + scenario — db/schema.py
     cur.execute(load_sql("create_proposal_schema.sql"))
 
     # ONTD schema bootstrap (WP10 step 6a) — created ONLY when absent, so

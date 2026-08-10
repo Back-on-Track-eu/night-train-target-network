@@ -62,7 +62,7 @@ from models.route.route import (
     Shunting,
 )
 from models.route.trip import Stop, StopType, Segment, Trip, TimetableWarning
-from models.route.version import GTFS_SERVICE_END, GTFS_SERVICE_START
+from models.route.model import GTFS_SERVICE_END, GTFS_SERVICE_START
 from models.params import ODPair
 from models.utils import min_to_interval as _min_to_interval
 

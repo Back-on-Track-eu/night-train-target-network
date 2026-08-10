@@ -110,8 +110,8 @@ from models.route.timetable import (
     VALID_AUTO_STOP_ADDITION_MODES,
 )
 from models.energy.calc_energy_consumption import calc_energy_consumption
-from models.route.version import ROUTE_BUILDER_VERSION
-from models.energy.version import ENERGY_CALC_VERSION
+from models.route.model import ROUTE_BUILDER_VERSION
+from models.energy.model import ENERGY_CALC_VERSION
 
 logger = logging.getLogger(__name__)
 

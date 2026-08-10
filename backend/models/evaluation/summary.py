@@ -32,13 +32,13 @@ Public interface:
 
 from __future__ import annotations
 
-from models.emissions.factors import EMISSION_FACTORS, MODE_SHIFT_SHARES
+from models.emissions.model import EMISSION_FACTORS, MODE_SHIFT_SHARES
 
 # Placeholder demand-KPI assumption (§8.1: "deterministic fakes derived
 # from route metrics ... plausible orders of magnitude for UI
 # development") — replaced wholesale once models/demand/ exists. Never
 # treat this as a real modelling assumption. The mode-shift shares and
-# CO2 factors it combines with live in models/emissions/factors.py.
+# CO2 factors it combines with live in models/emissions/model.py.
 _PLACEHOLDER_AVG_FARE_EUR = 120.0
 
 

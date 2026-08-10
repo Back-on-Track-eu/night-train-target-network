@@ -19,7 +19,7 @@ place:
     scenario tables. They carry provenance and a version; code constants
     cannot.
   * Domain assumptions not yet in the database — the owning model's
-    version.py STANDARD VALUES block (models/route, models/demand, …).
+    model.py STANDARD VALUES block (models/route, models/demand, …).
     They live there because they are versioned WITH the model: changing
     one bumps a model version, which is exactly what should not happen
     when a rate limit is retuned.

@@ -5,16 +5,38 @@ on:
     branches: [staging, production, backend-dev]
     paths:
       - 'backend/**'
+      - 'docs/MODEL.md'
       - '.devcontainer/**'
       - '.github/workflows/backend-tests.yml'
   pull_request:
     branches: [staging, production]
     paths:
       - 'backend/**'
+      - 'docs/MODEL.md'
       - '.devcontainer/**'
       - '.github/workflows/backend-tests.yml'
 
 jobs:
+
+  # ============================================================
+  # JOB 0 — docs/MODEL.md freshness
+  # Fails if the generated blocks in docs/MODEL.md no longer match the
+  # model registries (models/*/model.py) or the schema (db/schema.py).
+  # ============================================================
+  model-docs-check:
+    name: MODEL.md up-to-date check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check docs/MODEL.md against the registries
+        run: python backend/scripts/generate_model_docs.py --check
 
   # ============================================================
   # JOB 1 — Version bump enforcement
@@ -71,37 +93,64 @@ jobs:
           }
 
           # Route builder
-          check_version \
-            "backend/models/route/route_factory.py" \
-            "backend/models/route/version.py" \
-            "ROUTE_BUILDER_VERSION"
-
-          check_version \
-            "backend/models/route/trip.py" \
-            "backend/models/route/version.py" \
-            "ROUTE_BUILDER_VERSION"
-
-          check_version \
-            "backend/models/route/route.py" \
-            "backend/models/route/version.py" \
-            "ROUTE_BUILDER_VERSION"
-
-          check_version \
-            "backend/models/route/routing/rail_router.py" \
-            "backend/models/route/version.py" \
-            "ROUTE_BUILDER_VERSION"
+          for f in \
+            backend/models/route/route_factory.py \
+            backend/models/route/trip.py \
+            backend/models/route/route.py \
+            backend/models/route/timetable.py \
+            backend/models/route/routing/rail_router.py \
+            backend/models/route/routing/dynamics.py; do
+            check_version "$f" \
+              "backend/models/route/model.py" \
+              "ROUTE_BUILDER_VERSION"
+          done
 
           # Energy model
           check_version \
             "backend/models/energy/calc_energy_consumption.py" \
-            "backend/models/energy/version.py" \
+            "backend/models/energy/model.py" \
             "ENERGY_CALC_VERSION"
 
           # Cost/revenue evaluation
+          for f in \
+            backend/models/evaluation/calc.py \
+            backend/models/evaluation/views.py \
+            backend/models/evaluation/summary.py; do
+            check_version "$f" \
+              "backend/models/evaluation/model.py" \
+              "CALC_VERSION"
+          done
+
+          # Demand model (stopgap)
           check_version \
-            "backend/models/evaluation/calc.py" \
-            "backend/models/evaluation/version.py" \
-            "CALC_VERSION"
+            "backend/models/demand/stopgap.py" \
+            "backend/models/demand/model.py" \
+            "DEMAND_MODEL_VERSION"
+
+          # Models whose entire content is model.py (emissions factor set,
+          # composition cost calibration anchor, infrastructure parameter
+          # anchor): self-gate — any diff to the file requires its own
+          # version constant to move.
+          check_version \
+            "backend/models/emissions/model.py" \
+            "backend/models/emissions/model.py" \
+            "EMISSIONS_MODEL_VERSION"
+
+          check_version \
+            "backend/models/compositions/model.py" \
+            "backend/models/compositions/model.py" \
+            "COMPOSITIONS_MODEL_VERSION"
+
+          check_version \
+            "backend/models/infrastructure/model.py" \
+            "backend/models/infrastructure/model.py" \
+            "INFRA_MODEL_VERSION"
+
+          # Demand model.py self-gate (standard values live in the file)
+          check_version \
+            "backend/models/demand/model.py" \
+            "backend/models/demand/model.py" \
+            "DEMAND_MODEL_VERSION"
 
           if [ $FAIL -ne 0 ]; then
             echo ""
@@ -158,16 +207,16 @@ jobs:
           rm /tmp/graph-cache.zip
 
       # ------------------------------------------------------------------
-      # Inject GIT_SHA into version files before building Docker image
+      # Inject GIT_SHA into model files before building Docker image
       # ------------------------------------------------------------------
-      - name: Inject GIT_SHA into version files
+      - name: Inject GIT_SHA into model files
         run: |
           SHA="${{ github.sha }}"
-          echo "Injecting GIT_SHA=${SHA} into version files..."
+          echo "Injecting GIT_SHA=${SHA} into model files..."
           for f in \
-            backend/models/route/version.py \
-            backend/models/energy/version.py \
-            backend/models/evaluation/version.py; do
+            backend/models/route/model.py \
+            backend/models/energy/model.py \
+            backend/models/evaluation/model.py; do
             sed -i "s/GIT_SHA: str = \"unknown\"/GIT_SHA: str = \"${SHA}\"/" "$f"
             echo "  ✓ $f"
           done

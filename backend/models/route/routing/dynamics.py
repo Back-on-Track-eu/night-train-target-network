@@ -75,7 +75,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from models.route.version import (
+from models.route.model import (
     TRACTION_LOCO_WEIGHT_T,
     TRACTION_LOCO_POWER_KW,
     TRACTION_LOCO_TRACTIVE_EFFORT_KN,

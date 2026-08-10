@@ -234,7 +234,7 @@ class DBDataLoader:
         to its four per-table version pointers. Infrastructure only —
         operators/coach_types/composition_types are
         unversioned catalogs and have no scenario pointer at all (see
-        scenario.scenarios' docstring in create_scenario_schema.sql).
+        scenario.scenarios definition in db/schema.py).
 
         Every column on scenario.scenarios is NOT NULL, so this is always a
         single direct row fetch — no inheritance/fallback logic needed.

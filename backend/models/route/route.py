@@ -36,7 +36,7 @@ from models.route.trip import Trip
 
 # Standard schedule assumptions live in the route model's central registry —
 # see models/route/version.py (STANDARD VALUES).
-from models.route.version import WEEKS_PER_SEASON, DAYS_PER_OPERATING_WEEK
+from models.route.model import WEEKS_PER_SEASON, DAYS_PER_OPERATING_WEEK
 
 # =============================================================================
 # SCHEDULE
