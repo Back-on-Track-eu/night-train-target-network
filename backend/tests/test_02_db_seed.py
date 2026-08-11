@@ -42,7 +42,9 @@ EXPECTED_SCHEMAS = {"admin", "input_params", "scenario", "proposals"}
 EXPECTED_ROW_COUNTS = {
     "admin.users": 3,  # David, Bjarne, test_script (suite identity)
     "input_params.sources": 3,  # 2 legacy + calibration umbrella
-    "input_params.countries": 28,  # 7 original routing countries + 21 further EU27
+    # 7 calibrated routing countries + 21 further EU27 + 6 non-EU
+    # (NO, GB, BA, RS, ME, AL)
+    "input_params.countries": 34,
     "input_params.service_classes": 25,  # one per coach section (class_id naming rule)
     "input_params.operators": 2,  # STD-REF / STD-NEW
     "input_params.operator_class_costs": 50,  # 2 operators × 25 section classes (fan-out by class_main)
@@ -51,7 +53,7 @@ EXPECTED_ROW_COUNTS = {
     "input_params.composition_types": 8,  # the eight calibrated standard compositions
     "input_params.composition_type_coaches": 76,
     "input_params.track_infrastructure_defaults": 3,  # 1 per scenario
-    "input_params.track_infrastructures": 84,  # 3 full-table snapshots × 28 countries
+    "input_params.track_infrastructures": 102,  # 3 full-table snapshots × 34 countries
     "input_params.stop_infrastructure_defaults": 3,  # 1 per scenario
     # Floor: 3 full-table snapshots × 58 curated stops. The real total
     # includes the ONTD-derived stops seeded from db/dev/data/
@@ -94,8 +96,9 @@ EXPECTED_PHASE2_NOT_NULL_COLUMNS = {
 
 # Columns that must never be NULL. Every other track_infrastructures column
 # is legitimately nullable — resolved from track_infrastructure_defaults by
-# the loader (SE nulls tac/parking intentionally; the 21 EU27 countries added
-# beyond the original 7 null everything but country_code — see seed.py).
+# the loader (SE nulls tac/parking intentionally; the 27 countries in
+# _TRACK_INFRA_PLACEHOLDER_COUNTRIES null everything but country_code — see
+# seed.py).
 REQUIRED_COLUMNS = {
     "input_params.stop_infrastructures": [
         "stop_id",
@@ -337,6 +340,35 @@ def test_country_geometries_seeded(db_cur):
         """)
     missing = [row["country_code"] for row in db_cur.fetchall()]
     assert missing == [], f"Stop countries without a border geometry: {missing}"
+
+
+def test_country_geometries_cover_maritime_zones(db_cur):
+    """The border polygons must include maritime zones, not just land.
+
+    This is the whole point of the Marine Regions EEZ land union: with
+    land-only borders every belt and strait crossing fell outside all
+    polygons and was attributed to the UNK sentinel, taking the real track
+    on both approaches with it. Asserted on the Fehmarn Belt and the
+    Øresund — the two crossings the seeded routes actually use — rather
+    than on the source file, so a regression to a land-only dataset fails
+    here regardless of where the geometry came from."""
+    for country_code, lon, lat, where in (
+        ("DK", 11.29, 54.58, "Fehmarn Belt"),
+        ("SE", 12.85, 55.57, "Øresund"),
+    ):
+        db_cur.execute(
+            """
+            SELECT country_code
+            FROM input_params.countries
+            WHERE ST_Contains(country_geom, ST_SetSRID(ST_Point(%s, %s), 4326))
+            """,
+            (lon, lat),
+        )
+        matched = [row["country_code"] for row in db_cur.fetchall()]
+        assert matched == [country_code], (
+            f"{where} resolves to {matched or 'no country'}, expected "
+            f"['{country_code}'] — country_geom looks land-only again."
+        )
 
 
 # =============================================================================
