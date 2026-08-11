@@ -68,7 +68,7 @@ def workbook_url(id_var: str, kind_var: str, description: str) -> str:
     """Resolve a workbook id from the environment into a download URL.
 
     The ids live in backend/docker/.env (documented in .env.example
-    alongside GRAPH_CACHE_PATH and NATURAL_EARTH_COUNTRIES_URL) rather
+    alongside GRAPH_CACHE_PATH and EEZ_LAND_UNION_FILE_ID) rather
     than in code, so a link is rotated in one place. `kind_var` selects
     the endpoint, because the two are not interchangeable: a native sheet
     is exported on the fly and always current, while a Drive-hosted .xlsx
