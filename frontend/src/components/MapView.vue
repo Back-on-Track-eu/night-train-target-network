@@ -12,6 +12,7 @@ import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-csp-worker.js?url'
 // the worker never depends on how the main bundle was chunked or minified.
 maplibregl.setWorkerUrl(maplibreWorkerUrl)
 import { octilinearPath } from '@/utils/octilinear'
+import { mdiPlus, mdiClose } from '@mdi/js'
 
 // Two sources/layers: the in-scope route (highlighted) and the out-of-scope
 // route (dimmed grey). The dim layer is added first so the highlight draws on
@@ -55,6 +56,17 @@ interface MarkerStop {
   highlighted: boolean
 }
 
+// A proposed (not-yet-committed) stop along the temporary route, shown as an
+// interactive, less-pronounced marker with a plus/close affordance. Toggling one
+// only re-syncs these markers — never the route line or the fit.
+interface SuggestedMarker {
+  stopId: string
+  lat: number
+  lon: number
+  name: string
+  selected: boolean
+}
+
 // One leg of the route: its geometry plus the endpoint names and travel time
 // shown when the leg is hovered.
 interface MapSegment {
@@ -72,13 +84,20 @@ const props = defineProps<{
   // dimmed (highlighted=false) and each leg can be hovered for its travel time.
   // Falls back to `shape` (all highlighted) when absent.
   segments?: MapSegment[] | null
+  // Proposed stops along the temporary route (suggest mode). Rendered as their
+  // own interactive markers, independent of `stops`/`shape` so toggling one
+  // never redraws the route line or refits the map.
+  suggested?: SuggestedMarker[] | null
 }>()
+
+const emit = defineEmits<{ 'toggle-suggested': [stopId: string] }>()
 
 const { t } = useI18n()
 
 const mapContainer = ref<HTMLDivElement | null>(null)
 let map: maplibregl.Map | null = null
 let markers: maplibregl.Marker[] = []
+let suggestedMarkers: maplibregl.Marker[] = []
 let hoverPopup: maplibregl.Popup | null = null
 let mapLoaded = false
 let initialFitDone = false
@@ -111,6 +130,93 @@ function syncMarkers() {
       .addTo(map!)
     markers.push(marker)
   })
+}
+
+// An inline mdi icon (24x24 path) as an SVG element — the same path constants
+// AppIcon renders, but built as DOM so it can live inside a MapLibre marker.
+function iconSvgEl(pathD: string, color: string, px: number): SVGSVGElement {
+  const ns = 'http://www.w3.org/2000/svg'
+  const svg = document.createElementNS(ns, 'svg')
+  svg.setAttribute('viewBox', '0 0 24 24')
+  svg.setAttribute('width', String(px))
+  svg.setAttribute('height', String(px))
+  const path = document.createElementNS(ns, 'path')
+  path.setAttribute('d', pathD)
+  path.setAttribute('fill', color)
+  svg.appendChild(path)
+  return svg
+}
+
+// A proposed-stop marker: a dot carrying a plus (add) or close (remove) icon,
+// plus a text label. Dimmed while unselected, promoted to PRIMARY once selected,
+// mirroring the timeline bubble. The dot alone sizes the element so MapLibre
+// centres it on the coordinate; the label floats to the right without shifting it.
+//
+// NOTE: do NOT set inline `position` here. MapLibre positions markers by applying
+// a transform to an element its own `.maplibregl-marker` class makes
+// `position: absolute`; an inline `position: relative`/`static` would override
+// that and place the marker in normal flow, so it drifts (relative, not pinned)
+// as you zoom. The class's absolute + MapLibre's transform also make this element
+// the containing block for the absolutely-positioned label below.
+function makeSuggestedMarkerEl(m: SuggestedMarker): HTMLDivElement {
+  const el = document.createElement('div')
+  const size = 18
+  Object.assign(el.style, {
+    width: `${size}px`,
+    height: `${size}px`,
+    cursor: 'pointer',
+  })
+  const dot = document.createElement('div')
+  Object.assign(dot.style, {
+    width: '100%',
+    height: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: m.selected ? PRIMARY : PRIMARY_LIGHT,
+    border: `2px solid ${m.selected ? PRIMARY : DIMMED}`,
+    borderRadius: '50%',
+    boxShadow: '0 1px 4px rgba(0,0,0,0.35)',
+  })
+  dot.appendChild(
+    m.selected ? iconSvgEl(mdiClose, PRIMARY_LIGHT, 13) : iconSvgEl(mdiPlus, LABEL_DIMMED, 13),
+  )
+  const label = document.createElement('div')
+  label.textContent = m.name
+  Object.assign(label.style, {
+    position: 'absolute',
+    left: '100%',
+    top: '50%',
+    transform: 'translateY(-50%)',
+    marginLeft: '6px',
+    whiteSpace: 'nowrap',
+    fontSize: '11px',
+    fontWeight: m.selected ? '600' : '400',
+    color: m.selected ? LABEL_PRIMARY : LABEL_DIMMED,
+    textShadow: `0 0 2px ${PRIMARY_LIGHT}, 0 0 2px ${PRIMARY_LIGHT}`,
+    pointerEvents: 'none',
+  })
+  el.append(dot, label)
+  el.addEventListener('click', (e) => {
+    e.stopPropagation()
+    emit('toggle-suggested', m.stopId)
+  })
+  return el
+}
+
+// Rebuilds only the proposed-stop markers. Deliberately touches nothing else —
+// no route sources, no fitToStops — so selecting/unselecting a stop leaves the
+// temporary route line and the map framing untouched.
+function syncSuggestedMarkers() {
+  if (!map || !mapLoaded) return
+  suggestedMarkers.forEach((m) => m.remove())
+  suggestedMarkers = []
+  for (const s of props.suggested ?? []) {
+    const marker = new maplibregl.Marker({ element: makeSuggestedMarkerEl(s), anchor: 'center' })
+      .setLngLat([s.lon, s.lat])
+      .addTo(map!)
+    suggestedMarkers.push(marker)
+  }
 }
 
 // The station-name labels are a MapLibre symbol layer rather than DOM added to
@@ -266,6 +372,8 @@ function fitToStops(animate: boolean) {
   } else {
     const bounds = new maplibregl.LngLatBounds()
     props.stops.forEach((s) => bounds.extend([s.lon, s.lat]))
+    // Frame the proposed stops too, so entering suggest mode shows them all.
+    ;(props.suggested ?? []).forEach((s) => bounds.extend([s.lon, s.lat]))
     map.fitBounds(bounds, { padding: 80, maxZoom: 10, duration })
   }
   initialFitDone = true
@@ -359,6 +467,7 @@ onMounted(() => {
     initLayers()
     syncMarkers()
     syncStopLabels()
+    syncSuggestedMarkers()
     syncPolyline()
     fitToStops(false)
   })
@@ -385,9 +494,19 @@ watch(
   },
   { deep: true },
 )
+// Proposed-stop selection is isolated to its own markers — no line redraw, no
+// refit — which is exactly the "selecting a stop doesn't reroute" requirement.
+watch(
+  () => props.suggested,
+  () => {
+    syncSuggestedMarkers()
+  },
+  { deep: true },
+)
 
 onUnmounted(() => {
   markers.forEach((m) => m.remove())
+  suggestedMarkers.forEach((m) => m.remove())
   hoverPopup?.remove()
   hoverPopup = null
   map?.remove()
@@ -396,7 +515,15 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div ref="mapContainer" style="width: 100%; height: 100%; min-height: 480px" />
+  <!-- MapLibre's WebGL canvas is GPU-composited, so it escapes an ancestor's
+       `overflow: hidden` + `border-radius` (isolate/transform don't help either).
+       `clip-path` DOES clip composited layers, so it's what actually rounds the
+       corners. `rounded-xl` stays for any non-canvas overlays. -->
+  <div
+    ref="mapContainer"
+    class="overflow-hidden rounded-xl"
+    style="width: 100%; height: 100%; min-height: 480px; clip-path: inset(0 round 0.75rem)"
+  />
 </template>
 
 <style scoped>

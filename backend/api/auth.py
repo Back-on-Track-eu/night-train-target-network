@@ -15,13 +15,18 @@ API only validates them (see auth_oidc.py + auth_middleware.py).
 Flow
 ----
   Registration + login are the same endpoint (request-code).
-  If the email is new, a user row is created (unverified).
-  If it already exists, the existing user is used.
-  Either way an OTP is issued and emailed (adapters/mailer.py — BoT SMTP,
-  or logged when AUTH_EMAIL_DEV_MODE=true).
+  If the email is new, a PENDING user row is created (unverified, with a
+  throwaway placeholder display name). If it already exists, the existing
+  user is used. Either way an OTP is issued and emailed (adapters/mailer.py
+  — BoT SMTP, or logged when AUTH_EMAIL_DEV_MODE=true). No display name is
+  needed at this step.
 
-  On verify, the OTP is checked, the user is marked verified,
-  and a JWT is returned.
+  On verify, the OTP is checked. A first-time (never-verified) account then
+  picks its display name as a SECOND step — verify replies
+  {"needs_display_name": true} without consuming the code until a valid
+  name is supplied, at which point the placeholder is replaced, the user is
+  marked verified, and a JWT is returned. A returning (already-verified)
+  account skips straight to the JWT.
 
   Guest flow is separate: POST /api/auth/guest creates an anonymous
   user row and returns a guest JWT immediately (no email needed).
@@ -30,6 +35,7 @@ Flow
 from __future__ import annotations
 
 import logging
+import secrets
 from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, jsonify, request
@@ -71,14 +77,16 @@ def request_code():
     Request body
     ------------
     {
-        "email":        "user@example.com",   -- required
-        "display_name": "railfan42"           -- required on first call only;
-    }                                            ignored if user already exists
+        "email": "user@example.com"    -- required
+    }
+
+    No display name here — a new account picks it later, on verify (a
+    second step after the code). Any display_name sent is ignored.
 
     Response
     --------
     200  {}                          -- always; no info leaked about existence
-    400  {"error": "bad_request"}    -- missing/invalid fields
+    400  {"error": "bad_request"}    -- missing/invalid email
     502  {"error": "email_failed"}   -- OTP email could not be sent
 
     Security
@@ -89,7 +97,6 @@ def request_code():
     body = request.get_json(silent=True) or {}
 
     email = (body.get("email") or "").strip().lower()
-    display_name = (body.get("display_name") or "").strip()
 
     if not email:
         return jsonify({"error": "bad_request", "message": "email is required."}), 400
@@ -106,35 +113,13 @@ def request_code():
     if existing:
         user_id = existing["user_id"]
     else:
-        # --- new user: display_name required ---
-        if not display_name:
-            return (
-                jsonify(
-                    {
-                        "error": "bad_request",
-                        "message": "display_name is required for new accounts.",
-                    }
-                ),
-                400,
-            )
-
-        try:
-            validate_display_name(display_name)
-        except AuthError as e:
-            return jsonify({"error": "bad_request", "message": str(e)}), 400
-
-        if repo.display_name_taken(display_name):
-            return (
-                jsonify(
-                    {
-                        "error": "bad_request",
-                        "message": "That display name is already taken. Please choose another.",
-                    }
-                ),
-                400,
-            )
-
-        user_id = repo.create_user(email=email, display_name=display_name)["user_id"]
+        # New email: create a pending, unverified account so an OTP can be
+        # issued against it. The display name is chosen at verify time; a
+        # placeholder satisfies the NOT NULL/UNIQUE column until then and is
+        # never shown (a pending account owns nothing).
+        user_id = repo.create_user(email=email, display_name=_pending_display_name())[
+            "user_id"
+        ]
 
     # --- invalidate old codes + store the new one (atomic) ---
     otp = generate_otp()
@@ -194,9 +179,16 @@ def verify():
     Request body
     ------------
     {
-        "email": "user@example.com",
-        "code":  "482917"
-    }
+        "email":        "user@example.com",
+        "code":         "482917",
+        "display_name": "railfan42"          -- only on first-time
+    }                                           registration (see below)
+
+    Display name (first-time registration): a never-verified account must
+    choose a display name here, AFTER the code. If none is supplied, verify
+    replies 200 {"needs_display_name": true} WITHOUT consuming the code, so
+    the client can prompt for a name and re-submit the SAME code with it.
+    Returning (already-verified) accounts ignore display_name.
 
     Guest merge: send the current guest session's JWT as the Authorization
     bearer on this call and, on success, everything that guest owns
@@ -213,13 +205,16 @@ def verify():
           "is_guest": false, "merged_guest": null |
           {"guest_user_id": 99, "proposals_claimed": 2, "feedback_claimed": 0,
            "likes_claimed": 3, "comments_claimed": 1}}
-    400  {"error": "bad_request"}     -- missing fields
-    401  {"error": "invalid_code"}    -- wrong, expired, or already-used code
+    200  {"needs_display_name": true}   -- first-time verify without a name;
+                                           code is left unconsumed
+    400  {"error": "bad_request"}       -- missing fields / bad display name
+    401  {"error": "invalid_code"}      -- wrong, expired, or already-used code
     """
     body = request.get_json(silent=True) or {}
 
     email = (body.get("email") or "").strip().lower()
     code = (body.get("code") or "").strip()
+    display_name = (body.get("display_name") or "").strip()
 
     if not email or not code:
         return (
@@ -247,7 +242,32 @@ def verify():
     if not verify_otp(code, token_row["code_hash"]):
         return _invalid_code_response()
 
-    repo.consume_otp(token_row["token_id"], user["user_id"])
+    # First-time registration picks a display name here (after the code).
+    # Until a valid one is supplied the OTP is NOT consumed, so the same code
+    # carries through the follow-up call. Safe against enumeration: reaching
+    # this branch already required a valid code for this email.
+    if not user["is_verified"]:
+        if not display_name:
+            return jsonify({"needs_display_name": True}), 200
+        try:
+            validate_display_name(display_name)
+        except AuthError as e:
+            return jsonify({"error": "bad_request", "message": str(e)}), 400
+        if repo.display_name_taken(display_name):
+            return (
+                jsonify(
+                    {
+                        "error": "bad_request",
+                        "message": "That display name is already taken. Please choose another.",
+                    }
+                ),
+                400,
+            )
+        repo.complete_registration(token_row["token_id"], user["user_id"], display_name)
+        final_display_name = display_name
+    else:
+        repo.consume_otp(token_row["token_id"], user["user_id"])
+        final_display_name = user["display_name"]
 
     logger.info("User %d (%s) verified successfully.", user["user_id"], email)
 
@@ -273,7 +293,7 @@ def verify():
     token = create_jwt(
         user_id=user["user_id"],
         email=email,
-        display_name=user["display_name"],
+        display_name=final_display_name,
         is_guest=False,
     )
 
@@ -282,7 +302,7 @@ def verify():
             {
                 "token": token,
                 "user_id": user["user_id"],
-                "display_name": user["display_name"],
+                "display_name": final_display_name,
                 "is_guest": False,
                 "merged_guest": merged_guest,
             }
@@ -362,6 +382,14 @@ def guest():
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _pending_display_name() -> str:
+    """A throwaway, guaranteed-unique placeholder name for a pending
+    (pre-verification) account. Satisfies the NOT NULL/UNIQUE display_name
+    column until the user picks a real one at verify; never displayed,
+    since a pending account owns nothing."""
+    return f"pending_{secrets.token_hex(8)}"
 
 
 def _invalid_code_response():

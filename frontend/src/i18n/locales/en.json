@@ -11,15 +11,18 @@
     "noStopsFound": "No stops found",
     "minStopsTooltip": "Two stops per route minimum.",
     "loading": "Fetching data…",
+    "saved": "Proposal was saved.",
+    "publishError": "The proposal could not be saved. Please try again later.",
     "suggestions": {
       "title": "Add stops along the way?",
       "subtitle": "We found stops on your route. Pick any you'd like to include.",
       "addedTime": "+{minutes} min",
-      "none": "No stops selected",
-      "selectedCount": "{count} selected | {count} selected",
-      "skip": "Skip",
-      "confirm": "Add {count} stop | Add {count} stops",
-      "confirmNone": "Continue without stops"
+      "backToEdit": "Back to edit",
+      "continue": "Continue with {count} additional stop | Continue with {count} additional stops",
+      "continueNone": "Continue without additional stops",
+      "adoptAll": "Adopt all suggested stops and continue",
+      "addAria": "Add {name} to the route",
+      "removeAria": "Remove {name} from the route"
     },
     "frequency": {
       "daily": "Daily",
@@ -38,7 +41,7 @@
         "route": "Full Route",
         "per_trip_pair": "By trip pair",
         "per_trip_pair_per_country": "By country",
-        "per_trip_pair_per_od": "By route section",
+        "per_trip_pair_per_section": "By route section",
         "per_trip_per_stop": "By stop"
       },
       "norms": {
@@ -51,7 +54,24 @@
       "kpi": {
         "revenue": "Revenue",
         "cost": "Cost",
-        "net": "Net"
+        "subsidies": "Necessary Subsidies"
+      },
+      "demand": {
+        "estimate": "Mock Data",
+        "estimateHint": "Placeholder figures derived from route metrics — not yet from a demand model.",
+        "trips": "Passenger trips",
+        "fromAir": "Shifted from air",
+        "fromCar": "Shifted from car",
+        "co2Saved": "CO₂ saved",
+        "co2Intensity": "CO₂ intensity",
+        "subsidyPerCo2": "Subsidy per t CO₂",
+        "units": {
+          "tripsPerYear": "trips / year",
+          "paxKm": "pax·km",
+          "tCo2PerYear": "t CO₂ / year",
+          "gPerPaxKm": "g CO₂ / pax·km",
+          "eurPerTCo2": "€ / t CO₂"
+        }
       },
       "groups": {
         "cost": "Cost",
@@ -130,8 +150,107 @@
         "invalidEmail": "Please enter a valid e-mail address."
       },
       "classes": {
-        "all": "All Classes"
+        "all": "All Classes",
+        "Seat": "Seat",
+        "Couchette": "Couchette",
+        "Sleeper": "Sleeper",
+        "Capsule": "Capsule"
+      },
+      "direction": {
+        "outbound": "outbound",
+        "return": "return"
       }
     }
+  },
+  "gallery": {
+    "tabs": {
+      "aToB": "From A to B",
+      "byStation": "By Station",
+      "byCountry": "By Country"
+    },
+    "search": {
+      "from": "From",
+      "fromPlaceholder": "Click to select a station",
+      "to": "To",
+      "toPlaceholder": "Click to select a station",
+      "station": "Station",
+      "stationPlaceholder": "Click to select a station",
+      "country": "Country",
+      "countryPlaceholder": "Click to select a country",
+      "noCountries": "No countries found",
+      "button": "Search"
+    },
+    "sort": {
+      "direction": "Toggle sort direction",
+      "margin": "Margin",
+      "revenue": "Revenue",
+      "cost": "Cost",
+      "date": "Date",
+      "distance": "Distance",
+      "duration": "Duration"
+    },
+    "card": {
+      "distance": "Distance",
+      "proposedBy": "Proposed by {name}",
+      "guest": "Guest",
+      "existing": "Existing service ↗",
+      "km": "{value} km",
+      "stops": "({count} stop) | ({count} stops)",
+      "co2PerYear": "{value} t CO₂/yr",
+      "like": "Like",
+      "loginToLike": "Log in with an account to like proposals.",
+      "likeFailed": "Could not update your like. Please try again."
+    },
+    "back": "Gallery",
+    "cta": {
+      "create": "Suggest a new route"
+    },
+    "empty": "No proposals have been found for this filter. Be the first to make one!",
+    "loading": "Loading proposals…",
+    "loadingMore": "Loading more…",
+    "end": "That's all {count} proposals.",
+    "error": "Could not load proposals."
+  },
+  "user": {
+    "guest": "Guest",
+    "logout": "Log out",
+    "login": "Log in / Register"
+  },
+  "header": {
+    "logoAlt": "Night Train Target Network",
+    "switchLanguageAria": "Switch language to {language}"
+  },
+  "auth": {
+    "completed": "Evaluation completed",
+    "loginTitle": "Log in or register",
+    "verifyTitle": "Please verify your mail address",
+    "nameTitle": "Choose a username",
+    "emailIncorrect": "Change mail address",
+    "co2Savings": "This connection saves about {value} t CO₂ per year.",
+    "register": " Register to keep track of your proposal's impact on our research towards the EU target network 2032!",
+    "email": "E-Mail Address",
+    "username": "Username",
+    "usernameRequired": "New here? Choose a username to register.",
+    "continue": "Continue",
+    "continueGuest": "Continue as guest",
+    "or": "OR",
+    "codeSent": "We e-mailed a 6-digit code to {email}.",
+    "code": "Verification code",
+    "verify": "Verify",
+    "back": "Back",
+    "close": "Close",
+    "emailFailed": "Could not send the code. Please try again.",
+    "invalidCode": "Invalid or expired code. Please request a new one.",
+    "guestFailed": "Could not start a guest session. Please try again."
+  },
+  "toast": {
+    "dismiss": "Dismiss",
+    "loginSuccess": "Logged in successfully.",
+    "registerSuccess": "Welcome! Your account was created.",
+    "guestSuccess": "Continuing as guest.",
+    "logoutSuccess": "You have been logged out.",
+    "guestFailed": "Could not start a guest session. Please try again.",
+    "invalidCode": "Invalid or expired code. Please request a new one.",
+    "emailFailed": "Could not send the code. Please try again."
   }
 }

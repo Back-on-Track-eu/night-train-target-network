@@ -62,32 +62,48 @@ def test_request_code_rejects_bad_email(api_base):
     assert resp.status_code == 400
 
 
-def test_request_code_new_user_requires_display_name(api_base):
-    resp = _post(api_base, "/api/auth/request-code", {"email": _unique_email()})
+def test_request_code_new_user_no_display_name(api_base, db_cur):
+    """A brand-new email needs NO display name at request-code — a pending,
+    unverified account (placeholder name) is created and an OTP issued; the
+    name is chosen later, at verify."""
+    email = _unique_email()
+    resp = _post(api_base, "/api/auth/request-code", {"email": email})
     _skip_if_rate_limited(resp)
-    assert resp.status_code == 400
-    assert "display_name" in resp.json()["message"]
+    assert resp.status_code in (200, 502)
+
+    db_cur.execute(
+        "SELECT display_name, is_verified FROM admin.users WHERE email = %s",
+        (email,),
+    )
+    user = db_cur.fetchone()
+    assert user is not None
+    assert user["is_verified"] is False
+    assert user["display_name"].startswith("pending_")
 
 
-def test_request_code_rejects_guest_prefixed_name(api_base):
+def test_request_code_ignores_display_name(api_base, db_cur):
+    """display_name is no longer accepted at request-code — even a
+    guest-prefixed one is ignored rather than rejected (the name is chosen
+    and validated at verify)."""
+    email = _unique_email()
     resp = _post(
         api_base,
         "/api/auth/request-code",
-        {"email": _unique_email(), "display_name": "guest_impostor"},
+        {"email": email, "display_name": "guest_impostor"},
     )
     _skip_if_rate_limited(resp)
-    assert resp.status_code == 400
+    assert resp.status_code in (200, 502)
+    db_cur.execute("SELECT display_name FROM admin.users WHERE email = %s", (email,))
+    assert db_cur.fetchone()["display_name"] != "guest_impostor"
 
 
 def test_request_code_creates_user_and_token(api_base, db_cur):
-    """Happy path: user row (unverified) + one live OTP row appear. The
-    endpoint returns 200 when the mail lane works (dev mode) or 502 when
+    """Happy path: pending user row (unverified, placeholder name) + one live
+    OTP row appear. 200 when the mail lane works (dev mode) or 502 when
     unconfigured — the DB writes happen either way, by design (the code
     is stored before the send so a failed mail is retryable)."""
-    email, name = _unique_email(), _unique_name()
-    resp = _post(
-        api_base, "/api/auth/request-code", {"email": email, "display_name": name}
-    )
+    email = _unique_email()
+    resp = _post(api_base, "/api/auth/request-code", {"email": email})
     _skip_if_rate_limited(resp)
     assert resp.status_code in (200, 502)
 
@@ -97,7 +113,7 @@ def test_request_code_creates_user_and_token(api_base, db_cur):
     )
     user = db_cur.fetchone()
     assert user is not None
-    assert user["display_name"] == name
+    assert user["display_name"].startswith("pending_")
     assert user["is_verified"] is False
 
     db_cur.execute(
@@ -109,12 +125,10 @@ def test_request_code_creates_user_and_token(api_base, db_cur):
 
 
 def test_request_code_no_user_enumeration(api_base, db_cur):
-    """Same 200 for an existing email (no display_name needed) — response
-    body leaks nothing about whether the account existed."""
-    email, name = _unique_email(), _unique_name()
-    first = _post(
-        api_base, "/api/auth/request-code", {"email": email, "display_name": name}
-    )
+    """Same 200 for a new vs existing email — response body leaks nothing
+    about whether the account existed."""
+    email = _unique_email()
+    first = _post(api_base, "/api/auth/request-code", {"email": email})
     _skip_if_rate_limited(first)
     second = _post(api_base, "/api/auth/request-code", {"email": email})
     _skip_if_rate_limited(second)
@@ -143,7 +157,7 @@ def user_with_known_otp(db_cur, db_conn):
     email, name, otp = _unique_email(), _unique_name(), "271828"
     db_cur.execute(
         "INSERT INTO admin.users (email, display_name, is_verified) "
-        "VALUES (%s, %s, FALSE) RETURNING user_id",
+        "VALUES (%s, %s, TRUE) RETURNING user_id",
         (email, name),
     )
     user_id = db_cur.fetchone()["user_id"]
@@ -202,6 +216,77 @@ def test_verify_happy_path_and_single_use(api_base, db_cur, user_with_known_otp)
         {"email": fixture["email"], "code": fixture["otp"]},
     )
     assert replay.status_code == 401
+
+
+def test_verify_first_time_needs_then_sets_display_name(api_base, db_cur, db_conn):
+    """First-time registration chooses its display name AFTER the code: verify
+    without a name replies needs_display_name and leaves the code live; verify
+    with a name completes and issues the JWT."""
+    email, otp = _unique_email(), "424242"
+    db_cur.execute(
+        "INSERT INTO admin.users (email, display_name, is_verified) "
+        "VALUES (%s, %s, FALSE) RETURNING user_id",
+        (email, f"pending_{_unique_name()}"),
+    )
+    user_id = db_cur.fetchone()["user_id"]
+    db_conn.commit()
+    _fresh_otp_for(db_cur, db_conn, user_id, otp)
+
+    # No name yet → prompted; code NOT consumed.
+    resp = _post(api_base, "/api/auth/verify", {"email": email, "code": otp})
+    assert resp.status_code == 200
+    assert resp.json() == {"needs_display_name": True}
+
+    db_cur.execute(
+        "SELECT COUNT(*) AS n FROM admin.auth_tokens "
+        "WHERE user_id = %s AND NOT used AND expires_at > NOW()",
+        (user_id,),
+    )
+    assert db_cur.fetchone()["n"] == 1
+    db_conn.rollback()
+
+    # Provide the name (same code) → completed, verified, JWT.
+    chosen = _unique_name()
+    resp = _post(
+        api_base,
+        "/api/auth/verify",
+        {"email": email, "code": otp, "display_name": chosen},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["display_name"] == chosen
+    assert body["is_guest"] is False
+    assert body["token"].count(".") == 2
+
+    db_cur.execute(
+        "SELECT display_name, is_verified FROM admin.users WHERE user_id = %s",
+        (user_id,),
+    )
+    row = db_cur.fetchone()
+    assert row["display_name"] == chosen
+    assert row["is_verified"] is True
+    db_conn.rollback()
+
+
+def test_verify_first_time_rejects_guest_prefixed_name(api_base, db_cur, db_conn):
+    """The reserved guest_ prefix can't be claimed by a first-time
+    registration — validated at verify now, not at request-code."""
+    email, otp = _unique_email(), "090909"
+    db_cur.execute(
+        "INSERT INTO admin.users (email, display_name, is_verified) "
+        "VALUES (%s, %s, FALSE) RETURNING user_id",
+        (email, f"pending_{_unique_name()}"),
+    )
+    user_id = db_cur.fetchone()["user_id"]
+    db_conn.commit()
+    _fresh_otp_for(db_cur, db_conn, user_id, otp)
+
+    resp = _post(
+        api_base,
+        "/api/auth/verify",
+        {"email": email, "code": otp, "display_name": "guest_impostor"},
+    )
+    assert resp.status_code == 400
 
 
 # =============================================================================
@@ -344,7 +429,7 @@ def test_verify_with_guest_bearer_merges_guest_assets(api_base, db_cur, db_conn)
         email, name, otp = _unique_email(), _unique_name(), "314159"
         db_cur.execute(
             "INSERT INTO admin.users (email, display_name, is_verified) "
-            "VALUES (%s, %s, FALSE) RETURNING user_id",
+            "VALUES (%s, %s, TRUE) RETURNING user_id",
             (email, name),
         )
         user_id = db_cur.fetchone()["user_id"]
@@ -440,7 +525,7 @@ def test_verify_with_guest_bearer_merges_likes_and_comments(api_base, db_cur, db
     email, name, target_otp = _unique_email(), _unique_name(), "112358"
     db_cur.execute(
         "INSERT INTO admin.users (email, display_name, is_verified) "
-        "VALUES (%s, %s, FALSE) RETURNING user_id",
+        "VALUES (%s, %s, TRUE) RETURNING user_id",
         (email, name),
     )
     target_user_id = db_cur.fetchone()["user_id"]
@@ -531,7 +616,7 @@ def test_verify_with_invalid_bearer_still_succeeds(api_base, db_cur, db_conn):
     email, name, otp = _unique_email(), _unique_name(), "161803"
     db_cur.execute(
         "INSERT INTO admin.users (email, display_name, is_verified) "
-        "VALUES (%s, %s, FALSE) RETURNING user_id",
+        "VALUES (%s, %s, TRUE) RETURNING user_id",
         (email, name),
     )
     user_id = db_cur.fetchone()["user_id"]
