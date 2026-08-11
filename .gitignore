@@ -126,3 +126,4 @@ desktop.ini
 # -----------------------------------------------------------------------------
 backend/models/compositions/calib/seed/
 deploy/**/.env
+backend/models/compositions/calib/data/
