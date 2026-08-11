@@ -176,9 +176,15 @@ INPUT_PARAMS_TABLES: tuple[Table, ...] = (
             Column(
                 "country_geom",
                 "geometry(MultiPolygon, 4326)",
-                "Country border polygon (SRID 4326), seeded from Natural "
-                "Earth admin-0 countries geojson. Empty for countries "
-                "without a matched source feature.",
+                "Country border polygon (SRID 4326) covering the country's "
+                "land area AND its maritime zones (territorial sea, internal "
+                "and archipelagic waters, EEZ) — seeded from the Marine "
+                "Regions union of the ESRI country shapefile and the "
+                "Exclusive Economic Zones, v4. The maritime coverage is what "
+                "attributes belt, strait and tunnel crossings to a country "
+                "instead of the UNK sentinel: this is a routing-attribution "
+                "geometry, not a cartographic land border. NULL for "
+                "countries with no rail network, which no route can transit.",
             ),
         ),
         indexes=(

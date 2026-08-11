@@ -104,7 +104,7 @@ services:
       - OPENRAILROUTING_URL=http://targetnetwork-routing:8989
       # Baked into the image at build time; seed.py reads it to populate
       # input_params.countries.country_geom (CountryIndex source).
-      - COUNTRIES_GEOJSON_PATH=/app/models/route/routing/countries.geojson
+      - EEZ_LAND_UNION_FILE_ID=${EEZ_LAND_UNION_FILE_ID}
       # Auth plane (see backend/api/README.md). JWT_SECRET is a boot
       # requirement; SMTP_* enable real OTP mail; KEYCLOAK_* stay empty
       # until the bot realm exists (OIDC plane is dormant without them).

@@ -71,8 +71,9 @@ from models.route.model import (
     HSR_TRACK_SPEED_THRESHOLD_KMH,
     HSR_TRACK_SPEED_SANITY_MAX_KMH,
     HSR_AVOIDANCE_PRIORITY_FACTOR,
+    HSR_AVOIDANCE_RING_SIMPLIFY_DEG,
 )
-from models.utils import ms_to_min, haversine_path_m, bbox_area
+from models.utils import ms_to_min, haversine_path_m
 
 logger = logging.getLogger(__name__)
 
@@ -171,37 +172,88 @@ class CountryIndex:
     DBDataLoader itself, not rebuilt per request.
 
     Keyed natively in ISO 3166-1 alpha-2 (country_code), matching every
-    other country code in the codebase — no ISO3 conversion needed, unlike
-    the old geojson-file version which was keyed by Natural Earth's
-    ADM0_A3 (ISO3).
+    other country code in the codebase.
+
+    The polygons include maritime zones (db/dev/seed.py: Marine Regions EEZ
+    land union), so a leg midpoint in a strait or belt resolves to the
+    country whose waters it crosses instead of falling through to "UNK".
+    They are also two orders of magnitude denser than the land-only borders
+    they replaced — ~178k vertices across 32 countries — which is what the
+    R-tree and prepared geometries below are for: a linear contains() scan
+    over that data costs ~60us per call, and _compute_country_intervals()
+    calls lookup() once per routing interval.
     """
 
     def __init__(self, country_geometries: list[tuple[str, dict]]) -> None:
         from shapely.geometry import shape
+        from shapely.prepared import prep
+        from shapely.strtree import STRtree
 
-        self._geometries = country_geometries
-        self._shapes = [(cc, shape(geom)) for cc, geom in country_geometries]
-        logger.info("CountryIndex: loaded %d country polygons.", len(self._shapes))
+        # Exploded into component polygons: a country's MultiPolygon has a
+        # single envelope spanning every part, so the tree's prefilter is
+        # far sharper per-polygon. Sorted by code so index order is stable,
+        # which is what makes lookup() deterministic where polygons touch.
+        self._codes: list[str] = []
+        self._polygons: list = []
+        for country_code, geometry in sorted(country_geometries):
+            geom = shape(geometry)
+            parts = geom.geoms if geom.geom_type == "MultiPolygon" else [geom]
+            for polygon in parts:
+                self._codes.append(country_code)
+                self._polygons.append(polygon)
+        self._prepared = [prep(polygon) for polygon in self._polygons]
+        self._tree = STRtree(self._polygons)
+        self._avoidance_rings: dict[str, list | None] = {}
+        logger.info(
+            "CountryIndex: loaded %d polygons across %d countries.",
+            len(self._polygons),
+            len(set(self._codes)),
+        )
 
     def lookup(self, lon: float, lat: float) -> str | None:
         from shapely.geometry import Point
 
-        pt = Point(lon, lat)
-        for cc, shp in self._shapes:
-            if shp.contains(pt):
-                return cc
+        point = Point(lon, lat)
+        # Ascending index order is alphabetical country order, so the rare
+        # point on a shared boundary always resolves the same way.
+        for i in sorted(self._tree.query(point)):
+            if self._prepared[i].contains(point):
+                return self._codes[i]
         return None
 
     def get_largest_polygon(self, country_code: str) -> list | None:
-        for cc, geom in self._geometries:
-            if cc != country_code:
-                continue
-            if geom["type"] == "Polygon":
-                return geom["coordinates"][0]
-            elif geom["type"] == "MultiPolygon":
-                largest = max(geom["coordinates"], key=lambda poly: bbox_area(poly[0]))
-                return largest[0]
-        return None
+        """Outer ring of the country's largest polygon, simplified, for
+        GraphHopper's custom-model avoidance areas.
+
+        Simplification is not optional here: raw rings reach ~20k vertices
+        (Sweden), and this ring is serialized into every routing request
+        that avoids HSR in some countries but not others. At
+        HSR_AVOIDANCE_RING_SIMPLIFY_DEG the whole seeded set costs ~10k
+        vertices total — an avoidance area only has to contain a rail
+        network, not delimit sovereignty. Cached: the geometry never
+        changes, and one trip can fire dozens of mini-reroutes.
+        """
+        if country_code not in self._avoidance_rings:
+            self._avoidance_rings[country_code] = self._build_avoidance_ring(
+                country_code
+            )
+        return self._avoidance_rings[country_code]
+
+    def _build_avoidance_ring(self, country_code: str) -> list | None:
+        polygons = [
+            polygon
+            for polygon, code in zip(self._polygons, self._codes)
+            if code == country_code
+        ]
+        if not polygons:
+            return None
+        # By true area, not bounding box: an EEZ polygon's bbox is a poor
+        # proxy once maritime zones stretch a country's envelope out to sea.
+        largest = max(polygons, key=lambda polygon: polygon.area)
+        ring = largest.simplify(
+            HSR_AVOIDANCE_RING_SIMPLIFY_DEG, preserve_topology=True
+        ).exterior
+        return [list(coord) for coord in ring.coords]
 
 
 # ---------------------------------------------------------------------------

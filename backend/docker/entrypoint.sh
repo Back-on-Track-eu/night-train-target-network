@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 set -e
 
+# Country border polygons (input_params.countries.country_geom) — built
+# from the Drive-hosted Marine Regions EEZ land union, before the seed that
+# loads them. A no-op once db/dev/data/country_geoms.geojson.gz exists, so
+# restarts cost nothing. Soft-failing on purpose: seed.py degrades to NULL
+# geometry with a loud banner rather than the container refusing to start,
+# and the failure is already printed above.
+echo "Building country geometries..."
+python /app/scripts/export_country_geoms.py || echo "  WARNING: country geometry build failed — see above."
+
 echo "Running database seed..."
 python /app/db/dev/seed.py
 

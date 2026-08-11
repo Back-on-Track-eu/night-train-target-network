@@ -30,7 +30,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.18"
+ROUTE_BUILDER_VERSION: str = "0.9.19"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -45,6 +45,31 @@ ROUTE_BUILDER_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.19": {
+        "date": "2026-08-11",
+        "author": "david",
+        "changes": "Country attribution fixed at the data source: country "
+        "borders now come from the Marine Regions EEZ land union (land "
+        "PLUS maritime zones, 32 rail-network countries) instead of "
+        "Natural Earth admin-0 1:110m land polygons. The old data put "
+        "Rødbyhavn 53km and Puttgarden 34km outside any polygon, so every "
+        "belt and strait crossing — and the real track on both approaches "
+        "— was attributed to the UNK sentinel and drew no TAC, no buffer "
+        "quota and no electricity price. OUTPUT CHANGES: "
+        "country_distance_shares / country_time_shares gain the previously "
+        "unattributed kilometres on any route crossing water, so "
+        "per-country costs move on Scandinavian, Danish and Channel "
+        "routes; UNK now appears only on open-ocean legs. CountryIndex "
+        "rebuilt on an STRtree over exploded polygons with prepared "
+        "geometries (the new data is ~178k vertices; the previous linear "
+        "contains() scan cost ~60us per lookup, one per routing "
+        "interval), and HSR avoidance rings are simplified to the new "
+        "standard value HSR_AVOIDANCE_RING_SIMPLIFY_DEG before being "
+        "serialized into the routing request — unsimplified EEZ rings "
+        "reach 20k vertices. Six countries added to the seeded catalog "
+        "(NO, GB, BA, RS, ME, AL); MT and CY keep a NULL geometry, having "
+        "no rail network.",
+    },
     "0.9.18": {
         "date": "2026-08-10",
         "author": "david",
@@ -447,6 +472,16 @@ HSR_AVOIDANCE_PRIORITY_FACTOR: float = 0.01
 segments where HSR is not allowed — a strong penalty (100x) rather than a
 hard block, so a route is still found if high-speed track is genuinely
 the only physical connection."""
+
+HSR_AVOIDANCE_RING_SIMPLIFY_DEG: float = 0.01
+"""Douglas-Peucker tolerance in degrees (~1.1km) applied to a country's
+outer ring before it is sent to the routing engine as an HSR-avoidance
+area (rail_router.CountryIndex.get_largest_polygon). The area exists to
+say "this country's high-speed lines are off-limits", so it only has to
+contain the rail network — border precision is irrelevant, ring size is
+not: the raw EEZ rings total ~165k vertices across the seeded countries
+and would be serialized into every mixed-avoidance routing request. At
+this tolerance the same set costs ~10k vertices."""
 
 # --- auto_stop_addition (candidate search — models/route/timetable.py)
 AUTO_STOP_BUFFER_M: int = 10_000

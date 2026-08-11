@@ -18,14 +18,6 @@ COPY pyproject.toml uv.lock ./
 # Install dependencies into /app/.venv
 RUN uv sync --frozen --no-install-project
 
-# Download countries.geojson here so the runtime stage doesn't need curl
-# URL configured via NATURAL_EARTH_COUNTRIES_URL in .env.example.
-ARG NATURAL_EARTH_COUNTRIES_URL=https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson
-RUN apt-get -o Acquire::ForceIPv4=true update \
-    && apt-get install -y --no-install-recommends curl \
-    && rm -rf /var/lib/apt/lists/* \
-    && curl -fsSL "$NATURAL_EARTH_COUNTRIES_URL" -o /countries.geojson
-
 # =============================================================================
 FROM python:3.12-slim AS runtime
 
@@ -53,9 +45,6 @@ COPY --from=builder /app/.venv /app/.venv
 
 # Copy application code
 COPY . .
-
-# Copy pre-downloaded geojson from builder
-COPY --from=builder /countries.geojson models/route/routing/countries.geojson
 
 # Activate venv
 ENV PATH="/app/.venv/bin:$PATH"

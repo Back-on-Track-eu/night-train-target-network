@@ -1,6 +1,7 @@
 # Large data files — not needed in API image
 models/route/routing/docker/data/
 models/route/routing/docker/graph-cache/
+db/dev/data/
 
 # Standalone db stack — not needed in API image
 db/dev/Dockerfile
@@ -10,8 +11,10 @@ db/dev/.env.example
 # Google Sheets adapter — replaced by db adapter
 adapters/data_loader_from_spreadsheet.py
 
-# Dev/test scripts — not needed at runtime
+# Dev/test scripts — not needed at runtime, except the country geometry
+# build, which the API entrypoint runs before seeding.
 scripts/
+!scripts/export_country_geoms.py
 
 # Python
 .venv/
