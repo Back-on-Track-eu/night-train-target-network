@@ -119,7 +119,13 @@ export const VIEW_KEYS = [
   'route',
   'per_trip_pair',
   'per_trip_pair_per_country',
-  'per_trip_pair_per_od',
+  // "By route section" — backed by the backend's physical-section view
+  // (per_trip_pair_per_section), NOT the OD ticket-relation view. The section
+  // cells are pre-aggregated and normalised against their own section physics,
+  // so the panel reads them straight (no client-side summing). The OD view is
+  // still served (per_trip_pair_per_od on EvaluationViews) but no longer shown
+  // as a tab.
+  'per_trip_pair_per_section',
   'per_trip_per_stop',
 ] as const
 export type ViewKey = (typeof VIEW_KEYS)[number]
@@ -190,10 +196,34 @@ export interface Breakdown {
  *  per_sold when the cell has no sold place-km at all. */
 export type Normalisations = Record<NormKey, ClassKeyedBreakdowns>
 
-/** One filtered data point: human-readable filter labels (one entry per
- *  dimension, backend-provided) alongside the values. */
+/** A trip filter value — a single direction of a trip pair. The frontend
+ *  composes "origin → destination (localised direction)". */
+export interface TripFilterValue {
+  origin: string
+  destination: string
+  direction: 'outbound' | 'return'
+}
+
+/** An OD / section filter value — origin, destination and the accommodation
+ *  class (class_main may be "all"). The frontend composes
+ *  "origin → destination (localised class)". */
+export interface ClassFilterValue {
+  origin: string
+  destination: string
+  class_main: string
+}
+
+/** One filter dimension value. Proper-noun dimensions (trip_pair, stop,
+ *  country code, class_main code) stay plain strings — the frontend localises
+ *  country codes / class codes itself; the translatable ones (trip direction,
+ *  OD/section class) arrive structured so the frontend can compose + translate.
+ *  "all" wildcard cells send the literal string "all". */
+export type FilterValue = string | TripFilterValue | ClassFilterValue
+
+/** One filtered data point: per-dimension filter values (backend-provided)
+ *  alongside the values. See FilterValue for why some are structured. */
 export interface FilteredCell {
-  filter: Record<string, string>
+  filter: Record<string, FilterValue>
   values: Normalisations
 }
 
@@ -384,18 +414,42 @@ export interface EvaluationResponse {
 // PROPOSALS_DESIGN.md §2.1). TRoute stays generic — the route shape is typed
 // where it is consumed (ProposalViewport's BackendRoute), only the fields the
 // frontend reads.
+// Gallery KPI summary block of the calc response. Only co2_savings_t_per_year
+// is read by the builder (the auth gate); the rest passes through untyped.
+export interface ProposalCalcSummary {
+  co2_savings_t_per_year: number | null
+  // Demand & modal-shift KPIs — route-level, annual. PLACEHOLDER values
+  // (deterministic fakes derived from route metrics) until models/demand/
+  // lands; demand_kpis_placeholder stays true, so the UI must present these as
+  // estimates. Source: backend models/evaluation/summary.py.
+  demand_trips_per_year?: number
+  shift_air_trips_per_year?: number
+  shift_air_trip_km_per_year?: number
+  shift_car_trips_per_year?: number
+  shift_car_trip_km_per_year?: number
+  subsidy_eur_per_t_co2?: number | null
+  co2_g_per_pax_km?: number
+  demand_kpis_placeholder?: boolean
+  [key: string]: unknown
+}
+
 export interface ProposalCalcResponse<TRoute = unknown> {
   route_builder_version: string
   calc_version: string
   route_fingerprint: string
-  // True when served from the server-side compute cache.
-  cache_hit: boolean
+  // True when served from the server-side compute cache. Only present on a
+  // fresh calc — a proposal hydrated from GET /api/proposal/<id> (same shape,
+  // reused by ProposalViewport's applyPlan()) has no cache concept.
+  cache_hit?: boolean
   // Resolved request echo — defaults applied, scenario_id concrete.
   request: Record<string, unknown>
   // Only present when the request used auto_stop_addition="suggest".
   suggested_stops?: SuggestedStop[]
-  // Gallery KPI summary — not consumed by the proposal builder.
-  summary: Record<string, unknown>
+  // Gallery KPI summary — read by the auth gate (co2_savings_t_per_year) and
+  // the EvaluationPanel's demand/modal-shift box. Also returned by GET
+  // /api/proposal/<id> (see ProposalDetailResponse), so a loaded proposal
+  // populates the same box.
+  summary?: ProposalCalcSummary
   route: TRoute
   evaluation: {
     models: EvaluationModels
@@ -412,3 +466,267 @@ export type MapScope =
   | { kind: 'country'; country: string }
   | { kind: 'od'; originStopId: string; destinationStopId: string }
   | { kind: 'stop'; stopId: string }
+
+// --- POST /api/auth/guest ---------------------------------------------------
+// Backend: api/auth.py::guest(). Anonymous session — a real identity server-side
+// (guest tokens expire after 30 days). We only keep the token to attach as a
+// Bearer on the persist-on-calc endpoints; the other fields are informational.
+export interface GuestSessionResponse {
+  token: string
+  user_id: number
+  display_name: string
+  is_guest: boolean
+}
+
+// --- POST /api/auth/verify --------------------------------------------------
+// Backend: api/auth.py::verify(). OTP -> JWT. `merged_guest` is non-null when a
+// guest token was sent as the Bearer and that guest's work was reassigned to the
+// account (the guest→account merge).
+export interface VerifyResponse {
+  token: string
+  user_id: number
+  display_name: string
+  is_guest: false
+  merged_guest: null | {
+    guest_user_id: number
+    proposals_claimed: number
+    feedback_claimed: number
+    likes_claimed: number
+    comments_claimed: number
+  }
+}
+
+// verify's alternate 200: a first-time (never-verified) account must pick a
+// display name as a second step, after the code. The code is left unconsumed,
+// so the client re-submits the same code together with the chosen name.
+export interface VerifyNeedsNameResponse {
+  needs_display_name: true
+}
+
+// The persisted auth cookie payload (lib/authCookie.ts). Not a wire shape —
+// assembled from a guest or verify response and read back on boot.
+export interface StoredAuth {
+  token: string
+  is_guest: boolean
+  display_name: string
+  user_id: number
+}
+
+// --- POST /api/proposals ----------------------------------------------------
+// Backend: api/proposals.py + api/helpers/proposal_serialize.py::summary_row_to_dict().
+// Read-only gallery list (every user sees every row). Rows are a mix of two
+// shapes discriminated by `source` (WP10 step 6b): "proposal" (a saved
+// user proposal, with financial/demand/engagement KPIs) and "existing" (a
+// real night train from the ONTD catalog — a reduced descriptive shape, no
+// financials). Financial/demand KPIs are per-train-km and null when a
+// proposal was saved without an evaluation snapshot.
+
+// Fields shared by both source shapes.
+interface ProposalSummaryShared {
+  name: string
+  composition_id: string
+  total_distance_km: number
+  total_time_h: number
+  avg_speed_kmh: number
+  n_stops: number
+  // countries alphabetical; stop_ids in travel order ([0] = origin, last =
+  // destination — backend models/evaluation/summary.py::ordered_stops()).
+  countries: string[]
+  stop_ids: string[]
+  co2_g_per_pax_km: number | null
+}
+
+// source === "proposal": a saved user proposal.
+export interface ProposalSummaryProposal extends ProposalSummaryShared {
+  source: 'proposal'
+  proposal_id: number
+  proposal_version: number
+  user_id: number
+  route_fingerprint: string
+  scenario_id: number
+  route_builder_version: string
+  calc_version: string
+  // Financial KPIs, per train-km; null without an evaluation snapshot.
+  cost_eur_per_train_km: number | null
+  revenue_eur_per_train_km: number | null
+  margin_eur_per_train_km: number | null
+  subsidy_eur_per_year: number | null
+  demand_trips_per_year: number | null
+  demand_trip_km_per_year: number | null
+  shift_air_trips_per_year: number | null
+  shift_air_trip_km_per_year: number | null
+  shift_car_trips_per_year: number | null
+  shift_car_trip_km_per_year: number | null
+  co2_savings_t_per_year: number | null
+  subsidy_eur_per_t_co2: number | null
+  demand_kpis_placeholder: unknown
+  likes_count: number
+  comments_count: number
+  // Proposer identity, live-joined from admin.users. is_guest is derived
+  // server-side from the reserved "guest_" display-name prefix; the card
+  // shows a generic "Guest" label instead of the raw guest_… name.
+  display_name: string
+  is_guest: boolean
+  created_at: string
+  updated_at: string
+}
+
+// source === "existing": a real night train from the ONTD catalog. Reduced
+// shape — proposal-only fields (financials, demand, engagement, versions,
+// timestamps, proposal/user ids) are omitted rather than null-padded.
+export interface ProposalSummaryExisting extends ProposalSummaryShared {
+  source: 'existing'
+  route_id: string
+  // Whether the drawn line is real routing or a straight-line fallback.
+  geometry_routed: boolean
+  ontd_url: string
+}
+
+export type ProposalSummary = ProposalSummaryProposal | ProposalSummaryExisting
+
+// Sortable keys accepted by the backend, restricted to the subset the gallery
+// UI offers. Validated server-side against filter_builder.py's
+// SORTABLE_COLUMNS; an unlisted column 400s.
+export const PROPOSAL_SORT_KEYS = [
+  'created_at',
+  'total_distance_km',
+  'total_time_h',
+  'margin_eur_per_train_km',
+  'revenue_eur_per_train_km',
+  'cost_eur_per_train_km',
+] as const
+export type ProposalSortKey = (typeof PROPOSAL_SORT_KEYS)[number]
+
+export interface ProposalSort {
+  by: ProposalSortKey
+  dir: 'asc' | 'desc'
+}
+
+// All filter keys are OR / any-match server-side.
+export interface ProposalsFilter {
+  user_ids?: number[]
+  countries?: string[]
+  stop_ids?: string[]
+}
+
+export interface ProposalsRequest {
+  filter?: ProposalsFilter
+  sort?: ProposalSort[]
+  limit?: number
+  offset?: number
+}
+
+// The `summaries` section of the sectioned list response (default `include`).
+export interface ProposalsSummariesSection {
+  // Count after filtering, before pagination — what infinite scroll compares
+  // loaded length against.
+  total: number
+  proposals: ProposalSummary[]
+}
+
+// POST /api/proposals returns a SECTIONED response (proposals.py::_list_response):
+// each key is present only if named in the request's `include` (default
+// ["summaries"]). The gallery requests summaries only.
+export interface ProposalsResponse {
+  summaries?: ProposalsSummariesSection
+}
+
+// --- POST /api/proposal/publish ---------------------------------------------
+// Backend: api/proposal_publish.py (@require_auth, guest token is enough). The
+// server RECOMPUTES from compute_request — never send the route/evaluation. A
+// non-base scenario_id 422s, so publish sends scenario_id: null. There is no
+// dedup: mode "new" always creates a proposal; the returned proposal_id is then
+// adopted so later saves "overwrite" it.
+export interface PublishRequest {
+  mode: 'new' | 'overwrite'
+  // Non-empty (backend rejects blank). Auto-derived "Origin – Destination".
+  name: string
+  // The resolved `request` echo from a /calc response (with scenario_id nulled).
+  compute_request: Record<string, unknown>
+  // Required for mode "overwrite" (the owned proposal to replace); omitted for "new".
+  proposal_id?: number
+  based_on_proposal_id?: number
+}
+
+// The published proposal, full shape mirrors GET /api/proposal/<id>. Only the
+// fields the frontend consumes are typed here.
+export interface PublishResponse {
+  proposal_id: number
+  proposal_version: number
+  name: string
+}
+
+// POST/DELETE /api/proposal/<id>/like — both return the resulting state
+// directly (no need to compute the toggle client-side).
+export interface LikeResponse {
+  count: number
+  liked_by_me: boolean
+}
+
+// --- GET /api/proposal/<id> -------------------------------------------------
+// The full stored envelopes. The gallery map only needs the route geometry and
+// the endpoint stops, so we type just those fields (the route object carries
+// much more — see backend/api/route.py).
+export interface ProposalRouteStopPoint {
+  stop_id: string
+  stop_name: string
+  lat: number
+  lon: number
+}
+
+// The gallery map only reads the route geometry and endpoint stops — this is
+// the default TRoute for callers (like Gallery.vue) that don't need more.
+// A caller needing the full route (ProposalViewport.vue, to reuse the same
+// applyPlan() the calc endpoint feeds) passes its own richer route type as
+// ProposalDetailResponse<TRoute> instead — the wire shape is identical to
+// POST /api/proposal/calc's `route` either way (see proposal_serialize.py's
+// proposal_to_response_dict docstring).
+export interface GalleryRouteShape {
+  geometries: { id: string; coords: [number, number][] }[]
+  trip_pairs: {
+    outbound: {
+      segments: {
+        from_stop: ProposalRouteStopPoint
+        to_stop: ProposalRouteStopPoint
+        // Country codes in the order the segment traverses them.
+        country_distance_shares: Record<string, number>
+      }[]
+    }
+  }[]
+}
+
+// GET /api/proposal/<id> — flat compute-response shape
+// (proposal_serialize.py::proposal_to_response_dict): `route`/`evaluation` at
+// the top level, plus proposal metadata (identical to POST
+// /api/proposal/publish's response).
+export interface ProposalDetailResponse<TRoute = GalleryRouteShape> {
+  proposal_id: number
+  proposal_version: number
+  user_id: number | null
+  user_name: string | null
+  name: string
+  created_at: string | null
+  updated_at: string | null
+  route_builder_version: string
+  calc_version: string
+  route_fingerprint: string
+  request: Record<string, unknown>
+  // §5.4 gallery KPIs (demand / modal shift / emissions) — recomputed from the
+  // route + evaluation this response carries, so a loaded proposal shows the
+  // same figures /calc did.
+  summary?: ProposalCalcSummary
+  route: TRoute
+  evaluation: {
+    models: EvaluationModels
+    input: { parameters: EvaluationParameters }
+    views: EvaluationViews
+  }
+}
+
+// A proposal reduced to what the gallery map draws: its routed line geometry
+// (one entry per stored geometry leg) and endpoint stops for markers.
+export interface GalleryMapRoute {
+  key: string
+  lines: [number, number][][]
+  stops: { lat: number; lon: number; name: string }[]
+}

@@ -121,8 +121,8 @@ blocks the verification itself (`merged_guest` is simply `null`).
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/auth/request-code` | Register/login: send OTP to email (`5/hour` per IP) |
-| `POST` | `/api/auth/verify` | Verify OTP → `{token, user_id, display_name, is_guest, merged_guest}` — guest bearer attached triggers the merge (see above) |
+| `POST` | `/api/auth/request-code` | Register/login: send OTP to email (`5/hour` per IP). No display name here — a new email creates a pending, unverified account (placeholder name) and the name is chosen at verify |
+| `POST` | `/api/auth/verify` | Verify OTP → `{token, user_id, display_name, is_guest, merged_guest}` — guest bearer attached triggers the merge (see above). A first-time (never-verified) account must send `display_name` as a second step: verify without one replies `200 {"needs_display_name": true}` and leaves the code unconsumed, so the client re-submits the same code with the chosen name |
 | `POST` | `/api/auth/guest` | Anonymous guest session → guest JWT (`20/hour` per IP) |
 
 Config (see `docker/.env.example`): `JWT_SECRET` (required),
@@ -587,6 +587,18 @@ dimension — it's the whole-route aggregate); the other five views nest a
 breakdown shape, plus an `"all"` entry aggregating across that view's
 dimension. `od_key` format: `"{origin_stop_id}__{destination_stop_id}__{class_main}"`.
 
+**`filter` values.** One entry per drill dimension. Proper-noun dimensions are
+ready-to-display strings: `trip_pair` (`"Berlin ↔ Wien"`), `stop` (a stop
+name), `country` (an ISO code — the frontend resolves the localised name),
+`class_main` (a class code). The dimensions carrying a translatable token are
+sent **structured** so the client composes and localises them itself, rather
+than the backend baking English words into the string:
+
+- `trip` → `{"origin", "destination", "direction"}`, `direction ∈ {"outbound", "return"}` → client renders `"origin → destination (localised direction)"`
+- `od_pair` / `section` → `{"origin", "destination", "class_main"}` (`class_main` may be `"all"`) → client renders `"origin → destination (localised class)"`
+
+Every dimension still sends the literal string `"all"` for its wildcard cell.
+
 Each cell contains the same breakdown under five **normalisations** (not to be confused with the six *views* above — a view selects *what scope* the money belongs to, a normalisation selects *what unit* it is expressed in). All per-unit denominators are annual, matching the €/year leaves; route-section cells divide by the section's own annual physics:
 
 | Key | Unit | Description |
@@ -771,6 +783,13 @@ server-assigned `proposal_id` and prefixed row IDs
 (`P{proposal_id}_V{proposal_version}_R1...`). The frontend adopts this id
 as its loaded proposal, so a follow-up save is an ordinary `overwrite`
 against it.
+
+**Self-like**: a logged-in (non-guest) publisher automatically likes their
+own just-published proposal — the same idempotent `add_like()` behind
+`POST /api/proposal/<id>/like`. Guests are skipped (no persistent identity
+to attach a like to across a merge). Best-effort: the proposal is already
+committed by this point, so a like failure is logged, not surfaced as a
+publish error.
 
 **Errors:**
 
@@ -980,6 +999,7 @@ paginated).
         "co2_savings_t_per_year": 210.4, "subsidy_eur_per_t_co2": null,
         "demand_kpis_placeholder": true, "co2_g_per_pax_km": 33.0,
         "likes_count": 3,
+        "display_name": "David", "is_guest": false,
         "created_at": "2026-08-01T09:00:00+00:00",
         "updated_at": "2026-08-04T12:00:00+00:00"
       },
@@ -1040,7 +1060,11 @@ independently of publish/refresh, so storing it would go stale;
 `comments_count` excludes deleted comments, matching
 [`GET /api/proposal/<id>/engagements`](#proposal-engagements)).
 The counts are here so a gallery card can show them without one
-engagements call per row; comment bodies and the timeline are not. `"existing"` rows
+engagements call per row; comment bodies and the timeline are not. The
+proposer's `display_name` and an `is_guest` flag (derived from the
+reserved `guest_` display-name prefix) are also live-joined from
+`admin.users` so a card can label who proposed the route without a
+second lookup. `"existing"` rows
 carry the **reduced descriptive shape** shown above — identity, the
 shared metric subset, `geometry_routed` (whether the drawn line is real
 routing or a straight-line fallback), and `ontd_url` (deep link to the

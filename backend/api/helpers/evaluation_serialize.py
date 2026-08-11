@@ -166,11 +166,12 @@ def normalise_all_to_dict(
 
 def _label_context(
     route: Route,
-) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+) -> tuple[dict[str, str], dict[str, dict], dict[str, str]]:
     """Precompute, once per request:
     stop_names  — stop_id → stop_name
-    trip_labels — trip_id → 'Origin → Destination (outbound|return)', for a
-                  SINGLE direction. Covers every trip in every pair —
+    trip_labels — trip_id → structured {origin, destination, direction} for a
+                  SINGLE direction (the frontend composes and localises it).
+                  Covers every trip in every pair —
                   outbound AND return_trip — since
                   build_breakdown_per_trip_per_stop() keys its matrix by
                   whichever direction a stop call actually happened on.
@@ -181,7 +182,7 @@ def _label_context(
                   there would misrepresent it as outbound-only.
     """
     stop_names: dict[str, str] = {}
-    trip_labels: dict[str, str] = {}
+    trip_labels: dict[str, dict] = {}
     pair_labels: dict[str, str] = {}
     for pair in route.trip_pairs:
         for trip in pair.trips:
@@ -189,10 +190,11 @@ def _label_context(
             for s in stops:
                 stop_names[s.stop_id] = s.stop_name
             if stops:
-                direction_text = "outbound" if trip.direction == 0 else "return"
-                trip_labels[trip.trip_id] = (
-                    f"{stops[0].stop_name} \u2192 {stops[-1].stop_name} ({direction_text})"
-                )
+                trip_labels[trip.trip_id] = {
+                    "origin": stops[0].stop_name,
+                    "destination": stops[-1].stop_name,
+                    "direction": "outbound" if trip.direction == 0 else "return",
+                }
         outbound_stops = pair.outbound.stops
         if outbound_stops:
             pair_labels[pair.outbound.trip_id] = (
@@ -206,7 +208,9 @@ def _pair_value(pair_labels: dict[str, str], pair_key: str) -> str:
     return "all" if pair_key == "all" else pair_labels.get(pair_key, pair_key)
 
 
-def _trip_value(trip_labels: dict[str, str], trip_key: str) -> str:
+def _trip_value(trip_labels: dict[str, dict], trip_key: str) -> str | dict:
+    """'all', or the structured {origin, destination, direction} the frontend
+    composes and localises (falls back to the raw trip_id if unknown)."""
     return "all" if trip_key == "all" else trip_labels.get(trip_key, trip_key)
 
 
@@ -218,20 +222,23 @@ def _stop_value(stop_names: dict[str, str], stop_key: str) -> str:
     return "all" if stop_key == "all" else stop_names.get(stop_key, stop_key)
 
 
-def _od_value(stop_names: dict[str, str], od_key: str) -> str:
+def _od_value(stop_names: dict[str, str], od_key: str) -> str | dict:
     """od_key is 'origin_stop_id__destination_stop_id__class_main' (see
     views.py: build_breakdown_per_trip_pair_per_od's od_key()), or 'all'.
-    Uses → (not ↔) — an OD pair is a genuinely one-way ticket, unlike a
-    trip pair which always runs both directions."""
+    Returns 'all', or the structured {origin, destination, class_main} the
+    frontend composes and localises (with →, not ↔ — an OD pair is a
+    genuinely one-way ticket, unlike a trip pair which runs both ways)."""
     if od_key == "all":
         return "all"
     parts = od_key.split("__")
     if len(parts) != 3:
         return od_key
     origin_id, destination_id, class_main = parts
-    origin = stop_names.get(origin_id, origin_id)
-    destination = stop_names.get(destination_id, destination_id)
-    return f"{origin} \u2192 {destination} ({class_main})"
+    return {
+        "origin": stop_names.get(origin_id, origin_id),
+        "destination": stop_names.get(destination_id, destination_id),
+        "class_main": class_main,
+    }
 
 
 def _section_parts(section_key: str) -> tuple[str, str, str] | None:
@@ -245,17 +252,19 @@ def _section_parts(section_key: str) -> tuple[str, str, str] | None:
     return tuple(parts) if len(parts) == 3 else None
 
 
-def _section_value(stop_names: dict[str, str], section_key: str) -> str:
-    """Human-readable section label — → like a single trip, since a section
-    is directional (the opposite direction is its own key)."""
+def _section_value(stop_names: dict[str, str], section_key: str) -> str | dict:
+    """Returns 'all', or the structured {origin, destination, class_main}
+    (class_main may be 'all') the frontend composes and localises — with →,
+    since a section is directional (the opposite direction is its own key)."""
     parts = _section_parts(section_key)
     if parts is None:
         return "all" if section_key == "all" else section_key
     origin_id, destination_id, class_part = parts
-    origin = stop_names.get(origin_id, origin_id)
-    destination = stop_names.get(destination_id, destination_id)
-    class_text = "all classes" if class_part == "all" else class_part
-    return f"{origin} \u2192 {destination} ({class_text})"
+    return {
+        "origin": stop_names.get(origin_id, origin_id),
+        "destination": stop_names.get(destination_id, destination_id),
+        "class_main": class_part,
+    }
 
 
 # =============================================================================

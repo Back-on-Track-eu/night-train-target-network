@@ -223,6 +223,31 @@ class AuthRepository:
             self._conn.rollback()
             raise
 
+    def complete_registration(
+        self, token_id: int, user_id: int, display_name: str
+    ) -> None:
+        """First-ever verification of a pending account: set the chosen
+        display name, mark the user verified, and mark the code used — one
+        transaction, so the OTP is never consumed without the name landing
+        (and vice versa). Distinct from consume_otp() because a brand-new
+        account picks its name here, AFTER the code is confirmed, replacing
+        the placeholder request-code created."""
+        try:
+            with self._cursor() as cur:
+                cur.execute(
+                    "UPDATE admin.users SET display_name = %s, is_verified = TRUE "
+                    "WHERE user_id = %s",
+                    (display_name, user_id),
+                )
+                cur.execute(
+                    "UPDATE admin.auth_tokens SET used = TRUE WHERE token_id = %s",
+                    (token_id,),
+                )
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
+
     # ------------------------------------------------------------------
     # Writes — guest merge
     # ------------------------------------------------------------------

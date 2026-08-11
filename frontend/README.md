@@ -76,7 +76,7 @@ frontend/
     ├── i18n/
     │   ├── index.ts         # vue-i18n setup
     │   └── locales/
-    │       └── en.json      # English strings (add de.json etc. here)
+    │       └── en.json      # English strings
     ├── stores/
     │   └── store.ts         # Pinia store
     ├── lib/
@@ -86,14 +86,13 @@ frontend/
     │   └── octilinear.ts    # Octilinear map-line layout helpers
     └── components/
         ├── AppIcon.vue               # Tree-shakeable @mdi/js icon wrapper
-        ├── CompositionSelectCard.vue # Composition picker card
+        ├── CompositionPanel.vue      # Composition picker card
         ├── EvaluationPanel.vue       # Cost/revenue evaluation cube explorer
         ├── MapView.vue               # MapLibre route/stop map
         ├── ProposalViewport.vue      # Proposal build/evaluate workspace
         ├── RouteSectionSlider.vue    # OD-range slider for the evaluation panel
         ├── RouteStatsCard.vue        # Headline distance/speed/frequency card
-        ├── StopSelect.vue            # Stop search/select control
-        └── StopSuggestionOverlay.vue # Suggested-stop selection prompt
+        └── StopSelect.vue            # Stop search/select control
 ```
 
 ---

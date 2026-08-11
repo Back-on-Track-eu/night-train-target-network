@@ -1,0 +1,602 @@
+<script setup lang="ts">
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
+import Select from 'primevue/select'
+import {
+  mdiArrowLeftRight,
+  mdiMapMarkerOutline,
+  mdiEarth,
+  mdiMagnify,
+  mdiPlus,
+  mdiSortAscending,
+  mdiSortDescending,
+} from '@mdi/js'
+import AppIcon from '@/components/AppIcon.vue'
+import StopSelect from '@/components/StopSelect.vue'
+import CountrySelect from '@/components/CountrySelect.vue'
+import ProposalCard from '@/components/ProposalCard.vue'
+import GalleryMap from '@/components/GalleryMap.vue'
+import { useStore } from '@/stores/store'
+import { useLocaleFormat } from '@/composables/useLocaleFormat'
+import { fetchProposals, fetchProposalRoute, ProposalsError } from '@/lib/proposalsApi'
+import {
+  seedToQuery,
+  seedFromQuery,
+  queryString,
+  type GallerySearchSeed,
+} from '@/lib/proposalPrefill'
+import {
+  PROPOSAL_SORT_KEYS,
+  type Stop,
+  type ProposalSummary,
+  type ProposalSummaryProposal,
+  type ProposalsRequest,
+  type ProposalsFilter,
+  type ProposalSort,
+  type ProposalSortKey,
+  type GalleryMapRoute,
+} from '@/types/api'
+
+const { t } = useI18n()
+const store = useStore()
+const { countryName } = useLocaleFormat()
+const route = useRoute()
+const router = useRouter()
+
+const LIMIT = 20
+
+type SearchMode = 'aToB' | 'byStation' | 'byCountry'
+const mode = ref<SearchMode>('aToB')
+
+// Search inputs (kept per-mode; buildFilter() only reads the active mode's).
+const fromStop = ref<Stop | null>(null)
+const toStop = ref<Stop | null>(null)
+const stationStop = ref<Stop | null>(null)
+const countryCode = ref<string | null>(null)
+
+// Current search-bar state, handed to "Suggest a new route" so the new
+// proposal's itinerary can be prefilled from whatever the user was searching
+// for instead of two arbitrary stops.
+const searchSeed = computed<GallerySearchSeed>(() => ({
+  mode: mode.value,
+  fromStop: fromStop.value,
+  toStop: toStop.value,
+  stationStop: stationStop.value,
+  countryCode: countryCode.value,
+}))
+
+// Stops the active search targeted — handed to each card so it can pin the
+// matched stop(s) as itinerary anchors. Empty for by-country search.
+const highlightStopIds = computed(() => {
+  if (mode.value === 'aToB') {
+    return [fromStop.value?.stop_id, toStop.value?.stop_id].filter((id): id is string => !!id)
+  }
+  if (mode.value === 'byStation') {
+    return stationStop.value ? [stationStop.value.stop_id] : []
+  }
+  return []
+})
+
+// Sort as a field + direction. The field Select shows only field names; the
+// direction is an icon toggle (ascending/descending).
+const sortField = ref<ProposalSortKey>('margin_eur_per_train_km')
+const sortDir = ref<'asc' | 'desc'>('desc')
+
+// Result list (accumulated across pages) + pagination bookkeeping.
+const proposals = ref<ProposalSummary[]>([])
+const total = ref(0)
+const offset = ref(0)
+const loading = ref(false)
+const initialized = ref(false)
+const errorMsg = ref<string | null>(null)
+const sentinel = ref<HTMLElement | null>(null)
+
+const tabs = computed(() => [
+  { value: 'aToB' as const, label: t('gallery.tabs.aToB'), icon: mdiArrowLeftRight },
+  { value: 'byStation' as const, label: t('gallery.tabs.byStation'), icon: mdiMapMarkerOutline },
+  { value: 'byCountry' as const, label: t('gallery.tabs.byCountry'), icon: mdiEarth },
+])
+
+const sortFieldOptions = computed<{ value: ProposalSortKey; label: string }[]>(() => [
+  { value: 'margin_eur_per_train_km', label: t('gallery.sort.margin') },
+  { value: 'revenue_eur_per_train_km', label: t('gallery.sort.revenue') },
+  { value: 'cost_eur_per_train_km', label: t('gallery.sort.cost') },
+  { value: 'created_at', label: t('gallery.sort.date') },
+  { value: 'total_distance_km', label: t('gallery.sort.distance') },
+  { value: 'total_time_h', label: t('gallery.sort.duration') },
+])
+
+// Country codes present in the loaded stops, resolved to full names in the
+// active locale (unknown codes fall back to the raw code).
+const countryOptions = computed(() =>
+  [...new Set(store.stops.map((s) => s.country_code))]
+    .map((code) => ({ code, name: countryName(code) }))
+    .sort((a, b) => a.name.localeCompare(b.name)),
+)
+const selectedCountryName = computed(() =>
+  countryCode.value ? countryName(countryCode.value) : null,
+)
+
+const currentSort = computed<ProposalSort>(() => ({ by: sortField.value, dir: sortDir.value }))
+function toggleSortDir(): void {
+  sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
+}
+
+const reachedEnd = computed(() => initialized.value && proposals.value.length >= total.value)
+
+// Map the active search mode + inputs to a backend filter. All backend filters
+// are OR/any-match; "From A to B" therefore sends both stop_ids as an
+// approximation (routes touching either stop), not a strict A→B connection.
+function buildFilter(): ProposalsFilter | undefined {
+  if (mode.value === 'aToB') {
+    const ids = [fromStop.value?.stop_id, toStop.value?.stop_id].filter((id): id is string =>
+      Boolean(id),
+    )
+    return ids.length ? { stop_ids: ids } : undefined
+  }
+  if (mode.value === 'byStation') {
+    return stationStop.value ? { stop_ids: [stationStop.value.stop_id] } : undefined
+  }
+  return countryCode.value ? { countries: [countryCode.value] } : undefined
+}
+
+async function loadPage(): Promise<void> {
+  if (loading.value) return
+  loading.value = true
+  errorMsg.value = null
+  const requestOffset = offset.value
+  try {
+    const body: ProposalsRequest = {
+      sort: [currentSort.value],
+      limit: LIMIT,
+      offset: requestOffset,
+    }
+    const filter = buildFilter()
+    if (filter) body.filter = filter
+
+    const res = await fetchProposals(body)
+    proposals.value = requestOffset === 0 ? res.proposals : [...proposals.value, ...res.proposals]
+    total.value = res.total
+    offset.value = requestOffset + res.proposals.length
+    initialized.value = true
+  } catch (err) {
+    errorMsg.value = err instanceof ProposalsError ? err.message : t('gallery.error')
+  } finally {
+    loading.value = false
+  }
+}
+
+// A filter/sort change starts a fresh query from offset 0.
+function resetAndLoad(): void {
+  proposals.value = []
+  total.value = 0
+  offset.value = 0
+  initialized.value = false
+  loadPage()
+}
+
+function onSentinel(): void {
+  if (loading.value || !initialized.value || reachedEnd.value) return
+  loadPage()
+}
+
+// --- Map: draw every result's route --------------------------------------
+// Summaries carry no geometry (stripped server-side), so each proposal's route
+// is fetched once via GET /api/proposal/<id> and cached by key. The map shows
+// the routes for whatever is currently loaded, growing with the list. Existing
+// (ONTD) rows have no per-row geometry endpoint and are not drawn on the map
+// yet — they still appear as cards (map geometry for them would come from the
+// list response's `map_lines` section, a separate change).
+const proposalKey = (p: ProposalSummary): string =>
+  p.source === 'existing' ? `e-${p.route_id}` : `p-${p.proposal_id}-${p.proposal_version}`
+// `routed` separates a real routed geometry (many points per leg) from a
+// straight-line stand-in (e.g. the seed proposal) — only routed ones map.
+// `orderedCountries` lists the countries in itinerary order (the summary's own
+// `countries` is alphabetical), used for the flag order on the card.
+type CachedRoute = GalleryMapRoute & { routed: boolean; orderedCountries: string[] }
+const routeCache = ref<Record<string, CachedRoute>>({})
+const mapRoutes = computed(() =>
+  proposals.value
+    .map((p) => routeCache.value[proposalKey(p)])
+    .filter((r): r is CachedRoute => Boolean(r) && r.routed),
+)
+
+async function ensureRoutes(list: ProposalSummary[]): Promise<void> {
+  // Only proposal rows have a per-id route endpoint; existing (ONTD) rows are
+  // skipped (see the map note above).
+  const missing = list.filter(
+    (p): p is ProposalSummaryProposal =>
+      p.source === 'proposal' && !routeCache.value[proposalKey(p)],
+  )
+  if (!missing.length) return
+  const loaded = await Promise.all(
+    missing.map(async (p) => {
+      try {
+        const { route } = await fetchProposalRoute(p.proposal_id)
+        // Every stop along the route, in order — each segment's origin, then the
+        // final segment's destination. The gallery map dedupes the boundary
+        // repeats when it draws the bubbles.
+        const stops: GalleryMapRoute['stops'] = []
+        for (const pair of route.trip_pairs) {
+          const segs = pair.outbound.segments
+          if (!segs.length) continue
+          for (const seg of segs) {
+            stops.push({
+              lat: seg.from_stop.lat,
+              lon: seg.from_stop.lon,
+              name: seg.from_stop.stop_name,
+            })
+          }
+          const last = segs[segs.length - 1].to_stop
+          stops.push({ lat: last.lat, lon: last.lon, name: last.stop_name })
+        }
+        const lines = route.geometries.map((g) => g.coords)
+        const orderedCountries: string[] = []
+        for (const pair of route.trip_pairs) {
+          for (const seg of pair.outbound.segments) {
+            for (const cc of Object.keys(seg.country_distance_shares)) {
+              if (!orderedCountries.includes(cc)) orderedCountries.push(cc)
+            }
+          }
+        }
+        const entry: CachedRoute = {
+          key: proposalKey(p),
+          lines,
+          stops,
+          // A routed leg carries many intermediate points; a straight-line
+          // stand-in is just its two endpoints.
+          routed: lines.some((l) => l.length > 2),
+          orderedCountries,
+        }
+        return entry
+      } catch {
+        return null
+      }
+    }),
+  )
+  const add: Record<string, CachedRoute> = {}
+  for (const entry of loaded) if (entry) add[entry.key] = entry
+  if (Object.keys(add).length) routeCache.value = { ...routeCache.value, ...add }
+}
+
+// Hovering a route on the map scrolls its card into view and flashes its
+// background briefly. Scrolled manually (not via scrollIntoView) so the
+// target lands relative to the sticky map's own bounds rather than the raw
+// window edge: the first card's top aligns with the map's top, the last
+// card's bottom aligns with the map's bottom, and everything in between is
+// just centered in the viewport — mirroring where the hovered route sits
+// within the map itself (near the top edge, near the bottom edge, or
+// somewhere in the middle). Deduped so the continuous mousemove stream over
+// one route only fires once (until the pointer leaves and re-enters).
+const cardsContainer = ref<HTMLElement | null>(null)
+const flashedKey = ref<string | null>(null)
+// Set while a card is hovered; drives the map's route highlight (card → map).
+const cardHoverKey = ref<string | null>(null)
+// Keep in sync with the sticky map wrapper's `top-6` class below — its top and
+// bottom gaps from the viewport are equal (top-6 + h-[calc(100vh-3rem)]).
+const MAP_EDGE_OFFSET_PX = 24
+let lastScrolledKey: string | null = null
+let flashTimer: number | undefined
+function onHoverRoute(key: string | null): void {
+  if (!key) {
+    lastScrolledKey = null
+    return
+  }
+  if (key === lastScrolledKey) return
+  lastScrolledKey = key
+  const card = cardsContainer.value?.querySelector<HTMLElement>(`[data-proposal="${key}"]`)
+  if (card) {
+    const index = proposals.value.findIndex((p) => proposalKey(p) === key)
+    const rect = card.getBoundingClientRect()
+    let desiredViewportTop: number
+    if (index === 0) {
+      desiredViewportTop = MAP_EDGE_OFFSET_PX
+    } else if (index === proposals.value.length - 1) {
+      desiredViewportTop = window.innerHeight - MAP_EDGE_OFFSET_PX - rect.height
+    } else {
+      desiredViewportTop = (window.innerHeight - rect.height) / 2
+    }
+    window.scrollTo({ top: window.scrollY + rect.top - desiredViewportTop, behavior: 'smooth' })
+  }
+  flashedKey.value = key
+  if (flashTimer) clearTimeout(flashTimer)
+  flashTimer = window.setTimeout(() => {
+    flashedKey.value = null
+  }, 900)
+}
+
+// --- URL <-> search-bar sync -------------------------------------------
+// Reflects the whole search bar (filters + sort) in /gallery's query string
+// so results are shareable, reload-safe, and back/forward-navigable.
+// Suppressed during the initial hydration in onMounted below — otherwise
+// each ref assignment there would fire its own resetAndLoad()/router.replace
+// before the async stop-id resolution finishes, flashing unfiltered results.
+let hydrating = true
+
+function currentSearchQuery(): LocationQueryRaw {
+  return {
+    ...seedToQuery({
+      mode: mode.value,
+      fromStop: fromStop.value,
+      toStop: toStop.value,
+      stationStop: stationStop.value,
+      countryCode: countryCode.value,
+    }),
+    sort: sortField.value,
+    dir: sortDir.value,
+  }
+}
+
+watch([mode, fromStop, toStop, stationStop, countryCode, sortField, sortDir], () => {
+  if (hydrating) return
+  resetAndLoad()
+  router.replace({ query: currentSearchQuery() })
+})
+watch(proposals, ensureRoutes)
+
+// Navigate to a saved proposal's detail route (ProposalCard's @select, only
+// fired for source==='proposal' rows — see ProposalCard.vue).
+function openProposal(proposalId: number): void {
+  router.push({ name: 'proposal', params: { id: proposalId } })
+}
+
+// "Suggest a new route" — hand the current search bar to the builder route as
+// its prefill seed, off-URL via the store (see pendingProposalSeed) so it
+// doesn't show up in /proposal-builder's address bar.
+function createProposal(): void {
+  store.pendingProposalSeed = searchSeed.value
+  router.push({ name: 'proposal-builder' })
+}
+
+let observer: IntersectionObserver | null = null
+onMounted(async () => {
+  observer = new IntersectionObserver(
+    (entries) => {
+      if (entries[0]?.isIntersecting) onSentinel()
+    },
+    { rootMargin: '300px' },
+  )
+  if (sentinel.value) observer.observe(sentinel.value)
+
+  // Hydrate the search bar from the URL before the first query fires, so a
+  // shared or reloaded /gallery?... link reproduces the exact same results.
+  const hasStopParams = ['from', 'to', 'station'].some((k) => queryString(route.query[k]))
+  if (hasStopParams && store.stopsStatus !== 'success') await store.fetchStops()
+  const seed = seedFromQuery(route.query, store.stops)
+  mode.value = seed.mode
+  fromStop.value = seed.fromStop
+  toStop.value = seed.toStop
+  stationStop.value = seed.stationStop
+  countryCode.value = seed.countryCode
+  const sortParam = queryString(route.query.sort)
+  if (sortParam && (PROPOSAL_SORT_KEYS as readonly string[]).includes(sortParam)) {
+    sortField.value = sortParam as ProposalSortKey
+  }
+  const dirParam = queryString(route.query.dir)
+  if (dirParam === 'asc' || dirParam === 'desc') sortDir.value = dirParam
+
+  hydrating = false
+  resetAndLoad()
+  router.replace({ query: currentSearchQuery() })
+})
+onBeforeUnmount(() => observer?.disconnect())
+
+// Same pill passthrough as the Selects in EvaluationPanel.vue.
+const selectPt = {
+  root: {
+    class:
+      'flex cursor-pointer items-center rounded-full border border-primary-50/20 bg-transparent transition hover:bg-primary-50/10',
+  },
+  label: { class: 'px-3 py-1.5 text-sm text-primary-50 leading-none' },
+  dropdown: { class: 'flex items-center pr-3 text-primary-50/60' },
+  overlay: {
+    class:
+      'z-50 mt-1 overflow-hidden rounded-xl border border-primary-50/20 bg-sapphire-100 shadow-xl',
+  },
+  listContainer: { class: 'overflow-auto' },
+  option: {
+    class: 'cursor-pointer px-4 py-2 text-sm text-primary-50 transition hover:bg-primary-50/10',
+  },
+}
+
+const ctaClass =
+  'flex cursor-pointer items-center gap-1.5 rounded-full bg-primary-50/10 px-5 py-2 text-sm text-primary-50 transition hover:bg-primary-50/20'
+// A circle whose 28px (h-7/w-7) diameter equals the sort Select's height, so
+// the two sit as an equal-height pair.
+const iconBtnClass =
+  'flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-full border border-primary-50/20 text-primary-50/70 transition hover:bg-primary-50/10'
+</script>
+
+<template>
+  <div class="flex w-full max-w-6xl flex-col gap-6">
+    <!-- Search bar -->
+    <div class="flex flex-col items-center gap-4">
+      <!-- Category tabs -->
+      <div class="flex divide-x divide-primary-50/20 overflow-hidden rounded-full">
+        <button
+          v-for="tab in tabs"
+          :key="tab.value"
+          type="button"
+          class="flex cursor-pointer items-center gap-1.5 px-4 py-2 text-sm leading-none transition"
+          :class="
+            mode === tab.value
+              ? 'text-primary-50 font-bold'
+              : 'text-primary-50/60 hover:text-primary-50/100'
+          "
+          @click="mode = tab.value"
+        >
+          <AppIcon :path="tab.icon" :size="16" />
+          {{ tab.label }}
+        </button>
+      </div>
+
+      <!-- Input pill — adapts to the active mode -->
+      <div
+        class="flex items-center gap-1 rounded-full border border-primary-50/20 bg-primary-50/5 py-1.5 pl-2 pr-1.5 shadow-lg"
+      >
+        <!-- From A to B: two stop inputs -->
+        <template v-if="mode === 'aToB'">
+          <StopSelect :stops="store.stops" @select="fromStop = $event">
+            <div class="flex flex-col rounded-full px-4 py-1.5">
+              <span class="text-xs font-semibold text-primary-50">{{
+                t('gallery.search.from')
+              }}</span>
+              <span
+                class="text-sm hover:text-primary-50/80"
+                :class="fromStop ? 'text-primary-50' : 'text-primary-50/40'"
+              >
+                {{ fromStop?.name ?? t('gallery.search.fromPlaceholder') }}
+              </span>
+            </div>
+          </StopSelect>
+          <div class="h-8 w-px bg-primary-50/15"></div>
+          <StopSelect :stops="store.stops" @select="toStop = $event">
+            <div class="flex flex-col rounded-full px-4 py-1.5">
+              <span class="text-xs font-semibold text-primary-50">{{
+                t('gallery.search.to')
+              }}</span>
+              <span
+                class="text-sm hover:text-primary-50/80"
+                :class="toStop ? 'text-primary-50' : 'text-primary-50/40'"
+              >
+                {{ toStop?.name ?? t('gallery.search.toPlaceholder') }}
+              </span>
+            </div>
+          </StopSelect>
+        </template>
+
+        <!-- By Station: one stop input -->
+        <template v-else-if="mode === 'byStation'">
+          <StopSelect :stops="store.stops" @select="stationStop = $event">
+            <div class="flex flex-col rounded-full px-4 py-1.5">
+              <span class="text-xs font-semibold text-primary-50">{{
+                t('gallery.search.station')
+              }}</span>
+              <span
+                class="text-sm hover:text-primary-50/80"
+                :class="stationStop ? 'text-primary-50' : 'text-primary-50/40'"
+              >
+                {{ stationStop?.name ?? t('gallery.search.stationPlaceholder') }}
+              </span>
+            </div>
+          </StopSelect>
+        </template>
+
+        <!-- By Country: same picker style as the stop selection -->
+        <template v-else>
+          <CountrySelect :countries="countryOptions" @select="countryCode = $event">
+            <div class="flex flex-col rounded-full px-4 py-1.5">
+              <span class="text-xs font-semibold text-primary-50">{{
+                t('gallery.search.country')
+              }}</span>
+              <span
+                class="text-sm hover:text-primary-50/80"
+                :class="countryCode ? 'text-primary-50' : 'text-primary-50/40'"
+              >
+                {{ selectedCountryName ?? t('gallery.search.countryPlaceholder') }}
+              </span>
+            </div>
+          </CountrySelect>
+        </template>
+
+        <!-- Search button -->
+        <button
+          type="button"
+          class="flex cursor-pointer items-center justify-center rounded-full bg-primary-50/10 p-3 text-primary-50 transition hover:bg-primary-50/20"
+          :aria-label="t('gallery.search.button')"
+          @click="resetAndLoad"
+        >
+          <AppIcon :path="mdiMagnify" :size="20" />
+        </button>
+      </div>
+    </div>
+
+    <!-- Controls: sort (above the card list) + plan a new route (above the map) -->
+    <div class="flex items-center gap-2">
+      <div class="flex items-stretch gap-2">
+        <Select
+          v-model="sortField"
+          :options="sortFieldOptions"
+          option-value="value"
+          option-label="label"
+          :unstyled="true"
+          :pt="selectPt"
+        />
+        <button
+          type="button"
+          :class="iconBtnClass"
+          :aria-label="t('gallery.sort.direction')"
+          @click="toggleSortDir"
+        >
+          <AppIcon :path="sortDir === 'asc' ? mdiSortAscending : mdiSortDescending" :size="18" />
+        </button>
+      </div>
+      <button type="button" :class="[ctaClass, 'ml-auto']" @click="createProposal">
+        <AppIcon :path="mdiPlus" :size="18" />
+        {{ t('gallery.cta.create') }}
+      </button>
+    </div>
+
+    <!-- Results: one column of cards (left) + a browser-height sticky map (right).
+         The left column's trailing pb-[calc(100vh-3rem)] matches the map's own
+         height so a sticky element's unavoidable "catch up and rise" as it nears
+         its containing block's bottom happens entirely within that empty
+         padding, after the last real card/CTA — not while real content is still
+         on screen. Without it, the map visibly detaches and creeps upward while
+         the trailing CTA is still visible, well before the column truly ends. -->
+    <div class="flex gap-6">
+      <div class="flex w-96 shrink-0 flex-col gap-4 pb-[calc(100vh-3rem)]">
+        <p v-if="errorMsg" class="text-sm text-red-400">{{ errorMsg }}</p>
+
+        <div v-if="proposals.length" ref="cardsContainer" class="flex flex-col gap-4">
+          <div
+            v-for="p in proposals"
+            :key="proposalKey(p)"
+            :data-proposal="proposalKey(p)"
+            @mouseenter="cardHoverKey = proposalKey(p)"
+            @mouseleave="cardHoverKey = null"
+          >
+            <ProposalCard
+              :proposal="p"
+              :flash="flashedKey === proposalKey(p)"
+              :ordered-countries="routeCache[proposalKey(p)]?.orderedCountries"
+              :highlight-stop-ids="highlightStopIds"
+              @select="openProposal"
+            />
+          </div>
+        </div>
+        <p v-else-if="initialized && !loading" class="py-8 text-center text-sm text-primary-50/50">
+          {{ t('gallery.empty') }}
+        </p>
+
+        <!-- Infinite-scroll sentinel + status -->
+        <div ref="sentinel" class="flex h-8 items-center justify-center text-sm text-primary-50/40">
+          <span v-if="loading">{{
+            initialized ? t('gallery.loadingMore') : t('gallery.loading')
+          }}</span>
+        </div>
+
+        <!-- Trailing CTA -->
+        <div class="flex justify-center pb-4">
+          <button type="button" :class="ctaClass" @click="createProposal">
+            <AppIcon :path="mdiPlus" :size="18" />
+            {{ t('gallery.cta.create') }}
+          </button>
+        </div>
+      </div>
+
+      <div class="flex-1">
+        <div
+          class="sticky top-6 h-[calc(100vh-3rem)] overflow-hidden rounded-xl border border-primary-50/10"
+        >
+          <GalleryMap
+            :routes="mapRoutes"
+            :highlighted-key="cardHoverKey"
+            @hover-route="onHoverRoute"
+          />
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
