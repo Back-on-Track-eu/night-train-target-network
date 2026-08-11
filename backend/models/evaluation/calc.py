@@ -376,7 +376,12 @@ class EvaluationResult:
 
 
 def _calc_stop_cost(
-    trip_id: str, stop: Stop, stop_infra: StopInfraCollection, composition: Composition
+    trip_id: str,
+    stop: Stop,
+    stop_infra: StopInfraCollection,
+    composition: Composition,
+    driver_rate_eur_h: float,
+    crew_rate_eur_h: float,
 ) -> StopCost:
     sp = stop_infra.get(stop.stop_id)
     station_charge_eur = sp.stop_charge_eur if sp else 0.0
@@ -384,8 +389,8 @@ def _calc_stop_cost(
     dwell_h = stop.dwell_time_min / 60.0 if stop.dwell_time_min is not None else 0.0
     dwell_driver_hours = dwell_h * composition.driver_factor
     dwell_crew_hours = dwell_h * composition.total_crew
-    dwell_driver_eur = dwell_driver_hours * composition.driver_costs_eur_h
-    dwell_crew_eur = dwell_crew_hours * composition.crew_costs_eur_h
+    dwell_driver_eur = dwell_driver_hours * driver_rate_eur_h
+    dwell_crew_eur = dwell_crew_hours * crew_rate_eur_h
     return StopCost(
         trip_id=trip_id,
         stop_id=stop.stop_id,
@@ -404,6 +409,8 @@ def _calc_segment_cost(
     segment: Segment,
     composition: Composition,
     tracks: TrackInfraCollection,
+    driver_rate_eur_h: float,
+    crew_rate_eur_h: float,
 ) -> SegmentCost:
     distance_km = segment.distance_m / 1000.0
     # Time in motion = raw router driving + traction dynamics (accel/brake is
@@ -413,8 +420,8 @@ def _calc_segment_cost(
     coach_maintenance_eur = composition.coach_maint_eur_km * distance_km
     driver_hours = driving_h * composition.driver_factor
     crew_hours = driving_h * composition.total_crew
-    driver_eur = composition.driver_costs_eur_h * driver_hours
-    crew_eur = composition.crew_costs_eur_h * crew_hours
+    driver_eur = driver_rate_eur_h * driver_hours
+    crew_eur = crew_rate_eur_h * crew_hours
 
     tac_eur = 0.0
     energy_eur = 0.0
@@ -739,6 +746,15 @@ def evaluate_route(
 
     for pair in route.trip_pairs:
         for trip in pair.trips:
+            # Roster efficiency is a property of the whole trip, not of a
+            # segment: a driver relieved mid-route is a fact about the
+            # trip's total driving time. Both rates are therefore derived
+            # once here and applied to every segment and stop of the trip.
+            driving_h = (trip.driving_time_min + trip.dynamics_time_min) / 60.0
+            on_train_h = (trip.arrival_time_min - trip.departure_time_min) / 60.0
+            driver_rate = pair.composition.driver_rate_eur_h(driving_h, on_train_h)
+            crew_rate = pair.composition.crew_rate_eur_h(on_train_h)
+
             for i, segment in enumerate(trip.segments):
                 segment_costs.append(
                     _calc_segment_cost(
@@ -747,6 +763,8 @@ def evaluate_route(
                         segment=segment,
                         composition=pair.composition,
                         tracks=tracks,
+                        driver_rate_eur_h=driver_rate,
+                        crew_rate_eur_h=crew_rate,
                     )
                 )
 
@@ -763,7 +781,14 @@ def evaluate_route(
                     continue
                 seen_stop_ids.add(key)
                 stop_costs.append(
-                    _calc_stop_cost(trip.trip_id, stop, stop_infra, pair.composition)
+                    _calc_stop_cost(
+                        trip.trip_id,
+                        stop,
+                        stop_infra,
+                        pair.composition,
+                        driver_rate,
+                        crew_rate,
+                    )
                 )
 
     od_pair_revenues, od_pair_costs, od_pair_margins = _calc_od_pair_results(route)

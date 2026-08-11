@@ -60,6 +60,8 @@ Collections
 
 from __future__ import annotations
 
+import math
+
 import logging
 from dataclasses import dataclass, field
 from typing import Optional
@@ -230,6 +232,59 @@ class ServiceClass:
 # =============================================================================
 
 
+# =============================================================================
+# ROSTER EFFICIENCY (Dienstplanwirkungsgrad)
+# =============================================================================
+#
+# Shared by Operator (the DB mirror) and Composition (the flattened object
+# evaluation works with), both of which carry the same five roster fields.
+# The maths lives here once; see docs/MODEL.md for the derivation.
+
+
+def roster_efficiency(rates, role: str, basis_h: float, on_train_h: float) -> float:
+    """Share of paid hours that is productive, for one trip.
+
+    Paid hours exceed hours on the train: sign-on/off, positioning,
+    away-base rest and reserve cover. A duty is capped by law and
+    agreement — driving time for drivers (Directive 2005/47/EC: 8 h on a
+    night shift), working time for onboard staff — so a long trip needs
+    relief crews, and each relief adds a fixed unproductive allowance.
+    Efficiency therefore steps down at every duty boundary and recovers
+    gradually as that allowance amortises over a longer trip.
+
+    rates      — any object carrying the five roster fields
+    role       — "driver" (basis: driving time) or "crew" (basis: time on train)
+    basis_h    — hours measured against the duty cap
+    on_train_h — productive hours paid for on this trip
+
+    Returns the reference efficiency when the trip fits a single duty.
+    """
+    if role == "driver":
+        max_duty, eff_ref = rates.driver_max_duty_h, rates.driver_roster_eff_ref
+    else:
+        max_duty, eff_ref = rates.crew_max_duty_h, rates.crew_roster_eff_ref
+    if on_train_h <= 0 or max_duty <= 0:
+        return eff_ref
+    # -1e-9 keeps a trip of exactly max_duty at one duty despite float
+    # noise in the summed minute fields.
+    duties = max(1, math.ceil(basis_h / max_duty - 1e-9))
+    return eff_ref * on_train_h / (on_train_h + rates.relief_allowance_h * (duties - 1))
+
+
+def driver_rate_eur_h(rates, driving_h: float, on_train_h: float) -> float:
+    """Paid driver rate for a trip — raw wage over roster efficiency."""
+    return rates.driver_costs_eur_h / roster_efficiency(
+        rates, "driver", driving_h, on_train_h
+    )
+
+
+def crew_rate_eur_h(rates, on_train_h: float) -> float:
+    """Paid attendant rate for a trip — raw wage over roster efficiency."""
+    return rates.crew_costs_eur_h / roster_efficiency(
+        rates, "crew", on_train_h, on_train_h
+    )
+
+
 @dataclass
 class Operator:
     """
@@ -252,8 +307,14 @@ class Operator:
 
     operator_id: str
     operator_name: str
-    driver_costs_eur_h: float  # EUR per driver hour (rate, not duration)
-    crew_costs_eur_h: float  # EUR per crew hour (rate, not duration)
+    driver_costs_eur_h: float  # EUR per PRODUCTIVE driver hour (raw wage)
+    crew_costs_eur_h: float  # EUR per PRODUCTIVE crew hour (raw wage)
+    # Roster (Dienstplanwirkungsgrad) parameters — see roster_efficiency().
+    driver_max_duty_h: float
+    crew_max_duty_h: float
+    driver_roster_eff_ref: float
+    crew_roster_eff_ref: float
+    relief_allowance_h: float
     ebit_margin_per: float
     financing_quota_per: float
     var_overhead_per: float
@@ -265,6 +326,15 @@ class Operator:
     # to a working train, i.e. segment total_time_min (driving + dynamics + buffer).
     # Energy, TAC, and driver/crew costs are NOT included — billed separately.
     loco_full_service_lease_eur_h: float
+
+    def roster_efficiency(self, role: str, basis_h: float, on_train_h: float) -> float:
+        return roster_efficiency(self, role, basis_h, on_train_h)
+
+    def driver_rate_eur_h(self, driving_h: float, on_train_h: float) -> float:
+        return driver_rate_eur_h(self, driving_h, on_train_h)
+
+    def crew_rate_eur_h(self, on_train_h: float) -> float:
+        return crew_rate_eur_h(self, on_train_h)
 
 
 # =============================================================================
@@ -598,9 +668,16 @@ class Composition:
     # (id + remarks) without a second lookup. Keyed by position.
     coaches: dict[int, CoachType]
 
-    # operator cost
+    # operator cost — driver/crew rates are RAW productive-hour wages;
+    # evaluation divides them by the per-trip roster efficiency computed
+    # from the five roster fields below.
     driver_costs_eur_h: float
     crew_costs_eur_h: float
+    driver_max_duty_h: float
+    crew_max_duty_h: float
+    driver_roster_eff_ref: float
+    crew_roster_eff_ref: float
+    relief_allowance_h: float
     ebit_margin_per: float
     financing_quota_per: float
     var_overhead_per: float
@@ -622,6 +699,14 @@ class Composition:
     # indicative KPIs — seeded calibration values read from
     # composition_types columns (see IndicativeFigures). None if no
     indicative: Optional["IndicativeFigures"] = field(default=None)
+
+    def driver_rate_eur_h(self, driving_h: float, on_train_h: float) -> float:
+        """Paid driver rate for a trip — raw wage over roster efficiency."""
+        return driver_rate_eur_h(self, driving_h, on_train_h)
+
+    def crew_rate_eur_h(self, on_train_h: float) -> float:
+        """Paid attendant rate for a trip — raw wage over roster efficiency."""
+        return crew_rate_eur_h(self, on_train_h)
 
     @classmethod
     def from_type(cls, comp_type: CompositionType) -> "Composition":
@@ -674,6 +759,11 @@ class Composition:
             coaches=dict(comp_type.coaches),
             driver_costs_eur_h=comp_type.operator.driver_costs_eur_h,
             crew_costs_eur_h=comp_type.operator.crew_costs_eur_h,
+            driver_max_duty_h=comp_type.operator.driver_max_duty_h,
+            crew_max_duty_h=comp_type.operator.crew_max_duty_h,
+            driver_roster_eff_ref=comp_type.operator.driver_roster_eff_ref,
+            crew_roster_eff_ref=comp_type.operator.crew_roster_eff_ref,
+            relief_allowance_h=comp_type.operator.relief_allowance_h,
             ebit_margin_per=comp_type.operator.ebit_margin_per,
             financing_quota_per=comp_type.operator.financing_quota_per,
             var_overhead_per=comp_type.operator.var_overhead_per,
@@ -1219,7 +1309,7 @@ class Scenario:
     """
     One row of scenario.scenarios — a container pinning one version of
     each versioned infrastructure table. See
-    db/dev/sql/create_scenario_schema.sql for the full versioning
+    db/schema.py (scenario.scenarios) and db/README.md for the full versioning
     contract; summarized here for the fields this object carries:
 
     is_current_base: TRUE for exactly one row in the whole table — the

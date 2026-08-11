@@ -326,7 +326,9 @@ def composition_collection_to_dict(compositions: CompositionCollection) -> dict:
                     # readable without a second lookup) plus the combined
                     # rate: driver_factor × driver rate + crew_factor_total
                     # × crew rate — see descriptions.compositions.staff.
-                    # costs_per_hour
+                    # costs_per_hour. Raw productive-hour wages: the rate
+                    # evaluation actually charges is these over the trip's
+                    # roster efficiency (CALC 0.9.15).
                     "costs_per_hour": {
                         "driver_eur_h": c.driver_costs_eur_h,
                         "crew_eur_h": c.crew_costs_eur_h,

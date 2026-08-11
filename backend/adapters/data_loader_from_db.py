@@ -234,7 +234,7 @@ class DBDataLoader:
         to its four per-table version pointers. Infrastructure only —
         operators/coach_types/composition_types are
         unversioned catalogs and have no scenario pointer at all (see
-        scenario.scenarios' docstring in create_scenario_schema.sql).
+        scenario.scenarios definition in db/schema.py).
 
         Every column on scenario.scenarios is NOT NULL, so this is always a
         single direct row fetch — no inheritance/fallback logic needed.
@@ -436,6 +436,11 @@ class DBDataLoader:
                 operator_name=row["operator_name"],
                 driver_costs_eur_h=_f(row["operator_driver_costs_eur_h"]),
                 crew_costs_eur_h=_f(row["operator_crew_costs_eur_h"]),
+                driver_max_duty_h=_f(row["operator_driver_max_duty_h"]),
+                crew_max_duty_h=_f(row["operator_crew_max_duty_h"]),
+                driver_roster_eff_ref=_f(row["operator_driver_roster_eff_ref"]),
+                crew_roster_eff_ref=_f(row["operator_crew_roster_eff_ref"]),
+                relief_allowance_h=_f(row["operator_relief_allowance_h"]),
                 ebit_margin_per=_f(row["operator_ebit_margin_per"]),
                 financing_quota_per=_f(row["operator_financing_quota_per"]),
                 var_overhead_per=_f(row["operator_var_overhead_per"]),
@@ -691,7 +696,12 @@ class DBDataLoader:
                         "Hourly staff rates (denormalised from the "
                         "operator) and the combined staff cost per "
                         "operated hour: driver_factor × driver rate + "
-                        "crew_factor_total × crew rate. Unit: €/h"
+                        "crew_factor_total × crew rate. These are wages "
+                        "per PRODUCTIVE hour: evaluation divides them by "
+                        "the roster efficiency it computes for each trip, "
+                        "so the amount actually charged is higher — most "
+                        "of all on trips long enough to need a relief "
+                        "crew. Unit: €/h"
                     ),
                 },
                 "capacity": {
@@ -766,6 +776,17 @@ class DBDataLoader:
                     "operator_driver_costs_eur_h"
                 ),
                 "crew_costs_eur_h": operator_columns.get("operator_crew_costs_eur_h"),
+                "driver_max_duty_h": operator_columns.get("operator_driver_max_duty_h"),
+                "crew_max_duty_h": operator_columns.get("operator_crew_max_duty_h"),
+                "driver_roster_eff_ref": operator_columns.get(
+                    "operator_driver_roster_eff_ref"
+                ),
+                "crew_roster_eff_ref": operator_columns.get(
+                    "operator_crew_roster_eff_ref"
+                ),
+                "relief_allowance_h": operator_columns.get(
+                    "operator_relief_allowance_h"
+                ),
                 "ebit_margin_per": operator_columns.get("operator_ebit_margin_per"),
                 "financing_quota_per": operator_columns.get(
                     "operator_financing_quota_per"
