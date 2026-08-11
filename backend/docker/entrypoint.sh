@@ -18,4 +18,4 @@ echo "Bootstrapping ONTD reference data in the background..."
 python /app/db/ontd/bootstrap.py &
 
 echo "Starting API..."
-exec gunicorn --bind 0.0.0.0:5000 --workers 4 --timeout 120 "main:create_app()"
+exec gunicorn --bind "0.0.0.0:${API_CONTAINER_PORT:-5000}" --workers 4 --timeout 120 "main:create_app()"

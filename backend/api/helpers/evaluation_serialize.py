@@ -14,7 +14,7 @@ EUR values are NOT rounded here — every leaf on a Breakdown is already
 rounded by the time it reaches this file, at a precision scaled to its
 normalisation (2dp for annual EUR, finer for per-unit views — see
 models/evaluation/views.py: _round_breakdown() and NORMALISATION_NDIGITS /
-BREAKDOWN_TOTAL_NDIGITS in models/evaluation/version.py). This file only
+BREAKDOWN_TOTAL_NDIGITS in models/evaluation/model.py). This file only
 shapes dicts, it never re-formats numbers.
 
 Public interface:
@@ -42,22 +42,22 @@ from models.evaluation.views import (
     revenue_by_class_main,
     VIEW_META,
 )
-from models.evaluation.version import (
+from models.evaluation.model import (
     CALC_VERSION,
     CALC_MODEL_DESCRIPTION,
     CALC_FORMULAS,
 )
-from models.energy.version import (
+from models.energy.model import (
     ENERGY_CALC_VERSION,
     ENERGY_MODEL_DESCRIPTION,
     ENERGY_FORMULAS,
 )
-from models.emissions.factors import (
+from models.emissions.model import (
     EMISSION_FACTORS,
     EMISSIONS_MODEL_DESCRIPTION,
     EMISSIONS_MODEL_VERSION,
 )
-from models.route.version import (
+from models.route.model import (
     ROUTE_BUILDER_VERSION,
     ROUTE_BUILDER_DESCRIPTION,
     ROUTE_FORMULAS,
@@ -520,6 +520,10 @@ EVALUATION_OUTPUT_FIELDS: frozenset[str] = frozenset(
         "parking_eur",
         "ticket_revenue_eur",
         "ebit_margin_eur",
+        "operator_variable_total_eur",
+        "operator_fixed_total_eur",
+        "operator_total_eur",
+        "infrastructure_total_eur",
         "total_eur",
         "total_cost_eur",
         "total_revenue_eur",
@@ -528,12 +532,32 @@ EVALUATION_OUTPUT_FIELDS: frozenset[str] = frozenset(
 )
 
 
+def _param_to_dict(param) -> dict:
+    """models.formula.FormulaParam → plain dict. "ref" (the machine-readable
+    source pointer, see models/formula.py) is included only when set, so
+    the frontend can render clickable parameter sources."""
+    out = {
+        "symbol": param.symbol,
+        "description": param.description,
+        "unit": param.unit,
+    }
+    if param.ref:
+        out["ref"] = param.ref
+    return out
+
+
 def _formulas_to_dict(formulas: dict) -> dict:
-    """CalcFormula/EnergyFormula/RouteFormula registry → plain dict, filtered
-    to EVALUATION_OUTPUT_FIELDS. All three formula dataclasses share the
-    same (latex, description) shape."""
+    """models.formula.Formula registry → plain dict, filtered to
+    EVALUATION_OUTPUT_FIELDS. Each entry carries latex, description, and
+    the input/output legend (additive since CALC 0.9.14 / route builder
+    0.9.18 / energy 0.9.1)."""
     return {
-        key: {"latex": f.latex, "description": f.description}
+        key: {
+            "latex": f.latex,
+            "description": f.description,
+            "inputs": [_param_to_dict(p) for p in f.inputs],
+            "output": _param_to_dict(f.output),
+        }
         for key, f in formulas.items()
         if key in EVALUATION_OUTPUT_FIELDS
     }

@@ -3,7 +3,7 @@
 All demand-related code lives here. Today that is exactly one thing: the
 **stopgap uniform-distribution proxy** (`stopgap.py`), which populates a
 `Route`'s OD pairs from a flat target utilization and per-km fares — see
-`version.py` for the standard values and the open TODO describing the real
+`model.py` for the standard values and the open TODO describing the real
 model that will replace it.
 
 **Related documentation:** domain model & pipeline —
@@ -15,7 +15,7 @@ model that will replace it.
 ```
 demand/
 ├── stopgap.py    # distribute_demand() — the uniform-distribution proxy
-└── version.py    # DEMAND_MODEL_VERSION + stopgap standard values + open TODOs
+└── model.py      # DEMAND_MODEL_VERSION + stopgap standard values + open TODOs
 ```
 
 ## Callers

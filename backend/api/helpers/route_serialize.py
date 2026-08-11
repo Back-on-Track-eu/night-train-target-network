@@ -101,7 +101,7 @@ def _trip_general_parameters(trip: Trip) -> dict:
     intermediate stops. average_speed_kmh is trip_km divided by that same
     duration, so all figures stay internally consistent with each other.
     This is a different, unimplemented formula from the 'avg_speed' entry in
-    ROUTE_FORMULAS (models/route/version.py), which divides by pure
+    ROUTE_FORMULAS (models/route/model.py), which divides by pure
     driving time only (excluding buffer and dwell) — that entry documents
     a display-only value that was never wired up, not a contract this
     function needs to match.

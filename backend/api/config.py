@@ -19,7 +19,7 @@ place:
     scenario tables. They carry provenance and a version; code constants
     cannot.
   * Domain assumptions not yet in the database — the owning model's
-    version.py STANDARD VALUES block (models/route, models/demand, …).
+    model.py STANDARD VALUES block (models/route, models/demand, …).
     They live there because they are versioned WITH the model: changing
     one bumps a model version, which is exactly what should not happen
     when a rate limit is retuned.
@@ -79,3 +79,78 @@ LIKE_RATE_LIMIT = _env_str("LIKE_RATE_LIMIT", "60 per minute")
 # caller to key on (rate_limit_key() falls back to the address there).
 AUTH_REQUEST_CODE_RATE_LIMIT = _env_str("AUTH_REQUEST_CODE_RATE_LIMIT", "5 per hour")
 AUTH_GUEST_RATE_LIMIT = _env_str("AUTH_GUEST_RATE_LIMIT", "20 per hour")
+
+# How long an emailed OTP code stays redeemable. Short by design: the code
+# is a single-use credential in a third-party inbox.
+OTP_TTL_MINUTES = _env_int("OTP_TTL_MINUTES", 15)
+
+# Session lifetimes for the local-plane JWTs (api/auth_utils.py). Guests get
+# the longer window so their proposals stay accessible without an inbox to
+# re-verify through. Deployment security policy, not a code fact — hence
+# here rather than beside the JWT plumbing.
+JWT_TTL_DAYS = _env_int("JWT_TTL_DAYS", 7)
+GUEST_TTL_DAYS = _env_int("GUEST_TTL_DAYS", 30)
+
+
+# =============================================================================
+# Feedback — api/helpers/feedback_serialize.py
+# =============================================================================
+
+# Same family as COMMENT_BODY_MAX_LEN: a request-shaping cap, relaxable per
+# deployment without invalidating anything already stored.
+FEEDBACK_SUBJECT_MAX_LEN = _env_int("FEEDBACK_SUBJECT_MAX_LEN", 200)
+
+
+# =============================================================================
+# Proposals listing — api/proposals.py
+# =============================================================================
+
+# Page size when the request body carries no "limit".
+PROPOSALS_DEFAULT_LIMIT = _env_int("PROPOSALS_DEFAULT_LIMIT", 50)
+
+
+# =============================================================================
+# Effective-config boot log
+# =============================================================================
+
+
+def log_effective_config() -> None:
+    """One INFO block of every resolved non-secret setting, emitted at boot
+    (main.py) — so "what is this deployment actually running with" is
+    answered by `docker logs`, not by reading four files. Secrets and
+    credentials are deliberately absent; presence-only facts about them are
+    already logged by api/auth_utils.check_auth_config()."""
+    import logging
+
+    logger = logging.getLogger(__name__)
+    wiring = {
+        "POSTGRES_HOST": os.environ.get("POSTGRES_HOST"),
+        "POSTGRES_PORT": os.environ.get("POSTGRES_PORT"),
+        "POSTGRES_DB": os.environ.get("POSTGRES_DB"),
+        "OPENRAILROUTING_URL": os.environ.get("OPENRAILROUTING_URL"),
+        "API_CONTAINER_PORT": os.environ.get("API_CONTAINER_PORT", "5000"),
+        "ONTD_BOOTSTRAP": os.environ.get("ONTD_BOOTSTRAP", "auto"),
+        "AUTH_EMAIL_DEV_MODE": os.environ.get("AUTH_EMAIL_DEV_MODE", "false"),
+        "TESTING": os.environ.get("TESTING", "false"),
+    }
+    limits = {
+        "COMMENT_BODY_MAX_LEN": COMMENT_BODY_MAX_LEN,
+        "COMMENT_RATE_LIMIT": COMMENT_RATE_LIMIT,
+        "COMMENT_EDIT_RATE_LIMIT": COMMENT_EDIT_RATE_LIMIT,
+        "LIKE_RATE_LIMIT": LIKE_RATE_LIMIT,
+        "AUTH_REQUEST_CODE_RATE_LIMIT": AUTH_REQUEST_CODE_RATE_LIMIT,
+        "AUTH_GUEST_RATE_LIMIT": AUTH_GUEST_RATE_LIMIT,
+        "OTP_TTL_MINUTES": OTP_TTL_MINUTES,
+        "JWT_TTL_DAYS": JWT_TTL_DAYS,
+        "GUEST_TTL_DAYS": GUEST_TTL_DAYS,
+        "FEEDBACK_SUBJECT_MAX_LEN": FEEDBACK_SUBJECT_MAX_LEN,
+        "PROPOSALS_DEFAULT_LIMIT": PROPOSALS_DEFAULT_LIMIT,
+    }
+    logger.info(
+        "Effective config — wiring: %s",
+        ", ".join(f"{k}={v}" for k, v in wiring.items()),
+    )
+    logger.info(
+        "Effective config — API limits: %s",
+        ", ".join(f"{k}={v}" for k, v in limits.items()),
+    )

@@ -18,9 +18,15 @@ Pre-flight:
 import json
 import os
 import sys
+from pathlib import Path
+
 import requests
 
-API_BASE = os.environ.get("API_BASE_URL", "http://localhost:5050")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from dev_env import api_base_url  # noqa: E402
+
+API_BASE = api_base_url()
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "data")
 OUTPUT_PATH = os.path.join(OUTPUT_DIR, "scenarios_output.json")
 

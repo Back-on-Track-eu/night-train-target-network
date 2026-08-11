@@ -1,12 +1,13 @@
 """
-factors.py
-==========
-Flat per-mode GHG intensity factors (adapters/proposal/README.md decision
-24) — the single source for the night-train, air, and car
-g CO2e/pax-km values used across the platform:
-`proposals.proposal_summaries.co2_g_per_pax_km`, the "summary" block of
-POST /api/proposal/calc, the `evaluation.models.emissions` documentation
-entry (api/helpers/evaluation_serialize.py: models_to_dict()), and the
+model.py
+========
+Version anchor and factor set of the emissions model: flat per-mode GHG
+intensity factors (adapters/proposal/README.md decision 24) — the single
+source for the night-train, air, and car g CO2e/pax-km values used
+across the platform: `proposals.proposal_summaries.co2_g_per_pax_km`,
+the "summary" block of POST /api/proposal/calc, the
+`evaluation.models.emissions` documentation entry
+(api/helpers/evaluation_serialize.py: models_to_dict()), and the
 placeholder CO2-savings derivation in models/evaluation/summary.py.
 
 The night-train value is a flat European average until an energy-based,
@@ -23,14 +24,35 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-EMISSIONS_MODEL_VERSION: str = "0.1.0"
+EMISSIONS_MODEL_VERSION: str = "0.1.1"
 
 EMISSIONS_MODEL_DESCRIPTION: str = (
-    "Flat per-mode GHG intensity factors (g CO2e per passenger-km) — "
-    "reference values for the gallery's mode comparison and inputs to the "
-    "placeholder CO2-savings estimate. The night-train value is a flat "
-    "European average pending an energy-based, country-resolved model."
+    "Climate impact factors: how many grams of CO2-equivalent one "
+    "passenger-kilometre causes by night train, plane, and car — used for "
+    "the mode comparison and the CO2-savings estimate. The night-train "
+    "value is a European average until a country-resolved, energy-based "
+    "model replaces it."
 )
+
+CHANGELOG: dict = {
+    "0.1.1": {
+        "date": "2026-08-10",
+        "author": "david",
+        "changes": "factors.py renamed to model.py (every model now anchors "
+        "version, description, and changelog in a model.py); CHANGELOG "
+        "added; description rewritten in plain language for tool users. "
+        "Factor values unchanged.",
+    },
+    "0.1.0": {
+        "date": "2026-08-05",
+        "author": "david",
+        "changes": "Initial factor set (WP10 step 5, decision 24): EEA TERM "
+        "2020 EU-average 2018 values — night train 33 (passenger-rail "
+        "proxy), air 160, car 143 g CO2e/pax-km — plus the placeholder "
+        "mode-shift shares (air 0.35, car 0.20) consumed by the "
+        "CO2-savings estimate in models/evaluation/summary.py.",
+    },
+}
 
 
 @dataclass(frozen=True)

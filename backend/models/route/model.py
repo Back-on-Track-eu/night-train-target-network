@@ -1,8 +1,10 @@
 """
-version.py
-==========
-Version constant, standard values, open TODOs, and model description for
-the Night Train Route Builder.
+model.py
+========
+Version constant, standard values, open TODOs, and formula registry of
+the Night Train Route Builder — every model under models/ anchors its
+version, description, changelog, and (where applicable) formulas and
+standard values in a model.py like this one.
 
 Bump ROUTE_BUILDER_VERSION when any change affects the Trip output:
   - Routing logic or GraphHopper configuration
@@ -15,32 +17,65 @@ model (OPEN_TODOS below) — so all standard assumptions are tracked in one
 place. Modules using a value import it from here; inline TODO markers in
 the code reference their OPEN_TODOS key instead of carrying the full text.
 
-ROUTE_FORMULAS documents the key calculations in the route builder
-with LaTeX and plain-English descriptions.
+ROUTE_FORMULAS documents the key calculations of the route builder for
+tool users: LaTeX, a plain-language description, and an input/output
+legend with units (models/formula.py).
 """
 
 from __future__ import annotations
-from dataclasses import dataclass
+
+from models.formula import Formula, FormulaParam
 
 # =============================================================================
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.16"
+ROUTE_BUILDER_VERSION: str = "0.9.18"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
-# Short, plain-English summary of what this model computes — embedded as-is
+# Short, plain-language summary of what this model computes — embedded as-is
 # in the "models" section of the merged compute response, alongside
 # ROUTE_BUILDER_VERSION and ROUTE_FORMULAS.
 ROUTE_BUILDER_DESCRIPTION: str = (
-    "Route/timetable builder: turns a list of stops, a composition, and "
-    "routing/timetable/schedule mode selections into a full Route — trip "
-    "pairs, segments with buffer time, dwell times, and a mirrored "
-    "outbound/return schedule around 02:30."
+    "Route and timetable builder: turns a list of stops, a train "
+    "composition, and a few mode selections into a complete route — trip "
+    "pairs, travel and stopping times with schedule buffers, and a "
+    "mirrored outbound/return night schedule."
 )
 
 CHANGELOG: dict = {
+    "0.9.18": {
+        "date": "2026-08-10",
+        "author": "david",
+        "changes": "version.py renamed to model.py (every model now anchors "
+        "version, description, changelog, and formulas in a model.py). "
+        "ROUTE_FORMULAS rebuilt on the shared Formula/FormulaParam "
+        "dataclasses (models/formula.py): every formula carries a full "
+        "input/output legend with units, descriptions are rewritten in "
+        "plain language for tool users (code references moved into "
+        "comments), and the per-leg/per-segment time formulas now spell "
+        "out the dynamics and slack components introduced in "
+        "0.9.8/0.9.10. ADDITIVE response change once serialized: each "
+        "models.route_builder.formulas entry gains 'inputs' and 'output', "
+        "and input params carry an optional 'ref' source pointer "
+        "(models/formula.py) linking to upstream formulas, DB columns, or "
+        "standard values — renders docs/MODEL.md cross-links and is "
+        "available to the frontend. Bjarne coordination batch. No "
+        "computed number changes.",
+    },
+    "0.9.17": {
+        "date": "2026-08-10",
+        "author": "david",
+        "changes": "Constant relocation only: the persisted-GTFS calendar "
+        "window (_SERVICE_START/_SERVICE_END in "
+        "adapters/proposal/gtfs_store.py) moved into STANDARD VALUES as "
+        "GTFS_SERVICE_START/GTFS_SERVICE_END, values unchanged "
+        "(2032-12-12 .. 2033-12-10). It pins every saved service's "
+        "calendar, i.e. it is a fixed model assumption — sitting in an "
+        "adapter it could change without a version bump. No Trip output "
+        "change.",
+    },
     "0.9.16": {
         "date": "2026-08-07",
         "author": "david",
@@ -339,6 +374,19 @@ DEFAULT_SCHEDULE_MODE: str = "alwaysDaily"
 DEFAULT_ROUTING_MODE: str = "fullRouting"
 DEFAULT_AUTO_STOP_ADDITION: str = "add"
 
+# --- Persisted GTFS calendar window (adapters/proposal/gtfs_store.py)
+GTFS_SERVICE_START: str = "2032-12-12"
+GTFS_SERVICE_END: str = "2033-12-10"
+"""Nominal GTFS calendar window for persisted services — the project's
+target timetable year, 2032 (per the December-to-December European rail
+timetable-change convention: 2nd Sunday of December through the day before
+the following year's 2nd Sunday). GTFS requires concrete dates; the model
+itself only knows seasonal frequencies, so every saved service is pinned to
+this window until real timetable-year handling exists. Changing it changes
+persisted GTFS calendars, hence a version bump. If "2032" means the
+timetable period covering most of calendar year 2032 (starting Dec 2031)
+rather than the one starting Dec 2032, use "2031-12-14" / "2032-12-11"."""
+
 # --- Timetable (timetable_mode="simpleAutomatic")
 MIRROR_MIN: int = 26 * 60 + 30
 """02:30, expressed 'next day' (1590) on the continuous minutes-from-midnight
@@ -525,118 +573,415 @@ OPEN_TODOS: dict[str, str] = {
 
 
 # =============================================================================
-# ROUTE FORMULA REGISTRY
+# ROUTE FORMULA REGISTRY — LaTeX + plain-language description + input/output
+# legend per formula (models/formula.py). Descriptions are written for tool
+# users; developer detail lives in the comments next to each entry.
 # =============================================================================
 
-
-@dataclass(frozen=True)
-class RouteFormula:
-    """One entry in the route builder calculation model."""
-
-    latex: str
-    description: str
-
-
-ROUTE_FORMULAS: dict[str, RouteFormula] = {
+ROUTE_FORMULAS: dict[str, Formula] = {
     # ------------------------------------------------------------------
     # ROUTING
     # ------------------------------------------------------------------
-    "buffer_time": RouteFormula(
+    "buffer_time": Formula(
         latex=r"t_{buffer,l} = t_{drive,l} \times q_{buffer,country(l)}",
-        description="Buffer time per country leg: driving time multiplied by the "
-        "country's schedule buffer quota (accounts for construction, "
-        "delays, and operational margins).",
+        description="Safety margin added to the timetable on top of pure "
+        "driving time. Each country has its own buffer percentage, "
+        "reflecting how congested and delay-prone its network is.",
+        inputs=(
+            FormulaParam(
+                symbol="t_drive,l",
+                description="Driving time on one country leg (the part of a "
+                "segment within one country)",
+                unit="min",
+            ),
+            FormulaParam(
+                symbol="q_buffer,country(l)",
+                ref="column:input_params.track_infrastructures.track_buffer_quota_per",
+                description="That country's schedule buffer, as a share of "
+                "driving time",
+                unit="fraction",
+            ),
+        ),
+        output=FormulaParam(
+            symbol="t_buffer,l",
+            description="Buffer time added for this country leg",
+            unit="min",
+        ),
     ),
-    "total_time_per_leg": RouteFormula(
-        latex=r"t_{total,l} = t_{drive,l} + t_{buffer,l}",
-        description="Total travel time per country leg: driving time plus buffer.",
+    # Dynamics split out of driving time since 0.9.8; buffer applies to
+    # both driving and dynamics since 0.9.9 (see CHANGELOG).
+    "total_time_per_leg": Formula(
+        latex=r"t_{total,l} = t_{drive,l} + t_{dyn,l} + t_{buffer,l}",
+        description="Scheduled travel time for one country leg: driving "
+        "time, plus the time lost braking and accelerating at stops, plus "
+        "the schedule buffer.",
+        inputs=(
+            FormulaParam(
+                symbol="t_drive,l",
+                description="Driving time at cruise speed",
+                unit="min",
+            ),
+            FormulaParam(
+                symbol="t_dyn,l",
+                ref="formula:route.stop_dynamics_time_loss",
+                description="Time lost braking into and accelerating out of "
+                "stops on this leg",
+                unit="min",
+            ),
+            FormulaParam(
+                symbol="t_buffer,l",
+                ref="formula:route.buffer_time",
+                description="Schedule buffer for this leg",
+                unit="min",
+            ),
+        ),
+        output=FormulaParam(
+            symbol="t_total,l",
+            description="Scheduled time for the country leg",
+            unit="min",
+        ),
     ),
-    "total_time_per_segment": RouteFormula(
-        latex=r"t_{seg} = \sum_{l \in seg} t_{total,l}",
-        description="Total travel time per segment (stop pair): sum over all "
-        "country legs within the segment.",
+    # Slack is non-zero only when timetable_mode='simpleAutomaticWithFixedNight'
+    # stretches a short night interval (0.9.10).
+    "total_time_per_segment": Formula(
+        latex=r"t_{seg} = \sum_{l \in seg} t_{total,l} + t_{slack,seg}",
+        description="Scheduled travel time between two neighbouring stops: "
+        "the sum of all its country legs, plus any slack added when the "
+        "timetable is stretched to cover the night window.",
+        inputs=(
+            FormulaParam(
+                symbol="t_total,l",
+                ref="formula:route.total_time_per_leg",
+                description="Scheduled time of each country leg in the segment",
+                unit="min",
+            ),
+            FormulaParam(
+                symbol="t_slack,seg",
+                description="Slack time from night-window stretching (usually zero)",
+                unit="min",
+            ),
+        ),
+        output=FormulaParam(
+            symbol="t_seg",
+            description="Scheduled time between the two stops",
+            unit="min",
+        ),
     ),
-    "avg_speed": RouteFormula(
+    "avg_speed": Formula(
         latex=r"\bar{v}_{kmh} = \frac{d_{km}}{t_{drive,h}}",
-        description="Average speed: distance divided by pure driving time "
-        "(excluding buffer). Display value only — not stored.",
+        description="Average speed over a stretch: distance divided by pure "
+        "driving time, buffers excluded. Shown for orientation only.",
+        inputs=(
+            FormulaParam(symbol="d_km", description="Distance", unit="km"),
+            FormulaParam(
+                symbol="t_drive,h",
+                description="Pure driving time",
+                unit="h",
+            ),
+        ),
+        output=FormulaParam(
+            symbol="v̄_kmh",
+            description="Average speed",
+            unit="km/h",
+        ),
     ),
     # ------------------------------------------------------------------
     # DWELL TIME
     # ------------------------------------------------------------------
-    "dwell_time_boarding": RouteFormula(
+    "dwell_time_boarding": Formula(
         latex=r"t_{dwell} = \max(t_{board,comp},\ t_{board,infra})",
-        description="Dwell time at boarding stop: maximum of composition minimum "
-        "boarding time and infrastructure minimum boarding time.",
+        description="How long the train waits at a stop where passengers "
+        "board: the larger of the two minimum boarding times — one set by "
+        "the train, one by the station.",
+        inputs=(
+            FormulaParam(
+                symbol="t_board,comp",
+                ref="column:input_params.composition_types.composition_type_min_boarding_time",
+                description="Minimum boarding time the train composition needs",
+                unit="min",
+            ),
+            FormulaParam(
+                symbol="t_board,infra",
+                ref="column:input_params.track_infrastructures.track_min_boarding_time",
+                description="Minimum boarding time the station needs",
+                unit="min",
+            ),
+        ),
+        output=FormulaParam(
+            symbol="t_dwell",
+            description="Waiting time at the stop",
+            unit="min",
+        ),
     ),
-    "dwell_time_alighting": RouteFormula(
+    "dwell_time_alighting": Formula(
         latex=r"t_{dwell} = \max(t_{alight,comp},\ t_{alight,infra})",
-        description="Dwell time at alighting stop: maximum of composition minimum "
-        "alighting time and infrastructure minimum alighting time.",
+        description="How long the train waits at a stop where passengers "
+        "get off: the larger of the two minimum alighting times — one set "
+        "by the train, one by the station.",
+        inputs=(
+            FormulaParam(
+                symbol="t_alight,comp",
+                ref="column:input_params.composition_types.composition_type_min_alighting_time",
+                description="Minimum alighting time the train composition needs",
+                unit="min",
+            ),
+            FormulaParam(
+                symbol="t_alight,infra",
+                ref="column:input_params.track_infrastructures.track_min_alighting_time",
+                description="Minimum alighting time the station needs",
+                unit="min",
+            ),
+        ),
+        output=FormulaParam(
+            symbol="t_dwell",
+            description="Waiting time at the stop",
+            unit="min",
+        ),
     ),
-    "dwell_time_both": RouteFormula(
-        latex=r"t_{dwell} = \max(t_{board,comp},\ t_{board,infra},\ t_{alight,comp},\ t_{alight,infra})",
-        description="Dwell time at boarding+alighting stop: maximum of all four "
-        "boarding and alighting time constraints.",
+    "dwell_time_both": Formula(
+        latex=r"t_{dwell} = \max(t_{board,comp},\ t_{board,infra},"
+        r"\ t_{alight,comp},\ t_{alight,infra})",
+        description="How long the train waits at a stop where passengers "
+        "both board and get off: the largest of all four minimum times.",
+        inputs=(
+            FormulaParam(
+                symbol="t_board,comp",
+                description="Minimum boarding time the train composition needs",
+                unit="min",
+                ref="column:input_params.composition_types.composition_type_min_boarding_time",
+            ),
+            FormulaParam(
+                symbol="t_board,infra",
+                description="Minimum boarding time the station needs",
+                unit="min",
+                ref="column:input_params.track_infrastructures.track_min_boarding_time",
+            ),
+            FormulaParam(
+                symbol="t_alight,comp",
+                description="Minimum alighting time the train composition needs",
+                unit="min",
+                ref="column:input_params.composition_types.composition_type_min_alighting_time",
+            ),
+            FormulaParam(
+                symbol="t_alight,infra",
+                description="Minimum alighting time the station needs",
+                unit="min",
+                ref="column:input_params.track_infrastructures.track_min_alighting_time",
+            ),
+        ),
+        output=FormulaParam(
+            symbol="t_dwell",
+            description="Waiting time at the stop",
+            unit="min",
+        ),
     ),
     # ------------------------------------------------------------------
     # AUTO STOP ADDITION
     # ------------------------------------------------------------------
-    "auto_stop_added_time": RouteFormula(
-        latex=r"\Delta t_{cand} = \left(\sum_{l \in reroute(a, cand, b)} t_{total,l}\right) - t_{total,(a,b)} + t_{dwell,cand}",
-        description="Added time for one auto-stop candidate: total time of the "
-        "3-point mini-reroute of its own leg (leg start → candidate → leg "
-        "end) minus the original leg's total time, plus the candidate's "
-        "dwell (conservatively StopType BOTH). Used for greedy selection "
-        "in mode 'add' (budget: AUTO_STOP_MAX_DETOUR_PER of the original "
-        "trip time) and reported as added_time_min in mode 'suggest'. "
-        "Since 0.9.7 the mini-reroute legs carry traction dynamics (see "
-        "stop_dynamics_time_loss), so the extra accel/brake pair a new "
-        "stop introduces is included automatically.",
+    # Used for greedy selection in mode 'add' (budget:
+    # AUTO_STOP_MAX_DETOUR_PER of the original trip time) and reported as
+    # added_time_min in mode 'suggest'. Since 0.9.7 the mini-reroute legs
+    # carry traction dynamics, so the extra accel/brake pair a new stop
+    # introduces is included automatically. On-path candidates (within
+    # AUTO_STOP_ANALYTIC_DETOUR_M) are costed analytically since 0.9.15.
+    "auto_stop_added_time": Formula(
+        latex=r"\Delta t_{cand} = \left(\sum_{l \in reroute(a, cand, b)} "
+        r"t_{total,l}\right) - t_{total,(a,b)} + t_{dwell,cand}",
+        description="Extra travel time a suggested additional stop would "
+        "cost: the detour to reach it, the braking and accelerating it "
+        "causes, and the waiting time at the stop itself. Used to "
+        "automatically pick extra stops that fit the time budget, and to "
+        "report suggestions.",
+        inputs=(
+            FormulaParam(
+                symbol="Σ t_total (reroute)",
+                ref="formula:route.total_time_per_leg",
+                description="Travel time of the leg rerouted via the candidate stop",
+                unit="min",
+            ),
+            FormulaParam(
+                symbol="t_total,(a,b)",
+                ref="formula:route.total_time_per_leg",
+                description="Travel time of the original leg without the stop",
+                unit="min",
+            ),
+            FormulaParam(
+                symbol="t_dwell,cand",
+                ref="formula:route.dwell_time_both",
+                description="Waiting time at the candidate stop",
+                unit="min",
+            ),
+        ),
+        output=FormulaParam(
+            symbol="Δt_cand",
+            description="Added travel time if the stop is included",
+            unit="min",
+        ),
     ),
     # ------------------------------------------------------------------
     # TRACTION DYNAMICS
     # ------------------------------------------------------------------
-    "stop_dynamics_time_loss": RouteFormula(
-        latex=r"\Delta t_{leg} = \underbrace{\frac{v}{2\,a_{dec}}}_{braking} + \underbrace{t_{acc}(v) - \frac{d_{acc}(v)}{v}}_{acceleration},\quad t_{acc},d_{acc}\ \text{from}\ F(u)=\min\!\left(F_{loco},\ \frac{P_{loco}}{u}\right),\ m = m_{coaches} + m_{loco}",
-        description="Per-leg time lost to stopping, vs the router's "
-        "constant-cruise-speed passage (GraphHopper has no vehicle model): "
-        "braking into the arrival stop at constant service deceleration "
-        "TRACTION_BRAKE_DECELERATION_MS2 plus accelerating out of the "
-        "departure stop under two-phase traction (constant tractive effort "
-        "F_loco up to v1 = P/F, constant power P_loco above) of the assumed "
-        "standard locomotive hauling the composition's coach weight. v is "
-        "the leg's own average cruise speed, i.e. the link speed before "
-        "(braking) and after (acceleration) the stop. Added to "
-        "driving_time_min per fullRouting leg; damped linearly when the "
-        "leg is too short to contain both phases. See "
-        "models/route/routing/dynamics.py.",
+    # Implementation: models/route/routing/dynamics.py. The loss is added
+    # per fullRouting leg and damped linearly when the leg is too short to
+    # contain both phases; simpleRouting deliberately stays dynamics-free.
+    "stop_dynamics_time_loss": Formula(
+        latex=r"\Delta t_{leg} = \underbrace{\frac{v}{2\,a_{dec}}}_{braking} "
+        r"+ \underbrace{t_{acc}(v) - \frac{d_{acc}(v)}{v}}_{acceleration},"
+        r"\quad t_{acc},d_{acc}\ \text{from}\ "
+        r"F(u)=\min\!\left(F_{loco},\ \frac{P_{loco}}{u}\right),"
+        r"\ m = m_{coaches} + m_{loco}",
+        description="Time lost at every stop because a real train has to "
+        "brake before it and accelerate after it — the routing engine "
+        "alone assumes constant cruise speed. Braking uses a comfortable "
+        "constant deceleration; acceleration follows the physics of a "
+        "standard locomotive pulling the train's weight.",
+        inputs=(
+            FormulaParam(
+                symbol="v",
+                description="Cruise speed on the line before and after the stop",
+                unit="km/h",
+            ),
+            FormulaParam(
+                symbol="a_dec",
+                ref="standard:ROUTE.TRACTION_BRAKE_DECELERATION_MS2",
+                description="Comfortable service braking deceleration",
+                unit="m/s²",
+            ),
+            FormulaParam(
+                symbol="F_loco",
+                ref="standard:ROUTE.TRACTION_LOCO_TRACTIVE_EFFORT_KN",
+                description="Locomotive pulling force from standstill",
+                unit="kN",
+            ),
+            FormulaParam(
+                symbol="P_loco",
+                ref="standard:ROUTE.TRACTION_LOCO_POWER_KW",
+                description="Locomotive power",
+                unit="kW",
+            ),
+            FormulaParam(
+                symbol="m_coaches",
+                description="Weight of all coaches of the composition",
+                unit="t",
+                ref="column:input_params.coach_types.coach_type_weight_gross_t",
+            ),
+            FormulaParam(
+                symbol="m_loco",
+                description="Weight of the assumed standard locomotive",
+                unit="t",
+                ref="standard:ROUTE.TRACTION_LOCO_WEIGHT_T",
+            ),
+        ),
+        output=FormulaParam(
+            symbol="Δt_leg",
+            description="Time lost per stop compared to passing at constant speed",
+            unit="min",
+        ),
     ),
     # ------------------------------------------------------------------
     # SCHEDULE
     # ------------------------------------------------------------------
-    "arrival_time": RouteFormula(
+    "arrival_time": Formula(
         latex=r"t_{arr,i} = t_{dep,i-1} + t_{seg,i-1}",
-        description="Arrival time at stop i: departure from previous stop plus "
-        "total segment travel time (driving + dynamics + buffer).",
+        description="Arrival time at a stop: departure time at the previous "
+        "stop plus the scheduled travel time in between.",
+        inputs=(
+            FormulaParam(
+                symbol="t_dep,i-1",
+                ref="formula:route.departure_time",
+                description="Departure time at the previous stop",
+                unit="hh:mm",
+            ),
+            FormulaParam(
+                symbol="t_seg,i-1",
+                ref="formula:route.total_time_per_segment",
+                description="Scheduled travel time of the segment in between",
+                unit="min",
+            ),
+        ),
+        output=FormulaParam(
+            symbol="t_arr,i",
+            description="Arrival time at the stop",
+            unit="hh:mm",
+        ),
     ),
-    "departure_time": RouteFormula(
+    "departure_time": Formula(
         latex=r"t_{dep,i} = t_{arr,i} + t_{dwell,i}",
-        description="Departure time at intermediate stop: arrival time plus dwell time.",
+        description="Departure time at an intermediate stop: arrival time "
+        "plus the waiting time at the stop.",
+        inputs=(
+            FormulaParam(
+                symbol="t_arr,i",
+                ref="formula:route.arrival_time",
+                description="Arrival time at the stop",
+                unit="hh:mm",
+            ),
+            FormulaParam(
+                symbol="t_dwell,i",
+                ref="formula:route.dwell_time_both",
+                description="Waiting time at the stop",
+                unit="min",
+            ),
+        ),
+        output=FormulaParam(
+            symbol="t_dep,i",
+            description="Departure time at the stop",
+            unit="hh:mm",
+        ),
     ),
     # ------------------------------------------------------------------
     # TRIP STATS
     # ------------------------------------------------------------------
-    "total_distance": RouteFormula(
+    "total_distance": Formula(
         latex=r"d_{total} = \sum_{seg} \sum_{l \in seg} d_{m,l}",
-        description="Total trip distance: sum of all country leg distances in metres.",
+        description="Total trip distance: the distances of all country legs added up.",
+        inputs=(
+            FormulaParam(
+                symbol="d_m,l",
+                description="Distance of each country leg",
+                unit="m",
+            ),
+        ),
+        output=FormulaParam(
+            symbol="d_total",
+            description="Total trip distance",
+            unit="m",
+        ),
     ),
-    "total_driving_time": RouteFormula(
+    "total_driving_time": Formula(
         latex=r"t_{drive,total} = \sum_{seg} \sum_{l \in seg} t_{drive,l}",
-        description="Total driving time: sum of pure engine time across all country legs.",
+        description="Total driving time: the pure driving times of all "
+        "country legs added up, without buffers or waiting times.",
+        inputs=(
+            FormulaParam(
+                symbol="t_drive,l",
+                description="Driving time of each country leg",
+                unit="min",
+            ),
+        ),
+        output=FormulaParam(
+            symbol="t_drive,total",
+            description="Total driving time of the trip",
+            unit="min",
+        ),
     ),
-    "total_time": RouteFormula(
-        latex=r"t_{total} = \sum_{seg} t_{total,seg}",
-        description="Total trip time: driving time plus all buffer times.",
+    "total_time": Formula(
+        latex=r"t_{total} = \sum_{seg} t_{seg}",
+        description="Total scheduled trip time: all segment times added up "
+        "— driving, braking and accelerating at stops, buffers, and any "
+        "slack.",
+        inputs=(
+            FormulaParam(
+                symbol="t_seg",
+                ref="formula:route.total_time_per_segment",
+                description="Scheduled time of each segment",
+                unit="min",
+            ),
+        ),
+        output=FormulaParam(
+            symbol="t_total",
+            description="Total scheduled trip time",
+            unit="min",
+        ),
     ),
 }

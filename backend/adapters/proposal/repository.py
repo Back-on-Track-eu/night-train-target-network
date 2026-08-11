@@ -60,8 +60,8 @@ from adapters.proposal.gtfs_store import (
 )
 from adapters.proposal.id_prefix import rewrite_id_prefix
 from adapters.proposal.projection import build_summary_db_row
-from models.evaluation.version import CALC_VERSION
-from models.route.version import ROUTE_BUILDER_VERSION
+from models.evaluation.model import CALC_VERSION
+from models.route.model import ROUTE_BUILDER_VERSION
 
 logger = logging.getLogger(__name__)
 

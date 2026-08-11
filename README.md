@@ -6,6 +6,8 @@
 
 An open-source initiative by [Back-on-Track.eu](https://back-on-track.eu) to design and evaluate a European night train target network that could realistically be implemented by 2032.
 
+**Full calculation model documentation** — every formula, parameter, and assumption, fully cross-linked: [docs/MODEL.md](docs/MODEL.md)
+
 ## Vision
 
 Back-on-Track wants to put a serious, evidence-based night train network proposal in front of the European Commission (DG MOVE) and other key political stakeholders. The study needs to answer three core questions:
@@ -63,7 +65,9 @@ cd night-train-target-network
 
 **2. Create your `.env` file**
 
-One shared `.env` configures the whole backend. The defaults work out of the box:
+One shared `.env` configures the whole backend — the main stack, the
+devcontainer, the standalone database stack, and all host-run scripts and
+tests. The defaults work out of the box, and every port lives there too:
 
 ```bash
 cp backend/docker/.env.example backend/docker/.env
@@ -72,8 +76,11 @@ cp backend/docker/.env.example backend/docker/.env
 **3. Start everything**
 
 ```bash
-docker compose -f .devcontainer/docker-compose.yml up --build
+docker compose -f backend/docker/docker-compose.yml -f .devcontainer/docker-compose.yml up --build
 ```
+
+(`.devcontainer/docker-compose.yml` is an overlay on the backend stack —
+listing both files is required.)
 
 This builds and starts four containers: the Postgres/PostGIS database, the
 OpenRailRouting engine, the Flask backend API, and the Vue frontend. First run
@@ -81,13 +88,13 @@ takes a few minutes (routing graph + image builds); subsequent runs are fast.
 
 **4. Open the app**
 
-- Frontend: [http://localhost:5173](http://localhost:5173)
-- Backend API health check: [http://localhost:5050/api/health](http://localhost:5050/api/health)
+- Frontend: [http://localhost:5173](http://localhost:5173) (`FRONTEND_HOST_PORT`)
+- Backend API health check: [http://localhost:5050/api/health](http://localhost:5050/api/health) (`API_HOST_PORT`)
 
 **Stopping it**
 
 ```bash
-docker compose -f .devcontainer/docker-compose.yml down
+docker compose -f backend/docker/docker-compose.yml -f .devcontainer/docker-compose.yml down
 ```
 
 Add `-v` to also wipe the database volume for a clean slate.

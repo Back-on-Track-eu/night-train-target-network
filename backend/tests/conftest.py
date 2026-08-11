@@ -23,6 +23,7 @@ import psycopg2.extras
 import pytest
 import requests
 
+from dev_env import api_base_url, db_config
 from tests.helpers import (
     PROPOSAL_CALC_URL,
     build_route,
@@ -34,15 +35,11 @@ from tests.helpers import (
 # Configuration — from environment, with local-stack defaults
 # =============================================================================
 
-API_BASE = os.environ.get("API_BASE_URL", "http://localhost:5050")
+# Resolved by backend/dev_env.py — the single home for dev-side connection
+# defaults. Reads backend/docker/.env; real environment variables (CI) win.
+API_BASE = api_base_url()
 
-DB_CONFIG = {
-    "host": os.environ.get("POSTGRES_HOST", "localhost"),
-    "port": int(os.environ.get("POSTGRES_PORT", "5432")),
-    "dbname": os.environ.get("POSTGRES_DB", "target_network_test_db"),
-    "user": os.environ.get("POSTGRES_USER", "bot_admin"),
-    "password": os.environ.get("POSTGRES_PASSWORD", "devpassword"),
-}
+DB_CONFIG = db_config()
 
 # Canonical stop lists — every seeded stop the suite routes between.
 STOPS_BERLIN_WIEN = ["DE_BERLIN_HBF", "AT_WIEN_HBF"]

@@ -126,12 +126,12 @@ cd backend
 uv run python main.py
 ```
 
-When running outside Docker, set these in your PyCharm run configuration
-(or shell) to match your local `.env` values:
-```
-POSTGRES_HOST=localhost
-OPENRAILROUTING_URL=http://localhost:8989
-```
+When running outside Docker, no manual variables are needed for the
+standard setup: `backend/dev_env.py` reads `backend/docker/.env` and
+rewrites container-side wiring (`POSTGRES_HOST=postgres`,
+`OPENRAILROUTING_URL`) to localhost with the published host ports.
+Shell/PyCharm environment variables still win over the file if you need
+to point elsewhere.
 
 ---
 
@@ -141,13 +141,14 @@ To inspect or edit the database schema independently of the full stack,
 use the standalone DB stack with Mathesar:
 
 ```bash
+cp backend/docker/.env.example backend/docker/.env   # first time only
 cd backend/db/dev
-cp .env.example .env   # already has working defaults
 docker-compose up -d
-open http://localhost:8000   # Mathesar UI
+open http://localhost:8000   # Mathesar UI (MATHESAR_HOST_PORT)
 ```
 
-The standalone DB stack has its own `.env` — only `POSTGRES_*` variables are needed there.
+The standalone DB stack reads the shared `backend/docker/.env` — it has no
+`.env` of its own.
 
 ---
 

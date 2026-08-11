@@ -53,9 +53,6 @@ logger = logging.getLogger(__name__)
 
 bp = Blueprint("auth", __name__)
 
-# OTP expires after 15 minutes
-_OTP_TTL_MINUTES = 15
-
 # Max guest name generation attempts before giving up
 _MAX_GUEST_NAME_ATTEMPTS = 10
 
@@ -144,7 +141,8 @@ def request_code():
     repo.issue_otp(
         user_id=user_id,
         code_hash=hash_otp(otp),
-        expires_at=datetime.now(timezone.utc) + timedelta(minutes=_OTP_TTL_MINUTES),
+        expires_at=datetime.now(timezone.utc)
+        + timedelta(minutes=config.OTP_TTL_MINUTES),
     )
 
     # --- send email (after commit — a stored-but-unsent code is retryable) ---

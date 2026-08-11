@@ -35,7 +35,7 @@ and update_log unconditionally.
 import pytest
 import requests
 
-from models.route.version import ROUTE_BUILDER_VERSION
+from models.route.model import ROUTE_BUILDER_VERSION
 from tests.helpers import (
     PROPOSAL_URL,
     comment_url,

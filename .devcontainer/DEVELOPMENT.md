@@ -28,8 +28,10 @@ cd night-train-target-network
 **2. Create your `.env` file**
 
 The single `.env` for the entire backend lives at `backend/docker/.env` —
-it's shared by `backend/docker/docker-compose.yml` and
-`.devcontainer/docker-compose.yml`:
+it configures `backend/docker/docker-compose.yml`, the devcontainer
+overlay, the standalone `backend/db/dev` stack, and (via
+`backend/dev_env.py`) all host-run scripts and tests. Every port of the
+dev stack lives there too (see its Ports section):
 
 ```bash
 cp backend/docker/.env.example backend/docker/.env
@@ -46,14 +48,14 @@ If the prompt does not appear, open the command palette (`Ctrl+Shift+P`) and run
 **Dev Containers: Reopen in Container**.
 
 VS Code builds all four images and starts them automatically, then runs
-`.devcontainer/setup.sh` inside the `backend-api` container (`uv sync`,
+`.devcontainer/setup.sh` inside the `api` container (`uv sync`,
 `pre-commit install`, `npm install` for the frontend, then waits for the
 API health check to pass).
 
 **Option B — plain Docker Compose**
 
 ```bash
-docker compose -f .devcontainer/docker-compose.yml up --build
+docker compose -f backend/docker/docker-compose.yml -f .devcontainer/docker-compose.yml up --build
 ```
 
 **4. Verify everything works**
@@ -68,32 +70,36 @@ curl http://localhost:5050/api/params/compositions
 ## Stopping the stack
 
 ```bash
-docker compose -f .devcontainer/docker-compose.yml down
+docker compose -f backend/docker/docker-compose.yml -f .devcontainer/docker-compose.yml down
 ```
 
 Or use **Dev Containers: Stop Container** from the VS Code command palette.
 
 To also wipe the database volume (full reset):
 ```bash
-docker compose -f .devcontainer/docker-compose.yml down -v
+docker compose -f backend/docker/docker-compose.yml -f .devcontainer/docker-compose.yml down -v
 ```
 
 ---
 
 ## What's running
 
-Four services, defined in `.devcontainer/docker-compose.yml` (a
-self-contained duplicate of `backend/docker/docker-compose.yml`'s
-`postgres`/`openrailrouting`/`api` services, plus `frontend`):
+Four services. `postgres`, `openrailrouting` and `api` come entirely from
+`backend/docker/docker-compose.yml`; `.devcontainer/docker-compose.yml` is
+an OVERLAY that adds the workspace mount, the routing admin port, and the
+`frontend` service. One stack, two entry points — the devcontainer and
+`cd backend/docker && docker-compose up` share the same compose project,
+containers and volumes. All ports come from `backend/docker/.env`; the
+values below are the defaults:
 
 | Service | Container | Port(s) |
 |---|---|---|
-| `postgres` | `night_train_postgres` | `5432` |
-| `openrailrouting` | `openrailrouting` | `8989` (routing), `8990` (admin/metrics) |
-| `backend-api` | `backend-api` | `5050` (host) → `5000` (container) — host side moved off 5000 to avoid macOS AirPlay Receiver |
-| `frontend` | `night-train-frontend` | `5173` (Vite HMR — edits reflect instantly) |
+| `postgres` | `night_train_postgres` | `POSTGRES_HOST_PORT` (5432) |
+| `openrailrouting` | `openrailrouting` | `OPENRAILROUTING_HOST_PORT` (8989), admin/metrics `OPENRAILROUTING_ADMIN_HOST_PORT` (8990) |
+| `api` | `night-train-api` | `API_HOST_PORT` (5050) → `API_CONTAINER_PORT` (5000) — host side moved off 5000 to avoid macOS AirPlay Receiver |
+| `frontend` | `night-train-frontend` | `FRONTEND_HOST_PORT` (5173, Vite HMR — edits reflect instantly) |
 
-The `backend-api` service seeds the database (via its entrypoint) and
+The `api` service seeds the database (via its entrypoint) and
 starts Flask under gunicorn on every start — no separate seed step needed.
 
 ---
@@ -186,14 +192,14 @@ The API container waits for it automatically via a health check.
 
 **Container stuck in a bad state**
 ```bash
-docker compose -f .devcontainer/docker-compose.yml down
-docker compose -f .devcontainer/docker-compose.yml up --build
+docker compose -f backend/docker/docker-compose.yml -f .devcontainer/docker-compose.yml down
+docker compose -f backend/docker/docker-compose.yml -f .devcontainer/docker-compose.yml up --build
 ```
 
 **Full reset (wipes database)**
 ```bash
-docker compose -f .devcontainer/docker-compose.yml down -v
-docker compose -f .devcontainer/docker-compose.yml up --build
+docker compose -f backend/docker/docker-compose.yml -f .devcontainer/docker-compose.yml down -v
+docker compose -f backend/docker/docker-compose.yml -f .devcontainer/docker-compose.yml up --build
 ```
 
 **`docker compose up` fails with a missing env variable**

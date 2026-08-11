@@ -13,7 +13,7 @@ It is the mathematical core of the project — everything that produces a EUR nu
 models/evaluation/
 ├── calc.py      # Cost/revenue calculation → EvaluationResult
 ├── views.py     # Breakdown aggregation, allocation, normalisation
-└── version.py   # CALC_VERSION
+└── model.py     # CALC_VERSION
 ```
 
 ---
@@ -277,7 +277,7 @@ cell's own annual denominators; `scope=None` derives them from
 `route`/`trip_pair` as usual.
 
 Leaf rounding **scales with the divisor** (`NORMALISATION_NDIGITS` in
-version.py): annual figures are 2dp currency, but per-place-km leaves are of
+model.py): annual figures are 2dp currency, but per-place-km leaves are of
 order 10⁻³–10⁻² € — rounding those to 2dp quantizes them into noise (the
 0.9.4 bug behind the long-open per_available_place_km divisor xfail; the
 divisor itself was always exact). Totals (`total_eur`/`net_eur` properties)

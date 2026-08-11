@@ -2,14 +2,14 @@
 # =============================================================================
 # One-command local instance of the Target Network deploy stack.
 #
-#   ./local.sh            (or: ./local.sh up)   → http://localhost:8080
+#   ./local.sh            (or: ./local.sh up)   → http://localhost:8090
 #   ./local.sh down       stop, keep the database
 #   ./local.sh reset      stop + wipe the database volume
 #   ./local.sh logs       follow api logs
 #
 # This runs the SAME docker-compose.yml the servers run, plus a local Caddy
 # (docker-compose.local.yml) that plays bot-server's vhost role, so the
-# browser at localhost:8080 sees exactly what production serves. First boot
+# browser at localhost:8090 sees exactly what production serves. First boot
 # is detected via the database volume and handles seed + migration baseline
 # automatically, in the only order that works (seed first — it drops and
 # recreates the schemas, tracking table included).

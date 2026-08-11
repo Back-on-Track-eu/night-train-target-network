@@ -93,7 +93,7 @@ from models.route.trip import Segment, StopType, TimetableWarning
 from models.route.route import Schedule, SeasonalSchedule, Season, Frequency
 from models.route.routing.dynamics import TRACTION_LOCO_WEIGHT_T, stop_time_loss_s
 from models.route.routing.rail_router import RailRouter, RoutedLeg, build_router_stops
-from models.route.version import (
+from models.route.model import (
     MIRROR_MIN,
     NIGHT_START_MIN,
     NIGHT_END_MIN,

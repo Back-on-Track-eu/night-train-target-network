@@ -48,12 +48,11 @@ import dataclasses
 import re
 import typing
 
+from api import config
 from models.evaluation.views import VIEW_META, Breakdown
 from models.params import TRACK_INFRA_FIELD_NAMES
 
 _EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-
-_SUBJECT_MAX_LEN = 200
 
 _CATEGORY_INFRASTRUCTURE = "Infrastructure"
 _CATEGORY_COMPOSITIONS = "Compositions"
@@ -132,8 +131,10 @@ def validate_feedback_body(body: dict) -> list[str]:
             errors.append(f"'{field_name}' is required and must be a non-empty string.")
 
     subject = body.get("subject")
-    if isinstance(subject, str) and len(subject) > _SUBJECT_MAX_LEN:
-        errors.append(f"'subject' must be at most {_SUBJECT_MAX_LEN} characters.")
+    if isinstance(subject, str) and len(subject) > config.FEEDBACK_SUBJECT_MAX_LEN:
+        errors.append(
+            f"'subject' must be at most {config.FEEDBACK_SUBJECT_MAX_LEN} characters."
+        )
 
     return errors
 
