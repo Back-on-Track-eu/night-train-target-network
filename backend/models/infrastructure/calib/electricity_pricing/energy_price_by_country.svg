@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 884" width="960" height="884" font-family="Inter, Helvetica, Arial, sans-serif">
+<rect width="960" height="884" fill="#ffffff"/>
+<text x="40" y="44" font-size="21" font-weight="600" fill="#1a1a1a">Traction energy — final working price by country</text>
+<text x="40" y="68" font-size="13" fill="#5c5c5c">EUR per kWh · Eurostat nrg_pc_205_c band IE (20,000–69,999 MWh/a), 2025, with IM-tariff overrides · excl. VAT unless noted</text>
+<rect x="40" y="88" width="11" height="11" rx="2" fill="#4A6FA5"/>
+<text x="57" y="98" font-size="11.5" fill="#3d3d3d">Eurostat band IE benchmark</text>
+<rect x="230" y="88" width="11" height="11" rx="2" fill="#C4703A"/>
+<text x="247" y="98" font-size="11.5" fill="#3d3d3d">Traction-network override (§3b)</text>
+<rect x="450" y="88" width="11" height="11" rx="2" fill="#2E8B6F"/>
+<text x="467" y="98" font-size="11.5" fill="#3d3d3d">IM / national all-in tariff (§3a)</text>
+<rect x="670" y="88" width="11" height="11" rx="2" fill="#8B5A8C"/>
+<text x="687" y="98" font-size="11.5" fill="#3d3d3d">incl. non-deductible VAT (§5)</text>
+<line x1="235.3" y1="122" x2="235.3" y2="809" stroke="#e6e6e6" stroke-width="1"/>
+<text x="235.3" y="114" font-size="11" fill="#8a8a8a" text-anchor="middle">0.05</text>
+<line x1="362.7" y1="122" x2="362.7" y2="809" stroke="#e6e6e6" stroke-width="1"/>
+<text x="362.7" y="114" font-size="11" fill="#8a8a8a" text-anchor="middle">0.10</text>
+<line x1="490.0" y1="122" x2="490.0" y2="809" stroke="#e6e6e6" stroke-width="1"/>
+<text x="490.0" y="114" font-size="11" fill="#8a8a8a" text-anchor="middle">0.15</text>
+<line x1="617.3" y1="122" x2="617.3" y2="809" stroke="#e6e6e6" stroke-width="1"/>
+<text x="617.3" y="114" font-size="11" fill="#8a8a8a" text-anchor="middle">0.20</text>
+<line x1="744.7" y1="122" x2="744.7" y2="809" stroke="#e6e6e6" stroke-width="1"/>
+<text x="744.7" y="114" font-size="11" fill="#8a8a8a" text-anchor="middle">0.25</text>
+<line x1="872.0" y1="122" x2="872.0" y2="809" stroke="#e6e6e6" stroke-width="1"/>
+<text x="872.0" y="114" font-size="11" fill="#8a8a8a" text-anchor="middle">0.30</text>
+<line x1="108" y1="122" x2="108" y2="809" stroke="#bdbdbd" stroke-width="1"/>
+<line x1="433.5" y1="122" x2="433.5" y2="809" stroke="#d13b3b" stroke-width="1.4" stroke-dasharray="5,4"/>
+<text x="439.5" y="828" font-size="11" fill="#d13b3b">EU-27 average 0.1278</text>
+<text x="96" y="146" font-size="12.5" font-weight="600" fill="#2b2b2b" text-anchor="end">FI</text>
+<rect x="108" y="132" width="129.9" height="19" rx="2" fill="#4A6FA5"/>
+<text x="244.9" y="146" font-size="11.5" fill="#3d3d3d">0.0510</text>
+<text x="96" y="171" font-size="12.5" font-weight="600" fill="#2b2b2b" text-anchor="end">NO</text>
+<rect x="108" y="157" width="144.9" height="19" rx="2" fill="#4A6FA5"/>
+<text x="259.9" y="171" font-size="11.5" fill="#3d3d3d">0.0569</text>
+<text x="96" y="196" font-size="12.5" font-weight="600" fill="#2b2b2b" text-anchor="end">SE</text>
+<rect x="108" y="182" width="163.0" height="19" rx="2" fill="#2E8B6F"/>
+<text x="278.0" y="196" font-size="11.5" fill="#3d3d3d">0.0640</text>
+<text x="96" y="221" font-size="12.5" font-weight="600" fill="#2b2b2b" text-anchor="end">CH</text>
+<rect x="108" y="207" width="211.4" height="19" rx="2" fill="#2E8B6F"/>
+<text x="326.4" y="221" font-size="11.5" fill="#3d3d3d">0.0830</text>
+<text x="96" y="246" font-size="12.5" font-weight="600" fill="#2b2b2b" text-anchor="end">HR</text>
+<rect x="108" y="232" width="244.0" height="19" rx="2" fill="#2E8B6F"/>
+<text x="359.0" y="246" font-size="11.5" fill="#3d3d3d">0.0958</text>
+<text x="96" y="271" font-size="12.5" font-weight="600" fill="#2b2b2b" text-anchor="end">FR</text>
+<rect x="108" y="257" width="257.7" height="19" rx="2" fill="#C4703A"/>
+<text x="372.7" y="271" font-size="11.5" fill="#3d3d3d">0.1012</text>
+<text x="96" y="296" font-size="12.5" font-weight="600" fill="#2b2b2b" text-anchor="end">LV</text>
+<rect x="108" y="282" width="260.0" height="19" rx="2" fill="#4A6FA5"/>
+<text x="375.0" y="296" font-size="11.5" fill="#3d3d3d">0.1021</text>
+<text x="96" y="321" font-size="12.5" font-weight="600" fill="#2b2b2b" text-anchor="end">PT</text>
+<rect x="108" y="307" width="268.7" height="19" rx="2" fill="#4A6FA5"/>
+<text x="383.7" y="321" font-size="11.5" fill="#3d3d3d">0.1055</text>
+<text x="96" y="346" font-size="12.5" font-weight="600" fill="#2b2b2b" text-anchor="end">ES</text>
+<rect x="108" y="332" width="283.2" height="19" rx="2" fill="#4A6FA5"/>
+<text x="398.2" y="346" font-size="11.5" fill="#3d3d3d">0.1112</text>
+<text x="96" y="371" font-size="12.5" font-weight="600" fill="#2b2b2b" text-anchor="end">LU</text>
+<rect x="108" y="357" width="294.1" height="19" rx="2" fill="#4A6FA5"/>
+<text x="409.1" y="371" font-size="11.5" fill="#3d3d3d">0.1155</text>
+<text x="96" y="396" font-size="12.5" font-weight="600" fill="#2b2b2b" text-anchor="end">EE</text>
+<rect x="108" y="382" width="296.7" height="19" rx="2" fill="#4A6FA5"/>
+<text x="411.7" y="396" font-size="11.5" fill="#3d3d3d">0.1165</text>
+<text x="96" y="421" font-size="12.5" font-weight="600" fill="#2b2b2b" text-anchor="end">LT</text>
+<rect x="108" y="407" width="308.1" height="19" rx="2" fill="#4A6FA5"/>
+<text x="423.1" y="421" font-size="11.5" fill="#3d3d3d">0.1210</text>
+<text x="96" y="446" font-size="12.5" font-weight="600" fill="#2b2b2b" text-anchor="end">BE</text>
+<rect x="108" y="432" width="320.4" height="19" rx="2" fill="#4A6FA5"/>
+<text x="435.4" y="446" font-size="11.5" fill="#3d3d3d">0.1258</text>
+<text x="96" y="471" font-size="12.5" font-weight="600" fill="#2b2b2b" text-anchor="end">BG</text>
+<rect x="108" y="457" width="322.4" height="19" rx="2" fill="#4A6FA5"/>
+<text x="437.4" y="471" font-size="11.5" fill="#3d3d3d">0.1266</text>
+<text x="96" y="496" font-size="12.5" font-weight="600" fill="#2b2b2b" text-anchor="end">SI</text>
+<rect x="108" y="482" width="343.0" height="19" rx="2" fill="#4A6FA5"/>
+<text x="458.0" y="496" font-size="11.5" fill="#3d3d3d">0.1347</text>
+<text x="96" y="521" font-size="12.5" font-weight="600" fill="#2b2b2b" text-anchor="end">GR</text>
+<rect x="108" y="507" width="393.2" height="19" rx="2" fill="#4A6FA5"/>
+<text x="508.2" y="521" font-size="11.5" fill="#3d3d3d">0.1544</text>
+<text x="96" y="546" font-size="12.5" font-weight="600" fill="#2b2b2b" text-anchor="end">RO</text>
+<rect x="108" y="532" width="401.6" height="19" rx="2" fill="#4A6FA5"/>
+<text x="516.6" y="546" font-size="11.5" fill="#3d3d3d">0.1577</text>
+<text x="96" y="571" font-size="12.5" font-weight="600" fill="#2b2b2b" text-anchor="end">PL</text>
+<rect x="108" y="557" width="413.3" height="19" rx="2" fill="#4A6FA5"/>
+<text x="528.3" y="571" font-size="11.5" fill="#3d3d3d">0.1623</text>
+<text x="96" y="596" font-size="12.5" font-weight="600" fill="#2b2b2b" text-anchor="end">IT</text>
+<rect x="108" y="582" width="416.4" height="19" rx="2" fill="#4A6FA5"/>
+<text x="531.4" y="596" font-size="11.5" fill="#3d3d3d">0.1635</text>
+<text x="96" y="621" font-size="12.5" font-weight="600" fill="#2b2b2b" text-anchor="end">CZ</text>
+<rect x="108" y="607" width="422.2" height="19" rx="2" fill="#4A6FA5"/>
+<text x="537.2" y="621" font-size="11.5" fill="#3d3d3d">0.1658</text>
+<text x="96" y="646" font-size="12.5" font-weight="600" fill="#2b2b2b" text-anchor="end">HU</text>
+<rect x="108" y="632" width="432.9" height="19" rx="2" fill="#2E8B6F"/>
+<text x="547.9" y="646" font-size="11.5" fill="#3d3d3d">0.1700</text>
+<text x="96" y="671" font-size="12.5" font-weight="600" fill="#2b2b2b" text-anchor="end">DK</text>
+<rect x="108" y="657" width="435.7" height="19" rx="2" fill="#8B5A8C"/>
+<text x="550.7" y="671" font-size="11.5" fill="#3d3d3d">0.1711</text>
+<text x="96" y="696" font-size="12.5" font-weight="600" fill="#2b2b2b" text-anchor="end">SK</text>
+<rect x="108" y="682" width="437.8" height="19" rx="2" fill="#4A6FA5"/>
+<text x="552.8" y="696" font-size="11.5" fill="#3d3d3d">0.1719</text>
+<text x="96" y="721" font-size="12.5" font-weight="600" fill="#2b2b2b" text-anchor="end">AT</text>
+<rect x="108" y="707" width="450.8" height="19" rx="2" fill="#C4703A"/>
+<text x="565.8" y="721" font-size="11.5" fill="#3d3d3d">0.1770</text>
+<text x="96" y="746" font-size="12.5" font-weight="600" fill="#2b2b2b" text-anchor="end">IE</text>
+<rect x="108" y="732" width="525.4" height="19" rx="2" fill="#4A6FA5"/>
+<text x="640.4" y="746" font-size="11.5" fill="#3d3d3d">0.2063</text>
+<text x="96" y="771" font-size="12.5" font-weight="600" fill="#2b2b2b" text-anchor="end">DE</text>
+<rect x="108" y="757" width="525.9" height="19" rx="2" fill="#C4703A"/>
+<text x="640.9" y="771" font-size="11.5" fill="#3d3d3d">0.2065</text>
+<text x="96" y="796" font-size="12.5" font-weight="600" fill="#2b2b2b" text-anchor="end">UK</text>
+<rect x="108" y="782" width="728.9" height="19" rx="2" fill="#2E8B6F"/>
+<text x="843.9" y="796" font-size="11.5" fill="#3d3d3d">0.2862</text>
+<text x="40" y="861" font-size="11" fill="#7a7a7a">CH shown at its 22:00–06:00 night tariff (0.083); daytime base rate is 0.138. CY and MT omitted — no railways.</text>
+<text x="40" y="877" font-size="11" fill="#7a7a7a">A cross-border rotation pays each country's rate on its own leg, so the route-level price is a distance-weighted blend of these bars.</text>
+</svg>

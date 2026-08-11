@@ -1,0 +1,6 @@
+crossing_id,charged_by,parameter,value,unit,currency,basis_year,source_id,locator,note
+STOREBAELT,Banedanmark,fixed_per_train,4876.73,DKK/train,DKK,2025,DK-BEK-2024,infrastrukturafgifter,excl. VAT
+OERESUND_DK,Banedanmark,fixed_per_train,2592.02,DKK/train,DKK,2025,DK-BEK-2024,infrastrukturafgifter,Danish part
+OERESUND_SE,Trafikverket,fixed_per_train,0.0,SEK/train,SEK,2027,SE-NS-2027,Annex 1B,passage charge applies to freight only; regular track and path charges still apply
+CHANNEL_TUNNEL,Getlink,fixed_per_train,4039.0,EUR/train one-way,EUR,2020,CT-GETLINK-2026,Annexe 4 Offer 1,"night trains run at 120 km/h off-peak by definition; 2020 basis, RPI/IPC indexed"
+CHANNEL_TUNNEL,Getlink,per_passenger,18.35,EUR/passenger one-way,EUR,2020,CT-GETLINK-2026,Annexe 4 Offer 1,"couples the crossing cost to the demand model, not to routing"
