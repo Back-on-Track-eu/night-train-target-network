@@ -410,7 +410,13 @@ class TestTimeline:
         return compute(api_base, _STOPS, _COMPOSITION)["request"]
 
     def test_publish_comment_like_overwrite_refresh_in_order(
-        self, api_base, script_headers, script_user_id, db_conn, compute_request
+        self,
+        api_base,
+        clean_engagement_per_test,
+        script_headers,
+        script_user_id,
+        db_conn,
+        compute_request,
     ):
         """The WP11 acceptance case: every event kind on one proposal, in
         the order it happened, with a user overwrite and a system refresh
@@ -457,6 +463,9 @@ class TestTimeline:
         resp = requests.get(f"{api_base}{PROPOSAL_URL}/{pid}", timeout=60)
         assert resp.status_code == 200
 
+        # Exactly the five events this test performed: publishing writes
+        # no engagement of its own, so a "liked" here can only be the one
+        # posted above (see api/README.md, "No implicit engagement").
         body = _engagements(api_base, pid)
         assert _events(body) == [
             "published",
@@ -495,7 +504,7 @@ class TestTimeline:
         }
 
     def test_branch_events_land_on_both_proposals(
-        self, api_base, script_headers, compute_request
+        self, api_base, clean_engagement_per_test, script_headers, compute_request
     ):
         """based_on_proposal_id writes the informational branch pair
         (§4.1) — branched_from on the new proposal, branched_to on the
