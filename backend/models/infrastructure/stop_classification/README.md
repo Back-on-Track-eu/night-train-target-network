@@ -57,6 +57,8 @@ Everything under `data/` is gitignored (bulk data). What each file is:
 | `data/B-o-T_DataBase_stop_times.csv` | `stop_times` export from the night train database — defines where night trains stop today. | step 5 |
 | `data/eu_stations_{light_rail,subway,tram,train_yes,uic_name,uic_ref}.osm.pbf` | Exploration-only side outputs of the step 2 run. Each contains *every* OSM object with that tag (not just stations) — for QGIS tag-coverage analysis. **Not pipeline inputs**; safe to delete. | — |
 
+access via: https://drive.google.com/drive/folders/1iAjxVKRn1qhgR-yhfczO91M41KIIIIVd?usp=sharing
+
 Step 3b's why-a-centers-file explanation, the classification rules, and the
 matching strategy are documented in the notebooks themselves and in the
 "Design background" section below — read those in that order.
