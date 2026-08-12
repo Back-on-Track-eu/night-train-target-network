@@ -497,18 +497,26 @@ class TestMatrixConsistency:
 class TestSectionView:
     SECTION_ALL = "DE_BERLIN_HBF__AT_WIEN_HBF__all"
 
-    def test_section_keys_present_with_class_cells(self, eval_standard):
-        """The directional demand produces both direction section keys, each
-        with an 'all' cell and one cell per class_main with passengers."""
+    def test_every_stop_range_has_a_section_cell(self, eval_standard):
+        """Sections exist for EVERY ordered stop pair (CALC 0.9.16) — not only
+        ticketed OD relations — each with an 'all' cell and one cell per
+        class_main with passengers. Keys are canonical outbound order, so
+        reverse-ordered keys must be gone."""
         _, result = eval_standard
         sections = result["views"]["per_trip_pair_per_section"]["data"]["all"]
         for key in (
             "DE_BERLIN_HBF__AT_WIEN_HBF__all",
             "DE_BERLIN_HBF__AT_WIEN_HBF__Couchette",
             "DE_BERLIN_HBF__AT_WIEN_HBF__Seat",
-            "AT_WIEN_HBF__DE_BERLIN_HBF__all",
+            # sub-sections bounded by the intermediate stop — before 0.9.16
+            # these only existed if Dresden happened to carry tickets
+            "DE_BERLIN_HBF__DE_DRESDEN_HBF__all",
+            "DE_DRESDEN_HBF__AT_WIEN_HBF__all",
         ):
             assert key in sections, f"section key missing: {key}"
+        assert "AT_WIEN_HBF__DE_BERLIN_HBF__all" not in sections, (
+            "reverse-ordered key present — section keys must be canonical"
+        )
 
     def test_class_cells_sum_to_section_all(self, eval_standard):
         """Per-class cells partition their section: cost, revenue, and margin
@@ -528,32 +536,46 @@ class TestSectionView:
                 sum(c[field] for c in cls_cells), rel=REL_TOL
             ), f"class cells don't sum to section 'all' for {field}"
 
-    def test_full_trip_sections_capture_all_revenue(self, eval_standard):
-        """Every ticket rides entirely within its trip's full-length section,
-        so the two full-trip sections (one per direction) together carry the
-        route's entire revenue."""
+    def test_full_trip_section_captures_all_revenue(self, eval_standard):
+        """Every ticket rides entirely within the full-length section, and the
+        canonical cell folds both directions (CALC 0.9.16) — so the single
+        full-trip cell carries the route's entire revenue."""
         _, result = eval_standard
         sections = result["views"]["per_trip_pair_per_section"]["data"]["all"]
-        revenue = sum(
-            sections[key]["values"]["per_year"]["all"]["total_revenue_eur"]
-            for key in (
-                "DE_BERLIN_HBF__AT_WIEN_HBF__all",
-                "AT_WIEN_HBF__DE_BERLIN_HBF__all",
-            )
-        )
+        revenue = sections[self.SECTION_ALL]["values"]["per_year"]["all"][
+            "total_revenue_eur"
+        ]
         assert revenue == pytest.approx(
             route_bd(result)["total_revenue_eur"], rel=REL_TOL
         )
 
+    def test_adjacent_sections_revenue_sums_to_enclosing(self, eval_standard):
+        """Revenue is km-overlap-proportional and km are additive, so the two
+        sub-sections around Dresden sum to the full section's revenue. (Costs
+        deliberately don't — the shared boundary stop call is in both.)"""
+        _, result = eval_standard
+        sections = result["views"]["per_trip_pair_per_section"]["data"]["all"]
+
+        def rev(key: str) -> float:
+            return sections[key]["values"]["per_year"]["all"]["total_revenue_eur"]
+
+        assert rev(self.SECTION_ALL) == pytest.approx(
+            rev("DE_BERLIN_HBF__DE_DRESDEN_HBF__all")
+            + rev("DE_DRESDEN_HBF__AT_WIEN_HBF__all"),
+            rel=REL_TOL,
+        )
+
     def test_section_train_km_divisor_is_section_scoped(self, eval_standard):
         """A section cell's per_train_km divides by the SECTION's own annual
-        train-km (section distance x operating days), not the whole pair's.
-        For the full-trip section that's one direction's distance."""
+        train-km (section distance x operating days) — summed over BOTH
+        directions since the canonical cell folds them (CALC 0.9.16) — not
+        the whole pair's default scope."""
         costed, result = eval_standard
         sections = result["views"]["per_trip_pair_per_section"]["data"]["all"]
         cell = sections[self.SECTION_ALL]["values"]
-        outbound = costed["trip_pairs"][0]["outbound"]
-        section_annual_km = trip_distance_km(outbound) * operating_days(costed)
+        section_annual_km = sum(
+            trip_distance_km(t) for t in all_trips(costed)
+        ) * operating_days(costed)
         per_year = cell["per_year"]["all"]["total_cost_eur"]
         per_km = cell["per_train_km"]["all"]["total_cost_eur"]
         assert per_year == pytest.approx(per_km * section_annual_km, rel=REL_TOL)
