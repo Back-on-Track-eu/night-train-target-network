@@ -6,9 +6,9 @@ import AppIcon from '@/components/AppIcon.vue'
 import { useLocaleFormat } from '@/composables/useLocaleFormat'
 import {
   mdiSeatPassenger,
-  mdiBunkBed,
-  mdiBed,
   mdiBedOutline,
+  mdiBed,
+  mdiBunkBedOutline,
   mdiWeight,
   mdiSpeedometer,
   mdiChevronLeft,
@@ -60,20 +60,33 @@ function navigate(dir: 'prev' | 'next') {
 
 const current = computed(() => props.compositions[currentIndex.value])
 
+// Accommodation classes in fixed order, each with a structurally distinct
+// glyph. Three of the four are beds, so fill alone cannot separate them at
+// 20px: mdiBed (Sleeper) and mdiBedOutline (Capsule) were the same shape,
+// which made the NEW family — the only one carrying both — unreadable.
+const CLASS_ICONS: readonly [string, string][] = [
+  ['Seat', mdiSeatPassenger],
+  ['Couchette', mdiBedOutline],
+  ['Sleeper', mdiBed],
+  ['Capsule', mdiBunkBedOutline],
+]
+
+// Class keys arrive as English class_main values from the backend; the same
+// translations the evaluation drill-down uses label them here.
+function classLabel(key: string): string {
+  const k = `proposal.evaluation.classes.${key}`
+  return te(k) ? t(k) : key
+}
+
 // capacity.by_class is keyed by class_main directly (2026-07-22) — the
 // old density-constant matching is gone with the retired density column.
 const capacityStats = computed(() => {
   const by = current.value?.capacity.by_class ?? {}
-  const stats: { icon: string; count: number }[] = []
-  const seats = by['Seat']?.places ?? 0
-  const couchettes = by['Couchette']?.places ?? 0
-  const sleepers = by['Sleeper']?.places ?? 0
-  const capsules = by['Capsule']?.places ?? 0
-  if (seats > 0) stats.push({ icon: mdiSeatPassenger, count: seats })
-  if (couchettes > 0) stats.push({ icon: mdiBunkBed, count: couchettes })
-  if (sleepers > 0) stats.push({ icon: mdiBed, count: sleepers })
-  if (capsules > 0) stats.push({ icon: mdiBedOutline, count: capsules })
-  return stats
+  return CLASS_ICONS.map(([cls, icon]) => ({
+    icon,
+    label: classLabel(cls),
+    count: by[cls]?.places ?? 0,
+  })).filter((stat) => stat.count > 0)
 })
 
 // Merged in from the former RouteStatsCard — headline route figures shown
@@ -159,6 +172,8 @@ watch(
               v-for="stat in capacityStats"
               :key="stat.icon"
               class="flex items-center gap-2 text-primary-50/70"
+              :title="stat.label"
+              :aria-label="`${stat.count} ${stat.label}`"
             >
               <AppIcon :path="stat.icon" :size="20" />
               <span class="text-base font-semibold">{{ stat.count }}</span>
