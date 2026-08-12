@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import contextmanager
 from typing import Optional
 
 import psycopg2
@@ -54,8 +55,28 @@ class AuthRepository:
             password=required["POSTGRES_PASSWORD"],
         )
 
+    @contextmanager
     def _cursor(self):
-        return self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        """One cursor on this repository's single connection, rolled back
+        if the block raises.
+
+        psycopg2's own cursor context manager closes the cursor but leaves
+        the transaction open, so a single failed statement puts the
+        connection into "current transaction is aborted" and every later
+        call on this worker fails until the process restarts. That was
+        survivable while auth queries were rare; get_user() now runs on
+        every authenticated request, so one transient failure would take
+        down publishing, liking and commenting alongside it. Commits stay
+        the caller's business — the write paths commit after their block.
+        """
+        cursor = self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        try:
+            yield cursor
+        except Exception:
+            self._conn.rollback()
+            raise
+        finally:
+            cursor.close()
 
     def close(self) -> None:
         if self._conn and not self._conn.closed:
@@ -86,11 +107,39 @@ class AuthRepository:
         self._conn.rollback()
         return row is not None
 
+    def get_user(self, user_id: int) -> Optional[dict]:
+        """One admin.users row by id, or None if the account does not
+        exist — the auth middleware's existence check for every local-plane
+        bearer token.
+
+        A JWT outlives the row it names: a reseed recreates admin.users
+        from scratch while browsers keep their tokens, and a manually
+        deleted account leaves the same gap. Without this lookup the API
+        accepts the token, trusts its `sub`, and only discovers the
+        problem when a write hits proposals.proposals' foreign key — a
+        500 with a Postgres constraint message where the honest answer is
+        401 "sign in again". One indexed PK lookup per authenticated
+        request buys that.
+        """
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT user_id, email, display_name, is_verified, "
+                "       merged_into_user_id "
+                "FROM admin.users WHERE user_id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        self._conn.rollback()
+        return dict(row) if row else None
+
     def merged_target(self, user_id: int) -> Optional[int]:
-        """merged_into_user_id of a user, or None. Checked by the auth
-        middleware for guest tokens so a session that was merged into a
-        registered account fails with an explicit message instead of
-        silently acting as the abandoned guest."""
+        """merged_into_user_id of a user, or None.
+
+        Superseded on the request path by get_user(), which returns the
+        same column alongside the existence check the middleware now
+        needs — one lookup where this was the second. Kept as the
+        narrow, single-purpose query for callers that only want the
+        merge target."""
         with self._cursor() as cur:
             cur.execute(
                 "SELECT merged_into_user_id FROM admin.users WHERE user_id = %s",

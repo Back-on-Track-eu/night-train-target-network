@@ -113,8 +113,20 @@ def publish():
         logger.warning("proposal/publish failed (domain error): %s", e)
         return jsonify({"error": "domain_error", "message": str(e)}), 422
     except Exception as e:
+        # Logged in full, reported generically: an unexpected failure here
+        # is usually a database error, and its text carries schema and
+        # constraint names that belong in the container log rather than in
+        # a browser. The log line is the one that has to be diagnosable.
         logger.exception("proposal/publish failed (unexpected): %s", e)
-        return jsonify({"error": "publish_error", "message": str(e)}), 500
+        return (
+            jsonify(
+                {
+                    "error": "publish_error",
+                    "message": "Could not publish the proposal. Please try again.",
+                }
+            ),
+            500,
+        )
 
     payload = proposal_to_response_dict(
         record, route=record["route"], evaluation=record["evaluation"]
