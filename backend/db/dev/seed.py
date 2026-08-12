@@ -2228,6 +2228,29 @@ def seed_example_proposal(cur, conn) -> None:
         conn.rollback()
 
 
+def sync_ontd_schema(cur) -> None:
+    """Additive column top-ups for an ontd schema that already exists.
+
+    The guard above deliberately never re-applies create_ontd_schema.sql
+    on a database that already carries loaded ONTD data (it DROPs the
+    refreshed tables). That leaves one gap: a reseed rebuilds
+    input_params and proposals from the latest DDL while the ontd tables
+    stay at whatever shape they were created with — so a column added to
+    a refreshed table reaches a fresh database and a reloaded one, but
+    never a merely reseeded one. The gallery's UNION reads both sides,
+    so the halves must agree.
+
+    Every statement here is additive and IF NOT EXISTS: this is a
+    catch-up, never a migration in its own right. The server-side
+    counterpart is db/dev/sql/migrations/. Entries can be dropped once
+    no environment predates them.
+    """
+    cur.execute(
+        "ALTER TABLE ontd.route_summaries "
+        "ADD COLUMN IF NOT EXISTS country_relations TEXT[] NOT NULL DEFAULT '{}'"
+    )
+
+
 def main():
     conn = psycopg2.connect(
         host=DB_HOST,
@@ -2263,6 +2286,9 @@ def main():
             / "create_ontd_schema.sql"
         )
         cur.execute(ontd_ddl.read_text(encoding="utf-8"))
+    else:
+        print("Syncing existing ontd schema...")
+        sync_ontd_schema(cur)
 
     print("Seeding admin.users...")
     insert_rows(cur, "admin.users", USERS)

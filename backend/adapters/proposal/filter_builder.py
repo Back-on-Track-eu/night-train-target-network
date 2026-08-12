@@ -89,7 +89,46 @@ RANGE_COLUMNS: dict[str, str] = {
     "subsidy_eur_per_t_co2": "subsidy_eur_per_t_co2",
     "likes_count": "likes_count",
     "comments_count": "comments_count",
+    "co2_g_per_pax_km": "co2_g_per_pax_km",
 }
+
+# Which of RANGE_COLUMNS are EXTENSIVE — quantities where summing across
+# rows means something (annual totals, distances, times, engagement
+# counts). Everything else is a rate or a per-route count, where a sum
+# would be arithmetic without a referent: adding two €/train-km figures,
+# or two n_stops that share stations, produces a number nothing
+# corresponds to. GET /api/proposals/stats emits "sum" only for the
+# columns named here (api/helpers/proposal_stats.py); "avg"/"min"/"max"
+# apply to every numeric column.
+ADDITIVE_COLUMNS: frozenset[str] = frozenset(
+    {
+        "total_distance_km",
+        "total_time_h",
+        "subsidy_eur_per_year",
+        "demand_trips_per_year",
+        "demand_trip_km_per_year",
+        "shift_air_trips_per_year",
+        "shift_air_trip_km_per_year",
+        "shift_car_trips_per_year",
+        "shift_car_trip_km_per_year",
+        "co2_savings_t_per_year",
+        "likes_count",
+        "comments_count",
+    }
+)
+
+# The numeric columns BOTH gallery sources carry. Existing (ONTD) rows
+# are NULL in every other one by construction (WP10 step 6b), so a
+# statistic over them would be a proposal statistic wearing an
+# "existing" label — the stats endpoint reports this subset for the
+# existing and combined scopes, and the full set only under "proposal".
+SHARED_SOURCE_COLUMNS: tuple[str, ...] = (
+    "total_distance_km",
+    "total_time_h",
+    "avg_speed_kmh",
+    "n_stops",
+    "co2_g_per_pax_km",
+)
 
 # {filter key: db column} — timestamptz columns, same {"min", "max"} shape
 # as RANGE_COLUMNS but ISO 8601 datetime strings instead of numbers.
@@ -112,6 +151,7 @@ LIST_COLUMNS: dict[str, str] = {
 ARRAY_COLUMNS: dict[str, str] = {
     "countries": "countries",
     "stop_ids": "stop_ids",
+    "country_relations": "country_relations",
 }
 
 # {filter key: db column} — case-insensitive substring.
@@ -293,6 +333,44 @@ def _to_interval(hhmm: str, day_offset: int) -> str:
     min_to_interval(), GTFS overnight convention)."""
     hours, minutes = (int(part) for part in hhmm.split(":"))
     return min_to_interval(hours * 60 + minutes + day_offset * 1440)
+
+
+# =============================================================================
+# Aggregate SELECT list — GET /api/proposals/stats
+# =============================================================================
+
+# Every numeric column the statistics aggregate over, in a stable order.
+# Same registry the range filters use, so a column can never be
+# filterable but invisible to the statistics (or the reverse).
+AGGREGATE_COLUMNS: tuple[str, ...] = tuple(RANGE_COLUMNS)
+
+# Separates column from aggregate in the generated result aliases
+# (total_distance_km__avg). Two underscores because no column name
+# contains them, so api/helpers/proposal_stats.py can split the alias
+# back apart without a lookup table.
+AGGREGATE_ALIAS_SEP = "__"
+
+
+def build_aggregate_select(columns: tuple[str, ...] = AGGREGATE_COLUMNS) -> str:
+    """count/avg/min/max per column (plus sum for the extensive ones) as
+    one comma-separated SELECT list, no leading comma.
+
+    `n` is count(<column>), not count(*): existing (ONTD) rows are NULL
+    in every proposal-only column, so it states how many rows actually
+    carried a value rather than how many were scanned — the difference
+    between "average over 42 proposals" and "average over 142 rows, 100
+    of which had nothing to say".
+    """
+    parts: list[str] = []
+    for key in columns:
+        column = RANGE_COLUMNS[key]
+        parts.append(f"count({column}) AS {key}{AGGREGATE_ALIAS_SEP}n")
+        parts.append(f"avg({column}) AS {key}{AGGREGATE_ALIAS_SEP}avg")
+        parts.append(f"min({column}) AS {key}{AGGREGATE_ALIAS_SEP}min")
+        parts.append(f"max({column}) AS {key}{AGGREGATE_ALIAS_SEP}max")
+        if key in ADDITIVE_COLUMNS:
+            parts.append(f"sum({column}) AS {key}{AGGREGATE_ALIAS_SEP}sum")
+    return ", ".join(parts)
 
 
 # =============================================================================

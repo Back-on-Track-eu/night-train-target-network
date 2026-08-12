@@ -470,6 +470,7 @@ CREATE TABLE proposals.proposal_summaries (
     avg_speed_kmh            NUMERIC(5, 1) NOT NULL,
     n_stops                  SMALLINT NOT NULL,
     countries                TEXT[] NOT NULL,
+    country_relations        TEXT[] NOT NULL DEFAULT '{}',
     stop_ids                 TEXT[] NOT NULL,
     geom_simplified          geometry(MultiLineString, 4326),
 
@@ -495,6 +496,7 @@ CREATE TABLE proposals.proposal_summaries (
 );
 
 CREATE INDEX idx_summaries_countries ON proposals.proposal_summaries USING GIN (countries);
+CREATE INDEX idx_summaries_relations ON proposals.proposal_summaries USING GIN (country_relations);
 CREATE INDEX idx_summaries_stop_ids  ON proposals.proposal_summaries USING GIN (stop_ids);
 CREATE INDEX idx_summaries_geom      ON proposals.proposal_summaries USING GIST (geom_simplified);
 -- btree indexes on sortable KPI columns added as query patterns settle (§5.4)
@@ -503,6 +505,7 @@ COMMENT ON TABLE  proposals.proposal_summaries                        IS 'Derive
 COMMENT ON COLUMN proposals.proposal_summaries.route_fingerprint      IS 'Route identity fingerprint (§3.1) — informational only, same as proposals.proposals.route_fingerprint.';
 COMMENT ON COLUMN proposals.proposal_summaries.subsidy_eur_per_year   IS 'max(0, -net_eur): gap to target margin. Unit: EUR/year';
 COMMENT ON COLUMN proposals.proposal_summaries.geom_simplified        IS 'Per-segment shapes concatenated and simplified (Douglas-Peucker, tolerance tuned for gallery-map zoom levels) — small enough to ship all proposals in one map response for a long time.';
+COMMENT ON COLUMN proposals.proposal_summaries.country_relations      IS 'Country-to-country relations this proposal actually serves, as sorted "AA__BB" keys — derived from od_pairs (boarding-capable origin before alighting-capable destination), so a merely transited country contributes nothing. Ranking dimension of GET /api/proposals/stats (§7.7); written by models/evaluation/summary.py''s build_summary_row().';
 COMMENT ON COLUMN proposals.proposal_summaries.demand_kpis_placeholder IS 'TRUE while demand_*/shift_*/co2_* columns are placeholder-faked (§8) — no demand model exists yet.';
 COMMENT ON COLUMN proposals.proposal_summaries.co2_g_per_pax_km      IS 'Night-train GHG intensity (§8, decision 24): the flat models/emissions factor until the energy-based, country-resolved model enriches it per route. Unit: g CO2e / pax-km';
 COMMENT ON COLUMN proposals.proposal_summaries.created_at             IS 'Set once at the proposal''s first publish, never touched by an overwrite-publish or refresh — repository.py''s _upsert_summary() excludes it from the ON CONFLICT UPDATE. Gallery filter/sort target (WP6.1).';

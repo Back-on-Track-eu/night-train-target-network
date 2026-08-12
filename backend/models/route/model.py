@@ -30,7 +30,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.19"
+ROUTE_BUILDER_VERSION: str = "0.9.20"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -45,6 +45,17 @@ ROUTE_BUILDER_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.20": {
+        "date": "2026-08-12",
+        "author": "david",
+        "changes": "No computed change. timetable.py's _classify_stop_type() "
+        "is now public as classify_stop_type(): the ONTD projection "
+        "classifies existing trains' stops by the identical "
+        "NIGHT_START_MIN/NIGHT_END_MIN rule when deriving "
+        "country_relations for GET /api/proposals/stats, and the rule "
+        "must have exactly one home. Rename only — same thresholds, same "
+        "three-way result, no route, timetable or stop type changes.",
+    },
     "0.9.19": {
         "date": "2026-08-11",
         "author": "david",

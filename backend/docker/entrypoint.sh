@@ -26,5 +26,16 @@ python /app/db/dev/seed.py
 echo "Bootstrapping ONTD reference data in the background..."
 python /app/db/ontd/bootstrap.py &
 
+# Country relation candidate set (input_params.country_relations) — the
+# pairs of countries close enough by RAIL for one night train to connect
+# them, which GET /api/proposals/stats ranks its top/flop relations over.
+# Backgrounded and soft-failing for the same reason as the ONTD load: it
+# needs the routing engine, and the API is fully functional without it
+# (the statistics return an empty relations block). Idempotent, so a
+# restart costs one cheap rebuild rather than being skipped by a guard
+# that could go stale when the stop catalog changes.
+echo "Building country relations in the background..."
+python /app/scripts/build_country_relations.py &
+
 echo "Starting API..."
 exec gunicorn --bind "0.0.0.0:${API_CONTAINER_PORT:-5000}" --workers 4 --timeout 120 "main:create_app()"

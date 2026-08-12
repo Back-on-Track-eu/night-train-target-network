@@ -32,7 +32,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-CALC_VERSION: str = "0.9.14"
+CALC_VERSION: str = "0.9.15"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -66,6 +66,21 @@ CALC_MODEL_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.15": {
+        "date": "2026-08-12",
+        "author": "david",
+        "changes": "ADDITIVE output change: the gallery summary row "
+        "(summary.py's build_summary_row(), returned as 'summary' by "
+        "POST /api/proposal/calc and stored in "
+        "proposals.proposal_summaries) gains country_relations — the "
+        "sorted 'AA__BB' keys of every country-to-country relation the "
+        "route actually serves, derived from od_pairs so a merely "
+        "transited country contributes nothing. Ranking dimension behind "
+        "the new GET /api/proposals/stats (§7.7). No cost, revenue, "
+        "margin or demand number changes; the bump exists so the version "
+        "refresh (§4.2) rewrites every stored summary with the new "
+        "column.",
+    },
     "0.9.14": {
         "date": "2026-08-10",
         "author": "david",

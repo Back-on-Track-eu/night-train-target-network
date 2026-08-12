@@ -194,6 +194,99 @@ INPUT_PARAMS_TABLES: tuple[Table, ...] = (
     ),
     Table(
         schema="input_params",
+        name="country_relations",
+        description="Which pairs of countries are close enough to each "
+        "other for one night train to plausibly connect them — the "
+        "candidate set the proposal statistics rank top and flop "
+        "relations over (GET /api/proposals/stats). One row per "
+        "unordered country pair, measured between each country's "
+        "reference station (the catalog stop closest to that country's "
+        "stop centroid) and routed on real track, so sea crossings that "
+        "force a long land detour drop out on their own. Derived, "
+        "rebuildable data, NOT hand-maintained: "
+        "scripts/build_country_relations.py rebuilds it from the pinned "
+        "stop catalog, and countries with no stops in the catalog yet "
+        "simply have no rows.",
+        columns=(
+            Column(
+                "country_a",
+                "CHAR(2) NOT NULL REFERENCES input_params.countries(country_code)",
+                "First country of the pair — always the alphabetically "
+                "smaller code, so each pair appears exactly once.",
+            ),
+            Column(
+                "country_b",
+                "CHAR(2) NOT NULL REFERENCES input_params.countries(country_code)",
+                "Second country of the pair — always the alphabetically larger code.",
+            ),
+            Column(
+                "ref_stop_a",
+                "VARCHAR(120) NOT NULL",
+                "Reference station used for country_a: the catalog stop "
+                "closest to that country's stop centroid.",
+            ),
+            Column(
+                "ref_stop_b",
+                "VARCHAR(120) NOT NULL",
+                "Reference station used for country_b.",
+            ),
+            Column(
+                "great_circle_km",
+                "NUMERIC(8,1) NOT NULL",
+                "Straight-line distance between the two reference "
+                "stations. Only used to decide whether routing the pair "
+                "is worth attempting.",
+                "km",
+            ),
+            Column(
+                "rail_km",
+                "NUMERIC(8,1)",
+                "Distance on real track between the two reference "
+                "stations. Empty when no rail path could be found.",
+                "km",
+            ),
+            Column(
+                "rail_time_h",
+                "NUMERIC(6,2)",
+                "Travel time on that rail path, for a future "
+                "travel-time-based threshold. Empty when no rail path "
+                "could be found.",
+                "h",
+            ),
+            Column(
+                "routing_status",
+                "VARCHAR(20) NOT NULL",
+                "Why this pair does or does not carry a rail distance: "
+                "routed, prefiltered (too far apart to be worth "
+                "routing), no_connection (no rail path exists), or "
+                "snap_failed (a reference station could not be placed "
+                "on the network).",
+            ),
+            Column(
+                "stop_infra_version",
+                "INTEGER NOT NULL",
+                "Stop catalog snapshot the reference stations were "
+                "picked from. Resolved via "
+                "scenario.scenarios.stop_infrastructures_version — never "
+                "inferred.",
+            ),
+            Column(
+                "built_at",
+                "TIMESTAMPTZ NOT NULL DEFAULT now()",
+                "When this row was last rebuilt.",
+            ),
+        ),
+        constraints=(
+            "PRIMARY KEY (country_a, country_b, stop_infra_version)",
+            "CHECK (country_a < country_b)",
+        ),
+        indexes=(
+            "CREATE INDEX idx_country_relations_rail_km ON "
+            "input_params.country_relations (stop_infra_version, rail_km);",
+        ),
+    ),
+    Table(
+        schema="input_params",
         name="sources",
         description="Registry of data sources. Every parameter row can "
         "point to the source its values came from, so every number in the "

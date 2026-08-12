@@ -40,11 +40,10 @@ import argparse
 import json
 import os
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Optional
 
-from connection import connect, resolve_service_url
+from connection import connect
 from psycopg2.extras import RealDictCursor
 from stop_mapping import build_stop_mappings
 
@@ -62,26 +61,21 @@ if str(_BACKEND_ROOT) not in sys.path:
 # can never drift apart; needs the sys.path insert above.
 from adapters.proposal.projection import GEOM_SIMPLIFY_TOLERANCE_DEG  # noqa: E402
 
-# Reference composition for routing existing routes. The ONTD catalog has
-# no speed/HSR data of its own, and route() needs max_speed_kmh and
-# hsr_allowed — so one input_params composition stands in for every
-# existing train.
-#
-# Resolved at runtime rather than hardcoded: composition ids are a
-# calibration output and do rot (STD-7.1, the id used across the docs and
-# comparison scripts, had already been dropped from the catalog by the
-# time this ran). MATERIAL_STRATEGY picks the family instead —
-# 'refurbished' matches what existing night trains actually run, so the
-# routed times are comparable to their real schedules. --composition-id
-# overrides with a specific id.
-ROUTING_MATERIAL_STRATEGY = "refurbished"
+# Routing an existing train needs a composition, and the ONTD catalog
+# carries no speed/HSR data of its own — so one reference composition
+# stands in for every existing train. Context assembly, the reference
+# family and the concurrent fan-out all live in
+# adapters/routing_context.py, shared with
+# scripts/build_country_relations.py so both seed-time jobs measure the
+# same track by the same rules.
+from adapters.routing_context import (  # noqa: E402
+    REFERENCE_MATERIAL_STRATEGY as ROUTING_MATERIAL_STRATEGY,
+    build_reference_context,
+    route_all,
+)
 
-# Routes are routed concurrently: each is an independent pair of HTTP
-# round-trips (fullRouting snaps, then routes), so the run is bound by
-# router latency rather than by anything local. RailRouter's session is
-# built for this — its connection pool holds 64 — but the router
-# container is shared, so the default stays modest. Override with
-# ONTD_ROUTING_WORKERS.
+# Override with ONTD_ROUTING_WORKERS; --composition-id overrides the
+# reference family with a specific id.
 ROUTING_WORKERS = int(os.environ.get("ONTD_ROUTING_WORKERS", "8"))
 ROUTING_COMPOSITION_ID = None
 
@@ -159,7 +153,8 @@ def fetch_route_stops(cur) -> dict[str, list[dict[str, Any]]]:
         SELECT ft.route_id, ft.trip_id, ft.direction_id,
                ts.stop_id, ts.stop_sequence,
                ts.arrival_time, ts.departure_time,
-               s.stop_lat, s.stop_lon
+               ts.no_entry, ts.no_exit,
+               s.stop_lat, s.stop_lon, s.stop_country
           FROM first_trip ft
           JOIN ontd.trip_stop ts ON ts.trip_id = ft.trip_id
           LEFT JOIN ontd.stops s ON s.stop_id = ts.stop_id
@@ -228,67 +223,80 @@ def _scheduled_running_minutes(stops: list[dict[str, Any]]) -> list[Optional[int
     return minutes
 
 
+def _country_relations(stops: list[dict[str, Any]]) -> list[str]:
+    """Country-to-country relations this train actually serves, as sorted
+    "AA__BB" keys — the same dimension and shape the proposal side stores
+    (models/evaluation/summary.py's country_relations()), so
+    GET /api/proposals/stats ranks both sources together.
+
+    A pair counts only where the earlier stop can be boarded and the
+    later one alighted, which is what makes this a served relation rather
+    than a list of countries the train passes. Two conditions per side:
+    the ONTD timetable's own no_entry/no_exit flags, and the route
+    builder's night-window classification (classify_stop_type — imported,
+    never restated), applied to wall-clock times walked with the same day
+    rollover the running-time helper uses. Termini are boarding/alighting
+    by position, exactly as the route builder treats them.
+    """
+    from models.route.timetable import classify_stop_type
+    from models.route.trip import StopType
+
+    day_offset = 0
+    previous: Optional[int] = None
+    absolute: list[tuple[Optional[int], Optional[int]]] = []
+    for stop in stops:
+        resolved = []
+        for key in ("arrival_time", "departure_time"):
+            base = _clock_to_minutes(stop.get(key))
+            if base is None:
+                resolved.append(None)
+                continue
+            if previous is not None and base + day_offset * 1440 < previous:
+                day_offset += 1
+            previous = base + day_offset * 1440
+            resolved.append(previous)
+        absolute.append((resolved[0], resolved[1]))
+
+    can_board: list[bool] = []
+    can_alight: list[bool] = []
+    for index, stop in enumerate(stops):
+        arrival, departure = absolute[index]
+        if index == 0:
+            stop_type = StopType.BOARDING
+        elif index == len(stops) - 1:
+            stop_type = StopType.ALIGHTING
+        elif arrival is None or departure is None:
+            # No usable times: fall back to the operationally neutral
+            # case rather than dropping the stop from every relation.
+            stop_type = StopType.BOTH
+        else:
+            stop_type = classify_stop_type(arrival, departure)
+        can_board.append(
+            stop_type in (StopType.BOARDING, StopType.BOTH) and not stop.get("no_entry")
+        )
+        can_alight.append(
+            stop_type in (StopType.ALIGHTING, StopType.BOTH) and not stop.get("no_exit")
+        )
+
+    relations = set()
+    for i, origin in enumerate(stops):
+        if not can_board[i]:
+            continue
+        for j in range(i + 1, len(stops)):
+            if not can_alight[j]:
+                continue
+            a, b = origin.get("stop_country"), stops[j].get("stop_country")
+            if a and b and a != b:
+                relations.add("__".join(sorted((a, b))))
+    return sorted(relations)
+
+
 def _straight_line_geometry(stops: list[dict[str, Any]]) -> list[list[float]]:
     return [
         [float(s["stop_lon"]), float(s["stop_lat"])]
         for s in stops
         if s["stop_lat"] is not None and s["stop_lon"] is not None
     ]
-
-
-def _route_legs(context, stops: list[dict[str, Any]]):
-    """Route the stop sequence and return (legs, routed).
-
-    legs are RoutedLegs — geometry for the map projection, and the
-    driving/dynamics/buffer split plus country shares for the buffer
-    calibration dataset. Returns ([], False) when the router can't
-    produce a path, so the caller can fall back to straight lines and
-    flag it rather than presenting interpolated track as real.
-    """
-    from models.params import StopInfrastructure
-    from models.route.routing.rail_router import StopInput
-    from models.route.trip import StopType
-
-    located = [
-        s for s in stops if s["stop_lat"] is not None and s["stop_lon"] is not None
-    ]
-    if len(located) < 2:
-        return [], "too_few_stops", "fewer than two stops carry coordinates"
-
-    router, tracks, composition = context
-    router_stops = [
-        StopInput(
-            stop=StopInfrastructure(
-                stop_id=s["stop_id"],
-                stop_name=s["stop_id"],
-                stop_country_code="",
-                lat=float(s["stop_lat"]),
-                lon=float(s["stop_lon"]),
-                # Never read while routing — charges belong to evaluation,
-                # which never runs on existing routes (decision 23).
-                stop_charge_eur=0.0,
-            ),
-            stop_type=StopType.BOTH,
-        )
-        for s in located
-    ]
-    try:
-        return (
-            router.route(router_stops, composition, tracks, "fullRouting"),
-            "routed",
-            None,
-        )
-    except Exception as e:
-        message = str(e)
-        # The router distinguishes "could not snap a stop to any usable
-        # track" from "snapped fine but no path exists" — worth keeping
-        # apart, since the first is usually the profile's 1435mm gauge
-        # filter and the second a genuinely disconnected network.
-        status = "no_connection" if "Connection between" in message else "snap_failed"
-        print(
-            f"    routing failed ({type(e).__name__}: {message}) — straight-line fallback"
-        )
-        return [], status, message
 
 
 def _simplified_geojson(coords: list[list[float]]) -> Optional[str]:
@@ -304,98 +312,6 @@ def _simplified_geojson(coords: list[list[float]]) -> Optional[str]:
     if simplified.geom_type == "LineString":
         simplified = MultiLineString([simplified])
     return json.dumps(mapping(simplified))
-
-
-def _select_composition(collection, requested: Optional[str]):
-    """Resolve the reference composition: an explicit id if given, else
-    the first ROUTING_MATERIAL_STRATEGY one by id.
-
-    Deterministic (sorted) so successive rebuilds stay comparable — a
-    calibration set silently routed with a different composition than the
-    previous run would be worse than useless.
-    """
-    catalog = collection.all()
-    if requested:
-        composition = collection.get(requested)
-        if composition is None:
-            available = ", ".join(sorted(catalog)[:12])
-            print(
-                f"  WARNING: composition '{requested}' not found — pass a valid "
-                f"--composition-id. Available (first 12): {available}"
-            )
-        return composition
-
-    matching = sorted(
-        (
-            c
-            for c in catalog.values()
-            if c.material_strategy == ROUTING_MATERIAL_STRATEGY
-        ),
-        key=lambda c: c.comp_id,
-    )
-    if matching:
-        return matching[0]
-
-    fallback = sorted(catalog.values(), key=lambda c: c.comp_id)
-    if not fallback:
-        print("  WARNING: composition catalog is empty.")
-        return None
-    print(
-        f"  WARNING: no '{ROUTING_MATERIAL_STRATEGY}' composition in the catalog — "
-        f"falling back to '{fallback[0].comp_id}'."
-    )
-    return fallback[0]
-
-
-def _build_routing_context(composition_id: Optional[str]):
-    """Assemble everything route() needs: router, tracks, composition.
-
-    Existing routes are drawn on the same gallery map as proposals, so
-    they must be routed by the same rules — full two-pass routing with
-    the custom model, the composition's speed cap and HSR avoidance
-    (adapters/proposal/README.md decision 25, revised). Anything less would draw
-    the same physical night train on different tracks depending on which
-    table it came from.
-
-    The ONTD catalog carries no speed or HSR data (ontd.compositions is
-    descriptive — places and weight only), so one reference composition
-    stands in for every existing route; route() reads exactly two fields
-    off it, max_speed_kmh and hsr_allowed.
-
-    Returns None if anything is unavailable (router down, params not
-    seeded, unknown composition) — the caller falls back to straight
-    lines rather than aborting a load whose other work is good.
-    """
-    try:
-        from adapters.data_loader_from_db import DBDataLoader
-        from models.route.routing.rail_router import CountryIndex, RailRouter
-
-        # RailRouter reads OPENRAILROUTING_URL at construction, so the
-        # compose-service host has to be translated before that.
-        resolve_service_url()
-
-        loader = DBDataLoader()
-        composition = _select_composition(
-            loader.build_all_compositions(), composition_id
-        )
-        if composition is None:
-            return None
-
-        router = RailRouter(CountryIndex(loader.get_country_geometries()))
-        router.check_server()
-        print(
-            f"  routing with composition '{composition.comp_id}' "
-            f"({composition.material_strategy}, "
-            f"max {composition.max_speed_kmh:.0f} km/h, "
-            f"hsr_allowed={composition.hsr_allowed})"
-        )
-        return router, loader.build_all_tracks(), composition
-    except Exception as e:
-        print(
-            f"  WARNING: routing unavailable ({type(e).__name__}: {e}) — "
-            f"all geometry falls back to straight lines."
-        )
-        return None
 
 
 def _write_legs(cur, route_id: str, stops: list[dict[str, Any]], legs) -> None:
@@ -498,45 +414,6 @@ def _write_corridors(
         )
 
 
-def _route_all(context, routes, stops_by_route, workers: int) -> dict:
-    """Route every route concurrently; return {route_id: (legs, status, error)}.
-
-    Routing is done up front and in parallel, then written sequentially by
-    the caller — the database work stays single-threaded on one
-    connection, which keeps the transaction semantics exactly as they
-    were while removing the part that actually costs time.
-
-    Nothing shared here is mutated: the router's session is pooled, and
-    the composition, tracks and country index are read-only lookups.
-    """
-    results: dict = {}
-    routable = [r["route_id"] for r in routes if stops_by_route.get(r["route_id"])]
-    if not routable:
-        return results
-
-    print(f"  routing {len(routable)} routes, {workers} at a time")
-    done = 0
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {
-            pool.submit(_route_legs, context, stops_by_route[rid]): rid
-            for rid in routable
-        }
-        for future in as_completed(futures):
-            route_id = futures[future]
-            done += 1
-            try:
-                results[route_id] = future.result()
-            except Exception as e:
-                # A crash in one route must not lose the other 204.
-                results[route_id] = ([], "snap_failed", f"{type(e).__name__}: {e}")
-            status = results[route_id][1]
-            if status != "routed":
-                print(f"  [{done}/{len(routable)}] {route_id}: {status}")
-            elif done % 25 == 0 or done == len(routable):
-                print(f"  [{done}/{len(routable)}] routed")
-    return results
-
-
 def build_summaries(
     cur,
     with_geometry: bool = True,
@@ -546,9 +423,23 @@ def build_summaries(
     routes = fetch_active_routes(cur)
     stops_by_route = fetch_route_stops(cur)
 
-    context = _build_routing_context(composition_id) if with_geometry else None
+    context = build_reference_context(composition_id) if with_geometry else None
     routed = (
-        _route_all(context, routes, stops_by_route, workers)
+        route_all(
+            context,
+            (
+                (
+                    route["route_id"],
+                    [
+                        (s["stop_id"], s["stop_lat"], s["stop_lon"])
+                        for s in stops_by_route[route["route_id"]]
+                    ],
+                )
+                for route in routes
+                if stops_by_route.get(route["route_id"])
+            ),
+            workers=workers,
+        )
         if context is not None
         else {}
     )
@@ -586,9 +477,11 @@ def build_summaries(
         geojson = None
         if stops:
             if context is not None:
-                legs, status, error = routed.get(
-                    route_id, ([], "snap_failed", "no routing result")
-                )
+                result = routed.get(route_id)
+                if result is not None:
+                    legs, status, error = result.legs, result.status, result.error
+                else:
+                    status, error = "snap_failed", "no routing result"
             geometry_routed = status == "routed"
             coords = (
                 [point for leg in legs for point in leg.geometry]
@@ -607,12 +500,12 @@ def build_summaries(
         cur.execute(
             """
             INSERT INTO ontd.route_summaries (
-                route_id, name, stop_ids, n_stops, countries,
+                route_id, name, stop_ids, n_stops, countries, country_relations,
                 total_distance_km, total_time_h, avg_speed_kmh,
                 composition_id, co2_g_per_pax_km,
                 geom_simplified, geometry_routed, routing_status, routing_error
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                 CASE WHEN %s IS NULL THEN NULL
                      ELSE ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326) END,
                 %s, %s, %s
@@ -624,6 +517,7 @@ def build_summaries(
                 [mapping.get(s["stop_id"], s["stop_id"]) for s in stops],
                 len(stops),
                 _split_countries(route["countries"]),
+                _country_relations(stops),
                 round(total_distance_km, 1) if total_distance_km else None,
                 round(total_time_h, 2) if total_time_h else None,
                 round(avg_speed, 1) if avg_speed else None,
