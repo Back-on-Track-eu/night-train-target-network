@@ -323,6 +323,32 @@ Four core schemas, all created and seeded by `seed.py`: `admin`, `input_params`,
 | `track_infrastructures` | Country-level track parameters (TAC, energy price, terrain etc.), versioned, with per-field `_src` columns |
 | `stop_infrastructure_defaults` | Fallback station access charge per country (NULL = global), versioned |
 | `stop_infrastructures` | Night train stopping points with coordinates and charges, versioned |
+| `country_relations` | Which country pairs are close enough **by rail** for one night train to connect them — the candidate set `GET /api/proposals/stats` ranks top/flop relations over. Derived and rebuildable, not hand-maintained (see below); keyed by the stop snapshot its reference stations came from |
+
+**`country_relations` is built, not seeded.** `seed.py` creates the table
+empty; `backend/scripts/build_country_relations.py` fills it, and the
+container entrypoint runs that in the background after the seed (CI runs
+it as an explicit ordered step before pytest, same reasoning as the ONTD
+load). Per country it picks a **reference station** — the catalog stop
+closest to that country's own stop centroid, deliberately *not* the
+centroid of `countries.country_geom`, which includes maritime zones and
+therefore sits offshore — then prefilters pairs on great-circle distance
+× a rail detour factor and routes the survivors through OpenRailRouting.
+Only pairs whose **routed** distance comes in under
+`PROPOSALS_STATS_RELATION_MAX_KM` count as relations, which is what makes
+sea crossings drop out on their own: Italy and Greece are ~1000 km apart
+in a straight line and 1900+ km apart by track. Rejected pairs are stored
+with a `routing_status` rather than omitted, so "why is this pair
+missing" always has an answer in the table. Countries with no stops in
+the catalog yet get no reference station and no relations — the stats
+response names them under `unresolved_countries`.
+
+Rebuild it by hand with:
+
+```bash
+docker exec night-train-api python /app/scripts/build_country_relations.py
+docker exec night-train-api python /app/scripts/build_country_relations.py --dry-run
+```
 
 ### `scenario`
 
@@ -463,7 +489,7 @@ cutover. The sidecars are written/read by
 | `timetable_warnings` | One row per `TimetableWarning` (`models/route/trip.py`) — a derived timetable quality annotation, informational only |
 | `seasonal_schedules` | One row per `SeasonalSchedule` (`models/route/route.py`) — operating frequency (daily/three_per_week) per season on a route |
 | `update_log` | Append-only timeline event log (published/overwritten/recalculated/branched_from/branched_to) — preserves state transitions that `proposals.proposals` itself prunes on overwrite. Written by `publish()`/`refresh_proposal()` (`adapters/proposal/repository.py`), read as the third timeline source by `adapters/proposal/engagement_repository.py`. A NULL `user_id` marks a system event, which is what distinguishes a refresh from a user overwrite |
-| `proposal_summaries` | Derived projection over `proposals.proposals` for the gallery/map — route metrics, financial KPIs, placeholder demand KPIs, simplified PostGIS geometry. Not a source of truth; rebuildable at any time. Row-building logic: `adapters/proposal/projection.py`'s `build_summary_row()` (WP4, `tests/test_37_proposal_projection.py`); upserted by `publish()`, one row per proposal |
+| `proposal_summaries` | Derived projection over `proposals.proposals` for the gallery/map — route metrics, financial KPIs, placeholder demand KPIs, simplified PostGIS geometry, and `country_relations` (the sorted `"AA__BB"` keys of every country-to-country relation the proposal actually serves — derived from `od_pairs`, so a merely transited country contributes nothing; ranked by `GET /api/proposals/stats` against `input_params.country_relations`). Not a source of truth; rebuildable at any time. Row-building logic: `adapters/proposal/projection.py`'s `build_summary_row()` (WP4, `tests/test_37_proposal_projection.py`); upserted by `publish()`, one row per proposal |
 | `compute_cache_pointer` | Compute cache, pointer side — `request_hash` → which result it resolves to, plus request-specific response parts. `UNLOGGED`. Still unpopulated — lands with WP13 |
 | `compute_cache_result` | Compute cache, result side — `(route_fingerprint, scenario_id, composition_id)` → the shared route + evaluation payload, stored once per distinct result. `UNLOGGED`. Still unpopulated — lands with WP13 |
 

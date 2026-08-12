@@ -41,6 +41,7 @@ its own example files.
   - [`GET` / `POST /api/proposals`](#list-proposals) — filter/sort/paginate + map sections, proposals ∪ ONTD existing routes
 - [Analytics](#analytics)
   - [`POST /api/proposals/compare`](#compare-proposals) — compare two sides, stored or what-if
+  - [`GET /api/proposals/stats`](#proposal-stats) — counts, KPI aggregates, top/flop countries and relations
 - [Engagement](#engagement) — likes, comments and the event timeline
   - [`GET /api/proposal/<id>/engagements`](#proposal-engagements) — likes + comments + timeline
   - [`POST` / `DELETE /api/proposal/<id>/like`](#proposal-like) — like/unlike a proposal
@@ -989,7 +990,9 @@ paginated).
         "route_fingerprint": "sha256:...", "composition_id": "NEW-BAL-7",
         "scenario_id": 1, "route_builder_version": "0.9.13", "calc_version": "0.9.11",
         "total_distance_km": 683.4, "total_time_h": 9.0, "avg_speed_kmh": 76.0,
-        "n_stops": 3, "countries": ["AT", "DE"], "stop_ids": ["DE_BERLIN_HBF", "..."],
+        "n_stops": 3, "countries": ["AT", "DE"],
+        "country_relations": ["AT__DE"],
+        "stop_ids": ["DE_BERLIN_HBF", "..."],
         "cost_eur_per_train_km": 12.4, "revenue_eur_per_train_km": 14.1,
         "margin_eur_per_train_km": 1.7, "subsidy_eur_per_year": 0.0,
         "demand_trips_per_year": 4200, "demand_trip_km_per_year": 2870000,
@@ -1009,6 +1012,7 @@ paginated).
         "composition_id": "NJ-STD",
         "total_distance_km": 705.0, "total_time_h": 10.5, "avg_speed_kmh": 67.0,
         "n_stops": 8, "countries": ["AT", "CZ", "DE"],
+        "country_relations": ["AT__DE", "CZ__DE"],
         "stop_ids": ["DE_BERLIN_HBF", "..."],
         "co2_g_per_pax_km": 33.0,
         "geometry_routed": true,
@@ -1068,7 +1072,18 @@ carry the **reduced descriptive shape** shown above — identity, the
 shared metric subset, `geometry_routed` (whether the drawn line is real
 routing or a straight-line fallback), and `ontd_url` (deep link to the
 route's public ONTD page); proposal-only fields are **omitted**, not
-null-padded. Two namespace notes: `stop_ids` is the shared Target
+null-padded.
+
+`country_relations` is a **shared** column, not a proposal-only one:
+both projections derive the sorted `"AA__BB"` keys of the
+country-to-country relations that row actually serves — from `od_pairs`
+on the proposal side, from the timetable plus `no_entry`/`no_exit` on
+the existing side — so a country merely transited creates no relation
+and [`GET /api/proposals/stats`](#proposal-stats) can rank both sources
+on one axis. Filterable like any other array column
+(`{"country_relations": ["AT__DE"]}`).
+
+Two namespace notes: `stop_ids` is the shared Target
 Network namespace on both sides (step 6a's mapping — ONTD stops the
 mapping couldn't cover keep raw ONTD ids), while `composition_id` is
 **not** shared — proposal rows carry curated calibration ids, existing
@@ -1255,6 +1270,161 @@ names which side); `422 domain_error` when an override compute fails
 (unknown scenario/composition — message prefixed with the side index).
 
 </details>
+
+<a id="proposal-stats"></a>
+
+### `GET /api/proposals/stats`
+
+Descriptive statistics over everything the gallery holds
+(`adapters/proposal/README.md` §7.7): how many proposals and existing
+trains there are, what their KPIs look like in aggregate, and which
+countries and country-to-country **relations** are served most and
+least. Read-only and unauthenticated, same policy as the other GETs.
+
+Nothing is recomputed — every number is read off
+`proposals.proposal_summaries` ∪ `ontd.route_summaries`, so the response
+is fast and always agrees with what `POST /api/proposals` would return
+for the same filter. The bundle economics of a *set* of proposals
+(re-derived intensive quantities, live computes per member) is a
+different, parked endpoint — see `docs/PARKED_WORK.md`.
+
+<details>
+<summary>Request &amp; response details</summary>
+
+**Query parameters**
+
+| Param | Type | Description |
+|---|---|---|
+| `user_id` | int (optional) | Narrow to one user's proposals. Implies `sources: ["proposal"]` — existing trains have no owner. An unknown id returns zeros, not a `404`: this is an aggregate, not a resource lookup |
+
+There are deliberately no other parameters. The ranking lengths
+(`PROPOSALS_STATS_COUNTRY_TOP` / `_FLOP`) and the relation distance
+ceiling (`PROPOSALS_STATS_RELATION_MAX_KM`) are deployment settings in
+`api/config.py`: they define what "top" and "flop" *mean*, and two
+callers reading different definitions off one deployment would make the
+numbers incomparable.
+
+**Response**
+
+```json
+{
+  "scope": { "user_id": null, "sources": ["proposal", "existing"] },
+
+  "counts": {
+    "proposal": { "n": 42, "n_distinct_stops": 88, "n_distinct_countries": 14 },
+    "existing": { "n": 100, "n_distinct_stops": 210, "n_distinct_countries": 22 },
+    "all":      { "n": 142, "n_distinct_stops": 264, "n_distinct_countries": 24 }
+  },
+
+  "kpis": {
+    "proposal": {
+      "total_distance_km":     { "n": 42, "avg": 812.3, "min": 210.0, "max": 1980.4, "sum": 34116.6 },
+      "cost_eur_per_train_km": { "n": 42, "avg": 21.4, "min": 14.9, "max": 33.7 },
+      "likes_count":            { "n": 42, "avg": 1.9, "min": 0, "max": 14, "sum": 80 }
+    },
+    "existing": { "total_distance_km": { "...": "..." } },
+    "all":      { "total_distance_km": { "...": "..." } }
+  },
+
+  "countries": {
+    "ranked_by": "n_proposals",
+    "top":  [ { "country": "DE", "n_proposals": 21, "n_existing": 12, "n": 33 } ],
+    "flop": [ { "country": "PT", "n_proposals": 0,  "n_existing": 1,  "n": 1  } ]
+  },
+
+  "country_relations": {
+    "ranked_by": "n_proposals",
+    "basis": {
+      "reference": "nearest_catalog_stop_to_country_stop_centroid",
+      "distance": "routed_rail",
+      "max_relation_km": 1600.0,
+      "built_at": "2026-08-12T06:41:00+00:00"
+    },
+    "universe": {
+      "n_countries": 18, "n_pairs": 96,
+      "excluded_over_threshold": 41, "excluded_unroutable": 16,
+      "unresolved_countries": ["ES", "PT", "GB"]
+    },
+    "reference_stations": {
+      "DE": { "stop_id": "DE_FULDA", "stop_name": "Fulda", "lat": 50.554, "lon": 9.684 }
+    },
+    "top":  [ { "country_a": "AT", "country_b": "DE", "rail_km": 612.4, "rail_time_h": 7.9,
+                "n_proposals": 9, "n_existing": 4, "n": 13 } ],
+    "flop": [ { "country_a": "CZ", "country_b": "SI", "rail_km": 431.8, "rail_time_h": 5.8,
+                "n_proposals": 0, "n_existing": 0, "n": 0 } ]
+  }
+}
+```
+
+**`counts`** — rows, plus the distinct stops and countries reached.
+Distinct, not summed: two proposals over the same corridor reach two
+stations between them, not four.
+
+**`kpis`** — one `{n, avg, min, max}` block per numeric summary column,
+plus `sum` where a sum means something (distances, times, annual demand
+and CO2 figures, subsidy, engagement counts). Rates get no `sum`: adding
+two €/train-km figures produces a number nothing corresponds to.
+
+Three things worth reading carefully here:
+
+1. **`n` is per column, not per scope.** It counts the rows that
+   actually carried a value — the difference between "average over 42
+   proposals" and "average over 142 rows, 100 of which had nothing to
+   say". Columns where `n` would be zero are omitted rather than
+   null-padded, the same rule the gallery row follows for existing
+   trains.
+2. **Only the `proposal` scope carries financial, demand and engagement
+   columns.** Existing rows are NULL in all of them by construction, so
+   `existing` and `all` report the shared metric subset
+   (`total_distance_km`, `total_time_h`, `avg_speed_kmh`, `n_stops`,
+   `co2_g_per_pax_km`) only.
+3. **`avg` on a rate column is the mean across proposals, not a network
+   rate.** "What does a typical proposal cost per train-km" and "what
+   would these routes cost per train-km as one network" are different
+   questions; the second needs annual train-km as a weight, which the
+   summary projection doesn't carry.
+
+**`countries`** — one entry per country the filtered rows touch, ranked
+by proposal count, with the per-source split. The universe is the
+rail-network catalog plus anything the rows mention, so a country nobody
+has proposed anything for appears at zero — which is the entire point of
+the flop list. `UNK` (the open-water sentinel) is not a country and
+never ranks.
+
+**`country_relations`** — the same idea one level up: which *pairs* of
+countries are served. A pair counts for a row only where that row
+actually connects them boarding-to-alighting (derived from `od_pairs` on
+the proposal side, from the timetable plus `no_entry`/`no_exit` on the
+existing side), so a country merely transited creates no relation.
+
+The candidate set is `input_params.country_relations` — pairs measured
+between each country's **reference station** (the catalog stop closest
+to that country's stop centroid) and **routed on real track**, keeping
+only those under `max_relation_km`. Routing rather than straight-line
+distance is what makes sea crossings drop out by themselves: Italy and
+Greece look close in a straight line and are 1900+ km apart around the
+Adriatic. Everything excluded is counted rather than silently absent —
+`excluded_over_threshold`, `excluded_unroutable`, and
+`unresolved_countries` for countries the stop catalog doesn't cover yet
+(they still rank under `countries`, they just have no reference station
+to measure from). `reference_stations` is sent once as an envelope, not
+repeated per pair, so every distance is auditable.
+
+Ordering: `top` is most-served first. `flop` is least-served first, and
+within the zeros — which dominate while proposal volume is low — by
+distance ascending, so the nearest unserved relation (the most plausible
+missing night train) leads.
+
+An empty `universe.n_pairs` means the candidate set hasn't been built on
+this database: `scripts/build_country_relations.py` needs a live router,
+and the container runs it in the background at startup.
+
+**Errors:** `400 validation_error` for a non-integer `user_id` or an
+unknown query parameter.
+
+</details>
+
+---
 
 No delete endpoint (`adapters/proposal/README.md` §7.4) — proposals are
 removed manually in the database if ever needed. `proposal_summaries` has
