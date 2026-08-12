@@ -22,7 +22,13 @@ import pytest
 import requests
 
 from api.auth_utils import hash_otp
-from tests.helpers import PROPOSAL_URL, comment_url, like_url, publish
+from tests.helpers import (
+    PROPOSAL_URL,
+    comment_url,
+    engagements_url,
+    like_url,
+    publish,
+)
 
 _TIMEOUT = 15
 
@@ -631,3 +637,80 @@ def test_verify_with_invalid_bearer_still_succeeds(api_base, db_cur, db_conn):
     )
     assert resp.status_code == 200
     assert resp.json()["merged_guest"] is None
+
+
+@pytest.mark.timeout(30)
+def test_token_for_a_deleted_account_is_401_not_a_foreign_key_error(
+    api_base, db_cur, db_conn
+):
+    """A signed token whose account is gone must fail at the door.
+
+    The signature only proves the token was issued here, never that the
+    row it names still exists — a reseed recreates admin.users from
+    scratch while browsers keep their tokens, which is exactly how this
+    surfaced (a publish returning a proposals_user_id_fkey violation from
+    Postgres). The account is deleted here rather than reseeded, which
+    reproduces the same state in one statement.
+    """
+    email, name, otp = _unique_email(), _unique_name(), "271828"
+    db_cur.execute(
+        "INSERT INTO admin.users (email, display_name, is_verified) "
+        "VALUES (%s, %s, TRUE) RETURNING user_id",
+        (email, name),
+    )
+    user_id = db_cur.fetchone()["user_id"]
+    db_conn.commit()
+    _fresh_otp_for(db_cur, db_conn, user_id, otp)
+
+    token = requests.post(
+        f"{api_base}/api/auth/verify",
+        json={"email": email, "code": otp},
+        timeout=10,
+    ).json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # The token works while the account exists...
+    alive = requests.post(
+        f"{api_base}{like_url(_SEED_PROPOSAL_ID)}", headers=headers, timeout=10
+    )
+    assert alive.status_code == 200
+
+    # Engagement rows reference the user, so they go first — the point of
+    # the test is the token, not a cascade.
+    db_cur.execute("DELETE FROM proposals.likes WHERE user_id = %s", (user_id,))
+    db_cur.execute("DELETE FROM admin.auth_tokens WHERE user_id = %s", (user_id,))
+    db_cur.execute("DELETE FROM admin.users WHERE user_id = %s", (user_id,))
+    db_conn.commit()
+
+    # ...and is rejected cleanly once it does not.
+    resp = requests.post(
+        f"{api_base}{like_url(_SEED_PROPOSAL_ID)}", headers=headers, timeout=10
+    )
+    assert resp.status_code == 401
+    assert "sign in again" in resp.json()["message"].lower()
+
+    # A read that works without any token at all keeps working: the stale
+    # session degrades to anonymous rather than blanking the page. Only the
+    # write above has to tell the caller the session is dead.
+    read = requests.get(
+        f"{api_base}{engagements_url(_SEED_PROPOSAL_ID)}", headers=headers, timeout=10
+    )
+    assert read.status_code == 200
+    assert read.json()["likes"]["liked_by_me"] is False
+
+
+@pytest.mark.timeout(30)
+def test_garbage_token_still_401s_on_an_optional_auth_read(api_base):
+    """The degrade-to-anonymous rule is narrow on purpose.
+
+    It covers exactly one case — a well-formed, correctly signed token
+    whose account is gone. A token that fails to verify at all is still
+    an error worth surfacing, on reads as much as on writes, because
+    nothing legitimate produces one.
+    """
+    resp = requests.get(
+        f"{api_base}{engagements_url(_SEED_PROPOSAL_ID)}",
+        headers={"Authorization": "Bearer not-a-jwt"},
+        timeout=10,
+    )
+    assert resp.status_code == 401
