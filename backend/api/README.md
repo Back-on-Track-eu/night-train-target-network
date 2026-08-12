@@ -109,6 +109,20 @@ user always comes from the token, never the request body. The intended
 frontend flow is guest-first — obtain a guest JWT on first visit, send it
 on every publish, and merge on registration (below).
 
+**Every local-plane token is resolved against `admin.users`**, not just
+verified: a valid signature proves the token was issued here, never that
+the account it names still exists. A token whose account is gone — the
+dev stack reseeds `admin.users` on every container start, while browsers
+keep a 30-day cookie — is rejected by `@require_auth`/`@require_trust`
+with a `401` telling the caller to sign in again, so a client can discard
+the session instead of meeting a foreign-key error at the first write.
+`@optional_auth` endpoints (`GET /api/proposal/<id>/engagements`,
+`POST /api/feedback`) degrade that one case to **anonymous** instead:
+they are readable with no token at all, so a merely stale one should not
+take the page away. Every other authentication failure — bad signature,
+expired, malformed, merged guest — stays a hard `401` on all three
+decorators.
+
 **Guest → registered merge:** calling `POST /api/auth/verify` **with the
 guest session's JWT attached as the bearer** reassigns everything that
 guest owns (proposals, feedback, likes, comments — see `db/README.md`'s
