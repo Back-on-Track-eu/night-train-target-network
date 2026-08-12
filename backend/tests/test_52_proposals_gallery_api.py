@@ -324,7 +324,11 @@ class TestSourceUnion:
         by_id = {r["route_id"]: r for r in rows}
         assert set(existing_routes) <= set(by_id)
         row = by_id[existing_routes[0]]
-        # Reduced descriptive shape — proposal-only keys OMITTED, not null.
+        # Reduced descriptive shape — proposal-only keys OMITTED, not
+        # null. country_relations belongs to the SHARED metric subset
+        # (both projections derive it, §7.7): an existing train serves
+        # country-to-country relations exactly as a proposal does, which
+        # is what lets the statistics rank both sources on one axis.
         assert set(row) == {
             "source",
             "route_id",
@@ -335,6 +339,7 @@ class TestSourceUnion:
             "avg_speed_kmh",
             "n_stops",
             "countries",
+            "country_relations",
             "stop_ids",
             "co2_g_per_pax_km",
             "geometry_routed",

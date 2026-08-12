@@ -128,3 +128,4 @@ backend/models/compositions/calib/seed/
 deploy/**/.env
 backend/models/compositions/calib/data/
 backend/db/dev/data/country_geoms.geojson.gz
+backend/scripts/data/*_output.json
