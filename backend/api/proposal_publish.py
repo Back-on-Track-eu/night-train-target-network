@@ -21,7 +21,6 @@ from flask import Blueprint, g, jsonify, request
 
 from adapters.proposal.repository import ProposalForbiddenError, ProposalNotFoundError
 from api.auth_middleware import require_auth
-from api.helpers.dependencies import get_proposal_engagement_repository
 from api.helpers.proposal_serialize import proposal_to_response_dict
 from api.helpers.publish_dispatch import (
     ScenarioNotBaseError,
@@ -114,22 +113,20 @@ def publish():
         logger.warning("proposal/publish failed (domain error): %s", e)
         return jsonify({"error": "domain_error", "message": str(e)}), 422
     except Exception as e:
+        # Logged in full, reported generically: an unexpected failure here
+        # is usually a database error, and its text carries schema and
+        # constraint names that belong in the container log rather than in
+        # a browser. The log line is the one that has to be diagnosable.
         logger.exception("proposal/publish failed (unexpected): %s", e)
-        return jsonify({"error": "publish_error", "message": str(e)}), 500
-
-    if not g.is_guest:
-        # Self-like on publish — logged-in only, best-effort: the proposal
-        # is already committed at this point, so a like failure must not
-        # turn into a publish failure.
-        try:
-            get_proposal_engagement_repository().add_like(
-                record["proposal_id"], g.user_id
-            )
-        except Exception:
-            logger.exception(
-                "proposal/publish: self-like failed for proposal_id=%s",
-                record["proposal_id"],
-            )
+        return (
+            jsonify(
+                {
+                    "error": "publish_error",
+                    "message": "Could not publish the proposal. Please try again.",
+                }
+            ),
+            500,
+        )
 
     payload = proposal_to_response_dict(
         record, route=record["route"], evaluation=record["evaluation"]

@@ -308,3 +308,18 @@ class AuthError(Exception):
     """
 
     pass
+
+
+class UnknownAccountError(AuthError):
+    """
+    The token is well-formed and correctly signed, but names an account
+    that no longer exists.
+
+    Its own type because the two decorators answer it differently
+    (api/auth_middleware.py): a write must reject it, so the caller
+    learns the session is dead and can discard it, while a read that
+    works fine anonymously should serve the page rather than blank it.
+    Every other AuthError stays a hard 401 on both.
+    """
+
+    pass

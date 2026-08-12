@@ -32,7 +32,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-CALC_VERSION: str = "0.9.14"
+CALC_VERSION: str = "0.9.16"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -66,6 +66,39 @@ CALC_MODEL_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.16": {
+        "date": "2026-08-12",
+        "author": "david",
+        "changes": "per_trip_pair_per_section fix: sections were enumerated "
+        "from ticketed OD relations, so any stop range bounded by a night "
+        "stop (excluded from OD generation by the stopgap demand model) had "
+        "no cell — the frontend section slider showed 'No data' for it. "
+        "Sections are now every ordered pair of a trip's stops, independent "
+        "of demand. Section keys are additionally canonicalised to the "
+        "outbound trip's stop order, folding both directions of a pair into "
+        "one undirected cell (Breakdown values and NormalisationScope "
+        "physics accumulate) — previously keys were directional and the "
+        "frontend's outbound-ordered lookup silently showed the outbound "
+        "direction only. Allocation rules per section are unchanged. "
+        "Frontend-visible: section cell values roughly double (both "
+        "directions), reverse-ordered keys disappear, cells exist for every "
+        "slider range.",
+    },
+    "0.9.15": {
+        "date": "2026-08-12",
+        "author": "david",
+        "changes": "ADDITIVE output change: the gallery summary row "
+        "(summary.py's build_summary_row(), returned as 'summary' by "
+        "POST /api/proposal/calc and stored in "
+        "proposals.proposal_summaries) gains country_relations — the "
+        "sorted 'AA__BB' keys of every country-to-country relation the "
+        "route actually serves, derived from od_pairs so a merely "
+        "transited country contributes nothing. Ranking dimension behind "
+        "the new GET /api/proposals/stats (§7.7). No cost, revenue, "
+        "margin or demand number changes; the bump exists so the version "
+        "refresh (§4.2) rewrites every stored summary with the new "
+        "column.",
+    },
     "0.9.14": {
         "date": "2026-08-10",
         "author": "david",

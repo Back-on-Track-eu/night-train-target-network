@@ -131,10 +131,3 @@ def haversine_path_m(coords: list[list[float]]) -> float:
             coords[i + 1][1],
         )
     return total
-
-
-def bbox_area(ring: list) -> float:
-    """Bounding-box area of a polygon ring — used for largest-polygon selection."""
-    lons = [p[0] for p in ring]
-    lats = [p[1] for p in ring]
-    return (max(lons) - min(lons)) * (max(lats) - min(lats))

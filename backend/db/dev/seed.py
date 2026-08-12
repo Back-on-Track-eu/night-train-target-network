@@ -59,6 +59,7 @@ permanent; changing a value means seeding a new id, never editing a row
 in place. See db/schema.py for the rationale.
 """
 
+import gzip
 import os
 import sys
 from pathlib import Path
@@ -301,10 +302,11 @@ COUNTRIES = [
     # Remaining EU27 members — added so _check_country_coverage() in
     # route_factory.py doesn't reject a route for merely transiting one of
     # these, even though none has real track_infrastructures figures yet
-    # (see _TRACK_INFRA_CANONICAL_ROWS below: every field but country_code is None,
-    # so TrackInfraCollection resolves every one of them from the EU-average
-    # default — is_default stays False since a real row exists, but expect
-    # a "using EU default" warning logged per field per country).
+    # (see _TRACK_INFRA_PLACEHOLDER_COUNTRIES below: every field but
+    # country_code is None, so TrackInfraCollection resolves every one of
+    # them from the EU-average default — is_default stays False since a real
+    # row exists, but expect a "using EU default" warning logged per field
+    # per country).
     {"country_code": "BG", "country_name": "Bulgaria"},
     {"country_code": "HR", "country_name": "Croatia"},
     {"country_code": "CY", "country_name": "Cyprus"},
@@ -326,85 +328,107 @@ COUNTRIES = [
     {"country_code": "SK", "country_name": "Slovakia"},
     {"country_code": "SI", "country_name": "Slovenia"},
     {"country_code": "ES", "country_name": "Spain"},
+    # Non-EU countries the network reaches. NO/GB are Tier 2 routing scope
+    # (deferred), the Western Balkans are transit countries on southeastern
+    # corridors — all six get a border polygon and a placeholder track row,
+    # so a route through them is attributed rather than rejected.
+    {"country_code": "NO", "country_name": "Norway"},
+    {"country_code": "GB", "country_name": "United Kingdom"},
+    {"country_code": "BA", "country_name": "Bosnia and Herzegovina"},
+    {"country_code": "RS", "country_name": "Serbia"},
+    {"country_code": "ME", "country_name": "Montenegro"},
+    {"country_code": "AL", "country_name": "Albania"},
 ]
 
-# Natural Earth's ADM0_A3 (ISO 3166-1 alpha-3) for exactly the countries
-# seeded above. Kept local and minimal — this is a one-off seed-time
-# matching key, not a general country-code utility. It isn't importable
-# from elsewhere in the codebase anyway: seed.py also runs standalone in
-# the db/dev seeder image, which has no models/ package (see
-# backend/db/dev/Dockerfile).
-_COUNTRY_CODE_TO_ADM0_A3 = {
-    "DE": "DEU",
-    "AT": "AUT",
-    "CH": "CHE",
-    "FR": "FRA",
-    "BE": "BEL",
-    "DK": "DNK",
-    "SE": "SWE",
-    "BG": "BGR",
-    "HR": "HRV",
-    "CY": "CYP",
-    "CZ": "CZE",
-    "EE": "EST",
-    "FI": "FIN",
-    "GR": "GRC",
-    "HU": "HUN",
-    "IE": "IRL",
-    "IT": "ITA",
-    "LV": "LVA",
-    "LT": "LTU",
-    "LU": "LUX",
-    "MT": "MLT",
-    "NL": "NLD",
-    "PL": "POL",
-    "PT": "PRT",
-    "RO": "ROU",
-    "SK": "SVK",
-    "SI": "SVN",
-    "ES": "ESP",
-}
+# Country border polygons — Marine Regions "Union of the ESRI Country
+# shapefile and the Exclusive Economic Zones" v4 (Flanders Marine
+# Institute, 2024, https://doi.org/10.14284/698, CC-BY 4.0), filtered to
+# the rail-network countries above and reduced to one MultiPolygon each by
+# scripts/export_country_geoms.py, which downloads the source from Drive
+# and runs before this seed in both container entrypoints. Nothing is
+# fetched here: seed.py stays stdlib-only, and the geo dependencies live
+# with the script that needs them.
+#
+# The polygons cover land AND maritime zones. That is the point: with the
+# retired land-only borders (Natural Earth admin-0, 1:110m) every belt,
+# strait and tunnel crossing fell outside all polygons — Rødbyhavn and
+# Puttgarden both sat 30-50km from the nearest one — so the "UNK" sentinel
+# swallowed real track on both approaches, drawing no TAC, no buffer quota
+# and no electricity price. Countries with no railway (MT, CY) are
+# deliberately absent from the artifact and keep a NULL geometry: no
+# polygon, no attribution, and no route can transit them.
+COUNTRY_GEOMS_FILE = Path(
+    os.environ.get(
+        "COUNTRY_GEOMS_PATH",
+        Path(__file__).resolve().parent / "data" / "country_geoms.geojson.gz",
+    )
+)
+
+# Contract with scripts/export_country_geoms.py's _PROPERTY.
+_COUNTRY_GEOMS_PROPERTY = "country_code"
 
 
-def _load_natural_earth_features() -> dict[str, dict] | None:
+def _country_geoms_warning(reason: str) -> None:
+    print(
+        "\n  ############################################################\n"
+        f"  #  WARNING: country geometry artifact unavailable — {reason}.\n"
+        "  #  Seeding all countries with NULL geometry: routing cannot\n"
+        "  #  attribute distance to any country, so every segment falls\n"
+        "  #  back to the UNK sentinel and no route can be evaluated.\n"
+        "  #  It is normally built before this seed runs — check the\n"
+        "  #  export_country_geoms.py output above for a failed Drive\n"
+        "  #  download (EEZ_LAND_UNION_FILE_ID), or build it by hand:\n"
+        "  #  uv run python scripts/export_country_geoms.py\n"
+        "  ############################################################\n"
+    )
+
+
+def _read_country_geoms() -> dict[str, dict]:
+    """{country_code: GeoJSON geometry}, or {} with a warning banner.
+
+    Soft-failing by design, like the ONTD stop seed: seed.py runs in the
+    container entrypoint under set -e, and a Drive outage upstream must not
+    keep the API down. The banner plus test_02's geometry assertions make
+    the gap loud instead.
     """
-    Read the Natural Earth admin-0 countries geojson — the same file
-    rail_router.py used to read directly before country borders moved into
-    PostGIS — and index its features by ADM0_A3.
-
-    Returns None (with a warning) if the file isn't present, e.g. when
-    running seed.py outside the Docker images that download it at build
-    time. country_geom is a nullable column, so this degrades gracefully
-    to an ungeocoded seed rather than failing the whole run.
-    """
-    path = os.environ.get("COUNTRIES_GEOJSON_PATH")
-    if not path or not os.path.exists(path):
-        print(
-            f"  WARNING: countries geojson not found at "
-            f"COUNTRIES_GEOJSON_PATH={path!r} — skipping country_geom, "
-            f"all countries will be seeded with NULL geometry."
+    if not COUNTRY_GEOMS_FILE.is_file():
+        _country_geoms_warning(f"{COUNTRY_GEOMS_FILE} not found")
+        return {}
+    try:
+        with gzip.open(COUNTRY_GEOMS_FILE, "rt", encoding="utf-8") as fh:
+            collection = json.load(fh)
+        features = {
+            f["properties"][_COUNTRY_GEOMS_PROPERTY]: f["geometry"]
+            for f in collection["features"]
+        }
+    except Exception as e:
+        _country_geoms_warning(
+            f"{COUNTRY_GEOMS_FILE.name} is unreadable ({type(e).__name__}: {e})"
         )
-        return None
-    with open(path, encoding="utf-8") as f:
-        data = json.load(f)
-    return {f["properties"].get("ADM0_A3"): f["geometry"] for f in data["features"]}
+        return {}
+    if not features:
+        _country_geoms_warning(f"{COUNTRY_GEOMS_FILE.name} carries no features")
+    return features
 
 
 def seed_country_geometries(cur) -> None:
     """
     Populate input_params.countries.country_geom for every seeded country
-    that has a matching Natural Earth feature. Runs as UPDATEs after
-    COUNTRIES has been inserted, since ST_GeomFromGeoJSON() isn't something
-    insert_rows()'s plain-value INSERT can express.
+    the artifact covers. Runs as UPDATEs after COUNTRIES has been inserted,
+    since ST_GeomFromGeoJSON() isn't something insert_rows()'s plain-value
+    INSERT can express.
     """
-    features = _load_natural_earth_features()
-    if features is None:
+    features = _read_country_geoms()
+    if not features:
         return
-    matched, missing = 0, []
-    for cc, adm0_a3 in _COUNTRY_CODE_TO_ADM0_A3.items():
-        geometry = features.get(adm0_a3)
-        if geometry is None:
-            missing.append(cc)
+    seeded = {row["country_code"] for row in COUNTRIES}
+    matched = 0
+    for country_code, geometry in features.items():
+        if country_code not in seeded:
+            print(
+                f"  WARNING: artifact carries '{country_code}', which is not "
+                "in COUNTRIES — skipping."
+            )
             continue
         cur.execute(
             """
@@ -412,12 +436,14 @@ def seed_country_geometries(cur) -> None:
             SET country_geom = ST_SetSRID(ST_Multi(ST_GeomFromGeoJSON(%s)), 4326)
             WHERE country_code = %s
             """,
-            (_dumps(geometry), cc),
+            (_dumps(geometry), country_code),
         )
         matched += 1
-    print(f"  Matched {matched}/{len(_COUNTRY_CODE_TO_ADM0_A3)} country geometries.")
-    if missing:
-        print(f"  WARNING: no Natural Earth feature found for: {', '.join(missing)}")
+    print(f"  Matched {matched}/{len(seeded)} country geometries.")
+    # Railless countries have no polygon by design — named, not warned about.
+    ungeocoded = sorted(seeded - set(features))
+    if ungeocoded:
+        print(f"  No geometry (no rail network): {', '.join(ungeocoded)}.")
 
 
 # ============================================================
@@ -700,306 +726,70 @@ _TRACK_INFRA_CANONICAL_ROWS = [
         # long single-track stretches, freight mixing, winter operations
         "track_buffer_quota_per": 0.40,
     },
-    # Remaining EU27 members — every field None, resolved entirely from the
-    # EU-average default (track_infrastructure_defaults). Real figures TBD;
-    # this just gives each a real row so _check_country_coverage() in
-    # route_factory.py doesn't reject a route for merely transiting one of
-    # these (is_default stays False — a row exists — but every field will
-    # log a "using EU default" warning the first time it's resolved).
+]
+
+# Countries with no calibrated figures yet: every field None, resolved
+# entirely from the EU-average default (track_infrastructure_defaults).
+# The row exists so _check_country_coverage() in route_factory.py doesn't
+# reject a route for merely transiting one of these (is_default stays
+# False — a row exists — but every field logs a "using EU default" warning
+# the first time it's resolved). Listed as codes rather than 27 identical
+# dicts: adding a country is a one-token edit, and there is no per-country
+# value here to get out of step.
+_TRACK_INFRA_PLACEHOLDER_COUNTRIES = (
+    # Remaining EU27 members
+    "BG",
+    "HR",
+    "CY",
+    "CZ",
+    "EE",
+    "FI",
+    "GR",
+    "HU",
+    "IE",
+    "IT",
+    "LV",
+    "LT",
+    "LU",
+    "MT",
+    "NL",
+    "PL",
+    "PT",
+    "RO",
+    "SK",
+    "SI",
+    "ES",
+    # Non-EU: Tier 2 routing scope (NO, GB) and southeastern transit
+    "NO",
+    "GB",
+    "BA",
+    "RS",
+    "ME",
+    "AL",
+)
+
+_TRACK_INFRA_PLACEHOLDER_FIELDS = dict.fromkeys(
+    (
+        "track_tac_eur_train_km",
+        "track_parking_eur_day",
+        "track_shunting_eur_event",
+        "track_energy_price_eur_kwh",
+        "track_terrain_category",
+        "track_terrain_score",
+        "track_hsr_allowed",
+        "track_min_boarding_time",
+        "track_min_alighting_time",
+        "track_buffer_quota_per",
+    )
+)
+
+_TRACK_INFRA_CANONICAL_ROWS += [
     {
-        "country_code": "BG",
+        "country_code": country_code,
         "track_infra_version": 2,
-        "track_tac_eur_train_km": None,
-        "track_parking_eur_day": None,
-        "track_shunting_eur_event": None,
-        "track_energy_price_eur_kwh": None,
-        "track_terrain_category": None,
-        "track_terrain_score": None,
-        "track_hsr_allowed": None,
-        "track_min_boarding_time": None,
-        "track_min_alighting_time": None,
-        "track_buffer_quota_per": None,
-    },
-    {
-        "country_code": "HR",
-        "track_infra_version": 2,
-        "track_tac_eur_train_km": None,
-        "track_parking_eur_day": None,
-        "track_shunting_eur_event": None,
-        "track_energy_price_eur_kwh": None,
-        "track_terrain_category": None,
-        "track_terrain_score": None,
-        "track_hsr_allowed": None,
-        "track_min_boarding_time": None,
-        "track_min_alighting_time": None,
-        "track_buffer_quota_per": None,
-    },
-    {
-        "country_code": "CY",
-        "track_infra_version": 2,
-        "track_tac_eur_train_km": None,
-        "track_parking_eur_day": None,
-        "track_shunting_eur_event": None,
-        "track_energy_price_eur_kwh": None,
-        "track_terrain_category": None,
-        "track_terrain_score": None,
-        "track_hsr_allowed": None,
-        "track_min_boarding_time": None,
-        "track_min_alighting_time": None,
-        "track_buffer_quota_per": None,
-    },
-    {
-        "country_code": "CZ",
-        "track_infra_version": 2,
-        "track_tac_eur_train_km": None,
-        "track_parking_eur_day": None,
-        "track_shunting_eur_event": None,
-        "track_energy_price_eur_kwh": None,
-        "track_terrain_category": None,
-        "track_terrain_score": None,
-        "track_hsr_allowed": None,
-        "track_min_boarding_time": None,
-        "track_min_alighting_time": None,
-        "track_buffer_quota_per": None,
-    },
-    {
-        "country_code": "EE",
-        "track_infra_version": 2,
-        "track_tac_eur_train_km": None,
-        "track_parking_eur_day": None,
-        "track_shunting_eur_event": None,
-        "track_energy_price_eur_kwh": None,
-        "track_terrain_category": None,
-        "track_terrain_score": None,
-        "track_hsr_allowed": None,
-        "track_min_boarding_time": None,
-        "track_min_alighting_time": None,
-        "track_buffer_quota_per": None,
-    },
-    {
-        "country_code": "FI",
-        "track_infra_version": 2,
-        "track_tac_eur_train_km": None,
-        "track_parking_eur_day": None,
-        "track_shunting_eur_event": None,
-        "track_energy_price_eur_kwh": None,
-        "track_terrain_category": None,
-        "track_terrain_score": None,
-        "track_hsr_allowed": None,
-        "track_min_boarding_time": None,
-        "track_min_alighting_time": None,
-        "track_buffer_quota_per": None,
-    },
-    {
-        "country_code": "GR",
-        "track_infra_version": 2,
-        "track_tac_eur_train_km": None,
-        "track_parking_eur_day": None,
-        "track_shunting_eur_event": None,
-        "track_energy_price_eur_kwh": None,
-        "track_terrain_category": None,
-        "track_terrain_score": None,
-        "track_hsr_allowed": None,
-        "track_min_boarding_time": None,
-        "track_min_alighting_time": None,
-        "track_buffer_quota_per": None,
-    },
-    {
-        "country_code": "HU",
-        "track_infra_version": 2,
-        "track_tac_eur_train_km": None,
-        "track_parking_eur_day": None,
-        "track_shunting_eur_event": None,
-        "track_energy_price_eur_kwh": None,
-        "track_terrain_category": None,
-        "track_terrain_score": None,
-        "track_hsr_allowed": None,
-        "track_min_boarding_time": None,
-        "track_min_alighting_time": None,
-        "track_buffer_quota_per": None,
-    },
-    {
-        "country_code": "IE",
-        "track_infra_version": 2,
-        "track_tac_eur_train_km": None,
-        "track_parking_eur_day": None,
-        "track_shunting_eur_event": None,
-        "track_energy_price_eur_kwh": None,
-        "track_terrain_category": None,
-        "track_terrain_score": None,
-        "track_hsr_allowed": None,
-        "track_min_boarding_time": None,
-        "track_min_alighting_time": None,
-        "track_buffer_quota_per": None,
-    },
-    {
-        "country_code": "IT",
-        "track_infra_version": 2,
-        "track_tac_eur_train_km": None,
-        "track_parking_eur_day": None,
-        "track_shunting_eur_event": None,
-        "track_energy_price_eur_kwh": None,
-        "track_terrain_category": None,
-        "track_terrain_score": None,
-        "track_hsr_allowed": None,
-        "track_min_boarding_time": None,
-        "track_min_alighting_time": None,
-        "track_buffer_quota_per": None,
-    },
-    {
-        "country_code": "LV",
-        "track_infra_version": 2,
-        "track_tac_eur_train_km": None,
-        "track_parking_eur_day": None,
-        "track_shunting_eur_event": None,
-        "track_energy_price_eur_kwh": None,
-        "track_terrain_category": None,
-        "track_terrain_score": None,
-        "track_hsr_allowed": None,
-        "track_min_boarding_time": None,
-        "track_min_alighting_time": None,
-        "track_buffer_quota_per": None,
-    },
-    {
-        "country_code": "LT",
-        "track_infra_version": 2,
-        "track_tac_eur_train_km": None,
-        "track_parking_eur_day": None,
-        "track_shunting_eur_event": None,
-        "track_energy_price_eur_kwh": None,
-        "track_terrain_category": None,
-        "track_terrain_score": None,
-        "track_hsr_allowed": None,
-        "track_min_boarding_time": None,
-        "track_min_alighting_time": None,
-        "track_buffer_quota_per": None,
-    },
-    {
-        "country_code": "LU",
-        "track_infra_version": 2,
-        "track_tac_eur_train_km": None,
-        "track_parking_eur_day": None,
-        "track_shunting_eur_event": None,
-        "track_energy_price_eur_kwh": None,
-        "track_terrain_category": None,
-        "track_terrain_score": None,
-        "track_hsr_allowed": None,
-        "track_min_boarding_time": None,
-        "track_min_alighting_time": None,
-        "track_buffer_quota_per": None,
-    },
-    {
-        "country_code": "MT",
-        "track_infra_version": 2,
-        "track_tac_eur_train_km": None,
-        "track_parking_eur_day": None,
-        "track_shunting_eur_event": None,
-        "track_energy_price_eur_kwh": None,
-        "track_terrain_category": None,
-        "track_terrain_score": None,
-        "track_hsr_allowed": None,
-        "track_min_boarding_time": None,
-        "track_min_alighting_time": None,
-        "track_buffer_quota_per": None,
-    },
-    {
-        "country_code": "NL",
-        "track_infra_version": 2,
-        "track_tac_eur_train_km": None,
-        "track_parking_eur_day": None,
-        "track_shunting_eur_event": None,
-        "track_energy_price_eur_kwh": None,
-        "track_terrain_category": None,
-        "track_terrain_score": None,
-        "track_hsr_allowed": None,
-        "track_min_boarding_time": None,
-        "track_min_alighting_time": None,
-        "track_buffer_quota_per": None,
-    },
-    {
-        "country_code": "PL",
-        "track_infra_version": 2,
-        "track_tac_eur_train_km": None,
-        "track_parking_eur_day": None,
-        "track_shunting_eur_event": None,
-        "track_energy_price_eur_kwh": None,
-        "track_terrain_category": None,
-        "track_terrain_score": None,
-        "track_hsr_allowed": None,
-        "track_min_boarding_time": None,
-        "track_min_alighting_time": None,
-        "track_buffer_quota_per": None,
-    },
-    {
-        "country_code": "PT",
-        "track_infra_version": 2,
-        "track_tac_eur_train_km": None,
-        "track_parking_eur_day": None,
-        "track_shunting_eur_event": None,
-        "track_energy_price_eur_kwh": None,
-        "track_terrain_category": None,
-        "track_terrain_score": None,
-        "track_hsr_allowed": None,
-        "track_min_boarding_time": None,
-        "track_min_alighting_time": None,
-        "track_buffer_quota_per": None,
-    },
-    {
-        "country_code": "RO",
-        "track_infra_version": 2,
-        "track_tac_eur_train_km": None,
-        "track_parking_eur_day": None,
-        "track_shunting_eur_event": None,
-        "track_energy_price_eur_kwh": None,
-        "track_terrain_category": None,
-        "track_terrain_score": None,
-        "track_hsr_allowed": None,
-        "track_min_boarding_time": None,
-        "track_min_alighting_time": None,
-        "track_buffer_quota_per": None,
-    },
-    {
-        "country_code": "SK",
-        "track_infra_version": 2,
-        "track_tac_eur_train_km": None,
-        "track_parking_eur_day": None,
-        "track_shunting_eur_event": None,
-        "track_energy_price_eur_kwh": None,
-        "track_terrain_category": None,
-        "track_terrain_score": None,
-        "track_hsr_allowed": None,
-        "track_min_boarding_time": None,
-        "track_min_alighting_time": None,
-        "track_buffer_quota_per": None,
-    },
-    {
-        "country_code": "SI",
-        "track_infra_version": 2,
-        "track_tac_eur_train_km": None,
-        "track_parking_eur_day": None,
-        "track_shunting_eur_event": None,
-        "track_energy_price_eur_kwh": None,
-        "track_terrain_category": None,
-        "track_terrain_score": None,
-        "track_hsr_allowed": None,
-        "track_min_boarding_time": None,
-        "track_min_alighting_time": None,
-        "track_buffer_quota_per": None,
-    },
-    {
-        "country_code": "ES",
-        "track_infra_version": 2,
-        "track_tac_eur_train_km": None,
-        "track_parking_eur_day": None,
-        "track_shunting_eur_event": None,
-        "track_energy_price_eur_kwh": None,
-        "track_terrain_category": None,
-        "track_terrain_score": None,
-        "track_hsr_allowed": None,
-        "track_min_boarding_time": None,
-        "track_min_alighting_time": None,
-        "track_buffer_quota_per": None,
-    },
+        **_TRACK_INFRA_PLACEHOLDER_FIELDS,
+    }
+    for country_code in _TRACK_INFRA_PLACEHOLDER_COUNTRIES
 ]
 
 # Version 1 (2026 Base Line, deprecated) = the same full snapshot, except
@@ -2438,6 +2228,29 @@ def seed_example_proposal(cur, conn) -> None:
         conn.rollback()
 
 
+def sync_ontd_schema(cur) -> None:
+    """Additive column top-ups for an ontd schema that already exists.
+
+    The guard above deliberately never re-applies create_ontd_schema.sql
+    on a database that already carries loaded ONTD data (it DROPs the
+    refreshed tables). That leaves one gap: a reseed rebuilds
+    input_params and proposals from the latest DDL while the ontd tables
+    stay at whatever shape they were created with — so a column added to
+    a refreshed table reaches a fresh database and a reloaded one, but
+    never a merely reseeded one. The gallery's UNION reads both sides,
+    so the halves must agree.
+
+    Every statement here is additive and IF NOT EXISTS: this is a
+    catch-up, never a migration in its own right. The server-side
+    counterpart is db/dev/sql/migrations/. Entries can be dropped once
+    no environment predates them.
+    """
+    cur.execute(
+        "ALTER TABLE ontd.route_summaries "
+        "ADD COLUMN IF NOT EXISTS country_relations TEXT[] NOT NULL DEFAULT '{}'"
+    )
+
+
 def main():
     conn = psycopg2.connect(
         host=DB_HOST,
@@ -2473,6 +2286,9 @@ def main():
             / "create_ontd_schema.sql"
         )
         cur.execute(ontd_ddl.read_text(encoding="utf-8"))
+    else:
+        print("Syncing existing ontd schema...")
+        sync_ontd_schema(cur)
 
     print("Seeding admin.users...")
     insert_rows(cur, "admin.users", USERS)

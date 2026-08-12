@@ -317,7 +317,9 @@ def summary_row_to_dict(row: dict) -> dict:
 
     "existing" rows (ONTD catalog, §5.5 decision 23): the reduced,
     descriptive shape — identity (route_id, name), the shared metric
-    subset, geometry_routed (whether the drawn line is real routing or a
+    subset (country_relations included: both projections derive the
+    relations a row actually serves, §7.7, so the statistics rank both
+    sources on one axis), geometry_routed (whether the drawn line is real routing or a
     straight-line fallback), and ontd_url (deep link to the route's ONTD
     page). Proposal-only fields (financials, demand, engagement counts,
     timestamps,
@@ -337,6 +339,7 @@ def summary_row_to_dict(row: dict) -> dict:
             "avg_speed_kmh": _to_float(row["avg_speed_kmh"]),
             "n_stops": row["n_stops"],
             "countries": list(row["countries"]),
+            "country_relations": list(row["country_relations"]),
             "stop_ids": list(row["stop_ids"]),
             "co2_g_per_pax_km": _to_float(row["co2_g_per_pax_km"]),
             "geometry_routed": row["geometry_routed"],
@@ -358,6 +361,7 @@ def summary_row_to_dict(row: dict) -> dict:
         "avg_speed_kmh": _to_float(row["avg_speed_kmh"]),
         "n_stops": row["n_stops"],
         "countries": list(row["countries"]),
+        "country_relations": list(row["country_relations"]),
         "stop_ids": list(row["stop_ids"]),
         "cost_eur_per_train_km": _to_float(row["cost_eur_per_train_km"]),
         "revenue_eur_per_train_km": _to_float(row["revenue_eur_per_train_km"]),

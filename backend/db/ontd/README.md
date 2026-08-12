@@ -9,6 +9,17 @@ refresh); `projection.py` rebuilds `route_summaries` (gallery/map),
 `route_legs` (buffer calibration dataset) and `route_corridors`
 (gallery-map corridor pieces).
 
+`route_summaries.country_relations` is derived here too, by the same
+definition the proposal side uses: a country pair counts only where the
+earlier stop can be boarded and the later one alighted — the ONTD
+timetable's own `no_entry`/`no_exit` flags plus the route builder's
+night-window classification (`models/route/timetable.py`'s
+`classify_stop_type()`, imported rather than restated). That keeps
+existing trains and proposals on one ranking dimension for
+`GET /api/proposals/stats`. Stops with unusable times fall back to the
+operationally neutral case rather than dropping out, so a patchy
+timetable loses precision instead of losing relations.
+
 **Related documentation:** design doc — `adapters/proposal/README.md`
 (§5.5, §7.1) · schema — [`sql/create_ontd_schema.sql`](sql/create_ontd_schema.sql)
 (lifecycle rules in the file header) · API reference —

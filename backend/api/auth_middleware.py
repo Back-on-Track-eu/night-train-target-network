@@ -42,6 +42,7 @@ from api.auth_utils import (
     TRUST_GUEST,
     TRUST_OPERATOR,
     AuthError,
+    UnknownAccountError,
     decode_jwt,
 )
 
@@ -105,24 +106,39 @@ def _load_identity_from_request() -> dict | None:
         }
 
     # --- local plane: HS256 JWT issued by this app ---
+    # A valid signature says the token was issued here, not that the
+    # account it names still exists: a reseed recreates admin.users from
+    # scratch while browsers keep their tokens, and a deleted account
+    # leaves the same gap. Resolving the row makes both cases a clean 401
+    # the client can act on, instead of a foreign-key violation surfacing
+    # from whichever write the caller happened to attempt. Late import for
+    # the same reason as the OIDC path above.
+    from api.helpers.dependencies import get_auth_repository
+
     payload = decode_jwt(token)
     is_guest = bool(payload.get("is_guest", False))
-    if is_guest:
-        # A guest that verified an email was merged into that account
-        # (auth.py: verify) — its still-valid guest token must fail loudly,
-        # not act as the abandoned identity. One indexed PK lookup, guest
-        # tokens only. Late import for the same reason as the OIDC path.
-        from api.helpers.dependencies import get_auth_repository
+    user = get_auth_repository().get_user(int(payload["sub"]))
 
-        if get_auth_repository().merged_target(int(payload["sub"])) is not None:
-            raise AuthError(
-                "This guest session has been merged into a registered "
-                "account. Please log in with your email."
-            )
+    if user is None:
+        raise UnknownAccountError(
+            "This session belongs to an account that no longer exists. "
+            "Please sign in again."
+        )
+    # A guest that verified an email was merged into that account
+    # (auth.py: verify) — its still-valid guest token must fail loudly,
+    # not act as the abandoned identity.
+    if user["merged_into_user_id"] is not None:
+        raise AuthError(
+            "This guest session has been merged into a registered "
+            "account. Please log in with your email."
+        )
+
+    # Identity fields come from the row, not the token: a display name
+    # changed after the token was issued should not travel stale.
     return {
-        "user_id": int(payload["sub"]),
-        "email": payload.get("email"),
-        "display_name": payload.get("display_name"),
+        "user_id": user["user_id"],
+        "email": user["email"],
+        "display_name": user["display_name"],
         "is_guest": is_guest,
         "trust_level": TRUST_GUEST if is_guest else TRUST_CONTRIBUTOR,
     }
@@ -220,6 +236,15 @@ def optional_auth(f):
     If no token is present, sets g.user_id = None (unauthenticated).
     If a token is present but invalid, returns 401 — a bad token is
     treated as an error, not silently ignored.
+
+    One exception to that last rule: a token naming an account that no
+    longer exists (UnknownAccountError) degrades to anonymous instead.
+    These endpoints are readable without any token at all, so rejecting
+    one that is merely stale would take away a page the caller could
+    have had — the dev stack reseeds on every container start, so a
+    cookie outliving its row is ordinary rather than suspicious. The
+    session still fails at the first write, which is where the caller
+    needs to hear it.
     """
 
     @wraps(f)
@@ -227,6 +252,8 @@ def optional_auth(f):
         _clear_g()
         try:
             identity = _load_identity_from_request()
+        except UnknownAccountError:
+            identity = None
         except AuthError as e:
             return _unauthorized(str(e))
 

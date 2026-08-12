@@ -37,6 +37,7 @@ built on top of it:
 | `test_40` | End-to-end pipeline smoke |
 | `test_50` | `POST /api/proposal/publish` + proposals list/load (the only write path) |
 | `test_51` | Proposal engagement — likes + comments |
+| `test_55` | `GET /api/proposals/stats` — §7.7 counts, KPI aggregates per scope, top/flop countries and country relations |
 | `test_60` | Feedback API — submit/categories |
 | `test_70`–`test_71` | Auth — integration (API + DB) and standalone units |
 

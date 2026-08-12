@@ -113,6 +113,7 @@ class TestSummaryRow:
             "avg_speed_kmh",
             "n_stops",
             "countries",
+            "country_relations",
             "stop_ids",
             "cost_eur_per_train_km",
             "revenue_eur_per_train_km",
@@ -129,6 +130,20 @@ class TestSummaryRow:
             "demand_kpis_placeholder",
             "co2_g_per_pax_km",
         }
+
+    def test_country_relations_are_served_pairs(self, row):
+        """Relations come from od_pairs (boarding-capable origin before
+        alighting-capable destination), so they are a subset of the pairs
+        the route's own countries could form — a merely transited country
+        contributes none. Sorted "AA__BB" keys, no self-pairs."""
+        possible = {
+            "__".join(sorted((a, b)))
+            for a in row["countries"]
+            for b in row["countries"]
+            if a < b
+        }
+        assert set(row["country_relations"]) <= possible
+        assert row["country_relations"] == sorted(row["country_relations"])
 
     def test_route_metrics_are_plausible(self, row):
         assert row["total_distance_km"] > 0

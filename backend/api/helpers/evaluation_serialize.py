@@ -254,8 +254,9 @@ def _section_parts(section_key: str) -> tuple[str, str, str] | None:
 
 def _section_value(stop_names: dict[str, str], section_key: str) -> str | dict:
     """Returns 'all', or the structured {origin, destination, class_main}
-    (class_main may be 'all') the frontend composes and localises — with →,
-    since a section is directional (the opposite direction is its own key)."""
+    (class_main may be 'all') the frontend composes and localises. Endpoints
+    are in outbound stop order; the cell covers both directions of the pair
+    (undirected keys since CALC 0.9.16)."""
     parts = _section_parts(section_key)
     if parts is None:
         return "all" if section_key == "all" else section_key

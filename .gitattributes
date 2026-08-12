@@ -25,3 +25,9 @@
 *.jpg binary
 *.pyd binary
 *.dll binary
+# Frontend sources — LF (Prettier writes LF; without these every
+# `npm run format` rewrote the whole tree)
+*.ts text eol=lf
+*.vue text eol=lf
+*.css text eol=lf
+*.html text eol=lf

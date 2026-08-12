@@ -400,6 +400,7 @@ CREATE TABLE ontd.route_summaries (
     stop_ids           TEXT[] NOT NULL,
     n_stops            SMALLINT NOT NULL,
     countries          TEXT[] NOT NULL,
+    country_relations  TEXT[] NOT NULL DEFAULT '{}',
     total_distance_km  NUMERIC(8,1),
     total_time_h       NUMERIC(6,2),
     avg_speed_kmh      NUMERIC(5,1),
@@ -421,6 +422,8 @@ CREATE TABLE ontd.route_summaries (
                        ) STORED,
     refreshed_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+COMMENT ON COLUMN ontd.route_summaries.country_relations IS 'Country-to-country relations this existing train actually serves, as sorted "AA__BB" keys — the same shape and meaning as proposals.proposal_summaries.country_relations, so GET /api/proposals/stats ranks both sources on one dimension. Derived in projection.py from the timetable: a stop pair counts only where the origin can be boarded (models/route/timetable.py classify_stop_type + trip_stop.no_entry) and the destination alighted (+ no_exit).';
 
 COMMENT ON COLUMN ontd.route_summaries.stop_ids IS 'TARGET NETWORK stop ids (translated via ontd.stop_mappings at projection time, WP10 step 6a) so gallery filters and map aggregations share one namespace with proposals — raw ONTD ids stay on trip_stop/route_legs. Stops the mapping cannot cover (no coordinates, or country outside input_params.countries) keep their raw ONTD id.';
 

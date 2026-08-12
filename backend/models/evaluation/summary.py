@@ -22,9 +22,11 @@ cannot drift when a formula changes.
 
 Public interface:
   build_summary_row(route, evaluation) → dict  (every §5.4 KPI column:
-      route metrics, financial KPIs, placeholder demand KPIs, and the
-      flat night-train co2_g_per_pax_km. Identity columns and
-      geom_simplified are the callers' concern.)
+      route metrics, financial KPIs, placeholder demand KPIs, the served
+      country_relations, and the flat night-train co2_g_per_pax_km.
+      Identity columns and geom_simplified are the callers' concern.)
+  country_relations(route)             → list  (the served "AA__BB"
+      relation keys, derived from od_pairs — §7.7's stats dimension)
   ordered_stops(trip)                  → list  (a trip's stops in travel
       order — shared with the route fingerprint's canonical extract in
       adapters/proposal/projection.py)
@@ -71,10 +73,40 @@ def build_summary_row(route: dict, evaluation: dict) -> dict:
         **metrics,
         **financials,
         **demand,
+        "country_relations": country_relations(route),
         # Flat factor (decision 24) until the energy-based,
         # country-resolved model enriches it per route.
         "co2_g_per_pax_km": EMISSION_FACTORS["night_train"].g_per_pax_km,
     }
+
+
+def country_relations(route: dict) -> list[str]:
+    """Every country-to-country relation the route actually SERVES, as
+    sorted "AA__BB" keys (§7.7 — the ranking dimension behind
+    GET /api/proposals/stats).
+
+    Read off the route's own od_pairs rather than its countries list: an
+    OD pair exists only where a boarding-capable stop precedes an
+    alighting-capable one (models/demand/stopgap.py), so a country merely
+    transited, or reachable only boarding-to-boarding, contributes no
+    relation. Same-country pairs are dropped — a relation is between two
+    countries; domestic demand is a different question.
+    """
+    country_by_stop = {
+        stop["stop_id"]: stop.get("country_code")
+        for pair in route["trip_pairs"]
+        for trip in (pair["outbound"], pair["return_trip"])
+        for stop in ordered_stops(trip)
+    }
+    relations = {
+        "__".join(sorted((origin, destination)))
+        for pair in route["trip_pairs"]
+        for od in pair.get("od_pairs", [])
+        if (origin := country_by_stop.get(od["origin_stop_id"]))
+        and (destination := country_by_stop.get(od["destination_stop_id"]))
+        and origin != destination
+    }
+    return sorted(relations)
 
 
 def _route_metrics(route: dict) -> dict:
