@@ -169,12 +169,16 @@ NormalisationScope]` carrying each cell's own annual physical denominators.
 
 `section_key` is `"{origin_stop_id}__{destination_stop_id}__{class_main}"`
 with `class_main = "all"` for the class-independent section cell. Keys are
-**directional** — Hamburg→Berlin and Berlin→Hamburg are separate sections on
-separate trips.
+**undirected** (CALC 0.9.16): endpoints are canonicalised to the outbound
+trip's stop order, and one cell accumulates **both directions** of the pair
+over the same physical piece of track.
 
 A section is a **physical piece of a trip** between two of its stops — not a
-ticket relation (that is Layer 2B). Selecting `[Hamburg, Berlin]` on a
-`[Copenhagen, Hamburg, Berlin, Munich]` trip means:
+ticket relation (that is Layer 2B). **Every ordered pair of a trip's stops
+is a section** — enumeration is independent of ticketed OD relations, so
+ranges bounded by night stops (which never appear in OD pairs) exist too.
+Selecting `[Hamburg, Berlin]` on a `[Copenhagen, Hamburg, Berlin, Munich]`
+trip means:
 
 - every cost occurring between Hamburg and Berlin, plus a share of
   route-level costs, and
@@ -207,7 +211,8 @@ unlike every other matrix view. The wildcard cells `(pair, "all")` and
 
 Per-unit normalisations of a section cell divide by the section's **own**
 annual physics (its `NormalisationScope`): €/train-km of a section means per
-that section's annual train-km, not the whole pair's.
+that section's annual train-km — both directions summed, matching the cell's
+values — not the whole pair's.
 
 ### Layer 2C — per trip × stop
 
