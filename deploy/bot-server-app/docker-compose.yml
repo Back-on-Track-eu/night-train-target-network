@@ -77,6 +77,73 @@ services:
         condition: service_healthy
     restart: "no"
 
+  # One-shot: loads the ONTD reference data (existing night trains) after
+  # migrations, then exits. ONTD_BOOTSTRAP=auto makes it a no-op once
+  # ontd.route_summaries is populated, so routine deploys pay nothing — but
+  # a fresh or reseeded database gets its gallery context back without a
+  # human remembering to run anything (2026-08-13: the staging gallery
+  # 500'd on the missing table for exactly that reason). Deliberately NOT
+  # --strict, and nothing depends_on it: a Drive or routing hiccup must
+  # degrade the gallery, never fail the deploy or hold the api down.
+  ontd-bootstrap:
+    image: tn-${ENV_NAME}-backend
+    container_name: tn-${ENV_NAME}-ontd-bootstrap
+    command: ["python", "db/ontd/bootstrap.py"]
+    environment:
+      - POSTGRES_HOST=tn-${ENV_NAME}-db
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - OPENRAILROUTING_URL=http://targetnetwork-routing:8989
+      - ONTD_BOOTSTRAP=${ONTD_BOOTSTRAP:-auto}
+      # The workbook ids have no code default by design (xlsx_utils.py
+      # exits with a message if unset) and their dev-side home,
+      # backend/docker/.env, is gitignored — so the server stack
+      # enumerates them here with the current ids as defaults (AGENTS.md
+      # "Parameter placement"). Public link-shared ids, not secrets.
+      # Override in .env only to point at a different workbook.
+      - ONTD_WORKBOOK_ID=${ONTD_WORKBOOK_ID:-1ipyNcfZ6-a38xbAVPpAmTejYhKa6Dl97}
+      - ONTD_WORKBOOK_KIND=${ONTD_WORKBOOK_KIND:-drive_file}
+      - ONTD_COMPOSITIONS_ID=${ONTD_COMPOSITIONS_ID:-1vSJ-vHKb2uZRG4hMtW-5a--xUz43N6cd}
+      - ONTD_COMPOSITIONS_KIND=${ONTD_COMPOSITIONS_KIND:-drive_file}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - default
+      - routing_net
+    restart: "no"
+
+  # One-shot: rebuilds the country-relation candidate set that
+  # GET /api/proposals/stats ranks over (input_params.country_relations).
+  # Idempotent and cheap, so it simply runs on every deploy — an
+  # emptiness guard could go stale when the stop catalog changes. Same
+  # soft-fail stance as ontd-bootstrap: the stats endpoint returns an
+  # empty relations block until it has run.
+  country-relations:
+    image: tn-${ENV_NAME}-backend
+    container_name: tn-${ENV_NAME}-country-relations
+    command: ["python", "scripts/build_country_relations.py"]
+    environment:
+      - POSTGRES_HOST=tn-${ENV_NAME}-db
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - OPENRAILROUTING_URL=http://targetnetwork-routing:8989
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - default
+      - routing_net
+    restart: "no"
+
   api:
     image: tn-${ENV_NAME}-backend
     container_name: tn-${ENV_NAME}-api
@@ -102,9 +169,11 @@ services:
       - POSTGRES_DB=${POSTGRES_DB}
       # Shared routing engine (see header).
       - OPENRAILROUTING_URL=http://targetnetwork-routing:8989
-      # Baked into the image at build time; seed.py reads it to populate
-      # input_params.countries.country_geom (CountryIndex source).
-      - EEZ_LAND_UNION_FILE_ID=${EEZ_LAND_UNION_FILE_ID}
+      # No EEZ_LAND_UNION_FILE_ID here: the api never seeds, and declaring
+      # it as ${VAR} injects an EMPTY string when .env doesn't set it —
+      # which defeats the code default in scripts/export_country_geoms.py
+      # (os.environ.get returns "" once the variable exists). Absent beats
+      # empty; the code default is the id's one home.
       # Auth plane (see backend/api/README.md). JWT_SECRET is a boot
       # requirement; SMTP_* enable real OTP mail; KEYCLOAK_* stay empty
       # until the bot realm exists (OIDC plane is dormant without them).
