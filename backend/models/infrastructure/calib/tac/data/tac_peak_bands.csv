@@ -1,3 +1,0 @@
-country_code,band1_start,band1_end,band2_start,band2_end,weekdays_only
-AT,06:00,09:00,16:00,19:00,True
-CH,06:00,09:00,16:00,19:00,True
