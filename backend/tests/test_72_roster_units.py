@@ -44,7 +44,6 @@ def _operator(**overrides) -> Operator:
         var_overhead_per=0.08,
         fix_overhead_quota_per=0.12,
         svc_stockings_eur_place={},
-        loco_full_service_lease_eur_h=161.0,
     )
     kwargs.update(overrides)
     return Operator(**kwargs)

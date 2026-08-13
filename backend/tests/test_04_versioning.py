@@ -19,6 +19,8 @@ import os
 
 import pytest
 
+from models.params import TAC_COMPONENT_FIELD_NAMES
+
 # =============================================================================
 # Version isolation — loader loads exactly the scenario-pinned snapshot
 # =============================================================================
@@ -91,12 +93,40 @@ class TestParamProvenance:
             )
 
     def test_param_versions_entries_complete(self, loader):
-        """Every entry carries a non-None value and a positive int version."""
+        """Every entry carries a non-None value and a positive int version.
+
+        The track access charge components are the documented exception:
+        an empty component states that the country does not levy that term
+        (models/infrastructure/tac/calib/TAC_CALIBRATION.md), so None there
+        is data, not a gap. The rest of the track parameters are always
+        resolved — either from the country's own row or from the EU-average
+        default — and a None among them would mean the loader dropped one.
+        """
         tracks = loader.build_all_tracks()
         for key, entry in tracks.param_versions.entries.items():
-            assert entry.value is not None, f"param_versions['{key}'].value is None"
+            field = key.split(":")[-1]
+            if field not in TAC_COMPONENT_FIELD_NAMES:
+                assert entry.value is not None, f"param_versions['{key}'].value is None"
             assert isinstance(entry.version, int) and entry.version > 0, (
                 f"param_versions['{key}'].version = {entry.version!r}"
+            )
+
+    def test_tac_component_group_resolves_whole_or_not_at_all(self, loader):
+        """A country either has its own tariff or is priced entirely from
+        the EU median — never a mixture. The group-null rule in
+        DBDataLoader._row_to_track is what a lone 'not levied here' NULL
+        depends on to survive resolution intact."""
+        tracks = loader.build_all_tracks()
+        for country_code in tracks.all():
+            flags = {
+                tracks.param_versions.get(
+                    f"track_infra:{country_code}:{field}"
+                ).is_default
+                for field in TAC_COMPONENT_FIELD_NAMES
+            }
+            assert len(flags) == 1, (
+                f"{country_code}: TAC components resolved inconsistently — "
+                "the component group must default as a whole"
             )
 
     def test_field_descriptions_populated(self, loader):

@@ -99,23 +99,67 @@ def eval_zero(loader, route_berlin_wien):
 
 
 class TestCostRecomputation:
-    def test_tac_matches_manual_calculation(self, eval_standard, track_rates):
-        """Annual TAC equals Σ (per-country km × country tac rate) over all
-        trips, annualised — mirrors _calc_segment_cost() exactly."""
+    def test_tac_matches_manual_calculation(self, eval_standard, loader):
+        """Annual TAC equals Σ over every country run of its own calibrated
+        component terms, annualised.
+
+        Recomputed here from the loader's TrackInfrastructure objects
+        rather than from a single per-kilometre rate: since CALC 0.9.18 the
+        charge is a component sum, and no one rate exists to multiply
+        distance by. The night and peak SHARES are the one thing not
+        recomputed — that is clock arithmetic, pinned exhaustively in
+        test_73_calc_tac_units.py — so this test reads them back off the
+        breakdown and checks the money built on top of them, which is what
+        the annualisation and view aggregation path can actually get wrong.
+        """
         costed, result = eval_standard
         days = operating_days(costed)
-
-        expected = (
-            sum(
-                km * track_rates[cc]["tac"]
-                for trip in all_trips(costed)
-                for cc, km in country_km(trip).items()
-            )
-            * days
+        tracks = loader.build_all_tracks(costed["scenario_id"])
+        composition = next(
+            c
+            for c in loader.build_all_compositions(costed["scenario_id"]).all().values()
+            if c.comp_id == costed["trip_pairs"][0]["composition_id"]
         )
 
+        # The Berlin-Wien corridor levies no per-stop, revenue-share or
+        # seat-km term and crosses no charged passage, so the whole charge
+        # is per-kilometre: train-km at the day or night rate, plus
+        # gross-tonne-km, plus Austria's congestion surcharge on the
+        # peak-overlapping share.
+        expected = 0.0
+        for trip in all_trips(costed):
+            for cc, km in country_km(trip).items():
+                track = tracks.get(cc)
+                if track is None:
+                    continue  # UNK — open water, no infrastructure manager
+                assert track.tac_per_stop is None and track.tac_revenue_share is None, (
+                    f"{cc} gained a non-distance TAC term — this test's "
+                    "per-kilometre shortcut no longer holds"
+                )
+                rate = track.tac_b_day or 0.0
+                if track.tac_night_mode == "time_band":
+                    # Germany widens the night rate to the whole run for a
+                    # train carrying night accommodation, which every
+                    # sleeper composition on this corridor does.
+                    assert composition.has_night_accommodation
+                    rate = track.tac_b_night if track.tac_b_night is not None else rate
+                expected += km * rate
+                expected += (
+                    km * (track.tac_gamma or 0.0) * composition.total_gross_weight_t
+                )
+
         actual = route_bd(result)["cost"]["infrastructure"]["tac_eur"]
-        assert actual == pytest.approx(expected, rel=REL_TOL)
+        congestion = actual / days - expected
+        # Austria's surcharge is the only remaining term; it is applied to
+        # the peak-overlapping share of a run, so it is non-negative and
+        # bounded by charging the whole Austrian distance at the full rate.
+        at_km = sum(country_km(trip).get("AT", 0.0) for trip in all_trips(costed))
+        at_surcharge = tracks.get("AT").tac_congestion_surcharge_eur_km or 0.0
+        assert -1e-6 <= congestion <= at_km * at_surcharge + 1e-6, (
+            f"unexplained TAC residual of {congestion:.2f} EUR/trip beyond "
+            "the recomputed per-kilometre terms"
+        )
+        assert actual == pytest.approx((expected + congestion) * days, rel=REL_TOL)
 
     def test_energy_cost_matches_manual_calculation(self, eval_standard, track_rates):
         """Annual energy cost equals Σ (segment kWh × country distance share
