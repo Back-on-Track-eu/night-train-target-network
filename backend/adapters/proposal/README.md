@@ -35,7 +35,7 @@ work now finished, and preserved in git history), plus the parked
 | `gtfs_store.py` | Route ⇄ GTFS + sidecar tables (write and read-back) |
 | `compute_cache.py` | `ComputeCacheRepository` — the §2.3 two-map cache (`lookup`/`store`/`sweep`/`flush`) |
 | `engagement_repository.py` | Likes, comments, and the `UNION ALL` timeline merge |
-| `filter_builder.py` | Column-kind registry driving gallery SQL generation + validation |
+| `filter_builder.py` | Column-kind registry driving gallery SQL generation + validation, and the aggregate SELECT list behind §7.7's statistics |
 | `id_prefix.py` | `P{id}_V{n}_` prefix rewriting between neutral and published ID forms |
 
 ---
@@ -1136,6 +1136,87 @@ function in a `before_request` hook, before `@require_auth` has set
 `POST /api/proposal/calc` + `POST /api/proposal/publish`. Removal, not
 deprecation — see `docs/FRONTEND_API_HANDOVER_2026-08-07.md`;
 `test_stub_endpoints_return_501` and the API README change accordingly.
+
+### 7.7 `GET /api/proposals/stats` — descriptive statistics
+
+Counts, KPI aggregates, and the top/flop rankings over countries and
+country-to-country relations. Deliberately the cheap end of analysis:
+read-only over the stored gallery rows, one round trip, no recompute, no
+scenario override. Compare (§7.3) answers "line vs line"; the parked
+analyze endpoint answers "what does this *set* of lines do as a
+network"; stats answers "what has been proposed so far, and where are
+the gaps".
+
+That boundary is what keeps the aggregates honest. `avg` on a rate
+column is the unweighted mean of per-route figures — a typical
+proposal's cost per train-km, not the cost per train-km of the whole
+set. Deriving the second needs annual train-km per route as a weight,
+which `proposal_summaries` does not carry and which the analyze design
+derives per member at compute time. Sums are therefore emitted only for
+**extensive** columns (`filter_builder.ADDITIVE_COLUMNS`), never for
+rates, and network reach is reported as distinct stops and countries
+rather than as a sum of `n_stops` that would double-count every shared
+station.
+
+**Scopes.** Every statistic comes in three: `proposal`, `existing`,
+`all` — the gallery's own `source` vocabulary. Existing (ONTD) rows are
+NULL in every proposal-only column, so the `existing` and `all` scopes
+report only the shared metric subset
+(`filter_builder.SHARED_SOURCE_COLUMNS`). Reporting financials under
+`all` would put a proposals-only number under a label implying 142 rows
+contributed when 42 did.
+
+**Relations (the ranking dimension).** A relation is a pair of countries
+one train connects **boarding-to-alighting**, not a pair of countries it
+touches. On the proposal side it comes from `od_pairs`, which the demand
+model already builds under exactly that rule; on the existing side from
+the ONTD timetable's `no_entry`/`no_exit` flags plus the route builder's
+own night-window classification. Both write the same sorted `"AA__BB"`
+keys into a `country_relations` array column on their summary
+projection, so one `unnest` ranks both sources together.
+
+The candidate set they are ranked against is
+`input_params.country_relations` (`db/README.md`), built at seed time:
+
+1. **Reference station per country** — the catalog stop closest to that
+   country's own stop centroid. Not `ST_Centroid(countries.country_geom)`:
+   that geometry is the Marine Regions EEZ union (land *plus* maritime
+   zones, which is what attributes belt and strait crossings correctly),
+   so its centroid sits offshore for any country with a large sea area.
+2. **Prefilter** on great-circle distance × a rail detour factor, purely
+   to decide whether routing the pair is worth an HTTP call.
+3. **Route** the survivors on real track and keep only those whose
+   **routed** distance is under `PROPOSALS_STATS_RELATION_MAX_KM`.
+
+Step 3 is the one that earns its keep. A straight-line threshold admits
+Italy–Greece (~1000 km apart across the Mediterranean, 1900+ km by track
+around the Adriatic) and every Finnish pair (no through path at all —
+Gulf of Bothnia plus a 1524mm gauge break). Routing removes both without
+a maintained exception list.
+
+Two consequences are reported rather than hidden. Pairs dropped as too
+far or unroutable are **counted** in the response; countries with no
+stops in the catalog yet have no reference station, so they rank under
+`countries` but appear in `unresolved_countries` and contribute no
+relations. That list shrinks on its own as stop coverage grows — the
+catalog currently covers a subset of the seeded countries.
+
+**Flop ordering.** Zeros dominate both rankings while proposal volume is
+low, so the tie-break carries the information: relations sort by
+distance ascending within the zeros, putting the nearest unserved pair —
+the most plausible missing night train — first. Alphabetical would be
+noise.
+
+**Not filterable, on purpose.** Only `user_id` is a request parameter.
+Ranking lengths and the distance ceiling live in `api/config.py`: they
+define what "top" and "flop" mean, and a per-request definition would
+make two callers' numbers incomparable. The repository methods take the
+ordinary gallery `filters` dict, though, so a future
+`POST /api/proposals/stats` accepting the full §7.1 filter model
+("statistics over exactly what the gallery is showing") is a blueprint
+change with no SQL behind it.
+
+---
 
 ## 8. KPI definitions & placeholder policy
 

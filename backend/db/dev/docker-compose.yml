@@ -52,8 +52,10 @@ services:
 
   seeder:
     build:
-      context: .
-      dockerfile: Dockerfile
+      # Backend root, so the image gets db/ and the country geometry build
+      # script in their repo-relative places — see Dockerfile.
+      context: ../..
+      dockerfile: db/dev/Dockerfile
     container_name: night_train_seeder
     depends_on:
       postgres:

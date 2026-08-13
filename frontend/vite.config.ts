@@ -25,6 +25,7 @@ export default defineConfig({
     hmr: {
       clientPort: Number(process.env.FRONTEND_HOST_PORT ?? 5173),
     },
+    // Polling is required for HMR to see edits through the Docker bind mount.
     watch: {
       usePolling: true,
     },

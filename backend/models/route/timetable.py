@@ -113,11 +113,19 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 
-def _classify_stop_type(arrival_min: int, departure_min: int) -> StopType:
+def classify_stop_type(arrival_min: int, departure_min: int) -> StopType:
     """Shared three-way classification for INTERMEDIATE stops, used by every
     timetable_mode (termini are always boarding/alighting by position, the
-    caller's concern). Boarding is judged on DEPARTURE time, alighting on
-    ARRIVAL time:
+    caller's concern). Public since 0.9.20 so the ONTD projection can
+    classify existing trains by the identical rule instead of restating
+    it — both sides feed the same gallery, so the classification behind
+    proposal_summaries.country_relations and ontd.route_summaries.
+    country_relations has to be one function. Both arguments are minutes
+    on the trip's own departure-day clock (00:00 of the departure day =
+    0), which is what makes the NIGHT_* thresholds comparable across a
+    planned route and a wall-clock ONTD timetable.
+
+    Boarding is judged on DEPARTURE time, alighting on ARRIVAL time:
       departure strictly before NIGHT_START_MIN (00:00+1) → boarding
       arrival at/after NIGHT_END_MIN (05:00+1)            → alighting
       otherwise                                            → night
@@ -152,13 +160,13 @@ def _classify_stops(
 ) -> list[StopType]:
     """Stop types for a whole direction given its departure time and
     provisional offsets: first always boarding, last always alighting
-    (termini by position), everything between via _classify_stop_type()
+    (termini by position), everything between via classify_stop_type()
     on its provisional arrival/departure clock times."""
     n = len(arr_offset)
     stop_types: list[StopType] = [StopType.BOARDING]
     for i in range(1, n - 1):
         stop_types.append(
-            _classify_stop_type(
+            classify_stop_type(
                 departure_time_min + arr_offset[i], departure_time_min + dep_offset[i]
             )
         )
@@ -188,7 +196,7 @@ def simple_automatic_timetable(
          around MIRROR_MIN (02:30) to get this direction's departure time.
       2. Walk forward from that departure time to a provisional arrival
          AND departure clock time per intermediate stop (same min-dwell
-         approximation) and classify via _classify_stop_type(): boarding
+         approximation) and classify via classify_stop_type(): boarding
          if it departs strictly before 00:00, alighting if it arrives
          at/after 05:00, night otherwise. First stop is always boarding,
          last always alighting, regardless of clock time — they're

@@ -1,26 +1,38 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { Composition } from '@/types/api'
 import AppIcon from '@/components/AppIcon.vue'
+import { useLocaleFormat } from '@/composables/useLocaleFormat'
 import {
   mdiSeatPassenger,
-  mdiBunkBed,
-  mdiBed,
   mdiBedOutline,
+  mdiBed,
+  mdiBunkBedOutline,
   mdiWeight,
   mdiSpeedometer,
   mdiChevronLeft,
   mdiChevronRight,
+  mdiTrainCarPassenger,
+  mdiArrowLeftRight,
+  mdiSpeedometerMedium,
+  mdiCalendarSync,
 } from '@mdi/js'
 
 // compact: display mode — show only the name and capacities, hiding the
-// description and physical specs (weight / max. speed).
+// description and physical specs (weight / max. speed). routeStats: the
+// headline route figures (distance/speed/frequency) merged in alongside the
+// composition, shown only once a route exists (compact mode).
 const props = defineProps<{
   compositions: Composition[]
   selectedId?: string | null
   compact?: boolean
+  routeStats?: { distanceKm: number; avgSpeedKmh: number; frequencies: string[] } | null
 }>()
 const emit = defineEmits<{ select: [compId: string] }>()
+
+const { t, te } = useI18n()
+const { formatInt } = useLocaleFormat()
 
 const direction = ref<'forward' | 'backward'>('forward')
 
@@ -48,20 +60,50 @@ function navigate(dir: 'prev' | 'next') {
 
 const current = computed(() => props.compositions[currentIndex.value])
 
+// Accommodation classes in fixed order, each with a structurally distinct
+// glyph. Three of the four are beds, so fill alone cannot separate them at
+// 20px: mdiBed (Sleeper) and mdiBedOutline (Capsule) were the same shape,
+// which made the NEW family — the only one carrying both — unreadable.
+const CLASS_ICONS: readonly [string, string][] = [
+  ['Seat', mdiSeatPassenger],
+  ['Couchette', mdiBedOutline],
+  ['Sleeper', mdiBed],
+  ['Capsule', mdiBunkBedOutline],
+]
+
+// Class keys arrive as English class_main values from the backend; the same
+// translations the evaluation drill-down uses label them here.
+function classLabel(key: string): string {
+  const k = `proposal.evaluation.classes.${key}`
+  return te(k) ? t(k) : key
+}
+
 // capacity.by_class is keyed by class_main directly (2026-07-22) — the
 // old density-constant matching is gone with the retired density column.
 const capacityStats = computed(() => {
   const by = current.value?.capacity.by_class ?? {}
-  const stats: { icon: string; count: number }[] = []
-  const seats = by['Seat']?.places ?? 0
-  const couchettes = by['Couchette']?.places ?? 0
-  const sleepers = by['Sleeper']?.places ?? 0
-  const capsules = by['Capsule']?.places ?? 0
-  if (seats > 0) stats.push({ icon: mdiSeatPassenger, count: seats })
-  if (couchettes > 0) stats.push({ icon: mdiBunkBed, count: couchettes })
-  if (sleepers > 0) stats.push({ icon: mdiBed, count: sleepers })
-  if (capsules > 0) stats.push({ icon: mdiBedOutline, count: capsules })
-  return stats
+  return CLASS_ICONS.map(([cls, icon]) => ({
+    icon,
+    label: classLabel(cls),
+    count: by[cls]?.places ?? 0,
+  })).filter((stat) => stat.count > 0)
+})
+
+// Merged in from the former RouteStatsCard — headline route figures shown
+// below the composition once a route exists (display mode only).
+const frequencyLabel = computed(() =>
+  (props.routeStats?.frequencies ?? [])
+    .map((f) => (te(`proposal.frequency.${f}`) ? t(`proposal.frequency.${f}`) : f))
+    .join(', '),
+)
+const routeStatRows = computed(() => {
+  const rs = props.routeStats
+  if (!rs) return []
+  return [
+    { icon: mdiArrowLeftRight, value: `${formatInt(rs.distanceKm)} km` },
+    { icon: mdiSpeedometerMedium, value: `${formatInt(rs.avgSpeedKmh)} km/h` },
+    { icon: mdiCalendarSync, value: frequencyLabel.value },
+  ]
 })
 
 const transitionName = computed(() => `slide-${direction.value}`)
@@ -82,7 +124,7 @@ watch(
 </script>
 
 <template>
-  <div class="overflow-hidden rounded-xl bg-primary-50/5 mx-16 py-5">
+  <div class="max-w-md overflow-hidden rounded-xl bg-primary-50/5 mr-16 py-5 px-12">
     <div class="flex flex-col items-center gap-4 text-center">
       <!-- Name row with inline arrows -->
       <div class="flex items-center gap-2">
@@ -93,7 +135,10 @@ watch(
         >
           <AppIcon :path="mdiChevronLeft" :size="20" />
         </button>
-        <p class="text-base font-bold text-primary-50">{{ current.composition_id }}</p>
+        <span class="flex items-center gap-2">
+          <AppIcon :path="mdiTrainCarPassenger" :size="18" color="var(--p-primary-50)" />
+          <p class="text-base font-bold text-primary-50">{{ current.composition_id }}</p>
+        </span>
         <button
           v-if="count > 1"
           class="shrink-0 cursor-pointer text-primary-50/40 transition hover:text-primary-50"
@@ -120,13 +165,15 @@ watch(
 
       <!-- Animated: capacity + physical specs -->
       <Transition :name="transitionName" mode="out-in">
-        <div :key="current?.composition_id" class="flex flex-col items-center gap-4 mt-4">
+        <div :key="current?.composition_id" class="flex flex-col items-center gap-4">
           <!-- Capacity -->
           <div v-if="capacityStats.length > 0" class="flex justify-center gap-8">
             <div
               v-for="stat in capacityStats"
               :key="stat.icon"
               class="flex items-center gap-2 text-primary-50/70"
+              :title="stat.label"
+              :aria-label="`${stat.count} ${stat.label}`"
             >
               <AppIcon :path="stat.icon" :size="20" />
               <span class="text-base font-semibold">{{ stat.count }}</span>
@@ -138,14 +185,25 @@ watch(
             <div class="flex items-center gap-2">
               <AppIcon :path="mdiWeight" :size="20" />
               <span class="text-base font-semibold"
-                >{{ Math.round(current.routing.total_weight_t) }} t</span
+                >{{ formatInt(current.routing.total_weight_t) }} t</span
               >
             </div>
             <div class="flex items-center gap-2">
               <AppIcon :path="mdiSpeedometer" :size="20" />
               <span class="text-base font-semibold"
-                >max. {{ current.routing.max_speed_kmh }} km/h</span
+                >max. {{ formatInt(current.routing.max_speed_kmh) }} km/h</span
               >
+            </div>
+          </div>
+
+          <!-- Route stats (merged in from RouteStatsCard, display mode only) -->
+          <div
+            v-if="routeStatRows.length > 0"
+            class="flex flex-wrap justify-center gap-x-8 gap-y-4 text-primary-50/70"
+          >
+            <div v-for="stat in routeStatRows" :key="stat.icon" class="flex items-center gap-2">
+              <AppIcon :path="stat.icon" :size="20" />
+              <span class="text-base font-semibold">{{ stat.value }}</span>
             </div>
           </div>
         </div>

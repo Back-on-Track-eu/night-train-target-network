@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed, nextTick, watch } from 'vue'
 import Popover from 'primevue/popover'
 import AppIcon from './AppIcon.vue'
 import { mdiMagnify } from '@mdi/js'
@@ -12,7 +12,11 @@ const emit = defineEmits<{ select: [stop: Stop] }>()
 const { t } = useI18n()
 const popoverRef = ref<InstanceType<typeof Popover> | null>(null)
 const inputRef = ref<HTMLInputElement | null>(null)
+const listRef = ref<HTMLElement | null>(null)
 const filterQuery = ref('')
+// Index of the keyboard-highlighted row in `filtered`; drives the same
+// background the mouse hover uses, so both share one highlight.
+const activeIndex = ref(0)
 
 const filtered = computed(() =>
   props.stops.filter(
@@ -36,15 +40,55 @@ function pick(stop: Stop) {
   popoverRef.value?.hide()
 }
 
+// First selectable (non-disabled) row — where the highlight lands on open and
+// after the filter changes.
+function firstEnabledIndex(): number {
+  const i = filtered.value.findIndex((s) => !isDisabled(s))
+  return i === -1 ? 0 : i
+}
+
+function scrollActiveIntoView() {
+  nextTick(() => {
+    listRef.value?.querySelectorAll('button')[activeIndex.value]?.scrollIntoView({
+      block: 'nearest',
+    })
+  })
+}
+
+// Move the highlight by `delta`, wrapping around and skipping disabled rows.
+function move(delta: number) {
+  const items = filtered.value
+  const n = items.length
+  if (!n) return
+  let i = activeIndex.value
+  for (let step = 0; step < n; step++) {
+    i = (i + delta + n) % n
+    if (!isDisabled(items[i])) {
+      activeIndex.value = i
+      break
+    }
+  }
+  scrollActiveIntoView()
+}
+
+function setActive(i: number) {
+  if (!isDisabled(filtered.value[i])) activeIndex.value = i
+}
+
 function onEnter() {
-  const first = filtered.value.find((s) => !isDisabled(s))
-  if (!first) return
-  pick(first)
+  const stop = filtered.value[activeIndex.value]
+  if (stop && !isDisabled(stop)) pick(stop)
 }
 
 function onShow() {
+  activeIndex.value = firstEnabledIndex()
   nextTick(() => inputRef.value?.focus())
 }
+
+// Reset the highlight to the first selectable row whenever the filter changes.
+watch(filtered, () => {
+  activeIndex.value = firstEnabledIndex()
+})
 </script>
 
 <template>
@@ -86,9 +130,12 @@ function onShow() {
           font-family: inherit;
         "
         @keydown.enter.prevent="onEnter"
+        @keydown.down.prevent="move(1)"
+        @keydown.up.prevent="move(-1)"
       />
     </div>
     <div
+      ref="listRef"
       class="overflow-y-auto p-1.5"
       style="
         max-height: 20rem;
@@ -100,15 +147,17 @@ function onShow() {
         {{ t('proposal.noStopsFound') }}
       </p>
       <button
-        v-for="stop in filtered"
+        v-for="(stop, i) in filtered"
         :key="stop.stop_id"
         class="block w-full rounded-lg px-4 py-3 text-left text-base transition-colors"
-        :class="
+        :class="[
           isDisabled(stop)
             ? 'cursor-not-allowed text-primary-50/30'
-            : 'cursor-pointer text-primary-50 hover:bg-[#2b2e4a]'
-        "
+            : 'cursor-pointer text-primary-50',
+          !isDisabled(stop) && i === activeIndex ? 'bg-[#2b2e4a]' : '',
+        ]"
         :disabled="isDisabled(stop)"
+        @mouseenter="setActive(i)"
         @click="pick(stop)"
       >
         {{ stop.name }}

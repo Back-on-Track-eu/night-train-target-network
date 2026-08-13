@@ -32,7 +32,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-CALC_VERSION: str = "0.9.15"
+CALC_VERSION: str = "0.9.17"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -66,25 +66,63 @@ CALC_MODEL_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
-    "0.9.15": {
-        "date": "2026-08-11",
+    "0.9.17": {
+        "date": "2026-08-13",
         "author": "david",
-        "changes": "Driver and crew rates are now route-dependent: the "
+        "changes": "Driver and crew rates are route-dependent: the "
         "Dienstplanwirkungsgrad (roster efficiency) is computed per trip "
-        "instead of being baked into the seeded hourly rate as a flat 60/70%. "
-        "operator_driver_costs_eur_h and operator_crew_costs_eur_h now hold "
-        "RAW productive-hour wages (54.16 / 48.75 rather than 90.33 / 69.67); "
-        "five new operators columns carry the roster parameters. A duty is "
-        "capped by driving time for drivers (Directive 2005/47/EC: 8 h on a "
-        "night shift) and by working time for onboard staff, so a trip "
-        "crossing a duty boundary needs relief crews and each relief adds a "
-        "fixed unproductive allowance — efficiency steps down at every "
-        "boundary and recovers as that allowance amortises over a longer "
-        "trip. VALUES CHANGE: driver_eur and crew_eur rise on trips longer "
-        "than one duty (reference night route ~+17% on both rates, ~+4% on "
-        "total operator cost) and are unchanged on short ones. No response "
-        "key is added or removed — only the CALC_FORMULAS legend gains "
-        "entries, which is additive.",
+        "instead of being baked into the seeded hourly rate as a flat "
+        "60/70%. operator_driver_costs_eur_h and operator_crew_costs_eur_h "
+        "now hold RAW productive-hour wages (54.16 / 48.75 rather than "
+        "90.33 / 69.67); five new operators columns carry the roster "
+        "parameters. A duty is capped by driving time for drivers "
+        "(Directive 2005/47/EC: 8 h on a night shift) and by working time "
+        "for onboard staff, so a trip crossing a duty boundary needs relief "
+        "crews and each relief adds a fixed unproductive allowance — "
+        "efficiency steps down at every boundary and recovers as that "
+        "allowance amortises over a longer trip. VALUES CHANGE: driver_eur "
+        "and crew_eur rise on trips longer than one duty (reference night "
+        "route ~+17% on both rates, ~+4% on total operator cost) and are "
+        "unchanged on short ones; refurbished seat coaches additionally "
+        "carry 0.25 attendants for door-sensor-less despatch. No response "
+        "key is added or removed — the CALC_FORMULAS legend gains entries, "
+        "which is additive. Numbered 0.9.17 rather than 0.9.15: this work "
+        "was developed in parallel on the calib branch, where it briefly "
+        "carried 0.9.15, and staging independently used 0.9.15 and 0.9.16 "
+        "in the meantime.",
+    },
+    "0.9.16": {
+        "date": "2026-08-12",
+        "author": "david",
+        "changes": "per_trip_pair_per_section fix: sections were enumerated "
+        "from ticketed OD relations, so any stop range bounded by a night "
+        "stop (excluded from OD generation by the stopgap demand model) had "
+        "no cell — the frontend section slider showed 'No data' for it. "
+        "Sections are now every ordered pair of a trip's stops, independent "
+        "of demand. Section keys are additionally canonicalised to the "
+        "outbound trip's stop order, folding both directions of a pair into "
+        "one undirected cell (Breakdown values and NormalisationScope "
+        "physics accumulate) — previously keys were directional and the "
+        "frontend's outbound-ordered lookup silently showed the outbound "
+        "direction only. Allocation rules per section are unchanged. "
+        "Frontend-visible: section cell values roughly double (both "
+        "directions), reverse-ordered keys disappear, cells exist for every "
+        "slider range.",
+    },
+    "0.9.15": {
+        "date": "2026-08-12",
+        "author": "david",
+        "changes": "ADDITIVE output change: the gallery summary row "
+        "(summary.py's build_summary_row(), returned as 'summary' by "
+        "POST /api/proposal/calc and stored in "
+        "proposals.proposal_summaries) gains country_relations — the "
+        "sorted 'AA__BB' keys of every country-to-country relation the "
+        "route actually serves, derived from od_pairs so a merely "
+        "transited country contributes nothing. Ranking dimension behind "
+        "the new GET /api/proposals/stats (§7.7). No cost, revenue, "
+        "margin or demand number changes; the bump exists so the version "
+        "refresh (§4.2) rewrites every stored summary with the new "
+        "column.",
     },
     "0.9.14": {
         "date": "2026-08-10",
@@ -614,6 +652,12 @@ CALC_FORMULAS: dict[str, Formula] = {
                 ref="column:input_params.operators.operator_crew_costs_eur_h",
                 description="Crew wage per productive hour, per attendant",
                 unit="€/h",
+            ),
+            FormulaParam(
+                symbol="eta_crew",
+                ref="formula:calc.roster_efficiency_driver",
+                description="Share of paid crew hours that is productive",
+                unit="–",
             ),
             FormulaParam(
                 symbol="t_drive,h",

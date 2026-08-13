@@ -1,0 +1,270 @@
+<script setup lang="ts">
+import { ref, onMounted, onUnmounted, watch } from 'vue'
+import maplibregl, { type FilterSpecification } from 'maplibre-gl'
+import 'maplibre-gl/dist/maplibre-gl.css'
+import type { GalleryMapRoute } from '@/types/api'
+
+// Draws every proposal route in the search results at once — the multi-route
+// counterpart to MapView.vue (which is single-route with scope/hover). Same
+// basemap and brand colour; lines are semi-transparent so overlaps read.
+const PRIMARY = '#2271b3'
+const PRIMARY_LIGHT = '#eef4fb'
+// Label text sits on the near-white basemap, so it needs a darker shade than
+// the bubble fill (mirrors MapView.vue's LABEL_PRIMARY).
+const LABEL_PRIMARY = '#15517f'
+// Font stacks the basemap's own glyph server already serves (see MapView.vue).
+const FONT_BOLD = ['Montserrat Medium', 'Open Sans Bold', 'Noto Sans Regular']
+const FONT_REGULAR = ['Montserrat Regular', 'Open Sans Regular', 'Noto Sans Regular']
+const EUROPE_BOUNDS: [number, number, number, number] = [-30, 27, 50, 73]
+const ROUTES_SOURCE = 'gallery-routes'
+const ROUTES_LAYER = 'gallery-routes-line'
+// Invisible wide copy of the line layer — a 2.5px line is near-impossible to
+// hover, so this is the hit target (MapLibre still hit-tests zero-opacity fills).
+const ROUTES_HIT_LAYER = 'gallery-routes-hit'
+// Stop bubbles + name labels, shown only for the route the hovered card points
+// to. Their own point source starts empty and is filled on highlight.
+const STOPS_SOURCE = 'gallery-stops'
+const STOPS_CIRCLE_LAYER = 'gallery-stops-circle'
+const STOPS_LABEL_LAYER = 'gallery-stops-label'
+
+const props = defineProps<{ routes: GalleryMapRoute[]; highlightedKey?: string | null }>()
+const emit = defineEmits<{ hoverRoute: [key: string | null] }>()
+
+const mapContainer = ref<HTMLDivElement | null>(null)
+let map: maplibregl.Map | null = null
+let mapLoaded = false
+let hoveredKey: string | null = null
+// The map lives in a flex/sticky column whose width settles after init;
+// MapLibre doesn't watch its container, so resize it ourselves.
+let resizeObserver: ResizeObserver | null = null
+
+function routesFC() {
+  const features = props.routes.flatMap((r) =>
+    r.lines.map((line) => ({
+      type: 'Feature' as const,
+      geometry: { type: 'LineString' as const, coordinates: line },
+      // key ties every leg back to its proposal so a hover can be reported.
+      properties: { key: r.key },
+    })),
+  )
+  return { type: 'FeatureCollection' as const, features }
+}
+
+// Point features for one route's stops (empty when none is highlighted).
+// Consecutive coordinates repeat at leg/trip boundaries, so dedupe by position;
+// the first and last survivors are the route endpoints (drawn bolder).
+function stopsFC(route: GalleryMapRoute | null) {
+  if (!route) return { type: 'FeatureCollection' as const, features: [] }
+  const seen = new Set<string>()
+  const pts: GalleryMapRoute['stops'] = []
+  for (const s of route.stops) {
+    const id = `${s.lon.toFixed(5)},${s.lat.toFixed(5)}`
+    if (seen.has(id)) continue
+    seen.add(id)
+    pts.push(s)
+  }
+  const features = pts.map((s, i) => ({
+    type: 'Feature' as const,
+    geometry: { type: 'Point' as const, coordinates: [s.lon, s.lat] },
+    properties: { name: s.name, endpoint: i === 0 || i === pts.length - 1 },
+  }))
+  return { type: 'FeatureCollection' as const, features }
+}
+
+function setStops(route: GalleryMapRoute | null) {
+  if (!map || !mapLoaded) return
+  ;(map.getSource(STOPS_SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(stopsFC(route))
+}
+
+// Smoothly frame a single route, tighter than the all-routes fit so the hovered
+// line fills the view. Walks the line geometry for an accurate hull.
+function fitToRoute(route: GalleryMapRoute) {
+  if (!map || !mapLoaded) return
+  const bounds = new maplibregl.LngLatBounds()
+  let any = false
+  for (const line of route.lines)
+    for (const c of line) {
+      bounds.extend(c as [number, number])
+      any = true
+    }
+  if (!any)
+    for (const s of route.stops) {
+      bounds.extend([s.lon, s.lat])
+      any = true
+    }
+  if (any) map.fitBounds(bounds, { padding: 80, maxZoom: 10, duration: 700 })
+}
+
+// Frame all routes. Endpoint coordinates (route.stops) are enough to bound the
+// view and far cheaper than walking every geometry vertex.
+function fit() {
+  if (!map || !mapLoaded) return
+  const bounds = new maplibregl.LngLatBounds()
+  let any = false
+  for (const r of props.routes)
+    for (const s of r.stops) {
+      bounds.extend([s.lon, s.lat])
+      any = true
+    }
+  if (any) map.fitBounds(bounds, { padding: 60, maxZoom: 9, duration: 600 })
+}
+
+function sync() {
+  if (!map || !mapLoaded) return
+  // Features are being replaced — clear any active isolation so a departed
+  // route doesn't leave the others permanently hidden, and drop stray bubbles.
+  hoveredKey = null
+  setIsolate(null)
+  setStops(null)
+  ;(map.getSource(ROUTES_SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(routesFC())
+  fit()
+}
+
+// Isolate the focused route: show only it and hide every other route (both the
+// visible line and its hover hit-target). null shows them all again.
+function setIsolate(key: string | null) {
+  if (!map || !mapLoaded) return
+  const filter = (key ? ['==', ['get', 'key'], key] : null) as FilterSpecification | null
+  map.setFilter(ROUTES_LAYER, filter)
+  map.setFilter(ROUTES_HIT_LAYER, filter)
+}
+
+function onRouteHover(e: maplibregl.MapLayerMouseEvent) {
+  if (!map) return
+  const raw = e.features?.[0]?.properties?.key
+  const key = raw == null ? null : String(raw)
+  map.getCanvas().style.cursor = key ? 'pointer' : ''
+  if (key === hoveredKey) return
+  hoveredKey = key
+  setIsolate(key)
+  emit('hoverRoute', key)
+}
+
+function onRouteLeave() {
+  if (!map || hoveredKey === null) return
+  map.getCanvas().style.cursor = ''
+  hoveredKey = null
+  setIsolate(null)
+  emit('hoverRoute', null)
+}
+
+function initLayers() {
+  if (!map) return
+  map.addSource(ROUTES_SOURCE, { type: 'geojson', data: routesFC() })
+  map.addLayer({
+    id: ROUTES_LAYER,
+    type: 'line',
+    source: ROUTES_SOURCE,
+    layout: { 'line-join': 'round', 'line-cap': 'round' },
+    paint: { 'line-color': PRIMARY, 'line-width': 2.5, 'line-opacity': 0.5 },
+  })
+  map.addLayer({
+    id: ROUTES_HIT_LAYER,
+    type: 'line',
+    source: ROUTES_SOURCE,
+    layout: { 'line-join': 'round', 'line-cap': 'round' },
+    paint: { 'line-color': PRIMARY, 'line-width': 16, 'line-opacity': 0 },
+  })
+
+  // Stop bubbles + labels, on top of the lines. Filled only while a card is
+  // hovered (see applyHighlight); empty otherwise.
+  map.addSource(STOPS_SOURCE, {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] },
+  })
+  map.addLayer({
+    id: STOPS_CIRCLE_LAYER,
+    type: 'circle',
+    source: STOPS_SOURCE,
+    paint: {
+      'circle-radius': ['case', ['get', 'endpoint'], 6, 4],
+      'circle-color': PRIMARY,
+      'circle-stroke-color': PRIMARY_LIGHT,
+      'circle-stroke-width': 2.5,
+    },
+  })
+  map.addLayer({
+    id: STOPS_LABEL_LAYER,
+    type: 'symbol',
+    source: STOPS_SOURCE,
+    layout: {
+      'text-field': ['get', 'name'],
+      'text-font': ['case', ['get', 'endpoint'], ['literal', FONT_BOLD], ['literal', FONT_REGULAR]],
+      'text-size': ['case', ['get', 'endpoint'], 13, 11],
+      'text-max-width': 8,
+      'text-padding': 3,
+      // Radial placement puts each label on whichever side is free, so dense
+      // stop sequences keep more of their names.
+      'text-variable-anchor': ['left', 'right', 'top', 'bottom'],
+      'text-radial-offset': 0.8,
+      'text-justify': 'auto',
+      // Lower sort key wins a collision, so endpoints outrank intermediate stops.
+      'symbol-sort-key': ['case', ['get', 'endpoint'], 0, 1],
+    },
+    paint: {
+      'text-color': LABEL_PRIMARY,
+      'text-halo-color': PRIMARY_LIGHT,
+      'text-halo-width': 1.6,
+      'text-halo-blur': 0.2,
+    },
+  })
+
+  map.on('mousemove', ROUTES_HIT_LAYER, onRouteHover)
+  map.on('mouseleave', ROUTES_HIT_LAYER, onRouteLeave)
+}
+
+onMounted(() => {
+  if (!mapContainer.value) return
+  map = new maplibregl.Map({
+    container: mapContainer.value,
+    style: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
+    center: [13, 48],
+    zoom: 4,
+    maxBounds: EUROPE_BOUNDS,
+  })
+  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
+  map.on('load', () => {
+    mapLoaded = true
+    initLayers()
+    fit()
+  })
+  resizeObserver = new ResizeObserver(() => map?.resize())
+  resizeObserver.observe(mapContainer.value)
+})
+
+watch(() => props.routes, sync, { deep: true })
+
+// Card-driven highlight: hovering a card isolates its route, reveals that
+// route's stop bubbles + names, and smoothly frames it. Clearing the highlight
+// restores every route and eases back out to the all-routes view.
+function applyHighlight(key: string | null) {
+  if (!map || !mapLoaded) return
+  const route = key ? (props.routes.find((r) => r.key === key) ?? null) : null
+  // A card whose route isn't drawn here (e.g. a straight-line stand-in) leaves
+  // the current view untouched rather than blanking the map.
+  if (key && !route) return
+  setIsolate(route ? route.key : null)
+  setStops(route)
+  if (route) fitToRoute(route)
+  else fit()
+}
+watch(
+  () => props.highlightedKey,
+  (k) => applyHighlight(k ?? null),
+)
+
+onUnmounted(() => {
+  resizeObserver?.disconnect()
+  resizeObserver = null
+  map?.remove()
+  map = null
+})
+</script>
+
+<template>
+  <div
+    ref="mapContainer"
+    class="overflow-hidden rounded-xl"
+    style="width: 100%; height: 100%; min-height: 480px"
+  />
+</template>

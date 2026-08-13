@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import json
 
+from models.evaluation.summary import build_summary_row
 from adapters.proposal.filter_builder import (
     ALL_FILTER_KEYS,
     ARRAY_COLUMNS,
@@ -292,6 +293,11 @@ def proposal_to_response_dict(record: dict, route: dict, evaluation: dict) -> di
         "calc_version": record["calc_version"],
         "route_fingerprint": record["route_fingerprint"],
         "request": request,
+        # §5.4 gallery KPIs, from the exact route/evaluation this response
+        # carries — the same build_summary_row() the calc endpoint and the
+        # publish projection use, so a loaded proposal's demand/modal-shift
+        # figures match what /calc showed when it was built.
+        "summary": build_summary_row(route, evaluation),
         "route": route,
         "evaluation": evaluation,
     }
@@ -311,7 +317,9 @@ def summary_row_to_dict(row: dict) -> dict:
 
     "existing" rows (ONTD catalog, §5.5 decision 23): the reduced,
     descriptive shape — identity (route_id, name), the shared metric
-    subset, geometry_routed (whether the drawn line is real routing or a
+    subset (country_relations included: both projections derive the
+    relations a row actually serves, §7.7, so the statistics rank both
+    sources on one axis), geometry_routed (whether the drawn line is real routing or a
     straight-line fallback), and ontd_url (deep link to the route's ONTD
     page). Proposal-only fields (financials, demand, engagement counts,
     timestamps,
@@ -331,6 +339,7 @@ def summary_row_to_dict(row: dict) -> dict:
             "avg_speed_kmh": _to_float(row["avg_speed_kmh"]),
             "n_stops": row["n_stops"],
             "countries": list(row["countries"]),
+            "country_relations": list(row["country_relations"]),
             "stop_ids": list(row["stop_ids"]),
             "co2_g_per_pax_km": _to_float(row["co2_g_per_pax_km"]),
             "geometry_routed": row["geometry_routed"],
@@ -352,6 +361,7 @@ def summary_row_to_dict(row: dict) -> dict:
         "avg_speed_kmh": _to_float(row["avg_speed_kmh"]),
         "n_stops": row["n_stops"],
         "countries": list(row["countries"]),
+        "country_relations": list(row["country_relations"]),
         "stop_ids": list(row["stop_ids"]),
         "cost_eur_per_train_km": _to_float(row["cost_eur_per_train_km"]),
         "revenue_eur_per_train_km": _to_float(row["revenue_eur_per_train_km"]),
@@ -369,6 +379,8 @@ def summary_row_to_dict(row: dict) -> dict:
         "co2_g_per_pax_km": _to_float(row["co2_g_per_pax_km"]),
         "likes_count": row["likes_count"],
         "comments_count": row["comments_count"],
+        "display_name": row["display_name"],
+        "is_guest": row["is_guest"],
         "created_at": _isoformat(row.get("created_at")),
         "updated_at": _isoformat(row.get("updated_at")),
     }

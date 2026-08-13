@@ -110,6 +110,34 @@ PROPOSALS_DEFAULT_LIMIT = _env_int("PROPOSALS_DEFAULT_LIMIT", 50)
 
 
 # =============================================================================
+# Proposals statistics — api/proposal_stats.py
+# =============================================================================
+
+# How many countries and country-to-country relations the top and flop
+# rankings return. Deliberately NOT request parameters: they shape a
+# response, and letting two callers read different-length rankings off
+# the same deployment buys nothing.
+PROPOSALS_STATS_COUNTRY_TOP = _env_int("PROPOSALS_STATS_COUNTRY_TOP", 5)
+PROPOSALS_STATS_COUNTRY_FLOP = _env_int("PROPOSALS_STATS_COUNTRY_FLOP", 5)
+
+# How far apart two countries may be, measured on real track between
+# their reference stations, and still count as a relation one night
+# train could plausibly connect (§7.7). 1600 km is roughly the far edge
+# of a single night at night-train speeds; above it the pair is a
+# two-night journey and belongs to a different question.
+#
+# This is the API-side gate. scripts/build_country_relations.py applies
+# the same number as its build ceiling — it prefilters candidate pairs on
+# great-circle distance × a rail detour factor, then keeps only those
+# whose ROUTED distance also comes in under it. Sea crossings therefore
+# drop out on their own: Italy and Greece look close in a straight line
+# and are 1900+ km apart by track.
+PROPOSALS_STATS_RELATION_MAX_KM = float(
+    os.environ.get("PROPOSALS_STATS_RELATION_MAX_KM") or 1600
+)
+
+
+# =============================================================================
 # Effective-config boot log
 # =============================================================================
 
@@ -145,6 +173,9 @@ def log_effective_config() -> None:
         "GUEST_TTL_DAYS": GUEST_TTL_DAYS,
         "FEEDBACK_SUBJECT_MAX_LEN": FEEDBACK_SUBJECT_MAX_LEN,
         "PROPOSALS_DEFAULT_LIMIT": PROPOSALS_DEFAULT_LIMIT,
+        "PROPOSALS_STATS_COUNTRY_TOP": PROPOSALS_STATS_COUNTRY_TOP,
+        "PROPOSALS_STATS_COUNTRY_FLOP": PROPOSALS_STATS_COUNTRY_FLOP,
+        "PROPOSALS_STATS_RELATION_MAX_KM": PROPOSALS_STATS_RELATION_MAX_KM,
     }
     logger.info(
         "Effective config — wiring: %s",

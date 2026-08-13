@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import contextmanager
 from typing import Optional
 
 import psycopg2
@@ -50,6 +51,7 @@ from psycopg2.extras import Json
 
 from adapters.proposal.filter_builder import (
     DEFAULT_SOURCES,
+    build_aggregate_select,
     build_order_by,
     build_where,
 )
@@ -151,8 +153,28 @@ class ProposalRepository:
             password=required["POSTGRES_PASSWORD"],
         )
 
+    @contextmanager
     def _cursor(self):
-        return self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        """One cursor on this repository's single connection, rolled back
+        if the block raises.
+
+        The rollback is the point. psycopg2's own cursor context manager
+        closes the cursor but leaves the transaction open, so one failed
+        statement puts the connection into "current transaction is
+        aborted" and EVERY later call on this worker fails until the
+        process restarts — a single bad query in a read path takes the
+        publish path down with it. Rolling back here confines a failure
+        to the call that caused it. Commits stay the caller's business:
+        the write paths commit explicitly after their block.
+        """
+        cursor = self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        try:
+            yield cursor
+        except Exception:
+            self._conn.rollback()
+            raise
+        finally:
+            cursor.close()
 
     def close(self) -> None:
         if self._conn and not self._conn.closed:
@@ -774,7 +796,8 @@ class ProposalRepository:
         "proposal_id, proposal_version, user_id, name, "
         "route_fingerprint, composition_id, scenario_id, "
         "route_builder_version, calc_version, total_distance_km, "
-        "total_time_h, avg_speed_kmh, n_stops, countries, stop_ids, "
+        "total_time_h, avg_speed_kmh, n_stops, countries, country_relations, "
+        "stop_ids, "
         "cost_eur_per_train_km, revenue_eur_per_train_km, "
         "margin_eur_per_train_km, subsidy_eur_per_year, "
         "demand_trips_per_year, demand_trip_km_per_year, "
@@ -796,9 +819,12 @@ class ProposalRepository:
     _ENGAGEMENT_CTE = (
         "proposal_summaries_with_engagement AS ("
         "  SELECT ps.*, "
+        "         u.display_name, "
+        "         starts_with(u.display_name, 'guest_') AS is_guest, "
         "         COALESCE(l.likes_count, 0)::int AS likes_count, "
         "         COALESCE(c.comments_count, 0)::int AS comments_count "
         "  FROM proposals.proposal_summaries ps "
+        "  LEFT JOIN admin.users u ON u.user_id = ps.user_id "
         "  LEFT JOIN ("
         "    SELECT proposal_id, count(*) AS likes_count "
         "    FROM proposals.likes GROUP BY proposal_id"
@@ -827,7 +853,8 @@ class ProposalRepository:
         "       proposal_id, proposal_version, user_id, name, "
         "       route_fingerprint, composition_id, scenario_id, "
         "       route_builder_version, calc_version, total_distance_km, "
-        "       total_time_h, avg_speed_kmh, n_stops, countries, stop_ids, "
+        "       total_time_h, avg_speed_kmh, n_stops, countries, "
+        "       country_relations, stop_ids, "
         "       cost_eur_per_train_km, revenue_eur_per_train_km, "
         "       margin_eur_per_train_km, subsidy_eur_per_year, "
         "       demand_trips_per_year, demand_trip_km_per_year, "
@@ -835,7 +862,8 @@ class ProposalRepository:
         "       shift_car_trips_per_year, shift_car_trip_km_per_year, "
         "       co2_savings_t_per_year, subsidy_eur_per_t_co2, "
         "       demand_kpis_placeholder, co2_g_per_pax_km, geom_simplified, "
-        "       likes_count, comments_count, created_at, updated_at, "
+        "       likes_count, comments_count, display_name, is_guest, "
+        "       created_at, updated_at, "
         "       NULL::boolean AS geometry_routed, NULL::text AS ontd_url "
         "FROM proposal_summaries_with_engagement"
     )
@@ -847,7 +875,7 @@ class ProposalRepository:
         "       NULL::int AS scenario_id, "
         "       NULL::text AS route_builder_version, NULL::text AS calc_version, "
         "       total_distance_km, total_time_h, avg_speed_kmh, n_stops, "
-        "       countries, stop_ids, "
+        "       countries, country_relations, stop_ids, "
         "       NULL::numeric AS cost_eur_per_train_km, "
         "       NULL::numeric AS revenue_eur_per_train_km, "
         "       NULL::numeric AS margin_eur_per_train_km, "
@@ -863,6 +891,7 @@ class ProposalRepository:
         "       NULL::boolean AS demand_kpis_placeholder, co2_g_per_pax_km, "
         "       geom_simplified, "
         "       NULL::int AS likes_count, NULL::int AS comments_count, "
+        "       NULL::text AS display_name, NULL::boolean AS is_guest, "
         "       NULL::timestamptz AS created_at, NULL::timestamptz AS updated_at, "
         "       geometry_routed, ontd_url "
         "FROM ontd.route_summaries"
@@ -910,7 +939,8 @@ class ProposalRepository:
             sql = (
                 f"{ctes}"
                 f"SELECT source, route_id, geometry_routed, ontd_url, "
-                f"{self._SUMMARY_COLUMNS}, likes_count, comments_count "
+                f"{self._SUMMARY_COLUMNS}, likes_count, comments_count, "
+                f"display_name, is_guest "
                 f"FROM gallery{where_clause} "
                 f"ORDER BY {build_order_by(sort)}"
             )
@@ -1071,3 +1101,206 @@ class ProposalRepository:
             rows = cur.fetchall()
         self._conn.rollback()
         return [dict(row) for row in rows]
+
+    # =========================================================================
+    # Statistics — GET /api/proposals/stats (§7.7)
+    # =========================================================================
+    #
+    # Four read-only queries over the same gallery CTE stack the list and
+    # map sections use, so every statistic reflects exactly the rows the
+    # gallery would show for the same filter. None of them paginate: an
+    # aggregate over a page would be a statistic about a page.
+
+    # The current base scenario's pinned stop snapshot — reference
+    # stations and the relation universe are only meaningful against the
+    # catalog they were built from (§3.1: resolved, never inferred).
+    _BASE_STOP_INFRA_VERSION = (
+        "(SELECT stop_infrastructures_version FROM scenario.scenarios "
+        " WHERE is_current_base)"
+    )
+
+    def stats_kpis(self, filters: Optional[dict] = None) -> list[dict]:
+        """count/avg/min/max (and sum, for extensive columns) of every
+        numeric summary column, per source AND across both.
+
+        One pass: GROUPING SETS ((source), ()) returns the per-source
+        rows and the combined row together, with source NULL marking the
+        combined one — two round trips for the same numbers would only
+        risk them disagreeing under concurrent publishes.
+        """
+        where_sql, params = build_where(filters or {})
+        where_clause = f" WHERE {where_sql}" if where_sql else ""
+        with self._cursor() as cur:
+            cur.execute(
+                f"WITH {self._ENGAGEMENT_CTE}, {self._gallery_cte(filters)} "
+                f"SELECT source, count(*) AS n_rows, {build_aggregate_select()} "
+                f"FROM gallery{where_clause} "
+                "GROUP BY GROUPING SETS ((source), ())",
+                params,
+            )
+            rows = cur.fetchall()
+        self._conn.rollback()
+        return [dict(row) for row in rows]
+
+    def stats_reach(self, filters: Optional[dict] = None) -> list[dict]:
+        """Distinct stops and countries touched, per source and combined —
+        the network-reach counterpart to the KPI aggregates, where a plain
+        sum of n_stops would double-count every shared station.
+
+        The two lateral unnests multiply rows against each other, which
+        count(DISTINCT ...) is indifferent to; LEFT JOIN keeps a row whose
+        array is empty from disappearing from the row count.
+        """
+        where_sql, params = build_where(filters or {})
+        where_clause = f" WHERE {where_sql}" if where_sql else ""
+        with self._cursor() as cur:
+            cur.execute(
+                f"WITH {self._ENGAGEMENT_CTE}, {self._gallery_cte(filters)}, "
+                "filtered AS ("
+                f"  SELECT source, stop_ids, countries FROM gallery{where_clause}"
+                ") "
+                "SELECT f.source, "
+                "       count(DISTINCT s.stop_id) AS n_distinct_stops, "
+                "       count(DISTINCT c.country) AS n_distinct_countries "
+                "FROM filtered f "
+                "LEFT JOIN LATERAL unnest(f.stop_ids) AS s(stop_id) ON TRUE "
+                "LEFT JOIN LATERAL unnest(f.countries) AS c(country) ON TRUE "
+                "GROUP BY GROUPING SETS ((f.source), ())",
+                params,
+            )
+            rows = cur.fetchall()
+        self._conn.rollback()
+        return [dict(row) for row in rows]
+
+    def stats_country_counts(self, filters: Optional[dict] = None) -> list[dict]:
+        """Rows per country, ranked — the same "a row counts once per
+        country it touches" grain as map_country_counts(), without the
+        border geometry and with the countries nobody touched included.
+
+        The universe is the rail-network catalog (country_geom NOT NULL —
+        countries no route can transit are excluded by definition) unioned
+        with whatever the filtered set actually mentions, so an ONTD
+        country outside the catalog still ranks while a catalog country
+        with no proposals shows up at zero. That zero is the whole point
+        of the flop list: "nobody has proposed anything here" is the
+        answer, not a missing row. UNK (the open-water sentinel, §5.4) is
+        not a country and never joins the universe.
+        """
+        where_sql, params = build_where(filters or {})
+        where_clause = f" WHERE {where_sql}" if where_sql else ""
+        with self._cursor() as cur:
+            cur.execute(
+                f"WITH {self._ENGAGEMENT_CTE}, {self._gallery_cte(filters)}, "
+                "observed AS ("
+                "  SELECT source, unnest(countries) AS country "
+                f"  FROM gallery{where_clause}"
+                "), universe AS ("
+                "  SELECT country_code AS country FROM input_params.countries "
+                "  WHERE country_geom IS NOT NULL "
+                "  UNION "
+                "  SELECT DISTINCT country FROM observed WHERE country <> 'UNK'"
+                ") "
+                "SELECT u.country, "
+                "       count(o.source) FILTER (WHERE o.source = 'proposal') "
+                "         AS n_proposals, "
+                "       count(o.source) FILTER (WHERE o.source = 'existing') "
+                "         AS n_existing, "
+                "       count(o.source) AS n "
+                "FROM universe u LEFT JOIN observed o ON o.country = u.country "
+                "GROUP BY u.country "
+                "ORDER BY n_proposals DESC, n DESC, u.country",
+                params,
+            )
+            rows = cur.fetchall()
+        self._conn.rollback()
+        return [dict(row) for row in rows]
+
+    def stats_relation_counts(
+        self, filters: Optional[dict] = None, max_relation_km: float = 1600.0
+    ) -> list[dict]:
+        """Rows per country-to-country RELATION, ranked, over the routable
+        candidate set within max_relation_km.
+
+        Driven by input_params.country_relations rather than by what the
+        rows happen to contain: a relation nobody serves has to appear
+        (at zero) for the flop list to mean anything, and a pair the
+        router could not connect must not appear at all. The join is on
+        the stored "AA__BB" key, which both summary projections write in
+        the same sorted form.
+        """
+        where_sql, params = build_where(filters or {})
+        where_clause = f" WHERE {where_sql}" if where_sql else ""
+        with self._cursor() as cur:
+            cur.execute(
+                f"WITH {self._ENGAGEMENT_CTE}, {self._gallery_cte(filters)}, "
+                "observed AS ("
+                "  SELECT source, unnest(country_relations) AS relation "
+                f"  FROM gallery{where_clause}"
+                ") "
+                "SELECT r.country_a, r.country_b, r.rail_km, r.rail_time_h, "
+                "       count(o.source) FILTER (WHERE o.source = 'proposal') "
+                "         AS n_proposals, "
+                "       count(o.source) FILTER (WHERE o.source = 'existing') "
+                "         AS n_existing, "
+                "       count(o.source) AS n "
+                "FROM input_params.country_relations r "
+                "LEFT JOIN observed o "
+                "  ON o.relation = r.country_a || '__' || r.country_b "
+                f"WHERE r.stop_infra_version = {self._BASE_STOP_INFRA_VERSION} "
+                "  AND r.rail_km IS NOT NULL AND r.rail_km <= %s "
+                "GROUP BY r.country_a, r.country_b, r.rail_km, r.rail_time_h "
+                "ORDER BY n_proposals DESC, n DESC, r.rail_km, "
+                "         r.country_a, r.country_b",
+                params + [max_relation_km],
+            )
+            rows = cur.fetchall()
+        self._conn.rollback()
+        return [dict(row) for row in rows]
+
+    def stats_relation_universe(self, max_relation_km: float = 1600.0) -> dict:
+        """What the relation candidate set is made of, and which station
+        each country was measured from — filter-independent, so it
+        describes the same universe every ranking was drawn from.
+
+        Returned alongside the rankings so nothing disappears without a
+        number attached: pairs too far apart and pairs with no rail path
+        are counted rather than silently absent, and the reference
+        stations make every distance auditable (§7.7's R2 basis — the
+        catalog stop closest to that country's stop centroid).
+        """
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT count(*) FILTER (WHERE rail_km IS NOT NULL "
+                "                          AND rail_km <= %s) AS n_pairs, "
+                "       count(*) FILTER (WHERE rail_km IS NOT NULL "
+                "                          AND rail_km > %s) "
+                "         AS excluded_over_threshold, "
+                "       count(*) FILTER (WHERE rail_km IS NULL) "
+                "         AS excluded_unroutable, "
+                "       max(built_at) AS built_at "
+                "FROM input_params.country_relations "
+                f"WHERE stop_infra_version = {self._BASE_STOP_INFRA_VERSION}",
+                (max_relation_km, max_relation_km),
+            )
+            counts = dict(cur.fetchone())
+
+            cur.execute(
+                "WITH refs AS ("
+                "  SELECT country_a AS country, ref_stop_a AS stop_id "
+                "  FROM input_params.country_relations "
+                f"  WHERE stop_infra_version = {self._BASE_STOP_INFRA_VERSION} "
+                "  UNION "
+                "  SELECT country_b, ref_stop_b "
+                "  FROM input_params.country_relations "
+                f"  WHERE stop_infra_version = {self._BASE_STOP_INFRA_VERSION}"
+                ") "
+                "SELECT refs.country, refs.stop_id, si.stop_name, "
+                "       si.stop_lat, si.stop_lon "
+                "FROM refs JOIN input_params.stop_infrastructures si "
+                "  ON si.stop_id = refs.stop_id "
+                f" AND si.stop_infra_version = {self._BASE_STOP_INFRA_VERSION} "
+                "ORDER BY refs.country"
+            )
+            stations = [dict(row) for row in cur.fetchall()]
+        self._conn.rollback()
+        return {**counts, "reference_stations": stations}

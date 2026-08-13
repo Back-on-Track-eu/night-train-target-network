@@ -73,6 +73,35 @@ files describing the same three backend services, kept manually in sync:
 - Block order in `.vue` files: `<script>` → `<template>` → `<style>`
   (enforced by ESLint)
 
+### Routing (frontend)
+
+- `frontend/src/router/index.ts` — `vue-router` in HTML5 history mode.
+  Four routes: `/` (redirect to `/gallery`), `/gallery` (`Gallery.vue`),
+  `/proposal-builder` and `/proposal/:id` (both `ProposalWorkspace.vue`).
+  `App.vue` is just `<AppHeader/><router-view/><AuthModal/><ToastContainer/>`.
+- `/proposal-builder` and `/proposal/:id` deliberately share **one**
+  component (`ProposalWorkspace.vue`, a thin wrapper deriving
+  `mode`/`proposalId` from `route.params.id` and passing them to
+  `ProposalViewport`) instead of two separate route components. This is
+  load-bearing, not incidental: after publishing a new proposal, the app
+  does `router.replace({ name: 'proposal', params: { id } })` and relies on
+  Vue Router patching the existing instance rather than remounting it —
+  splitting this into two components would remount `ProposalViewport` and
+  discard the just-computed state.
+- Gallery's search bar (mode/from/to/station/country/sort/dir) round-trips
+  through `/gallery`'s query string — it owns that sync itself
+  (`useRoute`/`useRouter` inside `Gallery.vue`), reflecting its defaults into
+  the URL right after mount too, via `seedToQuery`/`seedFromQuery`
+  (`frontend/src/lib/proposalPrefill.ts`). `/proposal-builder`'s prefill seed
+  deliberately does *not* go through the URL: `Gallery.vue`'s
+  `createProposal()` stashes it in `store.pendingProposalSeed`
+  (`frontend/src/stores/store.ts`) just before the push, and
+  `ProposalWorkspace.vue` reads it once on mount — keeping arbitrary stop
+  picks out of the address bar at the cost of not surviving a reload.
+- The deployed (nginx) frontend image needs `frontend/nginx.conf`'s
+  `try_files ... /index.html` fallback for history-mode routes to survive a
+  direct load/refresh — keep it if `Dockerfile.demo`'s base image changes.
+
 ### CSS / Styling
 
 - Tailwind CSS v4 (no `tailwind.config.js` — uses `@tailwindcss/vite` plugin)

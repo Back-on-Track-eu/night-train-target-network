@@ -299,6 +299,18 @@ jobs:
         run: docker exec night-train-api python /app/db/ontd/bootstrap.py --force --strict
 
       # ------------------------------------------------------------------
+      # Build the country relation candidate set — explicit and ordered
+      # ------------------------------------------------------------------
+      # Same reasoning as the ONTD load above: the entrypoint runs this in
+      # the background (right for production, API up in seconds), but
+      # test_55's relation rankings need input_params.country_relations
+      # populated BEFORE pytest starts, and a build failure should fail the
+      # build loudly rather than silently skip those tests. --strict makes
+      # an empty result exit non-zero.
+      - name: Build country relations
+        run: docker exec night-train-api python /app/scripts/build_country_relations.py --strict
+
+      # ------------------------------------------------------------------
       # Set up Python and run tests
       # ------------------------------------------------------------------
       - name: Set up Python

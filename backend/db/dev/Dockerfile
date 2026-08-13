@@ -1,21 +1,23 @@
+# =============================================================================
+# Night Train — standalone seeder (db/dev/docker-compose.yml)
+# =============================================================================
+# Build context is the BACKEND ROOT, not this directory (see the compose
+# file): seed.py imports db.schema and runs alongside the country geometry
+# build script, so the image needs the same relative tree the repo has.
+
 FROM python:3.12-slim
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir psycopg2-binary python-dotenv
+# psycopg2/dotenv for the seed itself; pyshp/shapely for the country
+# geometry build below. Deliberately not the full API dependency set —
+# this image only seeds.
+RUN pip install --no-cache-dir psycopg2-binary python-dotenv pyshp shapely
 
-# Download countries.geojson so seed.py can populate country_geom.
-# Same source as backend/docker/Dockerfile — kept configurable via the
-# same build arg for consistency.
-ARG NATURAL_EARTH_COUNTRIES_URL=https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson
-RUN apt-get -o Acquire::ForceIPv4=true update \
-    && apt-get install -y --no-install-recommends curl \
-    && rm -rf /var/lib/apt/lists/* \
-    && curl -fsSL "$NATURAL_EARTH_COUNTRIES_URL" -o /app/countries.geojson
+COPY db/ ./db/
+COPY scripts/export_country_geoms.py ./scripts/
 
-ENV COUNTRIES_GEOJSON_PATH=/app/countries.geojson
-
-COPY seed.py sql_loader.py ./
-COPY sql/ ./sql/
-
-CMD ["python", "seed.py"]
+# Country border polygons first (a no-op once the artifact exists, and
+# soft-failing — seed.py degrades to NULL geometry with a loud banner),
+# then the seed that loads them.
+CMD ["sh", "-c", "python scripts/export_country_geoms.py || echo '  WARNING: country geometry build failed — see above.'; python db/dev/seed.py"]

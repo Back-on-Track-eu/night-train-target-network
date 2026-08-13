@@ -1102,8 +1102,9 @@ def build_breakdown_per_trip_pair_per_section(
     section_key: "{origin_stop_id}__{destination_stop_id}__{class_main}" with
                  class_main = "all" for the class-independent section cell,
                  or one class_main per class with passengers in the section.
-                 Directional: Hamburg→Berlin covers the trip(s) running in
-                 that direction; the opposite direction is its own key.
+                 Undirected (CALC 0.9.16): endpoints are canonicalised to the
+                 outbound trip's stop order, so one cell accumulates BOTH
+                 directions of the pair over the same physical piece of track.
 
     Semantics — a section is a physical piece of the trip, NOT a ticket
     relation (that's per_trip_pair_per_od): selecting [Hamburg, Berlin] on a
@@ -1111,8 +1112,11 @@ def build_breakdown_per_trip_pair_per_section(
     between Hamburg and Berlin, and a km-proportional share of the revenue
     of EVERYONE on board there — a Copenhagen→Munich passenger contributes
     exactly the fraction of their fare matching the km they ride within the
-    section. Sections overlap by construction (the full-trip section IS the
-    whole trip), so section cells deliberately do NOT sum to the pair total.
+    section. Every ordered pair of a trip's stops is a section (CALC 0.9.16)
+    — enumeration is independent of ticketed OD relations, so ranges bounded
+    by night stops (which never appear in OD pairs) exist too. Sections
+    overlap by construction (the full-trip section IS the whole trip), so
+    section cells deliberately do NOT sum to the pair total.
 
     Allocation, "__all" cell:
       driver, crew, coach_maintenance,
@@ -1183,6 +1187,10 @@ def build_breakdown_per_trip_pair_per_section(
             if trip_ids.intersection(pc.trip_ids)
         )
 
+        # Canonical section endpoints follow the outbound trip's stop order,
+        # so both directions of the pair land on one undirected cell key
+        outbound_order = {s.stop_id: i for i, s in enumerate(pair.outbound.stops)}
+
         for trip in pair.trips:
             trip_id = trip.trip_id
             stop_idx = {s.stop_id: i for i, s in enumerate(trip.stops)}
@@ -1192,20 +1200,28 @@ def build_breakdown_per_trip_pair_per_section(
             for km in seg_km:
                 cum_km.append(cum_km[-1] + km)
 
-            # Distinct physical sections on this trip = distinct (origin,
-            # destination) among its OD pairs, regardless of class
             trip_ods = [od for od in pair.od_pairs if od.trip_id == trip_id]
-            sections = {
-                (od.origin_stop_id, od.destination_stop_id)
-                for od in trip_ods
-                if od.origin_stop_id in stop_idx
-                and od.destination_stop_id in stop_idx
-                and stop_idx[od.origin_stop_id] < stop_idx[od.destination_stop_id]
-            }
+            # Every ordered pair of the trip's stops is a section (CALC
+            # 0.9.16) — independent of ticketed ODs, so ranges bounded by
+            # night stops (which carry no tickets) get a cell too
+            sections = [
+                (trip.stops[oi].stop_id, trip.stops[di].stop_id)
+                for oi in range(len(trip.stops) - 1)
+                for di in range(oi + 1, len(trip.stops))
+            ]
 
             for origin_id, dest_id in sections:
                 oi, di = stop_idx[origin_id], stop_idx[dest_id]
                 section_km = cum_km[di] - cum_km[oi]
+
+                # Undirected cell key: endpoints in outbound stop order
+                # (identity on the outbound trip; swapped on the return)
+                a = outbound_order.get(origin_id)
+                z = outbound_order.get(dest_id)
+                if a is not None and z is not None and a > z:
+                    key_a, key_b = dest_id, origin_id
+                else:
+                    key_a, key_b = origin_id, dest_id
 
                 b = Breakdown()
 
@@ -1353,7 +1369,7 @@ def build_breakdown_per_trip_pair_per_section(
                 b.cost.operator.variable.var_overhead_eur += sum(voh_by_class.values())
                 b.margin.ebit_margin_eur += sum(margin_by_class.values())
 
-                all_key = (pair_key, f"{origin_id}__{dest_id}__all")
+                all_key = (pair_key, f"{key_a}__{key_b}__all")
                 total_sold_pkm = sum(sold_pkm_by_class.values())
                 all_scope = NormalisationScope(
                     train_km=section_km * operating_days,
@@ -1369,9 +1385,9 @@ def build_breakdown_per_trip_pair_per_section(
                         for cls, places in composition.places_by_class.items()
                     },
                 )
-                # Accumulate, don't overwrite — the same directional section
-                # key can only recur if a stop sequence repeats, but silently
-                # dropping a cell would corrupt aggregates
+                # Accumulate, don't overwrite — the return trip lands on the
+                # same canonical key as the outbound, folding both directions
+                # into one cell (Breakdown values and scope physics add up)
                 if all_key in matrix:
                     matrix[all_key] += b
                     scopes[all_key] = scopes[all_key] + all_scope
@@ -1397,7 +1413,7 @@ def build_breakdown_per_trip_pair_per_section(
                     )
                     cb.margin.ebit_margin_eur += margin_by_class.get(cls, 0.0)
 
-                    cls_key = (pair_key, f"{origin_id}__{dest_id}__{cls}")
+                    cls_key = (pair_key, f"{key_a}__{key_b}__{cls}")
                     cls_avail_pkm = (
                         composition.places_by_class.get(cls, 0)
                         * section_km
@@ -2275,9 +2291,9 @@ _VIEW_FILTER_STAGES: dict[str, list[str]] = {
     ],
     "per_trip_pair_per_section": [
         "one trip pair (outbound + return), or 'all'",
-        "one route section (all costs occurring between two stops of a trip; "
-        "km-proportional revenue of everyone on board there), sub-keyed by "
-        "class_main or 'all'",
+        "one route section (all costs occurring between two stops, both "
+        "directions of the pair; km-proportional revenue of everyone on "
+        "board there), sub-keyed by class_main or 'all'",
     ],
     "per_trip_per_stop": [
         "one trip (outbound or return), or 'all'",
@@ -2301,7 +2317,8 @@ _VIEW_DESCRIPTIONS: dict[str, str] = {
     "build_breakdown_per_trip_pair_per_od(). Cells partition "
     "the pair total (they sum to it).",
     "per_trip_pair_per_section": "Matrix of annual totals by trip pair x route "
-    "section (two stops of a trip, directional). A section "
+    "section (any two stops of a trip; keys in outbound stop "
+    "order, both directions of the pair folded into one cell). A section "
     "carries every cost physically occurring between its "
     "stops plus a share of route-level costs, and the "
     "km-proportional revenue of everyone on board there — "
