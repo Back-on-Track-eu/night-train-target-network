@@ -30,7 +30,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.20"
+ROUTE_BUILDER_VERSION: str = "0.9.22"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -45,6 +45,40 @@ ROUTE_BUILDER_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.22": {
+        "date": "2026-08-13",
+        "author": "david",
+        "changes": "Locomotives become catalog entities "
+        "(input_params.loco_types) instead of a hardcoded 90 t constant "
+        "plus a count. Traction dynamics and the timetable now haul "
+        "Composition.total_gross_weight_t — coaches plus EVERY assigned "
+        "locomotive at its own mass — where they previously added one "
+        "locomotive's weight regardless of how many the composition has. "
+        "NO VALUE CHANGE at the seeded catalog: all eight compositions "
+        "run a single 90 t machine, so the two expressions are "
+        "arithmetically identical today. They diverge the moment a "
+        "composition gains a second locomotive or a per-type mass is "
+        "sourced, which is why the constant is retired now rather than "
+        "later. TRACTION_LOCO_WEIGHT_T is removed; the energy model's "
+        "formula reference moves from the standard value to the column.",
+    },
+    "0.9.21": {
+        "date": "2026-08-13",
+        "author": "david",
+        "changes": "ADDITIVE output change: a Segment now carries the "
+        "countries it passes through IN PATH ORDER (the share dicts are "
+        "unordered and cannot express it) and the separately charged "
+        "crossings it owns. Ordering is what lets the evaluation place "
+        "each country run on the clock, which the calibrated night "
+        "tariffs need; crossings are matched by polygon intersection "
+        "here rather than at evaluation time, and each is claimed by the "
+        "first leg touching it, so one split by an intermediate stop is "
+        "charged once per trip instead of by every leg. No physics "
+        "changes: distances, times and country shares are identical to "
+        "0.9.20. Route payloads stored before this version stay "
+        "loadable — the deserializer falls back to the share dict's keys "
+        "for ordering and charges no crossing.",
+    },
     "0.9.20": {
         "date": "2026-08-12",
         "author": "david",
@@ -518,12 +552,6 @@ AUTO_STOP_MAX_DETOUR_PER: float = 0.05
 fraction of the original trip's time, before mode 'add' stops adding
 further candidates. Mode 'suggest' deliberately ignores this budget."""
 
-# --- Traction dynamics (per-stop accel/brake time loss — models/route/routing/dynamics.py)
-TRACTION_LOCO_WEIGHT_T: float = 90.0
-"""Assumed standard locomotive weight (Siemens Vectron, ~90t). Locomotives
-are full-service leased and not part of the composition data, so the loco
-is a fixed standard assumption added on top of Composition.total_weight_t
-(which covers coaches only)."""
 
 TRACTION_LOCO_POWER_KW: float = 6_400.0
 """Assumed locomotive continuous power at the wheel (Siemens Vectron AC:
@@ -915,7 +943,7 @@ ROUTE_FORMULAS: dict[str, Formula] = {
                 symbol="m_loco",
                 description="Weight of the assumed standard locomotive",
                 unit="t",
-                ref="standard:ROUTE.TRACTION_LOCO_WEIGHT_T",
+                ref="column:input_params.loco_types.loco_type_weight_t",
             ),
         ),
         output=FormulaParam(

@@ -298,6 +298,8 @@ CREATE TABLE proposals.segments (
     energy_kwh                NUMERIC NOT NULL,
     country_distance_shares  JSONB NOT NULL,
     country_time_shares      JSONB NOT NULL,
+    countries                JSONB NOT NULL DEFAULT '[]'::jsonb,
+    passages                 JSONB NOT NULL DEFAULT '[]'::jsonb,
     PRIMARY KEY (trip_id, segment_sequence)
 );
 
@@ -315,6 +317,8 @@ COMMENT ON COLUMN proposals.segments.slack_time_min           IS 'Deliberate sch
 COMMENT ON COLUMN proposals.segments.energy_kwh                IS 'Energy consumption for this segment. Unit: kWh';
 COMMENT ON COLUMN proposals.segments.country_distance_shares  IS 'Per-country share of this segment''s distance, e.g. {"DE": 0.7, "AT": 0.3}. Shares sum to 1.0.';
 COMMENT ON COLUMN proposals.segments.country_time_shares      IS 'Per-country share of this segment''s time. Can differ from country_distance_shares (e.g. a mountainous section is slower relative to its length). Shares sum to 1.0.';
+COMMENT ON COLUMN proposals.segments.countries                IS 'The same countries as country_distance_shares, but IN PATH ORDER, which a JSON object cannot express. Track access charges need it: a night rate applies to the clock time a run spends in one country, and placing each country on the clock requires knowing which was entered first. Empty for routes stored before ROUTE_BUILDER 0.9.21.';
+COMMENT ON COLUMN proposals.segments.passages                 IS 'Separately charged crossings this segment owns (STOREBAELT, OERESUND_DK, OERESUND_SE, CHANNEL_TUNNEL), matched by polygon intersection at routing time. A crossing is attributed to exactly one segment per trip, so one split by an intermediate stop is not charged twice. Empty for routes stored before ROUTE_BUILDER 0.9.21.';
 
 -- ---------------------------------------------------------------
 -- od_pairs — one row per ODPair (models/params.py): trip-pair-scoped

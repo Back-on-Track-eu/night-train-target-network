@@ -76,6 +76,8 @@ def _segment_to_dict(seg: Segment, geometry_id: str) -> dict:
         "energy_kwh": seg.energy_kwh,
         "country_distance_shares": seg.country_distance_shares,
         "country_time_shares": seg.country_time_shares,
+        "countries": seg.countries,
+        "passages": seg.passages,
     }
 
 
@@ -368,6 +370,12 @@ def _segment_from_dict(d: dict, geometries_by_id: dict[str, list]) -> Segment:
         energy_kwh=float(d["energy_kwh"]),
         country_distance_shares=d["country_distance_shares"],
         country_time_shares=d["country_time_shares"],
+        # pre-0.9.21 payloads predate ordered countries and passages. The
+        # share dict's keys stand in for the ordering (calc_tac.py places
+        # its clock windows approximately in that case), and no passage is
+        # charged — a stale route stays evaluable rather than failing.
+        countries=list(d.get("countries") or d["country_distance_shares"].keys()),
+        passages=list(d.get("passages") or []),
     )
 
 

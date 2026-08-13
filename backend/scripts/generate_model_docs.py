@@ -98,6 +98,7 @@ STANDARD_VALUE_FILES: dict[str, Path] = {
     "ROUTE": BACKEND / "models" / "route" / "model.py",
     "ENERGY": BACKEND / "models" / "energy" / "model.py",
     "DEMAND": BACKEND / "models" / "demand" / "model.py",
+    "INFRASTRUCTURE": BACKEND / "models" / "infrastructure" / "model.py",
 }
 
 
@@ -503,6 +504,8 @@ CALC_ALLOCATION_FORMULAS = [
 # specifically about splitting a cost across accommodation classes.
 CALC_DERIVATION_FORMULAS = [
     ("roster_efficiency_driver", "Roster efficiency (Dienstplanwirkungsgrad)"),
+    ("tac_night_share", "Night share of a country run (track access)"),
+    ("tac_peak_share", "Rush-hour share of a country run (track access)"),
 ]
 
 # The generic aggregation rule (x_total = sum of a level's items), which

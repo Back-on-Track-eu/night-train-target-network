@@ -298,8 +298,9 @@ def _insert_segments(
             "INSERT INTO proposals.segments "
             "(trip_id, segment_sequence, from_stop_id, to_stop_id, shape_id, "
             " distance_m, driving_time_min, dynamics_time_min, buffer_time_min, "
-            " slack_time_min, energy_kwh, country_distance_shares, country_time_shares) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            " slack_time_min, energy_kwh, country_distance_shares, "
+            " country_time_shares, countries, passages) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             (
                 trip_id,
                 i,
@@ -314,6 +315,12 @@ def _insert_segments(
                 seg["energy_kwh"],
                 Json(seg["country_distance_shares"]),
                 Json(seg["country_time_shares"]),
+                # Ordered countries and owned crossings — see
+                # models/route/trip.py. Payloads planned before
+                # ROUTE_BUILDER 0.9.21 carry neither; an empty list is
+                # what route_serialize.py's fallback expects to see.
+                Json(seg.get("countries") or []),
+                Json(seg.get("passages") or []),
             ),
         )
 
@@ -483,7 +490,7 @@ def _build_trip(cur, trip_id: str, direction: int, stop_infra) -> Trip:
     cur.execute(
         "SELECT segment_sequence, shape_id, distance_m, driving_time_min, "
         " dynamics_time_min, buffer_time_min, slack_time_min, energy_kwh, "
-        " country_distance_shares, country_time_shares "
+        " country_distance_shares, country_time_shares, countries, passages "
         "FROM proposals.segments WHERE trip_id = %s ORDER BY segment_sequence",
         (trip_id,),
     )
@@ -507,6 +514,8 @@ def _build_trip(cur, trip_id: str, direction: int, stop_infra) -> Trip:
                 energy_kwh=float(srow["energy_kwh"]),
                 country_distance_shares=srow["country_distance_shares"],
                 country_time_shares=srow["country_time_shares"],
+                countries=list(srow["countries"] or []),
+                passages=list(srow["passages"] or []),
             )
         )
 

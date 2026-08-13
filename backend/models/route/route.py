@@ -20,7 +20,7 @@ season governs.
 
 Locomotives are not fleet-sized here — they're utilization-based
 full-service leased and billed per segment in calc.py
-(composition.loco_full_service_lease_eur_h × segment.total_time_min),
+(composition.loco_lease_total_eur_h × segment.total_time_min),
 since lease cost scales directly with usage regardless of rotation.
 
 Operator invariant: all TripPairs in a Route must share the same operator_id.
@@ -342,7 +342,7 @@ class Route:
         one loco's actual usage.
 
         Physics only — no cost, minutes not hours. calc.py converts to
-        hours and multiplies by composition.loco_full_service_lease_eur_h
+        hours and multiplies by composition.loco_lease_total_eur_h
         for route-level lease cost.
         """
         seen_segments: set[tuple[str, str]] = set()

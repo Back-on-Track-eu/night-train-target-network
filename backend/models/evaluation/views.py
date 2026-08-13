@@ -424,10 +424,7 @@ def build_breakdown(
         else route.loco_propulsion_min
     )
     b.cost.operator.variable.loco_eur = _ann_trip(
-        composition.n_locos
-        * composition.loco_full_service_lease_eur_h
-        * loco_min
-        / 60.0,
+        composition.loco_lease_total_eur_h * loco_min / 60.0,
         operating_days,
     )
 
@@ -584,8 +581,15 @@ def build_breakdown_per_trip_pair_per_country(
                 b.cost.operator.variable.coach_maintenance_eur += _ann_trip(
                     sc.coach_maintenance_eur * d, operating_days
                 )
+                # Track access is attributed to the country that actually
+                # levied it, not spread by distance share: two countries on
+                # one segment can charge very differently, which is the
+                # whole point of the component model. Crossing charges have
+                # no levying country (their operator bills them), so they
+                # keep the distance-share split — see SegmentTac.by_country.
                 b.cost.infrastructure.tac_eur += _ann_trip(
-                    sc.tac_eur * d, operating_days
+                    sc.tac.by_country.get(country, 0.0) + sc.tac.passage_eur * d,
+                    operating_days,
                 )
                 b.cost.infrastructure.energy_eur += _ann_trip(
                     sc.energy_eur * d, operating_days
@@ -623,10 +627,7 @@ def build_breakdown_per_trip_pair_per_country(
 
             # Loco — time-based
             loco_eur = (
-                composition.n_locos
-                * composition.loco_full_service_lease_eur_h
-                * pair.loco_propulsion_min
-                / 60.0
+                composition.loco_lease_total_eur_h * pair.loco_propulsion_min / 60.0
             )
             b.cost.operator.variable.loco_eur = _ann_trip(
                 loco_eur * t_share, operating_days
@@ -910,10 +911,7 @@ def build_breakdown_per_trip_pair_per_od(
             # Loco — billed once per pair cycle, allocated by weighted
             # place-hours share
             loco_eur = (
-                composition.n_locos
-                * composition.loco_full_service_lease_eur_h
-                * pair.loco_propulsion_min
-                / 60.0
+                composition.loco_lease_total_eur_h * pair.loco_propulsion_min / 60.0
             )
             b.cost.operator.variable.loco_eur += _ann_trip(
                 loco_eur * wph_share, operating_days
@@ -1275,10 +1273,7 @@ def build_breakdown_per_trip_pair_per_section(
                     + section_dwell_min
                 )
                 b.cost.operator.variable.loco_eur += _ann_trip(
-                    composition.n_locos
-                    * composition.loco_full_service_lease_eur_h
-                    * section_loco_min
-                    / 60.0,
+                    composition.loco_lease_total_eur_h * section_loco_min / 60.0,
                     operating_days,
                 )
 
@@ -1552,8 +1547,7 @@ def build_breakdown_per_trip_per_stop(
         for fc in result.composition_fleet_costs
     )
     loco_total = _ann_trip(
-        route.trip_pairs[0].composition.n_locos
-        * route.trip_pairs[0].composition.loco_full_service_lease_eur_h
+        route.trip_pairs[0].composition.loco_lease_total_eur_h
         * route.loco_propulsion_min
         / 60.0,
         operating_days,

@@ -6,6 +6,7 @@ Shared utilities for the Night Train model.
 Sections
 --------
   Unit conversions     — distance, time, speed
+  Clock bands          — overlap of a run with a daily tariff band
   Geography            — haversine distance, bbox area
   Country code lookup  — ISO 3166-1 alpha-2 ↔ alpha-3 conversion
 """
@@ -99,6 +100,55 @@ def m_to_km(metres: int) -> float:
 def km_to_m(km: float) -> int:
     """Convert kilometres to metres (rounded)."""
     return round(km * 1000)
+
+
+# =============================================================================
+# CLOCK BANDS
+# =============================================================================
+
+MINUTES_PER_DAY = 1440
+
+
+def band_overlap_min(
+    start_min: float, end_min: float, band_start_min: int, band_end_min: int
+) -> float:
+    """
+    Minutes of [start_min, end_min) that fall inside a daily clock band.
+
+    The interval is measured from midnight of the trip's first day and may
+    run past midnight into a second or third day (a night train routinely
+    does). The band is a time of day and repeats every 24 h; it may itself
+    wrap midnight, which every calibrated night band does (Germany
+    23:00–06:00, Belgium 19:00–05:59).
+
+    Both wraps are handled by walking the interval one calendar day at a
+    time and intersecting each day's slice with the band, split into its
+    pre- and post-midnight halves where it wraps. Returns 0.0 for an empty
+    or reversed interval.
+
+    Used by models/infrastructure/calc_tac.py for both the night-rate share
+    and the peak-band share of a country run.
+    """
+    if end_min <= start_min or band_start_min == band_end_min:
+        return 0.0
+
+    if band_start_min < band_end_min:
+        windows = [(band_start_min, band_end_min)]
+    else:  # wraps midnight — the evening half plus the morning half
+        windows = [(band_start_min, MINUTES_PER_DAY), (0, band_end_min)]
+
+    total = 0.0
+    first_day = int(start_min // MINUTES_PER_DAY)
+    last_day = int((end_min - 1e-9) // MINUTES_PER_DAY)
+    for day in range(first_day, last_day + 1):
+        offset = day * MINUTES_PER_DAY
+        for window_start, window_end in windows:
+            total += max(
+                0.0,
+                min(end_min, offset + window_end)
+                - max(start_min, offset + window_start),
+            )
+    return total
 
 
 # =============================================================================

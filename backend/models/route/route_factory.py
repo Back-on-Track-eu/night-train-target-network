@@ -90,6 +90,7 @@ from models.params import (
     ParamVersions,
     TrackInfraCollection,
     StopInfraCollection,
+    PassageChargeCollection,
     Composition,
     CompositionCollection,
 )
@@ -148,6 +149,11 @@ class RouteProvenance:
     Threaded through for the same reason as compositions above — avoids
     api/proposal_calc.py's evaluate step reloading it via
     loader.build_all_stops() a second time."""
+    passages: PassageChargeCollection
+    """The scenario's separately charged crossings. Routing already
+    attributed each crossing to a segment by polygon (Segment.passages);
+    this carries the CHARGES for the evaluate step, threaded through for
+    the same reason as tracks and stop_infra above."""
 
 
 @dataclass
@@ -271,6 +277,8 @@ def _build_trip_stops_and_legs(
             country_distance_shares=routed_legs[i].country_distance_shares,
             country_time_shares=routed_legs[i].country_time_shares,
             slack_time_min=slack_per_leg[i],
+            countries=routed_legs[i].countries,
+            passages=routed_legs[i].passages,
         )
         for i in range(len(routed_legs))
     ]
@@ -750,6 +758,7 @@ def plan_route(
     )
 
     stop_infra = loader.build_all_stops(scenario_id)
+    passages = loader.build_all_passages(scenario_id)
     parking = _parkings(
         [t for pair in trip_pairs for t in pair.trips],
         stop_infra,
@@ -778,6 +787,7 @@ def plan_route(
             tracks=tracks_used,
             compositions=compositions,
             stop_infra=stop_infra,
+            passages=passages,
         ),
         suggestions,
     )

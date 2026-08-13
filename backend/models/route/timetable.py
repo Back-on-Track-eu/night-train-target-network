@@ -91,7 +91,7 @@ from dataclasses import dataclass
 from models.params import Composition, TrackInfraCollection, StopInfraCollection
 from models.route.trip import Segment, StopType, TimetableWarning
 from models.route.route import Schedule, SeasonalSchedule, Season, Frequency
-from models.route.routing.dynamics import TRACTION_LOCO_WEIGHT_T, stop_time_loss_s
+from models.route.routing.dynamics import stop_time_loss_s
 from models.route.routing.rail_router import RailRouter, RoutedLeg, build_router_stops
 from models.route.model import (
     MIRROR_MIN,
@@ -753,7 +753,7 @@ def _analytic_added_time_min(
         cruise_speed_ms = leg.distance_m / (leg.driving_time_min * 60)
     else:
         cruise_speed_ms = composition.max_speed_kmh / 3.6
-    mass_kg = (composition.total_weight_t + TRACTION_LOCO_WEIGHT_T) * 1_000
+    mass_kg = composition.total_gross_weight_t * 1_000
 
     dynamics_min = stop_time_loss_s(cruise_speed_ms, mass_kg) / 60
     detour_min = (2 * candidate.detour_distance_m / cruise_speed_ms) / 60

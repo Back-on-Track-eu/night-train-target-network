@@ -72,6 +72,21 @@ class Segment:
     models/route/timetable.py). Declared last (dataclass default), listed
     with the other time components in spirit: total = driving + dynamics
     + buffer + slack.
+
+    countries is the same set as country_distance_shares' keys but IN PATH
+    ORDER, which a dict of shares cannot express. Track access charges need
+    it: a night rate applies to the clock time a run spends in one country,
+    and placing each country on the clock requires knowing which was
+    entered first.
+
+    passages lists the separately charged crossings (Storebælt, Øresund,
+    Channel Tunnel) this segment owns, matched by polygon intersection at
+    routing time (routing/rail_router.py: PassageIndex). A crossing is
+    attributed to exactly one segment per trip, so one split by an
+    intermediate stop is not charged twice.
+
+    Both default to empty so a route payload stored before ROUTE_BUILDER
+    0.9.21 stays constructible — see api/helpers/route_serialize.py.
     """
 
     from_stop: Stop
@@ -85,6 +100,8 @@ class Segment:
     country_distance_shares: dict[str, float]
     country_time_shares: dict[str, float]
     slack_time_min: int = 0  # fixed-night stretch padding — see class docstring
+    countries: list[str] = field(default_factory=list)
+    passages: list[str] = field(default_factory=list)
 
     @property
     def total_time_min(self) -> int:

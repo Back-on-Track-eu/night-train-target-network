@@ -158,83 +158,238 @@ _CALIB_SEED_CSVS = (
     "composition_types.csv",
     "composition_type_coaches.csv",
     "class_cost_allocation.csv",
+    "loco_types.csv",
+    "operator_loco_costs.csv",
+    "composition_type_locos.csv",
 )
 
 
-def _ensure_calib_seed_csvs() -> None:
-    """Regenerate the calib seed CSVs from the calibration notebook when
-    they are absent. The CSVs are derived artifacts (not committed); the
-    notebook is the source of truth. Only its pandas/matplotlib-free
-    cells are executed — the compute + seed-export path is stdlib-only
-    by design (the notebook's export cell documents the contract), so
-    this works inside the API container without dev extras."""
-    if all((CALIB_SEED_DIR / f).is_file() for f in _CALIB_SEED_CSVS):
-        return
+def _run_notebook_for_seed_csvs(
+    nb_path: Path, workdir: Path, targets: Path, names: tuple[str, ...]
+) -> None:
+    """Execute a calibration notebook far enough to produce its seed CSVs.
+
+    Calibration notebooks are the single source of truth: the seed CSVs are
+    derived artifacts, not committed, and regenerating them here means a
+    fresh container never runs against a stale number.
+
+    Two filters keep this working inside the API container, which has no
+    dev extras:
+
+    - Cells importing pandas or matplotlib, or using pd./plt., are skipped.
+      Detection is by code token rather than prose, so a comment mentioning
+      pandas does not trip it.
+    - Execution stops as soon as every target CSV exists. The compute and
+      export cells always precede the document generator, so this skips
+      regenerating a committed calibration document on every boot without
+      needing the notebook to mark its own cells.
+    """
     import json as _json
     import os as _os
     import re as _re
 
-    calib_dir = CALIB_SEED_DIR.parent
-    nb_path = calib_dir / "02_calibration.ipynb"
-    assert nb_path.is_file(), (
-        f"calib seed CSVs missing and {nb_path} not found — cannot "
-        "regenerate; commit the CSVs or restore the notebook"
-    )
-    print(
-        "  calib seed CSVs missing — regenerating from "
-        "02_calibration.ipynb (stdlib cells only)..."
-    )
+    print(f"  seed CSVs missing — regenerating from {nb_path.name}...")
     with open(nb_path, encoding="utf-8") as fh:
         nb = _json.load(fh)
-    ns: dict = {}
+
+    namespace: dict = {}
     cwd = _os.getcwd()
-    _os.chdir(calib_dir)  # the export cell writes seed/ relative paths
+    _os.chdir(workdir)  # the export cells write relative paths
     try:
         for cell in nb["cells"]:
             if cell["cell_type"] != "code":
                 continue
             src = "".join(cell["source"])
-            # skip display/validation/chart cells by actual code tokens
-            # (import statements and pd./plt. usage) — NOT by prose, so
-            # comments mentioning pandas/matplotlib don't trip the filter
             if _re.search(
                 r"^\s*(?:import|from)\s+(?:pandas|matplotlib)", src, _re.M
             ) or _re.search(r"\bpd\.|\bplt\.", src):
                 continue
             try:
-                exec(compile(src, "<02_calibration>", "exec"), ns)
+                exec(compile(src, f"<{nb_path.name}>", "exec"), namespace)
             except Exception as e:
                 first_line = src.strip().splitlines()[0][:60]
                 raise AssertionError(
-                    f"02_calibration.ipynb cell starting {first_line!r} "
-                    f"raised {type(e).__name__}: {e} — the compute/export "
-                    "cells must stay stdlib-only AND self-contained "
-                    "(merging their imports into a pandas cell makes the "
-                    "filter skip them; see the notebook's stdlib-imports "
-                    "cell comment)"
+                    f"{nb_path.name} cell starting {first_line!r} raised "
+                    f"{type(e).__name__}: {e} — the compute/export cells "
+                    "must stay stdlib-only AND self-contained (merging "
+                    "their imports into a pandas cell makes the filter "
+                    "skip them; see the notebook's stdlib-imports cell)"
                 ) from e
+            # Empty names means "run the whole notebook" — used for a
+            # notebook that only produces inputs for the next one.
+            if names and all((targets / name).is_file() for name in names):
+                break
     finally:
         _os.chdir(cwd)
-    missing = [f for f in _CALIB_SEED_CSVS if not (CALIB_SEED_DIR / f).is_file()]
+
+    missing = [name for name in names if not (targets / name).is_file()]
     assert not missing, (
-        f"notebook execution did not produce {missing} — the notebook's "
-        "compute/export cells may have gained a pandas dependency; keep "
-        "them stdlib-only (see the export cell's header comment)"
+        f"{nb_path.name} did not produce {missing} — its compute/export "
+        "cells may have gained a pandas dependency; keep them stdlib-only "
+        "(see the export cell's header comment)"
     )
-    print("  calib seed CSVs regenerated.")
+    print(f"  seed CSVs regenerated from {nb_path.name}.")
 
 
-_ensure_calib_seed_csvs()
+def _ensure_seed_csvs(
+    seed_dir: Path, names: tuple[str, ...], notebooks: tuple[Path, ...]
+) -> None:
+    """Regenerate a domain's seed CSVs from its notebooks when absent.
+
+    notebooks run in order; only the last one writes the seed CSVs, but an
+    earlier one may write files it reads (the TAC calibration reads the
+    source register that 01 produces).
+    """
+    if all((seed_dir / name).is_file() for name in names):
+        return
+    for nb_path in notebooks:
+        assert nb_path.is_file(), (
+            f"seed CSVs missing and {nb_path} not found — cannot "
+            "regenerate; restore the notebook"
+        )
+    for i, nb_path in enumerate(notebooks):
+        _run_notebook_for_seed_csvs(
+            nb_path,
+            workdir=nb_path.parent,
+            targets=seed_dir,
+            # Only the last notebook is expected to produce the targets;
+            # the earlier ones run to completion for their side effects.
+            names=names if i == len(notebooks) - 1 else (),
+        )
 
 
-def _read_calib_csv(name: str) -> list[dict]:
-    path = CALIB_SEED_DIR / name
+_ensure_seed_csvs(
+    CALIB_SEED_DIR,
+    _CALIB_SEED_CSVS,
+    (CALIB_SEED_DIR.parent / "02_calibration.ipynb",),
+)
+
+
+def _read_seed_csv(seed_dir: Path, name: str, notebook: str) -> list[dict]:
+    path = seed_dir / name
     assert path.is_file(), (
-        f"missing {path} — run models/compositions/calib/02_calibration.ipynb "
-        "top to bottom first (its final cell writes the seed CSVs)"
+        f"missing {path} — run {notebook} top to bottom first (its export "
+        "cell writes the seed CSVs)"
     )
     with open(path, newline="", encoding="utf-8") as fh:
         return list(csv.DictReader(fh))
+
+
+def _read_calib_csv(name: str) -> list[dict]:
+    return _read_seed_csv(
+        CALIB_SEED_DIR, name, "models/compositions/calib/02_calibration.ipynb"
+    )
+
+
+# ============================================================
+# TAC calibration seed CSVs
+# ============================================================
+# Track access charges per country, exported by
+# models/infrastructure/tac/calib/02_tac_calibration.ipynb (seed export
+# cell) after 01 has written the source register. Every value arrives as
+# plain EUR at the 2032 evaluation year — the notebook converts currency
+# and price basis exactly once, so nothing below does unit arithmetic.
+# Derivations: models/infrastructure/tac/calib/TAC_CALIBRATION.md.
+
+TAC_SEED_DIR = (
+    Path(__file__).resolve().parents[2]
+    / "models"
+    / "infrastructure"
+    / "tac"
+    / "calib"
+    / "seed"
+)
+
+_TAC_SEED_CSVS = (
+    "track_tac.csv",
+    "track_tac_default.csv",
+    "passage_charges.csv",
+    "sources.csv",
+)
+
+_ensure_seed_csvs(
+    TAC_SEED_DIR,
+    _TAC_SEED_CSVS,
+    (
+        TAC_SEED_DIR.parent / "01_source_extraction.ipynb",
+        TAC_SEED_DIR.parent / "02_tac_calibration.ipynb",
+    ),
+)
+
+
+def _read_tac_csv(name: str) -> list[dict]:
+    return _read_seed_csv(
+        TAC_SEED_DIR,
+        name,
+        "models/infrastructure/tac/calib/01_source_extraction.ipynb then 02_tac_calibration.ipynb",
+    )
+
+
+# Columns whose empty string is a real NULL — "this country does not levy
+# this term" — and must never become 0.0. The loader's group substitution
+# is what turns a wholly uncalibrated country into the EU median, and that
+# has to stay a load-time decision (see DBDataLoader._row_to_track).
+_TAC_NUMERIC_COLUMNS = (
+    "track_tac_b_day",
+    "track_tac_b_night",
+    "track_tac_gamma",
+    "track_tac_seat_km",
+    "track_tac_per_stop",
+    "track_tac_revenue_share",
+    "track_tac_fixed_per_train_km",
+    "track_tac_peak_multiplier",
+    "track_tac_congestion_surcharge_eur_km",
+)
+
+_TAC_TIME_COLUMNS = (
+    "track_tac_night_band_start",
+    "track_tac_night_band_end",
+    "track_tac_peak_band1_start",
+    "track_tac_peak_band1_end",
+    "track_tac_peak_band2_start",
+    "track_tac_peak_band2_end",
+)
+
+_TAC_BOOL_COLUMNS = (
+    "track_tac_night_full_if_accommodation",
+    "track_tac_peak_weekdays_only",
+)
+
+
+def _tac_columns(row: dict) -> dict:
+    """One calibration row as track-table column values, empty cells kept
+    as NULL. source_id/change_log are dropped here — the FK is resolved
+    against input_params.sources by seed_sources(), see _TAC_SOURCE_KEYS."""
+    out: dict = {}
+    for column in _TAC_NUMERIC_COLUMNS:
+        out[column] = float(row[column]) if row[column] else None
+    for column in _TAC_TIME_COLUMNS:
+        out[column] = row[column] or None
+    for column in _TAC_BOOL_COLUMNS:
+        out[column] = row[column] == "True"
+    out["track_tac_night_mode"] = row["track_tac_night_mode"] or "none"
+    return out
+
+
+_TAC_ROWS = {row["country_code"]: row for row in _read_tac_csv("track_tac.csv")}
+
+TAC_BY_COUNTRY = {cc: _tac_columns(row) for cc, row in _TAC_ROWS.items()}
+
+TAC_DEFAULT = _tac_columns(_read_tac_csv("track_tac_default.csv")[0])
+
+# {country_code: register source_id} — resolved to a real FK after the
+# sources table is inserted, since the FK is a SERIAL the CSV cannot know.
+_TAC_SOURCE_KEYS = {
+    cc: row["source_id"] for cc, row in _TAC_ROWS.items() if row["source_id"]
+}
+
+_TAC_CHANGE_LOGS = {
+    cc: row["change_log"] for cc, row in _TAC_ROWS.items() if row["change_log"]
+}
+
+PASSAGE_CHARGES_RAW = _read_tac_csv("passage_charges.csv")
+
+TAC_SOURCES = _read_tac_csv("sources.csv")
 
 
 def _num(row: dict, *keys: str) -> dict:
@@ -273,6 +428,26 @@ SOURCES.append(
         "source_date": "2026-07-21",
     }
 )
+
+# The TAC source register — one row per document actually cited by a
+# calibrated value (models/infrastructure/tac/calib/01_source_extraction
+# .ipynb). Seeded so every track access number in the database points at
+# the network statement it was read from.
+SOURCES += [
+    {
+        "source_description": row["source_description"],
+        "source_url": row["source_url"] or None,
+        "source_date": row["source_date"] or None,
+    }
+    for row in TAC_SOURCES
+]
+
+# {register source_id: source_description} — the join key between the
+# calibration's own ids (AT-SNNB-2027) and the SERIAL source_id the
+# database assigns.
+TAC_SOURCE_DESCRIPTIONS = {
+    row["source_id"]: row["source_description"] for row in TAC_SOURCES
+}
 
 SRC_EXCEL = "B-o-T_targetnetwork_DB_v2.xlsx — illustrative placeholder values"
 SRC_ILLUSTRATIVE = "Illustrative / internal estimate"
@@ -454,6 +629,14 @@ def seed_country_geometries(cur) -> None:
 # One service class per coach section (class_id = "<coach> - <section
 # label>", workbook 2026-07-22); density retired — densities are derived
 # per composition from section geometry.
+# Class categories that do NOT make a train count as carrying night
+# accommodation for tariff purposes. Everything a passenger can lie down in
+# does; a dining car alone does not make a night train. The distinction
+# drives the German whole-run night pricing — see
+# models/infrastructure/tac/calib/TAC_CALIBRATION.md (DE section) and
+# models/infrastructure/calc_tac.py.
+_DAY_CLASS_MAINS = frozenset({"Seat", "Catering"})
+
 SERVICE_CLASSES = sorted(
     {
         (row["class_id"], row["class_main"].capitalize())
@@ -461,8 +644,21 @@ SERVICE_CLASSES = sorted(
     }
 )
 SERVICE_CLASSES = [
-    {"service_class_id": cid, "service_class_main": cm} for cid, cm in SERVICE_CLASSES
+    {
+        "service_class_id": cid,
+        "service_class_main": cm,
+        "service_class_is_night_accommodation": cm not in _DAY_CLASS_MAINS,
+    }
+    for cid, cm in SERVICE_CLASSES
 ]
+
+# A catalog with no night accommodation at all would silently disable the
+# German night widening — the failure this assert exists to catch, since
+# nothing else about the evaluation would look wrong.
+assert any(r["service_class_is_night_accommodation"] for r in SERVICE_CLASSES), (
+    "no service class counts as night accommodation — check that "
+    "coach_type_classes.csv still spells class_main as expected"
+)
 
 
 # ============================================================
@@ -483,7 +679,6 @@ OPERATORS = [
         "operator_financing_quota_per",
         "operator_var_overhead_per",
         "operator_fix_overhead_quota_per",
-        "operator_loco_lease_eur_h",
     )
     for row in _read_calib_csv("operators.csv")
 ]
@@ -602,7 +797,14 @@ _TRACK_INFRA_DEFAULT_2026_OVERRIDES = {
 
 
 def _build_track_infra_defaults() -> list[dict]:
-    v2032 = _TRACK_INFRA_DEFAULT_2032
+    """The EU-average fallback row, once per scenario version.
+
+    The TAC component group is the calibrated European median (see
+    TAC_DEFAULT) and is identical in all three: the 2026 deprecated
+    snapshot predates the TAC calibration entirely, and inventing a
+    historical median for it would be worse than reusing the current one.
+    """
+    v2032 = {**_TRACK_INFRA_DEFAULT_2032, **TAC_DEFAULT}
     return [
         {
             **v2032,
@@ -797,15 +999,66 @@ _TRACK_INFRA_CANONICAL_ROWS += [
     for country_code in _TRACK_INFRA_PLACEHOLDER_COUNTRIES
 ]
 
+# The calibration names the United Kingdom "UK"; the database uses the
+# ISO 3166-1 alpha-2 code everywhere. One alias, declared once.
+_TAC_COUNTRY_ALIASES = {"UK": "GB"}
+
+
+def _apply_tac_calibration(rows: list[dict]) -> None:
+    """Merge the calibrated TAC components onto the canonical country rows,
+    in place.
+
+    A country the calibration does not cover keeps every component NULL,
+    which the loader reads as "no rate term at all" and resolves to the
+    EU-median group — the same treatment as a country with no row.
+    """
+    calibrated = {
+        _TAC_COUNTRY_ALIASES.get(cc, cc): values
+        for cc, values in TAC_BY_COUNTRY.items()
+    }
+    change_logs = {
+        _TAC_COUNTRY_ALIASES.get(cc, cc): note for cc, note in _TAC_CHANGE_LOGS.items()
+    }
+    for row in rows:
+        cc = row["country_code"]
+        row.update(calibrated.get(cc, TAC_UNCALIBRATED))
+        if cc in change_logs:
+            row["change_log"] = change_logs[cc]
+
+
+# Every component NULL — what an uncalibrated country carries, so the
+# column set stays uniform across the table rather than some rows silently
+# lacking keys.
+TAC_UNCALIBRATED = {
+    **dict.fromkeys(_TAC_NUMERIC_COLUMNS),
+    **dict.fromkeys(_TAC_TIME_COLUMNS),
+    **dict.fromkeys(_TAC_BOOL_COLUMNS, False),
+    "track_tac_night_mode": "none",
+}
+
+_apply_tac_calibration(_TRACK_INFRA_CANONICAL_ROWS)
+
 # Version 1 (2026 Base Line, deprecated) = the same full snapshot, except
 # DE still carries its original, lower (pre-correction) rates — exactly
 # the full-table-snapshot invariant in practice. track_hsr_allowed is
 # forced True on every non-null row, matching the pre-2032-policy figures.
+# The pre-correction DE rates. track_tac_eur_train_km is display only —
+# since the cost model prices from the components, the historical snapshot
+# has to move a COMPONENT to differ in cost at all, which is what
+# track_tac_b_night does here (Germany levies no day rate). Scaled by the
+# same 3.10/5.40 ratio the flat figure carries, so the two tell the same
+# story rather than drifting apart: the 2026 line is the cheaper,
+# pre-correction world.
+_V1_DE_TAC_RATIO = 3.10 / 5.40
+
 _TRACK_INFRA_V1_OVERRIDES = {
     "DE": {
         "track_tac_eur_train_km": 3.10,
         "track_parking_eur_day": 50.00,
         "track_buffer_quota_per": 0.45,
+        "track_tac_b_night": round(
+            TAC_BY_COUNTRY["DE"]["track_tac_b_night"] * _V1_DE_TAC_RATIO, 8
+        ),
     },
 }
 
@@ -1606,7 +1859,6 @@ def build_composition_types() -> list[dict]:
         row["composition_type_coach_amort_years"] = int(
             row["composition_type_coach_amort_years"]
         )
-        row["composition_type_n_locos"] = int(row["composition_type_n_locos"])
         row["composition_type_hsr_allowed"] = (
             row["composition_type_hsr_allowed"] == "True"
         )
@@ -1677,6 +1929,35 @@ def seed_sources(cur, source_ids: dict) -> None:
     cur.execute(
         "UPDATE input_params.composition_types             SET source_id=%s", (cal,)
     )
+    _seed_tac_sources(cur, source_ids)
+
+
+def _seed_tac_sources(cur, source_ids: dict) -> None:
+    """Point every calibrated TAC row at the network statement it was read
+    from, overwriting the blanket illustrative FK set above.
+
+    The calibration's own source ids (AT-SNNB-2027) are resolved through
+    the description text, since the database assigns the numeric source_id
+    itself. One FK per country covers the whole component group — where a
+    country's terms come from more than one document the extras are named
+    in the row's change_log (see models/params.py).
+    """
+    for country_code, register_id in _TAC_SOURCE_KEYS.items():
+        description = TAC_SOURCE_DESCRIPTIONS[register_id]
+        cur.execute(
+            "UPDATE input_params.track_infrastructures SET track_tac_src=%s "
+            "WHERE country_code=%s",
+            (
+                source_ids[description],
+                _TAC_COUNTRY_ALIASES.get(country_code, country_code),
+            ),
+        )
+    for passage_id, register_id in _PASSAGE_SOURCE_KEYS.items():
+        cur.execute(
+            "UPDATE input_params.passage_charges SET passage_src=%s "
+            "WHERE passage_id=%s",
+            (source_ids[TAC_SOURCE_DESCRIPTIONS[register_id]], passage_id),
+        )
 
 
 def seed_operator_class_costs(cur):
@@ -1724,6 +2005,71 @@ def seed_coach_type_classes(cur):
         )
 
 
+LOCO_TYPES = [
+    {
+        "loco_type_id": row["loco_type_id"],
+        "loco_type_description": row["loco_type_description"],
+        "loco_type_traction": row["loco_type_traction"],
+        "loco_type_weight_t": float(row["loco_type_weight_t"]),
+        "loco_type_max_speed_kmh": int(row["loco_type_max_speed_kmh"]),
+    }
+    for row in _read_calib_csv("loco_types.csv")
+]
+
+OPERATOR_LOCO_COSTS_RAW = [
+    (row["operator_id"], row["loco_type_id"], float(row["operator_loco_lease_eur_h"]))
+    for row in _read_calib_csv("operator_loco_costs.csv")
+]
+
+COMPOSITION_TYPE_LOCOS_RAW = [
+    (row["composition_type_id"], int(row["position"]), row["loco_type_id"])
+    for row in _read_calib_csv("composition_type_locos.csv")
+]
+
+
+def seed_operator_loco_costs(cur):
+    """Rental rate per operator and machine. Sparse by design — only the
+    pairings the calibration actually derived a rate for get a row, and the
+    loader refuses to cost a composition whose pairing is missing."""
+    for operator_id, loco_type_id, eur_h in OPERATOR_LOCO_COSTS_RAW:
+        cur.execute(
+            "SELECT operator_row_id FROM input_params.operators WHERE operator_id=%s",
+            (operator_id,),
+        )
+        operator_row_id = cur.fetchone()[0]
+        cur.execute(
+            "SELECT loco_type_row_id FROM input_params.loco_types WHERE loco_type_id=%s",
+            (loco_type_id,),
+        )
+        loco_type_row_id = cur.fetchone()[0]
+        cur.execute(
+            """INSERT INTO input_params.operator_loco_costs
+               (operator_row_id, loco_type_row_id, operator_loco_lease_eur_h)
+               VALUES (%s, %s, %s)""",
+            (operator_row_id, loco_type_row_id, eur_h),
+        )
+
+
+def seed_composition_type_locos(cur):
+    for comp_id, position, loco_type_id in COMPOSITION_TYPE_LOCOS_RAW:
+        cur.execute(
+            "SELECT composition_type_row_id FROM input_params.composition_types WHERE composition_type_id=%s",
+            (comp_id,),
+        )
+        composition_type_row_id = cur.fetchone()[0]
+        cur.execute(
+            "SELECT loco_type_row_id FROM input_params.loco_types WHERE loco_type_id=%s",
+            (loco_type_id,),
+        )
+        loco_type_row_id = cur.fetchone()[0]
+        cur.execute(
+            """INSERT INTO input_params.composition_type_locos
+               (composition_type_row_id, position, loco_type_row_id)
+               VALUES (%s, %s, %s)""",
+            (composition_type_row_id, position, loco_type_row_id),
+        )
+
+
 def seed_composition_type_coaches(cur):
     for comp_id, position, coach_type_id in COMPOSITION_TYPE_COACHES_RAW:
         cur.execute(
@@ -1763,6 +2109,55 @@ def seed_composition_type_coaches(cur):
 #      HSR allowed (a second current lineage head; is_current_scenario=TRUE,
 #      is_current_base=FALSE).
 
+# ============================================================
+# passage charges
+# ============================================================
+#
+# Three identical full-table snapshots, one per scenario version, in the
+# same lockstep numbering as the track and stop tables. Identical because
+# no seeded scenario varies a crossing charge — the versioning contract
+# still requires a complete snapshot per version rather than a shared row
+# (see db/schema.py: scenario.scenarios).
+
+PASSAGE_CHARGES = [
+    {
+        "passage_id": row["passage_id"],
+        "passage_name": row["passage_name"],
+        "passage_fixed_eur": float(row["passage_fixed_eur"]),
+        "passage_per_passenger_eur": float(row["passage_per_passenger_eur"]),
+        "passage_geom": row["passage_geom"],
+        "passage_version": version,
+    }
+    for version in (1, 2, 3)
+    for row in PASSAGE_CHARGES_RAW
+]
+
+_PASSAGE_SOURCE_KEYS = {
+    row["passage_id"]: row["source_id"] for row in PASSAGE_CHARGES_RAW
+}
+
+
+def seed_passage_charges(cur) -> None:
+    """Insert the crossing rows, parsing the GeoJSON geometry server-side.
+    Kept out of insert_rows() because the geometry column needs a
+    ST_GeomFromGeoJSON() call around its placeholder."""
+    for row in PASSAGE_CHARGES:
+        cur.execute(
+            """INSERT INTO input_params.passage_charges
+               (passage_id, passage_name, passage_fixed_eur,
+                passage_per_passenger_eur, passage_geom, passage_version)
+               VALUES (%s, %s, %s, %s, ST_GeomFromGeoJSON(%s), %s)""",
+            (
+                row["passage_id"],
+                row["passage_name"],
+                row["passage_fixed_eur"],
+                row["passage_per_passenger_eur"],
+                row["passage_geom"],
+                row["passage_version"],
+            ),
+        )
+
+
 HISTORICAL_SCENARIO_2026 = {
     "scenario_key": "2026-baseline",
     "scenario_name": "2026 Base Line",
@@ -1778,6 +2173,7 @@ HISTORICAL_SCENARIO_2026 = {
     "track_infrastructure_defaults_version": 1,
     "stop_infrastructures_version": 1,
     "stop_infrastructure_defaults_version": 1,
+    "passage_charges_version": 1,
 }
 
 BASE_SCENARIO = {
@@ -1793,6 +2189,7 @@ BASE_SCENARIO = {
     "track_infrastructure_defaults_version": 2,
     "stop_infrastructures_version": 2,
     "stop_infrastructure_defaults_version": 2,
+    "passage_charges_version": 2,
 }
 
 HSR_SCENARIO = {
@@ -1800,7 +2197,7 @@ HSR_SCENARIO = {
     "scenario_name": "2032 Base Line + Night Trains on HSR allowed",
     "description": "A second current lineage, independent of 'base': "
     "identical to the 2032 Base Line in every field except "
-    "track_hsr_allowed=True everywhere. Own full snapshot of all four "
+    "track_hsr_allowed=True everywhere. Own full snapshot of all five "
     "tables (version 3), not a partial diff against 'base'.",
     "change_log": "Initial seed.",
     "editor": "david",
@@ -1810,6 +2207,7 @@ HSR_SCENARIO = {
     "track_infrastructure_defaults_version": 3,
     "stop_infrastructures_version": 3,
     "stop_infrastructure_defaults_version": 3,
+    "passage_charges_version": 3,
 }
 
 
@@ -2114,7 +2512,8 @@ def _compute_example_proposal(
         fare_per_km_by_class=STOPGAP_FARE_PER_KM_BY_CLASS,
     )
     stop_infra = loader.build_all_stops(scenario_id)
-    _, views = evaluate_and_build_views(route, tracks, stop_infra)
+    passages = loader.build_all_passages(scenario_id)
+    _, views = evaluate_and_build_views(route, tracks, stop_infra, passages)
 
     serialized_route = route_to_dict(route, scenario_id, tracks)
     evaluation = {
@@ -2309,9 +2708,13 @@ def main():
     print("Seeding input_params.service_classes...")
     insert_rows(cur, "input_params.service_classes", SERVICE_CLASSES)
 
+    print("Seeding input_params.loco_types...")
+    insert_rows(cur, "input_params.loco_types", LOCO_TYPES)
+
     print("Seeding input_params.operators...")
     insert_rows(cur, "input_params.operators", OPERATORS)
     seed_operator_class_costs(cur)
+    seed_operator_loco_costs(cur)
 
     print("Seeding input_params.coach_types...")
     insert_rows(cur, "input_params.coach_types", COACH_TYPES)
@@ -2329,9 +2732,13 @@ def main():
     print("Seeding input_params.stop_infrastructures...")
     insert_rows(cur, "input_params.stop_infrastructures", STOP_INFRASTRUCTURES)
 
+    print("Seeding input_params.passage_charges...")
+    seed_passage_charges(cur)
+
     print("Seeding input_params.composition_types...")
     insert_rows(cur, "input_params.composition_types", build_composition_types())
     seed_composition_type_coaches(cur)
+    seed_composition_type_locos(cur)
 
     print("Injecting source IDs...")
     seed_sources(cur, source_ids)
@@ -2360,11 +2767,15 @@ def main():
         ("input_params", "operator_class_costs"),
         ("input_params", "coach_types"),
         ("input_params", "coach_type_classes"),
+        ("input_params", "loco_types"),
+        ("input_params", "operator_loco_costs"),
+        ("input_params", "composition_type_locos"),
         ("input_params", "track_infrastructure_defaults"),
         (
             "input_params",
             "track_infrastructures",
         ),  # 84 rows: 3 full snapshots x 28 countries
+        ("input_params", "passage_charges"),  # 12 rows: 3 snapshots x 4 crossings
         ("input_params", "stop_infrastructure_defaults"),
         ("input_params", "stop_infrastructures"),
         ("input_params", "composition_types"),

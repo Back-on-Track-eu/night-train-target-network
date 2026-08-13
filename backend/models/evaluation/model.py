@@ -32,7 +32,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-CALC_VERSION: str = "0.9.17"
+CALC_VERSION: str = "0.9.19"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -66,6 +66,55 @@ CALC_MODEL_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.19": {
+        "date": "2026-08-13",
+        "author": "david",
+        "changes": "Locomotive cost is summed over the machines a "
+        "composition actually hauls, each at its operator's rate for that "
+        "machine, replacing n_locos x one flat operator rate. The rate "
+        "moves from input_params.operators to input_params."
+        "operator_loco_costs, keyed by (operator, locomotive type) — the "
+        "same shape as operator_class_costs, and for the same reason: a "
+        "lease price is a commercial term of a pairing, not a property of "
+        "either side alone. NO VALUE CHANGE at the seeded catalog: every "
+        "composition runs one machine and each operator has exactly one "
+        "priced pairing, so the sum equals the old product. An unpriced "
+        "pairing now fails the load loudly instead of resolving to a "
+        "default. Response change: the operator block exposes "
+        "loco_lease_eur_h per machine plus a locos list, in place of the "
+        "single loco_full_service_lease_eur_h field.",
+    },
+    "0.9.18": {
+        "date": "2026-08-13",
+        "author": "david",
+        "changes": "Track access charges are priced from the calibrated "
+        "component model instead of one flat per-country rate. Each "
+        "country run of a segment is now charged its own day/night "
+        "train-km rate, gross-tonne-km rate, seat-km, per-stop, flat "
+        "per-train-km and revenue-share terms, plus a peak multiplier or "
+        "congestion surcharge where the country declares peak bands; the "
+        "separately charged crossings (Storebælt, Øresund, Channel "
+        "Tunnel) are billed per traverse, attributed to one segment per "
+        "trip at routing time. Night rates split each country run pro "
+        "rata by the clock time it spends inside the national band, with "
+        "the German rule widening the night rate to the whole German run "
+        "for a train carrying night accommodation. Values are seeded in "
+        "EUR at 2032 from models/infrastructure/tac/calib. "
+        "SEQUENCING: the traffic pre-pass now runs BEFORE segment costs, "
+        "since the Swiss revenue share and the Channel Tunnel's "
+        "per-passenger fee price traffic rather than distance; "
+        "compute_segment_passenger_loads() reads the Route's segments "
+        "directly instead of the computed SegmentCosts, which is what "
+        "makes that possible. VALUES CHANGE: tac_eur moves substantially "
+        "in both directions per country, and the per-country cost view "
+        "now attributes the charge each country actually levied instead "
+        "of spreading the segment total by distance share (crossing "
+        "charges keep the distance split — they have no levying "
+        "country). No response key is added or removed; the "
+        "CALC_FORMULAS legend gains entries, which is additive. "
+        "SegmentCost carries the component breakdown internally as "
+        "SegmentCost.tac.",
+    },
     "0.9.17": {
         "date": "2026-08-13",
         "author": "david",
@@ -721,7 +770,7 @@ CALC_FORMULAS: dict[str, Formula] = {
         inputs=(
             FormulaParam(
                 symbol="c_loco,lease/h",
-                ref="column:input_params.operators.operator_loco_lease_eur_h",
+                ref="column:input_params.operator_loco_costs.operator_loco_lease_eur_h",
                 description="All-inclusive locomotive rental rate per hour in use",
                 unit="€/h",
             ),
@@ -948,27 +997,213 @@ CALC_FORMULAS: dict[str, Formula] = {
     # INFRASTRUCTURE
     # ------------------------------------------------------------------
     "tac_eur": Formula(
-        latex=r"C_{TAC} = \sum_{seg} \sum_{l \in seg} d_{km,l} \times p_{TAC,country(l)}",
-        description="Track access charge — the 'rail toll' paid to each "
-        "country's infrastructure company: the distance driven in the "
-        "country times its per-kilometre rate.",
+        latex=r"C_{TAC} = \sum_{seg}\Big[\sum_{c \in seg} \big( "
+        r"d_{c}\,(1{-}\nu_c)\,b_{day,c}\,\mu_c + d_{c}\,\nu_c\,b_{night,c} "
+        r"+ d_{c}\,(\gamma_c m_{gross} + \sigma_c P + \phi_c + \kappa_c \pi_c) "
+        r"\big) + \sum_{stop} h_{country(stop)} "
+        r"+ \rho_{c}\,R_{seg,c} + \sum_{x \in seg}\big(F_x + f_x n_{seg}\big)\Big]",
+        description="Track access charge — what the operator pays each "
+        "country's infrastructure company for using the track. Every "
+        "country charges its own mix: a rate per kilometre driven (higher "
+        "or lower at night), a rate per tonne of train weight and "
+        "kilometre, in some countries a rate per seat, a flat "
+        "administrative add-on, a fee per stop made, a share of the "
+        "ticket revenue earned there, and a surcharge for running through "
+        "a congested area at rush hour. Crossings billed separately — the "
+        "Storebælt and Øresund links and the Channel Tunnel — are added "
+        "per crossing, one of them also per passenger carried. A term a "
+        "country does not levy is simply absent.",
         inputs=(
             FormulaParam(
-                symbol="d_km,l",
-                description="Distance driven in the country",
+                symbol="d_c",
+                description="Distance driven in this country on this segment",
                 unit="km",
             ),
             FormulaParam(
-                symbol="p_TAC,country(l)",
-                ref="column:input_params.track_infrastructures.track_tac_eur_train_km",
-                description="The country's track access charge per train-kilometre",
+                symbol="nu_c",
+                ref="formula:calc.tac_night_share",
+                description="Share of the run in this country priced at the night rate",
+                unit="–",
+            ),
+            FormulaParam(
+                symbol="b_day,c",
+                ref="column:input_params.track_infrastructures.track_tac_b_day",
+                description="The country's day rate per train-kilometre",
                 unit="€/train-km",
+            ),
+            FormulaParam(
+                symbol="b_night,c",
+                ref="column:input_params.track_infrastructures.track_tac_b_night",
+                description="The country's night rate per train-kilometre",
+                unit="€/train-km",
+            ),
+            FormulaParam(
+                symbol="gamma_c",
+                ref="column:input_params.track_infrastructures.track_tac_gamma",
+                description="The country's rate per tonne of train weight "
+                "and kilometre",
+                unit="€/(t·km)",
+            ),
+            FormulaParam(
+                symbol="m_gross",
+                ref="column:input_params.loco_types.loco_type_weight_t",
+                description="Weight of the whole train — coaches plus locomotives",
+                unit="t",
+            ),
+            FormulaParam(
+                symbol="sigma_c",
+                ref="column:input_params.track_infrastructures.track_tac_seat_km",
+                description="The country's rate per place and kilometre",
+                unit="€/(place·km)",
+            ),
+            FormulaParam(
+                symbol="P",
+                description="Places the train offers",
+                unit="places",
+            ),
+            FormulaParam(
+                symbol="phi_c",
+                ref="column:input_params.track_infrastructures.track_tac_fixed_per_train_km",
+                description="The country's flat administrative add-on per "
+                "train-kilometre",
+                unit="€/train-km",
+            ),
+            FormulaParam(
+                symbol="kappa_c",
+                ref="column:input_params.track_infrastructures.track_tac_congestion_surcharge_eur_km",
+                description="The country's congestion surcharge per train-kilometre",
+                unit="€/train-km",
+            ),
+            FormulaParam(
+                symbol="pi_c",
+                ref="formula:calc.tac_peak_share",
+                description="Share of the run in this country falling in rush hour",
+                unit="–",
+            ),
+            FormulaParam(
+                symbol="mu_c",
+                ref="column:input_params.track_infrastructures.track_tac_peak_multiplier",
+                description="Factor the day rate is multiplied by over the "
+                "rush-hour share of the run (1 outside it)",
+                unit="factor",
+            ),
+            FormulaParam(
+                symbol="h_country(stop)",
+                ref="column:input_params.track_infrastructures.track_tac_per_stop",
+                description="Fee for making one stop, at that stop's own "
+                "country rate. A trip's first segment pays for both of its "
+                "ends, since no other segment owns the starting station",
+                unit="€/stop",
+            ),
+            FormulaParam(
+                symbol="rho_c",
+                ref="column:input_params.track_infrastructures.track_tac_revenue_share",
+                description="Share of the ticket revenue earned in this "
+                "country that the infrastructure manager takes",
+                unit="fraction",
+            ),
+            FormulaParam(
+                symbol="R_seg,c",
+                description="Ticket revenue attributable to this segment in "
+                "this country, per train run",
+                unit="€/trip",
+            ),
+            FormulaParam(
+                symbol="F_x",
+                ref="column:input_params.passage_charges.passage_fixed_eur",
+                description="Charge for crossing a separately billed link, per train",
+                unit="€/traverse",
+            ),
+            FormulaParam(
+                symbol="f_x",
+                ref="column:input_params.passage_charges.passage_per_passenger_eur",
+                description="Charge for crossing a separately billed link, "
+                "per passenger",
+                unit="€/passenger",
+            ),
+            FormulaParam(
+                symbol="n_seg",
+                description="Passengers aboard on this segment, per train run",
+                unit="passengers",
             ),
         ),
         output=FormulaParam(
             symbol="C_TAC",
             description="Annual track access charges",
             unit="€/year",
+        ),
+    ),
+    "tac_night_share": Formula(
+        latex=r"\nu_c = \begin{cases} 0 & \text{no night tariff} \\ "
+        r"1 & \text{widening applies} \\ "
+        r"\dfrac{|[t_{in}, t_{out}) \cap B_{night,c}|}{t_{out} - t_{in}} "
+        r"& \text{otherwise}\end{cases}",
+        description="How much of a country run is charged at the night "
+        "rate. Countries with a night tariff define a band — Germany "
+        "23:00 to 06:00, for instance — and the run is split between day "
+        "and night rate in proportion to the clock time it actually "
+        "spends inside it, rather than being priced entirely one way "
+        "based on where its middle falls. Germany adds a rule of its own: "
+        "a train carrying couchettes, sleepers or capsules is charged the "
+        "night rate over its whole German run, whatever the clock says.",
+        inputs=(
+            FormulaParam(
+                symbol="t_in, t_out",
+                description="When the train enters and leaves the country "
+                "on this segment",
+                unit="min",
+            ),
+            FormulaParam(
+                symbol="B_night,c",
+                ref="column:input_params.track_infrastructures.track_tac_night_band_start",
+                description="The country's night tariff band (band end: "
+                "track_tac_night_band_end)",
+                unit="time of day",
+            ),
+        ),
+        output=FormulaParam(
+            symbol="nu_c",
+            description="Share of the country run priced at the night rate",
+            unit="–",
+        ),
+    ),
+    "tac_peak_share": Formula(
+        latex=r"\pi_c = w \cdot \frac{\sum_{j} |[t_{in}, t_{out}) "
+        r"\cap B_{peak,c,j}|}{t_{out} - t_{in}}, \quad "
+        r"w = \tfrac{5}{7} \text{ if weekdays only, else } 1",
+        description="How much of a country run falls in rush hour. Austria "
+        "and Switzerland charge extra for running through a congested area "
+        "during the morning or evening commuter peak. Because the tool "
+        "knows a departure's clock time but not which day of the week it "
+        "runs, a peak that applies Monday to Friday only is charged at "
+        "five sevenths of the overlap — the average over a week — rather "
+        "than all or nothing.",
+        inputs=(
+            FormulaParam(
+                symbol="t_in, t_out",
+                description="When the train enters and leaves the country "
+                "on this segment",
+                unit="min",
+            ),
+            FormulaParam(
+                symbol="B_peak,c,j",
+                ref="column:input_params.track_infrastructures.track_tac_peak_band1_start",
+                description="The country's two daily peak bands "
+                "(track_tac_peak_band1_* and track_tac_peak_band2_*)",
+                unit="time of day",
+            ),
+            FormulaParam(
+                symbol="w",
+                ref="standard:INFRASTRUCTURE.WEEKDAY_BLEND",
+                description="Weekday blend, applied where the bands run "
+                "Monday to Friday only",
+                unit="–",
+            ),
+        ),
+        output=FormulaParam(
+            symbol="pi_c",
+            description="Share of the country run falling in rush hour",
+            unit="–",
         ),
     ),
     # Energy per leg comes from the energy model (models/energy/model.py),
