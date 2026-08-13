@@ -158,20 +158,18 @@ The TAC component model is fully in the schema
 exec'ing `06`'s stdlib cells when absent, same contract as the
 compositions calibration:
 
-- **`seed/sources.csv`** — the full register, inserted into
-  `input_params.sources` with the `source_key` prefixed into the
-  description (that prefix is how per-country `track_tac_src` FKs get
-  resolved).
-- **`seed/track_tac.csv`** — DB-ready TAC columns per country
-  (`track_tac_night_mode` … `track_tac_peak_weekdays_only` plus the flat
-  indicative `track_tac_eur_train_km`), **EUR-converted** — `06` is the
-  single place FX happens. Merged onto seed.py's canonical country rows;
-  SE keeps its flat NULL on purpose (test fixture — the flat is
-  display-only, SE's component group is seeded normally).
-- **`seed/passage_charges.csv`** — crossing charges with the polygon from
-  `tac/data/passage_geometries.geojson` as a GeoJSON string per row,
-  inserted via `ST_GeomFromGeoJSON` into `input_params.passage_charges`
-  (the fifth scenario-versioned table).
+> **Superseded for TAC (2026-08-13).** Track access charges no longer
+> seed from here. They are calibrated in `models/infrastructure/tac/calib/`
+> and exported by that package's `02_tac_calibration.ipynb` into its own
+> `seed/` directory, which `db/dev/seed.py` reads directly and regenerates
+> on a fresh container. In particular, currency and price-basis conversion
+> now happen there — `06` is no longer "the single place FX happens" for
+> TAC. `06`'s remaining sections below are unaffected.
+>
+> What moved: `seed/sources.csv`, `seed/track_tac.csv` and
+> `seed/passage_charges.csv` are now produced by the `tac/calib` package as
+> `tac/calib/seed/sources.csv`, `track_tac.csv`, `track_tac_default.csv`
+> and `passage_charges.csv`. See `models/infrastructure/tac/calib/README.md`.
 
 `seed/track_infrastructures.csv` / `_defaults.csv` are still exported for
 the wider infra columns (parking, shunting, energy, terrain, buffer) but

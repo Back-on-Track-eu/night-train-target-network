@@ -124,7 +124,8 @@ Allocation rules per country:
 | `driver`, `crew` (driving) | `country_time_shares` per segment |
 | `driver`, `crew` (dwell) | 100% to `StopCost.country_code` |
 | `loco`, `cleaning` | Pair-level time share (`t_share`) |
-| `coach_maintenance`, `tac`, `energy` | `country_distance_shares` per segment |
+| `coach_maintenance`, `energy` | `country_distance_shares` per segment |
+| `tac` | The charge each country actually levied (`SegmentTac.by_country`) — two countries on one segment can price very differently, which is the point of the component model. Crossing charges have no levying country and keep the distance-share split |
 | `coach_amortisation`, `financing`, `fix_overhead` | Pair-level distance share (`d_share`) |
 | `shunting` | 100% to terminal stop's country (`Shunting.country_code`) |
 | `station_charge` | 100% to `StopCost.country_code` |

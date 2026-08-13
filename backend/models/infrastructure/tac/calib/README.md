@@ -11,25 +11,45 @@ tac/calib/
 ├── 01_source_extraction.ipynb   the source register
 ├── 02_tac_calibration.ipynb     the values, and the document generator
 ├── TAC_CALIBRATION.md           generated — the calibration document
-└── data/                        generated — gitignored
-    ├── sources_register.csv
-    ├── tac_components.csv
-    ├── tac_night_mode.csv
-    ├── tac_peak_bands.csv
+├── data/                        generated — gitignored
+│   ├── sources_register.csv
+│   ├── tac_components.csv
+│   ├── tac_night_mode.csv
+│   ├── tac_peak_bands.csv
+│   ├── passage_charges.csv
+│   └── passage_geometries.geojson
+└── seed/                        generated — gitignored
+    ├── track_tac.csv
+    ├── track_tac_default.csv
     ├── passage_charges.csv
-    └── passage_geometries.geojson
+    └── sources.csv
 ```
+
+`data/` is the calibration record and `seed/` is what the database
+reads — the same values, but converted, pivoted one row per country, and
+reduced to the columns `db/dev/seed.py` inserts. Keeping them apart is
+what lets a reviewer check `data/` line by line against a source document
+while the seed step handles a plain number and no units.
 
 ## Regenerating
 
 Run `01` then `02`, top to bottom. Both are stdlib-only and take no
 arguments; `02` reads the register `01` writes, so the order matters.
-Everything under `data/`, and `TAC_CALIBRATION.md` itself, is a generated
-artifact — **never hand-edit them**, the next run overwrites the change
-silently. To change a value, change the notebook.
+Everything under `data/` and `seed/`, and `TAC_CALIBRATION.md` itself, is
+a generated artifact — **never hand-edit them**, the next run overwrites
+the change silently. To change a value, change the notebook.
 
-`data/` is gitignored; `TAC_CALIBRATION.md` is committed, following the
-`docs/MODEL.md` precedent for generated-but-published documents.
+`data/` and `seed/` are gitignored; `TAC_CALIBRATION.md` is committed,
+following the `docs/MODEL.md` precedent for generated-but-published
+documents.
+
+Nothing has to be run by hand for a fresh stack: `db/dev/seed.py`
+regenerates the seed CSVs itself when they are absent, executing both
+notebooks in order and stopping as soon as the four files exist. That
+stop matters — every cell here is stdlib-only, so unlike the compositions
+notebook there is no pandas import to mark where the document generator
+begins, and without it a committed calibration document would be rewritten
+on every container start.
 
 ## What belongs here, and what does not
 
@@ -58,7 +78,9 @@ number the cost model can use, and both happen once, in `02`:
    calibration that already sits at nominal 2032.
 
 The database receives one plain EUR number per component, already at the
-evaluation year. `calc_tac.py` never sees a currency or a price basis.
+evaluation year — that conversion is what the `seed/` export applies and
+`data/` deliberately does not. `calc_tac.py` never sees a currency or a
+price basis, and neither does `seed.py`.
 
 A national tariff that demonstrably does not move with the European
 average takes an explicit rate of its own via `ESCALATION_OVERRIDE`, with
@@ -77,3 +99,25 @@ Every value carries a status: `sourced` (named document, named locator),
 term* — not an absence, which is why every country carries every
 parameter. Notebook `02` fails rather than writing a citation that does
 not resolve against the register.
+
+## What the seed export adds
+
+Three things the calibration record itself does not carry, because they
+are database concerns rather than tariff facts:
+
+- **The fallback group.** A country the model routes through but the
+  register has no rate term for is priced from the European median of
+  `b_day`, `b_night` and `gamma` (`track_tac_default.csv`). Median rather
+  than mean: the calibrated spread runs from 0.21 to 6.94 EUR/train-km,
+  and an average over that lands on a figure no network actually charges.
+  Only those three terms are defaulted — a seat surcharge or a per-stop
+  charge is a national particularity, and handing one to every
+  uncalibrated country would invent tariff structure rather than fill a
+  gap. The substitution itself happens in the loader, as a group: a
+  country levying any rate term keeps its own empty components, which
+  mean *not levied here*.
+- **Crossing names and polygons per charge row.** Øresund is one polygon
+  behind two charge rows, so the geometry is duplicated onto each — the
+  database keys on the charge, not the crossing.
+- **The source register, reduced.** Only documents an actual value cites
+  are seeded; an unused register row is a research note, not provenance.

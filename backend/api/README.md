@@ -219,7 +219,13 @@ grouped by concern:
 real section geometry), `equipment` (amenity OR-aggregations incl.
 **has_wifi**, plus the **food_and_beverages** catering concept),
 `coaches` (`{count, list}` — the ordered formation referencing the
-top-level **coach_types** catalog), `fixed_costs`, `variable_km`,
+top-level **coach_types** catalog), **`locos`** (the ordered locomotives
+with mass, design speed and traction, from `input_params.loco_types` —
+`routing.n_locos` is their count, not a stored column) and
+**`loco_lease_eur_h`** (the hourly rental rate keyed by `loco_type_id`,
+since the rate is a term of the (operator, machine) pairing —
+`loco_full_service_lease_eur_h` remains alongside it as the whole-consist
+rate the cost model multiplies by), `fixed_costs`, `variable_km`,
 **cost_allocation** (`by_class_main`: each class's blended cost
 proportion — the workbook cost_acc columns; identical to the
 evaluation's by_class_main hardware basis; sums to 1), and `indicative`

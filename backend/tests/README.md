@@ -40,6 +40,7 @@ built on top of it:
 | `test_55` | `GET /api/proposals/stats` — §7.7 counts, KPI aggregates per scope, top/flop countries and country relations |
 | `test_60` | Feedback API — submit/categories |
 | `test_70`–`test_71` | Auth — integration (API + DB) and standalone units |
+| `test_72`–`test_74` | Standalone model units — no stack, no DB. Roster efficiency, the component track access charge, and the locomotive catalog. Runnable on their own with `pytest tests/test_7X_....py` |
 
 Content tests that need *controlled* demand (`test_30`, `test_40`) call
 the model layer directly (`tests/helpers.py:compute_evaluation_domain()`),

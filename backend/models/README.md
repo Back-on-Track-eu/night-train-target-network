@@ -44,10 +44,13 @@ models/
 │   └── README.md                    # Emissions model documentation (sources, consumers, roadmap)
 ├── compositions/
 │   ├── model.py                     # COMPOSITIONS_MODEL_VERSION — cost calibration anchor (calib/CALIBRATION.md)
+│   │                                #   also the source of the loco_types catalog
 │   └── calib/                       # Calibration notebooks, data, and CALIBRATION.md
 ├── infrastructure/
-│   ├── model.py                     # INFRA_MODEL_VERSION — infrastructure parameter anchor
-│   └── STOP_CLASSIFICATION.md       # Stop catalog classification pipeline
+│   ├── model.py                     # INFRA_MODEL_VERSION + WEEKDAY_BLEND
+│   ├── calc_tac.py                  # Component track access charge per segment
+│   ├── STOP_CLASSIFICATION.md       # Stop catalog classification pipeline
+│   └── tac/calib/                   # TAC calibration notebooks + TAC_CALIBRATION.md
 └── evaluation/
     ├── calc.py                      # Cost/revenue evaluation → EvaluationResult
     ├── views.py                     # Breakdown aggregation, allocation, normalisation
