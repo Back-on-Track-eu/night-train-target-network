@@ -70,7 +70,7 @@ station parameters).
 | Route & timetable builder | `0.9.20` | Route and timetable builder: turns a list of stops, a train composition, and a few mode selections into a complete route — trip pairs, travel and stopping times with schedule buffers, and a mirrored outbound/return night schedule. | [`model.py`](../backend/models/route/model.py) | [README.md](../backend/models/README.md) |
 | Energy model | `0.9.1` | Traction energy model: estimates the electricity a train uses on each part of the route. Currently a flat 28 kWh per kilometre placeholder, until the weight/speed/terrain model is calibrated against Deutsche Bahn Trassenfinder data. | [`model.py`](../backend/models/energy/model.py) | [README.md](../backend/models/energy/README.md) |
 | Demand model | `0.0.2` | Demand model (placeholder): assumes every accommodation class is 70% booked at a flat per-kilometre fare, spread evenly across all connections — a stand-in until a real demand model with directional demand, price sensitivity, and competition from other modes replaces it. | [`model.py`](../backend/models/demand/model.py) | [README.md](../backend/models/demand/README.md) |
-| Cost & revenue evaluation | `0.9.16` | Cost and revenue evaluation: computes the operator's fixed and variable costs, the charges paid to infrastructure companies, and the ticket revenue of a route, then aggregates the result into views per route, trip pair, country, connection, route section, and stop. | [`model.py`](../backend/models/evaluation/model.py) | [README.md](../backend/models/evaluation/README.md) |
+| Cost & revenue evaluation | `0.9.17` | Cost and revenue evaluation: computes the operator's fixed and variable costs, the charges paid to infrastructure companies, and the ticket revenue of a route, then aggregates the result into views per route, trip pair, country, connection, route section, and stop. | [`model.py`](../backend/models/evaluation/model.py) | [README.md](../backend/models/evaluation/README.md) |
 | Emissions model | `0.1.1` | Climate impact factors: how many grams of CO2-equivalent one passenger-kilometre causes by night train, plane, and car — used for the mode comparison and the CO2-savings estimate. The night-train value is a European average until a country-resolved, energy-based model replaces it. | [`model.py`](../backend/models/emissions/model.py) | [README.md](../backend/models/emissions/README.md) |
 | Composition cost model | `0.9.2` | Composition cost model: calibrated purchase, maintenance, cleaning, crew, and availability parameters per train composition, in a 'new' and a 'refurbished' rolling stock family, at 2032 prices. | [`model.py`](../backend/models/compositions/model.py) | [CALIBRATION.md](../backend/models/compositions/calib/CALIBRATION.md) |
 | Infrastructure parameter model | `0.9.1` | Infrastructure parameter model: per-country track access charges, station charges, electricity prices, terrain, schedule buffers, and minimum stopping times, with EU-average fallbacks — plus the catalog of possible night train stops. | [`model.py`](../backend/models/infrastructure/model.py) | [STOP_CLASSIFICATION.md](../backend/models/infrastructure/STOP_CLASSIFICATION.md) |
@@ -462,6 +462,26 @@ Cost per sold place-kilometre of one class: the class's share of a cost divided 
 | Input | `pkm_sold,c` | Sold place-kilometres of the class per year | place-km/year | set by the tool user |
 | **Output** | `c_c` | Cost per sold place-kilometre of the class | €/place-km | — |
 
+**Upstream derivations** — quantities the cost leaves below divide or multiply by, computed per trip rather than read from a parameter:
+
+<a id="f-calc-roster_efficiency_driver"></a>
+#### Roster efficiency (Dienstplanwirkungsgrad) — `roster_efficiency_driver`
+
+$$ \eta = \eta_{ref} \cdot \frac{t_{train,h}}{t_{train,h} + t_{relief} \cdot (n_{duty} - 1)}, \quad n_{duty} = \left\lceil \frac{t_{basis,h}}{t_{duty,max}} \right\rceil $$
+
+Dienstplanwirkungsgrad — the share of paid staff hours that is actually productive. Paid time exceeds time on the train because of sign-on and sign-off, positioning to and from the train, rest away from the home base, and reserve cover. A shift may not exceed a legal maximum, so a long trip has to be worked by two or more crews in succession; each handover adds a fixed unproductive allowance. The value therefore drops at every shift boundary and then recovers as that fixed allowance is spread over a longer trip.
+
+| | Symbol | Meaning | Unit | Source |
+|---|---|---|---|---|
+| Input | `eta_ref` | Efficiency when the trip fits a single shift (operator_crew_roster_eff_ref for onboard staff) | – | parameter [`operator_driver_roster_eff_ref`](#p-input_params-operators-operator_driver_roster_eff_ref) |
+| Input | `t_train,h` | Time the staff member is on the train | h | computed upstream |
+| Input | `t_basis,h` | Hours measured against the shift cap — driving time for drivers, time on train for onboard staff | h | computed upstream |
+| Input | `t_duty,max` | Longest permitted shift (operator_crew_max_duty_h for onboard staff) | h | parameter [`operator_driver_max_duty_h`](#p-input_params-operators-operator_driver_max_duty_h) |
+| Input | `t_relief` | Unproductive hours added per crew handover | h | parameter [`operator_relief_allowance_h`](#p-input_params-operators-operator_relief_allowance_h) |
+| **Output** | `eta` | Productive share of paid hours for this trip | – | — |
+
+**Used by:** [`crew_eur`](#f-calc-crew_eur), [`driver_eur`](#f-calc-driver_eur)
+
 **The cost/revenue tree** — every subtotal shown with the exact leaves it sums, in the same structure as the tool's cost breakdown views:
 
 <a id="f-calc-total_cost_eur"></a>
@@ -516,13 +536,14 @@ Costs that scale with how much the train runs — driving and staffing hours, ki
 <a id="f-calc-driver_eur"></a>
 ####### Driver cost — `driver_eur`
 
-$$ C_{driver} = c_{driver/h} \times \left( \sum_{seg} t_{drive,h} \cdot f_{driver} + \sum_{stop} t_{dwell,h} \cdot f_{driver} \right) $$
+$$ C_{driver} = \frac{c_{driver/h}}{\eta_{driver}} \times \left( \sum_{seg} t_{drive,h} \cdot f_{driver} + \sum_{stop} t_{dwell,h} \cdot f_{driver} \right) $$
 
-Driver cost: the hourly driver rate times all hours the driver is on duty — driving between stops and waiting at them.
+Driver cost: the driver wage per productive hour, divided by the share of paid hours that is productive, times all hours the driver is on duty — driving between stops and waiting at them. Trips too long for one driver shift need a relief driver, which lowers that share and raises the effective rate.
 
 | | Symbol | Meaning | Unit | Source |
 |---|---|---|---|---|
-| Input | `c_driver/h` | Driver cost per hour on duty | €/h | parameter [`operator_driver_costs_eur_h`](#p-input_params-operators-operator_driver_costs_eur_h) |
+| Input | `c_driver/h` | Driver wage per productive hour | €/h | parameter [`operator_driver_costs_eur_h`](#p-input_params-operators-operator_driver_costs_eur_h) |
+| Input | `eta_driver` | Share of paid driver hours that is productive | – | formula [`roster_efficiency_driver`](#f-calc-roster_efficiency_driver) |
 | Input | `t_drive,h` | Driving time between stops | h | computed upstream |
 | Input | `t_dwell,h` | Waiting time at stops | h | formula [`dwell_time_both`](#f-route-dwell_time_both) |
 | Input | `f_driver` | Number of drivers the train needs | persons | parameter [`composition_type_driver_factor`](#p-input_params-composition_types-composition_type_driver_factor) |
@@ -533,13 +554,14 @@ Driver cost: the hourly driver rate times all hours the driver is on duty — dr
 <a id="f-calc-crew_eur"></a>
 ####### Cabin crew cost — `crew_eur`
 
-$$ C_{crew} = c_{crew/h} \times \left( \sum_{seg} t_{drive,h} \cdot n_{crew} + \sum_{stop} t_{dwell,h} \cdot n_{crew} \right) $$
+$$ C_{crew} = \frac{c_{crew/h}}{\eta_{crew}} \times \left( \sum_{seg} t_{drive,h} \cdot n_{crew} + \sum_{stop} t_{dwell,h} \cdot n_{crew} \right) $$
 
-Cabin crew cost: the hourly rate per crew member times all hours the crew is on board — while driving and while waiting at stops.
+Cabin crew cost: the crew wage per productive hour, divided by the share of paid hours that is productive, times all hours the crew is on board — while driving and while waiting at stops. Trips too long for one shift need a relief crew, which lowers that share and raises the effective rate.
 
 | | Symbol | Meaning | Unit | Source |
 |---|---|---|---|---|
-| Input | `c_crew/h` | Cost per crew member per hour on duty | €/h | parameter [`operator_crew_costs_eur_h`](#p-input_params-operators-operator_crew_costs_eur_h) |
+| Input | `c_crew/h` | Crew wage per productive hour, per attendant | €/h | parameter [`operator_crew_costs_eur_h`](#p-input_params-operators-operator_crew_costs_eur_h) |
+| Input | `eta_crew` | Share of paid crew hours that is productive | – | formula [`roster_efficiency_driver`](#f-calc-roster_efficiency_driver) |
 | Input | `t_drive,h` | Driving time between stops | h | computed upstream |
 | Input | `t_dwell,h` | Waiting time at stops | h | formula [`dwell_time_both`](#f-route-dwell_time_both) |
 | Input | `n_crew` | Crew members on board (train manager counted with a factor) | persons | parameter [`coach_type_crew_factor`](#p-input_params-coach_types-coach_type_crew_factor) |
@@ -1001,8 +1023,13 @@ Train operating company and its cost rates. A catalog, not history: operator_id 
 | <a id="p-input_params-operators-operator_row_id"></a>`operator_row_id` | — | — | — |
 | <a id="p-input_params-operators-operator_id"></a>`operator_id` | Operator identifier (e.g. STD-REF, STD-NEW). | — | — |
 | <a id="p-input_params-operators-operator_name"></a>`operator_name` | Full operator name. | — | — |
-| <a id="p-input_params-operators-operator_driver_costs_eur_h"></a>`operator_driver_costs_eur_h` | Driver pay per hour on duty (roster inefficiency already included — billable hours equal trip time). | €/h | [`driver_eur`](#f-calc-driver_eur) |
-| <a id="p-input_params-operators-operator_crew_costs_eur_h"></a>`operator_crew_costs_eur_h` | Cabin crew pay per hour on duty, per attendant. The train manager is counted with a factor on the composition. | €/h | [`crew_eur`](#f-calc-crew_eur) |
+| <a id="p-input_params-operators-operator_driver_costs_eur_h"></a>`operator_driver_costs_eur_h` | Driver pay per PRODUCTIVE hour, i.e. the raw wage rate before roster inefficiency. Evaluation divides it by the Dienstplanwirkungsgrad it computes per trip from the four roster columns below. | €/h | [`driver_eur`](#f-calc-driver_eur) |
+| <a id="p-input_params-operators-operator_crew_costs_eur_h"></a>`operator_crew_costs_eur_h` | Cabin crew pay per PRODUCTIVE hour, per attendant, before roster inefficiency (same treatment as the driver rate). The train manager is counted with a factor on the composition. | €/h | [`crew_eur`](#f-calc-crew_eur) |
+| <a id="p-input_params-operators-operator_driver_max_duty_h"></a>`operator_driver_max_duty_h` | Longest driving time one driver may work between daily rest periods. Directive 2005/47/EC sets 8 h on a night shift (9 h by day); national agreements may be stricter. A trip whose driving time exceeds it needs a relief driver, which lowers the roster efficiency. | h | [`roster_efficiency_driver`](#f-calc-roster_efficiency_driver) |
+| <a id="p-input_params-operators-operator_crew_max_duty_h"></a>`operator_crew_max_duty_h` | Longest working time one onboard attendant may work between daily rest periods, per the applicable collective agreement. Same relief mechanism as the driver column. | h | — |
+| <a id="p-input_params-operators-operator_driver_roster_eff_ref"></a>`operator_driver_roster_eff_ref` | Dienstplanwirkungsgrad for a driver duty that needs no relief: the share of paid hours that is productive once sign-on/off, reserve cover and leave are absorbed. | fraction | [`roster_efficiency_driver`](#f-calc-roster_efficiency_driver) |
+| <a id="p-input_params-operators-operator_crew_roster_eff_ref"></a>`operator_crew_roster_eff_ref` | Dienstplanwirkungsgrad for an onboard duty that needs no relief. Higher than the driver value: onboard links position less and rest away from base more predictably. | fraction | — |
+| <a id="p-input_params-operators-operator_relief_allowance_h"></a>`operator_relief_allowance_h` | Unproductive hours added per relief event — positioning to and from the relief point, the extra sign-on/off, and away-base rest handling. Applied once per additional duty beyond the first, for both roles. | h | [`roster_efficiency_driver`](#f-calc-roster_efficiency_driver) |
 | <a id="p-input_params-operators-operator_ebit_margin_per"></a>`operator_ebit_margin_per` | Operating profit the operator requires, as a share of ticket revenue. | fraction of revenue | [`ebit_margin_eur`](#f-calc-ebit_margin_eur) |
 | <a id="p-input_params-operators-operator_financing_quota_per"></a>`operator_financing_quota_per` | Annual financing cost as a share of the capital tied up in coaches. | fraction/year | [`financing_eur`](#f-calc-financing_eur) |
 | <a id="p-input_params-operators-operator_var_overhead_per"></a>`operator_var_overhead_per` | Variable overhead — ticket sales, distribution, customer service — as a share of ticket revenue. | fraction of revenue | [`var_overhead_eur`](#f-calc-var_overhead_eur) |

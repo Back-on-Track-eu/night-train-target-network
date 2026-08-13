@@ -497,6 +497,14 @@ CALC_ALLOCATION_FORMULAS = [
     ("per_sold_place_km_by_class", "Cost per sold place-km, by class"),
 ]
 
+# Upstream derivations consumed by the cost leaves — computed per trip
+# rather than read from a parameter, and not cost or revenue lines
+# themselves. Distinct from CALC_ALLOCATION_FORMULAS, which is
+# specifically about splitting a cost across accommodation classes.
+CALC_DERIVATION_FORMULAS = [
+    ("roster_efficiency_driver", "Roster efficiency (Dienstplanwirkungsgrad)"),
+]
+
 # The generic aggregation rule (x_total = sum of a level's items), which
 # the country/section/OD/stop matrix views reuse at levels the fixed
 # CALC_TREE above doesn't name individually.
@@ -520,6 +528,7 @@ def render_calc_formulas() -> str:
     collect(CALC_TREE)
     covered = (
         {k for k, _ in CALC_ALLOCATION_FORMULAS}
+        | {k for k, _ in CALC_DERIVATION_FORMULAS}
         | {k for k, _ in CALC_GENERIC_FORMULAS}
         | tree_keys
     )
@@ -527,12 +536,16 @@ def render_calc_formulas() -> str:
     if missing:
         raise SystemExit(
             f"generate_model_docs: CALC_FORMULAS keys not placed in CALC_TREE, "
-            f"CALC_ALLOCATION_FORMULAS, or CALC_GENERIC_FORMULAS: {sorted(missing)}"
+            f"CALC_ALLOCATION_FORMULAS, CALC_DERIVATION_FORMULAS, or "
+            f"CALC_GENERIC_FORMULAS: {sorted(missing)}"
         )
     return (
         "**Cost allocation to accommodation classes** — an upstream step "
         "used by every per-class normalisation below, not a cost or "
         f"revenue line itself:\n\n{render_list(CALC_ALLOCATION_FORMULAS)}\n\n"
+        "**Upstream derivations** — quantities the cost leaves below divide "
+        "or multiply by, computed per trip rather than read from a "
+        f"parameter:\n\n{render_list(CALC_DERIVATION_FORMULAS)}\n\n"
         "**The cost/revenue tree** — every subtotal shown with the exact "
         "leaves it sums, in the same structure as the tool's cost "
         f"breakdown views:\n\n{render_calc_tree()}\n\n"
