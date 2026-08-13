@@ -30,7 +30,13 @@ uv.lock
 .mypy_cache/
 .dmypy.json
 dmypy.json
-.pytype/
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Energy model notebooks (required for reproducibility)
+!backend/models/energy/notebooks/Energy_model_Helena.ipynb
+!backend/models/energy/notebooks/Trassenfinder_API_query.ipynb.pytype/
 
 # Pytest
 .pytest_cache/
