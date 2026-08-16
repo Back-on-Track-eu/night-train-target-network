@@ -18,9 +18,9 @@ the full design and its principles).
 | 2 | Filter all station objects out of the raw extract | ✅ done | `step2_filter_stations.py` |
 | 3a | Fetch center coordinates for station ways/relations | ✅ done | `step3a_fetch_missing_centers.py` |
 | 3b | Classify "real" railway stations vs. urban transit | ✅ done | `step3b_classify_stations.ipynb` |
-| 4 | Merge classified stations with ONTD (left join; inspect ONTD rows without an OSM match) | ⬜ to build | reuse the matcher from step 5 as template |
-| 5 | Qualify stops via current night train stops (`stop_times`) | 🟡 draft ready | `step5_match_night_train_stops.ipynb` |
-| 6 | Add stations for [functional urban areas](https://ec.europa.eu/eurostat/web/gisco/geodata/statistical-units/cities-functional-urban-areas) that have no qualified stop yet | ⬜ to build | — |
+| 4 | Merge classified stations with ONTD (left join; inspect ONTD rows without an OSM match) | ✅ done | reuse the matcher from step 5 as template |
+| 5 | Qualify stops via current night train stops (`stop_times`) | ✅ done | `step5_JoinNTStopsWithOSM.ipynb` |
+| 6 | Add stations for [functional urban areas](https://ec.europa.eu/eurostat/web/gisco/geodata/statistical-units/cities-functional-urban-areas) that have no qualified stop yet | ✅ done | — |
 | 7 | Update the station charge data | ⬜ to build | — |
 
 Steps 2 and 3 only need re-running when the OSM source data is refreshed.
@@ -53,6 +53,7 @@ Everything under `data/` is gitignored (bulk data). What each file is:
 | `data/step5_output_unmatched_report.csv` | Step 5 output: night train stops with no OSM match within range — review, don't drop. | manual review |
 | `data/step5_output_duplicate_osm_matches_report.csv` | Step 5 output: OSM stations claimed by more than one schedule stop name. | manual review |
 | `data/step5_output_schedule_coord_conflicts_report.csv` | Step 5 output: stops whose schedule coordinate reports disagree by more than the jitter threshold. | manual review |
+| `data/step6_metropol.csv` | Step 6 output: stops which lay in urban areas | manual selection
 | `data/bahnhoefe_stops_sorted.csv` | ONTD export (48,617 stations): names (real/Latin/ASCII), country code, timezone, lat/lon, and the ID linking to the old stop charge data. | step 4 |
 | `data/B-o-T_DataBase_stop_times.csv` | `stop_times` export from the night train database — defines where night trains stop today. | step 5 |
 | `data/eu_stations_{light_rail,subway,tram,train_yes,uic_name,uic_ref}.osm.pbf` | Exploration-only side outputs of the step 2 run. Each contains *every* OSM object with that tag (not just stations) — for QGIS tag-coverage analysis. **Not pipeline inputs**; safe to delete. | — |
@@ -348,6 +349,10 @@ several anchors, all of them recorded in `signals` like any other tier.
 Per country the chain is: GTFS signal → national category → anchor-based
 signals. A country nobody onboarded yet still gets Tier 1 + population as the
 default anchor type, so no country ends up empty.
+
+**Documentation step6:**
+Stops which lay in urban areas were selected manually, for every area 1-2 stops each. Furthermore Tourism areas & major ferry hubs were added.
+
 
 #### Stage D — Manual overrides
 
