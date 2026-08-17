@@ -88,13 +88,23 @@ pgdata/
 # produce (CALIBRATION.md, TAC_CALIBRATION.md) stay tracked, following the
 # docs/MODEL.md precedent for generated-but-published documents.
 backend/models/compositions/calib/data/
-backend/models/infrastructure/calib/data/
-backend/models/infrastructure/calib/*/data/
 backend/models/infrastructure/tac/calib/data/
-backend/models/infrastructure/tac/calib/seed/
+backend/models/infrastructure/energy_pricing/calib/data/
+backend/models/infrastructure/facility/calib/data/
+backend/models/infrastructure/route_context/calib/data/
 
 # Seed CSVs — regenerated from the calibration notebooks at seed time
 backend/models/compositions/calib/seed/
+backend/models/infrastructure/tac/calib/seed/
+backend/models/infrastructure/energy_pricing/calib/seed/
+backend/models/infrastructure/facility/calib/seed/
+backend/models/infrastructure/route_context/calib/seed/
+
+# NOT ignored, deliberately: route_context/calib/sources/. It holds an
+# extraction from a live database (ONTD timetables against router passage
+# times), not a derivation — the calibration cannot reproduce it on a machine
+# with no ONTD snapshot, so it travels with the repository like a source
+# document. See that package's README.
 
 # Downloaded from Drive when absent (ONTD stop catalog, country geometries)
 backend/db/dev/data/*.csv

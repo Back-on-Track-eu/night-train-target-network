@@ -194,41 +194,11 @@ class SegmentTac:
 
 
 # =============================================================================
-# PLACING A COUNTRY RUN ON THE CLOCK
+# BAND SHARES OF A COUNTRY RUN
 # =============================================================================
-
-
-def _country_windows(segment: Segment) -> list[tuple[str, float, float, float]]:
-    """
-    Place each country run of the segment on the clock:
-    (country_code, enter_min, exit_min, distance_share), in path order.
-
-    Each country's time share positions it between the from_stop departure
-    and the to_stop arrival; its distance share gives it a length. "UNK"
-    slices (open water, ferries, geometry outside every polygon) still
-    advance the time cursor so they do not shift later countries' windows,
-    and are yielded like any other — the caller skips them, since there is
-    no infrastructure manager to pay.
-    """
-    t0 = segment.from_stop.departure_time_min
-    t1 = segment.to_stop.arrival_time_min
-    duration = float((t1 or 0) - (t0 or 0)) if t0 is not None else 0.0
-
-    # Ordered path list. Payloads stored before ROUTE_BUILDER 0.9.21 have
-    # none — fall back to the share dict's keys, which loses ordering
-    # precision (and so places the clock windows only approximately) but
-    # keeps a stale route evaluable.
-    countries = segment.countries or list(segment.country_distance_shares.keys())
-
-    windows: list[tuple[str, float, float, float]] = []
-    cursor = float(t0 or 0)
-    for cc in countries:
-        enter = cursor
-        cursor += duration * segment.country_time_shares.get(cc, 0.0)
-        windows.append(
-            (cc, enter, cursor, segment.country_distance_shares.get(cc, 0.0))
-        )
-    return windows
+# Placing each country run on the clock is Segment.country_windows()
+# (models/route/trip.py) — shared with the energy price model, which needs
+# the identical placement for the electricity night band.
 
 
 def _night_fraction(
@@ -435,7 +405,7 @@ def calc_segment_tac(
     result = SegmentTac()
     distance_km = segment.distance_m / 1000.0
 
-    for cc, enter, exit_, dist_share in _country_windows(segment):
+    for cc, enter, exit_, dist_share in segment.country_windows():
         track = tracks.get(cc)
         if track is None:
             continue  # "UNK" — open water or ferry, no infrastructure manager
