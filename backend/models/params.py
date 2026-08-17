@@ -229,7 +229,7 @@ class ServiceClass:
     """Whether this class makes the train count as carrying night
     accommodation for tariff purposes — see the column comment on
     input_params.service_classes.service_class_is_night_accommodation and
-    models/infrastructure/calc_tac.py's night-band widening."""
+    models/infrastructure/tac/calc_tac.py's night-band widening."""
 
 
 # =============================================================================
@@ -999,7 +999,7 @@ class DefaultTrackInfra:
     buffer_quota_per: float
     buffer_src: Optional[ParamsSource]
 
-    # --- track access charge components (models/infrastructure/calc_tac.py)
+    # --- track access charge components (models/infrastructure/tac/calc_tac.py)
     # All EUR at the 2032 evaluation year — the calibration notebook does
     # both conversions once, before seeding. A None here is a documented
     # tariff fact ("not levied"), never a gap: the loader substitutes this
@@ -1024,6 +1024,36 @@ class DefaultTrackInfra:
     tac_peak_band2_start_min: Optional[int]
     tac_peak_band2_end_min: Optional[int]
     tac_peak_weekdays_only: bool
+
+    # --- traction energy price terms
+    #     (models/infrastructure/energy_pricing/calc_energy_price.py)
+    # EUR at the 2032 evaluation year, converted once in the calibration
+    # notebook. None is a tariff fact, never a gap, and — unlike the TAC
+    # group — never substituted from the defaults row: no night price means
+    # one rate around the clock, no catenary term means the country levies
+    # no separate supply-equipment charge. Only the day rate above
+    # (energy_price_eur_kwh) resolves against the default. Provenance for
+    # the group is energy_price_src, shared with the day rate.
+    energy_price_night_eur_kwh: Optional[float]  # €/kWh inside the band
+    energy_night_band_start_min: Optional[int]  # minute of day, may wrap
+    energy_night_band_end_min: Optional[int]
+    energy_catenary_eur_train_km: Optional[float]  # €/train-km
+    energy_catenary_eur_gross_tonne_km: Optional[float]  # €/gross-tonne-km
+
+    # --- service facility terms
+    #     (models/infrastructure/facility/calc_facility.py)
+    # EUR at the 2032 evaluation year. Unlike the energy group these DO resolve
+    # against the defaults row — as one group, keyed on parking_basis: every
+    # country that stables a train charges something, or has been documented
+    # not to, in which case its basis reads 'none'. Only the rate column
+    # matching the basis carries a value. Provenance for the group is
+    # parking_src, shared with the shunting figure it is calibrated alongside.
+    parking_basis: Optional[str]  # per_metre_day | per_hour | per_event | none
+    parking_eur_metre_day: Optional[float]
+    parking_eur_hour: Optional[float]
+    parking_eur_event: Optional[float]
+    parking_free_hours: Optional[float]
+    parking_hotel_power_eur_hour: Optional[float]
 
     def source_for(self, field_name: str) -> Optional[ParamsSource]:
         """
@@ -1086,6 +1116,36 @@ has its own tariff or is priced from the EU median, never a mixture. They
 are registered in ParamVersions like any other field and share
 track_tac_src for provenance."""
 
+ENERGY_PRICE_FIELD_NAMES = (
+    "energy_price_night_eur_kwh",
+    "energy_night_band_start_min",
+    "energy_night_band_end_min",
+    "energy_catenary_eur_train_km",
+    "energy_catenary_eur_gross_tonne_km",
+)
+"""The calibrated energy price terms beyond the day rate, kept apart from
+TRACK_INFRA_FIELD_NAMES because they are never defaulted: a None here is
+the documented tariff fact "not levied" (see DBDataLoader._row_to_track),
+where a None in the ten legacy parameters is a gap the defaults row fills.
+Registered in ParamVersions like any other field and sharing
+energy_price_src with the day rate, which is the value they qualify."""
+
+FACILITY_FIELD_NAMES = (
+    "parking_basis",
+    "parking_eur_metre_day",
+    "parking_eur_hour",
+    "parking_eur_event",
+    "parking_free_hours",
+    "parking_hotel_power_eur_hour",
+)
+"""The calibrated stabling terms, kept apart from TRACK_INFRA_FIELD_NAMES
+because they resolve as ONE GROUP rather than field by field (see
+DBDataLoader._row_to_track): a country prices in exactly one unit, so the two
+unused rate columns are NULL by construction and defaulting them individually
+would mix two countries' tariff structures. The trigger is parking_basis.
+Shunting is not here — it stays the single per-event field
+shunting_eur_event, which defaults like any other legacy parameter."""
+
 TAC_RATE_FIELD_NAMES = ("tac_b_day", "tac_b_night", "tac_gamma")
 """The three distance-based rate terms whose joint absence triggers
 group resolution. A country levying any one of them is calibrated; the
@@ -1103,8 +1163,11 @@ _TRACK_DEFAULT_SRC_ATTRS = {
     "min_alighting_time_min": "min_alighting_src",
     "buffer_quota_per": "buffer_src",
     **{name: "tac_src" for name in TAC_COMPONENT_FIELD_NAMES},
+    **{name: "energy_price_src" for name in ENERGY_PRICE_FIELD_NAMES},
+    **{name: "parking_src" for name in FACILITY_FIELD_NAMES},
 }
-"""Maps each TRACK_INFRA_FIELD_NAMES / TAC_COMPONENT_FIELD_NAMES entry to
+"""Maps each TRACK_INFRA_FIELD_NAMES / TAC_COMPONENT_FIELD_NAMES /
+ENERGY_PRICE_FIELD_NAMES / FACILITY_FIELD_NAMES entry to
 its source attribute on DefaultTrackInfra — see
 DefaultTrackInfra.source_for(). The whole TAC component group shares
 tac_src: a country's track access terms come from its network statement,
@@ -1187,7 +1250,7 @@ class TrackInfrastructure:
     min_alighting_time_min: int
     buffer_quota_per: float
 
-    # --- track access charge components (models/infrastructure/calc_tac.py)
+    # --- track access charge components (models/infrastructure/tac/calc_tac.py)
     # All EUR at the 2032 evaluation year — the calibration notebook does
     # both conversions once, before seeding. A None here is a documented
     # tariff fact ("not levied"), never a gap: the loader substitutes this
@@ -1212,6 +1275,36 @@ class TrackInfrastructure:
     tac_peak_band2_start_min: Optional[int]
     tac_peak_band2_end_min: Optional[int]
     tac_peak_weekdays_only: bool
+
+    # --- traction energy price terms
+    #     (models/infrastructure/energy_pricing/calc_energy_price.py)
+    # EUR at the 2032 evaluation year, converted once in the calibration
+    # notebook. None is a tariff fact, never a gap, and — unlike the TAC
+    # group — never substituted from the defaults row: no night price means
+    # one rate around the clock, no catenary term means the country levies
+    # no separate supply-equipment charge. Only the day rate above
+    # (energy_price_eur_kwh) resolves against the default. Provenance for
+    # the group is energy_price_src, shared with the day rate.
+    energy_price_night_eur_kwh: Optional[float]  # €/kWh inside the band
+    energy_night_band_start_min: Optional[int]  # minute of day, may wrap
+    energy_night_band_end_min: Optional[int]
+    energy_catenary_eur_train_km: Optional[float]  # €/train-km
+    energy_catenary_eur_gross_tonne_km: Optional[float]  # €/gross-tonne-km
+
+    # --- service facility terms
+    #     (models/infrastructure/facility/calc_facility.py)
+    # EUR at the 2032 evaluation year. Unlike the energy group these DO resolve
+    # against the defaults row — as one group, keyed on parking_basis: every
+    # country that stables a train charges something, or has been documented
+    # not to, in which case its basis reads 'none'. Only the rate column
+    # matching the basis carries a value. Provenance for the group is
+    # parking_src, shared with the shunting figure it is calibrated alongside.
+    parking_basis: Optional[str]  # per_metre_day | per_hour | per_event | none
+    parking_eur_metre_day: Optional[float]
+    parking_eur_hour: Optional[float]
+    parking_eur_event: Optional[float]
+    parking_free_hours: Optional[float]
+    parking_hotel_power_eur_hour: Optional[float]
 
 
 @dataclass

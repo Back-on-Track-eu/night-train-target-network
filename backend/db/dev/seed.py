@@ -392,6 +392,295 @@ PASSAGE_CHARGES_RAW = _read_tac_csv("passage_charges.csv")
 TAC_SOURCES = _read_tac_csv("sources.csv")
 
 
+# ============================================================
+# energy pricing calibration seed CSVs
+# ============================================================
+# Traction energy prices per country, exported by
+# models/infrastructure/energy_pricing/calib/02_energy_pricing_calibration
+# .ipynb (seed export cell) after 01 has written the source register. Same
+# contract as the TAC block above: plain EUR at the 2032 evaluation year,
+# currency and price basis converted exactly once in the notebook.
+# Derivations:
+# models/infrastructure/energy_pricing/calib/ENERGY_PRICING_CALIBRATION.md.
+
+ENERGY_SEED_DIR = (
+    Path(__file__).resolve().parents[2]
+    / "models"
+    / "infrastructure"
+    / "energy_pricing"
+    / "calib"
+    / "seed"
+)
+
+_ENERGY_SEED_CSVS = (
+    "track_energy.csv",
+    "track_energy_default.csv",
+    "sources.csv",
+)
+
+_ensure_seed_csvs(
+    ENERGY_SEED_DIR,
+    _ENERGY_SEED_CSVS,
+    (
+        ENERGY_SEED_DIR.parent / "01_source_extraction.ipynb",
+        ENERGY_SEED_DIR.parent / "02_energy_pricing_calibration.ipynb",
+    ),
+)
+
+
+def _read_energy_csv(name: str) -> list[dict]:
+    return _read_seed_csv(
+        ENERGY_SEED_DIR,
+        name,
+        "models/infrastructure/energy_pricing/calib/01_source_extraction.ipynb "
+        "then 02_energy_pricing_calibration.ipynb",
+    )
+
+
+# Columns whose empty string is a real NULL. Unlike the TAC group these are
+# never substituted from the defaults row: an empty night price means the
+# country charges one rate around the clock, an empty catenary term means it
+# levies no supply-equipment charge (see DBDataLoader._energy_components).
+_ENERGY_NUMERIC_COLUMNS = (
+    "track_energy_price_eur_kwh",
+    "track_energy_price_night_eur_kwh",
+    "track_energy_catenary_eur_train_km",
+    "track_energy_catenary_eur_gross_tonne_km",
+)
+
+_ENERGY_TIME_COLUMNS = (
+    "track_energy_night_band_start",
+    "track_energy_night_band_end",
+)
+
+
+def _energy_columns(row: dict) -> dict:
+    """One calibration row as track-table column values, empty cells kept as
+    NULL. source_id/change_log are dropped here — the FK is resolved against
+    input_params.sources by seed_sources(), see _ENERGY_SOURCE_KEYS."""
+    out: dict = {c: float(row[c]) if row[c] else None for c in _ENERGY_NUMERIC_COLUMNS}
+    out.update({c: row[c] or None for c in _ENERGY_TIME_COLUMNS})
+    return out
+
+
+_ENERGY_ROWS = {
+    row["country_code"]: row for row in _read_energy_csv("track_energy.csv")
+}
+
+ENERGY_BY_COUNTRY = {cc: _energy_columns(row) for cc, row in _ENERGY_ROWS.items()}
+
+# The fallback row carries the median day price and nothing else — a night
+# band and a catenary charge are national particularities, so an
+# uncalibrated country is priced without either rather than given an
+# invented median (see the calibration document, Part IV).
+ENERGY_DEFAULT = _energy_columns(_read_energy_csv("track_energy_default.csv")[0])
+
+_ENERGY_SOURCE_KEYS = {
+    cc: row["source_id"] for cc, row in _ENERGY_ROWS.items() if row["source_id"]
+}
+
+_ENERGY_CHANGE_LOGS = {
+    cc: row["change_log"] for cc, row in _ENERGY_ROWS.items() if row["change_log"]
+}
+
+ENERGY_SOURCES = _read_energy_csv("sources.csv")
+
+
+# ============================================================
+# facility calibration seed CSVs
+# ============================================================
+# Shunting, stabling and hotel power per country, exported by
+# models/infrastructure/facility/calib/02_facility_calibration.ipynb after 01
+# has written the source register. Same contract as the TAC and energy blocks
+# above: plain EUR at the 2032 evaluation year, both conversions done once in
+# the notebook. Derivations:
+# models/infrastructure/facility/calib/FACILITY_CALIBRATION.md.
+
+FACILITY_SEED_DIR = (
+    Path(__file__).resolve().parents[2]
+    / "models"
+    / "infrastructure"
+    / "facility"
+    / "calib"
+    / "seed"
+)
+
+_FACILITY_SEED_CSVS = (
+    "track_facility.csv",
+    "track_facility_default.csv",
+    "sources.csv",
+)
+
+_ensure_seed_csvs(
+    FACILITY_SEED_DIR,
+    _FACILITY_SEED_CSVS,
+    (
+        FACILITY_SEED_DIR.parent / "01_source_extraction.ipynb",
+        FACILITY_SEED_DIR.parent / "02_facility_calibration.ipynb",
+    ),
+)
+
+
+def _read_facility_csv(name: str) -> list[dict]:
+    return _read_seed_csv(
+        FACILITY_SEED_DIR,
+        name,
+        "models/infrastructure/facility/calib/01_source_extraction.ipynb "
+        "then 02_facility_calibration.ipynb",
+    )
+
+
+_FACILITY_NUMERIC_COLUMNS = (
+    "track_shunting_eur_event",
+    "track_parking_eur_metre_day",
+    "track_parking_eur_hour",
+    "track_parking_eur_event",
+    "track_parking_free_hours",
+    "track_parking_hotel_power_eur_hour",
+    "track_parking_eur_day",
+)
+
+
+def _facility_columns(row: dict) -> dict:
+    """One calibration row as track-table column values. Only the rate column
+    matching the basis carries a number; the others are NULL because the
+    country does not price in that unit."""
+    out: dict = {
+        c: float(row[c]) if row[c] else None for c in _FACILITY_NUMERIC_COLUMNS
+    }
+    out["track_parking_basis"] = row["track_parking_basis"] or None
+    return out
+
+
+_FACILITY_ROWS = {
+    row["country_code"]: row for row in _read_facility_csv("track_facility.csv")
+}
+
+FACILITY_BY_COUNTRY = {cc: _facility_columns(row) for cc, row in _FACILITY_ROWS.items()}
+
+FACILITY_DEFAULT = _facility_columns(
+    _read_facility_csv("track_facility_default.csv")[0]
+)
+
+_FACILITY_SOURCE_KEYS = {
+    cc: row["source_id"] for cc, row in _FACILITY_ROWS.items() if row["source_id"]
+}
+
+_FACILITY_CHANGE_LOGS = {
+    cc: row["change_log"] for cc, row in _FACILITY_ROWS.items() if row["change_log"]
+}
+
+FACILITY_SOURCES = _read_facility_csv("sources.csv")
+
+
+# ============================================================
+# route context calibration seed CSVs
+# ============================================================
+# Terrain, schedule supplement, dwell floor and high-speed access per country,
+# exported by models/infrastructure/route_context/calib/
+# 02_route_context_calibration.ipynb after 01 has written the source register
+# and, where a database with a loaded ONTD snapshot was reachable, the
+# observation set under sources/. Derivations:
+# models/infrastructure/route_context/calib/ROUTE_CONTEXT_CALIBRATION.md.
+#
+# The only one of the four infrastructure domains with no money in it, so
+# nothing here is converted or escalated — what travels is a terrain score, a
+# fraction, two dwell floors and a flag.
+
+ROUTE_CONTEXT_SEED_DIR = (
+    Path(__file__).resolve().parents[2]
+    / "models"
+    / "infrastructure"
+    / "route_context"
+    / "calib"
+    / "seed"
+)
+
+_ROUTE_CONTEXT_SEED_CSVS = (
+    "track_route_context.csv",
+    "track_route_context_default.csv",
+    "sources.csv",
+)
+
+_ensure_seed_csvs(
+    ROUTE_CONTEXT_SEED_DIR,
+    _ROUTE_CONTEXT_SEED_CSVS,
+    (
+        ROUTE_CONTEXT_SEED_DIR.parent / "01_source_extraction.ipynb",
+        ROUTE_CONTEXT_SEED_DIR.parent / "02_route_context_calibration.ipynb",
+    ),
+)
+
+
+def _read_route_context_csv(name: str) -> list[dict]:
+    return _read_seed_csv(
+        ROUTE_CONTEXT_SEED_DIR,
+        name,
+        "models/infrastructure/route_context/calib/01_source_extraction.ipynb "
+        "then 02_route_context_calibration.ipynb",
+    )
+
+
+def _minutes_to_interval(value: str) -> str | None:
+    """The calibration carries a dwell floor in minutes; the column is an
+    INTERVAL. Converted here rather than in the notebook so the calibration
+    stays in the unit it reasons about."""
+    if not value:
+        return None
+    total = int(round(float(value) * 60))
+    return f"{total // 3600:02d}:{total % 3600 // 60:02d}:{total % 60:02d}"
+
+
+def _route_context_columns(row: dict) -> dict:
+    """One calibration row as track-table column values."""
+    return {
+        "track_terrain_category": row["track_terrain_category"] or None,
+        "track_terrain_score": (
+            float(row["track_terrain_score"]) if row["track_terrain_score"] else None
+        ),
+        "track_buffer_quota_per": (
+            float(row["track_buffer_quota_per"])
+            if row["track_buffer_quota_per"]
+            else None
+        ),
+        "track_min_boarding_time": _minutes_to_interval(row["track_min_boarding_time"]),
+        "track_min_alighting_time": _minutes_to_interval(
+            row["track_min_alighting_time"]
+        ),
+        "track_hsr_allowed": (
+            None
+            if not row["track_hsr_allowed"]
+            else row["track_hsr_allowed"].strip().lower() == "true"
+        ),
+    }
+
+
+_ROUTE_CONTEXT_ROWS = {
+    row["country_code"]: row
+    for row in _read_route_context_csv("track_route_context.csv")
+}
+
+ROUTE_CONTEXT_BY_COUNTRY = {
+    cc: _route_context_columns(row) for cc, row in _ROUTE_CONTEXT_ROWS.items()
+}
+
+ROUTE_CONTEXT_DEFAULT = _route_context_columns(
+    _read_route_context_csv("track_route_context_default.csv")[0]
+)
+
+_ROUTE_CONTEXT_SOURCE_KEYS = {
+    cc: row["source_id"] for cc, row in _ROUTE_CONTEXT_ROWS.items() if row["source_id"]
+}
+
+_ROUTE_CONTEXT_CHANGE_LOGS = {
+    cc: row["change_log"]
+    for cc, row in _ROUTE_CONTEXT_ROWS.items()
+    if row["change_log"]
+}
+
+ROUTE_CONTEXT_SOURCES = _read_route_context_csv("sources.csv")
+
+
 def _num(row: dict, *keys: str) -> dict:
     """Return a copy of row with the given keys coerced to float."""
     out = dict(row)
@@ -429,24 +718,37 @@ SOURCES.append(
     }
 )
 
-# The TAC source register — one row per document actually cited by a
-# calibrated value (models/infrastructure/tac/calib/01_source_extraction
-# .ipynb). Seeded so every track access number in the database points at
-# the network statement it was read from.
+# The infrastructure source registers — one row per document actually cited
+# by a calibrated value, from the TAC and energy pricing calibrations. Seeded
+# so every track access and energy number in the database points at the
+# document it was read from.
+#
+# The three registers overlap heavily: a network statement typically prices a
+# track access term, an energy term and a facility tariff, and each register
+# describes the document in its own words. Deduplicated by the register's source_id, which is the
+# document's identity — inserting two rows for one network statement would
+# make provenance look richer than it is, and seed_sources() resolves the FK
+# through the description text, which must therefore be unique. First
+# register wins on wording; the section a value was actually read at lives in
+# the per-value locator in each calibration's data/, not here.
+_INFRA_SOURCE_ROWS: dict[str, dict] = {}
+for _row in TAC_SOURCES + ENERGY_SOURCES + FACILITY_SOURCES + ROUTE_CONTEXT_SOURCES:
+    _INFRA_SOURCE_ROWS.setdefault(_row["source_id"], _row)
+
 SOURCES += [
     {
         "source_description": row["source_description"],
         "source_url": row["source_url"] or None,
         "source_date": row["source_date"] or None,
     }
-    for row in TAC_SOURCES
+    for row in _INFRA_SOURCE_ROWS.values()
 ]
 
 # {register source_id: source_description} — the join key between the
-# calibration's own ids (AT-SNNB-2027) and the SERIAL source_id the
-# database assigns.
-TAC_SOURCE_DESCRIPTIONS = {
-    row["source_id"]: row["source_description"] for row in TAC_SOURCES
+# calibrations' own ids (AT-SNNB-2027) and the SERIAL source_id the database
+# assigns. One map for both domains, since one document is one row.
+INFRA_SOURCE_DESCRIPTIONS = {
+    sid: row["source_description"] for sid, row in _INFRA_SOURCE_ROWS.items()
 }
 
 SRC_EXCEL = "B-o-T_targetnetwork_DB_v2.xlsx — illustrative placeholder values"
@@ -634,7 +936,7 @@ def seed_country_geometries(cur) -> None:
 # does; a dining car alone does not make a night train. The distinction
 # drives the German whole-run night pricing — see
 # models/infrastructure/tac/calib/TAC_CALIBRATION.md (DE section) and
-# models/infrastructure/calc_tac.py.
+# models/infrastructure/tac/calc_tac.py.
 _DAY_CLASS_MAINS = frozenset({"Seat", "Catering"})
 
 SERVICE_CLASSES = sorted(
@@ -761,13 +1063,6 @@ COACH_TYPE_CLASSES_RAW = [
 _TRACK_INFRA_DEFAULT_2032 = {
     "track_infra_default_key": "_default",
     "track_tac_eur_train_km": 4.50,
-    "track_parking_eur_day": 65.00,
-    "track_shunting_eur_event": 575.00,
-    "track_energy_price_eur_kwh": 0.150,
-    "track_terrain_category": "Flat",
-    "track_terrain_score": 1.0,
-    "track_min_boarding_time": "00:02:00",
-    "track_min_alighting_time": "00:02:00",
     # Qualified assumption: schedule buffer quotas across European networks
     # realistically sit at 30-50% of pure driving time (construction sites,
     # mixed-traffic congestion, temporary speed restrictions, node dwell
@@ -782,7 +1077,6 @@ _TRACK_INFRA_DEFAULT_2032 = {
     # (per-country time bands) plus route-model work to apply the quota
     # per leg by clock time — see OPEN_TODOS["buffer_quota_time_of_day"]
     # in models/route/version.py before starting.
-    "track_buffer_quota_per": 0.40,
 }
 
 # 2026 deprecated row — a handful of values manipulated downward (same
@@ -791,8 +1085,6 @@ _TRACK_INFRA_DEFAULT_2032 = {
 # historical scenario. Everything not overridden here matches 2032.
 _TRACK_INFRA_DEFAULT_2026_OVERRIDES = {
     "track_tac_eur_train_km": 4.20,
-    "track_parking_eur_day": 60.00,
-    "track_buffer_quota_per": 0.35,
 }
 
 
@@ -803,13 +1095,28 @@ def _build_track_infra_defaults() -> list[dict]:
     TAC_DEFAULT) and is identical in all three: the 2026 deprecated
     snapshot predates the TAC calibration entirely, and inventing a
     historical median for it would be worse than reusing the current one.
+    The energy group (ENERGY_DEFAULT) is the same story and carries the
+    median day price only — no night band, no catenary charge, since
+    neither is a gap to fill. The facility group (FACILITY_DEFAULT) carries
+    the European default directly rather than a median of the calibrated
+    countries: for seventeen of the twenty-eight that default IS the
+    calibration, so a median over them would re-derive it with extra steps.
+    The route context group (ROUTE_CONTEXT_DEFAULT) carries the European
+    ONTD-weighted schedule supplement and the median terrain band — the
+    fallback every placeholder country resolves to, since those rows are left
+    NULL on purpose.
     """
-    v2032 = {**_TRACK_INFRA_DEFAULT_2032, **TAC_DEFAULT}
+    v2032 = {
+        **_TRACK_INFRA_DEFAULT_2032,
+        **TAC_DEFAULT,
+        **ENERGY_DEFAULT,
+        **FACILITY_DEFAULT,
+        **ROUTE_CONTEXT_DEFAULT,
+    }
     return [
         {
             **v2032,
             **_TRACK_INFRA_DEFAULT_2026_OVERRIDES,
-            "track_hsr_allowed": True,
             "track_infra_default_version": 1,
         },
         {**v2032, "track_hsr_allowed": False, "track_infra_default_version": 2},
@@ -827,111 +1134,53 @@ _TRACK_INFRA_CANONICAL_ROWS = [
         "country_code": "DE",
         "track_infra_version": 2,
         "track_tac_eur_train_km": 5.40,
-        "track_parking_eur_day": 70.00,
-        "track_shunting_eur_event": 575.00,
-        "track_energy_price_eur_kwh": 0.142,
-        "track_terrain_category": "Flat",
-        "track_terrain_score": 1.0,
-        "track_hsr_allowed": True,
-        "track_min_boarding_time": "00:02:00",
-        "track_min_alighting_time": "00:02:00",
         # worst long-distance punctuality of the major networks, Generalsanierung
         # construction backlog, dense mixed traffic
-        "track_buffer_quota_per": 0.50,
     },
     {
         "country_code": "AT",
         "track_infra_version": 2,
         "track_tac_eur_train_km": 4.20,
-        "track_parking_eur_day": 60.00,
-        "track_shunting_eur_event": 575.00,
-        "track_energy_price_eur_kwh": 0.138,
-        "track_terrain_category": "Hilly",
-        "track_terrain_score": 1.4,
-        "track_hsr_allowed": True,
-        "track_min_boarding_time": "00:02:00",
-        "track_min_alighting_time": "00:02:00",
         # high ÖBB punctuality, well-maintained network; Alpine corridors and the Wien
         # node keep it above the floor
-        "track_buffer_quota_per": 0.35,
     },
     {
         "country_code": "CH",
         "track_infra_version": 2,
         "track_tac_eur_train_km": 6.80,
-        "track_parking_eur_day": 85.00,
-        "track_shunting_eur_event": 575.00,
-        "track_energy_price_eur_kwh": 0.165,
-        "track_terrain_category": "Mountainous",
-        "track_terrain_score": 1.8,
-        "track_hsr_allowed": True,
-        "track_min_boarding_time": "00:03:00",
-        "track_min_alighting_time": "00:03:00",
         # best punctuality in Europe — dense but rigorously timetabled; band floor
-        "track_buffer_quota_per": 0.30,
     },
     {
         "country_code": "FR",
         "track_infra_version": 2,
         "track_tac_eur_train_km": 4.60,
-        "track_parking_eur_day": 55.00,
-        "track_shunting_eur_event": 575.00,
-        "track_energy_price_eur_kwh": 0.130,
-        "track_terrain_category": "Flat",
-        "track_terrain_score": 1.0,
-        "track_hsr_allowed": True,
-        "track_min_boarding_time": "00:02:00",
-        "track_min_alighting_time": "00:02:00",
         # moderate punctuality; maintenance backlog on the conventional (non-LGV)
         # network night trains use
-        "track_buffer_quota_per": 0.40,
     },
     {
         "country_code": "BE",
         "track_infra_version": 2,
         "track_tac_eur_train_km": 5.10,
-        "track_parking_eur_day": 50.00,
-        "track_shunting_eur_event": 575.00,
-        "track_energy_price_eur_kwh": 0.145,
-        "track_terrain_category": "Flat",
-        "track_terrain_score": 1.0,
-        "track_hsr_allowed": True,
-        "track_min_boarding_time": "00:02:00",
-        "track_min_alighting_time": "00:02:00",
         # dense, congested network around the Brussels node, frequent engineering
         # works
-        "track_buffer_quota_per": 0.45,
     },
     {
         "country_code": "DK",
         "track_infra_version": 2,
         "track_tac_eur_train_km": 4.80,
-        "track_parking_eur_day": 55.00,
-        "track_shunting_eur_event": 575.00,
-        "track_energy_price_eur_kwh": 0.128,
-        "track_terrain_category": "Flat",
-        "track_terrain_score": 1.0,
-        "track_hsr_allowed": True,
-        "track_min_boarding_time": "00:02:00",
-        "track_min_alighting_time": "00:02:00",
         # ERTMS/signalling programme disruptions, Storebælt corridor bottleneck
-        "track_buffer_quota_per": 0.40,
     },
-    # SE has NULL tac and parking → will resolve from defaults (tests is_default=True)
+    # SE keeps a NULL flat TAC as the is_default test fixture. Its parking and
+    # shunting NULLs below are overwritten by _apply_facility_calibration() —
+    # Sweden is calibrated, and a fixture is not a reason to unprice a country.
+    # The TAC fixture survives because the flat column is display-only.
     {
         "country_code": "SE",
         "track_infra_version": 2,
         "track_tac_eur_train_km": None,
         "track_parking_eur_day": None,
         "track_shunting_eur_event": None,
-        "track_energy_price_eur_kwh": 0.090,
-        "track_terrain_category": "Hilly",
-        "track_terrain_score": 1.2,
-        "track_hsr_allowed": True,
-        "track_min_boarding_time": "00:02:00",
-        "track_min_alighting_time": "00:02:00",
         # long single-track stretches, freight mixing, winter operations
-        "track_buffer_quota_per": 0.40,
     },
 ]
 
@@ -1036,7 +1285,126 @@ TAC_UNCALIBRATED = {
     "track_tac_night_mode": "none",
 }
 
+# Every energy column NULL — what a country the calibration does not cover
+# carries, so the column set stays uniform across the table rather than some
+# rows silently lacking keys (insert_rows() takes its column list from the
+# first row).
+ENERGY_UNCALIBRATED = {
+    **dict.fromkeys(_ENERGY_NUMERIC_COLUMNS),
+    **dict.fromkeys(_ENERGY_TIME_COLUMNS),
+}
+
+
+def _apply_energy_calibration(rows: list[dict]) -> None:
+    """Merge the calibrated energy prices onto the canonical country rows,
+    in place.
+
+    A country the calibration does not cover keeps every energy column NULL.
+    For the day price the loader then substitutes the EU median, as it does
+    for any missing legacy parameter; the night and catenary columns stay
+    empty, which the cost model reads as "not levied" rather than as missing
+    data — see DBDataLoader._energy_components().
+    """
+    calibrated = {
+        _TAC_COUNTRY_ALIASES.get(cc, cc): values
+        for cc, values in ENERGY_BY_COUNTRY.items()
+    }
+    change_logs = {
+        _TAC_COUNTRY_ALIASES.get(cc, cc): note
+        for cc, note in _ENERGY_CHANGE_LOGS.items()
+    }
+    for row in rows:
+        cc = row["country_code"]
+        row.update(calibrated.get(cc, ENERGY_UNCALIBRATED))
+        if cc in change_logs:
+            # A country calibrated by both domains keeps both notes: the TAC
+            # merge below may already have written one.
+            existing = row.get("change_log")
+            row["change_log"] = (
+                f"{existing} {change_logs[cc]}" if existing else change_logs[cc]
+            )
+
+
 _apply_tac_calibration(_TRACK_INFRA_CANONICAL_ROWS)
+_apply_energy_calibration(_TRACK_INFRA_CANONICAL_ROWS)
+
+
+# Every facility column NULL — what a country the calibration does not cover
+# carries. The loader then resolves the whole group from the defaults row,
+# since a NULL basis means "no facility figures for this country" rather than
+# "no charge levied" (that is the documented basis 'none').
+FACILITY_UNCALIBRATED = {
+    **dict.fromkeys(_FACILITY_NUMERIC_COLUMNS),
+    "track_parking_basis": None,
+}
+
+
+def _apply_facility_calibration(rows: list[dict]) -> None:
+    """Merge the calibrated shunting and stabling figures onto the canonical
+    country rows, in place."""
+    calibrated = {
+        _TAC_COUNTRY_ALIASES.get(cc, cc): values
+        for cc, values in FACILITY_BY_COUNTRY.items()
+    }
+    change_logs = {
+        _TAC_COUNTRY_ALIASES.get(cc, cc): note
+        for cc, note in _FACILITY_CHANGE_LOGS.items()
+    }
+    for row in rows:
+        cc = row["country_code"]
+        row.update(calibrated.get(cc, FACILITY_UNCALIBRATED))
+        if cc in change_logs:
+            existing = row.get("change_log")
+            row["change_log"] = (
+                f"{existing} {change_logs[cc]}" if existing else change_logs[cc]
+            )
+
+
+_apply_facility_calibration(_TRACK_INFRA_CANONICAL_ROWS)
+
+
+def _apply_route_context_calibration(rows: list[dict]) -> None:
+    """Merge the calibrated route-context values onto the canonical country
+    rows, in place.
+
+    The placeholder countries are skipped on purpose. Their rows carry None in
+    every one of these fields as a deliberate fixture — they exist to prove
+    that field-by-field resolution from the defaults row works, and
+    _with_hsr_allowed() reads a None track_hsr_allowed as the marker for
+    "leave this row alone" when building the v1 and v3 snapshots. Filling them
+    would both destroy the fixture and silently flip those countries onto
+    scenario-specific HSR permissions they were never meant to have. They
+    resolve to the defaults row, which is itself calibrated.
+    """
+    calibrated = {
+        _TAC_COUNTRY_ALIASES.get(cc, cc): values
+        for cc, values in ROUTE_CONTEXT_BY_COUNTRY.items()
+    }
+    change_logs = {
+        _TAC_COUNTRY_ALIASES.get(cc, cc): note
+        for cc, note in _ROUTE_CONTEXT_CHANGE_LOGS.items()
+    }
+    for row in rows:
+        cc = row["country_code"]
+        if cc in _TRACK_INFRA_PLACEHOLDER_COUNTRIES or cc not in calibrated:
+            continue
+        row.update(calibrated[cc])
+        if cc in change_logs:
+            existing = row.get("change_log")
+            row["change_log"] = (
+                f"{existing} {change_logs[cc]}" if existing else change_logs[cc]
+            )
+
+
+_apply_route_context_calibration(_TRACK_INFRA_CANONICAL_ROWS)
+
+# Level the change_log key across every row. insert_rows() takes its column
+# list from the FIRST row, so a key present on some rows and not others either
+# vanishes from the INSERT or raises KeyError, depending purely on which
+# country happens to be first — and both merges above write change_log only
+# where their calibration carries a note.
+for _row in _TRACK_INFRA_CANONICAL_ROWS:
+    _row.setdefault("change_log", None)
 
 # Version 1 (2026 Base Line, deprecated) = the same full snapshot, except
 # DE still carries its original, lower (pre-correction) rates — exactly
@@ -1054,7 +1422,9 @@ _V1_DE_TAC_RATIO = 3.10 / 5.40
 _TRACK_INFRA_V1_OVERRIDES = {
     "DE": {
         "track_tac_eur_train_km": 3.10,
-        "track_parking_eur_day": 50.00,
+        # The 2026 snapshot keeps its own schedule supplement: the calibrated
+        # value comes from a 2026 ONTD extraction and describes today's
+        # network, not the historical one this version stands for.
         "track_buffer_quota_per": 0.45,
         "track_tac_b_night": round(
             TAC_BY_COUNTRY["DE"]["track_tac_b_night"] * _V1_DE_TAC_RATIO, 8
@@ -1930,6 +2300,9 @@ def seed_sources(cur, source_ids: dict) -> None:
         "UPDATE input_params.composition_types             SET source_id=%s", (cal,)
     )
     _seed_tac_sources(cur, source_ids)
+    _seed_energy_sources(cur, source_ids)
+    _seed_facility_sources(cur, source_ids)
+    _seed_route_context_sources(cur, source_ids)
 
 
 def _seed_tac_sources(cur, source_ids: dict) -> None:
@@ -1943,7 +2316,7 @@ def _seed_tac_sources(cur, source_ids: dict) -> None:
     in the row's change_log (see models/params.py).
     """
     for country_code, register_id in _TAC_SOURCE_KEYS.items():
-        description = TAC_SOURCE_DESCRIPTIONS[register_id]
+        description = INFRA_SOURCE_DESCRIPTIONS[register_id]
         cur.execute(
             "UPDATE input_params.track_infrastructures SET track_tac_src=%s "
             "WHERE country_code=%s",
@@ -1956,7 +2329,79 @@ def _seed_tac_sources(cur, source_ids: dict) -> None:
         cur.execute(
             "UPDATE input_params.passage_charges SET passage_src=%s "
             "WHERE passage_id=%s",
-            (source_ids[TAC_SOURCE_DESCRIPTIONS[register_id]], passage_id),
+            (source_ids[INFRA_SOURCE_DESCRIPTIONS[register_id]], passage_id),
+        )
+
+
+def _seed_energy_sources(cur, source_ids: dict) -> None:
+    """Point every calibrated energy row at the document its price was read
+    from, overwriting the blanket illustrative FK set above.
+
+    One FK per country covers the day price, the night price and the
+    catenary terms together — they are one tariff picture, and where more
+    than one document is involved the extras are named in the row's
+    change_log (see models/params.py: _TRACK_DEFAULT_SRC_ATTRS). The
+    calibration's own source ids resolve through the description text, since
+    the database assigns the numeric source_id itself.
+    """
+    for country_code, register_id in _ENERGY_SOURCE_KEYS.items():
+        cur.execute(
+            "UPDATE input_params.track_infrastructures "
+            "SET track_energy_price_src=%s WHERE country_code=%s",
+            (
+                source_ids[INFRA_SOURCE_DESCRIPTIONS[register_id]],
+                _TAC_COUNTRY_ALIASES.get(country_code, country_code),
+            ),
+        )
+
+
+def _seed_facility_sources(cur, source_ids: dict) -> None:
+    """Point every calibrated facility row at the document its charges were
+    read from, overwriting the blanket illustrative FK set above.
+
+    One FK covers shunting and stabling together: they come from the same
+    network statement in every country that publishes either, and where more
+    than one document is involved the extras are named in the row's
+    change_log. The parking and shunting _src columns are set to the same
+    source for that reason.
+    """
+    for country_code, register_id in _FACILITY_SOURCE_KEYS.items():
+        cur.execute(
+            "UPDATE input_params.track_infrastructures "
+            "SET track_parking_src=%s, track_shunting_src=%s WHERE country_code=%s",
+            (
+                source_ids[INFRA_SOURCE_DESCRIPTIONS[register_id]],
+                source_ids[INFRA_SOURCE_DESCRIPTIONS[register_id]],
+                _TAC_COUNTRY_ALIASES.get(country_code, country_code),
+            ),
+        )
+
+
+def _seed_route_context_sources(cur, source_ids: dict) -> None:
+    """Point every calibrated route-context row at its document.
+
+    Four _src columns share one FK: terrain, high-speed permission, the two
+    dwell floors and the buffer quota all come out of the same calibration
+    run, and splitting them would claim a per-field provenance the domain
+    does not have. The per-value record stays
+    models/infrastructure/route_context/calib/data/route_context.csv.
+    """
+    for country_code, register_id in _ROUTE_CONTEXT_SOURCE_KEYS.items():
+        source_id = source_ids[INFRA_SOURCE_DESCRIPTIONS[register_id]]
+        cur.execute(
+            "UPDATE input_params.track_infrastructures "
+            "SET track_terrain_src=%s, track_hsr_src=%s, "
+            "    track_min_boarding_src=%s, track_min_alighting_src=%s, "
+            "    track_buffer_src=%s "
+            "WHERE country_code=%s",
+            (
+                source_id,
+                source_id,
+                source_id,
+                source_id,
+                source_id,
+                _TAC_COUNTRY_ALIASES.get(country_code, country_code),
+            ),
         )
 
 

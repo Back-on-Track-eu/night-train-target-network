@@ -506,6 +506,7 @@ CALC_DERIVATION_FORMULAS = [
     ("roster_efficiency_driver", "Roster efficiency (Dienstplanwirkungsgrad)"),
     ("tac_night_share", "Night share of a country run (track access)"),
     ("tac_peak_share", "Rush-hour share of a country run (track access)"),
+    ("energy_night_share", "Night share of a country run (electricity)"),
 ]
 
 # The generic aggregation rule (x_total = sum of a level's items), which

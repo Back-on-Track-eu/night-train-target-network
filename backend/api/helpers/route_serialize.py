@@ -299,6 +299,7 @@ def route_to_dict(route: Route, scenario_id: int, tracks: TrackInfraCollection) 
                 "stop_name": p.stop_name,
                 "country_code": p.country_code,
                 "trip_ids": p.trip_ids,
+                "hours": p.hours,
             }
             for p in route.parkings
         ],
@@ -487,6 +488,11 @@ def route_from_dict(
             stop_name=p["stop_name"],
             country_code=p["country_code"],
             trip_ids=p["trip_ids"],
+            # Payloads stored before ROUTE_BUILDER 0.9.23 carry no layover.
+            # Zero prices no stabling rather than guessing a duration, so a
+            # stale route stays evaluable with its facility line understated
+            # and visibly so — see Parking in models/route/route.py.
+            hours=float(p.get("hours", 0.0)),
         )
         for p in data.get("parkings", [])
     ]

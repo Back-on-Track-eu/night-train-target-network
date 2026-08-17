@@ -32,7 +32,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-CALC_VERSION: str = "0.9.19"
+CALC_VERSION: str = "0.9.22"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -66,6 +66,68 @@ CALC_MODEL_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.22": {
+        "date": "2026-08-17",
+        "author": "david",
+        "changes": "VALUES CHANGE: shunting and stabling are priced from the "
+        "facility calibration instead of two flat placeholder rates. A "
+        "shunting event costs what the infrastructure manager charges plus the "
+        "market cost of what it does not supply (115-321 EUR/event across "
+        "Europe against a flat 575 before, so most routes get cheaper here). "
+        "A stabling occupation is priced on the country's own basis against "
+        "the scheduled layover and the train's length, so Norway and Croatia "
+        "cost nothing on a twelve-hour turnaround where their free allowances "
+        "cover it, and the power drawn while standing is charged on top at "
+        "14.94 EUR/stabled hour. The flat track_parking_eur_day and the "
+        "reference figures are display-only from here. Implementation: "
+        "models/infrastructure/facility/calc_facility.py.",
+    },
+    "0.9.21": {
+        "date": "2026-08-17",
+        "author": "david",
+        "changes": "VALUES CHANGE: traction energy is priced from the "
+        "calibrated energy model instead of one flat rate per country. "
+        "Three things change per country leg. The electricity price is the "
+        "calibrated one (ENERGY_PRICING_CALIBRATION.md) rather than the "
+        "placeholder the seed carried — Germany moves 0.142 to 0.2336 "
+        "EUR/kWh, Switzerland 0.165 to 0.1527, the EU fallback 0.150 to "
+        "0.1553. Austria, Switzerland and Croatia band their tariff, so the "
+        "share of a country run inside 22:00-06:00 is priced at the night "
+        "rate pro rata, the same clock mechanism the German track access "
+        "night rate uses (and independent of it — the two bands differ by "
+        "country). And the charge for using the catenary and traction "
+        "power-supply installations is now levied where a country levies "
+        "it: thirteen do, in three different units, and the track access "
+        "calibration excludes every one of them as energy, so until now "
+        "nothing priced them. Per-country cost cells also attribute energy "
+        "to the country that supplied it rather than spreading a segment "
+        "total by distance share — the same correction track access got in "
+        "0.9.18. Implementation: "
+        "models/infrastructure/energy_pricing/calc_energy_price.py.",
+    },
+    "0.9.20": {
+        "date": "2026-08-13",
+        "author": "david",
+        "changes": "VALUES CHANGE: per-country and per-OD cells now "
+        "normalise against their OWN physics instead of the whole trip "
+        "pair's. The NormalisationScope machinery already did this for "
+        "route sections; countries and OD pairs were never wired to it and "
+        "silently fell back to the pair-wide denominators, which scaled "
+        "every per-unit figure down by that cell's share of the route. On "
+        "an Amsterdam-Warsaw run, Dutch track access read 0.38 EUR/train-km "
+        "where the applied Dutch rate is 2.58, because 190 of 1,310 km were "
+        "Dutch. A country cell now divides by the kilometres run in that "
+        "country; an OD cell by the span it actually rides, not the cycle "
+        "the train runs regardless of who is aboard. per_available_place_km "
+        "and per_sold_place_km get the same treatment, so an OD pair's "
+        "per-sold figures reflect its own occupancy rather than the pair "
+        "average. per_year and per_operating_day are untouched. "
+        "CONSEQUENCE: per-unit country and OD cells no longer sum to the "
+        "route total and cannot — rates over different denominators are "
+        "not additive. The additive identity is now the weighted form, "
+        "Sum(cell rate x cell km) = route rate x route km, pinned in "
+        "tests/test_30_evaluation_content.py. No response key changes.",
+    },
     "0.9.19": {
         "date": "2026-08-13",
         "author": "david",
@@ -1207,28 +1269,104 @@ CALC_FORMULAS: dict[str, Formula] = {
         ),
     ),
     # Energy per leg comes from the energy model (models/energy/model.py),
-    # carried on the route input.
-    "energy_eur": Formula(
-        latex=r"C_{energy} = \sum_{seg} \sum_{l \in seg} E_{kWh,l} \times p_{energy,country(l)}",
-        description="Electricity cost for traction: the energy the train "
-        "uses in each country times that country's electricity price.",
+    # carried on the route input; this prices it.
+    "energy_night_share": Formula(
+        latex=r"\nu^{E}_{c} = \frac{|[t_{in},t_{out}] \cap B^{E}_{c}|}{t_{out}-t_{in}}",
+        description="Share of a country leg whose electricity is billed at "
+        "the night rate: how much of the time the train spends in the "
+        "country falls inside that country's electricity night tariff "
+        "window. Only Austria, Switzerland and Croatia have one. The share "
+        "of the clock is applied to the kilowatt-hours drawn, which is exact "
+        "at constant speed — the routed geometry does not record where along "
+        "the leg the clock crossed the boundary. This window is not the "
+        "track access night band: Germany discounts track access at night "
+        "and not electricity, Switzerland the reverse.",
         inputs=(
             FormulaParam(
-                symbol="E_kWh,l",
+                symbol="t_in, t_out",
+                description="When the train enters and leaves the country "
+                "on this segment",
+                unit="min",
+            ),
+            FormulaParam(
+                symbol="B^E_c",
+                ref="column:input_params.track_infrastructures.track_energy_night_band_start",
+                description="The country's electricity night band "
+                "(track_energy_night_band_start and _end)",
+                unit="time of day",
+            ),
+        ),
+        output=FormulaParam(
+            symbol="nu^E_c",
+            description="Share of the country leg billed at the night rate",
+            unit="–",
+        ),
+    ),
+    "energy_eur": Formula(
+        latex=r"C_{energy} = \sum_{seg} \sum_{c \in seg} \left[ E_{kWh,c} \left( (1-\nu^{E}_{c}) p_{c} + \nu^{E}_{c} p^{night}_{c} \right) + d_{c} \left( e_{c} + e^{gt}_{c} m_{gross} \right) \right]",
+        description="Traction energy cost: the electricity the train uses in "
+        "each country at that country's price, plus what the "
+        "infrastructure manager charges for supplying it through the "
+        "catenary. The electricity is billed at the day rate outside the "
+        "national night window and at the night rate inside it. The supply "
+        "charge is levied per kilometre by nine countries and on the weight "
+        "moved by three; it is kept in the unit each one publishes rather "
+        "than converted into a price per kilowatt-hour, since converting it "
+        "would depend on an assumed consumption.",
+        inputs=(
+            FormulaParam(
+                symbol="E_kWh,c",
                 ref="formula:energy.energy_per_leg",
                 description="Energy used in the country (from the energy model)",
                 unit="kWh",
             ),
             FormulaParam(
-                symbol="p_energy,country(l)",
+                symbol="p_c",
                 ref="column:input_params.track_infrastructures.track_energy_price_eur_kwh",
-                description="The country's traction electricity price",
+                description="The country's day traction electricity price",
                 unit="€/kWh",
+            ),
+            FormulaParam(
+                symbol="p^night_c",
+                ref="column:input_params.track_infrastructures.track_energy_price_night_eur_kwh",
+                description="Its night-band price, where the tariff is banded",
+                unit="€/kWh",
+            ),
+            FormulaParam(
+                symbol="nu^E_c",
+                ref="formula:calc.energy_night_share",
+                description="Share of the country leg billed at the night rate",
+                unit="–",
+            ),
+            FormulaParam(
+                symbol="e_c",
+                ref="column:input_params.track_infrastructures.track_energy_catenary_eur_train_km",
+                description="Charge for using the catenary and traction "
+                "power-supply installations, per train-kilometre",
+                unit="€/train-km",
+            ),
+            FormulaParam(
+                symbol="e^gt_c",
+                ref="column:input_params.track_infrastructures.track_energy_catenary_eur_gross_tonne_km",
+                description="The same charge where the country levies it on "
+                "the weight moved instead",
+                unit="€/gross-tonne-km",
+            ),
+            FormulaParam(
+                symbol="m_gross",
+                description="Gross weight of the whole consist, coaches plus "
+                "locomotives",
+                unit="t",
+            ),
+            FormulaParam(
+                symbol="d_c",
+                description="Kilometres run in the country on this segment",
+                unit="km",
             ),
         ),
         output=FormulaParam(
             symbol="C_energy",
-            description="Annual traction electricity cost",
+            description="Annual traction energy cost",
             unit="€/year",
         ),
     ),

@@ -83,23 +83,33 @@ def _track_param_columns(nullable: bool) -> tuple[Column, ...]:
         Column(
             "track_parking_eur_day",
             f"NUMERIC(8,2){nn}",
-            "Cost of parking the train overnight between two nights of service.",
-            "€/day",
+            "Indicative cost of one stabling occupation for the reference "
+            "train — a single headline number for display and comparison. The "
+            "cost model does NOT read it: it prices stabling from the basis "
+            "and rate columns further down, against the actual layover and "
+            "train length.",
+            "€/occupation (EUR at 2032 prices)",
         ),
         _src("track_parking_src", "the parking cost"),
         Column(
             "track_shunting_eur_event",
             f"NUMERIC(8,2){nn}",
-            "Cost of one shunting movement (coupling, uncoupling, moving "
-            "the train in the yard).",
-            "€/event",
+            "All-in cost of one shunting movement: what the infrastructure "
+            "manager charges plus what it does not supply. Roughly nine "
+            "tenths of the figure is the market cost of a shunting locomotive "
+            "and crew where the IM sells only facility access — see the "
+            "calibration document.",
+            "€/event (EUR at 2032 prices)",
         ),
         _src("track_shunting_src", "the shunting cost"),
         Column(
             "track_energy_price_eur_kwh",
-            f"NUMERIC(6,3){nn}",
-            "Traction electricity price.",
-            "€/kWh",
+            f"NUMERIC(8,6){nn}",
+            "Traction electricity price: the day rate, and the rate around "
+            "the clock for the twenty-five countries whose tariff is not "
+            "banded. Where a night band exists the cost model prices the "
+            "in-band share at track_energy_price_night_eur_kwh instead.",
+            "€/kWh (EUR at 2032 prices)",
         ),
         _src("track_energy_price_src", "the electricity price"),
         Column(
@@ -145,6 +155,152 @@ def _track_param_columns(nullable: bool) -> tuple[Column, ...]:
             "fraction of driving time",
         ),
         _src("track_buffer_src", "the buffer quota"),
+    )
+
+
+def _track_facility_columns() -> tuple[Column, ...]:
+    """The calibrated service-facility terms: how a country prices one
+    stabling occupation, and the power the train draws while it stands.
+
+    EUR at the 2032 evaluation year (see
+    models/infrastructure/facility/calib/FACILITY_CALIBRATION.md). Shunting
+    needs no column here — it stays the single per-event figure it always was
+    in track_shunting_eur_event above, now carrying the calibrated all-in
+    value rather than a placeholder.
+
+    track_parking_basis is the group's trigger: NULL means the whole group
+    resolves from the defaults row (see DBDataLoader._row_to_track), because
+    unlike a night band or a catenary charge, every country that stables a
+    train charges *something* — or has been positively documented not to, in
+    which case the basis reads 'none'. Only the rate column matching the basis
+    is populated; the other two are NULL because that country does not price
+    in that unit.
+    """
+    return (
+        Column(
+            "track_parking_basis",
+            "VARCHAR(16) CHECK (track_parking_basis IN "
+            "('per_metre_day', 'per_hour', 'per_event', 'none'))",
+            "How the country prices one stabling occupation: per metre of "
+            "train length per started 24 hours, per started hour "
+            "(length-independent, as Germany's Anlagenpreissystem is by "
+            "design), a flat charge per occupation with no time term, or "
+            "'none' where the network statement documents that no siding "
+            "charge is levied.",
+        ),
+        Column(
+            "track_parking_eur_metre_day",
+            "NUMERIC(8,4)",
+            "Stabling rate where the country prices by length and time. Empty "
+            "means it prices in one of the other units.",
+            "€/metre per started 24 h (EUR at 2032 prices)",
+        ),
+        Column(
+            "track_parking_eur_hour",
+            "NUMERIC(8,4)",
+            "Stabling rate where the country prices per started hour, "
+            "independent of train length.",
+            "€/started hour (EUR at 2032 prices)",
+        ),
+        Column(
+            "track_parking_eur_event",
+            "NUMERIC(10,4)",
+            "Stabling charge where the country prices one occupation flat, "
+            "with no time or length term.",
+            "€/occupation (EUR at 2032 prices)",
+        ),
+        Column(
+            "track_parking_free_hours",
+            "NUMERIC(6,2)",
+            "Free stabling allowance before the charge starts. Material where "
+            "it exceeds a layover: Norway's 48 h and Croatia's 24 h zero a "
+            "twelve-hour turnaround entirely.",
+            "hours",
+        ),
+        Column(
+            "track_parking_hotel_power_eur_hour",
+            "NUMERIC(8,4)",
+            "Power the train draws while stabled, charged on ACTUAL stabled "
+            "hours rather than on the billable hours after a free track "
+            "allowance — the electricity flows whether or not the siding is "
+            "free. One European proxy rate, from DB InfraGO's unmetered "
+            "Elektrant flat charge.",
+            "€/stabled hour (EUR at 2032 prices)",
+        ),
+    )
+
+
+def _track_energy_columns() -> tuple[Column, ...]:
+    """The calibrated traction-energy price terms beyond the day rate,
+    shared verbatim by track_infrastructures and
+    track_infrastructure_defaults.
+
+    Every monetary value is EUR at the 2032 evaluation year — the
+    calibration notebook converts currency and price basis exactly once,
+    before the seed step (see
+    models/infrastructure/energy_pricing/calib/ENERGY_PRICING_CALIBRATION.md).
+
+    Nullable in BOTH tables, and — unlike the TAC component group — never
+    substituted from the defaults row: an empty night price means the
+    country charges one rate around the clock, and an empty catenary term
+    means it levies no separate supply-equipment charge. Both are tariff
+    facts, and only three of twenty-eight countries band their tariff at
+    all, so defaulting either would invent tariff structure. The day rate
+    (track_energy_price_eur_kwh) stays with the legacy parameters above
+    because it does resolve field by field: every country pays *something*
+    for electricity.
+    """
+    return (
+        Column(
+            "track_energy_price_night_eur_kwh",
+            "NUMERIC(8,6)",
+            "Traction electricity price inside the country's night tariff "
+            "band, charged pro rata on the share of a run that falls in "
+            "it. Empty means one rate around the clock (AT, CH and HR are "
+            "the only banded tariffs). Never resolved from the defaults "
+            "row, which leaves it empty: a banded tariff is a national "
+            "particularity, not a gap to fill.",
+            "€/kWh (EUR at 2032 prices)",
+        ),
+        Column(
+            "track_energy_night_band_start",
+            "TIME",
+            "Start of the national electricity night tariff band, local "
+            "clock. Bands may run across midnight (22:00–06:00). This is "
+            "the ENERGY band and is independent of the track access night "
+            "band (track_tac_night_band_start): Germany bands the track "
+            "charge 23:00–06:00 and does not band electricity at all, "
+            "Switzerland the reverse.",
+            "time of day",
+        ),
+        Column(
+            "track_energy_night_band_end",
+            "TIME",
+            "End of the national electricity night tariff band, local clock.",
+            "time of day",
+        ),
+        Column(
+            "track_energy_catenary_eur_train_km",
+            "NUMERIC(10,6)",
+            "Charge for using the catenary and traction power-supply "
+            "installations, where the infrastructure manager levies it per "
+            "train-kilometre (FR, HR, HU, IT, LT, LU, LV, PL, RO). Empty "
+            "means not levied in this unit — either not levied at all, or "
+            "charged on weight in the column below, or already inside the "
+            "energy price. Never resolved from the defaults row: roughly "
+            "half of Europe's infrastructure managers levy this charge, so "
+            "an uncalibrated country is priced without one rather than "
+            "given an invented median.",
+            "€/train-km (EUR at 2032 prices)",
+        ),
+        Column(
+            "track_energy_catenary_eur_gross_tonne_km",
+            "NUMERIC(12,8)",
+            "The same supply-equipment charge where the infrastructure "
+            "manager levies it on the weight moved instead (FI, GR, SK), "
+            "charged on the whole consist — coaches plus locomotives.",
+            "€/gross-tonne-km (EUR at 2032 prices)",
+        ),
     )
 
 
@@ -1077,6 +1233,8 @@ INPUT_PARAMS_TABLES: tuple[Table, ...] = (
             ),
             *_track_param_columns(nullable=False),
             *_track_tac_columns(nullable=False),
+            *_track_energy_columns(),
+            *_track_facility_columns(),
             _CHANGE_LOG,
             Column(
                 "track_infra_default_version",
@@ -1106,6 +1264,8 @@ INPUT_PARAMS_TABLES: tuple[Table, ...] = (
             ),
             *_track_param_columns(nullable=True),
             *_track_tac_columns(nullable=True),
+            *_track_energy_columns(),
+            *_track_facility_columns(),
             _CHANGE_LOG,
             Column(
                 "track_infra_version",

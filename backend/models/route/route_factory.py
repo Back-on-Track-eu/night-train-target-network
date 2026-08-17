@@ -289,10 +289,53 @@ def _build_trip_stops_and_legs(
 # =============================================================================
 
 
+# A full cycle is one operating day: a formation that arrives in the morning
+# leaves the same evening, and one that arrives in the evening leaves the next.
+# So a layover that computes negative has wrapped past midnight and gains a day.
+_DAY_MIN = 24 * 60
+
+
+def _layover_hours(trips: list[Trip], stop_id: str) -> float:
+    """Scheduled hours a formation stands at one terminal.
+
+    The gap between the last arrival at this stop and the next departure from
+    it, across all trips of the route — which for a trip pair is the inbound
+    arrival and the outbound departure of the following cycle. Terminal times
+    are minutes from midnight day 1 and a return trip may depart before the
+    inbound arrived in clock terms, so a negative gap wraps forward one day
+    rather than being clamped: an 06:00 arrival and a 20:00 departure is a
+    14 h layover, and a 20:00 arrival with an 06:00 departure is 10 h, not
+    minus fourteen.
+
+    Returns 0.0 where the route has no second trip to depart again — a
+    one-way route stables nothing, and pricing a layover of unknown length
+    would be an invention.
+    """
+    arrivals = [
+        t.segments[-1].to_stop.arrival_time_min
+        for t in trips
+        if t.segments and t.segments[-1].to_stop.stop_id == stop_id
+    ]
+    departures = [
+        t.segments[0].from_stop.departure_time_min
+        for t in trips
+        if t.segments and t.segments[0].from_stop.stop_id == stop_id
+    ]
+    arrivals = [a for a in arrivals if a is not None]
+    departures = [d for d in departures if d is not None]
+    if not arrivals or not departures:
+        return 0.0
+    gap = min(departures) - max(arrivals)
+    while gap < 0:
+        gap += _DAY_MIN
+    return gap / 60.0
+
+
 def _parkings(trips: list[Trip], stop_infra: StopInfraCollection) -> list[Parking]:
     """One Parking per unique terminal stop across all trips — deduplicated
     by stop_id since one formation sits there regardless of how many trips
-    share that terminal. trip_ids lists all trips parking at this stop."""
+    share that terminal. trip_ids lists all trips parking at this stop, and
+    hours is the scheduled layover (see _layover_hours)."""
     by_stop: dict[str, Parking] = {}
     for trip in trips:
         if not trip.stops:
@@ -310,6 +353,7 @@ def _parkings(trips: list[Trip], stop_infra: StopInfraCollection) -> list[Parkin
                     stop_name=sp.stop_name,
                     country_code=sp.stop_country_code,
                     trip_ids=[trip.trip_id],
+                    hours=_layover_hours(trips, stop.stop_id),
                 )
             elif trip.trip_id not in by_stop[stop.stop_id].trip_ids:
                 by_stop[stop.stop_id].trip_ids.append(trip.trip_id)

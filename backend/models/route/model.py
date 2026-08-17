@@ -30,7 +30,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.22"
+ROUTE_BUILDER_VERSION: str = "0.9.24"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -45,6 +45,37 @@ ROUTE_BUILDER_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.24": {
+        "date": "2026-08-17",
+        "author": "david",
+        "changes": "OUTPUT CHANGE, mode 'add' only: the auto-stop detour "
+        "budget is now 5% of TECHNICAL trip time (driving + dynamics + "
+        "dwell) rather than 5% of padded time. A detour costs real running "
+        "and stopping minutes; the schedule supplement is margin and should "
+        "not fund extra stops. The trigger was the route-context calibration "
+        "replacing a flat 0.40 supplement with per-country values of 0.35 to "
+        "0.71 — which would have given the same physical route a quarter "
+        "more stop budget in France than in Austria, and would have "
+        "reshuffled the stop list of every stored proposal on every future "
+        "buffer change. Candidate DISCOVERY is untouched: still every "
+        "catalog stop within AUTO_STOP_BUFFER_M (10 km) of the routed path. "
+        "Mode 'suggest' is untouched — it ignores the budget by design and "
+        "returns every candidate in the radius.",
+    },
+    "0.9.23": {
+        "date": "2026-08-17",
+        "author": "david",
+        "changes": "OUTPUT CHANGE: Parking carries the scheduled layover in "
+        "hours — the gap between the arrival that ends one trip at a terminal "
+        "and the departure that starts the next, wrapped forward a day where "
+        "the return departs earlier in clock terms than the inbound arrived. "
+        "Physics the route always knew and never reported; the facility "
+        "calibration needs it because Europe prices stabling per started "
+        "hour, per started 24 h period or per occupation, and because a free "
+        "allowance longer than the layover zeroes the charge. A route with no "
+        "second trip to depart again reports 0.0 rather than a guess. Stored "
+        "payloads without the field stay evaluable and price no stabling.",
+    },
     "0.9.22": {
         "date": "2026-08-13",
         "author": "david",
@@ -248,7 +279,8 @@ CHANGELOG: dict = {
         "author": "david",
         "changes": "auto_stop_addition implemented end to end: finds catalog stops "
         "within AUTO_STOP_BUFFER_M (3km) of the routed path and greedily adds "
-        "any that fit within a AUTO_STOP_MAX_DETOUR_PER (5%) detour-time "
+        "any that fit within a AUTO_STOP_MAX_DETOUR_PER (5% of technical "
+        "trip time) detour-time "
         "budget, cheapest first — see models/route/timetable.py. Stop gains a "
         "new auto_added field (BREAKING for consumers of POST /api/route/plan: "
         "every from_stop/to_stop in the response now carries this field). "
@@ -548,9 +580,16 @@ on a parallel line, which is also why AUTO_STOP_BUFFER_M is wide."""
 
 
 AUTO_STOP_MAX_DETOUR_PER: float = 0.05
-"""Max allowed increase in full (driving + dynamics + buffer + dwell) trip time, as a
-fraction of the original trip's time, before mode 'add' stops adding
-further candidates. Mode 'suggest' deliberately ignores this budget."""
+"""Max allowed increase in TECHNICAL trip time (driving + dynamics + dwell),
+as a fraction of the original trip's technical time, before mode 'add' stops
+adding further candidates. Mode 'suggest' deliberately ignores this budget.
+
+The schedule supplement is excluded from the basis: a detour costs real
+running and stopping minutes, while the supplement is margin, and margin
+should not fund extra stops. It also kept stop selection independent of the
+route-context calibration — with per-country supplements of 0.35 to 0.71,
+measuring against padded time would have given the same physical route a
+quarter more detour budget in France than in Austria."""
 
 
 TRACTION_LOCO_POWER_KW: float = 6_400.0

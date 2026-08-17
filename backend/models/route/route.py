@@ -107,12 +107,25 @@ class Shunting:
 class Parking:
     """One overnight parking location — deduplicated by stop_id.
     trip_ids lists all trips whose formation parks here (typically
-    both outbound and return of a trip pair)."""
+    both outbound and return of a trip pair).
+
+    hours is the scheduled layover: the gap between the arrival that ends one
+    trip here and the departure that starts the next. Physics, like every
+    other field on these objects — what it costs is
+    models/infrastructure/facility/calc_facility.py's business, and it needs
+    the duration because Europe prices stabling by started hour, by started
+    24 h period, or by occupation, and because a free allowance longer than
+    the layover zeroes the charge.
+
+    Defaults to 0.0 so a route payload stored before ROUTE_BUILDER 0.9.23
+    stays constructible — see api/helpers/route_serialize.py.
+    """
 
     stop_id: str
     stop_name: str
     country_code: str
     trip_ids: list[str]
+    hours: float = 0.0
 
 
 # =============================================================================

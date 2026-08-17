@@ -161,9 +161,22 @@ def insert_route_gtfs(cur, route: dict) -> None:
     for p in route["parkings"]:
         cur.execute(
             "INSERT INTO proposals.parkings "
-            "(route_id, stop_id, stop_name, country_code, trip_ids) "
-            "VALUES (%s, %s, %s, %s, %s)",
-            (route_id, p["stop_id"], p["stop_name"], p["country_code"], p["trip_ids"]),
+            "(route_id, stop_id, stop_name, country_code, trip_ids, layover_min) "
+            "VALUES (%s, %s, %s, %s, %s, %s)",
+            (
+                route_id,
+                p["stop_id"],
+                p["stop_name"],
+                p["country_code"],
+                p["trip_ids"],
+                # The facility charge is priced from the layover, so a stored
+                # route has to carry it or it would reprice cheaper than the
+                # response it was published from. Stored in minutes: hours is
+                # minutes/60 and rarely exact in decimal, so a fixed-scale
+                # column would round the reconstruction away from the value
+                # that was published (13.983333... -> 13.98).
+                round(p.get("hours", 0.0) * 60),
+            ),
         )
     for s in route["shuntings"]:
         cur.execute(
@@ -566,7 +579,7 @@ def _build_od_pairs(cur, outbound_trip_id: str, return_trip_id: str) -> list[ODP
 
 def _build_parkings(cur, route_id: str) -> list[Parking]:
     cur.execute(
-        "SELECT stop_id, stop_name, country_code, trip_ids "
+        "SELECT stop_id, stop_name, country_code, trip_ids, layover_min "
         "FROM proposals.parkings WHERE route_id = %s",
         (route_id,),
     )
@@ -576,6 +589,9 @@ def _build_parkings(cur, route_id: str) -> list[Parking]:
             stop_name=r["stop_name"],
             country_code=r["country_code"],
             trip_ids=list(r["trip_ids"]),
+            # The same arithmetic route_factory._layover_hours() does, so the
+            # reconstruction reproduces the published float exactly.
+            hours=(r["layover_min"] or 0) / 60.0,
         )
         for r in cur.fetchall()
     ]

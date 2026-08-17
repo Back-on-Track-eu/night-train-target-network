@@ -70,6 +70,8 @@ from models.params import (
     TrackInfraDescriptions,
     TRACK_INFRA_FIELD_NAMES,
     TAC_COMPONENT_FIELD_NAMES,
+    ENERGY_PRICE_FIELD_NAMES,
+    FACILITY_FIELD_NAMES,
     TAC_RATE_FIELD_NAMES,
     PassageCharge,
     PassageChargeCollection,
@@ -1178,6 +1180,51 @@ class DBDataLoader:
             "tac_peak_weekdays_only": bool(row["track_tac_peak_weekdays_only"]),
         }
 
+    @staticmethod
+    def _energy_components(row) -> dict:
+        """The traction-energy price terms of one track row, beyond the day
+        rate, as domain values.
+
+        Shared by the country rows and the defaults row so the two can never
+        map differently. Nothing is defaulted here and nothing is coerced to
+        zero: a NULL night price means the country charges one rate around
+        the clock, and a NULL catenary term means it levies no separate
+        supply-equipment charge — both of which the cost model has to be able
+        to tell apart from a rate of 0.0.
+        """
+        return {
+            "energy_price_night_eur_kwh": _f_or_none(
+                row["track_energy_price_night_eur_kwh"]
+            ),
+            "energy_night_band_start_min": _time_to_min_or_none(
+                row["track_energy_night_band_start"]
+            ),
+            "energy_night_band_end_min": _time_to_min_or_none(
+                row["track_energy_night_band_end"]
+            ),
+            "energy_catenary_eur_train_km": _f_or_none(
+                row["track_energy_catenary_eur_train_km"]
+            ),
+            "energy_catenary_eur_gross_tonne_km": _f_or_none(
+                row["track_energy_catenary_eur_gross_tonne_km"]
+            ),
+        }
+
+    @staticmethod
+    def _facility_components(row) -> dict:
+        """The service-facility terms of one track row. Shared by the country
+        rows and the defaults row so the two can never map differently."""
+        return {
+            "parking_basis": row["track_parking_basis"],
+            "parking_eur_metre_day": _f_or_none(row["track_parking_eur_metre_day"]),
+            "parking_eur_hour": _f_or_none(row["track_parking_eur_hour"]),
+            "parking_eur_event": _f_or_none(row["track_parking_eur_event"]),
+            "parking_free_hours": _f_or_none(row["track_parking_free_hours"]),
+            "parking_hotel_power_eur_hour": _f_or_none(
+                row["track_parking_hotel_power_eur_hour"]
+            ),
+        }
+
     def build_all_tracks(self, scenario_id: int | None = None) -> TrackInfraCollection:
         """
         Return track infrastructure at a scenario's pinned version as a
@@ -1255,6 +1302,8 @@ class DBDataLoader:
             buffer_quota_per=_f(default_row["track_buffer_quota_per"]),
             buffer_src=_src(default_row, "track_buffer_src", sources),
             **self._tac_components(default_row),
+            **self._energy_components(default_row),
+            **self._facility_components(default_row),
         )
 
         # Table/column documentation is identical for every country, so
@@ -1318,7 +1367,12 @@ class DBDataLoader:
             `descriptions` above, not duplicated per country/field here.
             Shared by both real rows and whole-country-synthesized rows
             below so the two paths can't drift apart."""
-            for field_name in TRACK_INFRA_FIELD_NAMES + TAC_COMPONENT_FIELD_NAMES:
+            for field_name in (
+                TRACK_INFRA_FIELD_NAMES
+                + TAC_COMPONENT_FIELD_NAMES
+                + ENERGY_PRICE_FIELD_NAMES
+                + FACILITY_FIELD_NAMES
+            ):
                 param_versions.add(
                     key=f"track_infra:{cc}:{field_name}",
                     value=getattr(track, field_name),
@@ -1342,7 +1396,12 @@ class DBDataLoader:
         # itself since there's no country-specific row to reference.
         default_field_sources = {
             field_name: default.source_for(field_name)
-            for field_name in TRACK_INFRA_FIELD_NAMES + TAC_COMPONENT_FIELD_NAMES
+            for field_name in (
+                TRACK_INFRA_FIELD_NAMES
+                + TAC_COMPONENT_FIELD_NAMES
+                + ENERGY_PRICE_FIELD_NAMES
+                + FACILITY_FIELD_NAMES
+            )
         }
         synthesized = 0
         for cc in all_country_codes:
@@ -1355,7 +1414,16 @@ class DBDataLoader:
             track = TrackInfrastructure(
                 country_code=cc,
                 field_is_default={
-                    f: True for f in TRACK_INFRA_FIELD_NAMES + TAC_COMPONENT_FIELD_NAMES
+                    # The energy terms are absent from the defaults row by
+                    # design, so they are not "defaulted" even here — a
+                    # country with no row is priced at the median day rate
+                    # with no night band and no catenary charge, which is
+                    # what the fallback row says.
+                    **dict.fromkeys(
+                        TRACK_INFRA_FIELD_NAMES + TAC_COMPONENT_FIELD_NAMES, True
+                    ),
+                    **dict.fromkeys(ENERGY_PRICE_FIELD_NAMES, False),
+                    **dict.fromkeys(FACILITY_FIELD_NAMES, True),
                 },
                 has_row=False,
                 tac_eur_train_km=default.tac_eur_train_km,
@@ -1368,7 +1436,14 @@ class DBDataLoader:
                 min_boarding_time_min=default.min_boarding_time_min,
                 min_alighting_time_min=default.min_alighting_time_min,
                 buffer_quota_per=default.buffer_quota_per,
-                **{f: getattr(default, f) for f in TAC_COMPONENT_FIELD_NAMES},
+                **{
+                    f: getattr(default, f)
+                    for f in (
+                        TAC_COMPONENT_FIELD_NAMES
+                        + ENERGY_PRICE_FIELD_NAMES
+                        + FACILITY_FIELD_NAMES
+                    )
+                },
             )
             result[cc] = track
             register(
@@ -1501,6 +1576,29 @@ class DBDataLoader:
             )
             tac_components = {f: getattr(default, f) for f in TAC_COMPONENT_FIELD_NAMES}
 
+        # The energy price terms are read as they stand. There is no group
+        # resolution and no field-by-field default: the defaults row carries
+        # none of them, and a NULL is the tariff fact "not levied" (see
+        # models/params.py: ENERGY_PRICE_FIELD_NAMES). Only the day rate
+        # above resolves, because every country pays something for
+        # electricity — but only three band their tariff and roughly half
+        # levy a supply-equipment charge.
+        energy_components = self._energy_components(row)
+
+        # The facility group resolves as a whole, keyed on the basis. A NULL
+        # basis means the calibration has no figures for this country at all —
+        # distinct from the documented basis 'none', which means the country
+        # levies no siding charge and must NOT pick up the European default.
+        facility_components = self._facility_components(row)
+        facility_group_default = facility_components["parking_basis"] is None
+        if facility_group_default:
+            logger.debug(
+                "TrackInfrastructure[%s]: no stabling basis — using the EU "
+                "default facility group.",
+                country_code,
+            )
+            facility_components = {f: getattr(default, f) for f in FACILITY_FIELD_NAMES}
+
         field_is_default = {
             "tac_eur_train_km": tac_def,
             "parking_eur_day": parking_def,
@@ -1513,6 +1611,8 @@ class DBDataLoader:
             "min_alighting_time_min": alight_def,
             "buffer_quota_per": buffer_def,
             **dict.fromkeys(TAC_COMPONENT_FIELD_NAMES, tac_group_default),
+            **dict.fromkeys(ENERGY_PRICE_FIELD_NAMES, False),
+            **dict.fromkeys(FACILITY_FIELD_NAMES, facility_group_default),
         }
 
         field_sources = {
@@ -1542,6 +1642,19 @@ class DBDataLoader:
                 TAC_COMPONENT_FIELD_NAMES,
                 default.tac_src if tac_group_default else field_src("track_tac_src"),
             ),
+            # The energy terms qualify the day rate, so they share its
+            # source — see models/params.py: _TRACK_DEFAULT_SRC_ATTRS.
+            **dict.fromkeys(
+                ENERGY_PRICE_FIELD_NAMES, field_src("track_energy_price_src")
+            ),
+            # The stabling terms share the parking source, as the shunting
+            # figure they were calibrated alongside does.
+            **dict.fromkeys(
+                FACILITY_FIELD_NAMES,
+                default.parking_src
+                if facility_group_default
+                else field_src("track_parking_src"),
+            ),
         }
 
         track = TrackInfrastructure(
@@ -1559,6 +1672,8 @@ class DBDataLoader:
             min_alighting_time_min=alight_val,
             buffer_quota_per=buffer_val,
             **tac_components,
+            **energy_components,
+            **facility_components,
         )
         return track, field_sources
 

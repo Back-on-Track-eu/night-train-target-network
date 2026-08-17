@@ -643,7 +643,7 @@ def _find_nearby_candidates(
     return candidates
 
 
-def _estimate_full_trip_time_min(
+def _estimate_technical_trip_time_min(
     stop_ids: list[str],
     routed_legs: list[RoutedLeg],
     composition: Composition,
@@ -651,15 +651,24 @@ def _estimate_full_trip_time_min(
     stop_infra: StopInfraCollection,
 ) -> int:
     """
-    Rough driving + dynamics + buffer + dwell trip time (total_time_min per
-    leg), used only to compare against
+    Rough driving + dynamics + dwell trip time, used only to compare against
     AUTO_STOP_MAX_DETOUR_PER — not the final published schedule. Every
     intermediate stop is conservatively treated as StopType.BOTH (the max
     of boarding/alighting dwell), since real classification only happens
     afterwards via route_factory._build_trip()'s timetable_mode switch and
     this needs to stay independent of timetable_mode.
+
+    The schedule supplement (buffer_time_min) is deliberately EXCLUDED. A
+    detour costs real running and stopping minutes; the supplement is margin,
+    and margin should not fund extra stops. Including it also coupled stop
+    selection to a calibration that is still being revised — since
+    ROUTE_CONTEXT 2026-08-17 the supplement ranges 0.35 to 0.71 by country, so
+    the same physical route through France would have bought a quarter more
+    detour than through Austria, for reasons that have nothing to do with
+    geography, and every future buffer change would silently reshuffle the
+    stop list of every stored proposal on refresh.
     """
-    total = sum(leg.total_time_min for leg in routed_legs)
+    total = sum(leg.driving_time_min + leg.dynamics_time_min for leg in routed_legs)
     for stop_id in stop_ids[1:-1]:
         country_code = stop_infra.get(stop_id).stop_country_code
         total += dwell_min(StopType.BOTH, country_code, composition, tracks)
@@ -805,7 +814,7 @@ def find_and_cost_auto_stop_candidates(
     # can never be accepted by mode "add", so measuring it precisely buys
     # nothing — its estimate is kept as the reported figure instead.
     budget_min = (
-        _estimate_full_trip_time_min(
+        _estimate_technical_trip_time_min(
             stop_ids, routed_legs, composition, tracks, stop_infra
         )
         * AUTO_STOP_MAX_DETOUR_PER
@@ -904,7 +913,7 @@ def apply_auto_stop_addition(
         return stop_ids, routed_legs
     costed_candidates.sort(key=lambda pair: pair[1])
 
-    baseline_time_min = _estimate_full_trip_time_min(
+    baseline_time_min = _estimate_technical_trip_time_min(
         stop_ids, routed_legs, composition, tracks, stop_infra
     )
     max_extra_min = baseline_time_min * AUTO_STOP_MAX_DETOUR_PER

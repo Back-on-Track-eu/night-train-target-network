@@ -355,6 +355,7 @@ CREATE TABLE proposals.parkings (
     stop_name     TEXT NOT NULL,
     country_code  TEXT NOT NULL,
     trip_ids      TEXT[] NOT NULL,
+    layover_min   INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (route_id, stop_id)
 );
 
@@ -362,6 +363,7 @@ COMMENT ON TABLE  proposals.parkings               IS 'One row per Parking (mode
 COMMENT ON COLUMN proposals.parkings.route_id      IS 'References proposals.routes.';
 COMMENT ON COLUMN proposals.parkings.stop_id       IS 'Soft reference to input_params.stop_infrastructures.stop_id.';
 COMMENT ON COLUMN proposals.parkings.trip_ids      IS 'All trip_ids (soft references to proposals.trips) whose formation parks at this stop.';
+COMMENT ON COLUMN proposals.parkings.layover_min IS 'Scheduled layover in MINUTES (Parking.hours x 60, ROUTE_BUILDER 0.9.23) — the gap between the arrival that ends one trip here and the departure that starts the next. Stored rather than re-derived because the facility charge depends on it, and a stored route must price identically to the response it was published from. Minutes rather than hours because that is what the timetable actually holds: hours is minutes/60, which is rarely exact in decimal, and a NUMERIC column would round the reconstruction away from the published value. 0 for routes published before that version.';
 
 -- ---------------------------------------------------------------
 -- shuntings — one row per Shunting (models/route/route.py): route-level,

@@ -126,7 +126,7 @@ def band_overlap_min(
     pre- and post-midnight halves where it wraps. Returns 0.0 for an empty
     or reversed interval.
 
-    Used by models/infrastructure/calc_tac.py for both the night-rate share
+    Used by models/infrastructure/tac/calc_tac.py for both the night-rate share
     and the peak-band share of a country run.
     """
     if end_min <= start_min or band_start_min == band_end_min:

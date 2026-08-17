@@ -124,13 +124,35 @@ Allocation rules per country:
 | `driver`, `crew` (driving) | `country_time_shares` per segment |
 | `driver`, `crew` (dwell) | 100% to `StopCost.country_code` |
 | `loco`, `cleaning` | Pair-level time share (`t_share`) |
-| `coach_maintenance`, `energy` | `country_distance_shares` per segment |
+| `coach_maintenance` | `country_distance_shares` per segment |
 | `tac` | The charge each country actually levied (`SegmentTac.by_country`) — two countries on one segment can price very differently, which is the point of the component model. Crossing charges have no levying country and keep the distance-share split |
+| `energy` | The country that supplied the electricity (`SegmentEnergy.by_country`, CALC 0.9.21) — prices differ by a factor of five across Europe and half the infrastructure managers add a catenary charge, so a distance-share split would misattribute it. Unlike `tac` every term is levied by the country the leg ran in, so the split is exhaustive |
 | `coach_amortisation`, `financing`, `fix_overhead` | Pair-level distance share (`d_share`) |
 | `shunting` | 100% to terminal stop's country (`Shunting.country_code`) |
 | `station_charge` | 100% to `StopCost.country_code` |
-| `parking` | 100% to `Parking.country_code` |
+| `parking` | 100% to `Parking.country_code` — the siding, and the hotel power drawn while standing on it (CALC 0.9.22) |
 | `svc_stockings`, `var_overhead`, `revenue`, `margin` | OD weighted place-km share per country |
+
+### Per-unit normalisation is scoped to the cell (CALC 0.9.20)
+
+A country cell's `per_train_km` divides by the kilometres run **in that
+country**; a section cell by its own distance; an OD cell by the span it
+rides. Only the route and trip-pair cells use the full cycle distance.
+Before 0.9.20 countries and OD pairs fell back to the pair-wide divisor,
+which scaled every per-unit figure down by that cell's share of the route
+— Dutch track access read 0.38 EUR/train-km on an Amsterdam–Warsaw run
+where the applied Dutch rate is 2.58.
+
+The consequence is that **per-unit country and OD cells are not additive**
+and cannot be: rates over different denominators do not sum. The additive
+identity is the weighted form,
+
+    Σ(cell rate × cell km) == route rate × route km
+
+which `tests/test_30_evaluation_content.py` pins in both directions — the
+weighted identity holds, and the naive sum deliberately does not.
+`per_year` and `per_operating_day` have no distance divisor and stay
+additive.
 
 ### Layer 2B — per trip pair × OD pair
 

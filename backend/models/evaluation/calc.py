@@ -36,9 +36,19 @@ per route, one revenue object per OD pair. No grouping or filtering here.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
-from models.infrastructure.calc_tac import SegmentTac, calc_segment_tac
+from models.infrastructure.energy_pricing.calc_energy_price import (
+    SegmentEnergy,
+    calc_segment_energy,
+)
+from models.infrastructure.facility.calc_facility import (
+    ParkingCharge,
+    calc_parking_event,
+    shunting_event_eur,
+)
+from models.infrastructure.tac.calc_tac import SegmentTac, calc_segment_tac
 from models.params import (
     Composition,
     PassageChargeCollection,
@@ -47,6 +57,8 @@ from models.params import (
 )
 from models.route.route import Route
 from models.route.trip import Segment, Stop
+
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # RESULT OBJECTS
@@ -118,7 +130,15 @@ class SegmentCost:
     so the per-country views can allocate the charge each country actually
     levied instead of spreading the segment total by distance share, and so
     a response can show why a country is expensive. See
-    models/infrastructure/calc_tac.py."""
+    models/infrastructure/tac/calc_tac.py."""
+    energy: SegmentEnergy = field(default_factory=SegmentEnergy)
+    """Component breakdown behind energy_eur — per country run, the
+    electricity itself (day and night band) and the charge for using the
+    catenary. Carried for the same reason as tac above: energy prices differ
+    by a factor of five across Europe and half the infrastructure managers
+    levy a supply-equipment charge, so spreading a segment total by distance
+    share would misattribute it. See
+    models/infrastructure/energy_pricing/calc_energy_price.py."""
 
     @property
     def variable_km_eur(self) -> float:
@@ -198,14 +218,27 @@ class ShuntingCost:
 
 @dataclass
 class ParkingCost:
-    """Cost for one overnight parking location. Mirrors Parking —
-    one ParkingCost per Parking in route.parkings.
-    parking_eur: €/operating-day (track_parking_eur_day from TrackInfrastructure)."""
+    """Cost for one overnight parking location. Mirrors Parking — one
+    ParkingCost per Parking in route.parkings.
+
+    parking_eur is the whole occupation, €/operating-day: the siding itself
+    priced on the country's own basis against the scheduled layover and the
+    train's length, plus the power drawn while standing. The flat
+    track_parking_eur_day column is never read — it is a display figure since
+    CALC 0.9.22, the same role the flat track access rate plays."""
 
     stop_id: str
     trip_ids: list[str]  # trips whose formation parks here
     country_code: str
     parking_eur: float  # €/operating-day
+    parking: ParkingCharge = field(
+        default_factory=lambda: ParkingCharge(0.0, 0.0, "none", 0.0, 0.0)
+    )
+    """Breakdown behind parking_eur — the layover in hours, the billable hours
+    after the country's free allowance, which basis priced it, and the split
+    between siding and hotel power. Carried so a response can show why a
+    layover is expensive, and because the two halves escalate differently.
+    See models/infrastructure/facility/calc_facility.py."""
 
 
 @dataclass
@@ -476,12 +509,10 @@ def _calc_segment_cost(
         segment_passengers=segment_passengers,
     )
 
-    energy_eur = 0.0
-    for cc, dist_share in segment.country_distance_shares.items():
-        track = tracks.get(cc)
-        if track is None:
-            continue
-        energy_eur += segment.energy_kwh * dist_share * track.energy_price_eur_kwh
+    # Traction energy is priced per country run from the calibrated day and
+    # night rates, plus the charge for using the catenary where the country
+    # levies one — the terms track access deliberately excludes.
+    energy = calc_segment_energy(segment, composition, tracks)
 
     return SegmentCost(
         trip_id=trip_id,
@@ -500,8 +531,9 @@ def _calc_segment_cost(
         driver_eur=driver_eur,
         crew_eur=crew_eur,
         tac_eur=tac.total_eur,
-        energy_eur=energy_eur,
+        energy_eur=energy.total_eur,
         tac=tac,
+        energy=energy,
     )
 
 
@@ -573,6 +605,22 @@ def _calc_route_cost(route: Route, tracks: TrackInfraCollection) -> RouteCost:
     return RouteCost(route_id=route.route_id, loco_eur=loco_eur)
 
 
+def _composition_for_trips(route: Route, trip_ids: list[str]):
+    """The composition that stables at a parking location — the one belonging
+    to the pair whose trips park there. Stabling is priced per metre in most of
+    Europe, so the length matters; a parking whose trips cannot be matched
+    falls back to the first pair rather than failing a whole evaluation."""
+    for pair in route.trip_pairs:
+        if pair.outbound.trip_id in trip_ids or pair.return_trip.trip_id in trip_ids:
+            return pair.composition
+    logger.warning(
+        "Parking trips %s match no trip pair — pricing its length from the "
+        "first pair's composition.",
+        trip_ids,
+    )
+    return route.trip_pairs[0].composition
+
+
 def _calc_parking_costs(
     route: Route, tracks: TrackInfraCollection
 ) -> list[ParkingCost]:
@@ -580,12 +628,19 @@ def _calc_parking_costs(
     costs = []
     for p in route.parkings:
         track = tracks.get(p.country_code)
+        composition = _composition_for_trips(route, p.trip_ids)
+        charge = calc_parking_event(
+            track,
+            length_m=composition.total_length_m,
+            hours=p.hours,
+        )
         costs.append(
             ParkingCost(
                 stop_id=p.stop_id,
                 trip_ids=p.trip_ids,
                 country_code=p.country_code,
-                parking_eur=track.parking_eur_day,  # €/operating-day
+                parking_eur=charge.total_eur,  # €/operating-day
+                parking=charge,
             )
         )
     return costs
@@ -603,7 +658,7 @@ def _calc_shunting_costs(
                 stop_id=s.stop_id,
                 trip_id=s.trip_id,
                 country_code=s.country_code,
-                shunting_eur=track.shunting_eur_event,  # €/event
+                shunting_eur=shunting_event_eur(track),  # €/event, all-in
             )
         )
     return costs
