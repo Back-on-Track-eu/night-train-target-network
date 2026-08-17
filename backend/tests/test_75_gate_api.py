@@ -74,9 +74,7 @@ def _insert_code(db_cur, db_conn, *, revoked=False, max_redemptions=0):
 
 
 def _drop_code(db_cur, db_conn, code):
-    db_cur.execute(
-        "DELETE FROM admin.access_code_redemptions WHERE code = %s", (code,)
-    )
+    db_cur.execute("DELETE FROM admin.access_code_redemptions WHERE code = %s", (code,))
     db_cur.execute("DELETE FROM admin.access_codes WHERE code = %s", (code,))
     db_conn.commit()
 
@@ -125,9 +123,7 @@ def test_code_match_is_case_insensitive_and_trimmed(api_base, live_code):
     assert _redeem(api_base, f"  {live_code.upper()}  ").status_code == 302
 
 
-def test_single_use_code_is_exhausted_after_one_redemption(
-    api_base, db_cur, db_conn
-):
+def test_single_use_code_is_exhausted_after_one_redemption(api_base, db_cur, db_conn):
     code = _insert_code(db_cur, db_conn, max_redemptions=1)
     try:
         assert _redeem(api_base, code).status_code == 302

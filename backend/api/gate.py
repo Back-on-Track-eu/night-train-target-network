@@ -102,9 +102,7 @@ def _cookie_code() -> str | None:
     if not token:
         return None
     try:
-        payload = jwt.decode(
-            token, _secret(), algorithms=["HS256"], audience=_AUDIENCE
-        )
+        payload = jwt.decode(token, _secret(), algorithms=["HS256"], audience=_AUDIENCE)
     except jwt.PyJWTError:
         return None
     return payload.get("code")
