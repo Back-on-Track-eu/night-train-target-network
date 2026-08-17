@@ -326,7 +326,9 @@ def composition_collection_to_dict(compositions: CompositionCollection) -> dict:
                     # readable without a second lookup) plus the combined
                     # rate: driver_factor × driver rate + crew_factor_total
                     # × crew rate — see descriptions.compositions.staff.
-                    # costs_per_hour
+                    # costs_per_hour. Raw productive-hour wages: the rate
+                    # evaluation actually charges is these over the trip's
+                    # roster efficiency (CALC 0.9.15).
                     "costs_per_hour": {
                         "driver_eur_h": c.driver_costs_eur_h,
                         "crew_eur_h": c.crew_costs_eur_h,
@@ -449,7 +451,25 @@ def composition_collection_to_dict(compositions: CompositionCollection) -> dict:
                 "financing_quota_per": c.financing_quota_per,
                 "var_overhead_per": c.var_overhead_per,
                 "fix_overhead_quota_per": c.fix_overhead_quota_per,
-                "loco_full_service_lease_eur_h": c.loco_full_service_lease_eur_h,
+                # The rate the cost model actually multiplies by: the whole
+                # consist per locomotive-hour. Retained under its original
+                # name so the cost-factor drilldown keeps resolving, and
+                # now strictly more accurate for it — the old field was the
+                # per-machine rate while the cost applied n_locos x that.
+                # Identical wherever a composition hauls one machine.
+                "loco_full_service_lease_eur_h": c.loco_lease_total_eur_h,
+                # Per machine, for a breakdown the scalar cannot express.
+                "loco_lease_eur_h": c.loco_lease_eur_h,
+                "locos": [
+                    {
+                        "loco_type_id": loco.loco_type_id,
+                        "description": loco.description,
+                        "traction": loco.traction,
+                        "weight_t": loco.weight_t,
+                        "max_speed_kmh": loco.max_speed_kmh,
+                    }
+                    for loco in c.locos
+                ],
                 "cost_per_class": c.svc_stockings_eur_place,
                 # --- sources for this operator's own values + its per-class costs ---
                 "source_ids": _source_ids_for_prefixes(

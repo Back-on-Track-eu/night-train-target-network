@@ -312,23 +312,27 @@ BASE_REQUEST = {
 }
 
 # The stop list the "add" default actually produces on this corridor
-# (AUTO_STOP_BUFFER_M=10km, AUTO_STOP_ANALYTIC_DETOUR_M=100m — see
-# models/route/version.py 0.9.15) — 8 catalog stops merged in at their
-# geographic positions between Dresden and Wien, everything else the
-# caller's own. Re-derive with the one-off script in the WP10 thread
-# (POST auto_stop_addition="add", read trip_pairs[0].outbound) whenever
+# (AUTO_STOP_BUFFER_M=10km, AUTO_STOP_ANALYTIC_DETOUR_M=100m) — 7 catalog
+# stops merged in at their geographic positions between Dresden and Wien,
+# everything else the caller's own. Re-derive with a POST of
+# auto_stop_addition="add" and read trip_pairs[0].outbound whenever
 # AUTO_STOP_BUFFER_M, AUTO_STOP_ANALYTIC_DETOUR_M, AUTO_STOP_MAX_DETOUR_PER,
 # or the stop catalog itself changes.
+#
+# Updated at ROUTE_BUILDER 0.9.24, which moved the detour budget onto
+# TECHNICAL trip time (driving + dynamics + dwell) instead of padded time.
+# DE_BAD_SCHANDAU and CZ_CESKA_TREBOVA dropped out: both sat at the margin of
+# the old, larger budget. That marginality is inherent — this list pins a
+# greedy cumulative budget, so a few per cent either way moves its tail, and
+# a diff here means the budget moved, not that the search broke.
 STOPS_WITH_BRNO = [
     "DE_BERLIN_HBF",
     "DE_DRESDEN_HBF",
-    "DE_BAD_SCHANDAU",
     "CZ_DECIN_HL_N",
     "CZ_USTI_NAD_LABEM_HL_N",
     "CZ_PRAHA_HOLESOVICE",
     "CZ_KOLIN",
     "CZ_PARDUBICE_HL_N",
-    "CZ_CESKA_TREBOVA",
     "CZ_BRNO_HLN",
     "CZ_BRECLAV",
     "AT_WIEN_HBF",
@@ -408,20 +412,20 @@ class TestModeSwitches:
     def test_auto_stop_addition_defaults_to_add_and_inserts_brno(
         self, plan_response_default_add
     ):
-        """With auto_stop_addition omitted (the 'add' default), 9 catalog
+        """With auto_stop_addition omitted (the 'add' default), 7 catalog
         stops along the Dresden-Wien corridor — all within
-        AUTO_STOP_BUFFER_M (10km) and comfortably within the cumulative
-        detour budget — are inserted at their geographic positions,
-        marked auto_added=true, everything else the caller's own (see
+        AUTO_STOP_BUFFER_M (10km) and within the cumulative detour budget
+        — are inserted at their geographic positions, marked
+        auto_added=true, everything else the caller's own (see
         STOPS_WITH_BRNO's own comment for how to re-derive this list:
-        12 entries total = 2 user stops + 9 auto-added + 1 user stop).
+        10 entries total = 2 user stops + 7 auto-added + 1 user stop).
         The return trip carries the same final stop list reversed with the
         same auto_added marking (the search runs once, from outbound — see
         _build_trip_pair() in route_factory.py)."""
         pair = plan_response_default_add["route"]["trip_pairs"][0]
         assert "suggested_stops" not in plan_response_default_add
 
-        expected_added = [False, False] + [True] * 9 + [False]
+        expected_added = [False, False] + [True] * 7 + [False]
         outbound = stop_times(pair["outbound"])
         assert [s["stop_id"] for s in outbound] == STOPS_WITH_BRNO
         assert [s["auto_added"] for s in outbound] == expected_added

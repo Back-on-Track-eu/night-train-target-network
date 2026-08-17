@@ -192,6 +192,27 @@ one entry per country: `country_code` plus a field object for each of
 `energy_price_eur_kwh`, `terrain_score`, `terrain_category`, `hsr_allowed`,
 `min_boarding_time_min`, `min_alighting_time_min`, `buffer_quota_per`.
 
+These ten are the headline per-country figures, and four of them are no longer
+what the cost model prices from. Track access is a calibrated component sum
+(day and night rates, gross-tonne-km, seat-km, per-stop, revenue share, peak
+terms) and traction energy is a day rate, an optional night rate with its band,
+and a catenary charge per train-km or per gross-tonne-km. Those components are
+seeded, versioned and served in the response's `descriptions`/`sources` chain
+like any other parameter, but they are not broken out per country in this
+payload — `tac_eur_train_km` stays a display figure and `energy_price_eur_kwh`
+is the day rate. Derivations:
+`models/infrastructure/tac/calib/TAC_CALIBRATION.md` and
+`models/infrastructure/energy_pricing/calib/ENERGY_PRICING_CALIBRATION.md`.
+
+The same applies to the two facility figures. `shunting_eur_event` is now an
+all-in charge — the infrastructure manager's tariff plus the market cost of the
+locomotive and crew it does not supply — and is read as it stands.
+`parking_eur_day` has become display-only: stabling is priced from a basis and a
+matching rate against the scheduled layover and the train's length, since Europe
+charges per started 24 h, per started hour, or flat per occupation, and power
+drawn while standing is charged on top. Derivations:
+`models/infrastructure/facility/calib/FACILITY_CALIBRATION.md`.
+
 **Field object** — every individually versioned parameter value is wrapped as:
 
 | Field | Type | Description |
@@ -219,7 +240,13 @@ grouped by concern:
 real section geometry), `equipment` (amenity OR-aggregations incl.
 **has_wifi**, plus the **food_and_beverages** catering concept),
 `coaches` (`{count, list}` — the ordered formation referencing the
-top-level **coach_types** catalog), `fixed_costs`, `variable_km`,
+top-level **coach_types** catalog), **`locos`** (the ordered locomotives
+with mass, design speed and traction, from `input_params.loco_types` —
+`routing.n_locos` is their count, not a stored column) and
+**`loco_lease_eur_h`** (the hourly rental rate keyed by `loco_type_id`,
+since the rate is a term of the (operator, machine) pairing —
+`loco_full_service_lease_eur_h` remains alongside it as the whole-consist
+rate the cost model multiplies by), `fixed_costs`, `variable_km`,
 **cost_allocation** (`by_class_main`: each class's blended cost
 proportion — the workbook cost_acc columns; identical to the
 evaluation's by_class_main hardware basis; sums to 1), and `indicative`
@@ -419,11 +446,12 @@ stop list.
       }
     ],
     "parkings": [
-      { "stop_id": "...", "stop_name": "...", "country_code": "...", "trip_ids": ["..."] }
+      { "stop_id": "...", "stop_name": "...", "country_code": "...", "trip_ids": ["..."], "hours": 14.0 }
     ],
     "shuntings": [
       { "stop_id": "...", "stop_name": "...", "country_code": "...", "trip_id": "..." }
     ],
+
     "track_infrastructure": [
       { "...": "one entry per country the route actually touches, see below" }
     ],
@@ -526,7 +554,7 @@ excluded — see the `evaluation` block below for those):
 | `distance_m` | int | Leg distance |
 | `driving_time_min`, `dynamics_time_min`, `buffer_time_min` | int | Leg duration components: raw router time (constant-cruise passage), per-stop accel/brake time loss (traction dynamics), and schedule buffer — the country quota applied to driving and to dynamics (the dynamics cruise speed is always derived from raw driving time first, buffer never feeds the physics) |
 | `slack_time_min` | int | Deliberate schedule padding beyond routing physics — non-zero only on legs inside a stretched fixed-night interval (see `timetable_mode`). Total leg time = driving + dynamics + buffer + slack, and stop-to-stop elapsed times always match that sum |
-| `energy_kwh` | float | Currently a flat 28.0 kWh/km dummy factor — not calibrated yet |
+| `energy_kwh` | float | Currently a flat 28.0 kWh/km dummy factor — not calibrated yet. How much it *costs* is calibrated: the price side splits this between the country's day and night electricity rate by clock time and adds the catenary charge where one is levied |
 | `country_distance_shares`, `country_time_shares` | object | `{country_code: share}`, each sums to 1.0. Includes transit-only countries the leg crosses without stopping |
 
 **`Stop`** (embedded in every `from_stop`/`to_stop`):

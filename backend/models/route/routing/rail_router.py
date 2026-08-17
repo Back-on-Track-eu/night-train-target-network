@@ -55,7 +55,7 @@ from __future__ import annotations
 import logging
 import os
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import requests
 
@@ -148,6 +148,8 @@ class RoutedLeg:
     energy_kwh: float  # 0.0 until energy model runs
     country_distance_shares: dict[str, float]  # {country_code: share}, sums to 1.0
     country_time_shares: dict[str, float]  # {country_code: share}, sums to 1.0
+    countries: list[str] = field(default_factory=list)  # path order — see Segment
+    passages: list[str] = field(default_factory=list)  # crossings this leg owns
 
     @property
     def total_time_min(self) -> int:
@@ -256,6 +258,43 @@ class CountryIndex:
         return [list(coord) for coord in ring.coords]
 
 
+class PassageIndex:
+    """
+    Crossing polygons for routing-time passage detection — which segment of
+    a trip crosses which separately charged link (Storebælt, Øresund, the
+    Channel Tunnel).
+
+    Built once from DBDataLoader.get_passage_geometries() — see
+    api/helpers/dependencies.py. Crossing GEOMETRY is static reference data
+    (a tunnel does not move between scenarios), so like CountryIndex this
+    is a startup-time singleton; the scenario-versioned CHARGES are
+    resolved separately at evaluation time via
+    DBDataLoader.build_all_passages().
+
+    Two passage_ids may share one polygon — OERESUND_DK and OERESUND_SE,
+    each infrastructure manager billing its half of one crossing. Both
+    match, both are attributed.
+
+    Only a handful of polygons exist, so a linear intersects() scan is
+    cheaper than the R-tree CountryIndex needs for its ~178k vertices.
+    """
+
+    def __init__(self, passage_geometries: list[tuple[str, dict]]) -> None:
+        from shapely.geometry import shape
+
+        self._shapes = [(pid, shape(geom)) for pid, geom in passage_geometries]
+        logger.info("PassageIndex: loaded %d passage polygons.", len(self._shapes))
+
+    def intersecting(self, coords: list[list[float]]) -> list[str]:
+        """passage_ids whose polygon this [lon, lat] path crosses."""
+        if len(coords) < 2 or not self._shapes:
+            return []
+        from shapely.geometry import LineString
+
+        line = LineString(coords)
+        return [pid for pid, shp in self._shapes if shp.intersects(line)]
+
+
 # ---------------------------------------------------------------------------
 # Router
 # ---------------------------------------------------------------------------
@@ -293,7 +332,9 @@ class RailRouter:
     # silently serializes calls beyond the limit, defeating the concurrency.
     _CONNECTION_POOL_SIZE = 64
 
-    def __init__(self, country_index: CountryIndex) -> None:
+    def __init__(
+        self, country_index: CountryIndex, passage_index: PassageIndex | None = None
+    ) -> None:
         self.base_url = os.environ.get(
             "OPENRAILROUTING_URL", "http://localhost:8989"
         ).rstrip("/")
@@ -307,6 +348,11 @@ class RailRouter:
         self._session.mount("http://", adapter)
         self._session.mount("https://", adapter)
         self._country_index = country_index
+        # Optional so a router can be built before passage_charges is
+        # seeded, and so tests that care only about geometry need not
+        # supply one — legs then carry passages=() and evaluation charges
+        # no crossings, which is the pre-0.9.21 behaviour.
+        self._passage_index = passage_index
 
     def check_server(self) -> dict:
         resp = self._session.get(
@@ -594,8 +640,8 @@ class RailRouter:
             len(stops), coords, leg_distance_detail, intervals, tracks
         )
 
-    @staticmethod
     def _parse_legs(
+        self,
         n_stops: int,
         coords: list[list[float]],
         leg_distance_detail: list,
@@ -609,8 +655,15 @@ class RailRouter:
         apportioned by overlap fraction, summed per country, then converted
         to country_distance_shares / country_time_shares (each summing to 1.0)
         alongside the leg's total distance_m / driving_time_min / buffer_time_min.
+
+        countries additionally records the order the legs entered them, which
+        the share dicts cannot express and track access charges need (see
+        Segment). Passages are attributed here too: a crossing is claimed by
+        the FIRST leg intersecting it, so one split by an intermediate stop
+        is charged once per trip rather than by every leg touching it.
         """
         legs: list[RoutedLeg] = []
+        claimed_passages: set[str] = set()
 
         for i in range(n_stops - 1):
             if i < len(leg_distance_detail):
@@ -622,6 +675,7 @@ class RailRouter:
 
             leg_cc_dist: dict[str, float] = defaultdict(float)
             leg_cc_dur_ms: dict[str, float] = defaultdict(float)
+            leg_countries: list[str] = []
 
             for iv_from, iv_to, cc, dist_m, iv_ms in intervals:
                 overlap_from = max(iv_from, from_idx)
@@ -632,6 +686,13 @@ class RailRouter:
                 fraction = (overlap_to - overlap_from) / span if span > 0 else 1.0
                 leg_cc_dist[cc] += dist_m * fraction
                 leg_cc_dur_ms[cc] += iv_ms * fraction
+                # Intervals arrive in path order, so first-seen is
+                # entry order. A country re-entered after a detour
+                # through a neighbour keeps its first position: its
+                # shares are summed into one entry either way, and one
+                # clock window per country is what pricing needs.
+                if cc not in leg_countries:
+                    leg_countries.append(cc)
 
             total_dist_m = sum(leg_cc_dist.values())
             total_dur_ms = sum(leg_cc_dur_ms.values())
@@ -653,9 +714,19 @@ class RailRouter:
                     continue  # "UNK" (open water/ferry) — no country, no buffer time
                 total_buffer_min += round(cc_drive_min * track.buffer_quota_per)
 
+            leg_geometry = coords[from_idx : to_idx + 1]
+            leg_passages: list[str] = []
+            if self._passage_index is not None:
+                leg_passages = [
+                    pid
+                    for pid in self._passage_index.intersecting(leg_geometry)
+                    if pid not in claimed_passages
+                ]
+                claimed_passages.update(leg_passages)
+
             legs.append(
                 RoutedLeg(
-                    geometry=coords[from_idx : to_idx + 1],
+                    geometry=leg_geometry,
                     distance_m=round(total_dist_m),
                     driving_time_min=ms_to_min(total_dur_ms),
                     dynamics_time_min=0,  # filled by apply_traction_dynamics()
@@ -663,6 +734,8 @@ class RailRouter:
                     energy_kwh=0.0,  # populated by calc_energy_consumption()
                     country_distance_shares=country_distance_shares,
                     country_time_shares=country_time_shares,
+                    countries=leg_countries,
+                    passages=leg_passages,
                 )
             )
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import NamedTuple, Optional
 
 
 class StopType(Enum):
@@ -54,6 +54,25 @@ class Stop:
         return self.departure_time_min - self.arrival_time_min
 
 
+class CountryWindow(NamedTuple):
+    """One country run of one segment, placed on the clock.
+
+    enter_min/exit_min are minutes from midnight day 1, like every other
+    clock value in the model; distance_share is that country's share of the
+    segment length. Produced by Segment.country_windows() and consumed by
+    every charge that depends on WHEN a train is in a country — the track
+    access night and peak bands (infrastructure/tac/calc_tac.py) and the
+    electricity night band (infrastructure/energy_pricing/
+    calc_energy_price.py). A NamedTuple so the two can unpack it positionally
+    or read it by name, and so neither owns the other's helper.
+    """
+
+    country_code: str
+    enter_min: float
+    exit_min: float
+    distance_share: float
+
+
 @dataclass
 class Segment:
     """
@@ -72,6 +91,21 @@ class Segment:
     models/route/timetable.py). Declared last (dataclass default), listed
     with the other time components in spirit: total = driving + dynamics
     + buffer + slack.
+
+    countries is the same set as country_distance_shares' keys but IN PATH
+    ORDER, which a dict of shares cannot express. Track access charges need
+    it: a night rate applies to the clock time a run spends in one country,
+    and placing each country on the clock requires knowing which was
+    entered first.
+
+    passages lists the separately charged crossings (Storebælt, Øresund,
+    Channel Tunnel) this segment owns, matched by polygon intersection at
+    routing time (routing/rail_router.py: PassageIndex). A crossing is
+    attributed to exactly one segment per trip, so one split by an
+    intermediate stop is not charged twice.
+
+    Both default to empty so a route payload stored before ROUTE_BUILDER
+    0.9.21 stays constructible — see api/helpers/route_serialize.py.
     """
 
     from_stop: Stop
@@ -85,6 +119,8 @@ class Segment:
     country_distance_shares: dict[str, float]
     country_time_shares: dict[str, float]
     slack_time_min: int = 0  # fixed-night stretch padding — see class docstring
+    countries: list[str] = field(default_factory=list)
+    passages: list[str] = field(default_factory=list)
 
     @property
     def total_time_min(self) -> int:
@@ -94,6 +130,41 @@ class Segment:
             + self.buffer_time_min
             + self.slack_time_min
         )
+
+    def country_windows(self) -> list[CountryWindow]:
+        """Place each country run of this segment on the clock, in path order.
+
+        Each country's time share positions it between the from_stop
+        departure and the to_stop arrival; its distance share gives it a
+        length. "UNK" slices (open water, ferries, geometry outside every
+        polygon) still advance the time cursor so they do not shift later
+        countries' windows, and are yielded like any other — a caller with no
+        infrastructure manager to pay skips them.
+
+        Physics only, like everything else here: which tariff band a window
+        falls into is the charge modules' business.
+        """
+        t0 = self.from_stop.departure_time_min
+        t1 = self.to_stop.arrival_time_min
+        duration = float((t1 or 0) - (t0 or 0)) if t0 is not None else 0.0
+
+        # Payloads stored before ROUTE_BUILDER 0.9.21 carry no ordered path
+        # list — fall back to the share dict's keys, which loses ordering
+        # precision (and so places the windows only approximately) but keeps
+        # a stale route evaluable.
+        countries = self.countries or list(self.country_distance_shares.keys())
+
+        windows: list[CountryWindow] = []
+        cursor = float(t0 or 0)
+        for cc in countries:
+            enter = cursor
+            cursor += duration * self.country_time_shares.get(cc, 0.0)
+            windows.append(
+                CountryWindow(
+                    cc, enter, cursor, self.country_distance_shares.get(cc, 0.0)
+                )
+            )
+        return windows
 
 
 @dataclass(frozen=True)
