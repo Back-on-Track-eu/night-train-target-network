@@ -575,11 +575,19 @@ class TestIncludeSections:
         aggregating by corridor rather than by proposal. Identical stop
         lists under the same default auto_stop_addition behaviour insert
         the same intermediate stops, so every literal segment is shared,
-        not just one."""
+        not just one.
+
+        Both sides use the SAME composition. An earlier version varied it,
+        which quietly made the test depend on two compositions producing an
+        identical auto-added stop list: the "add" budget is a share of
+        technical trip time, so a faster or slower consist can admit a
+        different number of marginal candidates and split the corridor into
+        different segments. That is correct behaviour and nothing to do with
+        corridor aggregation, which is what this test is about."""
         second = publish(
             api_base,
-            compute(api_base, _STOPS, "REF-BAL-9")["request"],
-            name="Berlin \u2013 Wien (gallery test, second composition)",
+            compute(api_base, _STOPS, _COMPOSITION)["request"],
+            name="Berlin \u2013 Wien (gallery test, second proposal)",
             headers=script_headers,
         )
         body = _gallery(

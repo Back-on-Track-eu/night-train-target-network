@@ -19,7 +19,11 @@ import os
 
 import pytest
 
-from models.params import TAC_COMPONENT_FIELD_NAMES
+from models.params import (
+    ENERGY_PRICE_FIELD_NAMES,
+    FACILITY_FIELD_NAMES,
+    TAC_COMPONENT_FIELD_NAMES,
+)
 
 # =============================================================================
 # Version isolation — loader loads exactly the scenario-pinned snapshot
@@ -95,17 +99,35 @@ class TestParamProvenance:
     def test_param_versions_entries_complete(self, loader):
         """Every entry carries a non-None value and a positive int version.
 
-        The track access charge components are the documented exception:
-        an empty component states that the country does not levy that term
-        (models/infrastructure/tac/calib/TAC_CALIBRATION.md), so None there
-        is data, not a gap. The rest of the track parameters are always
-        resolved — either from the country's own row or from the EU-average
-        default — and a None among them would mean the loader dropped one.
+        Two component groups are the documented exceptions, for the same
+        reason: an empty value states that the country does not levy that
+        term, so None there is data rather than a gap.
+
+        - The track access components
+          (models/infrastructure/tac/calib/TAC_CALIBRATION.md).
+        - The energy price terms beyond the day rate
+          (models/infrastructure/energy_pricing/calib/
+          ENERGY_PRICING_CALIBRATION.md) — twenty-five of twenty-eight
+          countries charge one electricity rate around the clock, and
+          roughly half levy no catenary charge.
+        - The service-facility terms
+          (models/infrastructure/facility/calib/FACILITY_CALIBRATION.md) — a
+          country prices a stabling occupation in exactly one unit, so the two
+          rate columns for the units it does not use are NULL by construction.
+
+        Every other track parameter is always resolved, either from the
+        country's own row or from the EU-average default, and a None among
+        them would mean the loader dropped one.
         """
         tracks = loader.build_all_tracks()
+        nullable = (
+            set(TAC_COMPONENT_FIELD_NAMES)
+            | set(ENERGY_PRICE_FIELD_NAMES)
+            | set(FACILITY_FIELD_NAMES)
+        )
         for key, entry in tracks.param_versions.entries.items():
             field = key.split(":")[-1]
-            if field not in TAC_COMPONENT_FIELD_NAMES:
+            if field not in nullable:
                 assert entry.value is not None, f"param_versions['{key}'].value is None"
             assert isinstance(entry.version, int) and entry.version > 0, (
                 f"param_versions['{key}'].version = {entry.version!r}"

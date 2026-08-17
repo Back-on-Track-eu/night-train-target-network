@@ -2,7 +2,7 @@
 test_73_calc_tac_units.py
 =========================
 Pure unit tests for the component track access charge model in
-models/infrastructure/calc_tac.py — no Docker stack, no DB. Runnable
+models/infrastructure/tac/calc_tac.py — no Docker stack, no DB. Runnable
 standalone:
 
     uv run --extra dev pytest tests/test_73_calc_tac_units.py -v
@@ -21,7 +21,7 @@ test does unit arithmetic.
 
 import pytest
 
-from models.infrastructure.calc_tac import WEEKDAY_BLEND, calc_segment_tac
+from models.infrastructure.tac.calc_tac import WEEKDAY_BLEND, calc_segment_tac
 from models.params import (
     PassageCharge,
     PassageChargeCollection,
@@ -76,6 +76,24 @@ def _track(country_code: str, **overrides) -> TrackInfrastructure:
         tac_peak_band2_start_min=None,
         tac_peak_band2_end_min=None,
         tac_peak_weekdays_only=False,
+        # Energy price terms — this suite prices track access only, and the
+        # zero day rate above plus these NULLs make an energy charge
+        # impossible, so a term leaking between the two domains shows up as
+        # a failure here rather than as a plausible number.
+        energy_price_night_eur_kwh=None,
+        energy_night_band_start_min=None,
+        energy_night_band_end_min=None,
+        energy_catenary_eur_train_km=None,
+        energy_catenary_eur_gross_tonne_km=None,
+        # Service facility terms — neither suite prices a facility charge, and
+        # a 'none' basis with no rates makes one impossible, so a term crossing
+        # a domain boundary fails here rather than shifting a number.
+        parking_basis="none",
+        parking_eur_metre_day=None,
+        parking_eur_hour=None,
+        parking_eur_event=None,
+        parking_free_hours=None,
+        parking_hotel_power_eur_hour=None,
     )
     kwargs.update(overrides)
     return TrackInfrastructure(**kwargs)

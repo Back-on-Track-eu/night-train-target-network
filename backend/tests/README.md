@@ -40,7 +40,7 @@ built on top of it:
 | `test_55` | `GET /api/proposals/stats` — §7.7 counts, KPI aggregates per scope, top/flop countries and country relations |
 | `test_60` | Feedback API — submit/categories |
 | `test_70`–`test_71` | Auth — integration (API + DB) and standalone units |
-| `test_72`–`test_74` | Standalone model units — no stack, no DB. Roster efficiency, the component track access charge, and the locomotive catalog. Runnable on their own with `pytest tests/test_7X_....py` |
+| `test_72`–`test_76` | Standalone model units — no stack, no DB. Roster efficiency, the component track access charge, the locomotive catalog, the traction energy price model, and the service-facility charges. Runnable on their own with `pytest tests/test_7X_....py` |
 
 Content tests that need *controlled* demand (`test_30`, `test_40`) call
 the model layer directly (`tests/helpers.py:compute_evaluation_domain()`),
@@ -239,7 +239,10 @@ Standard input: `eval_standard` (3-stop route, directional demand 40 Couchette
 | Test | Purpose | Input | Expected |
 |---|---|---|---|
 | `TestCostRecomputation::test_tac_matches_manual_calculation` | TAC model exact | per-country km × params tac rates × operating days | == `infrastructure.tac_eur` (rel 1e-3) |
-| `TestCostRecomputation::test_energy_cost_matches_manual_calculation` | Energy cost model exact | segment kWh × shares × params prices × days | == `infrastructure.energy_eur` |
+| `TestCostRecomputation::test_params_endpoint_serves_the_rates_the_evaluation_priced_from` | Cross-endpoint contract | `/params` headline rates vs the loader's, per country | equal at the pinned version |
+| `TestCostRecomputation::test_energy_cost_matches_manual_calculation` | Energy cost model bracketed | segment kWh × loader day/night prices + catenary per km/gtkm × days | `infrastructure.energy_eur` inside the day/night bracket; equality where no banded country is on the corridor |
+| `TestCostRecomputation::test_shunting_matches_manual_calculation` | Shunting model exact, and the event count | Σ events × the event's country all-in rate × days; 4 events per trip pair | == `operator.fixed.shunting_eur` |
+| `TestCostRecomputation::test_parking_matches_manual_calculation` | Stabling model exact | per parking: basis(layover, length) + hotel power × hours, annualised per operating day | == `infrastructure.parking_eur` |
 | `TestCostRecomputation::test_station_charge_matches_manual_calculation` | Station charge model exact | Σ charge per stop call × days | == `infrastructure.station_charge_eur` |
 | `TestCostRecomputation::test_coach_maintenance_matches_manual_calculation` | Variable-km cost exact | maint rate × total km × days | == `variable.coach_maintenance_eur` |
 | `TestCostRecomputation::test_revenue_matches_manual_calculation` | Revenue model exact | Σ places_sold × avg_price (no days multiplier) | == `total_revenue_eur` |
