@@ -57,6 +57,7 @@ from api import (
     proposal_stats,
     auth,
     feedback,
+    gate,
     proposals,
     proposal_engagement,
     scenarios,
@@ -99,6 +100,11 @@ def create_app() -> Flask:
     app.register_blueprint(proposal_stats.bp, url_prefix="/api")
     app.register_blueprint(proposal_engagement.bp, url_prefix="/api")
     app.register_blueprint(scenarios.bp, url_prefix="/api")
+    # Testing gate (2026-08-13 Decision 2). Registered without a prefix:
+    # it owns both /gate (the page) and /api/gate/* (check + redeem), and
+    # all three must stay reachable without a gate cookie — everything
+    # else on the site sits behind forward_auth -> /api/gate/check.
+    app.register_blueprint(gate.bp)
 
     # --- settings ---
     app.json.sort_keys = False

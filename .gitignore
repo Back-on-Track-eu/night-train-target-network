@@ -126,6 +126,9 @@ desktop.ini
 # -----------------------------------------------------------------------------
 backend/models/compositions/calib/seed/
 deploy/**/.env
+# Server-local compose overrides (per-host worker counts, party rate limits,
+# log caps). Never belongs in a public repo — the tracked compose is the contract.
+deploy/**/docker-compose.override.yml
 backend/models/compositions/calib/data/
 backend/db/dev/data/country_geoms.geojson.gz
 backend/scripts/data/*_output.json

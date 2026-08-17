@@ -58,3 +58,38 @@ COMMENT ON COLUMN admin.feedback.email        IS 'Reply-to address for an anonym
 COMMENT ON COLUMN admin.feedback.category     IS 'Top-level topic, e.g. ''Infrastructure'', ''Compositions'', ''Evaluation — calculation method'', ''Bug report''. Free text — GET /api/feedback/categories returns the current nine-category taxonomy, but new categories are accepted as they come up.';
 COMMENT ON COLUMN admin.feedback.sub_category IS 'Detail within category — e.g. a field name for ''Infrastructure''/''Compositions'', or a cost component for ''Evaluation — calculation method''. Free text, same rationale as category.';
 COMMENT ON COLUMN admin.feedback.notified_at  IS 'When the feedback mail to targetnetwork-wg@back-on-track.eu succeeded. NULL if the send failed or has not been attempted — the row is still kept either way, since storing feedback must not depend on mail delivery.';
+-- ------------------------------------------------------------------
+-- Testing gate (2026-08-13 Decision 2). Mirrors
+-- migrations/2026-08-17_testing_gate_access_codes.sql, which is its
+-- counterpart for server databases (never reseeded). Both must exist:
+-- a fresh seed followed by `migrate.py --baseline` records that
+-- migration as applied WITHOUT executing it, so a DB born from this
+-- file has to carry the tables already.
+--
+-- A gate, not authentication: identity still comes from the OTP flow.
+-- ------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS admin.access_codes (
+    code              TEXT PRIMARY KEY,
+    label             TEXT,
+    issued_by         TEXT,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    revoked_at        TIMESTAMPTZ,
+    max_redemptions   INTEGER NOT NULL DEFAULT 0
+        CHECK (max_redemptions >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS admin.access_code_redemptions (
+    id            BIGSERIAL PRIMARY KEY,
+    code          TEXT NOT NULL REFERENCES admin.access_codes(code) ON DELETE CASCADE,
+    redeemed_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    user_agent    TEXT,
+    remote_addr   TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_access_code_redemptions_code
+    ON admin.access_code_redemptions (code);
+CREATE INDEX IF NOT EXISTS idx_access_code_redemptions_at
+    ON admin.access_code_redemptions (redeemed_at DESC);
+
+COMMENT ON TABLE admin.access_codes IS 'Testing-party gate codes (2026-08-13 Decision 2). Not credentials: the gate only decides who reaches the app; identity comes from the OTP flow.';
+COMMENT ON TABLE admin.access_code_redemptions IS 'Append-only log of gate redemptions — per-tester browser attribution.';
