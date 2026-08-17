@@ -199,6 +199,18 @@ function avatarPt(code: string, index: number) {
     @keydown.enter="onCardClick"
     @keydown.space.prevent="onCardClick"
   >
+    <!-- Source badge. Existing trains and user proposals sit in one list, and
+         until now only the footer link distinguished them — which is easy to
+         miss while scanning. "ONTD" is the catalog's name, so it is not
+         translated. -->
+    <div v-if="proposal.source === 'existing'" class="flex justify-center">
+      <span
+        class="rounded-full bg-primary-50/15 px-2 py-0.5 text-[0.65rem] font-bold uppercase tracking-wider text-primary-50/70"
+      >
+        ONTD
+      </span>
+    </div>
+
     <!-- Upper half: itinerary (centered). Between anchors we show "(N stops)"
          while idle; on hover it fades out and the actual intermediate stops
          slide in from above. -->

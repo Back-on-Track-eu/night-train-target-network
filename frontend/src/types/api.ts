@@ -607,7 +607,16 @@ export interface ProposalsFilter {
   user_ids?: number[]
   countries?: string[]
   stop_ids?: string[]
+  /** Which UNION branch(es) the gallery is built from: 'proposal' =
+   *  proposals.proposal_summaries, 'existing' = the ONTD catalog's
+   *  ontd.route_summaries (see adapters/proposal/filter_builder.py,
+   *  SUPPORTED_SOURCES). Omitted means BOTH — the backend default. Sending
+   *  ['proposal'] compiles to a query that never touches the ontd schema. */
+  sources?: ProposalSourceKind[]
 }
+
+/** The two gallery row kinds. Mirrors SUPPORTED_SOURCES on the backend. */
+export type ProposalSourceKind = 'proposal' | 'existing'
 
 export interface ProposalsRequest {
   filter?: ProposalsFilter

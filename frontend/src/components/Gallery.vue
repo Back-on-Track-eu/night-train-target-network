@@ -35,6 +35,7 @@ import {
   type ProposalsFilter,
   type ProposalSort,
   type ProposalSortKey,
+  type ProposalSourceKind,
   type GalleryMapRoute,
 } from '@/types/api'
 
@@ -98,14 +99,43 @@ const tabs = computed(() => [
   { value: 'byCountry' as const, label: t('gallery.tabs.byCountry'), icon: mdiEarth },
 ])
 
-const sortFieldOptions = computed<{ value: ProposalSortKey; label: string }[]>(() => [
-  { value: 'margin_eur_per_train_km', label: t('gallery.sort.margin') },
-  { value: 'revenue_eur_per_train_km', label: t('gallery.sort.revenue') },
-  { value: 'cost_eur_per_train_km', label: t('gallery.sort.cost') },
-  { value: 'created_at', label: t('gallery.sort.date') },
-  { value: 'total_distance_km', label: t('gallery.sort.distance') },
-  { value: 'total_time_h', label: t('gallery.sort.duration') },
-])
+// Which source(s) the list shows. 'all' sends no `sources` key at all, which
+// the backend reads as both.
+type SourceChoice = 'all' | ProposalSourceKind
+const sourceFilter = ref<SourceChoice>('all')
+const sourceChoices: { value: SourceChoice; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'proposal', label: 'Suggested' },
+  { value: 'existing', label: 'ONTD' },
+]
+
+// Existing (ONTD) rows carry NULL in every financial column and have no
+// created_at, so offering those as sort fields while viewing ONTD only would
+// sort a column no row has — which is exactly why the default "Margin, desc"
+// looked arbitrary on a list that is 205 existing rows and 2 proposals.
+const SHARED_SORT_KEYS: readonly ProposalSortKey[] = ['total_distance_km', 'total_time_h']
+
+const sortFieldOptions = computed<{ value: ProposalSortKey; label: string }[]>(() => {
+  const all = [
+    { value: 'margin_eur_per_train_km' as ProposalSortKey, label: t('gallery.sort.margin') },
+    { value: 'revenue_eur_per_train_km' as ProposalSortKey, label: t('gallery.sort.revenue') },
+    { value: 'cost_eur_per_train_km' as ProposalSortKey, label: t('gallery.sort.cost') },
+    { value: 'created_at' as ProposalSortKey, label: t('gallery.sort.date') },
+    { value: 'total_distance_km' as ProposalSortKey, label: t('gallery.sort.distance') },
+    { value: 'total_time_h' as ProposalSortKey, label: t('gallery.sort.duration') },
+  ]
+  return sourceFilter.value === 'existing'
+    ? all.filter((o) => SHARED_SORT_KEYS.includes(o.value))
+    : all
+})
+
+// Switching to ONTD-only while sorted by a proposal-only column would leave the
+// Select showing a field that is no longer offered — fall back to distance.
+watch(sourceFilter, (choice) => {
+  if (choice === 'existing' && !SHARED_SORT_KEYS.includes(sortField.value)) {
+    sortField.value = 'total_distance_km'
+  }
+})
 
 // Country codes present in the loaded stops, resolved to full names in the
 // active locale (unknown codes fall back to the raw code).
@@ -129,16 +159,24 @@ const reachedEnd = computed(() => initialized.value && proposals.value.length >=
 // are OR/any-match; "From A to B" therefore sends both stop_ids as an
 // approximation (routes touching either stop), not a strict A→B connection.
 function buildFilter(): ProposalsFilter | undefined {
+  const base: ProposalsFilter = {}
+  // Omitting `sources` means BOTH on the backend, so only send it when the
+  // user has narrowed the list. ['proposal'] compiles to a query that never
+  // touches the ontd schema at all.
+  if (sourceFilter.value !== 'all') base.sources = [sourceFilter.value]
+
   if (mode.value === 'aToB') {
     const ids = [fromStop.value?.stop_id, toStop.value?.stop_id].filter((id): id is string =>
       Boolean(id),
     )
-    return ids.length ? { stop_ids: ids } : undefined
+    if (ids.length) base.stop_ids = ids
+  } else if (mode.value === 'byStation') {
+    if (stationStop.value) base.stop_ids = [stationStop.value.stop_id]
+  } else if (countryCode.value) {
+    base.countries = [countryCode.value]
   }
-  if (mode.value === 'byStation') {
-    return stationStop.value ? { stop_ids: [stationStop.value.stop_id] } : undefined
-  }
-  return countryCode.value ? { countries: [countryCode.value] } : undefined
+
+  return Object.keys(base).length ? base : undefined
 }
 
 async function loadPage(): Promise<void> {
@@ -328,7 +366,7 @@ function currentSearchQuery(): LocationQueryRaw {
   }
 }
 
-watch([mode, fromStop, toStop, stationStop, countryCode, sortField, sortDir], () => {
+watch([mode, fromStop, toStop, stationStop, countryCode, sortField, sortDir, sourceFilter], () => {
   if (hydrating) return
   resetAndLoad()
   router.replace({ query: currentSearchQuery() })
@@ -512,8 +550,29 @@ const iconBtnClass =
       </div>
     </div>
 
-    <!-- Controls: sort (above the card list) + plan a new route (above the map) -->
+    <!-- Controls: source + sort (above the card list) + plan a new route -->
     <div class="flex items-center gap-2">
+      <!-- Source switch. Suggested routes and the existing ONTD network are two
+           different kinds of thing sharing one list; this separates them, and
+           narrows the sort fields to the ones ONTD rows actually carry. -->
+      <div
+        class="flex shrink-0 items-center gap-0.5 rounded-full border border-primary-50/20 bg-primary-50/5 p-0.5"
+      >
+        <button
+          v-for="choice in sourceChoices"
+          :key="choice.value"
+          type="button"
+          class="cursor-pointer rounded-full px-3 py-1 text-xs leading-none transition"
+          :class="
+            sourceFilter === choice.value
+              ? 'bg-primary-50/20 font-bold text-primary-50'
+              : 'text-primary-50/60 hover:text-primary-50'
+          "
+          @click="sourceFilter = choice.value"
+        >
+          {{ choice.label }}
+        </button>
+      </div>
       <div class="flex items-stretch gap-2">
         <Select
           v-model="sortField"
