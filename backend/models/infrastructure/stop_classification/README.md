@@ -1,14 +1,100 @@
-# Stop Classification Pipeline — Implementation Suggestion
+# Stop classification pipeline
 
-Status: **design suggestion, not implemented.** This document describes *one
-possible way* to solve the problem. Feel free to deviate where you find a
-better or simpler approach — but please document deviations here.
+Builds the catalog of railway stations that qualify as night train stop
+candidates, starting from a raw OpenStreetMap (OSM) Europe extract. The
+qualified list later drives the frontend station picker and the automatic
+stop suggestion along routes — a station missing here is unselectable
+everywhere in the app, which is why the pipeline never deletes rows: it marks
+them, and every decision stays reviewable (see "Design background" below for
+the full design and its principles).
 
-Planned location: `backend/models/infrastructure/stop_classification/`
+![Pipeline sets](pipeline_sets.svg)
+
+## The pipeline, step by step
+
+| # | Step | Status | File |
+|---|------|--------|------|
+| 1 | Fetch OSM Europe data (`europe-latest.osm.pbf` from Geofabrik → `data/raw/`) | ✅ done | — (manual download) |
+| 2 | Filter all station objects out of the raw extract | ✅ done | `step2_filter_stations.py` |
+| 3a | Fetch center coordinates for station ways/relations | ✅ done | `step3a_fetch_missing_centers.py` |
+| 3b | Classify "real" railway stations vs. urban transit | ✅ done | `step3b_classify_stations.ipynb` |
+| 4 | Merge classified stations with ONTD (left join; inspect ONTD rows without an OSM match) | ✅ done | reuse the matcher from step 5 as template |
+| 5 | Qualify stops via current night train stops (`stop_times`) | ✅ done | `step5_JoinNTStopsWithOSM.ipynb` |
+| 6 | Add stations for [functional urban areas](https://ec.europa.eu/eurostat/web/gisco/geodata/statistical-units/cities-functional-urban-areas) that have no qualified stop yet | ✅ done | — |
+| 7 | Update the station charge data | ⬜ to build | — |
+
+Steps 2 and 3 only need re-running when the OSM source data is refreshed.
+Step 2 takes ~9 hours for all of Europe — do not re-run it casually; its
+output is checked into `data/` handover packages instead.
+
+## How to run
+
+All commands from this directory (`backend/models/infrastructure/stop_classification/`):
+
+```
+uv run python step3a_fetch_missing_centers.py     # needs internet (Overpass API)
+uv run jupyter lab                                # then run step3b, later step5
+```
+
+Each notebook checks its own input files exist and tells you which earlier
+step produces them if not.
+
+## Data inventory
+
+Everything under `data/` is gitignored (bulk data). What each file is:
+
+| File | What it is | Needed by |
+|------|-----------|-----------|
+| `data/raw/europe-latest.osm.pbf` | Raw OSM Europe extract (~32 GB, Geofabrik). Only needed to re-run step 2. | step 2 |
+| `data/step2_output_eu_stations.osm.pbf` | **The step 2 output.** Every OSM station object in Europe (98,944), with all tags. | steps 3a, 3b |
+| `data/step3a_output_way_relation_centers.csv` | Step 3a output: center lat/lon per station way/relation. | step 3b |
+| `data/step3b_output_osm_stations_classified.csv` | Step 3b output: all stations with `station_mode` classification. | steps 4, 5 |
+| `data/step5_output_matched_stops.csv` | Step 5 output: one confirmed OSM match per current night train stop. | step 4 (as an input to build), downstream import |
+| `data/step5_output_unmatched_report.csv` | Step 5 output: night train stops with no OSM match within range — review, don't drop. | manual review |
+| `data/step5_output_duplicate_osm_matches_report.csv` | Step 5 output: OSM stations claimed by more than one schedule stop name. | manual review |
+| `data/step5_output_schedule_coord_conflicts_report.csv` | Step 5 output: stops whose schedule coordinate reports disagree by more than the jitter threshold. | manual review |
+| `data/step6_metropol.csv` | Step 6 output: stops which lay in urban areas | manual selection
+| `data/bahnhoefe_stops_sorted.csv` | ONTD export (48,617 stations): names (real/Latin/ASCII), country code, timezone, lat/lon, and the ID linking to the old stop charge data. | step 4 |
+| `data/B-o-T_DataBase_stop_times.csv` | `stop_times` export from the night train database — defines where night trains stop today. | step 5 |
+| `data/eu_stations_{light_rail,subway,tram,train_yes,uic_name,uic_ref}.osm.pbf` | Exploration-only side outputs of the step 2 run. Each contains *every* OSM object with that tag (not just stations) — for QGIS tag-coverage analysis. **Not pipeline inputs**; safe to delete. | — |
+
+access via: https://drive.google.com/drive/folders/1iAjxVKRn1qhgR-yhfczO91M41KIIIIVd?usp=sharing
+
+Step 3b's why-a-centers-file explanation, the classification rules, and the
+matching strategy are documented in the notebooks themselves and in the
+"Design background" section below — read those in that order.
+
+## Known open items
+
+- **Country column is nearly empty after step 3b** (`addr:country` covers <1%
+  of OSM stations). Filling it from coordinates is a prerequisite for step 4's
+  within-country matching — use the project's existing `CountryIndex` helper
+  rather than adding a new reverse-geocoding dependency.
+- **`undecided` classification bucket is large (~41%)** — mostly minimal
+  `railway=halt` objects. They stay in per the keep-it-in principle; the
+  design doc's track-proximity second pass ("Design background" §3 Stage A) is
+  the planned refinement if the bucket causes noise downstream.
+- **Step 3a depends on the Overpass API**, which reflects current OSM (slightly
+  newer than the extract). Objects deleted since the extract date come back
+  without a center and are reported — expect a small handful. The public
+  instance occasionally answers a batch with a transient server error; the
+  script retries those automatically, and if a batch still fails it's skipped
+  and listed in `<output>.failed_ids.csv` rather than aborting the whole run —
+  just re-run the script to catch those up (Overpass is stateless per request,
+  so this is cheap).
+- Visual QA of the step 3b output in QGIS (load
+  `data/step3b_output_osm_stations_classified.csv` as a point layer, color by
+  `station_mode`) before anyone builds on it. Sanity anchor from the design
+  doc: roughly 300–500 qualified stops expected for Germany at the end of the
+  pipeline.
 
 ---
 
-## 1. The problem
+## Design background
+
+The pipeline follows the design below, written before implementation started. Kept as-is for the reasoning and the open decisions (§6); deviations from it should be noted inline as they're made.
+
+### 1. The problem
 
 We need a catalog of stops that are realistic candidates for night trains.
 
@@ -54,7 +140,7 @@ Three principles behind this:
 - **Auditable:** "why is station X (not) included?" must be answerable from the
   CSV alone — also for external stakeholders.
 
-## 2. Prerequisites
+### 2. Prerequisites
 
 Things to have ready before starting:
 
@@ -76,6 +162,30 @@ Things to have ready before starting:
    works well (same pattern as the calibration notebooks). The final pipeline
    should be a plain script, so it can be re-run when data updates.
 
+   `step2_filter_stations.py` (same folder) does the shrinking step in pure Python
+   instead of the CLI, so it stays reproducible without requiring the
+   `osmium` CLI tool to be installed separately — only the `osmium`/`tqdm`/
+   `psutil` Python packages, which are already project dependencies.
+
+   Only the `station` filter (the default) feeds this pipeline. The script
+   also supports further tag-based filters (`light_rail`, `subway`, `tram`,
+   `train_yes`, `uic_name`, `uic_ref`) for exploratory QGIS analysis — note
+   these match their tag on *any* object in the input, not just on stations.
+   All selected filters run in a single shared pass over the input, since a
+   continent-sized extract can take hours to scan:
+
+   ```
+   uv run python step2_filter_stations.py data/raw/europe-latest.osm.pbf -o data/step2_output_eu_stations
+   uv run python step2_filter_stations.py data/raw/europe-latest.osm.pbf --filters all -o data/eu_stations
+   ```
+
+   `-o`/`--output` sets an output *prefix*, not a full filename — each
+   selected filter writes `<prefix>_<filtername>.osm.pbf`. Default prefix is
+   the input filename with `.osm.pbf` stripped. A continent-sized extract can
+   take several hours, more so with multiple filters selected at once — the
+   progress bar reports objects processed, total matches, and current RAM
+   usage so a long run doesn't look stalled.
+
 2. **The current night train stop list** as CSV in GTFS-like format:
    `stop_name, stop_country, stop_timezone, stop_lat, stop_lon`.
    Note: it has **no station IDs** (no UIC/IBNR), so matching to OSM must work
@@ -92,7 +202,7 @@ Things to have ready before starting:
    Are the big hubs in? Are subway stations gone? QGIS is also the practical
    way to spot stops for the manual override list (see Stage D).
 
-## 3. Suggested pipeline
+### 3. Suggested pipeline
 
 ```
 OSM extract (.osm.pbf, untracked)
@@ -113,7 +223,7 @@ A stop qualifies if it matched **any** positive signal and is not manually
 excluded. Signals are independent — a stop can match several, and all of them
 are recorded.
 
-### Stage A — Real railway stations vs. subway/tram
+#### Stage A — Real railway stations vs. subway/tram
 
 Don't expect one perfect tag query — OSM tagging is inconsistent. Suggested:
 simple rules plus an explicit "undecided" bucket.
@@ -126,6 +236,11 @@ Take all objects with `railway=station`, `railway=halt`, or
   **or** has no subway/tram indicators at all.
 - **Urban transit (drop from further evaluation):** `station=subway`,
   `station=light_rail`, or `subway=yes`/`tram=yes` *without* `train=yes`.
+- **Ferry terminals (mark as `other`):** `amenity=ferry_terminal` without
+  heavy-rail evidence — ferry piers carry `public_transport=station`
+  surprisingly often and would otherwise flood the undecided bucket. Rows
+  stay in the CSV (`mode_rule=ferry_terminal`), so the set remains
+  retrievable later.
 - **Mixed (keep):** big hubs often serve rail *and* metro under one OSM object.
   Rule of thumb: never drop because a subway tag is *present* — only because
   heavy-rail evidence is *absent*.
@@ -140,7 +255,7 @@ in QGIS and the rules tuned. Urban-transit rows stay in the CSV but skip the
 following stages. (Base fields per row — `stop_id`, `stop_name`, `stop_lat`,
 `stop_lon`, etc. — follow the GTFS `stops.txt` format described in §4.)
 
-### Stage B — Matching external data to OSM stops
+#### Stage B — Matching external data to OSM stops
 
 Both the night train list and GTFS feeds name stations in their own way — they
 don't know OSM ids. Matching them to OSM rows is **the trickiest part of the
@@ -169,13 +284,13 @@ fall back to the same coordinates+name procedure. Write the matcher **once**
 and reuse it for both sources.
 
 **Important:** external stops with no OSM match must be written to
-`unmatched_report.csv`, never silently dropped. An unmatched night train stop
+`step5_output_unmatched_report.csv`, never silently dropped. An unmatched night train stop
 is always a data problem worth fixing — either bad source coordinates (a known
 issue) or missing/mistagged OSM data. Bonus: since *every* current night train
 stop should find a match, this list is a free test — use it to tune the
 thresholds in step 2 and 3.
 
-### Stage C — Qualification signals (three tiers)
+#### Stage C — Qualification signals (three tiers)
 
 **Tier 1 — stop of a current night train.** Matched via Stage B against the
 night train list. Signal: `current_night_train`. Highest confidence, but by
@@ -235,7 +350,11 @@ Per country the chain is: GTFS signal → national category → anchor-based
 signals. A country nobody onboarded yet still gets Tier 1 + population as the
 default anchor type, so no country ends up empty.
 
-### Stage D — Manual overrides
+**Documentation step6:**
+Stops which lay in urban areas were selected manually, for every area 1-2 stops each. Furthermore Tourism areas & major ferry hubs were added.
+
+
+#### Stage D — Manual overrides
 
 A tracked file `stop_overrides.csv` with columns `stop_ref, action, reason`
 (`action` = `include` or `exclude`; `reason` is **mandatory**).
@@ -249,14 +368,14 @@ A tracked file `stop_overrides.csv` with columns `stop_ref, action, reason`
 
 Unlike the bulk data, this file **is tracked in git** — it is curated content.
 
-### Stage E — Resolve
+#### Stage E — Resolve
 
 `qualified = (any positive signal) AND (no manual exclude)`, plus
 `candidate_tier` = best (lowest) tier among matched signals
 (1 = night train, 2 = GTFS long-distance, 3 = category/anchor-based,
 4 = manual include only).
 
-## 4. Output
+### 4. Output
 
 `classified_stops.csv` — **one row per station in the extract, nothing dropped.**
 
@@ -283,8 +402,9 @@ appended at the end as an extension — this is a normal GTFS pattern.
 | `signals_negative` | | e.g. `manual_exclude` |
 | `match_notes` | | Match confidence, distances, name scores |
 
-Plus `unmatched_report.csv` (external stops without OSM match) — this one does
-not need to follow the GTFS format since it never feeds downstream tooling.
+Plus a report of external stops without an OSM match (`step5_output_unmatched_report.csv`
+for the night train stop_times source — see "How to run" above) — this one
+does not need to follow the GTFS format since it never feeds downstream tooling.
 
 Both outputs live next to the input data and are gitignored.
 
@@ -292,7 +412,7 @@ Both outputs live next to the input data and are gitignored.
 the number lands far outside that range, revisit thresholds before importing —
 and do a visual pass in QGIS either way.
 
-## 5. Downstream integration
+### 5. Downstream integration
 
 - The CSV feeds the existing stop import/seed path; only `qualified = true`
   rows get imported into the versioned stop catalog.
@@ -307,7 +427,7 @@ and do a visual pass in QGIS either way.
   search and reduces exposure to the known coordinate-quality issues in the
   current stop source.
 
-## 6. Open decisions (check with David before/while implementing)
+### 6. Open decisions (check with David before/while implementing)
 
 1. Stop table schema extension (`candidate_tier`, `qualification_sources`) —
    implies a new table version.
@@ -324,7 +444,7 @@ and do a visual pass in QGIS either way.
    areas is the obvious next candidate) and where does a curated list for
    those come from?
 
-## 7. Deferred ideas
+### 7. Deferred ideas
 
 - Platform length check from OSM platform geometry (night trains are long;
   OSM data too patchy today). Add `OPEN_TODOS["stop_classification_platform_length"]`
@@ -333,7 +453,7 @@ and do a visual pass in QGIS either way.
 - Re-run strategy when OSM/GTFS sources update; record source timestamps in a
   small metadata sidecar file.
 
-## 8. Project conventions (short version)
+### 8. Project conventions (short version)
 
 - Standalone script(s), runnable without the API. Python 3.12, Black formatting.
 - Meaningful comments only; longer explanations belong in this file, not in

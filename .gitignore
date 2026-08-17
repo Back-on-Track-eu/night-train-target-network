@@ -1,8 +1,5 @@
 # =============================================================================
 # Night Train Target Network — .gitignore
-#
-# Paths are repo-root relative, so anything under backend/ or frontend/
-# needs that prefix — a bare "models/..." silently matches nothing.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -15,6 +12,7 @@ __pycache__/
 *.egg-info/
 *.egg
 .eggs/
+dist/
 build/
 .Python
 pip-wheel-metadata/
