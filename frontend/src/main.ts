@@ -44,6 +44,10 @@ import { i18n } from './i18n'
 import { router } from './router'
 import App from './App.vue'
 import './style.css'
+// Must run before any map is constructed — see lib/maplibreWorker.ts. Imported
+// here as well as in the map components so route-level code splitting cannot
+// decide whether it happens.
+import './lib/maplibreWorker'
 
 const app = createApp(App)
 

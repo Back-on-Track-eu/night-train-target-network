@@ -2,6 +2,10 @@
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import maplibregl, { type FilterSpecification } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
+// Sets MapLibre's worker URL (maplibre-gl-js#7339). This component previously
+// lacked the call while MapView.vue had it — so opening /gallery first spawned
+// the corrupt worker and no route line rendered anywhere in that session.
+import '@/lib/maplibreWorker'
 import type { GalleryMapRoute } from '@/types/api'
 
 // Draws every proposal route in the search results at once — the multi-route
