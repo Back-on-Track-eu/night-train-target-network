@@ -5,8 +5,9 @@ Only schema DDL lives in sql/*.sql, loaded via sql_loader.
 All seed data is plain Python dicts inserted via insert_rows(), sourced
 from this file plus two derived CSV inputs: the calib seed CSVs
 (regenerated from the calibration notebook, not committed) and
-data/ontd_seed_stops.csv (ONTD-derived stops, Drive-hosted and
-downloaded here when absent — see scripts/export_ontd_stop_seed.py).
+data/stop_seed_catalog.csv (the whole stop catalog, Drive-hosted and
+downloaded here when absent — produced by the stop classification
+pipeline, models/infrastructure/stops/step7_export_seed_stops.py).
 Idempotent — each schema starts with DROP SCHEMA ... CASCADE.
 
 Run order:
@@ -143,6 +144,7 @@ USERS = [
 # models/compositions/calib/CALIBRATION.md.
 
 import csv
+from collections import Counter
 from pathlib import Path
 
 CALIB_SEED_DIR = (
@@ -1490,580 +1492,28 @@ _STOP_INFRA_DEFAULT_CANONICAL = [
     {"country_code": None, "stop_charge_eur": 11.28},
 ]
 
-_STOP_INFRASTRUCTURES_CANONICAL = [
-    # Stops with explicit stop_charge_eur
-    {
-        "stop_id": "DE_BERLIN_HBF",
-        "stop_name": "Berlin Hbf",
-        "country_code": "DE",
-        "stop_timezone": "Europe/Berlin",
-        "stop_lat": 52.525,
-        "stop_lon": 13.369,
-        "stop_charge_eur": 9.80,
-    },
-    {
-        "stop_id": "DE_DRESDEN_HBF",
-        "stop_name": "Dresden Hbf",
-        "country_code": "DE",
-        "stop_timezone": "Europe/Berlin",
-        "stop_lat": 51.040,
-        "stop_lon": 13.732,
-        "stop_charge_eur": 6.50,
-    },
-    {
-        "stop_id": "AT_WIEN_HBF",
-        "stop_name": "Wien Hbf",
-        "country_code": "AT",
-        "stop_timezone": "Europe/Vienna",
-        "stop_lat": 48.185,
-        "stop_lon": 16.376,
-        "stop_charge_eur": 11.00,
-    },
-    {
-        "stop_id": "CH_ZUERICH_HB",
-        "stop_name": "Zuerich HB",
-        "country_code": "CH",
-        "stop_timezone": "Europe/Zurich",
-        "stop_lat": 47.378,
-        "stop_lon": 8.540,
-        "stop_charge_eur": 14.50,
-    },
-    {
-        "stop_id": "FR_PARIS_EST",
-        "stop_name": "Paris Gare de l'Est",
-        "country_code": "FR",
-        "stop_timezone": "Europe/Paris",
-        "stop_lat": 48.877,
-        "stop_lon": 2.359,
-        "stop_charge_eur": 13.20,
-    },
-    {
-        "stop_id": "BE_BRUSSELS_M",
-        "stop_name": "Bruxelles-Midi",
-        "country_code": "BE",
-        "stop_timezone": "Europe/Brussels",
-        "stop_lat": 50.836,
-        "stop_lon": 4.336,
-        "stop_charge_eur": 10.40,
-    },
-    {
-        "stop_id": "DK_COPENHAGEN",
-        "stop_name": "Koebenhavn H",
-        "country_code": "DK",
-        "stop_timezone": "Europe/Copenhagen",
-        "stop_lat": 55.673,
-        "stop_lon": 12.565,
-        "stop_charge_eur": 9.00,
-    },
-    # SE_STOCKHOLM has NULL stop_charge_eur → will resolve from global default (tests is_default=True)
-    {
-        "stop_id": "SE_STOCKHOLM_C",
-        "stop_name": "Stockholm C",
-        "country_code": "SE",
-        "stop_timezone": "Europe/Stockholm",
-        "stop_lat": 59.330,
-        "stop_lon": 18.058,
-        "stop_charge_eur": None,
-    },
-    # --- 50 additional main-station stops (2026-07-12) — main stations in
-    # major cities across SE/DK/DE/BE/NL/CZ/AT/CH/FR/IT, added for broader
-    # frontend testing coverage. Curated from the B-o-T target-network c_stops
-    # catalogue (~29k rows): coordinates cross-checked against a per-country
-    # bounding box (~15-30% of that sheet's rows have corrupted lat/lon —
-    # e.g. Danish stops with Spanish coordinates — so every row here was
-    # verified in-bounds before use, not copied blindly). stop_charge_eur is
-    # left None (→ resolves from DefaultStopInfra, same as SE_STOCKHOLM_C)
-    # unless the sheet's value was genuinely distinctive — most of its charge
-    # values (e.g. 44.462933, 37.797177, 7.59) turned out to be a handful of
-    # generic estimates reused verbatim across hundreds of unrelated stops in
-    # totally different countries, not real per-stop tariffs, so those were
-    # treated as unavailable rather than copied.
-    # Sweden
-    {
-        "stop_id": "SE_GOTEBORG_C",
-        "stop_name": "Göteborg C",
-        "country_code": "SE",
-        "stop_timezone": "Europe/Stockholm",
-        "stop_lat": 57.709,
-        "stop_lon": 11.973,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "SE_MALMO_C",
-        "stop_name": "Malmö C",
-        "country_code": "SE",
-        "stop_timezone": "Europe/Stockholm",
-        "stop_lat": 55.609,
-        "stop_lon": 13.001,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "SE_UPPSALA_C",
-        "stop_name": "Uppsala C",
-        "country_code": "SE",
-        "stop_timezone": "Europe/Stockholm",
-        "stop_lat": 59.858,
-        "stop_lon": 17.647,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "SE_LINKOPING_C",
-        "stop_name": "Linköping C",
-        "country_code": "SE",
-        "stop_timezone": "Europe/Stockholm",
-        "stop_lat": 58.416,
-        "stop_lon": 15.626,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "SE_OREBRO_C",
-        "stop_name": "Örebro C",
-        "country_code": "SE",
-        "stop_timezone": "Europe/Stockholm",
-        "stop_lat": 59.279,
-        "stop_lon": 15.212,
-        "stop_charge_eur": None,
-    },
-    # Denmark
-    {
-        "stop_id": "DK_AARHUS_H",
-        "stop_name": "Aarhus H",
-        "country_code": "DK",
-        "stop_timezone": "Europe/Copenhagen",
-        "stop_lat": 56.15,
-        "stop_lon": 10.205,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "DK_ODENSE",
-        "stop_name": "Odense",
-        "country_code": "DK",
-        "stop_timezone": "Europe/Copenhagen",
-        "stop_lat": 55.402,
-        "stop_lon": 10.386,
-        "stop_charge_eur": 93.38,
-    },
-    {
-        "stop_id": "DK_AALBORG",
-        "stop_name": "Aalborg",
-        "country_code": "DK",
-        "stop_timezone": "Europe/Copenhagen",
-        "stop_lat": 57.049,
-        "stop_lon": 9.922,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "DK_ESBJERG",
-        "stop_name": "Esbjerg",
-        "country_code": "DK",
-        "stop_timezone": "Europe/Copenhagen",
-        "stop_lat": 55.468,
-        "stop_lon": 8.458,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "DK_KOLDING",
-        "stop_name": "Kolding",
-        "country_code": "DK",
-        "stop_timezone": "Europe/Copenhagen",
-        "stop_lat": 55.491,
-        "stop_lon": 9.482,
-        "stop_charge_eur": None,
-    },
-    # Germany
-    {
-        "stop_id": "DE_MUENCHEN_HBF",
-        "stop_name": "München Hbf",
-        "country_code": "DE",
-        "stop_timezone": "Europe/Berlin",
-        "stop_lat": 48.142,
-        "stop_lon": 11.558,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "DE_HAMBURG_HBF",
-        "stop_name": "Hamburg Hbf",
-        "country_code": "DE",
-        "stop_timezone": "Europe/Berlin",
-        "stop_lat": 53.553,
-        "stop_lon": 10.007,
-        "stop_charge_eur": 32.47,
-    },
-    {
-        "stop_id": "DE_KOELN_HBF",
-        "stop_name": "Köln Hbf",
-        "country_code": "DE",
-        "stop_timezone": "Europe/Berlin",
-        "stop_lat": 50.943,
-        "stop_lon": 6.959,
-        "stop_charge_eur": 47.34,
-    },
-    {
-        "stop_id": "DE_FRANKFURT_HBF",
-        "stop_name": "Frankfurt am Main Hbf",
-        "country_code": "DE",
-        "stop_timezone": "Europe/Berlin",
-        "stop_lat": 50.107,
-        "stop_lon": 8.663,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "DE_STUTTGART_HBF",
-        "stop_name": "Stuttgart Hbf",
-        "country_code": "DE",
-        "stop_timezone": "Europe/Berlin",
-        "stop_lat": 48.784,
-        "stop_lon": 9.182,
-        "stop_charge_eur": None,
-    },
-    # Belgium
-    {
-        "stop_id": "BE_ANTWERPEN_CENTRAAL",
-        "stop_name": "Antwerpen Centraal",
-        "country_code": "BE",
-        "stop_timezone": "Europe/Brussels",
-        "stop_lat": 51.217,
-        "stop_lon": 4.421,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "BE_GENT_SINT_PIETERS",
-        "stop_name": "Gent-Sint-Pieters",
-        "country_code": "BE",
-        "stop_timezone": "Europe/Brussels",
-        "stop_lat": 51.036,
-        "stop_lon": 3.711,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "BE_LIEGE_GUILLEMINS",
-        "stop_name": "Liège-Guillemins",
-        "country_code": "BE",
-        "stop_timezone": "Europe/Brussels",
-        "stop_lat": 50.624,
-        "stop_lon": 5.566,
-        "stop_charge_eur": 126.67,
-    },
-    {
-        "stop_id": "BE_LEUVEN",
-        "stop_name": "Leuven",
-        "country_code": "BE",
-        "stop_timezone": "Europe/Brussels",
-        "stop_lat": 50.884,
-        "stop_lon": 4.714,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "BE_CHARLEROI_CENTRAL",
-        "stop_name": "Charleroi Central",
-        "country_code": "BE",
-        "stop_timezone": "Europe/Brussels",
-        "stop_lat": 50.405,
-        "stop_lon": 4.439,
-        "stop_charge_eur": None,
-    },
-    # Netherlands
-    {
-        "stop_id": "NL_AMSTERDAM_CENTRAAL",
-        "stop_name": "Amsterdam Centraal",
-        "country_code": "NL",
-        "stop_timezone": "Europe/Amsterdam",
-        "stop_lat": 52.379,
-        "stop_lon": 4.9,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "NL_ROTTERDAM_CENTRAAL",
-        "stop_name": "Rotterdam Centraal",
-        "country_code": "NL",
-        "stop_timezone": "Europe/Amsterdam",
-        "stop_lat": 51.924,
-        "stop_lon": 4.47,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "NL_UTRECHT_CENTRAAL",
-        "stop_name": "Utrecht Centraal",
-        "country_code": "NL",
-        "stop_timezone": "Europe/Amsterdam",
-        "stop_lat": 52.089,
-        "stop_lon": 5.11,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "NL_DEN_HAAG",
-        "stop_name": "Den Haag",
-        "country_code": "NL",
-        "stop_timezone": "Europe/Amsterdam",
-        "stop_lat": 52.08,
-        "stop_lon": 4.325,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "NL_EINDHOVEN_CENTRAAL",
-        "stop_name": "Eindhoven Centraal",
-        "country_code": "NL",
-        "stop_timezone": "Europe/Amsterdam",
-        "stop_lat": 51.443,
-        "stop_lon": 5.48,
-        "stop_charge_eur": None,
-    },
-    # Czechia
-    {
-        "stop_id": "CZ_PRAHA_HLN",
-        "stop_name": "Praha hl.n.",
-        "country_code": "CZ",
-        "stop_timezone": "Europe/Prague",
-        "stop_lat": 50.083,
-        "stop_lon": 14.436,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "CZ_BRNO_HLN",
-        "stop_name": "Brno hl.n.",
-        "country_code": "CZ",
-        "stop_timezone": "Europe/Prague",
-        "stop_lat": 49.191,
-        "stop_lon": 16.613,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "CZ_OSTRAVA_HLN",
-        "stop_name": "Ostrava hl.n.",
-        "country_code": "CZ",
-        "stop_timezone": "Europe/Prague",
-        "stop_lat": 49.852,
-        "stop_lon": 18.267,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "CZ_PLZEN_HLAVNI_NADRAZI",
-        "stop_name": "Plzeň hlavní nádraží",
-        "country_code": "CZ",
-        "stop_timezone": "Europe/Prague",
-        "stop_lat": 49.743,
-        "stop_lon": 13.388,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "CZ_OLOMOUC_HLN",
-        "stop_name": "Olomouc hl.n.",
-        "country_code": "CZ",
-        "stop_timezone": "Europe/Prague",
-        "stop_lat": 49.593,
-        "stop_lon": 17.278,
-        "stop_charge_eur": None,
-    },
-    # Austria
-    {
-        "stop_id": "AT_GRAZ_HBF",
-        "stop_name": "Graz Hbf",
-        "country_code": "AT",
-        "stop_timezone": "Europe/Vienna",
-        "stop_lat": 47.072,
-        "stop_lon": 15.416,
-        "stop_charge_eur": 50.5,
-    },
-    {
-        "stop_id": "AT_LINZ_HBF",
-        "stop_name": "Linz Hbf",
-        "country_code": "AT",
-        "stop_timezone": "Europe/Vienna",
-        "stop_lat": 48.29,
-        "stop_lon": 14.292,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "AT_SALZBURG_HBF",
-        "stop_name": "Salzburg Hbf",
-        "country_code": "AT",
-        "stop_timezone": "Europe/Vienna",
-        "stop_lat": 47.813,
-        "stop_lon": 13.046,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "AT_INNSBRUCK_HBF",
-        "stop_name": "Innsbruck Hbf",
-        "country_code": "AT",
-        "stop_timezone": "Europe/Vienna",
-        "stop_lat": 47.263,
-        "stop_lon": 11.401,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "AT_KLAGENFURT_HBF",
-        "stop_name": "Klagenfurt Hbf",
-        "country_code": "AT",
-        "stop_timezone": "Europe/Vienna",
-        "stop_lat": 46.616,
-        "stop_lon": 14.314,
-        "stop_charge_eur": None,
-    },
-    # Switzerland
-    {
-        "stop_id": "CH_GENEVE",
-        "stop_name": "Genève",
-        "country_code": "CH",
-        "stop_timezone": "Europe/Zurich",
-        "stop_lat": 46.211,
-        "stop_lon": 6.143,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "CH_BASEL_SBB",
-        "stop_name": "Basel SBB",
-        "country_code": "CH",
-        "stop_timezone": "Europe/Zurich",
-        "stop_lat": 47.548,
-        "stop_lon": 7.59,
-        "stop_charge_eur": 73.86,
-    },
-    {
-        "stop_id": "CH_BERN",
-        "stop_name": "Bern",
-        "country_code": "CH",
-        "stop_timezone": "Europe/Zurich",
-        "stop_lat": 46.948,
-        "stop_lon": 7.436,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "CH_LAUSANNE",
-        "stop_name": "Lausanne",
-        "country_code": "CH",
-        "stop_timezone": "Europe/Zurich",
-        "stop_lat": 46.517,
-        "stop_lon": 6.629,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "CH_LUZERN",
-        "stop_name": "Luzern",
-        "country_code": "CH",
-        "stop_timezone": "Europe/Zurich",
-        "stop_lat": 47.049,
-        "stop_lon": 8.31,
-        "stop_charge_eur": None,
-    },
-    # France
-    {
-        "stop_id": "FR_LYON_PART_DIEU",
-        "stop_name": "Lyon-Part-Dieu",
-        "country_code": "FR",
-        "stop_timezone": "Europe/Paris",
-        "stop_lat": 45.761,
-        "stop_lon": 4.86,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "FR_MARSEILLE_SAINT_CHARLES",
-        "stop_name": "Marseille Saint-Charles",
-        "country_code": "FR",
-        "stop_timezone": "Europe/Paris",
-        "stop_lat": 43.303,
-        "stop_lon": 5.381,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "FR_LILLE_EUROPE",
-        "stop_name": "Lille Europe",
-        "country_code": "FR",
-        "stop_timezone": "Europe/Paris",
-        "stop_lat": 50.684,
-        "stop_lon": 3.088,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "FR_STRASBOURG",
-        "stop_name": "Strasbourg",
-        "country_code": "FR",
-        "stop_timezone": "Europe/Paris",
-        "stop_lat": 48.574,
-        "stop_lon": 7.754,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "FR_BORDEAUX_SAINT_JEAN",
-        "stop_name": "Bordeaux Saint-Jean",
-        "country_code": "FR",
-        "stop_timezone": "Europe/Paris",
-        "stop_lat": 44.826,
-        "stop_lon": -0.556,
-        "stop_charge_eur": None,
-    },
-    # Italy
-    {
-        "stop_id": "IT_ROMA_TERMINI",
-        "stop_name": "Roma Termini",
-        "country_code": "IT",
-        "stop_timezone": "Europe/Rome",
-        "stop_lat": 41.9,
-        "stop_lon": 12.503,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "IT_MILANO_CENTRALE",
-        "stop_name": "Milano Centrale",
-        "country_code": "IT",
-        "stop_timezone": "Europe/Rome",
-        "stop_lat": 45.487,
-        "stop_lon": 9.205,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "IT_NAPOLI_CENTRALE",
-        "stop_name": "Napoli Centrale",
-        "country_code": "IT",
-        "stop_timezone": "Europe/Rome",
-        "stop_lat": 40.853,
-        "stop_lon": 14.273,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "IT_TORINO_PORTA_SUSA",
-        "stop_name": "Torino Porta Susa",
-        "country_code": "IT",
-        "stop_timezone": "Europe/Rome",
-        "stop_lat": 45.072,
-        "stop_lon": 7.666,
-        "stop_charge_eur": None,
-    },
-    {
-        "stop_id": "IT_FIRENZE_SMN",
-        "stop_name": "Firenze S. M. N.",
-        "country_code": "IT",
-        "stop_timezone": "Europe/Rome",
-        "stop_lat": 43.777,
-        "stop_lon": 11.248,
-        "stop_charge_eur": None,
-    },
-]
 
-
-# ONTD-derived stops — every station the existing-network (ONTD) snapshot
-# needs beyond the curated list above. A derived artifact, Drive-hosted
-# (not in the repo — no large data in git): regenerated by
-# backend/scripts/export_ontd_stop_seed.py against a database whose ontd
-# schema is loaded (it cannot be regenerated here — deriving it needs the
-# very data this seed precedes), then uploaded to Drive as a new version
-# of the same file. The seed downloads it once into db/dev/data/ when the
-# local copy is absent; ONTD_SEED_STOPS_FILE_ID (env) overrides the file
-# id without a code change, same pattern as ONTD_WORKBOOK_ID.
+# The whole stop catalog: every stop the app can plan through. A derived
+# artifact, Drive-hosted (not in the repo — no large data in git):
+# regenerated by models/infrastructure/stops/step7_export_seed_stops.py,
+# which unions the current night train stops (step 5) with the manual
+# metropolitan/tourism/ferry additions (step 6), then uploaded to Drive as
+# a new version of the same file. The seed downloads it once into
+# db/dev/data/ when the local copy is absent; STOP_SEED_FILE_ID (env)
+# overrides the file id without a code change, same pattern as
+# ONTD_WORKBOOK_ID.
 # Seeding the full catalog up front is what keeps the snapshot versions
 # immutable at runtime: the retired alternative (db/ontd/stop_mapping.py
 # minting missing stops during the bootstrap) mutated pinned versions,
 # breaking the compute cache's scenario-pin invariant — and never
 # survived a reseed anyway.
-ONTD_SEED_STOPS_CSV = Path(__file__).resolve().parent / "data" / "ontd_seed_stops.csv"
-ONTD_SEED_STOPS_FILE_ID = os.environ.get(
-    "ONTD_SEED_STOPS_FILE_ID", "1aqPOgvy4Nc4m7BIhOYkBUvOHpudQx8k6"
-)
+STOP_SEED_CSV = Path(__file__).resolve().parent / "data" / "stop_seed_catalog.csv"
+STOP_SEED_FILE_ID = os.environ.get("STOP_SEED_FILE_ID", "")
 
 # Contract with scripts/export_ontd_stop_seed.py's CSV_COLUMNS — also the
 # validation gate for downloads (a Drive permission error returns an HTML
 # page, which must not be seeded or cached as if it were the CSV).
-_ONTD_SEED_CSV_COLUMNS = [
+_STOP_SEED_CSV_COLUMNS = [
     "stop_id",
     "stop_name",
     "country_code",
@@ -2072,27 +1522,27 @@ _ONTD_SEED_CSV_COLUMNS = [
     "stop_lon",
 ]
 
-_ONTD_SEED_CHANGE_LOG = (
-    "seeded from ONTD snapshot (scripts/export_ontd_stop_seed.py) — interim "
-    "until the harmonized stop list lands; charge resolves via country/"
-    "global default"
+_STOP_SEED_CHANGE_LOG = (
+    "seeded from the stop classification pipeline "
+    "(models/infrastructure/stops, step 7) — charge resolves via country/"
+    "global default until real station charge data lands"
 )
 
 
-def _ontd_seed_warning(reason: str) -> None:
+def _stop_seed_warning(reason: str) -> None:
     print(
         "\n  ############################################################\n"
-        f"  #  WARNING: ONTD stop seed CSV unavailable — {reason}.\n"
-        "  #  Seeding the curated stop catalog only: ONTD routes will\n"
-        "  #  report unmatched stops and tests that plan through\n"
-        "  #  ONTD-derived stations will fail. Regenerate with\n"
-        "  #  backend/scripts/export_ontd_stop_seed.py (upload to Drive)\n"
-        "  #  or place the file at db/dev/data/ontd_seed_stops.csv.\n"
+        f"  #  WARNING: stop seed CSV unavailable — {reason}.\n"
+        "  #  Seeding NO stops: every route will report unmatched stops\n"
+        "  #  and most planning tests will fail. Regenerate with\n"
+        "  #  models/infrastructure/stops/step7_export_seed_stops.py\n"
+        "  #  (upload to Drive) or place the file at\n"
+        "  #  db/dev/data/stop_seed_catalog.csv.\n"
         "  ############################################################\n"
     )
 
 
-def _download_ontd_seed_stops() -> bool:
+def _download_stop_seed() -> bool:
     """Fetch the Drive-hosted CSV into db/dev/data/ — returns success.
     Soft-failing by design: seed.py runs in the container entrypoint
     under set -e, and a Drive outage must not keep the API down (the
@@ -2103,65 +1553,77 @@ def _download_ontd_seed_stops() -> bool:
 
     url = (
         "https://drive.usercontent.google.com/download"
-        f"?id={ONTD_SEED_STOPS_FILE_ID}&export=download&confirm=t"
+        f"?id={STOP_SEED_FILE_ID}&export=download&confirm=t"
     )
     print(
         "  ONTD stop seed CSV not found locally — downloading "
-        f"(id={ONTD_SEED_STOPS_FILE_ID})..."
+        f"(id={STOP_SEED_FILE_ID})..."
     )
     try:
         with urllib.request.urlopen(url, timeout=60) as resp:
             text = resp.read().decode("utf-8-sig")
     except Exception as e:
-        _ontd_seed_warning(f"download failed ({type(e).__name__}: {e})")
+        _stop_seed_warning(f"download failed ({type(e).__name__}: {e})")
         return False
 
     header = csv.DictReader(io.StringIO(text)).fieldnames
-    if header != _ONTD_SEED_CSV_COLUMNS:
-        _ontd_seed_warning(
+    if header != _STOP_SEED_CSV_COLUMNS:
+        _stop_seed_warning(
             f"downloaded content is not the expected CSV (header {header!r} — "
             "wrong file id, or the Drive file is not shared publicly)"
         )
         return False
 
-    ONTD_SEED_STOPS_CSV.parent.mkdir(parents=True, exist_ok=True)
-    ONTD_SEED_STOPS_CSV.write_text(text, encoding="utf-8")
+    STOP_SEED_CSV.parent.mkdir(parents=True, exist_ok=True)
+    STOP_SEED_CSV.write_text(text, encoding="utf-8")
     n_stops = sum(1 for _ in csv.DictReader(io.StringIO(text)))
-    print(f"  downloaded {ONTD_SEED_STOPS_CSV.name} ({n_stops} stops).")
+    print(f"  downloaded {STOP_SEED_CSV.name} ({n_stops} stops).")
     return True
 
 
-def _read_ontd_seed_stops() -> list[dict]:
-    if not ONTD_SEED_STOPS_CSV.is_file() and not _download_ontd_seed_stops():
+def _read_stop_seed() -> list[dict]:
+    if not STOP_SEED_CSV.is_file() and not _download_stop_seed():
         return []
-    with open(ONTD_SEED_STOPS_CSV, newline="", encoding="utf-8-sig") as fh:
+    with open(STOP_SEED_CSV, newline="", encoding="utf-8-sig") as fh:
         reader = csv.DictReader(fh)
-        if reader.fieldnames != _ONTD_SEED_CSV_COLUMNS:
-            _ontd_seed_warning(
-                f"local {ONTD_SEED_STOPS_CSV.name} has unexpected header "
+        if reader.fieldnames != _STOP_SEED_CSV_COLUMNS:
+            _stop_seed_warning(
+                f"local {STOP_SEED_CSV.name} has unexpected header "
                 f"{reader.fieldnames!r}"
             )
             return []
-        rows = [
-            {
-                "stop_id": row["stop_id"],
-                "stop_name": row["stop_name"],
-                "country_code": row["country_code"],
-                "stop_timezone": row["stop_timezone"],
-                "stop_lat": float(row["stop_lat"]),
-                "stop_lon": float(row["stop_lon"]),
-                "stop_charge_eur": None,  # resolves via country/global default
-                "change_log": _ONTD_SEED_CHANGE_LOG,
-            }
-            for row in reader
-        ]
-    curated_ids = {r["stop_id"] for r in _STOP_INFRASTRUCTURES_CANONICAL}
-    collisions = sorted({r["stop_id"] for r in rows} & curated_ids)
-    assert not collisions, (
-        f"ontd_seed_stops.csv collides with curated stop ids {collisions} — "
-        "regenerate the CSV (the exporter matches against the curated "
-        "catalog, so a collision means it ran against stale data)"
+        catalog = list(reader)
+
+    # The catalog covers more of Europe than the model does. A stop in a country
+    # COUNTRIES doesn't seed has no track access, energy or facility parameters
+    # behind it, so it could not be costed even if the foreign key allowed it —
+    # dropped here rather than at the constraint, and counted so the gap is
+    # visible instead of silent. Widening coverage means adding the country to
+    # COUNTRIES (it falls back to the European calibration mean), not relaxing
+    # this filter.
+    modelled = {row["country_code"] for row in COUNTRIES}
+    skipped = Counter(
+        row["country_code"] for row in catalog if row["country_code"] not in modelled
     )
+    if skipped:
+        total = sum(skipped.values())
+        detail = ", ".join(f"{code} {n}" for code, n in sorted(skipped.items()))
+        print(f"  {total} catalog stops skipped — country not modelled ({detail}).")
+
+    rows = [
+        {
+            "stop_id": row["stop_id"],
+            "stop_name": row["stop_name"],
+            "country_code": row["country_code"],
+            "stop_timezone": row["stop_timezone"],
+            "stop_lat": float(row["stop_lat"]),
+            "stop_lon": float(row["stop_lon"]),
+            "stop_charge_eur": None,  # resolves via country/global default
+            "change_log": _STOP_SEED_CHANGE_LOG,
+        }
+        for row in catalog
+        if row["country_code"] in modelled
+    ]
     return rows
 
 
@@ -2174,12 +1636,9 @@ def _build_stop_infra_defaults() -> list[dict]:
 
 
 def _build_stop_infrastructures() -> list[dict]:
-    # change_log defaulted for every row so insert_rows() (which takes its
-    # column list from the first row) sees one uniform key set across the
-    # curated dicts above and the ONTD CSV rows. The CSV is read once,
-    # outside the comprehension — the inner iterable would otherwise be
-    # re-evaluated per version.
-    all_stops = _STOP_INFRASTRUCTURES_CANONICAL + _read_ontd_seed_stops()
+    # The CSV is read once, outside the comprehension — the inner iterable
+    # would otherwise be re-evaluated per version.
+    all_stops = _read_stop_seed()
     return [
         {"change_log": None, **row, "stop_infra_version": version}
         for version in (1, 2, 3)
@@ -2796,9 +2255,9 @@ def _build_example_route(scenario_id: int, composition, tracks) -> dict:
     draft_prefix = "R1"
     composition_dict = _composition_physics_dict(composition)
 
-    berlin = ("DE_BERLIN_HBF", "Berlin Hbf", "DE", 52.525, 13.369)
-    dresden = ("DE_DRESDEN_HBF", "Dresden Hbf", "DE", 51.040, 13.732)
-    wien = ("AT_WIEN_HBF", "Wien Hbf", "AT", 48.185, 16.376)
+    berlin = ("osm:n3856100103", "Berlin Hbf", "DE", 52.525, 13.369)
+    dresden = ("osm:n25397500", "Dresden Hbf", "DE", 51.040, 13.732)
+    wien = ("osm:w423692233", "Wien Hbf", "AT", 48.185, 16.376)
 
     # Berlin -> Dresden: fully within DE. Dresden -> Wien: illustrative
     # DE/AT split (doesn't model the real Berlin-Dresden-Wien routing
@@ -2863,13 +2322,13 @@ def _build_example_route(scenario_id: int, composition, tracks) -> dict:
         ],
         "parkings": [
             {
-                "stop_id": "AT_WIEN_HBF",
+                "stop_id": "osm:w423692233",
                 "stop_name": "Wien Hbf",
                 "country_code": "AT",
                 "trip_ids": [f"{draft_prefix}_D0_T1"],
             },
             {
-                "stop_id": "DE_BERLIN_HBF",
+                "stop_id": "osm:n3856100103",
                 "stop_name": "Berlin Hbf",
                 "country_code": "DE",
                 "trip_ids": [f"{draft_prefix}_D1_T1"],
@@ -2877,25 +2336,25 @@ def _build_example_route(scenario_id: int, composition, tracks) -> dict:
         ],
         "shuntings": [
             {
-                "stop_id": "DE_BERLIN_HBF",
+                "stop_id": "osm:n3856100103",
                 "stop_name": "Berlin Hbf",
                 "country_code": "DE",
                 "trip_id": f"{draft_prefix}_D0_T1",
             },
             {
-                "stop_id": "AT_WIEN_HBF",
+                "stop_id": "osm:w423692233",
                 "stop_name": "Wien Hbf",
                 "country_code": "AT",
                 "trip_id": f"{draft_prefix}_D0_T1",
             },
             {
-                "stop_id": "AT_WIEN_HBF",
+                "stop_id": "osm:w423692233",
                 "stop_name": "Wien Hbf",
                 "country_code": "AT",
                 "trip_id": f"{draft_prefix}_D1_T1",
             },
             {
-                "stop_id": "DE_BERLIN_HBF",
+                "stop_id": "osm:n3856100103",
                 "stop_name": "Berlin Hbf",
                 "country_code": "DE",
                 "trip_id": f"{draft_prefix}_D1_T1",
@@ -2974,7 +2433,7 @@ def _compute_example_proposal(
         "calc_version": CALC_VERSION,
         "route_fingerprint": route_fingerprint(serialized_route),
         "request": {
-            "stops": ["DE_BERLIN_HBF", "DE_DRESDEN_HBF", "AT_WIEN_HBF"],
+            "stops": ["osm:n3856100103", "osm:n25397500", "osm:w423692233"],
             "composition_id": "NEW-BAL-7",
             "scenario_id": scenario_id,
             "timetable_mode": "simpleAutomatic",
