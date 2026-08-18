@@ -87,11 +87,16 @@ class TestStopInfrastructures:
             assert isinstance(charge["is_default"], bool)
 
     def test_is_default_flags_via_api(self, stops_body):
-        """SE_STOCKHOLM_C (NULL charge in seed) is is_default=True; Berlin
-        (explicit charge) is is_default=False — provenance survives the API."""
+        """The is_default flag survives the API. Every stop resolves from the
+        default today — the pipeline seeds stop_charge_eur NULL and the
+        curated catalog that carried explicit charges was retired — so this
+        asserts the flag is present and true, not that both states occur.
+        Add the is_default=False half once step 7b lands real charges."""
         stops = {s["stop_id"]: s for s in stops_body["stops"]}
-        assert stops["SE_STOCKHOLM_C"]["stop_charge_eur"]["is_default"] is True
-        assert stops["DE_BERLIN_HBF"]["stop_charge_eur"]["is_default"] is False
+        assert stops["osm:n25948183"]["stop_charge_eur"]["is_default"] is True
+        assert all(
+            s["stop_charge_eur"]["is_default"] is True for s in stops_body["stops"]
+        ), "a stop carries an explicit charge — restore the two-state assertion"
 
     def test_global_default_present(self, stops_body):
         """The global default row (the one SE resolves against) is exposed

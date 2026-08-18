@@ -750,8 +750,8 @@ class TestMatrixConsistency:
         _, result = eval_standard
         all_ods = result["views"]["per_trip_pair_per_od"]["data"]["all"]
         for key in (
-            "DE_BERLIN_HBF__AT_WIEN_HBF__Couchette",
-            "AT_WIEN_HBF__DE_BERLIN_HBF__Couchette",
+            "osm:n3856100103__osm:w423692233__Couchette",
+            "osm:w423692233__osm:n3856100103__Couchette",
         ):
             assert key in all_ods, f"OD key missing: {key}"
             assert all_ods[key]["values"]["per_year"]["all"]["total_revenue_eur"] > 0
@@ -779,7 +779,7 @@ class TestMatrixConsistency:
         """The origin stop carries a positive station charge in the stop matrix."""
         _, result = eval_standard
         all_stops = result["views"]["per_trip_per_stop"]["data"]["all"]
-        berlin = all_stops["DE_BERLIN_HBF"]
+        berlin = all_stops["osm:n3856100103"]
         charge = berlin["values"]["per_year"]["all"]["cost"]["infrastructure"][
             "station_charge_eur"
         ]
@@ -792,7 +792,7 @@ class TestMatrixConsistency:
 
 
 class TestSectionView:
-    SECTION_ALL = "DE_BERLIN_HBF__AT_WIEN_HBF__all"
+    SECTION_ALL = "osm:n3856100103__osm:w423692233__all"
 
     def test_every_stop_range_has_a_section_cell(self, eval_standard):
         """Sections exist for EVERY ordered stop pair (CALC 0.9.16) — not only
@@ -802,16 +802,16 @@ class TestSectionView:
         _, result = eval_standard
         sections = result["views"]["per_trip_pair_per_section"]["data"]["all"]
         for key in (
-            "DE_BERLIN_HBF__AT_WIEN_HBF__all",
-            "DE_BERLIN_HBF__AT_WIEN_HBF__Couchette",
-            "DE_BERLIN_HBF__AT_WIEN_HBF__Seat",
+            "osm:n3856100103__osm:w423692233__all",
+            "osm:n3856100103__osm:w423692233__Couchette",
+            "osm:n3856100103__osm:w423692233__Seat",
             # sub-sections bounded by the intermediate stop — before 0.9.16
             # these only existed if Dresden happened to carry tickets
-            "DE_BERLIN_HBF__DE_DRESDEN_HBF__all",
-            "DE_DRESDEN_HBF__AT_WIEN_HBF__all",
+            "osm:n3856100103__osm:n25397500__all",
+            "osm:n25397500__osm:w423692233__all",
         ):
             assert key in sections, f"section key missing: {key}"
-        assert "AT_WIEN_HBF__DE_BERLIN_HBF__all" not in sections, (
+        assert "osm:w423692233__osm:n3856100103__all" not in sections, (
             "reverse-ordered key present — section keys must be canonical"
         )
 
@@ -824,7 +824,7 @@ class TestSectionView:
         cls_cells = [
             cell["values"]["per_year"]["all"]
             for key, cell in sections.items()
-            if key.startswith("DE_BERLIN_HBF__AT_WIEN_HBF__")
+            if key.startswith("osm:n3856100103__osm:w423692233__")
             and not key.endswith("__all")
         ]
         assert cls_cells, "no class cells found for section"
@@ -857,8 +857,8 @@ class TestSectionView:
             return sections[key]["values"]["per_year"]["all"]["total_revenue_eur"]
 
         assert rev(self.SECTION_ALL) == pytest.approx(
-            rev("DE_BERLIN_HBF__DE_DRESDEN_HBF__all")
-            + rev("DE_DRESDEN_HBF__AT_WIEN_HBF__all"),
+            rev("osm:n3856100103__osm:n25397500__all")
+            + rev("osm:n25397500__osm:w423692233__all"),
             rel=REL_TOL,
         )
 

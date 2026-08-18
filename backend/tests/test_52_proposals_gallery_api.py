@@ -28,7 +28,7 @@ from tests.helpers import (
     stop_times,
 )
 
-_STOPS = ["DE_BERLIN_HBF", "AT_WIEN_HBF"]
+_STOPS = ["osm:n3856100103", "osm:w423692233"]
 _COMPOSITION = "NEW-BAL-7"
 
 
@@ -79,7 +79,7 @@ def existing_routes(db_conn):
                 co2_g_per_pax_km, geom_simplified, geometry_routed
             ) VALUES
             (%s, 'Gallery test existing Berlin–Wien',
-             ARRAY['DE_BERLIN_HBF','AT_WIEN_HBF'], 2, ARRAY['DE','AT'],
+             ARRAY['osm:n3856100103','osm:w423692233'], 2, ARRAY['DE','AT'],
              700.0, 9.5, 74.0, 33.0,
              ST_SetSRID(ST_GeomFromGeoJSON(
                '{"type":"MultiLineString","coordinates":[[[13.37,52.52],[16.37,48.19]]]}'
@@ -98,7 +98,7 @@ def existing_routes(db_conn):
             """
             INSERT INTO ontd.route_corridors (route_id, stop_a, stop_b, geometry)
             VALUES
-            (%s, 'AT_WIEN_HBF', 'DE_BERLIN_HBF',
+            (%s, 'osm:w423692233', 'osm:n3856100103',
              '{"type":"LineString","coordinates":[[13.37,52.52],[16.37,48.19]]}'::jsonb),
             (%s, 'FR_PARIS_AUSTERLITZ', 'FR_TOULOUSE_MATABIAU',
              '{"type":"LineString","coordinates":[[2.36,48.84],[1.45,43.61]]}'::jsonb)
@@ -188,7 +188,7 @@ class TestFilterKinds:
         assert published["proposal_id"] not in _proposal_ids(miss)
 
     def test_array_overlap_stop_ids_filter(self, api_base, published):
-        hit = _gallery(api_base, filter={"stop_ids": ["DE_BERLIN_HBF"]})
+        hit = _gallery(api_base, filter={"stop_ids": ["osm:n3856100103"]})
         assert published["proposal_id"] in _proposal_ids(hit)
 
     def test_proposal_ids_filter(self, api_base, published):
@@ -211,7 +211,7 @@ class TestFilterKinds:
             api_base,
             compute(
                 api_base,
-                ["DE_BERLIN_HBF", "CH_ZUERICH_HB", "AT_WIEN_HBF"],
+                ["osm:n3856100103", "osm:n1236383343", "osm:w423692233"],
                 _COMPOSITION,
             )["request"],
             name="Berlin \u2013 Wien via Z\u00fcrich (gallery test)",
@@ -375,7 +375,7 @@ class TestSourceUnion:
         """stop_ids is a shared Target Network namespace (step 6a) —
         one filter matches proposals AND existing routes over the same
         stop."""
-        body = _gallery(api_base, filter={"stop_ids": ["DE_BERLIN_HBF"]})
+        body = _gallery(api_base, filter={"stop_ids": ["osm:n3856100103"]})
         sources = {r["source"] for r in body["summaries"]["proposals"]}
         assert sources == {"proposal", "existing"}
 
@@ -418,7 +418,7 @@ class TestSourceUnion:
         rows = {r["stop_id"]: r for r in body["map_stop_counts"]}
         for row in rows.values():
             assert row["n"] == row["n_proposals"] + row["n_existing"]
-        berlin = rows["DE_BERLIN_HBF"]
+        berlin = rows["osm:n3856100103"]
         assert berlin["n_proposals"] >= 1 and berlin["n_existing"] >= 1
 
     def test_map_country_counts_triple(self, api_base, existing_routes, published):
@@ -459,12 +459,12 @@ class TestTripWindows:
         return f"{lo_h:02d}:{lo_m:02d}", f"{hi_h:02d}:{hi_m:02d}"
 
     def test_matching_window(self, api_base, published, computed):
-        frm, to = self._departure_window(computed, "DE_BERLIN_HBF")
+        frm, to = self._departure_window(computed, "osm:n3856100103")
         hit = _gallery(
             api_base,
             filter={
                 "trip_windows": [
-                    {"stop_id": "DE_BERLIN_HBF", "departure": {"from": frm, "to": to}}
+                    {"stop_id": "osm:n3856100103", "departure": {"from": frm, "to": to}}
                 ]
             },
         )
@@ -476,7 +476,7 @@ class TestTripWindows:
             filter={
                 "trip_windows": [
                     {
-                        "stop_id": "DE_BERLIN_HBF",
+                        "stop_id": "osm:n3856100103",
                         "departure": {"from": "03:00", "to": "03:01"},
                     }
                 ]
@@ -612,9 +612,9 @@ class TestIncludeSections:
             include=["map_stop_counts"],
         )
         stop_ids = {row["stop_id"] for row in body["map_stop_counts"]}
-        assert "DE_BERLIN_HBF" in stop_ids
+        assert "osm:n3856100103" in stop_ids
         berlin = next(
-            r for r in body["map_stop_counts"] if r["stop_id"] == "DE_BERLIN_HBF"
+            r for r in body["map_stop_counts"] if r["stop_id"] == "osm:n3856100103"
         )
         assert berlin["lat"] is not None and berlin["lon"] is not None
         assert berlin["n"] >= 1

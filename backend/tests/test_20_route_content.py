@@ -172,7 +172,7 @@ class TestTimetableMath:
         boarding/alighting minimum applies, so only positivity is asserted."""
         for trip in all_trips(route_berlin_dresden_wien):
             dresden = next(
-                s for s in stop_times(trip) if s["stop_id"] == "DE_DRESDEN_HBF"
+                s for s in stop_times(trip) if s["stop_id"] == "osm:n25397500"
             )
             assert dresden["dwell_time_min"] is not None
             assert dresden["dwell_time_min"] >= 1
@@ -305,7 +305,7 @@ BASE_REQUEST = {
     "stops": STOPS_BERLIN_DRESDEN_WIEN,
     "composition_id": "NEW-BAL-7",
     # Pinned off so the structural tests below see a deterministic
-    # caller's-list route — CZ_BRNO_HLN would otherwise be auto-added
+    # caller's-list route — osm:n3325029085 would otherwise be auto-added
     # (see module docstring); the add/suggest paths have their own
     # fixture/requests in TestModeSwitches.
     "auto_stop_addition": "off",
@@ -321,21 +321,31 @@ BASE_REQUEST = {
 #
 # Updated at ROUTE_BUILDER 0.9.24, which moved the detour budget onto
 # TECHNICAL trip time (driving + dynamics + dwell) instead of padded time.
-# DE_BAD_SCHANDAU and CZ_CESKA_TREBOVA dropped out: both sat at the margin of
+# osm:n2736023837 and osm:n3129289404 dropped out: both sat at the margin of
 # the old, larger budget. That marginality is inherent — this list pins a
 # greedy cumulative budget, so a few per cent either way moves its tail, and
 # a diff here means the budget moved, not that the search broke.
+#
+# Re-pinned when the stop classification pipeline replaced the catalog:
+# coordinates now come from OSM rather than ONTD, so marginal candidates
+# moved a little and the greedy budget resolved differently. Bad Schandau
+# (osm:n2736023837) and Ceska Trebova (osm:n3129289404) came back in, and
+# Decin (osm:n5062517821) and Breclav-area osm:n3325029085 dropped out to
+# pay for them — the same tail churn the paragraph above describes, at the
+# same count of seven. What is asserted structurally rather than by
+# identity is the invariant that matters: every stop 'add' inserts also
+# appears in 'suggest' (test_..._suggest_... below).
 STOPS_WITH_BRNO = [
-    "DE_BERLIN_HBF",
-    "DE_DRESDEN_HBF",
-    "CZ_DECIN_HL_N",
-    "CZ_USTI_NAD_LABEM_HL_N",
-    "CZ_PRAHA_HOLESOVICE",
-    "CZ_KOLIN",
-    "CZ_PARDUBICE_HL_N",
-    "CZ_BRNO_HLN",
-    "CZ_BRECLAV",
-    "AT_WIEN_HBF",
+    "osm:n3856100103",
+    "osm:n25397500",
+    "osm:n2736023837",
+    "osm:n4171354660",
+    "osm:n3134733933",
+    "osm:n24684084",
+    "osm:n3129312254",
+    "osm:n3129289404",
+    "osm:n3315724401",
+    "osm:w423692233",
 ]
 
 
@@ -368,7 +378,7 @@ def plan_response(api_base):
 @pytest.fixture(scope="module")
 def plan_response_default_add(api_base):
     """Same request with auto_stop_addition omitted entirely — covers the
-    "add" default, which inserts CZ_BRNO_HLN on this corridor. Built once
+    "add" default, which inserts osm:n3325029085 on this corridor. Built once
     for this module."""
     body = {k: v for k, v in BASE_REQUEST.items() if k != "auto_stop_addition"}
     resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=90)
@@ -471,9 +481,15 @@ class TestModeSwitches:
         relation, not equality: every stop 'add' inserted also appears in
         'suggest' (both start from the same candidate search), but
         'suggest' additionally surfaces the over-budget candidates 'add'
-        had to stop short of. This corridor: 14 suggested vs 10 inserted.
+        had to stop short of. This corridor: 20 suggested vs 10 inserted.
 
-        The final pair (AT_WIEN_WESTBF / AT_WIEN_MEIDLING) is asserted as
+        Re-pinned with the stop classification pipeline's catalog, which is
+        denser along the Berlin approach — Gesundbrunnen, Lichtenberg,
+        Ostbahnhof and Suedkreuz are all genuinely within AUTO_STOP_BUFFER_M
+        of the corridor and now appear, where the previous ONTD-only catalog
+        simply had no row for them.
+
+        The final pair (osm:n60093107 / osm:n66432827) is asserted as
         a set, not a strict order: both sit close together near the
         route's Vienna approach, so suggest_auto_stops()'s
         (leg_index, along_leg_fraction) sort assigns them to the routed
@@ -501,20 +517,39 @@ class TestModeSwitches:
         suggested = payload["suggested_stops"]
         suggested_ids = [s["stop_id"] for s in suggested]
         assert suggested_ids[:-2] == [
-            "DE_BERLIN_SUEDKREUZ",
-            "DE_DRESDEN_NEUSTADT",
-            "DE_BAD_SCHANDAU",
-            "CZ_DECIN_HL_N",
-            "CZ_USTI_NAD_LABEM_HL_N",
-            "CZ_PRAHA_HLN",
-            "CZ_PRAHA_HOLESOVICE",
-            "CZ_KOLIN",
-            "CZ_PARDUBICE_HL_N",
-            "CZ_CESKA_TREBOVA",
-            "CZ_BRNO_HLN",
-            "CZ_BRECLAV",
+            "osm:n2461322542",
+            "osm:n459277140",
+            "osm:n3419894993",
+            "osm:n29805967",
+            "osm:n2837556546",
+            "osm:n267379240",
+            "osm:n7103322725",
+            "osm:n3723386251",
+            "osm:n2736023837",
+            "osm:n5062517821",
+            "osm:n4171354660",
+            "osm:n3134751791",
+            "osm:n3134733933",
+            "osm:n24684084",
+            "osm:n3129312254",
+            "osm:n3129289404",
+            "osm:n3325029085",
+            "osm:n3315724401",
         ]
-        assert set(suggested_ids[-2:]) == {"AT_WIEN_WESTBF", "AT_WIEN_MEIDLING"}
+
+        # The cross-mode invariant, independent of either pinned list: 'add'
+        # and 'suggest' run the same candidate search, so everything 'add'
+        # inserted must be offered by 'suggest'. This is what actually breaks
+        # if the search regresses; the lists above only pin today's budget.
+        auto_added = [
+            s["stop_id"]
+            for s in stop_times(
+                plan_response_default_add["route"]["trip_pairs"][0]["outbound"]
+            )
+            if s["auto_added"]
+        ]
+        assert set(auto_added) <= set(suggested_ids)
+        assert set(suggested_ids[-2:]) == {"osm:n60093107", "osm:n66432827"}
         for s in suggested:
             assert set(s) == {
                 "stop_id",
@@ -580,7 +615,7 @@ FIXED_NIGHT_REQUEST = {
     # Berlin->Dresden is ~2h naturally — far shorter than the 5h night
     # window, so this interval MUST be stretched, exercising slack
     # distribution and the slow-section warning in one live response.
-    "fixed_night_interval": ["DE_BERLIN_HBF", "DE_DRESDEN_HBF"],
+    "fixed_night_interval": ["osm:n3856100103", "osm:n25397500"],
 }
 
 
@@ -670,7 +705,7 @@ class TestFixedNightMode:
         warnings, window constraints still satisfied."""
         body = {
             **FIXED_NIGHT_REQUEST,
-            "fixed_night_interval": ["DE_BERLIN_HBF", "AT_WIEN_HBF"],
+            "fixed_night_interval": ["osm:n3856100103", "osm:w423692233"],
         }
         resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=90)
         assert resp.status_code == 200, resp.text[:300]
@@ -690,11 +725,11 @@ class TestFixedNightMode:
         "interval, reason",
         [
             (None, "missing entirely"),
-            (["DE_BERLIN_HBF"], "only one stop"),
-            (["DE_BERLIN_HBF", "DE_BERLIN_HBF"], "same stop twice"),
-            (["DE_BERLIN_HBF", 42], "non-string entry"),
-            (["DE_BERLIN_HBF", "FR_PARIS_EST"], "stop not in stops list"),
-            (["AT_WIEN_HBF", "DE_BERLIN_HBF"], "wrong travel order"),
+            (["osm:n3856100103"], "only one stop"),
+            (["osm:n3856100103", "osm:n3856100103"], "same stop twice"),
+            (["osm:n3856100103", 42], "non-string entry"),
+            (["osm:n3856100103", "osm:n2506241285"], "stop not in stops list"),
+            (["osm:w423692233", "osm:n3856100103"], "wrong travel order"),
         ],
     )
     def test_invalid_interval_returns_400(self, api_base, interval, reason):
@@ -713,7 +748,7 @@ class TestFixedNightMode:
         body = {
             **BASE_REQUEST,
             "timetable_mode": "simpleAutomatic",
-            "fixed_night_interval": ["DE_BERLIN_HBF", "DE_DRESDEN_HBF"],
+            "fixed_night_interval": ["osm:n3856100103", "osm:n25397500"],
         }
         resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=30)
         assert resp.status_code == 400

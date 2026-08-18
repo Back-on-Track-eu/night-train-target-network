@@ -151,7 +151,7 @@ def test_column_exists_in_schema(table, column):
 
 COMP_ID = "NEW-BAL-7"
 COUNTRY = "DE"
-STOP_ID = "DE_BERLIN_HBF"
+STOP_ID = "osm:n3856100103"
 
 
 def test_all_compositions_load(loader):

@@ -136,7 +136,7 @@ class ParamVersionEntry:
     One entry per parameter field, keyed by "table_short:entity_id:field_name"
     in ParamVersions.entries, e.g.:
         "track_infra:DE:tac_eur_train_km"
-        "stop_infra:DE_BERLIN_HBF:stop_charge_eur"
+        "stop_infra:osm:n3856100103:stop_charge_eur"
         "composition_type:STD-7.1:max_speed_kmh"
         "operator:STD:driver_costs_eur_h"
         "coach_type:type1:weight_gross_t"
@@ -170,7 +170,7 @@ class ParamVersions:
 
     Keys follow the pattern "table_short:entity_id", e.g.:
         "track_infra:DE"            → TrackInfrastructure for Germany
-        "stop_infra:DE_BERLIN_HBF"  → StopInfrastructure for Berlin Hbf
+        "stop_infra:osm:n3856100103"  → StopInfrastructure for Berlin Hbf
         "composition_type:STD-7.1"  → CompositionType STD-7.1
         "coach_type:WLABmz"         → CoachType WLABmz
         "operator:STD"              → Operator STD

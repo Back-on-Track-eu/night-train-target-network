@@ -11,8 +11,8 @@ Fixture values relied on (see db/dev/seed.py):
     scenario '2026-baseline').
   - SE tac_eur_train_km is NULL at every version → resolves from the
     EU-average default row (is_default=True).
-  - SE_STOCKHOLM_C stop_charge_eur is NULL → resolves from the global
-    stop default; DE_BERLIN_HBF has an explicit charge.
+  - osm:n25948183 stop_charge_eur is NULL → resolves from the global
+    stop default; osm:n3856100103 has an explicit charge.
 """
 
 import os
@@ -187,12 +187,10 @@ class TestParamProvenance:
     def test_stop_null_charge_resolves_from_global_default(
         self, loader, db_cur, base_scenario
     ):
-        """SE_STOCKHOLM_C stop_charge is NULL — is_default=True and the value
+        """osm:n25948183 stop_charge is NULL — is_default=True and the value
         equals the global default row's charge."""
         stops = loader.build_all_stops()
-        se_charge = stops.param_versions.get(
-            "stop_infra:SE_STOCKHOLM_C:stop_charge_eur"
-        )
+        se_charge = stops.param_versions.get("stop_infra:osm:n25948183:stop_charge_eur")
         assert se_charge is not None
         assert se_charge.is_default is True
 
@@ -204,12 +202,28 @@ class TestParamProvenance:
         default_val = float(db_cur.fetchone()["stop_charge_eur"])
         assert float(se_charge.value) == pytest.approx(default_val, rel=1e-3)
 
+    @pytest.mark.xfail(
+        reason="no stop carries an explicit stop_charge_eur yet: the curated "
+        "catalog that held the thirteen negotiated charges was retired when the "
+        "stop classification pipeline took over the catalog, and the pipeline "
+        "seeds every charge NULL until step 7b lands real station charge data. "
+        "Un-xfail by pinning a stop that has one, once they exist.",
+        strict=True,
+    )
     def test_stop_explicit_charge_is_not_default(self, loader):
-        """DE_BERLIN_HBF has an explicit stop_charge — is_default=False."""
+        """A stop with an explicit stop_charge reports is_default=False.
+
+        The is_default=True path is covered by
+        test_stop_null_charge_resolves_from_global_default above; this is the
+        other half of the provenance contract, and it has no subject in the
+        catalog today."""
         stops = loader.build_all_stops()
-        berlin = stops.param_versions.get("stop_infra:DE_BERLIN_HBF:stop_charge_eur")
-        assert berlin is not None
-        assert berlin.is_default is False
+        explicit = [
+            entry
+            for key, entry in stops.param_versions.items()
+            if key.endswith(":stop_charge_eur") and entry.is_default is False
+        ]
+        assert explicit, "no stop has an explicit stop_charge_eur"
 
 
 # =============================================================================
