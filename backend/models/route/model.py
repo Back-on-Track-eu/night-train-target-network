@@ -30,7 +30,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.24"
+ROUTE_BUILDER_VERSION: str = "0.9.25"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -45,6 +45,21 @@ ROUTE_BUILDER_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.25": {
+        "date": "2026-08-18",
+        "author": "david",
+        "changes": "OUTPUT CHANGE, no logic change: the stop catalog was "
+        "replaced. db/dev/seed.py's 58 curated stops and the ONTD-derived "
+        "seed CSV both gave way to the stop classification pipeline's export "
+        "(models/infrastructure/stops), which is roughly 870 seeded stops on "
+        "OSM-keyed ids. Stop ids therefore change shape — DE_BERLIN_HBF "
+        "becomes osm:n3856100103 — and candidate DISCOVERY sees a denser "
+        "catalog, so the auto-stop search returns a different set for the "
+        "same request even though the budget rule is untouched. The bump is "
+        "what invalidates cached compute results and marks stored proposals "
+        "stale: their auto-added stops, and any caller stop id they hold, "
+        "predate the new catalog.",
+    },
     "0.9.24": {
         "date": "2026-08-17",
         "author": "david",

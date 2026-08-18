@@ -202,28 +202,14 @@ class TestParamProvenance:
         default_val = float(db_cur.fetchone()["stop_charge_eur"])
         assert float(se_charge.value) == pytest.approx(default_val, rel=1e-3)
 
-    @pytest.mark.xfail(
-        reason="no stop carries an explicit stop_charge_eur yet: the curated "
-        "catalog that held the thirteen negotiated charges was retired when the "
-        "stop classification pipeline took over the catalog, and the pipeline "
-        "seeds every charge NULL until step 7b lands real station charge data. "
-        "Un-xfail by pinning a stop that has one, once they exist.",
-        strict=True,
-    )
     def test_stop_explicit_charge_is_not_default(self, loader):
-        """A stop with an explicit stop_charge reports is_default=False.
-
-        The is_default=True path is covered by
-        test_stop_null_charge_resolves_from_global_default above; this is the
-        other half of the provenance contract, and it has no subject in the
-        catalog today."""
+        """A stop listed in the pipeline's station_charges.csv reports
+        is_default=False; the is_default=True path is covered by
+        test_stop_null_charge_resolves_from_global_default above."""
         stops = loader.build_all_stops()
-        explicit = [
-            entry
-            for key, entry in stops.param_versions.items()
-            if key.endswith(":stop_charge_eur") and entry.is_default is False
-        ]
-        assert explicit, "no stop has an explicit stop_charge_eur"
+        berlin = stops.param_versions.get("stop_infra:osm:n3856100103:stop_charge_eur")
+        assert berlin is not None
+        assert berlin.is_default is False
 
 
 # =============================================================================

@@ -1508,9 +1508,11 @@ _STOP_INFRA_DEFAULT_CANONICAL = [
 # breaking the compute cache's scenario-pin invariant — and never
 # survived a reseed anyway.
 STOP_SEED_CSV = Path(__file__).resolve().parent / "data" / "stop_seed_catalog.csv"
-STOP_SEED_FILE_ID = os.environ.get("STOP_SEED_FILE_ID", "")
+STOP_SEED_FILE_ID = os.environ.get(
+    "STOP_SEED_FILE_ID", "1QfkYrX5Fc5N0JqFLx5FWEaaZ6z0YCM6c"
+)
 
-# Contract with scripts/export_ontd_stop_seed.py's CSV_COLUMNS — also the
+# Contract with step7_export_seed_stops.py's SEED_COLUMNS — also the
 # validation gate for downloads (a Drive permission error returns an HTML
 # page, which must not be seeded or cached as if it were the CSV).
 _STOP_SEED_CSV_COLUMNS = [
@@ -1520,6 +1522,7 @@ _STOP_SEED_CSV_COLUMNS = [
     "stop_timezone",
     "stop_lat",
     "stop_lon",
+    "stop_charge_eur",
 ]
 
 _STOP_SEED_CHANGE_LOG = (
@@ -1581,6 +1584,11 @@ def _download_stop_seed() -> bool:
     return True
 
 
+def _parse_optional_float(value):
+    text = (value or "").strip()
+    return float(text) if text else None
+
+
 def _read_stop_seed() -> list[dict]:
     if not STOP_SEED_CSV.is_file() and not _download_stop_seed():
         return []
@@ -1618,7 +1626,10 @@ def _read_stop_seed() -> list[dict]:
             "stop_timezone": row["stop_timezone"],
             "stop_lat": float(row["stop_lat"]),
             "stop_lon": float(row["stop_lon"]),
-            "stop_charge_eur": None,  # resolves via country/global default
+            # Empty means no station charge is known: NULL resolves via the
+            # country/global default. Only stops listed in the pipeline's
+            # tracked station_charges.csv carry a figure.
+            "stop_charge_eur": _parse_optional_float(row["stop_charge_eur"]),
             "change_log": _STOP_SEED_CHANGE_LOG,
         }
         for row in catalog
