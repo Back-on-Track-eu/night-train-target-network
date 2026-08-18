@@ -3,55 +3,81 @@ Resolves the pipeline's bulk inputs, downloading them from Drive on first use.
 
 The data is deliberately not in git (see .gitignore): the OSM extract alone is
 tens of gigabytes, and the derived CSVs are regenerated artifacts, not source.
-Instead every file has a Drive id here, and ensure_local() fetches it into
-data/ when it isn't already there — the same soft-fail pattern db/dev/seed.py
-uses for ontd_seed_stops.csv, so behaviour is consistent across the project.
+Instead there is ONE Drive folder holding all of them, and ensure_local() picks
+a file out of it by name, syncing the folder once per process when something is
+missing.
 
-Each id is overridable by environment variable without a code change, which is
-what makes a re-generated file easy to swap in: upload it as a new version of
-the same Drive file (the id survives) or point the env var at a new one.
+One folder id rather than one id per file: the id lives in backend/docker/.env,
+because ids are wiring and that file is the project's one home for wiring
+(AGENTS.md "Parameter placement"). This module loads that .env through dev_env,
+so a notebook run from the host sees the same value the containers do.
+
+Two kinds of file, deliberately handled differently:
+
+  ensure_local(name)
+      Comes from outside this machine — the two external exports and the
+      OSM-derived intermediates that need the ~60 GB Europe extract, an osmium
+      pass and hours of Overpass calls to rebuild. Downloaded when absent.
+
+  local_input(name, produced_by)
+      Written by an earlier step of this pipeline. Never downloaded: a stale
+      Drive copy could silently override what the notebook just produced.
+      Missing means that step has not been run, and the error says which.
+
+A local file always wins. The sync only fills gaps, so re-running a step
+overwrites nothing and a hand-placed file is never clobbered.
 
 Usage from a notebook:
 
     from data_sources import ensure_local
     step4_csv = ensure_local("step4_MatchingONTDtoOSM.csv")
 
-Drive folder holding all of these:
+Drive folder:
 https://drive.google.com/drive/folders/1iAjxVKRn1qhgR-yhfczO91M41KIIIIVd
 """
 
 from __future__ import annotations
 
 import csv
-import io
+import inspect
 import os
-import urllib.request
+import shutil
+import sys
+import tempfile
 from pathlib import Path
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 
-DOWNLOAD_TIMEOUT_S = 300
+# backend/ on the path so a notebook launched from this directory can reach
+# dev_env, which loads backend/docker/.env — the same file the containers read.
+_BACKEND_ROOT = Path(__file__).resolve().parents[3]
+if str(_BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_ROOT))
 
-# filename -> (env var overriding the id, default Drive file id)
-#
-# Fill a default in as soon as the file has a stable Drive id; until then the
-# entry still works by setting the environment variable. An empty default is
-# reported as a missing id rather than attempted as a download.
-FILE_IDS: dict[str, tuple[str, str]] = {
-    "bahnhoefe_stops_sorted.csv": ("STOPS_ONTD_EXPORT_FILE_ID", ""),
-    "B-o-T_DataBase_stop_times.csv": ("STOPS_STOP_TIMES_FILE_ID", ""),
-    "step2_output_eu_stations.osm.pbf": ("STOPS_STEP2_OUTPUT_FILE_ID", ""),
-    "step3a_output_way_relation_centers.csv": ("STOPS_STEP3A_OUTPUT_FILE_ID", ""),
-    "step3b_output_osm_stations_classified.csv": ("STOPS_STEP3B_OUTPUT_FILE_ID", ""),
-    "step4_MatchingONTDtoOSM.csv": ("STOPS_STEP4_OUTPUT_FILE_ID", ""),
-    "step5_JoinedNTStops.csv": ("STOPS_STEP5_OUTPUT_FILE_ID", ""),
-    "step6_metropol.csv": ("STOPS_STEP6_LEGACY_FILE_ID", ""),
-    "step6_manual_additions.csv": ("STOPS_STEP6_ADDITIONS_FILE_ID", ""),
+try:
+    from dev_env import load_env_files
+
+    load_env_files()
+except ImportError:  # pragma: no cover — notebook run outside the repo
+    print("  dev_env not importable — reading the folder id from the environment.")
+
+FOLDER_ID_VAR = "STOPS_DRIVE_FOLDER_ID"
+
+# Files the folder is expected to provide. Listed so a typo fails loudly here
+# rather than as a confusing "not in the folder" after a multi-minute sync.
+DOWNLOADABLE = {
+    "bahnhoefe_stops_sorted.csv",
+    "B-o-T_DataBase_stop_times.csv",
+    "step2_output_eu_stations.osm.pbf",
+    "step3a_output_way_relation_centers.csv",
+    "step3b_output_osm_stations_classified.csv",
+    "step4_MatchingONTDtoOSM.csv",
+    "stop_seed_catalog.csv",
 }
 
-# Expected header per CSV, checked after download. A Drive permission error
-# serves an HTML page with HTTP 200, so without this the pipeline would cache
-# and then parse a login page as if it were data.
+# Expected header per CSV, checked on use. A Drive permission error serves an
+# HTML page with HTTP 200, so without this the pipeline would cache and then
+# parse a login page as if it were data.
 EXPECTED_HEADERS: dict[str, list[str]] = {
     "bahnhoefe_stops_sorted.csv": [
         "ID",
@@ -73,14 +99,6 @@ EXPECTED_HEADERS: dict[str, list[str]] = {
         "mode_rule",
         "stop_code",
     ],
-    "step6_metropol.csv": [
-        "stop_id",
-        "stop_name",
-        "stop_lat",
-        "stop_lon",
-        "country",
-        "stop_timezone",
-    ],
     "step4_MatchingONTDtoOSM.csv": [
         "ontd_id",
         "ontd_name",
@@ -99,78 +117,137 @@ EXPECTED_HEADERS: dict[str, list[str]] = {
         "distance_km",
         "candidate_count",
     ],
+    "stop_seed_catalog.csv": [
+        "stop_id",
+        "stop_name",
+        "country_code",
+        "stop_timezone",
+        "stop_lat",
+        "stop_lon",
+        "stop_charge_eur",
+    ],
 }
 
+_synced = False
 
-def file_id(filename: str) -> str:
-    """Drive id for a known filename, env var winning over the default."""
+
+def folder_id() -> str:
+    return os.environ.get(FOLDER_ID_VAR, "").strip()
+
+
+def sync_folder(*, force: bool = False) -> int:
+    """Copy every folder file missing from data/ into it. Returns the count.
+
+    Runs at most once per process unless forced. Downloads into a temporary
+    directory and copies only what is absent, so an existing local file — one a
+    step just wrote, or one placed by hand — is never overwritten.
+    """
+    global _synced
+    if _synced and not force:
+        return 0
+
+    ident = folder_id()
+    if not ident:
+        raise RuntimeError(
+            f"{FOLDER_ID_VAR} is not set — put the Drive folder id in "
+            "backend/docker/.env, or place the files in data/ by hand."
+        )
     try:
-        env_var, default = FILE_IDS[filename]
-    except KeyError:
-        raise KeyError(
-            f"{filename!r} is not a known pipeline input — add it to FILE_IDS"
+        import gdown
+    except ImportError:
+        raise RuntimeError(
+            "gdown is needed to sync the Drive folder. Install it with "
+            "`uv sync --extra dev`, or place the files in data/ by hand."
         ) from None
-    return os.environ.get(env_var, default).strip()
+
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"  syncing Drive folder {ident} — this takes a few minutes...")
+
+    # gdown's signature has drifted between majors (5.x took remaining_ok, 6.x
+    # dropped it), so only options present in the installed version are passed.
+    options = {"id": ident, "output": None, "quiet": True, "use_cookies": False}
+    accepted = inspect.signature(gdown.download_folder).parameters
+    options = {k: v for k, v in options.items() if k in accepted}
+    if "remaining_ok" in accepted:
+        options["remaining_ok"] = True
+
+    copied = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        gdown.download_folder(**{**options, "output": tmp})
+        for source in sorted(Path(tmp).rglob("*")):
+            if not source.is_file() or (DATA_DIR / source.name).exists():
+                continue
+            shutil.copy2(source, DATA_DIR / source.name)
+            print(f"    + {source.name} ({source.stat().st_size / 1e6:.1f} MB)")
+            copied += 1
+
+    _synced = True
+    print(f"  sync complete — {copied} file(s) added.")
+    return copied
+
+
+def _check_header(path: Path) -> None:
+    expected = EXPECTED_HEADERS.get(path.name)
+    if expected is None:
+        return
+    with open(path, encoding="utf-8-sig", newline="") as fh:
+        header = next(csv.reader(fh), None)
+    if header != expected:
+        raise ValueError(
+            f"{path.name} has an unexpected header {header!r} — the copy in "
+            "data/ is stale or is not the file it claims to be. Delete it and "
+            "re-sync, or regenerate it."
+        )
 
 
 def ensure_local(filename: str, *, required: bool = True) -> Path | None:
-    """Path to the local copy, downloading it from Drive if absent.
+    """Path to the local copy, syncing the Drive folder if it isn't there.
 
-    Returns None instead of raising when required=False and the file can't be
-    obtained, so a notebook can degrade to a partial run the way seed.py
-    degrades to the curated catalog.
+    Returns None instead of raising when required=False and the file cannot be
+    obtained, so a notebook can degrade to a partial run.
     """
+    if filename not in DOWNLOADABLE:
+        raise KeyError(
+            f"{filename!r} is not one of the pipeline's downloadable inputs. "
+            "If an earlier step produces it, use local_input() instead; "
+            "otherwise add it to DOWNLOADABLE."
+        )
+
     target = DATA_DIR / filename
-    if target.is_file():
-        return target
-
-    env_var, _ = FILE_IDS.get(filename, ("", ""))
-    ident = file_id(filename)
-    if not ident:
-        return _missing(
-            filename,
-            f"no Drive id configured — set {env_var} or add a default in "
-            "data_sources.py",
-            required,
-        )
-
-    url = (
-        "https://drive.usercontent.google.com/download"
-        f"?id={ident}&export=download&confirm=t"
-    )
-    print(f"  {filename} not found locally — downloading (id={ident})...")
-    try:
-        with urllib.request.urlopen(url, timeout=DOWNLOAD_TIMEOUT_S) as response:
-            payload = response.read()
-    except Exception as exc:
-        return _missing(
-            filename, f"download failed ({type(exc).__name__}: {exc})", required
-        )
-
-    expected = EXPECTED_HEADERS.get(filename)
-    if expected is not None:
+    if not target.is_file():
         try:
-            text = payload.decode("utf-8-sig")
-        except UnicodeDecodeError:
-            return _missing(filename, "downloaded content is not UTF-8 text", required)
-        header = next(csv.reader(io.StringIO(text)), None)
-        if header != expected:
-            return _missing(
-                filename,
-                f"downloaded content is not the expected CSV (header {header!r}) "
-                "— wrong file id, or the file is not shared publicly",
-                required,
-            )
+            sync_folder()
+        except RuntimeError as exc:
+            return _missing(filename, str(exc), required)
 
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(payload)
-    print(f"  downloaded {filename} ({len(payload) / 1e6:.1f} MB).")
+    if not target.is_file():
+        return _missing(
+            filename, "not present in the Drive folder after a sync.", required
+        )
+
+    _check_header(target)
     return target
 
 
+def local_input(filename: str, produced_by: str) -> Path:
+    """Path to a file an earlier step of this pipeline wrote.
+
+    Not downloadable by design: these are generated artifacts, so a Drive copy
+    could silently override what the notebook just produced. Missing means the
+    step that makes it has not been run.
+    """
+    path = DATA_DIR / filename
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"{filename} not found in {DATA_DIR} — run {produced_by} first."
+        )
+    return path
+
+
 def _missing(filename: str, reason: str, required: bool) -> None:
+    """Raise or warn, depending on whether the caller can proceed without it."""
     message = (
-        f"Pipeline input {filename!r} unavailable — {reason}.\n"
+        f"Pipeline input {filename!r} unavailable — {reason}\n"
         f"Place it manually at {DATA_DIR / filename} if the download can't work."
     )
     if required:

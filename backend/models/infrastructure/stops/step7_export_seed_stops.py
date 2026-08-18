@@ -42,7 +42,7 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-from data_sources import DATA_DIR, ensure_local
+from data_sources import DATA_DIR, ensure_local, local_input
 
 OUTPUT_PATH = DATA_DIR / "stop_seed_catalog.csv"
 PROVENANCE_PATH = DATA_DIR / "stop_seed_provenance.csv"
@@ -188,7 +188,9 @@ def iter_candidates():
     """(source, stop_id, stop_name, source_country, lat, lon, reason) from
     step 5 then step 6. Step 5 first so its ONTD-backed row wins when a stop
     qualifies both ways."""
-    step5_path = ensure_local("step5_JoinedNTStops.csv")
+    step5_path = local_input(
+        "step5_JoinedNTStops.csv", "step5_JoinNTStopsWithOSM.ipynb"
+    )
     with open(step5_path, encoding="utf-8-sig", newline="") as fh:
         for row in csv.DictReader(fh):
             yield (
@@ -200,7 +202,9 @@ def iter_candidates():
                 parse_float(row.get("osm_lon")),
                 f"night_train_stop:{(row.get('schedule_name') or '').strip()}",
             )
-    step6_path = ensure_local("step6_manual_additions.csv")
+    step6_path = local_input(
+        "step6_manual_additions.csv", "step6_manual_additions.ipynb"
+    )
     with open(step6_path, encoding="utf-8-sig", newline="") as fh:
         for row in csv.DictReader(fh):
             yield (
