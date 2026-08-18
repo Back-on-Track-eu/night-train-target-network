@@ -1,151 +1,210 @@
 # Stop classification pipeline
 
-> ## Handover — changes made on `backend-dev`, 2026-08-18
+> ## Handover — Johanna & Josh
 >
-> Johanna: your `infra-seed` work was merged into `backend-dev` and then
-> reworked in the places listed below. Nothing was thrown away — step 5's
-> matching logic was replaced, everything else is cleanup or additions. Please
-> read this section before running anything, then delete it once you've caught
+> **Where this stands:** the pipeline runs end to end and its output is now the
+> app's entire stop catalog — `db/dev/seed.py` no longer carries any stops of
+> its own. 980 stops, of which 583 are current night train stops (step 5) and
+> 397 are the manual additions (step 6).
+>
+> **What is left is yours**, and it is two things: the *reasons* behind the
+> manual selection, and the *station charges*. Both are described under "Your
+> two tasks" below, with everything already wired up so you only have to supply
+> the data. Please delete this handover once you have read it.
+>
+> ---
+>
+> ### What David changed during the migration
+>
+> **Step 5 was dropping 44% of the network.** The wired-in matcher compared
+> plain accent-folded names, so the schedule's `Berlin Hbf` never met ONTD's
+> `Berlin Hauptbahnhof` — and **267 of 610 schedule stops vanished**, including
+> nearly every major German and Austrian hub. Since step 5 is the
+> highest-confidence tier ("a night train demonstrably stops here today"), the
+> losses fed straight into step 6, which is partly what the metropolitan pass
+> was compensating for.
+>
+> Johanna, your other notebook never had this problem: it matched
+> geography-first and used names only for scoring. That is the strategy the
+> wired-in step 5 now uses — geo candidates within 1.5 km, scored 70 % name /
+> 30 % distance, with `exact` / `geo_name` / `geo_only` / `ambiguous` labels, a
+> name fallback, medoid coordinates and abbreviation expansion. **267 unmatched
+> became 16**, all accounted for. Your notebook is kept as
+> `step5_alt_direct_osm_match.ipynb` — it is not in the chain (it runs against
+> step 3b, so it cannot carry ONTD's country and ids through), but it is the
+> cleaner standalone matcher and a useful cross-check.
+>
+> **Step 6 became a notebook.** It had no script and no record of criteria —
+> the only artifact was `step6_metropol.csv`, mixing your picks with an earlier
+> step 5 run. `step6_manual_additions.ipynb` now holds the selections as
+> editable `stop_id: (name, reason)` dicts grouped by region, and resolves
+> name, coordinates and country at run time. The legacy CSV is no longer read.
+>
+> **Step 7 is new** (`step7_export_seed_stops.py`): it unions step 5 and step 6
+> into the exact shape `seed.py` consumes, so a step 5 re-run flows into the
+> catalog without touching your manual work.
+>
+> **Data corrections applied.** Country now comes from ONTD via the step 4
+> join, which disagreed with step 6 on seven stops and was right every time:
+> the four Crimean stations were coded `RU` against ONTD's `UA` (now `UA`,
+> David's call), Narva `RU` though it is in Estonia, Santander `NO`, Lichkov
+> `PL`. Timezones are IANA names derived from the country, because step 6's
+> timezone column held a bare UTC offset — which cannot express DST and was
+> wrong for Ireland. Three junk step 4 matches are excluded (OSM objects named
+> `tren`, `A` and `Arad`, 222–2743 km from their ONTD stop).
+>
+> **Five station choices need your eye.** Four step 6 picks were corrected to
+> the station the schedule actually calls at — Nicolina → Iași,
+> Миколаїв-Вантажний (freight) → Миколаїв, Кривий Ріг → Кривий Ріг-Головний,
+> and Велико Търново added alongside Горна Оряховица — and Poltava (19 trips)
+> was added outright. Wien Westbahnhof, Kolín, Česká Třebová and Esbjerg were
+> also added because route fixtures referenced them. Please sanity-check those.
+>
+> **Two Rail Baltica stops stay out** (Pärnu International, Rīga Airport): they
+> are not built, and this is a catalog of existing infrastructure.
+>
+> **Bulk data no longer lives in git.** `data_sources.py` downloads the inputs
+> from Drive into `data/` on first use, the same soft-fail pattern `seed.py`
+> uses. `data/` is gitignored, as is `charges/data/` and `charges/sources/` —
+> the notebooks are the truth in both cases.
+>
+> ---
+>
+> ### Your two tasks
+>
+> #### 1. Reasons for the manual additions
+>
+> 387 of the 397 step 6 stops have an empty `reason`. The design requires that
+> *"why is station X (not) included?"* be answerable from the data alone,
+> including by people outside the project; right now, for a stop like
+> `Osmaniye` or `Denizli`, nothing distinguishes it from one a night train
+> demonstrably serves. This is the single biggest gap in the catalog.
+>
+> Open `step6_manual_additions.ipynb` and fill the second element of each
+> tuple. Suggested vocabulary — keep it short and greppable:
+>
+> | reason | when |
+> |---|---|
+> | `fua:<city>` | functional urban area with no qualified stop |
+> | `tourism:<region>` | tourism destination |
+> | `ferry:<port>` | major ferry hub |
+> | `border` | border or interchange station |
+> | `network` | needed to make a corridor coherent |
+>
+> The last cell prints everything still unfilled, so the gap stays visible. Run
+> the notebook, then step 7, and the reasons travel into
+> `data/stop_seed_provenance.csv` beside each stop.
+>
+> One caveat worth knowing: step 6 was built on the **lossy** step 5 output, so
+> some picks were filling gaps that no longer exist (Berlin-Lichtenberg and
+> Gesundbrunnen were in while Berlin Hbf was not). Nothing was lost — step 7
+> unions both layers — but a few selections may now be redundant, and
+> conversely some FUAs you judged "already covered" were covered by a stop step
+> 5 had actually dropped. Worth a second pass while you are in there.
+>
+> #### 2. Station charges
+>
+> `charges/` is a calibration domain in the same shape as `tac/calib/`,
+> `energy_pricing/calib/` and `facility/calib/`: two notebooks, a source
+> register, and generated output. Charges come from documents in several
+> formats — PDF price lists, XLSX network statement annexes, figures that can
+> only be typed in from a scan — so each source gets its own reader section
+> rather than everything being forced through one CSV.
+>
+> ```
+> stops/charges/
+> ├── 01_source_extraction.ipynb    the source register
+> ├── 02_station_charges.ipynb      per-source readers, name resolution, output
+> ├── sources/                      the documents themselves — gitignored
+> └── data/                         generated — gitignored
+>     ├── sources_register.csv
+>     └── station_charges.csv       read by step7_export_seed_stops.py
+> ```
+>
+> **To add a source:** register the document in `01` (title, publisher, tariff
+> year, kind), drop the file in `sources/`, then copy the nearest reader
+> section in `02` and adapt it. Three readers are there to start from —
+> manual transcription, XLSX annex, PDF table — each appending rows in one
+> shape:
+>
+> ```python
+> {"source_ref": "<source_id from 01>", "station": "<name as printed>",
+>  "country_code": "DE", "charge_eur": 9.80, "basis": "per_call", "note": "..."}
+> ```
+>
+> `02` then does the two jobs common to every source: resolve the printed
+> station name to a catalog `stop_id` (same normalisation step 5 uses —
+> transliteration, abbreviation expansion), and pick one value per stop when
+> sources overlap. A name it cannot resolve unambiguously is **reported, not
+> guessed**, so a wrong station never gets charged silently.
+>
+> `pdfplumber` is not a backend dependency; the PDF reader says so and tells
+> you how to run with it. If a document is a scan, or the table extraction
+> looks unreliable, transcribe the figures by hand with the page cited instead
+> — a transcribed number someone can check beats a parsed one nobody can.
+>
+> **What is in there now:** 13 rows, all from `ILLUSTRATIVE-CURATED`. Those are
+> the placeholder values the retired curated catalog carried — `seed.py`
+> attributed them to "Illustrative / internal estimate", so they are *not*
+> published tariffs. They are registered so the figures are traceable rather
+> than silently inherited, and every one should be deleted from the manual
+> section as soon as its station has a sourced figure. Each run prints how many
+> are still illustrative.
+>
+> **A stop with no charge is fine.** Its `stop_charge_eur` stays NULL and
+> resolves through the global default (11.28 EUR) — currently 967 of 980 stops.
+> That is deliberate: a placeholder written into the row would override the
+> default and make "which stops still need real data?" unanswerable, whereas
+> NULL keeps it a one-line query. So add a row only where there is a real
+> figure, and follow the same discipline as the TAC and energy work: only
+> sourced values, cite the document and its tariff year, leave a station out
+> rather than inventing a number.
+>
+> ---
+>
+> ### How to finish and hand back
+>
+> ```
+> cd backend/models/infrastructure/stops
+> uv run --extra dev jupyter lab
+> #   step6_manual_additions.ipynb   — the reasons
+> #   charges/01_source_extraction.ipynb, then charges/02_station_charges.ipynb
+> uv run python step7_export_seed_stops.py
+> ```
+>
+> `02` resolves names against `data/stop_seed_catalog.csv`, so on a clean
+> checkout run step 7 once before it, then again afterwards to pick the charges
 > up.
 >
-> ### The one that matters: step 5 was dropping 44% of the network
+> Then upload `data/stop_seed_catalog.csv` to Drive as a **new version of the
+> same file** (id `1QfkYrX5Fc5N0JqFLx5FWEaaZ6z0YCM6c`, so nothing needs
+> repointing), commit `step6_manual_additions.ipynb` and the `charges/`
+> notebooks (their `data/` and `sources/` are gitignored — notebooks are truth),
+> and tell David so he can reseed and re-run the suite.
 >
-> Two step-5 notebooks were on the branch. `step5_JoinNTStopsWithOSM.ipynb`
-> (the one wired into the pipeline table) matched on plain accent/case-folded
-> names with no abbreviation handling, no fuzzy fallback and no geographic
-> pass. The schedule export writes `Berlin Hbf`; ONTD writes
-> `Berlin Hauptbahnhof`. Those never met, so the stop was dropped — and with
-> it **267 of 610 schedule stops**, including nearly every major German and
-> Austrian hub: Berlin, Hamburg, München, Köln, Frankfurt, Stuttgart,
-> Hannover, Leipzig, Nürnberg, Wien, Graz, Salzburg, Innsbruck and about
-> thirty more.
+> ---
 >
-> That is the highest-confidence tier in the whole design ("a night train
-> demonstrably stops here today"), so the losses propagated silently into
-> step 6 — which is partly what the metropolitan pass was compensating for.
+> ### Still open, for information
 >
-> The other notebook, `step5_match_night_train_stops.ipynb`, never had the
-> problem: it matches geography-first (`sjoin_nearest`, 1.5 km, EPSG:3035),
-> uses the name only for scoring, resolves conflicting schedule coordinates
-> with a medoid, and labels confidence — i.e. it implements Stage B as
-> written. 244 of the 267 lost stops have an OSM station within 1.5 km, so it
-> would have caught them. It wasn't wired in because it runs against step 3b
-> directly and so can't carry ONTD's country/ids through to the seed. (I first
-> proposed deleting it as a superseded draft; that was wrong, and is undone.)
->
-> **What's there now:** `step5_JoinNTStopsWithOSM.ipynb` keeps its place in
-> the chain (step 4 → 5 → 6 → 7) but its matcher is rebuilt on the other
-> notebook's strategy — geo candidates within 1.5 km scored 70 % name /
-> 30 % distance with `exact` / `geo_name` / `geo_only` / `ambiguous` labels,
-> a name fallback (`name_only`) when nothing is in range, medoid + spread on
-> the schedule coordinates, and abbreviation expansion on both sides.
-> Result: **16 unmatched instead of 267**; the residual is almost entirely
-> stations genuinely absent from ONTD (planned Rail Baltica stops, some
-> eastern European stations). The direct-OSM notebook is kept as
-> `step5_alt_direct_osm_match.ipynb`, marked as the reference variant.
->
-> Two data bugs surfaced on the way, both worth reporting upstream:
->
-> - **`B-o-T_DataBase_stop_times.csv` stamps Amsterdam Centraal's coordinate
->   (52.37921, 4.900293) onto nine unrelated stops** — the whole
->   Amsterdam–Zürich corridor (Antwerpen Centraal, Rotterdam Centraal, Bern,
->   Lausanne, Olten, Zürich HB, Fribourg, Schipol). Your alt notebook had
->   already spotted the Bern case. Distances are taken against the *best* of a
->   stop's reported coordinates rather than their mean, and the spread is
->   written to `step5_coord_conflicts_report.csv`.
-> - **Several schedule coordinates are hundreds of km off** the real station
->   (Luxembourg 31 km, Rastatt 268 km, Vercelli 318 km, Savona 343 km). Kept
->   and flagged `name_coords_conflict` rather than dropped, per the
->   keep-it-in principle.
->
-> ### Review these outputs — they are the pipeline's own test
->
-> Every current night train stop *should* match, so `unmatched_stops.csv` is a
-> free correctness check. It was never reviewed; 267 unmatched should have been
-> a loud failure. Step 5 now also writes `step5_review_flagged.csv`
-> (`geo_only` / `ambiguous` / `name_coords_conflict`),
-> `step5_coord_conflicts_report.csv` and `step5_duplicate_matches_report.csv`.
-> Please work through them after your next run, largest distance first, and
-> extend `ABBREVIATIONS` in the notebook when a naming convention shows up that
-> isn't covered.
->
-> ### Other changes
->
-> - **Folder renamed** `stop_classification/` → `stops/`, under
->   `models/infrastructure/`.
-> - **`data_sources.py` added.** Bulk inputs stay out of git but download from
->   Drive on first use, mirroring the soft-fail pattern `db/dev/seed.py`
->   already uses for `ontd_seed_stops.csv`. Notebooks call
->   `ensure_local("<filename>")` instead of hardcoding paths. **The Drive file
->   ids still need filling in** — see `FILE_IDS` in that file.
-> - **`step6_manual_additions.ipynb` added — your step 6, now reproducible.**
->   The legacy `step6_metropol.csv` is no longer read by anything and can be
->   deleted from `data/`; the twelve countries it uniquely supplied are now
->   listed explicitly in the notebook.
->   Step 6 had no notebook and no script: the only artifact was
->   `step6_metropol.csv`, which mixed your 398 hand-picked stops together with
->   an earlier step 5 run and recorded no reason for any of them. Nothing on
->   disk marked which rows were manual, so ~400 stops in a public catalog could
->   not answer *"why is this station included?"* — which the design explicitly
->   requires. The notebook now holds the selections as editable
->   `stop_id: (name, reason)` dicts grouped by region, resolves name,
->   coordinates and country from step 3b/step 4 at run time, and writes
->   `data/step6_manual_additions.csv`. **Every `reason` is empty — filling them
->   is yours**, they are your selections. Suggested vocabulary
->   (`fua:<city>`, `tourism:<region>`, `ferry:<port>`, `border`, `network`) is
->   in the notebook, and unfilled ones are listed on every run so the gap stays
->   visible.
-> - **`step7_export_seed_stops.py` added.** Produces `stop_seed_catalog.csv` in
->   exactly the shape `db/dev/seed.py` consumes, as the **union of the current
->   step 5 output and the step 6 additions** keyed on OSM id, so a step 5
->   re-run flows into the catalog without touching the manual selection. It
->   also writes `stop_seed_provenance.csv` (`stop_id, source, reason`), because
->   the catalog has to match seed.py's column contract exactly and can't carry
->   provenance itself. `country` comes from ONTD via the step 4 join rather
->   than step 6's column, which disagrees on seven stops and is wrong on every
->   one checked: the four Crimean stations were coded `RU` against ONTD's `UA`
->   (now `UA`), Narva `RU` though it is in Estonia, Santander `NO`, Lichkov
->   `PL`. `stop_timezone` is derived as an IANA name from the country, because
->   step 6's timezone column held a bare UTC offset — which cannot express DST
->   and is wrong for Ireland (marked `+1`).
-> - **Three junk step 4 matches excluded** from the seed export: real ONTD
->   stops matched to OSM objects named `tren`, `A` and `Arad`, between 222 and
->   2743 km away. Listed in `EXCLUDED_STOP_IDS` with reasons.
-> - **`step5_match_night_train_stops.ipynb` renamed** to
->   `step5_alt_direct_osm_match.ipynb`, with a status note at the top; two
->   input paths switched to `ensure_local`, otherwise untouched.
-> - **Step 5's hardcoded `DATA_DIR`** (an absolute path into a personal home
->   directory) replaced; step 4's German comments translated and a dead
->   commented-out branch removed.
-> - **README inventory** now lists both step-5 notebooks' outputs and says
->   which is the wired-in path.
->
-> ### Still open
->
-> - **Station charges (step 7 proper).** Seeded stops carry `stop_charge_eur`
->   as NULL, which resolves through the country/global default (11.28 EUR).
->   Deliberately not a placeholder value: a dummy number would override the
->   default and make "which stops still need real data?" unanswerable. Yours
->   and Josh's to fill.
-> - **398 reasons to fill in** in `step6_manual_additions.ipynb` — the single
->   biggest remaining gap in the catalog's auditability.
-> - **The 16 unmatched stops are all accounted for** — no OSM rescue pass was
->   needed. Eight were already in the catalog under a different name (Cyrillic,
->   or a suffix like *Dej Triaj*, *Härnösand resecentrum*). Four step 6 picks
->   were corrected to the station the schedule actually calls at: Nicolina →
->   Iași, Миколаїв-Вантажний (freight) → Миколаїв, Кривий Ріг → Кривий
->   Ріг-Головний, and Велико Търново added alongside Горна Оряховица. Poltava
->   (19 trips) was added outright. The two Rail Baltica stops stay out: they
->   are not built, and this is a catalog of existing infrastructure. Please
->   sanity-check those five station choices — they are in your territory.
+> - **`Baden` is one schedule name for two stations** — Baden (CH) and Baden
+>   bei Wien (AT). They collapse into one match and one is lost. David's
+>   defect, introduced by the step 5 rebuild; it needs the schedule stop split
+>   by coordinate cluster before matching.
+> - **112 stops are dropped at seed time** because their country is not in
+>   `seed.py`'s `COUNTRIES` — 67 Ukrainian, 36 Turkish, plus MD, MK and XK.
+>   They are in the catalog but cannot be costed; widening coverage is a
+>   modelling decision, not a data fix.
 > - **`Burgas`'s schedule coordinate is in Romania** (45.15 vs the real 42.49)
->   — a latitude typo in `B-o-T_DataBase_stop_times.csv`, worth reporting
->   upstream. It is why Burgas looked absent from the catalog when it was not.
-> - **One step-5 defect still open:** `Baden` is a single schedule name for two
->   different stations — Baden (CH) and Baden bei Wien (AT). They collapse into
->   one match and one is lost. That one is mine, introduced by the rebuild; it
->   needs the schedule stop split by coordinate cluster before matching.
-> - **`stop_overrides.csv`** (Stage D) still doesn't exist.
+>   — a latitude typo in `B-o-T_DataBase_stop_times.csv`. Also in that file:
+>   Amsterdam Centraal's coordinate is stamped on nine unrelated stops across
+>   the Zürich corridor, and Luxembourg sits 31 km off. Worth reporting
+>   upstream.
+> - **`stop_overrides.csv`** (Stage D) still does not exist.
+> - **Review the step 5 reports** after any re-run: `unmatched_stops.csv` is
+>   the pipeline's own test, since every current night train stop should match.
+>   `step5_review_flagged.csv`, `step5_coord_conflicts_report.csv` and
+>   `step5_duplicate_matches_report.csv` cover the rest. Extend `ABBREVIATIONS`
+>   in the notebook when a naming convention shows up that is not handled.
 
 Builds the catalog of railway stations that qualify as night train stop
 candidates, starting from a raw OpenStreetMap (OSM) Europe extract. The
@@ -169,7 +228,7 @@ the full design and its principles).
 | 5 | Qualify stops via current night train stops (`stop_times`) | ✅ done | `step5_JoinNTStopsWithOSM.ipynb` — geo-first matcher over step 4's output. `step5_alt_direct_osm_match.ipynb` is the direct schedule→OSM reference variant, not in the chain. |
 | 6 | Add stations for [functional urban areas](https://ec.europa.eu/eurostat/web/gisco/geodata/statistical-units/cities-functional-urban-areas) that have no qualified stop yet, plus tourism regions and ferry hubs | ✅ done, reasons outstanding | `step6_manual_additions.ipynb` |
 | 7 | Export the qualified catalog for the DB seed | ✅ done | `step7_export_seed_stops.py` |
-| 7b | Fill in real station charge data (seeded as NULL today) | ⬜ to build | — |
+| 7b | Calibrate station charges from tariff documents | ⬜ in progress — 13 illustrative rows, none sourced yet | `charges/01_source_extraction.ipynb`, `charges/02_station_charges.ipynb` |
 
 Steps 2 and 3 only need re-running when the OSM source data is refreshed.
 Step 2 takes ~9 hours for all of Europe — do not re-run it casually; its
@@ -211,7 +270,9 @@ Everything under `data/` is gitignored (bulk data). What each file is:
 | `data/step5_output_duplicate_osm_matches_report.csv` | Alt step 5 output: OSM stations claimed by more than one schedule stop name. | cross-checking only |
 | `data/step5_output_schedule_coord_conflicts_report.csv` | Alt step 5 output: schedule stops with disagreeing coordinate reports. | cross-checking only |
 | `data/step6_manual_additions.csv` | Step 6 output: the 398 hand-picked stops with `reason`. | step 7 |
-| `data/stop_seed_catalog.csv` | Step 7 output: union of step 5 and step 6 in `db/dev/seed.py`'s column contract. | DB seed |
+| `data/stop_seed_catalog.csv` | Step 7 output: union of step 5 and step 6 in `db/dev/seed.py`'s column contract, charges joined in from `station_charges.csv`. | DB seed |
+| `charges/data/station_charges.csv` | Generated by `charges/02_station_charges.ipynb`: one charge per stop. A stop absent here is seeded NULL and resolves via the global default. | step 7 |
+| `charges/data/sources_register.csv` | Generated by `charges/01_source_extraction.ipynb`: the tariff documents behind those charges. | `charges/02` |
 | `data/stop_seed_provenance.csv` | Step 7 output: which layer each catalog stop came from, and why. | manual review, stakeholder questions |
 | `data/bahnhoefe_stops_sorted.csv` | ONTD export (48,617 stations): names (real/Latin/ASCII), country code, timezone, lat/lon, and the ID linking to the old stop charge data. | step 4 |
 | `data/B-o-T_DataBase_stop_times.csv` | `stop_times` export from the night train database — defines where night trains stop today. | step 5 |

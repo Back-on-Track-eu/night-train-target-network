@@ -93,6 +93,7 @@ backend/models/infrastructure/tac/calib/data/
 backend/models/infrastructure/energy_pricing/calib/data/
 backend/models/infrastructure/facility/calib/data/
 backend/models/infrastructure/route_context/calib/data/
+backend/models/infrastructure/stops/charges/data/
 
 # Seed CSVs — regenerated from the calibration notebooks at seed time
 backend/models/compositions/calib/seed/
@@ -107,9 +108,19 @@ backend/models/infrastructure/route_context/calib/seed/
 # with no ONTD snapshot, so it travels with the repository like a source
 # document. See that package's README.
 
+# Ignored, unlike route_context's: stops/charges/sources/ holds published
+# tariff PDFs and spreadsheets — third-party documents that are not ours to
+# redistribute. 01_source_extraction.ipynb registers them by filename and
+# creates the directory, so a clone without them still runs.
+backend/models/infrastructure/stops/charges/sources/
+
 # Downloaded from Drive when absent (ONTD stop catalog, country geometries)
 backend/db/dev/data/*.csv
 backend/db/dev/data/country_geoms.geojson.gz
+
+# Bulk inputs of the stop classification pipeline — OSM extracts and the
+# derived CSVs, downloaded from Drive by stops/data_sources.py when absent.
+backend/models/infrastructure/stops/data/
 
 # Scratch output from the manual test scripts in backend/scripts/. Input
 # fixtures (tc_1_evaluation_input.json) do not match the pattern and stay
