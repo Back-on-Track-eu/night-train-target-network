@@ -9,6 +9,11 @@ name: Deploy staging
 on:
   push:
     branches: [staging]
+  # Manual re-run, same key and same forced command — no extra privilege.
+  # Needed because `git pull --ff-only` cannot move a checkout backwards:
+  # rolling staging to an earlier commit reports deploy success and
+  # changes nothing, so a re-run has to be triggerable without a commit.
+  workflow_dispatch:
 
 concurrency:
   group: deploy-staging

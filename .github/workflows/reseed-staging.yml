@@ -1,0 +1,47 @@
+name: Reseed staging
+
+# Rebuild the STAGING database from db/dev/seed.py. This is the only way to get
+# recalibrated reference data (coach types, cost factors, track/stop
+# infrastructure, TAC) onto a server until the idempotent `input-params`
+# one-shot exists — see the reseed.sh header on bot-server for the ordering
+# traps it encodes.
+#
+# DESTRUCTIVE on staging: accounts, proposals, likes, comments and feedback are
+# dropped. Preserved automatically: the testing-gate access codes with their
+# redemption log, and role `david`'s privileges. An anchor dump is written to
+# /opt/backups/reseed/ before anything is touched.
+#
+# Manual only — there is no push trigger, and no production equivalent: from the
+# 18-08 test party onwards production carries real volunteer submissions.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "reseed-staging" to confirm destroying staging data'
+        required: true
+        type: string
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+jobs:
+  reseed:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check confirmation
+        if: inputs.confirm != 'reseed-staging'
+        run: |
+          echo "::error::confirmation did not match — expected exactly: reseed-staging"
+          exit 1
+
+      - name: Reseed staging over SSH
+        env:
+          SSH_KEY: ${{ secrets.TN_DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H cloud.back-on-track.eu >> ~/.ssh/known_hosts 2>/dev/null
+          ssh -i ~/.ssh/deploy_key root@cloud.back-on-track.eu staging-reseed
