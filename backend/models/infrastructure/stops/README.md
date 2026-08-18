@@ -7,10 +7,11 @@
 > its own. 980 stops, of which 583 are current night train stops (step 5) and
 > 397 are the manual additions (step 6).
 >
-> **What is left is yours**, and it is two things: the *reasons* behind the
-> manual selection, and the *station charges*. Both are described under "Your
-> two tasks" below, with everything already wired up so you only have to supply
-> the data. Please delete this handover once you have read it.
+> **What is left is yours**: the *reasons* behind the manual selection, the
+> *station charges*, and a decision about the countries we cannot cost yet.
+> All three are described under "Your tasks" below, with everything already
+> wired up so you only have to supply the data. Please delete this handover
+> once you have read it.
 >
 > ---
 >
@@ -70,9 +71,9 @@
 >
 > ---
 >
-> ### Your two tasks
+> ### Your tasks
 >
-> #### 1. Reasons for the manual additions
+> #### 1. Reasons for the manual additions — Johanna
 >
 > 387 of the 397 step 6 stops have an empty `reason`. The design requires that
 > *"why is station X (not) included?"* be answerable from the data alone,
@@ -102,7 +103,7 @@
 > conversely some FUAs you judged "already covered" were covered by a stop step
 > 5 had actually dropped. Worth a second pass while you are in there.
 >
-> #### 2. Station charges
+> #### 2. Station charges — Josh, with Johanna
 >
 > `charges/` is a calibration domain in the same shape as `tac/calib/`,
 > `energy_pricing/calib/` and `facility/calib/`: two notebooks, a source
@@ -160,6 +161,32 @@
 > sourced values, cite the document and its tariff year, leave a station out
 > rather than inventing a number.
 >
+> #### 3. Infrastructure data for the countries we cannot cost yet
+>
+> 112 stops are in the catalog but dropped at seed time, because their country
+> has no row in `db/dev/seed.py`'s `COUNTRIES` and therefore no track access
+> charge, no traction energy price and no service facility tariff behind it:
+>
+> | country | stops | note |
+> |---|---|---|
+> | UA | 67 | the largest single gap; Ukraine is central to any target network |
+> | TR | 36 | |
+> | MK | 5 | |
+> | MD | 2 | |
+> | XK | 2 | |
+>
+> Seeding them needs the four infrastructure domains extended, not this
+> pipeline changed — `models/infrastructure/tac/calib/`,
+> `energy_pricing/calib/`, `facility/calib/` and `route_context/calib/`. Each
+> already falls back to the European mean for a country with no sourced value,
+> so the minimum is registering the country and letting the mean apply; the
+> better version is a network statement per country, which is what the existing
+> calibrations do for the 34 already modelled.
+>
+> That is a modelling decision rather than a data gap, and it is David's to
+> take, but it belongs on your radar: until it happens, a route through Lviv or
+> Istanbul cannot be costed, and the stops simply are not in the app.
+>
 > ---
 >
 > ### How to finish and hand back
@@ -190,10 +217,8 @@
 >   bei Wien (AT). They collapse into one match and one is lost. David's
 >   defect, introduced by the step 5 rebuild; it needs the schedule stop split
 >   by coordinate cluster before matching.
-> - **112 stops are dropped at seed time** because their country is not in
->   `seed.py`'s `COUNTRIES` — 67 Ukrainian, 36 Turkish, plus MD, MK and XK.
->   They are in the catalog but cannot be costed; widening coverage is a
->   modelling decision, not a data fix.
+> - **112 stops are dropped at seed time** for want of infrastructure data —
+>   see task 3 above.
 > - **`Burgas`'s schedule coordinate is in Romania** (45.15 vs the real 42.49)
 >   — a latitude typo in `B-o-T_DataBase_stop_times.csv`. Also in that file:
 >   Amsterdam Centraal's coordinate is stamped on nine unrelated stops across
@@ -244,11 +269,59 @@ uv run jupyter lab                                # then run step3b, step4, step
 uv run python step7_export_seed_stops.py          # writes data/stop_seed_catalog.csv
 ```
 
-Inputs resolve through `data_sources.py`: `ensure_local("<filename>")` returns
-the local path, downloading the file from Drive into `data/` when it isn't
-there yet. Nothing under `data/` is tracked in git. If a download can't work
-(no id configured, file not shared), place the file in `data/` by hand — the
-error message says which one and where.
+Inputs resolve through `data_sources.py`, which draws a line between two kinds
+of file:
+
+- **`ensure_local(name)`** — comes from outside this machine, so it syncs the
+  Drive folder into `data/` when the file is absent. That is the two external
+  exports (`bahnhoefe_stops_sorted.csv`, `B-o-T_DataBase_stop_times.csv`) and
+  the OSM-derived intermediates you cannot rebuild without the ~60 GB Europe
+  extract, an osmium pass and hours of Overpass calls (steps 2, 3a, 3b, 4).
+  One folder id, `STOPS_DRIVE_FOLDER_ID` in `backend/docker/.env`, covers all
+  of them; syncing uses `gdown` (in the `dev` extra), since Drive cannot list a
+  folder over plain HTTP. The sync only fills gaps — a local file always
+  wins, so a file a step just wrote is never overwritten.
+- **`local_input(name, produced_by)`** — written by an earlier step of this
+  pipeline, so it is never downloaded: a Drive copy could silently override
+  what your own notebook just produced. Missing means that step has not been
+  run, and the error says which one.
+
+Nothing under `data/` is tracked in git. If the sync can't work (no id set,
+`gdown` not installed, folder not shared), place the file in `data/` by hand —
+the message names the file and the reason.
+
+## Why this is not regenerated at seed time
+
+`db/dev/seed.py` runs the calibration notebooks itself when their seed CSVs are
+missing (`_ensure_seed_csvs`, used by `compositions/calib`, `tac/calib`,
+`energy_pricing/calib`, `facility/calib` and `route_context/calib`). This
+pipeline deliberately does not work that way, and the difference is worth
+stating because it is the first thing anyone asks.
+
+Those domains are **derivations**: given the source register in the repo, the
+notebook recomputes the same values every time, in seconds, offline. A
+container can reproduce them, so it does.
+
+This pipeline is neither cheap nor fully deterministic:
+
+- step 2 needs the ~60 GB OSM Europe extract, downloaded by hand from Geofabrik
+- step 3a makes hours of calls to a public, rate-limited Overpass instance
+- step 6 is a **human selection** — 404 stations chosen by judgement. The
+  notebook is a record of those decisions, not a derivation of them, and
+  re-running it cannot reproduce judgement it was never given
+
+So it runs offline on a workstation, publishes exactly one artifact
+(`stop_seed_catalog.csv`) to Drive, and `seed.py` downloads that. The rule:
+
+> If a container can reproduce it from what is in the repo, `seed.py`
+> regenerates it. If it needs external bulk data or human judgement, it runs
+> offline and publishes one artifact.
+
+The charge calibration in `charges/` is the near-miss: it *is* a derivation in
+the calib mould and could follow that pattern. It does not, because step 7
+joins its output into the catalog before upload — by the time `seed.py` sees
+the CSV the charges are already in it, and a second path would mean two places
+deciding a stop's charge.
 
 ## Data inventory
 

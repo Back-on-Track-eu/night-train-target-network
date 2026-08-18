@@ -157,6 +157,21 @@ retirement of `service_class_density`) is documented column-by-column in
 the column descriptions (`db/schema.py`) and in the
 migration `sql/migrations/2026-07-22_composition_redesign.sql`.
 
+### The stop catalog does not work this way
+
+`stop_seed_catalog.csv` is also a derived artifact, but `seed.py` downloads it
+rather than regenerating it. The stop classification pipeline that produces it
+(`models/infrastructure/stops`) needs the ~60 GB OSM Europe extract, hours of
+Overpass calls, and — in step 6 — a human selection of some 400 stations. A
+container cannot reproduce any of that, and re-running a selection cannot
+reproduce judgement. So the pipeline runs offline, publishes one artifact to
+Drive, and `seed.py` fetches it via `STOP_SEED_FILE_ID`.
+
+The rule across both cases: if a container can reproduce it from what is in
+the repo, `seed.py` regenerates it; if it needs external bulk data or human
+judgement, it runs offline and publishes one artifact. See
+`models/infrastructure/stops/README.md`.
+
 ---
 
 ## For database architects — standalone stack
