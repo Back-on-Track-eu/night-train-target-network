@@ -45,7 +45,8 @@ FILE_IDS: dict[str, tuple[str, str]] = {
     "step3b_output_osm_stations_classified.csv": ("STOPS_STEP3B_OUTPUT_FILE_ID", ""),
     "step4_MatchingONTDtoOSM.csv": ("STOPS_STEP4_OUTPUT_FILE_ID", ""),
     "step5_JoinedNTStops.csv": ("STOPS_STEP5_OUTPUT_FILE_ID", ""),
-    "step6_metropol.csv": ("STOPS_STEP6_OUTPUT_FILE_ID", ""),
+    "step6_metropol.csv": ("STOPS_STEP6_LEGACY_FILE_ID", ""),
+    "step6_manual_additions.csv": ("STOPS_STEP6_ADDITIONS_FILE_ID", ""),
 }
 
 # Expected header per CSV, checked after download. A Drive permission error
