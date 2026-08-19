@@ -30,7 +30,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.20"
+ROUTE_BUILDER_VERSION: str = "0.9.25"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -45,6 +45,86 @@ ROUTE_BUILDER_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.25": {
+        "date": "2026-08-18",
+        "author": "david",
+        "changes": "OUTPUT CHANGE, no logic change: the stop catalog was "
+        "replaced. db/dev/seed.py's 58 curated stops and the ONTD-derived "
+        "seed CSV both gave way to the stop classification pipeline's export "
+        "(models/infrastructure/stops), which is roughly 870 seeded stops on "
+        "OSM-keyed ids. Stop ids therefore change shape — DE_BERLIN_HBF "
+        "becomes osm:n3856100103 — and candidate DISCOVERY sees a denser "
+        "catalog, so the auto-stop search returns a different set for the "
+        "same request even though the budget rule is untouched. The bump is "
+        "what invalidates cached compute results and marks stored proposals "
+        "stale: their auto-added stops, and any caller stop id they hold, "
+        "predate the new catalog.",
+    },
+    "0.9.24": {
+        "date": "2026-08-17",
+        "author": "david",
+        "changes": "OUTPUT CHANGE, mode 'add' only: the auto-stop detour "
+        "budget is now 5% of TECHNICAL trip time (driving + dynamics + "
+        "dwell) rather than 5% of padded time. A detour costs real running "
+        "and stopping minutes; the schedule supplement is margin and should "
+        "not fund extra stops. The trigger was the route-context calibration "
+        "replacing a flat 0.40 supplement with per-country values of 0.35 to "
+        "0.71 — which would have given the same physical route a quarter "
+        "more stop budget in France than in Austria, and would have "
+        "reshuffled the stop list of every stored proposal on every future "
+        "buffer change. Candidate DISCOVERY is untouched: still every "
+        "catalog stop within AUTO_STOP_BUFFER_M (10 km) of the routed path. "
+        "Mode 'suggest' is untouched — it ignores the budget by design and "
+        "returns every candidate in the radius.",
+    },
+    "0.9.23": {
+        "date": "2026-08-17",
+        "author": "david",
+        "changes": "OUTPUT CHANGE: Parking carries the scheduled layover in "
+        "hours — the gap between the arrival that ends one trip at a terminal "
+        "and the departure that starts the next, wrapped forward a day where "
+        "the return departs earlier in clock terms than the inbound arrived. "
+        "Physics the route always knew and never reported; the facility "
+        "calibration needs it because Europe prices stabling per started "
+        "hour, per started 24 h period or per occupation, and because a free "
+        "allowance longer than the layover zeroes the charge. A route with no "
+        "second trip to depart again reports 0.0 rather than a guess. Stored "
+        "payloads without the field stay evaluable and price no stabling.",
+    },
+    "0.9.22": {
+        "date": "2026-08-13",
+        "author": "david",
+        "changes": "Locomotives become catalog entities "
+        "(input_params.loco_types) instead of a hardcoded 90 t constant "
+        "plus a count. Traction dynamics and the timetable now haul "
+        "Composition.total_gross_weight_t — coaches plus EVERY assigned "
+        "locomotive at its own mass — where they previously added one "
+        "locomotive's weight regardless of how many the composition has. "
+        "NO VALUE CHANGE at the seeded catalog: all eight compositions "
+        "run a single 90 t machine, so the two expressions are "
+        "arithmetically identical today. They diverge the moment a "
+        "composition gains a second locomotive or a per-type mass is "
+        "sourced, which is why the constant is retired now rather than "
+        "later. TRACTION_LOCO_WEIGHT_T is removed; the energy model's "
+        "formula reference moves from the standard value to the column.",
+    },
+    "0.9.21": {
+        "date": "2026-08-13",
+        "author": "david",
+        "changes": "ADDITIVE output change: a Segment now carries the "
+        "countries it passes through IN PATH ORDER (the share dicts are "
+        "unordered and cannot express it) and the separately charged "
+        "crossings it owns. Ordering is what lets the evaluation place "
+        "each country run on the clock, which the calibrated night "
+        "tariffs need; crossings are matched by polygon intersection "
+        "here rather than at evaluation time, and each is claimed by the "
+        "first leg touching it, so one split by an intermediate stop is "
+        "charged once per trip instead of by every leg. No physics "
+        "changes: distances, times and country shares are identical to "
+        "0.9.20. Route payloads stored before this version stay "
+        "loadable — the deserializer falls back to the share dict's keys "
+        "for ordering and charges no crossing.",
+    },
     "0.9.20": {
         "date": "2026-08-12",
         "author": "david",
@@ -214,7 +294,8 @@ CHANGELOG: dict = {
         "author": "david",
         "changes": "auto_stop_addition implemented end to end: finds catalog stops "
         "within AUTO_STOP_BUFFER_M (3km) of the routed path and greedily adds "
-        "any that fit within a AUTO_STOP_MAX_DETOUR_PER (5%) detour-time "
+        "any that fit within a AUTO_STOP_MAX_DETOUR_PER (5% of technical "
+        "trip time) detour-time "
         "budget, cheapest first — see models/route/timetable.py. Stop gains a "
         "new auto_added field (BREAKING for consumers of POST /api/route/plan: "
         "every from_stop/to_stop in the response now carries this field). "
@@ -514,16 +595,17 @@ on a parallel line, which is also why AUTO_STOP_BUFFER_M is wide."""
 
 
 AUTO_STOP_MAX_DETOUR_PER: float = 0.05
-"""Max allowed increase in full (driving + dynamics + buffer + dwell) trip time, as a
-fraction of the original trip's time, before mode 'add' stops adding
-further candidates. Mode 'suggest' deliberately ignores this budget."""
+"""Max allowed increase in TECHNICAL trip time (driving + dynamics + dwell),
+as a fraction of the original trip's technical time, before mode 'add' stops
+adding further candidates. Mode 'suggest' deliberately ignores this budget.
 
-# --- Traction dynamics (per-stop accel/brake time loss — models/route/routing/dynamics.py)
-TRACTION_LOCO_WEIGHT_T: float = 90.0
-"""Assumed standard locomotive weight (Siemens Vectron, ~90t). Locomotives
-are full-service leased and not part of the composition data, so the loco
-is a fixed standard assumption added on top of Composition.total_weight_t
-(which covers coaches only)."""
+The schedule supplement is excluded from the basis: a detour costs real
+running and stopping minutes, while the supplement is margin, and margin
+should not fund extra stops. It also kept stop selection independent of the
+route-context calibration — with per-country supplements of 0.35 to 0.71,
+measuring against padded time would have given the same physical route a
+quarter more detour budget in France than in Austria."""
+
 
 TRACTION_LOCO_POWER_KW: float = 6_400.0
 """Assumed locomotive continuous power at the wheel (Siemens Vectron AC:
@@ -915,7 +997,7 @@ ROUTE_FORMULAS: dict[str, Formula] = {
                 symbol="m_loco",
                 description="Weight of the assumed standard locomotive",
                 unit="t",
-                ref="standard:ROUTE.TRACTION_LOCO_WEIGHT_T",
+                ref="column:input_params.loco_types.loco_type_weight_t",
             ),
         ),
         output=FormulaParam(

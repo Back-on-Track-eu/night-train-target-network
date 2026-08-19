@@ -30,7 +30,7 @@ class TestTransliterate:
         [
             ("Berlin Hbf", "BERLIN_HBF"),
             # Curated style: umlauts fold to two letters, matching the
-            # seed's own CH_ZUERICH_HB / SE_GOTEBORG_C convention.
+            # seed's own osm:n1236383343 / osm:n1305188216 convention.
             ("Zürich HB", "ZUERICH_HB"),
             ("Göteborg C", "GOETEBORG_C"),
             ("Malmö C", "MALMOE_C"),
@@ -63,13 +63,17 @@ class TestTransliterate:
 
 
 class TestMintId:
+    """The minting rule itself, not the catalog: these assert the shape
+    mint_tn_stop_id() produces, which is unchanged. Note the ids it mints
+    (COUNTRY_NAME) no longer share a namespace with the seeded catalog,
+    which is now OSM-keyed — see the note in stop_mapping.py."""
+
     def test_shape(self):
         assert mint_tn_stop_id("de", "Berlin Hbf") == "DE_BERLIN_HBF"
 
-    def test_matches_curated_convention(self):
-        """The minting rule reproduces seed ids verbatim for stations
-        whose curated id was derived the same way — the property that
-        makes minted and curated stops one namespace."""
+    def test_folds_the_name_the_same_way_everywhere(self):
+        """The minting rule is transliterate() plus a country prefix, so a
+        minted id is reproducible from the name alone."""
         assert mint_tn_stop_id("CH", "Zürich HB") == "CH_ZUERICH_HB"
         assert mint_tn_stop_id("AT", "Wien Hbf") == "AT_WIEN_HBF"
         assert mint_tn_stop_id("FR", "Paris Est") == "FR_PARIS_EST"

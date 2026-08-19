@@ -307,7 +307,8 @@ def compute_evaluation_domain(
 
     tracks = loader.build_all_tracks(resolved_scenario_id)
     stop_infra = loader.build_all_stops(resolved_scenario_id)
-    _, views = evaluate_and_build_views(route, tracks, stop_infra)
+    passages = loader.build_all_passages(resolved_scenario_id)
+    _, views = evaluate_and_build_views(route, tracks, stop_infra, passages)
 
     costed = route_to_dict(route, resolved_scenario_id, tracks)
 

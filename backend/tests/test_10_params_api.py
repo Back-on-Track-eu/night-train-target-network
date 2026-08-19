@@ -87,11 +87,12 @@ class TestStopInfrastructures:
             assert isinstance(charge["is_default"], bool)
 
     def test_is_default_flags_via_api(self, stops_body):
-        """SE_STOCKHOLM_C (NULL charge in seed) is is_default=True; Berlin
-        (explicit charge) is is_default=False — provenance survives the API."""
+        """osm:n25948183 (no row in station_charges.csv) is is_default=True;
+        Berlin (listed there) is is_default=False — provenance survives the
+        API."""
         stops = {s["stop_id"]: s for s in stops_body["stops"]}
-        assert stops["SE_STOCKHOLM_C"]["stop_charge_eur"]["is_default"] is True
-        assert stops["DE_BERLIN_HBF"]["stop_charge_eur"]["is_default"] is False
+        assert stops["osm:n25948183"]["stop_charge_eur"]["is_default"] is True
+        assert stops["osm:n3856100103"]["stop_charge_eur"]["is_default"] is False
 
     def test_global_default_present(self, stops_body):
         """The global default row (the one SE resolves against) is exposed

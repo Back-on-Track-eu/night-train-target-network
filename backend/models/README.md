@@ -44,10 +44,27 @@ models/
 │   └── README.md                    # Emissions model documentation (sources, consumers, roadmap)
 ├── compositions/
 │   ├── model.py                     # COMPOSITIONS_MODEL_VERSION — cost calibration anchor (calib/CALIBRATION.md)
+│   │                                #   also the source of the loco_types catalog
 │   └── calib/                       # Calibration notebooks, data, and CALIBRATION.md
 ├── infrastructure/
-│   ├── model.py                     # INFRA_MODEL_VERSION — infrastructure parameter anchor
-│   └── STOP_CLASSIFICATION.md       # Stop catalog classification pipeline
+│   ├── model.py                     # INFRA_MODEL_VERSION + WEEKDAY_BLEND
+│   ├── STOP_CLASSIFICATION.md       # Stop catalog classification pipeline
+│   ├── tac/
+│   │   ├── calc_tac.py              # Component track access charge per segment
+│   │   └── calib/                   # TAC calibration notebooks + TAC_CALIBRATION.md
+│   ├── energy_pricing/
+│   │   ├── calc_energy_price.py     # Banded traction energy price + catenary charge per segment
+│   │   └── calib/                   # Traction energy price + supply charges,
+│   │                                #   ENERGY_PRICING_CALIBRATION.md
+│   ├── facility/
+│   │   ├── calc_facility.py         # Shunting event + stabling occupation with hotel power
+│   │   └── calib/                   # FACILITY_CALIBRATION.md
+│   ├── route_context/
+│   │   └── calib/                   # Terrain, schedule supplement, dwell, HSR access —
+│   │                                #   ROUTE_CONTEXT_CALIBRATION.md (no calc module:
+│   │                                #   nothing here is a charge)
+│   ├── stops/                       # RESERVED — station charge calibration
+│   └── README.md                    # The four calibrated domains and their shared contract
 └── evaluation/
     ├── calc.py                      # Cost/revenue evaluation → EvaluationResult
     ├── views.py                     # Breakdown aggregation, allocation, normalisation
@@ -185,10 +202,13 @@ model are consolidated in `route/model.py` (`STANDARD VALUES` /
 | `route_factory.py` | Sole constructor for `Trip`, `TripPair`, `Route` — orchestrates the full planning pipeline |
 | `demand/stopgap.py` | Stopgap demand model — populates `TripPair.od_pairs` |
 | `rail_router.py` | HTTP calls to routing engine, country attribution, buffer computation → `RoutedLeg` |
-| `calc_energy_consumption.py` | Energy model — enriches `RoutedLeg.energy_kwh` |
+| `calc_energy_consumption.py` | Energy model — enriches `RoutedLeg.energy_kwh` (how many kWh) |
+| `infrastructure/tac/calc_tac.py` | Component track access charge per segment |
+| `infrastructure/energy_pricing/calc_energy_price.py` | Traction energy price per segment — banded day/night rate plus the catenary charge (what a kWh costs) |
+| `infrastructure/facility/calc_facility.py` | One shunting movement, and one stabling occupation priced on the country's basis against the scheduled layover, plus hotel power |
 | `calc.py` | All monetary values — produces flat `EvaluationResult` with one cost object per event |
 | `views.py` | Aggregation, allocation, and normalisation — produces `Breakdown` matrices |
-| `trip.py` | Physics domain objects: `Stop`, `Segment`, `Trip`. No monetary values |
+| `trip.py` | Physics domain objects: `Stop`, `Segment`, `Trip`, and `Segment.country_windows()` — the clock placement both charge models band against. No monetary values |
 | `route.py` | Route container: `Route`, `TripPair`, `Parking`, `Shunting`, `ODPair`, `Schedule` |
 | `params.py` | Immutable parameter dataclasses loaded from DB |
 

@@ -35,7 +35,7 @@ BASE_REQUEST = {
     "stops": STOPS_BERLIN_DRESDEN_WIEN,
     "composition_id": "NEW-BAL-7",
     # Pinned off for deterministic structural assertions — see
-    # test_20_route_content.py's module docstring for why CZ_BRNO_HLN
+    # test_20_route_content.py's module docstring for why osm:n3325029085
     # would otherwise get auto-added on this corridor.
     "auto_stop_addition": "off",
 }
@@ -228,7 +228,7 @@ class TestValidation:
     def test_too_few_stops(self, api_base):
         resp = requests.post(
             f"{api_base}{PROPOSAL_CALC_URL}",
-            json={"stops": ["DE_BERLIN_HBF"], "composition_id": "NEW-BAL-7"},
+            json={"stops": ["osm:n3856100103"], "composition_id": "NEW-BAL-7"},
             timeout=30,
         )
         assert resp.status_code == 400

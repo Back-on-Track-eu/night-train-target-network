@@ -192,6 +192,27 @@ one entry per country: `country_code` plus a field object for each of
 `energy_price_eur_kwh`, `terrain_score`, `terrain_category`, `hsr_allowed`,
 `min_boarding_time_min`, `min_alighting_time_min`, `buffer_quota_per`.
 
+These ten are the headline per-country figures, and four of them are no longer
+what the cost model prices from. Track access is a calibrated component sum
+(day and night rates, gross-tonne-km, seat-km, per-stop, revenue share, peak
+terms) and traction energy is a day rate, an optional night rate with its band,
+and a catenary charge per train-km or per gross-tonne-km. Those components are
+seeded, versioned and served in the response's `descriptions`/`sources` chain
+like any other parameter, but they are not broken out per country in this
+payload — `tac_eur_train_km` stays a display figure and `energy_price_eur_kwh`
+is the day rate. Derivations:
+`models/infrastructure/tac/calib/TAC_CALIBRATION.md` and
+`models/infrastructure/energy_pricing/calib/ENERGY_PRICING_CALIBRATION.md`.
+
+The same applies to the two facility figures. `shunting_eur_event` is now an
+all-in charge — the infrastructure manager's tariff plus the market cost of the
+locomotive and crew it does not supply — and is read as it stands.
+`parking_eur_day` has become display-only: stabling is priced from a basis and a
+matching rate against the scheduled layover and the train's length, since Europe
+charges per started 24 h, per started hour, or flat per occupation, and power
+drawn while standing is charged on top. Derivations:
+`models/infrastructure/facility/calib/FACILITY_CALIBRATION.md`.
+
 **Field object** — every individually versioned parameter value is wrapped as:
 
 | Field | Type | Description |
@@ -219,7 +240,13 @@ grouped by concern:
 real section geometry), `equipment` (amenity OR-aggregations incl.
 **has_wifi**, plus the **food_and_beverages** catering concept),
 `coaches` (`{count, list}` — the ordered formation referencing the
-top-level **coach_types** catalog), `fixed_costs`, `variable_km`,
+top-level **coach_types** catalog), **`locos`** (the ordered locomotives
+with mass, design speed and traction, from `input_params.loco_types` —
+`routing.n_locos` is their count, not a stored column) and
+**`loco_lease_eur_h`** (the hourly rental rate keyed by `loco_type_id`,
+since the rate is a term of the (operator, machine) pairing —
+`loco_full_service_lease_eur_h` remains alongside it as the whole-consist
+rate the cost model multiplies by), `fixed_costs`, `variable_km`,
 **cost_allocation** (`by_class_main`: each class's blended cost
 proportion — the workbook cost_acc columns; identical to the
 evaluation's by_class_main hardware basis; sums to 1), and `indicative`
@@ -293,7 +320,7 @@ layer of candidate stops tagged with `added_time_min`.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `stops` | array of string | ✓ | Ordered list of stop IDs, min 2 — plain strings, e.g. `["DE_BERLIN_HBF", "AT_WIEN_HBF"]`. No per-stop type or time; both are derived automatically, see `timetable_mode` |
+| `stops` | array of string | ✓ | Ordered list of stop IDs, min 2 — plain strings, e.g. `["osm:n3856100103", "osm:w423692233"]`. No per-stop type or time; both are derived automatically, see `timetable_mode` |
 | `composition_id` | string | ✓ | From `/api/params/compositions` |
 | `scenario_id` | int | — | Pins which version of every parameter table to use. Omit for the current live base scenario |
 | `routing_mode` | string | — | Default `"fullRouting"` — see **Mode switches** below |
@@ -310,7 +337,7 @@ meaning for a call that never persists.
 ```json
 {
   "scenario_id": null,
-  "stops": ["DE_BERLIN_HBF", "DE_DRESDEN_HBF", "AT_WIEN_HBF"],
+  "stops": ["osm:n3856100103", "osm:n25397500", "osm:w423692233"],
   "composition_id": "STD-7.1",
   "routing_mode": "fullRouting",
   "timetable_mode": "simpleAutomatic",
@@ -368,7 +395,7 @@ stop list.
   "route_fingerprint": "sha256:3f9a1c...",
   "cache_hit": false,            // true when served from the compute cache (§2.3)
   "request": {
-    "stops": ["DE_BERLIN_HBF", "DE_DRESDEN_HBF", "AT_WIEN_HBF"],
+    "stops": ["osm:n3856100103", "osm:n25397500", "osm:w423692233"],
     "composition_id": "NEW-BAL-7",
     "scenario_id": 1,
     "timetable_mode": "simpleAutomatic",
@@ -381,7 +408,7 @@ stop list.
   ],
   "summary": {
     "total_distance_km": 683.4, "total_time_h": 9.0, "avg_speed_kmh": 76.0,
-    "n_stops": 3, "countries": ["AT", "DE"], "stop_ids": ["DE_BERLIN_HBF", "..."],
+    "n_stops": 3, "countries": ["AT", "DE"], "stop_ids": ["osm:n3856100103", "..."],
     "cost_eur_per_train_km": 12.4, "revenue_eur_per_train_km": 14.1,
     "margin_eur_per_train_km": 1.7, "subsidy_eur_per_year": 0.0,
     "demand_trips_per_year": 4200, "demand_trip_km_per_year": 2870000,
@@ -419,11 +446,12 @@ stop list.
       }
     ],
     "parkings": [
-      { "stop_id": "...", "stop_name": "...", "country_code": "...", "trip_ids": ["..."] }
+      { "stop_id": "...", "stop_name": "...", "country_code": "...", "trip_ids": ["..."], "hours": 14.0 }
     ],
     "shuntings": [
       { "stop_id": "...", "stop_name": "...", "country_code": "...", "trip_id": "..." }
     ],
+
     "track_infrastructure": [
       { "...": "one entry per country the route actually touches, see below" }
     ],
@@ -526,7 +554,7 @@ excluded — see the `evaluation` block below for those):
 | `distance_m` | int | Leg distance |
 | `driving_time_min`, `dynamics_time_min`, `buffer_time_min` | int | Leg duration components: raw router time (constant-cruise passage), per-stop accel/brake time loss (traction dynamics), and schedule buffer — the country quota applied to driving and to dynamics (the dynamics cruise speed is always derived from raw driving time first, buffer never feeds the physics) |
 | `slack_time_min` | int | Deliberate schedule padding beyond routing physics — non-zero only on legs inside a stretched fixed-night interval (see `timetable_mode`). Total leg time = driving + dynamics + buffer + slack, and stop-to-stop elapsed times always match that sum |
-| `energy_kwh` | float | Currently a flat 28.0 kWh/km dummy factor — not calibrated yet |
+| `energy_kwh` | float | Currently a flat 28.0 kWh/km dummy factor — not calibrated yet. How much it *costs* is calibrated: the price side splits this between the country's day and night electricity rate by clock time and adds the catenary charge where one is levied |
 | `country_distance_shares`, `country_time_shares` | object | `{country_code: share}`, each sums to 1.0. Includes transit-only countries the leg crosses without stopping |
 
 **`Stop`** (embedded in every `from_stop`/`to_stop`):
@@ -951,7 +979,7 @@ paginated).
     "proposal_ids":    [5],
     "user_ids":        [1],
     "countries":       {"values": ["DE", "AT"], "mode": "all"},
-    "stop_ids":        ["DE_BERLIN_HBF"],
+    "stop_ids":        ["osm:n3856100103"],
     "composition_ids": ["NEW-BAL-7"],
     "demand_kpis_placeholder": [true],
     "name": "wien",
@@ -977,8 +1005,8 @@ paginated).
     "updated_at":                  { "min": "2026-01-01T00:00:00+00:00" },
 
     "trip_windows": [
-      { "stop_id": "DE_BERLIN_HBF", "departure": { "from": "20:00", "to": "23:00" } },
-      { "stop_id": "AT_WIEN_HBF",   "arrival":   { "from": "07:00", "to": "09:30", "day_offset": 1 } }
+      { "stop_id": "osm:n3856100103", "departure": { "from": "20:00", "to": "23:00" } },
+      { "stop_id": "osm:w423692233",   "arrival":   { "from": "07:00", "to": "09:30", "day_offset": 1 } }
     ],
 
     "bbox": [8.0, 45.0, 20.0, 55.0]
@@ -1006,7 +1034,7 @@ paginated).
         "total_distance_km": 683.4, "total_time_h": 9.0, "avg_speed_kmh": 76.0,
         "n_stops": 3, "countries": ["AT", "DE"],
         "country_relations": ["AT__DE"],
-        "stop_ids": ["DE_BERLIN_HBF", "..."],
+        "stop_ids": ["osm:n3856100103", "..."],
         "cost_eur_per_train_km": 12.4, "revenue_eur_per_train_km": 14.1,
         "margin_eur_per_train_km": 1.7, "subsidy_eur_per_year": 0.0,
         "demand_trips_per_year": 4200, "demand_trip_km_per_year": 2870000,
@@ -1027,7 +1055,7 @@ paginated).
         "total_distance_km": 705.0, "total_time_h": 10.5, "avg_speed_kmh": 67.0,
         "n_stops": 8, "countries": ["AT", "CZ", "DE"],
         "country_relations": ["AT__DE", "CZ__DE"],
-        "stop_ids": ["DE_BERLIN_HBF", "..."],
+        "stop_ids": ["osm:n3856100103", "..."],
         "co2_g_per_pax_km": 33.0,
         "geometry_routed": true,
         "ontd_url": "https://back-on-track.eu/nighttrains/?route_id=42"
@@ -1041,7 +1069,7 @@ paginated).
         "type": "Feature",
         "geometry": { "type": "LineString", "coordinates": ["..."] },
         "properties": {
-          "stop_a": "AT_WIEN_HBF", "stop_b": "DE_BERLIN_HBF",
+          "stop_a": "osm:w423692233", "stop_b": "osm:n3856100103",
           "proposal_count": 2, "existing_count": 1, "total_count": 3,
           "proposal_ids": [5, 8], "existing_route_ids": ["42"],
           "avg_margin_eur_per_train_km": 0.9
@@ -1050,7 +1078,7 @@ paginated).
     ]
   },
   "map_stop_counts": [
-    { "stop_id": "DE_BERLIN_HBF", "lat": 52.525, "lon": 13.369,
+    { "stop_id": "osm:n3856100103", "lat": 52.525, "lon": 13.369,
       "n_proposals": 3, "n_existing": 1, "n": 4 }
   ],
   "map_country_counts": {
@@ -1360,7 +1388,7 @@ numbers incomparable.
       "unresolved_countries": ["ES", "PT", "GB"]
     },
     "reference_stations": {
-      "DE": { "stop_id": "DE_FULDA", "stop_name": "Fulda", "lat": 50.554, "lon": 9.684 }
+      "DE": { "stop_id": "osm:n1600298350", "stop_name": "Fulda", "lat": 50.554, "lon": 9.684 }
     },
     "top":  [ { "country_a": "AT", "country_b": "DE", "rail_km": 612.4, "rail_time_h": 7.9,
                 "n_proposals": 9, "n_existing": 4, "n": 13 } ],

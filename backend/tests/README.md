@@ -40,6 +40,7 @@ built on top of it:
 | `test_55` | `GET /api/proposals/stats` — §7.7 counts, KPI aggregates per scope, top/flop countries and country relations |
 | `test_60` | Feedback API — submit/categories |
 | `test_70`–`test_71` | Auth — integration (API + DB) and standalone units |
+| `test_72`–`test_76` | Standalone model units — no stack, no DB. Roster efficiency, the component track access charge, the locomotive catalog, the traction energy price model, and the service-facility charges. Runnable on their own with `pytest tests/test_7X_....py` |
 
 Content tests that need *controlled* demand (`test_30`, `test_40`) call
 the model layer directly (`tests/helpers.py:compute_evaluation_domain()`),
@@ -114,7 +115,7 @@ Shared code:
 | `test_composition_weight_matches_db_aggregation` | `total_weight_t` correct | SUM of coach gross weights | loader = DB |
 | `test_composition_density_matches_db` | Derived densities (`density_by_class_main_length/weight`, m and t per place) reproduce section sums ÷ places (`service_class_density` retired 2026-07-22) | coach section geometry | loader = section math per class |
 | `test_track_infra_fields_match_db` | Track values at pinned version, flagged non-default | DE row at pinned version | values match, `is_default=False` |
-| `test_stop_fields_match_db` | Stop identity/location correct | DE_BERLIN_HBF at pinned version | all fields match |
+| `test_stop_fields_match_db` | Stop identity/location correct | osm:n3856100103 at pinned version | all fields match |
 | `test_country_geometries_cover_stop_countries` | Runtime geometry availability for CountryIndex | `get_country_geometries()` | polygon for every stop country |
 | `test_composition_indicative_figures_present` | Seeded calibration KPIs wired through, per composition, differentiated by material strategy | `build_all_compositions()` | NEW-BAL-7 & REF-BUD-6 present with distinct positive KPIs |
 
@@ -132,8 +133,8 @@ Shared code:
 | `TestParamProvenance::test_field_descriptions_populated` | Column comments captured once per collection | `tracks.descriptions.fields` | ≥ 1 non-empty description |
 | `TestParamProvenance::test_explicit_value_is_not_default_and_has_source` | Explicit value provenance | DE tac | `is_default=False`, source populated |
 | `TestParamProvenance::test_null_value_resolves_from_default` | NULL → default resolution + value equality | SE tac vs defaults table | `is_default=True`, value = default row |
-| `TestParamProvenance::test_stop_null_charge_resolves_from_global_default` | Stop-level default resolution | SE_STOCKHOLM_C vs global default | `is_default=True`, value = global default |
-| `TestParamProvenance::test_stop_explicit_charge_is_not_default` | Explicit stop value | DE_BERLIN_HBF charge | `is_default=False` |
+| `TestParamProvenance::test_stop_null_charge_resolves_from_global_default` | Stop-level default resolution | osm:n25948183 vs global default | `is_default=True`, value = global default |
+| `TestParamProvenance::test_stop_explicit_charge_is_not_default` | Explicit stop value | osm:n3856100103 charge | `is_default=False` |
 | `test_git_sha_injected_in_ci` | CI injects GIT_SHA into all 3 model version files (skipped locally) | `GITHUB_SHA` env | all 3 `GIT_SHA` constants = commit SHA |
 
 ## test_10_params_api.py — GET /api/params/*
@@ -143,7 +144,7 @@ Shared code:
 | `TestStopInfrastructures::test_response_layout` | Top-level shape | GET StopInfrastructures | descriptions/sources/default_stops/count/stops; count = len(stops) |
 | `TestStopInfrastructures::test_stops_have_required_fields` | Per-stop fields | all stops | id/name/country/lat/lon/charge present |
 | `TestStopInfrastructures::test_stop_charge_is_field_object` | Field-object contract | all stops | `{value, is_default, version, source_id}` |
-| `TestStopInfrastructures::test_is_default_flags_via_api` | Provenance survives serialization | SE_STOCKHOLM_C / DE_BERLIN_HBF | True / False respectively |
+| `TestStopInfrastructures::test_is_default_flags_via_api` | Provenance survives serialization | osm:n25948183 / osm:n3856100103 | True / False respectively |
 | `TestStopInfrastructures::test_global_default_present` | Default row exposed | `default_stops.global` | present, charge > 0 |
 | `TestStopInfrastructures::test_source_ids_resolve` | Source dedup integrity | field `source_id`s | every id resolves in `sources` map |
 | `TestTrackInfrastructures::test_response_layout` | Top-level shape | GET TrackInfrastructures | descriptions/sources/default_track_infra/count/entries |
@@ -204,10 +205,10 @@ content, same models/route pipeline, just a different HTTP entry point).
 | `TestParkingsAndShuntings::test_parkings_deduplicated_by_stop` | Parking derivation | route parkings | ≥ 1, unique stop_ids, each with trip_ids |
 | `TestModeSwitches::test_explicit_default_values_accepted` / `test_simple_routing_mode_accepted` | Mode acceptance | explicit defaults / `simpleRouting` | 200 each |
 | `TestModeSwitches::test_invalid_mode_returns_400` (×4) | Mode validation | bad routing/timetable/schedule/auto_stop_addition mode | 400 each |
-| `TestModeSwitches::test_auto_stop_addition_defaults_to_add_and_inserts_brno` | auto_stop_addition defaults to `"add"`; CZ_BRNO_HLN sits on the corridor and fits the budget | default request (field omitted) | stops = Berlin, Dresden, **Brno**, Wien; `auto_added` true on Brno only; return trip reversed with mirrored `auto_added`; no `suggested_stops` |
+| `TestModeSwitches::test_auto_stop_addition_defaults_to_add_and_inserts_brno` | auto_stop_addition defaults to `"add"`; osm:n3325029085 sits on the corridor and fits the budget | default request (field omitted) | stops = Berlin, Dresden, **Brno**, Wien; `auto_added` true on Brno only; return trip reversed with mirrored `auto_added`; no `suggested_stops` |
 | `TestModeSwitches::test_auto_stop_addition_add_explicit_accepted` | Explicit `"add"` behaves identically to the omitted field | `auto_stop_addition="add"` | 200, Brno inserted, no `suggested_stops` |
 | `TestModeSwitches::test_auto_stop_addition_off_returns_exact_caller_list` | Explicit opt-out | `auto_stop_addition="off"` | 200, stop list unchanged, no `suggested_stops` |
-| `TestModeSwitches::test_auto_stop_addition_suggest_returns_suggested_stops_section` | `"suggest"` envelope + routing-like-off contract + cross-mode consistency with `"add"` | `auto_stop_addition="suggest"` | `suggested_stops` = exactly CZ_BRNO_HLN with full field set and `added_time_min > 0`, ordered between `request` and `route`; stop list unchanged, `auto_added=false` throughout; suggested ids == the ids `"add"` inserted |
+| `TestModeSwitches::test_auto_stop_addition_suggest_returns_suggested_stops_section` | `"suggest"` envelope + routing-like-off contract + cross-mode consistency with `"add"` | `auto_stop_addition="suggest"` | `suggested_stops` = exactly osm:n3325029085 with full field set and `added_time_min > 0`, ordered between `request` and `route`; stop list unchanged, `auto_added=false` throughout; suggested ids == the ids `"add"` inserted |
 | `TestModeSwitches::test_auto_added_field_false_throughout_when_off` | `Stop.auto_added` contract | module fixture (`auto_stop_addition="off"`) | every stop `auto_added=false` |
 | `TestModeSwitches::test_auto_stop_addition_bool_returns_400` (×2) / `test_auto_stop_addition_wrong_type_returns_400` | Pre-0.9.5 booleans and wrong types rejected, not mapped | `auto_stop_addition=true/false/"yes"` | 400 each |
 | `TestFixedNightMode::test_interval_covers_night_window_both_directions` | Night-window guarantee, interval reversed for return | fixed-night, Berlin→Dresden interval | dep(A) < 00:00, arr(B) ≥ 05:00, both directions |
@@ -238,7 +239,10 @@ Standard input: `eval_standard` (3-stop route, directional demand 40 Couchette
 | Test | Purpose | Input | Expected |
 |---|---|---|---|
 | `TestCostRecomputation::test_tac_matches_manual_calculation` | TAC model exact | per-country km × params tac rates × operating days | == `infrastructure.tac_eur` (rel 1e-3) |
-| `TestCostRecomputation::test_energy_cost_matches_manual_calculation` | Energy cost model exact | segment kWh × shares × params prices × days | == `infrastructure.energy_eur` |
+| `TestCostRecomputation::test_params_endpoint_serves_the_rates_the_evaluation_priced_from` | Cross-endpoint contract | `/params` headline rates vs the loader's, per country | equal at the pinned version |
+| `TestCostRecomputation::test_energy_cost_matches_manual_calculation` | Energy cost model bracketed | segment kWh × loader day/night prices + catenary per km/gtkm × days | `infrastructure.energy_eur` inside the day/night bracket; equality where no banded country is on the corridor |
+| `TestCostRecomputation::test_shunting_matches_manual_calculation` | Shunting model exact, and the event count | Σ events × the event's country all-in rate × days; 4 events per trip pair | == `operator.fixed.shunting_eur` |
+| `TestCostRecomputation::test_parking_matches_manual_calculation` | Stabling model exact | per parking: basis(layover, length) + hotel power × hours, annualised per operating day | == `infrastructure.parking_eur` |
 | `TestCostRecomputation::test_station_charge_matches_manual_calculation` | Station charge model exact | Σ charge per stop call × days | == `infrastructure.station_charge_eur` |
 | `TestCostRecomputation::test_coach_maintenance_matches_manual_calculation` | Variable-km cost exact | maint rate × total km × days | == `variable.coach_maintenance_eur` |
 | `TestCostRecomputation::test_revenue_matches_manual_calculation` | Revenue model exact | Σ places_sold × avg_price (no days multiplier) | == `total_revenue_eur` |
@@ -593,7 +597,7 @@ key). The only file in the suite runnable standalone.
    version number differs; a scenario with an actual stop-side value change
    would cover the other half of the override matrix.
 5. ~~**A stop within `AUTO_STOP_BUFFER_M` of an existing corridor**~~ —
-   **DONE**: `CZ_BRNO_HLN` (Brno hl.n., 49.191/16.613) sits ~10m off the
+   **DONE**: `osm:n3325029085` (Brno hl.n., 49.191/16.613) sits ~10m off the
    natural Berlin-Dresden-Wien routing (Dresden-Praha-Brno-Wien) and
    comfortably inside the detour budget, so the full `auto_stop_addition`
    behaviour is now pinned end to end in `test_20::TestModeSwitches`: the

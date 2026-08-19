@@ -19,6 +19,8 @@ import re
 
 import pytest
 
+from models.params import ENERGY_PRICE_FIELD_NAMES, FACILITY_FIELD_NAMES
+
 # =============================================================================
 # Static checks — SQL schema vs loader expectations
 # =============================================================================
@@ -102,6 +104,19 @@ LOADER_READ_COLUMNS = [
     ("input_params.track_infrastructures", "track_tac_eur_train_km"),
     ("input_params.track_infrastructures", "track_parking_eur_day"),
     ("input_params.track_infrastructures", "track_energy_price_eur_kwh"),
+    ("input_params.track_infrastructures", "track_energy_price_night_eur_kwh"),
+    ("input_params.track_infrastructures", "track_energy_night_band_start"),
+    ("input_params.track_infrastructures", "track_energy_catenary_eur_train_km"),
+    (
+        "input_params.track_infrastructures",
+        "track_energy_catenary_eur_gross_tonne_km",
+    ),
+    ("input_params.track_infrastructures", "track_parking_basis"),
+    ("input_params.track_infrastructures", "track_parking_eur_metre_day"),
+    ("input_params.track_infrastructures", "track_parking_eur_hour"),
+    ("input_params.track_infrastructures", "track_parking_eur_event"),
+    ("input_params.track_infrastructures", "track_parking_free_hours"),
+    ("input_params.track_infrastructures", "track_parking_hotel_power_eur_hour"),
     ("input_params.track_infrastructures", "track_terrain_category"),
     ("input_params.track_infrastructures", "track_terrain_score"),
     ("input_params.track_infrastructures", "track_hsr_allowed"),
@@ -136,7 +151,7 @@ def test_column_exists_in_schema(table, column):
 
 COMP_ID = "NEW-BAL-7"
 COUNTRY = "DE"
-STOP_ID = "DE_BERLIN_HBF"
+STOP_ID = "osm:n3856100103"
 
 
 def test_all_compositions_load(loader):
@@ -278,9 +293,117 @@ def test_track_infra_fields_match_db(loader, db_cur, base_scenario):
     assert t.hsr_allowed == row["track_hsr_allowed"]
     assert t.terrain_category == row["track_terrain_category"]
 
+    # Germany is calibrated for energy but bands neither its electricity
+    # tariff nor levies a catenary charge, so its energy group is a day rate
+    # plus four documented NULLs — which is exactly what must survive the
+    # load. A None here that arrived as a substituted default would price a
+    # night discount Germany does not give.
+    assert t.energy_price_night_eur_kwh is None
+    assert t.energy_night_band_start_min is None
+    assert t.energy_night_band_end_min is None
+    assert t.energy_catenary_eur_train_km is None
+    assert t.energy_catenary_eur_gross_tonne_km is None
+
     entry = tracks.param_versions.get(f"track_infra:{COUNTRY}:tac_eur_train_km")
     assert entry is not None
     assert entry.is_default is False
+
+    # The energy group is registered in ParamVersions like any other field,
+    # and never flagged defaulted: unlike the ten legacy parameters it has no
+    # fallback to resolve against (see models/params.py,
+    # ENERGY_PRICE_FIELD_NAMES).
+    for field_name in ENERGY_PRICE_FIELD_NAMES:
+        entry = tracks.param_versions.get(f"track_infra:{COUNTRY}:{field_name}")
+        assert entry is not None, f"{field_name} missing from param_versions"
+        assert entry.is_default is False
+
+    # The facility group is registered the same way. Germany is calibrated, so
+    # it is not defaulted — and it prices per started hour, which is the one
+    # basis a per-metre model would silently get wrong.
+    for field_name in FACILITY_FIELD_NAMES:
+        entry = tracks.param_versions.get(f"track_infra:{COUNTRY}:{field_name}")
+        assert entry is not None, f"{field_name} missing from param_versions"
+        assert entry.is_default is False
+    assert t.parking_basis == "per_hour"
+    assert t.parking_eur_metre_day is None
+
+
+def test_facility_group_is_resolved_for_every_country(loader):
+    """Every country ends up with a stabling basis, and exactly one rate column
+    populated for it. A country with no calibration takes the European default
+    group; a country documented as levying nothing carries the basis 'none'
+    with no rate at all — which is what distinguishes the two."""
+    tracks = loader.build_all_tracks()
+    rate_column = {
+        "per_metre_day": "parking_eur_metre_day",
+        "per_hour": "parking_eur_hour",
+        "per_event": "parking_eur_event",
+    }
+    for t in tracks.all().values():
+        assert t.parking_basis in (*rate_column, "none"), (
+            f"{t.country_code}: unresolved stabling basis {t.parking_basis!r}"
+        )
+        populated = [c for c in rate_column.values() if getattr(t, c) is not None]
+        if t.parking_basis == "none":
+            assert not populated, (
+                f"{t.country_code}: basis 'none' but carries {populated}"
+            )
+            continue
+        assert populated == [rate_column[t.parking_basis]], (
+            f"{t.country_code}: basis {t.parking_basis} with rate columns {populated}"
+        )
+
+
+def test_shunting_is_an_all_in_figure_not_an_im_tariff(loader):
+    """The calibrated shunting charge is the IM tariff plus the market cost of
+    what the IM does not supply, so every country lands in the band one hour of
+    a shunting locomotive and crew costs anywhere in Europe. A figure at the
+    published-tariff level (single-digit euro) would mean the top-up was lost."""
+    tracks = loader.build_all_tracks()
+    for t in tracks.all().values():
+        assert 80.0 <= t.shunting_eur_event <= 400.0, (
+            f"{t.country_code}: shunting {t.shunting_eur_event} outside the "
+            "all-in band — has the market top-up been dropped?"
+        )
+
+
+def test_banded_country_keeps_its_night_price_and_band(loader):
+    """Austria, Switzerland and Croatia are the three banded electricity
+    tariffs. Whichever of them the scenario routes through must arrive with a
+    night price BELOW its day price and a band on both ends — a half-loaded
+    band would silently price a whole country at one rate."""
+    tracks = loader.build_all_tracks()
+    banded = [
+        t for t in tracks.all().values() if t.energy_price_night_eur_kwh is not None
+    ]
+    assert banded, "no banded electricity tariff loaded — expected AT, CH and HR"
+    for t in banded:
+        assert t.energy_price_night_eur_kwh < t.energy_price_eur_kwh, (
+            f"{t.country_code}: night rate not below the day rate"
+        )
+        assert t.energy_night_band_start_min is not None
+        assert t.energy_night_band_end_min is not None
+        assert 0 <= t.energy_night_band_start_min < 24 * 60
+        assert 0 <= t.energy_night_band_end_min < 24 * 60
+
+
+def test_catenary_charge_is_levied_in_one_unit_only(loader):
+    """An infrastructure manager picks a unit: per train-km or per
+    gross-tonne-km. Both populated for one country would double-charge the
+    same asset."""
+    tracks = loader.build_all_tracks()
+    levied = [
+        t
+        for t in tracks.all().values()
+        if t.energy_catenary_eur_train_km is not None
+        or t.energy_catenary_eur_gross_tonne_km is not None
+    ]
+    assert levied, "no supply-equipment charge loaded — expected thirteen countries"
+    for t in levied:
+        assert (
+            t.energy_catenary_eur_train_km is None
+            or t.energy_catenary_eur_gross_tonne_km is None
+        ), f"{t.country_code} levies a catenary charge in both units"
 
 
 def test_stop_fields_match_db(loader, db_cur, base_scenario):

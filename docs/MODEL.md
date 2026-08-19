@@ -67,13 +67,13 @@ station parameters).
 <!-- BEGIN GENERATED: versions -->
 | Model | Version | What it computes | Anchor file | Documentation |
 |---|---|---|---|---|
-| Route & timetable builder | `0.9.20` | Route and timetable builder: turns a list of stops, a train composition, and a few mode selections into a complete route — trip pairs, travel and stopping times with schedule buffers, and a mirrored outbound/return night schedule. | [`model.py`](../backend/models/route/model.py) | [README.md](../backend/models/README.md) |
+| Route & timetable builder | `0.9.25` | Route and timetable builder: turns a list of stops, a train composition, and a few mode selections into a complete route — trip pairs, travel and stopping times with schedule buffers, and a mirrored outbound/return night schedule. | [`model.py`](../backend/models/route/model.py) | [README.md](../backend/models/README.md) |
 | Energy model | `0.9.1` | Traction energy model: estimates the electricity a train uses on each part of the route. Currently a flat 28 kWh per kilometre placeholder, until the weight/speed/terrain model is calibrated against Deutsche Bahn Trassenfinder data. | [`model.py`](../backend/models/energy/model.py) | [README.md](../backend/models/energy/README.md) |
 | Demand model | `0.0.2` | Demand model (placeholder): assumes every accommodation class is 70% booked at a flat per-kilometre fare, spread evenly across all connections — a stand-in until a real demand model with directional demand, price sensitivity, and competition from other modes replaces it. | [`model.py`](../backend/models/demand/model.py) | [README.md](../backend/models/demand/README.md) |
-| Cost & revenue evaluation | `0.9.16` | Cost and revenue evaluation: computes the operator's fixed and variable costs, the charges paid to infrastructure companies, and the ticket revenue of a route, then aggregates the result into views per route, trip pair, country, connection, route section, and stop. | [`model.py`](../backend/models/evaluation/model.py) | [README.md](../backend/models/evaluation/README.md) |
+| Cost & revenue evaluation | `0.9.22` | Cost and revenue evaluation: computes the operator's fixed and variable costs, the charges paid to infrastructure companies, and the ticket revenue of a route, then aggregates the result into views per route, trip pair, country, connection, route section, and stop. | [`model.py`](../backend/models/evaluation/model.py) | [README.md](../backend/models/evaluation/README.md) |
 | Emissions model | `0.1.1` | Climate impact factors: how many grams of CO2-equivalent one passenger-kilometre causes by night train, plane, and car — used for the mode comparison and the CO2-savings estimate. The night-train value is a European average until a country-resolved, energy-based model replaces it. | [`model.py`](../backend/models/emissions/model.py) | [README.md](../backend/models/emissions/README.md) |
-| Composition cost model | `0.9.2` | Composition cost model: calibrated purchase, maintenance, cleaning, crew, and availability parameters per train composition, in a 'new' and a 'refurbished' rolling stock family, at 2032 prices. | [`model.py`](../backend/models/compositions/model.py) | [CALIBRATION.md](../backend/models/compositions/calib/CALIBRATION.md) |
-| Infrastructure parameter model | `0.9.1` | Infrastructure parameter model: per-country track access charges, station charges, electricity prices, terrain, schedule buffers, and minimum stopping times, with EU-average fallbacks — plus the catalog of possible night train stops. | [`model.py`](../backend/models/infrastructure/model.py) | [STOP_CLASSIFICATION.md](../backend/models/infrastructure/STOP_CLASSIFICATION.md) |
+| Composition cost model | `0.9.3` | Composition cost model: calibrated purchase, maintenance, cleaning, crew, and availability parameters per train composition, in a 'new' and a 'refurbished' rolling stock family, at 2032 prices. | [`model.py`](../backend/models/compositions/model.py) | [CALIBRATION.md](../backend/models/compositions/calib/CALIBRATION.md) |
+| Infrastructure parameter model | `0.9.5` | Infrastructure parameter model: per-country track access charges, station charges, traction energy prices, shunting and stabling, terrain, schedule supplements and minimum stopping times, with EU-average fallbacks — plus the catalog of possible night train stops. Four calibrated domains, each a package under models/infrastructure/ with its own source register, notebooks and published calibration document. | [`model.py`](../backend/models/infrastructure/model.py) | [STOP_CLASSIFICATION.md](../backend/models/infrastructure/STOP_CLASSIFICATION.md) |
 <!-- END GENERATED: versions -->
 
 ---
@@ -220,7 +220,7 @@ Time lost at every stop because a real train has to brake before it and accelera
 | Input | `F_loco` | Locomotive pulling force from standstill | kN | standard value [`TRACTION_LOCO_TRACTIVE_EFFORT_KN`](#s-route-traction_loco_tractive_effort_kn) |
 | Input | `P_loco` | Locomotive power | kW | standard value [`TRACTION_LOCO_POWER_KW`](#s-route-traction_loco_power_kw) |
 | Input | `m_coaches` | Weight of all coaches of the composition | t | parameter [`coach_type_weight_gross_t`](#p-input_params-coach_types-coach_type_weight_gross_t) |
-| Input | `m_loco` | Weight of the assumed standard locomotive | t | standard value [`TRACTION_LOCO_WEIGHT_T`](#s-route-traction_loco_weight_t) |
+| Input | `m_loco` | Weight of the assumed standard locomotive | t | parameter [`loco_type_weight_t`](#p-input_params-loco_types-loco_type_weight_t) |
 | **Output** | `Δt_leg` | Time lost per stop compared to passing at constant speed | min | — |
 
 **Used by:** [`total_time_per_leg`](#f-route-total_time_per_leg)
@@ -373,7 +373,7 @@ Total train weight: all coach weights added up, plus the locomotive.
 | | Symbol | Meaning | Unit | Source |
 |---|---|---|---|---|
 | Input | `m_coach,t` | Weight of each coach | t | parameter [`coach_type_weight_gross_t`](#p-input_params-coach_types-coach_type_weight_gross_t) |
-| Input | `m_loco,t` | Locomotive weight | t | standard value [`TRACTION_LOCO_WEIGHT_T`](#s-route-traction_loco_weight_t) |
+| Input | `m_loco,t` | Locomotive weight | t | parameter [`loco_type_weight_t`](#p-input_params-loco_types-loco_type_weight_t) |
 | **Output** | `m_t` | Train gross weight | t | — |
 
 **Used by:** [`energy_per_leg`](#f-energy-energy_per_leg)
@@ -462,6 +462,72 @@ Cost per sold place-kilometre of one class: the class's share of a cost divided 
 | Input | `pkm_sold,c` | Sold place-kilometres of the class per year | place-km/year | set by the tool user |
 | **Output** | `c_c` | Cost per sold place-kilometre of the class | €/place-km | — |
 
+**Upstream derivations** — quantities the cost leaves below divide or multiply by, computed per trip rather than read from a parameter:
+
+<a id="f-calc-roster_efficiency_driver"></a>
+#### Roster efficiency (Dienstplanwirkungsgrad) — `roster_efficiency_driver`
+
+$$ \eta = \eta_{ref} \cdot \frac{t_{train,h}}{t_{train,h} + t_{relief} \cdot (n_{duty} - 1)}, \quad n_{duty} = \left\lceil \frac{t_{basis,h}}{t_{duty,max}} \right\rceil $$
+
+Dienstplanwirkungsgrad — the share of paid staff hours that is actually productive. Paid time exceeds time on the train because of sign-on and sign-off, positioning to and from the train, rest away from the home base, and reserve cover. A shift may not exceed a legal maximum, so a long trip has to be worked by two or more crews in succession; each handover adds a fixed unproductive allowance. The value therefore drops at every shift boundary and then recovers as that fixed allowance is spread over a longer trip.
+
+| | Symbol | Meaning | Unit | Source |
+|---|---|---|---|---|
+| Input | `eta_ref` | Efficiency when the trip fits a single shift (operator_crew_roster_eff_ref for onboard staff) | – | parameter [`operator_driver_roster_eff_ref`](#p-input_params-operators-operator_driver_roster_eff_ref) |
+| Input | `t_train,h` | Time the staff member is on the train | h | computed upstream |
+| Input | `t_basis,h` | Hours measured against the shift cap — driving time for drivers, time on train for onboard staff | h | computed upstream |
+| Input | `t_duty,max` | Longest permitted shift (operator_crew_max_duty_h for onboard staff) | h | parameter [`operator_driver_max_duty_h`](#p-input_params-operators-operator_driver_max_duty_h) |
+| Input | `t_relief` | Unproductive hours added per crew handover | h | parameter [`operator_relief_allowance_h`](#p-input_params-operators-operator_relief_allowance_h) |
+| **Output** | `eta` | Productive share of paid hours for this trip | – | — |
+
+**Used by:** [`crew_eur`](#f-calc-crew_eur), [`driver_eur`](#f-calc-driver_eur)
+
+<a id="f-calc-tac_night_share"></a>
+#### Night share of a country run (track access) — `tac_night_share`
+
+$$ \nu_c = \begin{cases} 0 & \text{no night tariff} \\ 1 & \text{widening applies} \\ \dfrac{|[t_{in}, t_{out}) \cap B_{night,c}|}{t_{out} - t_{in}} & \text{otherwise}\end{cases} $$
+
+How much of a country run is charged at the night rate. Countries with a night tariff define a band — Germany 23:00 to 06:00, for instance — and the run is split between day and night rate in proportion to the clock time it actually spends inside it, rather than being priced entirely one way based on where its middle falls. Germany adds a rule of its own: a train carrying couchettes, sleepers or capsules is charged the night rate over its whole German run, whatever the clock says.
+
+| | Symbol | Meaning | Unit | Source |
+|---|---|---|---|---|
+| Input | `t_in, t_out` | When the train enters and leaves the country on this segment | min | computed upstream |
+| Input | `B_night,c` | The country's night tariff band (band end: track_tac_night_band_end) | time of day | parameter [`track_tac_night_band_start`](#p-input_params-track_infrastructures-track_tac_night_band_start) |
+| **Output** | `nu_c` | Share of the country run priced at the night rate | – | — |
+
+**Used by:** [`tac_eur`](#f-calc-tac_eur)
+
+<a id="f-calc-tac_peak_share"></a>
+#### Rush-hour share of a country run (track access) — `tac_peak_share`
+
+$$ \pi_c = w \cdot \frac{\sum_{j} |[t_{in}, t_{out}) \cap B_{peak,c,j}|}{t_{out} - t_{in}}, \quad w = \tfrac{5}{7} \text{ if weekdays only, else } 1 $$
+
+How much of a country run falls in rush hour. Austria and Switzerland charge extra for running through a congested area during the morning or evening commuter peak. Because the tool knows a departure's clock time but not which day of the week it runs, a peak that applies Monday to Friday only is charged at five sevenths of the overlap — the average over a week — rather than all or nothing.
+
+| | Symbol | Meaning | Unit | Source |
+|---|---|---|---|---|
+| Input | `t_in, t_out` | When the train enters and leaves the country on this segment | min | computed upstream |
+| Input | `B_peak,c,j` | The country's two daily peak bands (track_tac_peak_band1_* and track_tac_peak_band2_*) | time of day | parameter [`track_tac_peak_band1_start`](#p-input_params-track_infrastructures-track_tac_peak_band1_start) |
+| Input | `w` | Weekday blend, applied where the bands run Monday to Friday only | – | standard value [`WEEKDAY_BLEND`](#s-infrastructure-weekday_blend) |
+| **Output** | `pi_c` | Share of the country run falling in rush hour | – | — |
+
+**Used by:** [`tac_eur`](#f-calc-tac_eur)
+
+<a id="f-calc-energy_night_share"></a>
+#### Night share of a country run (electricity) — `energy_night_share`
+
+$$ \nu^{E}_{c} = \frac{|[t_{in},t_{out}] \cap B^{E}_{c}|}{t_{out}-t_{in}} $$
+
+Share of a country leg whose electricity is billed at the night rate: how much of the time the train spends in the country falls inside that country's electricity night tariff window. Only Austria, Switzerland and Croatia have one. The share of the clock is applied to the kilowatt-hours drawn, which is exact at constant speed — the routed geometry does not record where along the leg the clock crossed the boundary. This window is not the track access night band: Germany discounts track access at night and not electricity, Switzerland the reverse.
+
+| | Symbol | Meaning | Unit | Source |
+|---|---|---|---|---|
+| Input | `t_in, t_out` | When the train enters and leaves the country on this segment | min | computed upstream |
+| Input | `B^E_c` | The country's electricity night band (track_energy_night_band_start and _end) | time of day | parameter [`track_energy_night_band_start`](#p-input_params-track_infrastructures-track_energy_night_band_start) |
+| **Output** | `nu^E_c` | Share of the country leg billed at the night rate | – | — |
+
+**Used by:** [`energy_eur`](#f-calc-energy_eur)
+
 **The cost/revenue tree** — every subtotal shown with the exact leaves it sums, in the same structure as the tool's cost breakdown views:
 
 <a id="f-calc-total_cost_eur"></a>
@@ -516,13 +582,14 @@ Costs that scale with how much the train runs — driving and staffing hours, ki
 <a id="f-calc-driver_eur"></a>
 ####### Driver cost — `driver_eur`
 
-$$ C_{driver} = c_{driver/h} \times \left( \sum_{seg} t_{drive,h} \cdot f_{driver} + \sum_{stop} t_{dwell,h} \cdot f_{driver} \right) $$
+$$ C_{driver} = \frac{c_{driver/h}}{\eta_{driver}} \times \left( \sum_{seg} t_{drive,h} \cdot f_{driver} + \sum_{stop} t_{dwell,h} \cdot f_{driver} \right) $$
 
-Driver cost: the hourly driver rate times all hours the driver is on duty — driving between stops and waiting at them.
+Driver cost: the driver wage per productive hour, divided by the share of paid hours that is productive, times all hours the driver is on duty — driving between stops and waiting at them. Trips too long for one driver shift need a relief driver, which lowers that share and raises the effective rate.
 
 | | Symbol | Meaning | Unit | Source |
 |---|---|---|---|---|
-| Input | `c_driver/h` | Driver cost per hour on duty | €/h | parameter [`operator_driver_costs_eur_h`](#p-input_params-operators-operator_driver_costs_eur_h) |
+| Input | `c_driver/h` | Driver wage per productive hour | €/h | parameter [`operator_driver_costs_eur_h`](#p-input_params-operators-operator_driver_costs_eur_h) |
+| Input | `eta_driver` | Share of paid driver hours that is productive | – | formula [`roster_efficiency_driver`](#f-calc-roster_efficiency_driver) |
 | Input | `t_drive,h` | Driving time between stops | h | computed upstream |
 | Input | `t_dwell,h` | Waiting time at stops | h | formula [`dwell_time_both`](#f-route-dwell_time_both) |
 | Input | `f_driver` | Number of drivers the train needs | persons | parameter [`composition_type_driver_factor`](#p-input_params-composition_types-composition_type_driver_factor) |
@@ -533,13 +600,14 @@ Driver cost: the hourly driver rate times all hours the driver is on duty — dr
 <a id="f-calc-crew_eur"></a>
 ####### Cabin crew cost — `crew_eur`
 
-$$ C_{crew} = c_{crew/h} \times \left( \sum_{seg} t_{drive,h} \cdot n_{crew} + \sum_{stop} t_{dwell,h} \cdot n_{crew} \right) $$
+$$ C_{crew} = \frac{c_{crew/h}}{\eta_{crew}} \times \left( \sum_{seg} t_{drive,h} \cdot n_{crew} + \sum_{stop} t_{dwell,h} \cdot n_{crew} \right) $$
 
-Cabin crew cost: the hourly rate per crew member times all hours the crew is on board — while driving and while waiting at stops.
+Cabin crew cost: the crew wage per productive hour, divided by the share of paid hours that is productive, times all hours the crew is on board — while driving and while waiting at stops. Trips too long for one shift need a relief crew, which lowers that share and raises the effective rate.
 
 | | Symbol | Meaning | Unit | Source |
 |---|---|---|---|---|
-| Input | `c_crew/h` | Cost per crew member per hour on duty | €/h | parameter [`operator_crew_costs_eur_h`](#p-input_params-operators-operator_crew_costs_eur_h) |
+| Input | `c_crew/h` | Crew wage per productive hour, per attendant | €/h | parameter [`operator_crew_costs_eur_h`](#p-input_params-operators-operator_crew_costs_eur_h) |
+| Input | `eta_crew` | Share of paid crew hours that is productive | – | formula [`roster_efficiency_driver`](#f-calc-roster_efficiency_driver) |
 | Input | `t_drive,h` | Driving time between stops | h | computed upstream |
 | Input | `t_dwell,h` | Waiting time at stops | h | formula [`dwell_time_both`](#f-route-dwell_time_both) |
 | Input | `n_crew` | Crew members on board (train manager counted with a factor) | persons | parameter [`coach_type_crew_factor`](#p-input_params-coach_types-coach_type_crew_factor) |
@@ -571,7 +639,7 @@ Locomotive rental: an all-inclusive hourly rate (maintenance and insurance inclu
 
 | | Symbol | Meaning | Unit | Source |
 |---|---|---|---|---|
-| Input | `c_loco,lease/h` | All-inclusive locomotive rental rate per hour in use | €/h | parameter [`operator_loco_lease_eur_h`](#p-input_params-operators-operator_loco_lease_eur_h) |
+| Input | `c_loco,lease/h` | All-inclusive locomotive rental rate per hour in use | €/h | parameter [`operator_loco_lease_eur_h`](#p-input_params-operator_loco_costs-operator_loco_lease_eur_h) |
 | Input | `t_loco,propulsion,min` | Minutes the locomotive is in use | min | computed upstream |
 | **Output** | `C_loco` | Annual locomotive rental cost | €/year | — |
 
@@ -725,14 +793,30 @@ Everything paid to infrastructure companies: track access charges, traction elec
 <a id="f-calc-tac_eur"></a>
 ###### Track access charge — `tac_eur`
 
-$$ C_{TAC} = \sum_{seg} \sum_{l \in seg} d_{km,l} \times p_{TAC,country(l)} $$
+$$ C_{TAC} = \sum_{seg}\Big[\sum_{c \in seg} \big( d_{c}\,(1{-}\nu_c)\,b_{day,c}\,\mu_c + d_{c}\,\nu_c\,b_{night,c} + d_{c}\,(\gamma_c m_{gross} + \sigma_c P + \phi_c + \kappa_c \pi_c) \big) + \sum_{stop} h_{country(stop)} + \rho_{c}\,R_{seg,c} + \sum_{x \in seg}\big(F_x + f_x n_{seg}\big)\Big] $$
 
-Track access charge — the 'rail toll' paid to each country's infrastructure company: the distance driven in the country times its per-kilometre rate.
+Track access charge — what the operator pays each country's infrastructure company for using the track. Every country charges its own mix: a rate per kilometre driven (higher or lower at night), a rate per tonne of train weight and kilometre, in some countries a rate per seat, a flat administrative add-on, a fee per stop made, a share of the ticket revenue earned there, and a surcharge for running through a congested area at rush hour. Crossings billed separately — the Storebælt and Øresund links and the Channel Tunnel — are added per crossing, one of them also per passenger carried. A term a country does not levy is simply absent.
 
 | | Symbol | Meaning | Unit | Source |
 |---|---|---|---|---|
-| Input | `d_km,l` | Distance driven in the country | km | computed upstream |
-| Input | `p_TAC,country(l)` | The country's track access charge per train-kilometre | €/train-km | parameter [`track_tac_eur_train_km`](#p-input_params-track_infrastructures-track_tac_eur_train_km) |
+| Input | `d_c` | Distance driven in this country on this segment | km | computed upstream |
+| Input | `nu_c` | Share of the run in this country priced at the night rate | – | formula [`tac_night_share`](#f-calc-tac_night_share) |
+| Input | `b_day,c` | The country's day rate per train-kilometre | €/train-km | parameter [`track_tac_b_day`](#p-input_params-track_infrastructures-track_tac_b_day) |
+| Input | `b_night,c` | The country's night rate per train-kilometre | €/train-km | parameter [`track_tac_b_night`](#p-input_params-track_infrastructures-track_tac_b_night) |
+| Input | `gamma_c` | The country's rate per tonne of train weight and kilometre | €/(t·km) | parameter [`track_tac_gamma`](#p-input_params-track_infrastructures-track_tac_gamma) |
+| Input | `m_gross` | Weight of the whole train — coaches plus locomotives | t | parameter [`loco_type_weight_t`](#p-input_params-loco_types-loco_type_weight_t) |
+| Input | `sigma_c` | The country's rate per place and kilometre | €/(place·km) | parameter [`track_tac_seat_km`](#p-input_params-track_infrastructures-track_tac_seat_km) |
+| Input | `P` | Places the train offers | places | computed upstream |
+| Input | `phi_c` | The country's flat administrative add-on per train-kilometre | €/train-km | parameter [`track_tac_fixed_per_train_km`](#p-input_params-track_infrastructures-track_tac_fixed_per_train_km) |
+| Input | `kappa_c` | The country's congestion surcharge per train-kilometre | €/train-km | parameter [`track_tac_congestion_surcharge_eur_km`](#p-input_params-track_infrastructures-track_tac_congestion_surcharge_eur_km) |
+| Input | `pi_c` | Share of the run in this country falling in rush hour | – | formula [`tac_peak_share`](#f-calc-tac_peak_share) |
+| Input | `mu_c` | Factor the day rate is multiplied by over the rush-hour share of the run (1 outside it) | factor | parameter [`track_tac_peak_multiplier`](#p-input_params-track_infrastructures-track_tac_peak_multiplier) |
+| Input | `h_country(stop)` | Fee for making one stop, at that stop's own country rate. A trip's first segment pays for both of its ends, since no other segment owns the starting station | €/stop | parameter [`track_tac_per_stop`](#p-input_params-track_infrastructures-track_tac_per_stop) |
+| Input | `rho_c` | Share of the ticket revenue earned in this country that the infrastructure manager takes | fraction | parameter [`track_tac_revenue_share`](#p-input_params-track_infrastructures-track_tac_revenue_share) |
+| Input | `R_seg,c` | Ticket revenue attributable to this segment in this country, per train run | €/trip | computed upstream |
+| Input | `F_x` | Charge for crossing a separately billed link, per train | €/traverse | parameter [`passage_fixed_eur`](#p-input_params-passage_charges-passage_fixed_eur) |
+| Input | `f_x` | Charge for crossing a separately billed link, per passenger | €/passenger | parameter [`passage_per_passenger_eur`](#p-input_params-passage_charges-passage_per_passenger_eur) |
+| Input | `n_seg` | Passengers aboard on this segment, per train run | passengers | computed upstream |
 | **Output** | `C_TAC` | Annual track access charges | €/year | — |
 
 **Used by:** [`infrastructure_total_eur`](#f-calc-infrastructure_total_eur)
@@ -740,15 +824,21 @@ Track access charge — the 'rail toll' paid to each country's infrastructure co
 <a id="f-calc-energy_eur"></a>
 ###### Traction electricity — `energy_eur`
 
-$$ C_{energy} = \sum_{seg} \sum_{l \in seg} E_{kWh,l} \times p_{energy,country(l)} $$
+$$ C_{energy} = \sum_{seg} \sum_{c \in seg} \left[ E_{kWh,c} \left( (1-\nu^{E}_{c}) p_{c} + \nu^{E}_{c} p^{night}_{c} \right) + d_{c} \left( e_{c} + e^{gt}_{c} m_{gross} \right) \right] $$
 
-Electricity cost for traction: the energy the train uses in each country times that country's electricity price.
+Traction energy cost: the electricity the train uses in each country at that country's price, plus what the infrastructure manager charges for supplying it through the catenary. The electricity is billed at the day rate outside the national night window and at the night rate inside it. The supply charge is levied per kilometre by nine countries and on the weight moved by three; it is kept in the unit each one publishes rather than converted into a price per kilowatt-hour, since converting it would depend on an assumed consumption.
 
 | | Symbol | Meaning | Unit | Source |
 |---|---|---|---|---|
-| Input | `E_kWh,l` | Energy used in the country (from the energy model) | kWh | formula [`energy_per_leg`](#f-energy-energy_per_leg) |
-| Input | `p_energy,country(l)` | The country's traction electricity price | €/kWh | parameter [`track_energy_price_eur_kwh`](#p-input_params-track_infrastructures-track_energy_price_eur_kwh) |
-| **Output** | `C_energy` | Annual traction electricity cost | €/year | — |
+| Input | `E_kWh,c` | Energy used in the country (from the energy model) | kWh | formula [`energy_per_leg`](#f-energy-energy_per_leg) |
+| Input | `p_c` | The country's day traction electricity price | €/kWh | parameter [`track_energy_price_eur_kwh`](#p-input_params-track_infrastructures-track_energy_price_eur_kwh) |
+| Input | `p^night_c` | Its night-band price, where the tariff is banded | €/kWh | parameter [`track_energy_price_night_eur_kwh`](#p-input_params-track_infrastructures-track_energy_price_night_eur_kwh) |
+| Input | `nu^E_c` | Share of the country leg billed at the night rate | – | formula [`energy_night_share`](#f-calc-energy_night_share) |
+| Input | `e_c` | Charge for using the catenary and traction power-supply installations, per train-kilometre | €/train-km | parameter [`track_energy_catenary_eur_train_km`](#p-input_params-track_infrastructures-track_energy_catenary_eur_train_km) |
+| Input | `e^gt_c` | The same charge where the country levies it on the weight moved instead | €/gross-tonne-km | parameter [`track_energy_catenary_eur_gross_tonne_km`](#p-input_params-track_infrastructures-track_energy_catenary_eur_gross_tonne_km) |
+| Input | `m_gross` | Gross weight of the whole consist, coaches plus locomotives | t | computed upstream |
+| Input | `d_c` | Kilometres run in the country on this segment | km | computed upstream |
+| **Output** | `C_energy` | Annual traction energy cost | €/year | — |
 
 **Used by:** [`infrastructure_total_eur`](#f-calc-infrastructure_total_eur)
 
@@ -903,8 +993,7 @@ model's version. Each constant lives in its model's `model.py`.
 | <a id="s-route-hsr_avoidance_ring_simplify_deg"></a>`HSR_AVOIDANCE_RING_SIMPLIFY_DEG` | `0.01` | Douglas-Peucker tolerance in degrees (~1.1km) applied to a country's outer ring before it is sent to the routing engine as an HSR-avoidance area (rail_router.CountryIndex.get_largest_polygon). The area exists to say "this country's high-speed lines are off-limits", so it only has to contain the rail network — border precision is irrelevant, ring size is not: the raw EEZ rings total ~165k vertices across the seeded countries and would be serialized into every mixed-avoidance routing request. At this tolerance the same set costs ~10k vertices. |
 | <a id="s-route-auto_stop_buffer_m"></a>`AUTO_STOP_BUFFER_M` | `10000` | Max distance (metres) from a stop to the already-routed path for that stop to be considered a candidate — covers both stops that sit right on the line and ones merely 'close by'. |
 | <a id="s-route-auto_stop_analytic_detour_m"></a>`AUTO_STOP_ANALYTIC_DETOUR_M` | `100` | Perpendicular distance to the routed geometry under which an auto-stop candidate is costed purely analytically (dwell + the dynamics model's accel/brake pair + out-and-back detour at cruise speed) with no router call — at this distance the stop sits on the routed line and a mini-reroute measures the same number at ~1.5s of router time (introduced 2026-08-06 after the 575-stop catalog made per-candidate routing the dominant calc cost). Candidates further out are refined by a real 3-point mini-reroute, since their true track detour can exceed the straight-line bound — e.g. a station the initial routing bypassed on a parallel line, which is also why AUTO_STOP_BUFFER_M is wide. |
-| <a id="s-route-auto_stop_max_detour_per"></a>`AUTO_STOP_MAX_DETOUR_PER` | `0.05` | Max allowed increase in full (driving + dynamics + buffer + dwell) trip time, as a fraction of the original trip's time, before mode 'add' stops adding further candidates. Mode 'suggest' deliberately ignores this budget. |
-| <a id="s-route-traction_loco_weight_t"></a>`TRACTION_LOCO_WEIGHT_T` | `90.0` | Assumed standard locomotive weight (Siemens Vectron, ~90t). Locomotives are full-service leased and not part of the composition data, so the loco is a fixed standard assumption added on top of Composition.total_weight_t (which covers coaches only). |
+| <a id="s-route-auto_stop_max_detour_per"></a>`AUTO_STOP_MAX_DETOUR_PER` | `0.05` | Max allowed increase in TECHNICAL trip time (driving + dynamics + dwell), as a fraction of the original trip's technical time, before mode 'add' stops adding further candidates. Mode 'suggest' deliberately ignores this budget. The schedule supplement is excluded from the basis: a detour costs real running and stopping minutes, while the supplement is margin, and margin should not fund extra stops. It also kept stop selection independent of the route-context calibration — with per-country supplements of 0.35 to 0.71, measuring against padded time would have given the same physical route a quarter more detour budget in France than in Austria. |
 | <a id="s-route-traction_loco_power_kw"></a>`TRACTION_LOCO_POWER_KW` | `6400.0` | Assumed locomotive continuous power at the wheel (Siemens Vectron AC: 6.4 MW). Governs the constant-power phase of acceleration above P / F ≈ 77 km/h. |
 | <a id="s-route-traction_loco_tractive_effort_kn"></a>`TRACTION_LOCO_TRACTIVE_EFFORT_KN` | `300.0` | Assumed locomotive starting tractive effort (Siemens Vectron: 300 kN). Governs the constant-force phase of acceleration from standstill. |
 | <a id="s-route-traction_brake_deceleration_ms2"></a>`TRACTION_BRAKE_DECELERATION_MS2` | `0.5` | Service braking deceleration. Rail braking is effectively mass-independent (brake systems are dimensioned per vehicle to a standard deceleration); 0.5 m/s² is a comfortable service value appropriate for sleeping passengers — full emergency capability is far higher and irrelevant for timetabling. |
@@ -922,6 +1011,12 @@ model's version. Each constant lives in its model's `model.py`.
 |---|---|---|
 | <a id="s-demand-stopgap_utilization_per"></a>`STOPGAP_UTILIZATION_PER` | `0.7` | Placeholder scalar utilization applied uniformly to every class until a real demand model lands. |
 | <a id="s-demand-stopgap_fare_per_km_by_class"></a>`STOPGAP_FARE_PER_KM_BY_CLASS` | `{'Seat': 0.1, 'Couchette': 0.13, 'Sleeper': 0.18, 'Capsule': 0.12, 'Catering': 0.0}` | Placeholder flat per-km fares by class_main — same caveat as above. |
+
+#### Infrastructure model — [`model.py`](../backend/models/infrastructure/model.py)
+
+| Constant | Value | Meaning |
+|---|---|---|
+| <a id="s-infrastructure-weekday_blend"></a>`WEEKDAY_BLEND` | `5.0 / 7.0` | Share of departures assumed to fall on a weekday. Austria and Switzerland levy their congestion surcharge and peak multiplier Monday to Friday only, but a Segment carries clock minutes and no service date, so a weekday-only tariff window is priced at five sevenths of its overlap rather than all or nothing — see calc_tac.py and OPEN_TODOS['tac_weekday_blend']. |
 <!-- END GENERATED: standard_values -->
 
 ---
@@ -991,6 +1086,7 @@ Accommodation class taxonomy. service_class_main groups the detailed classes int
 |---|---|---|---|
 | <a id="p-input_params-service_classes-service_class_id"></a>`service_class_id` | Detailed class name (e.g. "couchette (6-berth)", "Sleeper (2-berth) with shower & WC"). | — | — |
 | <a id="p-input_params-service_classes-service_class_main"></a>`service_class_main` | Top-level accommodation category: Seat, Couchette, Sleeper, Capsule, or Catering. | — | — |
+| <a id="p-input_params-service_classes-service_class_is_night_accommodation"></a>`service_class_is_night_accommodation` | Whether places of this class make the train count as carrying night accommodation for tariff purposes. Germany prices such a train at its night rate over the whole German run (see track_tac_night_full_if_accommodation). True for every class a passenger can lie down in; a dining car alone does not make a night train. | — | — |
 
 #### `input_params.operators`
 
@@ -1001,13 +1097,17 @@ Train operating company and its cost rates. A catalog, not history: operator_id 
 | <a id="p-input_params-operators-operator_row_id"></a>`operator_row_id` | — | — | — |
 | <a id="p-input_params-operators-operator_id"></a>`operator_id` | Operator identifier (e.g. STD-REF, STD-NEW). | — | — |
 | <a id="p-input_params-operators-operator_name"></a>`operator_name` | Full operator name. | — | — |
-| <a id="p-input_params-operators-operator_driver_costs_eur_h"></a>`operator_driver_costs_eur_h` | Driver pay per hour on duty (roster inefficiency already included — billable hours equal trip time). | €/h | [`driver_eur`](#f-calc-driver_eur) |
-| <a id="p-input_params-operators-operator_crew_costs_eur_h"></a>`operator_crew_costs_eur_h` | Cabin crew pay per hour on duty, per attendant. The train manager is counted with a factor on the composition. | €/h | [`crew_eur`](#f-calc-crew_eur) |
+| <a id="p-input_params-operators-operator_driver_costs_eur_h"></a>`operator_driver_costs_eur_h` | Driver pay per PRODUCTIVE hour, i.e. the raw wage rate before roster inefficiency. Evaluation divides it by the Dienstplanwirkungsgrad it computes per trip from the four roster columns below. | €/h | [`driver_eur`](#f-calc-driver_eur) |
+| <a id="p-input_params-operators-operator_crew_costs_eur_h"></a>`operator_crew_costs_eur_h` | Cabin crew pay per PRODUCTIVE hour, per attendant, before roster inefficiency (same treatment as the driver rate). The train manager is counted with a factor on the composition. | €/h | [`crew_eur`](#f-calc-crew_eur) |
+| <a id="p-input_params-operators-operator_driver_max_duty_h"></a>`operator_driver_max_duty_h` | Longest driving time one driver may work between daily rest periods. Directive 2005/47/EC sets 8 h on a night shift (9 h by day); national agreements may be stricter. A trip whose driving time exceeds it needs a relief driver, which lowers the roster efficiency. | h | [`roster_efficiency_driver`](#f-calc-roster_efficiency_driver) |
+| <a id="p-input_params-operators-operator_crew_max_duty_h"></a>`operator_crew_max_duty_h` | Longest working time one onboard attendant may work between daily rest periods, per the applicable collective agreement. Same relief mechanism as the driver column. | h | — |
+| <a id="p-input_params-operators-operator_driver_roster_eff_ref"></a>`operator_driver_roster_eff_ref` | Dienstplanwirkungsgrad for a driver duty that needs no relief: the share of paid hours that is productive once sign-on/off, reserve cover and leave are absorbed. | fraction | [`roster_efficiency_driver`](#f-calc-roster_efficiency_driver) |
+| <a id="p-input_params-operators-operator_crew_roster_eff_ref"></a>`operator_crew_roster_eff_ref` | Dienstplanwirkungsgrad for an onboard duty that needs no relief. Higher than the driver value: onboard links position less and rest away from base more predictably. | fraction | — |
+| <a id="p-input_params-operators-operator_relief_allowance_h"></a>`operator_relief_allowance_h` | Unproductive hours added per relief event — positioning to and from the relief point, the extra sign-on/off, and away-base rest handling. Applied once per additional duty beyond the first, for both roles. | h | [`roster_efficiency_driver`](#f-calc-roster_efficiency_driver) |
 | <a id="p-input_params-operators-operator_ebit_margin_per"></a>`operator_ebit_margin_per` | Operating profit the operator requires, as a share of ticket revenue. | fraction of revenue | [`ebit_margin_eur`](#f-calc-ebit_margin_eur) |
 | <a id="p-input_params-operators-operator_financing_quota_per"></a>`operator_financing_quota_per` | Annual financing cost as a share of the capital tied up in coaches. | fraction/year | [`financing_eur`](#f-calc-financing_eur) |
 | <a id="p-input_params-operators-operator_var_overhead_per"></a>`operator_var_overhead_per` | Variable overhead — ticket sales, distribution, customer service — as a share of ticket revenue. | fraction of revenue | [`var_overhead_eur`](#f-calc-var_overhead_eur) |
 | <a id="p-input_params-operators-operator_fix_overhead_quota_per"></a>`operator_fix_overhead_quota_per` | Fixed overhead — administration, management, planning — as a share of all other operating costs. | fraction of other costs | [`fix_overhead_eur`](#f-calc-fix_overhead_eur) |
-| <a id="p-input_params-operators-operator_loco_lease_eur_h"></a>`operator_loco_lease_eur_h` | All-inclusive locomotive rental rate (maintenance and insurance included), billed per hour the locomotive is in use. Two speed configurations exist as separate operator rows: up to 200 km/h (STD-REF) and 230 km/h (STD-NEW). | €/h | [`loco_eur`](#f-calc-loco_eur) |
 | <a id="p-input_params-operators-source_id"></a>`source_id` | Source for all values in this row. | — | — |
 
 #### `input_params.operator_class_costs`
@@ -1058,7 +1158,7 @@ Places per accommodation class within a coach type, with the class section's sha
 
 #### `input_params.composition_types`
 
-Train composition blueprint: which coaches, at which speed, with which cost parameters. Capacity comes from the coach list (composition_type_coaches → coach_type_classes). Locomotives are rented, not purchased — see operators.operator_loco_lease_eur_h. A catalog, not history: composition_type_id is a permanent natural key — new settings mean a new composition_type_id, never editing a row in place.
+Train composition blueprint: which coaches, at which speed, with which cost parameters. Capacity comes from the coach list (composition_type_coaches → coach_type_classes). Which locomotives it hauls comes from composition_type_locos; they are rented, not purchased, and the rate is per operator and machine (operator_loco_costs). A catalog, not history: composition_type_id is a permanent natural key — new settings mean a new composition_type_id, never editing a row in place.
 
 | Column | Meaning | Unit | Used in |
 |---|---|---|---|
@@ -1079,7 +1179,6 @@ Train composition blueprint: which coaches, at which speed, with which cost para
 | <a id="p-input_params-composition_types-composition_type_cleaning_eur_day"></a>`composition_type_cleaning_eur_day` | Cleaning and preparation for the next night, per coach and operating day, at 2032 prices. | €/coach/day | [`cleaning_eur`](#f-calc-cleaning_eur) |
 | <a id="p-input_params-composition_types-composition_type_coach_maint_eur_km"></a>`composition_type_coach_maint_eur_km` | Coach maintenance for the whole train per kilometre (per-coach rate × number of coaches; new 1.00 / refurbished 1.30 €/coach-km, 2032 prices). | €/train-km | [`coach_maintenance_eur`](#f-calc-coach_maintenance_eur) |
 | <a id="p-input_params-composition_types-composition_type_driver_factor"></a>`composition_type_driver_factor` | Number of drivers required per trip (e.g. 1 or 2). | persons | [`driver_eur`](#f-calc-driver_eur) |
-| <a id="p-input_params-composition_types-composition_type_n_locos"></a>`composition_type_n_locos` | Number of locomotives. Scales the locomotive rental cost and (once calibrated) the energy weight basis. | count | — |
 | <a id="p-input_params-composition_types-composition_type_zugchef_crew_factor"></a>`composition_type_zugchef_crew_factor` | Train manager, counted in attendant-equivalents (1.19; 2.38 for trains with 10 or more coaches). Total crew = sum of coach crew factors + this factor. | attendant-equivalents | — |
 | <a id="p-input_params-composition_types-composition_type_length_cost_prop"></a>`composition_type_length_cost_prop` | Weighting X of the class cost split: X by length, (1−X) by weight, on passenger space; service areas are split per place. See calib/CALIBRATION.md. | fraction | [`class_main_allocation`](#f-calc-class_main_allocation) |
 | <a id="p-input_params-composition_types-composition_type_food_and_beverages"></a>`composition_type_food_and_beverages` | Catering concept (e.g. 'dining car'). Coach amenities aggregate separately. | — | — |
@@ -1087,6 +1186,42 @@ Train composition blueprint: which coaches, at which speed, with which cost para
 | <a id="p-input_params-composition_types-composition_type_indicative_cost_eur_train_km"></a>`composition_type_indicative_cost_eur_train_km` | Indicative operator cost per train-kilometre on the 1,000 km reference route (14.5 h trip, 350 operating days, 2 trainsets) at 2032 prices, excluding infrastructure charges, energy, variable overhead and profit — a comparison figure between compositions, not a route evaluation. Derivation: calib/CALIBRATION.md. | €/train-km | — |
 | <a id="p-input_params-composition_types-composition_type_indicative_cost_ct_place_km"></a>`composition_type_indicative_cost_ct_place_km` | The same cost basis divided by the number of places. | ct/place-km | — |
 | <a id="p-input_params-composition_types-source_id"></a>`source_id` | Source for all values in this row. | — | — |
+
+#### `input_params.loco_types`
+
+Locomotive types — the physical machine, independent of who runs it. Weight and speed live here; the rental rate does not, because it is a commercial term that varies by operator (operator_loco_costs), exactly as onboard service cost varies by operator over service_classes. A catalog, not history: loco_type_id is a permanent natural key — a changed spec means a new loco_type_id, never editing a row in place.
+
+| Column | Meaning | Unit | Used in |
+|---|---|---|---|
+| <a id="p-input_params-loco_types-loco_type_row_id"></a>`loco_type_row_id` | — | — | — |
+| <a id="p-input_params-loco_types-loco_type_id"></a>`loco_type_id` | Stable natural key, e.g. VECTRON-MS-230. | — | — |
+| <a id="p-input_params-loco_types-loco_type_description"></a>`loco_type_description` | Machine and configuration in plain words, including the national class designation where the calibration pins one and an explicit note where it does not. | — | — |
+| <a id="p-input_params-loco_types-loco_type_traction"></a>`loco_type_traction` | Traction system, e.g. 'electric multi-system'. Not yet read by any model — recorded so a future electrification or traction-change model has it. | — | — |
+| <a id="p-input_params-loco_types-loco_type_weight_t"></a>`loco_type_weight_t` | Mass of one locomotive. Completes the gross weight the weight-dependent track access charge and the traction dynamics both work on — coach weight alone is not what gets hauled or weighed. | t | [`tac_eur`](#f-calc-tac_eur), [`train_weight`](#f-energy-train_weight), [`stop_dynamics_time_loss`](#f-route-stop_dynamics_time_loss) |
+| <a id="p-input_params-loco_types-loco_type_max_speed_kmh"></a>`loco_type_max_speed_kmh` | Design maximum speed. The composition's own max speed still governs the timetable; this records what the machine could do. | km/h | — |
+| <a id="p-input_params-loco_types-source_id"></a>`source_id` | Source for all values in this row. | — | — |
+| <a id="p-input_params-loco_types-change_log"></a>`change_log` | Free-text description of what changed in this version and why. | — | — |
+
+#### `input_params.operator_loco_costs`
+
+Locomotive rental rate per operator and machine — the locomotive counterpart of operator_class_costs. A pairing with no row is not priced, and the loader refuses to resolve a composition that needs one rather than substituting a fallback: a missing pairing is a wiring error, and a silent default would hide exactly the mistake this table exists to catch.
+
+| Column | Meaning | Unit | Used in |
+|---|---|---|---|
+| <a id="p-input_params-operator_loco_costs-operator_row_id"></a>`operator_row_id` | — | — | — |
+| <a id="p-input_params-operator_loco_costs-loco_type_row_id"></a>`loco_type_row_id` | — | — | — |
+| <a id="p-input_params-operator_loco_costs-operator_loco_lease_eur_h"></a>`operator_loco_lease_eur_h` | All-inclusive rental rate (maintenance and insurance included), billed per hour the locomotive is in use. | €/h | [`loco_eur`](#f-calc-loco_eur) |
+| <a id="p-input_params-operator_loco_costs-source_id"></a>`source_id` | Source for all values in this row. | — | — |
+
+#### `input_params.composition_type_locos`
+
+Ordered locomotive slots per composition type — the locomotive counterpart of composition_type_coaches. The number of locomotives is the number of rows here, never a stored column, so the two cannot disagree. position expresses machines hauling TOGETHER (double heading); a traction change part-way along a route is route-dependent and cannot be expressed on a composition type at all — that belongs on the trip when it is modelled.
+
+| Column | Meaning | Unit | Used in |
+|---|---|---|---|
+| <a id="p-input_params-composition_type_locos-composition_type_row_id"></a>`composition_type_row_id` | — | — | — |
+| <a id="p-input_params-composition_type_locos-position"></a>`position` | 1-based position in the consist. | — | — |
+| <a id="p-input_params-composition_type_locos-loco_type_row_id"></a>`loco_type_row_id` | — | — | — |
 
 #### `input_params.composition_type_coaches`
 
@@ -1106,13 +1241,13 @@ EU-average fallback track parameters, applied wherever a country's own field is 
 |---|---|---|---|
 | <a id="p-input_params-track_infrastructure_defaults-track_infra_default_id"></a>`track_infra_default_id` | — | — | — |
 | <a id="p-input_params-track_infrastructure_defaults-track_infra_default_key"></a>`track_infra_default_key` | Identifier of the default set (e.g. 'EU'). | — | — |
-| <a id="p-input_params-track_infrastructure_defaults-track_tac_eur_train_km"></a>`track_tac_eur_train_km` | Track access charge — the 'rail toll' paid to the country's infrastructure company per kilometre driven. | €/train-km | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_tac_eur_train_km"></a>`track_tac_eur_train_km` | Indicative track access charge for the reference night train — a single headline number for display and comparison. The cost model does NOT read it: it prices track access from the calibrated component columns further down. | €/train-km | — |
 | <a id="p-input_params-track_infrastructure_defaults-track_tac_src"></a>`track_tac_src` | Source for the track access charge. | — | — |
-| <a id="p-input_params-track_infrastructure_defaults-track_parking_eur_day"></a>`track_parking_eur_day` | Cost of parking the train overnight between two nights of service. | €/day | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_parking_eur_day"></a>`track_parking_eur_day` | Indicative cost of one stabling occupation for the reference train — a single headline number for display and comparison. The cost model does NOT read it: it prices stabling from the basis and rate columns further down, against the actual layover and train length. | €/occupation (EUR at 2032 prices) | — |
 | <a id="p-input_params-track_infrastructure_defaults-track_parking_src"></a>`track_parking_src` | Source for the parking cost. | — | — |
-| <a id="p-input_params-track_infrastructure_defaults-track_shunting_eur_event"></a>`track_shunting_eur_event` | Cost of one shunting movement (coupling, uncoupling, moving the train in the yard). | €/event | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_shunting_eur_event"></a>`track_shunting_eur_event` | All-in cost of one shunting movement: what the infrastructure manager charges plus what it does not supply. Roughly nine tenths of the figure is the market cost of a shunting locomotive and crew where the IM sells only facility access — see the calibration document. | €/event (EUR at 2032 prices) | — |
 | <a id="p-input_params-track_infrastructure_defaults-track_shunting_src"></a>`track_shunting_src` | Source for the shunting cost. | — | — |
-| <a id="p-input_params-track_infrastructure_defaults-track_energy_price_eur_kwh"></a>`track_energy_price_eur_kwh` | Traction electricity price. | €/kWh | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_energy_price_eur_kwh"></a>`track_energy_price_eur_kwh` | Traction electricity price: the day rate, and the rate around the clock for the twenty-five countries whose tariff is not banded. Where a night band exists the cost model prices the in-band share at track_energy_price_night_eur_kwh instead. | €/kWh (EUR at 2032 prices) | — |
 | <a id="p-input_params-track_infrastructure_defaults-track_energy_price_src"></a>`track_energy_price_src` | Source for the electricity price. | — | — |
 | <a id="p-input_params-track_infrastructure_defaults-track_terrain_category"></a>`track_terrain_category` | Rough terrain classification: Flat, Hilly, or Mountainous. | — | — |
 | <a id="p-input_params-track_infrastructure_defaults-track_terrain_score"></a>`track_terrain_score` | Terrain difficulty score — hills and mountains increase energy use. | 1–100 | — |
@@ -1125,6 +1260,35 @@ EU-average fallback track parameters, applied wherever a country's own field is 
 | <a id="p-input_params-track_infrastructure_defaults-track_min_alighting_src"></a>`track_min_alighting_src` | Source for the minimum alighting time. | — | — |
 | <a id="p-input_params-track_infrastructure_defaults-track_buffer_quota_per"></a>`track_buffer_quota_per` | Schedule buffer added on top of driving time, reflecting how congested and delay-prone the network is. | fraction of driving time | — |
 | <a id="p-input_params-track_infrastructure_defaults-track_buffer_src"></a>`track_buffer_src` | Source for the buffer quota. | — | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_tac_b_day"></a>`track_tac_b_day` | Base day rate of the minimum access package. Empty means the country levies no distance-based day rate. | €/train-km (EUR at 2032 prices) | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_tac_b_night"></a>`track_tac_b_night` | Night rate of the minimum access package, charged on the share of a run falling inside the country's night band. Empty means the country has no separate night rate. | €/train-km (EUR at 2032 prices) | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_tac_gamma"></a>`track_tac_gamma` | Weight-dependent term, charged on the whole consist — coaches plus locomotives. | €/gross-tonne-km (EUR at 2032 prices) | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_tac_seat_km"></a>`track_tac_seat_km` | Capacity-dependent term, charged per place the train offers (Spanish corridor surcharge). | €/seat-km (EUR at 2032 prices) | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_tac_per_stop"></a>`track_tac_per_stop` | Per-stop element of the path price: stopping and restarting consumes path capacity (Swiss Haltezuschlag). NOT a station usage fee — those are stop_infrastructures.stop_charge_eur. Charged at each stop's own country rate. | €/stop (EUR at 2032 prices) | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_tac_revenue_share"></a>`track_tac_revenue_share` | Share of the traffic revenue earned in this country that the infrastructure manager takes on top of the distance charges (Swiss Deckungsbeitrag). | fraction | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_tac_fixed_per_train_km"></a>`track_tac_fixed_per_train_km` | Flat administrative add-on charged per kilometre alongside the base rate (Luxembourgish path administration). | €/train-km (EUR at 2032 prices) | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_tac_peak_multiplier"></a>`track_tac_peak_multiplier` | Factor the day rate is multiplied by on the share of a run falling inside the country's peak bands (Swiss NZV: 2). | factor | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_tac_congestion_surcharge_eur_km"></a>`track_tac_congestion_surcharge_eur_km` | Flat surcharge on congested sections, charged on the share of a run falling inside the peak bands (Austrian überlastete Schienenwege). Kept apart from the multiplier above so a congestion charge can be shown as one. | €/train-km (EUR at 2032 prices) | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_tac_night_mode"></a>`track_tac_night_mode` | How the country prices night traffic: 'none' (one rate around the clock) or 'time_band' (the night rate applies pro rata to the time a run spends inside the band below). | — | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_tac_night_band_start"></a>`track_tac_night_band_start` | Start of the national night tariff band, local clock. Bands may run across midnight (23:00–06:00). | time of day | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_tac_night_band_end"></a>`track_tac_night_band_end` | End of the national night tariff band, local clock. | time of day | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_tac_night_full_if_accommodation"></a>`track_tac_night_full_if_accommodation` | German SPFV Nacht rule: when true, a train carrying night accommodation (couchette, sleeper or capsule) is priced at the night rate over its ENTIRE run in this country, not just the part inside the band. | — | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_tac_peak_band1_start"></a>`track_tac_peak_band1_start` | Start of the first daily peak band (morning commuter peak), local clock. | time of day | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_tac_peak_band1_end"></a>`track_tac_peak_band1_end` | End of the first daily peak band. | time of day | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_tac_peak_band2_start"></a>`track_tac_peak_band2_start` | Start of the second daily peak band (evening commuter peak), local clock. | time of day | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_tac_peak_band2_end"></a>`track_tac_peak_band2_end` | End of the second daily peak band. | time of day | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_tac_peak_weekdays_only"></a>`track_tac_peak_weekdays_only` | Whether the peak bands apply Monday to Friday only. The model knows a departure's clock time but not its weekday, so such a band is charged at its expected value — five sevenths of the overlap. | — | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_energy_price_night_eur_kwh"></a>`track_energy_price_night_eur_kwh` | Traction electricity price inside the country's night tariff band, charged pro rata on the share of a run that falls in it. Empty means one rate around the clock (AT, CH and HR are the only banded tariffs). Never resolved from the defaults row, which leaves it empty: a banded tariff is a national particularity, not a gap to fill. | €/kWh (EUR at 2032 prices) | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_energy_night_band_start"></a>`track_energy_night_band_start` | Start of the national electricity night tariff band, local clock. Bands may run across midnight (22:00–06:00). This is the ENERGY band and is independent of the track access night band (track_tac_night_band_start): Germany bands the track charge 23:00–06:00 and does not band electricity at all, Switzerland the reverse. | time of day | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_energy_night_band_end"></a>`track_energy_night_band_end` | End of the national electricity night tariff band, local clock. | time of day | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_energy_catenary_eur_train_km"></a>`track_energy_catenary_eur_train_km` | Charge for using the catenary and traction power-supply installations, where the infrastructure manager levies it per train-kilometre (FR, HR, HU, IT, LT, LU, LV, PL, RO). Empty means not levied in this unit — either not levied at all, or charged on weight in the column below, or already inside the energy price. Never resolved from the defaults row: roughly half of Europe's infrastructure managers levy this charge, so an uncalibrated country is priced without one rather than given an invented median. | €/train-km (EUR at 2032 prices) | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_energy_catenary_eur_gross_tonne_km"></a>`track_energy_catenary_eur_gross_tonne_km` | The same supply-equipment charge where the infrastructure manager levies it on the weight moved instead (FI, GR, SK), charged on the whole consist — coaches plus locomotives. | €/gross-tonne-km (EUR at 2032 prices) | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_parking_basis"></a>`track_parking_basis` | How the country prices one stabling occupation: per metre of train length per started 24 hours, per started hour (length-independent, as Germany's Anlagenpreissystem is by design), a flat charge per occupation with no time term, or 'none' where the network statement documents that no siding charge is levied. | — | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_parking_eur_metre_day"></a>`track_parking_eur_metre_day` | Stabling rate where the country prices by length and time. Empty means it prices in one of the other units. | €/metre per started 24 h (EUR at 2032 prices) | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_parking_eur_hour"></a>`track_parking_eur_hour` | Stabling rate where the country prices per started hour, independent of train length. | €/started hour (EUR at 2032 prices) | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_parking_eur_event"></a>`track_parking_eur_event` | Stabling charge where the country prices one occupation flat, with no time or length term. | €/occupation (EUR at 2032 prices) | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_parking_free_hours"></a>`track_parking_free_hours` | Free stabling allowance before the charge starts. Material where it exceeds a layover: Norway's 48 h and Croatia's 24 h zero a twelve-hour turnaround entirely. | hours | — |
+| <a id="p-input_params-track_infrastructure_defaults-track_parking_hotel_power_eur_hour"></a>`track_parking_hotel_power_eur_hour` | Power the train draws while stabled, charged on ACTUAL stabled hours rather than on the billable hours after a free track allowance — the electricity flows whether or not the siding is free. One European proxy rate, from DB InfraGO's unmetered Elektrant flat charge. | €/stabled hour (EUR at 2032 prices) | — |
 | <a id="p-input_params-track_infrastructure_defaults-change_log"></a>`change_log` | Free-text description of what changed in this version and why. | — | — |
 | <a id="p-input_params-track_infrastructure_defaults-track_infra_default_version"></a>`track_infra_default_version` | Per-table full-snapshot version number. Resolved via scenario.scenarios.track_infrastructure_defaults_version — never inferred. | — | — |
 
@@ -1136,13 +1300,13 @@ Country-level track parameters. Empty fields are resolved against track_infrastr
 |---|---|---|---|
 | <a id="p-input_params-track_infrastructures-track_infra_row_id"></a>`track_infra_row_id` | — | — | — |
 | <a id="p-input_params-track_infrastructures-country_code"></a>`country_code` | Two-letter country code (ISO 3166-1 alpha-2). | — | — |
-| <a id="p-input_params-track_infrastructures-track_tac_eur_train_km"></a>`track_tac_eur_train_km` | Track access charge — the 'rail toll' paid to the country's infrastructure company per kilometre driven. | €/train-km | [`tac_eur`](#f-calc-tac_eur) |
+| <a id="p-input_params-track_infrastructures-track_tac_eur_train_km"></a>`track_tac_eur_train_km` | Indicative track access charge for the reference night train — a single headline number for display and comparison. The cost model does NOT read it: it prices track access from the calibrated component columns further down. | €/train-km | — |
 | <a id="p-input_params-track_infrastructures-track_tac_src"></a>`track_tac_src` | Source for the track access charge. | — | — |
-| <a id="p-input_params-track_infrastructures-track_parking_eur_day"></a>`track_parking_eur_day` | Cost of parking the train overnight between two nights of service. | €/day | [`parking_eur`](#f-calc-parking_eur) |
+| <a id="p-input_params-track_infrastructures-track_parking_eur_day"></a>`track_parking_eur_day` | Indicative cost of one stabling occupation for the reference train — a single headline number for display and comparison. The cost model does NOT read it: it prices stabling from the basis and rate columns further down, against the actual layover and train length. | €/occupation (EUR at 2032 prices) | [`parking_eur`](#f-calc-parking_eur) |
 | <a id="p-input_params-track_infrastructures-track_parking_src"></a>`track_parking_src` | Source for the parking cost. | — | — |
-| <a id="p-input_params-track_infrastructures-track_shunting_eur_event"></a>`track_shunting_eur_event` | Cost of one shunting movement (coupling, uncoupling, moving the train in the yard). | €/event | [`shunting_eur`](#f-calc-shunting_eur) |
+| <a id="p-input_params-track_infrastructures-track_shunting_eur_event"></a>`track_shunting_eur_event` | All-in cost of one shunting movement: what the infrastructure manager charges plus what it does not supply. Roughly nine tenths of the figure is the market cost of a shunting locomotive and crew where the IM sells only facility access — see the calibration document. | €/event (EUR at 2032 prices) | [`shunting_eur`](#f-calc-shunting_eur) |
 | <a id="p-input_params-track_infrastructures-track_shunting_src"></a>`track_shunting_src` | Source for the shunting cost. | — | — |
-| <a id="p-input_params-track_infrastructures-track_energy_price_eur_kwh"></a>`track_energy_price_eur_kwh` | Traction electricity price. | €/kWh | [`energy_eur`](#f-calc-energy_eur) |
+| <a id="p-input_params-track_infrastructures-track_energy_price_eur_kwh"></a>`track_energy_price_eur_kwh` | Traction electricity price: the day rate, and the rate around the clock for the twenty-five countries whose tariff is not banded. Where a night band exists the cost model prices the in-band share at track_energy_price_night_eur_kwh instead. | €/kWh (EUR at 2032 prices) | [`energy_eur`](#f-calc-energy_eur) |
 | <a id="p-input_params-track_infrastructures-track_energy_price_src"></a>`track_energy_price_src` | Source for the electricity price. | — | — |
 | <a id="p-input_params-track_infrastructures-track_terrain_category"></a>`track_terrain_category` | Rough terrain classification: Flat, Hilly, or Mountainous. | — | — |
 | <a id="p-input_params-track_infrastructures-track_terrain_score"></a>`track_terrain_score` | Terrain difficulty score — hills and mountains increase energy use. | 1–100 | [`energy_per_leg`](#f-energy-energy_per_leg) |
@@ -1155,8 +1319,53 @@ Country-level track parameters. Empty fields are resolved against track_infrastr
 | <a id="p-input_params-track_infrastructures-track_min_alighting_src"></a>`track_min_alighting_src` | Source for the minimum alighting time. | — | — |
 | <a id="p-input_params-track_infrastructures-track_buffer_quota_per"></a>`track_buffer_quota_per` | Schedule buffer added on top of driving time, reflecting how congested and delay-prone the network is. | fraction of driving time | [`buffer_time`](#f-route-buffer_time) |
 | <a id="p-input_params-track_infrastructures-track_buffer_src"></a>`track_buffer_src` | Source for the buffer quota. | — | — |
+| <a id="p-input_params-track_infrastructures-track_tac_b_day"></a>`track_tac_b_day` | Base day rate of the minimum access package. Empty means the country levies no distance-based day rate. | €/train-km (EUR at 2032 prices) | [`tac_eur`](#f-calc-tac_eur) |
+| <a id="p-input_params-track_infrastructures-track_tac_b_night"></a>`track_tac_b_night` | Night rate of the minimum access package, charged on the share of a run falling inside the country's night band. Empty means the country has no separate night rate. | €/train-km (EUR at 2032 prices) | [`tac_eur`](#f-calc-tac_eur) |
+| <a id="p-input_params-track_infrastructures-track_tac_gamma"></a>`track_tac_gamma` | Weight-dependent term, charged on the whole consist — coaches plus locomotives. | €/gross-tonne-km (EUR at 2032 prices) | [`tac_eur`](#f-calc-tac_eur) |
+| <a id="p-input_params-track_infrastructures-track_tac_seat_km"></a>`track_tac_seat_km` | Capacity-dependent term, charged per place the train offers (Spanish corridor surcharge). | €/seat-km (EUR at 2032 prices) | [`tac_eur`](#f-calc-tac_eur) |
+| <a id="p-input_params-track_infrastructures-track_tac_per_stop"></a>`track_tac_per_stop` | Per-stop element of the path price: stopping and restarting consumes path capacity (Swiss Haltezuschlag). NOT a station usage fee — those are stop_infrastructures.stop_charge_eur. Charged at each stop's own country rate. | €/stop (EUR at 2032 prices) | [`tac_eur`](#f-calc-tac_eur) |
+| <a id="p-input_params-track_infrastructures-track_tac_revenue_share"></a>`track_tac_revenue_share` | Share of the traffic revenue earned in this country that the infrastructure manager takes on top of the distance charges (Swiss Deckungsbeitrag). | fraction | [`tac_eur`](#f-calc-tac_eur) |
+| <a id="p-input_params-track_infrastructures-track_tac_fixed_per_train_km"></a>`track_tac_fixed_per_train_km` | Flat administrative add-on charged per kilometre alongside the base rate (Luxembourgish path administration). | €/train-km (EUR at 2032 prices) | [`tac_eur`](#f-calc-tac_eur) |
+| <a id="p-input_params-track_infrastructures-track_tac_peak_multiplier"></a>`track_tac_peak_multiplier` | Factor the day rate is multiplied by on the share of a run falling inside the country's peak bands (Swiss NZV: 2). | factor | [`tac_eur`](#f-calc-tac_eur) |
+| <a id="p-input_params-track_infrastructures-track_tac_congestion_surcharge_eur_km"></a>`track_tac_congestion_surcharge_eur_km` | Flat surcharge on congested sections, charged on the share of a run falling inside the peak bands (Austrian überlastete Schienenwege). Kept apart from the multiplier above so a congestion charge can be shown as one. | €/train-km (EUR at 2032 prices) | [`tac_eur`](#f-calc-tac_eur) |
+| <a id="p-input_params-track_infrastructures-track_tac_night_mode"></a>`track_tac_night_mode` | How the country prices night traffic: 'none' (one rate around the clock) or 'time_band' (the night rate applies pro rata to the time a run spends inside the band below). | — | — |
+| <a id="p-input_params-track_infrastructures-track_tac_night_band_start"></a>`track_tac_night_band_start` | Start of the national night tariff band, local clock. Bands may run across midnight (23:00–06:00). | time of day | [`tac_night_share`](#f-calc-tac_night_share) |
+| <a id="p-input_params-track_infrastructures-track_tac_night_band_end"></a>`track_tac_night_band_end` | End of the national night tariff band, local clock. | time of day | — |
+| <a id="p-input_params-track_infrastructures-track_tac_night_full_if_accommodation"></a>`track_tac_night_full_if_accommodation` | German SPFV Nacht rule: when true, a train carrying night accommodation (couchette, sleeper or capsule) is priced at the night rate over its ENTIRE run in this country, not just the part inside the band. | — | — |
+| <a id="p-input_params-track_infrastructures-track_tac_peak_band1_start"></a>`track_tac_peak_band1_start` | Start of the first daily peak band (morning commuter peak), local clock. | time of day | [`tac_peak_share`](#f-calc-tac_peak_share) |
+| <a id="p-input_params-track_infrastructures-track_tac_peak_band1_end"></a>`track_tac_peak_band1_end` | End of the first daily peak band. | time of day | — |
+| <a id="p-input_params-track_infrastructures-track_tac_peak_band2_start"></a>`track_tac_peak_band2_start` | Start of the second daily peak band (evening commuter peak), local clock. | time of day | — |
+| <a id="p-input_params-track_infrastructures-track_tac_peak_band2_end"></a>`track_tac_peak_band2_end` | End of the second daily peak band. | time of day | — |
+| <a id="p-input_params-track_infrastructures-track_tac_peak_weekdays_only"></a>`track_tac_peak_weekdays_only` | Whether the peak bands apply Monday to Friday only. The model knows a departure's clock time but not its weekday, so such a band is charged at its expected value — five sevenths of the overlap. | — | — |
+| <a id="p-input_params-track_infrastructures-track_energy_price_night_eur_kwh"></a>`track_energy_price_night_eur_kwh` | Traction electricity price inside the country's night tariff band, charged pro rata on the share of a run that falls in it. Empty means one rate around the clock (AT, CH and HR are the only banded tariffs). Never resolved from the defaults row, which leaves it empty: a banded tariff is a national particularity, not a gap to fill. | €/kWh (EUR at 2032 prices) | [`energy_eur`](#f-calc-energy_eur) |
+| <a id="p-input_params-track_infrastructures-track_energy_night_band_start"></a>`track_energy_night_band_start` | Start of the national electricity night tariff band, local clock. Bands may run across midnight (22:00–06:00). This is the ENERGY band and is independent of the track access night band (track_tac_night_band_start): Germany bands the track charge 23:00–06:00 and does not band electricity at all, Switzerland the reverse. | time of day | [`energy_night_share`](#f-calc-energy_night_share) |
+| <a id="p-input_params-track_infrastructures-track_energy_night_band_end"></a>`track_energy_night_band_end` | End of the national electricity night tariff band, local clock. | time of day | — |
+| <a id="p-input_params-track_infrastructures-track_energy_catenary_eur_train_km"></a>`track_energy_catenary_eur_train_km` | Charge for using the catenary and traction power-supply installations, where the infrastructure manager levies it per train-kilometre (FR, HR, HU, IT, LT, LU, LV, PL, RO). Empty means not levied in this unit — either not levied at all, or charged on weight in the column below, or already inside the energy price. Never resolved from the defaults row: roughly half of Europe's infrastructure managers levy this charge, so an uncalibrated country is priced without one rather than given an invented median. | €/train-km (EUR at 2032 prices) | [`energy_eur`](#f-calc-energy_eur) |
+| <a id="p-input_params-track_infrastructures-track_energy_catenary_eur_gross_tonne_km"></a>`track_energy_catenary_eur_gross_tonne_km` | The same supply-equipment charge where the infrastructure manager levies it on the weight moved instead (FI, GR, SK), charged on the whole consist — coaches plus locomotives. | €/gross-tonne-km (EUR at 2032 prices) | [`energy_eur`](#f-calc-energy_eur) |
+| <a id="p-input_params-track_infrastructures-track_parking_basis"></a>`track_parking_basis` | How the country prices one stabling occupation: per metre of train length per started 24 hours, per started hour (length-independent, as Germany's Anlagenpreissystem is by design), a flat charge per occupation with no time term, or 'none' where the network statement documents that no siding charge is levied. | — | — |
+| <a id="p-input_params-track_infrastructures-track_parking_eur_metre_day"></a>`track_parking_eur_metre_day` | Stabling rate where the country prices by length and time. Empty means it prices in one of the other units. | €/metre per started 24 h (EUR at 2032 prices) | — |
+| <a id="p-input_params-track_infrastructures-track_parking_eur_hour"></a>`track_parking_eur_hour` | Stabling rate where the country prices per started hour, independent of train length. | €/started hour (EUR at 2032 prices) | — |
+| <a id="p-input_params-track_infrastructures-track_parking_eur_event"></a>`track_parking_eur_event` | Stabling charge where the country prices one occupation flat, with no time or length term. | €/occupation (EUR at 2032 prices) | — |
+| <a id="p-input_params-track_infrastructures-track_parking_free_hours"></a>`track_parking_free_hours` | Free stabling allowance before the charge starts. Material where it exceeds a layover: Norway's 48 h and Croatia's 24 h zero a twelve-hour turnaround entirely. | hours | — |
+| <a id="p-input_params-track_infrastructures-track_parking_hotel_power_eur_hour"></a>`track_parking_hotel_power_eur_hour` | Power the train draws while stabled, charged on ACTUAL stabled hours rather than on the billable hours after a free track allowance — the electricity flows whether or not the siding is free. One European proxy rate, from DB InfraGO's unmetered Elektrant flat charge. | €/stabled hour (EUR at 2032 prices) | — |
 | <a id="p-input_params-track_infrastructures-change_log"></a>`change_log` | Free-text description of what changed in this version and why. | — | — |
 | <a id="p-input_params-track_infrastructures-track_infra_version"></a>`track_infra_version` | Per-table full-snapshot version number. Resolved via scenario.scenarios.track_infrastructures_version — never inferred. | — | — |
+
+#### `input_params.passage_charges`
+
+Crossings that are charged per traverse instead of per kilometre — the Storebælt and Øresund fixed links and the Channel Tunnel. A crossing is its own entity rather than a country attribute because the charging party is the crossing's operator: Øresund is two rows over one polygon, each infrastructure manager billing its half. Which trip segment crosses which passage is decided at routing time by polygon intersection, so a crossing split by an intermediate stop is still paid for once. Version bumps are full-table snapshots, resolved via scenario.scenarios.passage_charges_version — see db/README.md for the versioning contract.
+
+| Column | Meaning | Unit | Used in |
+|---|---|---|---|
+| <a id="p-input_params-passage_charges-passage_row_id"></a>`passage_row_id` | — | — | — |
+| <a id="p-input_params-passage_charges-passage_id"></a>`passage_id` | Stable crossing identifier (STOREBAELT, OERESUND_DK, OERESUND_SE, CHANNEL_TUNNEL). | — | — |
+| <a id="p-input_params-passage_charges-passage_name"></a>`passage_name` | Full crossing name. | — | — |
+| <a id="p-input_params-passage_charges-passage_fixed_eur"></a>`passage_fixed_eur` | Charge per train crossing, one way. | €/traverse (EUR at 2032 prices) | [`tac_eur`](#f-calc-tac_eur) |
+| <a id="p-input_params-passage_charges-passage_per_passenger_eur"></a>`passage_per_passenger_eur` | Charge per carried passenger, one way (Channel Tunnel). Evaluated against the passengers actually aboard on the crossing segment, so this term follows demand. | €/passenger (EUR at 2032 prices) | [`tac_eur`](#f-calc-tac_eur) |
+| <a id="p-input_params-passage_charges-passage_src"></a>`passage_src` | Source for the crossing charges. | — | — |
+| <a id="p-input_params-passage_charges-passage_geom"></a>`passage_geom` | Crossing polygon (SRID 4326). A routed trip leg intersecting it owns the crossing. Static reference geometry — a tunnel does not move between scenarios; what the version pins are the charges. | — | — |
+| <a id="p-input_params-passage_charges-change_log"></a>`change_log` | Free-text description of what changed in this version and why. | — | — |
+| <a id="p-input_params-passage_charges-passage_version"></a>`passage_version` | Per-table full-snapshot version number. Resolved via scenario.scenarios.passage_charges_version — never inferred. | — | — |
 
 #### `input_params.stop_infrastructure_defaults`
 
@@ -1192,7 +1401,7 @@ Catalog of possible night train stops. An empty stop_charge_eur is resolved agai
 
 #### `scenario.scenarios`
 
-Container pinning one version of each versioned infrastructure table. Exactly one row has is_current_base = TRUE (the live default); exactly one row per scenario_key has is_current_scenario = TRUE (the head of that what-if lineage). All four *_version columns are per-table full-snapshot version numbers, resolved by exact match, and are NOT NULL — a scenario is always a complete, self-contained pin, never a partial diff. Compositions, coach types, and operators are catalogs, not scenario-versioned. Full versioning contract: db/README.md.
+Container pinning one version of each versioned infrastructure table. Exactly one row has is_current_base = TRUE (the live default); exactly one row per scenario_key has is_current_scenario = TRUE (the head of that what-if lineage). All five *_version columns are per-table full-snapshot version numbers, resolved by exact match, and are NOT NULL — a scenario is always a complete, self-contained pin, never a partial diff. Compositions, coach types, and operators are catalogs, not scenario-versioned. Full versioning contract: db/README.md.
 
 | Column | Meaning | Unit | Used in |
 |---|---|---|---|
@@ -1209,6 +1418,7 @@ Container pinning one version of each versioned infrastructure table. Exactly on
 | <a id="p-scenario-scenarios-track_infrastructure_defaults_version"></a>`track_infrastructure_defaults_version` | Pinned input_params.track_infrastructure_defaults version (full-table snapshot). | — | — |
 | <a id="p-scenario-scenarios-stop_infrastructures_version"></a>`stop_infrastructures_version` | Pinned input_params.stop_infrastructures version (full-table snapshot). | — | — |
 | <a id="p-scenario-scenarios-stop_infrastructure_defaults_version"></a>`stop_infrastructure_defaults_version` | Pinned input_params.stop_infrastructure_defaults version (full-table snapshot). | — | — |
+| <a id="p-scenario-scenarios-passage_charges_version"></a>`passage_charges_version` | Pinned input_params.passage_charges version (full-table snapshot). | — | — |
 <!-- END GENERATED: parameters -->
 
 ---

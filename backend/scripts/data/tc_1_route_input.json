@@ -3,9 +3,9 @@
   "proposal_version": null,
   "scenario_id": null,
   "stops": [
-    "DE_BERLIN_HBF",
-    "DE_DRESDEN_HBF",
-    "AT_WIEN_HBF"
+    "osm:n3856100103",
+    "osm:n25397500",
+    "osm:w423692233"
   ],
   "composition_id": "REF-COUCH-10",
   "routing_mode": "fullRouting",

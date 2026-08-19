@@ -43,7 +43,7 @@ from tests.helpers import (
     purge_saved_proposals,
 )
 
-_STOPS = ["DE_BERLIN_HBF", "AT_WIEN_HBF"]
+_STOPS = ["osm:n3856100103", "osm:w423692233"]
 _COMPOSITION = "NEW-BAL-7"
 _OTHER_COMPOSITION = "REF-BAL-9"
 

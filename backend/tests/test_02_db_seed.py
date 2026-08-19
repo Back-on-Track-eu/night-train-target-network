@@ -22,14 +22,12 @@ Covers:
 
 import pytest
 
-# The curated canonical stop list in db/dev/seed.py — the literal must
-# move with seed.py's _STOP_INFRASTRUCTURES_CANONICAL (same maintenance
-# contract the old hardcoded 174 row floor already had). The rest of the
-# catalog comes from the Drive-hosted ONTD seed CSV, whose size isn't
-# knowable here (the file lives inside the container in CI) — its
-# presence is asserted via the change_log provenance marker instead.
-N_CURATED_SEED_STOPS = 58
-ONTD_SEED_CHANGE_LOG_PREFIX = "seeded from ONTD snapshot"
+# The whole catalog now comes from the Drive-hosted stop seed CSV (the
+# curated in-file list was retired when the stop classification pipeline
+# took over), so its size isn't knowable here — the file lives inside the
+# container in CI. Presence is asserted via the change_log provenance
+# marker instead, and the floor below is deliberately loose.
+STOP_SEED_CHANGE_LOG_PREFIX = "seeded from the stop classification pipeline"
 
 # =============================================================================
 # Expectations after seeding — see db/dev/seed.py
@@ -55,11 +53,12 @@ EXPECTED_ROW_COUNTS = {
     "input_params.track_infrastructure_defaults": 3,  # 1 per scenario
     "input_params.track_infrastructures": 102,  # 3 full-table snapshots × 34 countries
     "input_params.stop_infrastructure_defaults": 3,  # 1 per scenario
-    # Floor: 3 full-table snapshots × 58 curated stops. The real total
-    # includes the ONTD-derived stops seeded from db/dev/data/
-    # ontd_seed_stops.csv — the exact count and the snapshot-set
-    # invariant are asserted by test_stop_catalog_snapshots below.
-    "input_params.stop_infrastructures": 174,
+    # Floor only — the real total is 3 full-table snapshots × the catalog
+    # from db/dev/data/stop_seed_catalog.csv, minus the stops whose country
+    # COUNTRIES doesn't model (~870 stops seeded, so ~2600 rows). Kept well
+    # below that so regenerating the catalog doesn't break the suite; the
+    # snapshot-set invariant is asserted by test_stop_catalog_snapshots.
+    "input_params.stop_infrastructures": 1500,
     "scenario.scenarios": 3,  # 2026-baseline + base + 2032-baseline-hsr-allowed
     "proposals.proposals": 1,  # one real saved example proposal — see seed_example_proposal()
     "proposals.routes": 1,
@@ -145,16 +144,17 @@ def test_stop_catalog_snapshots(db_cur):
     """The stop catalog is complete at seed time and version-immutable:
     every stop_infra_version carries the identical stop set (the
     full-table-snapshot invariant the retired runtime mint used to
-    violate — see db/ontd/stop_mapping.py's module docstring), and the
-    ONTD-derived share is actually present — a missing share means the
-    seed's Drive download of ontd_seed_stops.csv failed (its warning
-    banner is in the container log) and downstream failures like
-    test_20's auto-stop expectations would otherwise be baffling."""
+    violate — see db/ontd/stop_mapping.py's module docstring), and every
+    stop carries the pipeline's provenance marker. A catalog that is empty
+    or unmarked means the seed's Drive download of stop_seed_catalog.csv
+    failed (its warning banner is in the container log), which would
+    otherwise surface as baffling failures in test_20's auto-stop
+    expectations."""
     db_cur.execute(
         "SELECT stop_infra_version, array_agg(stop_id ORDER BY stop_id) AS ids, "
-        "       count(*) FILTER (WHERE change_log LIKE %s) AS n_ontd "
+        "       count(*) FILTER (WHERE change_log LIKE %s) AS n_seeded "
         "FROM input_params.stop_infrastructures GROUP BY stop_infra_version",
-        (f"{ONTD_SEED_CHANGE_LOG_PREFIX}%",),
+        (f"{STOP_SEED_CHANGE_LOG_PREFIX}%",),
     )
     rows = db_cur.fetchall()
     snapshots = {row["stop_infra_version"]: row["ids"] for row in rows}
@@ -162,15 +162,16 @@ def test_stop_catalog_snapshots(db_cur):
     for row in rows:
         version, ids = row["stop_infra_version"], row["ids"]
         assert len(ids) == len(set(ids)), f"duplicate stop_ids in version {version}"
-        assert row["n_ontd"] > 0, (
-            f"version {version}: no ONTD-derived stops — the seed's Drive "
-            "download of ontd_seed_stops.csv failed (see the container "
-            "log's warning banner) or the CSV is empty"
+        assert row["n_seeded"] > 0, (
+            f"version {version}: no stops carry the pipeline provenance "
+            "marker — the seed's Drive download of stop_seed_catalog.csv "
+            "failed (see the container log's warning banner) or the CSV "
+            "is empty"
         )
-        assert len(ids) == N_CURATED_SEED_STOPS + row["n_ontd"], (
-            f"version {version}: {len(ids)} stops != {N_CURATED_SEED_STOPS} "
-            f"curated + {row['n_ontd']} ONTD-derived — an unmarked writer "
-            "touched the catalog"
+        assert len(ids) == row["n_seeded"], (
+            f"version {version}: {len(ids)} stops but only {row['n_seeded']} "
+            "carry the seed provenance marker — an unmarked writer touched "
+            "the catalog"
         )
     assert snapshots[1] == snapshots[2] == snapshots[3], (
         "stop snapshots differ between versions — the seed is the only "

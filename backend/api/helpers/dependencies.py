@@ -29,6 +29,7 @@ State
 -----
   _loader          : DBDataLoader instance (created at startup)
   _country_index   : CountryIndex instance (built at startup from the loader)
+  _passage_index   : PassageIndex instance (crossing polygons, same lifetime)
   _rail_router     : RailRouter instance (built at startup on the CountryIndex)
   _proposal_repo   : ProposalRepository instance (created at startup)
   _feedback_repo   : FeedbackRepository instance (created at startup)
@@ -52,6 +53,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 _loader = None
 _country_index = None
+_passage_index = None
 _rail_router = None
 _proposal_repo = None
 _feedback_repo = None
@@ -82,6 +84,7 @@ def init() -> None:
     global \
         _loader, \
         _country_index, \
+        _passage_index, \
         _rail_router, \
         _proposal_repo, \
         _feedback_repo, \
@@ -98,14 +101,23 @@ def init() -> None:
     from adapters.proposal.engagement_repository import ProposalEngagementRepository
     from adapters.auth_repository import AuthRepository
     from adapters.proposal.compute_cache import ComputeCacheRepository
-    from models.route.routing.rail_router import CountryIndex, RailRouter
+    from models.route.routing.rail_router import (
+        CountryIndex,
+        PassageIndex,
+        RailRouter,
+    )
 
     logger.info("Connecting to database...")
 
     try:
         _loader = DBDataLoader()
         _country_index = CountryIndex(_loader.get_country_geometries())
-        _rail_router = RailRouter(_country_index)
+        # Crossing polygons are static reference data like the country
+        # borders — a tunnel does not move between scenarios — so the index
+        # is a startup singleton too. What a scenario pins are the charges,
+        # resolved per request by DBDataLoader.build_all_passages().
+        _passage_index = PassageIndex(_loader.get_passage_geometries())
+        _rail_router = RailRouter(_country_index, _passage_index)
         _proposal_repo = ProposalRepository()
         _feedback_repo = FeedbackRepository()
         _engagement_repo = ProposalEngagementRepository()
