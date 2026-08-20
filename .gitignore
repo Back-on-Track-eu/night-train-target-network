@@ -122,6 +122,13 @@ backend/db/dev/data/country_geoms.geojson.gz
 # derived CSVs, downloaded from Drive by stops/data_sources.py when absent.
 backend/models/infrastructure/stops/data/
 
+# Demand calibration. This package uses raw/ and out/ rather than data/ and
+# seed/: raw/ holds third-party downloads that the notebooks and ETL fetch but
+# never author, and out/ holds everything the ETL generates. Both are
+# reproducible from docu/SOURCES.md, and raw/ alone runs to gigabytes.
+backend/models/demand/calib/raw/
+backend/models/demand/calib/out/
+
 # Scratch output from the manual test scripts in backend/scripts/. Input
 # fixtures (tc_1_evaluation_input.json) do not match the pattern and stay
 # tracked.
@@ -159,4 +166,3 @@ desktop.ini
 *.tmp
 *.bak
 *.orig
-
