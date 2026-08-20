@@ -15,7 +15,9 @@ model that will replace it.
 ```
 demand/
 ├── stopgap.py    # distribute_demand() — the uniform-distribution proxy
-└── model.py      # DEMAND_MODEL_VERSION + stopgap standard values + open TODOs
+├── model.py      # DEMAND_MODEL_VERSION + stopgap standard values + open TODOs
+├── docu/         # concept, implementation log, source register
+└── calib/        # data acquisition and preparation for the real model
 ```
 
 ## Callers
@@ -37,3 +39,22 @@ with the existing test suite. When it lands here, the second replacement
 site is the placeholder demand KPIs in
 `adapters/proposal/projection.py` (`_PLACEHOLDER_*` constants,
 `adapters/proposal/README.md` §8.1).
+
+Design and progress are tracked in [`docu/`](docu/):
+
+- [`DEMAND_MODEL_CONCEPT.md`](docu/DEMAND_MODEL_CONCEPT.md) — what the model
+  is and why it is specified that way, including the acquisition-ordered data
+  inventory (§3) and the decisions taken so far (§5)
+- [`IMPLEMENTATION_DOCU.md`](docu/IMPLEMENTATION_DOCU.md) — what exists, what
+  was learned building it, what is next
+- [`SOURCES.md`](docu/SOURCES.md) — per-file provenance and licence for every
+  external input
+
+Data work happens in [`calib/`](calib/), which separates exploration
+notebooks from the ETL pipelines they produce; see
+[`calib/README.md`](calib/README.md).
+
+**Zone frame (DM1a) is complete.** `calib/out/01_zones.parquet` holds 1 514
+NUTS-3 zones with identity, membership, tier, geometry, population-weighted
+centroid, centroid source and the NUTS 2021↔2024 crosswalk. Batch 2 (zone
+attributes) is next.
