@@ -1,0 +1,2 @@
+source_id,short_id,title,publisher,pub_year,price_basis_year,currency,kind,url_or_file,date_accessed,reliability_note
+J01,example_fleet_press,EXAMPLE — Operator press release on new couchette fleet order,Example Railways,2026,2026,EUR,press,https://example.org/fleet-order,2026-08-20,"Worked example row — delete before handoff. Press figures are list prices, likely above negotiated"

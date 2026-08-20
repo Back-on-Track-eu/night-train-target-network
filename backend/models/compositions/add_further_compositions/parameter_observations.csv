@@ -1,0 +1,2 @@
+source_id,parameter,value,unit,condition,confidence,conversion_note,extraction_note
+J01,coach_purchase_keur_m,150,kEUR/m,new,medium,2026 prices — inflate to 2032 basis at integration,"EXAMPLE — delete before handoff. 30 coaches at 118 MEUR, 26.4 m each"

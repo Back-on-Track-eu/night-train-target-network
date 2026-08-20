@@ -1,0 +1,2 @@
+coach_type_id,description,length_m,weight_t,svc_length_m,svc_weight_t,crew,wifi,bikes,aircon,plugs,source_ids,notes
+EXAMPLE-Bcfam,"EXAMPLE — family couchette coach with play corner, based on OeBB Bcmz refit",26.4,54.0,2.0,3.5,0.5,True,False,True,True,J01,Worked example row — delete before handoff
