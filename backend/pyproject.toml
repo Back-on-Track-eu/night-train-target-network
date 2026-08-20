@@ -40,7 +40,13 @@ dev = [
     # Drive folder sync for the stop classification pipeline's bulk inputs
     # (models/infrastructure/stops/data_sources.py). Drive cannot list a folder
     # over plain HTTP, so this is the one dependency that can.
-    "gdown>=5.2.0",  # 5.x and 6.x differ; data_sources.py handles both
+    "gdown>=5.2.0", # 5.x and 6.x differ; data_sources.py handles both
+    # Demand calibration (models/demand/calib/): pyarrow reads the GISCO
+    # population grid, rasterio the GHS-POP raster. Every developer running
+    # the calibration needs both, so they sit here rather than in a separate
+    # extra — same reasoning as gdown.
+    "pyarrow>=17",
+    "rasterio>=1.5.1",
 ]
 
 [tool.ruff]
