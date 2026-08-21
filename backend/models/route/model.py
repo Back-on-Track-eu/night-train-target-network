@@ -490,6 +490,15 @@ DEFAULT_TIMETABLE_MODE: str = "simpleAutomatic"
 DEFAULT_SCHEDULE_MODE: str = "alwaysDaily"
 DEFAULT_ROUTING_MODE: str = "fullRouting"
 DEFAULT_AUTO_STOP_ADDITION: str = "add"
+DEFAULT_COMPOSITION_ID: str = "NEW-BAL-7"
+"""Composition a request without composition_id is computed with — the
+seven-coach new-fleet balanced train. It is the middle of the catalog on
+every axis a first result is read on (places, length, cost per place-km),
+so a first evaluation neither flatters the concept with the cheapest
+formation nor burdens it with the largest. The frontend posts no
+composition until the user picks one; it reads back which one was used
+from route.trip_pairs[].composition_id. db/dev/seed.py asserts the id
+exists once the catalog is seeded."""
 
 # --- Persisted GTFS calendar window (adapters/proposal/gtfs_store.py)
 GTFS_SERVICE_START: str = "2032-12-12"
