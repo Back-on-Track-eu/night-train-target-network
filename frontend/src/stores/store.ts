@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import type {
   Stop,
   Composition,
+  CompositionCatalog,
   Scenario,
   StopsResponse,
   CompositionsResponse,
@@ -29,6 +30,16 @@ export const useStore = defineStore('store', () => {
   const stopsError = ref<string | null>(null)
 
   const compositions = ref<Composition[]>([])
+  // Everything the same response carries alongside them — coach types,
+  // classes, operators, field documentation and sources. Kept because the
+  // composition detail overlay resolves a formation against it.
+  const compositionCatalog = ref<CompositionCatalog>({
+    operators: [],
+    classes: {},
+    coach_types: {},
+    descriptions: { compositions: {}, operators: {} },
+    sources: {},
+  })
   const compositionsStatus = ref<LoadStatus>('idle')
   const compositionsError = ref<string | null>(null)
 
@@ -108,6 +119,13 @@ export const useStore = defineStore('store', () => {
         compositionsError.value = `HTTP ${response.status}`
       } else {
         compositions.value = json.compositions
+        compositionCatalog.value = {
+          operators: json.operators,
+          classes: json.classes,
+          coach_types: json.coach_types,
+          descriptions: json.descriptions,
+          sources: json.sources,
+        }
         compositionsStatus.value = 'success'
         console.log('[compositions]', json.compositions)
       }
@@ -285,6 +303,7 @@ export const useStore = defineStore('store', () => {
     stopsStatus,
     stopsError,
     compositions,
+    compositionCatalog,
     compositionsStatus,
     compositionsError,
     scenarios,
