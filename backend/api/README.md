@@ -321,7 +321,7 @@ layer of candidate stops tagged with `added_time_min`.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `stops` | array of string | ✓ | Ordered list of stop IDs, min 2 — plain strings, e.g. `["osm:n3856100103", "osm:w423692233"]`. No per-stop type or time; both are derived automatically, see `timetable_mode` |
-| `composition_id` | string | ✓ | From `/api/params/compositions` |
+| `composition_id` | string | — | From `/api/params/compositions`. Omit to compute with the standard composition (`DEFAULT_COMPOSITION_ID`, `models/route/model.py`); the resolved id comes back in `request.composition_id` and on every `trip_pairs[]` entry |
 | `scenario_id` | int | — | Pins which version of every parameter table to use. Omit for the current live base scenario |
 | `routing_mode` | string | — | Default `"fullRouting"` — see **Mode switches** below |
 | `timetable_mode` | string | — | Default `"simpleAutomatic"` — see **Mode switches** below |

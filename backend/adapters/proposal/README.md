@@ -95,7 +95,9 @@ belongs to publish (§2.2).
 {
   // WHAT to compute
   "stops":              ["stop_id", "..."],        // required, min 2, plain IDs
-  "composition_id":     "REF-BAL-9",               // required
+  "composition_id":     "REF-BAL-9",               // optional; omitted = the standard
+                                                   // composition (DEFAULT_COMPOSITION_ID,
+                                                   // models/route/model.py)
   "scenario_id":        4,                         // optional; omitted = current base.
                                                    // Any scenario is computable —
                                                    // what-ifs live here and in compare;
