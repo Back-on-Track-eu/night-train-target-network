@@ -45,6 +45,7 @@
     "evaluating": "Evaluating your proposal…",
     "edit": "Edit",
     "cancelEdit": "Cancel Edit",
+    "swapDirection": "Swap travel direction",
     "mapPlaceholder": "Map",
     "trainCardPlaceholder": "Train info",
     "searchPlaceholder": "Search stops…",
@@ -52,7 +53,60 @@
     "noStopsFound": "No stops found",
     "minStopsTooltip": "Two stops per route minimum.",
     "loading": "Fetching data…",
-    "saved": "Proposal was saved.",
+    "saved": "Proposal was saved automatically.",
+    "funFacts": {
+      "label": "Did you know?",
+      "demandLabel": "Back-on-Track calls for",
+      "linkLabel": "back-on-track.eu",
+      "targetNetwork": {
+        "fact": "Europe ran about 100 night train lines in 2025 — roughly what you are planning here.",
+        "demand": "300 lines by 2035, enough to triple the number of night train passengers."
+      },
+      "sevenInTen": {
+        "fact": "7 in 10 Europeans say they would take a night train instead of a plane, given reasonable conditions.",
+        "demand": "dominant booking platforms to be required to show every night train running in their country."
+      },
+      "euEmissions": {
+        "fact": "A comprehensive European night train network could avoid 3% of the EU's total greenhouse gas emissions.",
+        "demand": "the Connecting Europe Facility — nearly €40 billion over six years — to co-finance night train coaches and track access charges."
+      },
+      "aviation": {
+        "fact": "Moving travellers from planes to night trains could cut about a quarter of aviation emissions.",
+        "demand": "a minimum airline ticket price, to stop fares being dumped below cost."
+      },
+      "climate": {
+        "fact": "Taking a night train is about 30 times better for the climate than flying the same route.",
+        "demand": "VAT scrapped on international rail tickets — international flights are already taxed at 0%."
+      },
+      "europeanSleeper": {
+        "fact": "European Sleeper's Brussels–Berlin–Prague route carried more than 230,000 passengers on over 750 trains in its first year.",
+        "demand": "the EU to buy sleeper and couchette coaches and lease them out, so newcomers like this one carry less risk."
+      },
+      "flyLess": {
+        "fact": "Nearly half of surveyed night train passengers say they will fly less and take the train more over the next five years.",
+        "demand": "night trains prioritised when train paths are allocated, so the services people want can actually run."
+      },
+      "carpatia": {
+        "fact": "Since December 2025 the Carpatia sleeper has linked Przemyśl and Kraków with Vienna, Salzburg and Munich.",
+        "demand": "EU co-funding for pilot routes to Europe's edges — Portugal, Greece, the Nordics, the Baltics."
+      },
+      "parisBerlin": {
+        "fact": "A Paris–Brussels–Berlin sleeper has run since March 2026, and Brussels–Milan is due to follow.",
+        "demand": "closed border stations reopened — no passenger train has crossed between Irun and Hendaye since 2020."
+      },
+      "rollingStock": {
+        "fact": "Europe has roughly 1,500 night train carriages. A full network needs several thousand more by 2035.",
+        "demand": "the European Investment Bank's Green Rail Investment Platform actually funded — the budget line is still empty."
+      },
+      "reuse": {
+        "fact": "About 1,300 publicly funded carriages are being scrapped in France, while Europe is short of sleeper stock.",
+        "demand": "EU rules that make reusing second-hand rolling stock possible instead."
+      },
+      "network": {
+        "fact": "Back-on-Track is a volunteer network of around 60 active members, with groups in eleven European countries.",
+        "demand": "night trains treated as their own transport segment, exempt from track access surcharges."
+      }
+    },
     "suggestions": {
       "title": "Add stops along the way?",
       "subtitle": "We found stops on your route. Pick any you'd like to include.",
@@ -198,6 +252,10 @@
       "direction": {
         "outbound": "outbound",
         "return": "return"
+      },
+      "section": {
+        "startAria": "Section start",
+        "endAria": "Section end"
       }
     }
   },
@@ -220,13 +278,12 @@
       "button": "Search"
     },
     "sort": {
-      "direction": "Toggle sort direction",
-      "margin": "Margin",
-      "revenue": "Revenue",
-      "cost": "Cost",
-      "date": "Date",
-      "distance": "Distance",
-      "duration": "Duration"
+      "distanceDesc": "Longest distance",
+      "distanceAsc": "Shortest distance",
+      "co2Desc": "Most CO₂ saved",
+      "co2Asc": "Least CO₂ saved",
+      "stopsDesc": "Most stops",
+      "stopsAsc": "Fewest stops"
     },
     "card": {
       "distance": "Distance",
@@ -235,9 +292,27 @@
       "existing": "Existing service ↗",
       "km": "{value} km",
       "stops": "({count} stop) | ({count} stops)",
-      "co2PerYear": "{value} t CO₂/yr",
+      "co2PerYear": "{value} t CO₂/yr saved",
       "like": "Like",
-      "loginToLike": "Log in with an account to like proposals."
+      "loginToLike": "Log in with an account to like proposals.",
+      "stat": {
+        "distance": {
+          "title": "Distance",
+          "body": "Total one-way length of the route."
+        },
+        "speed": {
+          "title": "Average speed",
+          "body": "Route length divided by total travel time, including time spent standing at stations."
+        },
+        "composition": {
+          "title": "Train composition",
+          "body": "The carriage configuration this route is planned with — it determines the seat, couchette and sleeper capacity."
+        },
+        "co2": {
+          "title": "CO₂ saved",
+          "body": "Estimated CO₂ emissions avoided each year by passengers shifting from air and car to this train. Derived from placeholder demand figures, not yet from a full demand model."
+        }
+      }
     },
     "back": "Gallery",
     "cta": {
