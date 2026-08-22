@@ -84,11 +84,9 @@ const itinerary = computed(() => {
 })
 
 // --- Lower-half stats (icon/value pairs, RouteStatsCard style) --------------
-const compositionLabel = computed(
-  () =>
-    store.compositions.find((c) => c.composition_id === props.proposal.composition_id)
-      ?.composition_id ?? props.proposal.composition_id,
-)
+// null on ONTD rows the catalogue names no composition for; the wagon stat is
+// then dropped entirely rather than shown as an icon beside a blank.
+const compositionLabel = computed(() => props.proposal.composition_id)
 
 // Each stat carries a stable `key`: it identifies the row for v-for AND selects
 // the explanation shown in the shared popover below. (The v-for used to key on
@@ -102,8 +100,14 @@ const stats = computed(() => {
       value: t('gallery.card.km', { value: formatInt(p.total_distance_km) }),
     },
     { key: 'speed', icon: mdiSpeedometerMedium, value: `${formatInt(p.avg_speed_kmh)} km/h` },
-    { key: 'composition', icon: mdiTrainCarPassenger, value: compositionLabel.value },
   ]
+  if (compositionLabel.value) {
+    list.push({
+      key: 'composition',
+      icon: mdiTrainCarPassenger,
+      value: compositionLabel.value,
+    })
+  }
   // co2 savings is a proposal-only KPI and null without an evaluation snapshot.
   if (p.source === 'proposal' && p.co2_savings_t_per_year != null) {
     list.push({
@@ -181,12 +185,24 @@ const proposerName = computed(() => {
   return p.is_guest ? t('gallery.card.guest') : p.display_name
 })
 
-// --- Whole-card click → open the proposal in ProposalViewport display mode.
-// Existing (ONTD) trains have no stored proposal to open, so only proposal
-// cards are clickable; the ONTD link / like button stop propagation.
-const isClickable = computed(() => props.proposal.source === 'proposal')
+// --- Whole-card click → the card's own destination. A proposal opens in
+// ProposalViewport display mode (via @select); an existing (ONTD) train has no
+// stored proposal, so it leaves for its back-on-track.eu catalogue entry — the
+// same target as the footer link, which stops propagation so a click on it
+// navigates once rather than twice. The like button stops propagation too.
+const isClickable = computed(() => props.proposal.source === 'proposal' || !!ontdUrl.value)
+// An existing train leaves the app, a proposal opens a view inside it — the two
+// are announced accordingly.
+const cardRole = computed(() => {
+  if (!isClickable.value) return undefined
+  return props.proposal.source === 'existing' ? 'link' : 'button'
+})
 function onCardClick() {
-  if (props.proposal.source === 'proposal') emit('select', props.proposal.proposal_id)
+  if (props.proposal.source === 'proposal') {
+    emit('select', props.proposal.proposal_id)
+  } else if (ontdUrl.value) {
+    window.open(ontdUrl.value, '_blank', 'noopener,noreferrer')
+  }
 }
 
 // Liking requires a registered account (not guest, not logged out) — an info
@@ -257,24 +273,12 @@ function avatarPt(code: string, index: number) {
   <article
     class="group flex flex-col gap-3 overflow-hidden rounded-xl p-4 transition-colors duration-500"
     :class="[flash ? 'bg-primary-50/20' : 'bg-primary-50/5', isClickable ? 'cursor-pointer' : '']"
-    :role="isClickable ? 'button' : undefined"
+    :role="cardRole"
     :tabindex="isClickable ? 0 : undefined"
     @click="onCardClick"
     @keydown.enter="onCardClick"
     @keydown.space.prevent="onCardClick"
   >
-    <!-- Source badge. Existing trains and user proposals sit in one list, and
-         until now only the footer link distinguished them — which is easy to
-         miss while scanning. "ONTD" is the catalog's name, so it is not
-         translated. -->
-    <div v-if="proposal.source === 'existing'" class="flex justify-center">
-      <span
-        class="rounded-full bg-primary-50/15 px-2 py-0.5 text-[0.65rem] font-bold uppercase tracking-wider text-primary-50/70"
-      >
-        ONTD
-      </span>
-    </div>
-
     <!-- Upper half: itinerary (centered). Between anchors we show "(N stops)"
          while idle; on hover it fades out and the actual intermediate stops
          slide in from above. -->
@@ -301,7 +305,10 @@ function avatarPt(code: string, index: number) {
     </div>
 
     <!-- Lower half: stat pairs (left) · flags + like + proposer (right) -->
-    <div class="mt-auto flex items-start justify-between gap-3 border-t border-primary-50/10 pt-3">
+    <!-- items-stretch (not items-start) so the right-hand column spans the
+         footer's full height — that is what lets the ONTD badge's mt-auto reach
+         the bottom corner. -->
+    <div class="mt-auto flex justify-between gap-3 border-t border-primary-50/10 pt-3">
       <div class="flex flex-col gap-2 text-primary-50/70">
         <!-- w-fit so the hover target is the stat itself, not the full column
              width — otherwise the popover opens from empty space beside it. -->
@@ -350,16 +357,18 @@ function avatarPt(code: string, index: number) {
           </button>
         </div>
 
-        <a
+        <!-- Where a proposal names its proposer, an existing train names itself
+             as one — the card's only marker of which kind it is. Plain text, not
+             a link: the whole card already leaves for the catalogue entry, so a
+             nested link would just be a second way to do the same thing. mt-auto
+             pins it to the card's bottom edge instead of letting it hang off the
+             flags. Kept in the badge style the "ONTD" pill used at the top. -->
+        <span
           v-if="ontdUrl"
-          :href="ontdUrl"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="text-xs text-primary-50/60 underline-offset-2 hover:underline"
-          @click.stop
+          class="mt-auto rounded-full bg-primary-50/15 px-2 py-0.5 text-[0.65rem] font-bold uppercase tracking-wider text-primary-50/70"
         >
           {{ t('gallery.card.existing') }}
-        </a>
+        </span>
         <span v-else class="text-xs text-primary-50/40">
           {{ t('gallery.card.proposedBy', { name: proposerName }) }}
         </span>

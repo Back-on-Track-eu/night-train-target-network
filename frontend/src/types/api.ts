@@ -524,7 +524,9 @@ export interface StoredAuth {
 // Fields shared by both source shapes.
 interface ProposalSummaryShared {
   name: string
-  composition_id: string
+  // null on ONTD rows whose catalogue entry names no composition (53 of the 205
+  // existing rows at the time of writing) — the card then omits the stat.
+  composition_id: string | null
   total_distance_km: number
   total_time_h: number
   avg_speed_kmh: number

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import { useStore } from '@/stores/store'
 import AppHeader from '@/components/AppHeader.vue'
 import AuthModal from '@/components/AuthModal.vue'
@@ -9,6 +10,12 @@ import ApiStatusBanner from '@/components/ApiStatusBanner.vue'
 
 const { t } = useI18n()
 const store = useStore()
+const route = useRoute()
+
+// The centered page heading belongs to the builder routes. The gallery renders
+// its own (left-aligned, beside the intro copy — see Gallery.vue), so this one
+// steps aside there rather than stacking a second heading above it.
+const showPageHeading = computed(() => route.name !== 'gallery')
 
 onMounted(() => {
   // Restore a remembered auth choice (sync, no network, no auto-guest) — a fresh
@@ -27,7 +34,7 @@ onMounted(() => {
     <AppHeader />
     <ApiStatusBanner />
     <div class="flex flex-1 flex-col items-center px-8 py-12">
-      <h1 class="mb-10 text-center text-4xl font-light text-white">
+      <h1 v-if="showPageHeading" class="mb-10 text-center text-4xl font-light text-white">
         {{ t('proposal.heading') }}
       </h1>
       <!-- Gallery only. Opening a proposal used to UNMOUNT the gallery, throwing

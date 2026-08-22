@@ -4,7 +4,15 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import Select from 'primevue/select'
 import Skeleton from 'primevue/skeleton'
-import { mdiArrowLeftRight, mdiMapMarkerOutline, mdiEarth, mdiMagnify, mdiPlus } from '@mdi/js'
+import {
+  mdiArrowLeftRight,
+  mdiMapMarkerOutline,
+  mdiEarth,
+  mdiMagnify,
+  mdiPlus,
+  mdiSortAscending,
+  mdiSortDescending,
+} from '@mdi/js'
 import AppIcon from '@/components/AppIcon.vue'
 import StopSelect from '@/components/StopSelect.vue'
 import CountrySelect from '@/components/CountrySelect.vue'
@@ -16,6 +24,7 @@ import { fetchProposals, fetchProposalRoute } from '@/lib/proposalsApi'
 import { createAbortSlot } from '@/lib/apiClient'
 import { asApiFailure, isRetryable, type ApiFailure } from '@/lib/apiError'
 import { mapLimit } from '@/lib/promisePool'
+import { octilinearPath } from '@/utils/octilinear'
 import { useApiFailure } from '@/composables/useApiFailure'
 import {
   seedToQuery,
@@ -28,6 +37,7 @@ import {
   type Stop,
   type ProposalSummary,
   type ProposalSummaryProposal,
+  type ProposalSummaryExisting,
   type ProposalsRequest,
   type ProposalsFilter,
   type ProposalSort,
@@ -97,6 +107,10 @@ const sortDir = ref<'asc' | 'desc'>('desc')
 // Result list (accumulated across pages) + pagination bookkeeping.
 const proposals = ref<ProposalSummary[]>([])
 const total = ref(0)
+// The count the result label shows. Separate from `total` (which pagination
+// resets to 0 on every new query) so hitting search keeps the previous number
+// on screen until the new one arrives, instead of blinking out and back.
+const shownTotal = ref<number | null>(null)
 const offset = ref(0)
 const loading = ref(false)
 const initialized = ref(false)
@@ -122,34 +136,41 @@ const tabs = computed(() => [
 // the backend reads as both.
 type SourceChoice = 'all' | ProposalSourceKind
 const sourceFilter = ref<SourceChoice>('all')
-const sourceChoices: { value: SourceChoice; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: 'proposal', label: 'Suggested' },
-  { value: 'existing', label: 'ONTD' },
-]
+const SOURCE_CHOICES: readonly SourceChoice[] = ['all', 'proposal', 'existing']
+const sourceOptions = computed(() =>
+  SOURCE_CHOICES.map((value) => ({ value, label: t(`gallery.source.${value}`) })),
+)
 
 // Existing (ONTD) rows carry NULL in every proposal-only column, so offering
 // CO₂ savings as a sort field while viewing ONTD only would sort a column no
 // row has.
 const SHARED_SORT_KEYS: readonly ProposalSortKey[] = ['total_distance_km', 'n_stops']
 
-// One entry per field × direction. Each label names the direction in words
-// rather than with an arrow glyph: "↓" on "Distance" is read as both
-// "descending" and "low to high" depending on the reader, and these are
-// self-describing without the extra step.
-const SORT_OPTIONS: readonly { field: ProposalSortKey; dir: 'asc' | 'desc'; key: string }[] = [
-  { field: 'total_distance_km', dir: 'desc', key: 'distanceDesc' },
-  { field: 'total_distance_km', dir: 'asc', key: 'distanceAsc' },
-  { field: 'co2_savings_t_per_year', dir: 'desc', key: 'co2Desc' },
-  { field: 'co2_savings_t_per_year', dir: 'asc', key: 'co2Asc' },
-  { field: 'n_stops', dir: 'desc', key: 'stopsDesc' },
-  { field: 'n_stops', dir: 'asc', key: 'stopsAsc' },
+// Sort is presented as field-in-words × direction-as-icon ("Distance" + the mdi
+// sort-descending glyph), so the option list is the cross product of these two.
+// The icon is aria-hidden (AppIcon always is), hence the sr-only direction name
+// rendered next to it in the template.
+const SORT_FIELDS: readonly { field: ProposalSortKey; key: string }[] = [
+  { field: 'total_distance_km', key: 'distance' },
+  { field: 'co2_savings_t_per_year', key: 'co2' },
+  { field: 'n_stops', key: 'stops' },
+]
+const SORT_DIRS: readonly { dir: 'asc' | 'desc'; icon: string }[] = [
+  { dir: 'desc', icon: mdiSortDescending },
+  { dir: 'asc', icon: mdiSortAscending },
 ]
 
 const sortOptions = computed(() =>
-  SORT_OPTIONS.filter(
-    (o) => sourceFilter.value !== 'existing' || SHARED_SORT_KEYS.includes(o.field),
-  ).map((o) => ({ value: `${o.field}:${o.dir}`, label: t(`gallery.sort.${o.key}`) })),
+  SORT_FIELDS.filter(
+    (f) => sourceFilter.value !== 'existing' || SHARED_SORT_KEYS.includes(f.field),
+  ).flatMap((f) =>
+    SORT_DIRS.map((d) => ({
+      value: `${f.field}:${d.dir}`,
+      label: t(`gallery.sort.${f.key}`),
+      icon: d.icon,
+      dirLabel: t(`gallery.sort.dir.${d.dir}`),
+    })),
+  ),
 )
 
 // The Select's single value, projected onto the field/direction pair the rest of
@@ -163,6 +184,12 @@ const sortSelection = computed<string>({
     sortDir.value = dir === 'asc' ? 'asc' : 'desc'
   },
 })
+
+// The closed Select renders through its #value slot, which only receives the
+// model value — this resolves it back to the option (label + icon) to draw.
+const selectedSortOption = computed(
+  () => sortOptions.value.find((o) => o.value === sortSelection.value) ?? null,
+)
 
 // Switching to ONTD-only while sorted by a proposal-only column would leave the
 // Select showing an option that is no longer offered — fall back to distance.
@@ -231,6 +258,7 @@ async function loadPage(): Promise<void> {
     if (seq !== requestSeq) return
     proposals.value = requestOffset === 0 ? res.proposals : [...proposals.value, ...res.proposals]
     total.value = res.total
+    shownTotal.value = res.total
     offset.value = requestOffset + res.proposals.length
     initialized.value = true
   } catch (err) {
@@ -272,22 +300,56 @@ function onSentinel(): void {
 // --- Map: draw every result's route --------------------------------------
 // Summaries carry no geometry (stripped server-side), so each proposal's route
 // is fetched once via GET /api/proposal/<id> and cached by key. The map shows
-// the routes for whatever is currently loaded, growing with the list. Existing
-// (ONTD) rows have no per-row geometry endpoint and are not drawn on the map
-// yet — they still appear as cards (map geometry for them would come from the
-// list response's `map_lines` section, a separate change).
+// the routes for whatever is currently loaded, growing with the list.
+//
+// Existing (ONTD) rows have no per-row geometry endpoint, so they are drawn the
+// way ProposalViewport draws an itinerary that has not been routed yet: one
+// schematic octilinear connector per consecutive stop pair, built client-side
+// from the loaded stop list (see schematicRoute).
 const proposalKey = (p: ProposalSummary): string =>
   p.source === 'existing' ? `e-${p.route_id}` : `p-${p.proposal_id}-${p.proposal_version}`
-// `routed` separates a real routed geometry (many points per leg) from a
-// straight-line stand-in (e.g. the seed proposal) — only routed ones map.
+// `drawable` gates what reaches the map: a proposal needs real routed geometry
+// (a straight-line stand-in such as the seed proposal would read as a route it
+// isn't), an existing row needs enough locatable stops to connect.
 // `orderedCountries` lists the countries in itinerary order (the summary's own
 // `countries` is alphabetical), used for the flag order on the card.
-type CachedRoute = GalleryMapRoute & { routed: boolean; orderedCountries: string[] }
+type MapRoute = GalleryMapRoute & { drawable: boolean }
+type CachedRoute = MapRoute & { orderedCountries: string[] }
 const routeCache = ref<Record<string, CachedRoute>>({})
-const mapRoutes = computed(() =>
+
+// Coordinates for an existing row's itinerary. ONTD stop_ids are a mix of
+// curated stop ids (which resolve here) and bare station names used as ids
+// (which do not — those stops carry no coordinates anywhere in the API, the
+// `map_stop_counts` section included), so an unlocatable stop is skipped and a
+// row left with fewer than two of them is not drawn at all.
+const stopById = computed(() => new Map(store.stops.map((s) => [s.stop_id, s])))
+
+function schematicRoute(p: ProposalSummaryExisting): MapRoute | null {
+  const pts = p.stop_ids.map((id) => stopById.value.get(id)).filter((s): s is Stop => Boolean(s))
+  if (pts.length < 2) return null
+  // Per leg rather than one path through all stops: octilinearPath treats each
+  // leg independently, so this draws the identical shape (same as MapView.vue).
+  const lines: [number, number][][] = []
+  for (let i = 0; i < pts.length - 1; i++) {
+    lines.push(
+      octilinearPath([
+        [pts[i].lon, pts[i].lat],
+        [pts[i + 1].lon, pts[i + 1].lat],
+      ]),
+    )
+  }
+  return {
+    key: proposalKey(p),
+    lines,
+    stops: pts.map((s) => ({ lat: s.lat, lon: s.lon, name: s.name })),
+    drawable: true,
+  }
+}
+
+const mapRoutes = computed<GalleryMapRoute[]>(() =>
   proposals.value
-    .map((p) => routeCache.value[proposalKey(p)])
-    .filter((r): r is CachedRoute => Boolean(r) && r.routed),
+    .map((p) => (p.source === 'existing' ? schematicRoute(p) : routeCache.value[proposalKey(p)]))
+    .filter((r): r is MapRoute => Boolean(r) && r.drawable),
 )
 
 // Keys whose geometry fetch failed. Without this the `watch(proposals)` below
@@ -299,8 +361,9 @@ const failedRouteKeys = new Set<string>()
 const routeSlot = createAbortSlot()
 
 async function ensureRoutes(list: ProposalSummary[]): Promise<void> {
-  // Only proposal rows have a per-id route endpoint; existing (ONTD) rows are
-  // skipped (see the map note above).
+  // Only proposal rows have a per-id route endpoint; existing (ONTD) rows need
+  // no fetch at all — schematicRoute derives their lines from stops already
+  // loaded (see the map note above).
   const missing = list.filter(
     (p): p is ProposalSummaryProposal =>
       p.source === 'proposal' &&
@@ -343,7 +406,7 @@ async function ensureRoutes(list: ProposalSummary[]): Promise<void> {
       stops,
       // A routed leg carries many intermediate points; a straight-line
       // stand-in is just its two endpoints.
-      routed: lines.some((l) => l.length > 2),
+      drawable: lines.some((l) => l.length > 2),
       orderedCountries,
     }
     return entry
@@ -532,10 +595,51 @@ const selectPt = {
 
 const ctaClass =
   'flex cursor-pointer items-center gap-1.5 rounded-full bg-primary-50/10 px-5 py-2 text-sm text-primary-50 transition hover:bg-primary-50/20'
+
+// One search-bar field (From / To / Station / Country). Fixed width, so picking
+// a station no longer resizes the field and with it the whole pill; `group` so
+// the hover target is the field's full box rather than just the glyphs of the
+// station name sitting in it.
+const searchFieldClass =
+  'group flex w-48 flex-col rounded-full px-4 py-1.5 transition-colors hover:bg-primary-50/10'
+// Long station names ellipsize rather than widening the now-fixed field.
+const searchValueClass = 'truncate text-sm transition-colors group-hover:text-primary-50/80'
 </script>
 
 <template>
-  <div class="flex w-full max-w-6xl flex-col gap-6">
+  <!-- -mb-6 trims App.vue's py-12 page padding to 24px below this page's last
+       row, which is what stops the sticky map from being pushed up at the end of
+       the scroll — see the results row's comment below. Keep the two in sync: if
+       App.vue's bottom padding changes, this offset has to change with it. -->
+  <div class="-mb-6 flex w-full max-w-6xl flex-col gap-6">
+    <!-- Page intro. The gallery owns its own h1 (App.vue's centered one steps
+         aside for this route): the question and the action it leads to on the
+         left, the copy that answers it on the right. -->
+    <div class="flex items-start gap-12 px-24">
+      <div class="flex w-2/5 shrink-0 flex-col items-start gap-6">
+        <h1 class="text-4xl font-light text-white">{{ t('gallery.heading') }}</h1>
+        <button type="button" :class="ctaClass" @click="createProposal">
+          <AppIcon :path="mdiPlus" :size="18" />
+          {{ t('gallery.cta.create') }}
+        </button>
+      </div>
+      <div class="flex-1 text-justify">
+        <p class="text-base font-semibold text-primary-50">{{ t('gallery.welcome.lead') }}</p>
+        <p class="mt-2 text-sm leading-relaxed text-primary-50/70">
+          {{ t('gallery.welcome.body') }}
+        </p>
+        <p class="mt-3 text-sm leading-relaxed text-primary-50/70">
+          {{ t('gallery.welcome.cta') }}
+        </p>
+      </div>
+    </div>
+
+    <!-- The gallery proper: search bar, result count, then the list + map. -->
+    <div class="flex flex-col items-center gap-1 pt-4">
+      <h2 class="text-4xl font-light text-primary-50 pt-8">{{ t('gallery.section.title') }}</h2>
+      <p class="text-sm text-primary-50/60">{{ t('gallery.section.subtitle') }}</p>
+    </div>
+
     <!-- Search bar -->
     <div class="flex flex-col items-center gap-4">
       <!-- Category tabs -->
@@ -569,13 +673,12 @@ const ctaClass =
             @select="fromStop = $event"
             @retry="store.fetchStops()"
           >
-            <div class="flex flex-col rounded-full px-4 py-1.5">
+            <div :class="searchFieldClass">
               <span class="text-xs font-semibold text-primary-50">{{
                 t('gallery.search.from')
               }}</span>
               <span
-                class="text-sm hover:text-primary-50/80"
-                :class="fromStop ? 'text-primary-50' : 'text-primary-50/40'"
+                :class="[searchValueClass, fromStop ? 'text-primary-50' : 'text-primary-50/40']"
               >
                 {{ fromStop?.name ?? t('gallery.search.fromPlaceholder') }}
               </span>
@@ -588,14 +691,11 @@ const ctaClass =
             @select="toStop = $event"
             @retry="store.fetchStops()"
           >
-            <div class="flex flex-col rounded-full px-4 py-1.5">
+            <div :class="searchFieldClass">
               <span class="text-xs font-semibold text-primary-50">{{
                 t('gallery.search.to')
               }}</span>
-              <span
-                class="text-sm hover:text-primary-50/80"
-                :class="toStop ? 'text-primary-50' : 'text-primary-50/40'"
-              >
+              <span :class="[searchValueClass, toStop ? 'text-primary-50' : 'text-primary-50/40']">
                 {{ toStop?.name ?? t('gallery.search.toPlaceholder') }}
               </span>
             </div>
@@ -610,13 +710,12 @@ const ctaClass =
             @select="stationStop = $event"
             @retry="store.fetchStops()"
           >
-            <div class="flex flex-col rounded-full px-4 py-1.5">
+            <div :class="searchFieldClass">
               <span class="text-xs font-semibold text-primary-50">{{
                 t('gallery.search.station')
               }}</span>
               <span
-                class="text-sm hover:text-primary-50/80"
-                :class="stationStop ? 'text-primary-50' : 'text-primary-50/40'"
+                :class="[searchValueClass, stationStop ? 'text-primary-50' : 'text-primary-50/40']"
               >
                 {{ stationStop?.name ?? t('gallery.search.stationPlaceholder') }}
               </span>
@@ -627,13 +726,12 @@ const ctaClass =
         <!-- By Country: same picker style as the stop selection -->
         <template v-else>
           <CountrySelect :countries="countryOptions" @select="countryCode = $event">
-            <div class="flex flex-col rounded-full px-4 py-1.5">
+            <div :class="searchFieldClass">
               <span class="text-xs font-semibold text-primary-50">{{
                 t('gallery.search.country')
               }}</span>
               <span
-                class="text-sm hover:text-primary-50/80"
-                :class="countryCode ? 'text-primary-50' : 'text-primary-50/40'"
+                :class="[searchValueClass, countryCode ? 'text-primary-50' : 'text-primary-50/40']"
               >
                 {{ selectedCountryName ?? t('gallery.search.countryPlaceholder') }}
               </span>
@@ -651,57 +749,69 @@ const ctaClass =
           <AppIcon :path="mdiMagnify" :size="20" />
         </button>
       </div>
+
+      <!-- How many rows the active search matched. Appears once the first query
+           has come back and then stays put across later searches — see
+           shownTotal. -->
+      <p v-if="shownTotal !== null && !failure" class="text-sm text-primary-50/50">
+        {{ t('gallery.matching', shownTotal) }}
+      </p>
     </div>
 
-    <!-- Controls: source + sort (above the card list) + plan a new route -->
-    <div class="flex items-center gap-2">
-      <!-- Source switch. Suggested routes and the existing ONTD network are two
-           different kinds of thing sharing one list; this separates them, and
-           narrows the sort fields to the ones ONTD rows actually carry. -->
-      <div
-        class="flex shrink-0 items-center gap-0.5 rounded-full border border-primary-50/20 bg-primary-50/5 p-0.5"
-      >
-        <button
-          v-for="choice in sourceChoices"
-          :key="choice.value"
-          type="button"
-          class="cursor-pointer rounded-full px-3 py-1 text-xs leading-none transition"
-          :class="
-            sourceFilter === choice.value
-              ? 'bg-primary-50/20 font-bold text-primary-50'
-              : 'text-primary-50/60 hover:text-primary-50'
-          "
-          @click="sourceFilter = choice.value"
-        >
-          {{ choice.label }}
-        </button>
-      </div>
-      <!-- Field and direction as ONE control: six self-describing options,
-           rather than a field Select the user then has to pair with a separate
-           arrow toggle. -->
-      <Select
-        v-model="sortSelection"
-        :options="sortOptions"
-        option-value="value"
-        option-label="label"
-        :unstyled="true"
-        :pt="selectPt"
-      />
-      <button type="button" :class="[ctaClass, 'ml-auto']" @click="createProposal">
-        <AppIcon :path="mdiPlus" :size="18" />
-        {{ t('gallery.cta.create') }}
-      </button>
-    </div>
-
-    <!-- Results: one column of cards (left) + a browser-height sticky map (right).
-         The left column's trailing pb-[calc(100vh-3rem)] matches the map's own
-         height so a sticky element's unavoidable "catch up and rise" as it nears
-         its containing block's bottom happens entirely within that empty
-         padding, after the last real card/CTA — not while real content is still
-         on screen. Without it, the map visibly detaches and creeps upward while
-         the trailing CTA is still visible, well before the column truly ends. -->
+    <!-- Results: one column of controls + cards (left) + a browser-height sticky
+         map (right).
+         The card column ends at the trailing CTA — no filler padding below it —
+         so the page's last scroll position is the one where the row's bottom
+         edge meets the stuck map's bottom edge, i.e. the CTA sits in the map's
+         bottom corner (the CTA block's own pb-4 is the gap). Past that point a
+         sticky element starts being pushed up out of view by the end of its
+         containing block, which is exactly what the -mb-6 on the root above
+         prevents: it leaves the document ending 24px below this row, matching
+         the map's own top-6 inset, so the scroll runs out at the same moment
+         the push would begin. -->
     <div class="flex gap-6">
-      <div class="flex w-96 shrink-0 flex-col gap-4 pb-[calc(100vh-3rem)]">
+      <div class="flex w-96 shrink-0 flex-col gap-4">
+        <!-- Source + sort, at the head of the column whose order they set —
+             which also puts the map's top edge level with them. -->
+        <div class="flex items-center justify-between gap-2">
+          <!-- Source switch. Suggested routes and the existing ONTD network are
+               two different kinds of thing sharing one list; this separates them,
+               and narrows the sort fields to the ones ONTD rows actually carry. -->
+          <Select
+            v-model="sourceFilter"
+            :options="sourceOptions"
+            option-value="value"
+            option-label="label"
+            :unstyled="true"
+            :pt="selectPt"
+          />
+          <!-- Field and direction as ONE control: the field in words, the
+               direction as an mdi sort glyph. -->
+          <Select
+            v-model="sortSelection"
+            :options="sortOptions"
+            option-value="value"
+            option-label="label"
+            :unstyled="true"
+            :pt="selectPt"
+          >
+            <template #value>
+              <span v-if="selectedSortOption" class="flex items-center gap-1.5">
+                {{ selectedSortOption.label }}
+                <AppIcon :path="selectedSortOption.icon" :size="16" />
+                <span class="sr-only">{{ selectedSortOption.dirLabel }}</span>
+              </span>
+            </template>
+            <template #option="{ option }">
+              <span class="flex items-center gap-1.5">
+                {{ option.label }}
+                <AppIcon :path="option.icon" :size="16" />
+                <span class="sr-only">{{ option.dirLabel }}</span>
+              </span>
+            </template>
+          </Select>
+        </div>
+
         <!-- Failures land here, in the column the user is reading, rather than
              as a one-line note above the fold. -->
         <div

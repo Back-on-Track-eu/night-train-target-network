@@ -260,6 +260,7 @@
     }
   },
   "gallery": {
+    "heading": "Are you dreaming of night trains as well?",
     "tabs": {
       "aToB": "From A to B",
       "byStation": "By Station",
@@ -277,19 +278,35 @@
       "noCountries": "No countries found",
       "button": "Search"
     },
+    "welcome": {
+      "lead": "Europe was once crossed by night trains. We want them back.",
+      "body": "Back-on-Track is building the Target Network 2032: a map of the night train connections Europe needs, which we'll ask the EU to support. Every route runs on tracks that already exist — nothing new has to be built.",
+      "cta": "The routes come from you. Browse what people have suggested so far, or suggest the connection you've always wanted."
+    },
+    "section": {
+      "title": "Gallery",
+      "subtitle": "Browse the route suggestions that have been submitted so far"
+    },
+    "matching": "Found {count} route | Found {count} routes",
+    "source": {
+      "all": "All routes",
+      "proposal": "Proposals",
+      "existing": "Existing"
+    },
     "sort": {
-      "distanceDesc": "Longest distance",
-      "distanceAsc": "Shortest distance",
-      "co2Desc": "Most CO₂ saved",
-      "co2Asc": "Least CO₂ saved",
-      "stopsDesc": "Most stops",
-      "stopsAsc": "Fewest stops"
+      "distance": "Distance",
+      "co2": "CO₂ saved",
+      "stops": "Stops",
+      "dir": {
+        "desc": "high to low",
+        "asc": "low to high"
+      }
     },
     "card": {
       "distance": "Distance",
       "proposedBy": "Proposed by {name}",
       "guest": "Guest",
-      "existing": "Existing service ↗",
+      "existing": "Existing connection",
       "km": "{value} km",
       "stops": "({count} stop) | ({count} stops)",
       "co2PerYear": "{value} t CO₂/yr saved",
