@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Avatar from 'primevue/avatar'
 import AvatarGroup from 'primevue/avatargroup'
+import Popover from 'primevue/popover'
 import AppIcon from '@/components/AppIcon.vue'
 import AppSpinner from '@/components/AppSpinner.vue'
 import { useStore } from '@/stores/store'
@@ -89,25 +90,86 @@ const compositionLabel = computed(
       ?.composition_id ?? props.proposal.composition_id,
 )
 
+// Each stat carries a stable `key`: it identifies the row for v-for AND selects
+// the explanation shown in the shared popover below. (The v-for used to key on
+// `icon`, which is a path string, not an identity.)
 const stats = computed(() => {
   const p = props.proposal
   const list = [
     {
+      key: 'distance',
       icon: mdiArrowLeftRight,
       value: t('gallery.card.km', { value: formatInt(p.total_distance_km) }),
     },
-    { icon: mdiSpeedometerMedium, value: `${formatInt(p.avg_speed_kmh)} km/h` },
-    { icon: mdiTrainCarPassenger, value: compositionLabel.value },
+    { key: 'speed', icon: mdiSpeedometerMedium, value: `${formatInt(p.avg_speed_kmh)} km/h` },
+    { key: 'composition', icon: mdiTrainCarPassenger, value: compositionLabel.value },
   ]
   // co2 savings is a proposal-only KPI and null without an evaluation snapshot.
   if (p.source === 'proposal' && p.co2_savings_t_per_year != null) {
     list.push({
+      key: 'co2',
       icon: mdiLeaf,
       value: t('gallery.card.co2PerYear', { value: formatInt(p.co2_savings_t_per_year) }),
     })
   }
   return list
 })
+
+// --- Stat explanation popover ----------------------------------------------
+// One Popover for all four stats, driven by the hovered stat's key. Same
+// hover-intent shape as CostPanel.vue's cost-factor popover: open on enter,
+// stay open while the cursor is over the panel itself, close on a short delay
+// once it has left both — so moving from the row into the panel doesn't
+// flicker-close it. `openKey` skips a redundant show() for the same row.
+const statPopover = ref<InstanceType<typeof Popover> | null>(null)
+const activeStatKey = ref<string | null>(null)
+const openStatKey = ref<string | null>(null)
+let closeTimer: ReturnType<typeof setTimeout> | null = null
+
+function cancelClose() {
+  if (closeTimer !== null) {
+    clearTimeout(closeTimer)
+    closeTimer = null
+  }
+}
+
+function openStat(key: string, event: Event) {
+  cancelClose()
+  if (openStatKey.value === key) return
+  activeStatKey.value = key
+  statPopover.value?.show(event)
+}
+
+function scheduleClose() {
+  cancelClose()
+  closeTimer = setTimeout(() => statPopover.value?.hide(), 150)
+}
+
+// A card can be unmounted mid-delay (the gallery replaces the list on every
+// filter change), so the pending timer must not outlive it.
+onBeforeUnmount(cancelClose)
+
+const activeStat = computed(() => {
+  const key = activeStatKey.value
+  if (!key) return null
+  return {
+    title: t(`gallery.card.stat.${key}.title`),
+    body: t(`gallery.card.stat.${key}.body`),
+  }
+})
+
+// Defined once at setup rather than as an inline :pt literal, which would
+// allocate a fresh passthrough object (and fresh handler identities) on every
+// render of every card in the list. Same convention as Gallery.vue's selectPt.
+const statPopoverPt = {
+  root: {
+    class:
+      'z-50 !rounded-xl !border !border-primary-50/20 !bg-sapphire-100 !shadow-xl before:!hidden after:!hidden',
+    onMouseenter: cancelClose,
+    onMouseleave: scheduleClose,
+  },
+  content: { class: '!p-4 !bg-transparent' },
+}
 
 // --- Footer: proposer (proposals) vs ONTD catalog link (existing trains) ----
 const ontdUrl = computed(() =>
@@ -241,7 +303,15 @@ function avatarPt(code: string, index: number) {
     <!-- Lower half: stat pairs (left) · flags + like + proposer (right) -->
     <div class="mt-auto flex items-start justify-between gap-3 border-t border-primary-50/10 pt-3">
       <div class="flex flex-col gap-2 text-primary-50/70">
-        <div v-for="stat in stats" :key="stat.icon" class="flex items-center gap-2">
+        <!-- w-fit so the hover target is the stat itself, not the full column
+             width — otherwise the popover opens from empty space beside it. -->
+        <div
+          v-for="stat in stats"
+          :key="stat.key"
+          class="flex w-fit cursor-help items-center gap-2"
+          @mouseenter="openStat(stat.key, $event)"
+          @mouseleave="scheduleClose"
+        >
           <AppIcon :path="stat.icon" :size="18" />
           <span class="text-sm font-semibold text-primary-50/80">{{ stat.value }}</span>
         </div>
@@ -295,6 +365,20 @@ function avatarPt(code: string, index: number) {
         </span>
       </div>
     </div>
+
+    <!-- What each stat denominates. PrimeVue teleports this to body, so it sits
+         above the card and its own hover keeps it open (see openStat). -->
+    <Popover
+      ref="statPopover"
+      :pt="statPopoverPt"
+      @show="openStatKey = activeStatKey"
+      @hide="openStatKey = null"
+    >
+      <div v-if="activeStat" class="flex max-w-xs flex-col gap-1" @click.stop>
+        <h4 class="text-sm font-bold text-primary-50">{{ activeStat.title }}</h4>
+        <p class="text-xs leading-relaxed text-primary-50/70">{{ activeStat.body }}</p>
+      </div>
+    </Popover>
   </article>
 </template>
 
