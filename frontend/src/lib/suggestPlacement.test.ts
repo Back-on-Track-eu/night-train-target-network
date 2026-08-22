@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { buildSuggestRows, type ConfirmedStop } from './suggestPlacement'
+import { buildSuggestRows, settledRows, type ConfirmedStop } from './suggestPlacement'
 import type { SuggestedStop } from '@/types/api'
 
 // Real station coordinates, so the expected orders below are the geography of
@@ -112,5 +112,92 @@ describe('buildSuggestRows', () => {
     const rows = buildSuggestRows([ODENSE, PRAHA], [], new Set())
 
     expect(rows.map((r) => r.name)).toEqual(['Odense', 'Praha hl.n.'])
+  })
+})
+
+// Stockholm-Zagreb, the reported case: the timeline listed these correctly, but
+// the itinerary the follow-up calc then ran with was re-derived from lat/lon
+// one stop at a time, which sent Køge, København Syd and the airport back
+// *after* Hamburg Hbf. Real coordinates and real backend ordering, straight
+// from POST /api/proposal/calc with auto_stop_addition="suggest".
+const STOCKHOLM = {
+  stop_id: 'stockholm',
+  stop_name: 'Stockholm Central',
+  lat: 59.329875,
+  lon: 18.057501,
+}
+const ZAGREB = {
+  stop_id: 'zagreb',
+  stop_name: 'Zagreb Glavni kolodvor',
+  lat: 45.804446,
+  lon: 15.978833,
+}
+const STOCKHOLM_ZAGREB_SUGGESTIONS: SuggestedStop[] = [
+  suggestion('kastrup', 'Københavns Lufthavn Kastrup', 55.629555, 12.649417),
+  suggestion('kobenhavn-h', 'Københavns Hovedbanegård', 55.672453, 12.565374),
+  suggestion('kobenhavn-syd', 'København Syd', 55.652631, 12.516191),
+  suggestion('hoje-taastrup', 'Høje Taastrup', 55.648655, 12.268851),
+  suggestion('koge', 'Køge', 55.457979, 12.186467),
+  suggestion('slagelse', 'Slagelse', 55.407501, 11.348556),
+  suggestion('flensburg', 'Flensburg / Flensborg', 54.774112, 9.436527),
+  suggestion('hamburg-hbf', 'Hamburg Hauptbahnhof', 53.552696, 10.007564),
+]
+
+describe('settledRows', () => {
+  test('keeps every adopted stop in the backend’s route order', () => {
+    const rows = settledRows(
+      [STOCKHOLM, ZAGREB],
+      STOCKHOLM_ZAGREB_SUGGESTIONS,
+      new Set(STOCKHOLM_ZAGREB_SUGGESTIONS.map((s) => s.stop_id)),
+    )
+
+    expect(rows.map((r) => r.name)).toEqual([
+      'Stockholm Central',
+      'Københavns Lufthavn Kastrup',
+      'Københavns Hovedbanegård',
+      'København Syd',
+      'Høje Taastrup',
+      'Køge',
+      'Slagelse',
+      'Flensburg / Flensborg',
+      'Hamburg Hauptbahnhof',
+      'Zagreb Glavni kolodvor',
+    ])
+  })
+
+  // Two stations 3 km apart, both far from the origin: the tightest case where
+  // proximity-based placement flipped a pair, since inserting Westbahnhof
+  // before Hauptbahnhof splits the long Stockholm leg fractionally cheaper.
+  test('keeps the order of two stops that all but share a location', () => {
+    const rows = settledRows(
+      [STOCKHOLM, ZAGREB],
+      [
+        suggestion('wien-hbf', 'Wien Hauptbahnhof', 48.18506, 16.377799),
+        suggestion('wien-west', 'Wien Westbahnhof', 48.196545, 16.336282),
+      ],
+      new Set(['wien-hbf', 'wien-west']),
+    )
+
+    expect(rows.map((r) => r.name)).toEqual([
+      'Stockholm Central',
+      'Wien Hauptbahnhof',
+      'Wien Westbahnhof',
+      'Zagreb Glavni kolodvor',
+    ])
+  })
+
+  test('drops the candidates the caller did not opt in, keeping every confirmed stop', () => {
+    const rows = settledRows(
+      [STOCKHOLM, ZAGREB],
+      STOCKHOLM_ZAGREB_SUGGESTIONS,
+      new Set(['hoje-taastrup', 'hamburg-hbf']),
+    )
+
+    expect(rows.map((r) => r.name)).toEqual([
+      'Stockholm Central',
+      'Høje Taastrup',
+      'Hamburg Hauptbahnhof',
+      'Zagreb Glavni kolodvor',
+    ])
   })
 })

@@ -18,7 +18,7 @@ import { ApiError, asApiFailure, isRetryable, type ApiFailure } from '@/lib/apiE
 import { useApiFailure } from '@/composables/useApiFailure'
 import { resolvePrefillStops, type GallerySearchSeed } from '@/lib/proposalPrefill'
 import { readDraft, writeDraft, clearDraft } from '@/lib/proposalDraftStorage'
-import { buildSuggestRows, type SuggestRow } from '@/lib/suggestPlacement'
+import { buildSuggestRows, settledRows, type SuggestRow } from '@/lib/suggestPlacement'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Skeleton from 'primevue/skeleton'
@@ -620,12 +620,20 @@ function toggleSuggested(stopId: string) {
 
 // User clicked "Continue with X additional stops". With no stops chosen, the
 // first "suggest" response already routed exactly the caller's stops, so reuse
-// it directly. Otherwise insert the chosen stops into the itinerary (by
-// proximity) and recompute with auto_stop_addition="off" — the caller has made
-// the selection, so no further suggestions are wanted.
+// it directly. Otherwise the itinerary becomes exactly what the timeline showed
+// — the caller's stops with the opted-in candidates on the leg they were listed
+// on — and we recompute with auto_stop_addition="off": the caller has made the
+// selection, so no further suggestions are wanted.
 async function confirmStopSelection(selectedIds: string[]) {
   const base = basePlan.value
-  const chosen = suggestedStops.value.filter((s) => selectedIds.includes(s.stop_id))
+  const suggestions = suggestedStops.value
+  const chosen = suggestions.filter((s) => selectedIds.includes(s.stop_id))
+  // Read the placement off the same rows the timeline rendered, before the
+  // suggest state (which baseOutbound derives from) is torn down below. Not
+  // suggestRows: that one is reversed when the user flipped the view, and the
+  // flip is a pure view change that leaves the itinerary's direction alone.
+  const confirmedStops = baseOutbound.value?.stop_times ?? []
+  const settled = settledRows(confirmedStops, suggestions, new Set(selectedIds))
   suggestedStops.value = []
   basePlan.value = null
   suggestSelected.value = new Set()
@@ -639,7 +647,7 @@ async function confirmStopSelection(selectedIds: string[]) {
     applyPlan(base, true) // opens the choose-phase gate for a no-choice visitor
     return
   }
-  for (const s of chosen) insertSuggestedStop(s)
+  itinerary.value = itineraryFromSettledRows(settled, confirmedStops, chosen)
   currentMode.value = 'loading'
   const stopIds = itinerary.value.filter((s) => s.selectedStop).map((s) => s.selectedStop!.stop_id)
   const json = await requestCalc(stopIds, 'off')
@@ -664,19 +672,49 @@ function cancelSuggestMode() {
   store.closeAuthModal()
 }
 
-// Turn a suggested stop into a full Stop record (preferring the loaded stop
-// list, falling back to the fields the suggestion already carries) and insert
-// it into the itinerary at the best-fitting position via addStop().
-function insertSuggestedStop(s: SuggestedStop) {
-  const stop: Stop = store.stops.find((st) => st.stop_id === s.stop_id) ?? {
-    stop_id: s.stop_id,
-    name: s.stop_name,
-    country_code: s.country_code,
-    lat: s.lat,
-    lon: s.lon,
-    stop_charge_eur: { value: 0, is_default: true },
+// Rebuild the itinerary from the settled suggest rows, keeping their order.
+// That order is the backend's own along-route order (see lib/suggestPlacement.ts)
+// and is authoritative here: re-deriving each stop's position from lat/lon —
+// which is what addStop() does for a manual pick — reorders whole clusters once
+// several stops arrive at once.
+//
+// Rows the caller already had keep their existing itinerary row, so the full
+// Stop record survives; the rest resolve against the loaded stop list, falling
+// back to the fields the response itself carries.
+function itineraryFromSettledRows(
+  rows: SuggestRow[],
+  confirmed: StopTimeFmt[],
+  chosen: SuggestedStop[],
+): ItineraryStop[] {
+  const existing = new Map(
+    itinerary.value.filter((s) => s.selectedStop).map((s) => [s.selectedStop!.stop_id, s]),
+  )
+  const byId = new Map(store.stops.map((s) => [s.stop_id, s]))
+  const fromCalc = new Map([...confirmed, ...chosen].map((s) => [s.stop_id, s]))
+  const out: ItineraryStop[] = []
+  const seen = new Set<string>()
+  for (const row of rows) {
+    if (seen.has(row.stopId)) continue
+    seen.add(row.stopId)
+    const kept = existing.get(row.stopId)
+    if (kept) {
+      out.push(kept)
+      continue
+    }
+    const known = byId.get(row.stopId)
+    const src = fromCalc.get(row.stopId)
+    if (!known && !src) continue
+    const stop: Stop = known ?? {
+      stop_id: src!.stop_id,
+      name: src!.stop_name,
+      country_code: src!.country_code,
+      lat: src!.lat,
+      lon: src!.lon,
+      stop_charge_eur: { value: 0, is_default: true },
+    }
+    out.push({ id: _nextId++, name: stop.name, selectedStop: stop })
   }
-  addStop(stop)
+  return out
 }
 
 // Keep the displayed route and evaluation on the same scenario. A scenario
@@ -856,7 +894,7 @@ function itineraryFromRoute(rr: RouteResult): ItineraryStop[] {
 }
 
 // Restores an itinerary from a persisted draft's bare stop ids (see
-// proposalDraftStorage.ts). Unlike itineraryFromRoute()/insertSuggestedStop(),
+// proposalDraftStorage.ts). Unlike itineraryFromRoute()/itineraryFromSettledRows(),
 // there's no synthesized-fallback data to fall back on for an id no longer in
 // the catalogue — such ids are simply dropped.
 function itineraryFromStopIds(stopIds: string[]): ItineraryStop[] {

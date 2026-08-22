@@ -106,3 +106,19 @@ export function buildSuggestRows(
   })
   return rows
 }
+
+// The rows that survive "Continue with N additional stops": every confirmed
+// stop plus the candidates the caller opted in, still in the order the timeline
+// showed them. This is the stop sequence the follow-up calc runs with, so it
+// has to come from the same placement the user was looking at — deriving it
+// again from lat/lon put a Danish stop between Hamburg Hbf and Wittenberge on
+// Stockholm-Zagreb, while the list above read correctly.
+export function settledRows(
+  confirmed: ConfirmedStop[],
+  suggestions: SuggestedStop[],
+  selected: ReadonlySet<string>,
+): SuggestRow[] {
+  return buildSuggestRows(confirmed, suggestions, selected).filter(
+    (r) => r.kind === 'confirmed' || r.selected,
+  )
+}
