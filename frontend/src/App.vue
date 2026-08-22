@@ -30,9 +30,28 @@ onMounted(() => {
       <h1 class="mb-10 text-center text-4xl font-light text-white">
         {{ t('proposal.heading') }}
       </h1>
-      <router-view />
-      <AuthModal v-if="store.authModal.open" />
+      <!-- Gallery only. Opening a proposal used to UNMOUNT the gallery, throwing
+           away the loaded pages, the pagination offset and every per-card route
+           geometry — so coming straight back re-ran the whole query plus one
+           GET /api/proposal/<id> per card. Keeping it alive makes that
+           round trip free instead of merely faster.
+           ProposalWorkspace is deliberately NOT cached: the publish flow does
+           router.replace() and depends on Vue Router patching that live
+           instance (see the "Routing (frontend)" note in AGENTS.md).
+           `include` matches the component name Vue infers from Gallery.vue's
+           filename — renaming that file silently disables the cache. -->
+      <router-view v-slot="{ Component }">
+        <keep-alive :include="['Gallery']">
+          <component :is="Component" />
+        </keep-alive>
+      </router-view>
     </div>
+    <!-- Shared app-level overlays live OUTSIDE the routed subtree: a modal owned
+         by the store has no business sitting among the route's own children,
+         where route churn and keep-alive activation can reach it. The `v-if`
+         stays — AuthModal has no internal visibility guard, so without it the
+         overlay would render permanently. -->
+    <AuthModal v-if="store.authModal.open" />
     <ToastContainer />
   </div>
 </template>

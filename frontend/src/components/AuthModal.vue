@@ -29,7 +29,13 @@ const email = ref('')
 const username = ref('')
 const digits = ref<string[]>(['', '', '', '', '', ''])
 const codeBoxes = ref<HTMLElement | null>(null)
-const loading = ref(false)
+// WHICH action is in flight, not just whether one is. A single boolean drove
+// every button's spinner at once, so submitting an e-mail also put a spinner on
+// "Continue as guest" — a button the user hadn't touched and which was in fact
+// merely unavailable. `loading` keeps the old meaning for the disabled guards.
+type BusyAction = 'email' | 'guest' | 'name' | 'verify'
+const busy = ref<BusyAction | null>(null)
+const loading = computed(() => busy.value !== null)
 const error = ref<string | null>(null)
 
 const code = computed(() => digits.value.join(''))
@@ -69,7 +75,7 @@ function dismiss() {
 // which works today and breaks the moment the modal is kept mounted.
 
 async function onGuest() {
-  loading.value = true
+  busy.value = 'guest'
   error.value = null
   try {
     await store.continueAsGuest()
@@ -78,13 +84,13 @@ async function onGuest() {
   } catch (e) {
     error.value = describe(e, 'errors.authGuestFailed')
   } finally {
-    loading.value = false
+    busy.value = null
   }
 }
 
 async function onEmailContinue() {
   if (!email.value.trim()) return
-  loading.value = true
+  busy.value = 'email'
   error.value = null
   try {
     await store.requestCode(email.value.trim())
@@ -92,13 +98,13 @@ async function onEmailContinue() {
   } catch (e) {
     error.value = describe(e, 'errors.slug.email_failed')
   } finally {
-    loading.value = false
+    busy.value = null
   }
 }
 
 async function onVerify() {
   if (!canVerify.value) return
-  loading.value = true
+  busy.value = 'verify'
   error.value = null
   try {
     // First-time registration: the backend asks for a display name (code left
@@ -113,13 +119,13 @@ async function onVerify() {
   } catch (e) {
     error.value = describe(e, 'errors.slug.invalid_code')
   } finally {
-    loading.value = false
+    busy.value = null
   }
 }
 
 async function onNameContinue() {
   if (!username.value.trim()) return
-  loading.value = true
+  busy.value = 'name'
   error.value = null
   try {
     // Re-submit the same code together with the chosen name to complete
@@ -138,7 +144,7 @@ async function onNameContinue() {
   } catch (e) {
     error.value = describe(e, 'errors.slug.invalid_code')
   } finally {
-    loading.value = false
+    busy.value = null
   }
 }
 
@@ -233,10 +239,11 @@ watch(
                   type="button"
                   :disabled="loading || !email.trim()"
                   class="auth-primary flex items-center justify-center gap-2 rounded-full px-6 py-2.5 text-sm"
+                  :class="{ 'is-busy': busy === 'email' }"
                   @click="onEmailContinue"
                 >
                   {{ t('auth.continue') }}
-                  <AppSpinner v-if="loading" :size="16" />
+                  <AppSpinner v-if="busy === 'email'" :size="16" />
                   <AppIcon v-else :path="mdiArrowRight" :size="16" />
                 </button>
               </div>
@@ -252,11 +259,12 @@ watch(
                 <button
                   type="button"
                   :disabled="loading"
-                  class="flex items-center gap-2 rounded-full border border-primary-50/30 px-6 py-2.5 text-sm text-primary-50 transition hover:bg-primary-50/10 disabled:opacity-50"
+                  class="flex items-center gap-2 rounded-full border border-primary-50/30 px-6 py-2.5 text-sm text-primary-50 transition hover:bg-primary-50/10"
+                  :class="busy === 'guest' ? 'cursor-progress' : 'disabled:opacity-50'"
                   @click="onGuest"
                 >
                   {{ t('auth.continueGuest') }}
-                  <AppSpinner v-if="loading" :size="16" />
+                  <AppSpinner v-if="busy === 'guest'" :size="16" />
                   <AppIcon v-else :path="mdiArrowRight" :size="16" />
                 </button>
               </div>
@@ -287,10 +295,11 @@ watch(
                 type="button"
                 :disabled="loading || !username.trim()"
                 class="auth-primary flex items-center gap-2 rounded-full px-6 py-2.5 text-sm"
+                :class="{ 'is-busy': busy === 'name' }"
                 @click="onNameContinue"
               >
                 {{ t('auth.continue') }}
-                <AppSpinner v-if="loading" :size="16" />
+                <AppSpinner v-if="busy === 'name'" :size="16" />
                 <AppIcon v-else :path="mdiArrowRight" :size="16" />
               </button>
             </div>
@@ -325,10 +334,11 @@ watch(
                 type="button"
                 :disabled="loading || !canVerify"
                 class="auth-primary flex items-center gap-2 rounded-full px-6 py-2.5 text-sm"
+                :class="{ 'is-busy': busy === 'verify' }"
                 @click="onVerify"
               >
                 {{ t('auth.verify') }}
-                <AppSpinner v-if="loading" :size="16" />
+                <AppSpinner v-if="busy === 'verify'" :size="16" />
                 <AppIcon v-else :path="mdiArrowRight" :size="16" />
               </button>
             </div>
@@ -368,5 +378,14 @@ watch(
 .auth-primary:disabled {
   cursor: not-allowed;
   opacity: 0.5;
+}
+/* While the request is in flight the button IS disabled (to block a double
+   submit) but it is working, not unavailable. Dimming it to 0.5 swallowed the
+   16px spinner inside it, so a slow OTP round trip looked like a dead button
+   and people clicked again. Keep full strength here; the 0.5 above still
+   applies to the genuine "nothing entered yet" case. */
+.auth-primary.is-busy:disabled {
+  cursor: progress;
+  opacity: 1;
 }
 </style>
