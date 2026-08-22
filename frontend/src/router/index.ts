@@ -6,6 +6,11 @@ import ProposalWorkspace from '@/components/ProposalWorkspace.vue'
 // proposal-builder and proposal/:id share one component instance.
 export const router = createRouter({
   history: createWebHistory(),
+  // Back/forward returns to where the user actually was. This matters most for
+  // the gallery: it is kept alive (App.vue), so returning from a proposal
+  // restores the card list intact — landing at the top of a list the user was
+  // fifteen cards into would undo most of that benefit.
+  scrollBehavior: (_to, _from, savedPosition) => savedPosition ?? { top: 0 },
   routes: [
     { path: '/', redirect: '/gallery' },
     { path: '/gallery', name: 'gallery', component: Gallery },

@@ -587,13 +587,16 @@ export type ProposalSummary = ProposalSummaryProposal | ProposalSummaryExisting
 // Sortable keys accepted by the backend, restricted to the subset the gallery
 // UI offers. Validated server-side against filter_builder.py's
 // SORTABLE_COLUMNS; an unlisted column 400s.
+//
+// Deliberately only the attributes a ProposalCard actually shows: sorting by a
+// figure the card doesn't display leaves the user re-ordering a list with no
+// visible reason for the order. That rules out the financial KPIs, duration and
+// created_at — which is also why the old "Margin, desc" default looked
+// arbitrary on a list that is mostly existing (ONTD) rows carrying NULL there.
 export const PROPOSAL_SORT_KEYS = [
-  'created_at',
   'total_distance_km',
-  'total_time_h',
-  'margin_eur_per_train_km',
-  'revenue_eur_per_train_km',
-  'cost_eur_per_train_km',
+  'co2_savings_t_per_year',
+  'n_stops',
 ] as const
 export type ProposalSortKey = (typeof PROPOSAL_SORT_KEYS)[number]
 

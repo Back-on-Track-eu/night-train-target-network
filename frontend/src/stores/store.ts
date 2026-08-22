@@ -49,6 +49,13 @@ export const useStore = defineStore('store', () => {
   // ProposalViewport's searchSeed prop.
   const pendingProposalSeed = ref<GallerySearchSeed | null>(null)
 
+  // The gallery is kept alive across navigation (App.vue), so its loaded list
+  // survives a trip into a proposal and back — which also means a proposal
+  // published in between would be missing from it. Publishing sets this; the
+  // gallery refetches once on re-activation and clears it. Plain
+  // back-navigation leaves it false and issues no requests at all.
+  const galleryStale = ref(false)
+
   // --- Auth ----------------------------------------------------------------
   // Identity is tri-state and DERIVED from the token (see authChoice): the app
   // never auto-creates a guest — a fresh visitor is 'none' until they choose.
@@ -264,6 +271,7 @@ export const useStore = defineStore('store', () => {
     scenariosFailure,
     selectedScenarioId,
     pendingProposalSeed,
+    galleryStale,
     fetchStops,
     fetchCompositions,
     fetchScenarios,

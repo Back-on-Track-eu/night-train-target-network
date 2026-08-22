@@ -1,18 +1,10 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, onActivated, onDeactivated, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import Select from 'primevue/select'
 import Skeleton from 'primevue/skeleton'
-import {
-  mdiArrowLeftRight,
-  mdiMapMarkerOutline,
-  mdiEarth,
-  mdiMagnify,
-  mdiPlus,
-  mdiSortAscending,
-  mdiSortDescending,
-} from '@mdi/js'
+import { mdiArrowLeftRight, mdiMapMarkerOutline, mdiEarth, mdiMagnify, mdiPlus } from '@mdi/js'
 import AppIcon from '@/components/AppIcon.vue'
 import StopSelect from '@/components/StopSelect.vue'
 import CountrySelect from '@/components/CountrySelect.vue'
@@ -90,9 +82,16 @@ const highlightStopIds = computed(() => {
   return []
 })
 
-// Sort as a field + direction. The field Select shows only field names; the
-// direction is an icon toggle (ascending/descending).
-const sortField = ref<ProposalSortKey>('margin_eur_per_train_km')
+// Sort as a field + direction. These stay the source of truth (the URL sync and
+// the request body are both field+direction); the single Select below drives
+// them through one combined "field:dir" value.
+//
+// Distance-desc is the default because it is the only sortable column BOTH
+// gallery sources carry a real value for — CO₂ savings is NULL on every
+// existing (ONTD) row, so defaulting to it would open the gallery on a page of
+// the handful of evaluated proposals with the whole catalogue sorted behind
+// them by NULLS LAST.
+const sortField = ref<ProposalSortKey>('total_distance_km')
 const sortDir = ref<'asc' | 'desc'>('desc')
 
 // Result list (accumulated across pages) + pagination bookkeeping.
@@ -129,28 +128,44 @@ const sourceChoices: { value: SourceChoice; label: string }[] = [
   { value: 'existing', label: 'ONTD' },
 ]
 
-// Existing (ONTD) rows carry NULL in every financial column and have no
-// created_at, so offering those as sort fields while viewing ONTD only would
-// sort a column no row has — which is exactly why the default "Margin, desc"
-// looked arbitrary on a list that is 205 existing rows and 2 proposals.
-const SHARED_SORT_KEYS: readonly ProposalSortKey[] = ['total_distance_km', 'total_time_h']
+// Existing (ONTD) rows carry NULL in every proposal-only column, so offering
+// CO₂ savings as a sort field while viewing ONTD only would sort a column no
+// row has.
+const SHARED_SORT_KEYS: readonly ProposalSortKey[] = ['total_distance_km', 'n_stops']
 
-const sortFieldOptions = computed<{ value: ProposalSortKey; label: string }[]>(() => {
-  const all = [
-    { value: 'margin_eur_per_train_km' as ProposalSortKey, label: t('gallery.sort.margin') },
-    { value: 'revenue_eur_per_train_km' as ProposalSortKey, label: t('gallery.sort.revenue') },
-    { value: 'cost_eur_per_train_km' as ProposalSortKey, label: t('gallery.sort.cost') },
-    { value: 'created_at' as ProposalSortKey, label: t('gallery.sort.date') },
-    { value: 'total_distance_km' as ProposalSortKey, label: t('gallery.sort.distance') },
-    { value: 'total_time_h' as ProposalSortKey, label: t('gallery.sort.duration') },
-  ]
-  return sourceFilter.value === 'existing'
-    ? all.filter((o) => SHARED_SORT_KEYS.includes(o.value))
-    : all
+// One entry per field × direction. Each label names the direction in words
+// rather than with an arrow glyph: "↓" on "Distance" is read as both
+// "descending" and "low to high" depending on the reader, and these are
+// self-describing without the extra step.
+const SORT_OPTIONS: readonly { field: ProposalSortKey; dir: 'asc' | 'desc'; key: string }[] = [
+  { field: 'total_distance_km', dir: 'desc', key: 'distanceDesc' },
+  { field: 'total_distance_km', dir: 'asc', key: 'distanceAsc' },
+  { field: 'co2_savings_t_per_year', dir: 'desc', key: 'co2Desc' },
+  { field: 'co2_savings_t_per_year', dir: 'asc', key: 'co2Asc' },
+  { field: 'n_stops', dir: 'desc', key: 'stopsDesc' },
+  { field: 'n_stops', dir: 'asc', key: 'stopsAsc' },
+]
+
+const sortOptions = computed(() =>
+  SORT_OPTIONS.filter(
+    (o) => sourceFilter.value !== 'existing' || SHARED_SORT_KEYS.includes(o.field),
+  ).map((o) => ({ value: `${o.field}:${o.dir}`, label: t(`gallery.sort.${o.key}`) })),
+)
+
+// The Select's single value, projected onto the field/direction pair the rest of
+// the component (request body, URL sync) is built around. Both refs are written
+// in one tick, so the watcher below still fires exactly once.
+const sortSelection = computed<string>({
+  get: () => `${sortField.value}:${sortDir.value}`,
+  set: (value) => {
+    const [by, dir] = value.split(':')
+    sortField.value = by as ProposalSortKey
+    sortDir.value = dir === 'asc' ? 'asc' : 'desc'
+  },
 })
 
 // Switching to ONTD-only while sorted by a proposal-only column would leave the
-// Select showing a field that is no longer offered — fall back to distance.
+// Select showing an option that is no longer offered — fall back to distance.
 watch(sourceFilter, (choice) => {
   if (choice === 'existing' && !SHARED_SORT_KEYS.includes(sortField.value)) {
     sortField.value = 'total_distance_km'
@@ -169,9 +184,6 @@ const selectedCountryName = computed(() =>
 )
 
 const currentSort = computed<ProposalSort>(() => ({ by: sortField.value, dir: sortDir.value }))
-function toggleSortDir(): void {
-  sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
-}
 
 const reachedEnd = computed(() => initialized.value && proposals.value.length >= total.value)
 
@@ -477,11 +489,27 @@ onMounted(async () => {
   resetAndLoad()
   router.replace({ query: currentSearchQuery() })
 })
-onBeforeUnmount(() => {
+// This component is kept alive (App.vue), so leaving the gallery deactivates it
+// instead of unmounting it. Cancelling in flight requests is right in BOTH
+// cases — nobody is looking at the result any more — so the teardown is shared.
+function teardown(): void {
   observer?.disconnect()
   // Drop everything in flight; their rejections are 'canceled' and stay silent.
   listSlot.cancel()
   routeSlot.cancel()
+}
+onBeforeUnmount(teardown)
+onDeactivated(teardown)
+
+// Coming back to a cached gallery. Deliberately does NOT re-run onMounted's
+// hydrate-and-load: the whole point is that a there-and-back trip costs zero
+// requests. Only a proposal published in the meantime forces a refresh.
+onActivated(() => {
+  if (sentinel.value && observer) observer.observe(sentinel.value)
+  if (store.galleryStale) {
+    store.galleryStale = false
+    resetAndLoad()
+  }
 })
 
 // Same pill passthrough as the Selects in EvaluationPanel.vue.
@@ -504,10 +532,6 @@ const selectPt = {
 
 const ctaClass =
   'flex cursor-pointer items-center gap-1.5 rounded-full bg-primary-50/10 px-5 py-2 text-sm text-primary-50 transition hover:bg-primary-50/20'
-// A circle whose 28px (h-7/w-7) diameter equals the sort Select's height, so
-// the two sit as an equal-height pair.
-const iconBtnClass =
-  'flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-full border border-primary-50/20 text-primary-50/70 transition hover:bg-primary-50/10'
 </script>
 
 <template>
@@ -652,24 +676,17 @@ const iconBtnClass =
           {{ choice.label }}
         </button>
       </div>
-      <div class="flex items-stretch gap-2">
-        <Select
-          v-model="sortField"
-          :options="sortFieldOptions"
-          option-value="value"
-          option-label="label"
-          :unstyled="true"
-          :pt="selectPt"
-        />
-        <button
-          type="button"
-          :class="iconBtnClass"
-          :aria-label="t('gallery.sort.direction')"
-          @click="toggleSortDir"
-        >
-          <AppIcon :path="sortDir === 'asc' ? mdiSortAscending : mdiSortDescending" :size="18" />
-        </button>
-      </div>
+      <!-- Field and direction as ONE control: six self-describing options,
+           rather than a field Select the user then has to pair with a separate
+           arrow toggle. -->
+      <Select
+        v-model="sortSelection"
+        :options="sortOptions"
+        option-value="value"
+        option-label="label"
+        :unstyled="true"
+        :pt="selectPt"
+      />
       <button type="button" :class="[ctaClass, 'ml-auto']" @click="createProposal">
         <AppIcon :path="mdiPlus" :size="18" />
         {{ t('gallery.cta.create') }}
