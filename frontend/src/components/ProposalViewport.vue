@@ -19,12 +19,15 @@ import { useApiFailure } from '@/composables/useApiFailure'
 import { resolvePrefillStops, type GallerySearchSeed } from '@/lib/proposalPrefill'
 import { readDraft, writeDraft, clearDraft } from '@/lib/proposalDraftStorage'
 import { buildSuggestRows, settledRows, type SuggestRow } from '@/lib/suggestPlacement'
+import { formatClock, dayOffset } from '@/lib/tripClock'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Skeleton from 'primevue/skeleton'
 import AppIcon from '@/components/AppIcon.vue'
 import AppSpinner from '@/components/AppSpinner.vue'
 import StopSelect from '@/components/StopSelect.vue'
+import StopTime from '@/components/StopTime.vue'
+import LoadingFunFact from '@/components/LoadingFunFact.vue'
 import CompositionPanel from '@/components/CompositionPanel.vue'
 import EvaluationPanel from '@/components/EvaluationPanel.vue'
 import MapView from '@/components/MapView.vue'
@@ -126,6 +129,10 @@ interface StopTimeFmt {
   lon: number
   arrival_time_fmt: string | null
   departure_time_fmt: string | null
+  // Calendar days after the trip's first departure — drives the "+1" marker, so
+  // a 20:00 → 08:00 night train doesn't read as travelling backwards in time.
+  arrival_day: number
+  departure_day: number
 }
 
 interface TripResult {
@@ -207,16 +214,7 @@ interface BackendRoute {
 // The merged calc response with its route key concretely typed.
 type CalcResponse = ProposalCalcResponse<BackendRoute>
 
-// Minutes-since-midnight (as returned by the API) -> "HH:MM" for display.
-// Wraps values outside 0-1439 (the mirror-around-02:30 timetable can produce
-// them) into a valid clock time rather than rendering "25:10".
-function formatMinutes(min: number | null): string | null {
-  if (min === null || min === undefined) return null
-  const wrapped = ((min % 1440) + 1440) % 1440
-  const h = Math.floor(wrapped / 60)
-  const m = wrapped % 60
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
-}
+// Clock formatting and the overnight day offset live in lib/tripClock.ts.
 
 // Travel time of a leg, in minutes, from the timetable the API already returns.
 // A negative difference means the leg runs over midnight, so wrap by a full day
@@ -229,15 +227,19 @@ function legTravelMinutes(seg: BackendSegment): number | null {
   return (((arrival - departure) % 1440) + 1440) % 1440
 }
 
-function toStopTimeFmt(stop: BackendStop): StopTimeFmt {
+// baseMin is the trip's own first departure — the reference the "+1" markers are
+// counted from (see lib/tripClock.ts).
+function toStopTimeFmt(stop: BackendStop, baseMin: number | null): StopTimeFmt {
   return {
     stop_id: stop.stop_id,
     stop_name: stop.stop_name,
     country_code: stop.country_code,
     lat: stop.lat,
     lon: stop.lon,
-    arrival_time_fmt: formatMinutes(stop.arrival_time_min),
-    departure_time_fmt: formatMinutes(stop.departure_time_min),
+    arrival_time_fmt: formatClock(stop.arrival_time_min),
+    departure_time_fmt: formatClock(stop.departure_time_min),
+    arrival_day: dayOffset(stop.arrival_time_min, baseMin),
+    departure_day: dayOffset(stop.departure_time_min, baseMin),
   }
 }
 
@@ -246,9 +248,10 @@ function toStopTimeFmt(stop: BackendStop): StopTimeFmt {
 // leg's to_stop).
 function buildStopTimes(segments: BackendSegment[]): StopTimeFmt[] {
   if (segments.length === 0) return []
+  const baseMin = segments[0].from_stop.departure_time_min
   return [
-    toStopTimeFmt(segments[0].from_stop),
-    ...segments.map((seg) => toStopTimeFmt(seg.to_stop)),
+    toStopTimeFmt(segments[0].from_stop, baseMin),
+    ...segments.map((seg) => toStopTimeFmt(seg.to_stop, baseMin)),
   ]
 }
 
@@ -331,14 +334,14 @@ const sectionStops = computed(() => {
   return outbound?.stop_times.map((s) => ({ stop_id: s.stop_id, name: s.stop_name })) ?? []
 })
 
-// In display and suggest modes, lock the composition card to the one used for
-// the routing — a single-element list hides the card's navigation (arrows/dots)
-// and prevents desyncing the suggest-mode base route from its composition.
+// In display, suggest AND loading modes, lock the composition card to the one
+// used for the routing — a single-element list hides the card's navigation
+// (arrows/dots) and prevents desyncing the suggest-mode base route from its
+// composition. 'loading' is in that set because the calc in flight was started
+// for THIS composition: switching mid-calc left the card advertising a train
+// the arriving result was not computed for.
 const compositionCards = computed(() => {
-  if (
-    (currentMode.value === 'display' || currentMode.value === 'suggest') &&
-    selectedCompositionId.value
-  ) {
+  if (currentMode.value !== 'edit' && selectedCompositionId.value) {
     const sel = store.compositions.filter((c) => c.composition_id === selectedCompositionId.value)
     if (sel.length > 0) return sel
   }
@@ -540,6 +543,9 @@ async function doPublish() {
     })
     publishedProposalId.value = resp.proposal_id
     saved.value = true
+    // The gallery is kept alive, so its cached list would otherwise not contain
+    // the proposal the user just published. Flag it to refetch once on return.
+    store.galleryStale = true
     clearDraft()
     toastStore.addToast('success', t('proposal.saved'))
     if (isFirstPublish) emit('published', resp.proposal_id)
@@ -609,6 +615,15 @@ async function restoreSuggestState(selectedIds: string[]) {
   }
 }
 
+// Close the register/guest gate THIS component opened — and only that. These
+// paths used to call closeAuthModal() unconditionally, which also slammed shut a
+// "Log in / Register" the user had opened themselves from the header: they
+// opened it while a proposal was still computing, the compute settled, and their
+// modal vanished under them. A standalone login is the user's, not ours.
+function dismissEvaluationGate(): void {
+  if (store.authModal.context === 'evaluation') store.closeAuthModal()
+}
+
 // User toggled a proposed stop's bubble/marker — the single selection source
 // for both the timeline and the map (replace the Set so it stays reactive).
 function toggleSuggested(stopId: string) {
@@ -640,7 +655,7 @@ async function confirmStopSelection(selectedIds: string[]) {
   suggestReversed.value = false
   if (!base) {
     currentMode.value = 'edit'
-    store.closeAuthModal()
+    dismissEvaluationGate()
     return
   }
   if (chosen.length === 0) {
@@ -669,7 +684,7 @@ function cancelSuggestMode() {
   suggestSelected.value = new Set()
   suggestReversed.value = false
   currentMode.value = 'edit'
-  store.closeAuthModal()
+  dismissEvaluationGate()
 }
 
 // Rebuild the itinerary from the settled suggest rows, keeping their order.
@@ -867,10 +882,17 @@ const showEvaluationSection = computed(
     routeResult.value !== null,
 )
 
-// Shared pill styling for the itinerary controls (Add Stop / Edit / Swap /
-// Cancel), matching the direction-swap button.
+// Quiet pill — used by the "Gallery" back link above the workspace.
 const pillClass =
   'flex cursor-pointer items-center gap-1.5 rounded-full border border-primary-50/20 px-3 py-1.5 text-sm leading-none text-primary-50 transition hover:bg-primary-50/10'
+
+// The itinerary's own tools (Edit / Add Stop / Swap / Cancel Edit). Same shape
+// as pillClass but filled and semibold: as bare outlines tucked under the table
+// they read as decoration and were being missed. Deliberately a SEPARATE
+// constant — pillClass is shared with the back link, which should stay quiet.
+// Still not solid CTAs: four secondary tools must not compete with Evaluate.
+const toolPillClass =
+  'flex cursor-pointer items-center gap-1.5 rounded-full border border-primary-50/30 bg-primary-50/10 px-3.5 py-2 text-sm font-semibold leading-none text-primary-50 transition hover:bg-primary-50/20'
 
 // Build itinerary rows from a planned route's outbound stops, so re-editing
 // starts from the actual route (router-inserted stops included), not the
@@ -910,13 +932,23 @@ function itineraryFromStopIds(stopIds: string[]): ItineraryStop[] {
 // Computed times for an itinerary row, looked up from the selected trip by stop
 // id — used to keep the timetable labels beside the (still editable) stops in a
 // clean re-edit. Null when there's no computed routing to read from.
-function rowTimes(
-  stop: ItineraryStop,
-): { arrival: string | null; departure: string | null } | null {
+function rowTimes(stop: ItineraryStop): {
+  arrival: string | null
+  departure: string | null
+  arrivalDay: number
+  departureDay: number
+} | null {
   const id = stop.selectedStop?.stop_id
   if (!id || !selectedTrip.value) return null
   const st = selectedTrip.value.stop_times.find((s) => s.stop_id === id)
-  return st ? { arrival: st.arrival_time_fmt, departure: st.departure_time_fmt } : null
+  return st
+    ? {
+        arrival: st.arrival_time_fmt,
+        departure: st.departure_time_fmt,
+        arrivalDay: st.arrival_day,
+        departureDay: st.departure_day,
+      }
+    : null
 }
 
 // Enter re-edit from display: stay on the computed view, just surface the
@@ -1038,6 +1070,8 @@ interface ViewRow {
   name: string
   arrival: string | null
   departure: string | null
+  arrivalDay: number
+  departureDay: number
 }
 
 const viewRows = computed((): ViewRow[] => {
@@ -1047,6 +1081,8 @@ const viewRows = computed((): ViewRow[] => {
       name: st.stop_name,
       arrival: st.arrival_time_fmt,
       departure: st.departure_time_fmt,
+      arrivalDay: st.arrival_day,
+      departureDay: st.departure_day,
     }))
   }
   return itinerary.value.map((s) => ({
@@ -1054,6 +1090,8 @@ const viewRows = computed((): ViewRow[] => {
     name: s.name,
     arrival: null,
     departure: null,
+    arrivalDay: 0,
+    departureDay: 0,
   }))
 })
 
@@ -1157,6 +1195,26 @@ const mapStops = computed(() => {
       highlighted: true,
     }))
 })
+
+// Every catalogue stop the user could still add, shown as dots on the map while
+// editing. Motivation from the field: a traveller does not know which stations
+// are even available, so the Add Stop dropdown is a search you can only use if
+// you already know the answer. Stops already on the itinerary are excluded —
+// they are drawn as route markers, and re-adding one is a no-op anyway.
+const mapAvailable = computed(() => {
+  if (currentMode.value !== 'edit') return null
+  const used = usedStopIds.value
+  return store.stops
+    .filter((s) => !used.has(s.stop_id))
+    .map((s) => ({ stopId: s.stop_id, lat: s.lat, lon: s.lon, name: s.name }))
+})
+
+// Adding from the map reuses addStop(), so a map pick lands at the same
+// geographically sensible position as one made through the dropdown.
+function onMapAddStop(stopId: string): void {
+  const stop = store.stops.find((s) => s.stop_id === stopId)
+  if (stop) addStop(stop)
+}
 
 const mapShape = computed(() => {
   // Suggest mode draws the temporary route from the base "suggest" response, as
@@ -1458,21 +1516,19 @@ onMounted(async () => {
                  re-edit); disappears the moment the builder goes dirty. -->
             <Column
               v-if="showComputedView"
-              style="width: 5rem"
+              style="width: 6rem"
               :pt="{ bodyCell: { class: '!p-0' } }"
             >
               <template #body="{ data: stop }">
                 <div class="flex flex-col items-end gap-1 py-2 pr-3">
-                  <span
-                    v-if="rowTimes(stop)?.arrival"
-                    class="text-xs tabular-nums leading-none text-primary-50"
-                    >{{ rowTimes(stop)?.arrival }}</span
-                  >
-                  <span
-                    v-if="rowTimes(stop)?.departure"
-                    class="text-xs tabular-nums leading-none text-primary-50"
-                    >{{ rowTimes(stop)?.departure }}</span
-                  >
+                  <StopTime
+                    :time="rowTimes(stop)?.arrival ?? null"
+                    :day="rowTimes(stop)?.arrivalDay"
+                  />
+                  <StopTime
+                    :time="rowTimes(stop)?.departure ?? null"
+                    :day="rowTimes(stop)?.departureDay"
+                  />
                 </div>
               </template>
             </Column>
@@ -1671,7 +1727,7 @@ onMounted(async () => {
             class="mb-4"
           >
             <!-- Times column (replaces drag handle) -->
-            <Column style="width: 5rem" :pt="{ bodyCell: { class: '!p-0' } }">
+            <Column style="width: 6rem" :pt="{ bodyCell: { class: '!p-0' } }">
               <template #body="{ data: row, index }">
                 <div class="flex flex-col items-end gap-1 py-2 pr-3">
                   <template v-if="currentMode === 'loading'">
@@ -1679,16 +1735,8 @@ onMounted(async () => {
                     <Skeleton v-if="index < viewRows.length - 1" width="3.5rem" height="10px" />
                   </template>
                   <template v-else>
-                    <span
-                      v-if="row.arrival"
-                      class="text-xs tabular-nums leading-none text-primary-50"
-                      >{{ row.arrival }}</span
-                    >
-                    <span
-                      v-if="row.departure"
-                      class="text-xs tabular-nums leading-none text-primary-50"
-                      >{{ row.departure }}</span
-                    >
+                    <StopTime :time="row.arrival" :day="row.arrivalDay" />
+                    <StopTime :time="row.departure" :day="row.departureDay" />
                   </template>
                 </div>
               </template>
@@ -1736,7 +1784,10 @@ onMounted(async () => {
                the middle; Cancel Edit (re-edit) on the right. The two flex-1
                spacers keep the middle group centered regardless of which side
                buttons are present. -->
-          <div v-if="currentMode !== 'loading'" class="flex items-center gap-2">
+          <div
+            v-if="currentMode !== 'loading'"
+            class="mt-5 flex items-center gap-2 border-t border-primary-50/10 pt-5"
+          >
             <div class="flex flex-1 items-center gap-2" />
 
             <div class="flex items-center gap-2">
@@ -1744,7 +1795,7 @@ onMounted(async () => {
                    untouched. -->
               <button
                 v-if="currentMode === 'suggest'"
-                :class="pillClass"
+                :class="toolPillClass"
                 @click="cancelSuggestMode"
               >
                 <AppIcon :path="mdiArrowLeft" :size="16" />
@@ -1752,7 +1803,7 @@ onMounted(async () => {
               </button>
 
               <!-- Edit (display) -->
-              <button v-if="currentMode === 'display'" :class="pillClass" @click="startEdit">
+              <button v-if="currentMode === 'display'" :class="toolPillClass" @click="startEdit">
                 <AppIcon :path="mdiPencil" :size="16" />
                 {{ t('proposal.edit') }}
               </button>
@@ -1766,21 +1817,26 @@ onMounted(async () => {
                 @select="addStop"
                 @retry="store.fetchStops()"
               >
-                <button :class="pillClass">
+                <button :class="toolPillClass">
                   <AppIcon :path="mdiPlus" :size="16" />
                   {{ t('proposal.addStop') }}
                 </button>
               </StopSelect>
 
               <!-- Swap direction (all modes where applicable) -->
-              <button v-if="showSwap" :class="pillClass" @click="swapDirection">
+              <button
+                v-if="showSwap"
+                :class="toolPillClass"
+                :aria-label="t('proposal.swapDirection')"
+                @click="swapDirection"
+              >
                 <AppIcon :path="mdiSwapVertical" :size="16" />
               </button>
             </div>
 
             <div class="flex flex-1 items-center justify-end gap-2">
               <!-- Cancel Edit (re-edit) -->
-              <button v-if="showCancelEdit" :class="pillClass" @click="cancelEdit">
+              <button v-if="showCancelEdit" :class="toolPillClass" @click="cancelEdit">
                 <AppIcon :path="mdiClose" :size="16" />
                 {{ t('proposal.cancelEdit') }}
               </button>
@@ -1947,8 +2003,10 @@ onMounted(async () => {
             :shape="mapShape"
             :segments="mapSegments"
             :suggested="mapSuggested"
+            :available="mapAvailable"
             class="w-full h-full"
             @toggle-suggested="toggleSuggested"
+            @add-stop="onMapAddStop"
           />
           <!-- Deliberately NOT wrapped in <Transition>. The fade wedged its own
                state machine here: the element kept `fade-enter-from` (opacity 0)
@@ -1979,6 +2037,10 @@ onMounted(async () => {
               <p class="max-w-xs text-center text-sm text-primary-50" aria-live="polite">
                 {{ progressCaption }}
               </p>
+              <!-- Sits BELOW the caption, never replacing it: the escalating
+                   caption is how the user learns the server is slow, and a fun
+                   fact must not push that off screen. -->
+              <LoadingFunFact />
               <!-- Lives here, beside the spinner, rather than under the Evaluate
                    button: a calc started from suggest mode hides that button, so
                    anchoring Cancel to it left the longest waits uncancellable.
