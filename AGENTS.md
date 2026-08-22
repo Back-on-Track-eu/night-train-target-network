@@ -209,6 +209,17 @@ npm install
 npm run dev
 ```
 
+### Frontend tests
+
+```bash
+cd frontend
+npm test
+```
+
+Vitest, node environment, `src/**/*.test.ts` — pure logic in `src/lib` only.
+Components are never mounted (no jsdom, no `@vue/test-utils`), so logic worth
+testing gets extracted out of the SFC first. Not wired into CI.
+
 ### Backend tests
 
 ```bash
