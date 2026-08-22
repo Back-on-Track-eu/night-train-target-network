@@ -15,6 +15,7 @@ import type {
 import { publishProposal, fetchProposalRoute, ProposalsError } from '@/lib/proposalsApi'
 import { resolvePrefillStops, type GallerySearchSeed } from '@/lib/proposalPrefill'
 import { readDraft, writeDraft, clearDraft } from '@/lib/proposalDraftStorage'
+import { buildSuggestRows, type SuggestRow } from '@/lib/suggestPlacement'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Skeleton from 'primevue/skeleton'
@@ -945,65 +946,15 @@ const baseOutbound = computed<TripResult | null>(() => {
 
 const suggestSelectedCount = computed(() => suggestSelected.value.size)
 
-// Best insertion index for a point among an ordered coord list, minimising the
-// added detour — the same nearest-neighbour rule as optimalInsertIndex, but over
-// a plain coord array so it can place proposed stops without touching itinerary.
-function bestInsertIndex(items: { lat: number; lon: number }[], p: { lat: number; lon: number }) {
-  const n = items.length
-  if (n === 0) return 0
-  let bestIndex = n
-  let bestExtra = Infinity
-  for (let i = 0; i <= n; i++) {
-    let extra: number
-    if (i === 0) extra = dist(p, items[0])
-    else if (i === n) extra = dist(items[n - 1], p)
-    else extra = dist(items[i - 1], p) + dist(p, items[i]) - dist(items[i - 1], items[i])
-    if (extra < bestExtra) {
-      bestExtra = extra
-      bestIndex = i
-    }
-  }
-  return bestIndex
-}
-
-interface SuggestRow {
-  kind: 'confirmed' | 'suggested'
-  stopId: string
-  name: string
-  lat: number
-  lon: number
-  selected: boolean
-  addedMin: number | null
-}
-
-// Confirmed stops (in order) interleaved with the proposed stops placed by
-// proximity — the serialized SuggestedStop carries no leg index, so proximity is
-// the robust placement. Reversed for display when the user flips direction.
+// Confirmed stops interleaved with the proposed stops along the way — see
+// lib/suggestPlacement.ts for the ordering rule. Reversed for display when the
+// user flips direction, after placement, so the flip stays a pure view change.
 const suggestRows = computed<SuggestRow[]>(() => {
-  const confirmed = baseOutbound.value?.stop_times ?? []
-  const rows: SuggestRow[] = confirmed.map(
-    (st): SuggestRow => ({
-      kind: 'confirmed',
-      stopId: st.stop_id,
-      name: st.stop_name,
-      lat: st.lat,
-      lon: st.lon,
-      selected: true,
-      addedMin: null,
-    }),
+  const rows = buildSuggestRows(
+    baseOutbound.value?.stop_times ?? [],
+    suggestedStops.value,
+    suggestSelected.value,
   )
-  for (const s of suggestedStops.value) {
-    const idx = bestInsertIndex(rows, { lat: s.lat, lon: s.lon })
-    rows.splice(idx, 0, {
-      kind: 'suggested',
-      stopId: s.stop_id,
-      name: s.stop_name,
-      lat: s.lat,
-      lon: s.lon,
-      selected: suggestSelected.value.has(s.stop_id),
-      addedMin: s.added_time_min,
-    })
-  }
   return suggestReversed.value ? [...rows].reverse() : rows
 })
 
