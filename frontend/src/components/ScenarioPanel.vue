@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Select from 'primevue/select'
+import Skeleton from 'primevue/skeleton'
 import { useStore } from '@/stores/store'
 import { selectPillPt } from '@/lib/selectPillPt'
 
@@ -18,7 +19,32 @@ const selectedScenario = computed(
 </script>
 
 <template>
-  <div v-if="store.scenarios.length > 0" class="scenario-gold-box rounded-xl p-4">
+  <!-- Loading: keep the box and its footprint, so the panel doesn't pop into
+       existence and shove everything below it down. -->
+  <div v-if="store.scenariosStatus === 'loading'" class="scenario-gold-box rounded-xl p-4">
+    <div class="flex justify-center">
+      <Skeleton width="12rem" height="2.25rem" border-radius="9999px" />
+    </div>
+    <Skeleton width="70%" height="0.875rem" class="!mt-3" />
+  </div>
+
+  <!-- Failure has to be visible, not just an absent control: with no scenario
+       loaded, selectedScenarioId stays null and the calc runs against the LIVE
+       BASE instead of whatever the user assumes is selected. Silently omitting
+       the panel would change the numbers without saying so. -->
+  <div v-else-if="store.scenariosFailure" class="scenario-gold-box rounded-xl p-4" role="alert">
+    <p class="text-sm leading-relaxed text-amber-200">{{ t('errors.scenariosUnavailable') }}</p>
+    <button
+      type="button"
+      class="mt-2 cursor-pointer text-sm font-semibold text-primary-50 underline underline-offset-2"
+      @click="store.fetchScenarios()"
+    >
+      {{ t('errors.retry') }}
+    </button>
+  </div>
+
+  <!-- Loaded and genuinely empty stays hidden — an empty list is not an error. -->
+  <div v-else-if="store.scenarios.length > 0" class="scenario-gold-box rounded-xl p-4">
     <div class="flex justify-center">
       <Select
         v-model="store.selectedScenarioId"

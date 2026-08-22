@@ -5,6 +5,7 @@ import { useStore } from '@/stores/store'
 import AppHeader from '@/components/AppHeader.vue'
 import AuthModal from '@/components/AuthModal.vue'
 import ToastContainer from '@/components/ToastContainer.vue'
+import ApiStatusBanner from '@/components/ApiStatusBanner.vue'
 
 const { t } = useI18n()
 const store = useStore()
@@ -24,6 +25,7 @@ onMounted(() => {
 <template>
   <div class="flex min-h-screen flex-col bg-sapphire">
     <AppHeader />
+    <ApiStatusBanner />
     <div class="flex flex-1 flex-col items-center px-8 py-12">
       <h1 class="mb-10 text-center text-4xl font-light text-white">
         {{ t('proposal.heading') }}

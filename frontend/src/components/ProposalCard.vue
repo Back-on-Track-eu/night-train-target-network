@@ -4,10 +4,12 @@ import { useI18n } from 'vue-i18n'
 import Avatar from 'primevue/avatar'
 import AvatarGroup from 'primevue/avatargroup'
 import AppIcon from '@/components/AppIcon.vue'
+import AppSpinner from '@/components/AppSpinner.vue'
 import { useStore } from '@/stores/store'
 import { useToastStore } from '@/stores/toastStore'
 import { useLocaleFormat } from '@/composables/useLocaleFormat'
-import { likeProposal, unlikeProposal, ProposalsError } from '@/lib/proposalsApi'
+import { likeProposal, unlikeProposal } from '@/lib/proposalsApi'
+import { useApiFailure } from '@/composables/useApiFailure'
 import type { ProposalSummary } from '@/types/api'
 import {
   mdiArrowLeftRight,
@@ -34,6 +36,7 @@ const emit = defineEmits<{ select: [proposalId: number] }>()
 const { t } = useI18n()
 const store = useStore()
 const { formatInt } = useLocaleFormat()
+const { report } = useApiFailure()
 
 // Summaries carry stop_ids only (in travel order); resolve display names from
 // the loaded stop list, falling back to the id (existing/ONTD rows may carry
@@ -150,10 +153,9 @@ async function onLikeClick() {
     likeCount.value = result.count
     likedByMe.value = result.liked_by_me
   } catch (err) {
-    toastStore.addToast(
-      'error',
-      err instanceof ProposalsError ? err.message : t('gallery.card.likeFailed'),
-    )
+    // The card has nowhere sensible to put inline copy, so this failure always
+    // toasts — including the 429 the like endpoint really does rate-limit.
+    report(err, { fallbackKey: 'errors.likeFailed', force: 'toast' })
   } finally {
     likeBusy.value = false
   }
@@ -271,7 +273,10 @@ function avatarPt(code: string, index: number) {
             :class="likedByMe ? 'text-primary-50' : 'text-primary-50/70 hover:text-primary-50'"
             @click.stop="onLikeClick"
           >
-            <AppIcon :path="likedByMe ? mdiThumbUp : mdiThumbUpOutline" :size="22" />
+            <!-- likeBusy guarded double-clicks but drove no visual state, so the
+                 button looked inert for the whole round trip. -->
+            <AppSpinner v-if="likeBusy" :size="18" />
+            <AppIcon v-else :path="likedByMe ? mdiThumbUp : mdiThumbUpOutline" :size="22" />
           </button>
         </div>
 

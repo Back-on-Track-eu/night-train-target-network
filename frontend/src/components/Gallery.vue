@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import Select from 'primevue/select'
+import Skeleton from 'primevue/skeleton'
 import {
   mdiArrowLeftRight,
   mdiMapMarkerOutline,
@@ -19,7 +20,11 @@ import ProposalCard from '@/components/ProposalCard.vue'
 import GalleryMap from '@/components/GalleryMap.vue'
 import { useStore } from '@/stores/store'
 import { useLocaleFormat } from '@/composables/useLocaleFormat'
-import { fetchProposals, fetchProposalRoute, ProposalsError } from '@/lib/proposalsApi'
+import { fetchProposals, fetchProposalRoute } from '@/lib/proposalsApi'
+import { createAbortSlot } from '@/lib/apiClient'
+import { asApiFailure, isRetryable, type ApiFailure } from '@/lib/apiError'
+import { mapLimit } from '@/lib/promisePool'
+import { useApiFailure } from '@/composables/useApiFailure'
 import {
   seedToQuery,
   seedFromQuery,
@@ -44,8 +49,14 @@ const store = useStore()
 const { countryName } = useLocaleFormat()
 const route = useRoute()
 const router = useRouter()
+const { describe, report } = useApiFailure()
 
 const LIMIT = 20
+// The gallery fans out one GET /api/proposal/<id> per card to draw its route.
+// Unbounded, a 20-card page meant 20 simultaneous requests against a backend
+// running 4 gunicorn workers — the gallery could manufacture the overload it
+// then reports.
+const ROUTE_FETCH_CONCURRENCY = 4
 
 type SearchMode = 'aToB' | 'byStation' | 'byCountry'
 const mode = ref<SearchMode>('aToB')
@@ -90,8 +101,17 @@ const total = ref(0)
 const offset = ref(0)
 const loading = ref(false)
 const initialized = ref(false)
-const errorMsg = ref<string | null>(null)
+const failure = ref<ApiFailure | null>(null)
+const failureMsg = ref<string | null>(null)
 const sentinel = ref<HTMLElement | null>(null)
+
+// One list query in flight at a time, newest wins: a filter change during a
+// slow load supersedes it instead of being dropped on the floor (which is what
+// the old `if (loading) return` guard did to it).
+const listSlot = createAbortSlot()
+// Belt and braces on top of the abort: only the newest request may write to
+// proposals/offset/total, so a late loser can never reorder the list.
+let requestSeq = 0
 
 const tabs = computed(() => [
   { value: 'aToB' as const, label: t('gallery.tabs.aToB'), icon: mdiArrowLeftRight },
@@ -180,10 +200,12 @@ function buildFilter(): ProposalsFilter | undefined {
 }
 
 async function loadPage(): Promise<void> {
-  if (loading.value) return
   loading.value = true
-  errorMsg.value = null
+  failure.value = null
+  failureMsg.value = null
   const requestOffset = offset.value
+  const seq = ++requestSeq
+  const signal = listSlot.begin()
   try {
     const body: ProposalsRequest = {
       sort: [currentSort.value],
@@ -193,19 +215,27 @@ async function loadPage(): Promise<void> {
     const filter = buildFilter()
     if (filter) body.filter = filter
 
-    const res = await fetchProposals(body)
+    const res = await fetchProposals(body, signal)
+    if (seq !== requestSeq) return
     proposals.value = requestOffset === 0 ? res.proposals : [...proposals.value, ...res.proposals]
     total.value = res.total
     offset.value = requestOffset + res.proposals.length
     initialized.value = true
   } catch (err) {
-    errorMsg.value = err instanceof ProposalsError ? err.message : t('gallery.error')
+    // A superseded request is not a failure — say nothing and let the winner
+    // own the loading state.
+    const f = asApiFailure(err)
+    if (f?.kind === 'canceled' || seq !== requestSeq) return
+    failure.value = f
+    failureMsg.value = describe(err, 'errors.proposalsLoadFailed')
+    report(err, { fallbackKey: 'errors.proposalsLoadFailed', force: 'inline' })
   } finally {
-    loading.value = false
+    if (seq === requestSeq) loading.value = false
   }
 }
 
-// A filter/sort change starts a fresh query from offset 0.
+// A filter/sort change starts a fresh query from offset 0. Deliberately NOT
+// guarded on `loading`: the point is to replace whatever is in flight.
 function resetAndLoad(): void {
   proposals.value = []
   total.value = 0
@@ -214,8 +244,16 @@ function resetAndLoad(): void {
   loadPage()
 }
 
+function retryLoad(): void {
+  // Retrying a first page is a reset; retrying a later page resumes it.
+  if (offset.value === 0) resetAndLoad()
+  else loadPage()
+}
+
+// Appending the same page twice IS a bug, so pagination keeps its guard —
+// unlike resetAndLoad, which means to supersede.
 function onSentinel(): void {
-  if (loading.value || !initialized.value || reachedEnd.value) return
+  if (loading.value || !initialized.value || reachedEnd.value || failure.value) return
   loadPage()
 }
 
@@ -240,62 +278,83 @@ const mapRoutes = computed(() =>
     .filter((r): r is CachedRoute => Boolean(r) && r.routed),
 )
 
+// Keys whose geometry fetch failed. Without this the `watch(proposals)` below
+// would retry every failed route on every page append — turning one bad
+// proposal into a request on every scroll.
+const failedRouteKeys = new Set<string>()
+// Cancels the whole in-flight batch when the gallery unmounts, so navigating
+// away mid-fan-out doesn't toast at a dead component.
+const routeSlot = createAbortSlot()
+
 async function ensureRoutes(list: ProposalSummary[]): Promise<void> {
   // Only proposal rows have a per-id route endpoint; existing (ONTD) rows are
   // skipped (see the map note above).
   const missing = list.filter(
     (p): p is ProposalSummaryProposal =>
-      p.source === 'proposal' && !routeCache.value[proposalKey(p)],
+      p.source === 'proposal' &&
+      !routeCache.value[proposalKey(p)] &&
+      !failedRouteKeys.has(proposalKey(p)),
   )
   if (!missing.length) return
-  const loaded = await Promise.all(
-    missing.map(async (p) => {
-      try {
-        const { route } = await fetchProposalRoute(p.proposal_id)
-        // Every stop along the route, in order — each segment's origin, then the
-        // final segment's destination. The gallery map dedupes the boundary
-        // repeats when it draws the bubbles.
-        const stops: GalleryMapRoute['stops'] = []
-        for (const pair of route.trip_pairs) {
-          const segs = pair.outbound.segments
-          if (!segs.length) continue
-          for (const seg of segs) {
-            stops.push({
-              lat: seg.from_stop.lat,
-              lon: seg.from_stop.lon,
-              name: seg.from_stop.stop_name,
-            })
-          }
-          const last = segs[segs.length - 1].to_stop
-          stops.push({ lat: last.lat, lon: last.lon, name: last.stop_name })
-        }
-        const lines = route.geometries.map((g) => g.coords)
-        const orderedCountries: string[] = []
-        for (const pair of route.trip_pairs) {
-          for (const seg of pair.outbound.segments) {
-            for (const cc of Object.keys(seg.country_distance_shares)) {
-              if (!orderedCountries.includes(cc)) orderedCountries.push(cc)
-            }
-          }
-        }
-        const entry: CachedRoute = {
-          key: proposalKey(p),
-          lines,
-          stops,
-          // A routed leg carries many intermediate points; a straight-line
-          // stand-in is just its two endpoints.
-          routed: lines.some((l) => l.length > 2),
-          orderedCountries,
-        }
-        return entry
-      } catch {
-        return null
+  const signal = routeSlot.begin()
+  const settled = await mapLimit(missing, ROUTE_FETCH_CONCURRENCY, async (p) => {
+    const { route } = await fetchProposalRoute(p.proposal_id, signal)
+    // Every stop along the route, in order — each segment's origin, then the
+    // final segment's destination. The gallery map dedupes the boundary
+    // repeats when it draws the bubbles.
+    const stops: GalleryMapRoute['stops'] = []
+    for (const pair of route.trip_pairs) {
+      const segs = pair.outbound.segments
+      if (!segs.length) continue
+      for (const seg of segs) {
+        stops.push({
+          lat: seg.from_stop.lat,
+          lon: seg.from_stop.lon,
+          name: seg.from_stop.stop_name,
+        })
       }
-    }),
-  )
+      const last = segs[segs.length - 1].to_stop
+      stops.push({ lat: last.lat, lon: last.lon, name: last.stop_name })
+    }
+    const lines = route.geometries.map((g) => g.coords)
+    const orderedCountries: string[] = []
+    for (const pair of route.trip_pairs) {
+      for (const seg of pair.outbound.segments) {
+        for (const cc of Object.keys(seg.country_distance_shares)) {
+          if (!orderedCountries.includes(cc)) orderedCountries.push(cc)
+        }
+      }
+    }
+    const entry: CachedRoute = {
+      key: proposalKey(p),
+      lines,
+      stops,
+      // A routed leg carries many intermediate points; a straight-line
+      // stand-in is just its two endpoints.
+      routed: lines.some((l) => l.length > 2),
+      orderedCountries,
+    }
+    return entry
+  })
+
   const add: Record<string, CachedRoute> = {}
-  for (const entry of loaded) if (entry) add[entry.key] = entry
+  let firstFailure: unknown = null
+  settled.forEach((result, index) => {
+    if (result.ok) {
+      add[result.value.key] = result.value
+      return
+    }
+    // A cancelled batch (unmount, or a newer batch superseding this one) is not
+    // a failure and must not be remembered as one.
+    if (asApiFailure(result.error)?.kind === 'canceled') return
+    failedRouteKeys.add(proposalKey(missing[index]))
+    firstFailure ??= result.error
+  })
   if (Object.keys(add).length) routeCache.value = { ...routeCache.value, ...add }
+  // ONE toast for the whole batch. Per-proposal toasts would mean twenty
+  // identical alerts during an outage; the dedupe key would collapse them
+  // anyway, but not fetching twenty times over is the real point.
+  if (firstFailure) report(firstFailure, { fallbackKey: 'errors.mapPartial', force: 'toast' })
 }
 
 // Hovering a route on the map scrolls its card into view and flashes its
@@ -418,7 +477,12 @@ onMounted(async () => {
   resetAndLoad()
   router.replace({ query: currentSearchQuery() })
 })
-onBeforeUnmount(() => observer?.disconnect())
+onBeforeUnmount(() => {
+  observer?.disconnect()
+  // Drop everything in flight; their rejections are 'canceled' and stay silent.
+  listSlot.cancel()
+  routeSlot.cancel()
+})
 
 // Same pill passthrough as the Selects in EvaluationPanel.vue.
 const selectPt = {
@@ -475,7 +539,12 @@ const iconBtnClass =
       >
         <!-- From A to B: two stop inputs -->
         <template v-if="mode === 'aToB'">
-          <StopSelect :stops="store.stops" @select="fromStop = $event">
+          <StopSelect
+            :stops="store.stops"
+            :status="store.stopsStatus"
+            @select="fromStop = $event"
+            @retry="store.fetchStops()"
+          >
             <div class="flex flex-col rounded-full px-4 py-1.5">
               <span class="text-xs font-semibold text-primary-50">{{
                 t('gallery.search.from')
@@ -489,7 +558,12 @@ const iconBtnClass =
             </div>
           </StopSelect>
           <div class="h-8 w-px bg-primary-50/15"></div>
-          <StopSelect :stops="store.stops" @select="toStop = $event">
+          <StopSelect
+            :stops="store.stops"
+            :status="store.stopsStatus"
+            @select="toStop = $event"
+            @retry="store.fetchStops()"
+          >
             <div class="flex flex-col rounded-full px-4 py-1.5">
               <span class="text-xs font-semibold text-primary-50">{{
                 t('gallery.search.to')
@@ -506,7 +580,12 @@ const iconBtnClass =
 
         <!-- By Station: one stop input -->
         <template v-else-if="mode === 'byStation'">
-          <StopSelect :stops="store.stops" @select="stationStop = $event">
+          <StopSelect
+            :stops="store.stops"
+            :status="store.stopsStatus"
+            @select="stationStop = $event"
+            @retry="store.fetchStops()"
+          >
             <div class="flex flex-col rounded-full px-4 py-1.5">
               <span class="text-xs font-semibold text-primary-50">{{
                 t('gallery.search.station')
@@ -606,7 +685,29 @@ const iconBtnClass =
          the trailing CTA is still visible, well before the column truly ends. -->
     <div class="flex gap-6">
       <div class="flex w-96 shrink-0 flex-col gap-4 pb-[calc(100vh-3rem)]">
-        <p v-if="errorMsg" class="text-sm text-red-400">{{ errorMsg }}</p>
+        <!-- Failures land here, in the column the user is reading, rather than
+             as a one-line note above the fold. -->
+        <div
+          v-if="failureMsg"
+          class="rounded-xl border border-red-400/30 bg-red-950/30 px-4 py-3"
+          role="alert"
+        >
+          <p class="text-sm text-red-200">{{ failureMsg }}</p>
+          <button
+            v-if="!failure || isRetryable(failure)"
+            type="button"
+            class="mt-2 cursor-pointer text-sm font-semibold text-red-100 underline decoration-red-400/50 underline-offset-2 transition hover:decoration-red-100"
+            @click="retryLoad"
+          >
+            {{ t('errors.retry') }}
+          </button>
+        </div>
+
+        <!-- First load: cards the size of real cards, so the column doesn't
+             collapse to a single line of text and then jump. -->
+        <div v-if="loading && !initialized" class="flex flex-col gap-4" aria-hidden="true">
+          <Skeleton v-for="n in 3" :key="n" height="9rem" border-radius="0.75rem" />
+        </div>
 
         <div v-if="proposals.length" ref="cardsContainer" class="flex flex-col gap-4">
           <div
@@ -625,15 +726,19 @@ const iconBtnClass =
             />
           </div>
         </div>
-        <p v-else-if="initialized && !loading" class="py-8 text-center text-sm text-primary-50/50">
+        <!-- "No proposals found" is only true if the query actually succeeded —
+             without the !failure guard it renders on top of a failed load and
+             reads as an answer. -->
+        <p
+          v-else-if="initialized && !loading && !failure"
+          class="py-8 text-center text-sm text-primary-50/50"
+        >
           {{ t('gallery.empty') }}
         </p>
 
         <!-- Infinite-scroll sentinel + status -->
         <div ref="sentinel" class="flex h-8 items-center justify-center text-sm text-primary-50/40">
-          <span v-if="loading">{{
-            initialized ? t('gallery.loadingMore') : t('gallery.loading')
-          }}</span>
+          <span v-if="loading && initialized">{{ t('gallery.loadingMore') }}</span>
         </div>
 
         <!-- Trailing CTA -->

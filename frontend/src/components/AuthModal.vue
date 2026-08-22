@@ -4,13 +4,16 @@ import { useI18n } from 'vue-i18n'
 import { useStore } from '@/stores/store'
 import { useToastStore } from '@/stores/toastStore'
 import AppIcon from '@/components/AppIcon.vue'
+import AppSpinner from '@/components/AppSpinner.vue'
 import { useLocaleFormat } from '@/composables/useLocaleFormat'
+import { useApiFailure } from '@/composables/useApiFailure'
 import { mdiCheckCircle, mdiArrowRight, mdiClose } from '@mdi/js'
 
 const { t } = useI18n()
 const store = useStore()
 const toastStore = useToastStore()
 const { formatInt } = useLocaleFormat()
+const { describe } = useApiFailure()
 
 const modal = computed(() => store.authModal)
 const isEvaluation = computed(() => modal.value.context === 'evaluation')
@@ -55,6 +58,16 @@ function dismiss() {
   store.closeAuthModal()
 }
 
+// Failures stay INLINE here (rendered below the form) and are deliberately not
+// also toasted: the user is looking straight at this modal, so a toast is a
+// second copy of the same sentence — and keeping both was why three error
+// strings existed twice in en.json. Successes still toast, because the modal
+// closes and takes its own feedback with it.
+//
+// Every handler resets `loading` in a finally. The old code only cleared it on
+// the failure paths and relied on App.vue unmounting the modal on success,
+// which works today and breaks the moment the modal is kept mounted.
+
 async function onGuest() {
   loading.value = true
   error.value = null
@@ -62,9 +75,9 @@ async function onGuest() {
     await store.continueAsGuest()
     dismiss()
     toastStore.addToast('success', t('toast.guestSuccess'))
-  } catch {
-    error.value = t('auth.guestFailed')
-    toastStore.addToast('error', t('toast.guestFailed'))
+  } catch (e) {
+    error.value = describe(e, 'errors.authGuestFailed')
+  } finally {
     loading.value = false
   }
 }
@@ -76,9 +89,9 @@ async function onEmailContinue() {
   try {
     await store.requestCode(email.value.trim())
     step.value = 'code'
-    loading.value = false
   } catch (e) {
-    error.value = e instanceof Error ? e.message : t('auth.emailFailed')
+    error.value = describe(e, 'errors.slug.email_failed')
+  } finally {
     loading.value = false
   }
 }
@@ -93,14 +106,13 @@ async function onVerify() {
     const { needsUsername } = await store.verifyCode(email.value.trim(), code.value)
     if (needsUsername) {
       step.value = 'name'
-      loading.value = false
       return
     }
     dismiss()
     toastStore.addToast('success', t('toast.loginSuccess'))
-  } catch {
-    error.value = t('auth.invalidCode')
-    toastStore.addToast('error', t('toast.invalidCode'))
+  } catch (e) {
+    error.value = describe(e, 'errors.slug.invalid_code')
+  } finally {
     loading.value = false
   }
 }
@@ -119,14 +131,13 @@ async function onNameContinue() {
     )
     if (needsUsername) {
       error.value = t('auth.usernameRequired')
-      loading.value = false
       return
     }
     dismiss()
     toastStore.addToast('success', t('toast.registerSuccess'))
   } catch (e) {
-    error.value = e instanceof Error ? e.message : t('auth.invalidCode')
-    toastStore.addToast('error', t('toast.invalidCode'))
+    error.value = describe(e, 'errors.slug.invalid_code')
+  } finally {
     loading.value = false
   }
 }
@@ -225,7 +236,8 @@ watch(
                   @click="onEmailContinue"
                 >
                   {{ t('auth.continue') }}
-                  <AppIcon :path="mdiArrowRight" :size="16" />
+                  <AppSpinner v-if="loading" :size="16" />
+                  <AppIcon v-else :path="mdiArrowRight" :size="16" />
                 </button>
               </div>
 
@@ -244,7 +256,8 @@ watch(
                   @click="onGuest"
                 >
                   {{ t('auth.continueGuest') }}
-                  <AppIcon :path="mdiArrowRight" :size="16" />
+                  <AppSpinner v-if="loading" :size="16" />
+                  <AppIcon v-else :path="mdiArrowRight" :size="16" />
                 </button>
               </div>
             </div>
@@ -277,7 +290,8 @@ watch(
                 @click="onNameContinue"
               >
                 {{ t('auth.continue') }}
-                <AppIcon :path="mdiArrowRight" :size="16" />
+                <AppSpinner v-if="loading" :size="16" />
+                <AppIcon v-else :path="mdiArrowRight" :size="16" />
               </button>
             </div>
           </template>
@@ -314,12 +328,13 @@ watch(
                 @click="onVerify"
               >
                 {{ t('auth.verify') }}
-                <AppIcon :path="mdiArrowRight" :size="16" />
+                <AppSpinner v-if="loading" :size="16" />
+                <AppIcon v-else :path="mdiArrowRight" :size="16" />
               </button>
             </div>
           </template>
 
-          <p v-if="error" class="text-sm text-red-400">{{ error }}</p>
+          <p v-if="error" class="text-sm text-red-400" role="alert">{{ error }}</p>
         </div>
       </div>
     </div>

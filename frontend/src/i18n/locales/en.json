@@ -1,7 +1,48 @@
 {
+  "errors": {
+    "offline": "You appear to be offline. Please check your connection and try again.",
+    "network": "We could not reach the server. Please try again in a moment.",
+    "timeout": "Server request timed out. Please try again.",
+    "stillWorking": "This is taking longer than usual. Our servers seem to be experiencing heightened demand.",
+    "highDemand": "We're experiencing high demand, so this is taking longer than usual.",
+    "server": "Something went wrong on our side. Please try again in a moment. Our team has been notified of a possible error.",
+    "unavailable": "The service is temporarily unavailable. Please try again in a few minutes.",
+    "malformed": "Your session may have expired. Reload the page to continue.",
+    "unauthorized": "Please log in again to continue.",
+    "forbidden": "Insufficient permissions",
+    "notFound": "It seems like we could not find what you are looking for.",
+    "badInput": "That request could not be processed. Please check your input.",
+    "retry": "Try again",
+    "cancel": "Cancel",
+    "reload": "Reload page",
+    "degraded": {
+      "title": "Connection problems",
+      "body": "Several requests to the server have failed. We may be experiencing high demand — some data may be missing or out of date."
+    },
+    "stopsUnavailable": "The station list could not be loaded.",
+    "stopsEmpty": "No stations are available right now.",
+    "compositionsUnavailable": "Train configurations could not be loaded.",
+    "scenariosUnavailable": "Scenarios could not be loaded — calculating against the live base.",
+    "calcFailed": "This route could not be evaluated.",
+    "proposalsLoadFailed": "Proposals could not be loaded.",
+    "proposalLoadFailed": "This proposal could not be loaded.",
+    "publishFailed": "Your proposal could not be saved. Please try again.",
+    "likeFailed": "Your like could not be saved. Please try again.",
+    "feedbackFailed": "Your feedback could not be sent. Please try again.",
+    "mapPartial": "Some routes could not be drawn on the map.",
+    "authGuestFailed": "We could not start a guest session. Please try again.",
+    "slug": {
+      "invalid_code": "This code is invalid or expired. Please request a new one.",
+      "rate_limited": "Too many requests. Please wait a moment and try again.",
+      "data_not_loaded": "The service is still starting up. Please try again in a minute.",
+      "email_failed": "We could not send the code. Please try again.",
+      "scenario_not_base": "That scenario cannot be saved as a proposal."
+    }
+  },
   "proposal": {
     "heading": "So, what's your \ndream night train route?",
     "evaluate": "Evaluate",
+    "evaluating": "Evaluating your proposal…",
     "edit": "Edit",
     "cancelEdit": "Cancel Edit",
     "mapPlaceholder": "Map",
@@ -12,7 +53,6 @@
     "minStopsTooltip": "Two stops per route minimum.",
     "loading": "Fetching data…",
     "saved": "Proposal was saved.",
-    "publishError": "The proposal could not be saved. Please try again later.",
     "suggestions": {
       "title": "Add stops along the way?",
       "subtitle": "We found stops on your route. Pick any you'd like to include.",
@@ -146,7 +186,6 @@
         "submit": "Send feedback",
         "submitting": "Sending…",
         "success": "Thank you! Your feedback has been sent.",
-        "error": "Something went wrong. Please try again.",
         "invalidEmail": "Please enter a valid e-mail address."
       },
       "classes": {
@@ -198,18 +237,15 @@
       "stops": "({count} stop) | ({count} stops)",
       "co2PerYear": "{value} t CO₂/yr",
       "like": "Like",
-      "loginToLike": "Log in with an account to like proposals.",
-      "likeFailed": "Could not update your like. Please try again."
+      "loginToLike": "Log in with an account to like proposals."
     },
     "back": "Gallery",
     "cta": {
       "create": "Suggest a new route"
     },
     "empty": "No proposals have been found for this filter. Be the first to make one!",
-    "loading": "Loading proposals…",
     "loadingMore": "Loading more…",
-    "end": "That's all {count} proposals.",
-    "error": "Could not load proposals."
+    "end": "That's all {count} proposals."
   },
   "user": {
     "guest": "Guest",
@@ -238,19 +274,13 @@
     "code": "Verification code",
     "verify": "Verify",
     "back": "Back",
-    "close": "Close",
-    "emailFailed": "Could not send the code. Please try again.",
-    "invalidCode": "Invalid or expired code. Please request a new one.",
-    "guestFailed": "Could not start a guest session. Please try again."
+    "close": "Close"
   },
   "toast": {
     "dismiss": "Dismiss",
     "loginSuccess": "Logged in successfully.",
     "registerSuccess": "Welcome! Your account was created.",
     "guestSuccess": "Continuing as guest.",
-    "logoutSuccess": "You have been logged out.",
-    "guestFailed": "Could not start a guest session. Please try again.",
-    "invalidCode": "Invalid or expired code. Please request a new one.",
-    "emailFailed": "Could not send the code. Please try again."
+    "logoutSuccess": "You have been logged out."
   }
 }
