@@ -27,6 +27,7 @@ dependencies = [
     "scikit-learn>=1.9.0",
     "transliterate>=1.10.2",
     "regex>=2026.7.19",
+    "pycountry>=26.2.16",
 ]
 
 [project.optional-dependencies]
