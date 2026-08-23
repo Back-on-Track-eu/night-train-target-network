@@ -28,6 +28,8 @@
     "proposalLoadFailed": "This proposal could not be loaded.",
     "publishFailed": "Your proposal could not be saved. Please try again.",
     "likeFailed": "Your like could not be saved. Please try again.",
+    "commentsLoadFailed": "The discussion could not be loaded.",
+    "commentFailed": "Your comment could not be saved. Please try again.",
     "feedbackFailed": "Your feedback could not be sent. Please try again.",
     "authGuestFailed": "We could not start a guest session. Please try again.",
     "slug": {
@@ -53,6 +55,34 @@
     "minStopsTooltip": "Two stops per route minimum.",
     "loading": "Fetching data…",
     "saved": "Proposal was saved automatically.",
+    "comments": {
+      "title": "Discussion",
+      "loading": "Loading the discussion…",
+      "empty": "No comments yet. Be the first to say something about this route.",
+      "placeholder": "Share your thoughts on this route…",
+      "post": "Post comment",
+      "posting": "Posting…",
+      "save": "Save",
+      "saving": "Saving…",
+      "cancel": "Cancel",
+      "edit": "Edit comment",
+      "edited": "edited",
+      "delete": "Delete comment",
+      "deleteConfirm": "Delete this comment?",
+      "deleteYes": "Delete",
+      "deleteNo": "Keep",
+      "like": "Like this proposal",
+      "charsLeft": "{count} character left | {count} characters left",
+      "charsOver": "{count} character over the limit | {count} characters over the limit",
+      "loginToComment": "Log in with an account to join the discussion.",
+      "login": "Log in",
+      "age": {
+        "now": "just now",
+        "minutes": "{count} minute ago | {count} minutes ago",
+        "hours": "{count} hour ago | {count} hours ago",
+        "days": "{count} day ago | {count} days ago"
+      }
+    },
     "funFacts": {
       "label": "Did you know?",
       "demandLabel": "Back-on-Track calls for",

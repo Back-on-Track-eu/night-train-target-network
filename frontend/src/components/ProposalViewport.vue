@@ -31,6 +31,7 @@ import LoadingFunFact from '@/components/LoadingFunFact.vue'
 import CompositionPanel from '@/components/CompositionPanel.vue'
 import EvaluationPanel from '@/components/EvaluationPanel.vue'
 import MapView from '@/components/MapView.vue'
+import CommentSection from '@/components/CommentSection.vue'
 import {
   mdiArrowLeft,
   mdiCheckCircle,
@@ -120,6 +121,11 @@ const publishError = ref<string | null>(null)
 // Publish recomputes server-side, so it is as slow as a calc and escalates the
 // same way.
 const publishPhase = ref<'idle' | 'working' | 'slow' | 'verySlow'>('idle')
+
+// The proposal_id a discussion can hang off: the one we opened, or the one the
+// first publish adopted. Null in a fresh builder session, which is why the
+// comment section cannot exist there — there is nothing to comment on yet.
+const storedProposalId = computed(() => props.proposalId ?? publishedProposalId.value)
 
 interface StopTimeFmt {
   stop_id: string
@@ -881,6 +887,16 @@ const showEvaluationSection = computed(
     currentMode.value !== 'suggest' &&
     routeResult.value !== null,
 )
+
+// Gate for the discussion. Keyed on routeResult ALONE, deliberately not on
+// currentMode like the evaluation section above: opening a stored proposal runs
+// 'display' -> 'loading' -> 'display' (loadStoredProposal, then applyPlan), so
+// a mode-based condition unmounts and remounts the section mid-load and it
+// fetches the thread twice, aborting the first request. routeResult is only
+// ever assigned, never cleared, so this flips false->true exactly once per
+// proposal and survives a re-evaluate. The storedProposalId !== null half of
+// the condition stays in the template, where it also narrows the prop.
+const showCommentSection = computed(() => routeResult.value !== null)
 
 // Quiet pill — used by the "Gallery" back link above the workspace.
 const pillClass =
@@ -2076,6 +2092,14 @@ onMounted(async () => {
         :stops="sectionStops"
         @scope-change="onScopeChange"
       />
+    </div>
+
+    <!-- Discussion, underneath everything. Deliberately NOT greyed out while
+         the builder is dirty, unlike the evaluation above: stale figures must
+         be greyed because they no longer describe the itinerary, but a thread
+         is about the proposal and has no business going dead mid-edit. -->
+    <div v-if="storedProposalId !== null && showCommentSection" class="w-full">
+      <CommentSection :proposal-id="storedProposalId" />
     </div>
   </div>
 </template>

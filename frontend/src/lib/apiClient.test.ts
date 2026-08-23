@@ -146,6 +146,24 @@ describe('apiRequest — a 2xx we cannot read is malformed, not a crash', () => 
     expect(err.failure.kind).toBe('malformed')
   })
 
+  test('204 resolves as undefined when the caller opts in with allowEmpty', async () => {
+    // DELETE /api/proposal/<id>/comment/<cid> is the one endpoint that answers
+    // with no content; without the opt-in it would look like a stale session.
+    // Not via reply(): the WHATWG Response constructor rejects a body — even
+    // an empty string — on 204, so this has to be the real null-body form.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 204 })))
+    await expect(
+      apiRequest('/api/proposal/1/comment/2', { method: 'DELETE', allowEmpty: true }),
+    ).resolves.toBeUndefined()
+    expect(health).toHaveBeenCalledWith('ok')
+  })
+
+  test('allowEmpty does not excuse an unreadable non-empty body', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply(200, '<!doctype html>', 'text/html')))
+    const err = await expectFailure(apiRequest('/api/scenarios', { allowEmpty: true }))
+    expect(err.failure.kind).toBe('malformed')
+  })
+
   test('200 whose body claims JSON but is truncated', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply(200, '{"stops":[')))
     const err = await expectFailure(apiRequest('/api/params/StopInfrastructures'))

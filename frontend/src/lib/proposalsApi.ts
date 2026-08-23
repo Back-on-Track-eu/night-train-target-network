@@ -11,6 +11,8 @@ import type {
   PublishRequest,
   PublishResponse,
   LikeResponse,
+  Comment,
+  EngagementResponse,
 } from '@/types/api'
 
 /** Every failure is an ApiError; re-exported so callers need one import. */
@@ -101,4 +103,65 @@ export function unlikeProposal(
   authHeaders: Record<string, string>,
 ): Promise<LikeResponse> {
   return sendLike('DELETE', proposalId, authHeaders)
+}
+
+/**
+ * Likes + comment thread + timeline for one proposal, in one request. The
+ * endpoint is open (optional_auth), but PASS THE AUTH HEADERS ANYWAY when the
+ * caller has them: `likes.liked_by_me` is always false without them, which is
+ * exactly the wrong-icon bug the gallery card has to live with.
+ */
+export function fetchEngagements(
+  proposalId: number,
+  authHeaders: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<EngagementResponse> {
+  return apiRequest<EngagementResponse>(`/api/proposal/${proposalId}/engagements`, {
+    headers: authHeaders,
+    ...(signal ? { signal } : {}),
+  })
+}
+
+/** Post a comment. Resolves with the created row (201), ready to append. */
+export function postComment(
+  proposalId: number,
+  body: string,
+  authHeaders: Record<string, string>,
+): Promise<Comment> {
+  return apiRequest<Comment>(`/api/proposal/${proposalId}/comment`, {
+    method: 'POST',
+    body: { body },
+    headers: authHeaders,
+  })
+}
+
+/** Edit own comment. Author-only server-side: 403 for anyone else. */
+export function editComment(
+  proposalId: number,
+  commentId: number,
+  body: string,
+  authHeaders: Record<string, string>,
+): Promise<Comment> {
+  return apiRequest<Comment>(`/api/proposal/${proposalId}/comment/${commentId}`, {
+    method: 'PATCH',
+    body: { body },
+    headers: authHeaders,
+  })
+}
+
+/**
+ * Delete own comment. The only endpoint in the API that answers 204, hence
+ * allowEmpty — see apiClient's empty-body check. The delete is soft server-side
+ * but the row leaves the thread for good, so callers just drop it.
+ */
+export function deleteComment(
+  proposalId: number,
+  commentId: number,
+  authHeaders: Record<string, string>,
+): Promise<void> {
+  return apiRequest<void>(`/api/proposal/${proposalId}/comment/${commentId}`, {
+    method: 'DELETE',
+    headers: authHeaders,
+    allowEmpty: true,
+  })
 }

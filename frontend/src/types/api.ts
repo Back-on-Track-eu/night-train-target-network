@@ -819,6 +819,42 @@ export interface LikeResponse {
   liked_by_me: boolean
 }
 
+// --- Engagement: comments + likes -------------------------------------------
+// Backend: api/helpers/proposal_engagement_serialize.py. Every comment write
+// returns the resulting row, which is why the client never recomputes a thread
+// it just modified.
+export interface Comment {
+  comment_id: number
+  proposal_id: number
+  // The proposal version the comment was written against. Carried because the
+  // backend stamps it; the thread is not filtered by it (comments key on
+  // proposal_id alone, so a discussion survives the proposal being overwritten).
+  proposal_version: number
+  // null once the author's account is deleted — user_name is then "[deleted]".
+  user_id: number | null
+  user_name: string
+  body: string
+  created_at: string
+  updated_at: string
+}
+
+// GET /api/proposal/<id>/engagements — one call, three sections. `liked_by_me`
+// is only correct when the request carried an auth header.
+//
+// `timeline` is the merged event log (publishes, refreshes, likes, comments).
+// Deliberately left unmodelled: nothing renders it yet, and inventing a type
+// for it would imply otherwise. Type it properly when the proposal-history
+// feature lands.
+export interface EngagementResponse {
+  proposal_id: number
+  likes: LikeResponse
+  comments: {
+    count: number
+    items: Comment[]
+  }
+  timeline: unknown[]
+}
+
 // --- GET /api/proposal/<id> -------------------------------------------------
 // GET /api/proposal/<id> — flat compute-response shape
 // (proposal_serialize.py::proposal_to_response_dict): `route`/`evaluation` at

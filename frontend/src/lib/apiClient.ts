@@ -60,6 +60,11 @@ export interface RequestOptions {
   /** Set false for calls whose failure says nothing about server health — the
    *  auth/OTP flow, where a user's own mistakes must not arm the banner. */
   countsTowardOutage?: boolean
+  /** Set true for the one endpoint family that answers 204 No Content
+   *  (DELETE /api/proposal/<id>/comment/<cid>). An empty 2xx then resolves as
+   *  undefined instead of being classified 'malformed' — see the empty-body
+   *  check below for why that is the default. */
+  allowEmpty?: boolean
 }
 
 /**
@@ -166,8 +171,14 @@ export async function apiRequest<T>(path: string, opts: RequestOptions = {}): Pr
 
     // A 2xx we can't read. Almost always the gate cookie expiring: Caddy's
     // forward_auth target 302s to /gate, fetch follows it, and we get HTML.
-    // An empty 2xx counts too — no endpoint in this API returns no content, so
-    // an empty success body means something answered that wasn't the API.
+    // An empty 2xx counts too: an endpoint that answers with a body and
+    // returned none did not answer at all — something in front of the API did.
+    // Endpoints that genuinely return 204 opt out via allowEmpty, so the check
+    // keeps its teeth everywhere else rather than being weakened globally.
+    if (opts.allowEmpty && text.length === 0) {
+      signal = 'ok'
+      return undefined as T
+    }
     if (parseFailed || text.length === 0) {
       const failure: ApiFailure = { kind: 'malformed', status: response.status }
       signal = outcome(failure)
