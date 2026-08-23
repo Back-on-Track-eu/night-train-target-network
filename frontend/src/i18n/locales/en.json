@@ -29,7 +29,6 @@
     "publishFailed": "Your proposal could not be saved. Please try again.",
     "likeFailed": "Your like could not be saved. Please try again.",
     "feedbackFailed": "Your feedback could not be sent. Please try again.",
-    "mapPartial": "Some routes could not be drawn on the map.",
     "authGuestFailed": "We could not start a guest session. Please try again.",
     "slug": {
       "invalid_code": "This code is invalid or expired. Please request a new one.",
@@ -261,10 +260,12 @@
   },
   "gallery": {
     "heading": "Are you dreaming of night trains as well?",
+    "browse": "Browse community proposals",
     "tabs": {
       "aToB": "From A to B",
       "byStation": "By Station",
-      "byCountry": "By Country"
+      "byCountry": "By Country",
+      "byRelation": "Between Countries"
     },
     "search": {
       "from": "From",
@@ -275,6 +276,9 @@
       "stationPlaceholder": "Click to select a station",
       "country": "Country",
       "countryPlaceholder": "Click to select a country",
+      "relationFrom": "Between",
+      "relationTo": "and",
+      "clear": "Clear {field}",
       "noCountries": "No countries found",
       "button": "Search"
     },
@@ -297,9 +301,19 @@
       "distance": "Distance",
       "co2": "CO₂ saved",
       "stops": "Stops",
+      "likes": "Likes",
+      "comments": "Comments",
+      "created": "Created",
+      "updated": "Updated",
       "dir": {
         "desc": "high to low",
         "asc": "low to high"
+      }
+    },
+    "map": {
+      "legend": {
+        "proposed": "Suggested",
+        "existing": "Existing connection"
       }
     },
     "card": {

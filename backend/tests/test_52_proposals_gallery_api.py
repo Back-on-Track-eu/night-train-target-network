@@ -134,6 +134,27 @@ def _proposal_ids(gallery_response) -> set[int]:
     }
 
 
+def _row_keys(summary_rows) -> list[tuple]:
+    """Row identity as (source, id), in list order — the two id spaces are
+    unrelated, so the source has to be part of the key."""
+    return [
+        ("existing", r["route_id"])
+        if r["source"] == "existing"
+        else ("proposal", r["proposal_id"])
+        for r in summary_rows
+    ]
+
+
+def _route_keys(map_routes_features) -> list[tuple]:
+    """The same identity, read off map_routes features."""
+    return [
+        ("existing", f["properties"]["route_id"])
+        if f["properties"]["source"] == "existing"
+        else ("proposal", f["properties"]["proposal_id"])
+        for f in map_routes_features
+    ]
+
+
 def _summary_row(api_base, published) -> dict:
     """The gallery row for one published proposal, fetched through the
     ordinary filter path (no dedicated by-id endpoint exists)."""
@@ -555,27 +576,41 @@ class TestIncludeSections:
         )
         assert set(body) == {"map_lines"}
         assert body["map_lines"]["type"] == "FeatureCollection"
-        matching = [
-            f
-            for f in body["map_lines"]["features"]
-            if published["proposal_id"] in f["properties"]["proposal_ids"]
-        ]
-        assert len(matching) >= 1
-        for feature in matching:
+        # Filtering to this one proposal means every returned corridor is
+        # one of its segments.
+        features = body["map_lines"]["features"]
+        assert len(features) >= 1
+        for feature in features:
             assert feature["properties"]["proposal_count"] >= 1
             assert feature["geometry"]["type"] == "LineString"
+            # Simplified for overview zoom, but still a drawable line.
+            assert len(feature["geometry"]["coordinates"]) >= 2
+
+    def test_map_lines_omits_contributing_id_lists(self, api_base, published):
+        """The id arrays were removed deliberately: their combined length
+        is the number of distinct (proposal, corridor) pairs, the one term
+        in this section unbounded in proposal count. Pinned as a test
+        because re-adding them would silently reintroduce that."""
+        body = _gallery(
+            api_base,
+            filter={"proposal_ids": [published["proposal_id"]]},
+            include=["map_lines"],
+        )
+        for feature in body["map_lines"]["features"]:
+            assert "proposal_ids" not in feature["properties"]
+            assert "existing_route_ids" not in feature["properties"]
 
     def test_map_lines_thickness_reflects_shared_corridor(
         self, api_base, script_headers, published
     ):
         """A second proposal on the exact same corridor (identical stop
-        list, different composition) should land on the SAME map_lines
-        feature(s) as `published`, with proposal_count bumped and both
-        ids present on every one of them — the whole point of
-        aggregating by corridor rather than by proposal. Identical stop
-        lists under the same default auto_stop_addition behaviour insert
-        the same intermediate stops, so every literal segment is shared,
-        not just one.
+        list) should land on the SAME map_lines feature(s) as `published`
+        rather than adding its own, with proposal_count bumped — the whole
+        point of aggregating by corridor rather than by proposal.
+        Identical stop lists under the same default auto_stop_addition
+        behaviour insert the same intermediate stops, so every literal
+        segment is shared; with the filter restricted to exactly these two
+        proposals, EVERY returned corridor must therefore carry both.
 
         Both sides use the SAME composition. An earlier version varied it,
         which quietly made the test depend on two compositions producing an
@@ -595,14 +630,9 @@ class TestIncludeSections:
             filter={"proposal_ids": [published["proposal_id"], second["proposal_id"]]},
             include=["map_lines"],
         )
-        matching = [
-            f
-            for f in body["map_lines"]["features"]
-            if published["proposal_id"] in f["properties"]["proposal_ids"]
-        ]
-        assert len(matching) >= 1
-        for feature in matching:
-            assert second["proposal_id"] in feature["properties"]["proposal_ids"]
+        features = body["map_lines"]["features"]
+        assert len(features) >= 1
+        for feature in features:
             assert feature["properties"]["proposal_count"] >= 2
 
     def test_map_stop_counts(self, api_base, published):
@@ -635,6 +665,68 @@ class TestIncludeSections:
         # both DE and AT have a seeded Natural Earth border polygon
         assert by_country["DE"]["geometry"]["type"] in ("Polygon", "MultiPolygon")
         assert by_country["AT"]["geometry"]["type"] in ("Polygon", "MultiPolygon")
+
+    def test_map_routes_matches_the_listed_rows(self, api_base, published):
+        """map_routes is the ONE map section that honours limit/offset,
+        because it exists to draw the route behind a card the user can
+        see. It must therefore cover exactly the rows summaries returned,
+        in the same order — otherwise the map draws routes for cards that
+        are not on screen."""
+        body = _gallery(
+            api_base,
+            sort=[{"by": "total_distance_km", "dir": "desc"}],
+            limit=5,
+            offset=0,
+            include=["summaries", "map_routes"],
+        )
+        assert set(body) == {"summaries", "map_routes"}
+        assert body["map_routes"]["type"] == "FeatureCollection"
+        assert _row_keys(body["summaries"]["proposals"]) == _route_keys(
+            body["map_routes"]["features"]
+        )
+
+    def test_map_routes_follows_the_window(self, api_base, published):
+        """A different page must yield a different, equally-aligned set —
+        the guard against map_routes quietly ignoring offset and always
+        returning the first page."""
+        common = dict(
+            sort=[{"by": "total_distance_km", "dir": "desc"}],
+            limit=3,
+            include=["summaries", "map_routes"],
+        )
+        first = _gallery(api_base, offset=0, **common)
+        second = _gallery(api_base, offset=3, **common)
+
+        for body in (first, second):
+            assert _row_keys(body["summaries"]["proposals"]) == _route_keys(
+                body["map_routes"]["features"]
+            )
+        # Only meaningful once there are enough rows for a second page.
+        if second["summaries"]["proposals"]:
+            assert _route_keys(first["map_routes"]["features"]) != _route_keys(
+                second["map_routes"]["features"]
+            )
+
+    def test_map_routes_emits_null_geometry_rather_than_dropping_a_row(
+        self, api_base, existing_routes
+    ):
+        """ONTD routes whose routing failed have geom_simplified NULL. The
+        feature is still emitted so "no geometry" stays distinguishable
+        from "not on this page" — which is what keeps the row-for-row
+        alignment above true."""
+        body = _gallery(
+            api_base,
+            filter={"sources": ["existing"]},
+            limit=50,
+            include=["summaries", "map_routes"],
+        )
+        features = body["map_routes"]["features"]
+        assert _row_keys(body["summaries"]["proposals"]) == _route_keys(features)
+        for feature in features:
+            assert feature["geometry"] is None or feature["geometry"]["type"] in (
+                "LineString",
+                "MultiLineString",
+            )
 
     def test_multiple_sections_together(self, api_base):
         body = _gallery(api_base, include=["summaries", "map_country_counts"])

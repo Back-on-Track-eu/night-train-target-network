@@ -23,9 +23,6 @@ import {
 
 const props = defineProps<{
   proposal: ProposalSummary
-  flash?: boolean
-  // Countries in itinerary order; falls back to the summary's alphabetical list.
-  orderedCountries?: string[]
   // Stops the active gallery search targeted (A-to-B from/to, or the single
   // by-station stop). Any that fall strictly between origin and destination are
   // pinned as always-visible itinerary anchors so the card shows why it matched.
@@ -239,11 +236,10 @@ async function onLikeClick() {
   }
 }
 
-// Flags shown in itinerary order when available (the summary's own list is
-// alphabetical).
-const flagCountries = computed(() =>
-  props.orderedCountries?.length ? props.orderedCountries : props.proposal.countries,
-)
+// Alphabetical, as the summary carries them. Itinerary order used to come from
+// the per-proposal route fetch the gallery no longer makes (the map now rides
+// the list request), and is not worth one request per card on its own.
+const flagCountries = computed(() => props.proposal.countries)
 const flagUrl = (code: string) => `/flags/${code.toLowerCase()}.svg`
 
 // Circular flag SVGs are vendored under public/flags/. Any country without a
@@ -271,8 +267,8 @@ function avatarPt(code: string, index: number) {
 
 <template>
   <article
-    class="group flex flex-col gap-3 overflow-hidden rounded-xl p-4 transition-colors duration-500"
-    :class="[flash ? 'bg-primary-50/20' : 'bg-primary-50/5', isClickable ? 'cursor-pointer' : '']"
+    class="group flex flex-col gap-3 overflow-hidden rounded-xl bg-primary-50/5 p-4 transition-colors duration-500"
+    :class="isClickable ? 'cursor-pointer' : ''"
     :role="cardRole"
     :tabindex="isClickable ? 0 : undefined"
     @click="onCardClick"

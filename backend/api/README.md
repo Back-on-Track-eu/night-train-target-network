@@ -967,10 +967,16 @@ every entry. Times are wall-clock `"HH:MM"` with an optional integer
 **`bbox`** is `[west, south, east, north]` — proposals whose
 `geom_simplified` intersects the box (GiST-indexed).
 
-`include` defaults to `["summaries"]` if omitted. `limit`/`offset` only
-apply to the `summaries` section — `map_lines`/`map_stop_counts`/
-`map_country_counts` always reflect the full filtered set (the map isn't
-paginated).
+`include` defaults to `["summaries"]` if omitted. `limit`/`offset` apply
+to `summaries` and to `map_routes` — which share one window, so the two
+always describe the same rows. The aggregate map sections
+(`map_lines`/`map_stop_counts`/`map_country_counts`) ignore them and
+always reflect the full filtered set.
+
+That split is the point: the aggregate sections answer "what does the
+whole result set look like", so paginating them would be meaningless,
+while `map_routes` answers "draw the route behind this card" and is
+therefore capped at the page size however many proposals exist.
 
 ```json
 {
@@ -1014,7 +1020,8 @@ paginated).
   "sort":    [{ "by": "likes_count", "dir": "desc" }],
   "limit":   50,
   "offset":  0,
-  "include": ["summaries", "map_lines", "map_stop_counts", "map_country_counts"]
+  "include": ["summaries", "map_lines", "map_routes",
+              "map_stop_counts", "map_country_counts"]
 }
 ```
 
@@ -1071,8 +1078,21 @@ paginated).
         "properties": {
           "stop_a": "osm:w423692233", "stop_b": "osm:n3856100103",
           "proposal_count": 2, "existing_count": 1, "total_count": 3,
-          "proposal_ids": [5, 8], "existing_route_ids": ["42"],
           "avg_margin_eur_per_train_km": 0.9
+        }
+      }
+    ]
+  },
+  "map_routes": {
+    "type": "FeatureCollection",
+    "features": [
+      {
+        "type": "Feature",
+        "geometry": { "type": "MultiLineString", "coordinates": ["..."] },
+        "properties": {
+          "source": "proposal",
+          "proposal_id": 5, "proposal_version": 1, "route_id": null,
+          "geometry_routed": null
         }
       }
     ]
@@ -1157,13 +1177,33 @@ Target Network stop namespace precisely for this). Every map section
 carries the per-source split **and** the total — decision 2026-08-06:
 all three, always — so a frontend drives thickness/size off the total
 and colours or toggles by source without a second query: `map_lines`
-features carry `proposal_count` / `existing_count` / `total_count` plus
-`proposal_ids` / `existing_route_ids`; `map_stop_counts` rows and
-`map_country_counts` features carry `n_proposals` / `n_existing` / `n`.
+features carry `proposal_count` / `existing_count` / `total_count`;
+`map_stop_counts` rows and `map_country_counts` features carry
+`n_proposals` / `n_existing` / `n`.
 `avg_margin_eur_per_train_km` is the mean across the corridor's
 proposals only (`null` on corridors served exclusively by existing
 trains). Corridor geometry prefers a proposal shape and falls back to
-the existing route's own. `map_country_counts` is one feature per
+the existing route's own, and is **simplified for overview zoom** by the
+query (`MAP_LINES_SIMPLIFY_TOLERANCE_DEG` in
+`adapters/proposal/repository.py`); the stored geometry is untouched.
+
+`map_lines` features **do not** carry the contributing `proposal_ids` /
+`existing_route_ids`. They used to, and were removed: their combined
+length is the number of distinct (proposal, corridor) pairs, so they were
+the one part of the response that grew without bound in proposal count —
+six figures of ids at ~10k proposals, with popular corridors carrying
+thousands each. Per-route geometry now comes from `map_routes` instead,
+which is paginated with the list and therefore fixed in size.
+
+`map_routes` is one feature per **listed** row — the already-simplified
+`geom_simplified` each projection maintains, for exactly the rows
+`summaries` returned. `geometry` is `null` for an ONTD route whose
+routing failed; the feature is still emitted, so "no geometry" is
+distinguishable from "not on this page". `geometry_routed` distinguishes
+real routing from the catalogue's straight-line-between-stops fallback
+(false on ~47% of ONTD routes, mostly broad gauge), so a client can draw
+a placeholder as a placeholder; `null` on proposals, which have no such
+flag. `map_country_counts` is one feature per
 country touched by the filtered set, carrying the country's own border
 geometry (`input_params.countries.country_geom`) so the frontend
 doesn't need a second lookup for the choropleth — `geometry: null` for

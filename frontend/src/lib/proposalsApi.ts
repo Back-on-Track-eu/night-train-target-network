@@ -7,9 +7,7 @@ import { ApiError } from './apiError'
 import type {
   ProposalsRequest,
   ProposalsResponse,
-  ProposalsSummariesSection,
   ProposalDetailResponse,
-  GalleryRouteShape,
   PublishRequest,
   PublishResponse,
   LikeResponse,
@@ -19,31 +17,34 @@ import type {
 export { ApiError }
 
 /**
- * One page of proposals for the gallery. The list response is sectioned and the
- * gallery only asks for summaries, so this unwraps that section.
+ * The gallery's one read: list page AND map in a single request. The response
+ * is sectioned and the caller picks which sections to compute via `body.include`
+ * (see ProposalsSection), so this returns the whole envelope rather than
+ * unwrapping one section.
  */
-export async function fetchProposals(
+export function fetchProposals(
   body: ProposalsRequest,
   signal?: AbortSignal,
-): Promise<ProposalsSummariesSection> {
-  const response = await apiRequest<ProposalsResponse>('/api/proposals', {
+): Promise<ProposalsResponse> {
+  return apiRequest<ProposalsResponse>('/api/proposals', {
     method: 'POST',
     body,
     ...(signal ? { signal } : {}),
   })
-  return response.summaries ?? { total: 0, proposals: [] }
 }
 
 /**
  * One proposal's current version (route + evaluation + metadata) — same wire
- * shape as publish's response. Used by the gallery map (geometry only) and by
- * ProposalViewport (the full route) to open a stored proposal.
+ * shape as publish's response. Used by ProposalViewport to open a stored
+ * proposal; it needs the full route.
  *
- * Note this is not cheap on the server: it re-runs the version refresh, which
- * can reach the routing engine (api/helpers/proposal_load.py), so it takes the
- * interactive budget rather than the reference one.
+ * Note this is not cheap on the server: it reconstructs the route and the whole
+ * evaluation, and re-runs the version refresh, which can reach the routing
+ * engine (api/helpers/proposal_load.py) — hence the interactive budget rather
+ * than the reference one. Do not call it in a loop: anything that needs
+ * geometry for many proposals at once wants POST /api/proposals' map sections.
  */
-export function fetchProposalRoute<TRoute = GalleryRouteShape>(
+export function fetchProposalRoute<TRoute>(
   id: number,
   signal?: AbortSignal,
 ): Promise<ProposalDetailResponse<TRoute>> {

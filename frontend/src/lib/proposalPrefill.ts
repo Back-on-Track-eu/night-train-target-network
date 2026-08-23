@@ -1,9 +1,9 @@
 import type { Stop } from '@/types/api'
 import { majorStops, capitalStopForCountry } from './majorStops'
 
-export type GallerySearchMode = 'aToB' | 'byStation' | 'byCountry'
+export type GallerySearchMode = 'aToB' | 'byStation' | 'byCountry' | 'byRelation'
 
-const SEARCH_MODES: GallerySearchMode[] = ['aToB', 'byStation', 'byCountry']
+const SEARCH_MODES: GallerySearchMode[] = ['aToB', 'byStation', 'byCountry', 'byRelation']
 
 /** The Gallery search bar's state at the moment "Suggest a new route" is
  * clicked — used to prefill the new proposal's itinerary instead of two
@@ -14,13 +14,20 @@ export interface GallerySearchSeed {
   toStop: Stop | null
   stationStop: Stop | null
   countryCode: string | null
+  // byRelation's country pair. Kept as two separate codes rather than the
+  // stored "AT__DE" token because the token is alphabetically ordered, which
+  // would silently swap the user's two selects on reload.
+  relationFrom: string | null
+  relationTo: string | null
 }
 
 // Query-string shape for Gallery's own URL sync (?mode&from&to&station&
-// country[&sort&dir]) — /proposal-builder's prefill seed travels off-URL via
-// store.pendingProposalSeed instead (see ProposalWorkspace.vue), so these
-// only round-trip Gallery's own search bar now.
-type SeedQuery = Partial<Record<'mode' | 'from' | 'to' | 'station' | 'country', string>>
+// country&relFrom&relTo[&sort&dir]) — /proposal-builder's prefill seed travels
+// off-URL via store.pendingProposalSeed instead (see ProposalWorkspace.vue), so
+// these only round-trip Gallery's own search bar now.
+type SeedQuery = Partial<
+  Record<'mode' | 'from' | 'to' | 'station' | 'country' | 'relFrom' | 'relTo', string>
+>
 
 export function seedToQuery(seed: GallerySearchSeed): SeedQuery {
   const query: SeedQuery = { mode: seed.mode }
@@ -28,6 +35,8 @@ export function seedToQuery(seed: GallerySearchSeed): SeedQuery {
   if (seed.toStop) query.to = seed.toStop.stop_id
   if (seed.stationStop) query.station = seed.stationStop.stop_id
   if (seed.countryCode) query.country = seed.countryCode
+  if (seed.relationFrom) query.relFrom = seed.relationFrom
+  if (seed.relationTo) query.relTo = seed.relationTo
   return query
 }
 
@@ -54,6 +63,8 @@ export function seedFromQuery(query: Record<string, unknown>, stops: Stop[]): Ga
     toStop: toId ? (byId.get(toId) ?? null) : null,
     stationStop: stationId ? (byId.get(stationId) ?? null) : null,
     countryCode: queryString(query.country),
+    relationFrom: queryString(query.relFrom),
+    relationTo: queryString(query.relTo),
   }
 }
 
@@ -88,8 +99,10 @@ function defaultPair(stops: Stop[]): [Stop, Stop] | null {
  *    random major stop second.
  *  - byCountry: that country's capital first, a random (different) major
  *    stop second.
- *  - anything else (empty search bar, or a byCountry pick with no resolvable
- *    capital): two random major stops.
+ *  - byRelation with both countries picked: the two capitals, in the order the
+ *    user picked them (NOT the alphabetical order the filter token uses).
+ *  - anything else (empty search bar, or a pick with no resolvable capital):
+ *    two random major stops.
  */
 export function resolvePrefillStops(
   seed: GallerySearchSeed | null,
@@ -108,6 +121,14 @@ export function resolvePrefillStops(
   if (knownStop) {
     const other = pickOtherStop(stops, knownStop)
     return other ? [knownStop, other] : null
+  }
+
+  if (seed?.mode === 'byRelation' && seed.relationFrom && seed.relationTo) {
+    const origin = capitalStopForCountry(stops, seed.relationFrom)
+    const destination = capitalStopForCountry(stops, seed.relationTo)
+    if (origin && destination && origin.stop_id !== destination.stop_id) {
+      return [origin, destination]
+    }
   }
 
   if (seed?.mode === 'byCountry' && seed.countryCode) {

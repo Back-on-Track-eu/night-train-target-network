@@ -378,6 +378,20 @@ def build_aggregate_select(columns: tuple[str, ...] = AGGREGATE_COLUMNS) -> str:
 # =============================================================================
 
 
+# Appended to every ORDER BY as the final tiebreaker. Without it a sort with
+# ties has no defined order among the tied rows, and Postgres is free to return
+# them differently for each query — which breaks two things quietly:
+#
+#   * pagination, because page N and page N+1 are separate queries: a row tied
+#     across the LIMIT boundary can be returned twice or skipped entirely;
+#   * the summaries/map_routes pairing, which is two queries over the same
+#     window and must name the same rows in the same order.
+#
+# Unique across the union by construction: proposal_id is unique among
+# proposals and NULL on existing rows, route_id the reverse (WP10 step 6b).
+_TIEBREAK = "source ASC, proposal_id ASC NULLS LAST, route_id ASC NULLS LAST"
+
+
 def build_order_by(sort: list[dict] | None) -> str:
     """`sort` is a list of {"by": <sortable column>, "dir": "asc"|"desc"}
     (§7.1) — assumed already validated (validate_list_body() rejects
@@ -388,11 +402,15 @@ def build_order_by(sort: list[dict] | None) -> str:
     NULL timestamps, likes and financial KPIs by construction (WP10 step
     6b), and Postgres's default of NULLS FIRST for DESC would float the
     whole existing catalog above every proposal on the default
-    newest-first sort."""
+    newest-first sort.
+
+    Always ends with _TIEBREAK, so the row order is TOTAL — see its comment
+    for the two things that silently break without it."""
     if not sort:
-        return "updated_at DESC NULLS LAST"
+        return f"updated_at DESC NULLS LAST, {_TIEBREAK}"
     parts = []
     for entry in sort:
         direction = "DESC" if entry.get("dir", "asc").lower() == "desc" else "ASC"
         parts.append(f"{entry['by']} {direction} NULLS LAST")
+    parts.append(_TIEBREAK)
     return ", ".join(parts)

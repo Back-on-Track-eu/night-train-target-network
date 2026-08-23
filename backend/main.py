@@ -42,6 +42,7 @@ POST /api/proposal/publish the only user write path (adapters/proposal/README.md
 import logging
 
 from flask import Flask, jsonify
+from flask_compress import Compress
 from flask_cors import CORS
 
 from api import config
@@ -82,6 +83,17 @@ def create_app() -> Flask:
 
     app = Flask(__name__)
     CORS(app)
+
+    # --- response compression ---
+    # Nothing in front of this app compresses: gunicorn cannot at any worker
+    # class, and the Caddy vhost fronting the servers has no `encode` directive
+    # (it also lives outside this repo). In the dev stack there is no proxy hop
+    # at all. So Flask is the only layer that covers every environment — which
+    # matters most for the gallery's map sections, large GeoJSON that gzips by
+    # roughly an order of magnitude. Level/threshold: api/config.py.
+    app.config["COMPRESS_LEVEL"] = config.COMPRESS_LEVEL
+    app.config["COMPRESS_MIN_SIZE"] = config.COMPRESS_MIN_SIZE
+    Compress(app)
 
     # --- rate limiter (per-endpoint limits live in api/auth.py) ---
     limiter.init_app(app)
