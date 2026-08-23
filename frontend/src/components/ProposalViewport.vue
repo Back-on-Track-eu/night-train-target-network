@@ -20,6 +20,8 @@ import { resolvePrefillStops, type GallerySearchSeed } from '@/lib/proposalPrefi
 import { readDraft, writeDraft, clearDraft } from '@/lib/proposalDraftStorage'
 import { buildSuggestRows, settledRows, type SuggestRow } from '@/lib/suggestPlacement'
 import { formatClock, dayOffset } from '@/lib/tripClock'
+import { routeFacts } from '@/lib/shareLinks'
+import { provideProposalEngagement } from '@/composables/useProposalEngagement'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Skeleton from 'primevue/skeleton'
@@ -31,6 +33,7 @@ import LoadingFunFact from '@/components/LoadingFunFact.vue'
 import CompositionPanel from '@/components/CompositionPanel.vue'
 import EvaluationPanel from '@/components/EvaluationPanel.vue'
 import MapView from '@/components/MapView.vue'
+import MapShareBar from '@/components/MapShareBar.vue'
 import CommentSection from '@/components/CommentSection.vue'
 import {
   mdiArrowLeft,
@@ -123,9 +126,15 @@ const publishError = ref<string | null>(null)
 const publishPhase = ref<'idle' | 'working' | 'slow' | 'verySlow'>('idle')
 
 // The proposal_id a discussion can hang off: the one we opened, or the one the
-// first publish adopted. Null in a fresh builder session, which is why the
-// comment section cannot exist there — there is nothing to comment on yet.
+// first publish adopted. Null in a fresh builder session, which is why neither
+// the comment section nor the map's like/share pill can exist there — there is
+// nothing to comment on, like, or link to yet.
 const storedProposalId = computed(() => props.proposalId ?? publishedProposalId.value)
+
+// Likes + comment thread for that proposal, fetched ONCE here and injected by
+// both the map pill and the discussion below (see the composable's header for
+// why it isn't a per-component fetch or a global store).
+provideProposalEngagement(storedProposalId)
 
 interface StopTimeFmt {
   stop_id: string
@@ -897,6 +906,16 @@ const showEvaluationSection = computed(
 // proposal and survives a re-evaluate. The storedProposalId !== null half of
 // the condition stays in the template, where it also narrows the prop.
 const showCommentSection = computed(() => routeResult.value !== null)
+
+// Share-message inputs. The figures are the real computed ones — never the
+// summary block's co2/demand fields, which are placeholders (see routeFacts()).
+// The names mirror derivedName(), which is what the proposal was published as,
+// so the message and the preview card's title agree.
+const shareFacts = computed(() => routeFacts(rawRoute.value))
+const shareOrigin = computed(() => sectionStops.value[0]?.name ?? '')
+const shareDestination = computed(
+  () => sectionStops.value[sectionStops.value.length - 1]?.name ?? '',
+)
 
 // Quiet pill — used by the "Gallery" back link above the workspace.
 const pillClass =
@@ -2023,6 +2042,20 @@ onMounted(async () => {
             class="w-full h-full"
             @toggle-suggested="toggleSuggested"
             @add-stop="onMapAddStop"
+          />
+          <!-- Like + share, bottom-left: MapLibre's zoom control is top-right
+               and its attribution bottom-right, so this corner is free. Placed
+               BEFORE the loading scrim below, which is `absolute inset-0` and
+               should legitimately cover it while a calc runs. Unlike the
+               evaluation panel it is NOT greyed out while the builder is dirty:
+               likes and links are about the proposal as published, not about
+               the unsaved itinerary. -->
+          <MapShareBar
+            v-if="storedProposalId !== null"
+            :proposal-id="storedProposalId"
+            :origin="shareOrigin"
+            :destination="shareDestination"
+            :facts="shareFacts"
           />
           <!-- Deliberately NOT wrapped in <Transition>. The fade wedged its own
                state machine here: the element kept `fade-enter-from` (opacity 0)

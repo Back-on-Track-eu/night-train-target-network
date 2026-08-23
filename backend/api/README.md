@@ -47,6 +47,8 @@ its own example files.
   - [`POST` / `DELETE /api/proposal/<id>/like`](#proposal-like) — like/unlike a proposal
   - [`POST /api/proposal/<id>/comment`](#proposal-comment) — add a comment
   - [`PATCH` / `DELETE /api/proposal/<id>/comment/<cid>`](#proposal-comment-item) — edit/delete own comment
+- [Sharing](#sharing)
+  - [`GET /api/proposal/<id>/share`](#proposal-share) — Open Graph link-preview stub (HTML, not JSON)
 - [Feedback](#feedback)
   - [`POST /api/feedback`](#post-feedback) — submit feedback
   - [`GET /api/feedback/categories`](#feedback-categories) — suggested category/sub_category values
@@ -1688,6 +1690,78 @@ timeline event moves to the edit time.
 the thread and the timeline. Storage keeps a tombstone row so
 `comment_id` stays stable, which is why a second `PATCH`/`DELETE` on it
 is a `404` rather than a resurrection — but nothing surfaces it.
+
+</details>
+
+---
+
+<a id="sharing"></a>
+
+## Sharing
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/proposal/<id>/share` | Open Graph link-preview stub — **HTML, not JSON** |
+
+<a id="proposal-share"></a>
+
+### `GET /api/proposal/<id>/share`
+
+<details>
+<summary>Why this exists and what it returns</summary>
+
+WhatsApp, Signal, Telegram and mail clients build a link's preview card
+by fetching the URL and reading its Open Graph tags, and none of them run
+JavaScript — so the SPA's `index.html` can only ever yield an empty
+shell. The frontend's share menu therefore hands out *this* URL, which
+answers `200 text/html` with per-proposal tags and bounces a human
+browser on to `/proposal/<id>`.
+
+It is mounted under `/api` despite being a page, not an API: Caddy routes
+`/api/*` to this container and everything else to the frontend image, so
+`/api` is the only prefix that reaches Flask without a new vhost block.
+
+Response, for `proposal_id` 12 named `Berlin – Paris`:
+
+```html
+<title>Berlin – Paris</title>
+<meta name="robots" content="noindex">
+<link rel="canonical" href="/proposal/12">
+<meta property="og:title" content="Berlin – Paris">
+<meta property="og:description" content="A night train route modelled on …">
+<meta property="og:url" content="https://<host>/api/proposal/12/share">
+<meta property="og:image" content="https://<host>/og/share-card.jpg">
+<meta http-equiv="refresh" content="0; url=/proposal/12">
+```
+
+- **`200`, never a redirect.** A `302` would hand the crawler the SPA
+  shell and lose the tags. The human bounce is a meta refresh, which
+  crawlers do not follow — that split is the whole design.
+- **Absolute `og:image`/`og:url`** built from `X-Forwarded-Proto` and
+  `X-Forwarded-Host`. Caddy terminates TLS and preserves `Host`, and no
+  `ProxyFix` is installed, so `request.scheme` is `http` on every
+  deployed environment — and an `http://` image on an `https://` page is
+  dropped by some clients.
+- **`og:description` is one fixed campaign line**, identical for every
+  proposal. Route figures live in the sharer's own message text, composed
+  in the frontend where the locale is known; and
+  `co2_savings_t_per_year` and the demand KPIs must never appear here at
+  all while `proposal_summaries.demand_kpis_placeholder` is `TRUE` — they
+  are deterministic fakes, and a forwarded chat message is exactly where
+  a placeholder gets read as fact.
+- **Unknown `id` → `404` as a page**, not the global JSON 404 handler,
+  pointing at `/gallery`.
+- **No rate limit**, following `api/gate.py`: Flask-Limiter keys on
+  `get_remote_address`, which behind Caddy is the proxy hop, so a limit
+  here would be one bucket shared by every visitor. The route costs a
+  single indexed primary-key lookup.
+
+**Deployment constraint:** an environment fronted by the testing gate or
+basic-auth cannot produce preview cards at all — the crawler receives
+Caddy's `302` to `/gate`. This path needs the same `forward_auth`
+exemption `/gate` and `/api/gate/*` have. The image itself is a static
+`1200×630` asset served by the frontend image from
+`frontend/public/og/`.
 
 </details>
 

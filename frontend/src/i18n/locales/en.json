@@ -71,7 +71,6 @@
       "deleteConfirm": "Delete this comment?",
       "deleteYes": "Delete",
       "deleteNo": "Keep",
-      "like": "Like this proposal",
       "charsLeft": "{count} character left | {count} characters left",
       "charsOver": "{count} character over the limit | {count} characters over the limit",
       "loginToComment": "Log in with an account to join the discussion.",
@@ -82,6 +81,22 @@
         "hours": "{count} hour ago | {count} hours ago",
         "days": "{count} day ago | {count} days ago"
       }
+    },
+    "share": {
+      "like": "Like this proposal",
+      "title": "Share this proposal",
+      "copyLink": "Copy link",
+      "copied": "Link copied",
+      "copyFailed": "Couldn't copy the link — select and copy it from the address bar.",
+      "email": "E-mail",
+      "whatsapp": "WhatsApp",
+      "more": "Share via…",
+      "stopsCount": "{count} stop | {count} stops",
+      "countriesCount": "{count} country | {count} countries",
+      "message": "Europe needs a night train from {origin} to {destination}. {km} km, {stops}, {countries} — here's what it would take:",
+      "messagePlain": "Europe needs a night train from {origin} to {destination}. Here's what it would take:",
+      "emailSubject": "Europe needs a {origin}–{destination} night train",
+      "emailBody": "This is what a {origin} – {destination} night train would look like — route, timetable and running costs, modelled on the Back-on-Track Target Network:"
     },
     "funFacts": {
       "label": "Did you know?",

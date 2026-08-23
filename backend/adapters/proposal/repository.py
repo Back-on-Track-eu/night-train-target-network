@@ -776,6 +776,21 @@ class ProposalRepository:
         self._conn.rollback()
         return row["user_id"] if row else None
 
+    def share_name(self, proposal_id: int) -> Optional[str]:
+        """A proposal's display name, or None if unknown — the whole read
+        behind api/proposal_share.py's link-preview stub. Deliberately not
+        get_container(): that row carries compute_request and
+        evaluation_output, two large JSONB columns, and this route is hit
+        by every chat client that previews a shared link."""
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT name FROM proposals.proposals WHERE proposal_id = %s",
+                (proposal_id,),
+            )
+            row = cur.fetchone()
+        self._conn.rollback()
+        return row["name"] if row else None
+
     def list_outdated(self, limit: Optional[int] = None) -> list[dict]:
         """§4.2's work queue: every proposal whose stored route_builder_
         version/calc_version has fallen behind the running code, or whose

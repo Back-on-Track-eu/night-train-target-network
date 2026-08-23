@@ -22,13 +22,13 @@ Endpoints — see api/README.md for full documentation.
   GET  /api/proposals/stats
   POST /api/proposals/compare
   GET  /api/proposal/<id>
-  GET    /api/proposal/<id>/likes
-  POST   /api/proposal/<id>/likes
-  DELETE /api/proposal/<id>/likes
-  GET    /api/proposal/<id>/comments
-  POST   /api/proposal/<id>/comments
-  PATCH  /api/proposal/<id>/comments/<cid>
-  DELETE /api/proposal/<id>/comments/<cid>
+  GET  /api/proposal/<id>/share            HTML link-preview stub, not JSON
+  GET    /api/proposal/<id>/engagements
+  POST   /api/proposal/<id>/like
+  DELETE /api/proposal/<id>/like
+  POST   /api/proposal/<id>/comment
+  PATCH  /api/proposal/<id>/comment/<cid>
+  DELETE /api/proposal/<id>/comment/<cid>
   GET  /api/params/StopInfrastructures
   GET  /api/params/compositions
   GET  /api/params/TrackInfrastructures
@@ -61,6 +61,7 @@ from api import (
     gate,
     proposals,
     proposal_engagement,
+    proposal_share,
     scenarios,
 )
 
@@ -111,6 +112,10 @@ def create_app() -> Flask:
     app.register_blueprint(proposal_compare.bp, url_prefix="/api")
     app.register_blueprint(proposal_stats.bp, url_prefix="/api")
     app.register_blueprint(proposal_engagement.bp, url_prefix="/api")
+    # Returns HTML, not JSON — a link-preview stub for chat clients, which
+    # only reaches Flask under /api because that is the prefix Caddy routes
+    # here (api/proposal_share.py).
+    app.register_blueprint(proposal_share.bp, url_prefix="/api")
     app.register_blueprint(scenarios.bp, url_prefix="/api")
     # Testing gate (2026-08-13 Decision 2). Registered without a prefix:
     # it owns both /gate (the page) and /api/gate/* (check + redeem), and

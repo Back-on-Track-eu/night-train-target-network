@@ -1,34 +1,27 @@
 <script setup lang="ts">
 // The proposal viewer's discussion thread, sitting under the evaluation.
 //
-// Self-contained on purpose: it takes a proposal_id and owns its own fetch and
-// state, so ProposalViewport.vue (already ~2100 lines) gains only the mount.
-// Nothing else in the app needs this state — the gallery's comment counts ride
-// the list request — so there is no store either.
+// The thread itself is injected, not fetched: the like button in the map's
+// action pill (MapShareBar) reads the same GET /engagements response, so
+// ProposalViewport provides that state once and both consume it — see
+// composables/useProposalEngagement.ts. What stays local to this component is
+// everything the pill has no interest in: drafts, the inline editor, and the
+// two-step delete.
 //
-// One GET serves the whole section (likes + thread), and every write returns
-// the resulting row, so the thread is patched from responses rather than
-// refetched. All the list/validation/timestamp logic lives in
-// lib/commentThread.ts, where it is unit-testable.
+// Every write returns the resulting row, so the thread is patched from
+// responses rather than refetched. All the list/validation/timestamp logic
+// lives in lib/commentThread.ts, where it is unit-testable.
 
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Textarea from 'primevue/textarea'
 import AppIcon from '@/components/AppIcon.vue'
 import AppSpinner from '@/components/AppSpinner.vue'
-import { mdiThumbUp, mdiThumbUpOutline, mdiPencilOutline, mdiTrashCanOutline } from '@mdi/js'
+import { mdiPencilOutline, mdiTrashCanOutline } from '@mdi/js'
 import { useStore } from '@/stores/store'
 import { useApiFailure } from '@/composables/useApiFailure'
-import { createAbortSlot } from '@/lib/apiClient'
-import { asApiFailure } from '@/lib/apiError'
-import {
-  fetchEngagements,
-  postComment,
-  editComment,
-  deleteComment,
-  likeProposal,
-  unlikeProposal,
-} from '@/lib/proposalsApi'
+import { useProposalEngagement } from '@/composables/useProposalEngagement'
+import { postComment, editComment, deleteComment } from '@/lib/proposalsApi'
 import {
   applyDeleted,
   applyEdited,
@@ -39,7 +32,7 @@ import {
   validateBody,
   wasEdited,
 } from '@/lib/commentThread'
-import type { Comment, LikeResponse } from '@/types/api'
+import type { Comment } from '@/types/api'
 
 const props = defineProps<{ proposalId: number }>()
 
@@ -47,58 +40,14 @@ const { t, locale } = useI18n()
 const store = useStore()
 const { describe, report } = useApiFailure()
 
-const comments = ref<Comment[]>([])
-const likes = ref<LikeResponse>({ count: 0, liked_by_me: false })
-const loadState = ref<'loading' | 'ready' | 'error'>('loading')
-const loadErrorMsg = ref<string | null>(null)
+// Shared with the map's action pill — including the reload-on-auth-change that
+// keeps liked_by_me honest. The fetch and its abort slot live in the parent, so
+// this component mounting and unmounting mid-load no longer costs a request.
+const { comments, loadState, loadErrorMsg, canEngage, load } = useProposalEngagement()
 
 // The header count comes from the local array, never from the response's
 // `count`: after a post or delete the two would disagree until the next load.
 const commentCount = computed(() => comments.value.length)
-
-// Commenting needs a REGISTERED account, not merely a token — the same bar the
-// gallery's like button sets, even though the API's floor is a guest token. A
-// public thread attached to a throwaway identity is a moderation problem, and
-// there are no moderation tools.
-const canWrite = computed(() => store.authChoice === 'user')
-
-// --- Load -------------------------------------------------------------------
-
-const loadSlot = createAbortSlot()
-
-async function load(): Promise<void> {
-  loadState.value = 'loading'
-  loadErrorMsg.value = null
-  try {
-    // Auth headers even though the endpoint is open: without them the server
-    // cannot say whether THIS user liked the proposal.
-    const json = await fetchEngagements(props.proposalId, store.authHeaders(), loadSlot.begin())
-    comments.value = json.comments.items
-    likes.value = json.likes
-    loadState.value = 'ready'
-  } catch (err) {
-    // A superseded/unmounted load is not a failure and must not paint an error.
-    if (asApiFailure(err)?.kind === 'canceled') return
-    loadState.value = 'error'
-    if (!report(err, { fallbackKey: 'errors.commentsLoadFailed' })) {
-      loadErrorMsg.value = describe(err, 'errors.commentsLoadFailed')
-    }
-  }
-}
-
-onMounted(load)
-// proposalId changes under us when a fresh publish does router.replace() —
-// ProposalWorkspace deliberately patches this instance rather than remounting
-// it (see AGENTS.md), so a watch is the only thing that notices.
-watch(() => props.proposalId, load)
-// Identity changes make `liked_by_me` stale, so the thread has to be re-read.
-// This is not only the login/logout case: App.vue restores the remembered token
-// in ITS onMounted, which Vue runs AFTER every child's, so on a page load the
-// first fetch above genuinely goes out unauthenticated and comes back with
-// liked_by_me false. Without this watch a reload shows a liked proposal as
-// unliked — exactly the bug the gallery card has to live with.
-watch(() => store.authToken, load)
-onBeforeUnmount(() => loadSlot.cancel())
 
 // Relative timestamps go stale while the page sits open. One shared clock,
 // ticking a minute at a time — the finest granularity commentAge() reports.
@@ -222,31 +171,6 @@ async function onDelete(comment: Comment): Promise<void> {
   }
 }
 
-// --- Like -------------------------------------------------------------------
-
-// Same toggle as the gallery card's, with one difference that matters: the
-// initial liked_by_me comes from the engagements response, so the icon is
-// right on arrival instead of self-correcting on the first click.
-const likeBusy = ref(false)
-
-async function onLike(): Promise<void> {
-  if (!canWrite.value) {
-    store.openAuthModal({ context: 'standalone' })
-    return
-  }
-  if (likeBusy.value) return
-  likeBusy.value = true
-  try {
-    likes.value = likes.value.liked_by_me
-      ? await unlikeProposal(props.proposalId, store.authHeaders())
-      : await likeProposal(props.proposalId, store.authHeaders())
-  } catch (err) {
-    report(err, { fallbackKey: 'errors.likeFailed', force: 'toast' })
-  } finally {
-    likeBusy.value = false
-  }
-}
-
 // resize-none, not resize-y: PrimeVue's auto-resize already grows the box with
 // its content, and the two fighting over the height made the manual drag
 // flicker. The handle was redundant as well as broken.
@@ -262,36 +186,15 @@ const quietButtonClass =
   <!-- Narrower than the panels above and centred: prose wants a short measure,
        and a comment stretched across the full 6xl workspace is hard to read. -->
   <section class="mx-auto flex w-full max-w-3xl flex-col gap-5 border-t border-primary-50/15 pt-8">
-    <!-- Header: title + count, with the like button on the right. The like
-         lives here rather than in its own strip because it comes from the same
-         request and reads as the other half of "what people think". -->
-    <div class="flex items-center justify-between gap-4">
-      <h3 class="text-lg font-semibold text-primary-50">
-        {{ t('proposal.comments.title') }}
-        <span v-if="commentCount > 0" class="font-normal text-primary-50/50">
-          {{ commentCount }}
-        </span>
-      </h3>
-
-      <div class="flex items-center gap-1.5">
-        <span v-if="likes.count > 0" class="text-sm font-semibold text-primary-50/70">
-          {{ likes.count }}
-        </span>
-        <button
-          type="button"
-          :disabled="likeBusy"
-          :aria-label="t('proposal.comments.like')"
-          class="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full transition hover:bg-primary-50/10 disabled:cursor-not-allowed"
-          :class="
-            likes.liked_by_me ? 'text-primary-50' : 'text-primary-50/70 hover:text-primary-50'
-          "
-          @click="onLike"
-        >
-          <AppSpinner v-if="likeBusy" :size="18" />
-          <AppIcon v-else :path="likes.liked_by_me ? mdiThumbUp : mdiThumbUpOutline" :size="22" />
-        </button>
-      </div>
-    </div>
+    <!-- Title + count only. The like button lives on the map now (MapShareBar),
+         beside share: both are about the proposal as a whole, not about the
+         discussion. -->
+    <h3 class="text-lg font-semibold text-primary-50">
+      {{ t('proposal.comments.title') }}
+      <span v-if="commentCount > 0" class="font-normal text-primary-50/50">
+        {{ commentCount }}
+      </span>
+    </h3>
 
     <!-- Load failed: the thread is unknown, so offer a retry rather than an
          empty state that would read as "no comments". -->
@@ -304,7 +207,9 @@ const quietButtonClass =
       </button>
     </div>
 
-    <div v-else-if="loadState === 'loading'" class="flex items-center gap-2 text-primary-50/60">
+    <!-- 'idle' means no proposal id yet, which this section is never mounted
+         without — treated as loading rather than given a state of its own. -->
+    <div v-else-if="loadState !== 'ready'" class="flex items-center gap-2 text-primary-50/60">
       <AppSpinner :size="18" />
       <span class="text-sm">{{ t('proposal.comments.loading') }}</span>
     </div>
@@ -417,7 +322,7 @@ const quietButtonClass =
       </ul>
 
       <!-- Composer, or the reason there isn't one. -->
-      <div v-if="canWrite" class="flex flex-col gap-2">
+      <div v-if="canEngage" class="flex flex-col gap-2">
         <Textarea
           v-model="draft"
           :placeholder="t('proposal.comments.placeholder')"

@@ -321,6 +321,7 @@ GET  /api/proposals
 POST /api/proposals
 GET  /api/proposal/<id>
 POST /api/proposals/compare        two sides, stored or what-if overrides, stateless
+GET  /api/proposal/<id>/share      Open Graph link-preview stub (HTML, not JSON)
 GET  /api/proposal/<id>/engagements likes + comments + event timeline
 POST/DELETE /api/proposal/<id>/like
 POST /api/proposal/<id>/comment
