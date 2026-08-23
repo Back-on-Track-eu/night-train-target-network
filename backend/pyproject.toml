@@ -28,6 +28,7 @@ dependencies = [
     "transliterate>=1.10.2",
     "regex>=2026.7.19",
     "pycountry>=26.2.16",
+    "deepl>=1.32.0",
 ]
 
 [project.optional-dependencies]
