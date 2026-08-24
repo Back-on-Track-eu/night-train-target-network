@@ -1190,7 +1190,9 @@ query (`MAP_LINES_SIMPLIFY_TOLERANCE_DEG` in
 `adapters/proposal/repository.py`); the stored geometry is untouched.
 
 `map_lines` features **do not** carry the contributing `proposal_ids` /
-`existing_route_ids`. They used to, and were removed: their combined
+`existing_route_ids`. They were present until 2026-08-23 and removed
+then — a client written against an older response will find them gone.
+Their combined
 length is the number of distinct (proposal, corridor) pairs, so they were
 the one part of the response that grew without bound in proposal count —
 six figures of ids at ~10k proposals, with popular corridors carrying
