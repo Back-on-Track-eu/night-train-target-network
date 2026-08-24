@@ -24,22 +24,6 @@ must compute:
 These values feed into `calc.py` which multiplies them by the country-specific
 electricity price to compute the traction energy cost.
 
-**Price is not this model's concern.** What a kilowatt-hour costs, and what an
-infrastructure manager charges for supplying it through the catenary, are
-calibrated in `models/infrastructure/energy_pricing/` and priced by its
-`calc_energy_price.py`. This model counts kilowatt-hours; that one multiplies
-them. Two consequences worth knowing before changing anything here:
-
-- The price side splits each country leg between a day and a night rate by
-  clock time (AT, CH and HR band their tariffs), and applies the split to the
-  kWh this model produces. It does not need to know where along the leg the
-  boundary fell — but it does assume energy accrues evenly with distance
-  within one country run.
-- The supply-equipment charges stay in the units the infrastructure managers
-  publish (per train-km, per gross-tonne-km) precisely so that calibrating
-  the flat 28 kWh/km placeholder away does not silently move thirteen
-  countries' infrastructure charges.
-
 ---
 
 ## Model definition
@@ -145,7 +129,7 @@ In a Jupyter notebook:
 
 - [ ] Enter the calibrated coefficients into `seed.py` for the relevant composition types
 - [ ] Replace the dummy implementation in `calc_energy_consumption.py` with the regression formula
-- [ ] Bump `ENERGY_CALC_VERSION` in `model.py` and add a changelog entry
+- [ ] Bump `ENERGY_CALC_VERSION` in `version.py` and add a changelog entry
 - [ ] Run `uv run --extra dev pytest tests/ -v` to confirm all tests still pass
 - [ ] Open a PR to `backend-dev` — tag David for review
 
@@ -194,7 +178,7 @@ uv run python scripts/calibrate_energy.py
 | File | Description |
 |---|---|
 | `calc_energy_consumption.py` | Main function called by `route_factory.py` — currently dummy, to be replaced |
-| `model.py` | Version constant, formulas, changelog — bump when implementation changes |
+| `version.py` | Version constant — bump when implementation changes |
 
 ## Related files
 

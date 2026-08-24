@@ -1,0 +1,321 @@
+route_name,start_ds100,end_ds100,composition_id,error
+1856 = 1857,AH,AA,REF-BUD-6,Es konnte keine Route von Hamburg Hbf (AH) nach Hamburg-Altona (AA) gefunden werden.
+1856 = 1857,AH,AA,REF-COUCH-6,Es konnte keine Route von Hamburg Hbf (AH) nach Hamburg-Altona (AA) gefunden werden.
+1856 = 1857,AH,AA,REF-BAL-9,Es konnte keine Route von Hamburg Hbf (AH) nach Hamburg-Altona (AA) gefunden werden.
+1856 = 1857,AH,AA,REF-COUCH-10,Es konnte keine Route von Hamburg Hbf (AH) nach Hamburg-Altona (AA) gefunden werden.
+1856 = 1857,AH,AA,REF-BUD-12,Es konnte keine Route von Hamburg Hbf (AH) nach Hamburg-Altona (AA) gefunden werden.
+1856 = 1857,AH,AA,REF-PREM-12,Es konnte keine Route von Hamburg Hbf (AH) nach Hamburg-Altona (AA) gefunden werden.
+1856 = 1857,AH,AA,NEW-BAL-7,Es konnte keine Route von Hamburg Hbf (AH) nach Hamburg-Altona (AA) gefunden werden.
+1856 = 1857,AH,AA,NEW-BAL-14,Es konnte keine Route von Hamburg Hbf (AH) nach Hamburg-Altona (AA) gefunden werden.
+1856 = 1857,MS,MOP,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1856 = 1857,MS,MOP,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1856 = 1857,MS,MOP,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1856 = 1857,MS,MOP,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1856 = 1857,MS,MOP,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1856 = 1857,MS,MOP,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1856 = 1857,MS,MOP,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1856 = 1857,MS,MOP,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1856 = 1857,MP,MS,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1856 = 1857,MP,MS,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1856 = 1857,MP,MS,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1856 = 1857,MP,MS,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1856 = 1857,MP,MS,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1856 = 1857,MP,MS,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1856 = 1857,MP,MS,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1856 = 1857,MP,MS,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1858 = 1859,RF,RK,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1858 = 1859,RF,RK,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1858 = 1859,RF,RK,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1858 = 1859,RF,RK,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1858 = 1859,RF,RK,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1858 = 1859,RF,RK,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1858 = 1859,RF,RK,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1858 = 1859,RF,RK,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1858 = 1859,,RLR,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1858 = 1859,,RLR,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1858 = 1859,,RLR,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1858 = 1859,,RLR,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1858 = 1859,,RLR,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1858 = 1859,,RLR,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1858 = 1859,,RLR,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1858 = 1859,,RLR,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1858 = 1859,RLR,RF,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1858 = 1859,RLR,RF,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1858 = 1859,RLR,RF,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1858 = 1859,RLR,RF,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1858 = 1859,RLR,RF,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1858 = 1859,RLR,RF,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1858 = 1859,RLR,RF,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+1858 = 1859,RLR,RF,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+332/1372 = 333/1373,FD,KKO,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+332/1372 = 333/1373,FD,KKO,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+332/1372 = 333/1373,FD,KKO,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+332/1372 = 333/1373,FD,KKO,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+332/1372 = 333/1373,FD,KKO,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+332/1372 = 333/1373,FD,KKO,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+332/1372 = 333/1373,FD,KKO,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+332/1372 = 333/1373,FD,KKO,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+332/1372 = 333/1373,KKO,KK,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+332/1372 = 333/1373,KKO,KK,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+332/1372 = 333/1373,KKO,KK,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+332/1372 = 333/1373,KKO,KK,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+332/1372 = 333/1373,KKO,KK,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+332/1372 = 333/1373,KKO,KK,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+332/1372 = 333/1373,KKO,KK,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+332/1372 = 333/1373,KKO,KK,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+332/1372 = 333/1373,KKO,FMZ,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+332/1372 = 333/1373,KKO,FMZ,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+332/1372 = 333/1373,KKO,FMZ,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+332/1372 = 333/1373,KKO,FMZ,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+332/1372 = 333/1373,KKO,FMZ,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+332/1372 = 333/1373,KKO,FMZ,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+332/1372 = 333/1373,KKO,FMZ,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+332/1372 = 333/1373,KKO,FMZ,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+334/1374 = 335/1375,KKO,NAH,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+334/1374 = 335/1375,KKO,NAH,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+334/1374 = 335/1375,KKO,NAH,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+334/1374 = 335/1375,KKO,NAH,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+334/1374 = 335/1375,KKO,NAH,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+334/1374 = 335/1375,KKO,NAH,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+334/1374 = 335/1375,KKO,NAH,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+334/1374 = 335/1375,KKO,NAH,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+452 = 453,DN,BLS,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+452 = 453,DN,BLS,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+452 = 453,DN,BLS,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+452 = 453,DN,BLS,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+452 = 453,DN,BLS,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+452 = 453,DN,BLS,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+452 = 453,DN,BLS,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+452 = 453,DN,BLS,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+454 = 455,KD,KKSU,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+454 = 455,KD,KKSU,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+454 = 455,KD,KKSU,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+454 = 455,KD,KKSU,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+454 = 455,KD,KKSU,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+454 = 455,KD,KKSU,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+454 = 455,KD,KKSU,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+454 = 455,KD,KKSU,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+456 = 457,KA,KKSU,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+456 = 457,KA,KKSU,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+456 = 457,KA,KKSU,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+456 = 457,KA,KKSU,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+456 = 457,KA,KKSU,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+456 = 457,KA,KKSU,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+456 = 457,KA,KKSU,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+456 = 457,KA,KKSU,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Berlinaren,AH,BLS,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Berlinaren,AH,BLS,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Berlinaren,AH,BLS,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Berlinaren,AH,BLS,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Berlinaren,AH,BLS,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Berlinaren,AH,BLS,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Berlinaren,AH,BLS,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Berlinaren,AH,BLS,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Canopus,RBB,RO,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Canopus,RBB,RO,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Canopus,RBB,RO,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Canopus,RBB,RO,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Canopus,RBB,RO,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Canopus,RBB,RO,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Canopus,RBB,RO,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Canopus,RBB,RO,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Canopus,RK,RBB,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Canopus,RK,RBB,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Canopus,RK,RBB,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Canopus,RK,RBB,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Canopus,RK,RBB,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Canopus,RK,RBB,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Canopus,RK,RBB,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Canopus,RK,RBB,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Canopus,RO,RF,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Canopus,RO,RF,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Canopus,RO,RF,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Canopus,RO,RF,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Canopus,RO,RF,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Canopus,RO,RF,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Canopus,RO,RF,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Canopus,RO,RF,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,UE  P,FFU,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,UE  P,FFU,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,UE  P,FFU,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,UE  P,FFU,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,UE  P,FFU,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,UE  P,FFU,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,UE  P,FFU,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,UE  P,FFU,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,UE  P,LL,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,UE  P,LL,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,UE  P,LL,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,UE  P,LL,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,UE  P,LL,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,UE  P,LL,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,UE  P,LL,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,UE  P,LL,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,FFS,FFLF,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,FFS,FFLF,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,FFS,FFLF,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,FFS,FFLF,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,FFS,FFLF,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,FFS,FFLF,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,FFS,FFLF,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,FFS,FFLF,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,FFU,FH  N,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,FFU,FH  N,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,FFU,FH  N,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,FFU,FH  N,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,FFU,FH  N,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,FFU,FH  N,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,FFU,FH  N,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,FFU,FH  N,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,FH  N,FFS,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,FH  N,FFS,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,FH  N,FFS,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,FH  N,FFS,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,FH  N,FFS,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,FH  N,FFS,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,FH  N,FFS,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+LE 232 = LE 235,FH  N,FFS,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Metropol,BPAF,BLS,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Metropol,BPAF,BLS,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Metropol,BPAF,BLS,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Metropol,BPAF,BLS,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Metropol,BPAF,BLS,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Metropol,BPAF,BLS,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Metropol,BPAF,BLS,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+Metropol,BPAF,BLS,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 236 = NJ 237,TGO,TS,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 236 = NJ 237,TGO,TS,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 236 = NJ 237,TGO,TS,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 236 = NJ 237,TGO,TS,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 236 = NJ 237,TGO,TS,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 236 = NJ 237,TGO,TS,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 236 = NJ 237,TGO,TS,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 236 = NJ 237,TGO,TS,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 236 = NJ 237,TU,TGO,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 236 = NJ 237,TU,TGO,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 236 = NJ 237,TU,TGO,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 236 = NJ 237,TU,TGO,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 236 = NJ 237,TU,TGO,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 236 = NJ 237,TU,TGO,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 236 = NJ 237,TU,TGO,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 236 = NJ 237,TU,TGO,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 40420 = NJ 40491,FKW,HG,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 40420 = NJ 40491,FKW,HG,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 40420 = NJ 40491,FKW,HG,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 40420 = NJ 40491,FKW,HG,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 40420 = NJ 40491,FKW,HG,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 40420 = NJ 40491,FKW,HG,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 40420 = NJ 40491,FKW,HG,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 40420 = NJ 40491,FKW,HG,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 40420 = NJ 40491,NWH,FKW,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 40420 = NJ 40491,NWH,FKW,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 40420 = NJ 40491,NWH,FKW,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 40420 = NJ 40491,NWH,FKW,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 40420 = NJ 40491,NWH,FKW,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 40420 = NJ 40491,NWH,FKW,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 40420 = NJ 40491,NWH,FKW,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 40420 = NJ 40491,NWH,FKW,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 40421 = NJ 40490,EE,FKW,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 40421 = NJ 40490,EE,FKW,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 40421 = NJ 40490,EE,FKW,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 40421 = NJ 40490,EE,FKW,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 40421 = NJ 40490,EE,FKW,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 40421 = NJ 40490,EE,FKW,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 40421 = NJ 40490,EE,FKW,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 40421 = NJ 40490,EE,FKW,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 408 = NJ 409,BPAF,LW,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 408 = NJ 409,BPAF,LW,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 408 = NJ 409,BPAF,LW,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 408 = NJ 409,BPAF,LW,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 408 = NJ 409,BPAF,LW,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 408 = NJ 409,BPAF,LW,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 408 = NJ 409,BPAF,LW,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 408 = NJ 409,BPAF,LW,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 408 = NJ 409,LBT,LH,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 408 = NJ 409,LBT,LH,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 408 = NJ 409,LBT,LH,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 408 = NJ 409,LBT,LH,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 408 = NJ 409,LBT,LH,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 408 = NJ 409,LBT,LH,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 408 = NJ 409,LBT,LH,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 408 = NJ 409,LBT,LH,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 408 = NJ 409,LW,LBT,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 408 = NJ 409,LW,LBT,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 408 = NJ 409,LW,LBT,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 408 = NJ 409,LW,LBT,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 408 = NJ 409,LW,LBT,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 408 = NJ 409,LW,LBT,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 408 = NJ 409,LW,LBT,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 408 = NJ 409,LW,LBT,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 420 = NJ 421,EHM,FKW,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 420 = NJ 421,EHM,FKW,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 420 = NJ 421,EHM,FKW,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 420 = NJ 421,EHM,FKW,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 420 = NJ 421,EHM,FKW,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 420 = NJ 421,EHM,FKW,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 420 = NJ 421,EHM,FKW,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 420 = NJ 421,EHM,FKW,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 420 = NJ 421,EMST,EHM,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 420 = NJ 421,EMST,EHM,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 420 = NJ 421,EMST,EHM,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 420 = NJ 421,EMST,EHM,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 420 = NJ 421,EMST,EHM,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 420 = NJ 421,EMST,EHM,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 420 = NJ 421,EMST,EHM,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 420 = NJ 421,EMST,EHM,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KA,KK,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KA,KK,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KA,KK,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KA,KK,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KA,KK,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KA,KK,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KA,KK,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KA,KK,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KBB,KKO,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KBB,KKO,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KBB,KKO,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KBB,KKO,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KBB,KKO,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KBB,KKO,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KBB,KKO,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KBB,KKO,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KKO,MOP,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KKO,MOP,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KKO,MOP,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KKO,MOP,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KKO,MOP,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KKO,MOP,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KKO,MOP,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KKO,MOP,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KKO,KB,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KKO,KB,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KKO,KB,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KKO,KB,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KKO,KB,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KKO,KB,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KKO,KB,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KKO,KB,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KKER,KA,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KKER,KA,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KKER,KA,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KKER,KA,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KKER,KA,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KKER,KA,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KKER,KA,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KKER,KA,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KK,KBB,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KK,KBB,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KK,KBB,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KK,KBB,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KK,KBB,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KK,KBB,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KK,KBB,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 468 = NJ 469,KK,KBB,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 470 = NJ 471,FH  N,HG,REF-BUD-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 470 = NJ 471,FH  N,HG,REF-COUCH-6,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 470 = NJ 471,FH  N,HG,REF-BAL-9,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 470 = NJ 471,FH  N,HG,REF-COUCH-10,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 470 = NJ 471,FH  N,HG,REF-BUD-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 470 = NJ 471,FH  N,HG,REF-PREM-12,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 470 = NJ 471,FH  N,HG,NEW-BAL-7,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche
+NJ 470 = NJ 471,FH  N,HG,NEW-BAL-14,400 Client Error: Bad Request for url: https://trassenfinder.de/api/web/routen/suche

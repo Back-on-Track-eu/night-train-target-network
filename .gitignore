@@ -160,3 +160,6 @@ desktop.ini
 *.bak
 *.orig
 
+
+# Jupyter autosave state
+.ipynb_checkpoints/
