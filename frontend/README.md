@@ -81,19 +81,53 @@ frontend/
     │   └── store.ts         # Pinia store
     ├── lib/
     │   ├── costFactorRates.ts  # Cost factor → per-unit-rate resolution (popover)
-    │   └── feedbackApi.ts      # Thin client for POST /api/feedback
+    │   ├── ctaButtonClass.ts   # Shared "Suggest a new route" pill styling
+    │   ├── feedbackApi.ts      # Thin client for POST /api/feedback
+    │   └── selectPillPt.ts     # Shared PrimeVue Select pass-through styling
     ├── utils/
     │   └── octilinear.ts    # Octilinear map-line layout helpers
     └── components/
         ├── AppIcon.vue               # Tree-shakeable @mdi/js icon wrapper
         ├── CompositionPanel.vue      # Composition picker card
         ├── EvaluationPanel.vue       # Cost/revenue evaluation cube explorer
+        ├── Gallery.vue               # Landing page: intro, search bar, result list + map
+        ├── LandingIntro.vue          # Landing pitch above the gallery (copy lives in en.json)
         ├── MapView.vue               # MapLibre route/stop map
         ├── ProposalViewport.vue      # Proposal build/evaluate workspace
         ├── RouteSectionSlider.vue    # OD-range slider for the evaluation panel
-        ├── RouteStatsCard.vue        # Headline distance/speed/frequency card
         └── StopSelect.vue            # Stop search/select control
 ```
+
+---
+
+## Landing Page Copy
+
+The pitch a first-time visitor reads on `/gallery` lives entirely in
+`en.json` under `gallery.heading`, `gallery.welcome.*`, `gallery.audience.*`
+and `gallery.story.*` — `LandingIntro.vue` holds only layout, so editing the
+text never means touching a component.
+
+The intro is two bands, both above the fold. The first carries the headline,
+the two calls to action and the argument, split into three headed blocks; the
+two columns are top-aligned inside a vertically centred row, so the lead-in
+above the headline shares a line with the first block heading. Its
+height is measured at runtime rather than fixed: the site header carries a
+background image and the API status banner comes and goes, so the offset above
+it is not a constant, and the collapsed row below it is subtracted so that row
+stays visible without scrolling.
+
+That second band — who the tool is for, and what happens to a submission — is a
+panel collapsed by default, so the pitch stays the whole first impression. It
+opens by animating `grid-template-rows` from `0fr` to `1fr`, which needs no
+height measurement: copy can grow freely without re-tuning a `max-height`.
+Toggling it scrolls the panel's bottom edge onto the fold, so opening reveals
+the whole panel, closing returns the page to where it started, and neither
+exposes the gallery below. A rule above the gallery heading keeps the two halves
+of the page apart.
+
+`LandingIntro` emits rather than navigates — `create` opens the builder,
+`browse` scrolls to the gallery — because what follows the intro on the page is
+`Gallery.vue`'s business, not the intro's.
 
 ---
 

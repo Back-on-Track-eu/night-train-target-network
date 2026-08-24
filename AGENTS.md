@@ -293,7 +293,8 @@ Full contract, `--baseline` semantics, and editorial rules:
 | `frontend/src/style.css` | Tailwind v4 import + CSS layer order declaration |
 | `frontend/src/stores/store.ts` | Pinia store — currently containing everything but might have more in the future |
 | `frontend/src/i18n/index.ts` | i18n setup; add new locales here |
-| `frontend/src/i18n/locales/en.json` | English translation strings |
+| `frontend/src/i18n/locales/en.json` | English translation strings — including the whole landing pitch (`gallery.heading`, `gallery.welcome.*`, `gallery.audience.*`, `gallery.story.*`) |
+| `frontend/src/components/LandingIntro.vue` | Landing pitch above the gallery: layout, hero sizing and scroll cue only, no copy |
 | `frontend/src/types/api.ts` | TypeScript types for backend responses |
 | `backend/docker/docker-compose.yml` | Canonical backend Docker stack |
 | `.devcontainer/docker-compose.yml` | Self-contained VS Code devcontainer stack — duplicates the above, plus `frontend` |
