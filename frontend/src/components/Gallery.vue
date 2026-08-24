@@ -587,9 +587,14 @@ const ctaClass =
          and the cue keeps a fixed distance from the foot of the viewport
          (heroCueSpace). Centring both together is what previously glued the cue
          to the copy and left the leftover height dumped below it. -->
+    <!-- Deliberately NOT `relative`: it had no absolutely-positioned child to
+         anchor, and a positioned element paints in a later phase than static
+         in-flow content — so it covered the search bar that galleryShift pulls
+         up into its padding band below, swallowing every click on the mode
+         tabs once the page was scrolled. -->
     <section
       ref="hero"
-      class="relative flex w-full flex-col"
+      class="flex w-full flex-col"
       :style="{ minHeight: heroMinHeight, ...heroCueSpace }"
     >
       <!-- my-auto rather than flex-1: it centres the row in the space the cue
@@ -640,8 +645,12 @@ const ctaClass =
       <p class="text-sm text-primary-50/60">{{ t('gallery.section.subtitle') }}</p>
     </div>
 
-    <!-- Search bar -->
-    <div class="flex flex-col items-center gap-4">
+    <!-- Search bar. `relative z-10` because this block is pulled up into the
+         hero's reserved cue band by galleryShift and therefore genuinely
+         overlaps it — the stacking context is what keeps the mode tabs
+         clickable there, whatever the hero above is positioned as. Removing
+         it re-breaks tab switching for anyone who has scrolled. -->
+    <div class="relative z-10 flex flex-col items-center gap-4">
       <!-- Category tabs -->
       <div class="flex divide-x divide-primary-50/20 overflow-hidden rounded-full">
         <button
