@@ -8,8 +8,11 @@ This folder contains the energy consumption model for night train routes.
 energy team — [`ONBOARDING.md`](ONBOARDING.md)
 
 **Current status:** Dummy implementation using a flat 28.0 kWh/km factor.
-The real regression-based model needs to be developed and calibrated.
-That is the purpose of this workstream.
+Training data collection from Trassenfinder is complete for Germany — 1,184
+samples across 148 routes and 8 compositions. The candidate regression in
+`calib/02_energy_calibration.ipynb` predates that collection and has not been
+refitted, so nothing is wired into the backend yet. See
+[`calib/README.md`](calib/README.md).
 
 ---
 
@@ -100,7 +103,7 @@ No authentication required, but a token-bucket rate limiter applies.
   - Scheduled travel time (minutes)
   - Energy consumption from Trassenfinder response (kWh)
   - Country / terrain category
-- [ ] Save results as a CSV (e.g. `backend/models/energy/notebooks/data/trassenfinder_samples.csv`)
+- [ ] Save results as a CSV (e.g. `backend/models/energy/calib/data/samples_ontd.csv`)
 - [ ] Aim for at least 50–100 samples across different countries and terrain types
 - [ ] Include at least 10 mountainous routes (Switzerland, Austria) and 10 flat routes (Germany, France)
 
@@ -160,8 +163,8 @@ uv sync --extra dev
 uv run jupyter lab
 ```
 
-JupyterLab opens in your browser. Navigate to `backend/models/energy/notebooks/` to find
-existing notebooks, or create new ones there.
+JupyterLab opens in your browser. Navigate to `backend/models/energy/calib/` to find
+the calibration notebooks.
 
 ### Running scripts
 
@@ -173,18 +176,96 @@ uv run python scripts/calibrate_energy.py
 
 ---
 
+## Data collection
+
+`calib/01_source_extraction.ipynb` builds the training dataset. It runs
+top to bottom with no manual steps — restart the kernel and run all cells.
+Roughly 1,500 collection requests plus ~230 for the pre-flight, 30–50 minutes.
+
+### Two route sources
+
+| Source | Routes queried | Collected | What it is |
+|---|---|---|---|
+| `ontd` | 95 | 95 | Real German night-train segments from the ONTD workbook — station to station, as operated |
+| `synthetic` | 100 | 53 | Generated station pairs, sampled for geographic and length diversity |
+
+The generated set loses 47 routes: 7 to invalid DS100 codes and 40 to genuine
+routing failures on branch lines a `D4` locomotive-hauled train cannot reach.
+The two samples nonetheless agree within 1% on fleet-weighted kWh/km per
+composition, so they pool — see [`calib/README.md`](calib/README.md).
+
+The two cover different parts of the design space. ONTD segments are mostly
+short (median 78 km air distance) because night trains stop often; the
+generated set is mostly long (median 355 km) and spreads across N-S, E-W and
+diagonal axes. Running both tests whether coefficients fitted on operational
+segments hold on arbitrary station pairs. If they diverge, the fit is picking
+up something about how night trains are routed rather than about moving a
+train, and the sources should not be pooled.
+
+The generated set is a robustness check, not evidence about real night-train
+routing — its pairs were sampled for diversity, not drawn from timetables.
+
+### Stages
+
+| Stage | What it does |
+|---|---|
+| Setup | Loads compositions and both sources, normalises to a common schema, applies `DS100_CORRECTIONS`, drops routes without a DS100 |
+| Payload | Builds the `spfv_lok` request template, held constant across both sources |
+| Query function | One request per route × composition, with error bodies preserved |
+| Pre-flight | Resolves each station's `mutter` flag once across both sources, and drops routes whose DS100 is not a Betriebsstelle |
+| Collection | Each source queried independently against all 8 compositions |
+| Save | Per-source CSVs plus a combined file carrying a `source` column |
+| Compare | Coverage and kWh/km by distance band, per source |
+| Quality check | Completeness verified from disk |
+
+**`mutter` is a property of the station, not a request option.** Trassenfinder
+rejects a Mutterbetriebsstelle sent as a child and a child sent as a mother,
+both with HTTP 400 and no indication which end is wrong. The pre-flight
+resolves this once per station rather than per request.
+
+### Data files
+
+Committed inputs live in `calib/sources/`; everything the notebooks write lives
+in `calib/data/` and `calib/seed/`, both gitignored.
+
+| File | Contents |
+|---|---|
+| `calib/sources/routes_ontd.csv` | German night-train segments from the ONTD workbook |
+| `calib/sources/routes_synthetic.csv` | The generated station pairs |
+| `calib/sources/compositions.csv` | The 8 standard compositions, with Trassenfinder locomotive numbers |
+| `calib/data/samples_ontd.csv` | ONTD training set — one row per segment × composition |
+| `calib/data/samples_synthetic.csv` | Generated-pair results |
+| `calib/data/samples_all.csv` | Both, with a `source` column |
+| `calib/data/failures_*.csv` | Requests that could not be completed, with the API message |
+| `calib/seed/energy_coefficients.csv` | What the database reads |
+
+`samples_*.csv` cannot be rebuilt at seed time — they are ~1,560 Trassenfinder
+calls — so they travel through Drive and `calib/data_sources.py` fetches them on
+first use. Set `ENERGY_DRIVE_FOLDER_ID` in `backend/docker/.env`. See
+[`calib/README.md`](calib/README.md).
+
+### Known data-quality issues in the ONTD extract
+
+Report upstream rather than patching in the notebook:
+
+- Lörrach Autoreisezug Terminal has no `start_ds100` — the segment is dropped
+- Köln Süd is exported as `KKSU`, which is not a valid Betriebsstelle; corrected
+  to `KKS` via `DS100_CORRECTIONS`
+- Düsseldorf Hbf → Köln Süd has no `travel_duration_min`
+
 ## Files in this folder
 
 | File | Description |
 |---|---|
 | `calc_energy_consumption.py` | Main function called by `route_factory.py` — currently dummy, to be replaced |
-| `version.py` | Version constant — bump when implementation changes |
+| `model.py` | Version constant, description, changelog, formula registry |
+| `calib/` | Collection and calibration — notebooks, sources, generated data and seed |
 
 ## Related files
 
 | File | Description |
 |---|---|
-| `backend/models/energy/notebooks/` | Jupyter notebooks for data collection, exploration, and calibration |
+| `backend/models/energy/calib/` | Collection and calibration notebooks — see its own README |
 | `backend/models/params.py` | `CompositionType` — energy factor fields |
 | `backend/models/route/trip.py` | `CountryLeg` — `distance_m`, `driving_time_min`, `energy_kwh` |
 
@@ -205,4 +286,10 @@ Join the Signal group for questions, updates, and coordination:
 | 2026-06 | Use regression model over physics simulation | Simpler to calibrate, sufficient accuracy for cost modelling purposes |
 | 2026-06 | Use Trassenfinder as calibration data source | No authentication required, covers European routes, free to use |
 | 2026-06 | Terrain score as proxy for gradient | Elevation data not available in current routing engine; revisit when SRTM elevation integrated |
+| 2026-08 | Resolve each station's `mutter` flag in a pre-flight pass | The flag is a property of the Betriebsstelle, not a request option. Hard-coding `mutter: True` lost 40 of 96 segments to HTTP 400, biased towards short segments. Resolving once per station costs ~60 requests and removes all retries from the main loop |
+| 2026-08 | Correct DS100 codes in the notebook, not the source CSV | Keeps the correction visible next to the code that needs it and leaves the ONTD extract as delivered, so upstream fixes can be dropped in without a merge conflict |
+| 2026-08 | Query notebook restructured as a linear run-all pipeline | The exploratory version defined the query function twice and ran the collection loop twice, so a top-to-bottom run silently used the wrong definition |
+| 2026-08 | Move notebooks and data into `calib/`, matching the other model packages | `energy/` was the only domain with `notebooks/` and an ad-hoc `data/{raw,processed,finished}` split. Personal filenames (`Regression_model_LS`, `Energy_model_Helena`) stop being findable once their authors move on; numbered stage names do not |
+| 2026-08 | Trassenfinder samples travel through Drive, not git | `01` is ~1,560 API calls over 30–50 minutes, so unlike every other calib package `seed.py` cannot regenerate them. `data_sources.ensure_local()` fetches them on first use, mirroring the ONTD seed pattern. Route lists stay committed under `calib/sources/` because they are curated input, not bulk output |
+| 2026-08 | Collect a second, generated route sample alongside ONTD | ONTD segments are short by construction (real night trains stop often), leaving the long-distance range thin. Generated pairs extend it and act as an out-of-sample check on whether the fit describes moving a train or how night trains happen to be routed. Kept in separate files with a `source` column so pooling stays a deliberate choice |
 | 2026-06 | Store coefficients per composition type in DB | Different train types have different energy profiles; allows future per-type calibration |
