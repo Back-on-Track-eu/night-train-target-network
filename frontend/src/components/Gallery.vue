@@ -6,7 +6,6 @@ import Select from 'primevue/select'
 import Skeleton from 'primevue/skeleton'
 import {
   mdiArrowLeftRight,
-  mdiChevronDown,
   mdiMapMarkerOutline,
   mdiEarth,
   mdiFlagOutline,
@@ -16,6 +15,7 @@ import {
   mdiSortDescending,
 } from '@mdi/js'
 import AppIcon from '@/components/AppIcon.vue'
+import LandingIntro from '@/components/LandingIntro.vue'
 import StopSelect from '@/components/StopSelect.vue'
 import CountrySelect from '@/components/CountrySelect.vue'
 import SearchField from '@/components/SearchField.vue'
@@ -25,6 +25,8 @@ import { useStore } from '@/stores/store'
 import { useLocaleFormat } from '@/composables/useLocaleFormat'
 import { fetchProposals } from '@/lib/proposalsApi'
 import { createAbortSlot } from '@/lib/apiClient'
+import { ctaButtonClass } from '@/lib/ctaButtonClass'
+import { selectPillPt } from '@/lib/selectPillPt'
 import { asApiFailure, isRetryable, type ApiFailure } from '@/lib/apiError'
 import { buildRelationToken, type GalleryRowRef } from '@/lib/galleryMap'
 import { useApiFailure } from '@/composables/useApiFailure'
@@ -152,10 +154,26 @@ const listSlot = createAbortSlot()
 let requestSeq = 0
 
 const tabs = computed(() => [
-  { value: 'aToB' as const, label: t('gallery.tabs.aToB'), icon: mdiArrowLeftRight },
-  { value: 'byStation' as const, label: t('gallery.tabs.byStation'), icon: mdiMapMarkerOutline },
-  { value: 'byCountry' as const, label: t('gallery.tabs.byCountry'), icon: mdiEarth },
-  { value: 'byRelation' as const, label: t('gallery.tabs.byRelation'), icon: mdiFlagOutline },
+  {
+    value: 'aToB' as const,
+    label: t('gallery.tabs.aToB'),
+    icon: mdiArrowLeftRight,
+  },
+  {
+    value: 'byStation' as const,
+    label: t('gallery.tabs.byStation'),
+    icon: mdiMapMarkerOutline,
+  },
+  {
+    value: 'byCountry' as const,
+    label: t('gallery.tabs.byCountry'),
+    icon: mdiEarth,
+  },
+  {
+    value: 'byRelation' as const,
+    label: t('gallery.tabs.byRelation'),
+    icon: mdiFlagOutline,
+  },
 ])
 
 // Which source(s) the list shows. 'all' sends no `sources` key at all, which
@@ -164,7 +182,10 @@ type SourceChoice = 'all' | ProposalSourceKind
 const sourceFilter = ref<SourceChoice>('all')
 const SOURCE_CHOICES: readonly SourceChoice[] = ['all', 'proposal', 'existing']
 const sourceOptions = computed(() =>
-  SOURCE_CHOICES.map((value) => ({ value, label: t(`gallery.source.${value}`) })),
+  SOURCE_CHOICES.map((value) => ({
+    value,
+    label: t(`gallery.source.${value}`),
+  })),
 )
 
 // Sort is presented as field-in-words × direction-as-icon ("Distance" + the mdi
@@ -247,7 +268,10 @@ const selectedRelationToName = computed(() =>
 // The stored "AT__DE" token, or null while the pair is incomplete or identical.
 const relationToken = computed(() => buildRelationToken(relationFrom.value, relationTo.value))
 
-const currentSort = computed<ProposalSort>(() => ({ by: sortField.value, dir: sortDir.value }))
+const currentSort = computed<ProposalSort>(() => ({
+  by: sortField.value,
+  dir: sortDir.value,
+}))
 
 const reachedEnd = computed(() => initialized.value && proposals.value.length >= total.value)
 
@@ -374,56 +398,18 @@ const rowRefOf = (p: ProposalSummary): GalleryRowRef =>
 // shared by many rows and so names no single card.
 const hoveredRow = ref<GalleryRowRef | null>(null)
 
-// --- Hero sizing + scroll affordance ----------------------------------------
-// The intro fills the viewport below whatever sits above it (App.vue's header,
-// the API status banner, the page padding), so scrolled to the top a visitor
-// sees the pitch and nothing else. Measured rather than hardcoded: the header
-// carries a background image, and the status banner appears and disappears, so
-// the offset is not a constant — a ResizeObserver keeps it honest.
-const hero = ref<HTMLElement | null>(null)
+// LandingIntro's secondary call to action. The target lives here rather than in
+// the intro because the intro has no business knowing what follows it.
 const gallerySection = ref<HTMLElement | null>(null)
-const heroMinHeight = ref('100vh')
-let heroObserver: ResizeObserver | null = null
-
-// The scroll cue has done its job the moment the reader starts scrolling, and
-// left on screen it just follows them down the page. Faded rather than removed
-// so it comes back the same way it left when they scroll home.
-const scrolled = ref(false)
-function onScroll(): void {
-  scrolled.value = window.scrollY > 24
-}
-
-// The cue sits this far above the foot of the viewport — far enough from the
-// copy to read as "there is more below" rather than as another line of it.
-// Once the cue fades, that band is dead space between the hero and the gallery,
-// so the gallery reclaims exactly it (see the negative margin in the template).
-const HERO_CUE_SPACE_VH = 16
-// Breathing room left above the gallery heading when the cue is clicked;
-// landing flush against the viewport edge reads as a cut-off page.
-const GALLERY_SCROLL_MARGIN_PX = 32
-
-// Both ends of the reclaim, so the band is described in exactly one place.
-const heroCueSpace = { paddingBottom: `${HERO_CUE_SPACE_VH}vh` }
-const galleryShift = computed(() => ({
-  marginTop: scrolled.value ? `-${HERO_CUE_SPACE_VH}vh` : '0px',
-}))
-
-function measureHero(): void {
-  if (!hero.value) return
-  const top = hero.value.getBoundingClientRect().top + window.scrollY
-  heroMinHeight.value = `calc(100vh - ${Math.max(0, Math.round(top))}px)`
-}
+// Breathing room above the heading; landing flush against the viewport edge
+// reads as a cut-off page.
+const GALLERY_SCROLL_MARGIN_PX = 24
 
 function scrollToGallery(): void {
   const target = gallerySection.value
   if (!target) return
-  // The click itself flips `scrolled`, which pulls the gallery up by the band
-  // the cue was occupying. Aim at where the heading will END UP, not where it
-  // is now — the reclaim animates, so measuring again mid-scroll wouldn't see
-  // the final position either.
-  const reclaimed = scrolled.value ? 0 : (window.innerHeight * HERO_CUE_SPACE_VH) / 100
   const top = target.getBoundingClientRect().top + window.scrollY
-  window.scrollTo({ top: top - reclaimed - GALLERY_SCROLL_MARGIN_PX, behavior: 'smooth' })
+  window.scrollTo({ top: top - GALLERY_SCROLL_MARGIN_PX, behavior: 'smooth' })
 }
 
 // --- URL <-> search-bar sync -------------------------------------------
@@ -486,16 +472,6 @@ onMounted(async () => {
   )
   if (sentinel.value) observer.observe(sentinel.value)
 
-  measureHero()
-  // Watches the whole document rather than the hero itself: what moves the hero
-  // is everything ABOVE it changing height (header image loading, status banner
-  // appearing), which an observer on the hero would never see.
-  heroObserver = new ResizeObserver(measureHero)
-  heroObserver.observe(document.body)
-  window.addEventListener('resize', measureHero)
-  window.addEventListener('scroll', onScroll, { passive: true })
-  onScroll()
-
   // Hydrate the search bar from the URL before the first query fires, so a
   // shared or reloaded /gallery?... link reproduces the exact same results.
   const hasStopParams = ['from', 'to', 'station'].some((k) => queryString(route.query[k]))
@@ -527,13 +503,7 @@ function teardown(): void {
   // Drop everything in flight; their rejections are 'canceled' and stay silent.
   listSlot.cancel()
 }
-onBeforeUnmount(() => {
-  teardown()
-  heroObserver?.disconnect()
-  heroObserver = null
-  window.removeEventListener('resize', measureHero)
-  window.removeEventListener('scroll', onScroll)
-})
+onBeforeUnmount(teardown)
 onDeactivated(teardown)
 
 // Coming back to a cached gallery. Deliberately does NOT re-run onMounted's
@@ -541,34 +511,11 @@ onDeactivated(teardown)
 // requests. Only a proposal published in the meantime forces a refresh.
 onActivated(() => {
   if (sentinel.value && observer) observer.observe(sentinel.value)
-  // The layout above the hero can have changed while this was cached.
-  measureHero()
   if (store.galleryStale) {
     store.galleryStale = false
     resetAndLoad()
   }
 })
-
-// Same pill passthrough as the Selects in EvaluationPanel.vue.
-const selectPt = {
-  root: {
-    class:
-      'flex cursor-pointer items-center rounded-full border border-primary-50/20 bg-transparent transition hover:bg-primary-50/10',
-  },
-  label: { class: 'px-3 py-1.5 text-sm text-primary-50 leading-none' },
-  dropdown: { class: 'flex items-center pr-3 text-primary-50/60' },
-  overlay: {
-    class:
-      'z-50 mt-1 overflow-hidden rounded-xl border border-primary-50/20 bg-sapphire-100 shadow-xl',
-  },
-  listContainer: { class: 'overflow-auto' },
-  option: {
-    class: 'cursor-pointer px-4 py-2 text-sm text-primary-50 transition hover:bg-primary-50/10',
-  },
-}
-
-const ctaClass =
-  'flex cursor-pointer items-center gap-1.5 rounded-full bg-primary-50/10 px-5 py-2 text-sm text-primary-50 transition hover:bg-primary-50/20'
 </script>
 
 <template>
@@ -577,79 +524,30 @@ const ctaClass =
        the scroll — see the results row's comment below. Keep the two in sync: if
        App.vue's bottom padding changes, this offset has to change with it. -->
   <div class="-mb-6 flex w-full max-w-6xl flex-col gap-6">
-    <!-- Page intro, sized to fill whatever is left of the viewport below the
-         site header (measured, not guessed — see heroMinHeight) so a fresh
-         visitor sees the pitch and nothing else. The gallery owns its own h1
-         (App.vue's centered one steps aside for this route): the question and
-         the action it leads to on the left, the copy that answers it on the
-         right. -->
-    <!-- Two bands, not one centred stack: the copy takes all the room left over
-         and the cue keeps a fixed distance from the foot of the viewport
-         (heroCueSpace). Centring both together is what previously glued the cue
-         to the copy and left the leftover height dumped below it. -->
-    <!-- Deliberately NOT `relative`: it had no absolutely-positioned child to
-         anchor, and a positioned element paints in a later phase than static
-         in-flow content — so it covered the search bar that galleryShift pulls
-         up into its padding band below, swallowing every click on the mode
-         tabs once the page was scrolled. -->
-    <section
-      ref="hero"
-      class="flex w-full flex-col"
-      :style="{ minHeight: heroMinHeight, ...heroCueSpace }"
-    >
-      <!-- my-auto rather than flex-1: it centres the row in the space the cue
-           leaves without turning items-start into a cross-axis centre, which
-           would drag the two columns out of alignment with each other. -->
-      <div class="my-auto flex items-start gap-12 px-24">
-        <div class="flex w-2/5 shrink-0 flex-col items-start gap-6">
-          <h1 class="text-4xl font-light text-white">{{ t('gallery.heading') }}</h1>
-          <button type="button" :class="ctaClass" @click="createProposal">
-            <AppIcon :path="mdiPlus" :size="18" />
-            {{ t('gallery.cta.create') }}
-          </button>
-        </div>
-        <div class="flex-1 text-justify">
-          <p class="text-base font-semibold text-primary-50">{{ t('gallery.welcome.lead') }}</p>
-          <p class="mt-2 text-sm leading-relaxed text-primary-50/70">
-            {{ t('gallery.welcome.body') }}
-          </p>
-          <p class="mt-3 text-sm leading-relaxed text-primary-50/70">
-            {{ t('gallery.welcome.cta') }}
-          </p>
-        </div>
-      </div>
+    <!-- Landing pitch: viewport-filling opening band, then who the tool is for
+         and what happens to a submission. Self-contained — it owns its own
+         sizing, scroll cue and h1 (App.vue's centred heading steps aside for
+         this route). -->
+    <LandingIntro @create="createProposal" @browse="scrollToGallery" />
 
-      <!-- Scroll affordance: without it the page looks like it ends here. -->
-      <button
-        type="button"
-        class="flex cursor-pointer flex-col items-center gap-0.5 self-center text-sm text-primary-50/60 transition-opacity duration-300 hover:text-primary-50"
-        :class="scrolled ? 'pointer-events-none opacity-0' : 'opacity-100'"
-        :aria-hidden="scrolled"
-        :tabindex="scrolled ? -1 : 0"
-        @click="scrollToGallery"
-      >
-        {{ t('gallery.browse') }}
-        <AppIcon :path="mdiChevronDown" :size="22" class="animate-bounce" />
-      </button>
-    </section>
-
-    <!-- The gallery proper: search bar, result count, then the list + map.
-         Rises into the band the scroll cue vacates (galleryShift) so the fade
-         doesn't just leave a hole where the cue used to be. -->
+    <!-- The gallery proper: search bar, result count, then the list + map. The
+         rule and the generous padding are what separate it from the landing
+         pitch above — without them the two read as one continuous column. -->
     <div
       ref="gallerySection"
-      class="flex flex-col items-center gap-1 transition-[margin-top] duration-500 ease-out"
-      :style="galleryShift"
+      class="mt-6 flex w-full flex-col items-center gap-1 border-t border-primary-50/10 pt-12"
     >
-      <h2 class="text-4xl font-light text-primary-50">{{ t('gallery.section.title') }}</h2>
-      <p class="text-sm text-primary-50/60">{{ t('gallery.section.subtitle') }}</p>
+      <h2 class="text-4xl font-light text-primary-50">
+        {{ t('gallery.section.title') }}
+      </h2>
+      <p class="text-sm text-primary-50/60">
+        {{ t('gallery.section.subtitle') }}
+      </p>
     </div>
 
-    <!-- Search bar. `relative z-10` because this block is pulled up into the
-         hero's reserved cue band by galleryShift and therefore genuinely
-         overlaps it — the stacking context is what keeps the mode tabs
-         clickable there, whatever the hero above is positioned as. Removing
-         it re-breaks tab switching for anyone who has scrolled. -->
+    <!-- Search bar. `relative z-10` gives the mode tabs and the pill dropdowns a
+         stacking context of their own, so neither the intro above nor the
+         sticky map column beside them can paint over the controls. -->
     <div class="relative z-10 flex flex-col items-center gap-4">
       <!-- Category tabs -->
       <div class="flex divide-x divide-primary-50/20 overflow-hidden rounded-full">
@@ -801,7 +699,7 @@ const ctaClass =
             option-value="value"
             option-label="label"
             :unstyled="true"
-            :pt="selectPt"
+            :pt="selectPillPt"
           />
           <!-- Field and direction as ONE control: the field in words, the
                direction as an mdi sort glyph. -->
@@ -811,7 +709,7 @@ const ctaClass =
             option-value="value"
             option-label="label"
             :unstyled="true"
-            :pt="selectPt"
+            :pt="selectPillPt"
           >
             <!-- Direction glyph first, then the field: the icon is the part
                  that changes between adjacent options, so leading with it makes
@@ -885,7 +783,7 @@ const ctaClass =
 
         <!-- Trailing CTA -->
         <div class="flex justify-center pb-4">
-          <button type="button" :class="ctaClass" @click="createProposal">
+          <button type="button" :class="ctaButtonClass" @click="createProposal">
             <AppIcon :path="mdiPlus" :size="18" />
             {{ t('gallery.cta.create') }}
           </button>
