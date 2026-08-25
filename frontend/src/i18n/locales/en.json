@@ -9,6 +9,8 @@
     "searchPlaceholder": "Search stops…",
     "addStop": "Add Stop",
     "noStopsFound": "No stops found",
+    "trackGauge": "Track gauge",
+    "gaugeUnknown": "gauge unknown",
     "minStopsTooltip": "Two stops per route minimum.",
     "loading": "Fetching data…",
     "saved": "Proposal was saved.",

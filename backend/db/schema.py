@@ -54,6 +54,13 @@ class Table:
     indexes: tuple[str, ...] = ()
 
 
+# Member-organisation languages of the localized stop-catalog columns —
+# one entry per language, mirrored by the stop classification pipeline
+# (models/infrastructure/stops, step 7 LANGS) and by the API serializer.
+# Extending the catalog to another language starts here and in the pipeline.
+STOP_NAME_LANGS = ("en", "de", "fr", "nl", "it", "es", "pl")
+
+
 def _src(name: str, of: str) -> Column:
     """Source-reference column — every parameter table links its values
     to the sources registry so each number stays traceable."""
@@ -1427,6 +1434,81 @@ INPUT_PARAMS_TABLES: tuple[Table, ...] = (
                 "€/stop",
             ),
             _src("stop_charge_src", "the station fee"),
+            Column(
+                "stop_provenance",
+                "VARCHAR(60) NOT NULL",
+                "Why the stop is in the catalog, as a human-readable "
+                "category (step 10 PROVENANCE_LABELS: 'existing night train "
+                "stop', 'urban area currently without night train service', "
+                "...). The detailed per-stop reasons stay in the pipeline's "
+                "step 6 notebook.",
+            ),
+            Column(
+                "name_latin",
+                "VARCHAR(120) NOT NULL",
+                "Latin-script form of the station name (transliterated where "
+                "the original is Cyrillic/Greek, otherwise the name itself).",
+            ),
+            Column(
+                "name_ascii",
+                "VARCHAR(120) NOT NULL",
+                "ASCII fold of name_latin — the diacritic-free search form.",
+            ),
+            Column(
+                "uic_ref",
+                "VARCHAR(12)",
+                "UIC station code from OSM, where tagged. Join key for "
+                "station-charge tariff documents.",
+            ),
+            *(
+                Column(
+                    f"country_{lang}",
+                    "VARCHAR(60) NOT NULL",
+                    f"Country name in '{lang}' (ISO 3166 translation "
+                    "catalogs via the pipeline).",
+                )
+                for lang in STOP_NAME_LANGS
+            ),
+            Column(
+                "city",
+                "VARCHAR(120)",
+                "Municipality the stop belongs to (Berlin Gesundbrunnen -> "
+                "Berlin), resolved geographically against OSM place nodes. "
+                "Empty for rural halts beyond any city/town radius.",
+            ),
+            Column(
+                "city_osm_id",
+                "BIGINT",
+                "OSM node id of the resolved place — the stable key behind "
+                "the localized city names.",
+            ),
+            *(
+                Column(
+                    f"city_{lang}",
+                    "VARCHAR(120)",
+                    f"City name in '{lang}' from the place node's own "
+                    "name:* tags (exonyms as curated in OSM — an Italian "
+                    "search for 'Monaco' reaches München's stops here).",
+                )
+                for lang in STOP_NAME_LANGS
+            ),
+            Column(
+                "gauges_mm",
+                "INTEGER[]",
+                "Night-train-capable track gauges at the stop (railway=rail, "
+                ">= 1435 mm; trams/Stadtbahn/narrow gauge are excluded by "
+                "the pipeline). Several values at break-of-gauge stations "
+                "(Kaunas 1435+1520). NULL = no usable tracks found nearby.",
+                "mm",
+            ),
+            Column(
+                "gauge_evidence",
+                "VARCHAR(20) CHECK (gauge_evidence IN ('tagged', "
+                "'untagged_tracks', 'narrow_gauge_only', 'no_tracks_nearby'))",
+                "How the gauge set was established from OSM: tagged tracks, "
+                "rail present but untagged, only sub-1435 rail nearby "
+                "(review flag), or no rail within the search radius.",
+            ),
             _CHANGE_LOG,
             Column(
                 "stop_infra_version",

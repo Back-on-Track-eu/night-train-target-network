@@ -245,9 +245,13 @@ def load_enrichment() -> tuple[list[str], dict[str, dict]]:
         reader = csv.DictReader(fh)
         # stop_id is the join key; stop_name is not appended as an extra
         # column but its value wins over the layer name below — step 7 owns
-        # display naming (bilingual primaries, qualifier strips).
+        # display naming (bilingual primaries, qualifier strips). country_code
+        # is already a seed contract column, so step 7's copy is dropped too —
+        # a duplicate header would break seed.py's exact-header validation.
         enrich_fields = [
-            f for f in (reader.fieldnames or []) if f not in ("stop_id", "stop_name")
+            f
+            for f in (reader.fieldnames or [])
+            if f not in ("stop_id", "stop_name", "country_code")
         ]
         rows = {row["stop_id"]: row for row in reader}
 

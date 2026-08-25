@@ -76,7 +76,7 @@ load_dotenv()
 from sql_loader import load_sql
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from db.schema import build_ddl
+from db.schema import STOP_NAME_LANGS, build_ddl
 
 DB_HOST = os.environ["POSTGRES_HOST"]
 DB_PORT = os.environ["POSTGRES_PORT"]
@@ -1512,9 +1512,12 @@ STOP_SEED_FILE_ID = os.environ.get(
     "STOP_SEED_FILE_ID", "1QfkYrX5Fc5N0JqFLx5FWEaaZ6z0YCM6c"
 )
 
-# Contract with step10_export_seed_stops.py's SEED_COLUMNS — also the
+# Contract with step10_export_seed_stops.py's output columns — also the
 # validation gate for downloads (a Drive permission error returns an HTML
-# page, which must not be seeded or cached as if it were the CSV).
+# page, which must not be seeded or cached as if it were the CSV). Exact
+# match, full width: catalog and seed move in lockstep, and every column
+# is consumed (the interim prefix check from the schema transition is
+# retired).
 _STOP_SEED_CSV_COLUMNS = [
     "stop_id",
     "stop_name",
@@ -1523,11 +1526,21 @@ _STOP_SEED_CSV_COLUMNS = [
     "stop_lat",
     "stop_lon",
     "stop_charge_eur",
+    "provenance",
+    "name_latin",
+    "name_ascii",
+    "uic_ref",
+    *(f"country_{lang}" for lang in STOP_NAME_LANGS),
+    "city",
+    "city_osm_id",
+    *(f"city_{lang}" for lang in STOP_NAME_LANGS),
+    "gauges",
+    "gauge_source",
 ]
 
 _STOP_SEED_CHANGE_LOG = (
     "seeded from the stop classification pipeline "
-    "(models/infrastructure/stops, step 7) — charge resolves via country/"
+    "(models/infrastructure/stops, step 10) — charge resolves via country/"
     "global default until real station charge data lands"
 )
 
@@ -1570,10 +1583,7 @@ def _download_stop_seed() -> bool:
         return False
 
     header = csv.DictReader(io.StringIO(text)).fieldnames
-    # Prefix check, not equality: the catalog carries enrichment columns
-    # (names, cities, languages, gauges) ahead of the schema migration that
-    # will consume them — the seed reads the leading contract columns only.
-    if (header or [])[: len(_STOP_SEED_CSV_COLUMNS)] != _STOP_SEED_CSV_COLUMNS:
+    if header != _STOP_SEED_CSV_COLUMNS:
         _stop_seed_warning(
             f"downloaded content is not the expected CSV (header {header!r} — "
             "wrong file id, or the Drive file is not shared publicly)"
@@ -1592,14 +1602,42 @@ def _parse_optional_float(value):
     return float(text) if text else None
 
 
+def _parse_optional_str(value):
+    text = (value or "").strip()
+    return text or None
+
+
+def _parse_gauges(value, stop_id):
+    """';'-separated gauge list -> Postgres INTEGER[] literal ('{1435,1520}'),
+    or None when the pipeline found no usable tracks. A literal string, not a
+    Python list, deliberately: insert_rows() JSON-dumps every list value (the
+    JSONB convention the proposal tables rely on), which would send '[1435]'
+    — not valid array syntax. A str passes through untouched and Postgres
+    casts it against the column type; reads come back as real lists either
+    way. Non-numeric leftovers (OSM words like 'broad' that step 8 keeps
+    visible rather than guessing) are dropped with a warning — a word cannot
+    be compared against a composition's gauge capability."""
+    text = (value or "").strip()
+    if not text:
+        return None
+    gauges = []
+    for part in text.split(";"):
+        part = part.strip()
+        if part.isdigit():
+            gauges.append(int(part))
+        elif part:
+            print(f"  {stop_id}: non-numeric gauge {part!r} dropped from seed.")
+    if not gauges:
+        return None
+    return "{" + ",".join(str(g) for g in sorted(gauges)) + "}"
+
+
 def _read_stop_seed() -> list[dict]:
     if not STOP_SEED_CSV.is_file() and not _download_stop_seed():
         return []
     with open(STOP_SEED_CSV, newline="", encoding="utf-8-sig") as fh:
         reader = csv.DictReader(fh)
-        if (reader.fieldnames or [])[
-            : len(_STOP_SEED_CSV_COLUMNS)
-        ] != _STOP_SEED_CSV_COLUMNS:
+        if reader.fieldnames != _STOP_SEED_CSV_COLUMNS:
             _stop_seed_warning(
                 f"local {STOP_SEED_CSV.name} has unexpected header "
                 f"{reader.fieldnames!r}"
@@ -1635,6 +1673,24 @@ def _read_stop_seed() -> list[dict]:
             # country/global default. Only stops listed in the pipeline's
             # tracked station_charges.csv carry a figure.
             "stop_charge_eur": _parse_optional_float(row["stop_charge_eur"]),
+            "stop_provenance": row["provenance"],
+            "name_latin": row["name_latin"],
+            "name_ascii": row["name_ascii"],
+            "uic_ref": _parse_optional_str(row["uic_ref"]),
+            **{f"country_{lang}": row[f"country_{lang}"] for lang in STOP_NAME_LANGS},
+            # City is empty for rural halts beyond any city/town radius; the
+            # localized names are then empty with it.
+            "city": _parse_optional_str(row["city"]),
+            "city_osm_id": (
+                int(row["city_osm_id"]) if row["city_osm_id"].strip() else None
+            ),
+            **{
+                f"city_{lang}": _parse_optional_str(row[f"city_{lang}"])
+                for lang in STOP_NAME_LANGS
+            },
+            # Array literal string (see _parse_gauges); None stays NULL.
+            "gauges_mm": _parse_gauges(row["gauges"], row["stop_id"]),
+            "gauge_evidence": _parse_optional_str(row["gauge_source"]),
             "change_log": _STOP_SEED_CHANGE_LOG,
         }
         for row in catalog

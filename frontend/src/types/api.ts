@@ -1,3 +1,13 @@
+/** Localized names keyed by language code (en/de/fr/nl/it/es/pl —
+ *  backend db/schema.py STOP_NAME_LANGS). */
+export type LocalizedNames = Record<string, string>
+
+export interface StopCity {
+  name: string
+  osm_id: number | null
+  names: LocalizedNames
+}
+
 export interface Stop {
   stop_id: string
   name: string
@@ -5,6 +15,17 @@ export interface Stop {
   lat: number
   lon: number
   stop_charge_eur: { value: number; is_default: boolean }
+  /** Catalog provenance category, e.g. "existing night train stop". */
+  provenance: string
+  name_latin: string
+  name_ascii: string
+  uic_ref: string | null
+  /** null for rural halts beyond any city/town radius. */
+  city: StopCity | null
+  country_names: LocalizedNames
+  /** Night-train-capable gauges (>= 1435 mm); null = unknown. */
+  gauges_mm: number[] | null
+  gauge_evidence: string | null
 }
 
 export interface Composition {
@@ -308,12 +329,21 @@ export interface TrackInfraParam {
   energy_price_eur_kwh: ParamField
 }
 
-/** stops[] — one per stop. */
+/** stops[] — one per stop. Enrichment fields are plain values (no
+ *  ParamField wrapper — nothing resolves against defaults). */
 export interface StopInfraParam {
   stop_id: string
   name: string
   country_code: string
   stop_charge_eur: ParamField
+  provenance: string
+  name_latin: string
+  name_ascii: string
+  uic_ref: string | null
+  city: StopCity | null
+  country_names: LocalizedNames
+  gauges_mm: number[] | null
+  gauge_evidence: string | null
 }
 
 /** compositions[] — composition-level rates are plain numbers (sourced at the

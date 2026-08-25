@@ -121,6 +121,25 @@ def stop_infra_to_dict(stop_infra: StopInfraCollection) -> dict:
             "stop_charge_eur": _field(
                 s.stop_id, "stop_charge_eur", float(s.stop_charge_eur)
             ),
+            # Catalog enrichment — plain values (no default resolution, so
+            # no _field() provenance wrapper; the snapshot version applies
+            # to all of them uniformly).
+            "provenance": s.provenance,
+            "name_latin": s.name_latin,
+            "name_ascii": s.name_ascii,
+            "uic_ref": s.uic_ref,
+            "city": (
+                {
+                    "name": s.city,
+                    "osm_id": s.city_osm_id,
+                    "names": s.city_names,
+                }
+                if s.city
+                else None
+            ),
+            "country_names": s.country_names,
+            "gauges_mm": s.gauges_mm,
+            "gauge_evidence": s.gauge_evidence,
         }
         for s in stop_infra.all().values()
     ]
