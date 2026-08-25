@@ -118,9 +118,19 @@ def stop_infra_to_dict(stop_infra: StopInfraCollection) -> dict:
             "country_code": s.stop_country_code,
             "lat": float(s.lat),  # location — always present, no default
             "lon": float(s.lon),  # location — always present, no default
-            "stop_charge_eur": _field(
-                s.stop_id, "stop_charge_eur", float(s.stop_charge_eur)
-            ),
+            # Everything about the charge in one object: the resolved value
+            # and its default flag as before, plus where the figure came from.
+            # The provenance keys are absent-as-None for a stop resolving
+            # through a default — there is no document behind a default.
+            "stop_charge_eur": {
+                **_field(s.stop_id, "stop_charge_eur", float(s.stop_charge_eur)),
+                "vat_rate_per": s.stop_charge_vat_rate_per,
+                "incl_vat_eur": s.stop_charge_incl_vat_eur,
+                "basis": s.stop_charge_basis,
+                "price_basis_year": s.stop_charge_price_basis_year,
+                "tariff_class": s.stop_charge_class,
+                "source": s.stop_charge_source,
+            },
             # Catalog enrichment — plain values (no default resolution, so
             # no _field() provenance wrapper; the snapshot version applies
             # to all of them uniformly).

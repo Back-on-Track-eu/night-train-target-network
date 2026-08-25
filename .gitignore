@@ -126,7 +126,9 @@ backend/models/demand/calib/out/
 # tariff PDFs and spreadsheets — third-party documents that are not ours to
 # redistribute. 01_source_extraction.ipynb registers them by filename and
 # creates the directory, so a clone without them still runs.
-backend/models/infrastructure/stops/charges/sources/
+backend/models/infrastructure/stops/charges/sources/*
+!backend/models/infrastructure/stops/charges/sources/*.csv
+!backend/models/infrastructure/stops/charges/sources/TEMPLATE.md
 
 # Downloaded from Drive when absent (ONTD stop catalog, country geometries)
 backend/db/dev/data/*.csv

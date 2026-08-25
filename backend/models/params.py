@@ -1521,6 +1521,16 @@ class StopInfrastructure:
 
     stop_charge_eur: float
 
+    # The charge's provenance, carried beside the figure: which document it
+    # came from, what it is per, and the VAT it excludes. A published number
+    # that cannot say where it came from is barely better than no number.
+    stop_charge_vat_rate_per: float | None = None
+    stop_charge_incl_vat_eur: float | None = None
+    stop_charge_basis: str | None = None
+    stop_charge_price_basis_year: int | None = None
+    stop_charge_class: str | None = None
+    stop_charge_source: str | None = None
+
     # Catalog enrichment (stop classification pipeline steps 7/8) — plain
     # values with no default resolution: nothing here falls back to
     # stop_infrastructure_defaults, so none of it appears in param_versions

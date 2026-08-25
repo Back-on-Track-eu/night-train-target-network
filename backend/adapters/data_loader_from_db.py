@@ -1860,6 +1860,11 @@ class DBDataLoader:
         if charge_is_default:
             charge_src = default.stop_charge_src
 
+        def _opt_f(value):
+            """NUMERIC columns arrive as Decimal or None; the domain wants
+            float or None."""
+            return None if value is None else float(value)
+
         # Localized columns fold into language-keyed dicts here, so nothing
         # downstream ever touches a column suffix. City names exist only
         # where a city was resolved; the dict is empty otherwise, not
@@ -1878,6 +1883,12 @@ class DBDataLoader:
             lat=_f(row["stop_lat"]),
             lon=_f(row["stop_lon"]),
             stop_charge_eur=charge,
+            stop_charge_vat_rate_per=_opt_f(row.get("stop_charge_vat_rate_per")),
+            stop_charge_incl_vat_eur=_opt_f(row.get("stop_charge_incl_vat_eur")),
+            stop_charge_basis=row.get("stop_charge_basis"),
+            stop_charge_price_basis_year=row.get("stop_charge_price_basis_year"),
+            stop_charge_class=row.get("stop_charge_class"),
+            stop_charge_source=row.get("stop_charge_source"),
             provenance=row.get("stop_provenance") or "",
             name_latin=row.get("name_latin") or "",
             name_ascii=row.get("name_ascii") or "",

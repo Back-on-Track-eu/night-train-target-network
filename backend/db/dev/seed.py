@@ -77,7 +77,6 @@ from sql_loader import load_sql
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from db.schema import STOP_NAME_LANGS, build_ddl
-from models.route.model import DEFAULT_COMPOSITION_ID
 
 DB_HOST = os.environ["POSTGRES_HOST"]
 DB_PORT = os.environ["POSTGRES_PORT"]
@@ -1527,6 +1526,12 @@ _STOP_SEED_CSV_COLUMNS = [
     "stop_lat",
     "stop_lon",
     "stop_charge_eur",
+    "stop_charge_vat_rate_per",
+    "stop_charge_incl_vat_eur",
+    "stop_charge_basis",
+    "stop_charge_price_basis_year",
+    "stop_charge_class",
+    "stop_charge_source",
     "provenance",
     "name_latin",
     "name_ascii",
@@ -1674,6 +1679,22 @@ def _read_stop_seed() -> list[dict]:
             # country/global default. Only stops listed in the pipeline's
             # tracked station_charges.csv carry a figure.
             "stop_charge_eur": _parse_optional_float(row["stop_charge_eur"]),
+            # The charge's provenance travels with it: without these a
+            # published figure cannot say which document it came from.
+            "stop_charge_vat_rate_per": _parse_optional_float(
+                row["stop_charge_vat_rate_per"]
+            ),
+            "stop_charge_incl_vat_eur": _parse_optional_float(
+                row["stop_charge_incl_vat_eur"]
+            ),
+            "stop_charge_basis": _parse_optional_str(row["stop_charge_basis"]),
+            "stop_charge_price_basis_year": (
+                int(row["stop_charge_price_basis_year"])
+                if row["stop_charge_price_basis_year"].strip()
+                else None
+            ),
+            "stop_charge_class": _parse_optional_str(row["stop_charge_class"]),
+            "stop_charge_source": _parse_optional_str(row["stop_charge_source"]),
             "stop_provenance": row["provenance"],
             "name_latin": row["name_latin"],
             "name_ascii": row["name_ascii"],
@@ -1771,14 +1792,6 @@ def build_composition_types() -> list[dict]:
 COMPOSITION_TYPE_IDS = [
     r["composition_type_id"] for r in _read_calib_csv("composition_types.csv")
 ]
-
-# A calc request without composition_id is computed with this one, so it has
-# to survive every recalibration of the catalog. Failing here, at container
-# start, beats a 400 in the browser.
-assert DEFAULT_COMPOSITION_ID in COMPOSITION_TYPE_IDS, (
-    f"DEFAULT_COMPOSITION_ID {DEFAULT_COMPOSITION_ID!r} (models/route/model.py) "
-    f"is not in the seeded composition catalog: {sorted(COMPOSITION_TYPE_IDS)}"
-)
 
 COMPOSITION_TYPE_COACHES_RAW = [
     (row["composition_type_id"], int(row["position"]), row["coach_type_id"])

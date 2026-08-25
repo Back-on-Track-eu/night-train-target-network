@@ -1435,6 +1435,45 @@ INPUT_PARAMS_TABLES: tuple[Table, ...] = (
             ),
             _src("stop_charge_src", "the station fee"),
             Column(
+                "stop_charge_vat_rate_per",
+                "NUMERIC(5,2)",
+                "VAT rate applying to the station charge, as a percentage "
+                "(19.00 = 19%). NULL where no charge is calibrated.",
+                "%",
+            ),
+            Column(
+                "stop_charge_incl_vat_eur",
+                "NUMERIC(10,2)",
+                "The station charge including VAT. The model prices from the "
+                "net stop_charge_eur; this is carried so both figures can be "
+                "compared against whichever one the tariff document printed.",
+                "EUR",
+            ),
+            Column(
+                "stop_charge_basis",
+                "VARCHAR(30)",
+                "What the charge is per — 'per_call' unless a country's "
+                "tariff genuinely differs.",
+            ),
+            Column(
+                "stop_charge_price_basis_year",
+                "SMALLINT",
+                "The year the published figure applies to, before any escalation.",
+            ),
+            Column(
+                "stop_charge_class",
+                "VARCHAR(60)",
+                "The country's own category for the station ('Preisklasse 2'), "
+                "which is why two stations in one country differ.",
+            ),
+            Column(
+                "stop_charge_source",
+                "VARCHAR(40)",
+                "source_id of the tariff document the charge was read from, "
+                "in the charge pipeline's own register "
+                "(models/infrastructure/stops/charges/01_source_extraction).",
+            ),
+            Column(
                 "stop_provenance",
                 "VARCHAR(60) NOT NULL",
                 "Why the stop is in the catalog, as a human-readable "
