@@ -59,6 +59,13 @@ def published(api_base, script_headers, computed):
 
 _EXISTING_ROUTE_IDS = ["TEST-GALLERY-E1", "TEST-GALLERY-E2"]
 
+# The corridor each fake route contributes, direction-collapsed the way
+# step 6a stores them and map_lines keys them (stop_a < stop_b). Since
+# the contributing id lists left the response, the stop pair is how a
+# corridor is identified.
+_E1_CORRIDOR = ("osm:n3856100103", "osm:w423692233")
+_E2_CORRIDOR = ("FR_PARIS_AUSTERLITZ", "FR_TOULOUSE_MATABIAU")
+
 
 @pytest.fixture(scope="module")
 def existing_routes(db_conn):
@@ -69,7 +76,10 @@ def existing_routes(db_conn):
     corridor/stop merging is observable; E2 is disjoint (FR). Committed
     (the API reads through its own connection) and deleted on teardown —
     same lifecycle pattern as purge_saved_proposals. geom_simplified is
-    a real PostGIS geometry, matching the proposal projection's type."""
+    a real PostGIS geometry, matching the proposal projection's type.
+    Corridor rows are written direction-collapsed (stop_a < stop_b) like
+    db/ontd/projection.py writes them — map_lines applies LEAST/GREATEST
+    only on the proposal branch and trusts this invariant here."""
     with db_conn.cursor() as cur:
         cur.execute(
             """
@@ -98,7 +108,7 @@ def existing_routes(db_conn):
             """
             INSERT INTO ontd.route_corridors (route_id, stop_a, stop_b, geometry)
             VALUES
-            (%s, 'osm:w423692233', 'osm:n3856100103',
+            (%s, 'osm:n3856100103', 'osm:w423692233',
              '{"type":"LineString","coordinates":[[13.37,52.52],[16.37,48.19]]}'::jsonb),
             (%s, 'FR_PARIS_AUSTERLITZ', 'FR_TOULOUSE_MATABIAU',
              '{"type":"LineString","coordinates":[[2.36,48.84],[1.45,43.61]]}'::jsonb)
@@ -407,32 +417,32 @@ class TestSourceUnion:
         endpoints AND fake existing route E1 — but a proposal's segments
         run between consecutive stops (incl. auto-added ones), so the
         merge assertion targets the count invariants on every feature
-        and E1's corridor being present with its existing_count."""
+        and E1's corridor being present with its existing_count.
+
+        Corridors are addressed by their stop pair: the contributing id
+        lists left the response (see
+        test_map_lines_omits_contributing_id_lists), so `existing_routes`
+        is a fixture dependency rather than something read back here."""
         body = _gallery(api_base, include=["map_lines"])
         features = body["map_lines"]["features"]
         assert features
+        corridors = {}
         for f in features:
             props = f["properties"]
             assert (
                 props["total_count"]
                 == props["proposal_count"] + props["existing_count"]
             )
-            assert len(props["proposal_ids"]) == props["proposal_count"]
-            assert len(props["existing_route_ids"]) == props["existing_count"]
-        e1_features = [
-            f
-            for f in features
-            if existing_routes[0] in f["properties"]["existing_route_ids"]
-        ]
-        assert len(e1_features) == 1
-        assert e1_features[0]["properties"]["existing_count"] >= 1
-        # Existing-only corridors carry no margin.
-        fr = [
-            f
-            for f in features
-            if existing_routes[1] in f["properties"]["existing_route_ids"]
-        ]
-        assert fr and fr[0]["properties"]["avg_margin_eur_per_train_km"] is None
+            corridors[(props["stop_a"], props["stop_b"])] = props
+        # Both sources reach the merged set: E1's corridor from the
+        # existing side, `published`'s legs from the proposal side.
+        assert corridors[_E1_CORRIDOR]["existing_count"] >= 1
+        assert any(props["proposal_count"] >= 1 for props in corridors.values())
+        # Existing-only corridors carry no margin — E2's stop ids are
+        # fixture-local, so no proposal can reach that pair.
+        fr = corridors[_E2_CORRIDOR]
+        assert fr["existing_count"] == 1 and fr["proposal_count"] == 0
+        assert fr["avg_margin_eur_per_train_km"] is None
 
     def test_map_stop_counts_triple(self, api_base, existing_routes, published):
         body = _gallery(api_base, include=["map_stop_counts"])
