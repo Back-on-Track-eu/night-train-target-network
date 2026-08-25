@@ -102,12 +102,15 @@ Shared code:
 | `test_historical_scenario_pins_version_1` | Historical lineage owns its own snapshot | 2026-baseline vs base rows | all four table versions = 1, differ from base |
 | `test_hsr_scenario_pins_version_3` | HSR lineage owns its own snapshot | HSR-allowed vs base rows | all four table versions = 3, differ from base |
 | `test_stop_infrastructure_values_unchanged_by_hsr_scenario` | Stop charges independent of HSR policy | `stop_infrastructures` at base vs HSR version | identical values despite different version numbers |
+| `test_stop_enrichment_seeded` | The catalog's enrichment reaches the DB, not just the CSV | seeded stops at version 1 | provenance from the known vocabulary; localized country names on every stop; ≥95% carry a city; ≥90% carry gauges; **no gauge below 1435 mm** |
+| `test_stop_gauge_break_of_gauge` | Multi-gauge stops survive as sets | Kaunas | `[1435, 1520]` — standard plus Russian gauge |
 
 ## test_03_loader.py — DBDataLoader correctness
 
 | Test | Purpose | Input | Expected |
 |---|---|---|---|
 | `test_column_exists_in_schema` (parametrized ×50) | SQL schema contains every column the loader reads (static, no live DB round-trip) | parsed `db/dev/sql/*.sql` | every (table, column) pair present |
+| `test_stop_enrichment_surfaces` | Suffixed language columns arrive folded into language-keyed dicts | Berlin Hbf; every cityless stop | `country_names["it"] == "Germania"`, `city_names["it"] == "Berlino"`, gauges `[1435]`; a rural halt yields `{}` not null-valued keys |
 | `test_all_compositions_load` | Full composition load succeeds | `build_all_compositions()` | exactly the 8 calibrated compositions |
 | `test_all_stops_load` | Full stop load succeeds | `build_all_stops()` | ≥ 8 stops |
 | `test_composition_fields_match_db` | Loader values = raw DB values (incl. operator join) | STD-7.1 vs DB row | id/speed/hsr/driver-cost/ebit all match |
@@ -142,9 +145,11 @@ Shared code:
 | Test | Purpose | Input | Expected |
 |---|---|---|---|
 | `TestStopInfrastructures::test_response_layout` | Top-level shape | GET StopInfrastructures | descriptions/sources/default_stops/count/stops; count = len(stops) |
-| `TestStopInfrastructures::test_stops_have_required_fields` | Per-stop fields | all stops | id/name/country/lat/lon/charge present |
+| `TestStopInfrastructures::test_stops_have_required_fields` | Per-stop fields | all stops | id/name/country/lat/lon/charge plus the enrichment block (provenance, latin/ascii names, uic_ref, city, country_names, gauges) |
 | `TestStopInfrastructures::test_stop_charge_is_field_object` | Field-object contract | all stops | `{value, is_default, version, source_id}` |
-| `TestStopInfrastructures::test_is_default_flags_via_api` | Provenance survives serialization | osm:n25948183 / osm:n3856100103 | True / False respectively |
+| `TestStopInfrastructures::test_stop_enrichment_shapes` | Nested shapes hold both ways | all stops | `country_names` has all seven languages; `city` is a `{name, osm_id, names}` object or `null`, never a bare string; `gauges_mm` is ints ≥1435 or `null`; both the city and no-city cases occur |
+| `TestStopInfrastructures::test_multilingual_search_case` | The reason the columns exist | München Hbf | `city.names.it == "Monaco di Baviera"` |
+| `TestStopInfrastructures::test_is_default_flags_via_api` | Charge provenance survives serialization | osm:n25948183; any stop with its own charge | defaulted stop `True` and equal to `default_stops.global`; explicit stop `False`. **Skips** while no charge is calibrated — a data gap, not an API regression |
 | `TestStopInfrastructures::test_global_default_present` | Default row exposed | `default_stops.global` | present, charge > 0 |
 | `TestStopInfrastructures::test_source_ids_resolve` | Source dedup integrity | field `source_id`s | every id resolves in `sources` map |
 | `TestTrackInfrastructures::test_response_layout` | Top-level shape | GET TrackInfrastructures | descriptions/sources/default_track_infra/count/entries |
@@ -347,6 +352,16 @@ the pre-storage floating-point value.
 | `TestCacheHitFlag::test_is_bool` | Flag shape (semantics live in `test_39`) | calc response | `cache_hit` is a bool |
 | `TestSummaryRow::*` | Every non-identity summary column present, metrics plausible, KPIs match the evaluation views, demand KPIs flagged placeholder, valid simplified MultiLineString | calc response | see file |
 | `TestSummaryRowSchemaConformance::test_row_inserts_cleanly` | Row shape matches `proposal_summaries` DDL | direct INSERT | insert succeeds (rolled back) |
+
+## test_38_ontd_stop_mapping.py — ONTD ↔ catalog stop bridge
+
+| Test | Purpose | Input | Expected |
+|---|---|---|---|
+| `TestTransliterate::test_folding` (parametrized) | One Latin id namespace for Latin, Cyrillic and Greek names | station names | folded id per the curated convention (Ü→UE, ø→OE, …) |
+| `TestTransliterate::test_idempotent` | Folding an id again changes nothing | folded name | unchanged |
+| `TestMintId::test_shape` / `test_folds_the_name_the_same_way_everywhere` | Legacy `{CC}_{NAME}` convention | country + name | `DE_BERLIN_HBF`, `CH_ZUERICH_HB`, … |
+| `TestDistance::test_known_pair` / `test_station_scale` | The matcher's metric | known coordinate pairs | correct metres; station-scale distances inside `MATCH_RADIUS_M`, city-scale outside |
+| `TestMappingTargetsCurrent::test_no_mapping_targets_removed_stops` | Mappings never point at stops the catalog dropped | `ontd.stop_mappings` vs the base snapshot | empty. Automatic rows self-heal on re-projection (the bootstrap detects the drift and re-runs step 3); manual/verified rows are never auto-overwritten, so those must be re-pointed or un-verified by hand |
 
 ## test_39_compute_cache.py — The §2.3 compute cache (WP13)
 
