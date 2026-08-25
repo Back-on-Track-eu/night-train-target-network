@@ -97,12 +97,23 @@ backend/models/infrastructure/facility/calib/data/
 backend/models/infrastructure/route_context/calib/data/
 backend/models/infrastructure/stops/charges/data/
 
+backend/models/energy/calib/data/
+
 # Seed CSVs — regenerated from the calibration notebooks at seed time
 backend/models/compositions/calib/seed/
 backend/models/infrastructure/tac/calib/seed/
 backend/models/infrastructure/energy_pricing/calib/seed/
 backend/models/infrastructure/facility/calib/seed/
 backend/models/infrastructure/route_context/calib/seed/
+backend/models/energy/calib/seed/
+
+# Demand model bulk inputs and derived artifacts. calib/raw/ holds third-party
+# downloads (ETISplus OD, census and GHS-POP grids) fetched from their sources;
+# calib/out/ holds everything the ETL notebooks derive from them. Tens of GB
+# between them, all reproducible. The notebooks in calib/exploration/ and
+# calib/etl/ that produce them stay tracked, as does docu/.
+backend/models/demand/calib/raw/
+backend/models/demand/calib/out/
 
 # NOT ignored, deliberately: route_context/calib/sources/. It holds an
 # extraction from a live database (ONTD timetables against router passage
