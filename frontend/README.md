@@ -80,6 +80,9 @@ frontend/
     ├── stores/
     │   └── store.ts         # Pinia store
     ├── lib/
+    │   ├── apiClient.ts       # One classified HTTP boundary for every backend call
+    │   ├── apiError.ts        # Failure classification shared by every consumer
+    │   ├── compositionFormation.ts  # Composition → drawable formation; class colours/glyphs
     │   ├── costFactorRates.ts  # Cost factor → per-unit-rate resolution (popover)
     │   ├── ctaButtonClass.ts   # Shared "Suggest a new route" pill styling
     │   ├── feedbackApi.ts      # Thin client for POST /api/feedback
@@ -87,16 +90,35 @@ frontend/
     ├── utils/
     │   └── octilinear.ts    # Octilinear map-line layout helpers
     └── components/
-        ├── AppIcon.vue               # Tree-shakeable @mdi/js icon wrapper
-        ├── CompositionPanel.vue      # Composition picker card
-        ├── EvaluationPanel.vue       # Cost/revenue evaluation cube explorer
-        ├── Gallery.vue               # Landing page: intro, search bar, result list + map
-        ├── LandingIntro.vue          # Landing pitch above the gallery (copy lives in en.json)
-        ├── MapView.vue               # MapLibre route/stop map
-        ├── ProposalViewport.vue      # Proposal build/evaluate workspace
-        ├── RouteSectionSlider.vue    # OD-range slider for the evaluation panel
-        └── StopSelect.vue            # Stop search/select control
+        ├── AppIcon.vue                    # Tree-shakeable @mdi/js icon wrapper
+        ├── CompositionDetailOverlay.vue   # Composition detail popover — facts + formation
+        ├── CompositionFormation.vue       # Formation drawing (Wagenstandsanzeiger)
+        ├── CompositionPanel.vue           # Composition of the computed route
+        ├── ComputeInputsPanel.vue         # Scenario + composition — the two recompute inputs
+        ├── EvaluationPanel.vue            # Cost/revenue evaluation cube explorer
+        ├── Gallery.vue                    # Landing page: intro, search bar, result list + map
+        ├── LandingIntro.vue               # Landing pitch above the gallery (copy lives in en.json)
+        ├── MapView.vue                    # MapLibre route/stop map
+        ├── ProposalViewport.vue           # Proposal build/evaluate workspace
+        ├── RouteSectionSlider.vue         # OD-range slider for the evaluation panel
+        └── StopSelect.vue                 # Stop search/select control
 ```
+
+Only the components above are listed; the tree is a map of the main pieces,
+not a complete file listing.
+
+**Recompute inputs.** The first evaluation posts no `composition_id` at all —
+the backend computes it with its standard composition (`DEFAULT_COMPOSITION_ID`,
+`backend/models/route/model.py`) and reports back which one that was. Scenario
+and composition therefore only appear once a route exists, together in
+`ComputeInputsPanel` above the results.
+
+Changing either does **not** recompute on the spot: `ProposalViewport` marks
+the results stale (`paramsStale`) and covers them with a recompute control, so
+the catalogue can be browsed without firing a calc per arrow click. Reverting
+to the selection the results were computed with clears the flag on its own. A
+diverged itinerary takes precedence — that is the Evaluate button's path,
+which also re-prompts for stop suggestions.
 
 ---
 

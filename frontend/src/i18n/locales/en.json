@@ -43,12 +43,12 @@
   "proposal": {
     "heading": "So, what's your \ndream night train route?",
     "evaluate": "Evaluate",
+    "recalculate": "Recalculate with this selection",
     "evaluating": "Evaluating your proposal…",
     "edit": "Edit",
     "cancelEdit": "Cancel Edit",
     "swapDirection": "Swap travel direction",
     "mapPlaceholder": "Map",
-    "trainCardPlaceholder": "Train info",
     "searchPlaceholder": "Search stops…",
     "addStop": "Add Stop",
     "noStopsFound": "No stops found",
@@ -167,6 +167,62 @@
     "frequency": {
       "daily": "Daily",
       "three_per_week": "3× per week"
+    },
+    "composition": {
+      "detailsAria": "Show composition details",
+      "previous": "Previous composition",
+      "next": "Next composition",
+      "formation": "Formation",
+      "loco": "Locomotive",
+      "coaches": "coaches",
+      "places": "places",
+      "hsrAllowed": "High-speed lines",
+      "serviceCoach": "Service coach — no places",
+      "coachHint": "Point at a coach to see its type data",
+      "coachPosition": "Coach {position} of {count}",
+      "moreDetails": "Crew, cost inputs and sources",
+      "sources": "Sources",
+      "strategy": {
+        "new": "New fleet",
+        "refurbished": "Refurbished fleet"
+      },
+      "equipment": {
+        "wifi": "Wi-Fi",
+        "bikes": "Bicycle spaces",
+        "aircon": "Air conditioning",
+        "plugs": "Power sockets"
+      },
+      "byClass": {
+        "title": "By class",
+        "places": "places",
+        "capacity": "capacity",
+        "cost": "cost"
+      },
+      "kpi": {
+        "title": "Indicative unit costs",
+        "perTrainKm": "Per train-km",
+        "perPlaceKm": "Per place-km",
+        "caption": "Bars compare with the dearest composition in the catalogue."
+      },
+      "sections": {
+        "crew": "Crew",
+        "cost": "Cost inputs"
+      },
+      "fields": {
+        "drivers": "Drivers",
+        "attendants": "Attendants, coaches",
+        "trainManager": "Train manager",
+        "crewTotal": "Attendants, total",
+        "staffRate": "Staff per hour",
+        "crewFactor": "crew",
+        "purchase": "Purchase, whole train",
+        "availability": "Availability",
+        "amortisation": "Write-off period",
+        "cleaning": "Cleaning per coach",
+        "maintenance": "Coach maintenance",
+        "densityLength": "Length per place",
+        "densityWeight": "Weight per place"
+      }
     },
     "map": {
       "travelTime": "Travel time",
