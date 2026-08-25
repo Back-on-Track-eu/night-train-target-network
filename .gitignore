@@ -54,6 +54,8 @@ dist/
 # Secrets
 # -----------------------------------------------------------------------------
 backend/docker/.env
+# Hand-made backups of the above — they carry the same JWT_SECRET.
+backend/docker/.env.bak*
 backend/db/dev/.env
 .devcontainer/.env
 deploy/**/.env

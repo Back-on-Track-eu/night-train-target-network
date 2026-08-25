@@ -17,17 +17,19 @@ import { readAuthCookie, writeAuthCookie, clearAuthCookie } from '@/lib/authCook
 import { readLocale, writeLocale, type Locale } from '@/lib/localeStorage'
 import { i18n } from '@/i18n'
 import type { GallerySearchSeed } from '@/lib/proposalPrefill'
+import { apiRequest } from '@/lib/apiClient'
+import { asApiFailure, type ApiFailure } from '@/lib/apiError'
 
 export type LoadStatus = 'idle' | 'loading' | 'success' | 'error'
 
-// Same-origin by default in production builds (set VITE_API_BASE_URL='' and
-// let the reverse proxy route /api/*); localhost fallback for bare local dev.
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5050'
-
 export const useStore = defineStore('store', () => {
+  // Reference data carries the classified ApiFailure rather than a string, so
+  // each consumer can choose its own copy (and offer Retry) instead of being
+  // handed a bare "HTTP 503" — or, worse, a JSON-parser message, which is what
+  // these used to produce for an empty-bodied 502 from the proxy.
   const stops = ref<Stop[]>([])
   const stopsStatus = ref<LoadStatus>('idle')
-  const stopsError = ref<string | null>(null)
+  const stopsFailure = ref<ApiFailure | null>(null)
 
   const compositions = ref<Composition[]>([])
   // Everything the same response carries alongside them — coach types,
@@ -41,14 +43,14 @@ export const useStore = defineStore('store', () => {
     sources: {},
   })
   const compositionsStatus = ref<LoadStatus>('idle')
-  const compositionsError = ref<string | null>(null)
+  const compositionsFailure = ref<ApiFailure | null>(null)
 
   // Base + current scenarios only (historical/superseded are hidden). The
   // selected id threads into the merged proposal/calc call so routing and cost
   // always reflect one scenario.
   const scenarios = ref<Scenario[]>([])
   const scenariosStatus = ref<LoadStatus>('idle')
-  const scenariosError = ref<string | null>(null)
+  const scenariosFailure = ref<ApiFailure | null>(null)
   const selectedScenarioId = ref<number | null>(null)
 
   // Gallery's search-bar state at the moment "Suggest a new route" was
@@ -57,6 +59,13 @@ export const useStore = defineStore('store', () => {
   // Set right before the router.push to 'proposal-builder'; read once by
   // ProposalViewport's searchSeed prop.
   const pendingProposalSeed = ref<GallerySearchSeed | null>(null)
+
+  // The gallery is kept alive across navigation (App.vue), so its loaded list
+  // survives a trip into a proposal and back — which also means a proposal
+  // published in between would be missing from it. Publishing sets this; the
+  // gallery refetches once on re-activation and clears it. Plain
+  // back-navigation leaves it false and issues no requests at all.
+  const galleryStale = ref(false)
 
   // --- Auth ----------------------------------------------------------------
   // Identity is tri-state and DERIVED from the token (see authChoice): the app
@@ -90,73 +99,59 @@ export const useStore = defineStore('store', () => {
 
   async function fetchStops(): Promise<void> {
     stopsStatus.value = 'loading'
-    stopsError.value = null
+    stopsFailure.value = null
     try {
-      const response = await fetch(`${BASE_URL}/api/params/StopInfrastructures`)
-      const json: StopsResponse = await response.json()
-      if (!response.ok) {
-        stopsStatus.value = 'error'
-        stopsError.value = `HTTP ${response.status}`
-      } else {
-        stops.value = json.stops
-        stopsStatus.value = 'success'
-        console.log('[stops]', json.stops)
-      }
+      const json = await apiRequest<StopsResponse>('/api/params/StopInfrastructures', {
+        budget: 'reference',
+      })
+      stops.value = json.stops
+      stopsStatus.value = 'success'
     } catch (err) {
       stopsStatus.value = 'error'
-      stopsError.value = err instanceof Error ? err.message : 'Unknown network error'
+      stopsFailure.value = asApiFailure(err)
     }
   }
 
   async function fetchCompositions(): Promise<void> {
     compositionsStatus.value = 'loading'
-    compositionsError.value = null
+    compositionsFailure.value = null
     try {
-      const response = await fetch(`${BASE_URL}/api/params/compositions`)
-      const json: CompositionsResponse = await response.json()
-      if (!response.ok) {
-        compositionsStatus.value = 'error'
-        compositionsError.value = `HTTP ${response.status}`
-      } else {
-        compositions.value = json.compositions
-        compositionCatalog.value = {
-          operators: json.operators,
-          classes: json.classes,
-          coach_types: json.coach_types,
-          descriptions: json.descriptions,
-          sources: json.sources,
-        }
-        compositionsStatus.value = 'success'
-        console.log('[compositions]', json.compositions)
+      const json = await apiRequest<CompositionsResponse>('/api/params/compositions', {
+        budget: 'reference',
+      })
+      compositions.value = json.compositions
+      compositionCatalog.value = {
+        operators: json.operators,
+        classes: json.classes,
+        coach_types: json.coach_types,
+        descriptions: json.descriptions,
+        sources: json.sources,
       }
+      compositionsStatus.value = 'success'
     } catch (err) {
       compositionsStatus.value = 'error'
-      compositionsError.value = err instanceof Error ? err.message : 'Unknown network error'
+      compositionsFailure.value = asApiFailure(err)
     }
   }
 
   async function fetchScenarios(): Promise<void> {
     scenariosStatus.value = 'loading'
-    scenariosError.value = null
+    scenariosFailure.value = null
     try {
-      const response = await fetch(`${BASE_URL}/api/scenarios`)
-      const json: ScenariosResponse = await response.json()
-      if (!response.ok) {
-        scenariosStatus.value = 'error'
-        scenariosError.value = `HTTP ${response.status}`
-      } else {
-        // Base first, then the other current what-if scenarios.
-        scenarios.value = [...json.current_base.scenarios, ...json.current_scenarios.scenarios]
-        selectedScenarioId.value =
-          scenarios.value.find((s) => s.is_current_base)?.scenario_id ??
-          scenarios.value[0]?.scenario_id ??
-          null
-        scenariosStatus.value = 'success'
-        console.log('[scenarios]', scenarios.value)
-      }
+      const json = await apiRequest<ScenariosResponse>('/api/scenarios', { budget: 'reference' })
+      // Base first, then the other current what-if scenarios.
+      scenarios.value = [...json.current_base.scenarios, ...json.current_scenarios.scenarios]
+      selectedScenarioId.value =
+        scenarios.value.find((s) => s.is_current_base)?.scenario_id ??
+        scenarios.value[0]?.scenario_id ??
+        null
+      scenariosStatus.value = 'success'
     } catch (err) {
       scenariosStatus.value = 'error'
-      scenariosError.value = err instanceof Error ? err.message : 'Unknown network error'
+      // Consumers MUST surface this: with no scenario loaded, selectedScenarioId
+      // stays null and the calc silently runs against the live base instead of
+      // the scenario the user thinks is selected. ComputeInputsPanel says so.
+      scenariosFailure.value = asApiFailure(err)
     }
   }
 
@@ -175,12 +170,15 @@ export const useStore = defineStore('store', () => {
     if (stored) setAuth(stored)
   }
 
-  // Explicit anonymous choice: mint a guest identity and remember it. Throws on
-  // failure so the modal can surface it.
+  // The three auth calls pass countsTowardOutage: false — a mistyped code or a
+  // rate-limited OTP request is the user's own flow, not evidence the backend is
+  // unwell, and must not arm the degraded banner.
+  const AUTH_OPTS = { method: 'POST', countsTowardOutage: false } as const
+
+  // Explicit anonymous choice: mint a guest identity and remember it. Throws an
+  // ApiError on failure so the modal can classify it.
   async function continueAsGuest(): Promise<void> {
-    const response = await fetch(`${BASE_URL}/api/auth/guest`, { method: 'POST' })
-    if (!response.ok) throw new Error(`guest session failed (HTTP ${response.status})`)
-    const json: GuestSessionResponse = await response.json()
+    const json = await apiRequest<GuestSessionResponse>('/api/auth/guest', AUTH_OPTS)
     const stored: StoredAuth = {
       token: json.token,
       is_guest: true,
@@ -197,23 +195,12 @@ export const useStore = defineStore('store', () => {
   // the field and resends. Any other non-2xx throws.
   async function requestCode(email: string): Promise<void> {
     console.debug('[auth] request-code → POST /api/auth/request-code', { email })
-    const response = await fetch(`${BASE_URL}/api/auth/request-code`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email }),
-    })
-    console.debug('[auth] request-code ←', response.status)
-    if (response.ok) {
-      console.debug(
-        '[auth] OTP accepted. If no email arrives, the backend is in AUTH_EMAIL_DEV_MODE — ' +
-          'the 6-digit code is logged in the backend-api container, not emailed. ' +
-          'See: docker compose -f .devcontainer/docker-compose.yml logs backend-api | grep OTP',
-      )
-      return
-    }
-    const json = await response.json().catch(() => ({}))
-    console.debug('[auth] request-code error body:', json)
-    throw new Error(json.message ?? `request failed (HTTP ${response.status})`)
+    await apiRequest('/api/auth/request-code', { ...AUTH_OPTS, body: { email } })
+    console.debug(
+      '[auth] OTP accepted. If no email arrives, the backend is in AUTH_EMAIL_DEV_MODE — ' +
+        'the 6-digit code is logged in the backend-api container, not emailed. ' +
+        'See: docker compose -f .devcontainer/docker-compose.yml logs backend-api | grep OTP',
+    )
   }
 
   // Verify the OTP -> JWT. Sends the CURRENT (guest) token so the backend merges
@@ -229,19 +216,11 @@ export const useStore = defineStore('store', () => {
       codeLength: code.length,
       hasUsername: !!usernameInput,
     })
-    const response = await fetch(`${BASE_URL}/api/auth/verify`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(
-        usernameInput ? { email, code, display_name: usernameInput } : { email, code },
-      ),
+    const json = await apiRequest<VerifyResponse | VerifyNeedsNameResponse>('/api/auth/verify', {
+      ...AUTH_OPTS,
+      headers: authHeaders(),
+      body: usernameInput ? { email, code, display_name: usernameInput } : { email, code },
     })
-    console.debug('[auth] verify ←', response.status)
-    const json = await response.json().catch(() => ({}))
-    if (!response.ok) {
-      console.debug('[auth] verify error body:', json)
-      throw new Error(json.message ?? `verification failed (HTTP ${response.status})`)
-    }
     // First-time registration: backend needs a display name before it issues
     // a token (code left unconsumed) — the caller shows the name step.
     if ((json as VerifyNeedsNameResponse).needs_display_name) {
@@ -301,16 +280,17 @@ export const useStore = defineStore('store', () => {
   return {
     stops,
     stopsStatus,
-    stopsError,
+    stopsFailure,
     compositions,
     compositionCatalog,
     compositionsStatus,
-    compositionsError,
+    compositionsFailure,
     scenarios,
     scenariosStatus,
-    scenariosError,
+    scenariosFailure,
     selectedScenarioId,
     pendingProposalSeed,
+    galleryStale,
     fetchStops,
     fetchCompositions,
     fetchScenarios,

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, computed, watch } from 'vue'
+import { onMounted, onBeforeUnmount, ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useStore } from '@/stores/store'
 import { useToastStore } from '@/stores/toastStore'
@@ -12,18 +12,30 @@ import type {
   Stop,
   SuggestedStop,
 } from '@/types/api'
-import { publishProposal, fetchProposalRoute, ProposalsError } from '@/lib/proposalsApi'
+import { publishProposal, fetchProposalRoute } from '@/lib/proposalsApi'
+import { apiRequest, createAbortSlot } from '@/lib/apiClient'
+import { ApiError, asApiFailure, isRetryable, type ApiFailure } from '@/lib/apiError'
+import { useApiFailure } from '@/composables/useApiFailure'
 import { resolvePrefillStops, type GallerySearchSeed } from '@/lib/proposalPrefill'
 import { readDraft, writeDraft, clearDraft } from '@/lib/proposalDraftStorage'
 import { useLocaleFormat } from '@/composables/useLocaleFormat'
+import { buildSuggestRows, settledRows, type SuggestRow } from '@/lib/suggestPlacement'
+import { formatClock, dayOffset } from '@/lib/tripClock'
+import { routeFacts } from '@/lib/shareLinks'
+import { provideProposalEngagement } from '@/composables/useProposalEngagement'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Skeleton from 'primevue/skeleton'
 import AppIcon from '@/components/AppIcon.vue'
+import AppSpinner from '@/components/AppSpinner.vue'
 import StopSelect from '@/components/StopSelect.vue'
 import ComputeInputsPanel from '@/components/ComputeInputsPanel.vue'
+import StopTime from '@/components/StopTime.vue'
+import LoadingFunFact from '@/components/LoadingFunFact.vue'
 import EvaluationPanel from '@/components/EvaluationPanel.vue'
 import MapView from '@/components/MapView.vue'
+import MapShareBar from '@/components/MapShareBar.vue'
+import CommentSection from '@/components/CommentSection.vue'
 import {
   mdiArrowLeft,
   mdiArrowLeftRight,
@@ -51,12 +63,27 @@ const { t, te } = useI18n()
 const { formatInt } = useLocaleFormat()
 const store = useStore()
 const toastStore = useToastStore()
-
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5050'
+const { describe, report } = useApiFailure()
 
 const currentMode = ref<'edit' | 'loading' | 'display' | 'suggest'>(props.mode)
 const selectedCompositionId = ref<string | null>(null)
-const evaluateError = ref<string | null>(null)
+
+// --- Calc state -----------------------------------------------------------
+// The calc is the one genuinely long call in the app (routing engine, one leg
+// at a time), so it reports progress rather than just spinning: 'slow' at 8s,
+// 'verySlow' at 30s, cancellable throughout.
+const calcPhase = ref<'idle' | 'working' | 'slow' | 'verySlow'>('idle')
+const calcFailure = ref<ApiFailure | null>(null)
+const calcFailureMsg = ref<string | null>(null)
+const calcSlot = createAbortSlot()
+// Arguments of the last calc, so Retry replays it rather than guessing.
+const lastCalcArgs = ref<{ stopIds: string[]; autoStopAddition: 'off' | 'suggest' } | null>(null)
+
+// Failure of loading a STORED proposal (/proposal/:id) — kept apart from the
+// calc's, because it must not fall through to the builder (see loadStored).
+const loadFailure = ref<ApiFailure | null>(null)
+const loadFailureMsg = ref<string | null>(null)
+const loadSlot = createAbortSlot()
 
 // Raw route as returned by POST /api/proposal/calc (before adaptRoute()) —
 // the map segment/highlight logic below reads it directly.
@@ -99,6 +126,20 @@ const publishedProposalId = ref<number | null>(null)
 const pendingPublish = ref(false)
 const saved = ref(false)
 const publishError = ref<string | null>(null)
+// Publish recomputes server-side, so it is as slow as a calc and escalates the
+// same way.
+const publishPhase = ref<'idle' | 'working' | 'slow' | 'verySlow'>('idle')
+
+// The proposal_id a discussion can hang off: the one we opened, or the one the
+// first publish adopted. Null in a fresh builder session, which is why neither
+// the comment section nor the map's like/share pill can exist there — there is
+// nothing to comment on, like, or link to yet.
+const storedProposalId = computed(() => props.proposalId ?? publishedProposalId.value)
+
+// Likes + comment thread for that proposal, fetched ONCE here and injected by
+// both the map pill and the discussion below (see the composable's header for
+// why it isn't a per-component fetch or a global store).
+provideProposalEngagement(storedProposalId)
 
 interface StopTimeFmt {
   stop_id: string
@@ -108,6 +149,10 @@ interface StopTimeFmt {
   lon: number
   arrival_time_fmt: string | null
   departure_time_fmt: string | null
+  // Calendar days after the trip's first departure — drives the "+1" marker, so
+  // a 20:00 → 08:00 night train doesn't read as travelling backwards in time.
+  arrival_day: number
+  departure_day: number
 }
 
 interface TripResult {
@@ -189,16 +234,7 @@ interface BackendRoute {
 // The merged calc response with its route key concretely typed.
 type CalcResponse = ProposalCalcResponse<BackendRoute>
 
-// Minutes-since-midnight (as returned by the API) -> "HH:MM" for display.
-// Wraps values outside 0-1439 (the mirror-around-02:30 timetable can produce
-// them) into a valid clock time rather than rendering "25:10".
-function formatMinutes(min: number | null): string | null {
-  if (min === null || min === undefined) return null
-  const wrapped = ((min % 1440) + 1440) % 1440
-  const h = Math.floor(wrapped / 60)
-  const m = wrapped % 60
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
-}
+// Clock formatting and the overnight day offset live in lib/tripClock.ts.
 
 // Travel time of a leg, in minutes, from the timetable the API already returns.
 // A negative difference means the leg runs over midnight, so wrap by a full day
@@ -211,15 +247,19 @@ function legTravelMinutes(seg: BackendSegment): number | null {
   return (((arrival - departure) % 1440) + 1440) % 1440
 }
 
-function toStopTimeFmt(stop: BackendStop): StopTimeFmt {
+// baseMin is the trip's own first departure — the reference the "+1" markers are
+// counted from (see lib/tripClock.ts).
+function toStopTimeFmt(stop: BackendStop, baseMin: number | null): StopTimeFmt {
   return {
     stop_id: stop.stop_id,
     stop_name: stop.stop_name,
     country_code: stop.country_code,
     lat: stop.lat,
     lon: stop.lon,
-    arrival_time_fmt: formatMinutes(stop.arrival_time_min),
-    departure_time_fmt: formatMinutes(stop.departure_time_min),
+    arrival_time_fmt: formatClock(stop.arrival_time_min),
+    departure_time_fmt: formatClock(stop.departure_time_min),
+    arrival_day: dayOffset(stop.arrival_time_min, baseMin),
+    departure_day: dayOffset(stop.departure_time_min, baseMin),
   }
 }
 
@@ -228,9 +268,10 @@ function toStopTimeFmt(stop: BackendStop): StopTimeFmt {
 // leg's to_stop).
 function buildStopTimes(segments: BackendSegment[]): StopTimeFmt[] {
   if (segments.length === 0) return []
+  const baseMin = segments[0].from_stop.departure_time_min
   return [
-    toStopTimeFmt(segments[0].from_stop),
-    ...segments.map((seg) => toStopTimeFmt(seg.to_stop)),
+    toStopTimeFmt(segments[0].from_stop, baseMin),
+    ...segments.map((seg) => toStopTimeFmt(seg.to_stop, baseMin)),
   ]
 }
 
@@ -316,41 +357,91 @@ const sectionStops = computed(() => {
 // POST /api/proposal/calc for the given stop ids and auto_stop_addition mode
 // — the merged, stateless compute endpoint: one call returns route AND
 // evaluation (no more separate plan + evaluation round trips). Returns the
-// parsed response, or null on error (having set evaluateError and dropped back
+// parsed response, or null on error (having set calcFailure and dropped back
 // to edit mode). proposal_id/proposal_version don't exist on this request —
 // persistence is publish's concern, not compute's.
 async function requestCalc(
   stopIds: string[],
   autoStopAddition: 'off' | 'suggest',
 ): Promise<CalcResponse | null> {
+  // Remember the arguments so Retry can replay exactly this call.
+  lastCalcArgs.value = { stopIds, autoStopAddition }
+  calcPhase.value = 'working'
+  const signal = calcSlot.begin()
   try {
-    const response = await fetch(`${BASE_URL}/api/proposal/calc`, {
+    const json = await apiRequest<CalcResponse>('/api/proposal/calc', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...store.authHeaders() },
+      headers: store.authHeaders(),
       // composition_id is omitted until the user picks one: the first
       // evaluation runs on the backend's standard composition
       // (DEFAULT_COMPOSITION_ID), and applyPlan() adopts whichever one the
       // response reports back.
-      body: JSON.stringify({
+      body: {
         stops: stopIds,
         ...(selectedCompositionId.value ? { composition_id: selectedCompositionId.value } : {}),
         auto_stop_addition: autoStopAddition,
         // Plan under the selected scenario (null = live base, resolved server-side).
         scenario_id: store.selectedScenarioId,
-      }),
+      },
+      // No deadline: the routing engine's own timeout is per leg and gunicorn
+      // allows 120s, so any client deadline we picked would sometimes kill a
+      // request that was about to succeed — and aborting wouldn't free the
+      // worker anyway. The user gets escalating copy and a Cancel button.
+      budget: 'heavy',
+      onSlow: (phase) => {
+        calcPhase.value = phase
+      },
+      signal,
     })
-    const json = await response.json()
-    if (!response.ok) {
-      evaluateError.value = json.message ?? `HTTP ${response.status}`
-      currentMode.value = 'edit'
-      return null
-    }
+    calcPhase.value = 'idle'
     return json
   } catch (err) {
-    evaluateError.value = err instanceof Error ? err.message : 'Unknown network error'
+    calcPhase.value = 'idle'
+    const failure = asApiFailure(err)
+    // The user cancelled, or a newer calc superseded this one: no error, and
+    // the caller of cancelCalc() owns the mode.
+    if (failure?.kind === 'canceled') return null
+    calcFailure.value = failure
+    // Two surfaces, never the same sentence twice. Actionable detail (the
+    // backend's own validation text) belongs inline, next to the control. A
+    // systemic failure gets a SHORT inline note plus the full explanation in a
+    // sticky toast — printing the long "something went wrong on our side…"
+    // copy inline as well is what put it on screen twice.
+    const verbatim = err instanceof ApiError ? err.verbatim : null
+    calcFailureMsg.value = verbatim ?? t('errors.calcFailed')
+    if (!verbatim) report(err)
     currentMode.value = 'edit'
     return null
   }
+}
+
+// What the map overlay says while we wait. Both the calc and publish escalate
+// through the same phases; whichever is running drives the copy.
+const progressCaption = computed(() => {
+  const phase = calcPhase.value !== 'idle' ? calcPhase.value : publishPhase.value
+  if (phase === 'verySlow') return t('errors.highDemand')
+  if (phase === 'slow') return t('errors.stillWorking')
+  return t('proposal.evaluating')
+})
+
+/** Stop waiting. Honest about what it does: the server keeps working. */
+function cancelCalc(): void {
+  calcSlot.cancel()
+  calcPhase.value = 'idle'
+  currentMode.value = 'edit'
+}
+
+/** Replay the last calc. Manual only — an automatic retry would re-queue work
+ *  on an already-saturated worker pool, which is what made the overload worse. */
+function retryCalc(): void {
+  const args = lastCalcArgs.value
+  if (!args) return
+  calcFailure.value = null
+  calcFailureMsg.value = null
+  currentMode.value = 'loading'
+  requestCalc(args.stopIds, args.autoStopAddition).then((json) => {
+    if (json) applyPlan(json, true)
+  })
 }
 
 // The raw backend trip currently shown (matches selectedTripId) — the source
@@ -479,15 +570,27 @@ async function doPublish() {
   }
   const isFirstPublish = publishedProposalId.value === null
   if (publishedProposalId.value) body.proposal_id = publishedProposalId.value
+  publishPhase.value = 'working'
   try {
-    const resp = await publishProposal(body, store.authHeaders())
+    const resp = await publishProposal(body, store.authHeaders(), {
+      onSlow: (phase) => {
+        publishPhase.value = phase
+      },
+    })
     publishedProposalId.value = resp.proposal_id
     saved.value = true
+    // The gallery is kept alive, so its cached list would otherwise not contain
+    // the proposal the user just published. Flag it to refetch once on return.
+    store.galleryStale = true
     clearDraft()
     toastStore.addToast('success', t('proposal.saved'))
     if (isFirstPublish) emit('published', resp.proposal_id)
   } catch (err) {
-    publishError.value = err instanceof ProposalsError ? err.message : t('proposal.publishError')
+    if (asApiFailure(err)?.kind === 'canceled') return
+    publishError.value = describe(err, 'errors.publishFailed')
+    report(err, { fallbackKey: 'errors.publishFailed' })
+  } finally {
+    publishPhase.value = 'idle'
   }
 }
 
@@ -495,7 +598,8 @@ async function evaluate() {
   const validStops = itinerary.value.filter((s) => s.selectedStop !== null)
   if (validStops.length < 2) return
   currentMode.value = 'loading'
-  evaluateError.value = null
+  calcFailure.value = null
+  calcFailureMsg.value = null
   saved.value = false
   publishError.value = null
   // First pass: "suggest" routes exactly the caller's stops and reports the
@@ -530,9 +634,10 @@ async function restoreSuggestState(selectedIds: string[]) {
   const stopIds = currentStopIds.value
   if (stopIds.length < 2) return
   currentMode.value = 'loading'
-  evaluateError.value = null
+  calcFailure.value = null
+  calcFailureMsg.value = null
   const json = await requestCalc(stopIds, 'suggest')
-  if (!json) return // requestCalc already reset currentMode to 'edit' and set evaluateError
+  if (!json) return // requestCalc already reset currentMode to 'edit' and set calcFailure
   const suggestions = json.suggested_stops ?? []
   if (suggestions.length > 0) {
     basePlan.value = json
@@ -546,6 +651,15 @@ async function restoreSuggestState(selectedIds: string[]) {
   }
 }
 
+// Close the register/guest gate THIS component opened — and only that. These
+// paths used to call closeAuthModal() unconditionally, which also slammed shut a
+// "Log in / Register" the user had opened themselves from the header: they
+// opened it while a proposal was still computing, the compute settled, and their
+// modal vanished under them. A standalone login is the user's, not ours.
+function dismissEvaluationGate(): void {
+  if (store.authModal.context === 'evaluation') store.closeAuthModal()
+}
+
 // User toggled a proposed stop's bubble/marker — the single selection source
 // for both the timeline and the map (replace the Set so it stays reactive).
 function toggleSuggested(stopId: string) {
@@ -557,26 +671,34 @@ function toggleSuggested(stopId: string) {
 
 // User clicked "Continue with X additional stops". With no stops chosen, the
 // first "suggest" response already routed exactly the caller's stops, so reuse
-// it directly. Otherwise insert the chosen stops into the itinerary (by
-// proximity) and recompute with auto_stop_addition="off" — the caller has made
-// the selection, so no further suggestions are wanted.
+// it directly. Otherwise the itinerary becomes exactly what the timeline showed
+// — the caller's stops with the opted-in candidates on the leg they were listed
+// on — and we recompute with auto_stop_addition="off": the caller has made the
+// selection, so no further suggestions are wanted.
 async function confirmStopSelection(selectedIds: string[]) {
   const base = basePlan.value
-  const chosen = suggestedStops.value.filter((s) => selectedIds.includes(s.stop_id))
+  const suggestions = suggestedStops.value
+  const chosen = suggestions.filter((s) => selectedIds.includes(s.stop_id))
+  // Read the placement off the same rows the timeline rendered, before the
+  // suggest state (which baseOutbound derives from) is torn down below. Not
+  // suggestRows: that one is reversed when the user flipped the view, and the
+  // flip is a pure view change that leaves the itinerary's direction alone.
+  const confirmedStops = baseOutbound.value?.stop_times ?? []
+  const settled = settledRows(confirmedStops, suggestions, new Set(selectedIds))
   suggestedStops.value = []
   basePlan.value = null
   suggestSelected.value = new Set()
   suggestReversed.value = false
   if (!base) {
     currentMode.value = 'edit'
-    store.closeAuthModal()
+    dismissEvaluationGate()
     return
   }
   if (chosen.length === 0) {
     applyPlan(base, true) // opens the choose-phase gate for a no-choice visitor
     return
   }
-  for (const s of chosen) insertSuggestedStop(s)
+  itinerary.value = itineraryFromSettledRows(settled, confirmedStops, chosen)
   currentMode.value = 'loading'
   const stopIds = itinerary.value.filter((s) => s.selectedStop).map((s) => s.selectedStop!.stop_id)
   const json = await requestCalc(stopIds, 'off')
@@ -598,22 +720,52 @@ function cancelSuggestMode() {
   suggestSelected.value = new Set()
   suggestReversed.value = false
   currentMode.value = 'edit'
-  store.closeAuthModal()
+  dismissEvaluationGate()
 }
 
-// Turn a suggested stop into a full Stop record (preferring the loaded stop
-// list, falling back to the fields the suggestion already carries) and insert
-// it into the itinerary at the best-fitting position via addStop().
-function insertSuggestedStop(s: SuggestedStop) {
-  const stop: Stop = store.stops.find((st) => st.stop_id === s.stop_id) ?? {
-    stop_id: s.stop_id,
-    name: s.stop_name,
-    country_code: s.country_code,
-    lat: s.lat,
-    lon: s.lon,
-    stop_charge_eur: { value: 0, is_default: true },
+// Rebuild the itinerary from the settled suggest rows, keeping their order.
+// That order is the backend's own along-route order (see lib/suggestPlacement.ts)
+// and is authoritative here: re-deriving each stop's position from lat/lon —
+// which is what addStop() does for a manual pick — reorders whole clusters once
+// several stops arrive at once.
+//
+// Rows the caller already had keep their existing itinerary row, so the full
+// Stop record survives; the rest resolve against the loaded stop list, falling
+// back to the fields the response itself carries.
+function itineraryFromSettledRows(
+  rows: SuggestRow[],
+  confirmed: StopTimeFmt[],
+  chosen: SuggestedStop[],
+): ItineraryStop[] {
+  const existing = new Map(
+    itinerary.value.filter((s) => s.selectedStop).map((s) => [s.selectedStop!.stop_id, s]),
+  )
+  const byId = new Map(store.stops.map((s) => [s.stop_id, s]))
+  const fromCalc = new Map([...confirmed, ...chosen].map((s) => [s.stop_id, s]))
+  const out: ItineraryStop[] = []
+  const seen = new Set<string>()
+  for (const row of rows) {
+    if (seen.has(row.stopId)) continue
+    seen.add(row.stopId)
+    const kept = existing.get(row.stopId)
+    if (kept) {
+      out.push(kept)
+      continue
+    }
+    const known = byId.get(row.stopId)
+    const src = fromCalc.get(row.stopId)
+    if (!known && !src) continue
+    const stop: Stop = known ?? {
+      stop_id: src!.stop_id,
+      name: src!.stop_name,
+      country_code: src!.country_code,
+      lat: src!.lat,
+      lon: src!.lon,
+      stop_charge_eur: { value: 0, is_default: true },
+    }
+    out.push({ id: _nextId++, name: stop.name, selectedStop: stop })
   }
-  addStop(stop)
+  return out
 }
 
 // Publish-after-auth: a no-choice visitor whose calc finished picks an identity
@@ -735,7 +887,8 @@ async function recomputeWithSelection() {
   const stopIds = currentStopIds.value
   if (stopIds.length < 2 || currentMode.value === 'loading') return
   currentMode.value = 'loading'
-  evaluateError.value = null
+  calcFailure.value = null
+  calcFailureMsg.value = null
   const json = await requestCalc(stopIds, 'off')
   if (json) applyPlan(json)
 }
@@ -771,10 +924,37 @@ const showEvaluationSection = computed(
     routeResult.value !== null,
 )
 
-// Shared pill styling for the itinerary controls (Add Stop / Edit / Swap /
-// Cancel), matching the direction-swap button.
+// Gate for the discussion. Keyed on routeResult ALONE, deliberately not on
+// currentMode like the evaluation section above: opening a stored proposal runs
+// 'display' -> 'loading' -> 'display' (loadStoredProposal, then applyPlan), so
+// a mode-based condition unmounts and remounts the section mid-load and it
+// fetches the thread twice, aborting the first request. routeResult is only
+// ever assigned, never cleared, so this flips false->true exactly once per
+// proposal and survives a re-evaluate. The storedProposalId !== null half of
+// the condition stays in the template, where it also narrows the prop.
+const showCommentSection = computed(() => routeResult.value !== null)
+
+// Share-message inputs. The figures are the real computed ones — never the
+// summary block's co2/demand fields, which are placeholders (see routeFacts()).
+// The names mirror derivedName(), which is what the proposal was published as,
+// so the message and the preview card's title agree.
+const shareFacts = computed(() => routeFacts(rawRoute.value))
+const shareOrigin = computed(() => sectionStops.value[0]?.name ?? '')
+const shareDestination = computed(
+  () => sectionStops.value[sectionStops.value.length - 1]?.name ?? '',
+)
+
+// Quiet pill — used by the "Gallery" back link above the workspace.
 const pillClass =
   'flex cursor-pointer items-center gap-1.5 rounded-full border border-primary-50/20 px-3 py-1.5 text-sm leading-none text-primary-50 transition hover:bg-primary-50/10'
+
+// The itinerary's own tools (Edit / Add Stop / Swap / Cancel Edit). Same shape
+// as pillClass but filled and semibold: as bare outlines tucked under the table
+// they read as decoration and were being missed. Deliberately a SEPARATE
+// constant — pillClass is shared with the back link, which should stay quiet.
+// Still not solid CTAs: four secondary tools must not compete with Evaluate.
+const toolPillClass =
+  'flex cursor-pointer items-center gap-1.5 rounded-full border border-primary-50/30 bg-primary-50/10 px-3.5 py-2 text-sm font-semibold leading-none text-primary-50 transition hover:bg-primary-50/20'
 
 // Build itinerary rows from a planned route's outbound stops, so re-editing
 // starts from the actual route (router-inserted stops included), not the
@@ -798,7 +978,7 @@ function itineraryFromRoute(rr: RouteResult): ItineraryStop[] {
 }
 
 // Restores an itinerary from a persisted draft's bare stop ids (see
-// proposalDraftStorage.ts). Unlike itineraryFromRoute()/insertSuggestedStop(),
+// proposalDraftStorage.ts). Unlike itineraryFromRoute()/itineraryFromSettledRows(),
 // there's no synthesized-fallback data to fall back on for an id no longer in
 // the catalogue — such ids are simply dropped.
 function itineraryFromStopIds(stopIds: string[]): ItineraryStop[] {
@@ -814,13 +994,23 @@ function itineraryFromStopIds(stopIds: string[]): ItineraryStop[] {
 // Computed times for an itinerary row, looked up from the selected trip by stop
 // id — used to keep the timetable labels beside the (still editable) stops in a
 // clean re-edit. Null when there's no computed routing to read from.
-function rowTimes(
-  stop: ItineraryStop,
-): { arrival: string | null; departure: string | null } | null {
+function rowTimes(stop: ItineraryStop): {
+  arrival: string | null
+  departure: string | null
+  arrivalDay: number
+  departureDay: number
+} | null {
   const id = stop.selectedStop?.stop_id
   if (!id || !selectedTrip.value) return null
   const st = selectedTrip.value.stop_times.find((s) => s.stop_id === id)
-  return st ? { arrival: st.arrival_time_fmt, departure: st.departure_time_fmt } : null
+  return st
+    ? {
+        arrival: st.arrival_time_fmt,
+        departure: st.departure_time_fmt,
+        arrivalDay: st.arrival_day,
+        departureDay: st.departure_day,
+      }
+    : null
 }
 
 // Enter re-edit from display: stay on the computed view, just surface the
@@ -942,6 +1132,8 @@ interface ViewRow {
   name: string
   arrival: string | null
   departure: string | null
+  arrivalDay: number
+  departureDay: number
 }
 
 const viewRows = computed((): ViewRow[] => {
@@ -951,6 +1143,8 @@ const viewRows = computed((): ViewRow[] => {
       name: st.stop_name,
       arrival: st.arrival_time_fmt,
       departure: st.departure_time_fmt,
+      arrivalDay: st.arrival_day,
+      departureDay: st.departure_day,
     }))
   }
   return itinerary.value.map((s) => ({
@@ -958,6 +1152,8 @@ const viewRows = computed((): ViewRow[] => {
     name: s.name,
     arrival: null,
     departure: null,
+    arrivalDay: 0,
+    departureDay: 0,
   }))
 })
 
@@ -972,65 +1168,15 @@ const baseOutbound = computed<TripResult | null>(() => {
 
 const suggestSelectedCount = computed(() => suggestSelected.value.size)
 
-// Best insertion index for a point among an ordered coord list, minimising the
-// added detour — the same nearest-neighbour rule as optimalInsertIndex, but over
-// a plain coord array so it can place proposed stops without touching itinerary.
-function bestInsertIndex(items: { lat: number; lon: number }[], p: { lat: number; lon: number }) {
-  const n = items.length
-  if (n === 0) return 0
-  let bestIndex = n
-  let bestExtra = Infinity
-  for (let i = 0; i <= n; i++) {
-    let extra: number
-    if (i === 0) extra = dist(p, items[0])
-    else if (i === n) extra = dist(items[n - 1], p)
-    else extra = dist(items[i - 1], p) + dist(p, items[i]) - dist(items[i - 1], items[i])
-    if (extra < bestExtra) {
-      bestExtra = extra
-      bestIndex = i
-    }
-  }
-  return bestIndex
-}
-
-interface SuggestRow {
-  kind: 'confirmed' | 'suggested'
-  stopId: string
-  name: string
-  lat: number
-  lon: number
-  selected: boolean
-  addedMin: number | null
-}
-
-// Confirmed stops (in order) interleaved with the proposed stops placed by
-// proximity — the serialized SuggestedStop carries no leg index, so proximity is
-// the robust placement. Reversed for display when the user flips direction.
+// Confirmed stops interleaved with the proposed stops along the way — see
+// lib/suggestPlacement.ts for the ordering rule. Reversed for display when the
+// user flips direction, after placement, so the flip stays a pure view change.
 const suggestRows = computed<SuggestRow[]>(() => {
-  const confirmed = baseOutbound.value?.stop_times ?? []
-  const rows: SuggestRow[] = confirmed.map(
-    (st): SuggestRow => ({
-      kind: 'confirmed',
-      stopId: st.stop_id,
-      name: st.stop_name,
-      lat: st.lat,
-      lon: st.lon,
-      selected: true,
-      addedMin: null,
-    }),
+  const rows = buildSuggestRows(
+    baseOutbound.value?.stop_times ?? [],
+    suggestedStops.value,
+    suggestSelected.value,
   )
-  for (const s of suggestedStops.value) {
-    const idx = bestInsertIndex(rows, { lat: s.lat, lon: s.lon })
-    rows.splice(idx, 0, {
-      kind: 'suggested',
-      stopId: s.stop_id,
-      name: s.stop_name,
-      lat: s.lat,
-      lon: s.lon,
-      selected: suggestSelected.value.has(s.stop_id),
-      addedMin: s.added_time_min,
-    })
-  }
   return suggestReversed.value ? [...rows].reverse() : rows
 })
 
@@ -1111,6 +1257,26 @@ const mapStops = computed(() => {
       highlighted: true,
     }))
 })
+
+// Every catalogue stop the user could still add, shown as dots on the map while
+// editing. Motivation from the field: a traveller does not know which stations
+// are even available, so the Add Stop dropdown is a search you can only use if
+// you already know the answer. Stops already on the itinerary are excluded —
+// they are drawn as route markers, and re-adding one is a no-op anyway.
+const mapAvailable = computed(() => {
+  if (currentMode.value !== 'edit') return null
+  const used = usedStopIds.value
+  return store.stops
+    .filter((s) => !used.has(s.stop_id))
+    .map((s) => ({ stopId: s.stop_id, lat: s.lat, lon: s.lon, name: s.name }))
+})
+
+// Adding from the map reuses addStop(), so a map pick lands at the same
+// geographically sensible position as one made through the dropdown.
+function onMapAddStop(stopId: string): void {
+  const stop = store.stops.find((s) => s.stop_id === stopId)
+  if (stop) addStop(stop)
+}
 
 const mapShape = computed(() => {
   // Suggest mode draws the temporary route from the base "suggest" response, as
@@ -1261,13 +1427,15 @@ const mapSegments = computed<MapSegment[] | null>(() => {
 // Load a stored proposal by id and populate display mode — same wire shape
 // as POST /api/proposal/calc (see types/api.ts's ProposalDetailResponse), so
 // applyPlan() can hydrate rawRoute/calcResult/itinerary from it exactly like
-// a fresh calc. selectedCompositionId is set first so CompositionPanel
+// a fresh calc. selectedCompositionId is set first so ComputeInputsPanel
 // locks onto the composition the stored route actually used, rather than
 // defaulting to the first one in the full catalogue.
 async function loadStoredProposal(proposalId: number) {
   currentMode.value = 'loading'
+  loadFailure.value = null
+  loadFailureMsg.value = null
   try {
-    const detail = await fetchProposalRoute<BackendRoute>(proposalId)
+    const detail = await fetchProposalRoute<BackendRoute>(proposalId, loadSlot.begin())
     publishedProposalId.value = detail.proposal_id
     selectedCompositionId.value = detail.route.trip_pairs[0]?.composition_id ?? null
     applyPlan(
@@ -1283,10 +1451,26 @@ async function loadStoredProposal(proposalId: number) {
       false,
     )
   } catch (err) {
-    evaluateError.value = err instanceof ProposalsError ? err.message : t('proposal.publishError')
-    currentMode.value = 'edit'
+    if (asApiFailure(err)?.kind === 'canceled') return
+    // Deliberately NOT falling through to 'edit'. That is what the old code did,
+    // and it silently turned "we couldn't load proposal 42" into a route BUILDER
+    // seeded with two arbitrary prefill stops, under a message about saving —
+    // so a shared link opened during a blip looked like a working (wrong) app.
+    loadFailure.value = asApiFailure(err)
+    loadFailureMsg.value = describe(err, 'errors.proposalLoadFailed')
   }
 }
+
+function retryLoadStored(): void {
+  if (props.proposalId != null) loadStoredProposal(props.proposalId)
+}
+
+// Leaving mid-request: both rejections classify as 'canceled', so nothing is
+// reported and neither counts against backend health.
+onBeforeUnmount(() => {
+  calcSlot.cancel()
+  loadSlot.cancel()
+})
 
 onMounted(async () => {
   // App.vue loads this reference data at startup; only fetch if we arrived here
@@ -1337,7 +1521,38 @@ onMounted(async () => {
         {{ t('gallery.back') }}
       </button>
     </div>
+
+    <!-- A stored proposal that wouldn't load. This REPLACES the workspace
+         rather than letting it fall through to edit mode: the old behaviour
+         quietly handed the user a route builder seeded with arbitrary stops,
+         which looks like a working app showing the wrong thing. -->
     <div
+      v-if="loadFailureMsg"
+      class="flex flex-col items-center gap-4 rounded-xl border border-red-400/30 bg-red-950/20 px-8 py-16 text-center"
+      role="alert"
+    >
+      <p class="max-w-md text-primary-50">{{ loadFailureMsg }}</p>
+      <div class="flex items-center gap-3">
+        <button
+          v-if="!loadFailure || isRetryable(loadFailure)"
+          type="button"
+          class="cursor-pointer rounded-full bg-primary-50/10 px-6 py-2 text-sm text-primary-50 transition hover:bg-primary-50/20"
+          @click="retryLoadStored"
+        >
+          {{ t('errors.retry') }}
+        </button>
+        <button
+          type="button"
+          class="cursor-pointer text-sm text-primary-50/60 underline underline-offset-2 transition hover:text-primary-50"
+          @click="emit('back')"
+        >
+          {{ t('gallery.back') }}
+        </button>
+      </div>
+    </div>
+
+    <div
+      v-else
       class="flex gap-6 transition-opacity duration-200"
       :class="paramsStale ? 'opacity-40' : ''"
     >
@@ -1367,21 +1582,19 @@ onMounted(async () => {
                  re-edit); disappears the moment the builder goes dirty. -->
             <Column
               v-if="showComputedView"
-              style="width: 5rem"
+              style="width: 6rem"
               :pt="{ bodyCell: { class: '!p-0' } }"
             >
               <template #body="{ data: stop }">
                 <div class="flex flex-col items-end gap-1 py-2 pr-3">
-                  <span
-                    v-if="rowTimes(stop)?.arrival"
-                    class="text-xs tabular-nums leading-none text-primary-50"
-                    >{{ rowTimes(stop)?.arrival }}</span
-                  >
-                  <span
-                    v-if="rowTimes(stop)?.departure"
-                    class="text-xs tabular-nums leading-none text-primary-50"
-                    >{{ rowTimes(stop)?.departure }}</span
-                  >
+                  <StopTime
+                    :time="rowTimes(stop)?.arrival ?? null"
+                    :day="rowTimes(stop)?.arrivalDay"
+                  />
+                  <StopTime
+                    :time="rowTimes(stop)?.departure ?? null"
+                    :day="rowTimes(stop)?.departureDay"
+                  />
                 </div>
               </template>
             </Column>
@@ -1430,8 +1643,10 @@ onMounted(async () => {
                   <div data-row-actions class="flex items-center gap-2">
                     <StopSelect
                       :stops="store.stops"
+                      :status="store.stopsStatus"
                       :disabled-ids="usedStopIdsExcluding(stop)"
                       @select="(s) => onStopSelect(stop, s)"
+                      @retry="store.fetchStops()"
                     >
                       <AppIcon :path="mdiPencil" :size="20" color="var(--p-primary-50)" />
                     </StopSelect>
@@ -1578,7 +1793,7 @@ onMounted(async () => {
             class="mb-4"
           >
             <!-- Times column (replaces drag handle) -->
-            <Column style="width: 5rem" :pt="{ bodyCell: { class: '!p-0' } }">
+            <Column style="width: 6rem" :pt="{ bodyCell: { class: '!p-0' } }">
               <template #body="{ data: row, index }">
                 <div class="flex flex-col items-end gap-1 py-2 pr-3">
                   <template v-if="currentMode === 'loading'">
@@ -1586,16 +1801,8 @@ onMounted(async () => {
                     <Skeleton v-if="index < viewRows.length - 1" width="3.5rem" height="10px" />
                   </template>
                   <template v-else>
-                    <span
-                      v-if="row.arrival"
-                      class="text-xs tabular-nums leading-none text-primary-50"
-                      >{{ row.arrival }}</span
-                    >
-                    <span
-                      v-if="row.departure"
-                      class="text-xs tabular-nums leading-none text-primary-50"
-                      >{{ row.departure }}</span
-                    >
+                    <StopTime :time="row.arrival" :day="row.arrivalDay" />
+                    <StopTime :time="row.departure" :day="row.departureDay" />
                   </template>
                 </div>
               </template>
@@ -1643,7 +1850,10 @@ onMounted(async () => {
                the middle; Cancel Edit (re-edit) on the right. The two flex-1
                spacers keep the middle group centered regardless of which side
                buttons are present. -->
-          <div v-if="currentMode !== 'loading'" class="flex items-center gap-2">
+          <div
+            v-if="currentMode !== 'loading'"
+            class="mt-5 flex items-center gap-2 border-t border-primary-50/10 pt-5"
+          >
             <div class="flex flex-1 items-center gap-2" />
 
             <div class="flex items-center gap-2">
@@ -1651,7 +1861,7 @@ onMounted(async () => {
                    untouched. -->
               <button
                 v-if="currentMode === 'suggest'"
-                :class="pillClass"
+                :class="toolPillClass"
                 @click="cancelSuggestMode"
               >
                 <AppIcon :path="mdiArrowLeft" :size="16" />
@@ -1659,7 +1869,7 @@ onMounted(async () => {
               </button>
 
               <!-- Edit (display) -->
-              <button v-if="currentMode === 'display'" :class="pillClass" @click="startEdit">
+              <button v-if="currentMode === 'display'" :class="toolPillClass" @click="startEdit">
                 <AppIcon :path="mdiPencil" :size="16" />
                 {{ t('proposal.edit') }}
               </button>
@@ -1668,24 +1878,31 @@ onMounted(async () => {
               <StopSelect
                 v-if="currentMode === 'edit'"
                 :stops="store.stops"
+                :status="store.stopsStatus"
                 :disabled-ids="usedStopIds"
                 @select="addStop"
+                @retry="store.fetchStops()"
               >
-                <button :class="pillClass">
+                <button :class="toolPillClass">
                   <AppIcon :path="mdiPlus" :size="16" />
                   {{ t('proposal.addStop') }}
                 </button>
               </StopSelect>
 
               <!-- Swap direction (all modes where applicable) -->
-              <button v-if="showSwap" :class="pillClass" @click="swapDirection">
+              <button
+                v-if="showSwap"
+                :class="toolPillClass"
+                :aria-label="t('proposal.swapDirection')"
+                @click="swapDirection"
+              >
                 <AppIcon :path="mdiSwapVertical" :size="16" />
               </button>
             </div>
 
             <div class="flex flex-1 items-center justify-end gap-2">
               <!-- Cancel Edit (re-edit) -->
-              <button v-if="showCancelEdit" :class="pillClass" @click="cancelEdit">
+              <button v-if="showCancelEdit" :class="toolPillClass" @click="cancelEdit">
                 <AppIcon :path="mdiClose" :size="16" />
                 {{ t('proposal.cancelEdit') }}
               </button>
@@ -1706,14 +1923,18 @@ onMounted(async () => {
           </div>
         </div>
 
-        <div
-          v-if="store.stopsStatus === 'loading' || store.compositionsStatus === 'loading'"
-          class="text-xs text-primary-50/40"
-        >
+        <div v-if="store.stopsStatus === 'loading'" class="text-xs text-primary-50/40">
           {{ t('proposal.loading') }}
         </div>
-        <div v-if="store.stopsError || store.compositionsError" class="text-xs text-red-400">
-          {{ store.stopsError ?? store.compositionsError }}
+        <div v-if="store.stopsFailure" class="max-w-sm text-xs break-words" role="alert">
+          <span class="text-red-400">{{ t('errors.stopsUnavailable') }}</span>
+          <button
+            type="button"
+            class="ml-2 cursor-pointer font-semibold text-primary-50 underline underline-offset-2"
+            @click="store.fetchStops()"
+          >
+            {{ t('errors.retry') }}
+          </button>
         </div>
 
         <!-- Evaluate button (fresh build, dirty re-edit, or loading) -->
@@ -1730,12 +1951,27 @@ onMounted(async () => {
           >
             {{ t('proposal.evaluate') }}
             <span v-if="currentMode !== 'loading'">→</span>
-            <span
-              v-else
-              class="h-4 w-4 animate-spin rounded-full border-2 border-primary-50/30 border-t-primary-50"
-            />
+            <AppSpinner v-else :size="16" />
           </button>
-          <p v-if="evaluateError" class="text-xs text-red-400">{{ evaluateError }}</p>
+
+          <!-- max-w-sm matches the itinerary table's own cap. The parent panel is
+               `w-fit`, so an uncapped sentence sets the panel's width and
+               collapses the flex-1 map beside it into a sliver. -->
+          <div
+            v-if="calcFailureMsg"
+            class="flex max-w-sm flex-col items-center gap-1 text-center break-words"
+            role="alert"
+          >
+            <p class="text-xs text-red-400">{{ calcFailureMsg }}</p>
+            <button
+              v-if="calcFailure && isRetryable(calcFailure)"
+              type="button"
+              class="cursor-pointer text-xs font-semibold text-primary-50 underline underline-offset-2"
+              @click="retryCalc"
+            >
+              {{ t('errors.retry') }}
+            </button>
+          </div>
         </div>
 
         <!-- Continue button (suggest mode) — replaces Evaluate; carries the count
@@ -1768,7 +2004,13 @@ onMounted(async () => {
             <AppIcon :path="mdiCheckCircle" :size="16" />
             {{ t('proposal.saved') }}
           </p>
-          <p v-if="publishError" class="text-xs text-red-400">{{ publishError }}</p>
+          <p
+            v-if="publishError"
+            class="max-w-sm text-center text-xs text-red-400 break-words"
+            role="alert"
+          >
+            {{ publishError }}
+          </p>
         </div>
       </div>
 
@@ -1797,19 +2039,73 @@ onMounted(async () => {
             :shape="mapShape"
             :segments="mapSegments"
             :suggested="mapSuggested"
+            :available="mapAvailable"
             class="w-full h-full"
             @toggle-suggested="toggleSuggested"
+            @add-stop="onMapAddStop"
           />
-          <Transition name="fade">
+          <!-- Like + share, bottom-left: MapLibre's zoom control is top-right
+               and its attribution bottom-right, so this corner is free. Placed
+               BEFORE the loading scrim below, which is `absolute inset-0` and
+               should legitimately cover it while a calc runs. Unlike the
+               evaluation panel it is NOT greyed out while the builder is dirty:
+               likes and links are about the proposal as published, not about
+               the unsaved itinerary. -->
+          <MapShareBar
+            v-if="storedProposalId !== null"
+            :proposal-id="storedProposalId"
+            :origin="shareOrigin"
+            :destination="shareDestination"
+            :facts="shareFacts"
+          />
+          <!-- Deliberately NOT wrapped in <Transition>. The fade wedged its own
+               state machine here: the element kept `fade-enter-from` (opacity 0)
+               into `fade-leave-active`, so the leave animated 0 -> 0, fired no
+               transitionend, and Vue never removed the node — not even with an
+               explicit :duration. What was left behind was invisible but still
+               an `absolute inset-0` scrim over the map, swallowing every click,
+               and (once Cancel moved in here) holding a focusable phantom
+               button. A 200ms fade on a loading scrim is not worth that. -->
+          <div
+            v-if="currentMode === 'loading'"
+            class="absolute inset-0 flex items-center justify-center rounded-xl bg-black/20 px-8 backdrop-blur-sm"
+          >
+            <!-- The caption sits on its own dark panel rather than straight on
+                   the scrim: the map underneath can be near-white (light tiles,
+                   or tiles that haven't loaded), and bg-black/20 is not enough
+                   contrast for light text — the message has to be readable to be
+                   worth showing. -->
             <div
-              v-if="currentMode === 'loading'"
-              class="absolute inset-0 flex items-center justify-center rounded-xl bg-black/20 backdrop-blur-sm"
+              class="flex flex-col items-center gap-4 rounded-xl bg-sapphire-100/95 px-6 py-5 shadow-xl"
             >
               <div
                 class="h-10 w-10 animate-spin rounded-full border-4 border-primary-50/30 border-t-primary-50"
               />
+              <!-- An unchanging spinner is what felt bad during the overload,
+                     so the caption escalates: what we're doing, then that the
+                     server is busy, then that we're under load. -->
+              <p class="max-w-xs text-center text-sm text-primary-50" aria-live="polite">
+                {{ progressCaption }}
+              </p>
+              <!-- Sits BELOW the caption, never replacing it: the escalating
+                   caption is how the user learns the server is slow, and a fun
+                   fact must not push that off screen. -->
+              <LoadingFunFact />
+              <!-- Lives here, beside the spinner, rather than under the Evaluate
+                   button: a calc started from suggest mode hides that button, so
+                   anchoring Cancel to it left the longest waits uncancellable.
+                   The server keeps working either way — aborting the fetch
+                   cannot free its worker — so this only ever means "I've stopped
+                   watching", and the copy avoids claiming otherwise. -->
+              <button
+                type="button"
+                class="cursor-pointer text-xs text-primary-50/60 underline underline-offset-2 transition hover:text-primary-50"
+                @click="cancelCalc"
+              >
+                {{ t('errors.cancel') }}
+              </button>
             </div>
-          </Transition>
+          </div>
         </div>
       </div>
     </div>
@@ -1817,7 +2113,7 @@ onMounted(async () => {
     <!-- Cost/revenue results (display + re-edit). Greyed out while the builder
          is dirty, since the figures no longer match the current itinerary. -->
     <div
-      v-if="showEvaluationSection"
+      v-if="showEvaluationSection && !loadFailureMsg"
       class="w-full transition-opacity duration-200"
       :class="isDirty ? 'pointer-events-none opacity-40' : ''"
     >
@@ -1862,6 +2158,14 @@ onMounted(async () => {
         </Transition>
       </div>
     </div>
+
+    <!-- Discussion, underneath everything. Deliberately NOT greyed out while
+         the builder is dirty, unlike the evaluation above: stale figures must
+         be greyed because they no longer describe the itinerary, but a thread
+         is about the proposal and has no business going dead mid-edit. -->
+    <div v-if="storedProposalId !== null && showCommentSection" class="w-full">
+      <CommentSection :proposal-id="storedProposalId" />
+    </div>
   </div>
 </template>
 
@@ -1887,13 +2191,5 @@ onMounted(async () => {
 }
 :deep(tr:hover .reorder-col > *) {
   opacity: 1;
-}
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.2s ease;
-}
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
 }
 </style>

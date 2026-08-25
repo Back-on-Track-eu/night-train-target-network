@@ -6,6 +6,20 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "frontend", "run", "dev"],
       "port": 5173
+    },
+    {
+      "name": "full-stack",
+      "runtimeExecutable": "docker",
+      "runtimeArgs": [
+        "compose",
+        "-f",
+        "backend/docker/docker-compose.yml",
+        "-f",
+        ".devcontainer/docker-compose.yml",
+        "up",
+        "--build"
+      ],
+      "port": 5173
     }
   ]
 }

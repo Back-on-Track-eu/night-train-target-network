@@ -627,7 +627,9 @@ export interface StoredAuth {
 // Fields shared by both source shapes.
 interface ProposalSummaryShared {
   name: string
-  composition_id: string
+  // null on ONTD rows whose catalogue entry names no composition (53 of the 205
+  // existing rows at the time of writing) — the card then omits the stat.
+  composition_id: string | null
   total_distance_km: number
   total_time_h: number
   avg_speed_kmh: number
@@ -690,26 +692,52 @@ export type ProposalSummary = ProposalSummaryProposal | ProposalSummaryExisting
 // Sortable keys accepted by the backend, restricted to the subset the gallery
 // UI offers. Validated server-side against filter_builder.py's
 // SORTABLE_COLUMNS; an unlisted column 400s.
+//
+// Deliberately only attributes a ProposalCard actually shows: sorting by a
+// figure the card doesn't display leaves the user re-ordering a list with no
+// visible reason for the order. That still rules out the financial KPIs and
+// duration — which is also why the old "Margin, desc" default looked arbitrary
+// on a list that is mostly existing (ONTD) rows carrying NULL there. Engagement
+// and timestamps qualify because the card renders them.
+//
+// PROPOSAL_ONLY_SORT_KEYS are NULL on every existing (ONTD) row by construction
+// (the gallery UNION null-pads proposal-only columns — filter_builder.py's
+// header), so sorting by one while viewing ONTD only would order a column no
+// row has. Gallery.vue hides these whenever the source filter is 'existing'.
 export const PROPOSAL_SORT_KEYS = [
-  'created_at',
   'total_distance_km',
-  'total_time_h',
-  'margin_eur_per_train_km',
-  'revenue_eur_per_train_km',
-  'cost_eur_per_train_km',
+  'n_stops',
+  'co2_savings_t_per_year',
+  'likes_count',
+  'comments_count',
+  'created_at',
+  'updated_at',
 ] as const
 export type ProposalSortKey = (typeof PROPOSAL_SORT_KEYS)[number]
+
+/** The sort keys BOTH gallery sources carry a real value for. Mirrors
+ *  filter_builder.py's SHARED_SOURCE_COLUMNS, narrowed to what the UI offers. */
+export const SHARED_SORT_KEYS: readonly ProposalSortKey[] = ['total_distance_km', 'n_stops']
 
 export interface ProposalSort {
   by: ProposalSortKey
   dir: 'asc' | 'desc'
 }
 
-// All filter keys are OR / any-match server-side.
+/** A TEXT[] filter (filter_builder.py's ARRAY_COLUMNS): a plain list is
+ *  array-overlap ("any", the default); the object form asks for containment
+ *  ("all" — the row must carry every value). */
+export type ProposalsArrayFilter = string[] | { values: string[]; mode: 'any' | 'all' }
+
 export interface ProposalsFilter {
   user_ids?: number[]
-  countries?: string[]
-  stop_ids?: string[]
+  countries?: ProposalsArrayFilter
+  stop_ids?: ProposalsArrayFilter
+  /** Country pairs a row serves, as "AT__DE" — the two ISO codes joined by a
+   *  DOUBLE underscore, alphabetically ordered (see buildRelationToken). A
+   *  shared column: both sources carry it, so filtering on it keeps existing
+   *  trains in the results. */
+  country_relations?: ProposalsArrayFilter
   /** Which UNION branch(es) the gallery is built from: 'proposal' =
    *  proposals.proposal_summaries, 'existing' = the ONTD catalog's
    *  ontd.route_summaries (see adapters/proposal/filter_builder.py,
@@ -721,11 +749,22 @@ export interface ProposalsFilter {
 /** The two gallery row kinds. Mirrors SUPPORTED_SOURCES on the backend. */
 export type ProposalSourceKind = 'proposal' | 'existing'
 
+/** Response sections the list endpoint can compute. Only the sections named
+ *  run their query (proposals.py::_list_response), so this is a real cost
+ *  lever, not just a response filter. Backend default is ["summaries"]. */
+export type ProposalsSection =
+  | 'summaries'
+  | 'map_lines'
+  | 'map_routes'
+  | 'map_stop_counts'
+  | 'map_country_counts'
+
 export interface ProposalsRequest {
   filter?: ProposalsFilter
   sort?: ProposalSort[]
   limit?: number
   offset?: number
+  include?: ProposalsSection[]
 }
 
 // The `summaries` section of the sectioned list response (default `include`).
@@ -736,11 +775,119 @@ export interface ProposalsSummariesSection {
   proposals: ProposalSummary[]
 }
 
+// --- The map sections -------------------------------------------------------
+// Backend: proposal_serialize.py::map_lines_to_geojson / map_stop_counts_to_dict
+// / map_country_counts_to_geojson. Every section is built from the SAME filters
+// as `summaries`, but limit/offset apply only to `summaries` — the map sections
+// always cover the whole filtered set. That is what lets the gallery request
+// them once per query instead of once per page.
+
+/** One feature per distinct stop-pair CORRIDOR — the physical line between two
+ *  stops, direction-agnostic, NOT one feature per proposal. Proposals and
+ *  existing ONTD trains land on the same feature when they share a corridor,
+ *  which is what makes "proposed n times" and "a train already runs here"
+ *  drawable in one pass. `geometry` is one representative routing for the
+ *  corridor, simplified server-side for overview zoom, so two routes taking
+ *  different tracks between the same pair collapse into one line.
+ *
+ *  Deliberately carries no contributing id lists: they grew without bound in
+ *  proposal count. Per-route geometry comes from `map_routes` instead. */
+export interface MapCorridorProperties {
+  stop_a: string
+  stop_b: string
+  proposal_count: number
+  existing_count: number
+  total_count: number
+  /** False when the representative shape is just the two stops joined up
+   *  rather than a routed line — a large minority of ONTD corridors. Measured
+   *  before simplification, so a genuinely straight routed line is not
+   *  mislabelled. */
+  geometry_routed: boolean | null
+  /** Mean across the corridor's PROPOSALS only — null on corridors served
+   *  exclusively by existing trains. */
+  avg_margin_eur_per_train_km: number | null
+}
+
+export interface MapCorridorFeature {
+  type: 'Feature'
+  geometry: { type: 'LineString'; coordinates: [number, number][] } | null
+  properties: MapCorridorProperties
+}
+
+export interface MapLinesSection {
+  type: 'FeatureCollection'
+  features: MapCorridorFeature[]
+}
+
+/** One feature per LISTED row — the route behind each card on the current
+ *  page. The one map section that honours limit/offset, sharing `summaries`'
+ *  exact window, so its size is capped by the page rather than by the result
+ *  set. `geometry` is null for an ONTD route whose routing failed; the feature
+ *  is still emitted, so "no geometry" stays distinguishable from "not on this
+ *  page". */
+export interface MapRouteProperties {
+  source: ProposalSourceKind
+  proposal_id: number | null
+  proposal_version: number | null
+  route_id: string | null
+  /** Whether the geometry is real routing or the ONTD catalogue's
+   *  straight-line-between-stops fallback (false on roughly half its routes).
+   *  null on proposals, which carry no such flag. */
+  geometry_routed: boolean | null
+}
+
+export interface MapRouteFeature {
+  type: 'Feature'
+  geometry: {
+    type: 'MultiLineString'
+    coordinates: [number, number][][]
+  } | null
+  properties: MapRouteProperties
+}
+
+export interface MapRoutesSection {
+  type: 'FeatureCollection'
+  features: MapRouteFeature[]
+}
+
+/** Per-stop density markers. Stops the ONTD catalogue names but never mapped to
+ *  a Target Network stop id carry no coordinates and are absent here. */
+export interface MapStopCount {
+  stop_id: string
+  lat: number | null
+  lon: number | null
+  n_proposals: number
+  n_existing: number
+  n: number
+}
+
+/** Coverage choropleth. `geometry` is null for a country code with no border
+ *  polygon (e.g. "UNK", an unattributed segment) — still a valid Feature. */
+export interface MapCountryCountFeature {
+  type: 'Feature'
+  geometry: { type: 'Polygon' | 'MultiPolygon'; coordinates: unknown } | null
+  properties: {
+    country: string
+    n_proposals: number
+    n_existing: number
+    n: number
+  }
+}
+
+export interface MapCountryCountsSection {
+  type: 'FeatureCollection'
+  features: MapCountryCountFeature[]
+}
+
 // POST /api/proposals returns a SECTIONED response (proposals.py::_list_response):
 // each key is present only if named in the request's `include` (default
-// ["summaries"]). The gallery requests summaries only.
+// ["summaries"]).
 export interface ProposalsResponse {
   summaries?: ProposalsSummariesSection
+  map_lines?: MapLinesSection
+  map_routes?: MapRoutesSection
+  map_stop_counts?: MapStopCount[]
+  map_country_counts?: MapCountryCountsSection
 }
 
 // --- POST /api/proposal/publish ---------------------------------------------
@@ -775,43 +922,54 @@ export interface LikeResponse {
   liked_by_me: boolean
 }
 
+// --- Engagement: comments + likes -------------------------------------------
+// Backend: api/helpers/proposal_engagement_serialize.py. Every comment write
+// returns the resulting row, which is why the client never recomputes a thread
+// it just modified.
+export interface Comment {
+  comment_id: number
+  proposal_id: number
+  // The proposal version the comment was written against. Carried because the
+  // backend stamps it; the thread is not filtered by it (comments key on
+  // proposal_id alone, so a discussion survives the proposal being overwritten).
+  proposal_version: number
+  // null once the author's account is deleted — user_name is then "[deleted]".
+  user_id: number | null
+  user_name: string
+  body: string
+  created_at: string
+  updated_at: string
+}
+
+// GET /api/proposal/<id>/engagements — one call, three sections. `liked_by_me`
+// is only correct when the request carried an auth header.
+//
+// `timeline` is the merged event log (publishes, refreshes, likes, comments).
+// Deliberately left unmodelled: nothing renders it yet, and inventing a type
+// for it would imply otherwise. Type it properly when the proposal-history
+// feature lands.
+export interface EngagementResponse {
+  proposal_id: number
+  likes: LikeResponse
+  comments: {
+    count: number
+    items: Comment[]
+  }
+  timeline: unknown[]
+}
+
 // --- GET /api/proposal/<id> -------------------------------------------------
-// The full stored envelopes. The gallery map only needs the route geometry and
-// the endpoint stops, so we type just those fields (the route object carries
-// much more — see backend/api/route.py).
-export interface ProposalRouteStopPoint {
-  stop_id: string
-  stop_name: string
-  lat: number
-  lon: number
-}
-
-// The gallery map only reads the route geometry and endpoint stops — this is
-// the default TRoute for callers (like Gallery.vue) that don't need more.
-// A caller needing the full route (ProposalViewport.vue, to reuse the same
-// applyPlan() the calc endpoint feeds) passes its own richer route type as
-// ProposalDetailResponse<TRoute> instead — the wire shape is identical to
-// POST /api/proposal/calc's `route` either way (see proposal_serialize.py's
-// proposal_to_response_dict docstring).
-export interface GalleryRouteShape {
-  geometries: { id: string; coords: [number, number][] }[]
-  trip_pairs: {
-    outbound: {
-      segments: {
-        from_stop: ProposalRouteStopPoint
-        to_stop: ProposalRouteStopPoint
-        // Country codes in the order the segment traverses them.
-        country_distance_shares: Record<string, number>
-      }[]
-    }
-  }[]
-}
-
 // GET /api/proposal/<id> — flat compute-response shape
 // (proposal_serialize.py::proposal_to_response_dict): `route`/`evaluation` at
 // the top level, plus proposal metadata (identical to POST
 // /api/proposal/publish's response).
-export interface ProposalDetailResponse<TRoute = GalleryRouteShape> {
+//
+// TRoute has no default: this endpoint reconstructs the full route AND the
+// whole evaluation cube, so the only justification for calling it is needing
+// that full shape (ProposalViewport.vue, which passes its own BackendRoute to
+// reuse the applyPlan() the calc endpoint feeds). The gallery used to call it
+// once per card just for geometry and now takes the map_lines section instead.
+export interface ProposalDetailResponse<TRoute> {
   proposal_id: number
   proposal_version: number
   user_id: number | null
@@ -833,12 +991,4 @@ export interface ProposalDetailResponse<TRoute = GalleryRouteShape> {
     input: { parameters: EvaluationParameters }
     views: EvaluationViews
   }
-}
-
-// A proposal reduced to what the gallery map draws: its routed line geometry
-// (one entry per stored geometry leg) and endpoint stops for markers.
-export interface GalleryMapRoute {
-  key: string
-  lines: [number, number][][]
-  stops: { lat: number; lon: number; name: string }[]
 }
