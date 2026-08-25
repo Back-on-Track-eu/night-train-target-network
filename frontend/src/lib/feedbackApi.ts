@@ -1,9 +1,12 @@
-// Thin client for POST /api/feedback — the anonymous (email reply-to) path
-// used by the cost-factor feedback form in the evaluation panel's detail
-// popover. No generic API client exists to extend, so this mirrors the
-// store's fetch pattern (stores/store.ts).
+// POST /api/feedback — the anonymous (email reply-to) path used by the
+// cost-factor feedback form in the evaluation panel's detail popover.
+// Error handling, timeouts and classification live in apiClient.
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5050'
+import { apiRequest } from './apiClient'
+import { ApiError } from './apiError'
+
+/** Every failure is an ApiError; re-exported so callers need one import. */
+export { ApiError }
 
 /** Request body for a cost-factor feedback submission. */
 export interface FeedbackPayload {
@@ -28,53 +31,19 @@ export interface FeedbackSuccess {
   email_sent: boolean
 }
 
-/** Carries a human-readable, already-surfaceable message for the UI. */
-export class FeedbackError extends Error {}
-
-/** Pull the most specific human-readable message out of an error body. */
-function extractErrorMessage(body: unknown, status: number): string {
-  if (body && typeof body === 'object') {
-    const record = body as Record<string, unknown>
-    const details = record.details
-    if (Array.isArray(details) && details.length > 0) {
-      return details.filter((d) => typeof d === 'string').join(' ')
-    }
-    if (typeof record.message === 'string' && record.message) {
-      return record.message
-    }
-  }
-  return `Request failed (HTTP ${status}).`
-}
-
 /**
- * Submit feedback. Resolves with the 201 body on success; rejects with a
- * FeedbackError carrying a readable message (backend `details`/`message`
- * where present) on any network or non-2xx failure.
+ * Submit feedback. Resolves with the 201 body; rejects with an ApiError whose
+ * `verbatim` carries the backend's validation text when there is any, and is
+ * null for a 500 (feedback.py's except-Exception returns str(e), which for a
+ * failed INSERT is a psycopg2 message naming tables and constraints).
  */
-export async function submitFeedback(
+export function submitFeedback(
   payload: FeedbackPayload,
   authHeaders: Record<string, string> = {},
 ): Promise<FeedbackSuccess> {
-  let response: Response
-  try {
-    response = await fetch(`${BASE_URL}/api/feedback`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders },
-      body: JSON.stringify(payload),
-    })
-  } catch (err) {
-    throw new FeedbackError(err instanceof Error ? err.message : 'Network error')
-  }
-
-  let body: unknown = null
-  try {
-    body = await response.json()
-  } catch {
-    // Non-JSON body (unexpected) — fall through to the status-based message.
-  }
-
-  if (!response.ok) {
-    throw new FeedbackError(extractErrorMessage(body, response.status))
-  }
-  return body as FeedbackSuccess
+  return apiRequest<FeedbackSuccess>('/api/feedback', {
+    method: 'POST',
+    body: payload,
+    headers: authHeaders,
+  })
 }

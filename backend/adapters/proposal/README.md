@@ -940,7 +940,8 @@ The example below is not exhaustive — it shows one filter of each kind:
   },
   "sort":    [{"by": <any filterable column>, "dir": "asc"|"desc"}],
   "limit":   int, "offset": int,
-  "include": ["summaries", "map_lines", "map_stop_counts", "map_country_counts"]
+  "include": ["summaries", "map_lines", "map_routes",
+              "map_stop_counts", "map_country_counts"]
 }
 ```
 
@@ -969,10 +970,16 @@ Response sections:
 - `map_lines`: GeoJSON FeatureCollection, one feature per distinct
   stop-pair **corridor** (direction-agnostic — outbound and return share a
   corridor) rather than one per proposal, so a client can drive line
-  *thickness* off `proposal_count` and look up which proposals share a
-  corridor via `proposal_ids`; `avg_margin_eur_per_train_km` is the mean
-  across exactly those proposals, for optional colouring — filtered but
-  **not** paginated (the map shows the whole filtered set).
+  *thickness* off `proposal_count`; `avg_margin_eur_per_train_km` is the
+  mean across exactly those proposals, for optional colouring — filtered
+  but **not** paginated (the map shows the whole filtered set). Geometry
+  is simplified for overview zoom at query time. The contributing
+  `proposal_ids` / `existing_route_ids` are deliberately not returned —
+  unbounded in proposal count, and superseded by `map_routes`.
+- `map_routes`: GeoJSON FeatureCollection, one feature per **listed** row
+  (the projections' stored `geom_simplified`) — the only map section that
+  IS paginated, sharing `summaries`' exact filter/sort/limit/offset so the
+  two always describe the same rows. Fixed in size at the page size.
 - `map_stop_counts`: `[{stop_id, lat, lon, n}]` — routes touching each stop
   (unnest over `stop_ids`, coordinates joined from the stop catalog).
 - `map_country_counts`: GeoJSON FeatureCollection, one feature per country

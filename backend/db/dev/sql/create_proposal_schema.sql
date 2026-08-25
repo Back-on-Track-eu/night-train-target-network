@@ -106,6 +106,12 @@ CREATE TABLE proposals.trips (
     created_at                TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- The gallery map's corridor query reaches trips by route_id, rebuilding it
+-- from the P{id}_V{version}_R1 convention (adapters/proposal/repository.py's
+-- map_lines()) — one lookup per row in the filtered set, so this grows with
+-- the proposal count. The FK above does not create an index of its own.
+CREATE INDEX idx_trips_route ON proposals.trips (route_id);
+
 COMMENT ON TABLE  proposals.trips                        IS 'GTFS trips.txt — one scheduled run of a route per proposal version. trip_id convention: P{proposal_id}_V{version}_R{route_index}_D{direction}_T{trip_index} e.g. P1_V1_R1_D0_T1.';
 COMMENT ON COLUMN proposals.trips.trip_id                IS 'GTFS trip identifier. Convention: P{proposal_id}_V{version}_R{route_index}_D{direction}_T{trip_index}.';
 COMMENT ON COLUMN proposals.trips.route_id               IS 'References proposals.routes.';

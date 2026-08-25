@@ -6,11 +6,12 @@ import 'katex/dist/katex.min.css'
 import Popover from 'primevue/popover'
 import Textarea from 'primevue/textarea'
 import InputText from 'primevue/inputtext'
-import Button from 'primevue/button'
 import AppIcon from '@/components/AppIcon.vue'
+import AppSpinner from '@/components/AppSpinner.vue'
 import { mdiChevronDown, mdiChevronRight, mdiInformationOutline } from '@mdi/js'
 import { resolveFactorRates, resolveFactorSubCategory } from '@/lib/costFactorRates'
-import { submitFeedback, FeedbackError } from '@/lib/feedbackApi'
+import { submitFeedback } from '@/lib/feedbackApi'
+import { useApiFailure } from '@/composables/useApiFailure'
 import { useStore } from '@/stores/store'
 import { useEvaluationFormat } from '@/composables/useEvaluationFormat'
 import type { Breakdown, EvaluationInput, FormulaMap } from '@/types/api'
@@ -28,6 +29,7 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const store = useStore()
+const { describe } = useApiFailure()
 const { formatEur, formatShare, formatRateValue } = useEvaluationFormat()
 
 // --- Cost tree: hierarchical node spec, flattened for rendering ------------
@@ -297,10 +299,10 @@ async function onSubmitFeedback() {
     draft.email = ''
   } catch (err) {
     feedbackStatus.value = 'error'
-    feedbackErrorMsg.value =
-      err instanceof FeedbackError && err.message
-        ? err.message
-        : t('proposal.evaluation.feedback.error')
+    // describe() keeps the backend's validation text (written for users) and
+    // drops a 500's, which for a failed INSERT is a psycopg2 message naming
+    // tables and constraints.
+    feedbackErrorMsg.value = describe(err, 'errors.feedbackFailed')
   }
 }
 </script>
@@ -483,18 +485,19 @@ async function onSubmitFeedback() {
             class="w-full rounded-lg border border-primary-50/20 bg-primary-50/5 px-3 py-2 text-sm text-primary-50 placeholder:text-primary-50/40"
           />
           <div class="flex flex-wrap items-center gap-3">
-            <Button
+            <button
               type="button"
-              :label="
+              :disabled="!canSubmitFeedback"
+              class="flex cursor-pointer items-center gap-2 self-start rounded-lg bg-primary-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-600 active:bg-primary-700 disabled:cursor-not-allowed disabled:bg-primary-500/40 disabled:text-white/60 disabled:shadow-none"
+              @click="onSubmitFeedback"
+            >
+              <AppSpinner v-if="feedbackStatus === 'submitting'" />
+              {{
                 feedbackStatus === 'submitting'
                   ? t('proposal.evaluation.feedback.submitting')
                   : t('proposal.evaluation.feedback.submit')
-              "
-              :disabled="!canSubmitFeedback"
-              :unstyled="true"
-              class="cursor-pointer self-start rounded-lg bg-primary-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-600 active:bg-primary-700 disabled:cursor-not-allowed disabled:bg-primary-500/40 disabled:text-white/60 disabled:shadow-none"
-              @click="onSubmitFeedback"
-            />
+              }}
+            </button>
             <span v-if="feedbackStatus === 'success'" class="text-sm text-green-400" role="status">
               {{ t('proposal.evaluation.feedback.success') }}
             </span>

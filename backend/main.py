@@ -22,13 +22,13 @@ Endpoints — see api/README.md for full documentation.
   GET  /api/proposals/stats
   POST /api/proposals/compare
   GET  /api/proposal/<id>
-  GET    /api/proposal/<id>/likes
-  POST   /api/proposal/<id>/likes
-  DELETE /api/proposal/<id>/likes
-  GET    /api/proposal/<id>/comments
-  POST   /api/proposal/<id>/comments
-  PATCH  /api/proposal/<id>/comments/<cid>
-  DELETE /api/proposal/<id>/comments/<cid>
+  GET  /api/proposal/<id>/share            HTML link-preview stub, not JSON
+  GET    /api/proposal/<id>/engagements
+  POST   /api/proposal/<id>/like
+  DELETE /api/proposal/<id>/like
+  POST   /api/proposal/<id>/comment
+  PATCH  /api/proposal/<id>/comment/<cid>
+  DELETE /api/proposal/<id>/comment/<cid>
   GET  /api/params/StopInfrastructures
   GET  /api/params/compositions
   GET  /api/params/TrackInfrastructures
@@ -42,6 +42,7 @@ POST /api/proposal/publish the only user write path (adapters/proposal/README.md
 import logging
 
 from flask import Flask, jsonify
+from flask_compress import Compress
 from flask_cors import CORS
 
 from api import config
@@ -60,6 +61,7 @@ from api import (
     gate,
     proposals,
     proposal_engagement,
+    proposal_share,
     scenarios,
 )
 
@@ -83,6 +85,17 @@ def create_app() -> Flask:
     app = Flask(__name__)
     CORS(app)
 
+    # --- response compression ---
+    # Nothing in front of this app compresses: gunicorn cannot at any worker
+    # class, and the Caddy vhost fronting the servers has no `encode` directive
+    # (it also lives outside this repo). In the dev stack there is no proxy hop
+    # at all. So Flask is the only layer that covers every environment — which
+    # matters most for the gallery's map sections, large GeoJSON that gzips by
+    # roughly an order of magnitude. Level/threshold: api/config.py.
+    app.config["COMPRESS_LEVEL"] = config.COMPRESS_LEVEL
+    app.config["COMPRESS_MIN_SIZE"] = config.COMPRESS_MIN_SIZE
+    Compress(app)
+
     # --- rate limiter (per-endpoint limits live in api/auth.py) ---
     limiter.init_app(app)
 
@@ -99,6 +112,10 @@ def create_app() -> Flask:
     app.register_blueprint(proposal_compare.bp, url_prefix="/api")
     app.register_blueprint(proposal_stats.bp, url_prefix="/api")
     app.register_blueprint(proposal_engagement.bp, url_prefix="/api")
+    # Returns HTML, not JSON — a link-preview stub for chat clients, which
+    # only reaches Flask under /api because that is the prefix Caddy routes
+    # here (api/proposal_share.py).
+    app.register_blueprint(proposal_share.bp, url_prefix="/api")
     app.register_blueprint(scenarios.bp, url_prefix="/api")
     # Testing gate (2026-08-13 Decision 2). Registered without a prefix:
     # it owns both /gate (the page) and /api/gate/* (check + redeem), and
