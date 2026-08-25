@@ -47,8 +47,6 @@ its own example files.
   - [`POST` / `DELETE /api/proposal/<id>/like`](#proposal-like) — like/unlike a proposal
   - [`POST /api/proposal/<id>/comment`](#proposal-comment) — add a comment
   - [`PATCH` / `DELETE /api/proposal/<id>/comment/<cid>`](#proposal-comment-item) — edit/delete own comment
-- [Sharing](#sharing)
-  - [`GET /api/proposal/<id>/share`](#proposal-share) — Open Graph link-preview stub (HTML, not JSON)
 - [Feedback](#feedback)
   - [`POST /api/feedback`](#post-feedback) — submit feedback
   - [`GET /api/feedback/categories`](#feedback-categories) — suggested category/sub_category values
@@ -185,8 +183,16 @@ documentation and sources appear **once**, not repeated per entity:
 **`StopInfrastructures`** adds `default_stops` (`global` fallback +
 `by_country` overrides for the stop charge) and `stops` — one entry per stop:
 `{stop_id, name, country_code, lat, lon, stop_charge_eur}`, where
-`stop_charge_eur` is a *field object* (see below), plus the catalog
-enrichment produced by the stop classification pipeline
+`stop_charge_eur` is a *field object* (see below) that additionally carries
+the charge's provenance — `vat_rate_per`, `incl_vat_eur`, `basis`,
+`price_basis_year`, `tariff_class` and `source` (the tariff document's id in
+the charge pipeline's register). All six are `null` for a stop resolving
+through a country or global default: a default has no document behind it. The
+model prices from `value`, which is net of VAT; `incl_vat_eur` is carried so
+both figures can be compared against whichever one the document printed.
+
+The response also carries the catalog enrichment produced by the stop
+classification pipeline
 (`models/infrastructure/stops`, steps 7–8):
 
 | Field | Description |
@@ -343,7 +349,7 @@ layer of candidate stops tagged with `added_time_min`.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `stops` | array of string | ✓ | Ordered list of stop IDs, min 2 — plain strings, e.g. `["osm:n3856100103", "osm:w423692233"]`. No per-stop type or time; both are derived automatically, see `timetable_mode` |
-| `composition_id` | string | — | From `/api/params/compositions`. Omit to compute with the standard composition (`DEFAULT_COMPOSITION_ID`, `models/route/model.py`); the resolved id comes back in `request.composition_id` and on every `trip_pairs[]` entry |
+| `composition_id` | string | ✓ | From `/api/params/compositions` |
 | `scenario_id` | int | — | Pins which version of every parameter table to use. Omit for the current live base scenario |
 | `routing_mode` | string | — | Default `"fullRouting"` — see **Mode switches** below |
 | `timetable_mode` | string | — | Default `"simpleAutomatic"` — see **Mode switches** below |
@@ -989,16 +995,10 @@ every entry. Times are wall-clock `"HH:MM"` with an optional integer
 **`bbox`** is `[west, south, east, north]` — proposals whose
 `geom_simplified` intersects the box (GiST-indexed).
 
-`include` defaults to `["summaries"]` if omitted. `limit`/`offset` apply
-to `summaries` and to `map_routes` — which share one window, so the two
-always describe the same rows. The aggregate map sections
-(`map_lines`/`map_stop_counts`/`map_country_counts`) ignore them and
-always reflect the full filtered set.
-
-That split is the point: the aggregate sections answer "what does the
-whole result set look like", so paginating them would be meaningless,
-while `map_routes` answers "draw the route behind this card" and is
-therefore capped at the page size however many proposals exist.
+`include` defaults to `["summaries"]` if omitted. `limit`/`offset` only
+apply to the `summaries` section — `map_lines`/`map_stop_counts`/
+`map_country_counts` always reflect the full filtered set (the map isn't
+paginated).
 
 ```json
 {
@@ -1042,8 +1042,7 @@ therefore capped at the page size however many proposals exist.
   "sort":    [{ "by": "likes_count", "dir": "desc" }],
   "limit":   50,
   "offset":  0,
-  "include": ["summaries", "map_lines", "map_routes",
-              "map_stop_counts", "map_country_counts"]
+  "include": ["summaries", "map_lines", "map_stop_counts", "map_country_counts"]
 }
 ```
 
@@ -1100,21 +1099,8 @@ therefore capped at the page size however many proposals exist.
         "properties": {
           "stop_a": "osm:w423692233", "stop_b": "osm:n3856100103",
           "proposal_count": 2, "existing_count": 1, "total_count": 3,
+          "proposal_ids": [5, 8], "existing_route_ids": ["42"],
           "avg_margin_eur_per_train_km": 0.9
-        }
-      }
-    ]
-  },
-  "map_routes": {
-    "type": "FeatureCollection",
-    "features": [
-      {
-        "type": "Feature",
-        "geometry": { "type": "MultiLineString", "coordinates": ["..."] },
-        "properties": {
-          "source": "proposal",
-          "proposal_id": 5, "proposal_version": 1, "route_id": null,
-          "geometry_routed": null
         }
       }
     ]
@@ -1199,35 +1185,13 @@ Target Network stop namespace precisely for this). Every map section
 carries the per-source split **and** the total — decision 2026-08-06:
 all three, always — so a frontend drives thickness/size off the total
 and colours or toggles by source without a second query: `map_lines`
-features carry `proposal_count` / `existing_count` / `total_count`;
-`map_stop_counts` rows and `map_country_counts` features carry
-`n_proposals` / `n_existing` / `n`.
+features carry `proposal_count` / `existing_count` / `total_count` plus
+`proposal_ids` / `existing_route_ids`; `map_stop_counts` rows and
+`map_country_counts` features carry `n_proposals` / `n_existing` / `n`.
 `avg_margin_eur_per_train_km` is the mean across the corridor's
 proposals only (`null` on corridors served exclusively by existing
 trains). Corridor geometry prefers a proposal shape and falls back to
-the existing route's own, and is **simplified for overview zoom** by the
-query (`MAP_LINES_SIMPLIFY_TOLERANCE_DEG` in
-`adapters/proposal/repository.py`); the stored geometry is untouched.
-
-`map_lines` features **do not** carry the contributing `proposal_ids` /
-`existing_route_ids`. They were present until 2026-08-23 and removed
-then — a client written against an older response will find them gone.
-Their combined
-length is the number of distinct (proposal, corridor) pairs, so they were
-the one part of the response that grew without bound in proposal count —
-six figures of ids at ~10k proposals, with popular corridors carrying
-thousands each. Per-route geometry now comes from `map_routes` instead,
-which is paginated with the list and therefore fixed in size.
-
-`map_routes` is one feature per **listed** row — the already-simplified
-`geom_simplified` each projection maintains, for exactly the rows
-`summaries` returned. `geometry` is `null` for an ONTD route whose
-routing failed; the feature is still emitted, so "no geometry" is
-distinguishable from "not on this page". `geometry_routed` distinguishes
-real routing from the catalogue's straight-line-between-stops fallback
-(false on ~47% of ONTD routes, mostly broad gauge), so a client can draw
-a placeholder as a placeholder; `null` on proposals, which have no such
-flag. `map_country_counts` is one feature per
+the existing route's own. `map_country_counts` is one feature per
 country touched by the filtered set, carrying the country's own border
 geometry (`input_params.countries.country_geom`) so the frontend
 doesn't need a second lookup for the choropleth — `geometry: null` for
@@ -1712,78 +1676,6 @@ timeline event moves to the edit time.
 the thread and the timeline. Storage keeps a tombstone row so
 `comment_id` stays stable, which is why a second `PATCH`/`DELETE` on it
 is a `404` rather than a resurrection — but nothing surfaces it.
-
-</details>
-
----
-
-<a id="sharing"></a>
-
-## Sharing
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/proposal/<id>/share` | Open Graph link-preview stub — **HTML, not JSON** |
-
-<a id="proposal-share"></a>
-
-### `GET /api/proposal/<id>/share`
-
-<details>
-<summary>Why this exists and what it returns</summary>
-
-WhatsApp, Signal, Telegram and mail clients build a link's preview card
-by fetching the URL and reading its Open Graph tags, and none of them run
-JavaScript — so the SPA's `index.html` can only ever yield an empty
-shell. The frontend's share menu therefore hands out *this* URL, which
-answers `200 text/html` with per-proposal tags and bounces a human
-browser on to `/proposal/<id>`.
-
-It is mounted under `/api` despite being a page, not an API: Caddy routes
-`/api/*` to this container and everything else to the frontend image, so
-`/api` is the only prefix that reaches Flask without a new vhost block.
-
-Response, for `proposal_id` 12 named `Berlin – Paris`:
-
-```html
-<title>Berlin – Paris</title>
-<meta name="robots" content="noindex">
-<link rel="canonical" href="/proposal/12">
-<meta property="og:title" content="Berlin – Paris">
-<meta property="og:description" content="A night train route modelled on …">
-<meta property="og:url" content="https://<host>/api/proposal/12/share">
-<meta property="og:image" content="https://<host>/og/share-card.jpg">
-<meta http-equiv="refresh" content="0; url=/proposal/12">
-```
-
-- **`200`, never a redirect.** A `302` would hand the crawler the SPA
-  shell and lose the tags. The human bounce is a meta refresh, which
-  crawlers do not follow — that split is the whole design.
-- **Absolute `og:image`/`og:url`** built from `X-Forwarded-Proto` and
-  `X-Forwarded-Host`. Caddy terminates TLS and preserves `Host`, and no
-  `ProxyFix` is installed, so `request.scheme` is `http` on every
-  deployed environment — and an `http://` image on an `https://` page is
-  dropped by some clients.
-- **`og:description` is one fixed campaign line**, identical for every
-  proposal. Route figures live in the sharer's own message text, composed
-  in the frontend where the locale is known; and
-  `co2_savings_t_per_year` and the demand KPIs must never appear here at
-  all while `proposal_summaries.demand_kpis_placeholder` is `TRUE` — they
-  are deterministic fakes, and a forwarded chat message is exactly where
-  a placeholder gets read as fact.
-- **Unknown `id` → `404` as a page**, not the global JSON 404 handler,
-  pointing at `/gallery`.
-- **No rate limit**, following `api/gate.py`: Flask-Limiter keys on
-  `get_remote_address`, which behind Caddy is the proxy hop, so a limit
-  here would be one bucket shared by every visitor. The route costs a
-  single indexed primary-key lookup.
-
-**Deployment constraint:** an environment fronted by the testing gate or
-basic-auth cannot produce preview cards at all — the crawler receives
-Caddy's `302` to `/gate`. This path needs the same `forward_auth`
-exemption `/gate` and `/api/gate/*` have. The image itself is a static
-`1200×630` asset served by the frontend image from
-`frontend/public/og/`.
 
 </details>
 

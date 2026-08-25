@@ -340,7 +340,7 @@ Four core schemas, all created and seeded by `seed.py`: `admin`, `input_params`,
 | `track_infrastructure_defaults` | EU-average fallback track parameters, versioned |
 | `track_infrastructures` | Country-level track parameters (TAC, energy price, terrain etc.), versioned, with per-field `_src` columns |
 | `stop_infrastructure_defaults` | Fallback station access charge per country (NULL = global), versioned |
-| `stop_infrastructures` | Night train stopping points with coordinates, charges, and the stop classification pipeline's enrichment (provenance category, Latin/ASCII names, UIC ref, city and country in seven languages, track gauges), versioned |
+| `stop_infrastructures` | Night train stopping points with coordinates, station charges and their provenance (VAT rate, gross figure, basis, price year, tariff class, source document), and the stop classification pipeline's enrichment (provenance category, Latin/ASCII names, UIC ref, city and country in seven languages, track gauges), versioned |
 | `passage_charges` | Crossings billed per traverse rather than per kilometre (Storebælt, Øresund, Channel Tunnel), with the polygon routing matches them by, versioned |
 | `country_relations` | Which country pairs are close enough **by rail** for one night train to connect them — the candidate set `GET /api/proposals/stats` ranks top/flop relations over. Derived and rebuildable, not hand-maintained (see below); keyed by the stop snapshot its reference stations came from |
 
