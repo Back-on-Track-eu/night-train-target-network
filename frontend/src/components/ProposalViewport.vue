@@ -18,6 +18,7 @@ import { ApiError, asApiFailure, isRetryable, type ApiFailure } from '@/lib/apiE
 import { useApiFailure } from '@/composables/useApiFailure'
 import { resolvePrefillStops, type GallerySearchSeed } from '@/lib/proposalPrefill'
 import { readDraft, writeDraft, clearDraft } from '@/lib/proposalDraftStorage'
+import { useLocaleFormat } from '@/composables/useLocaleFormat'
 import { buildSuggestRows, settledRows, type SuggestRow } from '@/lib/suggestPlacement'
 import { formatClock, dayOffset } from '@/lib/tripClock'
 import { routeFacts } from '@/lib/shareLinks'
@@ -28,19 +29,22 @@ import Skeleton from 'primevue/skeleton'
 import AppIcon from '@/components/AppIcon.vue'
 import AppSpinner from '@/components/AppSpinner.vue'
 import StopSelect from '@/components/StopSelect.vue'
+import ComputeInputsPanel from '@/components/ComputeInputsPanel.vue'
 import StopTime from '@/components/StopTime.vue'
 import LoadingFunFact from '@/components/LoadingFunFact.vue'
-import CompositionPanel from '@/components/CompositionPanel.vue'
 import EvaluationPanel from '@/components/EvaluationPanel.vue'
 import MapView from '@/components/MapView.vue'
 import MapShareBar from '@/components/MapShareBar.vue'
 import CommentSection from '@/components/CommentSection.vue'
 import {
   mdiArrowLeft,
+  mdiArrowLeftRight,
+  mdiCalendarSync,
   mdiCheckCircle,
   mdiClose,
   mdiPencil,
   mdiPlus,
+  mdiSpeedometerMedium,
   mdiSwapVertical,
   mdiTrashCan,
 } from '@mdi/js'
@@ -55,7 +59,8 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ back: []; published: [proposalId: number] }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
+const { formatInt } = useLocaleFormat()
 const store = useStore()
 const toastStore = useToastStore()
 const { describe, report } = useApiFailure()
@@ -349,20 +354,6 @@ const sectionStops = computed(() => {
   return outbound?.stop_times.map((s) => ({ stop_id: s.stop_id, name: s.stop_name })) ?? []
 })
 
-// In display, suggest AND loading modes, lock the composition card to the one
-// used for the routing — a single-element list hides the card's navigation
-// (arrows/dots) and prevents desyncing the suggest-mode base route from its
-// composition. 'loading' is in that set because the calc in flight was started
-// for THIS composition: switching mid-calc left the card advertising a train
-// the arriving result was not computed for.
-const compositionCards = computed(() => {
-  if (currentMode.value !== 'edit' && selectedCompositionId.value) {
-    const sel = store.compositions.filter((c) => c.composition_id === selectedCompositionId.value)
-    if (sel.length > 0) return sel
-  }
-  return store.compositions
-})
-
 // POST /api/proposal/calc for the given stop ids and auto_stop_addition mode
 // — the merged, stateless compute endpoint: one call returns route AND
 // evaluation (no more separate plan + evaluation round trips). Returns the
@@ -381,9 +372,13 @@ async function requestCalc(
     const json = await apiRequest<CalcResponse>('/api/proposal/calc', {
       method: 'POST',
       headers: store.authHeaders(),
+      // composition_id is omitted until the user picks one: the first
+      // evaluation runs on the backend's standard composition
+      // (DEFAULT_COMPOSITION_ID), and applyPlan() adopts whichever one the
+      // response reports back.
       body: {
         stops: stopIds,
-        composition_id: selectedCompositionId.value,
+        ...(selectedCompositionId.value ? { composition_id: selectedCompositionId.value } : {}),
         auto_stop_addition: autoStopAddition,
         // Plan under the selected scenario (null = live base, resolved server-side).
         scenario_id: store.selectedScenarioId,
@@ -478,6 +473,20 @@ const routeStats = computed(() => {
   }
 })
 
+// Headline route figures shown under the itinerary once a route exists.
+const routeStatRows = computed(() => {
+  const stats = routeStats.value
+  if (!stats) return []
+  const frequencies = stats.frequencies
+    .map((f) => (te(`proposal.frequency.${f}`) ? t(`proposal.frequency.${f}`) : f))
+    .join(', ')
+  return [
+    { icon: mdiArrowLeftRight, value: `${formatInt(stats.distanceKm)} km` },
+    { icon: mdiSpeedometerMedium, value: `${formatInt(stats.avgSpeedKmh)} km/h` },
+    { icon: mdiCalendarSync, value: frequencies },
+  ]
+})
+
 // Wire a successful calc response into the display: adapt the route, publish
 // the evaluation bundle, select the outbound trip, rebuild the itinerary from
 // the planned route (so the builder reflects what's actually on the map —
@@ -508,7 +517,19 @@ function applyPlan(json: CalcResponse, publish = false) {
     route.trips.find((t) => t.direction_id === 0)?.trip_id ?? route.trips[0]?.trip_id ?? null
   itinerary.value = itineraryFromRoute(route)
   committedItinerary.value = itinerary.value.map((s) => ({ ...s }))
+  // The first calc posts no composition, so the response is where we learn
+  // which one was used. Committing it in the same tick also keeps the
+  // recalc watcher below quiet — it only fires on a divergence from the
+  // committed value.
+  selectedCompositionId.value =
+    json.route.trip_pairs[0]?.composition_id ?? selectedCompositionId.value
   committedCompId.value = selectedCompositionId.value
+  // Same for the scenario, which also settles the selector when a STORED
+  // proposal was computed under a different one than the app currently has
+  // selected — otherwise the results would show as stale the moment they load.
+  const computedScenarioId = json.request.scenario_id
+  if (typeof computedScenarioId === 'number') store.selectedScenarioId = computedScenarioId
+  committedScenarioId.value = store.selectedScenarioId
   currentMode.value = 'display'
   if (!publish) return
   // Persist. An authenticated visitor (guest or registered) publishes right
@@ -575,7 +596,7 @@ async function doPublish() {
 
 async function evaluate() {
   const validStops = itinerary.value.filter((s) => s.selectedStop !== null)
-  if (validStops.length < 2 || !selectedCompositionId.value) return
+  if (validStops.length < 2) return
   currentMode.value = 'loading'
   calcFailure.value = null
   calcFailureMsg.value = null
@@ -611,7 +632,7 @@ async function evaluate() {
 // time. On zero suggestions this just degrades to plain 'edit' instead.
 async function restoreSuggestState(selectedIds: string[]) {
   const stopIds = currentStopIds.value
-  if (stopIds.length < 2 || !selectedCompositionId.value) return
+  if (stopIds.length < 2) return
   currentMode.value = 'loading'
   calcFailure.value = null
   calcFailureMsg.value = null
@@ -747,27 +768,6 @@ function itineraryFromSettledRows(
   return out
 }
 
-// Keep the displayed route and evaluation on the same scenario. A scenario
-// switch is one merged /calc call with auto_stop_addition="off": the stops
-// were settled by the last evaluation, so no re-prompting for suggestions,
-// and the server-side compute cache makes repeat scenarios cheap. The former
-// cost-only shortcut (re-running evaluation alone when the track versions
-// matched) went away with the separate evaluation endpoint.
-watch(
-  () => store.selectedScenarioId,
-  async (newId, oldId) => {
-    if (!rawRoute.value || currentMode.value === 'loading') return
-    if (newId == null || newId === oldId) return
-    const stopIds = currentStopIds.value
-    if (stopIds.length < 2 || !selectedCompositionId.value) return
-    currentMode.value = 'loading'
-    calcFailure.value = null
-    calcFailureMsg.value = null
-    const json = await requestCalc(stopIds, 'off')
-    if (json) applyPlan(json)
-  },
-)
-
 // Publish-after-auth: a no-choice visitor whose calc finished picks an identity
 // in the gate; the moment they do (authChoice leaves 'none'), persist. The gate
 // has no completion callback, so the store's auth state is the signal.
@@ -797,6 +797,7 @@ let _nextId = 1
 // the user cancels an edit. Null until the first evaluation.
 const committedItinerary = ref<ItineraryStop[] | null>(null)
 const committedCompId = ref<string | null>(null)
+const committedScenarioId = ref<number | null>(null)
 
 // Ordered stop ids of the current itinerary — the basis for the dirty check.
 const currentStopIds = computed(() =>
@@ -804,12 +805,10 @@ const currentStopIds = computed(() =>
 )
 
 // Guards the persistence watcher below against a mount-time race: while
-// onMounted is still awaiting fetchStops() to restore a draft (itinerary
-// still empty), CompositionPanel can already mount off the faster
-// compositions fetch and force-select compositions[0] (its own "keep a valid
-// selection" watch) — which, unguarded, the watcher below would read as "the
-// user cleared everything" and clearDraft() the very draft still being
-// restored. Flipped true once onMounted's initial restore/prefill decision is
+// onMounted is still awaiting fetchStops() to restore a draft, the itinerary
+// is still empty, and any watched ref settling in the meantime would be read
+// as "the user cleared everything" — clearing the very draft being restored.
+// Flipped true once onMounted's initial restore/prefill decision is
 // finalized, whichever branch it takes.
 const draftHydrated = ref(false)
 
@@ -845,7 +844,6 @@ watch(
 // swapping direction is a free view change, not a re-sequencing.
 const isDirty = computed(() => {
   if (!committedItinerary.value) return false
-  if (selectedCompositionId.value !== committedCompId.value) return true
   const committedIds = committedItinerary.value
     .filter((s) => s.selectedStop)
     .map((s) => s.selectedStop!.stop_id)
@@ -865,6 +863,35 @@ const showComputedView = computed(
     currentMode.value === 'display' ||
     (currentMode.value === 'edit' && routeResult.value !== null && !isDirty.value),
 )
+
+// Changing scenario or composition marks the displayed results stale instead
+// of recomputing on the spot: each arrow click through the composition
+// catalogue would otherwise be a full recompute, and the new selection should
+// be readable before it costs anything. Reverting to what the results were
+// computed with clears the flag by itself — this is a comparison, not a latch.
+// An itinerary that has itself diverged takes precedence: that path is the
+// Evaluate button's, which also re-prompts for stop suggestions.
+const paramsStale = computed(
+  () =>
+    routeResult.value !== null &&
+    currentMode.value !== 'loading' &&
+    currentMode.value !== 'suggest' &&
+    !isDirty.value &&
+    (selectedCompositionId.value !== committedCompId.value ||
+      store.selectedScenarioId !== committedScenarioId.value),
+)
+
+// The stale results' recompute: same "stops are settled" call the scenario
+// switch used to make on its own, now behind the user's click.
+async function recomputeWithSelection() {
+  const stopIds = currentStopIds.value
+  if (stopIds.length < 2 || currentMode.value === 'loading') return
+  currentMode.value = 'loading'
+  calcFailure.value = null
+  calcFailureMsg.value = null
+  const json = await requestCalc(stopIds, 'off')
+  if (json) applyPlan(json)
+}
 
 // Swap button is shown wherever there's a direction to flip: a multi-trip
 // route in display, or two or more stops while editing.
@@ -1400,7 +1427,7 @@ const mapSegments = computed<MapSegment[] | null>(() => {
 // Load a stored proposal by id and populate display mode — same wire shape
 // as POST /api/proposal/calc (see types/api.ts's ProposalDetailResponse), so
 // applyPlan() can hydrate rawRoute/calcResult/itinerary from it exactly like
-// a fresh calc. selectedCompositionId is set first so CompositionPanel
+// a fresh calc. selectedCompositionId is set first so ComputeInputsPanel
 // locks onto the composition the stored route actually used, rather than
 // defaulting to the first one in the full catalogue.
 async function loadStoredProposal(proposalId: number) {
@@ -1524,10 +1551,14 @@ onMounted(async () => {
       </div>
     </div>
 
-    <div v-else class="flex gap-6">
-      <!-- Left panel: shrink-wrapped to its content's natural width (itinerary
-           text + composition card) rather than a fixed share of the row, so
-           MapView gets whatever width is left over. -->
+    <div
+      v-else
+      class="flex gap-6 transition-opacity duration-200"
+      :class="paramsStale ? 'opacity-40' : ''"
+    >
+      <!-- Left panel: shrink-wrapped to its content's natural width (the
+           itinerary text) rather than a fixed share of the row, so MapView
+           gets whatever width is left over. -->
       <div class="flex w-fit shrink-0 flex-col justify-center gap-12">
         <div class="itinerary-table max-w-sm">
           <!-- Edit mode table -->
@@ -1877,49 +1908,19 @@ onMounted(async () => {
               </button>
             </div>
           </div>
-        </div>
 
-        <!-- Composition card — switchable in edit, locked to the used one in
-             display (where it also merges in the headline route figures,
-             once a route exists) -->
-        <div
-          v-if="store.compositionsStatus === 'success' && store.compositions.length > 0"
-          class="flex flex-col gap-6"
-        >
-          <CompositionPanel
-            :compositions="compositionCards"
-            :selected-id="selectedCompositionId"
-            :compact="currentMode === 'display' || currentMode === 'suggest'"
-            :route-stats="currentMode === 'display' ? routeStats : null"
-            @select="(id) => (selectedCompositionId = id)"
-          />
-        </div>
-        <!-- Loading and failure used to share the "Train info" placeholder,
-             which reads as a deliberate empty state for both. Split apart. -->
-        <Skeleton
-          v-else-if="store.compositionsStatus === 'loading'"
-          height="8rem"
-          border-radius="0.75rem"
-        />
-        <div
-          v-else-if="store.compositionsFailure"
-          class="flex h-32 flex-col items-center justify-center gap-2 rounded-xl bg-primary-50/5 px-4 text-center"
-          role="alert"
-        >
-          <p class="text-sm text-red-300">{{ t('errors.compositionsUnavailable') }}</p>
-          <button
-            type="button"
-            class="cursor-pointer text-sm font-semibold text-primary-50 underline underline-offset-2"
-            @click="store.fetchCompositions()"
+          <!-- Headline route figures — distance, average speed, frequency.
+               Its own panel under the itinerary controls, matching the boxes
+               in the results section. -->
+          <div
+            v-if="currentMode === 'display' && routeStatRows.length > 0"
+            class="mt-8 flex flex-wrap justify-center gap-x-8 gap-y-3 rounded-xl bg-primary-50/5 px-4 py-3 text-primary-50/70"
           >
-            {{ t('errors.retry') }}
-          </button>
-        </div>
-        <div
-          v-else
-          class="flex h-32 items-center justify-center rounded-xl bg-primary-50/5 text-sm text-primary-50/40"
-        >
-          {{ t('proposal.trainCardPlaceholder') }}
+            <div v-for="stat in routeStatRows" :key="stat.icon" class="flex items-center gap-2">
+              <AppIcon :path="stat.icon" :size="20" />
+              <span class="text-base font-semibold">{{ stat.value }}</span>
+            </div>
+          </div>
         </div>
 
         <div v-if="store.stopsStatus === 'loading'" class="text-xs text-primary-50/40">
@@ -2116,15 +2117,46 @@ onMounted(async () => {
       class="w-full transition-opacity duration-200"
       :class="isDirty ? 'pointer-events-none opacity-40' : ''"
     >
-      <!-- Route and evaluation arrive in the same calc response, so calcResult
-           is always set by the time this section shows. -->
-      <EvaluationPanel
-        v-if="calcResult"
-        :result="calcResult"
-        :summary="calcSummary"
-        :stops="sectionStops"
-        @scope-change="onScopeChange"
+      <!-- What the results were computed with. Only reachable once a route
+           exists — the first evaluation runs on the standard composition.
+           Stays interactive while the results below are stale: that is how
+           you get back to the committed selection without recomputing. -->
+      <ComputeInputsPanel
+        v-if="store.compositions.length > 0 || store.scenarios.length > 0"
+        class="mb-4"
+        :compositions="store.compositions"
+        :selected-composition-id="selectedCompositionId"
+        @select-composition="(id) => (selectedCompositionId = id)"
       />
+
+      <div class="relative">
+        <!-- Route and evaluation arrive in the same calc response, so calcResult
+             is always set by the time this section shows. -->
+        <EvaluationPanel
+          v-if="calcResult"
+          :result="calcResult"
+          :summary="calcSummary"
+          :stops="sectionStops"
+          @scope-change="onScopeChange"
+        />
+
+        <!-- Stale results: the whole area is the recompute control. -->
+        <Transition name="fade">
+          <button
+            v-if="paramsStale"
+            type="button"
+            class="absolute inset-0 flex cursor-pointer items-start justify-center rounded-xl bg-sapphire/60 pt-12 backdrop-blur-[2px]"
+            @click="recomputeWithSelection"
+          >
+            <span
+              class="flex items-center gap-2 rounded-full bg-primary-500 px-6 py-2 text-md font-semibold text-white shadow-lg transition hover:bg-primary-600"
+            >
+              {{ t('proposal.recalculate') }}
+              <span>→</span>
+            </span>
+          </button>
+        </Transition>
+      </div>
     </div>
 
     <!-- Discussion, underneath everything. Deliberately NOT greyed out while

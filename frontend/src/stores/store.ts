@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import type {
   Stop,
   Composition,
+  CompositionCatalog,
   Scenario,
   StopsResponse,
   CompositionsResponse,
@@ -31,6 +32,16 @@ export const useStore = defineStore('store', () => {
   const stopsFailure = ref<ApiFailure | null>(null)
 
   const compositions = ref<Composition[]>([])
+  // Everything the same response carries alongside them — coach types,
+  // classes, operators, field documentation and sources. Kept because the
+  // composition detail overlay resolves a formation against it.
+  const compositionCatalog = ref<CompositionCatalog>({
+    operators: [],
+    classes: {},
+    coach_types: {},
+    descriptions: { compositions: {}, operators: {} },
+    sources: {},
+  })
   const compositionsStatus = ref<LoadStatus>('idle')
   const compositionsFailure = ref<ApiFailure | null>(null)
 
@@ -109,6 +120,13 @@ export const useStore = defineStore('store', () => {
         budget: 'reference',
       })
       compositions.value = json.compositions
+      compositionCatalog.value = {
+        operators: json.operators,
+        classes: json.classes,
+        coach_types: json.coach_types,
+        descriptions: json.descriptions,
+        sources: json.sources,
+      }
       compositionsStatus.value = 'success'
     } catch (err) {
       compositionsStatus.value = 'error'
@@ -132,7 +150,7 @@ export const useStore = defineStore('store', () => {
       scenariosStatus.value = 'error'
       // Consumers MUST surface this: with no scenario loaded, selectedScenarioId
       // stays null and the calc silently runs against the live base instead of
-      // the scenario the user thinks is selected. ScenarioPanel says so.
+      // the scenario the user thinks is selected. ComputeInputsPanel says so.
       scenariosFailure.value = asApiFailure(err)
     }
   }
@@ -264,6 +282,7 @@ export const useStore = defineStore('store', () => {
     stopsStatus,
     stopsFailure,
     compositions,
+    compositionCatalog,
     compositionsStatus,
     compositionsFailure,
     scenarios,

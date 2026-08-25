@@ -7,16 +7,43 @@ export interface Stop {
   stop_charge_eur: { value: number; is_default: boolean }
 }
 
+/** Onboard amenities — OR-aggregated over the coaches at composition level,
+ *  as-built at coach-type level. */
+export interface OnboardEquipment {
+  has_wifi: boolean
+  has_bikes: boolean
+  has_climatization: boolean
+  has_plugs: boolean
+}
+
 export interface Composition {
   composition_id: string
   description: string
+  // "new" | "refurbished" — the fleet the cost model prices this train from.
+  material_strategy: string
   operator_id: string
   routing: {
     max_speed_kmh: number
     total_weight_t: number
+    // Coaches only — the locomotives are not part of it.
     total_length_m: number
     n_locos: number
     hsr_allowed: boolean
+    min_boarding_time_min: number
+    min_alighting_time_min: number
+  }
+  // Wages per PRODUCTIVE hour: evaluation divides them by the roster
+  // efficiency it computes per trip, so the charged rate is higher.
+  staff: {
+    driver_factor: number
+    crew_factor_total: number
+    zugchef_crew_factor: number
+    crew_factor_coaches: number
+    costs_per_hour: {
+      driver_eur_h: number
+      crew_eur_h: number
+      total_staff_eur_h: number
+    }
   }
   // Redesigned 2026-07-22: totals + full-composition average densities
   // (service areas included) + per-class_main entries with derived
@@ -29,11 +56,38 @@ export interface Composition {
       string,
       {
         places: number
-        density_length_m_per_place: number
-        density_weight_t_per_place: number
+        density_length_m_per_place: number | null
+        density_weight_t_per_place: number | null
       }
     >
   }
+  equipment: OnboardEquipment & { food_and_beverages: string }
+  // Ordered formation; coach_type_id references CompositionsResponse.coach_types.
+  coaches: {
+    count: number
+    list: { position: number; coach_type_id: string }[]
+  }
+  fixed_costs: {
+    purchase_coach_eur: number
+    coach_avail_per: number
+    coach_amort_years: number
+    cleaning_services_eur_day: number
+  }
+  variable_km: {
+    coach_maint_eur_km: number
+  }
+  // Blended cost proportion per class_main; sums to 1.
+  cost_allocation: {
+    by_class_main: Record<string, number>
+  }
+  // Seeded calibration figures — absent for compositions that carry none.
+  indicative: {
+    kpis: {
+      cost_eur_per_train_km: number
+      cost_ct_per_place_km: number
+    }
+  } | null
+  source_ids: number[]
 }
 
 export interface StopsResponse {
@@ -84,29 +138,81 @@ export interface ScenariosResponse {
   total_count: number
 }
 
-export interface CompositionsResponse {
-  compositions: Composition[]
-  operators: unknown[]
-  // All service classes grouped by class_main; class_id =
+/** One accommodation section of a coach type, listed under
+ *  CompositionsResponse.classes[class_main]. */
+export interface ClassEntry {
   // "<coach_type_id> - <section label>".
-  classes: Record<string, { class_id: string; coach_type_id: string; places: number }[]>
+  class_id: string
+  coach_type_id: string
+  places: number
+}
+
+/** A coach type as built — the catalog entry every position in a
+ *  composition's formation points at. */
+export interface CoachType {
+  length_m: number
+  length_wo_service_m: number
+  weight_gross_t: number
+  weight_wo_service_t: number
+  crew_factor: number
+  places_total: number
+  equipment: OnboardEquipment
+  // References into CompositionsResponse.classes.
+  class_ids: string[]
+  remarks: string
+  source_ids: number[]
+}
+
+/** A locomotive type an operator hauls with. */
+export interface LocoType {
+  loco_type_id: string
+  description: string
+  traction: string
+  weight_t: number
+  max_speed_kmh: number
+}
+
+export interface Operator {
+  operator_id: string
+  operator_name: string
+  driver_costs_eur_h: number
+  crew_costs_eur_h: number
+  ebit_margin_per: number
+  financing_quota_per: number
+  var_overhead_per: number
+  fix_overhead_quota_per: number
+  // Whole consist per locomotive-hour.
+  loco_full_service_lease_eur_h: number
+  loco_lease_eur_h: Record<string, number>
+  locos: LocoType[]
+  cost_per_class: Record<string, number>
+  source_ids: number[]
+}
+
+/** Nested field documentation shipped with the compositions payload:
+ *  descriptions.compositions[section][field] and descriptions.operators[field].
+ *  Read through describeField() in src/lib/compositionFormation.ts. */
+export interface CompositionDescriptions {
+  compositions: Record<string, Record<string, string>>
+  operators: Record<string, string>
+}
+
+export interface CompositionsResponse {
+  count: number
+  compositions: Composition[]
+  operators: Operator[]
+  // All service classes across the catalog, grouped by class_main.
+  classes: Record<string, ClassEntry[]>
   // All coach types keyed by coach_type_id, referenced from
   // compositions' coaches.list and carrying class_ids into "classes".
-  coach_types: Record<
-    string,
-    {
-      length_m: number
-      length_wo_service_m: number
-      weight_gross_t: number
-      weight_wo_service_t: number
-      crew_factor: number
-      places_total: number
-      equipment: Record<string, boolean>
-      class_ids: string[]
-      remarks: string
-    }
-  >
+  coach_types: Record<string, CoachType>
+  descriptions: CompositionDescriptions
+  sources: Record<string, ParamSource>
 }
+
+/** Everything the compositions payload carries besides the compositions
+ *  themselves — the shared catalog the detail overlay resolves against. */
+export type CompositionCatalog = Omit<CompositionsResponse, 'count' | 'compositions'>
 
 // --- POST /api/proposal/calc : "evaluation" block ---------------------------
 // Response shapes as produced by backend/api/helpers/evaluation_serialize.py,
@@ -368,10 +474,7 @@ export interface StopInfraSection {
 export interface CompositionsSection {
   // Nested documentation: descriptions.compositions[section][field] and
   // descriptions.operators[field].
-  descriptions: {
-    compositions: Record<string, Record<string, string>>
-    operators: Record<string, string>
-  }
+  descriptions: CompositionDescriptions
   sources: Record<string, ParamSource>
   compositions: CompositionParam[]
   operators: OperatorParam[]

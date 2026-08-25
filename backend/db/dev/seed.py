@@ -77,6 +77,7 @@ from sql_loader import load_sql
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from db.schema import build_ddl
+from models.route.model import DEFAULT_COMPOSITION_ID
 
 DB_HOST = os.environ["POSTGRES_HOST"]
 DB_PORT = os.environ["POSTGRES_PORT"]
@@ -1709,6 +1710,14 @@ def build_composition_types() -> list[dict]:
 COMPOSITION_TYPE_IDS = [
     r["composition_type_id"] for r in _read_calib_csv("composition_types.csv")
 ]
+
+# A calc request without composition_id is computed with this one, so it has
+# to survive every recalibration of the catalog. Failing here, at container
+# start, beats a 400 in the browser.
+assert DEFAULT_COMPOSITION_ID in COMPOSITION_TYPE_IDS, (
+    f"DEFAULT_COMPOSITION_ID {DEFAULT_COMPOSITION_ID!r} (models/route/model.py) "
+    f"is not in the seeded composition catalog: {sorted(COMPOSITION_TYPE_IDS)}"
+)
 
 COMPOSITION_TYPE_COACHES_RAW = [
     (row["composition_type_id"], int(row["position"]), row["coach_type_id"])
