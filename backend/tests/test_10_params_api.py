@@ -123,6 +123,41 @@ class TestStopInfrastructures:
         muenchen = stops["osm:n2470201868"]
         assert muenchen["city"]["names"]["it"] == "Monaco di Baviera"
 
+    def test_stop_charge_carries_provenance(self, stops_body):
+        """Everything about the charge lives in one object: the resolved
+        value and its default flag, plus where the figure came from. A stop
+        on a default has no document behind it, so those keys are null."""
+        keys = {
+            "value",
+            "is_default",
+            "vat_rate_per",
+            "incl_vat_eur",
+            "basis",
+            "price_basis_year",
+            "tariff_class",
+            "source",
+        }
+        sourced = 0
+        for stop in stops_body["stops"]:
+            charge = stop["stop_charge_eur"]
+            assert keys <= set(charge), stop["stop_id"]
+            if charge["source"]:
+                sourced += 1
+                assert charge["basis"]
+                assert charge["price_basis_year"]
+                net, rate = charge["value"], charge["vat_rate_per"]
+                if rate is not None:
+                    assert abs(net * (1 + rate / 100) - charge["incl_vat_eur"]) < 0.01
+            else:
+                assert charge["is_default"] is True, (
+                    f"{stop['stop_id']}: a charge of its own with no source"
+                )
+        if not sourced:
+            pytest.skip(
+                "no stop carries its own station charge yet — run the charge "
+                "calibration (models/infrastructure/stops/charges) and re-export"
+            )
+
     def test_stop_charge_is_field_object(self, stops_body):
         """stop_charge_eur is a field object: value + is_default (bool) +
         version + source_id."""

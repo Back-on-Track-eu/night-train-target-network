@@ -287,6 +287,36 @@ def test_stop_enrichment_seeded(db_cur):
     )
 
 
+def test_stop_charge_carries_its_provenance(db_cur):
+    """A seeded charge brings the document it came from with it. Without
+    that, a published figure cannot be traced back to a tariff, and the
+    charge columns are indistinguishable from an invented number."""
+    db_cur.execute("""
+        SELECT stop_charge_eur, stop_charge_vat_rate_per,
+               stop_charge_incl_vat_eur, stop_charge_basis,
+               stop_charge_price_basis_year, stop_charge_source
+        FROM input_params.stop_infrastructures
+        WHERE stop_charge_eur IS NOT NULL AND stop_infra_version = 1
+        """)
+    rows = db_cur.fetchall()
+    if not rows:
+        pytest.skip(
+            "no stop carries its own station charge yet — run the charge "
+            "calibration (models/infrastructure/stops/charges) and re-export"
+        )
+
+    for row in rows:
+        assert row["stop_charge_source"], "a charge with no source document"
+        assert row["stop_charge_basis"], "a charge that is not per anything"
+        assert row["stop_charge_price_basis_year"], "a charge with no price year"
+        # Net, rate and gross must still agree once through the database.
+        if row["stop_charge_vat_rate_per"] is not None:
+            net = float(row["stop_charge_eur"])
+            rate = float(row["stop_charge_vat_rate_per"])
+            gross = float(row["stop_charge_incl_vat_eur"])
+            assert abs(net * (1 + rate / 100) - gross) < 0.01, row
+
+
 def test_stop_gauge_break_of_gauge(db_cur):
     """Multi-gauge stops read like the break-of-gauge who's-who they are:
     Kaunas carries standard + Russian gauge."""

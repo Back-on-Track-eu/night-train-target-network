@@ -184,6 +184,13 @@ def test_stop_enrichment_surfaces(loader):
     assert berlin.gauges_mm == [1435]
     assert berlin.gauge_evidence == "tagged"
 
+    # Charge provenance rides with the figure, or is uniformly absent for a
+    # stop resolving through a default — a default has no source document.
+    for stop in stops.all().values():
+        if stop.stop_charge_source:
+            assert stop.stop_charge_basis
+            assert stop.stop_charge_price_basis_year
+
     # A rural halt: city is None and city_names is empty, not None-valued.
     no_city = [s for s in stops.all().values() if s.city is None]
     for stop in no_city:
