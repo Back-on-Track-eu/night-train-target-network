@@ -1,13 +1,21 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, watch } from 'vue'
 import Popover from 'primevue/popover'
+import Skeleton from 'primevue/skeleton'
 import AppIcon from './AppIcon.vue'
 import { mdiMagnify } from '@mdi/js'
 import { useI18n } from 'vue-i18n'
 import type { Stop } from '@/types/api'
+import type { LoadStatus } from '@/stores/store'
 
-const props = defineProps<{ stops: Stop[]; disabledIds?: Set<string> }>()
-const emit = defineEmits<{ select: [stop: Stop] }>()
+// `status` exists because an empty `stops` array means three different things —
+// still loading, failed to load, and genuinely empty — and the popover used to
+// render "No stops found" for all three. During a slow load that was a lie.
+const props = withDefaults(
+  defineProps<{ stops: Stop[]; disabledIds?: Set<string>; status?: LoadStatus }>(),
+  { status: 'success', disabledIds: undefined },
+)
+const emit = defineEmits<{ select: [stop: Stop]; retry: [] }>()
 
 const { t, locale } = useI18n()
 const popoverRef = ref<InstanceType<typeof Popover> | null>(null)
@@ -176,7 +184,31 @@ watch(filtered, () => {
         scrollbar-color: color-mix(in srgb, var(--p-primary-50) 50%, transparent) transparent;
       "
     >
-      <p v-if="!filtered.length" class="px-4 py-3 text-base text-primary-50/70">
+      <!-- Loading: hold the popover's height with rows, so it doesn't claim
+           there is nothing to find while the list is still on its way. -->
+      <div
+        v-if="status === 'loading' && !stops.length"
+        class="flex flex-col gap-1"
+        aria-hidden="true"
+      >
+        <Skeleton v-for="n in 4" :key="n" height="1.5rem" class="!mx-3 !my-2" />
+      </div>
+      <div v-else-if="status === 'error' && !stops.length" class="px-4 py-3" role="alert">
+        <p class="text-base text-primary-50/70">{{ t('errors.stopsUnavailable') }}</p>
+        <button
+          type="button"
+          class="mt-1 cursor-pointer text-sm font-semibold text-primary-50 underline underline-offset-2"
+          @click="emit('retry')"
+        >
+          {{ t('errors.retry') }}
+        </button>
+      </div>
+      <p v-else-if="!stops.length" class="px-4 py-3 text-base text-primary-50/70">
+        {{ t('errors.stopsEmpty') }}
+      </p>
+      <!-- Only now does "no stops found" mean what it says: we have the list,
+           and the user's query matched nothing in it. -->
+      <p v-else-if="!filtered.length" class="px-4 py-3 text-base text-primary-50/70">
         {{ t('proposal.noStopsFound') }}
       </p>
       <button
