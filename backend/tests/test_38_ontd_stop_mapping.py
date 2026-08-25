@@ -95,3 +95,29 @@ class TestDistance:
         near = _distance_m(52.5250, 13.3690, 52.5250, 13.3742)
         far = _distance_m(52.5250, 13.3690, 52.5250, 13.4430)
         assert near < MATCH_RADIUS_M < far
+
+
+class TestMappingTargetsCurrent:
+    """Every mapping row must point into the pinned catalog snapshot —
+    manual/verified rows survive catalog changes by design, which is
+    exactly how they get stranded on removed ids (2026-08 restructure
+    removed 21 duplicate stops). build_stop_mappings() warns; this test
+    makes the warning a failure so it cannot be shipped past."""
+
+    def test_no_mapping_targets_removed_stops(self, db_cur):
+        db_cur.execute("""
+            SELECT m.ontd_stop_id, m.tn_stop_id, m.match_method, m.verified
+            FROM ontd.stop_mappings m
+            WHERE NOT EXISTS (
+                SELECT 1 FROM input_params.stop_infrastructures s
+                JOIN scenario.scenarios sc
+                  ON sc.stop_infrastructures_version = s.stop_infra_version
+                WHERE sc.is_current_base AND s.stop_id = m.tn_stop_id
+            )
+            """)
+        stale = db_cur.fetchall()
+        assert stale == [], (
+            "mapping rows target stop ids absent from the base snapshot "
+            "(re-point or un-verify them, then force the ONTD bootstrap): "
+            + ", ".join(f"{r['ontd_stop_id']}->{r['tn_stop_id']}" for r in stale)
+        )

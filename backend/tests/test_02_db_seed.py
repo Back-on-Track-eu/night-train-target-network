@@ -105,6 +105,9 @@ REQUIRED_COLUMNS = {
         "country_code",
         "stop_lat",
         "stop_lon",
+        "stop_provenance",
+        "name_latin",
+        "name_ascii",
     ],
     "input_params.track_infrastructures": ["country_code"],
     "input_params.composition_types": [
@@ -227,6 +230,73 @@ def test_phase2_not_null_columns_enforced(db_cur, table, columns):
         row = db_cur.fetchone()
         assert row is not None, f"{table}.{col}: column not found"
         assert row["is_nullable"] == "NO", f"{table}.{col}: expected NOT NULL"
+
+
+# Known stop_provenance vocabulary — step 10's PROVENANCE_LABELS plus its
+# fallback. A new category is a deliberate pipeline change and lands here too.
+PROVENANCE_VOCABULARY = {
+    "existing night train stop",
+    "urban area currently without night train service",
+    "tourism region currently without night train service",
+    "ferry port currently without night train service",
+    "border / interchange station",
+    "network coherence addition",
+    "manual addition",
+}
+
+
+def test_stop_enrichment_seeded(db_cur):
+    """The catalog's enrichment actually lands in the DB: provenance from
+    the known vocabulary, localized country names on every stop, a city on
+    nearly all (rural halts excepted), and night-train-capable gauges on
+    most (stops whose OSM object sits off the platforms excepted)."""
+    db_cur.execute("""
+        SELECT stop_provenance, country_de, country_it, city, city_it,
+               gauges_mm
+        FROM input_params.stop_infrastructures
+        WHERE stop_infra_version = 1
+        """)
+    rows = db_cur.fetchall()
+    assert rows
+
+    bad_provenance = {r["stop_provenance"] for r in rows} - PROVENANCE_VOCABULARY
+    assert bad_provenance == set(), f"unknown provenance: {bad_provenance}"
+
+    assert all(r["country_de"] and r["country_it"] for r in rows), (
+        "localized country names must be present on every stop"
+    )
+
+    with_city = sum(1 for r in rows if r["city"])
+    assert with_city / len(rows) >= 0.95, (
+        f"only {with_city}/{len(rows)} stops resolve a city — step 7's "
+        "place fetch is incomplete (a failed Overpass country?)"
+    )
+    assert all(r["city_it"] for r in rows if r["city"]), (
+        "a resolved city must carry its localized names"
+    )
+
+    with_gauges = [r for r in rows if r["gauges_mm"] is not None]
+    assert len(with_gauges) / len(rows) >= 0.9, (
+        f"only {len(with_gauges)}/{len(rows)} stops carry gauges — "
+        "step 8 incomplete (a failed batch is resumable)"
+    )
+    narrow = [g for r in with_gauges for g in r["gauges_mm"] if g < 1435]
+    assert narrow == [], (
+        f"sub-1435 gauges seeded: {narrow} — the pipeline's night-train "
+        "capability filter (step 8 MIN_GAUGE_MM) is not being applied"
+    )
+
+
+def test_stop_gauge_break_of_gauge(db_cur):
+    """Multi-gauge stops read like the break-of-gauge who's-who they are:
+    Kaunas carries standard + Russian gauge."""
+    db_cur.execute("""
+        SELECT gauges_mm FROM input_params.stop_infrastructures
+        WHERE stop_name = 'Kaunas' AND stop_infra_version = 1
+        """)
+    row = db_cur.fetchone()
+    assert row is not None, "Kaunas missing from the catalog"
+    assert row["gauges_mm"] == [1435, 1520]
 
 
 def test_proposal_summaries_geom_is_postgis_geometry(db_cur):
