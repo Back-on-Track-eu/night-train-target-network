@@ -168,6 +168,36 @@ def test_all_stops_load(loader):
     assert len(stops.all()) >= 8, f"Expected >= 8 stops, got {len(stops.all())}"
 
 
+def test_stop_enrichment_surfaces(loader):
+    """The enrichment columns come through as folded, language-keyed
+    structures on the domain object — no column suffixes downstream."""
+    stops = loader.build_all_stops()
+    berlin = stops.all().get("osm:n3856100103")
+    assert berlin is not None, "Berlin Hbf missing from the catalog"
+
+    assert berlin.provenance == "existing night train stop"
+    assert berlin.name_ascii  # non-empty by contract
+    assert set(berlin.country_names) == {"en", "de", "fr", "nl", "it", "es", "pl"}
+    assert berlin.country_names["it"] == "Germania"
+    assert berlin.city == "Berlin"
+    assert berlin.city_names.get("it") == "Berlino"
+    assert berlin.gauges_mm == [1435]
+    assert berlin.gauge_evidence == "tagged"
+
+    # Charge provenance rides with the figure, or is uniformly absent for a
+    # stop resolving through a default — a default has no source document.
+    for stop in stops.all().values():
+        if stop.stop_charge_source:
+            assert stop.stop_charge_basis
+            assert stop.stop_charge_price_basis_year
+
+    # A rural halt: city is None and city_names is empty, not None-valued.
+    no_city = [s for s in stops.all().values() if s.city is None]
+    for stop in no_city:
+        assert stop.city_names == {}
+        assert stop.city_osm_id is None
+
+
 def test_composition_fields_match_db(loader, db_cur):
     """Composition built by the loader matches raw DB values for key routing
     and cost fields (including the operator join)."""

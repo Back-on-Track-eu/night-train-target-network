@@ -17,7 +17,7 @@ const props = withDefaults(
 )
 const emit = defineEmits<{ select: [stop: Stop]; retry: [] }>()
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const popoverRef = ref<InstanceType<typeof Popover> | null>(null)
 const inputRef = ref<HTMLInputElement | null>(null)
 const listRef = ref<HTMLElement | null>(null)
@@ -26,11 +26,44 @@ const filterQuery = ref('')
 // background the mouse hover uses, so both share one highlight.
 const activeIndex = ref(0)
 
-const filtered = computed(() =>
-  props.stops.filter(
-    (s) => !filterQuery.value || s.name.toLowerCase().includes(filterQuery.value.toLowerCase()),
-  ),
-)
+// One lowercase haystack per stop, built once per stops load: display name,
+// Latin/ASCII forms, and the city and country names in EVERY catalog language
+// (deliberately not just the UI locale — an Italian typing "Monaco" must find
+// München Hbf on the English UI too). name_ascii makes the search
+// diacritic-tolerant from the data side ("munchen" matches "München").
+const haystacks = computed(() => {
+  const map = new Map<string, string>()
+  for (const s of props.stops) {
+    const parts = [s.name, s.name_latin, s.name_ascii]
+    if (s.city) parts.push(s.city.name, ...Object.values(s.city.names))
+    if (s.country_names) parts.push(...Object.values(s.country_names))
+    map.set(s.stop_id, parts.filter(Boolean).join('\u0000').toLowerCase())
+  }
+  return map
+})
+
+const filtered = computed(() => {
+  const query = filterQuery.value.trim().toLowerCase()
+  if (!query) return props.stops
+  return props.stops.filter((s) => haystacks.value.get(s.stop_id)?.includes(query))
+})
+
+// Subtitle under each row: "city · country" in the current UI locale, falling
+// back through English to the on-the-ground names.
+function subtitle(s: Stop): string {
+  const city = s.city ? s.city.names[locale.value] || s.city.names.en || s.city.name : ''
+  const country = s.country_names?.[locale.value] || s.country_names?.en || s.country_code
+  return city ? `${city} \u00b7 ${country}` : country
+}
+
+// Track gauge badge. Several values at break-of-gauge stations (Kaunas
+// 1435 + 1520). null means the catalog found no usable track nearby — shown
+// as such rather than omitted, because an unknown gauge is exactly what
+// stops a stop from being checked for gauge compatibility later.
+function gaugeLabel(s: Stop): string {
+  if (!s.gauges_mm?.length) return t('proposal.gaugeUnknown')
+  return `${s.gauges_mm.join(' \u00b7 ')} mm`
+}
 
 function open(event: MouseEvent) {
   filterQuery.value = ''
@@ -192,7 +225,26 @@ watch(filtered, () => {
         @mouseenter="setActive(i)"
         @click="pick(stop)"
       >
-        {{ stop.name }}
+        <span class="flex items-baseline gap-3">
+          <span class="min-w-0 flex-1 truncate">{{ stop.name }}</span>
+          <span
+            class="shrink-0 text-sm tabular-nums"
+            :class="[
+              isDisabled(stop) ? 'text-primary-50/20' : 'text-primary-50/50',
+              stop.gauges_mm?.length ? '' : 'italic',
+            ]"
+            :title="t('proposal.trackGauge')"
+          >
+            {{ gaugeLabel(stop) }}
+          </span>
+        </span>
+        <span
+          v-if="subtitle(stop)"
+          class="block text-sm"
+          :class="isDisabled(stop) ? 'text-primary-50/20' : 'text-primary-50/50'"
+        >
+          {{ subtitle(stop) }}
+        </span>
       </button>
     </div>
   </Popover>

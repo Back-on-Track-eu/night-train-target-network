@@ -1,10 +1,14 @@
 """
 stop_mapping.py
 ===============
-Interim ONTD ↔ Target Network stop-id bridge (adapters/proposal/README.md §5.5,
+ONTD ↔ Target Network stop-id bridge (adapters/proposal/README.md §5.5,
 WP10 step 6a) — the mechanism that lets ONTD gallery rows share one stop
-namespace with proposals until the real harmonized stop list (numeric
-OSM-based identifiers, expected ~2 weeks out) replaces both id schemes.
+namespace with proposals. The harmonized OSM-based stop catalog this was
+written to await landed 2026-08 (stop ids "osm:n…"/"osm:w…"/"osm:r…" from
+the stop classification pipeline); the bridge remains as the permanent
+translation from ONTD's own ids, since ONTD stops and catalog stops can
+legitimately be different OSM objects for the same station (ONTD's export
+reads only railway=halt nodes).
 
 One-pass resolution per ONTD stop appearing on an active route:
 COORDINATE MATCH — nearest stop_infrastructures row of the current base
@@ -13,11 +17,10 @@ not the matcher (ONTD says "Bruxelles-Midi", the curated row says
 "Brussels Midi"); coordinates are what both sides agree on.
 
 The catalog is COMPLETE AT SEED TIME (revised 2026-08-07): every stop the
-ONTD snapshot needs is part of db/dev/seed.py's stop data, derived once by
-scripts/export_ontd_stop_seed.py into the Drive-hosted
-ontd_seed_stops.csv (downloaded to db/dev/data/ at seed time when absent)
-using this module's own id convention ({country}_{TRANSLITERATED_NAME},
-Ü→UE, ø→OE, ...). This replaces the earlier runtime MINT pass, which
+ONTD snapshot needs is part of db/dev/seed.py's stop data — since 2026-08
+the Drive-hosted stop_seed_catalog.csv from the stop classification
+pipeline (mint_tn_stop_id and its {country}_{NAME} convention remain only
+for legacy manual mapping rows predating the switch). This replaces the earlier runtime MINT pass, which
 inserted missing stops into input_params.stop_infrastructures during the
 bootstrap — mutating pinned snapshot versions at runtime, which (a) broke
 the compute cache's scenario-pin key invariant
@@ -57,6 +60,12 @@ Public interface:
 
 Callers: db/ontd/projection.py's build_summaries() (before writing
 route_summaries/route_corridors, so their stop ids come out translated).
+
+OPERATIONAL NOTE: the ontd schema is bootstrap-guarded, so a reseed with a
+changed stop catalog does NOT re-run this module by itself — mappings and
+route_summaries keep referencing the old ids until the bootstrap is forced
+(ONTD_BOOTSTRAP=force, stages 2-3). Required after any catalog change that
+adds, removes or re-points stop ids; see db/ontd/README.md.
 """
 
 from math import cos, radians, sqrt
@@ -365,6 +374,27 @@ def build_stop_mappings(cur) -> dict[str, str]:
             """,
             (ontd_id, nearest["stop_id"], round(distance, 1)),
         )
+
+    # Manual/verified rows are never auto-overwritten, which also means a
+    # catalog change can silently strand them on removed stop ids (the
+    # 2026-08 pipeline restructure removed 21 duplicate stops). Automatic
+    # rows self-heal on the next rebuild; protected rows only heal by hand,
+    # so stranded ones are shouted about here.
+    catalog_ids = {row["stop_id"] for row in catalog}
+    stale_protected = {
+        ontd_id: tn_id
+        for ontd_id, tn_id in protected.items()
+        if tn_id not in catalog_ids
+    }
+    if stale_protected:
+        print(
+            f"  WARNING: {len(stale_protected)} manual/verified mapping(s) "
+            "target stop ids absent from the pinned catalog snapshot — "
+            "route_summaries built from them carry dead ids. Re-point or "
+            "un-verify these rows in ontd.stop_mappings:"
+        )
+        for ontd_id, tn_id in sorted(stale_protected.items()):
+            print(f"    {ontd_id} -> {tn_id}")
 
     print(
         f"  stop mappings: {matched} coordinate-matched, "
