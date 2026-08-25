@@ -40,6 +40,7 @@ htmlcov/
 
 # Jupyter
 .ipynb_checkpoints/
+.nbrun/
 
 # -----------------------------------------------------------------------------
 # Node / Frontend
