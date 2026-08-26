@@ -1,5 +1,10 @@
 -- ============================================================
--- 2026-08-13_loco_types.sql
+-- 2026-08-14_loco_types.sql
+--
+-- Dated 08-14 to sort after 2026-08-13_tac_calibration.sql, which CREATES
+-- composition_type_loco_weight_t — the column this file migrates and drops.
+-- migrate.py applies in filename order; the original 08-13 name made this
+-- file run before tac_calibration and fail on every never-reseeded server DB.
 --
 -- Locomotives become catalog entities instead of a hardcoded 90 t
 -- constant plus a per-composition count plus a per-operator flat rate.
