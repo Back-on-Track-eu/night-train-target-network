@@ -817,7 +817,31 @@ COUNTRIES = [
     {"country_code": "RS", "country_name": "Serbia"},
     {"country_code": "ME", "country_name": "Montenegro"},
     {"country_code": "AL", "country_name": "Albania"},
+    # Eastern and southeastern networks the ONTD catalogue reaches. Same
+    # placeholder treatment as the blocks above. Present so their stops seed
+    # at all (_build_stop_infrastructures() drops any catalog row whose
+    # country is not here) and so their track kilometres are attributed
+    # rather than falling to RailRouter's "UNK" sentinel, which
+    # _check_country_coverage() exempts — an unmodelled country is silently
+    # free of charges, which is worse than an approximate figure.
+    {"country_code": "UA", "country_name": "Ukraine"},
+    {"country_code": "TR", "country_name": "Türkiye"},
+    {"country_code": "MD", "country_name": "Moldova"},
+    {"country_code": "MK", "country_name": "North Macedonia"},
+    # Liechtenstein has no stop of ours and never will — it is 10 km of the
+    # Feldkirch–Buchs line through Schaan-Vaduz, i.e. the Arlberg corridor
+    # every Zürich–Wien night train runs. Without a row those kilometres
+    # carry no buffer quota and no track access charge, and nothing warns.
+    {"country_code": "LI", "country_name": "Liechtenstein"},
 ]
+
+# Belarus and Russia are deliberately NOT modelled. Both are in the OSM
+# extract, so once the non-standard-gauge routing profiles exist the engine
+# could route a Ukrainian train through them. They are blocked in the
+# routing engine instead (models/route/routing/docker/custom_models/
+# night_train.json, country == BLR || country == RUS -> speed 0), which is
+# a hard exclusion rather than the silent "UNK" a missing row would give.
+
 
 # Country border polygons — Marine Regions "Union of the ESRI Country
 # shapefile and the Exclusive Economic Zones" v4 (Flanders Marine
@@ -1224,6 +1248,13 @@ _TRACK_INFRA_PLACEHOLDER_COUNTRIES = (
     "RS",
     "ME",
     "AL",
+    # Eastern/southeastern networks and the Arlberg transit country — see
+    # the matching block in COUNTRIES above.
+    "UA",
+    "TR",
+    "MD",
+    "MK",
+    "LI",
 )
 
 _TRACK_INFRA_PLACEHOLDER_FIELDS = dict.fromkeys(

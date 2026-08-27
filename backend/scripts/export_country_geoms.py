@@ -112,10 +112,13 @@ _COUNTRY_CODE_TO_ISO3 = {
     "HU": "HUN",
     "IE": "IRL",
     "IT": "ITA",
+    "LI": "LIE",
     "LT": "LTU",
     "LU": "LUX",
     "LV": "LVA",
+    "MD": "MDA",
     "ME": "MNE",
+    "MK": "MKD",
     "NL": "NLD",
     "NO": "NOR",
     "PL": "POL",
@@ -125,6 +128,8 @@ _COUNTRY_CODE_TO_ISO3 = {
     "SE": "SWE",
     "SI": "SVN",
     "SK": "SVK",
+    "TR": "TUR",
+    "UA": "UKR",
 }
 
 # A territory can appear several times in the source: its own union polygon
