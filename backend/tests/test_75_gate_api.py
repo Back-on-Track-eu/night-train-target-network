@@ -179,7 +179,7 @@ def test_check_rejects_tampered_signature(api_base, live_code):
     header, payload, sig = token.split(".")
     mid = len(sig) // 2
     flipped = "X" if sig[mid] != "X" else "Y"
-    tampered = f"{header}.{payload}.{sig[:mid]}{flipped}{sig[mid + 1:]}"
+    tampered = f"{header}.{payload}.{sig[:mid]}{flipped}{sig[mid + 1 :]}"
     assert _check(api_base, cookies={COOKIE: tampered}).status_code == 302
 
 
