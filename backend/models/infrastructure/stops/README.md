@@ -304,7 +304,7 @@ of file:
   Drive folder into `data/` when the file is absent. That is the external
   station export (`bahnhoefe_stops_sorted.csv`) and the OSM-derived
   intermediates you cannot rebuild without the ~60 GB Europe extract, an
-  osmium pass and hours of Overpass calls (steps 2, 3a, 3b, 4). One folder id,
+  osmium pass and hours of Overpass calls (steps 2, 3a, 3b). One folder id,
   `STOPS_DRIVE_FOLDER_ID` in `backend/docker/.env`, covers all of them;
   syncing uses `gdown` (in the `dev` extra), since Drive cannot list a folder
   over plain HTTP. The sync only fills gaps — a local file always wins, so a
@@ -331,7 +331,11 @@ of file:
 - **`local_input(name, produced_by)`** — written by an earlier step of this
   pipeline, so it is never downloaded: a Drive copy could silently override
   what your own notebook just produced. Missing means that step has not been
-  run, and the error says which one.
+  run, and the error says which one. **Step 4's output belongs here** and was
+  misfiled as downloadable until 2026-08-28: step 4 wrote it to the notebook's
+  working directory while step 5 read `data/`, where `ensure_local` had put a
+  stale Drive copy — so a step 4 re-run changed nothing downstream and said
+  nothing about it. Running step 5 now requires step 4 to have been run.
 
 Nothing under `data/` is tracked in git. If the sync can't work (no id set,
 `gdown` not installed, folder not shared), place the file in `data/` by hand —

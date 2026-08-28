@@ -35,8 +35,9 @@ overwrites nothing and a hand-placed file is never clobbered.
 
 Usage from a notebook:
 
-    from data_sources import ensure_local
-    step4_csv = ensure_local("step4_MatchingONTDtoOSM.csv")
+    from data_sources import ensure_local, local_input
+    osm_csv = ensure_local("step3b_output_osm_stations_classified.csv")
+    step4_csv = local_input("step4_MatchingONTDtoOSM.csv", "step4_...ipynb")
 
 Drive folder:
 https://drive.google.com/drive/folders/1iAjxVKRn1qhgR-yhfczO91M41KIIIIVd
@@ -81,7 +82,6 @@ DOWNLOADABLE = {
     "step2_output_eu_stations.osm.pbf",
     "step3a_output_way_relation_centers.csv",
     "step3b_output_osm_stations_classified.csv",
-    "step4_MatchingONTDtoOSM.csv",
     "stop_seed_catalog.csv",
 }
 
@@ -412,6 +412,7 @@ def local_input(filename: str, produced_by: str) -> Path:
         raise FileNotFoundError(
             f"{filename} not found in {DATA_DIR} — run {produced_by} first."
         )
+    _check_header(path)
     return path
 
 
