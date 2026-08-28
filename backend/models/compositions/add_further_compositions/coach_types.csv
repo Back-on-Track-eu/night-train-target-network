@@ -1,2 +1,12 @@
 coach_type_id,description,length_m,weight_t,svc_length_m,svc_weight_t,crew,wifi,bikes,aircon,plugs,source_ids,notes
 EXAMPLE-Bcfam,"EXAMPLE — family couchette coach with play corner, based on OeBB Bcmz refit",26.4,54.0,2.0,3.5,0.5,True,False,True,True,J01,Worked example row — delete before handoff
+WLAB-2,"WLAB-2 - Norwegian sleeping vagon, 2-berth compartments",26.4,54.0,2.0,3.5,0.5,True,False,True,True,,
+FR5-1,"FR5-1 - Norwegian bistro vagon",26.4,54.0,2.0,3.5,0.5,True,True,True,True,,
+BC5-3,"BC5-3 - Norwegian seating vagon with children play area",26.4,54.0,2.0,3.5,0.5,True,False,True,True,,
+B5-3,"B5-3 - Norwegian seating vagon",26.4,54.0,2.0,3.5,0.5,True,False,True,True,,
+B5-7,"B5-7 - Norwegian reclining seats vagon",26.4,54.0,2.0,3.5,0.5,True,False,True,True,,
+NOX-1,"NOX-1 - NOX sleeping vagon 42 persons",26.4,54.0,2.0,3.5,0.5,True,False,True,True,,
+NOX-2,"NOX-2 - NOX sleeping vagon 29 persons",26.4,54.0,2.0,3.5,0.5,True,False,True,True,,
+LR-1,"LR-1 - LunaRail sleeping vagon 66 persons",26.4,54.0,2.0,3.5,0.5,True,False,True,True,,
+LR-2,"LR-2 - LunaRail sleeping vagon 31 persons",26.4,54.0,2.0,3.5,0.5,True,False,True,True,,
+LR-3,"LR-3 - LunaRail sleeping vagon 42 persons",26.4,54.0,2.0,3.5,0.5,True,False,True,True,,

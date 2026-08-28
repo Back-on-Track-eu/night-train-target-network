@@ -1,3 +1,13 @@
 coach_type_id,position,class_main,section_label,places,length_m,weight_t,crew,source_ids
 EXAMPLE-Bcfam,1,couchette,couchette (4-berth) family,40,20.4,42.0,0.5,J01
 EXAMPLE-Bcfam,2,couchette,couchette (4-berth) PRM,4,4.0,8.5,0.0,J01
+WLAB-2,1,sleeping,sleeping (2-berth) compartment,30,26.4,54.0,0.5,
+FR5-1,1,restaurant,bistro vagon,49,26.4,54.0,0.5,
+BC5-3,1,seating,seating vagon with children play area,32,26.4,54.0,0.5,
+B5-3,1,seating,seating vagon,68,26.4,54.0,0.5,
+B5-7,1,couchette,reclining seats vagon,30,26.4,54.0,0.5,
+NOX-1,1,sleeping,NOX vagon 42 persons,42,26.4,54.0,0.5,
+NOX-2,1,sleeping,NOX vagon 29 persons,29,26.4,54.0,0.5,
+LR-1,1,sleeping,LR vagon 66 persons,66,26.4,54.0,0.5,
+LR-2,1,sleeping,LR vagon 31 persons,31,26.4,54.0,0.5,
+LR-3,1,sleeping,LR vagon 42 persons,42,26.4,54.0,0.5,

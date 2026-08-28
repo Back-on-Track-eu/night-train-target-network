@@ -1,0 +1,21 @@
+Sweden Talgo: total: (252 persons)
+--------------------------------------
+night train (9 vagons): (124 persons)
+23x reclining seats
+12x 4-bed couchettes
+10x 2-bed sleeper with bathroom
+31x single cabins
+2x weelchair cabins
+
+day train (9 vagons): (128 persons)
+112x 2. class
+14x 1. class
+
+
+Calibration:
+--------------
+availability: 0.85 for refurbished and new vagons
+
+refurbished coach maintenance: 
+RIC states 1.15 for coach with a/c and 0.75 for coach without a/c.
+suggestion: 0.95 as the middlepoint

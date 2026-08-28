@@ -1,2 +1,6 @@
 composition_type_id,description,material_strategy,max_speed_kmh,hsr_allowed,zugchef_crew_factor,length_cost_prop,food_and_beverages,loco_type_ids,source_ids,notes
 EXAMPLE-REF-FAM-7,EXAMPLE — family-oriented 7-coach refurbished formation,refurbished,200,False,1.19,0.7,kiosk/ trolley service/ morning service,VECTRON-MS-200,J01,Worked example row — delete before handoff
+Norwegian-7,7-coach Norwegian formation,new,200,False,1.19,0.7,bistro vagon,VECTRON-MS-200,,
+NOX-14,14-coach NOX formation,new,200,False,1.19,0.7,kiosk/ trolley service/ morning service,VECTRON-MS-200,,
+LR-7,7-coach LunaRail LR formation,new,200,False,1.19,0.7,kiosk/ trolley service/ morning service,VECTRON-MS-200,,
+LR-14,14-coach LunaRail LR formation,new,200,False,1.19,0.7,kiosk/ trolley service/ morning service,VECTRON-MS-200,,
