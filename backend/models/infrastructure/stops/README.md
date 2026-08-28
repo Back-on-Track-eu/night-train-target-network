@@ -236,7 +236,14 @@
 >   the Zürich corridor, and Luxembourg sits 31 km off. Worth reporting
 >   upstream.
 > - **`stop_overrides.csv`** (Stage D) still does not exist.
-> - **Review the step 5 reports** after any re-run: `unmatched_stops.csv` is
+> - **The schedule is live now.** Step 5 reads the ONTD workbook rather than a
+  frozen export, so a re-run picks up whatever ONTD currently says — which is
+  the point, but it also means step 5's output can change without anything in
+  this repo changing. Compare `unmatched_stops.csv` and the step 5 stop count
+  against the previous run and note the difference; a jump is ONTD moving, not
+  the pipeline breaking. Delete `data/ontd_stop_times.csv` (or pass
+  `refresh=True`) to force a re-fetch.
+- **Review the step 5 reports** after any re-run: `unmatched_stops.csv` is
 >   the pipeline's own test, since every current night train stop should match.
 >   `step5_review_flagged.csv`, `step5_coord_conflicts_report.csv` and
 >   `step5_duplicate_matches_report.csv` cover the rest. Extend `ABBREVIATIONS`
@@ -260,7 +267,7 @@ the full design and its principles).
 | 2 | Filter all station objects out of the raw extract | ✅ done | `step2_filter_stations.py` |
 | 3a | Fetch center coordinates for station ways/relations | ✅ done | `step3a_fetch_missing_centers.py` |
 | 3b | Classify "real" railway stations vs. urban transit | ✅ done | `step3b_classify_stations.ipynb` |
-| 4 | Merge classified stations with ONTD (left join; inspect ONTD rows without an OSM match) | ✅ done | `step4_MatchingONTDtoOSM.ipynb` |
+| 4 | Merge classified stations with the station register, topped up from ONTD where the register has no row (left join; inspect rows without an OSM match) | ✅ done | `step4_MatchingONTDtoOSM.ipynb` |
 | 5 | Qualify stops via current night train stops (`stop_times`), then diagnose the unmatched (ONTD coverage check) | ✅ done | `step5_JoinNTStopsWithOSM.ipynb` |
 | 6 | Add stations for [functional urban areas](https://ec.europa.eu/eurostat/web/gisco/geodata/statistical-units/cities-functional-urban-areas) without a qualified stop, plus tourism regions and ferry hubs — guarded against duplicating step 5 | ✅ done, reasons outstanding | `step6_manual_additions.ipynb` |
 | 7 | Enrich: Latin/ASCII names, UIC ref, country + city per stop, both in all member-organisation languages | ✅ done, place fetch per machine | `step7_enrich_stops.ipynb` |
@@ -282,7 +289,8 @@ All commands from this directory (`backend/models/infrastructure/stop_classifica
 
 ```
 uv run python step3a_fetch_missing_centers.py     # needs internet (Overpass API)
-uv run jupyter lab                                # then run step3b, step4, step5, step6,
+uv run jupyter lab                                # then run step3b, step4, step5 (first run
+                                                  #   fetches the ONTD workbook), step6,
                                                   #   step7 (first run fetches place nodes
                                                   #   via Overpass), step8 (Overpass)
 uv run python step10_export_seed_stops.py         # writes data/stop_seed_catalog.csv
@@ -293,14 +301,33 @@ Inputs resolve through `data_sources.py`, which draws a line between two kinds
 of file:
 
 - **`ensure_local(name)`** — comes from outside this machine, so it syncs the
-  Drive folder into `data/` when the file is absent. That is the two external
-  exports (`bahnhoefe_stops_sorted.csv`, `B-o-T_DataBase_stop_times.csv`) and
-  the OSM-derived intermediates you cannot rebuild without the ~60 GB Europe
-  extract, an osmium pass and hours of Overpass calls (steps 2, 3a, 3b, 4).
-  One folder id, `STOPS_DRIVE_FOLDER_ID` in `backend/docker/.env`, covers all
-  of them; syncing uses `gdown` (in the `dev` extra), since Drive cannot list a
-  folder over plain HTTP. The sync only fills gaps — a local file always
-  wins, so a file a step just wrote is never overwritten.
+  Drive folder into `data/` when the file is absent. That is the external
+  station export (`bahnhoefe_stops_sorted.csv`) and the OSM-derived
+  intermediates you cannot rebuild without the ~60 GB Europe extract, an
+  osmium pass and hours of Overpass calls (steps 2, 3a, 3b, 4). One folder id,
+  `STOPS_DRIVE_FOLDER_ID` in `backend/docker/.env`, covers all of them;
+  syncing uses `gdown` (in the `dev` extra), since Drive cannot list a folder
+  over plain HTTP. The sync only fills gaps — a local file always wins, so a
+  file a step just wrote is never overwritten.
+- **`ontd_stops()`** — the stops a night train actually calls at, taken from
+  the same workbook and emitted in the station register's own column shape.
+  Step 4 concatenates the ones the register does not carry: it is a
+  third-party OSM-derived list, and Sighișoara, Iași, Roma Ostiense, Veliko
+  Tarnovo, Hässleholm C, Åre and Briançon are absent from all three of its
+  name columns, so step 5 could not qualify them however good its own match
+  was. Restricted to called stops rather than all ~28k ONTD stops — step 4
+  bridges stops that could be qualified, and matching 28k against OSM to
+  reach a few dozen would only slow it and swell its ambiguity reports.
+- **`ontd_stop_times()`** — the night train schedule step 5 qualifies against,
+  read from the ONTD workbook `db/ontd/loader.py` loads (`ONTD_WORKBOOK_ID`),
+  and cached at `data/ontd_stop_times.csv` under the same local-file-wins
+  rule. It used to be a hand-made Drive export, `B-o-T_DataBase_stop_times.csv`
+  — correct on the day it was made, but nothing kept it level with the
+  workbook, and the two drifted **in both directions**: of the 239 active ONTD
+  stops with no catalog row, **224 were simply absent from that export**,
+  while it still carried stops no active train serves. The catalog was built
+  from one snapshot of ONTD while the app ran on another. Reading the same
+  workbook removes the second snapshot instead of rescheduling its refresh.
 - **`local_input(name, produced_by)`** — written by an earlier step of this
   pipeline, so it is never downloaded: a Drive copy could silently override
   what your own notebook just produced. Missing means that step has not been
