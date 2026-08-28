@@ -30,7 +30,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.25"
+ROUTE_BUILDER_VERSION: str = "0.9.26"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -45,6 +45,28 @@ ROUTE_BUILDER_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.26": {
+        "date": "2026-08-27",
+        "author": "david",
+        "changes": "OUTPUT CHANGE for 'new' compositions only: the speed "
+        "ceiling baked into the routing graph rises from 200 to 230 km/h "
+        "(MAX_COMPOSITION_SPEED_KMH, mirrored in "
+        "models/route/routing/docker/custom_models/night_train.json). The "
+        "200 predated the composition model, when there was one train and "
+        "200 was its speed; since fullRouting caps every trip at its own "
+        "composition.max_speed_kmh in the request custom model, the baked "
+        "value had become a second, lower cap that silently overrode it — "
+        "GraphHopper resolves two limit_to rules by minimum. Every "
+        "material_strategy='new' composition is specified at 230 km/h and "
+        "pays the +8% loco lease premium for it (compositions calibration "
+        "step 6b), so those trips were being charged for line speed the "
+        "router refused to use. Refurbished compositions (200 km/h) are "
+        "unaffected: their request cap still binds. simpleRouting and "
+        "route_geometry(), which send no composition, now run to 230 "
+        "rather than 200 — a change to the ONTD map geometry and to "
+        "simpleRouting times, not to any evaluated route. Requires a graph "
+        "re-import; shipped with the per-gauge routing profiles.",
+    },
     "0.9.25": {
         "date": "2026-08-18",
         "author": "david",
@@ -547,6 +569,27 @@ WEEKS_PER_SEASON: int = 26
 DAYS_PER_OPERATING_WEEK: dict[str, int] = {"DAILY": 7, "THREE_PER_WEEK": 3}
 """Operating days per week per Frequency name — specific days of week
 aren't modelled, they don't affect cost or fleet sizing."""
+
+# --- Routing graph ceiling (models/route/routing/docker/custom_models/night_train.json)
+MAX_COMPOSITION_SPEED_KMH: int = 230
+"""Speed ceiling baked into the routing graph — the fastest composition the
+catalog can hold. Not a per-trip value: fullRouting caps every trip at its
+own composition.max_speed_kmh in the request custom model, and that is
+always at most this, so the baked rule never binds there. What it does bound
+is the paths that send no composition at all — route_geometry() (ONTD map
+lines, which have no composition by design) and simpleRouting.
+
+230 rather than a higher number because above it the composition parameter
+breaks rather than scales: true high speed means distributed-traction
+trainsets, a different concept outside this model's scope (compositions
+calibration step 6b). It equals HSR_TRACK_SPEED_THRESHOLD_KMH by
+construction — track a night train could physically use is never treated as
+forbidden high-speed infrastructure.
+
+This value has two homes by necessity: GraphHopper reads the JSON at import
+time, not this constant. The JSON is the sanctioned mirror and carries a
+comment pointing back here — keep the two equal, and note that changing
+either requires a graph re-import."""
 
 # --- fullRouting HSR avoidance (models/route/routing/rail_router.py)
 HSR_TRACK_SPEED_THRESHOLD_KMH: int = 230

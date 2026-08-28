@@ -1,0 +1,20 @@
+// custom_models/nt_gauge_1520.json
+// Russian gauge — Baltics (LT/LV/EE), Ukraine, Moldova, and the broad-gauge border sidings at Polish and Romanian crossings.
+// The nt_ prefix is required: OpenRailRouting ships built-in custom models
+// named gauge_<mm>.json, and GraphHopper refuses any file in
+// custom_models.directory whose name shadows a built-in
+// ("Custom model file name '...' is already used for built-in profiles").
+// The only per-profile rule: everything else lives in the shared
+// night_train.json. Untagged track (gauge == 0) stays permitted, as it has
+// been since the first import — OSM tags gauge only where it differs from
+// the local norm, so blocking it would strand large parts of the network.
+// That permissiveness is the known weak point of the filter: the pre-check
+// in models/route/route_factory.py is the primary defence, this rule the
+// secondary one.
+
+{
+  "speed": [
+    { "if": "gauge != 0 && gauge != 1520",
+      "multiply_by": "0" }
+  ]
+}
