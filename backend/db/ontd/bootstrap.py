@@ -28,9 +28,25 @@ existing-route context, so a Drive outage or a router that is not ready
 must not keep the container from starting — this exits 0 and says what
 went wrong, unless --strict is passed.
 
+The guard is not just "has it ever run". seed.py DROPs input_params on
+every start, so the stop catalog can change under a projection that the
+guard would otherwise consider done — leaving ontd.stop_mappings and
+route_summaries.stop_ids pointing at stop ids the new catalog no longer
+has (the 2026-08 pipeline restructure replaced 21 such objects). That
+drift is detected here and repaired by re-running step 3 alone: the
+timetable and the curated composition catalog do not depend on the stop
+catalog, so there is no reason to re-download or re-route them.
+
+Drift detection is one-directional by design: it catches mappings left
+pointing at removed stops, which is the harmful case (dead ids reaching
+the gallery). A catalog that only *adds* stops leaves previously
+unmatched ONTD stops unmatched until the next --force; they keep their
+raw ids meanwhile, which is the documented fallback.
+
 ONTD_BOOTSTRAP controls it (env, so a deployment can decide without a
 code change):
-    auto   (default)  load only when ontd.route_summaries is empty
+    auto   (default)  load when ontd.route_summaries is empty, and
+                      re-project when the stop catalog has moved on
     force             load even if already populated
     off               skip entirely
 
@@ -91,6 +107,43 @@ def run_step(label: str, argv: list[str]) -> bool:
     return True
 
 
+def stale_stop_mappings() -> int:
+    """Mapping rows targeting stop ids absent from the base scenario's
+    pinned catalog snapshot — the signature of a reseeded catalog under an
+    unrefreshed projection. Returns 0 when nothing is stale, and also when
+    the tables do not exist yet (a first run has nothing to be stale)."""
+    try:
+        conn = connect()
+    except SystemExit:
+        raise
+    except Exception as e:
+        print(f"[ontd] cannot reach the database ({type(e).__name__}: {e})")
+        return 0
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT to_regclass('ontd.stop_mappings')")
+            if cur.fetchone()[0] is None:
+                return 0
+            cur.execute("""
+                SELECT count(*) FROM ontd.stop_mappings m
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM input_params.stop_infrastructures s
+                    JOIN scenario.scenarios sc
+                      ON sc.stop_infrastructures_version = s.stop_infra_version
+                    WHERE sc.is_current_base AND s.stop_id = m.tn_stop_id
+                )
+                """)
+            return cur.fetchone()[0]
+    except Exception as e:
+        # Never fatal: a drift check that cannot run must not stop a
+        # bootstrap that would otherwise proceed.
+        print(f"[ontd] stop-mapping drift check skipped ({type(e).__name__}: {e})")
+        return 0
+    finally:
+        conn.close()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -109,11 +162,21 @@ def main() -> int:
         print(f"[ontd] ONTD_BOOTSTRAP='{mode}' not recognised — treating as 'auto'.")
         mode = "auto"
 
+    steps = STEPS
     if not (args.force or mode == "force") and already_loaded():
-        print("[ontd] already loaded — skipping (ONTD_BOOTSTRAP=force to reload).")
-        return 0
+        stale = stale_stop_mappings()
+        if not stale:
+            print("[ontd] already loaded — skipping (ONTD_BOOTSTRAP=force to reload).")
+            return 0
+        print(
+            f"[ontd] {stale} stop mapping(s) target stop ids the current "
+            "catalog no longer has — the catalog was reseeded under this "
+            "projection. Re-running the projection only; the timetable and "
+            "composition catalog do not depend on the stop catalog."
+        )
+        steps = [step for step in STEPS if step[0] == "projection + geometry"]
 
-    for label, argv in STEPS:
+    for label, argv in steps:
         if not run_step(label, argv):
             print(
                 "[ontd] bootstrap incomplete. Existing-route context will be "

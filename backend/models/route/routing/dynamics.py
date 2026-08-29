@@ -76,7 +76,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from models.route.model import (
-    TRACTION_LOCO_WEIGHT_T,
     TRACTION_LOCO_POWER_KW,
     TRACTION_LOCO_TRACTIVE_EFFORT_KN,
     TRACTION_BRAKE_DECELERATION_MS2,
@@ -134,7 +133,7 @@ def apply_traction_dynamics(
     modified. Train mass = the composition's coach weight plus the assumed
     standard locomotive (Composition.total_weight_t is coaches only —
     locos are leased, not composition data)."""
-    mass_kg = (composition.total_weight_t + TRACTION_LOCO_WEIGHT_T) * 1_000
+    mass_kg = composition.total_gross_weight_t * 1_000
 
     for leg in legs:
         if leg.distance_m <= 0 or leg.driving_time_min <= 0:

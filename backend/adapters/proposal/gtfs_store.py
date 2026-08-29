@@ -161,9 +161,22 @@ def insert_route_gtfs(cur, route: dict) -> None:
     for p in route["parkings"]:
         cur.execute(
             "INSERT INTO proposals.parkings "
-            "(route_id, stop_id, stop_name, country_code, trip_ids) "
-            "VALUES (%s, %s, %s, %s, %s)",
-            (route_id, p["stop_id"], p["stop_name"], p["country_code"], p["trip_ids"]),
+            "(route_id, stop_id, stop_name, country_code, trip_ids, layover_min) "
+            "VALUES (%s, %s, %s, %s, %s, %s)",
+            (
+                route_id,
+                p["stop_id"],
+                p["stop_name"],
+                p["country_code"],
+                p["trip_ids"],
+                # The facility charge is priced from the layover, so a stored
+                # route has to carry it or it would reprice cheaper than the
+                # response it was published from. Stored in minutes: hours is
+                # minutes/60 and rarely exact in decimal, so a fixed-scale
+                # column would round the reconstruction away from the value
+                # that was published (13.983333... -> 13.98).
+                round(p.get("hours", 0.0) * 60),
+            ),
         )
     for s in route["shuntings"]:
         cur.execute(
@@ -298,8 +311,9 @@ def _insert_segments(
             "INSERT INTO proposals.segments "
             "(trip_id, segment_sequence, from_stop_id, to_stop_id, shape_id, "
             " distance_m, driving_time_min, dynamics_time_min, buffer_time_min, "
-            " slack_time_min, energy_kwh, country_distance_shares, country_time_shares) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            " slack_time_min, energy_kwh, country_distance_shares, "
+            " country_time_shares, countries, passages) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             (
                 trip_id,
                 i,
@@ -314,6 +328,12 @@ def _insert_segments(
                 seg["energy_kwh"],
                 Json(seg["country_distance_shares"]),
                 Json(seg["country_time_shares"]),
+                # Ordered countries and owned crossings — see
+                # models/route/trip.py. Payloads planned before
+                # ROUTE_BUILDER 0.9.21 carry neither; an empty list is
+                # what route_serialize.py's fallback expects to see.
+                Json(seg.get("countries") or []),
+                Json(seg.get("passages") or []),
             ),
         )
 
@@ -483,7 +503,7 @@ def _build_trip(cur, trip_id: str, direction: int, stop_infra) -> Trip:
     cur.execute(
         "SELECT segment_sequence, shape_id, distance_m, driving_time_min, "
         " dynamics_time_min, buffer_time_min, slack_time_min, energy_kwh, "
-        " country_distance_shares, country_time_shares "
+        " country_distance_shares, country_time_shares, countries, passages "
         "FROM proposals.segments WHERE trip_id = %s ORDER BY segment_sequence",
         (trip_id,),
     )
@@ -507,6 +527,8 @@ def _build_trip(cur, trip_id: str, direction: int, stop_infra) -> Trip:
                 energy_kwh=float(srow["energy_kwh"]),
                 country_distance_shares=srow["country_distance_shares"],
                 country_time_shares=srow["country_time_shares"],
+                countries=list(srow["countries"] or []),
+                passages=list(srow["passages"] or []),
             )
         )
 
@@ -557,7 +579,7 @@ def _build_od_pairs(cur, outbound_trip_id: str, return_trip_id: str) -> list[ODP
 
 def _build_parkings(cur, route_id: str) -> list[Parking]:
     cur.execute(
-        "SELECT stop_id, stop_name, country_code, trip_ids "
+        "SELECT stop_id, stop_name, country_code, trip_ids, layover_min "
         "FROM proposals.parkings WHERE route_id = %s",
         (route_id,),
     )
@@ -567,6 +589,9 @@ def _build_parkings(cur, route_id: str) -> list[Parking]:
             stop_name=r["stop_name"],
             country_code=r["country_code"],
             trip_ids=list(r["trip_ids"]),
+            # The same arithmetic route_factory._layover_hours() does, so the
+            # reconstruction reproduces the published float exactly.
+            hours=(r["layover_min"] or 0) / 60.0,
         )
         for r in cur.fetchall()
     ]

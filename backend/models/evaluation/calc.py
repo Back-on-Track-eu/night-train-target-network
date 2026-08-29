@@ -36,11 +36,29 @@ per route, one revenue object per OD pair. No grouping or filtering here.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import logging
+from dataclasses import dataclass, field
 
-from models.params import Composition, StopInfraCollection, TrackInfraCollection
+from models.infrastructure.energy_pricing.calc_energy_price import (
+    SegmentEnergy,
+    calc_segment_energy,
+)
+from models.infrastructure.facility.calc_facility import (
+    ParkingCharge,
+    calc_parking_event,
+    shunting_event_eur,
+)
+from models.infrastructure.tac.calc_tac import SegmentTac, calc_segment_tac
+from models.params import (
+    Composition,
+    PassageChargeCollection,
+    StopInfraCollection,
+    TrackInfraCollection,
+)
 from models.route.route import Route
 from models.route.trip import Segment, Stop
+
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # RESULT OBJECTS
@@ -104,8 +122,23 @@ class SegmentCost:
     crew_hours: float  # person-hours/segment — driving_h × composition.total_crew
     driver_eur: float  # €/segment  (driving time only — dwell is in StopCost)
     crew_eur: float  # €/segment  (driving time only — dwell is in StopCost)
-    tac_eur: float  # €/segment
+    tac_eur: float  # €/segment — Σ over tac.country_tacs and tac.passage_tacs
     energy_eur: float  # €/segment
+    tac: SegmentTac = field(default_factory=SegmentTac)
+    """Component breakdown behind tac_eur — per country run (base, tonnage,
+    seat, fixed, stop, revenue share, congestion) and per crossing. Carried
+    so the per-country views can allocate the charge each country actually
+    levied instead of spreading the segment total by distance share, and so
+    a response can show why a country is expensive. See
+    models/infrastructure/tac/calc_tac.py."""
+    energy: SegmentEnergy = field(default_factory=SegmentEnergy)
+    """Component breakdown behind energy_eur — per country run, the
+    electricity itself (day and night band) and the charge for using the
+    catenary. Carried for the same reason as tac above: energy prices differ
+    by a factor of five across Europe and half the infrastructure managers
+    levy a supply-equipment charge, so spreading a segment total by distance
+    share would misattribute it. See
+    models/infrastructure/energy_pricing/calc_energy_price.py."""
 
     @property
     def variable_km_eur(self) -> float:
@@ -185,14 +218,27 @@ class ShuntingCost:
 
 @dataclass
 class ParkingCost:
-    """Cost for one overnight parking location. Mirrors Parking —
-    one ParkingCost per Parking in route.parkings.
-    parking_eur: €/operating-day (track_parking_eur_day from TrackInfrastructure)."""
+    """Cost for one overnight parking location. Mirrors Parking — one
+    ParkingCost per Parking in route.parkings.
+
+    parking_eur is the whole occupation, €/operating-day: the siding itself
+    priced on the country's own basis against the scheduled layover and the
+    train's length, plus the power drawn while standing. The flat
+    track_parking_eur_day column is never read — it is a display figure since
+    CALC 0.9.22, the same role the flat track access rate plays."""
 
     stop_id: str
     trip_ids: list[str]  # trips whose formation parks here
     country_code: str
     parking_eur: float  # €/operating-day
+    parking: ParkingCharge = field(
+        default_factory=lambda: ParkingCharge(0.0, 0.0, "none", 0.0, 0.0)
+    )
+    """Breakdown behind parking_eur — the layover in hours, the billable hours
+    after the country's free allowance, which basis priced it, and the split
+    between siding and hotel power. Carried so a response can show why a
+    layover is expensive, and because the two halves escalate differently.
+    See models/infrastructure/facility/calc_facility.py."""
 
 
 @dataclass
@@ -292,6 +338,10 @@ class ODSegmentLoad:
     destination_stop_id: str
     class_main: str
     places_sold: int  # annual
+    revenue_eur: float  # €/year — places_sold × avg_price, this OD pair's
+    # ticket revenue, attributed whole to every segment it rides (an OD
+    # pair's fare buys its entire journey; splitting it per segment would
+    # need a fare-attribution rule the demand model does not have)
     density: float  # space factor: length density m/place (Composition.density_by_class_main_length)
 
     place_km: float  # places_sold × distance_km
@@ -317,6 +367,27 @@ class SegmentPassengerLoad:
     country_distance_shares: dict[str, float]
     country_time_shares: dict[str, float]
     od_loads: list[ODSegmentLoad]
+
+    @property
+    def total_places_sold(self) -> int:
+        """Annual passengers riding this segment — divide by the schedule's
+        operating days for the load of one train run."""
+        return sum(l.places_sold for l in self.od_loads)
+
+    @property
+    def total_revenue_eur(self) -> float:
+        """Annual ticket revenue attributable to this segment. Feeds the
+        revenue-share track access term (CH Deckungsbeitrag)."""
+        return sum(l.revenue_eur for l in self.od_loads)
+
+    def total_passengers_per_run(self, operating_days: int) -> float:
+        """Passengers aboard on one train run — the basis of a per-passenger
+        crossing charge."""
+        return self.total_places_sold / operating_days if operating_days else 0.0
+
+    def revenue_per_run(self, operating_days: int) -> float:
+        """Ticket revenue attributable to one train run over this segment."""
+        return self.total_revenue_eur / operating_days if operating_days else 0.0
 
     @property
     def total_place_km(self) -> float:
@@ -376,7 +447,12 @@ class EvaluationResult:
 
 
 def _calc_stop_cost(
-    trip_id: str, stop: Stop, stop_infra: StopInfraCollection, composition: Composition
+    trip_id: str,
+    stop: Stop,
+    stop_infra: StopInfraCollection,
+    composition: Composition,
+    driver_rate_eur_h: float,
+    crew_rate_eur_h: float,
 ) -> StopCost:
     sp = stop_infra.get(stop.stop_id)
     station_charge_eur = sp.stop_charge_eur if sp else 0.0
@@ -384,8 +460,8 @@ def _calc_stop_cost(
     dwell_h = stop.dwell_time_min / 60.0 if stop.dwell_time_min is not None else 0.0
     dwell_driver_hours = dwell_h * composition.driver_factor
     dwell_crew_hours = dwell_h * composition.total_crew
-    dwell_driver_eur = dwell_driver_hours * composition.driver_costs_eur_h
-    dwell_crew_eur = dwell_crew_hours * composition.crew_costs_eur_h
+    dwell_driver_eur = dwell_driver_hours * driver_rate_eur_h
+    dwell_crew_eur = dwell_crew_hours * crew_rate_eur_h
     return StopCost(
         trip_id=trip_id,
         stop_id=stop.stop_id,
@@ -404,6 +480,11 @@ def _calc_segment_cost(
     segment: Segment,
     composition: Composition,
     tracks: TrackInfraCollection,
+    passages: PassageChargeCollection,
+    driver_rate_eur_h: float,
+    crew_rate_eur_h: float,
+    segment_revenue_eur: float,
+    segment_passengers: float,
 ) -> SegmentCost:
     distance_km = segment.distance_m / 1000.0
     # Time in motion = raw router driving + traction dynamics (accel/brake is
@@ -413,17 +494,25 @@ def _calc_segment_cost(
     coach_maintenance_eur = composition.coach_maint_eur_km * distance_km
     driver_hours = driving_h * composition.driver_factor
     crew_hours = driving_h * composition.total_crew
-    driver_eur = composition.driver_costs_eur_h * driver_hours
-    crew_eur = composition.crew_costs_eur_h * crew_hours
+    driver_eur = driver_rate_eur_h * driver_hours
+    crew_eur = crew_rate_eur_h * crew_hours
 
-    tac_eur = 0.0
-    energy_eur = 0.0
-    for cc, dist_share in segment.country_distance_shares.items():
-        track = tracks.get(cc)
-        if track is None:
-            continue
-        tac_eur += distance_km * dist_share * track.tac_eur_train_km
-        energy_eur += segment.energy_kwh * dist_share * track.energy_price_eur_kwh
+    # Track access is priced from the calibrated component model, per
+    # country run and per crossing — never from the flat display column.
+    tac = calc_segment_tac(
+        segment,
+        composition,
+        tracks,
+        passages,
+        is_first_segment=segment_index == 0,
+        segment_revenue_eur=segment_revenue_eur,
+        segment_passengers=segment_passengers,
+    )
+
+    # Traction energy is priced per country run from the calibrated day and
+    # night rates, plus the charge for using the catenary where the country
+    # levies one — the terms track access deliberately excludes.
+    energy = calc_segment_energy(segment, composition, tracks)
 
     return SegmentCost(
         trip_id=trip_id,
@@ -441,8 +530,10 @@ def _calc_segment_cost(
         crew_hours=crew_hours,
         driver_eur=driver_eur,
         crew_eur=crew_eur,
-        tac_eur=tac_eur,
-        energy_eur=energy_eur,
+        tac_eur=tac.total_eur,
+        energy_eur=energy.total_eur,
+        tac=tac,
+        energy=energy,
     )
 
 
@@ -506,14 +597,28 @@ def _calc_route_cost(route: Route, tracks: TrackInfraCollection) -> RouteCost:
     in _calc_parking_costs and _calc_shunting_costs."""
     composition = route.trip_pairs[0].composition
     loco_eur = (
-        # n_locos scales the full-service lease; the energy-weight effect
-        # of additional locos follows with the energy model calibration
-        composition.n_locos
-        * composition.loco_full_service_lease_eur_h
-        * route.loco_propulsion_min
-        / 60.0
+        # Summed over the machines actually assigned, each at this
+        # operator's rate for that machine — a count times one rate could
+        # only ever price a consist of identical locomotives.
+        composition.loco_lease_total_eur_h * route.loco_propulsion_min / 60.0
     )
     return RouteCost(route_id=route.route_id, loco_eur=loco_eur)
+
+
+def _composition_for_trips(route: Route, trip_ids: list[str]):
+    """The composition that stables at a parking location — the one belonging
+    to the pair whose trips park there. Stabling is priced per metre in most of
+    Europe, so the length matters; a parking whose trips cannot be matched
+    falls back to the first pair rather than failing a whole evaluation."""
+    for pair in route.trip_pairs:
+        if pair.outbound.trip_id in trip_ids or pair.return_trip.trip_id in trip_ids:
+            return pair.composition
+    logger.warning(
+        "Parking trips %s match no trip pair — pricing its length from the "
+        "first pair's composition.",
+        trip_ids,
+    )
+    return route.trip_pairs[0].composition
 
 
 def _calc_parking_costs(
@@ -523,12 +628,19 @@ def _calc_parking_costs(
     costs = []
     for p in route.parkings:
         track = tracks.get(p.country_code)
+        composition = _composition_for_trips(route, p.trip_ids)
+        charge = calc_parking_event(
+            track,
+            length_m=composition.total_length_m,
+            hours=p.hours,
+        )
         costs.append(
             ParkingCost(
                 stop_id=p.stop_id,
                 trip_ids=p.trip_ids,
                 country_code=p.country_code,
-                parking_eur=track.parking_eur_day,  # €/operating-day
+                parking_eur=charge.total_eur,  # €/operating-day
+                parking=charge,
             )
         )
     return costs
@@ -546,7 +658,7 @@ def _calc_shunting_costs(
                 stop_id=s.stop_id,
                 trip_id=s.trip_id,
                 country_code=s.country_code,
-                shunting_eur=track.shunting_eur_event,  # €/event
+                shunting_eur=shunting_event_eur(track),  # €/event, all-in
             )
         )
     return costs
@@ -623,18 +735,21 @@ def _calc_od_pair_results(
 
 def compute_segment_passenger_loads(
     route: Route,
-    result: EvaluationResult,
 ) -> dict[tuple[str, int], SegmentPassengerLoad]:
     """
-    Pre-computes annual place-km and place-hours per (trip_id, segment_index)
-    for every OD pair that rides that segment.
+    Pre-computes annual place-km, place-hours and ticket revenue per
+    (trip_id, segment_index) for every OD pair that rides that segment.
 
     An OD pair rides segment i if origin_stop_index <= i < destination_stop_index.
     place-km and place-hours use country_distance_shares / country_time_shares
     for the per-country breakdown.
-    """
-    sc_by_key = {(sc.trip_id, sc.segment_index): sc for sc in result.segment_costs}
 
+    Reads the Route's own segments rather than the computed SegmentCosts —
+    every physical quantity it needs (distance, in-motion time, country
+    shares) is on the Segment already. That is what lets this run BEFORE
+    the cost pass, which the revenue-share and per-passenger track access
+    terms require (see evaluate_route()).
+    """
     stop_indices: dict[str, dict[str, int]] = {
         trip.trip_id: {s.stop_id: i for i, s in enumerate(trip.stops)}
         for pair in route.trip_pairs
@@ -650,12 +765,13 @@ def compute_segment_passenger_loads(
         density_by_class = pair.composition.density_by_class_main_length
         for trip in pair.trips:
             trip_stop_idx = stop_indices[trip.trip_id]
-            for seg_idx in range(len(trip.segments)):
-                sc = sc_by_key.get((trip.trip_id, seg_idx))
-                if sc is None:
-                    continue
-                distance_km = sc.distance_m / 1000.0
-                driving_h = sc.driving_time_min / 60.0
+            for seg_idx, segment in enumerate(trip.segments):
+                # In-motion time: raw router driving plus traction dynamics,
+                # matching SegmentCost.driving_time_min — buffer and dwell
+                # are excluded from both.
+                driving_time_min = segment.driving_time_min + segment.dynamics_time_min
+                distance_km = segment.distance_m / 1000.0
+                driving_h = driving_time_min / 60.0
                 od_loads: list[ODSegmentLoad] = []
 
                 for od in pair.od_pairs:
@@ -687,6 +803,7 @@ def compute_segment_passenger_loads(
                             destination_stop_id=od.destination_stop_id,
                             class_main=od.class_main,
                             places_sold=p,
+                            revenue_eur=p * od.avg_price,
                             density=density,
                             place_km=place_km,
                             place_hours=place_hours,
@@ -694,19 +811,19 @@ def compute_segment_passenger_loads(
                             weighted_place_hours=w_hours,
                             place_km_by_country={
                                 cc: place_km * s
-                                for cc, s in sc.country_distance_shares.items()
+                                for cc, s in segment.country_distance_shares.items()
                             },
                             place_hours_by_country={
                                 cc: place_hours * s
-                                for cc, s in sc.country_time_shares.items()
+                                for cc, s in segment.country_time_shares.items()
                             },
                             weighted_place_km_by_country={
                                 cc: w_km * s
-                                for cc, s in sc.country_distance_shares.items()
+                                for cc, s in segment.country_distance_shares.items()
                             },
                             weighted_place_hours_by_country={
                                 cc: w_hours * s
-                                for cc, s in sc.country_time_shares.items()
+                                for cc, s in segment.country_time_shares.items()
                             },
                         )
                     )
@@ -715,9 +832,9 @@ def compute_segment_passenger_loads(
                     trip_id=trip.trip_id,
                     segment_index=seg_idx,
                     distance_km=distance_km,
-                    driving_time_min=sc.driving_time_min,
-                    country_distance_shares=sc.country_distance_shares,
-                    country_time_shares=sc.country_time_shares,
+                    driving_time_min=driving_time_min,
+                    country_distance_shares=segment.country_distance_shares,
+                    country_time_shares=segment.country_time_shares,
                     od_loads=od_loads,
                 )
 
@@ -728,10 +845,21 @@ def evaluate_route(
     route: Route,
     tracks: TrackInfraCollection,
     stop_infra: StopInfraCollection,
+    passages: PassageChargeCollection,
 ) -> EvaluationResult:
     """Compute flat cost and revenue for a Route. No aggregation or
-    normalisation — see views.py."""
+    normalisation — see views.py.
+
+    The traffic pre-pass runs FIRST, before any cost: two track access
+    terms price traffic rather than distance — the Swiss contribution
+    margin takes a share of the revenue earned in the country, and the
+    Channel Tunnel charges per carried passenger — so segment costs cannot
+    be computed until the passengers and revenue riding each segment are
+    known.
+    """
     composition_fleet_costs = _calc_composition_fleet_costs(route)
+    segment_passenger_loads = compute_segment_passenger_loads(route)
+    operating_days = route.schedule.operating_days_per_year
 
     segment_costs = []
     seen_stop_ids: set[tuple[str, str]] = set()
@@ -739,7 +867,28 @@ def evaluate_route(
 
     for pair in route.trip_pairs:
         for trip in pair.trips:
+            # Roster efficiency is a property of the whole trip, not of a
+            # segment: a driver relieved mid-route is a fact about the
+            # trip's total driving time. Both rates are therefore derived
+            # once here and applied to every segment and stop of the trip.
+            driving_h = (trip.driving_time_min + trip.dynamics_time_min) / 60.0
+            on_train_h = (trip.arrival_time_min - trip.departure_time_min) / 60.0
+            driver_rate = pair.composition.driver_rate_eur_h(driving_h, on_train_h)
+            crew_rate = pair.composition.crew_rate_eur_h(on_train_h)
+
             for i, segment in enumerate(trip.segments):
+                # Per TRAIN RUN, not per year: the demand model thinks in
+                # annual figures, but a track access charge is levied on
+                # one train on one crossing on one night.
+                load = segment_passenger_loads.get((trip.trip_id, i))
+                per_run = (
+                    (
+                        load.total_passengers_per_run(operating_days),
+                        load.revenue_per_run(operating_days),
+                    )
+                    if load is not None
+                    else (0.0, 0.0)
+                )
                 segment_costs.append(
                     _calc_segment_cost(
                         trip_id=trip.trip_id,
@@ -747,6 +896,11 @@ def evaluate_route(
                         segment=segment,
                         composition=pair.composition,
                         tracks=tracks,
+                        passages=passages,
+                        driver_rate_eur_h=driver_rate,
+                        crew_rate_eur_h=crew_rate,
+                        segment_passengers=per_run[0],
+                        segment_revenue_eur=per_run[1],
                     )
                 )
 
@@ -763,7 +917,14 @@ def evaluate_route(
                     continue
                 seen_stop_ids.add(key)
                 stop_costs.append(
-                    _calc_stop_cost(trip.trip_id, stop, stop_infra, pair.composition)
+                    _calc_stop_cost(
+                        trip.trip_id,
+                        stop,
+                        stop_infra,
+                        pair.composition,
+                        driver_rate,
+                        crew_rate,
+                    )
                 )
 
     od_pair_revenues, od_pair_costs, od_pair_margins = _calc_od_pair_results(route)
@@ -778,7 +939,6 @@ def evaluate_route(
         od_pair_revenues=od_pair_revenues,
         od_pair_costs=od_pair_costs,
         od_pair_margins=od_pair_margins,
-        segment_passenger_loads={},  # populated below — needs full result
+        segment_passenger_loads=segment_passenger_loads,
     )
-    result.segment_passenger_loads = compute_segment_passenger_loads(route, result)
     return result

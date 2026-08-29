@@ -45,13 +45,14 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import timedelta
+from datetime import time, timedelta
 
 import psycopg2
 import psycopg2.extras
 
 from typing import Optional
 
+from db.schema import STOP_NAME_LANGS
 from models.params import (
     ParamsSource,
     IndicativeFigures,
@@ -59,6 +60,7 @@ from models.params import (
     ServiceClass,
     Operator,
     CoachType,
+    LocoType,
     CoachClassAssignment,
     CompositionType,
     Composition,
@@ -68,6 +70,13 @@ from models.params import (
     TrackInfraCollection,
     TrackInfraDescriptions,
     TRACK_INFRA_FIELD_NAMES,
+    TAC_COMPONENT_FIELD_NAMES,
+    ENERGY_PRICE_FIELD_NAMES,
+    FACILITY_FIELD_NAMES,
+    TAC_RATE_FIELD_NAMES,
+    PassageCharge,
+    PassageChargeCollection,
+    PASSAGE_FIELD_NAMES,
     DefaultStopInfra,
     StopInfrastructure,
     StopInfraCollection,
@@ -136,6 +145,18 @@ def _interval_to_min_or_none(value) -> int | None:
         return None
     if isinstance(value, timedelta):
         return round(value.total_seconds() / 60)
+    return round(float(value) * 60)
+
+
+def _time_to_min_or_none(value) -> int | None:
+    """Convert a psycopg2 datetime.time (from a TIME column) to minutes from
+    midnight, or return None. Used for the TAC night and peak bands, which
+    are times of day rather than durations — hence a separate helper from
+    _interval_to_min_or_none()."""
+    if value is None:
+        return None
+    if isinstance(value, time):
+        return value.hour * 60 + value.minute
     return round(float(value) * 60)
 
 
@@ -267,6 +288,7 @@ class DBDataLoader:
             ],
             "stop_infrastructures": row["stop_infrastructures_version"],
             "stop_infrastructure_defaults": row["stop_infrastructure_defaults_version"],
+            "passage_charges": row["passage_charges_version"],
         }
 
     def list_all_scenarios(self) -> list[Scenario]:
@@ -303,6 +325,7 @@ class DBDataLoader:
                 stop_infrastructure_defaults_version=row[
                     "stop_infrastructure_defaults_version"
                 ],
+                passage_charges_version=row["passage_charges_version"],
             )
             for row in rows
         ]
@@ -339,6 +362,7 @@ class DBDataLoader:
             row["service_class_id"]: ServiceClass(
                 class_id=row["service_class_id"],
                 class_main=row["service_class_main"],
+                is_night_accommodation=_b(row["service_class_is_night_accommodation"]),
             )
             for row in rows
         }
@@ -436,11 +460,15 @@ class DBDataLoader:
                 operator_name=row["operator_name"],
                 driver_costs_eur_h=_f(row["operator_driver_costs_eur_h"]),
                 crew_costs_eur_h=_f(row["operator_crew_costs_eur_h"]),
+                driver_max_duty_h=_f(row["operator_driver_max_duty_h"]),
+                crew_max_duty_h=_f(row["operator_crew_max_duty_h"]),
+                driver_roster_eff_ref=_f(row["operator_driver_roster_eff_ref"]),
+                crew_roster_eff_ref=_f(row["operator_crew_roster_eff_ref"]),
+                relief_allowance_h=_f(row["operator_relief_allowance_h"]),
                 ebit_margin_per=_f(row["operator_ebit_margin_per"]),
                 financing_quota_per=_f(row["operator_financing_quota_per"]),
                 var_overhead_per=_f(row["operator_var_overhead_per"]),
                 fix_overhead_quota_per=_f(row["operator_fix_overhead_quota_per"]),
-                loco_full_service_lease_eur_h=_f(row["operator_loco_lease_eur_h"]),
                 svc_stockings_eur_place={
                     sr["service_class_id"]: _f(
                         sr["operator_class_svc_stockings_eur_place"]
@@ -458,7 +486,6 @@ class DBDataLoader:
                 "financing_quota_per": operator.financing_quota_per,
                 "var_overhead_per": operator.var_overhead_per,
                 "fix_overhead_quota_per": operator.fix_overhead_quota_per,
-                "loco_lease_eur_h": operator.loco_full_service_lease_eur_h,
             }
             for field_name, field_val in op_fields.items():
                 param_versions.add(
@@ -531,6 +558,7 @@ class DBDataLoader:
             ] = CoachClassAssignment(
                 class_id=cr["service_class_id"],
                 class_main=sc.class_main,
+                is_night_accommodation=sc.is_night_accommodation,
                 places=_i(cr["coach_type_class_places"]),
                 section_length_m=_f(cr["section_length_m"] or 0),
                 section_weight_t=_f(cr["section_weight_t"] or 0),
@@ -579,6 +607,103 @@ class DBDataLoader:
     # COMPOSITIONS
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # LOCOMOTIVES
+    # ------------------------------------------------------------------
+
+    def _load_loco_types(self) -> dict[str, LocoType]:
+        """Locomotive catalog keyed by loco_type_id."""
+        with self._cursor() as cur:
+            cur.execute("SELECT * FROM input_params.loco_types")
+            return {
+                row["loco_type_id"]: LocoType(
+                    loco_type_id=row["loco_type_id"],
+                    description=row["loco_type_description"],
+                    traction=row["loco_type_traction"],
+                    weight_t=_f(row["loco_type_weight_t"]),
+                    max_speed_kmh=_i(row["loco_type_max_speed_kmh"]),
+                )
+                for row in cur.fetchall()
+            }
+
+    def _load_operator_loco_costs(self) -> dict[tuple[str, str], float]:
+        """{(operator_id, loco_type_id): EUR/h}. Sparse on purpose — an
+        absent pairing is not priced, and _compose_locos() refuses rather
+        than inventing a rate. Joined to natural keys here so nothing
+        downstream has to carry SERIAL row ids around."""
+        with self._cursor() as cur:
+            cur.execute(
+                """
+                SELECT o.operator_id, l.loco_type_id,
+                       c.operator_loco_lease_eur_h
+                FROM input_params.operator_loco_costs c
+                JOIN input_params.operators o
+                  ON o.operator_row_id = c.operator_row_id
+                JOIN input_params.loco_types l
+                  ON l.loco_type_row_id = c.loco_type_row_id
+                """
+            )
+            return {
+                (row["operator_id"], row["loco_type_id"]): _f(
+                    row["operator_loco_lease_eur_h"]
+                )
+                for row in cur.fetchall()
+            }
+
+    def _load_composition_locos(self) -> dict[str, list[str]]:
+        """{composition_type_id: [loco_type_id, ...]} in position order.
+        One query for the whole catalog, matching the coach wiring."""
+        wiring: dict[str, list[str]] = {}
+        with self._cursor() as cur:
+            cur.execute(
+                """
+                SELECT ct.composition_type_id, l.loco_type_id
+                FROM input_params.composition_type_locos cl
+                JOIN input_params.composition_types ct
+                  ON ct.composition_type_row_id = cl.composition_type_row_id
+                JOIN input_params.loco_types l
+                  ON l.loco_type_row_id = cl.loco_type_row_id
+                ORDER BY ct.composition_type_id, cl.position
+                """
+            )
+            for row in cur.fetchall():
+                wiring.setdefault(row["composition_type_id"], []).append(
+                    row["loco_type_id"]
+                )
+        return wiring
+
+    @staticmethod
+    def _compose_locos(
+        composition_type_id: str,
+        operator_id: str,
+        loco_type_ids: list[str],
+        catalog: dict[str, LocoType],
+        costs: dict[tuple[str, str], float],
+    ) -> tuple[list[LocoType], dict[str, float]]:
+        """Resolve a composition's machines and this operator's rate for
+        each.
+
+        Fails loudly on an unpriced (operator, machine) pairing. A missing
+        row means the catalog and the cost table disagree about what this
+        operator can run — substituting a list price would produce a
+        plausible number from inconsistent data, which is the one outcome
+        worth preventing outright.
+        """
+        locos, rates = [], {}
+        for loco_type_id in loco_type_ids:
+            rate = costs.get((operator_id, loco_type_id))
+            if rate is None:
+                raise ValueError(
+                    f"Composition '{composition_type_id}' hauls "
+                    f"'{loco_type_id}', but operator '{operator_id}' has no "
+                    "rate for it in input_params.operator_loco_costs. Seed "
+                    "the pairing — a locomotive nobody has priced cannot be "
+                    "costed."
+                )
+            locos.append(catalog[loco_type_id])
+            rates[loco_type_id] = rate
+        return locos, rates
+
     def build_all_compositions(
         self, scenario_id: int | None = None, include_indicative: bool = True
     ) -> CompositionCollection:
@@ -611,6 +736,9 @@ class DBDataLoader:
         """
         sources = self._load_sources()
         service_classes = self._load_service_classes()
+        loco_catalog = self._load_loco_types()
+        loco_costs = self._load_operator_loco_costs()
+        loco_wiring = self._load_composition_locos()
 
         # descriptions mirrors the ACTUAL response structure built by
         # api/helpers/params_serialize.py's composition_collection_to_dict()
@@ -669,7 +797,12 @@ class DBDataLoader:
                         "Vehicle-dependent minimum dwell time at alighting "
                         "stops. Unit: min"
                     ),
-                    "n_locos": comp_type_columns.get("composition_type_n_locos"),
+                    "n_locos": (
+                        "Number of locomotives hauling this composition — "
+                        "the count of its rows in "
+                        "input_params.composition_type_locos, never a "
+                        "stored column."
+                    ),
                 },
                 "staff": {
                     "driver_factor": comp_type_columns.get(
@@ -691,7 +824,12 @@ class DBDataLoader:
                         "Hourly staff rates (denormalised from the "
                         "operator) and the combined staff cost per "
                         "operated hour: driver_factor × driver rate + "
-                        "crew_factor_total × crew rate. Unit: €/h"
+                        "crew_factor_total × crew rate. These are wages "
+                        "per PRODUCTIVE hour: evaluation divides them by "
+                        "the roster efficiency it computes for each trip, "
+                        "so the amount actually charged is higher — most "
+                        "of all on trips long enough to need a relief "
+                        "crew. Unit: €/h"
                     ),
                 },
                 "capacity": {
@@ -766,6 +904,17 @@ class DBDataLoader:
                     "operator_driver_costs_eur_h"
                 ),
                 "crew_costs_eur_h": operator_columns.get("operator_crew_costs_eur_h"),
+                "driver_max_duty_h": operator_columns.get("operator_driver_max_duty_h"),
+                "crew_max_duty_h": operator_columns.get("operator_crew_max_duty_h"),
+                "driver_roster_eff_ref": operator_columns.get(
+                    "operator_driver_roster_eff_ref"
+                ),
+                "crew_roster_eff_ref": operator_columns.get(
+                    "operator_crew_roster_eff_ref"
+                ),
+                "relief_allowance_h": operator_columns.get(
+                    "operator_relief_allowance_h"
+                ),
                 "ebit_margin_per": operator_columns.get("operator_ebit_margin_per"),
                 "financing_quota_per": operator_columns.get(
                     "operator_financing_quota_per"
@@ -774,8 +923,9 @@ class DBDataLoader:
                 "fix_overhead_quota_per": operator_columns.get(
                     "operator_fix_overhead_quota_per"
                 ),
-                "loco_full_service_lease_eur_h": operator_columns.get(
-                    "operator_loco_lease_eur_h"
+                "loco_lease_eur_h": (
+                    "Locomotive rental rate per hour, for each machine this "
+                    "operator runs (input_params.operator_loco_costs)."
                 ),
                 "cost_per_class": operator_class_cost_columns.get(
                     "operator_class_svc_stockings_eur_place"
@@ -872,6 +1022,14 @@ class DBDataLoader:
                         f"not found for composition '{comp_id}'."
                     )
 
+                locos, loco_rates = self._compose_locos(
+                    comp_id,
+                    operator.operator_id,
+                    loco_wiring.get(comp_id, []),
+                    loco_catalog,
+                    loco_costs,
+                )
+
                 comp_type = CompositionType(
                     comp_id=comp_id,
                     comp_description=row["composition_type_description"],
@@ -901,7 +1059,7 @@ class DBDataLoader:
                     ),
                     coach_maint_eur_km=_f(row["composition_type_coach_maint_eur_km"]),
                     material_strategy=row["composition_type_material_strategy"],
-                    n_locos=int(row["composition_type_n_locos"]),
+                    locos=locos,
                     zugchef_crew_factor=_f(row["composition_type_zugchef_crew_factor"]),
                     length_cost_prop=_f(row["composition_type_length_cost_prop"]),
                     food_and_beverages=row["composition_type_food_and_beverages"],
@@ -942,7 +1100,7 @@ class DBDataLoader:
                         source=comp_src,
                     )
 
-                comp = Composition.from_type(comp_type)
+                comp = Composition.from_type(comp_type, loco_rates)
 
                 # --- indicative KPIs: seeded calibration values from the
                 #     composition_types columns (calib/CALIBRATION.md).
@@ -976,6 +1134,97 @@ class DBDataLoader:
     # ------------------------------------------------------------------
     # TRACK INFRASTRUCTURE
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _tac_components(row) -> dict:
+        """The TAC component fields of one track row, as domain values.
+
+        Shared by the country rows and the defaults row, which carry the
+        same columns — so the two can never map differently. Bands are
+        TIME columns in the database and minutes of day here; everything
+        else passes through with only a numeric cast.
+        """
+        return {
+            "tac_b_day": _f_or_none(row["track_tac_b_day"]),
+            "tac_b_night": _f_or_none(row["track_tac_b_night"]),
+            "tac_gamma": _f_or_none(row["track_tac_gamma"]),
+            "tac_seat_km": _f_or_none(row["track_tac_seat_km"]),
+            "tac_per_stop": _f_or_none(row["track_tac_per_stop"]),
+            "tac_revenue_share": _f_or_none(row["track_tac_revenue_share"]),
+            "tac_fixed_per_train_km": _f_or_none(row["track_tac_fixed_per_train_km"]),
+            "tac_peak_multiplier": _f_or_none(row["track_tac_peak_multiplier"]),
+            "tac_congestion_surcharge_eur_km": _f_or_none(
+                row["track_tac_congestion_surcharge_eur_km"]
+            ),
+            "tac_night_mode": row["track_tac_night_mode"] or "none",
+            "tac_night_band_start_min": _time_to_min_or_none(
+                row["track_tac_night_band_start"]
+            ),
+            "tac_night_band_end_min": _time_to_min_or_none(
+                row["track_tac_night_band_end"]
+            ),
+            "tac_night_full_if_accommodation": bool(
+                row["track_tac_night_full_if_accommodation"]
+            ),
+            "tac_peak_band1_start_min": _time_to_min_or_none(
+                row["track_tac_peak_band1_start"]
+            ),
+            "tac_peak_band1_end_min": _time_to_min_or_none(
+                row["track_tac_peak_band1_end"]
+            ),
+            "tac_peak_band2_start_min": _time_to_min_or_none(
+                row["track_tac_peak_band2_start"]
+            ),
+            "tac_peak_band2_end_min": _time_to_min_or_none(
+                row["track_tac_peak_band2_end"]
+            ),
+            "tac_peak_weekdays_only": bool(row["track_tac_peak_weekdays_only"]),
+        }
+
+    @staticmethod
+    def _energy_components(row) -> dict:
+        """The traction-energy price terms of one track row, beyond the day
+        rate, as domain values.
+
+        Shared by the country rows and the defaults row so the two can never
+        map differently. Nothing is defaulted here and nothing is coerced to
+        zero: a NULL night price means the country charges one rate around
+        the clock, and a NULL catenary term means it levies no separate
+        supply-equipment charge — both of which the cost model has to be able
+        to tell apart from a rate of 0.0.
+        """
+        return {
+            "energy_price_night_eur_kwh": _f_or_none(
+                row["track_energy_price_night_eur_kwh"]
+            ),
+            "energy_night_band_start_min": _time_to_min_or_none(
+                row["track_energy_night_band_start"]
+            ),
+            "energy_night_band_end_min": _time_to_min_or_none(
+                row["track_energy_night_band_end"]
+            ),
+            "energy_catenary_eur_train_km": _f_or_none(
+                row["track_energy_catenary_eur_train_km"]
+            ),
+            "energy_catenary_eur_gross_tonne_km": _f_or_none(
+                row["track_energy_catenary_eur_gross_tonne_km"]
+            ),
+        }
+
+    @staticmethod
+    def _facility_components(row) -> dict:
+        """The service-facility terms of one track row. Shared by the country
+        rows and the defaults row so the two can never map differently."""
+        return {
+            "parking_basis": row["track_parking_basis"],
+            "parking_eur_metre_day": _f_or_none(row["track_parking_eur_metre_day"]),
+            "parking_eur_hour": _f_or_none(row["track_parking_eur_hour"]),
+            "parking_eur_event": _f_or_none(row["track_parking_eur_event"]),
+            "parking_free_hours": _f_or_none(row["track_parking_free_hours"]),
+            "parking_hotel_power_eur_hour": _f_or_none(
+                row["track_parking_hotel_power_eur_hour"]
+            ),
+        }
 
     def build_all_tracks(self, scenario_id: int | None = None) -> TrackInfraCollection:
         """
@@ -1053,6 +1302,9 @@ class DBDataLoader:
             min_alighting_src=_src(default_row, "track_min_alighting_src", sources),
             buffer_quota_per=_f(default_row["track_buffer_quota_per"]),
             buffer_src=_src(default_row, "track_buffer_src", sources),
+            **self._tac_components(default_row),
+            **self._energy_components(default_row),
+            **self._facility_components(default_row),
         )
 
         # Table/column documentation is identical for every country, so
@@ -1116,7 +1368,12 @@ class DBDataLoader:
             `descriptions` above, not duplicated per country/field here.
             Shared by both real rows and whole-country-synthesized rows
             below so the two paths can't drift apart."""
-            for field_name in TRACK_INFRA_FIELD_NAMES:
+            for field_name in (
+                TRACK_INFRA_FIELD_NAMES
+                + TAC_COMPONENT_FIELD_NAMES
+                + ENERGY_PRICE_FIELD_NAMES
+                + FACILITY_FIELD_NAMES
+            ):
                 param_versions.add(
                     key=f"track_infra:{cc}:{field_name}",
                     value=getattr(track, field_name),
@@ -1140,7 +1397,12 @@ class DBDataLoader:
         # itself since there's no country-specific row to reference.
         default_field_sources = {
             field_name: default.source_for(field_name)
-            for field_name in TRACK_INFRA_FIELD_NAMES
+            for field_name in (
+                TRACK_INFRA_FIELD_NAMES
+                + TAC_COMPONENT_FIELD_NAMES
+                + ENERGY_PRICE_FIELD_NAMES
+                + FACILITY_FIELD_NAMES
+            )
         }
         synthesized = 0
         for cc in all_country_codes:
@@ -1152,7 +1414,18 @@ class DBDataLoader:
             )
             track = TrackInfrastructure(
                 country_code=cc,
-                field_is_default={f: True for f in TRACK_INFRA_FIELD_NAMES},
+                field_is_default={
+                    # The energy terms are absent from the defaults row by
+                    # design, so they are not "defaulted" even here — a
+                    # country with no row is priced at the median day rate
+                    # with no night band and no catenary charge, which is
+                    # what the fallback row says.
+                    **dict.fromkeys(
+                        TRACK_INFRA_FIELD_NAMES + TAC_COMPONENT_FIELD_NAMES, True
+                    ),
+                    **dict.fromkeys(ENERGY_PRICE_FIELD_NAMES, False),
+                    **dict.fromkeys(FACILITY_FIELD_NAMES, True),
+                },
                 has_row=False,
                 tac_eur_train_km=default.tac_eur_train_km,
                 parking_eur_day=default.parking_eur_day,
@@ -1164,6 +1437,14 @@ class DBDataLoader:
                 min_boarding_time_min=default.min_boarding_time_min,
                 min_alighting_time_min=default.min_alighting_time_min,
                 buffer_quota_per=default.buffer_quota_per,
+                **{
+                    f: getattr(default, f)
+                    for f in (
+                        TAC_COMPONENT_FIELD_NAMES
+                        + ENERGY_PRICE_FIELD_NAMES
+                        + FACILITY_FIELD_NAMES
+                    )
+                },
             )
             result[cc] = track
             register(
@@ -1279,6 +1560,46 @@ class DBDataLoader:
             default.buffer_quota_per,
         )
 
+        # The TAC component group resolves as a whole, not field by field.
+        # A country levying any distance-based rate term is calibrated, and
+        # its other components being NULL is then the documented fact "not
+        # levied here" — substituting an EU median into those would invent a
+        # Spanish seat surcharge or a Swiss stop charge for a country that
+        # has neither. Only when NO rate term is present at all does the
+        # whole group come from the defaults row.
+        tac_components = self._tac_components(row)
+        tac_group_default = all(tac_components[f] is None for f in TAC_RATE_FIELD_NAMES)
+        if tac_group_default:
+            logger.debug(
+                "TrackInfrastructure[%s]: no TAC rate term — using the "
+                "EU-median component group.",
+                country_code,
+            )
+            tac_components = {f: getattr(default, f) for f in TAC_COMPONENT_FIELD_NAMES}
+
+        # The energy price terms are read as they stand. There is no group
+        # resolution and no field-by-field default: the defaults row carries
+        # none of them, and a NULL is the tariff fact "not levied" (see
+        # models/params.py: ENERGY_PRICE_FIELD_NAMES). Only the day rate
+        # above resolves, because every country pays something for
+        # electricity — but only three band their tariff and roughly half
+        # levy a supply-equipment charge.
+        energy_components = self._energy_components(row)
+
+        # The facility group resolves as a whole, keyed on the basis. A NULL
+        # basis means the calibration has no figures for this country at all —
+        # distinct from the documented basis 'none', which means the country
+        # levies no siding charge and must NOT pick up the European default.
+        facility_components = self._facility_components(row)
+        facility_group_default = facility_components["parking_basis"] is None
+        if facility_group_default:
+            logger.debug(
+                "TrackInfrastructure[%s]: no stabling basis — using the EU "
+                "default facility group.",
+                country_code,
+            )
+            facility_components = {f: getattr(default, f) for f in FACILITY_FIELD_NAMES}
+
         field_is_default = {
             "tac_eur_train_km": tac_def,
             "parking_eur_day": parking_def,
@@ -1290,6 +1611,9 @@ class DBDataLoader:
             "min_boarding_time_min": board_def,
             "min_alighting_time_min": alight_def,
             "buffer_quota_per": buffer_def,
+            **dict.fromkeys(TAC_COMPONENT_FIELD_NAMES, tac_group_default),
+            **dict.fromkeys(ENERGY_PRICE_FIELD_NAMES, False),
+            **dict.fromkeys(FACILITY_FIELD_NAMES, facility_group_default),
         }
 
         field_sources = {
@@ -1313,6 +1637,25 @@ class DBDataLoader:
             or (default.min_alighting_src if alight_def else None),
             "buffer_quota_per": field_src("track_buffer_src")
             or (default.buffer_src if buffer_def else None),
+            # The whole component group shares track_tac_src — see
+            # models/params.py: _TRACK_DEFAULT_SRC_ATTRS.
+            **dict.fromkeys(
+                TAC_COMPONENT_FIELD_NAMES,
+                default.tac_src if tac_group_default else field_src("track_tac_src"),
+            ),
+            # The energy terms qualify the day rate, so they share its
+            # source — see models/params.py: _TRACK_DEFAULT_SRC_ATTRS.
+            **dict.fromkeys(
+                ENERGY_PRICE_FIELD_NAMES, field_src("track_energy_price_src")
+            ),
+            # The stabling terms share the parking source, as the shunting
+            # figure they were calibrated alongside does.
+            **dict.fromkeys(
+                FACILITY_FIELD_NAMES,
+                default.parking_src
+                if facility_group_default
+                else field_src("track_parking_src"),
+            ),
         }
 
         track = TrackInfrastructure(
@@ -1329,6 +1672,9 @@ class DBDataLoader:
             min_boarding_time_min=board_val,
             min_alighting_time_min=alight_val,
             buffer_quota_per=buffer_val,
+            **tac_components,
+            **energy_components,
+            **facility_components,
         )
         return track, field_sources
 
@@ -1514,6 +1860,22 @@ class DBDataLoader:
         if charge_is_default:
             charge_src = default.stop_charge_src
 
+        def _opt_f(value):
+            """NUMERIC columns arrive as Decimal or None; the domain wants
+            float or None."""
+            return None if value is None else float(value)
+
+        # Localized columns fold into language-keyed dicts here, so nothing
+        # downstream ever touches a column suffix. City names exist only
+        # where a city was resolved; the dict is empty otherwise, not
+        # None-valued per language.
+        country_names = {lang: row[f"country_{lang}"] for lang in STOP_NAME_LANGS}
+        city_names = {
+            lang: row[f"city_{lang}"]
+            for lang in STOP_NAME_LANGS
+            if row.get(f"city_{lang}")
+        }
+
         stop = StopInfrastructure(
             stop_id=stop_id,
             stop_name=row.get("stop_name") or "",
@@ -1521,8 +1883,111 @@ class DBDataLoader:
             lat=_f(row["stop_lat"]),
             lon=_f(row["stop_lon"]),
             stop_charge_eur=charge,
+            stop_charge_vat_rate_per=_opt_f(row.get("stop_charge_vat_rate_per")),
+            stop_charge_incl_vat_eur=_opt_f(row.get("stop_charge_incl_vat_eur")),
+            stop_charge_basis=row.get("stop_charge_basis"),
+            stop_charge_price_basis_year=row.get("stop_charge_price_basis_year"),
+            stop_charge_class=row.get("stop_charge_class"),
+            stop_charge_source=row.get("stop_charge_source"),
+            provenance=row.get("stop_provenance") or "",
+            name_latin=row.get("name_latin") or "",
+            name_ascii=row.get("name_ascii") or "",
+            uic_ref=row.get("uic_ref"),
+            country_names=country_names,
+            city=row.get("city"),
+            city_osm_id=row.get("city_osm_id"),
+            city_names=city_names,
+            # psycopg2 returns INTEGER[] as a Python list, NULL as None.
+            gauges_mm=row.get("gauges_mm"),
+            gauge_evidence=row.get("gauge_evidence"),
         )
         return stop, loc_src, charge_src, charge_is_default
+
+    # ------------------------------------------------------------------
+    # PASSAGE CHARGES
+    # ------------------------------------------------------------------
+
+    def build_all_passages(
+        self, scenario_id: int | None = None
+    ) -> PassageChargeCollection:
+        """
+        Return the separately charged crossings at a scenario's pinned
+        version — passage_charges is the fifth scenario-versioned
+        infrastructure table, under the same full-snapshot contract as the
+        other four.
+
+        There is no defaults table and no synthesis: a crossing either has
+        a charge row at this version or is not charged. Provenance is
+        registered per crossing per field under "passage:{id}:{field}",
+        mirroring the track pattern.
+
+        Geometry is deliberately not returned here — polygon matching is a
+        routing concern, see get_passage_geometries().
+        """
+        versions = self._resolve_scenario_versions(scenario_id)
+        sources = self._load_sources()
+
+        with self._cursor() as cur:
+            cur.execute(
+                """
+                SELECT * FROM input_params.passage_charges
+                WHERE passage_version = %s
+                """,
+                (versions["passage_charges"],),
+            )
+            rows = cur.fetchall()
+
+        result: dict[str, PassageCharge] = {}
+        param_versions = ParamVersions()
+        for row in rows:
+            passage_id = row["passage_id"]
+            charge = PassageCharge(
+                passage_id=passage_id,
+                passage_name=row["passage_name"],
+                fixed_eur=_f(row["passage_fixed_eur"]),
+                per_passenger_eur=_f(row["passage_per_passenger_eur"]),
+            )
+            result[passage_id] = charge
+            source = _src(row, "passage_src", sources)
+            for field_name in PASSAGE_FIELD_NAMES:
+                param_versions.add(
+                    key=f"passage:{passage_id}:{field_name}",
+                    value=getattr(charge, field_name),
+                    version=_i(row["passage_version"]),
+                    source=source,
+                )
+
+        logger.info("Built %d passage charges.", len(result))
+        return PassageChargeCollection(result, param_versions)
+
+    def get_passage_geometries(self) -> list[tuple[str, dict]]:
+        """
+        Return (passage_id, GeoJSON geometry) pairs for routing-time
+        crossing detection (rail_router.PassageIndex).
+
+        Version-independent by design, like get_country_geometries(): a
+        tunnel does not move between scenarios, so this reads each
+        passage_id's newest row rather than resolving a scenario. What a
+        scenario pins are the charges, resolved separately in
+        build_all_passages().
+
+        Plain (str, dict) pairs rather than a domain object, for the same
+        reason as get_country_geometries(): a data-access method must not
+        pull a routing-layer import into this layer.
+        """
+        with self._cursor() as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT ON (passage_id)
+                       passage_id, ST_AsGeoJSON(passage_geom) AS geom
+                FROM input_params.passage_charges
+                ORDER BY passage_id, passage_version DESC
+                """
+            )
+            rows = cur.fetchall()
+        result = [(row["passage_id"], json.loads(row["geom"])) for row in rows]
+        logger.info("Loaded %d passage geometries.", len(result))
+        return result
 
     # ------------------------------------------------------------------
     # COUNTRY GEOMETRIES

@@ -32,6 +32,7 @@ def scenario_to_dict(scenario: Scenario) -> dict:
         "track_infrastructure_defaults_version": scenario.track_infrastructure_defaults_version,
         "stop_infrastructures_version": scenario.stop_infrastructures_version,
         "stop_infrastructure_defaults_version": scenario.stop_infrastructure_defaults_version,
+        "passage_charges_version": scenario.passage_charges_version,
     }
 
 

@@ -309,9 +309,14 @@ def _per_trip_pair_view_to_dict(
 
 def _per_trip_pair_per_country_view_to_dict(
     matrix: dict[tuple[str, str], Breakdown],
+    scopes: dict[tuple[str, str], NormalisationScope],
     route: Route,
     trip_pair_by_key: dict[str, TripPair],
 ) -> dict:
+    """Country cells normalise against their OWN physics (CALC 0.9.20):
+    €/train-km in a country means per kilometre run in that country, not
+    per kilometre of the whole route. The ("all", "all") cell has no scope
+    entry and falls back to the route denominators."""
     meta = VIEW_META["per_trip_pair_per_country"]
     _, _, pair_labels = _label_context(route)
     data: dict[str, dict[str, dict]] = {}
@@ -323,7 +328,9 @@ def _per_trip_pair_per_country_view_to_dict(
         }
         data.setdefault(pair_key, {})[country_key] = {
             "filter": filter_dict,
-            "values": normalise_all_to_dict(b, route, trip_pair),
+            "values": normalise_all_to_dict(
+                b, route, trip_pair, scopes.get((pair_key, country_key))
+            ),
         }
     return {
         "description": meta["description"],
@@ -334,12 +341,17 @@ def _per_trip_pair_per_country_view_to_dict(
 
 def _per_trip_pair_per_od_view_to_dict(
     matrix: dict[tuple[str, str], Breakdown],
+    scopes: dict[tuple[str, str], NormalisationScope],
     route: Route,
     trip_pair_by_key: dict[str, TripPair],
 ) -> dict:
     """OD cells are class-scoped (od_key carries one class_main), so their
     class axis is the identity — {cls: the cell itself} — never a shares
-    re-split; the 'all' wildcard cells get the default shares split."""
+    re-split; the 'all' wildcard cells get the default shares split.
+
+    Since CALC 0.9.20 they also normalise against their own span: an OD
+    pair's train-km is the segments it actually rides, not the whole pair
+    cycle the train runs regardless of who is aboard."""
     meta = VIEW_META["per_trip_pair_per_od"]
     stop_names, _, pair_labels = _label_context(route)
     data: dict[str, dict[str, dict]] = {}
@@ -356,7 +368,11 @@ def _per_trip_pair_per_od_view_to_dict(
         data.setdefault(pair_key, {})[od_key] = {
             "filter": filter_dict,
             "values": normalise_all_to_dict(
-                b, route, trip_pair, class_split_override=class_override
+                b,
+                route,
+                trip_pair,
+                scopes.get((pair_key, od_key)),
+                class_split_override=class_override,
             ),
         }
     return {
@@ -482,10 +498,10 @@ def views_to_dict(views: ViewsBundle, route: Route) -> dict:
             views.bd_per_pair, route, trip_pair_by_key
         ),
         "per_trip_pair_per_country": _per_trip_pair_per_country_view_to_dict(
-            views.matrix_country, route, trip_pair_by_key
+            views.matrix_country, views.country_scopes, route, trip_pair_by_key
         ),
         "per_trip_pair_per_od": _per_trip_pair_per_od_view_to_dict(
-            views.matrix_od, route, trip_pair_by_key
+            views.matrix_od, views.od_scopes, route, trip_pair_by_key
         ),
         "per_trip_pair_per_section": _per_trip_pair_per_section_view_to_dict(
             views.matrix_section, views.section_scopes, route, trip_pair_by_key

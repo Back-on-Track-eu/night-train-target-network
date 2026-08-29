@@ -50,7 +50,7 @@ _SEED_PROPOSAL_ID = 1
 
 # The cheapest corridor the seed data supports — every fresh publish in
 # this file uses it to keep OpenRailRouting time bounded.
-_STOPS = ["DE_BERLIN_HBF", "AT_WIEN_HBF"]
+_STOPS = ["osm:n3856100103", "osm:w423692233"]
 _COMPOSITION = "NEW-BAL-7"
 _OTHER_COMPOSITION = "REF-BAL-9"  # the composition-change-via-overwrite case
 

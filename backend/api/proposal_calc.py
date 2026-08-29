@@ -18,6 +18,8 @@ import logging
 from flask import Blueprint, jsonify, request
 
 from api.helpers.proposal_compute import compute_proposal, validate_calc_body
+from models.route.routing.gauge import GaugeMismatchError
+from models.route.routing.rail_router import RailRoutingError
 
 logger = logging.getLogger(__name__)
 bp = Blueprint("proposal_calc", __name__)
@@ -65,6 +67,29 @@ def calc():
 
     try:
         computed, cache_hit = compute_proposal(body)
+    except GaugeMismatchError as e:
+        # Before the generic ValueError arm (it subclasses ValueError):
+        # the frontend marks the offending stops from conflicting_stops
+        # instead of printing a sentence, so the structure must survive.
+        logger.warning("proposal/calc failed (gauge mismatch): %s", e)
+        return (
+            jsonify(
+                {
+                    "error": "gauge_mismatch",
+                    "message": str(e),
+                    "conflicting_stops": e.conflicting_stops,
+                }
+            ),
+            422,
+        )
+    except RailRoutingError as e:
+        # A route the ROUTER cannot serve — no path on this gauge's
+        # network, a stop that will not snap to usable track. That is an
+        # answer about the request, not a fault of ours: without this arm
+        # it fell through to the 500 below and every unroutable pair read
+        # as "Something went wrong on our side".
+        logger.warning("proposal/calc failed (routing): %s", e)
+        return jsonify({"error": "routing_error", "message": str(e)}), 422
     except ValueError as e:
         logger.warning("proposal/calc failed (domain error): %s", e)
         return jsonify({"error": "domain_error", "message": str(e)}), 422

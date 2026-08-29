@@ -40,61 +40,119 @@ htmlcov/
 
 # Jupyter
 .ipynb_checkpoints/
+.nbrun/
 
 # -----------------------------------------------------------------------------
 # Node / Frontend
 # -----------------------------------------------------------------------------
 node_modules/
-dist/
 .parcel-cache/
+
+# Build output, both stacks (Python sdist/wheel and Vite)
+dist/
+
+# -----------------------------------------------------------------------------
+# Secrets
+# -----------------------------------------------------------------------------
+backend/docker/.env
+# Hand-made backups of the above — they carry the same JWT_SECRET.
+backend/docker/.env.bak*
+backend/db/dev/.env
+.devcontainer/.env
+deploy/**/.env
+# Server-local compose overrides (per-host worker counts, party rate limits,
+# log caps). Never belongs in a public repo — the tracked compose is the contract.
+deploy/**/docker-compose.override.yml
+credentials/
 
 # -----------------------------------------------------------------------------
 # Docker / Infrastructure
 # -----------------------------------------------------------------------------
-# Env files with secrets — never commit
-backend/docker/.env
-backend/db/dev/.env
-.devcontainer/.env
-
-# OpenRailRouting — large data and generated graph cache
+# OpenRailRouting — large source data and its generated graph cache
 backend/models/route/routing/docker/data/
 backend/models/route/routing/docker/graph-cache/
 backend/models/route_evaluation_model/routing/docker/graph-cache/
 
-# Postgres data volume (if mounted locally)
+# Written by the Docker entrypoint at container start
+backend/models/route/routing/countries.geojson
+
+# Postgres data volume, when mounted locally
 pgdata/
 
 # -----------------------------------------------------------------------------
-# Testing/ Test scripts
+# Generated data
+#
+# Everything here is reproducible: re-run the notebook, the seed step or the
+# download that produces it. Committing any of it invites silent divergence
+# between the artifact and the code that generates it.
 # -----------------------------------------------------------------------------
+# Calibration observation tables — written by the calib notebooks
+# (01_source_extraction.ipynb, then 02_*.ipynb, per domain). Re-run the
+# notebooks to regenerate; never hand-edit. The narrative documents these
+# produce (CALIBRATION.md, TAC_CALIBRATION.md) stay tracked, following the
+# docs/MODEL.md precedent for generated-but-published documents.
+backend/models/compositions/calib/data/
+backend/models/infrastructure/tac/calib/data/
+backend/models/infrastructure/energy_pricing/calib/data/
+backend/models/infrastructure/facility/calib/data/
+backend/models/infrastructure/route_context/calib/data/
+backend/models/infrastructure/stops/charges/data/
 
-# Generated scratch output from backend/scripts/*.py manual test scripts
-# (e.g. feedback_categories_output.json) — input fixtures like
-# tc_1_evaluation_input.json don't end in "_output.json" so stay tracked.
-# backend/scripts/data/*_output.json
+backend/models/energy/calib/data/
+
+# Seed CSVs — regenerated from the calibration notebooks at seed time
+backend/models/compositions/calib/seed/
+backend/models/infrastructure/tac/calib/seed/
+backend/models/infrastructure/energy_pricing/calib/seed/
+backend/models/infrastructure/facility/calib/seed/
+backend/models/infrastructure/route_context/calib/seed/
+backend/models/energy/calib/seed/
+
+# Demand model bulk inputs and derived artifacts. calib/raw/ holds third-party
+# downloads (ETISplus OD, census and GHS-POP grids) fetched from their sources;
+# calib/out/ holds everything the ETL notebooks derive from them. Tens of GB
+# between them, all reproducible. The notebooks in calib/exploration/ and
+# calib/etl/ that produce them stay tracked, as does docu/.
+backend/models/demand/calib/raw/
+backend/models/demand/calib/out/
+
+# NOT ignored, deliberately: route_context/calib/sources/. It holds an
+# extraction from a live database (ONTD timetables against router passage
+# times), not a derivation — the calibration cannot reproduce it on a machine
+# with no ONTD snapshot, so it travels with the repository like a source
+# document. See that package's README.
+
+# Ignored, unlike route_context's: stops/charges/sources/ holds published
+# tariff PDFs and spreadsheets — third-party documents that are not ours to
+# redistribute. 01_source_extraction.ipynb registers them by filename and
+# creates the directory, so a clone without them still runs.
+backend/models/infrastructure/stops/charges/sources/*
+!backend/models/infrastructure/stops/charges/sources/*.csv
+!backend/models/infrastructure/stops/charges/sources/TEMPLATE.md
+
+# Downloaded from Drive when absent (ONTD stop catalog, country geometries)
+backend/db/dev/data/*.csv
+backend/db/dev/data/country_geoms.geojson.gz
+
+# Bulk inputs of the stop classification pipeline — OSM extracts and the
+# derived CSVs, downloaded from Drive by stops/data_sources.py when absent.
+backend/models/infrastructure/stops/data/
+
+# Scratch output from the manual test scripts in backend/scripts/. Input
+# fixtures (tc_1_evaluation_input.json) do not match the pattern and stay
+# tracked.
+backend/scripts/data/*_output.json
 
 # -----------------------------------------------------------------------------
-# Claude / AI tooling
+# Local scratch and tooling
 # -----------------------------------------------------------------------------
 # Claude snapshot tool output — too large for git
-project-snapshot.zip
+project-snapshot*.zip
 .claude/export-temp/
 
-# -----------------------------------------------------------------------------
-# Notes / personal files
-# -----------------------------------------------------------------------------
 notes/
-
-# Generated at runtime by Docker entrypoint
-backend/models/route/routing/countries.geojson
-
-# Scratch files
 git_status.txt
 test_output.txt
-backend/db/dev/data/*.csv
-
-# Credentials
-credentials/
 
 # -----------------------------------------------------------------------------
 # OS / Editor
@@ -104,14 +162,11 @@ Thumbs.db
 desktop.ini
 
 .idea/
+*.iml
 .vscode/
 *.swp
 *.swo
 *~
-
-# PyCharm
-.idea/
-*.iml
 
 # -----------------------------------------------------------------------------
 # Misc
@@ -121,14 +176,3 @@ desktop.ini
 *.bak
 *.orig
 
-# -----------------------------------------------------------------------------
-# Large data
-# -----------------------------------------------------------------------------
-backend/models/compositions/calib/seed/
-deploy/**/.env
-# Server-local compose overrides (per-host worker counts, party rate limits,
-# log caps). Never belongs in a public repo — the tracked compose is the contract.
-deploy/**/docker-compose.override.yml
-backend/models/compositions/calib/data/
-backend/db/dev/data/country_geoms.geojson.gz
-backend/scripts/data/*_output.json
