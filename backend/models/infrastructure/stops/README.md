@@ -4,8 +4,15 @@
 >
 > **Where this stands:** the pipeline runs end to end and its output is now the
 > app's entire stop catalog — `db/dev/seed.py` no longer carries any stops of
-> its own. 962 stops, of which 583 are current night train stops (step 5) and
-> 379 are the manual additions (step 6).
+> its own. **700 are current night train stops (step 5) and 358 are the manual
+> additions (step 6)**, after the 2026-08-28 input fixes below.
+>
+> *(2026-08-28: step 5 now reads the schedule from the ONTD workbook the app
+> itself loads, step 4 tops its station register up from the same workbook, and
+> step 4's output finally reaches step 5 — it had been writing to the wrong
+> directory while step 5 read a stale Drive copy. Qualified stops 585 → 700,
+> unmatched 17 → 1. 23 step 6 additions that step 5 now qualifies on its own
+> were removed, which is the redundancy the caveat below predicted.)*
 >
 > *(2026-08-24 restructure: 21 step 6 entries that duplicated step 5 stops were
 > removed and guards added so the class of error cannot recur; the alt step 5
@@ -81,7 +88,7 @@
 >
 > #### 1. Reasons for the manual additions — Johanna
 >
-> 362 of the 379 step 6 stops have an unfilled `reason`. The design requires that
+> 341 of the 358 step 6 stops have an unfilled `reason`. The design requires that
 > *"why is station X (not) included?"* be answerable from the data alone,
 > including by people outside the project; right now, for a stop like
 > `Osmaniye` or `Denizli`, nothing distinguishes it from one a night train

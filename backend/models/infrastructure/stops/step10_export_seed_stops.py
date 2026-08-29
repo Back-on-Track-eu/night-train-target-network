@@ -61,7 +61,7 @@ import csv
 import math
 from pathlib import Path
 
-from data_sources import DATA_DIR, ensure_local, local_input
+from data_sources import DATA_DIR, local_input
 
 OUTPUT_PATH = DATA_DIR / "stop_seed_catalog.csv"
 PROVENANCE_PATH = DATA_DIR / "stop_seed_provenance.csv"
@@ -231,7 +231,7 @@ def parse_float(value):
 
 def load_step4_join() -> tuple[dict[str, str], dict[str, str]]:
     """OSM stop id -> (ONTD country code, ONTD id), from the step 4 join."""
-    path = ensure_local("step4_MatchingONTDtoOSM.csv")
+    path = local_input("step4_MatchingONTDtoOSM.csv", "step4_MatchingONTDtoOSM.ipynb")
     countries, ontd_ids = {}, {}
     with open(path, encoding="utf-8-sig", newline="") as fh:
         for row in csv.DictReader(fh):
