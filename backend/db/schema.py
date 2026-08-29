@@ -574,7 +574,9 @@ INPUT_PARAMS_TABLES: tuple[Table, ...] = (
                 "VARCHAR(20) NOT NULL",
                 "Why this pair does or does not carry a rail distance: "
                 "routed, prefiltered (too far apart to be worth "
-                "routing), no_connection (no rail path exists), or "
+                "routing), no_connection (no rail path exists), "
+                "gauge_mismatch (the two reference stations share no "
+                "track gauge, so no through service is possible), or "
                 "snap_failed (a reference station could not be placed "
                 "on the network).",
             ),
