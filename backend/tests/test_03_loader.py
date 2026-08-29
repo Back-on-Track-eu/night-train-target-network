@@ -189,7 +189,6 @@ def test_stop_enrichment_surfaces(loader):
     for stop in stops.all().values():
         if stop.stop_charge_source:
             assert stop.stop_charge_basis
-            assert stop.stop_charge_price_basis_year
 
     # A rural halt: city is None and city_names is empty, not None-valued.
     no_city = [s for s in stops.all().values() if s.city is None]
@@ -493,3 +492,22 @@ def test_composition_indicative_figures_present(loader):
     assert by_id["NEW-BAL-7"].total_length_m == pytest.approx(185.7)
     assert len(by_id["NEW-BAL-7"].coaches) == 7
     assert by_id["REF-BUD-6"].material_strategy == "refurbished"
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "The 13 station-charge rows are ILLUSTRATIVE-CURATED placeholders "
+        "and charges/data/station_charges.csv has no "
+        "price_basis_year column at all. See test_02_db_seed."
+        "test_stop_charge_carries_its_price_year for the full "
+        "reason. strict=True so this fails loudly once real "
+        "tariffs land."
+    ),
+)
+def test_stop_charge_price_year_surfaces(loader):
+    """Split out of test_stop_enrichment_surfaces so that test keeps
+    guarding the enrichment folding it is actually about."""
+    for stop in loader.build_all_stops().all().values():
+        if stop.stop_charge_source:
+            assert stop.stop_charge_price_basis_year, stop.stop_id

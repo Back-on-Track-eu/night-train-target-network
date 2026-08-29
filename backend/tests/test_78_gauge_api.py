@@ -109,14 +109,16 @@ class TestBroadGaugeRoutes:
     """The headline capability: trips that failed as snap errors before
     0.9.27 now route on their own gauge profile."""
 
-    def test_finnish_1524_routes_and_reports_its_gauge(self, db_conn):
+    def test_finnish_1524_routes_and_reports_the_family(self, db_conn):
         resp, south, north = _route_any_pair(db_conn, "FI", 1524)
         trips = resp.json()["route"]["trip_pairs"][0]
         # Both directions: the return trip resolves its own gauge from the
-        # reversed stop list, and must land on the same profile.
+        # reversed stop list, and must land on the same profile. Finnish
+        # stops are tagged 1524, which folds into the 1520 family — the
+        # reported gauge is the family representative the trip routed on.
         for direction in ("outbound", "return_trip"):
             general = trips[direction]["general_parameters"]
-            assert general["track_gauge_mm"] == 1524
+            assert general["track_gauge_mm"] == 1520
             assert general["trip_km"] > 50
 
     def test_ukrainian_1520_routes(self, db_conn):
@@ -219,8 +221,9 @@ class TestAutoStopGaugeFilter:
         )
         gauges = {r["stop_id"]: r["gauges_mm"] for r in cur.fetchall()}
         cur.close()
+        family = {1520, 1524}  # GAUGE_FAMILY_MM — either tag supports the trip
         for stop_id in stop_ids:
-            assert gauges.get(stop_id) and 1524 in gauges[stop_id], (
-                f"{stop_id} on a 1524 trip without 1524 support "
+            assert gauges.get(stop_id) and family & set(gauges[stop_id]), (
+                f"{stop_id} on a 1520-family trip without 1520/1524 support "
                 f"(gauges: {gauges.get(stop_id)})"
             )

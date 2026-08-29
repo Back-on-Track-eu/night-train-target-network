@@ -38,9 +38,23 @@ class TestResolveTripGauge:
         stops = [_stop("kyiv", [1520]), _stop("lviv", [1520])]
         assert resolve_trip_gauge(stops) == 1520
 
-    def test_finnish(self):
+    def test_finnish_resolves_to_the_family_representative(self):
+        # 1524 folds into the 1520 family (GAUGE_FAMILY_MM): interoperable
+        # in practice, tagged separately in OSM.
         stops = [_stop("rovaniemi", [1524]), _stop("helsinki", [1524])]
-        assert resolve_trip_gauge(stops) == 1524
+        assert resolve_trip_gauge(stops) == 1520
+
+    def test_estonian_seam_is_passable(self):
+        # The case that forced the family: Tartu is tagged {1520, 1524},
+        # Šiauliai {1520} — as separate networks the intersection resolved
+        # 1520 while Tartu's platform track was 1524-tagged, and the trip
+        # failed to snap at Tartu. One family, one profile, no seam.
+        stops = [
+            _stop("helsinki", [1524]),
+            _stop("tartu", [1520, 1524]),
+            _stop("siauliai", [1520]),
+        ]
+        assert resolve_trip_gauge(stops) == 1520
 
     def test_dual_gauge_border_stop_prefers_standard(self):
         # Kaunas carries both; with Warszawa the intersection is {1435}.
@@ -93,6 +107,15 @@ class TestResolveTripGauge:
         with pytest.raises(ValueError):
             resolve_trip_gauge(stops)
 
+    def test_family_member_never_reaches_profile_selection(self):
+        from models.route.model import GAUGE_FAMILY_MM
+
+        # Every family member maps to a supported representative, so no
+        # resolved gauge can name a profile that does not exist.
+        for member, representative in GAUGE_FAMILY_MM.items():
+            assert member not in SUPPORTED_GAUGES_MM
+            assert representative in SUPPORTED_GAUGES_MM
+
     def test_unsupported_resolved_gauge_raises_plain_value_error(self):
         # Catalog data naming a gauge no profile exists for is a data
         # defect, not a user mismatch — different error, no
@@ -111,6 +134,11 @@ class TestStopSupportsGauge:
     def test_not_supporting(self):
         assert not stop_supports_gauge(_stop("madrid", [1668]), 1435)
 
+    def test_family_member_supports_the_representative(self):
+        # A Finnish stop tagged {1524} must pass the auto-stop filter of a
+        # 1520-family trip.
+        assert stop_supports_gauge(_stop("tampere", [1524]), 1520)
+
     def test_unknown_is_strictly_false(self):
         # The auto-stop filter must never add a gauge-unknown stop: the
         # trip resolves permissively, additions are judged strictly.
@@ -120,9 +148,10 @@ class TestStopSupportsGauge:
 
 class TestContracts:
     def test_supported_gauges_cover_the_profile_set(self):
-        # Mirror of docker/config.yml's five profiles — the naming
-        # contract rail_router._profile_for_gauge() builds on.
-        assert SUPPORTED_GAUGES_MM == (1435, 1520, 1524, 1600, 1668)
+        # Mirror of docker/config.yml's four profiles — the naming
+        # contract rail_router._profile_for_gauge() builds on. 1524 is
+        # deliberately absent: it is a family member, not a profile.
+        assert SUPPORTED_GAUGES_MM == (1435, 1520, 1600, 1668)
         assert STANDARD_GAUGE_MM in SUPPORTED_GAUGES_MM
 
     def test_profile_names(self):
