@@ -2,10 +2,29 @@
 
 > ## Handover — Johanna & Josh
 >
+> *(2026-08-29 catalog batch: Kaunas restored as a step 6 addition — the
+> break-of-gauge station left the ONTD schedule and with it the catalog;
+> Arad added — dropped by step 4's junk-match exclusion; Tirana's entry
+> removed — it was the city's BUS terminal, Tiranë has had no rail station
+> since 2013, and as Albania's reference station it cost the country every
+> relations-matrix row; the four Crimean stations removed while the
+> peninsula is a disconnected component in the routing graph; seven
+> gauge-NULL stops corrected via step 8's GAUGE_OVERRIDES, leaving only
+> the two whose NULL is true — GR Ρίο (metre gauge) and AL Durrës
+> (disused network). Roma Ostiense was already added. Net: 358 → 355
+> manual additions.)*
+>
 > **Where this stands:** the pipeline runs end to end and its output is now the
 > app's entire stop catalog — `db/dev/seed.py` no longer carries any stops of
-> its own. 962 stops, of which 583 are current night train stops (step 5) and
-> 379 are the manual additions (step 6).
+> its own. **700 are current night train stops (step 5) and 358 are the manual
+> additions (step 6)**, after the 2026-08-28 input fixes below.
+>
+> *(2026-08-28: step 5 now reads the schedule from the ONTD workbook the app
+> itself loads, step 4 tops its station register up from the same workbook, and
+> step 4's output finally reaches step 5 — it had been writing to the wrong
+> directory while step 5 read a stale Drive copy. Qualified stops 585 → 700,
+> unmatched 17 → 1. 23 step 6 additions that step 5 now qualifies on its own
+> were removed, which is the redundancy the caveat below predicted.)*
 >
 > *(2026-08-24 restructure: 21 step 6 entries that duplicated step 5 stops were
 > removed and guards added so the class of error cannot recur; the alt step 5
@@ -81,7 +100,7 @@
 >
 > #### 1. Reasons for the manual additions — Johanna
 >
-> 362 of the 379 step 6 stops have an unfilled `reason`. The design requires that
+> 341 of the 358 step 6 stops have an unfilled `reason`. The design requires that
 > *"why is station X (not) included?"* be answerable from the data alone,
 > including by people outside the project; right now, for a stop like
 > `Osmaniye` or `Denizli`, nothing distinguishes it from one a night train
@@ -236,7 +255,14 @@
 >   the Zürich corridor, and Luxembourg sits 31 km off. Worth reporting
 >   upstream.
 > - **`stop_overrides.csv`** (Stage D) still does not exist.
-> - **Review the step 5 reports** after any re-run: `unmatched_stops.csv` is
+> - **The schedule is live now.** Step 5 reads the ONTD workbook rather than a
+  frozen export, so a re-run picks up whatever ONTD currently says — which is
+  the point, but it also means step 5's output can change without anything in
+  this repo changing. Compare `unmatched_stops.csv` and the step 5 stop count
+  against the previous run and note the difference; a jump is ONTD moving, not
+  the pipeline breaking. Delete `data/ontd_stop_times.csv` (or pass
+  `refresh=True`) to force a re-fetch.
+- **Review the step 5 reports** after any re-run: `unmatched_stops.csv` is
 >   the pipeline's own test, since every current night train stop should match.
 >   `step5_review_flagged.csv`, `step5_coord_conflicts_report.csv` and
 >   `step5_duplicate_matches_report.csv` cover the rest. Extend `ABBREVIATIONS`
@@ -260,7 +286,7 @@ the full design and its principles).
 | 2 | Filter all station objects out of the raw extract | ✅ done | `step2_filter_stations.py` |
 | 3a | Fetch center coordinates for station ways/relations | ✅ done | `step3a_fetch_missing_centers.py` |
 | 3b | Classify "real" railway stations vs. urban transit | ✅ done | `step3b_classify_stations.ipynb` |
-| 4 | Merge classified stations with ONTD (left join; inspect ONTD rows without an OSM match) | ✅ done | `step4_MatchingONTDtoOSM.ipynb` |
+| 4 | Merge classified stations with the station register, topped up from ONTD where the register has no row (left join; inspect rows without an OSM match) | ✅ done | `step4_MatchingONTDtoOSM.ipynb` |
 | 5 | Qualify stops via current night train stops (`stop_times`), then diagnose the unmatched (ONTD coverage check) | ✅ done | `step5_JoinNTStopsWithOSM.ipynb` |
 | 6 | Add stations for [functional urban areas](https://ec.europa.eu/eurostat/web/gisco/geodata/statistical-units/cities-functional-urban-areas) without a qualified stop, plus tourism regions and ferry hubs — guarded against duplicating step 5 | ✅ done, reasons outstanding | `step6_manual_additions.ipynb` |
 | 7 | Enrich: Latin/ASCII names, UIC ref, country + city per stop, both in all member-organisation languages | ✅ done, place fetch per machine | `step7_enrich_stops.ipynb` |
@@ -282,7 +308,8 @@ All commands from this directory (`backend/models/infrastructure/stop_classifica
 
 ```
 uv run python step3a_fetch_missing_centers.py     # needs internet (Overpass API)
-uv run jupyter lab                                # then run step3b, step4, step5, step6,
+uv run jupyter lab                                # then run step3b, step4, step5 (first run
+                                                  #   fetches the ONTD workbook), step6,
                                                   #   step7 (first run fetches place nodes
                                                   #   via Overpass), step8 (Overpass)
 uv run python step10_export_seed_stops.py         # writes data/stop_seed_catalog.csv
@@ -293,18 +320,41 @@ Inputs resolve through `data_sources.py`, which draws a line between two kinds
 of file:
 
 - **`ensure_local(name)`** — comes from outside this machine, so it syncs the
-  Drive folder into `data/` when the file is absent. That is the two external
-  exports (`bahnhoefe_stops_sorted.csv`, `B-o-T_DataBase_stop_times.csv`) and
-  the OSM-derived intermediates you cannot rebuild without the ~60 GB Europe
-  extract, an osmium pass and hours of Overpass calls (steps 2, 3a, 3b, 4).
-  One folder id, `STOPS_DRIVE_FOLDER_ID` in `backend/docker/.env`, covers all
-  of them; syncing uses `gdown` (in the `dev` extra), since Drive cannot list a
-  folder over plain HTTP. The sync only fills gaps — a local file always
-  wins, so a file a step just wrote is never overwritten.
+  Drive folder into `data/` when the file is absent. That is the external
+  station export (`bahnhoefe_stops_sorted.csv`) and the OSM-derived
+  intermediates you cannot rebuild without the ~60 GB Europe extract, an
+  osmium pass and hours of Overpass calls (steps 2, 3a, 3b). One folder id,
+  `STOPS_DRIVE_FOLDER_ID` in `backend/docker/.env`, covers all of them;
+  syncing uses `gdown` (in the `dev` extra), since Drive cannot list a folder
+  over plain HTTP. The sync only fills gaps — a local file always wins, so a
+  file a step just wrote is never overwritten.
+- **`ontd_stops()`** — the stops a night train actually calls at, taken from
+  the same workbook and emitted in the station register's own column shape.
+  Step 4 concatenates the ones the register does not carry: it is a
+  third-party OSM-derived list, and Sighișoara, Iași, Roma Ostiense, Veliko
+  Tarnovo, Hässleholm C, Åre and Briançon are absent from all three of its
+  name columns, so step 5 could not qualify them however good its own match
+  was. Restricted to called stops rather than all ~28k ONTD stops — step 4
+  bridges stops that could be qualified, and matching 28k against OSM to
+  reach a few dozen would only slow it and swell its ambiguity reports.
+- **`ontd_stop_times()`** — the night train schedule step 5 qualifies against,
+  read from the ONTD workbook `db/ontd/loader.py` loads (`ONTD_WORKBOOK_ID`),
+  and cached at `data/ontd_stop_times.csv` under the same local-file-wins
+  rule. It used to be a hand-made Drive export, `B-o-T_DataBase_stop_times.csv`
+  — correct on the day it was made, but nothing kept it level with the
+  workbook, and the two drifted **in both directions**: of the 239 active ONTD
+  stops with no catalog row, **224 were simply absent from that export**,
+  while it still carried stops no active train serves. The catalog was built
+  from one snapshot of ONTD while the app ran on another. Reading the same
+  workbook removes the second snapshot instead of rescheduling its refresh.
 - **`local_input(name, produced_by)`** — written by an earlier step of this
   pipeline, so it is never downloaded: a Drive copy could silently override
   what your own notebook just produced. Missing means that step has not been
-  run, and the error says which one.
+  run, and the error says which one. **Step 4's output belongs here** and was
+  misfiled as downloadable until 2026-08-28: step 4 wrote it to the notebook's
+  working directory while step 5 read `data/`, where `ensure_local` had put a
+  stale Drive copy — so a step 4 re-run changed nothing downstream and said
+  nothing about it. Running step 5 now requires step 4 to have been run.
 
 Nothing under `data/` is tracked in git. If the sync can't work (no id set,
 `gdown` not installed, folder not shared), place the file in `data/` by hand —

@@ -833,14 +833,21 @@ COUNTRIES = [
     # every Zürich–Wien night train runs. Without a row those kilometres
     # carry no buffer quota and no track access charge, and nothing warns.
     {"country_code": "LI", "country_name": "Liechtenstein"},
+    # Belarus and Russia are NOT modelled — no route may pass through
+    # either, under any routing mode (project decision; BLOCKED_COUNTRIES
+    # in models/route/model.py). These rows exist SOLELY to hold the
+    # border polygons that rail_router's request-time exclusion rules are
+    # built from (the graph-side `country` encoded value is not registered
+    # by this OpenRailRouting fork, so the block cannot be baked into the
+    # graph — see models/route/routing/docker/config.yml). Deliberately
+    # absent from _TRACK_INFRA_PLACEHOLDER_COUNTRIES below: their
+    # synthesized track rows keep has_row=False, so if the routing block
+    # ever failed, _check_country_coverage() would still 422 the route
+    # rather than silently pricing Belarusian kilometres. Do not "fix"
+    # either omission.
+    {"country_code": "BY", "country_name": "Belarus"},
+    {"country_code": "RU", "country_name": "Russia"},
 ]
-
-# Belarus and Russia are deliberately NOT modelled. Both are in the OSM
-# extract, so once the non-standard-gauge routing profiles exist the engine
-# could route a Ukrainian train through them. They are blocked in the
-# routing engine instead (models/route/routing/docker/custom_models/
-# night_train.json, country == BLR || country == RUS -> speed 0), which is
-# a hard exclusion rather than the silent "UNK" a missing row would give.
 
 
 # Country border polygons — Marine Regions "Union of the ESRI Country

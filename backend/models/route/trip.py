@@ -205,6 +205,11 @@ class Trip:
     direction: int
     segments: list[Segment]
     timetable_warnings: list[TimetableWarning] = field(default_factory=list)
+    # Track gauge this trip was routed on (routing/gauge.py resolution over
+    # the trip's stops) — serialized as general_parameters.track_gauge_mm.
+    # Defaulted only for dataclass field ordering; route_factory always
+    # passes the resolved value.
+    gauge_mm: int = 1435
 
     @property
     def departure_time_min(self) -> int:
@@ -279,6 +284,7 @@ class Trip:
         direction: int,
         segments: list[Segment],
         timetable_warnings: list[TimetableWarning] | None = None,
+        gauge_mm: int = 1435,
     ) -> "Trip":
         """Sole constructor — called exclusively by route_factory."""
         return cls(
@@ -286,4 +292,5 @@ class Trip:
             direction=direction,
             segments=segments,
             timetable_warnings=timetable_warnings or [],
+            gauge_mm=gauge_mm,
         )

@@ -36,6 +36,7 @@ import EvaluationPanel from '@/components/EvaluationPanel.vue'
 import MapView from '@/components/MapView.vue'
 import MapShareBar from '@/components/MapShareBar.vue'
 import CommentSection from '@/components/CommentSection.vue'
+import InlineAlert from '@/components/InlineAlert.vue'
 import {
   mdiArrowLeft,
   mdiArrowLeftRight,
@@ -195,6 +196,10 @@ interface BackendGeneralParameters {
   trip_km: number
   route_duration_min: number
   average_speed_kmh: number
+  // Track gauge the trip was routed on (ROUTE_BUILDER 0.9.27+) — 1435 for
+  // nearly everything; 1520 on the ex-Soviet/Finnish family, 1600 Ireland,
+  // 1668 Iberia. Optional so older stored proposals still type-check.
+  track_gauge_mm?: number
 }
 
 interface BackendTripSide {
@@ -1954,24 +1959,20 @@ onMounted(async () => {
             <AppSpinner v-else :size="16" />
           </button>
 
-          <!-- max-w-sm matches the itinerary table's own cap. The parent panel is
-               `w-fit`, so an uncapped sentence sets the panel's width and
-               collapses the flex-1 map beside it into a sliver. -->
-          <div
-            v-if="calcFailureMsg"
-            class="flex max-w-sm flex-col items-center gap-1 text-center break-words"
-            role="alert"
-          >
-            <p class="text-xs text-red-400">{{ calcFailureMsg }}</p>
+          <!-- max-w-sm (inside InlineAlert) matches the itinerary table's own
+               cap. The parent panel is `w-fit`, so an uncapped sentence sets
+               the panel's width and collapses the flex-1 map beside it into a
+               sliver. -->
+          <InlineAlert v-if="calcFailureMsg" :message="calcFailureMsg">
             <button
               v-if="calcFailure && isRetryable(calcFailure)"
               type="button"
-              class="cursor-pointer text-xs font-semibold text-primary-50 underline underline-offset-2"
+              class="w-fit cursor-pointer text-xs font-semibold text-primary-50 underline underline-offset-2"
               @click="retryCalc"
             >
               {{ t('errors.retry') }}
             </button>
-          </div>
+          </InlineAlert>
         </div>
 
         <!-- Continue button (suggest mode) — replaces Evaluate; carries the count
@@ -2004,13 +2005,7 @@ onMounted(async () => {
             <AppIcon :path="mdiCheckCircle" :size="16" />
             {{ t('proposal.saved') }}
           </p>
-          <p
-            v-if="publishError"
-            class="max-w-sm text-center text-xs text-red-400 break-words"
-            role="alert"
-          >
-            {{ publishError }}
-          </p>
+          <InlineAlert v-if="publishError" :message="publishError" />
         </div>
       </div>
 
