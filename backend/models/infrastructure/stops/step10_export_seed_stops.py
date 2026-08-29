@@ -172,7 +172,17 @@ COUNTRY_TIMEZONES = {
 EXCLUDED_STOP_IDS = {
     "osm:n4896717721",  # ONTD Dağkadı Hızlı Tren İstasyonu -> OSM "tren", 2743 km
     "osm:n8515238217",  # ONTD Tekučica -> OSM "A", 355 km
-    "osm:n9553124517",  # ONTD Közép-Garadna -> OSM "Arad", 222 km
+    "osm:n310754741",  # ONTD Dej -> "Autogara Dej", the BUS station 2.6 km
+    # out (fuzzy_raw). The real station, Dej Călători (osm:n2235196597),
+    # is a step 6 addition instead.
+    "osm:n2338638827",  # ONTD Lazarevac (RS) -> "Re", 938 km away on the
+    # metre-gauge Centovalli line in Piedmont — a coords_mismatch fuzzy
+    # match that step 5 flagged but did not block.
+    # osm:n9553124517 ("Arad") was listed here after ONTD Közép-Garadna
+    # junk-matched to it at 222 km — but the ban was by OSM id, and the id
+    # is the REAL Arad station. Once step 5 matched the actual ONTD Arad
+    # to it at <1 km, the ban blocked a legitimate stop (2026-08-29).
+    # The lesson: exclude bad MATCHES upstream, not station ids here.
 }
 
 

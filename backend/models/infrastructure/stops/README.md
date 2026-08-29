@@ -2,6 +2,18 @@
 
 > ## Handover — Johanna & Josh
 >
+> *(2026-08-29 catalog batch: Kaunas restored as a step 6 addition — the
+> break-of-gauge station left the ONTD schedule and with it the catalog;
+> Arad added — dropped by step 4's junk-match exclusion; Tirana's entry
+> removed — it was the city's BUS terminal, Tiranë has had no rail station
+> since 2013, and as Albania's reference station it cost the country every
+> relations-matrix row; the four Crimean stations removed while the
+> peninsula is a disconnected component in the routing graph; seven
+> gauge-NULL stops corrected via step 8's GAUGE_OVERRIDES, leaving only
+> the two whose NULL is true — GR Ρίο (metre gauge) and AL Durrës
+> (disused network). Roma Ostiense was already added. Net: 358 → 355
+> manual additions.)*
+>
 > **Where this stands:** the pipeline runs end to end and its output is now the
 > app's entire stop catalog — `db/dev/seed.py` no longer carries any stops of
 > its own. **700 are current night train stops (step 5) and 358 are the manual
