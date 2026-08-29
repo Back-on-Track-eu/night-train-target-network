@@ -172,6 +172,15 @@ Further notes:
   published proposals; publish assigns them. The fingerprint
   canonicalization strips prefixes anyway (§3.1), so fingerprints agree
   between ephemeral and published forms.
+- **Errors** (all JSON, `{"error", "message", …}`): `400 bad_request` /
+  `400 validation_error` (malformed request), `422 gauge_mismatch` (no
+  single track gauge serves every stop — carries `conflicting_stops:
+  {stop_id: [gauges]|null}` for every stop of the trip so the client can
+  mark them; 0.9.27), `422 routing_error` (the routing engine cannot serve
+  the request — no path on the trip's gauge network, a stop that will not
+  snap; an answer about the request, not a server fault), `422
+  domain_error` (any other model-level rejection, e.g. country coverage),
+  `500 calc_error` (genuinely unexpected).
 - **No persistence decisions.** No actions, no lookups. Request in, result
   out, forget.
 
@@ -581,8 +590,9 @@ refresh batch). Rationale for the route side (verified against
 - **rebuilt from DB anyway**: `composition` and `track_infrastructure`
   sections — `route_from_dict()` never reads them back, it reloads both via
   `scenario_id`/`composition_id`; purely informational in the JSON
-- **derived**: `general_parameters` (trip_km, duration, avg speed) —
-  recomputable from segments
+- **derived**: `general_parameters` (trip_km, duration, avg speed,
+  `track_gauge_mm` — the gauge profile the trip was routed on, 0.9.27) —
+  recomputable from segments (the gauge from the stops)
 - **genuinely irreducible route data**: per-segment physics (distance,
   driving/dynamics/buffer/slack times, energy, country distance/time
   shares, per-segment geometry), OD pairs (places_sold, avg_price,

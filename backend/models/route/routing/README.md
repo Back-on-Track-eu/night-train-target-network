@@ -291,6 +291,18 @@ docker compose up -d
 
 ---
 
+## Profile Selection (backend side)
+
+Since 0.9.27 the backend chooses among these profiles per trip:
+`models/route/routing/gauge.py` resolves ONE gauge from the trip's stops
+(set intersection of `gauges_mm`; unknown does not constrain; ties prefer
+1435) and `rail_router._profile_for_gauge()` maps it onto the naming
+contract above. Stop pairings no single gauge serves fail before any router
+call as `422 gauge_mismatch`. `SUPPORTED_GAUGES_MM` in
+`models/route/model.py` is the sanctioned mirror of the profile list here —
+adding a gauge means a new profile in `config.yml`, a re-import, and that
+tuple.
+
 ## Verifying the Gauge Profiles
 
 After a re-import, check that `country` reached the graph and that each
@@ -314,13 +326,19 @@ message, not a route.
 
 **The Belarus/Russia exclusion is not in the graph.** GraphHopper's `country`
 encoded value is not registered by this fork (`Unknown encoded value:
-country` at import), so the block cannot be baked in and is applied per
-request instead, as an area rule in `rail_router._build_custom_model()` —
-the same mechanism as HSR avoidance. Until that lands, a `night_train_1520`
-route from Warszawa to Vilnius may legitimately be routed through Belarus.
-Re-check whether the fork has gained `country` before adding it back to
-`graph.encoded_values`; that would be the better mechanism, since it follows
-real borders rather than a simplified ring.
+country` at import), so the block cannot be baked in. Since 0.9.27 it is
+applied per request instead (`BLOCKED_COUNTRIES` in `models/route/model.py`):
+`rail_router._blocked_country_rules()` builds a speed-0 area rule over EVERY
+component polygon of each blocked country — every component, because
+Russia's largest polygon is the western mainland and a block built from it
+alone would leave the Kaliningrad exclave open — and those rules ride in the
+custom model of every routing request, all modes (`route_geometry()` and
+`simpleRouting` included, which therefore run LM rather than CH). A bare
+`/route` call against this server, like the smoke tests above, carries no
+custom model and is NOT blocked — the exclusion lives in the backend's
+requests, not in the graph. Re-check whether the fork has gained `country`
+before adding it back to `graph.encoded_values`; that would be the better
+mechanism, since it follows real borders rather than a simplified ring.
 
 ---
 
