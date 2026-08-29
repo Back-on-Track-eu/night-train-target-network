@@ -14,15 +14,6 @@ Responsibilities
 - Country attribution of route geometry via shapely point-in-polygon.
 - Physics per segment: distance_m, driving_time_min, buffer_time_min,
   country_distance_shares, country_time_shares.
-- Gauge-aware profile selection: each call resolves ONE track gauge from
-  its stops (routing/gauge.py) and routes on that gauge's own GraphHopper
-  profile — night_train for 1435, night_train_<mm> otherwise (naming
-  contract: SUPPORTED_GAUGES_MM in models/route/model.py ←→
-  docker/config.yml). Baked per-profile so stop SNAPPING is gauge-correct.
-- Belarus/Russia exclusion (BLOCKED_COUNTRIES): a speed-0 area rule over
-  each blocked country's border polygon, attached to EVERY routing request
-  in every mode — the fork registers no `country` encoded value, so the
-  block cannot live in the graph (see docker/config.yml).
 - fullRouting custom model: composition speed cap + HSR avoidance — only
   track whose permitted speed exceeds HSR_TRACK_SPEED_THRESHOLD_KMH is
   penalized, and only where hsr_allowed (composition AND country) is
@@ -64,7 +55,7 @@ from __future__ import annotations
 import logging
 import os
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import requests
 
@@ -76,14 +67,11 @@ from models.params import (
 )
 from models.route.trip import StopType
 from models.route.routing.dynamics import apply_traction_dynamics
-from models.route.routing.gauge import resolve_trip_gauge
 from models.route.model import (
-    BLOCKED_COUNTRIES,
     HSR_TRACK_SPEED_THRESHOLD_KMH,
     HSR_TRACK_SPEED_SANITY_MAX_KMH,
     HSR_AVOIDANCE_PRIORITY_FACTOR,
     HSR_AVOIDANCE_RING_SIMPLIFY_DEG,
-    STANDARD_GAUGE_MM,
 )
 from models.utils import ms_to_min, haversine_path_m
 
@@ -160,8 +148,6 @@ class RoutedLeg:
     energy_kwh: float  # 0.0 until energy model runs
     country_distance_shares: dict[str, float]  # {country_code: share}, sums to 1.0
     country_time_shares: dict[str, float]  # {country_code: share}, sums to 1.0
-    countries: list[str] = field(default_factory=list)  # path order — see Segment
-    passages: list[str] = field(default_factory=list)  # crossings this leg owns
 
     @property
     def total_time_min(self) -> int:
@@ -253,25 +239,6 @@ class CountryIndex:
             )
         return self._avoidance_rings[country_code]
 
-    def get_blocking_rings(self, country_code: str) -> list[list]:
-        """EVERY component polygon's outer ring, simplified — for the
-        BLOCKED_COUNTRIES exclusion, where get_largest_polygon() would be
-        a hole: Russia's largest clipped polygon is the western mainland,
-        and a block built from it alone leaves the Kaliningrad exclave —
-        the one part of Russia a Poland–Lithuania route could actually cut
-        through — wide open. Not cached: built once per process by
-        RailRouter._blocked_country_rules(), which caches the result."""
-        return [
-            [
-                list(coord)
-                for coord in polygon.simplify(
-                    HSR_AVOIDANCE_RING_SIMPLIFY_DEG, preserve_topology=True
-                ).exterior.coords
-            ]
-            for polygon, code in zip(self._polygons, self._codes)
-            if code == country_code
-        ]
-
     def _build_avoidance_ring(self, country_code: str) -> list | None:
         polygons = [
             polygon
@@ -287,43 +254,6 @@ class CountryIndex:
             HSR_AVOIDANCE_RING_SIMPLIFY_DEG, preserve_topology=True
         ).exterior
         return [list(coord) for coord in ring.coords]
-
-
-class PassageIndex:
-    """
-    Crossing polygons for routing-time passage detection — which segment of
-    a trip crosses which separately charged link (Storebælt, Øresund, the
-    Channel Tunnel).
-
-    Built once from DBDataLoader.get_passage_geometries() — see
-    api/helpers/dependencies.py. Crossing GEOMETRY is static reference data
-    (a tunnel does not move between scenarios), so like CountryIndex this
-    is a startup-time singleton; the scenario-versioned CHARGES are
-    resolved separately at evaluation time via
-    DBDataLoader.build_all_passages().
-
-    Two passage_ids may share one polygon — OERESUND_DK and OERESUND_SE,
-    each infrastructure manager billing its half of one crossing. Both
-    match, both are attributed.
-
-    Only a handful of polygons exist, so a linear intersects() scan is
-    cheaper than the R-tree CountryIndex needs for its ~178k vertices.
-    """
-
-    def __init__(self, passage_geometries: list[tuple[str, dict]]) -> None:
-        from shapely.geometry import shape
-
-        self._shapes = [(pid, shape(geom)) for pid, geom in passage_geometries]
-        logger.info("PassageIndex: loaded %d passage polygons.", len(self._shapes))
-
-    def intersecting(self, coords: list[list[float]]) -> list[str]:
-        """passage_ids whose polygon this [lon, lat] path crosses."""
-        if len(coords) < 2 or not self._shapes:
-            return []
-        from shapely.geometry import LineString
-
-        line = LineString(coords)
-        return [pid for pid, shp in self._shapes if shp.intersects(line)]
 
 
 # ---------------------------------------------------------------------------
@@ -363,9 +293,7 @@ class RailRouter:
     # silently serializes calls beyond the limit, defeating the concurrency.
     _CONNECTION_POOL_SIZE = 64
 
-    def __init__(
-        self, country_index: CountryIndex, passage_index: PassageIndex | None = None
-    ) -> None:
+    def __init__(self, country_index: CountryIndex) -> None:
         self.base_url = os.environ.get(
             "OPENRAILROUTING_URL", "http://localhost:8989"
         ).rstrip("/")
@@ -379,67 +307,6 @@ class RailRouter:
         self._session.mount("http://", adapter)
         self._session.mount("https://", adapter)
         self._country_index = country_index
-        # Blocked-country rules+areas depend only on static geometry —
-        # built once on first use, shared by every request (route(),
-        # route_geometry(), all modes). None until built; may build to
-        # ([], {}) if polygons are missing (warned, degrades to unblocked
-        # — the country-coverage check in route_factory still 422s any
-        # route that then leaks through, see BLOCKED_COUNTRIES).
-        self._blocked_rules_cache: tuple[list, dict] | None = None
-        # Optional so a router can be built before passage_charges is
-        # seeded, and so tests that care only about geometry need not
-        # supply one — legs then carry passages=() and evaluation charges
-        # no crossings, which is the pre-0.9.21 behaviour.
-        self._passage_index = passage_index
-
-    def _profile_for_gauge(self, gauge_mm: int) -> str:
-        """Routing profile name for a gauge — THE naming contract with
-        docker/config.yml: the bare profile for standard gauge,
-        <profile>_<gauge_mm> for everything else. gauge.py has already
-        validated gauge_mm against SUPPORTED_GAUGES_MM."""
-        if gauge_mm == STANDARD_GAUGE_MM:
-            return self.profile
-        return f"{self.profile}_{gauge_mm}"
-
-    def _blocked_country_rules(self) -> tuple[list, dict]:
-        """(speed_rules, areas) hard-excluding BLOCKED_COUNTRIES — cached.
-
-        multiply_by 0, not the HSR 0.01: crossing Belarus or Russia is not
-        expensive, it is off the table (project decision — see
-        BLOCKED_COUNTRIES in models/route/model.py). Same ring machinery
-        as HSR avoidance; a missing polygon warns loudly and skips, since
-        an exception here would take every route down with it while the
-        country-coverage check still catches an actual leak."""
-        if self._blocked_rules_cache is not None:
-            return self._blocked_rules_cache
-        rules: list = []
-        areas: dict = {}
-        for cc in BLOCKED_COUNTRIES:
-            # Every component polygon, not the largest: Russia's clipped
-            # geometry is mainland + the Kaliningrad exclave, and the
-            # exclave is the part a Poland–Lithuania route could cut
-            # through. One area rule per component.
-            rings = self._country_index.get_blocking_rings(cc)
-            if not rings:
-                logger.warning(
-                    "No border polygon for blocked country '%s' — routes are "
-                    "NOT hard-excluded from it (country coverage still 422s "
-                    "any that pass through). Seed its geometry row.",
-                    cc,
-                )
-                continue
-            for index, ring in enumerate(rings):
-                closed_ring = ring if ring[0] == ring[-1] else ring + [ring[0]]
-                area_name = f"blocked{cc.lower()}{index}"
-                areas[area_name] = {
-                    "type": "Feature",
-                    "id": area_name,
-                    "properties": {},
-                    "geometry": {"type": "Polygon", "coordinates": [closed_ring]},
-                }
-                rules.append({"if": f"in_{area_name}", "multiply_by": "0"})
-        self._blocked_rules_cache = (rules, areas)
-        return self._blocked_rules_cache
 
     def check_server(self) -> dict:
         resp = self._session.get(
@@ -460,20 +327,12 @@ class RailRouter:
         existing trains are never evaluated (decision 23), so there is no
         composition to speak of and nothing would consume the result.
 
-        Single-pass, no speed cap, no HSR avoidance, no traction dynamics
-        — the shape is the shape. Two things do apply, as everywhere:
-        the gauge profile (resolved from the stops alone; ONTD's synthetic
-        stops carry no gauges, so they resolve standard — broad-gauge ONTD
-        lines keep failing to snap until the projection routes on catalog
-        stops) and the BLOCKED_COUNTRIES exclusion, which forces this off
-        CH and onto LM routing (a request custom model disables CH).
+        Always single-pass CH routing, like simpleRouting: no speed cap,
+        no HSR avoidance, no traction dynamics. The shape is the shape.
         """
         if len(stops) < 2:
             raise ValueError("At least 2 stops are required.")
-        profile = self._profile_for_gauge(resolve_trip_gauge(s.stop for s in stops))
-        raw = self._post_route(
-            self._build_payload(stops, self._build_custom_model(None, None), profile)
-        )
+        raw = self._post_route(self._build_payload(stops, None))
         paths = raw.get("paths") or []
         if not paths:
             raise ValueError("Router returned no path.")
@@ -521,29 +380,11 @@ class RailRouter:
         if len(stops) < 2:
             raise ValueError("At least 2 stops are required.")
 
-        # Gauge first — resolved from THIS call's own stops, so every
-        # entry point (trips, auto-stop mini-reroutes with a candidate
-        # spliced in) gets the right profile without threading a value
-        # through. An impossible pairing raises GaugeMismatchError here,
-        # before any HTTP — a domain answer, not a snap error.
-        gauge_mm = resolve_trip_gauge((s.stop for s in stops), composition)
-        profile = self._profile_for_gauge(gauge_mm)
-
         # routing_mode SWITCH — VALID_ROUTING_MODES is the same set
         # the compute request validation (api/helpers/proposal_compute.py) checks against, so an unknown mode
         # can only reach here if that validation was bypassed.
         if routing_mode == "simpleRouting":
-            # No HSR avoidance and no traction dynamics, but since 0.9.27
-            # not custom-model-free either: the BLOCKED_COUNTRIES rules
-            # ride on every request, and with the model already attached
-            # the composition speed cap is free — so simpleRouting times
-            # are capped at max_speed_kmh like fullRouting instead of the
-            # graph's 230 ceiling. Single-pass LM (custom model disables
-            # CH); still no snap pass, no HSR, no dynamics.
-            simple_model = self._build_custom_model(
-                int(composition.max_speed_kmh), None
-            )
-            raw = self._post_route(self._build_payload(stops, simple_model, profile))
+            raw = self._post_route(self._build_payload(stops, None))
             return self._parse_response(raw, stops, tracks)
         if routing_mode != "fullRouting":
             raise ValueError(
@@ -568,24 +409,17 @@ class RailRouter:
         custom_model = self._build_custom_model(vehicle_max_speed_kmh, avoid_hsr)
 
         if custom_model:
-            # Pass 1 snaps on the SAME gauge profile as pass 2 — that is
-            # what makes snapping gauge-correct (a dual-gauge station's
-            # 1435 platform vs its 1520 platform). Plain CH, no custom
-            # model: snapping is per-point nearest-edge, and the path
-            # between snapped points is discarded, so the blocked-country
-            # rules add nothing here but would cost the CH speedup.
-            snap_raw = self._post_route(self._build_payload(stops, None, profile))
+            snap_raw = self._post_route(self._build_payload(stops, None))
             snapped_coords = snap_raw["paths"][0]["snapped_waypoints"]["coordinates"]
             raw = self._post_route(
                 self._build_payload(
                     stops,
                     custom_model,
-                    profile,
                     override_coords=snapped_coords,
                 )
             )
         else:
-            raw = self._post_route(self._build_payload(stops, None, profile))
+            raw = self._post_route(self._build_payload(stops, None))
 
         legs = self._parse_response(raw, stops, tracks)
         # Traction dynamics (fullRouting only): GraphHopper has no vehicle
@@ -607,16 +441,10 @@ class RailRouter:
         avoid_high_speed_lines: dict[str, bool] | None,
     ) -> dict | None:
         """
-        GraphHopper custom model for a routing pass, or None only when
-        nothing needs one at all — which since 0.9.27 requires the
-        BLOCKED_COUNTRIES polygons to be missing too, as their speed-0
-        area rules are folded into every model built here (route(),
-        both modes, and route_geometry() all pass through this).
+        GraphHopper custom model for the fullRouting pass, or None when
+        nothing needs one (no speed cap, no country disallowing HSR).
 
-        Three independent concerns:
-          blocked  — BLOCKED_COUNTRIES exclusion (_blocked_country_rules):
-                     hard speed-0 over each blocked country's polygon,
-                     every mode, non-negotiable.
+        Two independent concerns:
           speed    — hard cap at the composition's own max_speed_kmh on
                      every segment (how fast THIS train may go, everywhere).
           priority — HSR avoidance: a segment is penalized by
@@ -641,12 +469,7 @@ class RailRouter:
           - Mixed permissions — one rule per disallowing country, scoped
             to that country's border polygon (in_<area> && speed range).
         """
-        blocked_rules, blocked_areas = self._blocked_country_rules()
-        speed_rules, priority_rules, areas = (
-            list(blocked_rules),
-            [],
-            dict(blocked_areas),
-        )
+        speed_rules, priority_rules, areas = [], [], {}
 
         if vehicle_max_speed_kmh is not None:
             speed_rules.append({"if": "true", "limit_to": str(vehicle_max_speed_kmh)})
@@ -708,16 +531,12 @@ class RailRouter:
         self,
         stops: list[StopInput],
         custom_model: dict | None,
-        profile: str,
         override_coords: list[list[float]] | None = None,
     ) -> dict:
         """
         custom_model: prebuilt by _build_custom_model() (or None for a plain
         CH pass) — passed in rather than rebuilt here, so route() builds it
         exactly once per call.
-        profile: the gauge profile from _profile_for_gauge() — always passed
-        explicitly (never defaulted to self.profile) so a call site cannot
-        silently route a broad-gauge trip on the standard-gauge graph.
         override_coords: snapped [lon, lat] pairs from pass 1, used in place
         of the original stop coordinates for pass 2 of two-pass routing.
         """
@@ -727,7 +546,7 @@ class RailRouter:
             else [[s.stop.lon, s.stop.lat] for s in stops]
         )
         payload: dict = {
-            "profile": profile,
+            "profile": self.profile,
             "points": points,
             "points_encoded": False,
             "instructions": False,
@@ -747,7 +566,7 @@ class RailRouter:
         except requests.HTTPError as exc:
             try:
                 msg = resp.json().get("message", resp.text)
-            except ValueError:  # body not JSON — proxies, timeouts
+            except:
                 msg = resp.text
             raise RailRoutingError(
                 f"Routing engine HTTP {resp.status_code}: {msg}"
@@ -775,8 +594,8 @@ class RailRouter:
             len(stops), coords, leg_distance_detail, intervals, tracks
         )
 
+    @staticmethod
     def _parse_legs(
-        self,
         n_stops: int,
         coords: list[list[float]],
         leg_distance_detail: list,
@@ -790,15 +609,8 @@ class RailRouter:
         apportioned by overlap fraction, summed per country, then converted
         to country_distance_shares / country_time_shares (each summing to 1.0)
         alongside the leg's total distance_m / driving_time_min / buffer_time_min.
-
-        countries additionally records the order the legs entered them, which
-        the share dicts cannot express and track access charges need (see
-        Segment). Passages are attributed here too: a crossing is claimed by
-        the FIRST leg intersecting it, so one split by an intermediate stop
-        is charged once per trip rather than by every leg touching it.
         """
         legs: list[RoutedLeg] = []
-        claimed_passages: set[str] = set()
 
         for i in range(n_stops - 1):
             if i < len(leg_distance_detail):
@@ -810,7 +622,6 @@ class RailRouter:
 
             leg_cc_dist: dict[str, float] = defaultdict(float)
             leg_cc_dur_ms: dict[str, float] = defaultdict(float)
-            leg_countries: list[str] = []
 
             for iv_from, iv_to, cc, dist_m, iv_ms in intervals:
                 overlap_from = max(iv_from, from_idx)
@@ -821,13 +632,6 @@ class RailRouter:
                 fraction = (overlap_to - overlap_from) / span if span > 0 else 1.0
                 leg_cc_dist[cc] += dist_m * fraction
                 leg_cc_dur_ms[cc] += iv_ms * fraction
-                # Intervals arrive in path order, so first-seen is
-                # entry order. A country re-entered after a detour
-                # through a neighbour keeps its first position: its
-                # shares are summed into one entry either way, and one
-                # clock window per country is what pricing needs.
-                if cc not in leg_countries:
-                    leg_countries.append(cc)
 
             total_dist_m = sum(leg_cc_dist.values())
             total_dur_ms = sum(leg_cc_dur_ms.values())
@@ -849,19 +653,9 @@ class RailRouter:
                     continue  # "UNK" (open water/ferry) — no country, no buffer time
                 total_buffer_min += round(cc_drive_min * track.buffer_quota_per)
 
-            leg_geometry = coords[from_idx : to_idx + 1]
-            leg_passages: list[str] = []
-            if self._passage_index is not None:
-                leg_passages = [
-                    pid
-                    for pid in self._passage_index.intersecting(leg_geometry)
-                    if pid not in claimed_passages
-                ]
-                claimed_passages.update(leg_passages)
-
             legs.append(
                 RoutedLeg(
-                    geometry=leg_geometry,
+                    geometry=coords[from_idx : to_idx + 1],
                     distance_m=round(total_dist_m),
                     driving_time_min=ms_to_min(total_dur_ms),
                     dynamics_time_min=0,  # filled by apply_traction_dynamics()
@@ -869,8 +663,6 @@ class RailRouter:
                     energy_kwh=0.0,  # populated by calc_energy_consumption()
                     country_distance_shares=country_distance_shares,
                     country_time_shares=country_time_shares,
-                    countries=leg_countries,
-                    passages=leg_passages,
                 )
             )
 

@@ -53,17 +53,7 @@ services:
       - "${OPENRAILROUTING_HOST_PORT:-8989}:${OPENRAILROUTING_CONTAINER_PORT:-8989}"
     volumes:
       - ../models/route/routing/docker/data:/app/data
-      # Repo-relative, resolved against the compose project directory
-      # (backend/docker/) exactly like the ../models mount above. NOT an
-      # .env value: it is the same path on every laptop, in CI (where
-      # backend-tests.yml's actions/cache restores this very directory) and
-      # on the servers, so by the parameter-placement rules it has no
-      # business in .env. It was one until 2026-08-24, holding a
-      # CONTAINER-side /app/... value that silently bind-mounted an empty
-      # root-owned directory on Linux and failed outright on macOS; hard-
-      # coding it here makes a stale GRAPH_CACHE_PATH in an existing .env
-      # inert rather than actively wrong.
-      - ../models/route/routing/docker/graph-cache:/app/graph-cache
+      - ${GRAPH_CACHE_PATH}:/app/graph-cache
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:${OPENRAILROUTING_CONTAINER_PORT:-8989}/health"]

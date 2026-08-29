@@ -42,10 +42,10 @@ API_BASE = api_base_url()
 DB_CONFIG = db_config()
 
 # Canonical stop lists — every seeded stop the suite routes between.
-STOPS_BERLIN_WIEN = ["osm:n3856100103", "osm:w423692233"]
-STOPS_BERLIN_DRESDEN_WIEN = ["osm:n3856100103", "osm:n25397500", "osm:w423692233"]
-STOPS_BERLIN_ZUERICH_WIEN = ["osm:n3856100103", "osm:n1236383343", "osm:w423692233"]
-STOPS_COPENHAGEN_STOCKHOLM = ["osm:n3739700410", "osm:n25948183"]
+STOPS_BERLIN_WIEN = ["DE_BERLIN_HBF", "AT_WIEN_HBF"]
+STOPS_BERLIN_DRESDEN_WIEN = ["DE_BERLIN_HBF", "DE_DRESDEN_HBF", "AT_WIEN_HBF"]
+STOPS_BERLIN_ZUERICH_WIEN = ["DE_BERLIN_HBF", "CH_ZUERICH_HB", "AT_WIEN_HBF"]
+STOPS_COPENHAGEN_STOCKHOLM = ["DK_COPENHAGEN", "SE_STOCKHOLM_C"]
 
 # Two calibrated test compositions — one per material strategy, so the
 # suite exercises both mechanics end to end: STD-NEW operator (loco 174,
@@ -237,7 +237,7 @@ def hsr_scenario(db_cur):
 # All fixtures pin auto_stop_addition="off": these are fixed-corridor
 # physics fixtures whose stop lists downstream tests (test_20 content
 # math, test_50 GTFS decomposition) rely on being exactly as requested —
-# the seeded osm:n3325029085 would otherwise be auto-added to any corridor
+# the seeded CZ_BRNO_HLN would otherwise be auto-added to any corridor
 # passing through Brno. The add/suggest behaviour has its own dedicated
 # tests in test_35's TestSuggestMode / TestModeSwitches-equivalent classes.
 #

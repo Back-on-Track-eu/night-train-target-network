@@ -1,94 +1,168 @@
-// Proposal read/write endpoints. All error handling, timeouts and cancellation
-// live in apiClient — these are thin wrappers that name the endpoint, pick a
-// budget class, and type the response.
+// Thin client for POST /api/proposals — the filtered/sorted/paginated list of
+// saved proposals shown in the Gallery. No generic API client exists to extend,
+// so this mirrors the store's fetch pattern (stores/store.ts) and feedbackApi.ts.
+// The list endpoint is public (no auth needed).
 
-import { apiRequest } from './apiClient'
-import { ApiError } from './apiError'
 import type {
   ProposalsRequest,
   ProposalsResponse,
+  ProposalsSummariesSection,
   ProposalDetailResponse,
+  GalleryRouteShape,
   PublishRequest,
   PublishResponse,
   LikeResponse,
-  Comment,
-  EngagementResponse,
 } from '@/types/api'
 
-/** Every failure is an ApiError; re-exported so callers need one import. */
-export { ApiError }
+const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5050'
 
-/**
- * The gallery's one read: list page AND map in a single request. The response
- * is sectioned and the caller picks which sections to compute via `body.include`
- * (see ProposalsSection), so this returns the whole envelope rather than
- * unwrapping one section.
- */
-export function fetchProposals(
-  body: ProposalsRequest,
-  signal?: AbortSignal,
-): Promise<ProposalsResponse> {
-  return apiRequest<ProposalsResponse>('/api/proposals', {
-    method: 'POST',
-    body,
-    ...(signal ? { signal } : {}),
-  })
+/** Carries a human-readable, already-surfaceable message for the UI. */
+export class ProposalsError extends Error {}
+
+/** Pull the most specific human-readable message out of an error body. */
+function extractErrorMessage(body: unknown, status: number): string {
+  if (body && typeof body === 'object') {
+    const record = body as Record<string, unknown>
+    const details = record.details
+    if (Array.isArray(details) && details.length > 0) {
+      return details.filter((d) => typeof d === 'string').join(' ')
+    }
+    if (typeof record.message === 'string' && record.message) {
+      return record.message
+    }
+  }
+  return `Request failed (HTTP ${status}).`
 }
 
 /**
- * One proposal's current version (route + evaluation + metadata) — same wire
- * shape as publish's response. Used by ProposalViewport to open a stored
- * proposal; it needs the full route.
- *
- * Note this is not cheap on the server: it reconstructs the route and the whole
- * evaluation, and re-runs the version refresh, which can reach the routing
- * engine (api/helpers/proposal_load.py) — hence the interactive budget rather
- * than the reference one. Do not call it in a loop: anything that needs
- * geometry for many proposals at once wants POST /api/proposals' map sections.
+ * Fetch one page of proposals. The list response is sectioned; the gallery
+ * only requests summaries, so this unwraps and resolves with the `summaries`
+ * section ({ total, proposals }). Rejects with a ProposalsError carrying a
+ * readable message on any network or non-2xx failure.
  */
-export function fetchProposalRoute<TRoute>(
+export async function fetchProposals(body: ProposalsRequest): Promise<ProposalsSummariesSection> {
+  let response: Response
+  try {
+    response = await fetch(`${BASE_URL}/api/proposals`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  } catch (err) {
+    throw new ProposalsError(err instanceof Error ? err.message : 'Network error')
+  }
+
+  let parsed: unknown = null
+  try {
+    parsed = await response.json()
+  } catch {
+    // Non-JSON body (unexpected) — fall through to the status-based message.
+  }
+
+  if (!response.ok) {
+    throw new ProposalsError(extractErrorMessage(parsed, response.status))
+  }
+  return (parsed as ProposalsResponse).summaries ?? { total: 0, proposals: [] }
+}
+
+/**
+ * Load one proposal's current version (route + evaluation + metadata) —
+ * identical wire shape to POST /api/proposal/publish's response. Used by the
+ * gallery map (route geometry only, the default TRoute) and by
+ * ProposalViewport (the full route, via an explicit TRoute) to open a stored
+ * proposal in display mode. Rejects with a ProposalsError on any network or
+ * non-2xx failure.
+ */
+export async function fetchProposalRoute<TRoute = GalleryRouteShape>(
   id: number,
-  signal?: AbortSignal,
 ): Promise<ProposalDetailResponse<TRoute>> {
-  return apiRequest<ProposalDetailResponse<TRoute>>(`/api/proposal/${id}`, {
-    ...(signal ? { signal } : {}),
-  })
+  let response: Response
+  try {
+    response = await fetch(`${BASE_URL}/api/proposal/${id}`)
+  } catch (err) {
+    throw new ProposalsError(err instanceof Error ? err.message : 'Network error')
+  }
+
+  let parsed: unknown = null
+  try {
+    parsed = await response.json()
+  } catch {
+    // Non-JSON body (unexpected) — fall through to the status-based message.
+  }
+
+  if (!response.ok) {
+    throw new ProposalsError(extractErrorMessage(parsed, response.status))
+  }
+  return parsed as ProposalDetailResponse<TRoute>
 }
 
 /**
- * Publish (persist) a proposal — the only user write path. Requires an auth
- * header (a guest token is enough). The server recomputes from
- * `body.compute_request`, so this is as expensive as a calc: 'heavy', no
- * deadline (see apiClient's header for why aborting would not help).
+ * Publish (persist) a proposal — the only write path. Requires an auth header
+ * (a guest token is enough); the caller passes `store.authHeaders()`. The server
+ * recomputes from `body.compute_request`. Rejects with a ProposalsError carrying
+ * a readable message on any network or non-2xx failure.
  */
-export function publishProposal(
+export async function publishProposal(
   body: PublishRequest,
   authHeaders: Record<string, string>,
-  opts?: { signal?: AbortSignal; onSlow?: (phase: 'slow' | 'verySlow') => void },
 ): Promise<PublishResponse> {
-  return apiRequest<PublishResponse>('/api/proposal/publish', {
-    method: 'POST',
-    body,
-    headers: authHeaders,
-    budget: 'heavy',
-    ...(opts?.signal ? { signal: opts.signal } : {}),
-    ...(opts?.onSlow ? { onSlow: opts.onSlow } : {}),
-  })
+  let response: Response
+  try {
+    response = await fetch(`${BASE_URL}/api/proposal/publish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
+      body: JSON.stringify(body),
+    })
+  } catch (err) {
+    throw new ProposalsError(err instanceof Error ? err.message : 'Network error')
+  }
+
+  let parsed: unknown = null
+  try {
+    parsed = await response.json()
+  } catch {
+    // Non-JSON body (unexpected) — fall through to the status-based message.
+  }
+
+  if (!response.ok) {
+    throw new ProposalsError(extractErrorMessage(parsed, response.status))
+  }
+  return parsed as PublishResponse
 }
 
 /**
- * Like/unlike. Both resolve with the resulting {count, liked_by_me}, so no
- * client-side toggle math is needed.
+ * Like/unlike a proposal. Both require an auth header (a guest token is
+ * accepted by the backend, but the like button only offers this to logged-in
+ * accounts — see ProposalCard.vue). Both resolve with the resulting
+ * {count, liked_by_me} directly, no client-side toggle math needed. Rejects
+ * with a ProposalsError on any network or non-2xx failure.
  */
-function sendLike(
+async function sendLike(
   method: 'POST' | 'DELETE',
   proposalId: number,
   authHeaders: Record<string, string>,
 ): Promise<LikeResponse> {
-  return apiRequest<LikeResponse>(`/api/proposal/${proposalId}/like`, {
-    method,
-    headers: authHeaders,
-  })
+  let response: Response
+  try {
+    response = await fetch(`${BASE_URL}/api/proposal/${proposalId}/like`, {
+      method,
+      headers: { ...authHeaders },
+    })
+  } catch (err) {
+    throw new ProposalsError(err instanceof Error ? err.message : 'Network error')
+  }
+
+  let parsed: unknown = null
+  try {
+    parsed = await response.json()
+  } catch {
+    // Non-JSON body (unexpected) — fall through to the status-based message.
+  }
+
+  if (!response.ok) {
+    throw new ProposalsError(extractErrorMessage(parsed, response.status))
+  }
+  return parsed as LikeResponse
 }
 
 export function likeProposal(
@@ -103,65 +177,4 @@ export function unlikeProposal(
   authHeaders: Record<string, string>,
 ): Promise<LikeResponse> {
   return sendLike('DELETE', proposalId, authHeaders)
-}
-
-/**
- * Likes + comment thread + timeline for one proposal, in one request. The
- * endpoint is open (optional_auth), but PASS THE AUTH HEADERS ANYWAY when the
- * caller has them: `likes.liked_by_me` is always false without them, which is
- * exactly the wrong-icon bug the gallery card has to live with.
- */
-export function fetchEngagements(
-  proposalId: number,
-  authHeaders: Record<string, string>,
-  signal?: AbortSignal,
-): Promise<EngagementResponse> {
-  return apiRequest<EngagementResponse>(`/api/proposal/${proposalId}/engagements`, {
-    headers: authHeaders,
-    ...(signal ? { signal } : {}),
-  })
-}
-
-/** Post a comment. Resolves with the created row (201), ready to append. */
-export function postComment(
-  proposalId: number,
-  body: string,
-  authHeaders: Record<string, string>,
-): Promise<Comment> {
-  return apiRequest<Comment>(`/api/proposal/${proposalId}/comment`, {
-    method: 'POST',
-    body: { body },
-    headers: authHeaders,
-  })
-}
-
-/** Edit own comment. Author-only server-side: 403 for anyone else. */
-export function editComment(
-  proposalId: number,
-  commentId: number,
-  body: string,
-  authHeaders: Record<string, string>,
-): Promise<Comment> {
-  return apiRequest<Comment>(`/api/proposal/${proposalId}/comment/${commentId}`, {
-    method: 'PATCH',
-    body: { body },
-    headers: authHeaders,
-  })
-}
-
-/**
- * Delete own comment. The only endpoint in the API that answers 204, hence
- * allowEmpty — see apiClient's empty-body check. The delete is soft server-side
- * but the row leaves the thread for good, so callers just drop it.
- */
-export function deleteComment(
-  proposalId: number,
-  commentId: number,
-  authHeaders: Record<string, string>,
-): Promise<void> {
-  return apiRequest<void>(`/api/proposal/${proposalId}/comment/${commentId}`, {
-    method: 'DELETE',
-    headers: authHeaders,
-    allowEmpty: true,
-  })
 }

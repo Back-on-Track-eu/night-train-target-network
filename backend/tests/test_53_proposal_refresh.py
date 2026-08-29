@@ -30,7 +30,7 @@ from models.route.model import ROUTE_BUILDER_VERSION
 from scripts.refresh_proposals import run as run_refresh
 from tests.helpers import PROPOSAL_URL, compute, publish, purge_saved_proposals
 
-_STOPS = ["osm:n3856100103", "osm:w423692233"]
+_STOPS = ["DE_BERLIN_HBF", "AT_WIEN_HBF"]
 _COMPOSITION = "NEW-BAL-7"
 
 # Guaranteed older than any real ROUTE_BUILDER_VERSION (semver-style

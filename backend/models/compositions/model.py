@@ -18,7 +18,7 @@ reseeded value alone is a data change and follows the DB versioning
 rules instead (see db/dev/seed.py).
 """
 
-COMPOSITIONS_MODEL_VERSION: str = "0.9.3"
+COMPOSITIONS_MODEL_VERSION: str = "0.9.2"
 
 COMPOSITIONS_MODEL_DESCRIPTION: str = (
     "Composition cost model: calibrated purchase, maintenance, cleaning, "
@@ -27,26 +27,6 @@ COMPOSITIONS_MODEL_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
-    "0.9.3": {
-        "date": "2026-08-13",
-        "author": "david",
-        "changes": "Locomotives become first-class catalog entities. "
-        "input_params.loco_types holds the machine (mass, design speed, "
-        "traction); operator_loco_costs holds the rental rate per "
-        "(operator, machine); composition_type_locos wires machines to "
-        "compositions in position order. Two types are seeded from the "
-        "existing lease derivation, which already distinguished the "
-        "230 km/h Vectron (CD class 384) from the standard 200 km/h "
-        "Vectron MS — a distinction material_strategy was carrying "
-        "implicitly while also standing for the business model. "
-        "composition_type_n_locos is dropped: the count is now the number "
-        "of wiring rows, so the two cannot disagree. operators."
-        "operator_loco_lease_eur_h is dropped. LOCOMOTIVE MASS REMAINS AN "
-        "ASSUMPTION: 90 t is the Vectron-class figure the traction model "
-        "always used as a hardcoded constant; it has no source in this "
-        "calibration and is carried here so it lives in one place rather "
-        "than two. A sourced per-type mass is an open question.",
-    },
     "0.9.2": {
         "date": "2026-07-21",
         "author": "david",

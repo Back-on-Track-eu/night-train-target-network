@@ -59,7 +59,6 @@ from models.route.timetable import (
 from models.route.routing.rail_router import VALID_ROUTING_MODES
 from models.route.model import (
     DEFAULT_AUTO_STOP_ADDITION,
-    DEFAULT_COMPOSITION_ID,
     DEFAULT_ROUTING_MODE,
     DEFAULT_SCHEDULE_MODE,
     DEFAULT_TIMETABLE_MODE,
@@ -91,10 +90,8 @@ def validate_calc_body(body: dict) -> list[str]:
     elif not all(isinstance(s, str) for s in stops):
         errors.append("'stops' must be a list of stop_id strings.")
 
-    # Optional: an omitted composition is computed with DEFAULT_COMPOSITION_ID
-    # (resolved in _resolve_request below, before the request is hashed).
-    if "composition_id" in body and not isinstance(body["composition_id"], str):
-        errors.append("'composition_id' must be a string if provided.")
+    if not isinstance(body.get("composition_id"), str):
+        errors.append("'composition_id' must be a string.")
 
     timetable_mode = body.get("timetable_mode", DEFAULT_TIMETABLE_MODE)
     if timetable_mode not in VALID_TIMETABLE_MODES:
@@ -176,7 +173,7 @@ def _resolve_request(body: dict, loader) -> dict:
     posted body verbatim."""
     return {
         "stops": list(body["stops"]),
-        "composition_id": body.get("composition_id", DEFAULT_COMPOSITION_ID),
+        "composition_id": body["composition_id"],
         "scenario_id": loader.resolve_scenario_id(body.get("scenario_id")),
         "timetable_mode": body.get("timetable_mode", DEFAULT_TIMETABLE_MODE),
         "fixed_night_interval": body.get("fixed_night_interval"),
@@ -280,7 +277,7 @@ def compute_proposal(
         proposal_id=NEUTRAL_PROPOSAL_ID,
         proposal_version=NEUTRAL_PROPOSAL_VERSION,
         stops=body["stops"],
-        composition_id=resolved_request["composition_id"],
+        composition_id=body["composition_id"],
         scenario_id=scenario_id,
         timetable_mode=resolved_request["timetable_mode"],
         fixed_night_interval=resolved_request["fixed_night_interval"],
@@ -346,7 +343,7 @@ def compute_proposal(
             request_hash=request_hash,
             route_fingerprint=fingerprint,
             scenario_id=scenario_id,
-            composition_id=resolved_request["composition_id"],
+            composition_id=body["composition_id"],
             resolved_request=response["request"],
             suggested_stops=response.get("suggested_stops"),
             payload={key: response[key] for key in _SHARED_PAYLOAD_KEYS},

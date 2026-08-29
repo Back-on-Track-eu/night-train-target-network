@@ -3,88 +3,21 @@ graphhopper:
   graph.location: /app/graph-cache
   custom_models.directory: /app/custom_models
 
-  # One profile per track gauge. They differ ONLY in which nt_gauge_<mm>.json
-  # they include (the nt_ prefix avoids OpenRailRouting's own built-in
-  # gauge_<mm>.json, which GraphHopper refuses to let a directory file shadow) — everything else (speed cap, service-track block, the
-  # Belarus/Russia exclusion) lives in the shared night_train.json.
-  #
-  # NAMING IS A CONTRACT: models/route/routing/rail_router.py derives the
-  # profile name as "<OPENRAILROUTING_PROFILE>" for standard gauge and
-  # "<OPENRAILROUTING_PROFILE>_<gauge_mm>" for every other gauge. Renaming a
-  # profile here breaks routing for that gauge.
-  #
-  # turn_costs is repeated verbatim per profile: Dropwizard's YAML parser
-  # does not resolve anchors/aliases (&x / *x arrives as the literal string
-  # and the profile fails to deserialize), so the block cannot be shared.
-  # Keep the five copies identical.
-  #
-  # night_train_1520 is the 1520/1524 FAMILY profile (0.9.28): the two are
-  # 4 mm apart, interoperable in practice, and tagged separately in OSM —
-  # treating the tags as separate networks made Estonia (tagged both ways)
-  # impassable at its own seam. nt_gauge_1520.json accepts both gauge tags;
-  # GAUGE_FAMILY_MM in models/route/model.py is the other half of the
-  # contract. There is deliberately no dedicated Finnish-gauge profile.
-  #
-  # Baking the gauge into the profile rather than sending it per request is
-  # what makes stop SNAPPING gauge-correct: 36 catalog stops carry two
-  # gauges (24 of them in Spain), and a request-time rule would let the CH
-  # snapping pass land a standard-gauge trip on an Iberian platform.
   profiles:
     - name: night_train
       turn_costs:
         vehicle_types: [train]
         u_turn_costs: 300
         enable_uturn_times: true
-      custom_model_files:
-        [rail.json, night_train.json, nt_gauge_1435.json, preferred_direction.json]
-    - name: night_train_1520
-      turn_costs:
-        vehicle_types: [train]
-        u_turn_costs: 300
-        enable_uturn_times: true
-      custom_model_files:
-        [rail.json, night_train.json, nt_gauge_1520.json, preferred_direction.json]
-    - name: night_train_1600
-      turn_costs:
-        vehicle_types: [train]
-        u_turn_costs: 300
-        enable_uturn_times: true
-      custom_model_files:
-        [rail.json, night_train.json, nt_gauge_1600.json, preferred_direction.json]
-    - name: night_train_1668
-      turn_costs:
-        vehicle_types: [train]
-        u_turn_costs: 300
-        enable_uturn_times: true
-      custom_model_files:
-        [rail.json, night_train.json, nt_gauge_1668.json, preferred_direction.json]
+      custom_model_files: [rail.json, night_train.json, preferred_direction.json]
 
-  # CH and LM preparation run per profile, but only over the edges that
-  # profile can reach, and the four non-standard networks are a small
-  # fraction of European rail — so the extra import cost is far below 5x.
   profiles_ch:
     - profile: night_train
-    - profile: night_train_1520
-    - profile: night_train_1600
-    - profile: night_train_1668
 
   profiles_lm:
     - profile: night_train
       maximum_lm_weight: 16
-    - profile: night_train_1520
-      maximum_lm_weight: 16
-    - profile: night_train_1600
-      maximum_lm_weight: 16
-    - profile: night_train_1668
-      maximum_lm_weight: 16
 
-  # NOTE: GraphHopper's `country` encoded value is NOT available in this
-  # fork — OpenRailRouting's encoded-value factory does not register it
-  # ("Unknown encoded value: country" at import). The Belarus/Russia
-  # exclusion therefore cannot be baked into the graph and is applied per
-  # request instead, as an area rule in rail_router._build_custom_model()
-  # (same mechanism as HSR avoidance). Do not re-add `country` here without
-  # first checking that the fork has gained it.
   graph.encoded_values: gauge,voltage,electrified,frequency,road_environment,max_speed,rail_access,rail_average_speed,railway_class,railway_service,preferred_direction
   graph.dataaccess.default_type: RAM_STORE
   prepare.min_network_size: 200

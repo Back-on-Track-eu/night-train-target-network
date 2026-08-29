@@ -172,14 +172,7 @@ def test_check_rejects_garbage_cookie(api_base):
 
 def test_check_rejects_tampered_signature(api_base, live_code):
     token = _redeem(api_base, live_code).cookies[COOKIE]
-    # Flip a character in the MIDDLE of the signature segment. The final
-    # base64url character encodes only 4 significant bits, so flipping it
-    # sometimes decodes to the identical signature bytes (U/V/W -> X) and
-    # the check rightly returns 204 — a ~3/64 flake, not a security hole.
-    header, payload, sig = token.split(".")
-    mid = len(sig) // 2
-    flipped = "X" if sig[mid] != "X" else "Y"
-    tampered = f"{header}.{payload}.{sig[:mid]}{flipped}{sig[mid + 1 :]}"
+    tampered = token[:-1] + ("X" if token[-1] != "X" else "Y")
     assert _check(api_base, cookies={COOKIE: tampered}).status_code == 302
 
 

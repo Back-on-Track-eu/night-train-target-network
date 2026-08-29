@@ -28,7 +28,6 @@ import re
 import pytest
 import requests
 
-from models.route.model import DEFAULT_COMPOSITION_ID
 from tests.conftest import STOPS_BERLIN_DRESDEN_WIEN, STOPS_BERLIN_WIEN
 from tests.helpers import PROPOSAL_CALC_URL, compute
 
@@ -36,7 +35,7 @@ BASE_REQUEST = {
     "stops": STOPS_BERLIN_DRESDEN_WIEN,
     "composition_id": "NEW-BAL-7",
     # Pinned off for deterministic structural assertions — see
-    # test_20_route_content.py's module docstring for why osm:n3325029085
+    # test_20_route_content.py's module docstring for why CZ_BRNO_HLN
     # would otherwise get auto-added on this corridor.
     "auto_stop_addition": "off",
 }
@@ -167,29 +166,20 @@ class TestResolvedRequest:
 
     def test_omitted_defaults_resolved_explicitly(self, api_base):
         """An omitted field and an explicitly-posted default must echo
-        identically (§2.1's 'resolved request' contract). The echo is the
-        compute cache's key input, so equality here is also what makes the
-        two requests share one cache entry."""
-        implicit = compute(api_base, stops=STOPS_BERLIN_WIEN, composition_id=None)
+        identically (§2.1's 'resolved request' contract)."""
+        implicit = compute(
+            api_base, stops=STOPS_BERLIN_WIEN, composition_id="NEW-BAL-7"
+        )
         explicit = compute(
             api_base,
             stops=STOPS_BERLIN_WIEN,
-            composition_id=DEFAULT_COMPOSITION_ID,
+            composition_id="NEW-BAL-7",
             timetable_mode="simpleAutomatic",
             schedule_mode="alwaysDaily",
             routing_mode="fullRouting",
             auto_stop_addition="add",
         )
         assert implicit["request"] == explicit["request"]
-
-    def test_omitted_composition_resolves_to_default(self, api_base):
-        """No composition_id posted: the standard composition is applied at
-        the API boundary and reported back, so the client learns which train
-        it got without knowing the default itself."""
-        response = compute(api_base, stops=STOPS_BERLIN_WIEN, composition_id=None)
-        assert response["request"]["composition_id"] == DEFAULT_COMPOSITION_ID
-        for pair in response["route"]["trip_pairs"]:
-            assert pair["composition_id"] == DEFAULT_COMPOSITION_ID
 
 
 # =============================================================================
@@ -238,21 +228,18 @@ class TestValidation:
     def test_too_few_stops(self, api_base):
         resp = requests.post(
             f"{api_base}{PROPOSAL_CALC_URL}",
-            json={"stops": ["osm:n3856100103"], "composition_id": "NEW-BAL-7"},
+            json={"stops": ["DE_BERLIN_HBF"], "composition_id": "NEW-BAL-7"},
             timeout=30,
         )
         assert resp.status_code == 400
 
-    def test_non_string_composition_id(self, api_base):
-        """composition_id is optional, but a posted one must be a string —
-        an omitted composition is covered in TestResolvedRequest."""
+    def test_missing_composition_id(self, api_base):
         resp = requests.post(
             f"{api_base}{PROPOSAL_CALC_URL}",
-            json={"stops": STOPS_BERLIN_WIEN, "composition_id": 7},
+            json={"stops": STOPS_BERLIN_WIEN},
             timeout=30,
         )
         assert resp.status_code == 400
-        assert resp.json()["error"] == "validation_error"
 
     def test_invalid_timetable_mode(self, api_base):
         resp = requests.post(

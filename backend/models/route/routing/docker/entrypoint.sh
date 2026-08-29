@@ -8,22 +8,6 @@
 
 set -e
 
-# Any arguments override the server start. `docker compose run` passes the
-# command through as "$@", but ENTRYPOINT means it never replaces this
-# script — so without this branch a documented one-off like
-#
-#   docker compose run --rm openrailrouting \
-#     java -Xmx24g -Xms1g -jar railway_routing.jar import config.yml
-#
-# was silently ignored and the SERVER started instead, after downloading a
-# prebuilt cache over the very graph-cache/ the import was meant to rebuild.
-# Handled before the download for the same reason: an import must start from
-# an empty cache, never from the Drive artifact.
-if [ "$#" -gt 0 ]; then
-    echo "[entrypoint] command override — running: $*"
-    exec "$@"
-fi
-
 GRAPH_CACHE_DIR="/app/graph-cache"
 GRAPH_CACHE_MARKER="${GRAPH_CACHE_DIR}/properties.txt"
 # Configured via GRAPH_CACHE_FILE_ID in backend/docker/.env (see

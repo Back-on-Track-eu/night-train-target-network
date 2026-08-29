@@ -63,7 +63,7 @@ CONTAINER_NAME = "openrailrouting"
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "data")
 
-STOPS = ["osm:n2506241285", "osm:n17401552", "osm:n2459919677", "osm:n3856100103"]
+STOPS = ["FR_PARIS_EST", "BE_BRUSSELS_M", "DE_HAMBURG_HBF", "DE_BERLIN_HBF"]
 COMPOSITION_ID = "STD-7.1"
 
 DEFAULT_SCENARIO_A = "base"

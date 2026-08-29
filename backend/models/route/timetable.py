@@ -91,8 +91,7 @@ from dataclasses import dataclass
 from models.params import Composition, TrackInfraCollection, StopInfraCollection
 from models.route.trip import Segment, StopType, TimetableWarning
 from models.route.route import Schedule, SeasonalSchedule, Season, Frequency
-from models.route.routing.dynamics import stop_time_loss_s
-from models.route.routing.gauge import resolve_trip_gauge, stop_supports_gauge
+from models.route.routing.dynamics import TRACTION_LOCO_WEIGHT_T, stop_time_loss_s
 from models.route.routing.rail_router import RailRouter, RoutedLeg, build_router_stops
 from models.route.model import (
     MIRROR_MIN,
@@ -563,7 +562,6 @@ def _find_nearby_candidates(
     stop_ids: list[str],
     routed_legs: list[RoutedLeg],
     stop_infra: StopInfraCollection,
-    gauge_mm: int,
 ) -> list[_AutoStopCandidate]:
     """
     Every stop in the catalog within AUTO_STOP_BUFFER_M of the routed path,
@@ -571,13 +569,7 @@ def _find_nearby_candidates(
     kept only once, at its closest leg. Not sorted here — selection order
     is decided by the caller.
 
-    Three cheap pre-filters run before any shapely work, in order:
-      0. Gauge filter: only stops whose catalog data says they offer the
-         trip's own gauge_mm track (stop_supports_gauge — STRICT: a
-         gauge-unknown stop is never auto-added; adding it risks an
-         unsnappable route for a stop nobody asked for). This is what
-         keeps an Iberian-gauge-only stop off a standard-gauge corridor's
-         suggestions even when it sits right beside the path.
+    Two cheap pre-filters run before any shapely work, in order:
       1. Touched-country filter: the catalog is cut down to stops in
          countries the routed legs actually pass through — read straight
          off each leg's country_distance_shares, which RailRouter already
@@ -603,9 +595,7 @@ def _find_nearby_candidates(
     pool = {
         stop_id: stop
         for stop_id, stop in stop_infra.all().items()
-        if stop_id not in existing
-        and stop.stop_country_code in touched_countries
-        and stop_supports_gauge(stop, gauge_mm)
+        if stop_id not in existing and stop.stop_country_code in touched_countries
     }
 
     margin_deg = AUTO_STOP_BUFFER_M * _DEG_PER_M * 1.5  # generous safety factor
@@ -653,7 +643,7 @@ def _find_nearby_candidates(
     return candidates
 
 
-def _estimate_technical_trip_time_min(
+def _estimate_full_trip_time_min(
     stop_ids: list[str],
     routed_legs: list[RoutedLeg],
     composition: Composition,
@@ -661,24 +651,15 @@ def _estimate_technical_trip_time_min(
     stop_infra: StopInfraCollection,
 ) -> int:
     """
-    Rough driving + dynamics + dwell trip time, used only to compare against
+    Rough driving + dynamics + buffer + dwell trip time (total_time_min per
+    leg), used only to compare against
     AUTO_STOP_MAX_DETOUR_PER — not the final published schedule. Every
     intermediate stop is conservatively treated as StopType.BOTH (the max
     of boarding/alighting dwell), since real classification only happens
     afterwards via route_factory._build_trip()'s timetable_mode switch and
     this needs to stay independent of timetable_mode.
-
-    The schedule supplement (buffer_time_min) is deliberately EXCLUDED. A
-    detour costs real running and stopping minutes; the supplement is margin,
-    and margin should not fund extra stops. Including it also coupled stop
-    selection to a calibration that is still being revised — since
-    ROUTE_CONTEXT 2026-08-17 the supplement ranges 0.35 to 0.71 by country, so
-    the same physical route through France would have bought a quarter more
-    detour than through Austria, for reasons that have nothing to do with
-    geography, and every future buffer change would silently reshuffle the
-    stop list of every stored proposal on refresh.
     """
-    total = sum(leg.driving_time_min + leg.dynamics_time_min for leg in routed_legs)
+    total = sum(leg.total_time_min for leg in routed_legs)
     for stop_id in stop_ids[1:-1]:
         country_code = stop_infra.get(stop_id).stop_country_code
         total += dwell_min(StopType.BOTH, country_code, composition, tracks)
@@ -772,7 +753,7 @@ def _analytic_added_time_min(
         cruise_speed_ms = leg.distance_m / (leg.driving_time_min * 60)
     else:
         cruise_speed_ms = composition.max_speed_kmh / 3.6
-    mass_kg = composition.total_gross_weight_t * 1_000
+    mass_kg = (composition.total_weight_t + TRACTION_LOCO_WEIGHT_T) * 1_000
 
     dynamics_min = stop_time_loss_s(cruise_speed_ms, mass_kg) / 60
     detour_min = (2 * candidate.detour_distance_m / cruise_speed_ms) / 60
@@ -811,13 +792,7 @@ def find_and_cost_auto_stop_candidates(
     mini-reroute failed are excluded. Selection order (cheapest-first for
     "add", geographic for "suggest") is each consumer's own concern.
     """
-    # The trip's gauge governs which stops may join it — resolved from the
-    # CURRENT stop list (identical to the trip's own resolution: candidates
-    # passing the strict filter below cannot narrow the intersection).
-    gauge_mm = resolve_trip_gauge(
-        (stop_infra.get(sid) for sid in stop_ids), composition
-    )
-    candidates = _find_nearby_candidates(stop_ids, routed_legs, stop_infra, gauge_mm)
+    candidates = _find_nearby_candidates(stop_ids, routed_legs, stop_infra)
     if not candidates:
         return []
 
@@ -830,7 +805,7 @@ def find_and_cost_auto_stop_candidates(
     # can never be accepted by mode "add", so measuring it precisely buys
     # nothing — its estimate is kept as the reported figure instead.
     budget_min = (
-        _estimate_technical_trip_time_min(
+        _estimate_full_trip_time_min(
             stop_ids, routed_legs, composition, tracks, stop_infra
         )
         * AUTO_STOP_MAX_DETOUR_PER
@@ -929,7 +904,7 @@ def apply_auto_stop_addition(
         return stop_ids, routed_legs
     costed_candidates.sort(key=lambda pair: pair[1])
 
-    baseline_time_min = _estimate_technical_trip_time_min(
+    baseline_time_min = _estimate_full_trip_time_min(
         stop_ids, routed_legs, composition, tracks, stop_infra
     )
     max_extra_min = baseline_time_min * AUTO_STOP_MAX_DETOUR_PER

@@ -32,7 +32,7 @@ from tests.helpers import (
 
 STATS_URL = "/api/proposals/stats"
 
-_STOPS = ["osm:n3856100103", "osm:w423692233"]
+_STOPS = ["DE_BERLIN_HBF", "AT_WIEN_HBF"]
 _COMPOSITION = "NEW-BAL-7"
 
 _EXISTING_ROUTE_ID = "TEST-STATS-E1"
@@ -71,7 +71,7 @@ def existing_route(db_conn):
                 co2_g_per_pax_km, geometry_routed
             ) VALUES (
                 %s, 'Stats test existing Berlin–Wien',
-                ARRAY['osm:n3856100103','osm:w423692233'], 2, ARRAY['DE','AT'],
+                ARRAY['DE_BERLIN_HBF','AT_WIEN_HBF'], 2, ARRAY['DE','AT'],
                 ARRAY['AT__DE'], 700.0, 9.5, 74.0, 33.0, FALSE
             )
             ON CONFLICT (route_id) DO NOTHING

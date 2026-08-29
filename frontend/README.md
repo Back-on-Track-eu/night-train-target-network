@@ -80,76 +80,20 @@ frontend/
     ├── stores/
     │   └── store.ts         # Pinia store
     ├── lib/
-    │   ├── apiClient.ts       # One classified HTTP boundary for every backend call
-    │   ├── apiError.ts        # Failure classification shared by every consumer
-    │   ├── compositionFormation.ts  # Composition → drawable formation; class colours/glyphs
     │   ├── costFactorRates.ts  # Cost factor → per-unit-rate resolution (popover)
-    │   ├── ctaButtonClass.ts   # Shared "Suggest a new route" pill styling
-    │   ├── feedbackApi.ts      # Thin client for POST /api/feedback
-    │   └── selectPillPt.ts     # Shared PrimeVue Select pass-through styling
+    │   └── feedbackApi.ts      # Thin client for POST /api/feedback
     ├── utils/
     │   └── octilinear.ts    # Octilinear map-line layout helpers
     └── components/
-        ├── AppIcon.vue                    # Tree-shakeable @mdi/js icon wrapper
-        ├── CompositionDetailOverlay.vue   # Composition detail popover — facts + formation
-        ├── CompositionFormation.vue       # Formation drawing (Wagenstandsanzeiger)
-        ├── CompositionPanel.vue           # Composition of the computed route
-        ├── ComputeInputsPanel.vue         # Scenario + composition — the two recompute inputs
-        ├── EvaluationPanel.vue            # Cost/revenue evaluation cube explorer
-        ├── Gallery.vue                    # Landing page: intro, search bar, result list + map
-        ├── LandingIntro.vue               # Landing pitch above the gallery (copy lives in en.json)
-        ├── MapView.vue                    # MapLibre route/stop map
-        ├── ProposalViewport.vue           # Proposal build/evaluate workspace
-        ├── RouteSectionSlider.vue         # OD-range slider for the evaluation panel
-        └── StopSelect.vue                 # Stop search/select control
+        ├── AppIcon.vue               # Tree-shakeable @mdi/js icon wrapper
+        ├── CompositionPanel.vue      # Composition picker card
+        ├── EvaluationPanel.vue       # Cost/revenue evaluation cube explorer
+        ├── MapView.vue               # MapLibre route/stop map
+        ├── ProposalViewport.vue      # Proposal build/evaluate workspace
+        ├── RouteSectionSlider.vue    # OD-range slider for the evaluation panel
+        ├── RouteStatsCard.vue        # Headline distance/speed/frequency card
+        └── StopSelect.vue            # Stop search/select control
 ```
-
-Only the components above are listed; the tree is a map of the main pieces,
-not a complete file listing.
-
-**Recompute inputs.** The first evaluation posts no `composition_id` at all —
-the backend computes it with its standard composition (`DEFAULT_COMPOSITION_ID`,
-`backend/models/route/model.py`) and reports back which one that was. Scenario
-and composition therefore only appear once a route exists, together in
-`ComputeInputsPanel` above the results.
-
-Changing either does **not** recompute on the spot: `ProposalViewport` marks
-the results stale (`paramsStale`) and covers them with a recompute control, so
-the catalogue can be browsed without firing a calc per arrow click. Reverting
-to the selection the results were computed with clears the flag on its own. A
-diverged itinerary takes precedence — that is the Evaluate button's path,
-which also re-prompts for stop suggestions.
-
----
-
-## Landing Page Copy
-
-The pitch a first-time visitor reads on `/gallery` lives entirely in
-`en.json` under `gallery.heading`, `gallery.welcome.*`, `gallery.audience.*`
-and `gallery.story.*` — `LandingIntro.vue` holds only layout, so editing the
-text never means touching a component.
-
-The intro is two bands, both above the fold. The first carries the headline,
-the two calls to action and the argument, split into three headed blocks; the
-two columns are top-aligned inside a vertically centred row, so the lead-in
-above the headline shares a line with the first block heading. Its
-height is measured at runtime rather than fixed: the site header carries a
-background image and the API status banner comes and goes, so the offset above
-it is not a constant, and the collapsed row below it is subtracted so that row
-stays visible without scrolling.
-
-That second band — who the tool is for, and what happens to a submission — is a
-panel collapsed by default, so the pitch stays the whole first impression. It
-opens by animating `grid-template-rows` from `0fr` to `1fr`, which needs no
-height measurement: copy can grow freely without re-tuning a `max-height`.
-Toggling it scrolls the panel's bottom edge onto the fold, so opening reveals
-the whole panel, closing returns the page to where it started, and neither
-exposes the gallery below. A rule above the gallery heading keeps the two halves
-of the page apart.
-
-`LandingIntro` emits rather than navigates — `create` opens the builder,
-`browse` scrolls to the gallery — because what follows the intro on the page is
-`Gallery.vue`'s business, not the intro's.
 
 ---
 

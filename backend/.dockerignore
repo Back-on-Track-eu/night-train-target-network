@@ -2,27 +2,22 @@
 models/route/routing/docker/data/
 models/route/routing/docker/graph-cache/
 db/dev/data/
-# Demand model calibration tree: third-party downloads in calib/raw/, derived
-# artifacts in calib/out/, and the notebooks that turn one into the other.
-# Nothing here is imported at runtime — the demand model is not wired into the
-# API — and raw/ alone runs to double-digit GB.
-models/demand/calib/
-# Calibration observation tables, written by the 02_*.ipynb notebooks in each
-# domain. Notebook output, never read by the API. Seed CSVs (calib/seed/) are
-# deliberately NOT excluded: db/dev/seed.py reads them at container seed time.
-**/calib/data/
+
 # Standalone db stack — not needed in API image
 db/dev/Dockerfile
 db/dev/docker-compose.yml
 db/dev/.env.example
+
 # Google Sheets adapter — replaced by db adapter
 adapters/data_loader_from_spreadsheet.py
+
 # Dev/test scripts — not needed at runtime, except the two seed-time
 # jobs the API entrypoint runs: the country geometry build (before
 # seeding) and the country relation build (backgrounded after it).
 scripts/
 !scripts/export_country_geoms.py
 !scripts/build_country_relations.py
+
 # Python
 .venv/
 __pycache__/
@@ -30,10 +25,13 @@ __pycache__/
 **/__pycache__/
 .pytest_cache/
 .ruff_cache/
+
 # Git
 .git/
 .gitignore
+
 # Docs
 *.md
+
 # Credentials
 credentials/

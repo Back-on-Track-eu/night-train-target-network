@@ -106,12 +106,6 @@ CREATE TABLE proposals.trips (
     created_at                TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- The gallery map's corridor query reaches trips by route_id, rebuilding it
--- from the P{id}_V{version}_R1 convention (adapters/proposal/repository.py's
--- map_lines()) — one lookup per row in the filtered set, so this grows with
--- the proposal count. The FK above does not create an index of its own.
-CREATE INDEX idx_trips_route ON proposals.trips (route_id);
-
 COMMENT ON TABLE  proposals.trips                        IS 'GTFS trips.txt — one scheduled run of a route per proposal version. trip_id convention: P{proposal_id}_V{version}_R{route_index}_D{direction}_T{trip_index} e.g. P1_V1_R1_D0_T1.';
 COMMENT ON COLUMN proposals.trips.trip_id                IS 'GTFS trip identifier. Convention: P{proposal_id}_V{version}_R{route_index}_D{direction}_T{trip_index}.';
 COMMENT ON COLUMN proposals.trips.route_id               IS 'References proposals.routes.';
@@ -304,8 +298,6 @@ CREATE TABLE proposals.segments (
     energy_kwh                NUMERIC NOT NULL,
     country_distance_shares  JSONB NOT NULL,
     country_time_shares      JSONB NOT NULL,
-    countries                JSONB NOT NULL DEFAULT '[]'::jsonb,
-    passages                 JSONB NOT NULL DEFAULT '[]'::jsonb,
     PRIMARY KEY (trip_id, segment_sequence)
 );
 
@@ -323,8 +315,6 @@ COMMENT ON COLUMN proposals.segments.slack_time_min           IS 'Deliberate sch
 COMMENT ON COLUMN proposals.segments.energy_kwh                IS 'Energy consumption for this segment. Unit: kWh';
 COMMENT ON COLUMN proposals.segments.country_distance_shares  IS 'Per-country share of this segment''s distance, e.g. {"DE": 0.7, "AT": 0.3}. Shares sum to 1.0.';
 COMMENT ON COLUMN proposals.segments.country_time_shares      IS 'Per-country share of this segment''s time. Can differ from country_distance_shares (e.g. a mountainous section is slower relative to its length). Shares sum to 1.0.';
-COMMENT ON COLUMN proposals.segments.countries                IS 'The same countries as country_distance_shares, but IN PATH ORDER, which a JSON object cannot express. Track access charges need it: a night rate applies to the clock time a run spends in one country, and placing each country on the clock requires knowing which was entered first. Empty for routes stored before ROUTE_BUILDER 0.9.21.';
-COMMENT ON COLUMN proposals.segments.passages                 IS 'Separately charged crossings this segment owns (STOREBAELT, OERESUND_DK, OERESUND_SE, CHANNEL_TUNNEL), matched by polygon intersection at routing time. A crossing is attributed to exactly one segment per trip, so one split by an intermediate stop is not charged twice. Empty for routes stored before ROUTE_BUILDER 0.9.21.';
 
 -- ---------------------------------------------------------------
 -- od_pairs — one row per ODPair (models/params.py): trip-pair-scoped
@@ -361,7 +351,6 @@ CREATE TABLE proposals.parkings (
     stop_name     TEXT NOT NULL,
     country_code  TEXT NOT NULL,
     trip_ids      TEXT[] NOT NULL,
-    layover_min   INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (route_id, stop_id)
 );
 
@@ -369,7 +358,6 @@ COMMENT ON TABLE  proposals.parkings               IS 'One row per Parking (mode
 COMMENT ON COLUMN proposals.parkings.route_id      IS 'References proposals.routes.';
 COMMENT ON COLUMN proposals.parkings.stop_id       IS 'Soft reference to input_params.stop_infrastructures.stop_id.';
 COMMENT ON COLUMN proposals.parkings.trip_ids      IS 'All trip_ids (soft references to proposals.trips) whose formation parks at this stop.';
-COMMENT ON COLUMN proposals.parkings.layover_min IS 'Scheduled layover in MINUTES (Parking.hours x 60, ROUTE_BUILDER 0.9.23) — the gap between the arrival that ends one trip here and the departure that starts the next. Stored rather than re-derived because the facility charge depends on it, and a stored route must price identically to the response it was published from. Minutes rather than hours because that is what the timetable actually holds: hours is minutes/60, which is rarely exact in decimal, and a NUMERIC column would round the reconstruction away from the published value. 0 for routes published before that version.';
 
 -- ---------------------------------------------------------------
 -- shuntings — one row per Shunting (models/route/route.py): route-level,

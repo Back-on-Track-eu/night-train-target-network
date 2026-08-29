@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import ScenarioPanel from '@/components/ScenarioPanel.vue'
 import EffectPanel from '@/components/EffectPanel.vue'
 import ViewRow from '@/components/ViewRow.vue'
 import CostBreakdownPanel from '@/components/CostBreakdownPanel.vue'
@@ -27,6 +28,7 @@ const breakdown = ref<Breakdown | null>(null)
 
 <template>
   <div class="flex flex-col gap-4">
+    <ScenarioPanel />
     <EffectPanel :summary="summary" />
     <ViewRow
       :views="result.views"
