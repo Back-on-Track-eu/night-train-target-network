@@ -57,6 +57,32 @@ describe('classify', () => {
     expect(f).toMatchObject({ kind: 'bad_input', message: 'Request body must be JSON.' })
   })
 
+  test('422 gauge_mismatch is bad_input with the message kept', () => {
+    // ROUTE_BUILDER 0.9.27: no single track gauge serves every stop of a
+    // trip. Written for users on the backend side, so it must classify
+    // bad_input (verbatim renders) exactly like domain_error — the
+    // conflicting_stops payload rides along for a future stop-marking UI.
+    const body = {
+      error: 'gauge_mismatch',
+      message: 'No single track gauge serves every stop of this trip: …',
+      conflicting_stops: { 'osm:n1': [1520], 'osm:n2': [1435] },
+    }
+    const failure = classify(422, body)
+    expect(failure).toMatchObject({ kind: 'bad_input', slug: 'gauge_mismatch' })
+    expect(messageKey(failure)).toBe('errors.badInput')
+  })
+
+  test('422 routing_error is bad_input with the message kept', () => {
+    // The routing engine cannot serve the request (no path on the trip's
+    // gauge network, an unsnappable stop) — an answer about the request,
+    // previously a 500 that rendered as "something went wrong on our side".
+    const failure = classify(422, {
+      error: 'routing_error',
+      message: 'Routing engine error: Connection between locations not found',
+    })
+    expect(failure).toMatchObject({ kind: 'bad_input', slug: 'routing_error' })
+  })
+
   test('422 domain_error is bad_input', () => {
     expect(classify(422, DOMAIN_422)).toMatchObject({ kind: 'bad_input', slug: 'domain_error' })
   })

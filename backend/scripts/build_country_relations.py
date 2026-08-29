@@ -117,6 +117,13 @@ def reference_stations(cur, stop_infra_version: int) -> list[dict]:
     """One reference station per country: the catalog stop closest to
     that country's stop centroid.
 
+    Stops with KNOWN gauges are preferred over gauge-NULL ones at any
+    distance (ORDER BY gauges_mm IS NULL first): a NULL reference station
+    resolves standard-gauge and then fails to snap for exactly the reason
+    step 8 found no tracks — Albania's centroid-nearest stop was Tirana's
+    BUS terminal, and it silently cost the country all 19 of its
+    relations. One defective stop must not poison a country's whole row.
+
     gauges_mm rides along: without it every reference station looks
     gauge-unknown to the router, which then routes the whole matrix on
     the standard-gauge profile and cannot snap a single broad-gauge
@@ -148,7 +155,7 @@ def reference_stations(cur, stop_infra_version: int) -> list[dict]:
                s.gauges_mm
           FROM centroid c
           JOIN catalog s ON s.country_code = c.country_code
-      ORDER BY c.country_code, s.geom <-> c.geom
+      ORDER BY c.country_code, s.gauges_mm IS NULL, s.geom <-> c.geom
         """,
         (stop_infra_version,),
     )

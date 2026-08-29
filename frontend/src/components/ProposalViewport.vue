@@ -195,6 +195,10 @@ interface BackendGeneralParameters {
   trip_km: number
   route_duration_min: number
   average_speed_kmh: number
+  // Track gauge the trip was routed on (ROUTE_BUILDER 0.9.27+) — 1435 for
+  // nearly everything; 1520 on the ex-Soviet/Finnish family, 1600 Ireland,
+  // 1668 Iberia. Optional so older stored proposals still type-check.
+  track_gauge_mm?: number
 }
 
 interface BackendTripSide {

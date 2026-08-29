@@ -38,7 +38,7 @@ models/route/routing/docker/
 ├── config.yml                  # GraphHopper / OpenRailRouting configuration
 ├── custom_models/
 │   ├── night_train.json        # shared base model for every gauge profile
-│   └── nt_gauge_<mm>.json      # one per gauge: 1435, 1520, 1524, 1600, 1668
+│   └── nt_gauge_<mm>.json      # one per gauge family: 1435, 1520 (+1524), 1600, 1668
 ├── data/                       # ← NOT in git — place OSM file here
 │   └── europe-latest.osm.pbf
 └── graph-cache/                # ← NOT in git — generated during import
@@ -110,7 +110,7 @@ Success looks like:
 INFO  com.graphhopper.GraphHopper - flushed graph
 ```
 
-The built graph is stored in `graph-cache/`. Rail-only Europe is far smaller than a road graph: the single-profile cache was ~190 MB zipped. Re-measure after adding the gauge profiles.
+The built graph is stored in `graph-cache/`. Rail-only Europe is far smaller than a road graph: **213 MB zipped** for the four-profile cache (2026-08-29), against ~190 MB for the single-profile one — the three extra gauge networks are a small fraction of European rail, so four profiles cost about 12% more than one, not four times.
 
 ### Step 4 — Start the local Server
 
@@ -179,8 +179,7 @@ and differ only in which `custom_models/nt_gauge_<mm>.json` they add:
 | Profile | Gauge | Network |
 |---|---|---|
 | `night_train` | 1435 mm | Standard gauge — the European mainline network |
-| `night_train_1520` | 1520 mm | Baltics, Ukraine, Moldova, broad-gauge border sidings in PL/RO |
-| `night_train_1524` | 1524 mm | Finland |
+| `night_train_1520` | 1520 + 1524 mm (one family, 0.9.28) | Baltics, Ukraine, Moldova, Finland, broad-gauge border sidings in PL/RO |
 | `night_train_1600` | 1600 mm | Ireland and Northern Ireland (island network, intra-island only) |
 | `night_train_1668` | 1668 mm | Spain, Portugal, and the French break-of-gauge stations |
 
@@ -295,9 +294,14 @@ docker compose up -d
 
 Since 0.9.27 the backend chooses among these profiles per trip:
 `models/route/routing/gauge.py` resolves ONE gauge from the trip's stops
-(set intersection of `gauges_mm`; unknown does not constrain; ties prefer
-1435) and `rail_router._profile_for_gauge()` maps it onto the naming
-contract above. Stop pairings no single gauge serves fail before any router
+(set intersection of `gauges_mm`, each set first normalized through
+`GAUGE_FAMILY_MM` — 1524 folds into 1520; unknown does not constrain; ties
+prefer 1435) and `rail_router._profile_for_gauge()` maps it onto the naming
+contract above. **1520 and 1524 are one family** (0.9.28): interoperable in
+practice, tagged separately in OSM, and as separate profiles the Estonian
+seam — tagged both ways — was impassable. `night_train_1520` accepts both
+tags; there is no separate Finnish-gauge profile, and family trips report
+`track_gauge_mm: 1520`. Stop pairings no single gauge serves fail before any router
 call as `422 gauge_mismatch`. `SUPPORTED_GAUGES_MM` in
 `models/route/model.py` is the sanctioned mirror of the profile list here —
 adding a gauge means a new profile in `config.yml`, a re-import, and that
@@ -317,7 +321,7 @@ profile routes its own gauge and refuses the others:
 |---|---|---|
 | `night_train` | Berlin → Wien | Helsinki → Tampere |
 | `night_train_1520` | Kyiv → Lviv | Kyiv → Warszawa |
-| `night_train_1524` | Helsinki → Tampere | Helsinki → Stockholm |
+| `night_train_1520` (Finnish 1524 tag) | Helsinki → Tampere | Helsinki → Stockholm |
 | `night_train_1600` | Dublin → Cork | Dublin → London |
 | `night_train_1668` | Madrid → Sevilla | Madrid → Perpignan |
 
