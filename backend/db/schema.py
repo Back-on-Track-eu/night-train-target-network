@@ -1545,10 +1545,14 @@ INPUT_PARAMS_TABLES: tuple[Table, ...] = (
             Column(
                 "gauge_evidence",
                 "VARCHAR(20) CHECK (gauge_evidence IN ('tagged', "
-                "'untagged_tracks', 'narrow_gauge_only', 'no_tracks_nearby'))",
+                "'untagged_tracks', 'narrow_gauge_only', 'no_tracks_nearby', "
+                "'override'))",
                 "How the gauge set was established from OSM: tagged tracks, "
                 "rail present but untagged, only sub-1435 rail nearby "
-                "(review flag), or no rail within the search radius.",
+                "(review flag), no rail within the search radius, or a "
+                "hand-verified override (step 8's GAUGE_OVERRIDES — the "
+                "station node is right but OSM carries no gauge-tagged way "
+                "within the radius).",
             ),
             _CHANGE_LOG,
             Column(
