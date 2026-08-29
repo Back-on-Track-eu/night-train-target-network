@@ -1,0 +1,1066 @@
+# European rail construction projects that change what a router sees.
+#
+# Every project we know about, at every horizon. Which of them are in a given
+# network is decided by comparing an opening date against a target's `as_of`,
+# so this one file produces a 2032 network and a 2040 one with no edit. There
+# is deliberately no in/out flag: a hand-set boolean that nothing checks against
+# the dates beside it is a second source of truth waiting to disagree with the
+# first.
+#
+# ---------------------------------------------------------------- what is here
+#
+# A project belongs here if it changes what a *router* sees:
+#   - topology — a new link, a new alignment, a reopened corridor; or
+#   - a tag the night_train profile reads — gauge, maxspeed, service.
+#
+# Capacity work alongside an existing route, resignalling, and station rebuilds
+# that do not move a junction are out: the router takes the same path before and
+# after, so the economic model does not move. Stuttgart 21 is here not because
+# the station is bigger but because long-distance trains stop reversing at a
+# terminus and run through onto the Wendlingen–Ulm line. The junction moves.
+#
+# Work that changes no route at *any* date is listed under `irrelevant:` at the
+# bottom, with the reason — that is a different thing from "not open yet", and
+# conflating the two was a real bug in the file this replaces.
+#
+# ------------------------------------------------------------------ per project
+#
+#   opening.official   the operator's own target date
+#   opening.latest     the most recent reported date, where it differs.
+#                      Targets default to `date_basis: latest`, the pessimistic
+#                      one, because megaprojects slip late and rarely early.
+#   scope              WHERE the changes apply. `ways:` is precise and cheap;
+#                      `bbox:` is coarse and forces a node-location index.
+#                      Run `osm-survey corridors` to turn a bbox into way ids.
+#   changes            WHAT is done, from changes/library.yml
+#   probe              two well-connected stations whose best path should move
+#                      once this opens, plus the box the new path must pass
+#                      through. `osm-pipe verify` uses these as the test.
+#   osm.failure_modes  why GraphHopper cannot route it today. Vocabulary and
+#                      full discussion in doc-jasper/future-network-2032.md.
+#
+# Dates were researched on 2026-08-16 and are a claim, not a fact. Re-check any
+# marginal one before publishing a result that depends on it.
+#
+# ------------------------------------------------------------------- known gap
+#
+# Every `scope` below is a bbox, because no corridor has been surveyed for way
+# ids yet. Bboxes are coarse — Rail Baltica's spans 54.3–59.5°N and contains a
+# good deal of unrelated planned track, and *any* single node inside the box
+# puts a whole way in scope. Until `osm-survey corridors` has run over each
+# corridor and filled in `scope.ways`, treat per-project attribution as
+# approximate. The `ntn:project` marker on every rewritten way is what makes a
+# specific route auditable in the meantime.
+
+name: europe
+description: European rail projects that change routing, at every horizon
+
+projects:
+  # ============================================================== Nordics ===
+
+  - id: fehmarn-belt
+    name: Fehmarn Belt Fixed Link
+    corridor: Puttgarden (DE) – Rødbyhavn (DK)
+    countries: [DE, DK]
+    impact: new-link
+    opening:
+      official: "2029-06"
+      latest: "2031"
+      note: >-
+        Femern A/S confirmed in January 2026 that opening is no longer expected
+        before 2031. The benchmark case for the whole pipeline: it cuts
+        Hamburg–Copenhagen from roughly seven hours to four.
+    scope:
+      bbox: [54.30, 10.90, 54.80, 11.65]
+    changes:
+      - promote: construction
+      # The corridor is severed south of the tunnel: a bbox query over Fehmarn
+      # island returned 29 construction ways, 127 disused, 24 abandoned and
+      # exactly *one* railway=rail. The Vogelfluglinie has carried no trains
+      # since 31 August 2022. Promoting construction alone leaves a hole.
+      #
+      # `untyped: true` matters here and was found the hard way. 25 ways in
+      # this chain carry a bare `railway=disused` with no `disused:railway`
+      # sub-tag, and skipping them broke the corridor at the Fehmarn Sound —
+      # Grossenbrode to Burg, a 12 km hop, routed 648 km round via Jutland.
+      # A weaker claim than the prefixed spelling, which is why it is opt-in,
+      # but inside this project's box it is the same closed line.
+      - promote: { lifecycle: disused, untyped: true }
+      - drop_oneway
+    osm:
+      lifecycle: [construction, disused, abandoned]
+      failure_modes:
+        - lifecycle-value
+        - namespaced-attrs
+        - oneway-single-track
+        - corridor-disused
+      verified: "2026-08-16"
+      note: >-
+        The belt crossing is a chain of railway=construction ways (976707770 →
+        304926270 → 149084842 → 944021059), each sharing a node with the next,
+        so this corridor is internally connected — its problems are tagging,
+        not topology. Every one of them is oneway=yes with no twin mapped
+        alongside. gauge/electrified/voltage/frequency sit under the
+        construction: prefix while maxspeed, highspeed and usage do not, which
+        is typical but not guaranteed.
+
+        Those four way ids are the obvious first `scope.ways` to fill in.
+
+        SURVEYED 2026-08-29 on -d fehmarn. Two findings, both arguing for
+        scope.ways over this bbox:
+
+        (1) OSM draws the belt crossing and the whole German hinterland as ONE
+        connected chain — corridor 14994826 "Vogelfluglinie", 287 km over 397
+        ways (249 disused, 66 abandoned, 45 construction, 34 proposed), touching
+        routable track at only 7 nodes. It carries maxspeed=200, gauge=1435,
+        opening_date=2029 and oneway=yes throughout. So this project and
+        fehmarn-hinterland-de are not separable by way id without splitting
+        that chain by hand at the coast.
+
+        (1a) The corridor is continuous once `untyped: true` is set, and the
+        probe passes: Hamburg–København goes 518 km / 238 min via Jutland at
+        today's date and 351 km / 153 min through the tunnel at 2032, −85 min.
+        Lübeck–Nykøbing Falster goes 514 km / 247 min to 143 km / 57 min.
+
+        (2) `promote: disused` here also catches "Inselbahn Fehmarn" (corridor
+        116716354, 12.2 km, disused/abandoned/razed, attached to nothing) — a
+        historic island railway that is gone, not being rebuilt. It currently
+        does no harm because it forms an isolated component below
+        min_network_size and GraphHopper deletes it, which is most of this
+        project's 14.6 km of `pruned` track. But it is being promoted, and on
+        a different extract or a lower min_network_size it would not be caught.
+        Fixing it properly means replacing this bbox with a reviewed way list.
+    probe:
+      from: { name: Hamburg Hbf, lat: 53.5528, lon: 10.0065 }
+      to: { name: København H, lat: 55.6727, lon: 12.5641 }
+      via_bbox: [54.30, 10.90, 54.80, 11.65]
+      baseline: Jutland and the Great Belt, roughly 470 km
+    sources:
+      - title: Fehmarnbelt Fixed Link (German transport ministry)
+        url: https://www.bmv.de/EN/Topics/EU-Policy/EU-Transport-Policy/Fehmarnbelt/fehmarnbelt-fixed-link.html
+      - title: Fehmarn Belt tunnel opening set for mid-2029
+        url: https://www.globalhighways.com/wh10/news/fehmarn-belt-tunnel-opening-set-mid-2029
+      - title: Fehmarnbelt Tunnel project profile (delay to 2031)
+        url: https://www.blackridgeresearch.com/project-profiles/femern-fehmarn-belt-tunnel-fixed-link-project-tunnel-between-germany-and-denmark
+
+  - id: fehmarn-hinterland-de
+    name: Fehmarnbelt German hinterland (Lübeck–Puttgarden)
+    corridor: Lübeck – Neustadt – Fehmarn – Puttgarden (DE)
+    countries: [DE]
+    impact: new-alignment
+    opening:
+      official: "2029"
+      latest: "2029"
+      note: >-
+        88 km rebuilt as double-track electrified 200 km/h, 55 km of it on new
+        alignment, plus the Fehmarn Sound tunnel. Without this the belt tunnel
+        connects to nothing on the German side. All rail traffic north of
+        Neustadt has been suspended since 31 August 2022.
+    scope:
+      bbox: [53.85, 10.60, 54.55, 11.35]
+    changes:
+      - promote: construction
+      - promote: disused
+      # The rebuild follows the old Vogelfluglinie alignment, so here the
+      # abandoned way *is* the alignment. A stronger claim than reopening a
+      # disused line, and scoped tighter for that reason.
+      - promote: abandoned
+      - drop_oneway
+    osm:
+      lifecycle: [construction, disused, abandoned]
+      failure_modes:
+        - lifecycle-value
+        - namespaced-attrs
+        - corridor-disused
+        - unconnected
+      verified: "2026-08-16"
+      note: >-
+        The German and Danish sides are not symmetric. Rødbyhavn returned 9
+        railway=rail ways against 54 disused; the German side has effectively
+        none. This 88 km is where the hole is, which is why the reopening
+        changes are scoped to this project and its neighbour rather than
+        applied Europe-wide.
+
+        Measured on the fehmarn dataset: this project promotes 157 ways, all
+        of them disused or abandoned and NOT ONE of them construction. The
+        rebuild has not been drawn as railway=construction — OSM still shows
+        the old alignment out of service and nothing new beside it. So
+        `promote: construction` is kept for when that changes, and reports
+        zero until it does. Note also that this box overlaps fehmarn-belt's,
+        which appears first and therefore claims the ways on Fehmarn island.
+    probe:
+      from: { name: Lübeck Hbf, lat: 53.8697, lon: 10.6699 }
+      to: { name: Nykøbing Falster, lat: 54.7697, lon: 11.8686 }
+      via_bbox: [54.30, 10.90, 54.80, 11.65]
+      baseline: no direct path — falls back to Jutland
+    sources:
+      - title: Rail link for the Fehmarn Belt Fixed Link (DB E&C)
+        url: https://db-engineering-consulting.com/en/projects/rail-link-for-the-fehmarn-belt-fixed-link/
+      - title: Bahnstrecke Lübeck–Puttgarden (closure since 31 Aug 2022)
+        url: https://de.wikipedia.org/wiki/Bahnstrecke_L%C3%BCbeck%E2%80%93Puttgarden
+
+  - id: norrbotniabanan
+    name: Norrbotniabanan
+    corridor: Umeå – Skellefteå – Luleå (SE)
+    countries: [SE]
+    impact: new-alignment
+    opening:
+      official: "2035"
+      latest: "2035"
+      note: >-
+        Dated by its middle section, not its first. Umeå–Dåva opens for freight
+        in 2026 and Skellefteå–Luleå before 2030, but Dåva–Skellefteå is not
+        expected until 2035 — and a corridor with a hole in the middle changes
+        no journey time. Two thirds of a link is not two thirds of a benefit;
+        it is none of it. The official 2030 date refers to sections that do not
+        on their own change a path, so it is not recorded as this project's
+        opening.
+    scope:
+      bbox: [63.70, 20.10, 65.70, 22.30]
+    changes:
+      - promote: construction
+      - promote: proposed
+    osm:
+      lifecycle: [construction, proposed]
+      failure_modes: [lifecycle-value, unconnected, pruned]
+    sources:
+      - title: North Bothnia Line
+        url: https://en.wikipedia.org/wiki/North_Bothnia_Line
+      - title: Norrbotniabanan (Skellefteå kommun)
+        url: https://skelleftea.se/invanare/startsida/trafik-och-samhallsutveckling/resor-och-transporter/norrbotniabanan
+
+  - id: dk-electrification
+    name: Danish electrification programme
+    corridor: Fredericia – Aalborg – Frederikshavn, Vejle – Struer, Roskilde – Kalundborg (DK)
+    countries: [DK]
+    impact: electrification
+    opening:
+      official: "2026"
+      latest: "2029"
+      note: >-
+        Attribute-only. The night_train profile does not gate on electrification
+        (the assumed Vectron Dual Mode has diesel fallback), so routing is
+        unchanged — but the energy model is electrification-aware, so an
+        unwired-looking corridor is costed as diesel.
+    scope:
+      bbox: [54.90, 8.00, 57.80, 12.80]
+    # Deliberately empty, and a known gap rather than an oversight. Setting
+    # electrified=contact_line over this bbox would wire every unelectrified
+    # branch line in Denmark, which is a worse error than leaving it. It needs
+    # `scope.ways` for the four named corridors first — run `osm-survey
+    # corridors -d fehmarn --bbox 54.9,8.0,57.8,12.8`. Until then the energy
+    # model reads these corridors as diesel, which is today's behaviour.
+    changes: []
+    osm:
+      lifecycle: [rail]
+      failure_modes: [namespaced-attrs]
+      note: >-
+        No routing failure. Listed so the energy side of the model does not
+        quietly assume diesel on a corridor that will be wired, and so the gap
+        is recorded rather than forgotten.
+    sources:
+      - title: Electrification Programme (Banedanmark)
+        url: https://uk.bane.dk/en/Projects/Electrification-Programme
+      - title: Danish electrification programme faces delays (IRJ)
+        url: https://www.railjournal.com/infrastructure/danish-electrification-programme-faces-delays/
+
+  # ========================================================= Alps and AT ===
+
+  - id: brenner-base-tunnel
+    name: Brenner Base Tunnel
+    corridor: Innsbruck (AT) – Fortezza/Franzensfeste (IT)
+    countries: [AT, IT]
+    impact: new-link
+    opening:
+      official: "2032"
+      latest: "2034"
+      note: >-
+        55 km, around 90 percent excavated. Postponed from 2030 to 2032;
+        Italian reporting in 2025 described the 2032 date as hanging by a
+        thread with 2034 openly discussed. The most schedule-risky entry that
+        is still inside a 2032 horizon — and with the default `latest` basis it
+        falls *outside* it. A target that wants it in must say so in
+        `force_in`, with a reason.
+    scope:
+      bbox: [46.70, 11.20, 47.30, 11.60]
+    changes:
+      - promote: construction
+      - promote: proposed
+    osm:
+      lifecycle: [construction, proposed]
+      failure_modes: [lifecycle-value, namespaced-attrs, unconnected]
+    probe:
+      from: { name: Innsbruck Hbf, lat: 47.2632, lon: 11.4011 }
+      to: { name: Bolzano/Bozen, lat: 46.4770, lon: 11.3260 }
+      via_bbox: [46.70, 11.20, 47.30, 11.60]
+      baseline: the existing Brenner ramp over the pass
+    sources:
+      - title: Brenner Base Tunnel opening postponed (Railway Gazette)
+        url: https://www.railwaygazette.com/infrastructure/brenner-base-tunnel-opening-postponed/59190.article
+      - title: Brenner Base Tunnel could be delayed until 2034
+        url: https://www.trasportoeuropa.it/english/brenner-base-tunnel-could-be-delayed-until-2034/
+
+  - id: semmering-base-tunnel
+    name: Semmering Base Tunnel
+    corridor: Gloggnitz – Mürzzuschlag (AT)
+    countries: [AT]
+    impact: new-alignment
+    opening:
+      official: "2030"
+      latest: "2030"
+      note: >-
+        27.3 km replacing a 60–80 km/h mountain line with 230 km/h. Around 30
+        minutes off Vienna–Graz, which propagates to every Vienna–south night
+        train path. Both dates agree, which makes it the cleanest date test in
+        the catalogue: out at 2029, in at 2031.
+    scope:
+      bbox: [47.55, 15.60, 47.75, 15.90]
+    changes:
+      - promote: construction
+      # Added after surveying: the corridor is not uniformly `construction`.
+      # See osm.note — without this the chain breaks at the proposed segments
+      # and the whole 58 km promotes to an unreachable island.
+      - promote: proposed
+    osm:
+      lifecycle: [construction, proposed, abandoned]
+      failure_modes: [lifecycle-value, namespaced-attrs, unconnected]
+      verified: "2026-08-29"
+      note: >-
+        SURVEYED on -d austria. The corridor is one chain — 58.1 km over 23
+        ways, ÖBB-Infrastruktur AG, opening_date=2027, maxspeed 160,
+        electrified=contact_line, touching live track at 6 nodes — but it is
+        NOT uniformly railway=construction: 15 construction, 6 proposed, 2
+        abandoned.
+
+        That mix is the whole story. Promoting only `construction` left the
+        proposed segments as they were, breaking the chain, and the entire
+        58 km promoted into an unreachable island:
+
+          promote: construction          55.6 km promoted, 0.0 joined network
+          + promote: proposed            56.8 km promoted, 56.8 joined network
+
+        A textbook `unconnected` failure that was nothing to do with missing
+        junctions — the corridor was severed by its own tagging, and no
+        connector would have fixed it. Worth remembering before reaching for
+        `osm-survey connectors`: check the lifecycle mix first.
+    probe:
+      from: { name: Wien Hbf, lat: 48.1852, lon: 16.3776 }
+      to: { name: Graz Hbf, lat: 47.0725, lon: 15.4160 }
+      via_bbox: [47.55, 15.60, 47.75, 15.90]
+      baseline: the Semmering mountain line
+    sources:
+      - title: Semmering base tunnel (ÖBB-Infrastruktur)
+        url: https://infrastruktur.oebb.at/en/projects-for-austria/railway-lines/southern-line-vienna-villach/semmering-base-tunnel
+      - title: Semmering Base Tunnel
+        url: https://en.wikipedia.org/wiki/Semmering_Base_Tunnel
+
+  - id: koralmbahn
+    name: Koralm Railway and Koralm Tunnel
+    corridor: Graz – Klagenfurt (AT)
+    countries: [AT]
+    impact: new-link
+    opening:
+      official: "2025-12-14"
+      latest: "2025-12-14"
+      note: >-
+        Already open: 130 km, a 33 km base tunnel, Graz–Klagenfurt in 41
+        minutes against roughly three hours before.
+
+        This is the control case for the whole pipeline. Its opening date is in
+        the past, so it is in *every* network including today's, and its probe
+        must therefore report ALREADY at every date. If it does not, the
+        extract is stale or the import is broken — the one test that separates
+        a tooling failure from a tagging failure.
+    scope:
+      bbox: [46.55, 14.25, 47.10, 15.50]
+    changes:
+      # Expect most of it as railway=rail already. Any remaining construction
+      # ways are mapping lag, and are exactly what a promotion picks up — so
+      # this is not `changes: []`, but it should be close to a no-op.
+      - promote: construction
+    osm:
+      lifecycle: [rail, construction]
+      failure_modes: [already-open]
+    probe:
+      from: { name: Graz Hbf, lat: 47.0725, lon: 15.4160 }
+      to: { name: Klagenfurt Hbf, lat: 46.6167, lon: 14.3100 }
+      via_bbox: [46.60, 14.80, 46.95, 15.25]
+      baseline: via Bruck an der Mur and the Drau valley, roughly 3 hours
+    sources:
+      - title: Koralm Railway construction concludes (IRJ)
+        url: https://www.railjournal.com/passenger/main-line/koralm-railway-construction-concludes/
+      - title: Koralm Railway
+        url: https://en.wikipedia.org/wiki/Koralm_Railway
+
+  - id: lyon-turin
+    name: Mont d'Ambin Base Tunnel (Lyon–Turin)
+    corridor: Saint-Jean-de-Maurienne (FR) – Susa (IT)
+    countries: [FR, IT]
+    impact: new-link
+    opening:
+      official: "2033"
+      latest: "2033"
+      note: >-
+        One year past a 2032 horizon, which is exactly why it is a catalogue
+        entry with a date rather than an exclusion: at `--as-of 2040` it is in,
+        with no edit to this file.
+    scope:
+      # Approximate, from the corridor endpoints — not surveyed. Replace with
+      # scope.ways before using this project in a published result.
+      bbox: [45.05, 6.20, 45.40, 7.15]
+    changes:
+      - promote: construction
+      - promote: proposed
+    osm:
+      lifecycle: [construction, proposed]
+      failure_modes: [lifecycle-value, namespaced-attrs, unconnected]
+      note: bbox is approximate and unverified; no OSM check has been made.
+    sources:
+      - title: Mont d'Ambin Base Tunnel
+        url: https://en.wikipedia.org/wiki/Mont_d%27Ambin_Base_Tunnel
+
+  # ============================================================= Germany ===
+
+  - id: stuttgart-21
+    name: Stuttgart 21 through station and airport link
+    corridor: Stuttgart Hbf – Flughafen – Wendlingen (DE)
+    countries: [DE]
+    impact: node
+    opening:
+      official: "2026-12"
+      latest: "2026-12"
+      note: >-
+        Not a capacity project as far as the router is concerned: it moves the
+        junction. Long-distance trains stop using the terminus throat and run
+        through to the Wendlingen–Ulm high-speed line, open since December
+        2022. Stuttgart–Ulm falls from 43 to 28 minutes.
+    scope:
+      bbox: [48.68, 9.10, 48.80, 9.35]
+    changes:
+      - promote: construction
+    osm:
+      lifecycle: [construction, rail]
+      failure_modes: [lifecycle-value, namespaced-attrs, unconnected]
+    probe:
+      from: { name: Stuttgart Hbf, lat: 48.7840, lon: 9.1820 }
+      to: { name: Ulm Hbf, lat: 48.3990, lon: 9.9820 }
+      via_bbox: [48.68, 9.15, 48.76, 9.30]
+      baseline: the Filstal line via Geislingen
+    sources:
+      - title: Stuttgart 21 opening confirmed (IRJ)
+        url: https://www.railjournal.com/infrastructure/stuttgart-21-opening-confirmed/
+      - title: Stuttgart–Ulm rail project (City of Stuttgart)
+        url: https://www.stuttgart.de/en/leben/stadtentwicklung/bahnprojekt-stuttgart-ulm/
+
+  - id: rastatt-tunnel
+    name: Rastatt Tunnel (Karlsruhe–Basel section)
+    corridor: Rastatt (DE)
+    countries: [DE]
+    impact: new-alignment
+    opening:
+      official: "2026-12"
+      latest: "2026-12"
+      note: >-
+        Only the 4.27 km tunnel is in horizon; civil works completed August
+        2025. Four-tracking the whole Karlsruhe–Basel corridor is a separate,
+        much later entry. Marginal for journey time; included because it is a
+        new alignment through a chronic bottleneck on the Rhine–Alpine corridor.
+    scope:
+      bbox: [48.79, 8.15, 48.92, 8.25]
+    changes:
+      - promote: construction
+    osm:
+      lifecycle: [construction]
+      failure_modes: [lifecycle-value, unconnected, pruned]
+    sources:
+      - title: German Rail completes construction of Rastatt Tunnel (IRJ)
+        url: https://www.railjournal.com/infrastructure/german-rail-completes-construction-of-rastatt-tunnel/
+      - title: Rastatt Tunnel
+        url: https://en.wikipedia.org/wiki/Rastatt_Tunnel
+
+  - id: nbs-frankfurt-mannheim
+    name: Neubaustrecke Frankfurt–Mannheim
+    corridor: Frankfurt (Main) – Darmstadt – Mannheim (DE)
+    countries: [DE]
+    impact: new-alignment
+    opening:
+      official: "2035"
+      latest: "2035"
+      note: Mid-2030s. Out at 2032, in at 2040.
+    scope:
+      # Approximate, from the corridor endpoints — not surveyed.
+      bbox: [49.40, 8.30, 50.15, 8.80]
+    changes:
+      - promote: construction
+      - promote: proposed
+    osm:
+      lifecycle: [construction, proposed]
+      failure_modes: [lifecycle-value, unconnected]
+      note: bbox is approximate and unverified; no OSM check has been made.
+    sources:
+      - title: Neubaustrecke Frankfurt–Mannheim
+        url: https://de.wikipedia.org/wiki/Neubaustrecke_Frankfurt%E2%80%93Mannheim
+
+  - id: karlsruhe-basel-full
+    name: Karlsruhe–Basel four-tracking (beyond the Rastatt tunnel)
+    corridor: Karlsruhe – Offenburg – Freiburg – Basel (DE)
+    countries: [DE, CH]
+    impact: new-alignment
+    opening:
+      official: "2040"
+      latest: "2040"
+      note: >-
+        The full corridor is now projected towards 2040. The Rastatt tunnel
+        section is a separate, much earlier entry.
+    scope:
+      # Approximate, from the corridor endpoints — not surveyed.
+      bbox: [47.50, 7.50, 49.05, 8.55]
+    changes:
+      - promote: construction
+      - promote: proposed
+    osm:
+      lifecycle: [construction, proposed]
+      failure_modes: [lifecycle-value, unconnected]
+      note: >-
+        bbox is approximate and unverified. It is also a long corridor box
+        containing a great deal of unrelated track, so this project in
+        particular wants scope.ways before it is trusted.
+    sources:
+      - title: Karlsruhe–Basel railway line upgrade
+        url: https://www.railway-technology.com/projects/karlsruhe-basel-railway-line-upgrade-germany/
+
+  - id: dresden-prague
+    name: Dresden–Prague Erzgebirge base tunnel
+    corridor: Dresden (DE) – Ústí nad Labem (CZ)
+    countries: [DE, CZ]
+    impact: new-link
+    opening:
+      official: "2035"
+      latest: "2035"
+      note: 2035 at the earliest. Out at 2032, in at 2040.
+    scope:
+      # Approximate, from the corridor endpoints — not surveyed.
+      bbox: [50.55, 13.55, 51.10, 14.25]
+    changes:
+      - promote: construction
+      - promote: proposed
+    osm:
+      lifecycle: [proposed]
+      failure_modes: [lifecycle-value, unconnected, not-mapped]
+      note: bbox is approximate and unverified; no OSM check has been made.
+    sources:
+      - title: Dresden–Prague high-speed railway
+        url: https://en.wikipedia.org/wiki/Dresden%E2%80%93Prague_high-speed_railway
+
+  # ============================================================== France ===
+
+  - id: lgv-bordeaux-toulouse
+    name: LGV Bordeaux–Toulouse (GPSO)
+    corridor: Bordeaux – Agen – Toulouse (FR)
+    countries: [FR]
+    impact: new-alignment
+    opening:
+      official: "2032"
+      latest: "2032"
+      note: >-
+        222 km of new high-speed line, with construction only starting from
+        2024. Toulouse moves onto the LGV Sud Europe Atlantique, changing every
+        Paris–Toulouse and Toulouse–north path.
+    scope:
+      bbox: [43.55, -0.65, 44.90, 1.50]
+    changes:
+      - promote: construction
+      - promote: proposed
+    osm:
+      lifecycle: [proposed, construction]
+      failure_modes: [lifecycle-value, unconnected, missing-maxspeed, pruned]
+      note: >-
+        A long, mostly-proposed alignment is the classic pruned case: it
+        promotes to a large but isolated component and GraphHopper deletes it
+        whole. Expect to need connectors at both ends.
+    probe:
+      from: { name: Bordeaux Saint-Jean, lat: 44.8258, lon: -0.5561 }
+      to: { name: Toulouse Matabiau, lat: 43.6111, lon: 1.4536 }
+      via_bbox: [43.90, 0.20, 44.60, 1.10]
+      baseline: the classic line via Agen and Montauban
+    sources:
+      - title: LGV Bordeaux–Toulouse
+        url: https://en.wikipedia.org/wiki/LGV_Bordeaux%E2%80%93Toulouse
+      - title: LGV Toulouse-Bordeaux, mise en service en 2032
+        url: https://www.clustertotem.fr/lgv-toulouse-bordeaux-une-mise-en-service-en-2032/
+
+  # =============================================================== Italy ===
+
+  - id: terzo-valico
+    name: Terzo Valico dei Giovi
+    corridor: Genova – Tortona/Novi Ligure – Milano (IT)
+    countries: [IT]
+    impact: new-alignment
+    opening:
+      official: "2027"
+      latest: "2028"
+      note: Genoa–Milan to about one hour; testing may push into 2028.
+    scope:
+      bbox: [44.35, 8.70, 44.85, 8.95]
+    changes:
+      - promote: construction
+    osm:
+      lifecycle: [construction]
+      failure_modes: [lifecycle-value, namespaced-attrs, unconnected]
+    probe:
+      from: { name: Genova Piazza Principe, lat: 44.4172, lon: 8.9192 }
+      to: { name: Milano Centrale, lat: 45.4863, lon: 9.2044 }
+      via_bbox: [44.40, 8.70, 44.80, 8.95]
+      baseline: the Giovi pass lines
+    sources:
+      - title: Terzo Valico and the Genoa junction (FS Italiane)
+        url: https://www.fsitaliane.it/en/strategic-projects/terzo-valico-.html
+      - title: Terzo Valico dei Giovi completato nel 2027
+        url: https://www.trasportoeuropa.it/notizie/infrastrutture/terzo-valico-dei-giovi-completato-salvo-sorprese-nel-2027/
+
+  - id: napoli-bari
+    name: Napoli–Bari high-speed/high-capacity line
+    corridor: Napoli – Benevento – Foggia – Bari (IT)
+    countries: [IT]
+    impact: new-alignment
+    opening:
+      official: "2028"
+      latest: "2028"
+      note: 145 km of new line, Napoli–Bari from four hours to two.
+    scope:
+      bbox: [40.75, 14.20, 41.35, 16.95]
+    changes:
+      - promote: construction
+    osm:
+      lifecycle: [construction]
+      failure_modes: [lifecycle-value, namespaced-attrs, unconnected]
+    probe:
+      from: { name: Napoli Centrale, lat: 40.8522, lon: 14.2725 }
+      to: { name: Bari Centrale, lat: 41.1176, lon: 16.8698 }
+      via_bbox: [41.00, 14.70, 41.35, 15.90]
+      baseline: via Caserta and Foggia on the classic line
+    sources:
+      - title: Naples-Bari (FS Italiane)
+        url: https://www.fsitaliane.it/en/strategic-projects/napoli-bari-.html
+      - title: Tracklaying underway on Naples–Bari HSL (IRJ)
+        url: https://www.railjournal.com/regions/europe/tracklaying-underway-on-naples-bari-hsl/
+
+  - id: brescia-verona-padova
+    name: Brescia–Verona–Padova high-speed line
+    corridor: Brescia – Verona – Vicenza – Padova (IT)
+    countries: [IT]
+    impact: new-alignment
+    opening:
+      official: "2027"
+      latest: "2032"
+      note: >-
+        Brescia–Verona entered trial running in 2026 for a 2027 launch;
+        Verona–Vicenza follows; Vicenza–Padova is the laggard. Treat the
+        eastern half as uncertain within a 2032 horizon.
+    scope:
+      bbox: [45.30, 10.15, 45.60, 11.95]
+    changes:
+      - promote: construction
+    osm:
+      lifecycle: [construction]
+      failure_modes: [lifecycle-value, namespaced-attrs, unconnected]
+    probe:
+      from: { name: Milano Centrale, lat: 45.4863, lon: 9.2044 }
+      to: { name: Venezia Mestre, lat: 45.4823, lon: 12.2320 }
+      via_bbox: [45.30, 10.30, 45.60, 11.60]
+      baseline: the classic Milano–Venezia line east of Brescia
+    sources:
+      - title: Brescia-Verona-Padua HS/HC Line (FS Italiane)
+        url: https://www.fsitaliane.it/en/strategic-projects/brescia-verona-padua-hs-hc-line.html
+      - title: Brescia-Verona high-speed line begins trial runs
+        url: https://www.firstonline.info/en/The-Brescia-Verona-high-speed-line-begins-its-trial-runs--accelerating-toward-activation-in-2027./
+
+  # ====================================================== Iberia (gauge!) ===
+
+  - id: basque-y
+    name: Basque Y
+    corridor: Vitoria-Gasteiz – Bilbao – Donostia/San Sebastián (ES)
+    countries: [ES]
+    impact: new-link
+    opening:
+      official: "2027"
+      latest: "2030"
+      note: >-
+        172 km of 1435 mm line in an otherwise 1668 mm region. The gauge is the
+        point: it is the standard-gauge bridge between the French border and
+        the Madrid network, so it is what makes a Paris–Madrid night train a
+        single-gauge run rather than a gauge-change.
+    scope:
+      bbox: [42.80, -3.10, 43.35, -1.90]
+    changes:
+      - promote: construction
+      - promote: proposed
+    osm:
+      lifecycle: [construction, proposed]
+      failure_modes:
+        - lifecycle-value
+        - namespaced-attrs
+        - unconnected
+        - gauge-excluded
+      note: >-
+        Watch the gauge tag here specifically, and note that the library's
+        gauge=1435 default is *correct* for this project and dangerous one box
+        over. A promoted way that inherits the surrounding 1668 mm assumption,
+        or an Iberian-gauge way that picks up our 1435 default, both produce
+        wrong answers — and the profile's gauge rule makes the error silent.
+        The strongest argument in the catalogue for scope.ways over a bbox.
+    probe:
+      from: { name: Bilbao Abando, lat: 43.2620, lon: -2.9280 }
+      to: { name: Donostia/San Sebastián, lat: 43.3170, lon: -1.9760 }
+      via_bbox: [42.90, -2.80, 43.30, -2.00]
+      baseline: the classic coastal line via Miranda de Ebro
+    sources:
+      - title: Basque Y
+        url: https://en.wikipedia.org/wiki/Basque_Y
+      - title: Vitoria–Bilbao–San Sebastián line (Adif Alta Velocidad)
+        url: http://www.adifaltavelocidad.es/en_US/infraestructuras/lineas_de_alta_velocidad/vitoria_bilbao_sansebastian/vitoria_bilbao_sansebastian.shtml
+
+  - id: murcia-almeria
+    name: Murcia–Almería high-speed line
+    corridor: Murcia – Lorca – Vera – Almería (ES)
+    countries: [ES]
+    impact: new-link
+    opening:
+      official: "2026"
+      latest: "2027"
+      note: >-
+        Almost 200 km on the Mediterranean corridor; Almería joins the
+        high-speed network for the first time. Guaranteed for 2026 by the
+        minister, with the Lorca tunnelling and fit-out making 2027 likelier.
+    scope:
+      bbox: [36.80, -2.50, 38.05, -1.05]
+    changes:
+      - promote: construction
+    osm:
+      lifecycle: [construction]
+      failure_modes: [lifecycle-value, unconnected, gauge-excluded]
+    probe:
+      from: { name: Murcia del Carmen, lat: 37.9760, lon: -1.1310 }
+      to: { name: Almería, lat: 36.8390, lon: -2.4570 }
+      via_bbox: [37.00, -2.20, 37.80, -1.40]
+      baseline: the single-track Iberian-gauge line via Lorca
+    sources:
+      - title: Murcia–Almería high-speed rail line
+        url: https://en.wikipedia.org/wiki/Murcia%E2%80%93Almer%C3%ADa_high-speed_rail_line
+      - title: Almería–Murcia line (Adif Alta Velocidad)
+        url: https://www.adifaltavelocidad.es/en/l%C3%ADnea-almer%C3%ADa-murcia
+
+  - id: lisboa-madrid
+    name: Lisbon–Madrid corridor (Évora–Caia, Plasencia–Talayuela)
+    corridor: Lisboa – Évora – Elvas/Caia – Badajoz – Plasencia – Madrid (PT, ES)
+    countries: [PT, ES]
+    impact: new-link
+    opening:
+      official: "2026"
+      latest: "2030"
+      note: >-
+        Évora–Caia civil works finished in 2025 with service from 2026;
+        Plasencia–Talayuela by end 2028; Portugal, Spain and the Commission
+        agreed a five-hour Lisbon–Madrid link by 2030. The Caia–Badajoz border
+        section is still study-stage, which is exactly where the corridor is
+        most likely to be unmapped.
+    scope:
+      bbox: [38.40, -8.00, 40.20, -3.60]
+    changes:
+      - promote: construction
+      - promote: proposed
+    osm:
+      lifecycle: [construction, proposed]
+      failure_modes:
+        - lifecycle-value
+        - unconnected
+        - not-mapped
+        - gauge-excluded
+    probe:
+      from: { name: Lisboa Oriente, lat: 38.7676, lon: -9.0993 }
+      to: { name: Madrid Chamartín, lat: 40.4720, lon: -3.6820 }
+      via_bbox: [38.70, -7.60, 39.20, -6.60]
+      baseline: via Entroncamento and Valencia de Alcántara, or no path
+    sources:
+      - title: High-speed rail connection between Lisbon and Madrid (CINEA)
+        url: https://cinea.ec.europa.eu/featured-projects/high-speed-rail-connection-between-lisbon-and-madrid_en
+      - title: Lisbon–Madrid high-speed line plan agreed (IRJ)
+        url: https://www.railjournal.com/passenger/high-speed/lisbon-madrid-high-speed-line-plan-agreed/
+
+  # ============================================ Baltics and central Europe ===
+
+  - id: rail-baltica
+    name: Rail Baltica
+    corridor: Tallinn – Riga – Panevėžys – Kaunas – Warszawa (EE, LV, LT, PL)
+    countries: [EE, LV, LT, PL]
+    impact: gauge
+    opening:
+      official: "2030"
+      latest: "2035"
+      note: >-
+        870 km of new 1435 mm line — the single largest network change in the
+        catalogue for a night train model, and the one whose date is least
+        safe. Officials describe a 2030 Warsaw–Tallinn service as an aspiration
+        rather than a guarantee, Latvia now points at 2035, and phase 1 is
+        single-track.
+    scope:
+      bbox: [54.30, 21.00, 59.50, 25.50]
+    changes:
+      # `untyped: true` on both: the surveyed chain is 305 ways, of which 26
+      # carry a bare `railway=<stage>` with no sub-tag. Skipping those severs
+      # the corridor mid-way — the same failure that broke Semmering and the
+      # Fehmarn Sound.
+      - promote: { lifecycle: construction, untyped: true }
+      - promote: { lifecycle: proposed, untyped: true }
+      # Every way in the chain carries oneway=yes with no twin mapped, which
+      # would make an 870 km corridor route in one direction only.
+      - drop_oneway
+    osm:
+      lifecycle: [construction, proposed]
+      failure_modes:
+        - lifecycle-value
+        - unconnected
+        - gauge-excluded
+        - pruned
+        - not-mapped
+      note: >-
+        Two gates fire at once. The surrounding Baltic network is 1520 mm and
+        already excluded by the profile's gauge rule, so a promoted 1435 mm
+        alignment has nothing compatible to attach to — it will be an island
+        whatever the tagging says, until the corridor is continuous end to end.
+
+        This bbox is the worst in the catalogue: 54.3–59.5°N is five degrees of
+        latitude containing a great deal of unrelated planned track, all of
+        which would pick up the 1435 default and silently become routable. Do
+        not trust this project's output until scope.ways is filled in.
+
+        SURVEYED 2026-08-29 on -d europe. Corridor 53856093, 1,154 km over 305
+        ways (166 proposed, 127 construction, 12 abandoned), operator Rail
+        Baltic Estonia OÜ, maxspeed 249, gauge 1435, opening_date 2026 —
+        bbox [54.58, 23.95, 59.50, 25.29].
+
+        Three findings. (a) 26 of the 305 ways use the bare `railway=<stage>`
+        spelling, so `untyped: true` is required on both promotions or the
+        chain is severed. (b) Every way is oneway=yes, hence drop_oneway.
+        (c) It is attached to routable track at only THREE nodes over 1,154 km,
+        which is precarious — one OSM edit could isolate the whole corridor.
+
+        Note what this project does NOT cover: the Polish section from Warszawa
+        is an upgrade of existing line, already tagged railway=rail, so it
+        carries no lifecycle tags and there is nothing here to promote.
+        Warszawa–Kaunas therefore routes on the conventional Polish network at
+        conventional speeds (504 km, 325 min measured) no matter what this
+        entry does. Modelling the Polish speed uplift needs scope.ways plus a
+        `set: {maxspeed: ...}`, the way budapest-belgrade does it.
+
+        The box also contains three things that must never be promoted and are
+        currently excluded only by the profile's gauge rule, not by scope: the
+        Rastenburger Kleinbahnen (292 km, abandoned, 750 mm), the
+        Viljandi–Mõisaküla line (265 km, abandoned/razed, 750 mm,
+        usage=tourism) and the proposed Helsinki–Tallinn tunnel (228 km,
+        1524 mm).
+    probe:
+      from: { name: Warszawa Centralna, lat: 52.2286, lon: 21.0031 }
+      to: { name: Riga Central, lat: 56.9465, lon: 24.1200 }
+      via_bbox: [54.60, 23.30, 56.50, 24.60]
+      baseline: no standard-gauge path
+    sources:
+      - title: Rail Baltica
+        url: https://en.wikipedia.org/wiki/Rail_Baltica
+      - title: Rail Baltica (CINEA)
+        url: https://cinea.ec.europa.eu/featured-projects/rail-baltica-connecting-baltic-states-rest-europe-high-speed-train_en
+      - title: Warsaw-Tallinn by 2030 is aspiration, not guarantee (BNS)
+        url: https://www.baltictimes.com/warsaw-tallinn_train_service_by_2030_is_aspiration__not_guarantee_-rail_baltica_rep_-_bns_interview/
+
+  - id: cpk-warszawa-lodz
+    name: CPK high-speed line, Warszawa–Łódź
+    corridor: Warszawa – CPK airport – Łódź (PL)
+    countries: [PL]
+    impact: new-alignment
+    opening:
+      official: "2032"
+      latest: "2032"
+      note: >-
+        First operational section of the "Y" network, timed with the CPK
+        airport. Warszawa–Łódź from about 70 to about 40 minutes.
+    scope:
+      bbox: [51.65, 19.35, 52.30, 21.10]
+    changes:
+      - promote: proposed
+    osm:
+      lifecycle: [proposed]
+      failure_modes:
+        - lifecycle-value
+        - unconnected
+        - missing-maxspeed
+        - not-mapped
+        - pruned
+      note: >-
+        Location decisions were still being issued in 2025, so parts of the
+        alignment may have no OSM geometry at all. This is the project most
+        likely to need a hand-drawn patch rather than a tag promotion — and
+        nothing in this pipeline can invent a line OSM does not draw.
+    probe:
+      from: { name: Warszawa Centralna, lat: 52.2286, lon: 21.0031 }
+      to: { name: Łódź Fabryczna, lat: 51.7690, lon: 19.4720 }
+      via_bbox: [51.75, 19.60, 52.20, 20.90]
+      baseline: the existing Warszawa–Łódź line, roughly 70 minutes
+    sources:
+      - title: Poland's high-speed ambitions - CPK (Railway Gazette)
+        url: https://www.railwaygazette.com/sponsored-content/2025/09/01/polands-high-speed-ambitions-cpk-and-the-shaping-of-a-new-european-corridor/
+      - title: High-speed rail in Poland
+        url: https://en.wikipedia.org/wiki/High-speed_rail_in_Poland
+
+  - id: cpk-full-y
+    name: CPK full "Y" network to Poznań and Wrocław
+    corridor: Łódź – Poznań / Wrocław (PL)
+    countries: [PL]
+    impact: new-alignment
+    opening:
+      official: "2035"
+      latest: "2035"
+      note: The rest of the Y beyond the Warszawa–Łódź first section.
+    scope:
+      # Approximate, from the corridor endpoints — not surveyed.
+      bbox: [51.00, 16.80, 52.50, 19.60]
+    changes:
+      - promote: proposed
+    osm:
+      lifecycle: [proposed]
+      failure_modes: [lifecycle-value, not-mapped, unconnected]
+      note: bbox is approximate and unverified; much of this may not be mapped.
+    sources:
+      - title: High-speed rail in Poland
+        url: https://en.wikipedia.org/wiki/High-speed_rail_in_Poland
+
+  - id: budapest-belgrade
+    name: Budapest–Belgrade railway
+    corridor: Budapest – Kelebia – Subotica – Novi Sad – Beograd (HU, RS)
+    countries: [HU, RS]
+    impact: speed
+    opening:
+      official: "2026-02"
+      latest: "2026"
+      note: >-
+        The existing alignment rebuilt for 200 km/h rather than a new one, so
+        topology barely moves — but Budapest–Belgrade drops to 2 h 40, which
+        changes the reachable set for a Vienna/Budapest night train. The
+        Serbian section opened October 2025, the Hungarian February 2026, with
+        through services held up by signalling.
+    scope:
+      bbox: [44.75, 19.30, 47.55, 20.60]
+    changes:
+      - promote: construction
+      # The risk here is speed, not routability: OSM maxspeed on the rebuilt
+      # sections lags the works, so the model under-rates the corridor. This
+      # reaches only track this project promoted — the sections already tagged
+      # railway=rail keep whatever maxspeed OSM has, and fixing those needs
+      # scope.ways.
+      - default: { maxspeed: "200" }
+    osm:
+      lifecycle: [rail, construction]
+      failure_modes: [already-open, missing-maxspeed]
+    probe:
+      from: { name: Budapest Keleti, lat: 47.5005, lon: 19.0836 }
+      to: { name: Beograd Centar, lat: 44.8090, lon: 20.4260 }
+      via_bbox: [45.20, 19.60, 46.30, 20.20]
+      baseline: the same alignment at pre-rebuild speeds
+    sources:
+      - title: Serbian section of Budapest-Belgrade railway opens
+        url: https://dailynewshungary.com/serbia-budapest-belgrade-railway-open/
+      - title: Belgrade-Budapest railway 2026 construction update
+        url: https://railwaynews.net/belgrade-budapest-railway-modernization-project-serbia-hungary-high-speed-rail.html
+
+  # ========================================================= UK and north ===
+
+  - id: hs2-phase-1
+    name: HS2 Phase 1 (London–Birmingham)
+    corridor: London Euston – Birmingham Curzon Street (GB)
+    countries: [GB]
+    impact: new-alignment
+    opening:
+      official: "2033"
+      latest: "2036"
+      note: >-
+        2033 at the earliest and widely reported as later. Behind the Channel
+        Tunnel for night train purposes, so its effect on this model is small
+        even once it opens.
+    scope:
+      # Approximate, from the corridor endpoints — not surveyed.
+      bbox: [51.50, -1.95, 52.55, -0.10]
+    changes:
+      - promote: construction
+      - promote: proposed
+    osm:
+      lifecycle: [construction, proposed]
+      failure_modes: [lifecycle-value, unconnected]
+      note: bbox is approximate and unverified; no OSM check has been made.
+    sources:
+      - title: High Speed 2
+        url: https://en.wikipedia.org/wiki/High_Speed_2
+
+  - id: ostlanken
+    name: Ostlänken (Järna–Linköping)
+    corridor: Järna – Nyköping – Norrköping – Linköping (SE)
+    countries: [SE]
+    impact: new-alignment
+    opening:
+      official: "2035"
+      latest: "2035"
+    scope:
+      # Approximate, from the corridor endpoints — not surveyed.
+      bbox: [58.35, 15.55, 59.15, 17.65]
+    changes:
+      - promote: construction
+      - promote: proposed
+    osm:
+      lifecycle: [construction, proposed]
+      failure_modes: [lifecycle-value, unconnected]
+      note: bbox is approximate and unverified; no OSM check has been made.
+    sources:
+      - title: Ostlänken
+        url: https://en.wikipedia.org/wiki/Ostl%C3%A4nken
+
+  - id: ringeriksbanen
+    name: Ringeriksbanen
+    corridor: Sandvika – Hønefoss (NO)
+    countries: [NO]
+    impact: new-link
+    opening:
+      official: "2034"
+      latest: "2034"
+      note: Cuts Oslo–Bergen by about an hour once open.
+    scope:
+      # Approximate, from the corridor endpoints — not surveyed.
+      bbox: [59.85, 10.10, 60.25, 10.65]
+    changes:
+      - promote: construction
+      - promote: proposed
+    osm:
+      lifecycle: [proposed]
+      failure_modes: [lifecycle-value, unconnected]
+      note: bbox is approximate and unverified; no OSM check has been made.
+    sources:
+      - title: Ringeriksbanen
+        url: https://en.wikipedia.org/wiki/Ringeriksbanen
+
+# Work deliberately not modelled at ANY date, with the reason. This is not the
+# same as "not open yet" — a line opening in 2035 is an ordinary entry above
+# with a 2035 date, out at 2032 and in at 2040. These change no route at any
+# horizon, so no date would ever bring them in.
+irrelevant:
+  - id: vastlanken
+    name: Västlänken (Gothenburg)
+    reason: >-
+      A commuter tunnel under the city centre. Long-distance paths through
+      Göteborg are unchanged, so the router takes the same route before and
+      after and the economic model does not move.
+    source: https://en.wikipedia.org/wiki/West_Link
+  - id: de-electrification-east
+    name: Berlin–Görlitz and Görlitz–Dresden electrification
+    reason: >-
+      Electrification does not gate the night_train profile — the assumed
+      Vectron Dual Mode has diesel fallback — so no path changes. It would
+      matter to the energy model, like the Danish programme, but no date makes
+      it a routing change.
+    source: https://www.railjournal.com/infrastructure/german-polish-cross-border-electrification-proceeds/

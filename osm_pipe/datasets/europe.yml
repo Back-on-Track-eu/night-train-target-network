@@ -1,0 +1,10 @@
+# The whole modelled area. ~35 GB download, ~0.26 GB after the rail extract.
+#
+# Geofabrik refreshes this weekly. Re-downloading changes the network under
+# every cache built from it, which is why `osm-pipe download` records the
+# snapshot timestamp in data/raw/europe.provenance.json and every graph cache
+# carries it in network.json.
+name: europe
+description: Full Geofabrik Europe extract
+regions:
+  - europe

@@ -1,0 +1,20 @@
+# The Fehmarn Belt corridor, both sides plus the German approach.
+#
+# The primary test set. It is the benchmark case for the whole pipeline: in the
+# present the fastest Hamburg -> København path runs up Jutland and across the
+# Great Belt, ~470 km; once the belt tunnel and its German hinterland are open
+# it should cross the belt instead.
+#
+# Three regions rather than a clip, because the probe endpoints have to be
+# well-connected to real network at both ends — Hamburg for the origin,
+# Sjælland for the destination — and a box tight around the belt would strand
+# both. ~1.2 GB against Europe's 35.
+#
+# This dataset previously existed only as a hand-merged file that nothing in
+# the repo could reproduce. This file is that recipe.
+name: fehmarn
+description: Fehmarn Belt corridor — Denmark, Schleswig-Holstein, Hamburg
+regions:
+  - europe/denmark
+  - europe/germany/schleswig-holstein
+  - europe/germany/hamburg

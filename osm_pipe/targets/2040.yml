@@ -1,0 +1,29 @@
+# The same catalogue, eight years later.
+#
+# This file exists mostly to prove the point: nothing here is a copy of
+# 2032.yml with edits, because the catalogue holds every project at every
+# horizon and the date does the selecting. Lyon–Turin, HS2, Dresden–Prague,
+# Norrbotniabanan, Ostlänken, Ringeriksbanen, the full CPK Y and the
+# Karlsruhe–Basel corridor are all out at 2032 and in here.
+#
+#   osm-pipe projects 2040
+#   osm-pipe diff ...        (against 2032, once diff lands)
+
+name: 2040
+description: European rail network as assumed complete by the end of 2040
+dataset: europe
+catalogue: europe
+as_of: 2040-12-31
+date_basis: latest
+
+# None needed: at 2040 every project's pessimistic date has passed, so there is
+# nothing left to argue about. That is worth noticing — the further out the
+# horizon, the less the date_basis choice matters and the more the catalogue's
+# *completeness* does.
+force_in: []
+force_out: []
+
+connectors: 2032
+
+graphhopper:
+  xmx: 6g

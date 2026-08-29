@@ -1,0 +1,71 @@
+# Hand-authored connector ways.
+#
+# A connector is one short way joining two node ids that already exist in OSM.
+# It exists because promoting tags does not fix topology: mappers draw a
+# planned alignment as a standalone way whose endpoint sits *on top of* an
+# existing junction without being the same node, and GraphHopper only joins
+# ways that share a node id. The promoted line becomes its own component, falls
+# below `prepare.min_network_size: 200`, and is deleted at import — silently.
+#
+# ---------------------------------------------------------------- workflow
+#
+#   osm-pipe   build      2032 -d <dataset>
+#   osm-survey gaps       2032 -d <dataset>     # ranks the candidates
+#   osm-survey connectors 2032 -d <dataset>     # prints entries to paste
+#   ...read each one, keep the real ones, write a reason...
+#   osm-pipe   build      2032 -d <dataset> --overwrite
+#   osm-pipe   verify     2032 -d <dataset>     # did a route change?
+#
+# `osm-survey connectors` proposes; it never writes. Every entry here asserts
+# that two pieces of railway will be physically joined, which is a modelling
+# claim about the world. It should arrive through a diff someone read.
+#
+# ------------------------------------------------------------------ fields
+#
+#   id        unique, stable. Ends up on the way as ntn:connector=<id>, so a
+#             computed route can be audited for whether it leaned on track
+#             that does not exist.
+#   project   optional; must exist in catalogue/europe.yml.
+#   reason    why these two ends are the same junction. Required by review,
+#             not by the parser. "the gap list said so" is not a reason.
+#   a, b      OSM node ids, and they must be different. Both must exist in the
+#             rail extract — stitch aborts rather than writing a dangling
+#             reference, because a connector referencing a node that is not
+#             there joins nothing while looking perfectly correct on a map.
+#   via       optional [[lat, lon], ...] shape points. Interior only, so they
+#             cannot affect connectivity; use them when a straight line would
+#             be visibly wrong.
+#   tags      overrides on top of railway=rail, gauge=1435, maxspeed=100,
+#             usage=main.
+#
+# A connector over 500 m is reported as invented track rather than a missing
+# junction. Still allowed — a target may need one — but said out loud.
+#
+# ------------------------------------------------------------- finding ids
+#
+# On openstreetmap.org, zoom to the gap (the gap list carries a direct link per
+# row), click the track, then click the endpoint vertex — the node id is in the
+# sidebar and in the URL. It must belong to a railway way: the rail extract
+# keeps nothing else, so an id taken from a road or a building fails the
+# existence check.
+#
+# ------------------------------------------------------------- worked case
+#
+# Left commented because it is a template, not a finding. The Fehmarn Belt
+# crossing itself turned out to be internally connected — its problems are
+# tagging and a severed hinterland, both of which the catalogue's changes
+# handle. Fill this list from a real `osm-survey connectors` run.
+#
+# connectors:
+#   - id: grossenbrode-throat
+#     project: fehmarn-hinterland-de
+#     reason: >-
+#       Promoted construction track ends 11 m short of the live line at the
+#       Großenbrode throat; the two were drawn by different mappers and never
+#       merged. Checked against the 2029 track plan.
+#     a: 9573947076
+#     b: 1621074811
+#     tags:
+#       maxspeed: "160"
+
+connectors: []

@@ -1,0 +1,11 @@
+# Downloads, interim extracts, graph caches and survey output. All of it is
+# either fetched from Geofabrik or reproducible from the checked-in catalogue,
+# datasets and targets. Committing any of it invites silent divergence between
+# the artefact and the files that describe it.
+data/
+
+.venv/
+__pycache__/
+*.egg-info/
+.ruff_cache/
+.pytest_cache/

@@ -1,0 +1,62 @@
+# The rail network as we expect it at the end of 2032.
+#
+# Thin on purpose. The network is decided by `as_of` against the catalogue's
+# opening dates, so the only things here are the ones a date cannot express.
+#
+#   osm-pipe projects 2032           what this date selects, and why
+#   osm-pipe build    2032           build it
+#   osm-pipe build    2032 --as-of 2026-08-29    the same file, today's network
+#
+# There is no separate baseline target. The baseline is this file at today's
+# date, where no project has opened yet and the transform is the identity.
+
+name: 2032
+description: European rail network as assumed complete by the end of 2032
+dataset: europe
+catalogue: europe
+as_of: 2032-12-31
+
+# `latest` is the pessimistic date — the most recent reported one, rather than
+# the operator's own target. Megaprojects slip late and rarely early, so this
+# is the defensible default. Switch to `official` to see the optimistic network.
+date_basis: latest
+
+# Where we disagree with the dates. Every entry needs a reason: overriding a
+# dated, sourced catalogue entry is a modelling decision, and this is the only
+# record of it.
+#
+# `force_in` means "believe this project's *official* date rather than the
+# pessimistic one" — it is not unconditional. A project whose official date is
+# also after `as_of` stays out and says so, because an unconditional include
+# would drop a 2032 tunnel into the baseline the moment anyone ran `--as-of`
+# today. `force_out` is unconditional: excluding can only be conservative.
+#
+# These two are the arguable calls in the 2032 network — expect to be
+# challenged on both.
+force_in:
+  - id: brenner-base-tunnel
+    reason: >-
+      Official target is 2032 and the tunnel is around 90 percent excavated;
+      the 2034 figure is Italian press speculation rather than an operator
+      date. Kept in, but it is the most schedule-risky project in the network
+      and any result that leans on Innsbruck–Fortezza should say so.
+  - id: rail-baltica
+    reason: >-
+      Official target is 2030 and it is the largest single network change in
+      the catalogue for a night train model, so excluding it changes the
+      answer more than including it. Kept in with eyes open: Latvia points at
+      2035, officials call a 2030 Warsaw–Tallinn service an aspiration, and
+      phase 1 is single-track. Drop this override for a conservative run.
+
+force_out: []
+
+connectors: 2032
+
+graphhopper:
+  # Measured on full-Europe rail (2.7 M nodes, 3.0 M edges): peak 3.9 GB used,
+  # 5.5 GB committed, import ~3 minutes. 6g leaves headroom and — the reason
+  # for this number rather than a rounder one — fits a stock Docker Desktop VM,
+  # which defaults to 8 GiB. Ask for more than the VM has and the heap outgrows
+  # the cgroup before the collector reacts, so the container is killed instead.
+  # Override per machine with `--xmx`, not by editing this.
+  xmx: 6g

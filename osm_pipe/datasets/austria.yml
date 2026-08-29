@@ -1,0 +1,19 @@
+# The second test set, and the one that carries the control case.
+#
+# Koralm opened on 14 December 2025 and is already tagged railway=rail. It must
+# therefore route at *every* date, including today's. Nothing else in the test
+# suite can tell a tooling failure from a data failure: if Graz -> Klagenfurt
+# does not route here, the extract is stale or the import is broken, and no
+# amount of staring at promotion rules will help.
+#
+# Semmering is the date test. It opens in 2030, so `--as-of 2029` must leave it
+# out and `--as-of 2031` must pull it in, off one catalogue and one extract.
+#
+# Brenner is in this extract too, but only its Austrian half — the tunnel
+# crosses into Italy, so the cross-border case needs europe.
+#
+# ~750 MB.
+name: austria
+description: Austria — Koralm (control), Semmering, Brenner north portal
+regions:
+  - europe/austria

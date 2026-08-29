@@ -1,0 +1,127 @@
+# Every planned line in the extract, promoted. Not a network anyone should
+# publish from — it is an upper bound and a regression check.
+#
+# Two jobs:
+#
+# 1. **Fidelity.** These rules are the ones the previous tool (`railnet`'s
+#    `proposed-as-built` / `target-2032`) applied globally. On full Europe they
+#    promote ~24,500 construction/proposed ways and move ~21,090 track-km into
+#    the routable network. Reproducing that number is how we know the rule
+#    engine and the import survived the rewrite intact.
+#
+# 2. **Finding what the catalogue is missing.** Diff this against a dated
+#    target and the difference is exactly the set of corridors nobody has
+#    catalogued. That is the cheapest way to grow catalogue/europe.yml.
+#
+# Why it is not a defensible network: it promotes lines opening in 2040, lines
+# that will never open, and every speculative alignment a mapper has drawn. A
+# route through it cannot be attributed to a project with a known opening date,
+# which is the whole point of the catalogue.
+#
+# It uses `extra_rules` rather than the catalogue because these rules are
+# global by design — no project, no scope, no date. That is also why every way
+# they touch is marked `ntn:project=all-planned` rather than a real project id.
+
+name: all-planned
+description: Every proposed and under-construction line treated as existing
+dataset: europe
+catalogue: europe
+as_of: "1970"
+
+# Belt and braces: as_of 1970 already selects nothing, and this makes the
+# intent explicit for anyone who edits the date.
+force_in: []
+force_out: []
+
+connectors: 2032
+
+extra_rules:
+  - name: all-planned/promote:construction
+    types: [w]
+    when:
+      railway: construction
+      # `rail` only. Promoting light_rail or narrow_gauge produces a railway
+      # value in neither the routable set nor the planned set, so the way
+      # vanishes from the map instead of staying visible as planned track.
+      construction:railway: [rail]
+    rename:
+      construction:railway: railway
+      construction:gauge: gauge
+      construction:electrified: electrified
+      construction:voltage: voltage
+      construction:frequency: frequency
+      construction:maxspeed: maxspeed
+      construction:usage: usage
+      construction:tracks: tracks
+      construction:railway:etcs: railway:etcs
+    set:
+      ntn:project: all-planned
+      ntn:change: promote:construction
+    default:
+      gauge: "1435"
+      maxspeed: "160"
+      usage: main
+
+  # The short spelling: railway=construction + construction=rail, with no
+  # construction:railway. Both are in use across Europe.
+  - name: all-planned/promote:construction-short
+    types: [w]
+    when:
+      railway: construction
+      construction: [rail]
+      construction:railway: false
+    rename:
+      construction:gauge: gauge
+      construction:electrified: electrified
+      construction:voltage: voltage
+      construction:frequency: frequency
+      construction:maxspeed: maxspeed
+      construction:usage: usage
+    set:
+      railway: rail
+      ntn:project: all-planned
+      ntn:change: promote:construction
+    default:
+      gauge: "1435"
+      maxspeed: "160"
+      usage: main
+
+  - name: all-planned/promote:proposed
+    types: [w]
+    when:
+      railway: proposed
+      proposed:railway: [rail]
+    rename:
+      proposed:railway: railway
+      proposed:gauge: gauge
+      proposed:electrified: electrified
+      proposed:voltage: voltage
+      proposed:frequency: frequency
+      proposed:maxspeed: maxspeed
+      proposed:usage: usage
+    set:
+      ntn:project: all-planned
+      ntn:change: promote:proposed
+    default:
+      gauge: "1435"
+      maxspeed: "160"
+      usage: main
+
+  # railway=proposed with no lifecycle sub-tag: the mapper recorded that
+  # something is planned without recording what. A weaker signal — drop this
+  # rule if you want planned-rail evidence only.
+  - name: all-planned/promote:proposed-untyped
+    types: [w]
+    when:
+      railway: proposed
+      proposed:railway: false
+    set:
+      railway: rail
+      ntn:project: all-planned
+      ntn:change: promote:proposed-untyped
+    default:
+      gauge: "1435"
+      maxspeed: "160"
+
+graphhopper:
+  xmx: 6g

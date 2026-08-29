@@ -1,0 +1,54 @@
+[project]
+name = "osm-pipe"
+version = "0.1.0"
+description = "Build a GraphHopper graph cache for the rail network as of a future date"
+readme = "README.md"
+# Pinned to 3.12, same as backend/pyproject.toml. pyosmium 3.7 publishes no
+# wheels beyond cp312 and a source build needs CMake + Boost; the rewrite and
+# stitch stages use the 3.x SimpleHandler / obj.replace() / osmium.osm.mutable
+# API, so lifting the ceiling means porting both to FileProcessor first.
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "osmium>=3.7,<4",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# The survey pipeline is deliberately a separate install. The main pipeline
+# reads and writes .pbf files and needs nothing else; the survey labels
+# connected components and aggregates per-corridor statistics.
+survey = [
+    "numpy>=2.1",
+    "scipy>=1.14",
+    "pandas>=2.2",
+]
+# Human-facing maps only. Drags in the whole GDAL stack plus an external
+# `tippecanoe` binary, which is why it is not in `survey`.
+viz = [
+    "geopandas>=1.0",
+    "shapely>=2.1",
+    "pyogrio>=0.10",
+]
+dev = [
+    "ruff==0.15.21",
+    "pytest>=8.0",
+]
+
+[project.scripts]
+osm-pipe = "osm_pipe.cli:main"
+osm-survey = "osm_survey.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/osm_pipe", "src/osm_survey"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

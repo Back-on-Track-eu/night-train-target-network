@@ -1,0 +1,107 @@
+# The mechanical transform library.
+#
+# A catalogue entry says *what will be built and why*, with a source. This file
+# says *how* a tag rewrite is performed. The split is the point: "railway=
+# construction becomes railway=rail" is mechanics that apply identically
+# everywhere, while "the Brenner Base Tunnel opens in 2032" is a claim about
+# the world that needs a citation and a review. Editing this file changes every
+# project at once, which is exactly why it is not edited per project.
+#
+# A project opts in by name:
+#
+#   changes:
+#     - promote: construction
+#     - promote: { lifecycle: disused, untyped: true }
+#     - drop_oneway
+#     - default: { maxspeed: "200" }
+#
+# Every rule generated from here also carries `ntn:project`, `ntn:change` and
+# `ntn:opening`, written by the expander rather than declared here, so a
+# computed route can be audited back to the project and the date that put it
+# in the graph.
+
+changes:
+  # ------------------------------------------------------------------ promote
+  promote:
+    doc: >-
+      Move a lifecycle-tagged way onto `railway` and lift every attribute the
+      routing profile and the energy model read out of the lifecycle namespace.
+
+      Two failures are fixed at once. OpenRailRouting's RailAccessParser admits
+      only rail/light_rail/tram/subway/narrow_gauge and drops everything else at
+      import, so the value has to move. And OSM puts the real attributes under
+      the prefix — construction:gauge, construction:electrified — while the
+      parsers read the bare keys only, so renaming `railway` alone yields an
+      edge with no gauge and no electrification. Such an edge survives the
+      profile by luck (an absent gauge encodes as 0, which is allowed) and
+      reads as diesel to the energy model.
+
+    # Attributes moved from `<lifecycle>:<key>` to `<key>`.
+    lift:
+      - gauge
+      - electrified
+      - voltage
+      - frequency
+      - maxspeed
+      - usage
+      - tracks
+      - railway:etcs
+
+    # Only `rail`. Promoting light_rail or narrow_gauge produces a railway
+    # value that is in neither the routable set nor the planned set, so the way
+    # vanishes from the map entirely instead of staying visible as planned
+    # track — the failure mode where a target appears to *lose* network.
+    accept: [rail]
+
+    # Filled only where the key is still absent after the lift, so anything
+    # actually mapped in OSM beats these. Explicit modelling assumptions:
+    # change them here, not in code.
+    default:
+      gauge: "1435"
+      maxspeed: "160"
+      usage: main
+
+    lifecycles:
+      # Under construction or concretely planned. Promoting these anywhere is
+      # defensible — the mapper has recorded a documented plan.
+      construction: {}
+      proposed: {}
+
+      # Closed, lifted, or gone. The population is mostly not what the name
+      # suggests: `railway=disused` Europe-wide is thousands of kilometres of
+      # branch line nobody is rebuilding. Inside one project's scope it means
+      # something specific — the line is shut *because* the construction ways
+      # beside it are being built. So these refuse to run unscoped, and they
+      # skip anything with a `service` tag, which keeps yards, sidings and
+      # harbour track out (127 of the disused ways on Fehmarn island alone).
+      disused: { require_scope: true, exclude_service: true }
+      abandoned: { require_scope: true, exclude_service: true }
+      razed: { require_scope: true, exclude_service: true }
+
+  # ------------------------------------------------------------- drop_oneway
+  drop_oneway:
+    doc: >-
+      Drop `oneway` from track this project promoted, asserting double track.
+
+      A double-track line is sometimes mapped as one way per direction, and
+      sometimes only one of them is drawn — either way those ways carry
+      oneway=yes. Every way in the Fehmarn Belt chain does, with no twin
+      alongside. If the router honours the tag, the promoted corridor routes
+      one way across the Baltic and refuses the other, which reads as a routing
+      bug rather than a data problem.
+
+      Whether OpenRailRouting honours `oneway` on railway ways is unconfirmed —
+      it has its own preferred_direction encoded value and may ignore it — but
+      dropping the tag is safe either way. It is a separate opt-in with its own
+      marker rather than part of `promote`, because asserting double track is
+      an assumption about the world, not mechanics.
+
+  # -------------------------------------------------------------- default/set
+  # For the project that needs a specific value the lift cannot supply — a
+  # known design speed, say. `default` fills only where the key is absent, so
+  # mapped data still wins; `set` overwrites OSM, which is rare enough that it
+  # should be explained in the project's `opening.note`.
+  default:
+    doc: Fill specific tags where still absent, on this project's promoted track.
+  set:
+    doc: Set specific tags unconditionally on this project's promoted track.
