@@ -18,6 +18,13 @@ graphhopper:
   # and the profile fails to deserialize), so the block cannot be shared.
   # Keep the five copies identical.
   #
+  # night_train_1520 is the 1520/1524 FAMILY profile (0.9.28): the two are
+  # 4 mm apart, interoperable in practice, and tagged separately in OSM —
+  # treating the tags as separate networks made Estonia (tagged both ways)
+  # impassable at its own seam. nt_gauge_1520.json accepts both gauge tags;
+  # GAUGE_FAMILY_MM in models/route/model.py is the other half of the
+  # contract. There is deliberately no dedicated Finnish-gauge profile.
+  #
   # Baking the gauge into the profile rather than sending it per request is
   # what makes stop SNAPPING gauge-correct: 36 catalog stops carry two
   # gauges (24 of them in Spain), and a request-time rule would let the CH
@@ -37,13 +44,6 @@ graphhopper:
         enable_uturn_times: true
       custom_model_files:
         [rail.json, night_train.json, nt_gauge_1520.json, preferred_direction.json]
-    - name: night_train_1524
-      turn_costs:
-        vehicle_types: [train]
-        u_turn_costs: 300
-        enable_uturn_times: true
-      custom_model_files:
-        [rail.json, night_train.json, nt_gauge_1524.json, preferred_direction.json]
     - name: night_train_1600
       turn_costs:
         vehicle_types: [train]
@@ -65,7 +65,6 @@ graphhopper:
   profiles_ch:
     - profile: night_train
     - profile: night_train_1520
-    - profile: night_train_1524
     - profile: night_train_1600
     - profile: night_train_1668
 
@@ -73,8 +72,6 @@ graphhopper:
     - profile: night_train
       maximum_lm_weight: 16
     - profile: night_train_1520
-      maximum_lm_weight: 16
-    - profile: night_train_1524
       maximum_lm_weight: 16
     - profile: night_train_1600
       maximum_lm_weight: 16

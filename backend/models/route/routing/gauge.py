@@ -15,7 +15,15 @@ stock can run on (today: everything — see composition_gauges()):
   - Kyiv {1520} ∩ Lviv {1520}                        → 1520
   - Berlin {1435} ∩ Wien {1435}                      → 1435
   - Kaunas {1435, 1520} ∩ Warszawa {1435}            → 1435
+  - Helsinki {1524} ∩ Tartu {1520, 1524}             → 1520 (family, below)
   - Kyiv {1520} ∩ Warszawa {1435}                    → ∅ → GaugeMismatchError
+
+GAUGE FAMILIES. Every stop's gauge set is normalized through
+GAUGE_FAMILY_MM before intersecting — today that folds 1524 into 1520,
+because the two are interoperable in practice while OSM tags them
+separately, and the seam (Estonia, tagged both ways) was impassable when
+they were distinct networks. The 1520 profile accepts both tags; 1524
+never reaches profile selection, and family trips report 1520.
 
 UNKNOWN DOES NOT CONSTRAIN. A stop with gauges_mm=None (step 8 found no
 usable tracks nearby — coordinate defects, untagged OSM, war damage) is
@@ -48,7 +56,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Iterable
 
-from models.route.model import STANDARD_GAUGE_MM, SUPPORTED_GAUGES_MM
+from models.route.model import (
+    GAUGE_FAMILY_MM,
+    STANDARD_GAUGE_MM,
+    SUPPORTED_GAUGES_MM,
+)
 
 if TYPE_CHECKING:  # import cycle guard only — nothing here is read at runtime
     from models.params import Composition, StopInfrastructure
@@ -105,9 +117,9 @@ def resolve_trip_gauge(
     if not known:
         return STANDARD_GAUGE_MM
 
-    common = frozenset(known[0].gauges_mm)
+    common = _family(known[0].gauges_mm)
     for stop in known[1:]:
-        common &= frozenset(stop.gauges_mm)
+        common &= _family(stop.gauges_mm)
 
     allowed = composition_gauges(composition)
     if allowed is not None:
@@ -144,7 +156,14 @@ def resolve_trip_gauge(
 def stop_supports_gauge(stop: "StopInfrastructure", gauge_mm: int) -> bool:
     """STRICT: does this stop's catalog data say it offers gauge_mm track?
 
-    Unknown (gauges_mm=None) is False — see the module docstring's
+    Family-aware — a Finnish stop tagged {1524} supports a 1520-family
+    trip. Unknown (gauges_mm=None) is False — see the module docstring's
     strictness split. resolve_trip_gauge() stays the permissive side.
     """
-    return bool(stop.gauges_mm) and gauge_mm in stop.gauges_mm
+    return bool(stop.gauges_mm) and gauge_mm in _family(stop.gauges_mm)
+
+
+def _family(gauges_mm: Iterable[int]) -> frozenset[int]:
+    """A gauge set with every member replaced by its family representative
+    (GAUGE_FAMILY_MM) — {1520, 1524} and {1524} both become {1520}."""
+    return frozenset(GAUGE_FAMILY_MM.get(g, g) for g in gauges_mm)

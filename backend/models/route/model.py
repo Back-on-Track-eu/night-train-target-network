@@ -30,7 +30,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.27"
+ROUTE_BUILDER_VERSION: str = "0.9.28"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -45,6 +45,25 @@ ROUTE_BUILDER_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.28": {
+        "date": "2026-08-29",
+        "author": "david",
+        "changes": "1520 and 1524 mm are ONE gauge family. They are 4 mm "
+        "apart, historically the same Russian gauge, and interoperable in "
+        "practice - Finnish and ex-Soviet stock runs on both - but OSM "
+        "tags them separately, so treating them as distinct networks made "
+        "the seam impassable exactly where it matters: Estonia. Tartu "
+        "carries {1520,1524}, its platform track is 1524-tagged, the "
+        "intersection with a Latvian {1520} stop resolved 1520, and the "
+        "trip then failed to snap at Tartu on the 1520 profile (measured "
+        "2026-08-29: every EE relation except EE-FI snap_failed). "
+        "GAUGE_FAMILY_MM folds 1524 into 1520 at resolution time; the "
+        "night_train_1520 profile now accepts both tags (nt_gauge_1520."
+        "json), night_train_1524 is removed, and SUPPORTED_GAUGES_MM "
+        "shrinks to four. NEEDS A GRAPH RE-IMPORT and Drive re-upload. "
+        "OUTPUT CHANGE: Finnish trips report track_gauge_mm=1520 (the "
+        "family representative) rather than 1524.",
+    },
     "0.9.27": {
         "date": "2026-08-29",
         "author": "david",
@@ -627,13 +646,27 @@ support several gauges, and the fallback when every stop's gauge is unknown
 (routing/gauge.py's resolution rules). Also the one gauge whose routing
 profile carries no suffix (see SUPPORTED_GAUGES_MM)."""
 
-SUPPORTED_GAUGES_MM: tuple[int, ...] = (1435, 1520, 1524, 1600, 1668)
-"""Every gauge with a routing profile in the graph. NAMING CONTRACT with
-docker/config.yml: STANDARD_GAUGE_MM routes on the bare
+SUPPORTED_GAUGES_MM: tuple[int, ...] = (1435, 1520, 1600, 1668)
+"""Every gauge FAMILY with a routing profile in the graph. NAMING CONTRACT
+with docker/config.yml: STANDARD_GAUGE_MM routes on the bare
 OPENRAILROUTING_PROFILE (night_train); every other member on
 <profile>_<gauge_mm> (night_train_1520, ...). Sanctioned mirror of the
 profile list in config.yml — keep the two equal; adding a gauge means a new
 profile there, a graph re-import, and the member here."""
+
+GAUGE_FAMILY_MM: dict[int, int] = {1524: 1520}
+"""Gauges folded into another gauge's profile — {tagged: representative}.
+1524 (Finnish) and 1520 (ex-Soviet) are 4 mm apart, historically the same
+gauge, and interoperable in practice: Finnish and ex-Soviet stock runs on
+both, and VR services crossed the border for decades. OSM tags them
+separately, and treating the tags as separate networks made the seam
+impassable exactly where the target network cares: Estonia, whose track is
+tagged both ways, ended up with stops the resolver put on one profile and
+platform track the graph put on the other. The night_train_1520 profile
+accepts BOTH tags (docker/custom_models/nt_gauge_1520.json — the other half
+of this mapping; keep them in step), and routing/gauge.py normalizes every
+stop's gauge set through this table before intersecting, so 1524 never
+reaches profile selection. Trips on the family report track_gauge_mm=1520."""
 
 BLOCKED_COUNTRIES: tuple[str, ...] = ("BY", "RU")
 """Countries no route may pass through, under any routing mode — a project
@@ -811,13 +844,17 @@ OPEN_TODOS: dict[str, str] = {
         "composition_gauges() and nothing else changes."
     ),
     "gauge_null_stops": (
-        "(David, 2026-08-27) 10 catalog stops carry gauges_mm=NULL "
-        "(evidence no_tracks_nearby): AL Durrës/Tiranë, DE Oldenburg "
-        "(Holstein) and PL Łeba (coordinate errors), GR Ρίο (metre gauge), "
-        "TR Adana/Mersin, UA Краматорськ/Слов'янськ/Росинка. Hand-correct "
-        "coordinates/gauges (or drop dead stops) in the stop pipeline; "
-        "until then gauge.py treats NULL as 'unknown, does not constrain' "
-        "— NEVER as 1435 (the UA three would break)."
+        "(David, 2026-08-29 — mostly resolved) Of the 10 gauges_mm=NULL "
+        "stops, 7 are hand-corrected via step 8's GAUGE_OVERRIDES (DE "
+        "Oldenburg (Holstein), PL Łeba, TR Adana/Mersin at 1435 — station "
+        "nodes are correct, OSM just has no gauge-tagged track within the "
+        "150 m radius; UA Краматорськ/Слов'янськ/Росинка at 1520 — the "
+        "network is uniformly 1520, tagging is sparse or war-affected). "
+        "The remaining NULLs are INTENTIONAL: GR Ρίο (metre-gauge line, "
+        "no >=1435 track exists) and AL Durrës (network out of service, "
+        "OSM tags it disused). The Tirana entry was removed outright - it "
+        "was the city's BUS terminal. gauge.py still treats NULL as "
+        "'unknown, does not constrain', never as 1435."
     ),
     "shunting_y_shape": (
         "_shuntings() creates one Shunting per trip terminal with no "
