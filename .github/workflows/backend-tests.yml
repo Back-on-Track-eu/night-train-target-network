@@ -99,8 +99,7 @@ jobs:
             backend/models/route/route.py \
             backend/models/route/timetable.py \
             backend/models/route/routing/rail_router.py \
-            backend/models/route/routing/dynamics.py \
-            backend/models/route/routing/gauge.py; do
+            backend/models/route/routing/dynamics.py; do
             check_version "$f" \
               "backend/models/route/model.py" \
               "ROUTE_BUILDER_VERSION"

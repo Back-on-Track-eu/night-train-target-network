@@ -231,7 +231,7 @@ ENERGY_FORMULAS: dict[str, Formula] = {
             ),
             FormulaParam(
                 symbol="m_loco,t",
-                ref="column:input_params.loco_types.loco_type_weight_t",
+                ref="standard:ROUTE.TRACTION_LOCO_WEIGHT_T",
                 description="Locomotive weight",
                 unit="t",
             ),

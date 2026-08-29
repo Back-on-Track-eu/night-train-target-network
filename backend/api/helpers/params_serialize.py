@@ -118,38 +118,9 @@ def stop_infra_to_dict(stop_infra: StopInfraCollection) -> dict:
             "country_code": s.stop_country_code,
             "lat": float(s.lat),  # location — always present, no default
             "lon": float(s.lon),  # location — always present, no default
-            # Everything about the charge in one object: the resolved value
-            # and its default flag as before, plus where the figure came from.
-            # The provenance keys are absent-as-None for a stop resolving
-            # through a default — there is no document behind a default.
-            "stop_charge_eur": {
-                **_field(s.stop_id, "stop_charge_eur", float(s.stop_charge_eur)),
-                "vat_rate_per": s.stop_charge_vat_rate_per,
-                "incl_vat_eur": s.stop_charge_incl_vat_eur,
-                "basis": s.stop_charge_basis,
-                "price_basis_year": s.stop_charge_price_basis_year,
-                "tariff_class": s.stop_charge_class,
-                "source": s.stop_charge_source,
-            },
-            # Catalog enrichment — plain values (no default resolution, so
-            # no _field() provenance wrapper; the snapshot version applies
-            # to all of them uniformly).
-            "provenance": s.provenance,
-            "name_latin": s.name_latin,
-            "name_ascii": s.name_ascii,
-            "uic_ref": s.uic_ref,
-            "city": (
-                {
-                    "name": s.city,
-                    "osm_id": s.city_osm_id,
-                    "names": s.city_names,
-                }
-                if s.city
-                else None
+            "stop_charge_eur": _field(
+                s.stop_id, "stop_charge_eur", float(s.stop_charge_eur)
             ),
-            "country_names": s.country_names,
-            "gauges_mm": s.gauges_mm,
-            "gauge_evidence": s.gauge_evidence,
         }
         for s in stop_infra.all().values()
     ]
@@ -355,9 +326,7 @@ def composition_collection_to_dict(compositions: CompositionCollection) -> dict:
                     # readable without a second lookup) plus the combined
                     # rate: driver_factor × driver rate + crew_factor_total
                     # × crew rate — see descriptions.compositions.staff.
-                    # costs_per_hour. Raw productive-hour wages: the rate
-                    # evaluation actually charges is these over the trip's
-                    # roster efficiency (CALC 0.9.15).
+                    # costs_per_hour
                     "costs_per_hour": {
                         "driver_eur_h": c.driver_costs_eur_h,
                         "crew_eur_h": c.crew_costs_eur_h,
@@ -480,25 +449,7 @@ def composition_collection_to_dict(compositions: CompositionCollection) -> dict:
                 "financing_quota_per": c.financing_quota_per,
                 "var_overhead_per": c.var_overhead_per,
                 "fix_overhead_quota_per": c.fix_overhead_quota_per,
-                # The rate the cost model actually multiplies by: the whole
-                # consist per locomotive-hour. Retained under its original
-                # name so the cost-factor drilldown keeps resolving, and
-                # now strictly more accurate for it — the old field was the
-                # per-machine rate while the cost applied n_locos x that.
-                # Identical wherever a composition hauls one machine.
-                "loco_full_service_lease_eur_h": c.loco_lease_total_eur_h,
-                # Per machine, for a breakdown the scalar cannot express.
-                "loco_lease_eur_h": c.loco_lease_eur_h,
-                "locos": [
-                    {
-                        "loco_type_id": loco.loco_type_id,
-                        "description": loco.description,
-                        "traction": loco.traction,
-                        "weight_t": loco.weight_t,
-                        "max_speed_kmh": loco.max_speed_kmh,
-                    }
-                    for loco in c.locos
-                ],
+                "loco_full_service_lease_eur_h": c.loco_full_service_lease_eur_h,
                 "cost_per_class": c.svc_stockings_eur_place,
                 # --- sources for this operator's own values + its per-class costs ---
                 "source_ids": _source_ids_for_prefixes(

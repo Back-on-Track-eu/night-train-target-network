@@ -11,19 +11,13 @@ Fixture values relied on (see db/dev/seed.py):
     scenario '2026-baseline').
   - SE tac_eur_train_km is NULL at every version → resolves from the
     EU-average default row (is_default=True).
-  - osm:n25948183 stop_charge_eur is NULL → resolves from the global
-    stop default; osm:n3856100103 has an explicit charge.
+  - SE_STOCKHOLM_C stop_charge_eur is NULL → resolves from the global
+    stop default; DE_BERLIN_HBF has an explicit charge.
 """
 
 import os
 
 import pytest
-
-from models.params import (
-    ENERGY_PRICE_FIELD_NAMES,
-    FACILITY_FIELD_NAMES,
-    TAC_COMPONENT_FIELD_NAMES,
-)
 
 # =============================================================================
 # Version isolation — loader loads exactly the scenario-pinned snapshot
@@ -97,58 +91,12 @@ class TestParamProvenance:
             )
 
     def test_param_versions_entries_complete(self, loader):
-        """Every entry carries a non-None value and a positive int version.
-
-        Two component groups are the documented exceptions, for the same
-        reason: an empty value states that the country does not levy that
-        term, so None there is data rather than a gap.
-
-        - The track access components
-          (models/infrastructure/tac/calib/TAC_CALIBRATION.md).
-        - The energy price terms beyond the day rate
-          (models/infrastructure/energy_pricing/calib/
-          ENERGY_PRICING_CALIBRATION.md) — twenty-five of twenty-eight
-          countries charge one electricity rate around the clock, and
-          roughly half levy no catenary charge.
-        - The service-facility terms
-          (models/infrastructure/facility/calib/FACILITY_CALIBRATION.md) — a
-          country prices a stabling occupation in exactly one unit, so the two
-          rate columns for the units it does not use are NULL by construction.
-
-        Every other track parameter is always resolved, either from the
-        country's own row or from the EU-average default, and a None among
-        them would mean the loader dropped one.
-        """
+        """Every entry carries a non-None value and a positive int version."""
         tracks = loader.build_all_tracks()
-        nullable = (
-            set(TAC_COMPONENT_FIELD_NAMES)
-            | set(ENERGY_PRICE_FIELD_NAMES)
-            | set(FACILITY_FIELD_NAMES)
-        )
         for key, entry in tracks.param_versions.entries.items():
-            field = key.split(":")[-1]
-            if field not in nullable:
-                assert entry.value is not None, f"param_versions['{key}'].value is None"
+            assert entry.value is not None, f"param_versions['{key}'].value is None"
             assert isinstance(entry.version, int) and entry.version > 0, (
                 f"param_versions['{key}'].version = {entry.version!r}"
-            )
-
-    def test_tac_component_group_resolves_whole_or_not_at_all(self, loader):
-        """A country either has its own tariff or is priced entirely from
-        the EU median — never a mixture. The group-null rule in
-        DBDataLoader._row_to_track is what a lone 'not levied here' NULL
-        depends on to survive resolution intact."""
-        tracks = loader.build_all_tracks()
-        for country_code in tracks.all():
-            flags = {
-                tracks.param_versions.get(
-                    f"track_infra:{country_code}:{field}"
-                ).is_default
-                for field in TAC_COMPONENT_FIELD_NAMES
-            }
-            assert len(flags) == 1, (
-                f"{country_code}: TAC components resolved inconsistently — "
-                "the component group must default as a whole"
             )
 
     def test_field_descriptions_populated(self, loader):
@@ -187,10 +135,12 @@ class TestParamProvenance:
     def test_stop_null_charge_resolves_from_global_default(
         self, loader, db_cur, base_scenario
     ):
-        """osm:n25948183 stop_charge is NULL — is_default=True and the value
+        """SE_STOCKHOLM_C stop_charge is NULL — is_default=True and the value
         equals the global default row's charge."""
         stops = loader.build_all_stops()
-        se_charge = stops.param_versions.get("stop_infra:osm:n25948183:stop_charge_eur")
+        se_charge = stops.param_versions.get(
+            "stop_infra:SE_STOCKHOLM_C:stop_charge_eur"
+        )
         assert se_charge is not None
         assert se_charge.is_default is True
 
@@ -202,35 +152,12 @@ class TestParamProvenance:
         default_val = float(db_cur.fetchone()["stop_charge_eur"])
         assert float(se_charge.value) == pytest.approx(default_val, rel=1e-3)
 
-    def test_stop_explicit_charge_is_not_default(self, loader, db_cur, base_scenario):
-        """A stop carrying its own stop_charge_eur reports is_default=False;
-        the is_default=True path is covered by
-        test_stop_null_charge_resolves_from_global_default above.
-
-        The stop is looked up rather than pinned by id: which stops carry a
-        charge depends on the pipeline's station_charges.csv, which is
-        regenerated per calibration run (charges/02_station_charges.ipynb).
-        Pinning one id made this test fail for a data reason — the catalog
-        exported before any charge was calibrated — rather than a code one.
-        Skips while no charge is seeded at all, so the gap stays visible
-        without turning red."""
-        db_cur.execute(
-            "SELECT stop_id, stop_charge_eur FROM input_params.stop_infrastructures "
-            "WHERE stop_charge_eur IS NOT NULL AND stop_infra_version = %s LIMIT 1",
-            (base_scenario["stop_infrastructures_version"],),
-        )
-        row = db_cur.fetchone()
-        if row is None:
-            pytest.skip(
-                "no stop carries its own station charge yet — run the charge "
-                "calibration (models/infrastructure/stops/charges) and re-export"
-            )
-
+    def test_stop_explicit_charge_is_not_default(self, loader):
+        """DE_BERLIN_HBF has an explicit stop_charge — is_default=False."""
         stops = loader.build_all_stops()
-        entry = stops.param_versions.get(f"stop_infra:{row['stop_id']}:stop_charge_eur")
-        assert entry is not None
-        assert entry.is_default is False
-        assert float(entry.value) == pytest.approx(float(row["stop_charge_eur"]))
+        berlin = stops.param_versions.get("stop_infra:DE_BERLIN_HBF:stop_charge_eur")
+        assert berlin is not None
+        assert berlin.is_default is False
 
 
 # =============================================================================

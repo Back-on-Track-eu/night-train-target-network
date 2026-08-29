@@ -1,28 +1,23 @@
 """
 stop_mapping.py
 ===============
-ONTD ↔ Target Network stop-id bridge (adapters/proposal/README.md §5.5,
+Interim ONTD ↔ Target Network stop-id bridge (adapters/proposal/README.md §5.5,
 WP10 step 6a) — the mechanism that lets ONTD gallery rows share one stop
-namespace with proposals. The harmonized OSM-based stop catalog this was
-written to await landed 2026-08 (stop ids "osm:n…"/"osm:w…"/"osm:r…" from
-the stop classification pipeline); the bridge remains as the permanent
-translation from ONTD's own ids, since ONTD stops and catalog stops can
-legitimately be different OSM objects for the same station (ONTD's export
-reads only railway=halt nodes).
+namespace with proposals until the real harmonized stop list (numeric
+OSM-based identifiers, expected ~2 weeks out) replaces both id schemes.
 
 One-pass resolution per ONTD stop appearing on an active route:
 COORDINATE MATCH — nearest stop_infrastructures row of the current base
-scenario's pinned snapshot within MATCH_RADIUS_M, or within
-NAME_CONFIRM_RADIUS_M if the two names agree after transliteration. Names
-are deliberately not the matcher (ONTD says "Bruxelles-Midi", the curated
-row says "Brussels Midi") — coordinates are what both sides agree on, and
-the name only confirms a distance too loose to trust alone.
+scenario's pinned snapshot within MATCH_RADIUS_M. Names are deliberately
+not the matcher (ONTD says "Bruxelles-Midi", the curated row says
+"Brussels Midi"); coordinates are what both sides agree on.
 
 The catalog is COMPLETE AT SEED TIME (revised 2026-08-07): every stop the
-ONTD snapshot needs is part of db/dev/seed.py's stop data — since 2026-08
-the Drive-hosted stop_seed_catalog.csv from the stop classification
-pipeline (mint_tn_stop_id and its {country}_{NAME} convention remain only
-for legacy manual mapping rows predating the switch). This replaces the earlier runtime MINT pass, which
+ONTD snapshot needs is part of db/dev/seed.py's stop data, derived once by
+scripts/export_ontd_stop_seed.py into the Drive-hosted
+ontd_seed_stops.csv (downloaded to db/dev/data/ at seed time when absent)
+using this module's own id convention ({country}_{TRANSLITERATED_NAME},
+Ü→UE, ø→OE, ...). This replaces the earlier runtime MINT pass, which
 inserted missing stops into input_params.stop_infrastructures during the
 bootstrap — mutating pinned snapshot versions at runtime, which (a) broke
 the compute cache's scenario-pin key invariant
@@ -43,7 +38,7 @@ alignment task (Giovanni ↔ David, 2026-06-22) needs as its seed.
 
 Deliberately unmapped (absent from the table, route_summaries keeps the
 raw ONTD id): stops without coordinates (nothing to match on) and stops
-with no catalog row in range (seed CSV out of date, or a
+with no catalog row within MATCH_RADIUS_M (seed CSV out of date, or a
 country outside input_params.countries that the exporter could not seed)
 — all reported by build_stop_mappings() and queryable as the gap between
 active ONTD stops and mapping rows.
@@ -62,12 +57,6 @@ Public interface:
 
 Callers: db/ontd/projection.py's build_summaries() (before writing
 route_summaries/route_corridors, so their stop ids come out translated).
-
-OPERATIONAL NOTE: the ontd schema is bootstrap-guarded, so a reseed with a
-changed stop catalog does NOT re-run this module by itself — mappings and
-route_summaries keep referencing the old ids until the bootstrap is forced
-(ONTD_BOOTSTRAP=force, stages 2-3). Required after any catalog change that
-adds, removes or re-points stop ids; see db/ontd/README.md.
 """
 
 from math import cos, radians, sqrt
@@ -77,30 +66,7 @@ from typing import Any, Optional
 # different sources also pin "the station" at different reference points.
 # 500 m separates "same station, different pin" from "different station"
 # for European main stations without known false positives at import time.
-# Two tiers, because 500 m alone rejected 102 of 703 active ONTD stops
-# (measured 2026-08-28) and nearly half of those were the SAME station under
-# a different node convention — OSM's station node against ONTD's building or
-# platform coordinate. Torino Porta Nuova missed by 28 m, Göppingen by 71,
-# Suceava by 200.
-#
-#   <= MATCH_RADIUS_M          coordinates alone, as before
-#   <= NAME_CONFIRM_RADIUS_M   only if the names agree after transliteration
-#
-# Names are still not the matcher (module docstring: ONTD says "Bruxelles-Midi"
-# where the catalog says "Brussels Midi"). They are a CONFIRMATION on a
-# distance already too loose to trust by itself. In the 1-3 km band the
-# catalog carries the native name and ONTD the Latin one — Нова Загора against
-# Nova Zagora, Кременчук against Kremenchuk — so transliterate() settles 27 of
-# the 34 there, and correctly refuses the ones that are different stations:
-# Provadiya/Добрина (different town), Iași/Nicolina (the other station in
-# Iași), Sindel/Синдел Разпределителна (station vs marshalling yard),
-# Kozyatyn/Козятин 1.
-#
-# 3 km is the ceiling because beyond it same-name pairs stop being the same
-# station: HR "Trnava" sits 3.5 km from SK Trnava and is an ONTD coordinate
-# defect, not a match to make.
-MATCH_RADIUS_M = 1000.0
-NAME_CONFIRM_RADIUS_M = 3000.0
+MATCH_RADIUS_M = 500.0
 
 # Curated-style transliteration (the DE_*/CH_*/SE_* seed rows' own
 # convention: Zürich → ZUERICH, not ZURICH), extended to the rest of the
@@ -363,7 +329,7 @@ def build_stop_mappings(cur) -> dict[str, str]:
     protected = _protected_mappings(cur)
 
     mapping: dict[str, str] = dict(protected)
-    matched = no_coords = name_confirmed = 0
+    matched = no_coords = 0
     # (ontd_id, name, nearest catalog distance in m) per unmatched stop —
     # printed below so a stale seed CSV is visible in the bootstrap log,
     # not just as quietly untranslated gallery ids.
@@ -379,22 +345,7 @@ def build_stop_mappings(cur) -> dict[str, str]:
 
         lat, lon = float(stop["stop_lat"]), float(stop["stop_lon"])
         nearest, distance = _nearest(lat, lon, catalog)
-        if nearest is None or distance > NAME_CONFIRM_RADIUS_M:
-            unmatched.append((ontd_id, stop["stop_name"], distance))
-            continue
-
-        if distance <= MATCH_RADIUS_M:
-            pass
-        elif transliterate(stop["stop_name"]) == transliterate(nearest["stop_name"]):
-            # Recorded as 'coordinate' rather than a method of its own: the
-            # match_method CHECK constraint allows only coordinate/minted/
-            # manual, and widening it means a full ONTD reload (the schema
-            # file drops and recreates) plus a staging migration. distance_m
-            # still separates the two — a row above MATCH_RADIUS_M is
-            # name-confirmed by construction. Give it its own method when the
-            # ONTD schema next changes for another reason.
-            name_confirmed += 1
-        else:
+        if nearest is None or distance > MATCH_RADIUS_M:
             unmatched.append((ontd_id, stop["stop_name"], distance))
             continue
 
@@ -415,42 +366,17 @@ def build_stop_mappings(cur) -> dict[str, str]:
             (ontd_id, nearest["stop_id"], round(distance, 1)),
         )
 
-    # Manual/verified rows are never auto-overwritten, which also means a
-    # catalog change can silently strand them on removed stop ids (the
-    # 2026-08 pipeline restructure removed 21 duplicate stops). Automatic
-    # rows self-heal on the next rebuild; protected rows only heal by hand,
-    # so stranded ones are shouted about here.
-    catalog_ids = {row["stop_id"] for row in catalog}
-    stale_protected = {
-        ontd_id: tn_id
-        for ontd_id, tn_id in protected.items()
-        if tn_id not in catalog_ids
-    }
-    if stale_protected:
-        print(
-            f"  WARNING: {len(stale_protected)} manual/verified mapping(s) "
-            "target stop ids absent from the pinned catalog snapshot — "
-            "route_summaries built from them carry dead ids. Re-point or "
-            "un-verify these rows in ontd.stop_mappings:"
-        )
-        for ontd_id, tn_id in sorted(stale_protected.items()):
-            print(f"    {ontd_id} -> {tn_id}")
-
     print(
-        f"  stop mappings: {matched} matched "
-        f"({matched - name_confirmed} within {MATCH_RADIUS_M:.0f} m, "
-        f"{name_confirmed} name-confirmed beyond it), {len(unmatched)} "
-        f"unmatched, {no_coords} without coordinates, {len(protected)} "
-        "manual/verified preserved"
+        f"  stop mappings: {matched} coordinate-matched, "
+        f"{len(unmatched)} unmatched, {no_coords} without coordinates, "
+        f"{len(protected)} manual/verified preserved"
     )
     if unmatched:
         print(
-            f"  UNMATCHED ONTD STOPS — no catalog row within "
-            f"{MATCH_RADIUS_M:.0f} m, and none within "
-            f"{NAME_CONFIRM_RADIUS_M:.0f} m whose name matches; "
-            "route_summaries keeps their raw ONTD ids. A near miss with a "
-            "differing name is usually an ONTD coordinate defect (HR "
-            "'Trnava' is in Slovakia) or a genuinely different station:"
+            "  UNMATCHED ONTD STOPS — no catalog row within "
+            f"{MATCH_RADIUS_M:.0f} m; route_summaries keeps their raw ONTD "
+            "ids. If these are legitimate stations, regenerate the seed "
+            "CSV (backend/scripts/export_ontd_stop_seed.py) and reseed:"
         )
         for ontd_id, name, distance in unmatched:
             print(f"    {ontd_id}  {name!r}  (nearest {distance:.0f} m)")

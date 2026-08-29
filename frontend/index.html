@@ -22,25 +22,6 @@
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>BoT-Network</title>
-    <!-- Link-preview card for any URL in the app EXCEPT a shared proposal.
-         Crawlers don't run JS, so nothing here can be per-page — a shared
-         proposal link therefore points at GET /api/proposal/<id>/share
-         (backend/api/proposal_share.py), which serves the real title and an
-         absolute image URL. og:image is relative here on purpose: the origin
-         differs per environment and is unknown at build time. The spec wants
-         it absolute and crawlers resolve it anyway; the route that matters
-         doesn't rely on that leniency. -->
-    <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="Back-on-Track Target Network" />
-    <meta property="og:title" content="Back-on-Track Target Network" />
-    <meta
-      property="og:description"
-      content="An economic model of a European night train network — plan a route, see what it would cost to run, and say what you think."
-    />
-    <meta property="og:image" content="/og/share-card.jpg" />
-    <meta property="og:image:width" content="1200" />
-    <meta property="og:image:height" content="630" />
-    <meta name="twitter:card" content="summary_large_image" />
   </head>
   <body>
     <div id="app"></div>

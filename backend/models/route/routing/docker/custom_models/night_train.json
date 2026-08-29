@@ -1,32 +1,16 @@
 // custom_models/night_train.json
-// Shared base model for every night_train* profile. Track GAUGE is not
-// decided here — each profile adds exactly one nt_gauge_<mm>.json alongside
-// this file (see config.yml). Rules are independent `if` clauses rather
-// than an else_if chain, because GraphHopper concatenates the rule lists of
-// all custom_model_files and a chain cannot span files; multiply_by 0 is
-// absorbing, so the two forms are equivalent anyway.
-//
-// The 230 limit is a GRAPH-LEVEL ceiling, not a per-trip speed: it bounds
-// the paths that send no composition (route_geometry, and simpleRouting
-// until G3). fullRouting caps every trip at its own
-// composition.max_speed_kmh in the request custom model, which is always
-// <= 230, so this never binds there. Sanctioned mirror of
-// MAX_COMPOSITION_SPEED_KMH in models/route/model.py — keep the two equal.
-//
-// Belarus and Russia are excluded from routing by project decision, but NOT
-// here: GraphHopper's `country` encoded value is unavailable in this fork,
-// so the block is applied per request as an area rule in
-// rail_router._build_custom_model(), the same way HSR avoidance is.
-//
-// Power systems: 25kV 50Hz AC, 15kV 16.7Hz AC, 3kV DC, 1.5kV DC + diesel.
-// Use with: [rail.json, nt_gauge_<mm>.json, preferred_direction.json]
+// Power systems: 25kV 50Hz AC, 15kV 16.7Hz AC, 3kV DC, 1.5kV DC + diesel fallback
+// Maximum speed: 200 km/h on all compatible track types
+// Use with: [rail.json, preferred_direction.json]
 
 {
   "distance_influence": 0.2,
   "speed": [
-    { "if": "railway_service == YARD || railway_service == SPUR",
-      "multiply_by": "0" },
-    { "if": "true",
-      "limit_to": "230" }
+    { "if": "gauge != 0 && gauge != 1435",
+      "multiply_by": "0.0" },
+    { "else_if": "railway_service == YARD || railway_service == SPUR",
+      "multiply_by": "0.0" },
+    { "else_if": "true",
+      "limit_to": "200" }
   ]
 }

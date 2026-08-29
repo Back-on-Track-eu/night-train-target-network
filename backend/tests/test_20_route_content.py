@@ -172,7 +172,7 @@ class TestTimetableMath:
         boarding/alighting minimum applies, so only positivity is asserted."""
         for trip in all_trips(route_berlin_dresden_wien):
             dresden = next(
-                s for s in stop_times(trip) if s["stop_id"] == "osm:n25397500"
+                s for s in stop_times(trip) if s["stop_id"] == "DE_DRESDEN_HBF"
             )
             assert dresden["dwell_time_min"] is not None
             assert dresden["dwell_time_min"] >= 1
@@ -305,47 +305,33 @@ BASE_REQUEST = {
     "stops": STOPS_BERLIN_DRESDEN_WIEN,
     "composition_id": "NEW-BAL-7",
     # Pinned off so the structural tests below see a deterministic
-    # caller's-list route — osm:n3325029085 would otherwise be auto-added
+    # caller's-list route — CZ_BRNO_HLN would otherwise be auto-added
     # (see module docstring); the add/suggest paths have their own
     # fixture/requests in TestModeSwitches.
     "auto_stop_addition": "off",
 }
 
 # The stop list the "add" default actually produces on this corridor
-# (AUTO_STOP_BUFFER_M=10km, AUTO_STOP_ANALYTIC_DETOUR_M=100m) — 7 catalog
-# stops merged in at their geographic positions between Dresden and Wien,
-# everything else the caller's own. Re-derive with a POST of
-# auto_stop_addition="add" and read trip_pairs[0].outbound whenever
+# (AUTO_STOP_BUFFER_M=10km, AUTO_STOP_ANALYTIC_DETOUR_M=100m — see
+# models/route/version.py 0.9.15) — 8 catalog stops merged in at their
+# geographic positions between Dresden and Wien, everything else the
+# caller's own. Re-derive with the one-off script in the WP10 thread
+# (POST auto_stop_addition="add", read trip_pairs[0].outbound) whenever
 # AUTO_STOP_BUFFER_M, AUTO_STOP_ANALYTIC_DETOUR_M, AUTO_STOP_MAX_DETOUR_PER,
 # or the stop catalog itself changes.
-#
-# Updated at ROUTE_BUILDER 0.9.24, which moved the detour budget onto
-# TECHNICAL trip time (driving + dynamics + dwell) instead of padded time.
-# osm:n2736023837 and osm:n3129289404 dropped out: both sat at the margin of
-# the old, larger budget. That marginality is inherent — this list pins a
-# greedy cumulative budget, so a few per cent either way moves its tail, and
-# a diff here means the budget moved, not that the search broke.
-#
-# Re-pinned when the stop classification pipeline replaced the catalog:
-# coordinates now come from OSM rather than ONTD, so marginal candidates
-# moved a little and the greedy budget resolved differently. Bad Schandau
-# (osm:n2736023837) and Ceska Trebova (osm:n3129289404) came back in, and
-# Decin (osm:n5062517821) and Breclav-area osm:n3325029085 dropped out to
-# pay for them — the same tail churn the paragraph above describes, at the
-# same count of seven. What is asserted structurally rather than by
-# identity is the invariant that matters: every stop 'add' inserts also
-# appears in 'suggest' (test_..._suggest_... below).
 STOPS_WITH_BRNO = [
-    "osm:n3856100103",
-    "osm:n25397500",
-    "osm:n2736023837",
-    "osm:n4171354660",
-    "osm:n3134733933",
-    "osm:n24684084",
-    "osm:n3129312254",
-    "osm:n3129289404",
-    "osm:n3315724401",
-    "osm:w423692233",
+    "DE_BERLIN_HBF",
+    "DE_DRESDEN_HBF",
+    "DE_BAD_SCHANDAU",
+    "CZ_DECIN_HL_N",
+    "CZ_USTI_NAD_LABEM_HL_N",
+    "CZ_PRAHA_HOLESOVICE",
+    "CZ_KOLIN",
+    "CZ_PARDUBICE_HL_N",
+    "CZ_CESKA_TREBOVA",
+    "CZ_BRNO_HLN",
+    "CZ_BRECLAV",
+    "AT_WIEN_HBF",
 ]
 
 
@@ -378,7 +364,7 @@ def plan_response(api_base):
 @pytest.fixture(scope="module")
 def plan_response_default_add(api_base):
     """Same request with auto_stop_addition omitted entirely — covers the
-    "add" default, which inserts osm:n3325029085 on this corridor. Built once
+    "add" default, which inserts CZ_BRNO_HLN on this corridor. Built once
     for this module."""
     body = {k: v for k, v in BASE_REQUEST.items() if k != "auto_stop_addition"}
     resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=90)
@@ -422,20 +408,20 @@ class TestModeSwitches:
     def test_auto_stop_addition_defaults_to_add_and_inserts_brno(
         self, plan_response_default_add
     ):
-        """With auto_stop_addition omitted (the 'add' default), 7 catalog
+        """With auto_stop_addition omitted (the 'add' default), 9 catalog
         stops along the Dresden-Wien corridor — all within
-        AUTO_STOP_BUFFER_M (10km) and within the cumulative detour budget
-        — are inserted at their geographic positions, marked
-        auto_added=true, everything else the caller's own (see
+        AUTO_STOP_BUFFER_M (10km) and comfortably within the cumulative
+        detour budget — are inserted at their geographic positions,
+        marked auto_added=true, everything else the caller's own (see
         STOPS_WITH_BRNO's own comment for how to re-derive this list:
-        10 entries total = 2 user stops + 7 auto-added + 1 user stop).
+        12 entries total = 2 user stops + 9 auto-added + 1 user stop).
         The return trip carries the same final stop list reversed with the
         same auto_added marking (the search runs once, from outbound — see
         _build_trip_pair() in route_factory.py)."""
         pair = plan_response_default_add["route"]["trip_pairs"][0]
         assert "suggested_stops" not in plan_response_default_add
 
-        expected_added = [False, False] + [True] * 7 + [False]
+        expected_added = [False, False] + [True] * 9 + [False]
         outbound = stop_times(pair["outbound"])
         assert [s["stop_id"] for s in outbound] == STOPS_WITH_BRNO
         assert [s["auto_added"] for s in outbound] == expected_added
@@ -481,21 +467,19 @@ class TestModeSwitches:
         relation, not equality: every stop 'add' inserted also appears in
         'suggest' (both start from the same candidate search), but
         'suggest' additionally surfaces the over-budget candidates 'add'
-        had to stop short of. This corridor: 20 suggested vs 10 inserted.
+        had to stop short of. This corridor: 14 suggested vs 10 inserted.
 
-        The candidate list is asserted by its properties, not as a pinned
-        sequence of stop ids. That pin broke on both catalog changes it saw
-        — the pipeline restructure removed duplicate objects that were in
-        the list (Gesundbrunnen's S-Bahn node, Suedkreuz's platform group),
-        and the ordering shifts whenever a stop enters or leaves the
-        corridor — each time reporting a catalog edit as an auto-stop
-        regression. What the pin was really protecting is here instead:
-        every stop 'add' inserted is offered by 'suggest', the list is
-        ordered along the route, the terminals never appear, and every
-        entry is a real catalog stop near the corridor.
-
-        Mode 'suggest' ignores AUTO_STOP_MAX_DETOUR_PER, so it necessarily
-        offers at least as many stops as 'add' inserts."""
+        The final pair (AT_WIEN_WESTBF / AT_WIEN_MEIDLING) is asserted as
+        a set, not a strict order: both sit close together near the
+        route's Vienna approach, so suggest_auto_stops()'s
+        (leg_index, along_leg_fraction) sort assigns them to the routed
+        polyline geometrically, not topologically — which one gets the
+        smaller fraction can flip with the router's own path geometry
+        (graph version, internal tie-breaking) even though both stops'
+        coordinates are fixed and unchanged. Asserting a strict order for
+        a genuinely near-tied pair over-specifies the router, not the
+        auto-stop logic this test targets; every other candidate here is
+        well-separated and keeps a strict order."""
         body = {**BASE_REQUEST, "auto_stop_addition": "suggest"}
         resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=90)
         assert resp.status_code == 200
@@ -512,46 +496,21 @@ class TestModeSwitches:
 
         suggested = payload["suggested_stops"]
         suggested_ids = [s["stop_id"] for s in suggested]
-
-        # The cross-mode invariant: 'add' and 'suggest' run the same
-        # candidate search, so everything 'add' inserted must be offered by
-        # 'suggest' — and 'suggest', ignoring the detour budget, offers at
-        # least as many. This is what actually breaks if the search regresses.
-        auto_added = [
-            s["stop_id"]
-            for s in stop_times(
-                plan_response_default_add["route"]["trip_pairs"][0]["outbound"]
-            )
-            if s["auto_added"]
+        assert suggested_ids[:-2] == [
+            "DE_BERLIN_SUEDKREUZ",
+            "DE_DRESDEN_NEUSTADT",
+            "DE_BAD_SCHANDAU",
+            "CZ_DECIN_HL_N",
+            "CZ_USTI_NAD_LABEM_HL_N",
+            "CZ_PRAHA_HLN",
+            "CZ_PRAHA_HOLESOVICE",
+            "CZ_KOLIN",
+            "CZ_PARDUBICE_HL_N",
+            "CZ_CESKA_TREBOVA",
+            "CZ_BRNO_HLN",
+            "CZ_BRECLAV",
         ]
-        assert auto_added, "the 'add' fixture inserted nothing to compare against"
-        assert set(auto_added) <= set(suggested_ids)
-        assert len(suggested_ids) >= len(auto_added)
-
-        # No duplicates, and never the caller's own stops back again.
-        assert len(set(suggested_ids)) == len(suggested_ids)
-        assert not set(suggested_ids) & set(STOPS_BERLIN_DRESDEN_WIEN)
-
-        # Ordered along the route, not arbitrarily: the corridor runs
-        # Berlin -> Dresden -> Wien, so travel order is north to south. The
-        # ends are compared rather than every adjacent pair, because stops
-        # within the 10 km buffer can sit slightly off the line and swap
-        # locally without the list being wrong (see the near-tied Vienna
-        # approach pair that made the old strict pin flaky).
-        if len(suggested) >= 6:
-            head = [s["lat"] for s in suggested[:3]]
-            tail = [s["lat"] for s in suggested[-3:]]
-            assert min(head) > max(tail), (
-                "suggestions are not in travel order along the corridor: "
-                f"first three at {head}, last three at {tail}"
-            )
-
-        # Every suggestion is a real catalog stop in a country the corridor
-        # actually crosses — the search must not reach across Europe.
-        corridor_countries = {"DE", "CZ", "AT"}
-        for s in suggested:
-            assert s["country_code"] in corridor_countries, s
-
+        assert set(suggested_ids[-2:]) == {"AT_WIEN_WESTBF", "AT_WIEN_MEIDLING"}
         for s in suggested:
             assert set(s) == {
                 "stop_id",
@@ -617,7 +576,7 @@ FIXED_NIGHT_REQUEST = {
     # Berlin->Dresden is ~2h naturally — far shorter than the 5h night
     # window, so this interval MUST be stretched, exercising slack
     # distribution and the slow-section warning in one live response.
-    "fixed_night_interval": ["osm:n3856100103", "osm:n25397500"],
+    "fixed_night_interval": ["DE_BERLIN_HBF", "DE_DRESDEN_HBF"],
 }
 
 
@@ -707,7 +666,7 @@ class TestFixedNightMode:
         warnings, window constraints still satisfied."""
         body = {
             **FIXED_NIGHT_REQUEST,
-            "fixed_night_interval": ["osm:n3856100103", "osm:w423692233"],
+            "fixed_night_interval": ["DE_BERLIN_HBF", "AT_WIEN_HBF"],
         }
         resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=90)
         assert resp.status_code == 200, resp.text[:300]
@@ -727,11 +686,11 @@ class TestFixedNightMode:
         "interval, reason",
         [
             (None, "missing entirely"),
-            (["osm:n3856100103"], "only one stop"),
-            (["osm:n3856100103", "osm:n3856100103"], "same stop twice"),
-            (["osm:n3856100103", 42], "non-string entry"),
-            (["osm:n3856100103", "osm:n2506241285"], "stop not in stops list"),
-            (["osm:w423692233", "osm:n3856100103"], "wrong travel order"),
+            (["DE_BERLIN_HBF"], "only one stop"),
+            (["DE_BERLIN_HBF", "DE_BERLIN_HBF"], "same stop twice"),
+            (["DE_BERLIN_HBF", 42], "non-string entry"),
+            (["DE_BERLIN_HBF", "FR_PARIS_EST"], "stop not in stops list"),
+            (["AT_WIEN_HBF", "DE_BERLIN_HBF"], "wrong travel order"),
         ],
     )
     def test_invalid_interval_returns_400(self, api_base, interval, reason):
@@ -750,7 +709,7 @@ class TestFixedNightMode:
         body = {
             **BASE_REQUEST,
             "timetable_mode": "simpleAutomatic",
-            "fixed_night_interval": ["osm:n3856100103", "osm:n25397500"],
+            "fixed_night_interval": ["DE_BERLIN_HBF", "DE_DRESDEN_HBF"],
         }
         resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=30)
         assert resp.status_code == 400

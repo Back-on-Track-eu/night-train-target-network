@@ -71,110 +71,11 @@ class TestStopInfrastructures:
         assert stops_body["count"] == len(stops_body["stops"])
 
     def test_stops_have_required_fields(self, stops_body):
-        """Every stop exposes identity, location, its charge field object,
-        and the catalog enrichment."""
-        required = {
-            "stop_id",
-            "name",
-            "country_code",
-            "lat",
-            "lon",
-            "stop_charge_eur",
-            "provenance",
-            "name_latin",
-            "name_ascii",
-            "uic_ref",
-            "city",
-            "country_names",
-            "gauges_mm",
-            "gauge_evidence",
-        }
+        """Every stop exposes identity, location, and its charge field object."""
+        required = {"stop_id", "name", "country_code", "lat", "lon", "stop_charge_eur"}
         for stop in stops_body["stops"]:
             missing = required - set(stop)
             assert missing == set(), f"Stop '{stop.get('stop_id')}' missing: {missing}"
-
-    def test_stop_enrichment_shapes(self, stops_body):
-        """country_names is a full language dict; city is a nested object
-        with its own names dict, or null for rural halts — never a bare
-        string; gauges_mm is a list of ints >= 1435 or null."""
-        langs = {"en", "de", "fr", "nl", "it", "es", "pl"}
-        saw_city = saw_no_city = False
-        for stop in stops_body["stops"]:
-            assert set(stop["country_names"]) == langs, stop["stop_id"]
-            city = stop["city"]
-            if city is None:
-                saw_no_city = True
-            else:
-                saw_city = True
-                assert {"name", "osm_id", "names"} <= set(city), stop["stop_id"]
-                assert isinstance(city["names"], dict)
-            gauges = stop["gauges_mm"]
-            if gauges is not None:
-                assert gauges and all(
-                    isinstance(g, int) and g >= 1435 for g in gauges
-                ), f"{stop['stop_id']}: {gauges}"
-        assert saw_city, "no stop resolved a city — enrichment missing?"
-        assert saw_no_city, "every stop has a city — rural-halt null case untested"
-
-    def test_multilingual_search_case(self, stops_body):
-        """The reason the columns exist: an Italian 'Monaco' has to reach
-        München Hauptbahnhof through city.names.it."""
-        stops = {s["stop_id"]: s for s in stops_body["stops"]}
-        muenchen = stops["osm:n2470201868"]
-        assert muenchen["city"]["names"]["it"] == "Monaco di Baviera"
-
-    def test_stop_charge_carries_provenance(self, stops_body):
-        """Everything about the charge lives in one object: the resolved
-        value and its default flag, plus where the figure came from. A stop
-        on a default has no document behind it, so those keys are null."""
-        keys = {
-            "value",
-            "is_default",
-            "vat_rate_per",
-            "incl_vat_eur",
-            "basis",
-            "price_basis_year",
-            "tariff_class",
-            "source",
-        }
-        sourced = 0
-        for stop in stops_body["stops"]:
-            charge = stop["stop_charge_eur"]
-            assert keys <= set(charge), stop["stop_id"]
-            if charge["source"]:
-                sourced += 1
-                assert charge["basis"]
-                net, rate = charge["value"], charge["vat_rate_per"]
-                if rate is not None:
-                    assert abs(net * (1 + rate / 100) - charge["incl_vat_eur"]) < 0.01
-            else:
-                assert charge["is_default"] is True, (
-                    f"{stop['stop_id']}: a charge of its own with no source"
-                )
-        if not sourced:
-            pytest.skip(
-                "no stop carries its own station charge yet — run the charge "
-                "calibration (models/infrastructure/stops/charges) and re-export"
-            )
-
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "The 13 station-charge rows are ILLUSTRATIVE-CURATED placeholders "
-            "and charges/data/station_charges.csv has no "
-            "price_basis_year column at all. See test_02_db_seed."
-            "test_stop_charge_carries_its_price_year for the full "
-            "reason. strict=True so this fails loudly once real "
-            "tariffs land."
-        ),
-    )
-    def test_stop_charge_carries_its_price_year(self, stops_body):
-        """Split out of test_stop_charge_carries_provenance so that test
-        keeps guarding the key set, basis and the VAT arithmetic."""
-        for stop in stops_body["stops"]:
-            charge = stop["stop_charge_eur"]
-            if charge["source"]:
-                assert charge["price_basis_year"], stop["stop_id"]
 
     def test_stop_charge_is_field_object(self, stops_body):
         """stop_charge_eur is a field object: value + is_default (bool) +
@@ -186,31 +87,11 @@ class TestStopInfrastructures:
             assert isinstance(charge["is_default"], bool)
 
     def test_is_default_flags_via_api(self, stops_body):
-        """Provenance survives the API in both directions: a stop with no
-        calibrated charge reports is_default=True and carries the global
-        default's value; a stop with its own charge reports False.
-
-        Only the defaulted stop is pinned by id. Which stops carry a charge
-        follows the pipeline's station_charges.csv, so the explicit case is
-        found in the response and skipped while none exists — a data gap
-        (no charge calibrated yet) should not read as an API regression."""
+        """SE_STOCKHOLM_C (NULL charge in seed) is is_default=True; Berlin
+        (explicit charge) is is_default=False — provenance survives the API."""
         stops = {s["stop_id"]: s for s in stops_body["stops"]}
-        assert stops["osm:n25948183"]["stop_charge_eur"]["is_default"] is True
-
-        explicit = [
-            s for s in stops_body["stops"] if not s["stop_charge_eur"]["is_default"]
-        ]
-        if not explicit:
-            pytest.skip(
-                "no stop carries its own station charge yet — run the charge "
-                "calibration (models/infrastructure/stops/charges) and re-export"
-            )
-        global_default = stops_body["default_stops"]["global"]["stop_charge_eur"][
-            "value"
-        ]
-        for stop in explicit:
-            assert stop["stop_charge_eur"]["value"] is not None
-        assert stops["osm:n25948183"]["stop_charge_eur"]["value"] == global_default
+        assert stops["SE_STOCKHOLM_C"]["stop_charge_eur"]["is_default"] is True
+        assert stops["DE_BERLIN_HBF"]["stop_charge_eur"]["is_default"] is False
 
     def test_global_default_present(self, stops_body):
         """The global default row (the one SE resolves against) is exposed

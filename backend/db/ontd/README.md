@@ -78,30 +78,6 @@ catalog match stay unmapped and keep raw ONTD ids — reported by
 `build_stop_mappings()` and queryable as the gap between active ONTD
 stops and mapping rows.
 
-**After a stop-catalog change** (new Drive CSV with removed or re-pointed
-stop ids), the bootstrap repairs itself: `seed.py` DROPs `input_params`
-on every start, so a reseeded catalog can leave this schema's derived
-mappings pointing at ids that no longer exist. `bootstrap.py` detects
-exactly that (`stale_stop_mappings()`) and re-runs the projection step
-alone — the timetable and the curated composition catalog do not depend
-on the stop catalog, so nothing is re-downloaded or re-routed
-unnecessarily. A normal `docker compose up --build` is enough.
-
-The mapping stage then re-matches every active ONTD stop against the new
-snapshot and warns about manual/verified rows stranded on removed ids
-(those must be re-pointed or un-verified by hand — protection cuts both
-ways). `test_38`'s `test_no_mapping_targets_removed_stops` asserts the
-end state.
-
-The detection is one-directional: it catches mappings left on removed
-stops, not a catalog that merely *added* stops which previously
-unmatched ONTD stops could now match. Those keep their raw ONTD ids
-until a full reload:
-
-```bash
-docker exec night-train-api python db/ontd/bootstrap.py --force
-```
-
 Since WP10 step 6b, `route_summaries` and `route_corridors` are no
 longer projection-only artifacts — they are the live `"existing"`
 branch of `POST /api/proposals`' gallery union (summaries rows, corridor

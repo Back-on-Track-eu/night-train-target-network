@@ -62,7 +62,7 @@ OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "data")
 
 NAME_PREFIX = "MANUAL_TEST_COMPARE "
 
-_STOPS = ["osm:n3856100103", "osm:w423692233"]
+_STOPS = ["DE_BERLIN_HBF", "AT_WIEN_HBF"]
 
 SEED_ANCHORS = [
     {"label": "Berlin – Wien (Balkan Standard)", "composition_id": "NEW-BAL-7"},

@@ -41,7 +41,6 @@ Public interface:
   proposal_to_response_dict(...)       -> dict        (full §2.1-shaped response: metadata + route + evaluation)
   summary_row_to_dict(row)             -> dict        (one proposal_summaries row for list responses)
   map_lines_to_geojson(rows)           -> dict        (GeoJSON FeatureCollection, one feature per corridor)
-  map_routes_to_geojson(rows)          -> dict        (GeoJSON FeatureCollection, one feature per LISTED row)
   map_stop_counts_to_dict(rows)        -> list[dict]
   map_country_counts_to_geojson(rows)  -> dict         (GeoJSON FeatureCollection, one feature per country)
 """
@@ -62,13 +61,7 @@ from adapters.proposal.filter_builder import (
     SUPPORTED_SOURCES,
 )
 
-_INCLUDE_SECTIONS = {
-    "summaries",
-    "map_lines",
-    "map_routes",
-    "map_stop_counts",
-    "map_country_counts",
-}
+_INCLUDE_SECTIONS = {"summaries", "map_lines", "map_stop_counts", "map_country_counts"}
 # The one home for the default "include" sections — api/proposals.py
 # imports it for the empty-body listing path.
 DEFAULT_INCLUDE = ["summaries"]
@@ -393,14 +386,6 @@ def summary_row_to_dict(row: dict) -> dict:
     }
 
 
-def _geometry_or_none(value) -> dict | None:
-    """A geometry column that may arrive as a dict (JSONB), a JSON string
-    (ST_AsGeoJSON), or NULL."""
-    if value is None:
-        return None
-    return value if isinstance(value, dict) else json.loads(value)
-
-
 def map_lines_to_geojson(rows: list[dict]) -> dict:
     """`map_lines` section (§7.1, WP6.1 revision; existing-route merge
     WP10 step 6b): GeoJSON FeatureCollection with one feature per
@@ -410,81 +395,32 @@ def map_lines_to_geojson(rows: list[dict]) -> dict:
     SAME feature when they share the corridor, so every feature carries
     the per-source split AND the total — `proposal_count` /
     `existing_count` / `total_count` (decision 2026-08-06: all three,
-    always). Thickness off `total_count`, colour/toggle by source, no
-    second query. `avg_margin_eur_per_train_km` is the mean across the
-    corridor's proposals only — None on corridors served exclusively by
-    existing trains.
-
-    The contributing id lists (`proposal_ids`, `existing_route_ids`)
-    were REMOVED: they were unbounded in proposal count and nothing read
-    them once per-route geometry moved to the paginated `map_routes`
-    section. See repository.map_lines()'s docstring.
-
-    `geometry` is simplified for overview zoom by the query (ST_Simplify,
-    see MAP_LINES_SIMPLIFY_TOLERANCE_DEG) and arrives as an
-    ST_AsGeoJSON string — parsed here, not re-queried. It is None only if
-    a corridor somehow resolved no representative shape.
-
-    `geometry_routed` is False when the representative shape is just the
-    two stops joined up rather than a routed line — true of a large
-    minority of ONTD corridors. Measured before simplification, so a
-    genuinely straight routed line is not mislabelled."""
+    always) — plus the id lists (`proposal_ids`, `existing_route_ids`)
+    for the assignment. Thickness off `total_count`, colour/toggle by
+    source, no second query. `avg_margin_eur_per_train_km` is the mean
+    across the corridor's proposals only — None on corridors served
+    exclusively by existing trains. geometry arrives pre-serialized JSON
+    (both proposals.shapes.geometry and ontd.route_corridors.geometry
+    are stored GeoJSON) — parsed here, not re-queried."""
     return {
         "type": "FeatureCollection",
         "features": [
             {
                 "type": "Feature",
-                "geometry": _geometry_or_none(row["geometry"]),
+                "geometry": row["geometry"]
+                if isinstance(row["geometry"], dict)
+                else json.loads(row["geometry"]),
                 "properties": {
                     "stop_a": row["stop_a"],
                     "stop_b": row["stop_b"],
                     "proposal_count": row["proposal_count"],
                     "existing_count": row["existing_count"],
                     "total_count": row["total_count"],
-                    "geometry_routed": row["geometry_routed"],
+                    "proposal_ids": list(row["proposal_ids"]),
+                    "existing_route_ids": list(row["existing_route_ids"]),
                     "avg_margin_eur_per_train_km": _to_float(
                         row["avg_margin_eur_per_train_km"]
                     ),
-                },
-            }
-            for row in rows
-        ],
-    }
-
-
-def map_routes_to_geojson(rows: list[dict]) -> dict:
-    """`map_routes` section: GeoJSON FeatureCollection with one feature
-    per LISTED row — the route belonging to each card on the current
-    page, from the projections' stored `geom_simplified`.
-
-    Unlike the other map sections this one IS paginated, sharing
-    `summaries`' filter/sort/limit/offset so the two always describe the
-    same rows (§7.1's "map sections cover the whole filtered set" is
-    documented with this exception). That is what keeps its size fixed at
-    the page size however many proposals exist.
-
-    `geometry` is None for an ONTD route whose routing failed
-    (route_summaries.geom_simplified NULL, routing_status on the row) —
-    the feature is still emitted so the caller can tell "no geometry"
-    apart from "not in this page".
-
-    `geometry_routed` says whether that geometry is real routing or the
-    catalogue's straight-line-between-stops fallback — true of nearly
-    half the ONTD routes (broad gauge, mostly). It rides along so a
-    client can draw the difference instead of presenting a placeholder
-    as a surveyed line. NULL on proposals, which carry no such flag."""
-    return {
-        "type": "FeatureCollection",
-        "features": [
-            {
-                "type": "Feature",
-                "geometry": _geometry_or_none(row["geometry"]),
-                "properties": {
-                    "source": row["source"],
-                    "proposal_id": row["proposal_id"],
-                    "proposal_version": row["proposal_version"],
-                    "route_id": row["route_id"],
-                    "geometry_routed": row["geometry_routed"],
                 },
             }
             for row in rows

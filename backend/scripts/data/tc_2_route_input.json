@@ -3,8 +3,8 @@
   "proposal_version": null,
   "scenario_id": null,
   "stops": [
-    "osm:n25948183",
-    "osm:n251904108"
+    "SE_STOCKHOLM_C",
+    "IT_ROMA_TERMINI"
   ],
   "composition_id": "REF-COUCH-10",
   "routing_mode": "fullRouting",

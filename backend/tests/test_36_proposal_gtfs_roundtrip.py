@@ -150,7 +150,7 @@ class TestRouteRoundtrip:
             )
         ]
         assert any(s["auto_added"] for s in stops_in_route), (
-            "fixture assumption: osm:n3325029085 should auto-add on this "
+            "fixture assumption: CZ_BRNO_HLN should auto-add on this "
             "corridor — see test_20_route_content.py's module docstring"
         )
 

@@ -30,7 +30,7 @@ class TestTransliterate:
         [
             ("Berlin Hbf", "BERLIN_HBF"),
             # Curated style: umlauts fold to two letters, matching the
-            # seed's own osm:n1236383343 / osm:n1305188216 convention.
+            # seed's own CH_ZUERICH_HB / SE_GOTEBORG_C convention.
             ("Zürich HB", "ZUERICH_HB"),
             ("Göteborg C", "GOETEBORG_C"),
             ("Malmö C", "MALMOE_C"),
@@ -63,17 +63,13 @@ class TestTransliterate:
 
 
 class TestMintId:
-    """The minting rule itself, not the catalog: these assert the shape
-    mint_tn_stop_id() produces, which is unchanged. Note the ids it mints
-    (COUNTRY_NAME) no longer share a namespace with the seeded catalog,
-    which is now OSM-keyed — see the note in stop_mapping.py."""
-
     def test_shape(self):
         assert mint_tn_stop_id("de", "Berlin Hbf") == "DE_BERLIN_HBF"
 
-    def test_folds_the_name_the_same_way_everywhere(self):
-        """The minting rule is transliterate() plus a country prefix, so a
-        minted id is reproducible from the name alone."""
+    def test_matches_curated_convention(self):
+        """The minting rule reproduces seed ids verbatim for stations
+        whose curated id was derived the same way — the property that
+        makes minted and curated stops one namespace."""
         assert mint_tn_stop_id("CH", "Zürich HB") == "CH_ZUERICH_HB"
         assert mint_tn_stop_id("AT", "Wien Hbf") == "AT_WIEN_HBF"
         assert mint_tn_stop_id("FR", "Paris Est") == "FR_PARIS_EST"
@@ -95,29 +91,3 @@ class TestDistance:
         near = _distance_m(52.5250, 13.3690, 52.5250, 13.3742)
         far = _distance_m(52.5250, 13.3690, 52.5250, 13.4430)
         assert near < MATCH_RADIUS_M < far
-
-
-class TestMappingTargetsCurrent:
-    """Every mapping row must point into the pinned catalog snapshot —
-    manual/verified rows survive catalog changes by design, which is
-    exactly how they get stranded on removed ids (2026-08 restructure
-    removed 21 duplicate stops). build_stop_mappings() warns; this test
-    makes the warning a failure so it cannot be shipped past."""
-
-    def test_no_mapping_targets_removed_stops(self, db_cur):
-        db_cur.execute("""
-            SELECT m.ontd_stop_id, m.tn_stop_id, m.match_method, m.verified
-            FROM ontd.stop_mappings m
-            WHERE NOT EXISTS (
-                SELECT 1 FROM input_params.stop_infrastructures s
-                JOIN scenario.scenarios sc
-                  ON sc.stop_infrastructures_version = s.stop_infra_version
-                WHERE sc.is_current_base AND s.stop_id = m.tn_stop_id
-            )
-            """)
-        stale = db_cur.fetchall()
-        assert stale == [], (
-            "mapping rows target stop ids absent from the base snapshot "
-            "(re-point or un-verify them, then force the ONTD bootstrap): "
-            + ", ".join(f"{r['ontd_stop_id']}->{r['tn_stop_id']}" for r in stale)
-        )

@@ -17,7 +17,7 @@ Public interface:
                                                           plan → stopgap
                                                           demand → evaluate
                                                           → views)
-  evaluate_and_build_views(route, tracks, stop_infra, passages)
+  evaluate_and_build_views(route, tracks, stop_infra)
       -> (EvaluationResult, ViewsBundle)                (the post-routing
                                                           half, for callers
                                                           that bring their
@@ -41,11 +41,7 @@ from models.demand.model import (
 )
 from models.evaluation.calc import EvaluationResult, evaluate_route
 from models.evaluation.views import ViewsBundle, build_all_views
-from models.params import (
-    PassageChargeCollection,
-    StopInfraCollection,
-    TrackInfraCollection,
-)
+from models.params import StopInfraCollection, TrackInfraCollection
 from models.route.route import Route
 from models.route.route_factory import (
     AutoStopSuggestion,
@@ -75,15 +71,12 @@ def evaluate_and_build_views(
     route: Route,
     tracks: TrackInfraCollection,
     stop_infra: StopInfraCollection,
-    passages: PassageChargeCollection,
 ) -> tuple[EvaluationResult, ViewsBundle]:
     """Evaluate an already-built, already-demand-populated Route and build
     every breakdown view — the post-routing half of run_compute(), exposed
     for callers that construct their Route another way (the seed's
     hand-crafted example route, tests applying controlled demand)."""
-    result = evaluate_route(
-        route=route, tracks=tracks, stop_infra=stop_infra, passages=passages
-    )
+    result = evaluate_route(route=route, tracks=tracks, stop_infra=stop_infra)
     return result, build_all_views(route, result)
 
 
@@ -142,7 +135,7 @@ def run_compute(
     )
 
     evaluation_result, views = evaluate_and_build_views(
-        route, provenance.tracks, provenance.stop_infra, provenance.passages
+        route, provenance.tracks, provenance.stop_infra
     )
 
     return ComputeResult(

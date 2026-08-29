@@ -1,4 +1,3 @@
-/// <reference types="vitest/config" />
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
@@ -30,11 +29,5 @@ export default defineConfig({
     watch: {
       usePolling: true,
     },
-  },
-  // Unit tests cover pure logic in src/lib only (node environment, no DOM) —
-  // components are not mounted, so no jsdom/@vue/test-utils is pulled in.
-  test: {
-    environment: 'node',
-    include: ['src/**/*.test.ts'],
   },
 })

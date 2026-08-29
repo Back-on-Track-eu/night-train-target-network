@@ -60,8 +60,6 @@ Collections
 
 from __future__ import annotations
 
-import math
-
 import logging
 from dataclasses import dataclass, field
 from typing import Optional
@@ -136,7 +134,7 @@ class ParamVersionEntry:
     One entry per parameter field, keyed by "table_short:entity_id:field_name"
     in ParamVersions.entries, e.g.:
         "track_infra:DE:tac_eur_train_km"
-        "stop_infra:osm:n3856100103:stop_charge_eur"
+        "stop_infra:DE_BERLIN_HBF:stop_charge_eur"
         "composition_type:STD-7.1:max_speed_kmh"
         "operator:STD:driver_costs_eur_h"
         "coach_type:type1:weight_gross_t"
@@ -170,7 +168,7 @@ class ParamVersions:
 
     Keys follow the pattern "table_short:entity_id", e.g.:
         "track_infra:DE"            → TrackInfrastructure for Germany
-        "stop_infra:osm:n3856100103"  → StopInfrastructure for Berlin Hbf
+        "stop_infra:DE_BERLIN_HBF"  → StopInfrastructure for Berlin Hbf
         "composition_type:STD-7.1"  → CompositionType STD-7.1
         "coach_type:WLABmz"         → CoachType WLABmz
         "operator:STD"              → Operator STD
@@ -225,69 +223,11 @@ class ServiceClass:
 
     class_id: str  # e.g. "seat (reclining)", "couchette (6-berth)"
     class_main: str  # e.g. "Seat", "Couchette", "Sleeper"
-    is_night_accommodation: bool = False
-    """Whether this class makes the train count as carrying night
-    accommodation for tariff purposes — see the column comment on
-    input_params.service_classes.service_class_is_night_accommodation and
-    models/infrastructure/tac/calc_tac.py's night-band widening."""
 
 
 # =============================================================================
 # OPERATOR  (input_params.operators + input_params.operator_class_costs)
 # =============================================================================
-
-
-# =============================================================================
-# ROSTER EFFICIENCY (Dienstplanwirkungsgrad)
-# =============================================================================
-#
-# Shared by Operator (the DB mirror) and Composition (the flattened object
-# evaluation works with), both of which carry the same five roster fields.
-# The maths lives here once; see docs/MODEL.md for the derivation.
-
-
-def roster_efficiency(rates, role: str, basis_h: float, on_train_h: float) -> float:
-    """Share of paid hours that is productive, for one trip.
-
-    Paid hours exceed hours on the train: sign-on/off, positioning,
-    away-base rest and reserve cover. A duty is capped by law and
-    agreement — driving time for drivers (Directive 2005/47/EC: 8 h on a
-    night shift), working time for onboard staff — so a long trip needs
-    relief crews, and each relief adds a fixed unproductive allowance.
-    Efficiency therefore steps down at every duty boundary and recovers
-    gradually as that allowance amortises over a longer trip.
-
-    rates      — any object carrying the five roster fields
-    role       — "driver" (basis: driving time) or "crew" (basis: time on train)
-    basis_h    — hours measured against the duty cap
-    on_train_h — productive hours paid for on this trip
-
-    Returns the reference efficiency when the trip fits a single duty.
-    """
-    if role == "driver":
-        max_duty, eff_ref = rates.driver_max_duty_h, rates.driver_roster_eff_ref
-    else:
-        max_duty, eff_ref = rates.crew_max_duty_h, rates.crew_roster_eff_ref
-    if on_train_h <= 0 or max_duty <= 0:
-        return eff_ref
-    # -1e-9 keeps a trip of exactly max_duty at one duty despite float
-    # noise in the summed minute fields.
-    duties = max(1, math.ceil(basis_h / max_duty - 1e-9))
-    return eff_ref * on_train_h / (on_train_h + rates.relief_allowance_h * (duties - 1))
-
-
-def driver_rate_eur_h(rates, driving_h: float, on_train_h: float) -> float:
-    """Paid driver rate for a trip — raw wage over roster efficiency."""
-    return rates.driver_costs_eur_h / roster_efficiency(
-        rates, "driver", driving_h, on_train_h
-    )
-
-
-def crew_rate_eur_h(rates, on_train_h: float) -> float:
-    """Paid attendant rate for a trip — raw wage over roster efficiency."""
-    return rates.crew_costs_eur_h / roster_efficiency(
-        rates, "crew", on_train_h, on_train_h
-    )
 
 
 @dataclass
@@ -312,14 +252,8 @@ class Operator:
 
     operator_id: str
     operator_name: str
-    driver_costs_eur_h: float  # EUR per PRODUCTIVE driver hour (raw wage)
-    crew_costs_eur_h: float  # EUR per PRODUCTIVE crew hour (raw wage)
-    # Roster (Dienstplanwirkungsgrad) parameters — see roster_efficiency().
-    driver_max_duty_h: float
-    crew_max_duty_h: float
-    driver_roster_eff_ref: float
-    crew_roster_eff_ref: float
-    relief_allowance_h: float
+    driver_costs_eur_h: float  # EUR per driver hour (rate, not duration)
+    crew_costs_eur_h: float  # EUR per crew hour (rate, not duration)
     ebit_margin_per: float
     financing_quota_per: float
     var_overhead_per: float
@@ -330,40 +264,7 @@ class Operator:
     # insurance bundled into the rate). Billed per hour the loco is coupled
     # to a working train, i.e. segment total_time_min (driving + dynamics + buffer).
     # Energy, TAC, and driver/crew costs are NOT included — billed separately.
-    # The rate itself lives on input_params.operator_loco_costs, per operator
-    # AND machine, and reaches the model as Composition.loco_lease_eur_h.
-
-    def roster_efficiency(self, role: str, basis_h: float, on_train_h: float) -> float:
-        return roster_efficiency(self, role, basis_h, on_train_h)
-
-    def driver_rate_eur_h(self, driving_h: float, on_train_h: float) -> float:
-        return driver_rate_eur_h(self, driving_h, on_train_h)
-
-    def crew_rate_eur_h(self, on_train_h: float) -> float:
-        return crew_rate_eur_h(self, on_train_h)
-
-
-# =============================================================================
-# LOCOMOTIVE TYPE  (input_params.loco_types)
-# =============================================================================
-
-
-@dataclass
-class LocoType:
-    """
-    One locomotive type — the physical machine, independent of who runs it.
-
-    Weight and speed are intrinsic and live here. The rental rate does not:
-    it is a commercial term varying by operator, resolved through
-    input_params.operator_loco_costs and carried on the Composition, the
-    same way onboard service cost varies by operator over service classes.
-    """
-
-    loco_type_id: str
-    description: str
-    traction: str
-    weight_t: float
-    max_speed_kmh: int
+    loco_full_service_lease_eur_h: float
 
 
 # =============================================================================
@@ -384,7 +285,6 @@ class CoachClassAssignment:
 
     class_id: str  # FK → input_params.classes.class_id
     class_main: str  # denormalised from input_params.classes
-    is_night_accommodation: bool  # denormalised from input_params.classes
     places: int  # number of places of this class in the coach
     # real section geometry (workbook 2026-07-22) — basis of the class
     # cost allocation and of derived densities; Σ section_length_m over a
@@ -437,10 +337,6 @@ class CoachType:
         """Total places across all classes in this coach."""
         return sum(a.places for a in self.classes.values())
 
-    def has_night_accommodation(self) -> bool:
-        """Whether any section of this coach is night accommodation."""
-        return any(a.is_night_accommodation for a in self.classes.values())
-
 
 # =============================================================================
 # COMPOSITION TYPE  (input_params.compositions + input_params.composition_coaches)
@@ -474,7 +370,7 @@ class CompositionType:
     material_strategy: (
         str  # 'new' | 'refurbished' — drives the parameter family and operator tier
     )
-    locos: list[LocoType]  # in position order; see composition_type_locos
+    n_locos: int  # locomotives needed; scales loco lease (and energy weight, once calibrated)
     zugchef_crew_factor: float  # attendant-equivalents (1.19 / 2.38)
     length_cost_prop: float  # X of the class cost allocation (1-X on weight)
     food_and_beverages: str | None  # catering concept (composition-level)
@@ -490,7 +386,7 @@ class CompositionType:
     min_alighting_time_min: int
 
     # composition-level cost params — locomotives are full-service leased
-    # (see input_params.operator_loco_costs), not purchased
+    # (see Operator.loco_full_service_lease_eur_h), not purchased
     purchase_coach_eur: float
     coach_avail_per: float
     coach_amort_years: int
@@ -509,25 +405,6 @@ class CompositionType:
     def total_weight_t(self) -> float:
         """Total gross weight of all coaches in tonnes."""
         return sum(c.weight_gross_t for c in self.coaches.values())
-
-    @property
-    def n_locos(self) -> int:
-        """Derived from the assignment, never stored — a count and a list
-        that can disagree is a class of bug worth designing out."""
-        return len(self.locos)
-
-    def total_gross_weight_t(self) -> float:
-        """Coaches plus every locomotive — the gross weight the traction
-        dynamics haul and the weight-dependent track access charge is
-        levied on. total_weight_t() is coaches only, since locomotives are
-        leased rather than part of the composition's own coach list."""
-        return self.total_weight_t() + sum(loco.weight_t for loco in self.locos)
-
-    def has_night_accommodation(self) -> bool:
-        """Whether any coach carries a night-accommodation section — the
-        condition behind the German whole-run night pricing (see
-        calc_tac.py). A property of the train alone, no timetable needed."""
-        return any(c.has_night_accommodation() for c in self.coaches.values())
 
     def total_length_m(self) -> float:
         """Total coach length in metres (locomotive excluded)."""
@@ -671,8 +548,7 @@ class Composition:
     operator_name: str
 
     material_strategy: str
-    locos: list[LocoType]  # in position order
-    loco_lease_eur_h: dict[str, float]  # loco_type_id -> €/h for THIS operator
+    n_locos: int
     zugchef_crew_factor: float
     length_cost_prop: float
     food_and_beverages: str | None
@@ -690,7 +566,7 @@ class Composition:
     energy_factor_terrain: float
 
     # general train properties (derived from coaches)
-    total_weight_t: float  # coaches only — total_gross_weight_t adds the locos
+    total_weight_t: float
     total_length_m: float
     total_length_wo_service_m: float
     total_weight_wo_service_t: float
@@ -722,16 +598,9 @@ class Composition:
     # (id + remarks) without a second lookup. Keyed by position.
     coaches: dict[int, CoachType]
 
-    # operator cost — driver/crew rates are RAW productive-hour wages;
-    # evaluation divides them by the per-trip roster efficiency computed
-    # from the five roster fields below.
+    # operator cost
     driver_costs_eur_h: float
     crew_costs_eur_h: float
-    driver_max_duty_h: float
-    crew_max_duty_h: float
-    driver_roster_eff_ref: float
-    crew_roster_eff_ref: float
-    relief_allowance_h: float
     ebit_margin_per: float
     financing_quota_per: float
     var_overhead_per: float
@@ -739,6 +608,10 @@ class Composition:
     svc_stockings_eur_place: dict[
         str, float
     ]  # keyed by class_main (weighted_avg_by_main_class()) — Operator's own copy above stays class_id-keyed
+    loco_full_service_lease_eur_h: (
+        float  # billed on route-level deduplicated loco operating time
+    )
+
     # composition cost — locomotives are full-service leased, not purchased
     purchase_coach_eur: float
     coach_avail_per: float
@@ -750,45 +623,8 @@ class Composition:
     # composition_types columns (see IndicativeFigures). None if no
     indicative: Optional["IndicativeFigures"] = field(default=None)
 
-    @property
-    def n_locos(self) -> int:
-        return len(self.locos)
-
-    @property
-    def total_gross_weight_t(self) -> float:
-        """Coaches plus every locomotive — the gross weight the traction
-        dynamics haul and the weight-dependent track access charge is
-        levied on. total_weight_t is coaches only: locomotives are leased,
-        not part of the composition's coach list."""
-        return self.total_weight_t + sum(loco.weight_t for loco in self.locos)
-
-    @property
-    def loco_lease_total_eur_h(self) -> float:
-        """Rate for the whole consist per locomotive-hour — the sum over
-        the machines actually assigned, at this operator's rate for each.
-        Replaces the old n_locos x one-rate product, which could only ever
-        price identical machines."""
-        return sum(self.loco_lease_eur_h[loco.loco_type_id] for loco in self.locos)
-
-    @property
-    def has_night_accommodation(self) -> bool:
-        """Whether any coach carries a couchette, sleeper or capsule
-        section. Germany prices a train that does at its night rate over
-        the whole German run — see calc_tac.py."""
-        return any(c.has_night_accommodation() for c in self.coaches.values())
-
-    def driver_rate_eur_h(self, driving_h: float, on_train_h: float) -> float:
-        """Paid driver rate for a trip — raw wage over roster efficiency."""
-        return driver_rate_eur_h(self, driving_h, on_train_h)
-
-    def crew_rate_eur_h(self, on_train_h: float) -> float:
-        """Paid attendant rate for a trip — raw wage over roster efficiency."""
-        return crew_rate_eur_h(self, on_train_h)
-
     @classmethod
-    def from_type(
-        cls, comp_type: CompositionType, loco_lease_eur_h: dict[str, float]
-    ) -> "Composition":
+    def from_type(cls, comp_type: CompositionType) -> "Composition":
         """
         Construct a fully resolved Composition from its CompositionType.
         Called exclusively by DBDataLoader.build_all_compositions().
@@ -809,8 +645,7 @@ class Composition:
             operator_id=comp_type.operator.operator_id,
             operator_name=comp_type.operator.operator_name,
             material_strategy=comp_type.material_strategy,
-            locos=comp_type.locos,
-            loco_lease_eur_h=loco_lease_eur_h,
+            n_locos=comp_type.n_locos,
             zugchef_crew_factor=comp_type.zugchef_crew_factor,
             length_cost_prop=comp_type.length_cost_prop,
             food_and_beverages=comp_type.food_and_beverages,
@@ -839,11 +674,6 @@ class Composition:
             coaches=dict(comp_type.coaches),
             driver_costs_eur_h=comp_type.operator.driver_costs_eur_h,
             crew_costs_eur_h=comp_type.operator.crew_costs_eur_h,
-            driver_max_duty_h=comp_type.operator.driver_max_duty_h,
-            crew_max_duty_h=comp_type.operator.crew_max_duty_h,
-            driver_roster_eff_ref=comp_type.operator.driver_roster_eff_ref,
-            crew_roster_eff_ref=comp_type.operator.crew_roster_eff_ref,
-            relief_allowance_h=comp_type.operator.relief_allowance_h,
             ebit_margin_per=comp_type.operator.ebit_margin_per,
             financing_quota_per=comp_type.operator.financing_quota_per,
             var_overhead_per=comp_type.operator.var_overhead_per,
@@ -851,6 +681,7 @@ class Composition:
             svc_stockings_eur_place=comp_type.weighted_avg_by_main_class(
                 comp_type.operator.svc_stockings_eur_place
             ),
+            loco_full_service_lease_eur_h=comp_type.operator.loco_full_service_lease_eur_h,
             purchase_coach_eur=comp_type.purchase_coach_eur,
             coach_avail_per=comp_type.coach_avail_per,
             coach_amort_years=comp_type.coach_amort_years,
@@ -999,62 +830,6 @@ class DefaultTrackInfra:
     buffer_quota_per: float
     buffer_src: Optional[ParamsSource]
 
-    # --- track access charge components (models/infrastructure/tac/calc_tac.py)
-    # All EUR at the 2032 evaluation year — the calibration notebook does
-    # both conversions once, before seeding. A None here is a documented
-    # tariff fact ("not levied"), never a gap: the loader substitutes this
-    # whole group only when no rate term at all is present, so a lone None
-    # survives resolution intact. Provenance for the group is track_tac_src,
-    # shared by every component below (see TAC_COMPONENT_FIELD_NAMES).
-    tac_b_day: Optional[float]  # €/train-km
-    tac_b_night: Optional[float]  # €/train-km, on the night-band share
-    tac_gamma: Optional[float]  # €/gross-tonne-km, whole consist
-    tac_seat_km: Optional[float]  # €/seat-km (ES corridor surcharge)
-    tac_per_stop: Optional[float]  # €/stop (CH Haltezuschlag)
-    tac_revenue_share: Optional[float]  # fraction of attributable revenue
-    tac_fixed_per_train_km: Optional[float]  # €/train-km (LU path admin)
-    tac_peak_multiplier: Optional[float]  # scales the day rate in peak
-    tac_congestion_surcharge_eur_km: Optional[float]  # flat €/train-km in peak
-    tac_night_mode: str  # 'none' | 'time_band'
-    tac_night_band_start_min: Optional[int]  # minute of day, may wrap midnight
-    tac_night_band_end_min: Optional[int]
-    tac_night_full_if_accommodation: bool  # DE whole-run night widening
-    tac_peak_band1_start_min: Optional[int]
-    tac_peak_band1_end_min: Optional[int]
-    tac_peak_band2_start_min: Optional[int]
-    tac_peak_band2_end_min: Optional[int]
-    tac_peak_weekdays_only: bool
-
-    # --- traction energy price terms
-    #     (models/infrastructure/energy_pricing/calc_energy_price.py)
-    # EUR at the 2032 evaluation year, converted once in the calibration
-    # notebook. None is a tariff fact, never a gap, and — unlike the TAC
-    # group — never substituted from the defaults row: no night price means
-    # one rate around the clock, no catenary term means the country levies
-    # no separate supply-equipment charge. Only the day rate above
-    # (energy_price_eur_kwh) resolves against the default. Provenance for
-    # the group is energy_price_src, shared with the day rate.
-    energy_price_night_eur_kwh: Optional[float]  # €/kWh inside the band
-    energy_night_band_start_min: Optional[int]  # minute of day, may wrap
-    energy_night_band_end_min: Optional[int]
-    energy_catenary_eur_train_km: Optional[float]  # €/train-km
-    energy_catenary_eur_gross_tonne_km: Optional[float]  # €/gross-tonne-km
-
-    # --- service facility terms
-    #     (models/infrastructure/facility/calc_facility.py)
-    # EUR at the 2032 evaluation year. Unlike the energy group these DO resolve
-    # against the defaults row — as one group, keyed on parking_basis: every
-    # country that stables a train charges something, or has been documented
-    # not to, in which case its basis reads 'none'. Only the rate column
-    # matching the basis carries a value. Provenance for the group is
-    # parking_src, shared with the shunting figure it is calibrated alongside.
-    parking_basis: Optional[str]  # per_metre_day | per_hour | per_event | none
-    parking_eur_metre_day: Optional[float]
-    parking_eur_hour: Optional[float]
-    parking_eur_event: Optional[float]
-    parking_free_hours: Optional[float]
-    parking_hotel_power_eur_hour: Optional[float]
-
     def source_for(self, field_name: str) -> Optional[ParamsSource]:
         """
         Return this default row's source for a given TrackInfrastructure
@@ -1089,68 +864,6 @@ tracking on a real row and marking all of them True when synthesizing a
 whole missing country's row — single source of truth so the two never
 drift apart."""
 
-TAC_COMPONENT_FIELD_NAMES = (
-    "tac_b_day",
-    "tac_b_night",
-    "tac_gamma",
-    "tac_seat_km",
-    "tac_per_stop",
-    "tac_revenue_share",
-    "tac_fixed_per_train_km",
-    "tac_peak_multiplier",
-    "tac_congestion_surcharge_eur_km",
-    "tac_night_mode",
-    "tac_night_band_start_min",
-    "tac_night_band_end_min",
-    "tac_night_full_if_accommodation",
-    "tac_peak_band1_start_min",
-    "tac_peak_band1_end_min",
-    "tac_peak_band2_start_min",
-    "tac_peak_band2_end_min",
-    "tac_peak_weekdays_only",
-)
-"""The calibrated TAC component fields, kept apart from
-TRACK_INFRA_FIELD_NAMES above because they resolve as ONE GROUP rather
-than field by field (see DBDataLoader._row_to_track): a country either
-has its own tariff or is priced from the EU median, never a mixture. They
-are registered in ParamVersions like any other field and share
-track_tac_src for provenance."""
-
-ENERGY_PRICE_FIELD_NAMES = (
-    "energy_price_night_eur_kwh",
-    "energy_night_band_start_min",
-    "energy_night_band_end_min",
-    "energy_catenary_eur_train_km",
-    "energy_catenary_eur_gross_tonne_km",
-)
-"""The calibrated energy price terms beyond the day rate, kept apart from
-TRACK_INFRA_FIELD_NAMES because they are never defaulted: a None here is
-the documented tariff fact "not levied" (see DBDataLoader._row_to_track),
-where a None in the ten legacy parameters is a gap the defaults row fills.
-Registered in ParamVersions like any other field and sharing
-energy_price_src with the day rate, which is the value they qualify."""
-
-FACILITY_FIELD_NAMES = (
-    "parking_basis",
-    "parking_eur_metre_day",
-    "parking_eur_hour",
-    "parking_eur_event",
-    "parking_free_hours",
-    "parking_hotel_power_eur_hour",
-)
-"""The calibrated stabling terms, kept apart from TRACK_INFRA_FIELD_NAMES
-because they resolve as ONE GROUP rather than field by field (see
-DBDataLoader._row_to_track): a country prices in exactly one unit, so the two
-unused rate columns are NULL by construction and defaulting them individually
-would mix two countries' tariff structures. The trigger is parking_basis.
-Shunting is not here — it stays the single per-event field
-shunting_eur_event, which defaults like any other legacy parameter."""
-
-TAC_RATE_FIELD_NAMES = ("tac_b_day", "tac_b_night", "tac_gamma")
-"""The three distance-based rate terms whose joint absence triggers
-group resolution. A country levying any one of them is calibrated; the
-other components being None then means "not levied here"."""
-
 _TRACK_DEFAULT_SRC_ATTRS = {
     "tac_eur_train_km": "tac_src",
     "parking_eur_day": "parking_src",
@@ -1162,18 +875,9 @@ _TRACK_DEFAULT_SRC_ATTRS = {
     "min_boarding_time_min": "min_boarding_src",
     "min_alighting_time_min": "min_alighting_src",
     "buffer_quota_per": "buffer_src",
-    **{name: "tac_src" for name in TAC_COMPONENT_FIELD_NAMES},
-    **{name: "energy_price_src" for name in ENERGY_PRICE_FIELD_NAMES},
-    **{name: "parking_src" for name in FACILITY_FIELD_NAMES},
 }
-"""Maps each TRACK_INFRA_FIELD_NAMES / TAC_COMPONENT_FIELD_NAMES /
-ENERGY_PRICE_FIELD_NAMES / FACILITY_FIELD_NAMES entry to
-its source attribute on DefaultTrackInfra — see
-DefaultTrackInfra.source_for(). The whole TAC component group shares
-tac_src: a country's track access terms come from its network statement,
-and where more than one document is involved the extras are named in the
-row's change_log (the per-value record stays the calibration itself, see
-models/infrastructure/tac/calib/TAC_CALIBRATION.md)."""
+"""Maps each TRACK_INFRA_FIELD_NAMES entry to its source attribute on
+DefaultTrackInfra — see DefaultTrackInfra.source_for()."""
 
 
 @dataclass
@@ -1250,62 +954,6 @@ class TrackInfrastructure:
     min_alighting_time_min: int
     buffer_quota_per: float
 
-    # --- track access charge components (models/infrastructure/tac/calc_tac.py)
-    # All EUR at the 2032 evaluation year — the calibration notebook does
-    # both conversions once, before seeding. A None here is a documented
-    # tariff fact ("not levied"), never a gap: the loader substitutes this
-    # whole group only when no rate term at all is present, so a lone None
-    # survives resolution intact. Provenance for the group is track_tac_src,
-    # shared by every component below (see TAC_COMPONENT_FIELD_NAMES).
-    tac_b_day: Optional[float]  # €/train-km
-    tac_b_night: Optional[float]  # €/train-km, on the night-band share
-    tac_gamma: Optional[float]  # €/gross-tonne-km, whole consist
-    tac_seat_km: Optional[float]  # €/seat-km (ES corridor surcharge)
-    tac_per_stop: Optional[float]  # €/stop (CH Haltezuschlag)
-    tac_revenue_share: Optional[float]  # fraction of attributable revenue
-    tac_fixed_per_train_km: Optional[float]  # €/train-km (LU path admin)
-    tac_peak_multiplier: Optional[float]  # scales the day rate in peak
-    tac_congestion_surcharge_eur_km: Optional[float]  # flat €/train-km in peak
-    tac_night_mode: str  # 'none' | 'time_band'
-    tac_night_band_start_min: Optional[int]  # minute of day, may wrap midnight
-    tac_night_band_end_min: Optional[int]
-    tac_night_full_if_accommodation: bool  # DE whole-run night widening
-    tac_peak_band1_start_min: Optional[int]
-    tac_peak_band1_end_min: Optional[int]
-    tac_peak_band2_start_min: Optional[int]
-    tac_peak_band2_end_min: Optional[int]
-    tac_peak_weekdays_only: bool
-
-    # --- traction energy price terms
-    #     (models/infrastructure/energy_pricing/calc_energy_price.py)
-    # EUR at the 2032 evaluation year, converted once in the calibration
-    # notebook. None is a tariff fact, never a gap, and — unlike the TAC
-    # group — never substituted from the defaults row: no night price means
-    # one rate around the clock, no catenary term means the country levies
-    # no separate supply-equipment charge. Only the day rate above
-    # (energy_price_eur_kwh) resolves against the default. Provenance for
-    # the group is energy_price_src, shared with the day rate.
-    energy_price_night_eur_kwh: Optional[float]  # €/kWh inside the band
-    energy_night_band_start_min: Optional[int]  # minute of day, may wrap
-    energy_night_band_end_min: Optional[int]
-    energy_catenary_eur_train_km: Optional[float]  # €/train-km
-    energy_catenary_eur_gross_tonne_km: Optional[float]  # €/gross-tonne-km
-
-    # --- service facility terms
-    #     (models/infrastructure/facility/calc_facility.py)
-    # EUR at the 2032 evaluation year. Unlike the energy group these DO resolve
-    # against the defaults row — as one group, keyed on parking_basis: every
-    # country that stables a train charges something, or has been documented
-    # not to, in which case its basis reads 'none'. Only the rate column
-    # matching the basis carries a value. Provenance for the group is
-    # parking_src, shared with the shunting figure it is calibrated alongside.
-    parking_basis: Optional[str]  # per_metre_day | per_hour | per_event | none
-    parking_eur_metre_day: Optional[float]
-    parking_eur_hour: Optional[float]
-    parking_eur_event: Optional[float]
-    parking_free_hours: Optional[float]
-    parking_hotel_power_eur_hour: Optional[float]
-
 
 @dataclass
 class TrackInfraCollection:
@@ -1362,79 +1010,6 @@ class TrackInfraCollection:
         return self._data.get(country_code)
 
     def all(self) -> dict[str, TrackInfrastructure]:
-        return self._data
-
-    def __len__(self) -> int:
-        return len(self._data)
-
-
-# =============================================================================
-# PASSAGE CHARGES  (input_params.passage_charges)
-# =============================================================================
-
-PASSAGE_FIELD_NAMES = ("fixed_eur", "per_passenger_eur")
-"""Canonical value-field names on PassageCharge — shared by DBDataLoader
-for ParamVersions registration, mirroring TRACK_INFRA_FIELD_NAMES."""
-
-
-@dataclass
-class PassageCharge:
-    """
-    One crossing charged per traverse rather than per kilometre — the
-    Storebælt and Øresund fixed links, the Channel Tunnel (extensible to
-    Fehmarnbelt in a 2032 scenario).
-
-    Populated by DBDataLoader.build_all_passages(). A crossing is its own
-    entity keyed by passage_id rather than a country attribute, because
-    the charging party is the crossing's operator: Øresund is two rows
-    over one polygon, each infrastructure manager billing its half.
-
-    Geometry is deliberately NOT carried here. Polygon matching happens at
-    routing time (rail_router.PassageIndex), so by the time evaluation
-    runs a Segment already knows which crossings it owns.
-
-    fixed_eur          per train traverse, one way
-    per_passenger_eur  per carried passenger, one way (Channel Tunnel) —
-                       evaluated against the segment's passenger load, so
-                       this term follows demand rather than routing
-
-    No _src fields: source and version provenance live on
-    PassageChargeCollection.param_versions, mirroring TrackInfrastructure.
-    """
-
-    passage_id: str
-    passage_name: str
-    fixed_eur: float
-    per_passenger_eur: float
-
-
-@dataclass
-class PassageChargeCollection:
-    """
-    Dict-backed collection of PassageCharge keyed by passage_id, built by
-    DBDataLoader.build_all_passages() at a scenario's pinned version —
-    passage_charges is the fifth scenario-versioned infrastructure table,
-    under the same full-snapshot contract as the other four.
-
-    get() returns None for an unknown passage_id. calc_tac.py logs and
-    skips rather than failing there: a routing-time geometry match against
-    a charge row dropped in a later version is a data inconsistency worth
-    surfacing, not worth killing an evaluation over.
-    """
-
-    _data: dict[str, PassageCharge]
-    param_versions: ParamVersions
-
-    def __init__(
-        self, data: dict[str, PassageCharge], param_versions: ParamVersions
-    ) -> None:
-        self._data = data
-        self.param_versions = param_versions
-
-    def get(self, passage_id: str) -> Optional[PassageCharge]:
-        return self._data.get(passage_id)
-
-    def all(self) -> dict[str, PassageCharge]:
         return self._data
 
     def __len__(self) -> int:
@@ -1520,35 +1095,6 @@ class StopInfrastructure:
     lon: float
 
     stop_charge_eur: float
-
-    # The charge's provenance, carried beside the figure: which document it
-    # came from, what it is per, and the VAT it excludes. A published number
-    # that cannot say where it came from is barely better than no number.
-    stop_charge_vat_rate_per: float | None = None
-    stop_charge_incl_vat_eur: float | None = None
-    stop_charge_basis: str | None = None
-    stop_charge_price_basis_year: int | None = None
-    stop_charge_class: str | None = None
-    stop_charge_source: str | None = None
-
-    # Catalog enrichment (stop classification pipeline steps 7/8) — plain
-    # values with no default resolution: nothing here falls back to
-    # stop_infrastructure_defaults, so none of it appears in param_versions
-    # beyond the snapshot version every column shares.
-    provenance: str = ""
-    name_latin: str = ""
-    name_ascii: str = ""
-    uic_ref: str | None = None
-    # Localized names keyed by language code (db.schema.STOP_NAME_LANGS) —
-    # the loader folds the country_*/city_* columns into these dicts so
-    # downstream code never touches column suffixes.
-    country_names: dict[str, str] = field(default_factory=dict)
-    city: str | None = None
-    city_osm_id: int | None = None
-    city_names: dict[str, str] = field(default_factory=dict)
-    # Night-train-capable gauges (>= 1435 mm); None = no usable tracks found.
-    gauges_mm: list[int] | None = None
-    gauge_evidence: str | None = None
 
 
 @dataclass
@@ -1701,4 +1247,3 @@ class Scenario:
     track_infrastructure_defaults_version: int
     stop_infrastructures_version: int
     stop_infrastructure_defaults_version: int
-    passage_charges_version: int

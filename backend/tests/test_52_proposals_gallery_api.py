@@ -28,7 +28,7 @@ from tests.helpers import (
     stop_times,
 )
 
-_STOPS = ["osm:n3856100103", "osm:w423692233"]
+_STOPS = ["DE_BERLIN_HBF", "AT_WIEN_HBF"]
 _COMPOSITION = "NEW-BAL-7"
 
 
@@ -59,13 +59,6 @@ def published(api_base, script_headers, computed):
 
 _EXISTING_ROUTE_IDS = ["TEST-GALLERY-E1", "TEST-GALLERY-E2"]
 
-# The corridor each fake route contributes, direction-collapsed the way
-# step 6a stores them and map_lines keys them (stop_a < stop_b). Since
-# the contributing id lists left the response, the stop pair is how a
-# corridor is identified.
-_E1_CORRIDOR = ("osm:n3856100103", "osm:w423692233")
-_E2_CORRIDOR = ("FR_PARIS_AUSTERLITZ", "FR_TOULOUSE_MATABIAU")
-
 
 @pytest.fixture(scope="module")
 def existing_routes(db_conn):
@@ -76,10 +69,7 @@ def existing_routes(db_conn):
     corridor/stop merging is observable; E2 is disjoint (FR). Committed
     (the API reads through its own connection) and deleted on teardown —
     same lifecycle pattern as purge_saved_proposals. geom_simplified is
-    a real PostGIS geometry, matching the proposal projection's type.
-    Corridor rows are written direction-collapsed (stop_a < stop_b) like
-    db/ontd/projection.py writes them — map_lines applies LEAST/GREATEST
-    only on the proposal branch and trusts this invariant here."""
+    a real PostGIS geometry, matching the proposal projection's type."""
     with db_conn.cursor() as cur:
         cur.execute(
             """
@@ -89,7 +79,7 @@ def existing_routes(db_conn):
                 co2_g_per_pax_km, geom_simplified, geometry_routed
             ) VALUES
             (%s, 'Gallery test existing Berlin–Wien',
-             ARRAY['osm:n3856100103','osm:w423692233'], 2, ARRAY['DE','AT'],
+             ARRAY['DE_BERLIN_HBF','AT_WIEN_HBF'], 2, ARRAY['DE','AT'],
              700.0, 9.5, 74.0, 33.0,
              ST_SetSRID(ST_GeomFromGeoJSON(
                '{"type":"MultiLineString","coordinates":[[[13.37,52.52],[16.37,48.19]]]}'
@@ -108,7 +98,7 @@ def existing_routes(db_conn):
             """
             INSERT INTO ontd.route_corridors (route_id, stop_a, stop_b, geometry)
             VALUES
-            (%s, 'osm:n3856100103', 'osm:w423692233',
+            (%s, 'AT_WIEN_HBF', 'DE_BERLIN_HBF',
              '{"type":"LineString","coordinates":[[13.37,52.52],[16.37,48.19]]}'::jsonb),
             (%s, 'FR_PARIS_AUSTERLITZ', 'FR_TOULOUSE_MATABIAU',
              '{"type":"LineString","coordinates":[[2.36,48.84],[1.45,43.61]]}'::jsonb)
@@ -142,27 +132,6 @@ def _proposal_ids(gallery_response) -> set[int]:
         for p in gallery_response["summaries"]["proposals"]
         if p["source"] == "proposal"
     }
-
-
-def _row_keys(summary_rows) -> list[tuple]:
-    """Row identity as (source, id), in list order — the two id spaces are
-    unrelated, so the source has to be part of the key."""
-    return [
-        ("existing", r["route_id"])
-        if r["source"] == "existing"
-        else ("proposal", r["proposal_id"])
-        for r in summary_rows
-    ]
-
-
-def _route_keys(map_routes_features) -> list[tuple]:
-    """The same identity, read off map_routes features."""
-    return [
-        ("existing", f["properties"]["route_id"])
-        if f["properties"]["source"] == "existing"
-        else ("proposal", f["properties"]["proposal_id"])
-        for f in map_routes_features
-    ]
 
 
 def _summary_row(api_base, published) -> dict:
@@ -219,7 +188,7 @@ class TestFilterKinds:
         assert published["proposal_id"] not in _proposal_ids(miss)
 
     def test_array_overlap_stop_ids_filter(self, api_base, published):
-        hit = _gallery(api_base, filter={"stop_ids": ["osm:n3856100103"]})
+        hit = _gallery(api_base, filter={"stop_ids": ["DE_BERLIN_HBF"]})
         assert published["proposal_id"] in _proposal_ids(hit)
 
     def test_proposal_ids_filter(self, api_base, published):
@@ -242,7 +211,7 @@ class TestFilterKinds:
             api_base,
             compute(
                 api_base,
-                ["osm:n3856100103", "osm:n1236383343", "osm:w423692233"],
+                ["DE_BERLIN_HBF", "CH_ZUERICH_HB", "AT_WIEN_HBF"],
                 _COMPOSITION,
             )["request"],
             name="Berlin \u2013 Wien via Z\u00fcrich (gallery test)",
@@ -406,7 +375,7 @@ class TestSourceUnion:
         """stop_ids is a shared Target Network namespace (step 6a) —
         one filter matches proposals AND existing routes over the same
         stop."""
-        body = _gallery(api_base, filter={"stop_ids": ["osm:n3856100103"]})
+        body = _gallery(api_base, filter={"stop_ids": ["DE_BERLIN_HBF"]})
         sources = {r["source"] for r in body["summaries"]["proposals"]}
         assert sources == {"proposal", "existing"}
 
@@ -417,39 +386,39 @@ class TestSourceUnion:
         endpoints AND fake existing route E1 — but a proposal's segments
         run between consecutive stops (incl. auto-added ones), so the
         merge assertion targets the count invariants on every feature
-        and E1's corridor being present with its existing_count.
-
-        Corridors are addressed by their stop pair: the contributing id
-        lists left the response (see
-        test_map_lines_omits_contributing_id_lists), so `existing_routes`
-        is a fixture dependency rather than something read back here."""
+        and E1's corridor being present with its existing_count."""
         body = _gallery(api_base, include=["map_lines"])
         features = body["map_lines"]["features"]
         assert features
-        corridors = {}
         for f in features:
             props = f["properties"]
             assert (
                 props["total_count"]
                 == props["proposal_count"] + props["existing_count"]
             )
-            corridors[(props["stop_a"], props["stop_b"])] = props
-        # Both sources reach the merged set: E1's corridor from the
-        # existing side, `published`'s legs from the proposal side.
-        assert corridors[_E1_CORRIDOR]["existing_count"] >= 1
-        assert any(props["proposal_count"] >= 1 for props in corridors.values())
-        # Existing-only corridors carry no margin — E2's stop ids are
-        # fixture-local, so no proposal can reach that pair.
-        fr = corridors[_E2_CORRIDOR]
-        assert fr["existing_count"] == 1 and fr["proposal_count"] == 0
-        assert fr["avg_margin_eur_per_train_km"] is None
+            assert len(props["proposal_ids"]) == props["proposal_count"]
+            assert len(props["existing_route_ids"]) == props["existing_count"]
+        e1_features = [
+            f
+            for f in features
+            if existing_routes[0] in f["properties"]["existing_route_ids"]
+        ]
+        assert len(e1_features) == 1
+        assert e1_features[0]["properties"]["existing_count"] >= 1
+        # Existing-only corridors carry no margin.
+        fr = [
+            f
+            for f in features
+            if existing_routes[1] in f["properties"]["existing_route_ids"]
+        ]
+        assert fr and fr[0]["properties"]["avg_margin_eur_per_train_km"] is None
 
     def test_map_stop_counts_triple(self, api_base, existing_routes, published):
         body = _gallery(api_base, include=["map_stop_counts"])
         rows = {r["stop_id"]: r for r in body["map_stop_counts"]}
         for row in rows.values():
             assert row["n"] == row["n_proposals"] + row["n_existing"]
-        berlin = rows["osm:n3856100103"]
+        berlin = rows["DE_BERLIN_HBF"]
         assert berlin["n_proposals"] >= 1 and berlin["n_existing"] >= 1
 
     def test_map_country_counts_triple(self, api_base, existing_routes, published):
@@ -490,12 +459,12 @@ class TestTripWindows:
         return f"{lo_h:02d}:{lo_m:02d}", f"{hi_h:02d}:{hi_m:02d}"
 
     def test_matching_window(self, api_base, published, computed):
-        frm, to = self._departure_window(computed, "osm:n3856100103")
+        frm, to = self._departure_window(computed, "DE_BERLIN_HBF")
         hit = _gallery(
             api_base,
             filter={
                 "trip_windows": [
-                    {"stop_id": "osm:n3856100103", "departure": {"from": frm, "to": to}}
+                    {"stop_id": "DE_BERLIN_HBF", "departure": {"from": frm, "to": to}}
                 ]
             },
         )
@@ -507,7 +476,7 @@ class TestTripWindows:
             filter={
                 "trip_windows": [
                     {
-                        "stop_id": "osm:n3856100103",
+                        "stop_id": "DE_BERLIN_HBF",
                         "departure": {"from": "03:00", "to": "03:01"},
                     }
                 ]
@@ -586,53 +555,31 @@ class TestIncludeSections:
         )
         assert set(body) == {"map_lines"}
         assert body["map_lines"]["type"] == "FeatureCollection"
-        # Filtering to this one proposal means every returned corridor is
-        # one of its segments.
-        features = body["map_lines"]["features"]
-        assert len(features) >= 1
-        for feature in features:
+        matching = [
+            f
+            for f in body["map_lines"]["features"]
+            if published["proposal_id"] in f["properties"]["proposal_ids"]
+        ]
+        assert len(matching) >= 1
+        for feature in matching:
             assert feature["properties"]["proposal_count"] >= 1
             assert feature["geometry"]["type"] == "LineString"
-            # Simplified for overview zoom, but still a drawable line.
-            assert len(feature["geometry"]["coordinates"]) >= 2
-
-    def test_map_lines_omits_contributing_id_lists(self, api_base, published):
-        """The id arrays were removed deliberately: their combined length
-        is the number of distinct (proposal, corridor) pairs, the one term
-        in this section unbounded in proposal count. Pinned as a test
-        because re-adding them would silently reintroduce that."""
-        body = _gallery(
-            api_base,
-            filter={"proposal_ids": [published["proposal_id"]]},
-            include=["map_lines"],
-        )
-        for feature in body["map_lines"]["features"]:
-            assert "proposal_ids" not in feature["properties"]
-            assert "existing_route_ids" not in feature["properties"]
 
     def test_map_lines_thickness_reflects_shared_corridor(
         self, api_base, script_headers, published
     ):
         """A second proposal on the exact same corridor (identical stop
-        list) should land on the SAME map_lines feature(s) as `published`
-        rather than adding its own, with proposal_count bumped — the whole
-        point of aggregating by corridor rather than by proposal.
-        Identical stop lists under the same default auto_stop_addition
-        behaviour insert the same intermediate stops, so every literal
-        segment is shared; with the filter restricted to exactly these two
-        proposals, EVERY returned corridor must therefore carry both.
-
-        Both sides use the SAME composition. An earlier version varied it,
-        which quietly made the test depend on two compositions producing an
-        identical auto-added stop list: the "add" budget is a share of
-        technical trip time, so a faster or slower consist can admit a
-        different number of marginal candidates and split the corridor into
-        different segments. That is correct behaviour and nothing to do with
-        corridor aggregation, which is what this test is about."""
+        list, different composition) should land on the SAME map_lines
+        feature(s) as `published`, with proposal_count bumped and both
+        ids present on every one of them — the whole point of
+        aggregating by corridor rather than by proposal. Identical stop
+        lists under the same default auto_stop_addition behaviour insert
+        the same intermediate stops, so every literal segment is shared,
+        not just one."""
         second = publish(
             api_base,
-            compute(api_base, _STOPS, _COMPOSITION)["request"],
-            name="Berlin \u2013 Wien (gallery test, second proposal)",
+            compute(api_base, _STOPS, "REF-BAL-9")["request"],
+            name="Berlin \u2013 Wien (gallery test, second composition)",
             headers=script_headers,
         )
         body = _gallery(
@@ -640,9 +587,14 @@ class TestIncludeSections:
             filter={"proposal_ids": [published["proposal_id"], second["proposal_id"]]},
             include=["map_lines"],
         )
-        features = body["map_lines"]["features"]
-        assert len(features) >= 1
-        for feature in features:
+        matching = [
+            f
+            for f in body["map_lines"]["features"]
+            if published["proposal_id"] in f["properties"]["proposal_ids"]
+        ]
+        assert len(matching) >= 1
+        for feature in matching:
+            assert second["proposal_id"] in feature["properties"]["proposal_ids"]
             assert feature["properties"]["proposal_count"] >= 2
 
     def test_map_stop_counts(self, api_base, published):
@@ -652,9 +604,9 @@ class TestIncludeSections:
             include=["map_stop_counts"],
         )
         stop_ids = {row["stop_id"] for row in body["map_stop_counts"]}
-        assert "osm:n3856100103" in stop_ids
+        assert "DE_BERLIN_HBF" in stop_ids
         berlin = next(
-            r for r in body["map_stop_counts"] if r["stop_id"] == "osm:n3856100103"
+            r for r in body["map_stop_counts"] if r["stop_id"] == "DE_BERLIN_HBF"
         )
         assert berlin["lat"] is not None and berlin["lon"] is not None
         assert berlin["n"] >= 1
@@ -675,68 +627,6 @@ class TestIncludeSections:
         # both DE and AT have a seeded Natural Earth border polygon
         assert by_country["DE"]["geometry"]["type"] in ("Polygon", "MultiPolygon")
         assert by_country["AT"]["geometry"]["type"] in ("Polygon", "MultiPolygon")
-
-    def test_map_routes_matches_the_listed_rows(self, api_base, published):
-        """map_routes is the ONE map section that honours limit/offset,
-        because it exists to draw the route behind a card the user can
-        see. It must therefore cover exactly the rows summaries returned,
-        in the same order — otherwise the map draws routes for cards that
-        are not on screen."""
-        body = _gallery(
-            api_base,
-            sort=[{"by": "total_distance_km", "dir": "desc"}],
-            limit=5,
-            offset=0,
-            include=["summaries", "map_routes"],
-        )
-        assert set(body) == {"summaries", "map_routes"}
-        assert body["map_routes"]["type"] == "FeatureCollection"
-        assert _row_keys(body["summaries"]["proposals"]) == _route_keys(
-            body["map_routes"]["features"]
-        )
-
-    def test_map_routes_follows_the_window(self, api_base, published):
-        """A different page must yield a different, equally-aligned set —
-        the guard against map_routes quietly ignoring offset and always
-        returning the first page."""
-        common = dict(
-            sort=[{"by": "total_distance_km", "dir": "desc"}],
-            limit=3,
-            include=["summaries", "map_routes"],
-        )
-        first = _gallery(api_base, offset=0, **common)
-        second = _gallery(api_base, offset=3, **common)
-
-        for body in (first, second):
-            assert _row_keys(body["summaries"]["proposals"]) == _route_keys(
-                body["map_routes"]["features"]
-            )
-        # Only meaningful once there are enough rows for a second page.
-        if second["summaries"]["proposals"]:
-            assert _route_keys(first["map_routes"]["features"]) != _route_keys(
-                second["map_routes"]["features"]
-            )
-
-    def test_map_routes_emits_null_geometry_rather_than_dropping_a_row(
-        self, api_base, existing_routes
-    ):
-        """ONTD routes whose routing failed have geom_simplified NULL. The
-        feature is still emitted so "no geometry" stays distinguishable
-        from "not on this page" — which is what keeps the row-for-row
-        alignment above true."""
-        body = _gallery(
-            api_base,
-            filter={"sources": ["existing"]},
-            limit=50,
-            include=["summaries", "map_routes"],
-        )
-        features = body["map_routes"]["features"]
-        assert _row_keys(body["summaries"]["proposals"]) == _route_keys(features)
-        for feature in features:
-            assert feature["geometry"] is None or feature["geometry"]["type"] in (
-                "LineString",
-                "MultiLineString",
-            )
 
     def test_multiple_sections_together(self, api_base):
         body = _gallery(api_base, include=["summaries", "map_country_counts"])
