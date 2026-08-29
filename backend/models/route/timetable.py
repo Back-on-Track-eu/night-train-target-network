@@ -92,6 +92,7 @@ from models.params import Composition, TrackInfraCollection, StopInfraCollection
 from models.route.trip import Segment, StopType, TimetableWarning
 from models.route.route import Schedule, SeasonalSchedule, Season, Frequency
 from models.route.routing.dynamics import stop_time_loss_s
+from models.route.routing.gauge import resolve_trip_gauge, stop_supports_gauge
 from models.route.routing.rail_router import RailRouter, RoutedLeg, build_router_stops
 from models.route.model import (
     MIRROR_MIN,
@@ -562,6 +563,7 @@ def _find_nearby_candidates(
     stop_ids: list[str],
     routed_legs: list[RoutedLeg],
     stop_infra: StopInfraCollection,
+    gauge_mm: int,
 ) -> list[_AutoStopCandidate]:
     """
     Every stop in the catalog within AUTO_STOP_BUFFER_M of the routed path,
@@ -569,7 +571,13 @@ def _find_nearby_candidates(
     kept only once, at its closest leg. Not sorted here — selection order
     is decided by the caller.
 
-    Two cheap pre-filters run before any shapely work, in order:
+    Three cheap pre-filters run before any shapely work, in order:
+      0. Gauge filter: only stops whose catalog data says they offer the
+         trip's own gauge_mm track (stop_supports_gauge — STRICT: a
+         gauge-unknown stop is never auto-added; adding it risks an
+         unsnappable route for a stop nobody asked for). This is what
+         keeps an Iberian-gauge-only stop off a standard-gauge corridor's
+         suggestions even when it sits right beside the path.
       1. Touched-country filter: the catalog is cut down to stops in
          countries the routed legs actually pass through — read straight
          off each leg's country_distance_shares, which RailRouter already
@@ -595,7 +603,9 @@ def _find_nearby_candidates(
     pool = {
         stop_id: stop
         for stop_id, stop in stop_infra.all().items()
-        if stop_id not in existing and stop.stop_country_code in touched_countries
+        if stop_id not in existing
+        and stop.stop_country_code in touched_countries
+        and stop_supports_gauge(stop, gauge_mm)
     }
 
     margin_deg = AUTO_STOP_BUFFER_M * _DEG_PER_M * 1.5  # generous safety factor
@@ -801,7 +811,13 @@ def find_and_cost_auto_stop_candidates(
     mini-reroute failed are excluded. Selection order (cheapest-first for
     "add", geographic for "suggest") is each consumer's own concern.
     """
-    candidates = _find_nearby_candidates(stop_ids, routed_legs, stop_infra)
+    # The trip's gauge governs which stops may join it — resolved from the
+    # CURRENT stop list (identical to the trip's own resolution: candidates
+    # passing the strict filter below cannot narrow the intersection).
+    gauge_mm = resolve_trip_gauge(
+        (stop_infra.get(sid) for sid in stop_ids), composition
+    )
+    candidates = _find_nearby_candidates(stop_ids, routed_legs, stop_infra, gauge_mm)
     if not candidates:
         return []
 

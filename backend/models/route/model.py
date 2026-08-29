@@ -30,7 +30,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.26"
+ROUTE_BUILDER_VERSION: str = "0.9.27"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -45,6 +45,35 @@ ROUTE_BUILDER_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.27": {
+        "date": "2026-08-29",
+        "author": "david",
+        "changes": "Gauge-aware routing + hard Belarus/Russia exclusion. "
+        "Each trip resolves ONE track gauge from its stops' gauges_mm "
+        "(routing/gauge.py: set intersection; unknown does not constrain; "
+        "ties prefer 1435) and routes on that gauge's own GraphHopper "
+        "profile (night_train_<mm>, see docker/config.yml — 0.9.26 built "
+        "the profiles, this wires them up). Broad-gauge trips that "
+        "previously failed as snap errors now route: Rovaniemi-Helsinki "
+        "(1524), Kyiv-Lviv (1520), Dublin-Cork (1600), Madrid-Lisboa "
+        "(1668). A stop pairing no single gauge serves fails BEFORE any "
+        "router call as 422 gauge_mismatch naming every stop's gauges. "
+        "auto_stop_addition candidates are filtered to the trip's gauge "
+        "(strictly: gauge-unknown stops are never auto-added). Trips carry "
+        "gauge_mm, serialized as general_parameters.track_gauge_mm. "
+        "Belarus and Russia are excluded in EVERY routing mode via "
+        "request-time area rules (speed 0 over their border polygons, "
+        "BLOCKED_COUNTRIES) — the graph-baked country rule planned in "
+        "0.9.26 is impossible in this OpenRailRouting fork (no `country` "
+        "encoded value), so the block rides in the request custom model "
+        "like HSR avoidance; input_params.countries carries BY/RU rows "
+        "solely to hold the polygons. simpleRouting consequently sends a "
+        "custom model now (block + composition speed cap) and runs LM "
+        "instead of CH: its times are capped at the composition's "
+        "max_speed_kmh like fullRouting (previously uncapped at the graph "
+        "ceiling — an OUTPUT CHANGE for simpleRouting only, and an honest "
+        "one). route_geometry() attaches the block alone.",
+    },
     "0.9.26": {
         "date": "2026-08-27",
         "author": "david",
@@ -591,6 +620,34 @@ time, not this constant. The JSON is the sanctioned mirror and carries a
 comment pointing back here — keep the two equal, and note that changing
 either requires a graph re-import."""
 
+# --- Track gauge (models/route/routing/gauge.py + docker/config.yml)
+STANDARD_GAUGE_MM: int = 1435
+"""The European mainline gauge — the tie-break winner when a trip's stops
+support several gauges, and the fallback when every stop's gauge is unknown
+(routing/gauge.py's resolution rules). Also the one gauge whose routing
+profile carries no suffix (see SUPPORTED_GAUGES_MM)."""
+
+SUPPORTED_GAUGES_MM: tuple[int, ...] = (1435, 1520, 1524, 1600, 1668)
+"""Every gauge with a routing profile in the graph. NAMING CONTRACT with
+docker/config.yml: STANDARD_GAUGE_MM routes on the bare
+OPENRAILROUTING_PROFILE (night_train); every other member on
+<profile>_<gauge_mm> (night_train_1520, ...). Sanctioned mirror of the
+profile list in config.yml — keep the two equal; adding a gauge means a new
+profile there, a graph re-import, and the member here."""
+
+BLOCKED_COUNTRIES: tuple[str, ...] = ("BY", "RU")
+"""Countries no route may pass through, under any routing mode — a project
+decision (Back-on-Track EU, 2026-08), not an infrastructure fact. Enforced
+at request time: rail_router attaches a speed-0 area rule over each
+country's border polygon to every routing request (the graph-side `country`
+encoded value is not registered by this OpenRailRouting fork, so the block
+cannot be baked in — see docker/config.yml). input_params.countries carries
+rows for these codes SOLELY to hold the polygons; they are deliberately NOT
+in seed.py's placeholder tuple, so if the block ever failed, the route
+would still 422 on country coverage rather than silently pricing Belarusian
+kilometres — defence in depth, not redundancy."""
+
+
 # --- fullRouting HSR avoidance (models/route/routing/rail_router.py)
 HSR_TRACK_SPEED_THRESHOLD_KMH: int = 230
 """A track segment counts as high-speed infrastructure when its permitted
@@ -743,6 +800,24 @@ OPEN_TODOS: dict[str, str] = {
         "interacts with the timetable (buffer feeds departure times which "
         "feed each leg's clock time — likely needs one fixed-point "
         "iteration or an approximation from the provisional timetable)."
+    ),
+    "composition_gauge_capability": (
+        "(David, 2026-08-29) composition_gauges() in routing/gauge.py "
+        "returns None — every composition may run every gauge. True for "
+        "the calibrated catalog (all standard-gauge stock, and evaluating "
+        "1520/1524 concepts is the point of the tool), but variable-gauge "
+        "stock (Talgo RD) and gauge-bound stock are real distinctions. "
+        "When compositions gain a gauge capability column, it flows into "
+        "composition_gauges() and nothing else changes."
+    ),
+    "gauge_null_stops": (
+        "(David, 2026-08-27) 10 catalog stops carry gauges_mm=NULL "
+        "(evidence no_tracks_nearby): AL Durrës/Tiranë, DE Oldenburg "
+        "(Holstein) and PL Łeba (coordinate errors), GR Ρίο (metre gauge), "
+        "TR Adana/Mersin, UA Краматорськ/Слов'янськ/Росинка. Hand-correct "
+        "coordinates/gauges (or drop dead stops) in the stop pipeline; "
+        "until then gauge.py treats NULL as 'unknown, does not constrain' "
+        "— NEVER as 1435 (the UA three would break)."
     ),
     "shunting_y_shape": (
         "_shuntings() creates one Shunting per trip terminal with no "
