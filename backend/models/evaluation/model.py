@@ -32,7 +32,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-CALC_VERSION: str = "0.9.22"
+CALC_VERSION: str = "0.9.23"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -66,6 +66,25 @@ CALC_MODEL_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.23": {
+        "date": "2026-08-30",
+        "author": "david",
+        "changes": "VALUES CHANGE, no logic change here: the energy model "
+        "replaced its flat 28 kWh/km placeholder with the calibrated model "
+        "(ENERGY_CALC_VERSION 1.1.0), so every segment's energy_kwh moves "
+        "and every figure derived from it moves with it. Fleet-weighted "
+        "intensity is 9.19 kWh/km against the 28 assumed before, so "
+        "traction energy cost falls by roughly two thirds and every cost "
+        "total, margin and net figure that contains it changes. Energy is "
+        "now composition-dependent: a heavier or longer train costs more "
+        "to move, where the placeholder charged every train the same per "
+        "kilometre. Pricing itself is untouched - calc_energy_price.py "
+        "multiplies the same rates by different kilowatt-hours. Bumped so "
+        "the compute cache misses and stored proposals refresh rather than "
+        "serving placeholder-era energy costs as current. See "
+        "models/energy/model.py CHANGELOG 1.1.0 and "
+        "models/energy/calib/README.md.",
+    },
     "0.9.22": {
         "date": "2026-08-17",
         "author": "david",

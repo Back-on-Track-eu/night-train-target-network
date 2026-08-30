@@ -480,11 +480,6 @@ class CompositionType:
     food_and_beverages: str | None  # catering concept (composition-level)
     coaches: dict[int, CoachType]  # keyed by position
 
-    # energy regression coefficients
-    energy_factor_weight: float
-    energy_factor_speed: float
-    energy_factor_terrain: float
-
     # vehicle-dependent minimum dwell times
     min_boarding_time_min: int
     min_alighting_time_min: int
@@ -684,11 +679,6 @@ class Composition:
     min_boarding_time_min: int
     min_alighting_time_min: int
 
-    # energy
-    energy_factor_weight: float
-    energy_factor_speed: float
-    energy_factor_terrain: float
-
     # general train properties (derived from coaches)
     total_weight_t: float  # coaches only — total_gross_weight_t adds the locos
     total_length_m: float
@@ -819,9 +809,6 @@ class Composition:
             hsr_allowed=comp_type.hsr_allowed,
             min_boarding_time_min=comp_type.min_boarding_time_min,
             min_alighting_time_min=comp_type.min_alighting_time_min,
-            energy_factor_weight=comp_type.energy_factor_weight,
-            energy_factor_speed=comp_type.energy_factor_speed,
-            energy_factor_terrain=comp_type.energy_factor_terrain,
             total_weight_t=comp_type.total_weight_t(),
             total_length_m=comp_type.total_length_m(),
             total_length_wo_service_m=comp_type.total_length_wo_service_m(),
