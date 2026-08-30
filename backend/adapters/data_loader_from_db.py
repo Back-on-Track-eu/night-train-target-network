@@ -1037,13 +1037,6 @@ class DBDataLoader:
                     max_speed_kmh=_f(row["composition_type_max_speed_kmh"]),
                     hsr_allowed=_b(row["composition_type_hsr_allowed"]),
                     coaches=coaches_by_comp_row.get(comp_row_id, {}),
-                    energy_factor_weight=_f(
-                        row["composition_type_energy_factor_weight"]
-                    ),
-                    energy_factor_speed=_f(row["composition_type_energy_factor_speed"]),
-                    energy_factor_terrain=_f(
-                        row["composition_type_energy_factor_terrain"]
-                    ),
                     min_boarding_time_min=_interval_to_min(
                         row["composition_type_min_boarding_time"]
                     ),
@@ -1081,9 +1074,6 @@ class DBDataLoader:
                     "max_speed_kmh": comp_type.max_speed_kmh,
                     "hsr_allowed": comp_type.hsr_allowed,
                     "driver_factor": comp_type.driver_factor,
-                    "energy_factor_weight": comp_type.energy_factor_weight,
-                    "energy_factor_speed": comp_type.energy_factor_speed,
-                    "energy_factor_terrain": comp_type.energy_factor_terrain,
                     "min_boarding_time_min": comp_type.min_boarding_time_min,
                     "min_alighting_time_min": comp_type.min_alighting_time_min,
                     "purchase_coach_eur": comp_type.purchase_coach_eur,

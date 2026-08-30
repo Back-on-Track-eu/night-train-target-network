@@ -10,8 +10,9 @@ instead, following the pattern of the stop pipeline's data_sources.py.
 Two kinds of file, deliberately handled differently:
 
   ensure_local(name)
-      Comes from outside this machine - the collected Trassenfinder samples.
-      Downloaded when absent so 02 can run without re-querying the API.
+      Comes from outside this machine - the collected Trassenfinder samples,
+      from 01 and from the 01b speed sweep. Downloaded when absent so 02 can
+      run without re-querying the API.
 
   local_input(name, produced_by)
       Written by an earlier step of this calibration. Never downloaded: a stale
@@ -63,8 +64,10 @@ DOWNLOADABLE = {
     "samples_ontd.csv",
     "samples_synthetic.csv",
     "samples_all.csv",
+    "samples_speed.csv",
     "failures_ontd.csv",
     "failures_synthetic.csv",
+    "failures_speed.csv",
 }
 
 _SAMPLE_HEADER = [
@@ -79,10 +82,53 @@ _SAMPLE_HEADER = [
     "weight_t",
     "length_m",
     "v_max_kmh",
+    # Derived per composition and sent with the request. Recorded because both
+    # cap achievable speed: a sample without them cannot be told apart from one
+    # collected under different braking assumptions.
+    "bremshundertstel",
+    "streckenklasse",
+    # Total is authoritative; the three components are summed per route point.
     "energy_kwh",
+    "energy_components_kwh",
+    "energy_traktion_kwh",
+    "energy_hilfsbetriebe_kwh",
+    "energy_wagen_kwh",
     "distance_km",
     "travel_time_min",
+    # Free on every response, for the TAC and station-charge calibrations.
+    "trassenpreis_eur",
+    "stationspreis_eur",
 ]
+
+# The speed sweep adds the stratum it was collected under, whether high-speed
+# lines were allowed, and the booked v_max requested. v_max_kmh still holds the
+# composition's nominal maximum, so the two speed columns together say whether
+# the request was binding by construction.
+# The sweep carries more than the main sample: the stratum and segment set it
+# was collected under, the booked speed requested, and the speed profile.
+#
+# 01 deliberately does NOT record the profile columns, so samples_all.csv keeps
+# the schema it was collected with. Adding them there would invalidate the
+# existing file against this contract and force a re-collection to fix a
+# diagnostic, which is the wrong trade.
+_SPEED_SAMPLE_HEADER = (
+    ["source", "segment_set", "stratum", "sfs_allowed"]
+    + _SAMPLE_HEADER[1:13]
+    + ["v_max_requested_kmh"]
+    + _SAMPLE_HEADER[13:]
+    + [
+        "preis_energie_eur",
+        "kosten_fahrzeuge_personal_eur",
+        "marktsegment",
+        "v_peak_kmh",
+        "v_mean_dist_kmh",
+        "v_rms_kmh",
+        "schnellfahrt_share_pct",
+        "n_route_points",
+        "maximalwerte",
+        "speed_unzulaessig",
+    ]
+)
 
 _FAILURE_HEADER = [
     "source",
@@ -93,6 +139,18 @@ _FAILURE_HEADER = [
     "error",
 ]
 
+_SPEED_FAILURE_HEADER = [
+    "source",
+    "stratum",
+    "sfs_allowed",
+    "route_name",
+    "start_ds100",
+    "end_ds100",
+    "composition_id",
+    "v_max_requested_kmh",
+    "error",
+]
+
 # Expected header per CSV, checked on use. A Drive permission error serves an
 # HTML page with HTTP 200, so without this the calibration would cache and then
 # parse a login page as if it were data.
@@ -100,8 +158,10 @@ EXPECTED_HEADERS: dict[str, list[str]] = {
     "samples_ontd.csv": _SAMPLE_HEADER,
     "samples_synthetic.csv": _SAMPLE_HEADER,
     "samples_all.csv": _SAMPLE_HEADER,
+    "samples_speed.csv": _SPEED_SAMPLE_HEADER,
     "failures_ontd.csv": _FAILURE_HEADER,
     "failures_synthetic.csv": _FAILURE_HEADER,
+    "failures_speed.csv": _SPEED_FAILURE_HEADER,
 }
 
 _synced = False

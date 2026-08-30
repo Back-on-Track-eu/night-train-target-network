@@ -1669,9 +1669,6 @@ STOP_INFRASTRUCTURES = _build_stop_infrastructures()
 # calibration — they keep the established defaults until the energy
 # model calibration workstream lands.
 _COMP_ENERGY_AND_TIMES = dict(
-    composition_type_energy_factor_weight=0.000168,
-    composition_type_energy_factor_speed=0.015123,
-    composition_type_energy_factor_terrain=0.034545,
     composition_type_min_boarding_time="00:02:00",
     composition_type_min_alighting_time="00:02:00",
 )
@@ -2163,9 +2160,6 @@ def _composition_physics_dict(comp) -> dict:
         "hsr_allowed": comp.hsr_allowed,
         "min_boarding_time_min": comp.min_boarding_time_min,
         "min_alighting_time_min": comp.min_alighting_time_min,
-        "energy_factor_weight": comp.energy_factor_weight,
-        "energy_factor_speed": comp.energy_factor_speed,
-        "energy_factor_terrain": comp.energy_factor_terrain,
         "total_weight_t": comp.total_weight_t,
         "total_crew": comp.total_crew,
         "places_by_class": comp.places_by_class,

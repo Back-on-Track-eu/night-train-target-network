@@ -952,24 +952,6 @@ INPUT_PARAMS_TABLES: tuple[Table, ...] = (
                 "km/h",
             ),
             Column(
-                "composition_type_energy_factor_weight",
-                "NUMERIC(10,6) NOT NULL",
-                "Energy model: base factor per tonne-kilometre.",
-                "kWh/(t·km)",
-            ),
-            Column(
-                "composition_type_energy_factor_speed",
-                "NUMERIC(10,6) NOT NULL",
-                "Energy model: air resistance factor, applied to speed squared.",
-                "kWh/(t·km·(km/h)²)",
-            ),
-            Column(
-                "composition_type_energy_factor_terrain",
-                "NUMERIC(10,6) NOT NULL",
-                "Energy model: terrain factor, applied to the terrain score.",
-                "kWh/(t·km) per terrain point",
-            ),
-            Column(
                 "composition_type_min_boarding_time",
                 "INTERVAL NOT NULL",
                 "Minimum waiting time this train needs at stops where "
