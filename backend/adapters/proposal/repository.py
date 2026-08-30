@@ -75,6 +75,21 @@ logger = logging.getLogger(__name__)
 # loose heuristic: nothing else in a compute response starts with it.
 _STRUCTURAL_ROUTE_PREFIX = "R1"
 
+# Douglas-Peucker tolerance, in degrees, for the corridor geometry map_lines()
+# returns. Deliberately its OWN value rather than a reuse of projection.py's
+# GEOM_SIMPLIFY_TOLERANCE_DEG: that one serves a single route drawn on its own,
+# this one an overview of the whole network, where far more can be thrown away.
+# The stored geometry is untouched — this only shapes what the section sends
+# over the wire, and the gallery draws the unabridged route from map_routes the
+# moment a card is hovered.
+#
+# ~0.002° is roughly 200 m. Sized against what the corridor layer is actually
+# seen at: the gallery fits to zoom 9 or below, where this is well under a
+# pixel, but nothing stops a user zooming further, and it stays acceptable
+# (~6 px) at zoom 12. Coarser buys little — the payload is already dominated by
+# corridor COUNT by then — and starts visibly cutting corners.
+MAP_LINES_SIMPLIFY_TOLERANCE_DEG = 0.002
+
 
 def outdated_trigger(container: dict) -> Optional[dict]:
     """Whether a stored proposal's version/scenario pin has fallen behind
@@ -761,6 +776,21 @@ class ProposalRepository:
         self._conn.rollback()
         return row["user_id"] if row else None
 
+    def share_name(self, proposal_id: int) -> Optional[str]:
+        """A proposal's display name, or None if unknown — the whole read
+        behind api/proposal_share.py's link-preview stub. Deliberately not
+        get_container(): that row carries compute_request and
+        evaluation_output, two large JSONB columns, and this route is hit
+        by every chat client that previews a shared link."""
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT name FROM proposals.proposals WHERE proposal_id = %s",
+                (proposal_id,),
+            )
+            row = cur.fetchone()
+        self._conn.rollback()
+        return row["name"] if row else None
+
     def list_outdated(self, limit: Optional[int] = None) -> list[dict]:
         """§4.2's work queue: every proposal whose stored route_builder_
         version/calc_version has fallen behind the running code, or whose
@@ -976,10 +1006,35 @@ class ProposalRepository:
         thickness off the total and colour/toggle by source without a
         second query. avg_margin is proposals-only (existing rows carry
         no financials) — NULL on corridors served only by existing
-        trains. Geometry prefers a proposal shape (routed with the live
-        tool's exact settings) and falls back to the existing corridor's
-        own geometry — both are stored GeoJSON, min(::text) picks a
-        deterministic representative."""
+        trains.
+
+        The contributing id LISTS are deliberately NOT returned. They
+        were the one part of this section that grew without bound (their
+        combined length is the number of distinct (proposal, corridor)
+        pairs, so ~10k proposals means six figures of ids and single
+        popular corridors carrying thousands), and nothing consumes
+        them: per-route geometry for the hovered card comes from
+        map_routes(), which is paginated with the list.
+
+        Geometry is aggregated by REFERENCE, not by value: segs carries
+        shape_id / route_id, and the representative geometry is joined
+        back in once per corridor at the outer level. Aggregating the
+        GeoJSON text itself (the previous min(geometry)) streamed every
+        segment's full polyline through the grouping aggregate — at 10k
+        proposals that is ~200k multi-KB strings per gallery load, which
+        dwarfed everything else this query does. Corridor COUNT is the
+        well-behaved dimension (distinct stop pairs saturate), so doing
+        the geometry work per corridor rather than per segment makes
+        this section's cost flat in proposal count.
+
+        A proposal shape wins over an existing corridor's own geometry
+        (routed with the live tool's exact settings); min() over the id
+        picks a deterministic representative either way. ST_Simplify —
+        not ST_SimplifyPreserveTopology — matches the shapely
+        preserve_topology=False used on the projection side, so both
+        render at the same fidelity; see
+        MAP_LINES_SIMPLIFY_TOLERANCE_DEG for why the tolerance is its
+        own value."""
         where_sql, params = build_where(filters or {})
         where_clause = f" WHERE {where_sql}" if where_sql else ""
         with self._cursor() as cur:
@@ -993,41 +1048,99 @@ class ProposalRepository:
                 "         f.margin_eur_per_train_km, "
                 "         LEAST(s.from_stop_id, s.to_stop_id) AS stop_a, "
                 "         GREATEST(s.from_stop_id, s.to_stop_id) AS stop_b, "
-                "         sh.geometry::text AS geometry "
+                "         s.shape_id "
                 "  FROM filtered f "
                 "  JOIN proposals.trips t "
                 "    ON f.source = 'proposal' "
                 "   AND t.route_id = 'P' || f.proposal_id || '_V' || f.proposal_version || '_R1' "
                 "  JOIN proposals.segments s ON s.trip_id = t.trip_id "
-                "  JOIN proposals.shapes sh ON sh.shape_id = s.shape_id "
                 "  WHERE s.shape_id IS NOT NULL "
                 "  UNION ALL "
                 # route_corridors already stores direction-collapsed pairs
                 # (stop_a < stop_b, db/ontd/projection.py) — no
-                # LEAST/GREATEST needed on this branch.
+                # LEAST/GREATEST needed on this branch. It carries its
+                # geometry inline rather than by shape_id, so the outer join
+                # below reaches it on (route_id, stop_a, stop_b).
                 "  SELECT f.source, NULL::int, f.route_id, NULL::numeric, "
-                "         rc.stop_a, rc.stop_b, rc.geometry::text "
+                "         rc.stop_a, rc.stop_b, NULL::text "
                 "  FROM filtered f "
                 "  JOIN ontd.route_corridors rc "
                 "    ON f.source = 'existing' AND rc.route_id = f.route_id"
+                "), grouped AS ("
+                "  SELECT stop_a, stop_b, "
+                "         count(DISTINCT proposal_id) AS proposal_count, "
+                "         count(DISTINCT route_id) AS existing_count, "
+                "         count(DISTINCT proposal_id) + count(DISTINCT route_id) "
+                "           AS total_count, "
+                "         avg(margin_eur_per_train_km) AS avg_margin_eur_per_train_km, "
+                "         min(shape_id) FILTER (WHERE source = 'proposal') "
+                "           AS rep_shape_id, "
+                "         min(route_id) FILTER (WHERE source = 'existing') "
+                "           AS rep_route_id "
+                "  FROM segs GROUP BY stop_a, stop_b"
+                "), rep AS ("
+                "  SELECT g.*, "
+                "         ST_GeomFromGeoJSON("
+                "           COALESCE(sh.geometry, rc.geometry)::text) AS geom "
+                "  FROM grouped g "
+                "  LEFT JOIN proposals.shapes sh ON sh.shape_id = g.rep_shape_id "
+                "  LEFT JOIN ontd.route_corridors rc "
+                "         ON rc.route_id = g.rep_route_id "
+                "        AND rc.stop_a = g.stop_a AND rc.stop_b = g.stop_b"
                 ") "
-                "SELECT stop_a, stop_b, "
-                "       array_remove(array_agg(DISTINCT proposal_id ORDER BY proposal_id), NULL) "
-                "         AS proposal_ids, "
-                "       array_remove(array_agg(DISTINCT route_id ORDER BY route_id), NULL) "
-                "         AS existing_route_ids, "
-                "       count(DISTINCT proposal_id) AS proposal_count, "
-                "       count(DISTINCT route_id) AS existing_count, "
-                "       count(DISTINCT proposal_id) + count(DISTINCT route_id) "
-                "         AS total_count, "
-                "       avg(margin_eur_per_train_km) AS avg_margin_eur_per_train_km, "
-                "       COALESCE("
-                "         min(geometry) FILTER (WHERE source = 'proposal'), "
-                "         min(geometry) FILTER (WHERE source = 'existing')"
-                "       ) AS geometry "
-                "FROM segs GROUP BY stop_a, stop_b",
-                params,
+                "SELECT stop_a, stop_b, proposal_count, existing_count, "
+                "       total_count, avg_margin_eur_per_train_km, "
+                # Measured on the UNSIMPLIFIED shape on purpose: a real routed
+                # line that happens to run straight would collapse to two
+                # points under ST_Simplify and be mislabelled a placeholder.
+                "       ST_NPoints(geom) > 2 AS geometry_routed, "
+                "       ST_AsGeoJSON(ST_Simplify(geom, %s)) AS geometry "
+                "FROM rep",
+                list(params) + [MAP_LINES_SIMPLIFY_TOLERANCE_DEG],
             )
+            rows = cur.fetchall()
+        self._conn.rollback()
+        return [dict(row) for row in rows]
+
+    def map_routes(
+        self,
+        filters: Optional[dict] = None,
+        sort: Optional[list[dict]] = None,
+        limit: Optional[int] = None,
+        offset: int = 0,
+    ) -> list[dict]:
+        """`map_routes` section: one already-simplified polyline per
+        LISTED row — the same filter, sort and window as
+        list_summaries(), so the two sections always describe the same
+        rows. That pagination is the point, and it is the one deliberate
+        exception to "map sections cover the whole filtered set": this
+        section exists to draw the route belonging to a card the user
+        can actually see, so its cost is capped at the page size no
+        matter how many proposals exist.
+
+        Reads proposal_summaries.geom_simplified / route_summaries.
+        geom_simplified, which both projections already maintain (see
+        projection.py's _geom_simplified) and which the gallery union
+        already carries — until now only as a bbox filter target, never
+        returned. NULL for an ONTD route whose routing failed; the row
+        is still emitted, with a null geometry, rather than silently
+        dropped."""
+        where_sql, params = build_where(filters or {})
+        where_clause = f" WHERE {where_sql}" if where_sql else ""
+        sql = (
+            f"WITH {self._ENGAGEMENT_CTE}, {self._gallery_cte(filters)} "
+            "SELECT source, proposal_id, proposal_version, route_id, "
+            "       geometry_routed, "
+            "       ST_AsGeoJSON(geom_simplified) AS geometry "
+            f"FROM gallery{where_clause} "
+            f"ORDER BY {build_order_by(sort)}"
+        )
+        page_params = list(params)
+        if limit is not None:
+            sql += " LIMIT %s OFFSET %s"
+            page_params += [limit, offset]
+        with self._cursor() as cur:
+            cur.execute(sql, page_params)
             rows = cur.fetchall()
         self._conn.rollback()
         return [dict(row) for row in rows]

@@ -52,6 +52,7 @@ import psycopg2.extras
 
 from typing import Optional
 
+from db.schema import STOP_NAME_LANGS
 from models.params import (
     ParamsSource,
     IndicativeFigures,
@@ -1849,6 +1850,22 @@ class DBDataLoader:
         if charge_is_default:
             charge_src = default.stop_charge_src
 
+        def _opt_f(value):
+            """NUMERIC columns arrive as Decimal or None; the domain wants
+            float or None."""
+            return None if value is None else float(value)
+
+        # Localized columns fold into language-keyed dicts here, so nothing
+        # downstream ever touches a column suffix. City names exist only
+        # where a city was resolved; the dict is empty otherwise, not
+        # None-valued per language.
+        country_names = {lang: row[f"country_{lang}"] for lang in STOP_NAME_LANGS}
+        city_names = {
+            lang: row[f"city_{lang}"]
+            for lang in STOP_NAME_LANGS
+            if row.get(f"city_{lang}")
+        }
+
         stop = StopInfrastructure(
             stop_id=stop_id,
             stop_name=row.get("stop_name") or "",
@@ -1856,6 +1873,23 @@ class DBDataLoader:
             lat=_f(row["stop_lat"]),
             lon=_f(row["stop_lon"]),
             stop_charge_eur=charge,
+            stop_charge_vat_rate_per=_opt_f(row.get("stop_charge_vat_rate_per")),
+            stop_charge_incl_vat_eur=_opt_f(row.get("stop_charge_incl_vat_eur")),
+            stop_charge_basis=row.get("stop_charge_basis"),
+            stop_charge_price_basis_year=row.get("stop_charge_price_basis_year"),
+            stop_charge_class=row.get("stop_charge_class"),
+            stop_charge_source=row.get("stop_charge_source"),
+            provenance=row.get("stop_provenance") or "",
+            name_latin=row.get("name_latin") or "",
+            name_ascii=row.get("name_ascii") or "",
+            uic_ref=row.get("uic_ref"),
+            country_names=country_names,
+            city=row.get("city"),
+            city_osm_id=row.get("city_osm_id"),
+            city_names=city_names,
+            # psycopg2 returns INTEGER[] as a Python list, NULL as None.
+            gauges_mm=row.get("gauges_mm"),
+            gauge_evidence=row.get("gauge_evidence"),
         )
         return stop, loc_src, charge_src, charge_is_default
 

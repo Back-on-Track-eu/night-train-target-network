@@ -1,15 +1,23 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, watch } from 'vue'
 import Popover from 'primevue/popover'
+import Skeleton from 'primevue/skeleton'
 import AppIcon from './AppIcon.vue'
 import { mdiMagnify } from '@mdi/js'
 import { useI18n } from 'vue-i18n'
 import type { Stop } from '@/types/api'
+import type { LoadStatus } from '@/stores/store'
 
-const props = defineProps<{ stops: Stop[]; disabledIds?: Set<string> }>()
-const emit = defineEmits<{ select: [stop: Stop] }>()
+// `status` exists because an empty `stops` array means three different things —
+// still loading, failed to load, and genuinely empty — and the popover used to
+// render "No stops found" for all three. During a slow load that was a lie.
+const props = withDefaults(
+  defineProps<{ stops: Stop[]; disabledIds?: Set<string>; status?: LoadStatus }>(),
+  { status: 'success', disabledIds: undefined },
+)
+const emit = defineEmits<{ select: [stop: Stop]; retry: [] }>()
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const popoverRef = ref<InstanceType<typeof Popover> | null>(null)
 const inputRef = ref<HTMLInputElement | null>(null)
 const listRef = ref<HTMLElement | null>(null)
@@ -18,11 +26,44 @@ const filterQuery = ref('')
 // background the mouse hover uses, so both share one highlight.
 const activeIndex = ref(0)
 
-const filtered = computed(() =>
-  props.stops.filter(
-    (s) => !filterQuery.value || s.name.toLowerCase().includes(filterQuery.value.toLowerCase()),
-  ),
-)
+// One lowercase haystack per stop, built once per stops load: display name,
+// Latin/ASCII forms, and the city and country names in EVERY catalog language
+// (deliberately not just the UI locale — an Italian typing "Monaco" must find
+// München Hbf on the English UI too). name_ascii makes the search
+// diacritic-tolerant from the data side ("munchen" matches "München").
+const haystacks = computed(() => {
+  const map = new Map<string, string>()
+  for (const s of props.stops) {
+    const parts = [s.name, s.name_latin, s.name_ascii]
+    if (s.city) parts.push(s.city.name, ...Object.values(s.city.names))
+    if (s.country_names) parts.push(...Object.values(s.country_names))
+    map.set(s.stop_id, parts.filter(Boolean).join('\u0000').toLowerCase())
+  }
+  return map
+})
+
+const filtered = computed(() => {
+  const query = filterQuery.value.trim().toLowerCase()
+  if (!query) return props.stops
+  return props.stops.filter((s) => haystacks.value.get(s.stop_id)?.includes(query))
+})
+
+// Subtitle under each row: "city · country" in the current UI locale, falling
+// back through English to the on-the-ground names.
+function subtitle(s: Stop): string {
+  const city = s.city ? s.city.names[locale.value] || s.city.names.en || s.city.name : ''
+  const country = s.country_names?.[locale.value] || s.country_names?.en || s.country_code
+  return city ? `${city} \u00b7 ${country}` : country
+}
+
+// Track gauge badge. Several values at break-of-gauge stations (Kaunas
+// 1435 + 1520). null means the catalog found no usable track nearby — shown
+// as such rather than omitted, because an unknown gauge is exactly what
+// stops a stop from being checked for gauge compatibility later.
+function gaugeLabel(s: Stop): string {
+  if (!s.gauges_mm?.length) return t('proposal.gaugeUnknown')
+  return `${s.gauges_mm.join(' \u00b7 ')} mm`
+}
 
 function open(event: MouseEvent) {
   filterQuery.value = ''
@@ -143,7 +184,31 @@ watch(filtered, () => {
         scrollbar-color: color-mix(in srgb, var(--p-primary-50) 50%, transparent) transparent;
       "
     >
-      <p v-if="!filtered.length" class="px-4 py-3 text-base text-primary-50/70">
+      <!-- Loading: hold the popover's height with rows, so it doesn't claim
+           there is nothing to find while the list is still on its way. -->
+      <div
+        v-if="status === 'loading' && !stops.length"
+        class="flex flex-col gap-1"
+        aria-hidden="true"
+      >
+        <Skeleton v-for="n in 4" :key="n" height="1.5rem" class="!mx-3 !my-2" />
+      </div>
+      <div v-else-if="status === 'error' && !stops.length" class="px-4 py-3" role="alert">
+        <p class="text-base text-primary-50/70">{{ t('errors.stopsUnavailable') }}</p>
+        <button
+          type="button"
+          class="mt-1 cursor-pointer text-sm font-semibold text-primary-50 underline underline-offset-2"
+          @click="emit('retry')"
+        >
+          {{ t('errors.retry') }}
+        </button>
+      </div>
+      <p v-else-if="!stops.length" class="px-4 py-3 text-base text-primary-50/70">
+        {{ t('errors.stopsEmpty') }}
+      </p>
+      <!-- Only now does "no stops found" mean what it says: we have the list,
+           and the user's query matched nothing in it. -->
+      <p v-else-if="!filtered.length" class="px-4 py-3 text-base text-primary-50/70">
         {{ t('proposal.noStopsFound') }}
       </p>
       <button
@@ -160,7 +225,26 @@ watch(filtered, () => {
         @mouseenter="setActive(i)"
         @click="pick(stop)"
       >
-        {{ stop.name }}
+        <span class="flex items-baseline gap-3">
+          <span class="min-w-0 flex-1 truncate">{{ stop.name }}</span>
+          <span
+            class="shrink-0 text-sm tabular-nums"
+            :class="[
+              isDisabled(stop) ? 'text-primary-50/20' : 'text-primary-50/50',
+              stop.gauges_mm?.length ? '' : 'italic',
+            ]"
+            :title="t('proposal.trackGauge')"
+          >
+            {{ gaugeLabel(stop) }}
+          </span>
+        </span>
+        <span
+          v-if="subtitle(stop)"
+          class="block text-sm"
+          :class="isDisabled(stop) ? 'text-primary-50/20' : 'text-primary-50/50'"
+        >
+          {{ subtitle(stop) }}
+        </span>
       </button>
     </div>
   </Popover>

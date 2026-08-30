@@ -37,7 +37,8 @@ models/route/routing/docker/
 ├── docker-compose.yml          # standalone routing-only stack (for graph import)
 ├── config.yml                  # GraphHopper / OpenRailRouting configuration
 ├── custom_models/
-│   └── night_train.json        # custom routing profile for night trains
+│   ├── night_train.json        # shared base model for every gauge profile
+│   └── nt_gauge_<mm>.json      # one per gauge family: 1435, 1520 (+1524), 1600, 1668
 ├── data/                       # ← NOT in git — place OSM file here
 │   └── europe-latest.osm.pbf
 └── graph-cache/                # ← NOT in git — generated during import
@@ -96,14 +97,20 @@ docker compose run --rm openrailrouting `
 ```
 
 > **Requirements:** At least 24 GB of free RAM during import.
-> The import takes **20–40 minutes** for full Europe.
+> The import takes **20–40 minutes** for full Europe, longer since the graph
+> carries five gauge profiles (each with its own CH and LM preparation).
+>
+> Any argument overrides the default server start, so `entrypoint.sh` runs
+> this import and skips the graph-cache download. Without that override the
+> command would have started the server and pulled the prebuilt cache over
+> the very directory the import is meant to rebuild.
 
 Success looks like:
 ```
 INFO  com.graphhopper.GraphHopper - flushed graph
 ```
 
-The built graph is stored in `graph-cache/` (~5–10 GB).
+The built graph is stored in `graph-cache/`. Rail-only Europe is far smaller than a road graph: **213 MB zipped** for the four-profile cache (2026-08-29), against ~190 MB for the single-profile one — the three extra gauge networks are a small fraction of European rail, so four profiles cost about 12% more than one, not four times.
 
 ### Step 4 — Start the local Server
 
@@ -164,19 +171,57 @@ docker compose logs -f
 
 ---
 
-## Night Train Profile
+## Night Train Profiles
 
-The routing uses a custom `night_train` profile defined in
-`custom_models/night_train.json`. It is configured for:
+There is one profile per track gauge. They share `custom_models/night_train.json`
+and differ only in which `custom_models/nt_gauge_<mm>.json` they add:
+
+| Profile | Gauge | Network |
+|---|---|---|
+| `night_train` | 1435 mm | Standard gauge — the European mainline network |
+| `night_train_1520` | 1520 + 1524 mm (one family, 0.9.28) | Baltics, Ukraine, Moldova, Finland, broad-gauge border sidings in PL/RO |
+| `night_train_1600` | 1600 mm | Ireland and Northern Ireland (island network, intra-island only) |
+| `night_train_1668` | 1668 mm | Spain, Portugal, and the French break-of-gauge stations |
+
+The `nt_` prefix is not cosmetic: OpenRailRouting ships built-in custom
+models called `gauge_<mm>.json`, and GraphHopper rejects any file in
+`custom_models.directory` that shadows a built-in name.
+
+**The profile name is a contract.** `rail_router.py` derives it as
+`<OPENRAILROUTING_PROFILE>` for standard gauge and
+`<OPENRAILROUTING_PROFILE>_<gauge_mm>` for the rest; renaming a profile in
+`config.yml` breaks routing for that gauge.
+
+Baking the gauge into the profile rather than sending it in the request is
+what keeps stop *snapping* gauge-correct. 36 catalog stops carry two gauges,
+24 of them in Spain — a request-time rule would let the CH snapping pass land
+a standard-gauge trip on an Iberian platform.
+
+Shared settings, from `night_train.json` and `config.yml`:
 
 | Parameter | Value | Reason |
 |---|---|---|
-| Max speed | 200 km/h | Siemens Vectron MS top speed |
-| Gauge | 1435 mm only | Standard gauge — all European mainlines |
+| Speed ceiling | 230 km/h | Graph-level bound, not a per-trip speed — see below |
 | Electrification | All tracks | Vectron Dual Mode supports diesel fallback |
 | Service tracks | Blocked | No routing via yards or spurs |
+| Belarus, Russia | Blocked at request time | Project decision — see note below |
 | Routing objective | 80% time / 20% distance | Balanced for night train economics |
 | U-turn penalty | 300 seconds (5 min) | Locomotive reversal time |
+
+The 230 km/h ceiling bounds only the paths that send no composition:
+`route_geometry()` (ONTD map lines, which have no composition by design) and
+`simpleRouting`. `fullRouting` caps every trip at its own
+`composition.max_speed_kmh` in the request custom model, and GraphHopper
+resolves two `limit_to` rules by minimum, so the baked value never binds
+there. It mirrors `MAX_COMPOSITION_SPEED_KMH` in `models/route/model.py`;
+keep the two equal, and remember that changing either needs a re-import.
+
+Untagged track (`gauge == 0`) is permitted by every gauge profile, as it has
+been since the first import: OSM tags gauge only where it differs from the
+local norm, so blocking it would strand large parts of the network. That
+permissiveness is the filter's known weak point — the pre-check in
+`models/route/route_factory.py` is the primary defence, these rules the
+secondary one.
 
 ---
 
@@ -191,7 +236,7 @@ GET http://localhost:8989/route
 | Parameter | Example | Description |
 |---|---|---|
 | `point` | `48.2082,16.3738` | lat,lon — repeat for each waypoint |
-| `profile` | `night_train` | routing profile to use |
+| `profile` | `night_train` | routing profile — see the gauge table above |
 | `calc_points` | `true` / `false` | include route geometry in response |
 | `instructions` | `false` | exclude turn-by-turn instructions |
 | `details` | `distance` | request per-segment details |
@@ -212,9 +257,20 @@ Available at `http://localhost:8990` — shows server health and metrics.
 ## Re-importing the Graph
 
 Re-import is needed when:
-- `config.yml` profiles are changed
-- `night_train.json` custom model is changed
+- `config.yml` profiles or `graph.encoded_values` are changed
+- any file in `custom_models/` is changed
 - The OSM data file is updated
+
+> **A re-import destroys anything hand-applied to `graph-cache/`.** Patch the
+> OSM `.pbf` instead of the cache when a link is missing from OSM (e.g. the
+> Sicily train ferry), so the change survives every later import.
+
+GraphHopper validates `graph-cache/` against `config.yml` at startup and
+refuses to start on a mismatch, so the config and the cache must ship
+together. After a re-import: zip `graph-cache/`, upload it to Drive, set the
+new id as `GRAPH_CACHE_FILE_ID` in `backend/docker/.env`, and rebuild the
+image (`custom_models/` is `COPY`d at build time, so `docker compose build`
+is required — not just `up`).
 
 Steps:
 ```powershell
@@ -231,6 +287,62 @@ docker compose run --rm openrailrouting `
 # Start server again
 docker compose up -d
 ```
+
+---
+
+## Profile Selection (backend side)
+
+Since 0.9.27 the backend chooses among these profiles per trip:
+`models/route/routing/gauge.py` resolves ONE gauge from the trip's stops
+(set intersection of `gauges_mm`, each set first normalized through
+`GAUGE_FAMILY_MM` — 1524 folds into 1520; unknown does not constrain; ties
+prefer 1435) and `rail_router._profile_for_gauge()` maps it onto the naming
+contract above. **1520 and 1524 are one family** (0.9.28): interoperable in
+practice, tagged separately in OSM, and as separate profiles the Estonian
+seam — tagged both ways — was impassable. `night_train_1520` accepts both
+tags; there is no separate Finnish-gauge profile, and family trips report
+`track_gauge_mm: 1520`. Stop pairings no single gauge serves fail before any router
+call as `422 gauge_mismatch`. `SUPPORTED_GAUGES_MM` in
+`models/route/model.py` is the sanctioned mirror of the profile list here —
+adding a gauge means a new profile in `config.yml`, a re-import, and that
+tuple.
+
+## Verifying the Gauge Profiles
+
+After a re-import, check that `country` reached the graph and that each
+profile routes its own gauge and refuses the others:
+
+```powershell
+# five profiles must be listed
+(curl "http://localhost:8989/info" -UseBasicParsing).Content
+```
+
+| Profile | Should route | Should fail |
+|---|---|---|
+| `night_train` | Berlin → Wien | Helsinki → Tampere |
+| `night_train_1520` | Kyiv → Lviv | Kyiv → Warszawa |
+| `night_train_1520` (Finnish 1524 tag) | Helsinki → Tampere | Helsinki → Stockholm |
+| `night_train_1600` | Dublin → Cork | Dublin → London |
+| `night_train_1668` | Madrid → Sevilla | Madrid → Perpignan |
+
+A failing pair should return a "connection between locations not found"
+message, not a route.
+
+**The Belarus/Russia exclusion is not in the graph.** GraphHopper's `country`
+encoded value is not registered by this fork (`Unknown encoded value:
+country` at import), so the block cannot be baked in. Since 0.9.27 it is
+applied per request instead (`BLOCKED_COUNTRIES` in `models/route/model.py`):
+`rail_router._blocked_country_rules()` builds a speed-0 area rule over EVERY
+component polygon of each blocked country — every component, because
+Russia's largest polygon is the western mainland and a block built from it
+alone would leave the Kaliningrad exclave open — and those rules ride in the
+custom model of every routing request, all modes (`route_geometry()` and
+`simpleRouting` included, which therefore run LM rather than CH). A bare
+`/route` call against this server, like the smoke tests above, carries no
+custom model and is NOT blocked — the exclusion lives in the backend's
+requests, not in the graph. Re-check whether the fork has gained `country`
+before adding it back to `graph.encoded_values`; that would be the better
+mechanism, since it follows real borders rather than a simplified ring.
 
 ---
 

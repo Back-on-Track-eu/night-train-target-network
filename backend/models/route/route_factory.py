@@ -96,6 +96,7 @@ from models.params import (
 )
 from models.route.trip import Stop, StopType, Segment, Trip, TimetableWarning
 from models.route.route import Route, TripPair, Parking, Shunting
+from models.route.routing.gauge import resolve_trip_gauge
 from models.route.routing.rail_router import RailRouter, RoutedLeg, build_router_stops
 from models.route.timetable import (
     simple_automatic_timetable,
@@ -465,8 +466,18 @@ def _build_trip(
     """
     tid = _trip_id(proposal_id, proposal_version, direction, pair_index)
 
+    # The trip's track gauge — resolved from the USER'S stops before any
+    # router call so an impossible pairing (Kyiv 1520 + Warszawa 1435)
+    # fails as 422 gauge_mismatch, not a snap error. route() resolves
+    # again internally from whatever list it is given (auto-stop
+    # mini-reroutes included); this value is the one the Trip carries, and
+    # auto-added stops cannot change it — the candidate filter only admits
+    # stops that support it (timetable._find_nearby_candidates).
+    router_stops = build_router_stops(stop_ids, stop_infra)
+    gauge_mm = resolve_trip_gauge((rs.stop for rs in router_stops), composition)
+
     routed_legs = router.route(
-        stops=build_router_stops(stop_ids, stop_infra),
+        stops=router_stops,
         composition=composition,
         tracks=tracks,
         routing_mode=routing_mode,
@@ -569,6 +580,7 @@ def _build_trip(
         direction=direction,
         segments=segments,
         timetable_warnings=timetable_warnings,
+        gauge_mm=gauge_mm,
     )
     logger.info(
         "_build_trip: id=%s %dm %.0fmin", tid, trip.distance_m, trip.total_time_min

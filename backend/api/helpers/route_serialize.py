@@ -115,6 +115,10 @@ def _trip_general_parameters(trip: Trip) -> dict:
         "trip_km": round(trip_km, 1),
         "route_duration_min": duration_min,
         "average_speed_kmh": round(average_speed_kmh, 1),
+        # Which per-gauge routing profile carried the trip (0.9.27) —
+        # 1435 for the whole network west of the break-of-gauge lines,
+        # informative exactly where routes were impossible before.
+        "track_gauge_mm": trip.gauge_mm,
         "timetable_warnings": [
             _timetable_warning_to_dict(w) for w in trip.timetable_warnings
         ],

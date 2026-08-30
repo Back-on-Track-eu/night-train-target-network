@@ -154,7 +154,7 @@ Config (see `docker/.env.example`): `JWT_SECRET` (required),
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/params/StopInfrastructures` | All stops with location and per-stop charges |
+| `GET` | `/api/params/StopInfrastructures` | All stops: location, per-stop charges, and the catalog enrichment (names, city, country, gauges) |
 | `GET` | `/api/params/compositions` | All composition types with full parameters, plus their operators |
 | `GET` | `/api/params/TrackInfrastructures` | All country track infrastructure parameters |
 
@@ -183,7 +183,35 @@ documentation and sources appear **once**, not repeated per entity:
 **`StopInfrastructures`** adds `default_stops` (`global` fallback +
 `by_country` overrides for the stop charge) and `stops` — one entry per stop:
 `{stop_id, name, country_code, lat, lon, stop_charge_eur}`, where
-`stop_charge_eur` is a *field object* (see below).
+`stop_charge_eur` is a *field object* (see below) that additionally carries
+the charge's provenance — `vat_rate_per`, `incl_vat_eur`, `basis`,
+`price_basis_year`, `tariff_class` and `source` (the tariff document's id in
+the charge pipeline's register). All six are `null` for a stop resolving
+through a country or global default: a default has no document behind it. The
+model prices from `value`, which is net of VAT; `incl_vat_eur` is carried so
+both figures can be compared against whichever one the document printed.
+
+The response also carries the catalog enrichment produced by the stop
+classification pipeline
+(`models/infrastructure/stops`, steps 7–8):
+
+| Field | Description |
+|---|---|
+| `provenance` | Why the stop is in the catalog, as a display category — `"existing night train stop"`, `"urban area currently without night train service"`, `"tourism region currently without night train service"`, ferry / border / network variants |
+| `name_latin`, `name_ascii` | Latin-script and diacritic-free forms of the station name — the search forms (`"munchen"` finds `München Hauptbahnhof`) |
+| `uic_ref` | UIC station code where OSM has one, else `null` |
+| `city` | `{name, osm_id, names}` for the municipality the stop belongs to (*Berlin Gesundbrunnen → Berlin*), or `null` for rural halts beyond any city radius. `names` is keyed by language code |
+| `country_names` | The country's name keyed by language code, always all seven |
+| `gauges_mm` | Night-train-capable track gauges, several at break-of-gauge stations (`[1435, 1520]` at Kaunas); `null` where no usable track was found |
+| `gauge_evidence` | How the gauge set was established: `tagged`, `untagged_tracks`, `narrow_gauge_only`, `no_tracks_nearby` |
+
+The language keys are `en, de, fr, nl, it, es, pl` — the member-organisation
+languages, defined once in `db/schema.py` as `STOP_NAME_LANGS`. They exist so
+the stop picker can be searched in any of them: an Italian user typing
+*Monaco* reaches München's stops through `city.names.it`, whatever the
+interface language. These fields are plain values, not field objects — none
+of them resolves against a default row, so there is no `is_default` to
+report.
 
 **`TrackInfrastructures`** adds `default_track_infra` (the single EU-average
 fallback row, `{value, source_id}` per field) and `track_infrastructures` —

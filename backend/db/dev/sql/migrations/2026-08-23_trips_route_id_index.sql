@@ -1,0 +1,23 @@
+-- ============================================================
+-- 2026-08-23_trips_route_id_index.sql
+-- The gallery map's corridor section (adapters/proposal/repository.py's
+-- map_lines()) reaches proposals.trips by route_id, rebuilding the key
+-- from the P{proposal_id}_V{version}_R1 convention:
+--
+--   JOIN proposals.trips t
+--     ON t.route_id = 'P' || f.proposal_id || '_V' || f.proposal_version || '_R1'
+--
+-- That is one lookup per row in the filtered set, so its cost grows with
+-- the proposal count — and proposals.trips.route_id had no index. The FK
+-- to proposals.routes does not create one (Postgres indexes the
+-- referenced side, never the referencing side).
+--
+-- Index only, no data change, so nothing to backfill. Not written as
+-- CREATE INDEX CONCURRENTLY on purpose: db/migrate.py wraps each file in
+-- one transaction together with its tracking record, and CONCURRENTLY
+-- cannot run inside a transaction block. proposals.trips is small enough
+-- that the brief write lock at deploy time is not worth breaking that
+-- contract for.
+-- ============================================================
+
+CREATE INDEX idx_trips_route ON proposals.trips (route_id);
