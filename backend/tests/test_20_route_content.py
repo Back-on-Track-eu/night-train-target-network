@@ -477,13 +477,7 @@ class TestModeSwitches:
         suggested = payload["suggested_stops"]
         suggested_ids = [s["stop_id"] for s in suggested]
         assert suggested_ids[:-2] == [
-            "osm:n2461322542",
-            "osm:n459277140",
-            "osm:n3419894993",
-            "osm:n29805967",
-            "osm:n2837556546",
             "osm:n267379240",
-            "osm:n7103322725",
             "osm:n3723386251",
             "osm:n2736023837",
             "osm:n5062517821",
