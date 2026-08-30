@@ -181,7 +181,7 @@ def streckenklasse(composition) -> str:
             return name
 
     raise ValueError(
-        f"no EN 15528 class covers {axle_load:.2f} t/axle and " f"{metre_load:.2f} t/m"
+        f"no EN 15528 class covers {axle_load:.2f} t/axle and {metre_load:.2f} t/m"
     )
 
 

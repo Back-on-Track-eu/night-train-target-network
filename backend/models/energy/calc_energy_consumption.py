@@ -74,13 +74,9 @@ def calc_energy_consumption(
                 coef.DRAG_IDENTIFIED_UP_TO_KMH,
             )
 
-        traction = (
-            coef.A_PER_LEG_KWH_PER_T * mass_t
-            + distance_km
-            * (
-                coef.B_PER_KM_KWH
-                + coef.C_PER_TKM_KWH * mass_t
-                + drag_per_km * avg_speed_kmh**2
-            )
+        traction = coef.A_PER_LEG_KWH_PER_T * mass_t + distance_km * (
+            coef.B_PER_KM_KWH
+            + coef.C_PER_TKM_KWH * mass_t
+            + drag_per_km * avg_speed_kmh**2
         )
         leg.energy_kwh = traction + aux_kw * hours

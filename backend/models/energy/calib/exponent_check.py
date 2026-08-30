@@ -1,7 +1,15 @@
-import numpy as np, pandas as pd, statsmodels.api as sm
+import numpy as np
+import pandas as pd
+import statsmodels.api as sm
 
 d = pd.read_csv("data/samples_speed.csv")
-d["seg"] = d.route_name.astype(str) + "__" + d.start_ds100.astype(str) + "__" + d.end_ds100.astype(str)
+d["seg"] = (
+    d.route_name.astype(str)
+    + "__"
+    + d.start_ds100.astype(str)
+    + "__"
+    + d.end_ds100.astype(str)
+)
 d["v"] = d.distance_km / (d.travel_time_min / 60)
 keys = ["seg", "composition_id", "stratum"]
 
@@ -23,6 +31,8 @@ for p in np.arange(1.5, 3.01, 0.05):
 res = pd.DataFrame(best, columns=["exponent", "within_R2"])
 peak = res.loc[res.within_R2.idxmax()]
 print(res.iloc[::4].round(4).to_string(index=False))
-print(f"\nbest-fitting exponent: {peak.exponent:.2f}   within-group R^2 {peak.within_R2:.5f}")
+print(
+    f"\nbest-fitting exponent: {peak.exponent:.2f}   within-group R^2 {peak.within_R2:.5f}"
+)
 print("Near 2.0 means the v^2 drag law holds over the observed range, and")
 print("applying it above that range is physics rather than curve-fitting.")

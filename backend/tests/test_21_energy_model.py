@@ -50,9 +50,9 @@ class _Comp:
 
 
 # The fleet's corner points, from the calibration compositions.
-LIGHT_SHORT = _Comp(313.0, 158.4, 6)   # REF-COUCH-6
-LIGHT_LONG = _Comp(313.8, 185.7, 7)    # NEW-BAL-7 - same mass, +17% length
-HEAVY = _Comp(636.0, 316.8, 12)        # REF-BUD-12
+LIGHT_SHORT = _Comp(313.0, 158.4, 6)  # REF-COUCH-6
+LIGHT_LONG = _Comp(313.8, 185.7, 7)  # NEW-BAL-7 - same mass, +17% length
+HEAVY = _Comp(636.0, 316.8, 12)  # REF-BUD-12
 
 
 def _energy(comp, distance_km=500.0, avg_kmh=120.0):
