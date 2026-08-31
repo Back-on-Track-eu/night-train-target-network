@@ -201,7 +201,7 @@ def route_stops(
     real answer about the network and the first is a data problem.
     """
     from models.params import StopInfrastructure
-    from models.route.routing.rail_router import StopInput
+    from models.route.routing.rail_router import StopInput, route_trip
     from models.route.trip import StopType
 
     located = [p for p in points if p[1] is not None and p[2] is not None]
@@ -228,8 +228,12 @@ def route_stops(
         for point in located
     ]
     try:
-        legs = context.router.route(
-            router_stops, context.composition, context.tracks, "fullRouting"
+        legs = route_trip(
+            context.router,
+            router_stops,
+            context.composition,
+            context.tracks,
+            "fullRouting",
         )
         return RoutingResult(legs, "routed")
     except Exception as e:

@@ -97,7 +97,12 @@ from models.params import (
 from models.route.trip import Stop, StopType, Segment, Trip, TimetableWarning
 from models.route.route import Route, TripPair, Parking, Shunting
 from models.route.routing.gauge import resolve_trip_gauge
-from models.route.routing.rail_router import RailRouter, RoutedLeg, build_router_stops
+from models.route.routing.rail_router import (
+    RailRouter,
+    RoutedLeg,
+    build_router_stops,
+    route_trip,
+)
 from models.route.timetable import (
     simple_automatic_timetable,
     simple_automatic_fixed_night_timetable,
@@ -476,7 +481,8 @@ def _build_trip(
     router_stops = build_router_stops(stop_ids, stop_infra)
     gauge_mm = resolve_trip_gauge((rs.stop for rs in router_stops), composition)
 
-    routed_legs = router.route(
+    routed_legs = route_trip(
+        router,
         stops=router_stops,
         composition=composition,
         tracks=tracks,

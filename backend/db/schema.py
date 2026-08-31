@@ -44,7 +44,9 @@ class Column:
 @dataclass(frozen=True)
 class Table:
     """One table: columns plus verbatim table-level constraint and index
-    lines. description becomes COMMENT ON TABLE."""
+    lines. description becomes COMMENT ON TABLE. unlogged marks a
+    disposable cache table — no WAL, lost on crash, never a source of
+    truth."""
 
     schema: str
     name: str
@@ -52,6 +54,7 @@ class Table:
     columns: tuple[Column, ...]
     constraints: tuple[str, ...] = ()
     indexes: tuple[str, ...] = ()
+    unlogged: bool = False
 
 
 # Member-organisation languages of the localized stop-catalog columns —
@@ -1674,6 +1677,101 @@ SCENARIO_TABLES: tuple[Table, ...] = (
 
 
 # =============================================================================
+# route_cache — per-graph stop-pair routing segment cache
+# =============================================================================
+# Mirrored verbatim by db/dev/sql/migrations/2026-08-31_route_segment_cache.sql
+# (servers only ever move through migrations). A cache like the §2.3
+# compute cache, not versioned data: keyed per routing graph, purged per
+# graph when that graph's GraphHopper import changes, refilled by
+# scripts/precompute_route_segments.py and by every live-routed miss.
+
+ROUTE_CACHE_TABLES: tuple[Table, ...] = (
+    Table(
+        schema="route_cache",
+        name="graph_state",
+        description="GraphHopper import_date each graph's cached segments "
+        "were routed against. RouteSegmentRepository.sync_graph_import() "
+        "compares it with the live /info at API startup and purges that "
+        "graph's rows on a change — a re-import empties exactly the graph "
+        "it touched.",
+        columns=(
+            Column("routing_graph_key", "VARCHAR(50) PRIMARY KEY"),
+            Column("import_date", "TEXT NOT NULL"),
+            Column("synced_at", "TIMESTAMPTZ NOT NULL DEFAULT now()"),
+        ),
+    ),
+    Table(
+        schema="route_cache",
+        name="route_segments",
+        description="Raw routed physics for one stop pair on one routing "
+        "graph, canonical lo->hi orientation (stop ids sorted; direction is "
+        "symmetric, one row serves both). Scenario-independent by design: "
+        "buffer quotas, traction dynamics and energy are applied downstream, "
+        "so parameter recalibrations invalidate zero rows. Grows from "
+        "precompute loads (source=precompute) and from every live-routed "
+        "miss (source=runtime). Row contract: "
+        "models/route/routing/segment_cache.py.",
+        unlogged=True,
+        columns=(
+            Column(
+                "routing_graph_key",
+                "VARCHAR(50) NOT NULL",
+                "The graph these segments were routed on — each graph has its "
+                "own snapped points and HSR resolution, nothing is shared.",
+            ),
+            Column("stop_lo", "VARCHAR(120) NOT NULL", "Smaller stop_id of the pair."),
+            Column("stop_hi", "VARCHAR(120) NOT NULL", "Larger stop_id of the pair."),
+            Column(
+                "variant_key",
+                "VARCHAR(80) NOT NULL",
+                "route_variant_key(): gauge profile + hash of the resolved "
+                "custom model — everything that shapes the geometry on a "
+                "graph. Unknown key -> miss -> live route + store.",
+            ),
+            Column(
+                "distance_m", "INTEGER NOT NULL", "Rounded total, for screening.", "m"
+            ),
+            Column(
+                "country_distance_m",
+                "JSONB NOT NULL",
+                "Unrounded per-country distance; shares derive from this.",
+                "m",
+            ),
+            Column(
+                "country_driving_ms",
+                "JSONB NOT NULL",
+                "Unrounded per-country raw driving time — what buffer quotas "
+                "and driving_time_min are recomputed from per request.",
+                "ms",
+            ),
+            Column(
+                "countries", "JSONB NOT NULL", "Country codes in path order, lo->hi."
+            ),
+            Column(
+                "passages",
+                "JSONB NOT NULL",
+                "Full intersecting passage_id list of this pair — the cross-leg "
+                "first-claim dedupe happens at trip assembly.",
+            ),
+            Column(
+                "geometry",
+                "JSONB NOT NULL",
+                "[[lon, lat], ...] lo->hi. Deliberately the last column — large; "
+                "keep it out of ad-hoc SELECTs.",
+            ),
+            Column(
+                "source",
+                "VARCHAR(10) NOT NULL DEFAULT 'runtime'",
+                "'precompute' (bulk load) or 'runtime' (stored on a miss).",
+            ),
+            Column("routed_at", "TIMESTAMPTZ NOT NULL DEFAULT now()"),
+        ),
+        constraints=("PRIMARY KEY (routing_graph_key, stop_lo, stop_hi, variant_key)",),
+    ),
+)
+
+
+# =============================================================================
 # DDL rendering
 # =============================================================================
 
@@ -1692,7 +1790,7 @@ def _table_ddl(table: Table) -> str:
     body_lines = [f"    {c.name} {c.sql_type}" for c in table.columns]
     body_lines += [f"    {c}" for c in table.constraints]
     lines = [
-        f"CREATE TABLE {qualified} (",
+        f"CREATE {'UNLOGGED ' if table.unlogged else ''}TABLE {qualified} (",
         ",\n".join(body_lines),
         ");",
         _comment("TABLE", qualified, table.description),
@@ -1727,4 +1825,10 @@ def build_ddl() -> str:
         "",
     ]
     parts += [_table_ddl(t) + "\n" for t in SCENARIO_TABLES]
+    parts += [
+        "DROP SCHEMA IF EXISTS route_cache CASCADE;",
+        "CREATE SCHEMA route_cache;",
+        "",
+    ]
+    parts += [_table_ddl(t) + "\n" for t in ROUTE_CACHE_TABLES]
     return "\n".join(parts)

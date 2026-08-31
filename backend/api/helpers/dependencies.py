@@ -18,6 +18,17 @@ cold pool for no gain. Handlers call get_rail_router(graph_key), where
 graph_key is a scenario's routing_graph_key pin (scenario.scenarios; None
 → the default graph).
 
+Route segment cache
+-------------------
+Every router shares one RouteSegmentRepository (route_cache schema —
+adapters/route_segment_repository.py): routing is served lookup-first per
+stop pair and every live-routed miss is stored back, keyed by the
+router's own graph. At startup each graph's GraphHopper import_date is
+reconciled with route_cache.graph_state — a re-imported graph has its
+cached rows purged before it serves a single request. ROUTE_SEGMENT_CACHE_ENABLED=false
+(default true) builds cache-less routers; a repository failure at startup
+degrades to the same, never blocks the API.
+
 Routing graph registry
 ----------------------
 The key → URL mapping is deployment configuration, not database content.
@@ -54,6 +65,7 @@ State
   _passage_index   : PassageIndex instance (crossing polygons, same lifetime)
   _rail_routers    : dict[graph_key, RailRouter] (built at startup on the
                      CountryIndex, one per configured routing graph)
+  _segment_repo    : RouteSegmentRepository | None (shared by all routers)
   _proposal_repo   : ProposalRepository instance (created at startup)
   _feedback_repo   : FeedbackRepository instance (created at startup)
   _engagement_repo : ProposalEngagementRepository instance (created at startup)
@@ -79,6 +91,7 @@ _loader = None
 _country_index = None
 _passage_index = None
 _rail_routers: dict = {}
+_segment_repo = None
 _proposal_repo = None
 _feedback_repo = None
 _engagement_repo = None
@@ -140,6 +153,7 @@ def init() -> None:
         _country_index, \
         _passage_index, \
         _rail_routers, \
+        _segment_repo, \
         _proposal_repo, \
         _feedback_repo, \
         _engagement_repo, \
@@ -155,6 +169,7 @@ def init() -> None:
     from adapters.proposal.engagement_repository import ProposalEngagementRepository
     from adapters.auth_repository import AuthRepository
     from adapters.proposal.compute_cache import ComputeCacheRepository
+    from adapters.route_segment_repository import RouteSegmentRepository
     from models.route.routing.rail_router import (
         CountryIndex,
         PassageIndex,
@@ -176,10 +191,19 @@ def init() -> None:
         # planet, not of an OSM snapshot. Construction is cheap (a
         # Session each, no network call), so even a graph no scenario
         # pins yet costs nothing until routed on.
+        _segment_repo = _build_segment_repository(RouteSegmentRepository)
         _rail_routers = {
-            key: RailRouter(_country_index, _passage_index, base_url=url)
+            key: RailRouter(
+                _country_index,
+                _passage_index,
+                base_url=url,
+                graph_key=key,
+                segment_repository=_segment_repo,
+            )
             for key, url in _routing_graph_urls().items()
         }
+        if _segment_repo is not None:
+            _sync_segment_cache(_rail_routers, _segment_repo)
         logger.info(
             "Routing graphs configured: %s",
             ", ".join(
@@ -221,6 +245,53 @@ def get_country_index():
     if not _loaded or _country_index is None:
         raise DataNotLoadedError("Data not loaded. Call POST /api/data/load first.")
     return _country_index
+
+
+def _build_segment_repository(repository_cls):
+    """The shared segment-cache repository, or None when disabled by env
+    or unreachable — routing then runs live, which is slower but never
+    wrong, so a cache problem must not take the API down."""
+    if os.environ.get("ROUTE_SEGMENT_CACHE_ENABLED", "true").strip().lower() in (
+        "0",
+        "false",
+        "no",
+    ):
+        logger.info("Route segment cache disabled (ROUTE_SEGMENT_CACHE_ENABLED).")
+        return None
+    try:
+        return repository_cls()
+    except Exception as e:
+        logger.warning(
+            "Route segment cache unavailable (%s: %s) — live routing only. "
+            "Is the route_cache migration applied?",
+            type(e).__name__,
+            e,
+        )
+        return None
+
+
+def _sync_segment_cache(routers: dict, repo) -> None:
+    """Reconcile each graph's cached rows with the graph its instance
+    actually serves — /info's import_date. An unreachable instance is
+    skipped (rows stay; they belong to whatever graph comes back)."""
+    for key, router in sorted(routers.items()):
+        try:
+            import_date = router.check_server().get("import_date")
+        except Exception as e:
+            logger.warning(
+                "Routing graph '%s' unreachable at startup (%s) — segment "
+                "cache left as is.",
+                key,
+                type(e).__name__,
+            )
+            continue
+        repo.sync_graph_import(key, import_date)
+        logger.info(
+            "Route segment cache [%s]: %d segment(s), graph import %s.",
+            key,
+            repo.count(key),
+            import_date,
+        )
 
 
 def get_rail_router(graph_key: str | None = None):
