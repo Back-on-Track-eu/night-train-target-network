@@ -342,6 +342,52 @@ class RailRoutingError(Exception):
     pass
 
 
+# --- Routing graph naming contract -------------------------------------
+#
+# One OpenRailRouting instance per routing graph. Every per-graph setting
+# is suffixed with the graph key, uppercased, so the default graph reads
+# exactly like any other and no instance is implicitly "the" router:
+#
+#   OPENRAILROUTING_URL_<KEY>             backend registry entry
+#   OPENRAILROUTING_HOST_PORT_<KEY>       published port
+#   OPENRAILROUTING_ADMIN_HOST_PORT_<KEY> published admin port
+#   GRAPH_CACHE_FILE_ID_<KEY>             Drive id of the prebuilt cache
+#
+# OPENRAILROUTING_CONTAINER_PORT is NOT suffixed: every instance binds the
+# same port inside the stack, because they share one config.yml.
+#
+# Scenarios select their graph via scenario.scenarios.routing_graph_key;
+# the key -> URL mapping is deployment configuration, never database
+# content. See api/helpers/dependencies.py and this folder's README.
+DEFAULT_ROUTING_GRAPH_KEY = "infra_2026"
+
+ROUTING_URL_ENV_PREFIX = "OPENRAILROUTING_URL_"
+
+_LOCAL_ROUTING_URL = "http://localhost:8989"
+
+
+def routing_url_env_var(graph_key: str) -> str:
+    """Environment variable holding the URL of one routing graph."""
+    return f"{ROUTING_URL_ENV_PREFIX}{graph_key.upper()}"
+
+
+def default_base_url() -> str:
+    """URL of the DEFAULT routing graph, for callers that do no scenario
+    resolution of their own — tests, host scripts, routing_context.py.
+
+    Precedence: the default graph's own suffixed variable, then the
+    unsuffixed OPENRAILROUTING_URL, then localhost. The unsuffixed name is
+    kept solely as a compatibility path for the server stacks under
+    deploy/, which set it and know nothing about graph keys; the dev stack
+    and CI use the suffixed form.
+    """
+    return (
+        os.environ.get(routing_url_env_var(DEFAULT_ROUTING_GRAPH_KEY))
+        or os.environ.get("OPENRAILROUTING_URL")
+        or _LOCAL_ROUTING_URL
+    )
+
+
 class RailRouter:
     """
     Wraps the OpenRailRouting (GraphHopper) instance.
@@ -364,11 +410,18 @@ class RailRouter:
     _CONNECTION_POOL_SIZE = 64
 
     def __init__(
-        self, country_index: CountryIndex, passage_index: PassageIndex | None = None
+        self,
+        country_index: CountryIndex,
+        passage_index: PassageIndex | None = None,
+        base_url: str | None = None,
     ) -> None:
-        self.base_url = os.environ.get(
-            "OPENRAILROUTING_URL", "http://localhost:8989"
-        ).rstrip("/")
+        # Explicit base_url wins — the multi-graph registry
+        # (api/helpers/dependencies.py) constructs one RailRouter per
+        # routing graph in the same process, so the environment alone
+        # cannot address them. Everything single-graph (tests,
+        # routing_context.py, host scripts) keeps passing nothing and
+        # lands on the default graph.
+        self.base_url = (base_url or default_base_url()).rstrip("/")
         self.profile = os.environ.get("OPENRAILROUTING_PROFILE", "night_train")
         self.timeout = int(os.environ.get("OPENRAILROUTING_TIMEOUT", "30"))
         self._session = requests.Session()

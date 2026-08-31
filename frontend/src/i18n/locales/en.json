@@ -41,7 +41,8 @@
     }
   },
   "proposal": {
-    "heading": "So, what's your \ndream night train route?",
+    "heading": "So, what's your dream night train route?",
+    "subheading": "Sketch it, run the numbers, improve and help us build the evidence for Europe's night train target network.",
     "evaluate": "Evaluate",
     "recalculate": "Recalculate with this selection",
     "evaluating": "Evaluating your proposal…",

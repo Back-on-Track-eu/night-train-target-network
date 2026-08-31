@@ -99,8 +99,7 @@ jobs:
             backend/models/route/route.py \
             backend/models/route/timetable.py \
             backend/models/route/routing/rail_router.py \
-            backend/models/route/routing/dynamics.py \
-            backend/models/route/routing/gauge.py; do
+            backend/models/route/routing/dynamics.py; do
             check_version "$f" \
               "backend/models/route/model.py" \
               "ROUTE_BUILDER_VERSION"
@@ -211,20 +210,23 @@ jobs:
         id: cache-graph
         uses: actions/cache@v4
         with:
-          path: backend/models/route/routing/docker/graph-cache
-          key: openrailrouting-graph-${{ hashFiles('backend/models/route/routing/docker/config.yml') }}
+          path: backend/models/route/routing/docker/graph-cache-infra-2026
+          # infra-2026 prefix: the path changed with the per-graph dir
+          # rename, and a key bump guarantees a clean save at the new
+          # path instead of restoring an archive recorded at the old one.
+          key: openrailrouting-graph-infra-2026-${{ hashFiles('backend/models/route/routing/docker/config.yml') }}
 
       - name: Download graph cache if not cached
         if: steps.cache-graph.outputs.cache-hit != 'true'
         run: |
-          mkdir -p backend/models/route/routing/docker/graph-cache
+          mkdir -p backend/models/route/routing/docker/graph-cache-infra-2026
           # The id's one home is the routing container's entrypoint default
           # (AGENTS.md "Parameter placement") — read it from there.
           FILE_ID=$(grep -oP 'GRAPH_CACHE_FILE_ID:-\K[^}]+' \
             backend/models/route/routing/docker/entrypoint.sh)
           URL="https://drive.usercontent.google.com/download?id=${FILE_ID}&export=download&confirm=t"
           curl -L "$URL" -o /tmp/graph-cache.zip
-          unzip -o /tmp/graph-cache.zip -d backend/models/route/routing/docker/graph-cache
+          unzip -o /tmp/graph-cache.zip -d backend/models/route/routing/docker/graph-cache-infra-2026
           rm /tmp/graph-cache.zip
 
       # ------------------------------------------------------------------

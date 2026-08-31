@@ -1,15 +1,15 @@
 services:
-  openrailrouting:
+  openrailrouting-infra-2026:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: openrailrouting
+    container_name: openrailrouting-infra-2026
     ports:
       - "8989:8989"
       - "8990:8990"
     volumes:
-      - ./data:/app/data
-      - ./graph-cache:/app/graph-cache
+      - ./data-infra-2026:/app/data
+      - ./graph-cache-infra-2026:/app/graph-cache
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8989/health"]

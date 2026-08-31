@@ -12,7 +12,7 @@ set -e
 # command through as "$@", but ENTRYPOINT means it never replaces this
 # script — so without this branch a documented one-off like
 #
-#   docker compose run --rm openrailrouting \
+#   docker compose run --rm openrailrouting-infra-2026 \
 #     java -Xmx24g -Xms1g -jar railway_routing.jar import config.yml
 #
 # was silently ignored and the SERVER started instead, after downloading a
@@ -26,7 +26,9 @@ fi
 
 GRAPH_CACHE_DIR="/app/graph-cache"
 GRAPH_CACHE_MARKER="${GRAPH_CACHE_DIR}/properties.txt"
-# Configured via GRAPH_CACHE_FILE_ID in backend/docker/.env (see
+# Passed in by compose as GRAPH_CACHE_FILE_ID — unsuffixed, because a
+# container serves exactly one graph and does not know its key. The
+# host-side variable IS suffixed (GRAPH_CACHE_FILE_ID_<KEY>); see
 # .env.example), alongside the ONTD workbook ids — same class of value,
 # same place. The literal below is only a fallback for compose stacks
 # that do not inject it yet; there is no reason for this id to live in

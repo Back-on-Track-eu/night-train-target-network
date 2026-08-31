@@ -1,0 +1,464 @@
+# Deploy handover — David → Giovanni
+
+**Living document.** Everything the server side needs to know from the
+backend, in one place. Supersedes `deploy/HANDOVER.md` (2026-08-10),
+`deploy/HANDOVER-2026-08-31-scenario-routing.md` and
+`docs/STAGING_DEPLOY_NOTES.md` — all three are folded in here and should be
+deleted.
+
+Updated after each change that touches deploy, capacity or server data.
+Last update 2026-08-31 (scenario routing graphs).
+
+**If you read one section:** §3 is the deploy currently queued for staging,
+§4 is a mandatory cache wipe that comes with it, and §7 is the capacity work
+that is genuinely yours to schedule.
+
+| | |
+|---|---|
+| §1 | What is shipping now |
+| §2 | Why your compose files need no edits |
+| §3 | Deploy order for this batch |
+| §4 | Wipe the routing graph cache — required |
+| §5 | Standing gotchas on every staging deploy |
+| §6 | How deploy relates to the backend `.env` |
+| §7 | **Capacity: routing under batch load** |
+| §8 | When the 2032 graph lands |
+| §9 | Older open items |
+| §10 | Questions back to you |
+
+---
+
+## 1. What this batch does
+
+Scenarios now pin the **routing graph** they route on, not just their five
+`input_params` version snapshots. `scenario.scenarios` gains
+`routing_graph_key`; the backend holds one `RailRouter` per configured
+graph and picks it per request from that pin. This is the groundwork for
+the 2032 upgraded-network scenarios — Jasper's OSM file is not here yet,
+so **nothing new runs on the servers**: one routing instance, exactly as
+today.
+
+Alongside it, the scenario set was rebuilt. The old "2026 Base Line" /
+"2032 Base Line" naming is gone ("2032" named a price year, which became
+confusing once the network itself is a scenario axis). Three selectable
+scenarios, all on today's network:
+
+| key | |
+|---|---|
+| `infra-2026` | today's network, no high-speed access — the live base |
+| `infra-2026-hsr` | + night trains allowed on high-speed lines |
+| `infra-2026-hsr-opt-tt` | + optimised timetables (reduced schedule supplement) |
+
+Plus one superseded revision on the `infra-2026` key
+(`is_current_scenario = FALSE`) holding the pre-correction German track
+access rates, so evaluations published before that correction stay
+reproducible. Not user-selectable.
+
+---
+
+## 2. Why your compose files need no edits
+
+The dev stack moved to per-graph environment variables
+(`OPENRAILROUTING_URL_INFRA_2026` and friends). Your `api` services set the
+**unsuffixed** `OPENRAILROUTING_URL=http://targetnetwork-routing:8989`, and
+that is still honoured — deliberately, as the compatibility path for stacks
+that know nothing about graph keys. Resolution order is: the default
+graph's suffixed variable, then the unsuffixed one, then localhost
+(`models/route/routing/rail_router.py`, `default_base_url()`).
+
+So `bot-server-app/docker-compose.yml` works as-is. If you ever want to be
+explicit, rename that one line to `OPENRAILROUTING_URL_INFRA_2026` — same
+result, no rush.
+
+**Per §1 of the first handover**, the variables added on the backend side
+are absent from your `environment:` blocks. I checked each: none is needed
+for a boot or a request path on the servers today. Nothing to backfill.
+
+---
+
+## 3. Staging deploy — order matters
+
+Staging deploys itself: merged PR → branch push → Actions
+(`deploy-staging.yml`) → `deploy.sh` → build → **migrations applied before
+the api may start** → `migrate.py --check` → health check. So step 1 below
+happens on its own. Steps 2–4 do not, and their order is not negotiable.
+
+**Step 0 — wipe the graph cache. Required for this deploy.** See §4; the
+profile set changed at `ROUTE_BUILDER_VERSION` 0.9.28 and the routing
+container will restart-loop against the old graph. Do this before or
+alongside the merge, not after the api starts failing.
+
+**Step 1 — schema (automatic).** `db/migrate.py` applies
+`2026-08-29_scenario_routing_graph.sql`: adds `routing_graph_key`,
+backfills every existing row to `'infra_2026'`, sets NOT NULL. Existing
+scenarios keep working — they all route on today's network.
+
+**Step 2 — scenario data (manual).**
+
+```bash
+cd /opt/targetnetwork-staging/deploy/bot-server-app
+docker compose run --rm migrate python scripts/migrate_scenarios_2026.py --install --dry-run
+docker compose run --rm migrate python scripts/migrate_scenarios_2026.py --install
+```
+
+Writes the three new snapshots and scenario rows, moves the base, truncates
+the compute cache. Reads `db/dev/seed.py`'s own data structures rather than
+hardcoding values into SQL, so the calibration stays single-sourced. New
+snapshots are appended above the existing maximum version, so server
+version numbers will not match a fresh dev seed — cosmetic, since
+`scenario_id` is the handle every consumer uses.
+
+**If you reseed staging instead** (`Reseed staging` workflow), steps 2–4
+are unnecessary: `seed.py` produces the new scenario set directly. Given
+staging is still reseeded from scratch (§5), that is the simpler path here
+— the migration script exists for **production**, which is never reseeded
+and carries real volunteer submissions.
+
+**Step 3 — refresh proposals (manual).**
+
+```bash
+docker compose run --rm migrate python scripts/refresh_proposals.py
+```
+
+Recomputes every published proposal against the new base and repoints its
+`scenario_id`.
+
+**Step 4 — delete the old scenarios (manual).**
+
+```bash
+docker compose run --rm migrate python scripts/migrate_scenarios_2026.py --delete-old --dry-run
+docker compose run --rm migrate python scripts/migrate_scenarios_2026.py --delete-old
+```
+
+**Never run step 4 before step 3.** `proposals.proposals.scenario_id` has
+**no foreign key**, so deleting a scenario row does not error — it strands
+every proposal pinning it, because reads rebuild `input.parameters` through
+that pin and resolution raises on a missing row. The script refuses while
+any proposal, summary or cache row still references a retired scenario, but
+the ordering is the real protection.
+
+**Rollback.** Steps 1–3 are additive; the old scenario rows are still there
+and moving the base back is one `UPDATE`. After step 4 there is no
+rollback, so leave a soak period between 3 and 4 if you want one.
+
+---
+
+## 4. Wipe the routing graph cache before this deploy — from 0.9.28 on
+
+**Required for this deploy.** On the server the graph cache is a Docker
+named volume, not a directory:
+
+```bash
+cd /opt/targetnetwork-app/deploy/bot-server      # wherever the shared stack lives
+docker compose stop targetnetwork-routing
+docker volume rm tn_graphcache                   # entrypoint re-downloads from Drive
+docker compose up -d targetnetwork-routing
+```
+
+Renaming beats deleting when you can: `docker volume create tn_graphcache_old`
+plus a copy, so a failed download leaves you a working graph to move back.
+Reload takes ~2 min and **both environments share this container** — staging
+and production both lose routing while it reloads. Schedule accordingly.
+
+**Why.** The graph is built per *profile*, and the profile set is baked in at
+import time. `ROUTE_BUILDER_VERSION` 0.9.28 changed it: 1520 and 1524 mm
+became one gauge family, so `night_train_1524` was removed and
+`night_train_1520`'s custom model changed to accept both tags. GraphHopper
+compares the config's profile hashes against the graph's at startup and
+refuses to run when they differ:
+
+```
+java.lang.IllegalStateException: Profiles do not match:
+Graphhopper config: night_train|…,night_train_1520|209904841,…
+Graph:              night_train|…,night_train_1520|722514490,night_train_1524|…
+Change configuration to match the graph or delete /app/graph-cache/
+```
+
+The container then restart-loops and the API never comes up, because it
+waits on the routing service being healthy.
+
+The cache is **not in git** — a ~213 MB zip on Drive, fetched by
+`entrypoint.sh` when the graph-cache directory is empty. The file id does not
+change between versions; a new graph is uploaded as a *new version of the
+same file*. So the fix is always "delete the local copy and let it
+download", never an id change.
+
+**When this stops applying:** never entirely. It applies to any deploy
+crossing a change to `config.yml` or `custom_models/` — the only two inputs
+to the profile hash. If a release note says the graph was re-imported, wipe
+the cache.
+
+**Dev-side note:** the local directories were renamed this batch, so the
+equivalent there is `graph-cache-infra-2026/`, not `graph-cache/` (one
+directory per routing graph). Server volumes are unchanged.
+
+---
+
+---
+
+## 5. Standing staging gotchas
+
+Merged in from `docs/STAGING_DEPLOY_NOTES.md`, which this document replaces.
+These apply to every staging deploy, not just this batch. Each says when it
+stops applying.
+
+### The database is fully reseeded, so schema changes need no migration — for now
+
+`db/dev/seed.py` drops and rebuilds `input_params` and `scenario` from
+scratch, and staging currently runs that path via the `Reseed staging`
+workflow. That is why 0.9.28's `gauge_evidence` CHECK change (adding
+`'override'`) shipped without a migration.
+
+**When this stops applying:** the moment staging stops being reseeded — at
+the first stable release. From then on every schema change in
+`backend/db/schema.py` needs a matching migration, and the stop catalogue
+needs a new `stop_infra_version` rather than an in-place edit, because
+scenario-pinned versions are immutable (`adapters/proposal/README.md` §4.2).
+This entry is the reminder to make that switch deliberately rather than
+discovering it.
+
+Note that **production is already past that line** — never reseeded, real
+volunteer submissions since the 18-08 test party. That asymmetry is why this
+batch ships both a migration and a data-migration script even though staging
+would not need either.
+
+### The stop catalogue comes from Drive, not from git
+
+`stop_seed_catalog.csv` is downloaded at seed time. Publishing a catalogue
+change means uploading a new *version of the same Drive file*, then
+reseeding. A deploy that seems to ignore a catalogue change is usually a
+catalogue that was never uploaded.
+
+The seed log states the count it actually loaded:
+
+```
+downloaded stop_seed_catalog.csv (1050 stops).
+```
+
+Check that number against the release note — the fastest confirmation that
+staging is running the catalogue you think it is.
+
+*Two corrections to the note this replaces:* the variable `seed.py` reads is
+**`STOP_SEED_FILE_ID`**, not `ONTD_SEED_STOPS_FILE_ID` (that one belongs to
+`scripts/export_ontd_stop_seed.py`, a different artifact — the ONTD seed
+stops CSV). And the catalogue is written by
+**`step10_export_seed_stops.py`**; the pipeline grew past step 7.
+
+### Expected log noise, not errors
+
+```
+TrackInfrastructure[BY]: no row in track_infrastructures — using EU-average default for every field.
+TrackInfrastructure[RU]: no row in track_infrastructures — using EU-average default for every field.
+```
+
+Belarus and Russia are in `input_params.countries` **solely** to hold the
+border polygons the routing exclusion is built from (`BLOCKED_COUNTRIES`,
+`models/route/model.py`). They deliberately have no track-infrastructure
+rows, so that if the routing block ever failed, the country-coverage check
+would still reject the route rather than silently price Belarusian
+kilometres. The warning is that design working. Do not "fix" it by adding
+rows.
+
+```
+2 catalog stops skipped — country not modelled (XK 2).
+```
+
+Kosovo is not in the country list yet. Two catalogue stops are dropped at
+seed time as a result. Known, tracked, harmless.
+
+### New this batch: expected scenario counts
+
+After a reseed, `scenario.scenarios` holds **4** rows — three selectable
+plus the superseded revision. `GET /api/scenarios` returns 1 base, 2
+current, 1 historical. All four carry `routing_graph_key = 'infra_2026'`.
+Anything else means the seed or the migration did not complete.
+
+---
+
+---
+
+## 6. How deploy relates to the backend `.env` (context, no action)
+
+`deploy/bot-server-app/docker-compose.yml` enumerates every variable the
+`api` service needs in its own `environment:` block. It does **not** use
+`env_file:`, and it does not read `backend/docker/.env`.
+
+That separation is deliberate and I'd keep it: `backend/docker/.env.example`
+carries working *dev defaults* (`POSTGRES_PASSWORD=devpassword`,
+`AUTH_EMAIL_DEV_MODE`, a Drive graph-cache id), and CI copies it verbatim.
+None of that belongs on a server. The rule is now written down in AGENTS.md
+("Parameter placement"): one dev-side `.env`; server stacks enumerate their
+environment explicitly.
+
+The trade-off is that a variable added on the backend side is silently
+absent on staging/production until someone adds it to your `environment:`
+block. I checked every one currently unset — none break a boot or a request
+path today (they all have code defaults, and the ONTD ones are moot because
+of §3 below). So there is nothing to backfill right now. This is just the
+mechanism to know about when reviewing future backend PRs.
+
+If you'd rather not track it by hand, the alternative is a small
+`deploy/bot-server-app/.env.defaults` committed to git (non-secret
+operational values only) listed *before* `.env` in an `env_file:` array
+(last file wins), with the secret ones staying in `.env`. Your call — I'm
+not proposing it, just noting it exists.
+
+---
+
+## 7. Capacity findings — routing under batch load
+
+Context: proposal computes are becoming batch-shaped (one `/calc` fanning
+out to many route requests). `apply_auto_stop_addition()` already does
+this. These are the four ceilings, and what I would do about each. All
+yours to schedule — none blocks this deploy.
+
+**Correction first.** I previously told David two graphs would be a RAM
+problem. The startup log says otherwise: `edges: 2,976,018 (117MB), nodes:
+2,653,477 (41MB), geo (69MB), name (10MB)` — about **240 MB resident per
+graph**. The 5–10 GB figure is the on-disk cache, not the heap. Two
+instances are cheap in memory. The contention is CPU.
+
+**(a) Gunicorn workers — the binding limit.** `--workers 2` on the servers,
+sync. One `/calc` holds one worker for its entire batch, so concurrent
+users cap at 2 regardless of how well the batch parallelises internally.
+The proper fix is WP14 (per-request DB connections from a pool) followed by
+`--threads`, because a calc is I/O-bound waiting on GraphHopper, not
+CPU-bound in Python. WP14 is currently marked "not gating anything" —
+that stops being true once batch calcs are normal. Until then, the VPS
+upsize makes `--workers 4` viable. **Watch out:** `api/limiter.py` stores
+rate-limit state per process, so the effective ceiling is (limit ×
+workers). Going 2 → 4 silently doubles every rate limit. Either move the
+limiter to shared storage or re-tune the numbers.
+
+**(b) The 120s gunicorn timeout** caps batch size hard (per-route timeout
+is 30s, but the whole calc must finish inside 120s or the worker is
+killed). My recommendation is an explicit maximum batch size with a clean
+422 past it, rather than raising the timeout — a long-held sync worker is
+exactly problem (a). Asynchronous jobs only if real batches genuinely
+exceed a sane cap.
+
+**(c) Two-pass routing doubles the call count.** `fullRouting` does a
+snap pass then a custom-model pass, so N trips is 2N HTTP calls. The snap
+pass is cacheable and shouldn't exist at request time at all: snapping
+depends only on `(coordinates, gauge profile, graph)`, so it is
+**per-stop, not per-trip**. Precomputing it once per stop per profile per
+graph removes half the traffic outright. That is the cheapest large win
+available and needs no API change.
+
+**(d) CPU contention.** `config.yml` sets no `maxThreads`/`minThreads`, so
+GraphHopper runs on Dropwizard's Jetty defaults — up to 1024 threads
+against a CPU-bound workload, which thrashes under burst rather than
+queueing. Worth setting an explicit thread ceiling near core count, and an
+explicit `-Xmx` per instance before a second one ever runs.
+
+**The gap behind all of it:** there is no per-segment route cache. WP13's
+compute cache keys the whole proposal, so changing one stop re-routes every
+leg. A segment cache keyed on `(from_stop, to_stop, resolved custom-model
+hash, routing_graph_key, ROUTE_BUILDER_VERSION)` would cut most batch
+traffic — the same Berlin–Warszawa segment is currently recomputed across
+every proposal that contains it.
+
+Sequence I'd suggest: snapped-coordinate cache → segment cache → batch cap
+→ WP14. The first two also make the per-graph precompute affordable when
+2032 arrives.
+
+---
+
+## 8. When the 2032 graph lands
+
+Not now, but so it's on your radar — a second graph is a compose service,
+three environment variables, and scenario rows. No code.
+
+- Service `openrailrouting-infra-2032` exists in the dev compose behind
+  profile `infra-2032`, off by default. Server equivalent is yours to add.
+- Own graph cache (separate Drive file, own id), own host directories,
+  ports 8991/8992 in dev.
+- **Precompute cost multiplies per graph** — every route/segment batch you
+  run today runs once per graph. This is the main reason (c) and the
+  segment cache matter before rather than after.
+- A scenario pinning a graph with no configured URL fails loudly
+  (`RoutingGraphNotConfiguredError`). Never a silent fallback to the wrong
+  network — that would return plausible routes computed on the wrong
+  infrastructure, which is the worst failure mode available to us.
+
+---
+
+## 9. Older open items
+
+Carried from the 2026-08-10 handover. Still open, still yours to action or
+discard.
+
+### 9.1 `LOCAL_HTTP_PORT` missing from `.env.example`
+
+`docker-compose.local.yml` reads `${LOCAL_HTTP_PORT:-8090}` for the local
+Caddy's published port, but `deploy/bot-server-app/.env.example` does not
+list it. Harmless — the default works — but someone whose 8090 is taken has
+no way to discover the variable except by reading the compose file. A
+commented line in the example would fix it.
+
+### 9.2 ONTD reference data never loads on staging/production
+
+`backend/docker/entrypoint.sh` runs `seed.py`, then `db/ontd/bootstrap.py`
+in the background, then gunicorn. Your `api` service overrides it with an
+explicit `command: [gunicorn, ...]` — correctly, since that entrypoint's
+`seed.py` starts with `DROP SCHEMA … CASCADE` and must never run on a
+long-lived database.
+
+The side effect is that `bootstrap.py` does not run either, so
+`ontd.route_summaries` stays empty and the gallery shows proposals only, with
+no existing-night-train context.
+
+If intentional, ignore. If the servers should show existing routes it needs
+its own one-shot invocation (same shape as `migrate`), plus
+`ONTD_WORKBOOK_ID` / `ONTD_COMPOSITIONS_ID` in the `environment:` block. The
+routing engine must be reachable, and it re-routes ~205 routes, so it is not
+a per-deploy step — more a manual `docker compose run --rm` after a schema
+reset. CI does exactly that shape: `bootstrap.py --force --strict`.
+
+**New reason this matters:** the schedule-supplement re-calibration
+(`backend/models/scenarios/README.md`) reads `ontd.route_legs`. Until the
+servers carry ONTD data, that calibration can only be run from a developer
+machine.
+
+### 9.3 Two legacy deploy directories
+
+`deploy/bot-server/` and `deploy/bot-server-demo/` both predate
+`bot-server-app` and, as far as I can tell, neither boots against current
+`staging`: stale build-context paths in the former, no `JWT_SECRET` in
+either (`check_auth_config()` raises at boot), and a schema description in
+the demo README that predates the `scenario` schema entirely.
+
+My read is these should be deleted rather than repaired. Your call — if
+either is still serving something on the box, say so and I will leave them
+documented.
+
+*Note:* `deploy/bot-server/` is still where the shared
+`targetnetwork-routing` container is defined, so check what actually runs
+before deleting that one.
+
+---
+
+## 10. Questions back to you
+
+1. VPS sizing after the upsize — how many cores, and are you comfortable
+   with `--workers 4` plus the rate-limit doubling described in §7?
+2. For staging: reseed (simpler, wipes accounts/proposals/likes/comments)
+   or run the migration path (preserves them, more steps)? The reseed
+   workflow already preserves the testing-gate access codes. I have no
+   preference; production has no choice and takes the migration path.
+3. Do you want a soak period between step 3 and step 4 of §3?
+4. §9.2 — should the servers load ONTD reference data at all?
+5. §9.3 — delete the two legacy deploy directories?
+
+---
+
+## Maintaining this document
+
+One file, updated in the same PR as the change it describes. The rule that
+keeps it useful: **every entry says when it stops applying.** A gotcha with
+no expiry becomes folklore nobody dares remove.
+
+When a section stops applying, delete it rather than marking it done — git
+history is the archive. When a new capacity finding lands, it goes in §7
+next to the others so the picture stays whole rather than scattered across
+dated files.

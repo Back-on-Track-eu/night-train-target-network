@@ -1,7 +1,7 @@
 # Backend Test Suite
 
 Integration test suite for the night-train-target-network backend. All tests
-run against the **live Docker stack** (postgres + openrailrouting + api) —
+run against the **live Docker stack** (postgres + openrailrouting-infra-2026 + api) —
 there are no mocks.
 
 **Related documentation:** endpoints under test —
@@ -99,7 +99,10 @@ Shared code:
 | `test_stop_infrastructure_global_default_exists` | Global stop default present | pinned version, `country_code IS NULL` | ≥ 1 row |
 | `test_country_geometries_seeded` | PostGIS borders for every stop country | `country_geom IS NULL` per stop country | no missing geometries |
 | `test_exactly_one_current_base_scenario` | Base scenario uniqueness | `scenario.scenarios` | exactly 1 `is_current_base` |
-| `test_historical_scenario_pins_version_1` | Historical lineage owns its own snapshot | 2026-baseline vs base rows | all four table versions = 1, differ from base |
+| `test_base_scenario_pins_version_1` | Base lineage owns its own snapshot | Infra 2026 row | all five table versions = 1 |
+| `test_superseded_revision_pins_version_4` | Superseded revision shares the lineage key | infra-2026 non-current row | all five versions = 4, `is_current_scenario` false |
+| `test_opt_tt_reduces_buffer_quota` | Optimised timetables actually differ | v1 vs v3 buffer quotas | at least one country lower, none higher |
+| `test_all_scenarios_route_on_the_2026_graph` | Routing graph pin | every scenario row | `routing_graph_key` = `infra_2026` |
 | `test_hsr_scenario_pins_version_3` | HSR lineage owns its own snapshot | HSR-allowed vs base rows | all four table versions = 3, differ from base |
 | `test_stop_infrastructure_values_unchanged_by_hsr_scenario` | Stop charges independent of HSR policy | `stop_infrastructures` at base vs HSR version | identical values despite different version numbers |
 | `test_stop_enrichment_seeded` | The catalog's enrichment reaches the DB, not just the CSV | seeded stops at version 1 | provenance from the known vocabulary; localized country names on every stop; ≥95% carry a city; ≥90% carry gauges; **no gauge below 1435 mm** |
@@ -156,7 +159,7 @@ Shared code:
 | `TestTrackInfrastructures::test_every_field_is_field_object` | All 10 fields field-objects (guards against a field dropping out) | every country × 10 fields | dict with value + is_default |
 | `TestTrackInfrastructures::test_default_row_covers_all_fields` | EU-average default complete | `default_track_infra` | value for all 10 fields |
 | `TestTrackInfrastructures::test_is_default_flags_via_api` | Provenance via API | SE / DE tac | True / False |
-| `TestTrackInfrastructures::test_scenario_id_pins_parameter_version` | `?scenario_id=` pinning | base vs 2026-baseline request | DE tac 5.40 vs 3.10 |
+| `TestTrackInfrastructures::test_scenario_id_pins_parameter_version` | `?scenario_id=` pinning | base vs superseded revision | DE tac 5.40 vs 3.10 |
 | `TestCompositions::test_response_layout` | Top-level shape | GET compositions | descriptions/sources/count/compositions/operators |
 | `TestCompositions::test_composition_sections_present` | Restructured grouped sections | every composition | routing/staff/energy/capacity/equipment/coaches/fixed_costs/variable_km/source_ids |
 | `TestCompositions::test_capacity_non_empty_with_places_and_density` | Capacity content | every composition | ≥ 1 class; places > 0; density > 0 |
@@ -177,7 +180,7 @@ Shared code:
 | `TestScenariosGrouping::test_historical_scenarios_group_flags` | Historical group semantics | `historical_scenarios` rows | superseded versions only |
 | `TestScenariosGrouping::test_base_scenario_is_in_current_base_group` | Seed cross-check | seeded base scenario | appears in `current_base`, which holds exactly that row |
 | `TestScenariosGrouping::test_hsr_scenario_is_in_current_scenarios_group` | Seed cross-check | seeded HSR-allowed lineage head | appears in `current_scenarios` only |
-| `TestScenariosGrouping::test_historical_scenario_is_in_historical_scenarios_group` | Seed cross-check | seeded 2026 Base Line scenario | appears in `historical_scenarios` only |
+| `TestScenariosGrouping::test_historical_scenario_is_in_historical_scenarios_group` | Seed cross-check | superseded infra-2026 revision | appears in `historical_scenarios` only |
 
 ---
 
@@ -267,7 +270,7 @@ Standard input: `eval_standard` (3-stop route, directional demand 40 Couchette
 | `TestMatrixConsistency::test_traversed_countries_appear_in_matrix` | Matrix coverage | traversed countries | all appear as keys |
 | `TestMatrixConsistency::test_od_matrix_carries_directional_keys_with_revenue` | OD keys deterministic | directional demand | both direction keys present, revenue > 0 |
 | `TestMatrixConsistency::test_stop_matrix_terminal_has_station_charge` | Stop matrix content | Berlin cell | station charge > 0 |
-| `TestScenarioOverride::test_historical_override_lowers_tac` | Scenario override swaps the re-pinned table | same route, base vs 2026-baseline | TAC strictly lower; station charges unchanged |
+| `TestScenarioOverride::test_historical_override_lowers_tac` | Scenario override swaps the re-pinned table | same route, base vs superseded revision | TAC strictly lower; station charges unchanged |
 
 ## test_35_proposal_calc_api.py — POST /api/proposal/calc contract (merged)
 
@@ -607,8 +610,9 @@ key). The only file in the suite runnable standalone.
    would let TAC-under-default be recomputed for a route that runs entirely on
    default-resolved rates.
 4. **A scenario re-pinning `stop_infrastructures` to genuinely different
-   values** — all three currently-seeded snapshots (2026-baseline / base /
-   2032-baseline-hsr-allowed) carry byte-identical stop charges, only the
+   values** — every currently-seeded snapshot (Infra 2026 / + NT on HSR /
+   + optimised timetables / superseded revision) carries byte-identical
+   stop charges, only the
    version number differs; a scenario with an actual stop-side value change
    would cover the other half of the override matrix.
 5. ~~**A stop within `AUTO_STOP_BUFFER_M` of an existing corridor**~~ —

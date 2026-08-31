@@ -10,11 +10,33 @@ A CountryIndex (country border geometries, for routing/HSR-avoidance) is
 built once at the same time — input_params.countries is static reference
 data, not one of the scenario-versioned tables, so there's no need to
 re-query it per request. Route handlers call get_country_index() to access
-it. A RailRouter is built on top of it, also once: it holds a
-requests.Session with a warm connection pool sized for concurrent routing
-calls (see rail_router.py), and Session is safe for concurrent use — a
-per-request RailRouter would start every compute on a cold pool for no
-gain. Handlers call get_rail_router().
+it. On top of it, one RailRouter PER CONFIGURED ROUTING GRAPH is built,
+also once: each holds a requests.Session with a warm connection pool sized
+for concurrent routing calls (see rail_router.py), and Session is safe for
+concurrent use — a per-request RailRouter would start every compute on a
+cold pool for no gain. Handlers call get_rail_router(graph_key), where
+graph_key is a scenario's routing_graph_key pin (scenario.scenarios; None
+→ the default graph).
+
+Routing graph registry
+----------------------
+The key → URL mapping is deployment configuration, not database content.
+Every graph is configured the same way — one OPENRAILROUTING_URL_<KEY>
+variable, the key uppercased: OPENRAILROUTING_URL_INFRA_2026 serves key
+"infra_2026", OPENRAILROUTING_URL_INFRA_2032 serves "infra_2032". The
+default graph is not special-cased; it is simply the key a scenario gets
+when it pins nothing. Empty values are skipped, so backend/docker/.env
+can keep a variable present-but-blank while its instance is off.
+
+The unsuffixed OPENRAILROUTING_URL is honoured for the default graph
+only, as a compatibility path for the server stacks under deploy/ which
+set it and know nothing about graph keys (rail_router.default_base_url).
+
+A scenario pinning a key with no configured URL fails loudly at compute
+time (RoutingGraphNotConfiguredError) — never a silent fallback to the
+wrong graph, which would produce plausible routes and corrupt everything
+downstream. All graphs share config.yml/custom_models, so the gauge
+profile names are identical on every instance.
 
 A ProposalRepository (write path for saved proposals), a
 FeedbackRepository (write path for feedback submissions), a
@@ -30,7 +52,8 @@ State
   _loader          : DBDataLoader instance (created at startup)
   _country_index   : CountryIndex instance (built at startup from the loader)
   _passage_index   : PassageIndex instance (crossing polygons, same lifetime)
-  _rail_router     : RailRouter instance (built at startup on the CountryIndex)
+  _rail_routers    : dict[graph_key, RailRouter] (built at startup on the
+                     CountryIndex, one per configured routing graph)
   _proposal_repo   : ProposalRepository instance (created at startup)
   _feedback_repo   : FeedbackRepository instance (created at startup)
   _engagement_repo : ProposalEngagementRepository instance (created at startup)
@@ -43,6 +66,7 @@ State
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -54,7 +78,7 @@ logger = logging.getLogger(__name__)
 _loader = None
 _country_index = None
 _passage_index = None
-_rail_router = None
+_rail_routers: dict = {}
 _proposal_repo = None
 _feedback_repo = None
 _engagement_repo = None
@@ -76,6 +100,36 @@ class DataNotLoadedError(Exception):
     pass
 
 
+class RoutingGraphNotConfiguredError(Exception):
+    """Raised when a scenario pins a routing_graph_key this deployment
+    serves no OpenRailRouting instance for — a configuration error, never
+    something to paper over with a different graph."""
+
+    pass
+
+
+def _routing_graph_urls() -> dict:
+    """graph_key → base URL, from the environment (see the registry
+    contract in the module docstring, and the naming contract in
+    rail_router.py). The default key is always present so a deployment
+    that configures no graph at all still routes."""
+    # Imported here, not at module scope, for the same reason init()'s
+    # imports are deferred: rail_router pulls in the geometry stack.
+    from models.route.routing.rail_router import (
+        DEFAULT_ROUTING_GRAPH_KEY,
+        ROUTING_URL_ENV_PREFIX,
+        default_base_url,
+    )
+
+    urls = {
+        var[len(ROUTING_URL_ENV_PREFIX) :].lower(): value.strip()
+        for var, value in os.environ.items()
+        if var.startswith(ROUTING_URL_ENV_PREFIX) and value.strip()
+    }
+    urls.setdefault(DEFAULT_ROUTING_GRAPH_KEY, default_base_url())
+    return urls
+
+
 def init() -> None:
     """
     Initialise the DBDataLoader and CountryIndex at startup.
@@ -85,7 +139,7 @@ def init() -> None:
         _loader, \
         _country_index, \
         _passage_index, \
-        _rail_router, \
+        _rail_routers, \
         _proposal_repo, \
         _feedback_repo, \
         _engagement_repo, \
@@ -117,7 +171,22 @@ def init() -> None:
         # is a startup singleton too. What a scenario pins are the charges,
         # resolved per request by DBDataLoader.build_all_passages().
         _passage_index = PassageIndex(_loader.get_passage_geometries())
-        _rail_router = RailRouter(_country_index, _passage_index)
+        # One RailRouter per configured graph, all sharing the two static
+        # indexes — border and crossing geometry are properties of the
+        # planet, not of an OSM snapshot. Construction is cheap (a
+        # Session each, no network call), so even a graph no scenario
+        # pins yet costs nothing until routed on.
+        _rail_routers = {
+            key: RailRouter(_country_index, _passage_index, base_url=url)
+            for key, url in _routing_graph_urls().items()
+        }
+        logger.info(
+            "Routing graphs configured: %s",
+            ", ".join(
+                f"{key} → {router.base_url}"
+                for key, router in sorted(_rail_routers.items())
+            ),
+        )
         _proposal_repo = ProposalRepository()
         _feedback_repo = FeedbackRepository()
         _engagement_repo = ProposalEngagementRepository()
@@ -154,14 +223,31 @@ def get_country_index():
     return _country_index
 
 
-def get_rail_router():
+def get_rail_router(graph_key: str | None = None):
     """
-    Return the singleton RailRouter.
-    Raises DataNotLoadedError if init() has not completed successfully.
+    Return the RailRouter for one routing graph — graph_key is a
+    scenario's routing_graph_key pin; None → DEFAULT_ROUTING_GRAPH_KEY.
+    Raises DataNotLoadedError if init() has not completed successfully,
+    and RoutingGraphNotConfiguredError for a key this deployment serves
+    no instance for (see the registry contract in the module docstring).
     """
-    if not _loaded or _rail_router is None:
+    from models.route.routing.rail_router import (
+        DEFAULT_ROUTING_GRAPH_KEY,
+        routing_url_env_var,
+    )
+
+    if not _loaded or not _rail_routers:
         raise DataNotLoadedError("Data not loaded. Call POST /api/data/load first.")
-    return _rail_router
+    key = graph_key or DEFAULT_ROUTING_GRAPH_KEY
+    router = _rail_routers.get(key)
+    if router is None:
+        raise RoutingGraphNotConfiguredError(
+            f"No routing instance configured for graph '{key}' — expected "
+            f"env {routing_url_env_var(key)} (see "
+            f"backend/docker/.env.example). Configured: "
+            f"{', '.join(sorted(_rail_routers))}."
+        )
+    return router
 
 
 def get_proposal_repository():

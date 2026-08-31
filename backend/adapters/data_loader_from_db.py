@@ -38,6 +38,7 @@ New domain model mapping
                              representation from it. input_params.countries
                              is static reference data, not scenario-versioned.
   list_all_scenarios()    → list[Scenario]  (every scenario.scenarios row)
+  resolve_routing_graph_key() → str         (a scenario's routing graph pin)
 """
 
 from __future__ import annotations
@@ -249,19 +250,13 @@ class DBDataLoader:
             )
         return row["scenario_id"]
 
-    def _resolve_scenario_versions(self, scenario_id: int | None) -> dict[str, int]:
-        """
-        Resolve a scenario_id (or None → the live is_current_base scenario)
-        to its four per-table version pointers. Infrastructure only —
-        operators/coach_types/composition_types are
-        unversioned catalogs and have no scenario pointer at all (see
-        scenario.scenarios definition in db/schema.py).
-
-        Every column on scenario.scenarios is NOT NULL, so this is always a
-        single direct row fetch — no inheritance/fallback logic needed.
-        Returned dict keys match the *_version column names minus the
-        "_version" suffix, e.g. {"track_infrastructures": 2, ...}.
-        """
+    def _fetch_scenario_row(self, scenario_id: int | None):
+        """One scenario.scenarios row — scenario_id, or None → the live
+        is_current_base scenario. Every column is NOT NULL, so this is
+        always a single direct row fetch — no inheritance/fallback logic.
+        Shared by _resolve_scenario_versions() and
+        resolve_routing_graph_key(); raises ValueError when the row does
+        not exist (unknown id, or an unseeded database)."""
         with self._cursor() as cur:
             if scenario_id is None:
                 cur.execute(
@@ -280,6 +275,31 @@ class DBDataLoader:
                     "correctly seeded."
                 )
             raise ValueError(f"Scenario '{scenario_id}' not found.")
+        return row
+
+    def resolve_routing_graph_key(self, scenario_id: int | None) -> str:
+        """
+        Resolve a scenario_id (or None → the live is_current_base scenario)
+        to its routing_graph_key pin — which OpenRailRouting instance every
+        distance and travel time comes from. The compute path
+        (api/helpers/proposal_compute.py) selects the RailRouter with this;
+        the key → URL mapping lives in the deployment
+        (api/helpers/dependencies.py), not in the database.
+        """
+        return self._fetch_scenario_row(scenario_id)["routing_graph_key"]
+
+    def _resolve_scenario_versions(self, scenario_id: int | None) -> dict[str, int]:
+        """
+        Resolve a scenario_id (or None → the live is_current_base scenario)
+        to its four per-table version pointers. Infrastructure only —
+        operators/coach_types/composition_types are
+        unversioned catalogs and have no scenario pointer at all (see
+        scenario.scenarios definition in db/schema.py).
+
+        Returned dict keys match the *_version column names minus the
+        "_version" suffix, e.g. {"track_infrastructures": 2, ...}.
+        """
+        row = self._fetch_scenario_row(scenario_id)
 
         return {
             "track_infrastructures": row["track_infrastructures_version"],
@@ -326,6 +346,7 @@ class DBDataLoader:
                     "stop_infrastructure_defaults_version"
                 ],
                 passage_charges_version=row["passage_charges_version"],
+                routing_graph_key=row["routing_graph_key"],
             )
             for row in rows
         ]

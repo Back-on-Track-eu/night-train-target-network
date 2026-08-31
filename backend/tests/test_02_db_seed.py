@@ -11,8 +11,9 @@ Covers:
   - Referential/structural integrity spot checks (compositions have coaches,
     coach classes have places, exactly one row per country at the pinned
     track infra version, defaults rows exist)
-  - All three seeded scenarios (2026 Base Line / 2032 Base Line / 2032 Base
-    Line + HSR allowed) are present and consistent
+  - All three seeded scenarios (Infra 2026 / + NT on HSR / + optimised
+    timetables) are present and consistent, all pinned to the infra_2026
+    routing graph
   - Proposals redesign, schema phase 1 (2026-08-03, additive-only — see
     adapters/proposal/README.md §5.2): new sidecar/update_log/
     proposal_summaries/compute-cache tables exist, the new columns on
@@ -59,7 +60,7 @@ EXPECTED_ROW_COUNTS = {
     # below that so regenerating the catalog doesn't break the suite; the
     # snapshot-set invariant is asserted by test_stop_catalog_snapshots.
     "input_params.stop_infrastructures": 1500,
-    "scenario.scenarios": 3,  # 2026-baseline + base + 2032-baseline-hsr-allowed
+    "scenario.scenarios": 4,  # three current + one superseded revision
     "proposals.proposals": 1,  # one real saved example proposal — see seed_example_proposal()
     "proposals.routes": 1,
     "proposals.trips": 2,  # both directions of the one seeded proposal
@@ -161,7 +162,20 @@ def test_stop_catalog_snapshots(db_cur):
     )
     rows = db_cur.fetchall()
     snapshots = {row["stop_infra_version"]: row["ids"] for row in rows}
-    assert set(snapshots) == {1, 2, 3}
+
+    # Expected versions come from the scenario pins, not a literal: every
+    # scenario owns a complete snapshot, so the set of pinned versions IS
+    # the set that must exist. Hardcoding it meant adding a scenario broke
+    # this test for the wrong reason.
+    db_cur.execute(
+        "SELECT DISTINCT stop_infrastructures_version AS v FROM scenario.scenarios"
+    )
+    pinned = {row["v"] for row in db_cur.fetchall()}
+    assert set(snapshots) == pinned, (
+        "stop snapshot versions do not match the versions scenarios pin — "
+        "a scenario resolves to a snapshot that was never seeded, or a "
+        "snapshot exists that nothing pins"
+    )
     for row in rows:
         version, ids = row["stop_infra_version"], row["ids"]
         assert len(ids) == len(set(ids)), f"duplicate stop_ids in version {version}"
@@ -176,11 +190,15 @@ def test_stop_catalog_snapshots(db_cur):
             "carry the seed provenance marker — an unmarked writer touched "
             "the catalog"
         )
-    assert snapshots[1] == snapshots[2] == snapshots[3], (
-        "stop snapshots differ between versions — the seed is the only "
-        "writer and builds every version from one list, so this points at "
-        "a runtime write into input_params.stop_infrastructures"
-    )
+    reference_version = min(snapshots)
+    reference_ids = snapshots[reference_version]
+    for version, ids in sorted(snapshots.items()):
+        assert ids == reference_ids, (
+            f"stop snapshot v{version} differs from v{reference_version} — "
+            "the seed is the only writer and builds every version from one "
+            "list, so this points at a runtime write into "
+            "input_params.stop_infrastructures"
+        )
 
 
 @pytest.mark.parametrize("table,columns", REQUIRED_COLUMNS.items())
@@ -506,6 +524,17 @@ def test_country_geometries_cover_maritime_zones(db_cur):
 # =============================================================================
 
 
+# The five per-table pins every scenario carries — mirrors
+# scenario.scenarios in db/schema.py.
+_SCENARIO_VERSION_COLUMNS = (
+    "track_infrastructures_version",
+    "track_infrastructure_defaults_version",
+    "stop_infrastructures_version",
+    "stop_infrastructure_defaults_version",
+    "passage_charges_version",
+)
+
+
 def test_exactly_one_current_base_scenario(db_cur):
     """Exactly one scenario carries is_current_base = TRUE — the partial
     unique index enforces at most one; the seed must supply exactly one."""
@@ -515,32 +544,79 @@ def test_exactly_one_current_base_scenario(db_cur):
     assert db_cur.fetchone()["n"] == 1
 
 
-def test_historical_scenario_pins_version_1(historical_scenario, base_scenario):
-    """The 2026 Base Line scenario pins all four infrastructure tables to
-    version 1 — its own full snapshot, not a partial diff against base."""
-    for col in (
-        "track_infrastructures_version",
-        "track_infrastructure_defaults_version",
-        "stop_infrastructures_version",
-        "stop_infrastructure_defaults_version",
-    ):
-        assert historical_scenario[col] == 1
-        assert historical_scenario[col] != base_scenario[col]
+def test_base_scenario_pins_version_1(base_scenario):
+    """Infra 2026 is the live base and pins every table to version 1 —
+    its own full snapshot, not a partial diff."""
+    assert base_scenario["scenario_key"] == "infra-2026"
+    for col in _SCENARIO_VERSION_COLUMNS:
+        assert base_scenario[col] == 1
 
 
-def test_hsr_scenario_pins_version_3(hsr_scenario, base_scenario):
-    """The 2032 Base Line + HSR allowed scenario pins all four
-    infrastructure tables to version 3 — independent from base's
-    version 2, per-table, even though only track_hsr_allowed actually
-    differs in the underlying data."""
-    for col in (
-        "track_infrastructures_version",
-        "track_infrastructure_defaults_version",
-        "stop_infrastructures_version",
-        "stop_infrastructure_defaults_version",
-    ):
-        assert hsr_scenario[col] == 3
+def test_hsr_scenario_pins_version_2(hsr_scenario, base_scenario):
+    """The NT-on-HSR scenario pins all five infrastructure tables to
+    version 2 — independent from base's version 1, per-table, even though
+    only track_hsr_allowed actually differs in the underlying data."""
+    for col in _SCENARIO_VERSION_COLUMNS:
+        assert hsr_scenario[col] == 2
         assert hsr_scenario[col] != base_scenario[col]
+
+
+def test_opt_tt_scenario_pins_version_3(opt_tt_scenario, base_scenario):
+    """The optimised-timetable scenario pins all five tables to version 3,
+    its own complete snapshot."""
+    for col in _SCENARIO_VERSION_COLUMNS:
+        assert opt_tt_scenario[col] == 3
+        assert opt_tt_scenario[col] != base_scenario[col]
+
+
+def test_superseded_revision_pins_version_4(historical_scenario, base_scenario):
+    """The superseded infra-2026 revision owns a complete version-4
+    snapshot and shares the base's scenario_key — one lineage, two
+    revisions, only one of them current."""
+    assert historical_scenario["scenario_key"] == base_scenario["scenario_key"]
+    assert historical_scenario["is_current_scenario"] is False
+    for col in _SCENARIO_VERSION_COLUMNS:
+        assert historical_scenario[col] == 4
+
+
+def test_all_scenarios_route_on_the_2026_graph(db_cur):
+    """Every seeded scenario pins the infra_2026 routing graph — the 2032
+    graph arrives with its own scenario rows, never by repointing these."""
+    db_cur.execute("SELECT routing_graph_key FROM scenario.scenarios")
+    keys = {r["routing_graph_key"] for r in db_cur.fetchall()}
+    assert keys == {"infra_2026"}
+
+
+def test_opt_tt_reduces_buffer_quota(db_cur, opt_tt_scenario, base_scenario):
+    """The optimised-timetable snapshot carries a strictly lower schedule
+    supplement than the base wherever the base sits above the benchmark,
+    and never a higher one — the only numeric difference between the three
+    seeded scenarios (models/scenarios/README.md)."""
+    db_cur.execute(
+        """
+        SELECT b.country_code,
+               b.track_buffer_quota_per AS base_quota,
+               o.track_buffer_quota_per AS opt_quota
+        FROM input_params.track_infrastructures b
+        JOIN input_params.track_infrastructures o
+          ON o.country_code = b.country_code
+         AND o.track_infra_version = %s
+        WHERE b.track_infra_version = %s
+          AND b.track_buffer_quota_per IS NOT NULL
+        """,
+        (
+            opt_tt_scenario["track_infrastructures_version"],
+            base_scenario["track_infrastructures_version"],
+        ),
+    )
+    rows = db_cur.fetchall()
+    assert rows, "No country carries a buffer quota — seed data missing."
+    assert any(r["opt_quota"] < r["base_quota"] for r in rows), (
+        "No country's schedule supplement was reduced — the optimised "
+        "timetable scenario is indistinguishable from the base."
+    )
+    for row in rows:
+        assert row["opt_quota"] <= row["base_quota"], row["country_code"]
 
 
 def test_stop_infrastructure_values_unchanged_by_hsr_scenario(
