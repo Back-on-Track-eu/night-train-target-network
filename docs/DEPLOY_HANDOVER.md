@@ -7,7 +7,7 @@ backend, in one place. Supersedes `deploy/HANDOVER.md` (2026-08-10),
 deleted.
 
 Updated after each change that touches deploy, capacity or server data.
-Last update 2026-08-31 (scenario routing graphs).
+Last update 2026-08-31 (route segment cache, §7a).
 
 **If you read one section:** §3 is the deploy currently queued for staging,
 §4 is a mandatory cache wipe that comes with it, and §7 is the capacity work
@@ -22,6 +22,7 @@ that is genuinely yours to schedule.
 | §5 | Standing gotchas on every staging deploy |
 | §6 | How deploy relates to the backend `.env` |
 | §7 | **Capacity: routing under batch load** |
+| §7a | **Route segment cache — shipped; precompute is yours to run** |
 | §8 | When the 2032 graph lands |
 | §9 | Older open items |
 | §10 | Questions back to you |
@@ -351,16 +352,83 @@ against a CPU-bound workload, which thrashes under burst rather than
 queueing. Worth setting an explicit thread ceiling near core count, and an
 explicit `-Xmx` per instance before a second one ever runs.
 
-**The gap behind all of it:** there is no per-segment route cache. WP13's
-compute cache keys the whole proposal, so changing one stop re-routes every
-leg. A segment cache keyed on `(from_stop, to_stop, resolved custom-model
-hash, routing_graph_key, ROUTE_BUILDER_VERSION)` would cut most batch
-traffic — the same Berlin–Warszawa segment is currently recomputed across
-every proposal that contains it.
+**The gap behind all of it** was the missing per-segment route cache —
+closed in §7a below (`ROUTE_BUILDER_VERSION` deliberately not in the key:
+cached rows are raw physics, everything the version governs is applied
+after). Remaining sequence: batch cap → WP14.
 
-Sequence I'd suggest: snapped-coordinate cache → segment cache → batch cap
-→ WP14. The first two also make the per-graph precompute affordable when
-2032 arrives.
+---
+
+## 7a. Route segment cache — shipped
+
+Resolves the gap §7 names: routing is now served per stop pair from
+`route_cache.route_segments` and only misses hit GraphHopper. Every
+live-routed pair is stored back, so the table fills itself from traffic;
+the precompute script front-loads it so first users do not pay. Keyed per
+graph: `(routing_graph_key, stop_lo, stop_hi, variant_key)` — each graph
+has its own snapped points and HSR resolution, nothing is shared. This
+also delivers §7(c): the runtime snap pass only happens on a miss.
+
+**Stops applying:** never — it replaces live routing as the normal path.
+The precompute sub-section stops applying per graph once its batch has run
+against the graph's final import.
+
+### Deploy (this batch)
+
+1. Migration `2026-08-31_route_segment_cache.sql` is picked up by
+   `db/migrate.py` like any other — lands the schema, no data.
+2. No `.env` change required. `ROUTE_SEGMENT_CACHE_ENABLED` defaults to
+   true; set it `false` only to diagnose (the API then routes live, as
+   before).
+3. Start the API and check the log for one line per graph:
+   `Route segment cache [infra_2026]: 0 segment(s), graph import 2026-…`.
+   From there, every `/calc` logs
+   `segment cache [infra_2026]: N/M pair(s) served, K routed+stored`.
+
+### Invalidation is automatic — but read this
+
+`route_cache.graph_state` remembers the GraphHopper `import_date` each
+graph's rows were routed against. At API start the live `/info` is
+compared; on a change that graph's rows are **purged** and the log warns
+`graph import changed … purged N cached segment(s)`. So: a graph
+re-import (§4 wipes, the queued gauge fix, Jasper's 2032 file) empties
+that graph's cache on the next API start, and the cache refills. Nothing
+to do by hand — but expect the first hours after a re-import to route
+live, and re-run the precompute afterwards. **This is a recurring cost per
+graph, not one-off** — it belongs in the capacity estimate as such.
+
+### Precompute (per graph, against its final import)
+
+From `backend/`, on the server (uses the same
+`OPENRAILROUTING_URL_<KEY>` the API does):
+
+```bash
+uv run python scripts/precompute_route_segments.py --graph infra_2026 --measure-only
+uv run python scripts/precompute_route_segments.py --graph infra_2026 --cap-km 800 --workers 4
+uv run python scripts/precompute_route_segments.py --graph infra_2026 --cap-km 800 --finalize
+uv run python scripts/precompute_route_segments.py --graph infra_2026 --load
+```
+
+- `--measure-only` first: real pair counts per cap, the empirical variant
+  count (expect 2 custom models per graph, ×1 gauge profile for standard-
+  gauge pairs), and a latency probe → hours table. Pick the cap from that.
+- The batch is resumable — rerun the same command after an interruption;
+  per-pair failures go to `route_segments_<key>.failures.csv` and never
+  stop it. Start with `--workers 4`; the one container is shared with live
+  users, so run off-peak.
+- `--load` does the same `import_date` reconciliation as the API and then
+  bulk-loads with ON CONFLICT DO NOTHING — safe on top of rows traffic has
+  already grown. Restart the API afterwards (count is logged at start).
+- Keep the `.csv.gz` — after a `route_cache` wipe it is the fast way back.
+  It is only valid for the import it was routed against (`.meta.json`
+  records it).
+- `--limit 50` exists for a cheap end-to-end dry run.
+
+### Capacity note
+
+With the cache serving, a `/calc` is Postgres lookups + evaluation instead
+of GraphHopper waits — §7(a)'s worker/thread reasoning shifts accordingly;
+GraphHopper CPU (§7(d)) matters mostly during a precompute batch now.
 
 ---
 

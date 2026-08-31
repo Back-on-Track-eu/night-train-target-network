@@ -423,6 +423,24 @@ scenario means and for the crossing-charge gap the copy leaves open.
 
 See `db/schema.py` (scenario.scenarios) for the column-level definitions.
 
+### `route_cache`
+
+A cache, not data — the routing counterpart of the §2.3 compute cache:
+UNLOGGED, disposable, never a source of truth. Declared in
+`db/schema.py` (`ROUTE_CACHE_TABLES`) and mirrored by migration
+`2026-08-31_route_segment_cache.sql`.
+
+| Table | Description |
+|---|---|
+| `route_segments` | Raw routed physics of one stop pair on one routing graph, keyed `(routing_graph_key, stop_lo, stop_hi, variant_key)` with the stop ids sorted (direction is symmetric, one row serves both). Stores unrounded per-country distance/time, geometry, countries and passages; everything scenario-dependent (buffer quotas, dynamics, energy, TAC) is applied downstream, so parameter recalibrations invalidate zero rows. Grows from precompute loads (`source=precompute`) and from every live-routed miss (`source=runtime`). Row contract: `models/route/routing/segment_cache.py`. |
+| `graph_state` | The GraphHopper `import_date` each graph's rows were routed against. `RouteSegmentRepository.sync_graph_import()` compares it with the live `/info` at API start and purges that graph's rows on a change — invalidation per graph, automatic. |
+
+Dev reseed drops the schema and bulk-loads any
+`db/dev/data/route_segments_<graph_key>.csv.gz` (optionally Drive-hosted via
+`ROUTE_SEGMENTS_FILE_ID_<KEY>`); servers load via
+`scripts/precompute_route_segments.py --load`. Not versioned: a cache row is
+either right for its graph import or purged with it.
+
 ### `proposals`
 
 GTFS-compatible tables plus a thin project-specific `proposals` version

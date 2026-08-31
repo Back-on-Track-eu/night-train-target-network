@@ -640,6 +640,17 @@ key). The only file in the suite runnable standalone.
    `AUTO_STOP_MAX_DETOUR_PER`) — today every near-corridor candidate fits,
    so the rejection branch is only covered implicitly.
 
+## test_79_route_segment_cache.py — Route segment cache
+
+| Test | What it checks | Fixture | Assertion |
+|---|---|---|---|
+| `test_leg_survives_store_and_load_forward` | RoutedLeg → CachedSegment → RoutedLeg round-trip is lossless; buffer/dynamics/energy come back zero | — | field equality, shares re-derived |
+| `test_reverse_flips_path_but_not_physics` | hi→lo read reverses geometry and country order only | — | reversed lists, same totals |
+| `test_store_reverse_then_load_reverse_is_identity` | A leg routed hi→lo stores canonically and reads back unchanged | — | geometry identity |
+| `test_csv_row_matches_contract` | CSV row ↔ DB row ↔ CachedSegment agree with `CSV_COLUMNS` | — | round-trip equality |
+| `test_key_order_independent` / `test_key_differs_by_model_and_profile` | `route_variant_key()` is canonical and discriminates model + profile | — | key equality/inequality |
+| `test_miss_stores_then_hit_matches_live` | Live stack: first cached call misses and stores one row, second hits; both physics-identical to a cache-less router. Runs under its own `test_<graph>` key and purges it | live stack | distance/time/buffer/dynamics/countries/passages/geometry equal, count == 1 |
+
 ## Conventions
 
 - Session-scoped route fixtures in `conftest.py` are **read-only** — never
