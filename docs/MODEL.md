@@ -68,9 +68,9 @@ station parameters).
 | Model | Version | What it computes | Anchor file | Documentation |
 |---|---|---|---|---|
 | Route & timetable builder | `0.9.29` | Route and timetable builder: turns a list of stops, a train composition, and a few mode selections into a complete route — trip pairs, travel and stopping times with schedule buffers, and a mirrored outbound/return night schedule. | [`model.py`](../backend/models/route/model.py) | [README.md](../backend/models/README.md) |
-| Energy model | `0.9.1` | Traction energy model: estimates the electricity a train uses on each part of the route. Currently a flat 28 kWh per kilometre placeholder, until the weight/speed/terrain model is calibrated against Deutsche Bahn Trassenfinder data. | [`model.py`](../backend/models/energy/model.py) | [README.md](../backend/models/energy/README.md) |
+| Energy model | `1.1.0` | Traction energy model calibrated against Deutsche Bahn Trassenfinder technical runs: start/stop energy per leg, rolling resistance per tonne-kilometre, air resistance growing with train length and the square of average speed, plus a constant auxiliary and hotel-power draw for the running time. Coach hotel power is an assumption, not a measurement - Trassenfinder was queried with it switched off. | [`model.py`](../backend/models/energy/model.py) | [README.md](../backend/models/energy/README.md) |
 | Demand model | `0.0.2` | Demand model (placeholder): assumes every accommodation class is 70% booked at a flat per-kilometre fare, spread evenly across all connections — a stand-in until a real demand model with directional demand, price sensitivity, and competition from other modes replaces it. | [`model.py`](../backend/models/demand/model.py) | [README.md](../backend/models/demand/README.md) |
-| Cost & revenue evaluation | `0.9.22` | Cost and revenue evaluation: computes the operator's fixed and variable costs, the charges paid to infrastructure companies, and the ticket revenue of a route, then aggregates the result into views per route, trip pair, country, connection, route section, and stop. | [`model.py`](../backend/models/evaluation/model.py) | [README.md](../backend/models/evaluation/README.md) |
+| Cost & revenue evaluation | `0.9.23` | Cost and revenue evaluation: computes the operator's fixed and variable costs, the charges paid to infrastructure companies, and the ticket revenue of a route, then aggregates the result into views per route, trip pair, country, connection, route section, and stop. | [`model.py`](../backend/models/evaluation/model.py) | [README.md](../backend/models/evaluation/README.md) |
 | Emissions model | `0.1.1` | Climate impact factors: how many grams of CO2-equivalent one passenger-kilometre causes by night train, plane, and car — used for the mode comparison and the CO2-savings estimate. The night-train value is a European average until a country-resolved, energy-based model replaces it. | [`model.py`](../backend/models/emissions/model.py) | [README.md](../backend/models/emissions/README.md) |
 | Composition cost model | `0.9.3` | Composition cost model: calibrated purchase, maintenance, cleaning, crew, and availability parameters per train composition, in a 'new' and a 'refurbished' rolling stock family, at 2032 prices. | [`model.py`](../backend/models/compositions/model.py) | [CALIBRATION.md](../backend/models/compositions/calib/CALIBRATION.md) |
 | Infrastructure parameter model | `0.9.5` | Infrastructure parameter model: per-country track access charges, station charges, traction energy prices, shunting and stabling, terrain, schedule supplements and minimum stopping times, with EU-average fallbacks — plus the catalog of possible night train stops. Four calibrated domains, each a package under models/infrastructure/ with its own source register, notebooks and published calibration document. | [`model.py`](../backend/models/infrastructure/model.py) | [STOP_CLASSIFICATION.md](../backend/models/infrastructure/STOP_CLASSIFICATION.md) |
@@ -306,19 +306,19 @@ and [onboarding notes](../backend/models/energy/ONBOARDING.md).
 <a id="f-energy-energy_per_leg"></a>
 #### `energy_per_leg`
 
-$$ E_{kWh,l} = m_t \times d_{km,l} \times \left( f_{weight} + f_{speed} \cdot \bar{v}^2_{kmh,l} + f_{terrain} \cdot s_{terrain,l} \right) $$
+$$ E_{kWh,l} = A \cdot m_t + d_{km,l} \left( B + C \cdot m_t + (K_m m_t + K_L L_m) \cdot \bar{v}^2_{kmh,l} \right) + (P_{loco} + P_{hotel} \cdot n_{coach}) \cdot t_{h,l} $$
 
-Electricity used on one country leg: the train's weight times the distance, scaled by three factors — a base factor, one growing with the square of speed (air resistance), and one for the terrain (hills and mountains cost energy).
+Electricity used on one country leg: start/stop energy for the train's weight, rolling resistance over the distance, air resistance growing with train length and the square of average speed, and the on-board power supply (locomotive systems plus heating, air conditioning and light in the coaches) for as long as the leg takes.
 
 | | Symbol | Meaning | Unit | Source |
 |---|---|---|---|---|
-| Input | `m_t` | Train gross weight | t | formula [`train_weight`](#f-energy-train_weight) |
+| Input | `m_t` | Coach train weight at 80% load, locomotive excluded | t | formula [`train_weight`](#f-energy-train_weight) |
+| Input | `L_m` | Coach rake length, locomotive excluded | m | computed upstream |
+| Input | `n_coach` | Number of coaches | 1 | computed upstream |
 | Input | `d_km,l` | Distance of the country leg | km | computed upstream |
-| Input | `f_weight` | Base energy factor per tonne-kilometre | kWh/(t·km) | parameter [`composition_type_energy_factor_weight`](#p-input_params-composition_types-composition_type_energy_factor_weight) |
-| Input | `f_speed` | Air resistance factor, applied to speed squared | kWh/(t·km·(km/h)²) | parameter [`composition_type_energy_factor_speed`](#p-input_params-composition_types-composition_type_energy_factor_speed) |
-| Input | `f_terrain` | Terrain factor, applied to the terrain score | kWh/(t·km) per terrain point | parameter [`composition_type_energy_factor_terrain`](#p-input_params-composition_types-composition_type_energy_factor_terrain) |
 | Input | `v̄_kmh,l` | Average speed on the leg | km/h | formula [`avg_speed`](#f-energy-avg_speed) |
-| Input | `s_terrain,l` | Terrain difficulty score of the leg's country | 1–100 | parameter [`track_terrain_score`](#p-input_params-track_infrastructures-track_terrain_score) |
+| Input | `t_h,l` | Driving time on the leg, dynamics included | h | computed upstream |
+| Input | `A, B, C, K_m, K_L, P_loco, P_hotel` | Calibrated coefficients, fleet-wide. Fitted against DB Trassenfinder technical runs; the values live in models/energy/calibrated_coefficients.py and are regenerated by calib/02_energy_calibration.ipynb | see models/energy/calibrated_coefficients.py | computed upstream |
 | **Output** | `E_kWh,l` | Electricity used on the country leg | kWh | — |
 
 **Used by:** [`energy_eur`](#f-calc-energy_eur), [`energy_per_km`](#f-energy-energy_per_km), [`total_energy`](#f-energy-total_energy)
@@ -366,30 +366,16 @@ Average speed per country leg: distance divided by driving time. Feeds the air r
 <a id="f-energy-train_weight"></a>
 #### `train_weight`
 
-$$ m_t = \sum_{coach} m_{coach,t} + m_{loco,t} $$
+$$ m_t = \sum_{coach} m_{coach,t} $$
 
-Total train weight: all coach weights added up, plus the locomotive.
+Train weight as the energy model uses it: all coach gross weights at 80% load added up, WITHOUT the locomotive. The calibration data was collected on this basis (Trassenfinder's Wagenzugmasse excludes the traction unit), so the locomotive's own resistance is inside the per-km constant B rather than scaled by weight.
 
 | | Symbol | Meaning | Unit | Source |
 |---|---|---|---|---|
 | Input | `m_coach,t` | Weight of each coach | t | parameter [`coach_type_weight_gross_t`](#p-input_params-coach_types-coach_type_weight_gross_t) |
-| Input | `m_loco,t` | Locomotive weight | t | parameter [`loco_type_weight_t`](#p-input_params-loco_types-loco_type_weight_t) |
-| **Output** | `m_t` | Train gross weight | t | — |
+| **Output** | `m_t` | Coach train weight, locomotive excluded | t | — |
 
 **Used by:** [`energy_per_leg`](#f-energy-energy_per_leg)
-
-<a id="f-energy-energy_dummy"></a>
-#### `energy_dummy`
-
-$$ E_{kWh,l} = c_{dummy} \times d_{km,l} $$
-
-Placeholder currently in use: a flat 28 kWh per kilometre, regardless of weight, speed, or terrain — until the model above is calibrated.
-
-| | Symbol | Meaning | Unit | Source |
-|---|---|---|---|---|
-| Input | `c_dummy` | Flat energy factor | kWh/km | standard value [`ENERGY_FLAT_FACTOR_KWH_KM`](#s-energy-energy_flat_factor_kwh_km) |
-| Input | `d_km,l` | Distance of the country leg | km | computed upstream |
-| **Output** | `E_kWh,l` | Electricity used on the country leg | kWh | — |
 <!-- END GENERATED: energy_formulas -->
 
 ---
@@ -1005,12 +991,6 @@ model's version. Each constant lives in its model's `model.py`.
 | <a id="s-route-traction_brake_deceleration_ms2"></a>`TRACTION_BRAKE_DECELERATION_MS2` | `0.5` | Service braking deceleration. Rail braking is effectively mass-independent (brake systems are dimensioned per vehicle to a standard deceleration); 0.5 m/s² is a comfortable service value appropriate for sleeping passengers — full emergency capability is far higher and irrelevant for timetabling. |
 | <a id="s-route-neutral_proposal_id"></a>`NEUTRAL_PROPOSAL_ID` | `0` | — |
 
-#### Energy model — [`model.py`](../backend/models/energy/model.py)
-
-| Constant | Value | Meaning |
-|---|---|---|
-| <a id="s-energy-energy_flat_factor_kwh_km"></a>`ENERGY_FLAT_FACTOR_KWH_KM` | `28.0` | Flat placeholder energy factor used by calc_energy_consumption.py until the weight/speed/terrain regression is calibrated. Every train is assumed to use this much electricity per kilometre, regardless of weight, speed, or terrain. |
-
 #### Demand model — [`model.py`](../backend/models/demand/model.py)
 
 | Constant | Value | Meaning |
@@ -1174,9 +1154,6 @@ Train composition blueprint: which coaches, at which speed, with which cost para
 | <a id="p-input_params-composition_types-composition_type_operator_id"></a>`composition_type_operator_id` | Operator running this composition (soft reference to operators.operator_id). | — | — |
 | <a id="p-input_params-composition_types-composition_type_hsr_allowed"></a>`composition_type_hsr_allowed` | Whether this train may use high-speed lines at all (combined with each country's own permission). | — | — |
 | <a id="p-input_params-composition_types-composition_type_max_speed_kmh"></a>`composition_type_max_speed_kmh` | Maximum operational speed. | km/h | — |
-| <a id="p-input_params-composition_types-composition_type_energy_factor_weight"></a>`composition_type_energy_factor_weight` | Energy model: base factor per tonne-kilometre. | kWh/(t·km) | [`energy_per_leg`](#f-energy-energy_per_leg) |
-| <a id="p-input_params-composition_types-composition_type_energy_factor_speed"></a>`composition_type_energy_factor_speed` | Energy model: air resistance factor, applied to speed squared. | kWh/(t·km·(km/h)²) | [`energy_per_leg`](#f-energy-energy_per_leg) |
-| <a id="p-input_params-composition_types-composition_type_energy_factor_terrain"></a>`composition_type_energy_factor_terrain` | Energy model: terrain factor, applied to the terrain score. | kWh/(t·km) per terrain point | [`energy_per_leg`](#f-energy-energy_per_leg) |
 | <a id="p-input_params-composition_types-composition_type_min_boarding_time"></a>`composition_type_min_boarding_time` | Minimum waiting time this train needs at stops where passengers board. | interval (hh:mm:ss) | [`dwell_time_boarding`](#f-route-dwell_time_boarding), [`dwell_time_both`](#f-route-dwell_time_both) |
 | <a id="p-input_params-composition_types-composition_type_min_alighting_time"></a>`composition_type_min_alighting_time` | Minimum waiting time this train needs at stops where passengers get off. | interval (hh:mm:ss) | [`dwell_time_alighting`](#f-route-dwell_time_alighting), [`dwell_time_both`](#f-route-dwell_time_both) |
 | <a id="p-input_params-composition_types-composition_type_purchase_coach_eur"></a>`composition_type_purchase_coach_eur` | Average purchase price per coach, from the per-metre price model (new 145 / refurbished 53 k€ per metre of coach, double-deck ×1.12) applied to this composition's coach lengths. Derivation: calib/CALIBRATION.md. | €/coach | [`coach_amortisation_eur`](#f-calc-coach_amortisation_eur), [`financing_eur`](#f-calc-financing_eur) |
@@ -1203,7 +1180,7 @@ Locomotive types — the physical machine, independent of who runs it. Weight an
 | <a id="p-input_params-loco_types-loco_type_id"></a>`loco_type_id` | Stable natural key, e.g. VECTRON-MS-230. | — | — |
 | <a id="p-input_params-loco_types-loco_type_description"></a>`loco_type_description` | Machine and configuration in plain words, including the national class designation where the calibration pins one and an explicit note where it does not. | — | — |
 | <a id="p-input_params-loco_types-loco_type_traction"></a>`loco_type_traction` | Traction system, e.g. 'electric multi-system'. Not yet read by any model — recorded so a future electrification or traction-change model has it. | — | — |
-| <a id="p-input_params-loco_types-loco_type_weight_t"></a>`loco_type_weight_t` | Mass of one locomotive. Completes the gross weight the weight-dependent track access charge and the traction dynamics both work on — coach weight alone is not what gets hauled or weighed. | t | [`tac_eur`](#f-calc-tac_eur), [`train_weight`](#f-energy-train_weight), [`stop_dynamics_time_loss`](#f-route-stop_dynamics_time_loss) |
+| <a id="p-input_params-loco_types-loco_type_weight_t"></a>`loco_type_weight_t` | Mass of one locomotive. Completes the gross weight the weight-dependent track access charge and the traction dynamics both work on — coach weight alone is not what gets hauled or weighed. | t | [`tac_eur`](#f-calc-tac_eur), [`stop_dynamics_time_loss`](#f-route-stop_dynamics_time_loss) |
 | <a id="p-input_params-loco_types-loco_type_max_speed_kmh"></a>`loco_type_max_speed_kmh` | Design maximum speed. The composition's own max speed still governs the timetable; this records what the machine could do. | km/h | — |
 | <a id="p-input_params-loco_types-source_id"></a>`source_id` | Source for all values in this row. | — | — |
 | <a id="p-input_params-loco_types-change_log"></a>`change_log` | Free-text description of what changed in this version and why. | — | — |
@@ -1315,7 +1292,7 @@ Country-level track parameters. Empty fields are resolved against track_infrastr
 | <a id="p-input_params-track_infrastructures-track_energy_price_eur_kwh"></a>`track_energy_price_eur_kwh` | Traction electricity price: the day rate, and the rate around the clock for the twenty-five countries whose tariff is not banded. Where a night band exists the cost model prices the in-band share at track_energy_price_night_eur_kwh instead. | €/kWh (EUR at 2032 prices) | [`energy_eur`](#f-calc-energy_eur) |
 | <a id="p-input_params-track_infrastructures-track_energy_price_src"></a>`track_energy_price_src` | Source for the electricity price. | — | — |
 | <a id="p-input_params-track_infrastructures-track_terrain_category"></a>`track_terrain_category` | Rough terrain classification: Flat, Hilly, or Mountainous. | — | — |
-| <a id="p-input_params-track_infrastructures-track_terrain_score"></a>`track_terrain_score` | Terrain difficulty score — hills and mountains increase energy use. | 1–100 | [`energy_per_leg`](#f-energy-energy_per_leg) |
+| <a id="p-input_params-track_infrastructures-track_terrain_score"></a>`track_terrain_score` | Terrain difficulty score — hills and mountains increase energy use. | 1–100 | — |
 | <a id="p-input_params-track_infrastructures-track_terrain_src"></a>`track_terrain_src` | Source for terrain category and score. | — | — |
 | <a id="p-input_params-track_infrastructures-track_hsr_allowed"></a>`track_hsr_allowed` | Whether night trains may use the country's high-speed lines. | — | — |
 | <a id="p-input_params-track_infrastructures-track_hsr_src"></a>`track_hsr_src` | Source for the high-speed permission. | — | — |
