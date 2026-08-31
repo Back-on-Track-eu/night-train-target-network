@@ -2,7 +2,7 @@
 conftest.py
 ===========
 Shared pytest fixtures. All tests are integration tests — they require the
-full Docker stack (postgres + openrailrouting + api) to be running.
+full Docker stack (postgres + openrailrouting-infra-2026 + api) to be running.
 
 Start the stack before running:
     cd backend/docker && docker-compose up -d
@@ -193,38 +193,58 @@ def base_scenario(db_cur):
 
 @pytest.fixture(scope="session")
 def historical_scenario(db_cur):
-    """The seeded, deprecated historical scenario (scenario_key=
-    '2026-baseline') — pins every table to version 1 (DE's original
-    lower track_tac_eur_train_km among them). is_current_scenario is
-    FALSE for this row (it's not the head of an active lineage), so it's
-    looked up by scenario_key alone. Enables scenario override tests
-    that need a known-different snapshot from the live base."""
+    """The superseded revision of the infra-2026 lineage (scenario_key=
+    'infra-2026', is_current_scenario=FALSE) — pins every table to version
+    4, carrying Germany's pre-correction track access rates. The only
+    seeded snapshot whose TARIFFS differ from the base, so it is what the
+    scenario-override tests pin to; the HSR and optimised-timetable
+    scenarios differ in routing and timetabling, not in charges."""
     db_cur.execute(
-        "SELECT * FROM scenario.scenarios WHERE scenario_key = '2026-baseline'"
+        "SELECT * FROM scenario.scenarios "
+        "WHERE scenario_key = 'infra-2026' AND is_current_scenario = FALSE"
     )
     row = db_cur.fetchone()
     assert row is not None, (
-        "Historical 2026 scenario missing — see db/dev/seed.py: "
-        "HISTORICAL_SCENARIO_2026."
+        "Superseded infra-2026 revision missing — see db/dev/seed.py: "
+        "SUPERSEDED_BASE_REVISION."
     )
     return row
 
 
 @pytest.fixture(scope="session")
 def hsr_scenario(db_cur):
-    """The seeded 'HSR allowed' scenario (scenario_key=
-    '2032-baseline-hsr-allowed') — a second current lineage head
-    (is_current_scenario=TRUE, is_current_base=FALSE), identical to the
-    live base except track_hsr_allowed=True everywhere. Enables tests of
-    the non-base 'current_scenarios' API group and of pinning to a
-    live-but-non-default scenario_id."""
+    """The seeded 'NT on HSR' scenario (scenario_key='infra-2026-hsr') —
+    a second current lineage head (is_current_scenario=TRUE,
+    is_current_base=FALSE), identical to the live base except
+    track_hsr_allowed=True everywhere. Enables tests of the non-base
+    'current_scenarios' API group and of pinning to a live-but-non-default
+    scenario_id."""
     db_cur.execute(
         "SELECT * FROM scenario.scenarios "
-        "WHERE scenario_key = '2032-baseline-hsr-allowed' AND is_current_scenario = TRUE"
+        "WHERE scenario_key = 'infra-2026-hsr' AND is_current_scenario = TRUE"
     )
     row = db_cur.fetchone()
     assert row is not None, (
-        "HSR-allowed scenario missing — see db/dev/seed.py: HSR_SCENARIO."
+        "NT-on-HSR scenario missing — see db/dev/seed.py: HSR_SCENARIO."
+    )
+    return row
+
+
+@pytest.fixture(scope="session")
+def opt_tt_scenario(db_cur):
+    """The seeded optimised-timetable scenario (scenario_key=
+    'infra-2026-hsr-opt-tt') — the third current lineage head, identical
+    to hsr_scenario except for a reduced track_buffer_quota_per. The only
+    seeded scenario carrying a numeric value difference from the base, so
+    it is what cross-version resolution tests pin to (see
+    models/scenarios/README.md for the reduction itself)."""
+    db_cur.execute(
+        "SELECT * FROM scenario.scenarios "
+        "WHERE scenario_key = 'infra-2026-hsr-opt-tt' AND is_current_scenario = TRUE"
+    )
+    row = db_cur.fetchone()
+    assert row is not None, (
+        "Optimised-timetable scenario missing — see db/dev/seed.py: OPT_TT_SCENARIO."
     )
     return row
 

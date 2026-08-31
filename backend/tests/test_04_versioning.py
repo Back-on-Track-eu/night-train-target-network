@@ -6,9 +6,9 @@ full-table snapshot resolution, default value handling, param_versions
 structure, scenario pinning, and CI model-version injection.
 
 Fixture values relied on (see db/dev/seed.py):
-  - DE track infra exists at three snapshot versions: v2 tac=5.40 (base
-    scenario's pinned version) and v1 tac=3.10 (pinned by the historical
-    scenario '2026-baseline').
+  - DE track infra exists at four snapshot versions: v1 tac=5.40 (the base
+    scenario Infra 2026) and v4 tac=3.10 (the superseded revision of that
+    same lineage). v3 additionally carries the reduced schedule supplement.
   - SE tac_eur_train_km is NULL at every version → resolves from the
     EU-average default row (is_default=True).
   - osm:n25948183 stop_charge_eur is NULL → resolves from the global
@@ -32,31 +32,34 @@ from models.params import (
 
 class TestVersionIsolation:
     def test_loader_uses_base_pinned_version(self, loader):
-        """Loader with no scenario_id resolves to the base scenario and
-        returns DE's v2 value (tac=5.40) — not the older snapshot."""
+        """Loader with no scenario_id resolves to the base scenario (Infra
+        2026, version 1) and returns DE's calibrated tac=5.40."""
         de = loader.build_all_tracks().get("DE")
         assert de is not None
         assert de.tac_eur_train_km == pytest.approx(5.40, rel=1e-3)
 
-    def test_loader_pinned_to_historical_returns_old_snapshot(
-        self, loader, historical_scenario
+    def test_loader_pinned_to_other_scenario_returns_that_snapshot(
+        self, loader, opt_tt_scenario
     ):
-        """Loader pinned to the 2026 Base Line scenario returns DE's v1
-        value (tac=3.10) — exact-match resolution on the pinned version,
-        no fallback to 'latest'."""
-        de = loader.build_all_tracks(historical_scenario["scenario_id"]).get("DE")
-        assert de is not None
-        assert de.tac_eur_train_km == pytest.approx(3.10, rel=1e-3)
+        """Loader pinned to the optimised-timetable scenario returns that
+        version's reduced schedule supplement, not the base's — exact-match
+        resolution on the pinned version, no fallback to 'latest'. The
+        buffer quota is the only value that differs numerically between the
+        seeded scenarios (models/scenarios/README.md)."""
+        base_de = loader.build_all_tracks().get("DE")
+        opt_de = loader.build_all_tracks(opt_tt_scenario["scenario_id"]).get("DE")
+        assert base_de is not None and opt_de is not None
+        assert opt_de.buffer_quota_per < base_de.buffer_quota_per
 
-    def test_db_has_all_three_de_versions(self, db_cur):
-        """All three DE snapshot rows exist — confirms the fixture the two
+    def test_db_has_all_de_versions(self, db_cur):
+        """All four DE snapshot rows exist — confirms the fixture the two
         tests above depend on is actually in place."""
         db_cur.execute("""
             SELECT track_infra_version FROM input_params.track_infrastructures
             WHERE country_code = 'DE' ORDER BY track_infra_version
             """)
         versions = [r["track_infra_version"] for r in db_cur.fetchall()]
-        assert versions == [1, 2, 3]
+        assert versions == [1, 2, 3, 4]
 
     def test_full_table_snapshot_invariant(self, db_cur):
         """Every track_infrastructures version is a COMPLETE snapshot — the
