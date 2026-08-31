@@ -58,13 +58,16 @@ _DB_DEFAULTS = {
 _DEFAULT_API_HOST_PORT = "5050"
 _DEFAULT_ROUTING_HOST_PORT = "8989"
 
-# Routing settings are per graph, suffixed with the graph key (naming
-# contract: models/route/routing/rail_router.py). Host-run tools are
-# single-graph, so they use the default graph's pair; the constants are
-# spelled out here rather than derived, to keep this module free of an
-# import from the geometry-heavy rail_router.
-_DEFAULT_ROUTING_URL_VAR = "OPENRAILROUTING_URL_INFRA_2026"
-_DEFAULT_ROUTING_PORT_VAR = "OPENRAILROUTING_HOST_PORT_INFRA_2026"
+# Routing settings are per graph, suffixed with the graph key, uppercased
+# (naming contract: models/route/routing/rail_router.py). The prefixes are
+# spelled out here rather than imported, to keep this module free of a
+# dependency on the geometry-heavy rail_router. So is the default key: it
+# is the only graph most host-run tools ever mean.
+_ROUTING_URL_PREFIX = "OPENRAILROUTING_URL_"
+_ROUTING_PORT_PREFIX = "OPENRAILROUTING_HOST_PORT_"
+_DEFAULT_ROUTING_GRAPH_KEY = "INFRA_2026"
+_DEFAULT_ROUTING_URL_VAR = _ROUTING_URL_PREFIX + _DEFAULT_ROUTING_GRAPH_KEY
+_DEFAULT_ROUTING_PORT_VAR = _ROUTING_PORT_PREFIX + _DEFAULT_ROUTING_GRAPH_KEY
 _DEFAULT_API_CONTAINER_NAME = "night-train-api"
 
 
@@ -131,8 +134,8 @@ def resolve_service_url(
     container port — so the port is swapped along with the hostname, or
     the rewritten URL would point at a closed port on localhost.
 
-    Both arguments are per-graph, so a second graph is resolved by passing
-    its own pair (see rail_router.py's naming contract).
+    Both arguments are per-graph (see rail_router.py's naming contract);
+    resolve_routing_urls() applies this to every configured graph at once.
 
     Rewritten in place on os.environ because RailRouter reads the
     variable itself; returns the effective URL, or None if unset.
@@ -155,6 +158,32 @@ def resolve_service_url(
     return rewritten
 
 
+def resolve_routing_urls() -> dict[str, str]:
+    """Point every configured routing graph's URL at localhost when run
+    from the host.
+
+    resolve_service_url()'s rewrite applied across the whole registry
+    rather than the default graph alone: each OPENRAILROUTING_URL_<KEY> is
+    paired with its own OPENRAILROUTING_HOST_PORT_<KEY>, so a tool that
+    routes on a non-default graph works straight off backend/docker/.env
+    instead of needing the URL overridden in the shell.
+
+    Returns graph_key -> effective URL, lowercased keys to match the
+    backend registry (api/helpers/dependencies.py).
+    """
+    load_env_files()
+    resolved = {}
+    # Materialised before iterating: resolve_service_url() writes back to
+    # os.environ, which cannot be mutated mid-iteration.
+    url_vars = [var for var in os.environ if var.startswith(_ROUTING_URL_PREFIX)]
+    for var in url_vars:
+        key = var[len(_ROUTING_URL_PREFIX) :]
+        url = resolve_service_url(var, _ROUTING_PORT_PREFIX + key)
+        if url:
+            resolved[key.lower()] = url
+    return resolved
+
+
 def resolve_env() -> dict[str, str]:
     """Fill in dev defaults for anything unset and publish them to
     os.environ, so every consumer in this process sees the same
@@ -169,7 +198,7 @@ def resolve_env() -> dict[str, str]:
     # standard port. Doing it here keeps a non-standard published port
     # working without every script knowing about it.
     os.environ.setdefault(_DEFAULT_ROUTING_URL_VAR, routing_base_url())
-    resolve_service_url()
+    resolve_routing_urls()
     return {key: os.environ[key] for key in _DB_DEFAULTS}
 
 

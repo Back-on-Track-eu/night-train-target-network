@@ -6,9 +6,12 @@ full-table snapshot resolution, default value handling, param_versions
 structure, scenario pinning, and CI model-version injection.
 
 Fixture values relied on (see db/dev/seed.py):
-  - DE track infra exists at four snapshot versions: v1 tac=5.40 (the base
-    scenario Infra 2026) and v4 tac=3.10 (the superseded revision of that
-    same lineage). v3 additionally carries the reduced schedule supplement.
+  - DE track infra exists at seven snapshot versions: v1 tac=5.40 (the
+    base scenario Infra 2026) and v4 tac=3.10 (the superseded revision of
+    that same lineage). v3 additionally carries the reduced schedule
+    supplement. v5-v7 are the Infra 2032 copies of v1-v3, so DE's tac is
+    5.40 there too — the 2032 scenarios differ by routing graph, not by
+    tariff (models/scenarios/README.md).
   - SE tac_eur_train_km is NULL at every version → resolves from the
     EU-average default row (is_default=True).
   - osm:n25948183 stop_charge_eur is NULL → resolves from the global
@@ -52,14 +55,16 @@ class TestVersionIsolation:
         assert opt_de.buffer_quota_per < base_de.buffer_quota_per
 
     def test_db_has_all_de_versions(self, db_cur):
-        """All four DE snapshot rows exist — confirms the fixture the two
-        tests above depend on is actually in place."""
+        """All seven DE snapshot rows exist — confirms the fixture the two
+        tests above depend on is actually in place, and that the version
+        grid was extended in every table rather than only in the scenario
+        rows (db/dev/seed.py: INFRA_VERSIONS)."""
         db_cur.execute("""
             SELECT track_infra_version FROM input_params.track_infrastructures
             WHERE country_code = 'DE' ORDER BY track_infra_version
             """)
         versions = [r["track_infra_version"] for r in db_cur.fetchall()]
-        assert versions == [1, 2, 3, 4]
+        assert versions == [1, 2, 3, 4, 5, 6, 7]
 
     def test_full_table_snapshot_invariant(self, db_cur):
         """Every track_infrastructures version is a COMPLETE snapshot — the

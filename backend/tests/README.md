@@ -102,7 +102,10 @@ Shared code:
 | `test_base_scenario_pins_version_1` | Base lineage owns its own snapshot | Infra 2026 row | all five table versions = 1 |
 | `test_superseded_revision_pins_version_4` | Superseded revision shares the lineage key | infra-2026 non-current row | all five versions = 4, `is_current_scenario` false |
 | `test_opt_tt_reduces_buffer_quota` | Optimised timetables actually differ | v1 vs v3 buffer quotas | at least one country lower, none higher |
-| `test_all_scenarios_route_on_the_2026_graph` | Routing graph pin | every scenario row | `routing_graph_key` = `infra_2026` |
+| `test_scenario_key_and_routing_graph_agree` | Routing graph pin | every scenario row | `scenario_key`'s network matches `routing_graph_key` |
+| `test_infra_2032_scenarios_pin_versions_5_to_7` | Version grid, 2032 half | the three `infra_2032` rows | all five pins = 5, 6, 7 respectively |
+| `test_infra_2032_scenarios_are_current_but_not_base` | Scenario flags | the three `infra_2032` rows | `is_current_scenario` true, `is_current_base` false |
+| `test_infra_2032_snapshots_copy_their_2026_counterparts` | Full-snapshot copy | `track_infrastructures` v5-7 vs v1-3 | no value differs |
 | `test_hsr_scenario_pins_version_3` | HSR lineage owns its own snapshot | HSR-allowed vs base rows | all four table versions = 3, differ from base |
 | `test_stop_infrastructure_values_unchanged_by_hsr_scenario` | Stop charges independent of HSR policy | `stop_infrastructures` at base vs HSR version | identical values despite different version numbers |
 | `test_stop_enrichment_seeded` | The catalog's enrichment reaches the DB, not just the CSV | seeded stops at version 1 | provenance from the known vocabulary; localized country names on every stop; ≥95% carry a city; ≥90% carry gauges; **no gauge below 1435 mm** |
@@ -175,6 +178,8 @@ Shared code:
 | `TestScenariosResponseLayout::test_group_shape` | Group structure | response groups | each group is `{count, scenarios}`, `count` matches list length |
 | `TestScenariosResponseLayout::test_total_count_matches_group_sum` | Partition completeness | response | `total_count` = sum of group counts — every scenario in exactly one group |
 | `TestScenariosResponseLayout::test_scenarios_have_required_fields` | Field completeness | every scenario row | full column set exposed |
+| `TestScenariosRoutingGraphPin::test_every_scenario_pins_a_known_routing_graph` | Routing graph pin | every scenario, every group | `routing_graph_key` in {`infra_2026`, `infra_2032`} |
+| `TestScenariosRoutingGraphPin::test_both_networks_are_offered` | Version grid reaches the API | selectable scenarios | three per network |
 | `TestScenariosGrouping::test_current_base_group_flags` | Base group semantics | `current_base` rows | both `is_current_base` and `is_current_scenario` true |
 | `TestScenariosGrouping::test_current_scenarios_group_flags` | Current group semantics | `current_scenarios` rows | non-base current lineage heads only |
 | `TestScenariosGrouping::test_historical_scenarios_group_flags` | Historical group semantics | `historical_scenarios` rows | superseded versions only |

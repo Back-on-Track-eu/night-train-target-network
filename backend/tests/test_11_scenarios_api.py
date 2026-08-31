@@ -8,8 +8,12 @@ Response contract for the read-only scenario listing endpoint:
 Covers the three-group response layout (current_base / current_scenarios /
 historical_scenarios), per-scenario field shape, count consistency, and
 that the seeded scenarios (see conftest.py: base_scenario, hsr_scenario,
-historical_scenario) land in the groups their flags dictate.
+historical_scenario, scenarios_2032) land in the groups their flags
+dictate. Six scenarios are selectable — three operating conditions on
+each of the two networks — plus one superseded revision.
 """
+
+from collections import Counter
 
 import pytest
 import requests
@@ -76,14 +80,25 @@ class TestScenariosResponseLayout:
 
 
 class TestScenariosRoutingGraphPin:
-    def test_every_scenario_pins_a_routing_graph(self, scenarios_body):
-        """routing_graph_key is a non-empty string on every scenario, and
-        every seeded scenario routes on today's network — 'infra_2026'
-        (see db/dev/seed.py's scenario section); 'infra_2032' rows only
-        appear once the second graph exists."""
+    def test_every_scenario_pins_a_known_routing_graph(self, scenarios_body):
+        """routing_graph_key is one of the two seeded graphs on every
+        scenario, in every group (db/dev/seed.py's scenario section). A
+        key outside that set means the API is serving a scenario no
+        deployment can route."""
         for group in GROUPS:
             for scenario in scenarios_body[group]["scenarios"]:
-                assert scenario["routing_graph_key"] == "infra_2026"
+                assert scenario["routing_graph_key"] in {"infra_2026", "infra_2032"}
+
+    def test_both_networks_are_offered(self, scenarios_body):
+        """Both networks reach the API as selectable scenarios — three
+        operating conditions each, per the version grid in db/dev/seed.py.
+        Catches a seed that inserted only one half of it."""
+        selectable = [
+            *scenarios_body["current_base"]["scenarios"],
+            *scenarios_body["current_scenarios"]["scenarios"],
+        ]
+        by_graph = Counter(s["routing_graph_key"] for s in selectable)
+        assert by_graph == {"infra_2026": 3, "infra_2032": 3}, by_graph
 
 
 class TestScenariosGrouping:

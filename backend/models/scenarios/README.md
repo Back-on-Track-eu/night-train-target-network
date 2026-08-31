@@ -23,9 +23,10 @@ Every scenario is a point on two axes.
 
 **Infrastructure** — which physical network. This is the routing graph
 (`routing_graph_key`), because it determines every distance and travel
-time. `infra_2026` is today's network. `infra_2032` will be the upgraded
-network from Jasper's manipulated OSM extract; it arrives with its own
-routing instance (`models/route/routing/README.md`, "Multiple Graphs").
+time. `infra_2026` is today's network; `infra_2032` is the upgraded
+network built from Jasper's manipulated OSM extract, imported and
+verified on 2026-08-31 (`models/route/routing/README.md`, "Bringing up a
+second graph"). Each runs as its own OpenRailRouting instance.
 
 **Operating conditions** — what night trains are permitted and how well
 they are scheduled on that network. Two levers, cumulative:
@@ -37,14 +38,26 @@ they are scheduled on that network. Two levers, cumulative:
   well-designed paths rather than the residual ones they get today
   (`track_buffer_quota_per`).
 
-Three operating conditions per network, so three scenarios today and six
-once the 2032 graph exists:
+Three operating conditions per network, so six scenarios:
 
 | | Infra 2026 | Infra 2032 |
 |---|---|---|
-| baseline | `infra-2026` ✅ | pending graph |
-| + NT on HSR | `infra-2026-hsr` ✅ | pending graph |
-| + NT on HSR + OPT TT | `infra-2026-hsr-opt-tt` ✅ | pending graph |
+| baseline | `infra-2026` (v1) | `infra-2032` (v5) |
+| + NT on HSR | `infra-2026-hsr` (v2) | `infra-2032-hsr` (v6) |
+| + NT on HSR + OPT TT | `infra-2026-hsr-opt-tt` (v3) | `infra-2032-hsr-opt-tt` (v7) |
+
+The version number in each cell is the single number that scenario pins
+across all five versioned tables. Version 4 is outside the grid: it is
+the superseded `infra-2026` revision. `infra-2026` remains the live
+default (`is_current_base`); the other five are current lineage heads.
+
+**The two columns are identical in the database.** Every value in all
+five versioned tables is copied unchanged from the 2026 column to the
+2032 one. That is not laziness — it is where the difference lives. An
+upgraded network is new track, track determines distance and travel time,
+and both come from the routing graph. A 2032 scenario that also moved a
+tariff would confound two effects in one comparison, which is the thing
+the full-snapshot design exists to prevent (`db/README.md`).
 
 **"2026" names the network, not the price year.** Every monetary parameter
 stays on the calibrated 2032 evaluation-year basis in all three scenarios
@@ -54,7 +67,7 @@ the full-snapshot design exists to prevent.
 
 ---
 
-## The three seeded scenarios
+## The six seeded scenarios
 
 ### 1. Infra 2026 — `infra-2026`
 
@@ -78,8 +91,47 @@ high-speed paths. That is a known gap, not a modelling claim.
 
 ### 3. Infra 2026 + NT on HSR + optimised timetables — `infra-2026-hsr-opt-tt`
 
-Scenario 2 with a reduced schedule supplement. The rest of this document
-is about how much reduction, and why that number is currently provisional.
+Scenario 2 with a reduced schedule supplement. The optimised-timetable
+section below is about how much reduction, and why that number is
+currently provisional.
+
+### 4, 5, 6. The Infra 2032 trio
+
+`infra-2032`, `infra-2032-hsr`, `infra-2032-hsr-opt-tt` — scenarios 1, 2
+and 3 asked of the upgraded network. The operating conditions and every
+tariff are unchanged; what differs is `routing_graph_key`, and therefore
+every distance and travel time.
+
+The Hamburg → København corridor is the clearest illustration and was the
+acceptance check for the graph itself: 504.4 km / 226 min on `infra_2026`
+via Jutland, 350.1 km / 148 min on `infra_2032` across the Fehmarn fixed
+link. That is the shape of what these three scenarios add — journeys that
+take a long detour today become direct, and the operating-condition
+levers then apply on top.
+
+Read `infra-2032-hsr-opt-tt` as the upper bound of the six: everything
+currently under construction or firmly committed, plus both operating
+improvements. It is not a forecast, and it inherits scenario 3's
+provisional schedule supplement.
+
+**Known gap — crossing charges.** `passage_charges` versions 5–7 are
+copies of 1–3, so they hold the crossings that exist today (Storebælt,
+Øresund, the Channel Tunnel) and nothing else. Every fixed link the 2032
+network adds is therefore priced as if traversing it were free, and 2032
+costs are understated by exactly that toll — on Fehmarn, on the very
+corridor that makes the network different. This is the same class of
+admission as the HSR track-access gap in scenario 2: a known omission,
+not a modelling claim. Closing it needs a sourced tariff per new
+crossing (Femern A/S publishes assumptions), then a new version pair and
+new scenario rows — never an edit to versions 5–7, which are pinned.
+
+**Deployment coupling.** These three cannot be computed by a deployment
+that does not run an OpenRailRouting instance for `infra_2032`. The API
+answers `503 routing_graph_not_configured` rather than falling back to
+another graph (`api/helpers/dependencies.py`, `api/proposal_calc.py`).
+Enabling the instance is three lines in `backend/docker/.env`; CI
+deliberately does not, so the suite covers these rows by reading them,
+never by computing them.
 
 ---
 
@@ -218,11 +270,24 @@ claiming precision, and this document is the honest version.
 ## Adding a scenario
 
 1. New full-table snapshot version in each of the five versioned tables
-   (`db/dev/seed.py`) — a complete copy, never a partial diff.
+   (`db/dev/seed.py`) — a complete copy, never a partial diff. The
+   version grid at the top of that file's scenario section is the one
+   place the numbering lives; extend it there rather than adding another
+   hand-written builder.
 2. New `scenario.scenarios` row pinning those five versions plus a
    `routing_graph_key`.
-3. A user-facing `description`: what the scenario assumes, in plain
+3. A migration under `db/dev/sql/migrations/` doing the same to server
+   databases, which are never reseeded (`db/migrate.py`). See
+   `2026-08-31_infra_2032_scenarios.sql` for the pattern: copy forward
+   with `INSERT ... SELECT` against the server's own rows and a column
+   list read from `information_schema`, so a database whose calibration
+   has moved on carries its own values rather than literals from the day
+   the migration was written.
+4. A user-facing `description`: what the scenario assumes, in plain
    language, without repository jargon. Someone who has just opened the
    platform reads these.
-4. Never repoint or edit a pinned version. Scenario rows are immutable;
+5. If the scenario pins a routing graph that is not already live, say so
+   in the handover to deployment — a seeded scenario nobody can compute
+   is a worse failure than a missing one.
+6. Never repoint or edit a pinned version. Scenario rows are immutable;
    a changed value means a new version and a new scenario row.

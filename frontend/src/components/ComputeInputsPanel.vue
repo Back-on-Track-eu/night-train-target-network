@@ -31,73 +31,94 @@ const selectedScenario = computed(
 </script>
 
 <template>
-  <!-- One box each, side by side: they are peers, and the scenario's
-       description would otherwise stretch a shared box around a one-line
-       composition card. items-stretch keeps the two the same height. -->
-  <div class="grid grid-cols-1 items-stretch gap-4 sm:grid-cols-2">
-    <!-- display:contents so the state chain stays one grid cell, not three. -->
-    <div class="contents">
-      <!-- Loading: hold the box and its footprint, so the panel doesn't pop
-           into existence and shove everything below it down. -->
-      <div
-        v-if="store.scenariosStatus === 'loading'"
-        class="scenario-gold-box flex flex-col justify-center gap-3 rounded-xl p-4"
-      >
-        <div class="flex justify-center">
-          <Skeleton width="12rem" height="2.25rem" border-radius="9999px" />
-        </div>
-        <Skeleton width="70%" height="0.875rem" />
-      </div>
+  <div class="flex flex-col gap-3">
+    <!-- Both boxes are pickers, which the controls alone don't say — the pill
+         reads as a label and the composition card as a read-out. -->
+    <div class="flex flex-col gap-1">
+      <h2 class="text-base font-semibold text-primary-50">
+        {{ t('proposal.evaluation.sections.inputs.title') }}
+      </h2>
+      <p class="text-sm leading-relaxed text-primary-50/70">
+        {{ t('proposal.evaluation.sections.inputs.body') }}
+      </p>
+    </div>
 
-      <!-- Failure has to be visible, not just an absent control: with no
+    <!-- One box each, side by side: they are peers, and the scenario's
+         description would otherwise stretch a shared box around a one-line
+         composition card. items-stretch keeps the two the same height. -->
+    <div class="grid grid-cols-1 items-stretch gap-4 sm:grid-cols-2">
+      <!-- display:contents so the state chain stays one grid cell, not three. -->
+      <div class="contents">
+        <!-- Loading: hold the box and its footprint, so the panel doesn't pop
+           into existence and shove everything below it down. -->
+        <div
+          v-if="store.scenariosStatus === 'loading'"
+          class="scenario-gold-box flex flex-col justify-center gap-3 rounded-xl p-4"
+        >
+          <div class="flex justify-center">
+            <Skeleton width="12rem" height="2.25rem" border-radius="9999px" />
+          </div>
+          <Skeleton width="70%" height="0.875rem" />
+        </div>
+
+        <!-- Failure has to be visible, not just an absent control: with no
            scenario loaded, selectedScenarioId stays null and the calc runs
            against the LIVE BASE instead of whatever the user assumes is
            selected. Silently omitting the box would change the numbers
            without saying so. -->
-      <div
-        v-else-if="store.scenariosFailure"
-        class="scenario-gold-box flex flex-col justify-center gap-2 rounded-xl p-4"
-        role="alert"
-      >
-        <p class="text-sm leading-relaxed text-amber-200">{{ t('errors.scenariosUnavailable') }}</p>
-        <button
-          type="button"
-          class="cursor-pointer text-sm font-semibold text-primary-50 underline underline-offset-2"
-          @click="store.fetchScenarios()"
+        <div
+          v-else-if="store.scenariosFailure"
+          class="scenario-gold-box flex flex-col justify-center gap-2 rounded-xl p-4"
+          role="alert"
         >
-          {{ t('errors.retry') }}
-        </button>
-      </div>
-
-      <!-- Loaded and genuinely empty stays hidden — an empty list is not an
-           error. -->
-      <div
-        v-else-if="store.scenarios.length > 0"
-        class="scenario-gold-box flex flex-col justify-center gap-3 rounded-xl p-4"
-      >
-        <div class="flex justify-center">
-          <Select
-            v-model="store.selectedScenarioId"
-            :options="store.scenarios"
-            option-value="scenario_id"
-            option-label="scenario_name"
-            :aria-label="t('proposal.evaluation.scenario')"
-            :unstyled="true"
-            :pt="selectPillPt"
-          />
+          <p class="text-sm leading-relaxed text-amber-200">
+            {{ t('errors.scenariosUnavailable') }}
+          </p>
+          <button
+            type="button"
+            class="cursor-pointer text-sm font-semibold text-primary-50 underline underline-offset-2"
+            @click="store.fetchScenarios()"
+          >
+            {{ t('errors.retry') }}
+          </button>
         </div>
-        <p v-if="selectedScenario?.description" class="text-sm leading-relaxed text-primary-50/70">
-          {{ selectedScenario.description }}
-        </p>
-      </div>
-    </div>
 
-    <CompositionPanel
-      v-if="compositions.length > 0"
-      :compositions="compositions"
-      :selected-id="selectedCompositionId"
-      @select="(id) => emit('selectComposition', id)"
-    />
+        <!-- Loaded and genuinely empty stays hidden — an empty list is not an
+           error. -->
+        <div
+          v-else-if="store.scenarios.length > 0"
+          class="scenario-gold-box flex flex-col justify-center gap-3 rounded-xl p-4"
+        >
+          <span class="text-center text-xs tracking-wide text-primary-50/50 uppercase">
+            {{ t('proposal.evaluation.scenario') }}
+          </span>
+          <div class="flex justify-center">
+            <Select
+              v-model="store.selectedScenarioId"
+              :options="store.scenarios"
+              option-value="scenario_id"
+              option-label="scenario_name"
+              :aria-label="t('proposal.evaluation.scenario')"
+              :unstyled="true"
+              :pt="selectPillPt"
+            />
+          </div>
+          <p
+            v-if="selectedScenario?.description"
+            class="text-sm leading-relaxed text-primary-50/70"
+          >
+            {{ selectedScenario.description }}
+          </p>
+        </div>
+      </div>
+
+      <CompositionPanel
+        v-if="compositions.length > 0"
+        :compositions="compositions"
+        :selected-id="selectedCompositionId"
+        @select="(id) => emit('selectComposition', id)"
+      />
+    </div>
   </div>
 </template>
 

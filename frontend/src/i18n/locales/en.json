@@ -41,7 +41,8 @@
     }
   },
   "proposal": {
-    "heading": "So, what's your \ndream night train route?",
+    "heading": "So, what's your dream night train route?",
+    "subheading": "Sketch it, run the numbers, improve and help us build the evidence for Europe's night train target network.",
     "evaluate": "Evaluate",
     "recalculate": "Recalculate with this selection",
     "evaluating": "Evaluating your proposal…",
@@ -57,6 +58,7 @@
     "minStopsTooltip": "Two stops per route minimum.",
     "loading": "Fetching data…",
     "saved": "Proposal was saved automatically.",
+    "routeStats": "Route stats",
     "comments": {
       "title": "Discussion",
       "loading": "Loading the discussion…",
@@ -169,6 +171,7 @@
       "three_per_week": "3× per week"
     },
     "composition": {
+      "label": "Train composition",
       "detailsAria": "Show composition details",
       "previous": "Previous composition",
       "next": "Next composition",
@@ -233,6 +236,20 @@
     },
     "evaluation": {
       "scenario": "Scenario",
+      "sections": {
+        "inputs": {
+          "title": "Choose a scenario and a train composition",
+          "body": "Both change every figure below — pick the scenario to evaluate against, and the train composition that would run the route."
+        },
+        "impact": {
+          "title": "Key performance indicators",
+          "body": "Annual demand, modal shift and emissions for this route."
+        },
+        "finance": {
+          "title": "Costs and revenue",
+          "body": "What running the route would cost each year, what tickets would bring in, and the gap between them."
+        }
+      },
       "views": {
         "route": "Full Route",
         "per_trip_pair": "By trip pair",
@@ -276,7 +293,7 @@
         "fixed": "Fixed",
         "infrastructure": "Infrastructure",
         "revenue": "Revenue",
-        "margin": "Expected Margin"
+        "margin": "Operator Expected Margin"
       },
       "fields": {
         "driver": "Driver",

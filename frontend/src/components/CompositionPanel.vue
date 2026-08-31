@@ -91,7 +91,9 @@ watch(
 </script>
 
 <template>
-  <div class="relative flex h-full w-full items-center gap-2 rounded-xl bg-primary-50/5 p-4">
+  <!-- Column, so the box can carry a label above its content the way the
+       scenario box does; the card itself stays the centred row below it. -->
+  <div class="relative flex h-full w-full flex-col gap-3 rounded-xl bg-primary-50/5 p-4">
     <!-- Details in the corner: the overlay is far wider than this box, and
          PrimeVue anchors it to the trigger's left edge — opening it from the
          left keeps it over the page instead of pushed off the right side. -->
@@ -106,68 +108,74 @@ watch(
       <AppIcon :path="mdiInformationOutline" :size="18" />
     </button>
 
-    <button
-      v-if="count > 1"
-      class="shrink-0 cursor-pointer text-primary-50/40 transition hover:text-primary-50"
-      :aria-label="t('proposal.composition.previous')"
-      @click="navigate('prev')"
-    >
-      <AppIcon :path="mdiChevronLeft" :size="20" />
-    </button>
+    <span class="text-center text-xs tracking-wide text-primary-50/50 uppercase">
+      {{ t('proposal.composition.label') }}
+    </span>
 
-    <Transition :name="transitionName" mode="out-in">
-      <div :key="current?.composition_id" class="flex flex-1 flex-col items-center gap-2">
-        <div class="flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
-          <AppIcon :path="mdiTrainCarPassenger" :size="18" color="var(--p-primary-50)" />
-          <span class="text-base font-bold text-primary-50">{{ current.composition_id }}</span>
-          <span
-            class="rounded-full border border-primary-50/20 px-2 py-0.5 text-xs text-primary-50/60"
-          >
-            {{ t(`proposal.composition.strategy.${current.material_strategy}`) }}
-          </span>
-        </div>
+    <div class="flex flex-1 items-center gap-2">
+      <button
+        v-if="count > 1"
+        class="shrink-0 cursor-pointer text-primary-50/40 transition hover:text-primary-50"
+        :aria-label="t('proposal.composition.previous')"
+        @click="navigate('prev')"
+      >
+        <AppIcon :path="mdiChevronLeft" :size="20" />
+      </button>
 
-        <div class="text-sm text-primary-50/60">
-          {{ formatInt(current.coaches.count) }} {{ t('proposal.composition.coaches') }} ·
-          {{ formatInt(current.capacity.total_places) }} {{ t('proposal.composition.places') }} ·
-          {{ formatInt(current.routing.max_speed_kmh) }} km/h
-        </div>
+      <Transition :name="transitionName" mode="out-in">
+        <div :key="current?.composition_id" class="flex flex-1 flex-col items-center gap-2">
+          <div class="flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
+            <AppIcon :path="mdiTrainCarPassenger" :size="18" color="var(--p-primary-50)" />
+            <span class="text-base font-bold text-primary-50">{{ current.composition_id }}</span>
+            <span
+              class="rounded-full border border-primary-50/20 px-2 py-0.5 text-xs text-primary-50/60"
+            >
+              {{ t(`proposal.composition.strategy.${current.material_strategy}`) }}
+            </span>
+          </div>
 
-        <!-- Places per class -->
-        <div class="flex flex-wrap justify-center gap-x-5 gap-y-1">
-          <div
-            v-for="stat in capacityStats"
-            :key="stat.label"
-            class="flex items-center gap-1.5"
-            :title="stat.label"
-            :aria-label="`${stat.places} ${stat.label}`"
-          >
-            <AppIcon :path="stat.icon" :size="18" :color="stat.color" />
-            <span class="text-sm font-semibold text-primary-50/80">{{ stat.places }}</span>
+          <div class="text-sm text-primary-50/60">
+            {{ formatInt(current.coaches.count) }} {{ t('proposal.composition.coaches') }} ·
+            {{ formatInt(current.capacity.total_places) }} {{ t('proposal.composition.places') }} ·
+            {{ formatInt(current.routing.max_speed_kmh) }} km/h
+          </div>
+
+          <!-- Places per class -->
+          <div class="flex flex-wrap justify-center gap-x-5 gap-y-1">
+            <div
+              v-for="stat in capacityStats"
+              :key="stat.label"
+              class="flex items-center gap-1.5"
+              :title="stat.label"
+              :aria-label="`${stat.places} ${stat.label}`"
+            >
+              <AppIcon :path="stat.icon" :size="18" :color="stat.color" />
+              <span class="text-sm font-semibold text-primary-50/80">{{ stat.places }}</span>
+            </div>
+          </div>
+
+          <!-- On board — dimmed where the train doesn't have it -->
+          <div class="flex gap-2">
+            <AppIcon
+              v-for="amenity in amenities"
+              :key="amenity.key"
+              :path="amenity.path"
+              :size="15"
+              :class="amenity.present ? 'text-primary-50/60' : 'text-primary-50/15'"
+            />
           </div>
         </div>
+      </Transition>
 
-        <!-- On board — dimmed where the train doesn't have it -->
-        <div class="flex gap-2">
-          <AppIcon
-            v-for="amenity in amenities"
-            :key="amenity.key"
-            :path="amenity.path"
-            :size="15"
-            :class="amenity.present ? 'text-primary-50/60' : 'text-primary-50/15'"
-          />
-        </div>
-      </div>
-    </Transition>
-
-    <button
-      v-if="count > 1"
-      class="shrink-0 cursor-pointer text-primary-50/40 transition hover:text-primary-50"
-      :aria-label="t('proposal.composition.next')"
-      @click="navigate('next')"
-    >
-      <AppIcon :path="mdiChevronRight" :size="20" />
-    </button>
+      <button
+        v-if="count > 1"
+        class="shrink-0 cursor-pointer text-primary-50/40 transition hover:text-primary-50"
+        :aria-label="t('proposal.composition.next')"
+        @click="navigate('next')"
+      >
+        <AppIcon :path="mdiChevronRight" :size="20" />
+      </button>
+    </div>
 
     <!-- Formation drawing + full parameter set for the shown composition -->
     <CompositionDetailOverlay v-if="current" ref="detailOverlay" :composition="current" />

@@ -77,19 +77,83 @@ container, not a second profile. The backend stack is prepared for this:
   is the one exception — all instances share `config.yml`, so they bind
   the same port internally. The contract lives in `rail_router.py`.
 
-Importing the 2032 graph once the OSM file exists (place it in
-`data-infra-2032/` first; the import must start from an empty
-`graph-cache-infra-2032/`):
+### Bringing up a second graph
+
+The worked example is `infra_2032`, but nothing below is specific to it —
+the same six steps apply to any new graph key.
+
+**The OSM filename is a contract.** `config.yml` reads
+`datareader.file: /app/data/europe-latest.osm.pbf`, and that config is
+baked into the image every instance shares, so each graph's `data-<key>/`
+directory must present its extract under exactly that name. A file called
+anything else is silently not read. Renaming `datareader.file` to
+something more honest is not worth it: CI keys its graph cache on
+`hashFiles(config.yml)`, and GraphHopper validates a cache against the
+config it was built with, so the edit costs a re-import and re-upload of
+every existing graph for a cosmetic gain.
 
 ```powershell
-cd backend/docker
+# 1. Place the extract under the contract name, clear any stale one
+cd backend\models\route\routing\docker
+Move-Item -Force <source>.osm.pbf .\data-infra-2032\europe-latest.osm.pbf
+
+# 2. The import must start from an EMPTY cache — over a populated one it
+#    loads the existing graph and reports success without reading the new
+#    extract. entrypoint.sh refuses the run rather than let that happen.
+Remove-Item -Recurse -Force .\graph-cache-infra-2032 -ErrorAction SilentlyContinue
+
+# 3. Import (~30-45 min, needs 24 GB free to the Docker VM — on Windows
+#    that is a .wslconfig memory setting, not host RAM)
+cd ..\..\..\..\docker
 docker compose --profile infra-2032 run --rm openrailrouting-infra-2032 `
   java -Xmx24g -Xms1g -jar railway_routing.jar import config.yml
+
+# 4. Start the instance and verify it (next section) BEFORE uploading
+docker compose --profile infra-2032 up -d openrailrouting-infra-2032
+uv run python scripts/verify_routing_graph.py --graph infra_2032 --against infra_2026
 ```
 
-Then zip `graph-cache-infra-2032/`, upload to Drive, and put the file id
-into `GRAPH_CACHE_FILE_ID_INFRA_2032` so servers download it exactly like
-the base graph.
+Only once that passes: zip `graph-cache-infra-2032/`, upload to Drive, and
+put the file id into `GRAPH_CACHE_FILE_ID_INFRA_2032` so servers download
+it exactly like the base graph. Then uncomment the three `_INFRA_2032`
+lines in `backend/docker/.env` and restart the stack; the API logs
+`Routing graphs configured: ...` with every registered key at startup.
+
+Do NOT compare OSM file sizes as a coverage check. An extract prepared for
+this stack is filtered down to railway data and is orders of magnitude
+smaller than a full Geofabrik `europe-latest.osm.pbf` — the comparison
+that carries information is between graph caches, after the import.
+
+### Verifying a newly imported graph
+
+`scripts/verify_routing_graph.py` is the acceptance gate. It talks HTTP to
+the routing engines only — no API, no database, no seeded scenario — so it
+runs before the graph is registered anywhere:
+
+```powershell
+uv run python scripts/verify_routing_graph.py --graph infra_2032 --against infra_2026
+```
+
+| Check | What a failure means |
+|---|---|
+| `/info` profile lists identical across instances | The image or the cache is out of step with this source tree |
+| `/info` bounding boxes side by side | Coverage lost — the extract does not span the same area |
+| Gauge matrix, should-route rows | Missing network for that gauge |
+| Gauge matrix, should-block rows | **The gauge tags did not survive into the graph** |
+| Corridor delta against the reference graph | Near-identical numbers mean the upgrade is not in this OSM file |
+| Graph cache size on disk | Reported, not asserted — a bulk sanity number |
+
+The should-block rows are the ones that matter on a pre-filtered extract.
+Untagged track (`gauge == 0`) is permitted by every profile by design, so
+a graph that lost its `gauge` tags routes everything on every profile and
+looks perfectly healthy — until a Spanish trip is planned on standard
+gauge. The same reasoning applies to `voltage`, `electrified` and
+`railway_service`: confirm with whoever prepared the extract which tags
+their filter kept, against `graph.encoded_values` in `config.yml`.
+
+One more thing a filtered extract loses: anything hand-patched into the
+previous `.pbf`. If a link was ever added by hand (see the re-import
+warning below), it is in that file and not in a freshly filtered one.
 
 ---
 
@@ -113,7 +177,7 @@ backend/models/route/routing/docker/data-infra-2026/europe-latest.osm.pbf
 > **Note:** This file is large and will take 1–3 hours to download depending on
 > your connection. If the download is interrupted, resume it with:
 > ```powershell
-> curl -L -C - -o data\europe-latest.osm.pbf https://download.geofabrik.de/europe-latest.osm.pbf
+> curl -L -C - -o data-infra-2026\europe-latest.osm.pbf https://download.geofabrik.de/europe-latest.osm.pbf
 > ```
 
 ### Step 2 — Build the Docker Image
@@ -145,7 +209,7 @@ docker compose run --rm openrailrouting-infra-2026 `
 
 > **Requirements:** At least 24 GB of free RAM during import.
 > The import takes **20–40 minutes** for full Europe, longer since the graph
-> carries five gauge profiles (each with its own CH and LM preparation).
+> carries four gauge profiles (each with its own CH and LM preparation).
 >
 > Any argument overrides the default server start, so `entrypoint.sh` runs
 > this import and skips the graph-cache download. Without that override the
@@ -356,11 +420,13 @@ tuple.
 
 ## Verifying the Gauge Profiles
 
-After a re-import, check that `country` reached the graph and that each
-profile routes its own gauge and refuses the others:
+After a re-import, check that each profile routes its own gauge and
+refuses the others. `scripts/verify_routing_graph.py` runs this whole
+table for you (see "Verifying a newly imported graph" below); the raw
+calls are:
 
 ```powershell
-# five profiles must be listed
+# four profiles must be listed
 (curl "http://localhost:8989/info" -UseBasicParsing).Content
 ```
 
@@ -399,7 +465,7 @@ Geofabrik updates the Europe extract weekly. To update:
 
 ```powershell
 # Download new file
-curl -L -o data\europe-latest.osm.pbf `
+curl -L -o data-infra-2026\europe-latest.osm.pbf `
   https://download.geofabrik.de/europe-latest.osm.pbf
 
 # Re-import (see above)

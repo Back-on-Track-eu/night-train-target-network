@@ -405,8 +405,21 @@ are:
   not selectable, and it exists so evaluations published before the TAC
   correction stay reproducible.
 
-All four pin `routing_graph_key = "infra_2026"`. The matching Infra 2032
-trio arrives with the second routing graph.
+Plus the matching **Infra 2032** trio on the second routing graph:
+`"infra-2032"` (version 5), `"infra-2032-hsr"` (version 6) and
+`"infra-2032-hsr-opt-tt"` (version 7), all three current lineage heads.
+They pin `routing_graph_key = "infra_2032"`; the four above pin
+`"infra_2026"`.
+
+The 2032 snapshots are exact copies of their 2026 counterparts in all
+five tables — an upgraded network is new track, and track lives in the
+routing graph, not here. Server databases receive them through
+`dev/sql/migrations/2026-08-31_infra_2032_scenarios.sql`, which copies
+versions 1-3 forward as 5-7. A deployment that does not run an
+OpenRailRouting instance for `infra_2032` cannot compute those three; the
+API answers `503 routing_graph_not_configured` rather than routing them
+on the wrong graph. See `models/scenarios/README.md` for what each
+scenario means and for the crossing-charge gap the copy leaves open.
 
 See `db/schema.py` (scenario.scenarios) for the column-level definitions.
 
