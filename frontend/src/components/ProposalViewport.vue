@@ -1916,14 +1916,20 @@ onMounted(async () => {
 
           <!-- Headline route figures — distance, average speed, frequency.
                Its own panel under the itinerary controls, matching the boxes
-               in the results section. -->
+               in the results section, and labelled the same way so the strip
+               reads as a titled panel rather than three loose pills. -->
           <div
             v-if="currentMode === 'display' && routeStatRows.length > 0"
-            class="mt-8 flex flex-wrap justify-center gap-x-8 gap-y-3 rounded-xl bg-primary-50/5 px-4 py-3 text-primary-50/70"
+            class="mt-8 flex flex-col items-center gap-2 rounded-xl bg-primary-50/5 px-4 py-3 text-primary-50/70"
           >
-            <div v-for="stat in routeStatRows" :key="stat.icon" class="flex items-center gap-2">
-              <AppIcon :path="stat.icon" :size="20" />
-              <span class="text-base font-semibold">{{ stat.value }}</span>
+            <span class="text-xs tracking-wide text-primary-50/50 uppercase">
+              {{ t('proposal.routeStats') }}
+            </span>
+            <div class="flex flex-wrap justify-center gap-x-8 gap-y-3">
+              <div v-for="stat in routeStatRows" :key="stat.icon" class="flex items-center gap-2">
+                <AppIcon :path="stat.icon" :size="20" />
+                <span class="text-base font-semibold">{{ stat.value }}</span>
+              </div>
             </div>
           </div>
         </div>
