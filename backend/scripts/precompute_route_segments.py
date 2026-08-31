@@ -379,9 +379,7 @@ def measure(router, stops, models, probe_pairs, workers) -> None:
         label = f"{cap} km" if cap else "uncapped"
         print(f"  {label:>9}: {n:>9,} pairs → ~{n * len(models):>10,} segments")
 
-    print(
-        f"\nCustom-model variants (empirical, expected 3 per graph): {len(models)}"
-    )
+    print(f"\nCustom-model variants (empirical, expected 3 per graph): {len(models)}")
     for key, m in sorted(models.items()):
         print(f"  {key}: {m['description']} — {sorted(m['compositions'])}")
     print(
