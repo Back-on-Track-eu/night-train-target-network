@@ -1696,6 +1696,80 @@ def _stop_seed_warning(reason: str) -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# route_cache — precomputed route segments (optional, one file per graph)
+# ---------------------------------------------------------------------------
+# Produced by scripts/precompute_route_segments.py (--finalize) as
+# route_segments_<graph_key>.csv.gz; local under db/dev/data/, or Drive-
+# hosted with ROUTE_SEGMENTS_FILE_ID_<KEY> (the graph naming contract in
+# models/route/routing/rail_router.py). Optional by design: no file ->
+# empty cache -> every pair live-routes once and stores itself. Dev only:
+# servers load via the script's --load; a dev reseed drops route_cache and
+# starts from these files again.
+ROUTE_SEGMENTS_DIR = Path(__file__).resolve().parent / "data"
+ROUTE_SEGMENTS_GLOB = "route_segments_*.csv.gz"
+_ROUTE_SEGMENTS_ID_PREFIX = "ROUTE_SEGMENTS_FILE_ID_"
+
+
+def _download_route_segments(graph_key: str) -> Path | None:
+    """Fetch the Drive-hosted file for one graph if an id is configured —
+    soft-failing like _download_stop_seed()."""
+    import urllib.request
+
+    file_id = os.environ.get(f"{_ROUTE_SEGMENTS_ID_PREFIX}{graph_key.upper()}", "")
+    if not file_id:
+        return None
+    target = ROUTE_SEGMENTS_DIR / f"route_segments_{graph_key}.csv.gz"
+    url = (
+        "https://drive.usercontent.google.com/download"
+        f"?id={file_id}&export=download&confirm=t"
+    )
+    print(f"  route segments for '{graph_key}' — downloading (id={file_id})...")
+    try:
+        with urllib.request.urlopen(url, timeout=600) as resp:
+            data = resp.read()
+    except Exception as e:
+        print(f"  download failed ({type(e).__name__}: {e}).")
+        return None
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+    return target
+
+
+def seed_route_segments() -> None:
+    """Bulk-load every route_segments_<graph_key>.csv.gz present (plus any
+    Drive-configured graph) through RouteSegmentRepository.load_csv() —
+    its own connection, so this runs after the main commit like
+    seed_example_proposal()."""
+    from adapters.route_segment_repository import RouteSegmentRepository
+
+    configured = {
+        var[len(_ROUTE_SEGMENTS_ID_PREFIX) :].lower()
+        for var, value in os.environ.items()
+        if var.startswith(_ROUTE_SEGMENTS_ID_PREFIX) and value.strip()
+    }
+    for graph_key in configured:
+        if not (ROUTE_SEGMENTS_DIR / f"route_segments_{graph_key}.csv.gz").is_file():
+            _download_route_segments(graph_key)
+
+    files = sorted(ROUTE_SEGMENTS_DIR.glob(ROUTE_SEGMENTS_GLOB))
+    if not files:
+        print("  route_cache: no route_segments_*.csv.gz — cache fills from traffic.")
+        return
+    repo = RouteSegmentRepository()
+    try:
+        for path in files:
+            graph_key = path.name[len("route_segments_") : -len(".csv.gz")]
+            meta_path = path.with_name(f"route_segments_{graph_key}.meta.json")
+            if meta_path.is_file():
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                repo.sync_graph_import(graph_key, meta.get("import_date"))
+            inserted = repo.load_csv(path, graph_key)
+            print(f"  route_cache [{graph_key}]: {inserted} segment(s) loaded.")
+    finally:
+        repo.close()
+
+
 def _download_stop_seed() -> bool:
     """Fetch the Drive-hosted CSV into db/dev/data/ — returns success.
     Soft-failing by design: seed.py runs in the container entrypoint
@@ -3018,6 +3092,9 @@ def main():
     # above to already be visible to them.
     seed_example_proposal(cur, conn)
 
+    print("Seeding route_cache (optional precomputed segments)...")
+    seed_route_segments()
+
     print("\nDone. Row counts:")
     for schema, table in [
         ("admin", "users"),
@@ -3042,6 +3119,8 @@ def main():
         ("input_params", "composition_types"),
         ("input_params", "composition_type_coaches"),
         ("scenario", "scenarios"),
+        ("route_cache", "graph_state"),
+        ("route_cache", "route_segments"),
         ("proposals", "proposals"),
         ("proposals", "routes"),
         ("proposals", "trips"),

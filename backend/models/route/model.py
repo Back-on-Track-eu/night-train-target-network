@@ -30,7 +30,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.29"
+ROUTE_BUILDER_VERSION: str = "0.9.30"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -45,6 +45,28 @@ ROUTE_BUILDER_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.30": {
+        "date": "2026-08-31",
+        "author": "david",
+        "changes": "Route segment cache. Routing is served per consecutive "
+        "stop pair from route_cache.route_segments, keyed by "
+        "(routing_graph_key, stop pair, variant_key) where variant_key is "
+        "the gauge profile plus a hash of the resolved custom model; only "
+        "misses reach GraphHopper, as two-point calls, and are stored "
+        "back so the cache grows with every request. RailRouter.route() "
+        "is now the pure-physics layer (raw per-country distance/time, no "
+        "buffer, no dynamics) and route_trip() the domain entry that "
+        "applies country buffer quotas and traction dynamics on top — the "
+        "single call site every consumer shares. Cached rows are "
+        "therefore scenario-free; a graph re-import purges its own rows "
+        "automatically (route_cache.graph_state vs /info import_date). "
+        "NO OUTPUT CHANGE: per-pair stitching is identical to the former "
+        "multi-point call (via-points are hard constraints, snapping is "
+        "per-point deterministic) and buffer/dynamics math is unchanged, "
+        "recomputed from unrounded per-country ms with the same rounding. "
+        "The bump records the point at which routing stopped depending "
+        "on a live GraphHopper call per trip.",
+    },
     "0.9.29": {
         "date": "2026-08-31",
         "author": "david",

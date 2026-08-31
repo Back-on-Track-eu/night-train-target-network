@@ -7,7 +7,7 @@ backend, in one place. Supersedes `deploy/HANDOVER.md` (2026-08-10),
 deleted.
 
 Updated after each change that touches deploy, capacity or server data.
-Last update 2026-08-31 (scenario routing graphs).
+Last update 2026-08-31 (route segment cache precompute runbook, §7a.3).
 
 **If you read one section:** §3 is the deploy currently queued for staging,
 §4 is a mandatory cache wipe that comes with it, and §7 is the capacity work
@@ -22,6 +22,7 @@ that is genuinely yours to schedule.
 | §5 | Standing gotchas on every staging deploy |
 | §6 | How deploy relates to the backend `.env` |
 | §7 | **Capacity: routing under batch load** |
+| §7a | **Route segment cache — shipped; the full precompute runbook** |
 | §8 | When the 2032 graph lands |
 | §9 | Older open items |
 | §10 | Questions back to you |
@@ -351,16 +352,216 @@ against a CPU-bound workload, which thrashes under burst rather than
 queueing. Worth setting an explicit thread ceiling near core count, and an
 explicit `-Xmx` per instance before a second one ever runs.
 
-**The gap behind all of it:** there is no per-segment route cache. WP13's
-compute cache keys the whole proposal, so changing one stop re-routes every
-leg. A segment cache keyed on `(from_stop, to_stop, resolved custom-model
-hash, routing_graph_key, ROUTE_BUILDER_VERSION)` would cut most batch
-traffic — the same Berlin–Warszawa segment is currently recomputed across
-every proposal that contains it.
+**The gap behind all of it** was the missing per-segment route cache —
+closed in §7a below (`ROUTE_BUILDER_VERSION` deliberately not in the key:
+cached rows are raw physics, everything the version governs is applied
+after). Remaining sequence: batch cap → WP14.
 
-Sequence I'd suggest: snapped-coordinate cache → segment cache → batch cap
-→ WP14. The first two also make the per-graph precompute affordable when
-2032 arrives.
+---
+
+## 7a. Route segment cache — shipped; the full precompute is yours to run
+
+Resolves the gap §7 names: routing is now served per stop pair from
+`route_cache.route_segments` and only misses hit GraphHopper. Every
+live-routed pair is stored back, so the table fills itself from traffic;
+the precompute front-loads it so first users never pay a routing call.
+Keyed per graph: `(routing_graph_key, stop_lo, stop_hi, variant_key)` —
+each graph has its own snapped points and HSR resolution, nothing is
+shared. This also delivers §7(c): the runtime snap pass only happens on a
+miss.
+
+**Stops applying:** never for the cache itself. The precompute runbook
+(§7a.3) stops applying per graph once its batch has run against that
+graph's final import — until the next re-import.
+
+### 7a.1 Deploy (this batch)
+
+1. Migration `2026-08-31_route_segment_cache.sql` is picked up by
+   `db/migrate.py` like any other — lands the schema, no data.
+2. No `.env` change required. `ROUTE_SEGMENT_CACHE_ENABLED` defaults to
+   true; set it `false` only to diagnose (the API then routes live, as
+   before). Nothing to add to the `environment:` block (§6) for the
+   default graph.
+3. Start the API and check the log for one line per graph:
+   `Route segment cache [infra_2026]: 0 segment(s), graph import 2026-…`.
+   From there, every `/calc` logs
+   `segment cache [infra_2026]: N/M pair(s) served, K routed+stored`.
+
+### 7a.2 Invalidation is automatic — but read this
+
+`route_cache.graph_state` remembers the GraphHopper `import_date` each
+graph's rows were routed against. At API start the live `/info` is
+compared; on a change that graph's rows are **purged** and the log warns
+`graph import changed … purged N cached segment(s)`. So: a graph
+re-import (§4 wipes, Jasper's 2032 file, any profile change) empties that
+graph's cache on the next API start, and the cache refills. Nothing to do
+by hand — but expect the first hours after a re-import to route live, and
+re-run the precompute afterwards. **This is a recurring cost per graph,
+not one-off** — it belongs in the Sep 1st capacity estimate as such.
+
+Rule of thumb for sequencing: **graph first, precompute last.** Never start
+a batch while a re-import is still possible for that graph — the batch is
+simply deleted on the next API start.
+
+### 7a.3 Precompute runbook — the full collection
+
+**What it does.** Routes every stop pair under a haversine cap, once per
+routing variant, pass-2-only (each stop is snapped once per gauge profile
+up front — half the calls of a runtime miss), writes a CSV, bulk-loads it.
+Four phases, each independently runnable and resumable.
+
+**Where it runs.** Through the `migrate` service, like
+`refresh_proposals.py` — same network as `openrailrouting`, same database
+credentials, no host Python needed. The default graph resolves through the
+unsuffixed `OPENRAILROUTING_URL` the stack already sets. Two things the
+`run --rm` container does not give you on its own:
+
+- **Persistence.** The CSV must land on the host, or an interrupted run
+  cannot resume and a finished one is lost when the container exits.
+  Bind-mount a host directory and point `--out` into it. Everything the
+  script writes (`.csv`, `.snapped.csv`, `.failures.csv`, `.csv.gz`,
+  `.meta.json`) sits next to `--out`.
+- **Survival.** A 15–30 h job must outlive your SSH session: run it
+  detached and follow the container log.
+
+```bash
+cd /opt/targetnetwork-staging/deploy/bot-server-app
+mkdir -p /opt/targetnetwork-staging/route-cache
+export RC=/opt/targetnetwork-staging/route-cache
+export OUT=/route-cache/route_segments_infra_2026.csv   # container-side path
+
+# Phase 0 — measure (minutes). Do this first, every time.
+docker compose run --rm -v $RC:/route-cache migrate \
+  python scripts/precompute_route_segments.py --graph infra_2026 --measure-only
+
+# Phase 0b — dry run of the whole pipeline (minutes): 50 pairs, then load them.
+docker compose run --rm -v $RC:/route-cache migrate \
+  python scripts/precompute_route_segments.py --graph infra_2026 --out $OUT --cap-km 300 --limit 50
+docker compose run --rm -v $RC:/route-cache migrate \
+  python scripts/precompute_route_segments.py --graph infra_2026 --out $OUT --finalize
+docker compose run --rm -v $RC:/route-cache migrate \
+  python scripts/precompute_route_segments.py --graph infra_2026 --out $OUT --load
+rm $RC/route_segments_infra_2026.*        # start the real run clean
+
+# Phase 1 — the batch (hours). Detached; the container keeps running after logout.
+docker compose run -d --name precompute-infra-2026 -v $RC:/route-cache migrate \
+  python scripts/precompute_route_segments.py --graph infra_2026 --out $OUT --cap-km 800 --workers 4
+docker logs -f precompute-infra-2026            # progress every 500 segments: rate, ETA, failures
+
+# Phase 2 — finalize (minutes): completeness check, gzip, meta.json
+docker compose run --rm -v $RC:/route-cache migrate \
+  python scripts/precompute_route_segments.py --graph infra_2026 --out $OUT --cap-km 800 --finalize
+
+# Phase 3 — load (minutes): COPY into route_cache, ON CONFLICT DO NOTHING
+docker compose run --rm -v $RC:/route-cache migrate \
+  python scripts/precompute_route_segments.py --graph infra_2026 --out $OUT --load
+docker rm precompute-infra-2026
+```
+
+**Reading `--measure-only`.** It prints four things; the batch decisions
+come from them, not from the estimates in the meeting summary:
+
+- *Pair counts per cap* (300 / 500 / 800 / uncapped) from the live
+  catalog — the real numbers.
+- *Custom-model variants* for this graph: expect **3** for `infra_2026`
+  (the six REF compositions collapse to one 200 km/h model that always
+  avoids HSR; the two NEW compositions give a 230 km/h model that avoids
+  HSR under scenario 1 and one that does not under 2/3). More than 3 means
+  a scenario carries mixed per-country `hsr_allowed` — stop and tell me
+  before running. Broad-gauge pairs add one profile each on top; standard-
+  gauge pairs add nothing.
+- *Latency probe*: ~20 real calls, single-threaded, average ms/call.
+- *Worker-hours per cap* extrapolated from that:
+  `hours = pairs × variants × latency / workers / 3600`. Treat the
+  extrapolation as an upper bound on scaling: one container does not scale
+  linearly with workers (§7(d)). Confirm with the Phase 0b dry run's
+  reported rate at your real `--workers` before believing the hours.
+
+Order of magnitude if the probe lands near 300 ms and the container gives
+you ~4 effective workers: 800 km ≈ 250k pairs × 3 ≈ 750k segments ≈ 16 h;
+uncapped ≈ 500k pairs × 3 ≈ 1.5M segments ≈ 31 h. Both to be replaced by
+the measured figures.
+
+**Choosing the cap.** The cap trades batch hours against first-user
+latency on long pairs — never correctness: a pair beyond the cap routes
+live once and is stored like any other. Consecutive night-train stops are
+mostly 100–400 km apart, but non-stop legs exist (Berlin–Paris is ~880 km
+as the crow flies), so 800 km is the floor I'd accept; 1 000–1 200 km or
+uncapped if the measured hours allow. Whatever you pick, pass the same
+`--cap-km` to `--finalize` so `meta.json` records it.
+
+**Workers and timing.** `--workers 4` is the safe start. The routing
+container is shared with live users for the whole batch, and it is
+CPU-bound — run overnight, and watch `/calc` latency on staging while it
+runs. If you want the batch off the live instance entirely, a second
+`openrailrouting` container on the *same* graph-cache directory
+(read-only bind) plus `OPENRAILROUTING_URL_INFRA_2026=http://<that
+container>:8989` in the `migrate` service's `environment:` block isolates
+it completely — the graph key stays `infra_2026`, so the rows are the same
+rows. Optional; the shared-instance path works, it is just slower for
+everyone during the run.
+
+**Interruptions.** Rerun the exact Phase 1 command (`docker rm` the old
+container first). Already-routed keys are read from the CSV and skipped;
+snapped coordinates come from `.snapped.csv`. Per-pair failures never stop
+the batch — they go to `route_segments_infra_2026.failures.csv` with the
+GraphHopper message. Expect a few hundred: unconnected islands, stops with
+defective coordinates (the ten gauge-NULL stops are the usual suspects),
+`PointNotFound` for stops far from any track. A failed pair is simply
+absent from the cache and, if a user ever requests it, fails live with the
+same 422 it fails with today. Anything systematic — thousands of failures,
+or all failures sharing one stop id — send me the file.
+
+**Verifying the load.** Before/after counts are printed by `--load`;
+independently:
+
+```sql
+SELECT routing_graph_key, source, COUNT(*) FROM route_cache.route_segments
+GROUP BY 1, 2;                                   -- precompute vs runtime rows per graph
+SELECT * FROM route_cache.graph_state;           -- import_date the rows are valid for
+```
+
+No API restart is needed — lookups query the table live. The startup line
+is just where the count is logged.
+
+**Keep the artefacts.** `route_segments_infra_2026.csv.gz` + `.meta.json`
+are the fast way back after any `route_cache` wipe (a reseed, a volume
+loss) — `--load` again, minutes instead of hours. They are valid only for
+the `import_date` in `meta.json`; `--load` checks that against the live
+graph and refuses stale data by purging first. Expect roughly 1–2 GB
+uncompressed for a full run, a few hundred MB gzipped. Upload the pair to
+Drive as well: `ROUTE_SEGMENTS_FILE_ID_INFRA_2026` lets a dev reseed pull
+it, which is how the rest of us get a warm cache locally.
+
+**The 2032 graph.** Identical runbook with `--graph infra_2032`, once that
+instance runs (§8) and `OPENRAILROUTING_URL_INFRA_2032` is in the
+`migrate` service's `environment:` block — the script refuses a graph it
+has no URL for rather than routing on the wrong one. Scenarios 5–7 pin it,
+so the variant enumeration finds the same three models on its own. A
+second full run, a second set of artefacts, a second recurring cost.
+
+**When to rerun.** Whenever the API logs
+`graph import changed … purged` for a graph, or `graph_state.import_date`
+no longer matches that instance's `/info`. Until the rerun the cache
+refills from traffic on its own, so nothing is broken — just slower.
+
+**Troubleshooting.**
+
+| Symptom | Cause / fix |
+|---|---|
+| `No URL configured for graph 'infra_2032'` | Add `OPENRAILROUTING_URL_INFRA_2032` to the `migrate` service environment |
+| `Missing required environment variable(s) for DB connection` | The `migrate` service lacks a `POSTGRES_*` variable the api has |
+| Rate far below the probe, ETA growing | Container CPU-bound — lower `--workers`, or the isolation setup above |
+| `snap failed for <stop>` lines | Stop far from track / bad coordinates — its pairs are skipped, listed as unsnappable in the predict line |
+| `MISMATCH, investigate` at the end | Routed+failed ≠ predicted — the run was cut short; rerun Phase 1 |
+| `--load` prints `graph import changed` | The graph was re-imported after the batch — the file is stale; rerun |
+
+### 7a.4 Capacity note
+
+With the cache serving, a `/calc` is Postgres lookups + evaluation instead
+of GraphHopper waits — §7(a)'s worker/thread reasoning shifts accordingly;
+GraphHopper CPU (§7(d)) now matters mostly during a precompute batch, which
+is also when a second instance would earn its keep.
 
 ---
 

@@ -418,6 +418,48 @@ call as `422 gauge_mismatch`. `SUPPORTED_GAUGES_MM` in
 adding a gauge means a new profile in `config.yml`, a re-import, and that
 tuple.
 
+## Route Segment Cache (backend side)
+
+Routing is served **per stop pair** from `route_cache.route_segments`
+(`adapters/route_segment_repository.py`); only misses reach GraphHopper,
+and every miss is stored back — the cache grows with traffic. Keyed by
+`(routing_graph_key, stop_lo, stop_hi, variant_key)`: each graph has its own
+snapped points and HSR resolution, so nothing is shared across graphs.
+
+`rail_router.py` is split in two layers for this:
+
+- **Layer 1 — `RailRouter.route(stops, max_speed_kmh, avoid_hsr, gauge_mm,
+  routing_mode)`** returns *raw* physics only (geometry, distance, unrounded
+  per-country distance/time, countries, passages). Its inputs are exactly
+  what shapes the geometry, which is what makes the cache key honest:
+  `route_variant_key(profile, custom_model)` = gauge profile + hash of the
+  resolved custom model (speed cap, HSR vector, blocked-country areas).
+- **Layer 2 — `route_trip(router, stops, composition, tracks, routing_mode)`**
+  is what every call site uses (`route_factory`, `timetable`'s reroutes,
+  `routing_context`). It resolves layer-1 inputs from the domain pair, then
+  applies the scenario-dependent physics — country buffer quotas and
+  traction dynamics — on top. Cached rows therefore stay scenario-free: a
+  TAC or buffer-quota recalibration invalidates nothing.
+
+Per-pair stitching is output-identical to one multi-point call (via-points
+are hard constraints; snapping is per-point deterministic). The one known
+caveat — terminus/reversal stations where the arrival track constrains the
+departure — is unchanged from live routing. Note the gauge is resolved over
+the *whole trip's* stops, so a dual-gauge border pair pulled broad by its
+co-stops misses under the standard-gauge row and self-populates under the
+broad one.
+
+**Invalidation is per graph and automatic:** `route_cache.graph_state`
+remembers each graph's GraphHopper `import_date`; at API start the live
+`/info` is compared and a changed graph has its rows purged. A re-import
+empties exactly the graph it touched. Neither `ROUTE_BUILDER_VERSION` nor
+scenario ids are in the key — nothing they change is stored.
+
+Front-loading: `scripts/precompute_route_segments.py --graph <key>` routes
+every pair under a distance cap once and bulk-loads the CSV (`--load`, or
+`db/dev/seed.py` picking up `db/dev/data/route_segments_<key>.csv.gz` on a
+dev reseed). Deploy and run notes: `docs/DEPLOY_HANDOVER.md` §7a.
+
 ## Verifying the Gauge Profiles
 
 After a re-import, check that each profile routes its own gauge and

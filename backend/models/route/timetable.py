@@ -93,7 +93,12 @@ from models.route.trip import Segment, StopType, TimetableWarning
 from models.route.route import Schedule, SeasonalSchedule, Season, Frequency
 from models.route.routing.dynamics import stop_time_loss_s
 from models.route.routing.gauge import resolve_trip_gauge, stop_supports_gauge
-from models.route.routing.rail_router import RailRouter, RoutedLeg, build_router_stops
+from models.route.routing.rail_router import (
+    RailRouter,
+    RoutedLeg,
+    build_router_stops,
+    route_trip,
+)
 from models.route.model import (
     MIRROR_MIN,
     NIGHT_START_MIN,
@@ -715,7 +720,8 @@ def _candidate_added_time_min(
     leg_start_id = stop_ids[candidate.leg_index]
     leg_end_id = stop_ids[candidate.leg_index + 1]
     try:
-        sub_legs = router.route(
+        sub_legs = route_trip(
+            router,
             stops=build_router_stops(
                 [leg_start_id, candidate.stop_id, leg_end_id], stop_infra
             ),
@@ -974,7 +980,8 @@ def apply_auto_stop_addition(
     )
     final_reroute_start = time.monotonic()
     final_stop_ids = [sid for sid, _ in committed]
-    final_routed_legs = router.route(
+    final_routed_legs = route_trip(
+        router,
         stops=build_router_stops(final_stop_ids, stop_infra),
         composition=composition,
         tracks=tracks,

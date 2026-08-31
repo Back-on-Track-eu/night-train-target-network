@@ -33,7 +33,7 @@ work now finished, and preserved in git history), plus the parked
 | `repository.py` | `ProposalRepository` — publish, refresh, load, gallery/map queries, `outdated_trigger()` |
 | `projection.py` | Pure `(route, evaluation) → summary row`; `route_fingerprint()`; `GEOM_SIMPLIFY_TOLERANCE_DEG` |
 | `gtfs_store.py` | Route ⇄ GTFS + sidecar tables (write and read-back) |
-| `compute_cache.py` | `ComputeCacheRepository` — the §2.3 two-map cache (`lookup`/`store`/`sweep`/`flush`) |
+| `compute_cache.py` | `ComputeCacheRepository` — the §2.3 two-map cache (`lookup`/`store`/`sweep`/`flush`). Underneath it, routing itself is cached per stop pair in `adapters/route_segment_repository.py` (`route_cache` schema) — a miss here no longer means re-routing every unchanged leg |
 | `engagement_repository.py` | Likes, comments, and the `UNION ALL` timeline merge |
 | `filter_builder.py` | Column-kind registry driving gallery SQL generation + validation, and the aggregate SELECT list behind §7.7's statistics |
 | `id_prefix.py` | `P{id}_V{n}_` prefix rewriting between neutral and published ID forms |
