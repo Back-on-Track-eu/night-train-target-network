@@ -11,9 +11,10 @@ Covers:
   - Referential/structural integrity spot checks (compositions have coaches,
     coach classes have places, exactly one row per country at the pinned
     track infra version, defaults rows exist)
-  - All three seeded scenarios (Infra 2026 / + NT on HSR / + optimised
-    timetables) are present and consistent, all pinned to the infra_2026
-    routing graph
+  - All six seeded scenarios are present and consistent: three operating
+    conditions (baseline / + NT on HSR / + optimised timetables) on each
+    of the two networks, each pinning the routing graph its key names,
+    plus the superseded infra-2026 revision
   - Proposals redesign, schema phase 1 (2026-08-03, additive-only — see
     adapters/proposal/README.md §5.2): new sidecar/update_log/
     proposal_summaries/compute-cache tables exist, the new columns on
@@ -579,12 +580,72 @@ def test_superseded_revision_pins_version_4(historical_scenario, base_scenario):
         assert historical_scenario[col] == 4
 
 
-def test_all_scenarios_route_on_the_2026_graph(db_cur):
-    """Every seeded scenario pins the infra_2026 routing graph — the 2032
-    graph arrives with its own scenario rows, never by repointing these."""
-    db_cur.execute("SELECT routing_graph_key FROM scenario.scenarios")
-    keys = {r["routing_graph_key"] for r in db_cur.fetchall()}
-    assert keys == {"infra_2026"}
+def test_scenario_key_and_routing_graph_agree(db_cur):
+    """A scenario's key names the network its routing graph serves.
+
+    The two are separate columns and nothing in the schema ties them
+    together, so a copy-paste slip could pin infra-2032 to the 2026 graph
+    and produce entirely plausible — and entirely wrong — numbers. This
+    is the check that would catch it."""
+    db_cur.execute("SELECT scenario_key, routing_graph_key FROM scenario.scenarios")
+    for row in db_cur.fetchall():
+        network = row["scenario_key"].split("-")[1]
+        assert row["routing_graph_key"] == f"infra_{network}", (
+            f"Scenario '{row['scenario_key']}' pins '{row['routing_graph_key']}'."
+        )
+
+
+def test_infra_2032_scenarios_pin_versions_5_to_7(scenarios_2032):
+    """The 2032 trio pins versions 5, 6 and 7 across all five tables —
+    one complete snapshot each, in the same operating-condition order as
+    the 2026 trio's 1, 2, 3 (db/dev/seed.py's version grid)."""
+    for scenario_key, expected in (
+        ("infra-2032", 5),
+        ("infra-2032-hsr", 6),
+        ("infra-2032-hsr-opt-tt", 7),
+    ):
+        scenario = scenarios_2032[scenario_key]
+        for col in _SCENARIO_VERSION_COLUMNS:
+            assert scenario[col] == expected, (
+                f"{scenario_key}.{col} = {scenario[col]}, expected {expected}"
+            )
+
+
+def test_infra_2032_scenarios_are_current_but_not_base(scenarios_2032):
+    """All three are selectable lineage heads, and none of them displaces
+    Infra 2026 as the live default."""
+    for scenario in scenarios_2032.values():
+        assert scenario["is_current_scenario"] is True
+        assert scenario["is_current_base"] is False
+
+
+def test_infra_2032_snapshots_copy_their_2026_counterparts(db_cur):
+    """Versions 5-7 are exact copies of 1-3 in the versioned tables.
+
+    What separates a 2032 scenario from its 2026 counterpart is the
+    routing graph, not a value here — so any difference in this table
+    means someone edited a snapshot in place, which the versioning
+    contract forbids outright (db/README.md). Track infrastructure is
+    the table to check: it is the only one whose values vary by operating
+    condition at all, so a copy defect shows up here first."""
+    db_cur.execute(
+        """
+        SELECT count(*) AS n FROM (
+            SELECT country_code, track_hsr_allowed, track_buffer_quota_per,
+                   track_tac_eur_train_km, track_infra_version - 4 AS src_version
+            FROM input_params.track_infrastructures
+            WHERE track_infra_version IN (5, 6, 7)
+            EXCEPT
+            SELECT country_code, track_hsr_allowed, track_buffer_quota_per,
+                   track_tac_eur_train_km, track_infra_version
+            FROM input_params.track_infrastructures
+            WHERE track_infra_version IN (1, 2, 3)
+        ) AS diff
+        """
+    )
+    assert db_cur.fetchone()["n"] == 0, (
+        "Infra 2032 track snapshots differ from their 2026 sources."
+    )
 
 
 def test_opt_tt_reduces_buffer_quota(db_cur, opt_tt_scenario, base_scenario):

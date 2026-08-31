@@ -231,6 +231,29 @@ def hsr_scenario(db_cur):
 
 
 @pytest.fixture(scope="session")
+def scenarios_2032(db_cur):
+    """The three Infra 2032 lineage heads, keyed by scenario_key.
+
+    They mirror the 2026 trio's operating conditions on the infra_2032
+    routing graph and pin versions 5-7 (db/dev/seed.py's version grid).
+    Read-only in tests: computing on one needs an OpenRailRouting
+    instance for that graph, which CI deliberately does not run — see
+    the deployment-coupling note in the seed's scenario section.
+    """
+    db_cur.execute(
+        "SELECT * FROM scenario.scenarios "
+        "WHERE routing_graph_key = 'infra_2032' ORDER BY scenario_key"
+    )
+    rows = {row["scenario_key"]: row for row in db_cur.fetchall()}
+    assert set(rows) == {
+        "infra-2032",
+        "infra-2032-hsr",
+        "infra-2032-hsr-opt-tt",
+    }, f"Infra 2032 scenarios missing or renamed — got {sorted(rows)}"
+    return rows
+
+
+@pytest.fixture(scope="session")
 def opt_tt_scenario(db_cur):
     """The seeded optimised-timetable scenario (scenario_key=
     'infra-2026-hsr-opt-tt') — the third current lineage head, identical
