@@ -14,7 +14,7 @@ Covers:
 import pytest
 import requests
 
-from dev_env import routing_base_url
+from dev_env import resolve_routing_urls, routing_base_url
 
 
 @pytest.mark.timeout(10)
@@ -43,6 +43,34 @@ def test_openrailrouting_health():
     routing requests from the API have somewhere to go."""
     resp = requests.get(f"{routing_base_url()}/health")
     assert resp.status_code == 200
+
+
+@pytest.mark.timeout(10)
+def test_dev_env_resolves_every_routing_graph(monkeypatch):
+    """Host-run tools resolve EVERY configured graph, not just the default.
+
+    backend/docker/.env holds container-network URLs; on the host each has
+    to be rewritten to localhost on that graph's own published port. Doing
+    this for the default graph alone is the regression to catch — a second
+    graph (infra_2032) would then be reached at a compose service name
+    that does not resolve outside the stack, and a tool routing on it
+    would fail with a DNS error rather than an honest configuration one.
+    """
+    # .invalid is reserved and guaranteed never to resolve (RFC 2606), so
+    # the rewrite branch is exercised deterministically — a plain made-up
+    # hostname can be answered by a wildcard-resolving DNS server.
+    monkeypatch.setenv(
+        "OPENRAILROUTING_URL_INFRA_TEST", "http://openrailrouting-test.invalid:8989"
+    )
+    monkeypatch.setenv("OPENRAILROUTING_HOST_PORT_INFRA_TEST", "18989")
+
+    resolved = resolve_routing_urls()
+
+    assert resolved["infra_test"] == "http://localhost:18989"
+    # The default graph is resolved in the same pass, never special-cased.
+    # It is present because conftest.py calls db_config() at import time,
+    # which publishes the default URL through resolve_env().
+    assert "infra_2026" in resolved
 
 
 @pytest.mark.timeout(10)
