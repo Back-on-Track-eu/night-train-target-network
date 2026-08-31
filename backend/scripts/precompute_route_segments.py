@@ -380,7 +380,7 @@ def measure(router, stops, models, probe_pairs, workers) -> None:
         print(f"  {label:>9}: {n:>9,} pairs → ~{n * len(models):>10,} segments")
 
     print(
-        f"\nCustom-model variants (empirical, summary expected 2 per graph): {len(models)}"
+        f"\nCustom-model variants (empirical, expected 3 per graph): {len(models)}"
     )
     for key, m in sorted(models.items()):
         print(f"  {key}: {m['description']} — {sorted(m['compositions'])}")
