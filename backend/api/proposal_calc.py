@@ -17,6 +17,7 @@ import logging
 
 from flask import Blueprint, jsonify, request
 
+from api.helpers.dependencies import RoutingGraphNotConfiguredError
 from api.helpers.proposal_compute import compute_proposal, validate_calc_body
 from models.route.routing.gauge import GaugeMismatchError
 from models.route.routing.rail_router import RailRoutingError
@@ -81,6 +82,19 @@ def calc():
                 }
             ),
             422,
+        )
+    except RoutingGraphNotConfiguredError as e:
+        # The scenario pins a routing graph this deployment serves no
+        # instance for. A configuration gap, not a bad request and not a
+        # bug: the scenario rows are seeded everywhere, but running the
+        # second OpenRailRouting instance is a per-deployment decision
+        # (backend/docker/.env). 503 rather than 500 so the frontend can
+        # say "this scenario is unavailable here" instead of "something
+        # went wrong", and so monitoring does not read it as a crash.
+        logger.error("proposal/calc failed (routing graph not configured): %s", e)
+        return (
+            jsonify({"error": "routing_graph_not_configured", "message": str(e)}),
+            503,
         )
     except RailRoutingError as e:
         # A route the ROUTER cannot serve — no path on this gauge's
