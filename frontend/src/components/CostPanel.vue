@@ -10,6 +10,7 @@ import AppIcon from '@/components/AppIcon.vue'
 import AppSpinner from '@/components/AppSpinner.vue'
 import { mdiChevronDown, mdiChevronRight, mdiInformationOutline } from '@mdi/js'
 import { resolveFactorRates, resolveFactorSubCategory } from '@/lib/costFactorRates'
+import { fundedCostEur } from '@/lib/breakdownTotals'
 import { submitFeedback } from '@/lib/feedbackApi'
 import { useApiFailure } from '@/composables/useApiFailure'
 import { useStore } from '@/stores/store'
@@ -86,9 +87,6 @@ const costTree = computed<CostNode[]>(() => {
             { key: 'shunting', label: f('shunting'), value: x.shunting_eur },
           ],
         },
-        // Target EBIT margin — shown as a point under Operator (the profit the
-        // fare must cover on top of operator costs), not a cost line itself.
-        { key: 'ebit_margin', label: f('ebit_margin'), value: b.margin.ebit_margin_eur },
       ],
     },
     {
@@ -102,6 +100,12 @@ const costTree = computed<CostNode[]>(() => {
         { key: 'parking', label: f('parking'), value: i.parking_eur },
       ],
     },
+    // The operator's expected margin is a profit carve-out rather than a cost,
+    // so the backend keeps it out of cost.total_eur — but the subsidy figure
+    // beside this tree does include it. It therefore sits here as a peer of
+    // operator and infrastructure, not inside operator, whose own total would
+    // otherwise disagree with the children under it.
+    { key: 'ebit_margin', label: g('margin'), value: b.margin.ebit_margin_eur },
   ]
 })
 
@@ -125,7 +129,7 @@ interface CostRow {
 }
 
 const costRows = computed<CostRow[]>(() => {
-  const total = props.breakdown.cost.total_eur
+  const total = fundedCostEur(props.breakdown)
   const rows: CostRow[] = []
   const visit = (nodes: CostNode[], depth: number) => {
     for (const n of nodes) {
@@ -318,7 +322,7 @@ async function onSubmitFeedback() {
         {{ formatShare(1) }}
       </span>
       <span class="w-24 text-right font-semibold text-primary-50 tabular-nums">
-        {{ formatEur(breakdown.cost.total_eur) }}
+        {{ formatEur(fundedCostEur(breakdown)) }}
       </span>
     </div>
     <div
@@ -337,7 +341,7 @@ async function onSubmitFeedback() {
       <span v-else class="w-5 shrink-0" />
       <span
         class="flex flex-1 items-center gap-1 text-sm"
-        :class="row.hasChildren ? 'text-primary-50' : 'text-primary-50/70'"
+        :class="row.depth === 0 || row.hasChildren ? 'text-primary-50' : 'text-primary-50/70'"
       >
         {{ row.label }}
         <button
