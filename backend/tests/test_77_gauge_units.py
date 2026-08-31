@@ -149,7 +149,7 @@ class TestStopSupportsGauge:
 class TestContracts:
     def test_supported_gauges_cover_the_profile_set(self):
         # Mirror of docker/config.yml's four profiles — the naming
-        # contract rail_router._profile_for_gauge() builds on. 1524 is
+        # contract rail_router.profile_for_gauge() builds on. 1524 is
         # deliberately absent: it is a family member, not a profile.
         assert SUPPORTED_GAUGES_MM == (1435, 1520, 1600, 1668)
         assert STANDARD_GAUGE_MM in SUPPORTED_GAUGES_MM
@@ -159,8 +159,8 @@ class TestContracts:
 
         router = RailRouter(CountryIndex([]))
         base = router.profile
-        assert router._profile_for_gauge(STANDARD_GAUGE_MM) == base
+        assert router.profile_for_gauge(STANDARD_GAUGE_MM) == base
         for gauge in SUPPORTED_GAUGES_MM:
             if gauge == STANDARD_GAUGE_MM:
                 continue
-            assert router._profile_for_gauge(gauge) == f"{base}_{gauge}"
+            assert router.profile_for_gauge(gauge) == f"{base}_{gauge}"
