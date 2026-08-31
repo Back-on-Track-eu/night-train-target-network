@@ -66,7 +66,7 @@ Check status with:
 docker-compose ps
 ```
 
-Wait until all three containers (`night_train_postgres`, `openrailrouting`, `night-train-api`) show as healthy before testing.
+Wait until all three containers (`night_train_postgres`, `openrailrouting-infra-2026`, `night-train-api`) show as healthy before testing.
 
 ---
 
@@ -87,7 +87,7 @@ From `backend/`:
 uv run --extra dev pytest tests/ -v
 ```
 
-Tests require the full Docker stack to be running (`postgres` + `openrailrouting` + `api`).
+Tests require the full Docker stack to be running (`postgres` + `openrailrouting-infra-2026` + `api`).
 
 The suite is organised by layer (stack health → DB seed → loader → versioning →
 params API → route/evaluation content → proposal compute/publish →
@@ -119,7 +119,7 @@ start only the dependencies in Docker and run the API from your venv:
 ```bash
 # Start postgres and routing engine only
 cd backend/docker
-docker-compose up -d postgres openrailrouting
+docker-compose up -d postgres openrailrouting-infra-2026
 
 # Run the API from PyCharm or the terminal
 cd backend
@@ -129,7 +129,7 @@ uv run python main.py
 When running outside Docker, no manual variables are needed for the
 standard setup: `backend/dev_env.py` reads `backend/docker/.env` and
 rewrites container-side wiring (`POSTGRES_HOST=postgres`,
-`OPENRAILROUTING_URL`) to localhost with the published host ports.
+`OPENRAILROUTING_URL_INFRA_2026`) to localhost with the published host ports.
 Shell/PyCharm environment variables still win over the file if you need
 to point elsewhere.
 

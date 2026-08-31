@@ -67,7 +67,7 @@ station parameters).
 <!-- BEGIN GENERATED: versions -->
 | Model | Version | What it computes | Anchor file | Documentation |
 |---|---|---|---|---|
-| Route & timetable builder | `0.9.28` | Route and timetable builder: turns a list of stops, a train composition, and a few mode selections into a complete route — trip pairs, travel and stopping times with schedule buffers, and a mirrored outbound/return night schedule. | [`model.py`](../backend/models/route/model.py) | [README.md](../backend/models/README.md) |
+| Route & timetable builder | `0.9.29` | Route and timetable builder: turns a list of stops, a train composition, and a few mode selections into a complete route — trip pairs, travel and stopping times with schedule buffers, and a mirrored outbound/return night schedule. | [`model.py`](../backend/models/route/model.py) | [README.md](../backend/models/README.md) |
 | Energy model | `0.9.1` | Traction energy model: estimates the electricity a train uses on each part of the route. Currently a flat 28 kWh per kilometre placeholder, until the weight/speed/terrain model is calibrated against Deutsche Bahn Trassenfinder data. | [`model.py`](../backend/models/energy/model.py) | [README.md](../backend/models/energy/README.md) |
 | Demand model | `0.0.2` | Demand model (placeholder): assumes every accommodation class is 70% booked at a flat per-kilometre fare, spread evenly across all connections — a stand-in until a real demand model with directional demand, price sensitivity, and competition from other modes replaces it. | [`model.py`](../backend/models/demand/model.py) | [README.md](../backend/models/demand/README.md) |
 | Cost & revenue evaluation | `0.9.22` | Cost and revenue evaluation: computes the operator's fixed and variable costs, the charges paid to infrastructure companies, and the ticket revenue of a route, then aggregates the result into views per route, trip pair, country, connection, route section, and stop. | [`model.py`](../backend/models/evaluation/model.py) | [README.md](../backend/models/evaluation/README.md) |
@@ -1435,7 +1435,7 @@ Catalog of possible night train stops. An empty stop_charge_eur is resolved agai
 
 #### `scenario.scenarios`
 
-Container pinning one version of each versioned infrastructure table. Exactly one row has is_current_base = TRUE (the live default); exactly one row per scenario_key has is_current_scenario = TRUE (the head of that what-if lineage). All five *_version columns are per-table full-snapshot version numbers, resolved by exact match, and are NOT NULL — a scenario is always a complete, self-contained pin, never a partial diff. Compositions, coach types, and operators are catalogs, not scenario-versioned. Full versioning contract: db/README.md.
+Container pinning one version of each versioned infrastructure table. Exactly one row has is_current_base = TRUE (the live default); exactly one row per scenario_key has is_current_scenario = TRUE (the head of that what-if lineage). All five *_version columns are per-table full-snapshot version numbers, resolved by exact match, and are NOT NULL — a scenario is always a complete, self-contained pin, never a partial diff. routing_graph_key pins the routing graph the same way (the one piece of infrastructure living outside the database). Compositions, coach types, and operators are catalogs, not scenario-versioned. Full versioning contract: db/README.md.
 
 | Column | Meaning | Unit | Used in |
 |---|---|---|---|
@@ -1453,6 +1453,7 @@ Container pinning one version of each versioned infrastructure table. Exactly on
 | <a id="p-scenario-scenarios-stop_infrastructures_version"></a>`stop_infrastructures_version` | Pinned input_params.stop_infrastructures version (full-table snapshot). | — | — |
 | <a id="p-scenario-scenarios-stop_infrastructure_defaults_version"></a>`stop_infrastructure_defaults_version` | Pinned input_params.stop_infrastructure_defaults version (full-table snapshot). | — | — |
 | <a id="p-scenario-scenarios-passage_charges_version"></a>`passage_charges_version` | Pinned input_params.passage_charges version (full-table snapshot). | — | — |
+| <a id="p-scenario-scenarios-routing_graph_key"></a>`routing_graph_key` | Routing graph this scenario routes on — the physical rail network (OSM state) behind every distance and travel time, e.g. "infra_2026" or "infra_2032". Pinned like the *_version columns but not itself a snapshot version: the graph lives outside the database, in an OpenRailRouting instance. Naming contract with the deployment: key <k> is served by the instance at env OPENRAILROUTING_URL_<K>, the key uppercased — every graph alike, none implicit — see models/route/routing/rail_router.py. The TAC and passage changes an upgraded network implies are NOT carried here; they ride this same row's track_infrastructures_version and passage_charges_version pins. | — | — |
 <!-- END GENERATED: parameters -->
 
 ---
