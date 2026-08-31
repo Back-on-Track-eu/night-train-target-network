@@ -229,15 +229,19 @@ def compute_proposal(
     been checked and lets models/pipeline.py's ValueError (domain errors)
     propagate uncaught.
 
-    loader/router default to the process-wide singletons (get_loader()/
-    get_rail_router()) — every Flask caller (/calc, publish, compare, the
-    on-load refresh fallback) relies on this default and passes neither.
-    The override exists for scripts/refresh_proposals.py's concurrent
-    batch mode: DBDataLoader holds one non-thread-safe connection, so
-    each worker thread needs its OWN loader instance, while RailRouter (a
-    pooled requests.Session, explicitly built for concurrent use — see
-    api/helpers/dependencies.py's docstring) stays shared across threads
-    via the ordinary singleton default. use_cache=False exists for the
+    loader defaults to the process-wide singleton (get_loader());
+    router defaults to the registry router for the scenario's
+    routing_graph_key pin, resolved AFTER the request is (see below) —
+    every Flask caller (/calc, publish, compare, the on-load refresh
+    fallback) relies on these defaults and passes neither. The loader
+    override exists for scripts/refresh_proposals.py's concurrent batch
+    mode: DBDataLoader holds one non-thread-safe connection, so each
+    worker thread needs its OWN loader instance, while the registry's
+    RailRouters (pooled requests.Sessions, explicitly built for
+    concurrent use — see api/helpers/dependencies.py's docstring) stay
+    shared across threads via the ordinary default. The router override
+    exists for tests only — a caller passing one takes over graph
+    selection entirely. use_cache=False exists for the
     same script and the same reason (the cache repository is a singleton
     with one connection) — and costs it nothing: the script flushes the
     cache first and computes each proposal exactly once, so hits are
@@ -260,10 +264,16 @@ def compute_proposal(
     it; publish and the refresh paths ignore it).
     """
     loader = loader if loader is not None else get_loader()
-    router = router if router is not None else get_rail_router()
 
     resolved_request = _resolve_request(body, loader)
     scenario_id = resolved_request["scenario_id"]
+    # Router selection is a scenario pin (scenario.scenarios
+    # .routing_graph_key), so it can only happen after the scenario is
+    # resolved — an explicit router argument still wins, exactly like an
+    # explicit loader. Not part of the cache hash: scenario rows are
+    # immutable, so scenario_id already pins the graph.
+    if router is None:
+        router = get_rail_router(loader.resolve_routing_graph_key(scenario_id))
 
     cache = get_compute_cache() if use_cache else None
     request_hash = canonical_request_hash(resolved_request) if cache else None

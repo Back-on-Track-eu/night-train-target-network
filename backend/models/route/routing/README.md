@@ -2,7 +2,7 @@
 
 This folder contains the OpenRailRouting server used to calculate rail travel times
 and distances between stations. It runs as a Docker container and exposes a REST API on the host port configured in `backend/docker/.env`
-(`OPENRAILROUTING_HOST_PORT`, default 8989). With this self-hosted setup,
+(`OPENRAILROUTING_HOST_PORT_INFRA_2026`, default 8989). With this self-hosted setup,
 request limits depend only on your local machine — not on the public
 https://routing.openrailrouting.org/maps/ instance — and routing settings can
 be adjusted individually.
@@ -39,10 +39,57 @@ models/route/routing/docker/
 ├── custom_models/
 │   ├── night_train.json        # shared base model for every gauge profile
 │   └── nt_gauge_<mm>.json      # one per gauge family: 1435, 1520 (+1524), 1600, 1668
-├── data/                       # ← NOT in git — place OSM file here
+├── data-infra-2026/            # ← NOT in git — place OSM file here
+│                               #    (one data-<key>/ dir per routing graph)
 │   └── europe-latest.osm.pbf
-└── graph-cache/                # ← NOT in git — generated during import
+└── graph-cache-infra-2026/     # ← NOT in git — generated during import
+                                #    (one graph-cache-<key>/ dir per graph)
 ```
+
+---
+
+## Multiple Graphs (Infrastructure Scenarios)
+
+A GraphHopper process serves many profiles but exactly **one graph** — a
+second OSM base (e.g. the 2032 upgraded-network file) is therefore a second
+container, not a second profile. The backend stack is prepared for this:
+
+* Each graph has a **key** (`infra_2026` = today's network, `infra_2032` =
+  the upgrade). Scenarios pin their graph via
+  `scenario.scenarios.routing_graph_key`; the backend holds one `RailRouter`
+  per configured key (`api/helpers/dependencies.py`).
+* The second instance lives in `backend/docker/docker-compose.yml` as
+  service `openrailrouting-infra-2032`, gated behind compose profile
+  `infra-2032` and **off by default**. It reuses this folder's image,
+  `config.yml` and `custom_models/` unchanged (identical gauge profiles on
+  every instance). Every instance mounts its own `data-<key>/` and
+  `graph-cache-<key>/` host directories (none in git — the repo
+  `.gitignore` wildcards cover them; keep `graph-cache-*/` in
+  `.git/info/exclude` for branch-suffixed copies).
+* Enabling it is three lines in `backend/docker/.env` —
+  `COMPOSE_PROFILES=infra-2032`, `OPENRAILROUTING_URL_INFRA_2032`,
+  `GRAPH_CACHE_FILE_ID_INFRA_2032` — see `.env.example`.
+* **Every per-graph setting is suffixed with the graph key**, the
+  default graph included: `OPENRAILROUTING_URL_<KEY>`,
+  `OPENRAILROUTING_HOST_PORT_<KEY>`,
+  `OPENRAILROUTING_ADMIN_HOST_PORT_<KEY>`, `GRAPH_CACHE_FILE_ID_<KEY>`.
+  No instance is implicitly "the" router. `OPENRAILROUTING_CONTAINER_PORT`
+  is the one exception — all instances share `config.yml`, so they bind
+  the same port internally. The contract lives in `rail_router.py`.
+
+Importing the 2032 graph once the OSM file exists (place it in
+`data-infra-2032/` first; the import must start from an empty
+`graph-cache-infra-2032/`):
+
+```powershell
+cd backend/docker
+docker compose --profile infra-2032 run --rm openrailrouting-infra-2032 `
+  java -Xmx24g -Xms1g -jar railway_routing.jar import config.yml
+```
+
+Then zip `graph-cache-infra-2032/`, upload to Drive, and put the file id
+into `GRAPH_CACHE_FILE_ID_INFRA_2032` so servers download it exactly like
+the base graph.
 
 ---
 
@@ -60,7 +107,7 @@ https://download.geofabrik.de/europe-latest.osm.pbf
 
 Save it to:
 ```
-backend/models/route/routing/docker/data/europe-latest.osm.pbf
+backend/models/route/routing/docker/data-infra-2026/europe-latest.osm.pbf
 ```
 
 > **Note:** This file is large and will take 1–3 hours to download depending on
@@ -92,7 +139,7 @@ This step processes the OSM data and builds the routing graph. Only needed once,
 or when the OSM data is updated.
 
 ```powershell
-docker compose run --rm openrailrouting `
+docker compose run --rm openrailrouting-infra-2026 `
   java -Xmx24g -Xms1g -jar railway_routing.jar import config.yml
 ```
 
@@ -110,7 +157,7 @@ Success looks like:
 INFO  com.graphhopper.GraphHopper - flushed graph
 ```
 
-The built graph is stored in `graph-cache/`. Rail-only Europe is far smaller than a road graph: **213 MB zipped** for the four-profile cache (2026-08-29), against ~190 MB for the single-profile one — the three extra gauge networks are a small fraction of European rail, so four profiles cost about 12% more than one, not four times.
+The built graph is stored in `graph-cache-infra-2026/`. Rail-only Europe is far smaller than a road graph: **213 MB zipped** for the four-profile cache (2026-08-29), against ~190 MB for the single-profile one — the three extra gauge networks are a small fraction of European rail, so four profiles cost about 12% more than one, not four times.
 
 ### Step 4 — Start the local Server
 
@@ -261,14 +308,14 @@ Re-import is needed when:
 - any file in `custom_models/` is changed
 - The OSM data file is updated
 
-> **A re-import destroys anything hand-applied to `graph-cache/`.** Patch the
+> **A re-import destroys anything hand-applied to the graph-cache directory.** Patch the
 > OSM `.pbf` instead of the cache when a link is missing from OSM (e.g. the
 > Sicily train ferry), so the change survives every later import.
 
-GraphHopper validates `graph-cache/` against `config.yml` at startup and
+GraphHopper validates the graph cache against `config.yml` at startup and
 refuses to start on a mismatch, so the config and the cache must ship
-together. After a re-import: zip `graph-cache/`, upload it to Drive, set the
-new id as `GRAPH_CACHE_FILE_ID` in `backend/docker/.env`, and rebuild the
+together. After a re-import: zip `graph-cache-infra-2026/`, upload it to Drive, set the
+new id as `GRAPH_CACHE_FILE_ID_INFRA_2026` in `backend/docker/.env`, and rebuild the
 image (`custom_models/` is `COPY`d at build time, so `docker compose build`
 is required — not just `up`).
 
@@ -278,10 +325,10 @@ Steps:
 docker compose down
 
 # Delete old graph cache
-Remove-Item -Recurse -Force graph-cache\
+Remove-Item -Recurse -Force graph-cache-infra-2026\
 
 # Re-run import
-docker compose run --rm openrailrouting `
+docker compose run --rm openrailrouting-infra-2026 `
   java -Xmx24g -Xms1g -jar railway_routing.jar import config.yml
 
 # Start server again
@@ -366,7 +413,7 @@ curl -L -o data\europe-latest.osm.pbf `
 |---|---|---|
 | `docker: command not found` | Docker not on PATH | Restart PowerShell after installing Docker Desktop |
 | `Cannot connect to Docker daemon` | Docker Desktop not running | Open Docker Desktop, wait for "Engine running" |
-| `port 8989 already in use` | Another service on that port | Change `OPENRAILROUTING_HOST_PORT` in `backend/docker/.env` |
+| `port 8989 already in use` | Another service on that port | Change `OPENRAILROUTING_HOST_PORT_INFRA_2026` in `backend/docker/.env` |
 | `No route found` | Station coordinates snap to non-rail | Check lat/lon are correct and near a rail station |
 | `OutOfMemoryError` during import | Not enough RAM | Close other applications, ensure 24 GB free |
 | Server starts but returns 503 | Graph still loading | Wait 30–60 seconds after `docker compose up` |
@@ -380,7 +427,7 @@ The Docker setup uses a **two-stage build**:
 1. **Builder stage** — Maven + Java 21, clones and compiles OpenRailRouting
 2. **Runtime stage** — JRE only, copies the JAR — keeps the image lean (~300 MB vs ~1.5 GB)
 
-The OSM data (`data/`) and routing graph (`graph-cache/`) are mounted as volumes
+The OSM data (`data-<key>/`) and routing graph (`graph-cache-<key>/`) are mounted as volumes
 outside the container so they survive image rebuilds.
 
 The `config.yml` and `custom_models/` are baked into the image. Changes to these

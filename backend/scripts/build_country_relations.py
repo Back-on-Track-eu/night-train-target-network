@@ -99,7 +99,7 @@ def great_circle_km(lat_a: float, lon_a: float, lat_b: float, lon_b: float) -> f
 
 def connect():
     """One resolver for host- and container-run alike (dev_env.py), which
-    also points OPENRAILROUTING_URL at localhost when run from the host —
+    also points the default graph URL at localhost when run from the host —
     the router and the database have to agree on which stack this is."""
     return psycopg2.connect(**db_config())
 

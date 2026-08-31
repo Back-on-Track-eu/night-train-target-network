@@ -1,6 +1,9 @@
 # Large data files — not needed in API image
-models/route/routing/docker/data/
-models/route/routing/docker/graph-cache/
+# One data-*/graph-cache-*/ pair per routing graph (infra_2026, infra_2032,
+# ...) — the wildcard keeps the API build context ~1.3MB for every graph
+# ever added, so no edit here when the next one arrives.
+models/route/routing/docker/data*/
+models/route/routing/docker/graph-cache*/
 db/dev/data/
 # Demand model calibration tree: third-party downloads in calib/raw/, derived
 # artifacts in calib/out/, and the notebooks that turn one into the other.

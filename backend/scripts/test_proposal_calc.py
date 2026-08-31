@@ -68,7 +68,7 @@ from dev_env import api_base_url, routing_base_url  # noqa: E402
 
 API_BASE = api_base_url()
 ROUTING_URL = routing_base_url()
-CONTAINER_NAME = "openrailrouting"
+CONTAINER_NAME = "openrailrouting-infra-2026"
 
 # The six views every evaluation response must carry — see
 # models/evaluation/views.py's VIEW_META / api/README.md's "Proposal

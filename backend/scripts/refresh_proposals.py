@@ -30,10 +30,10 @@ DB_CONFIG is in. run() below sets the same host-side defaults conftest.py
 uses (POSTGRES_HOST=localhost, etc., via setdefault() — never overrides
 a value a container already injected). Deliberately does NOT load
 backend/docker/.env: that file's POSTGRES_HOST=postgres and
-OPENRAILROUTING_URL=http://openrailrouting:8989 are Docker Compose
+OPENRAILROUTING_URL_INFRA_2026=http://openrailrouting-infra-2026:8989 are Docker Compose
 network hostnames, meaningless (and actively wrong) from the host;
 models/route/routing/rail_router.py's RailRouter already falls back to
-http://localhost:8989 on its own when OPENRAILROUTING_URL is unset, so
+http://localhost:8989 on its own when that variable is unset, so
 nothing extra is needed there as long as this script leaves it alone.
 
 Concurrency (see docs/PARKED_WORK.md): only the
@@ -77,8 +77,10 @@ logger = logging.getLogger(__name__)
 
 
 def _compute_one(row: dict) -> tuple[dict, dict]:
-    """Runs on a worker thread — its own DBDataLoader, the shared
-    RailRouter (see module docstring). Returns (computed, trigger); the
+    """Runs on a worker thread — its own DBDataLoader; the RailRouter is
+    resolved per proposal by compute_proposal() from the scenario's
+    routing_graph_key pin (registry routers are shared and thread-safe —
+    see api/helpers/dependencies.py). Returns (computed, trigger); the
     DB write happens back on the main thread."""
     trigger = outdated_trigger(row)
     # Can't happen in practice — list_outdated() already filtered to
@@ -102,7 +104,6 @@ def _compute_one(row: dict) -> tuple[dict, dict]:
         computed, _ = compute_proposal(
             refresh_request,
             loader=thread_loader,
-            router=dependencies.get_rail_router(),
             use_cache=False,
         )
     finally:

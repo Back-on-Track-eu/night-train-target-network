@@ -32,6 +32,8 @@ SCENARIO_FIELDS = {
     "track_infrastructure_defaults_version",
     "stop_infrastructures_version",
     "stop_infrastructure_defaults_version",
+    "passage_charges_version",
+    "routing_graph_key",
 }
 
 GROUPS = ("current_base", "current_scenarios", "historical_scenarios")
@@ -71,6 +73,17 @@ class TestScenariosResponseLayout:
                     f"Scenario '{scenario.get('scenario_id')}' in "
                     f"'{group}' missing: {missing}"
                 )
+
+
+class TestScenariosRoutingGraphPin:
+    def test_every_scenario_pins_a_routing_graph(self, scenarios_body):
+        """routing_graph_key is a non-empty string on every scenario, and
+        every seeded scenario routes on today's network — 'infra_2026'
+        (see db/dev/seed.py's scenario section); 'infra_2032' rows only
+        appear once the second graph exists."""
+        for group in GROUPS:
+            for scenario in scenarios_body[group]["scenarios"]:
+                assert scenario["routing_graph_key"] == "infra_2026"
 
 
 class TestScenariosGrouping:
@@ -114,7 +127,7 @@ class TestScenariosGrouping:
     def test_historical_scenario_is_in_historical_scenarios_group(
         self, scenarios_body, historical_scenario
     ):
-        """The deprecated 2026 Base Line scenario (is_current_scenario=
+        """The superseded infra-2026 revision (is_current_scenario=
         FALSE) appears in historical_scenarios, not current_base or
         current_scenarios."""
         historical_keys = {

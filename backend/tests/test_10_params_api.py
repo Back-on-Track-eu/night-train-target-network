@@ -277,9 +277,9 @@ class TestTrackInfrastructures:
         assert tracks["DE"]["tac_eur_train_km"]["is_default"] is False
 
     def test_scenario_id_pins_parameter_version(self, api_base, historical_scenario):
-        """?scenario_id=<2026-baseline> returns DE's v1 snapshot values
-        (tac=3.10), while the default request returns the base's v2
-        (tac=5.40)."""
+        """?scenario_id=<superseded infra-2026 revision> returns DE's
+        v4 snapshot values (tac=3.10), while the default request returns
+        the base's v1 (tac=5.40)."""
         base = requests.get(
             f"{api_base}/api/params/TrackInfrastructures", timeout=15
         ).json()
