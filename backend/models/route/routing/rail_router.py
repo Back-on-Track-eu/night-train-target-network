@@ -1,61 +1,103 @@
 """
 rail_router.py
 ==============
-Wrapper around the local OpenRailRouting (GraphHopper) instance.
+Wrapper around one OpenRailRouting (GraphHopper) instance — one RailRouter
+per routing graph (api/helpers/dependencies.py registry).
 
 Unit conventions (internal)
 ----------------------------
   Distance : metres  (_m)   — GraphHopper native
   Duration : minutes (_min) — converted from GraphHopper milliseconds on parse
 
+Two layers
+----------
+Layer 1 — RailRouter.route(stops, max_speed_kmh, avoid_hsr, gauge_mm,
+routing_mode): pure router physics. Its inputs are EXACTLY the inputs that
+shape the routed geometry — profile (from gauge) and the resolved custom
+model (speed cap, HSR vector, blocked countries) — which is what makes the
+route-segment cache key honest: route_variant_key(profile, custom_model)
+covers everything this layer can vary. Returned RoutedLegs carry raw
+per-country distance/time dicts and buffer_time_min=0, dynamics_time_min=0,
+energy_kwh=0.0 — nothing scenario-dependent. With a RouteSegmentRepository
+attached (the default), every mode is served lookup-first per consecutive
+stop pair against route_cache.route_segments for THIS router's graph;
+misses are live-routed as two-point calls and stored back, so the cache
+grows with every request. Per-pair decomposition is output-identical to
+one multi-point call: GraphHopper treats via-points as hard constraints
+and snapping is per-point deterministic.
+
+Layer 2 — route_trip(router, stops, composition, tracks, routing_mode):
+the shared domain entry every trip-routing call site uses
+(route_factory._build_trip(), timetable.py's mini-reroutes and final
+reroute, adapters/routing_context.py). Resolves the layer-1 inputs from
+the domain pair (resolve_routing_params(), incl. the trip gauge via
+routing/gauge.py), then applies the scenario-dependent physics on top:
+country buffer quotas (apply_country_buffer()) and traction dynamics
+(routing/dynamics.py). Nobody calls layer 1 directly except the cache
+machinery and scripts/precompute_route_segments.py — this keeps the
+single-call-site guarantee for dynamics.
+
 Responsibilities
 ----------------
 - HTTP communication with GraphHopper (two-pass routing for custom models).
 - Country attribution of route geometry via shapely point-in-polygon.
-- Physics per segment: distance_m, driving_time_min, buffer_time_min,
-  country_distance_shares, country_time_shares.
+- Raw physics per segment: distance_m, driving_time_min,
+  country_distance_m, country_driving_ms (and the shares derived from
+  them), countries, passages.
+- Gauge-aware profile selection: the trip gauge (resolved by layer 2 from
+  the call's own stops, routing/gauge.py) selects the GraphHopper profile
+  — night_train for 1435, night_train_<mm> otherwise (naming contract:
+  SUPPORTED_GAUGES_MM in models/route/model.py ←→ docker/config.yml).
+  Baked per-profile so stop SNAPPING is gauge-correct.
+- Belarus/Russia exclusion (BLOCKED_COUNTRIES): a speed-0 area rule over
+  each blocked country's border polygon, attached to EVERY routing request
+  in every mode — the fork registers no `country` encoded value, so the
+  block cannot live in the graph (see docker/config.yml).
 - fullRouting custom model: composition speed cap + HSR avoidance — only
   track whose permitted speed exceeds HSR_TRACK_SPEED_THRESHOLD_KMH is
-  penalized, and only where hsr_allowed (composition AND country) is
-  false. Thresholds/factor live in models/route/version.py (STANDARD
-  VALUES); mechanism in _build_custom_model()'s docstring.
-- fullRouting traction dynamics: each leg's dynamics_time_min is filled
-  with the per-stop accel/brake time loss (routing/dynamics.py), kept
-  separate from the raw router driving_time_min so the two stay
-  differentiable — applied here so every consumer of route() gets
-  consistent physics.
+  penalized, and only where avoid_hsr says so. Thresholds/factor live in
+  models/route/model.py (STANDARD VALUES); mechanism in
+  build_custom_model()'s docstring.
 
-NOT responsible for:
-- Stop timetable data  (→ models/route/route_factory.py — Stop is built there)
-- Energy consumption   (→ models/energy/calc_energy_consumption.py)
-- TAC / energy costs   (→ models/evaluation/calc.py)
-
-route() returns list[RoutedLeg] — bare segment physics with no Stop
-attached. route_factory._build_trip_stops_and_legs() pairs each RoutedLeg with the
-Stop objects it builds, producing the final list[Segment].
+NOT responsible for (layer 2 / downstream):
+- Country buffer quotas   (→ apply_country_buffer(), called by route_trip())
+- Traction dynamics       (→ routing/dynamics.py, called by route_trip())
+- Stop timetable data     (→ models/route/route_factory.py)
+- Energy consumption      (→ models/energy/calc_energy_consumption.py)
+- TAC / energy costs      (→ models/evaluation/calc.py)
 
 Public surface
 --------------
-  RailRouter.route(stops, composition, tracks, routing_mode) → list[RoutedLeg]
+  route_trip(router, stops, composition, tracks, routing_mode)
+      → list[RoutedLeg]                            (layer 2 — domain entry)
+  resolve_routing_params(composition, tracks, stops)
+      → (max_speed_kmh, avoid_hsr, gauge_mm)
+  apply_country_buffer(legs, tracks)               (quota on raw driving)
+  RailRouter.route(stops, max_speed_kmh, avoid_hsr, gauge_mm, routing_mode)
+      → list[RoutedLeg]                            (layer 1)
+  RailRouter.build_custom_model(max_speed_kmh, avoid_hsr) → dict | None
+  RailRouter.profile_for_gauge(gauge_mm) → str
+  RailRouter.snap_point() / route_pair_from_snapped()   (precompute script)
+  route_variant_key(profile, custom_model) → str   (segment-cache key)
   RailRoutingError
   RoutedLeg  (output type — public)
   StopInput  (input type — public; wraps StopInfrastructure + StopType)
   VALID_ROUTING_MODES  (single source of truth for allowed routing_mode
-    strings — the routing_mode switch lives in RailRouter.route() below,
-    so its registry lives here too, mirroring VALID_TIMETABLE_MODES /
-    VALID_SCHEDULE_MODES in models/route/timetable.py; the compute
-    request validation in api/helpers/proposal_compute.py reads from it)
-  build_router_stops(stop_ids, stop_infra) → list[StopInput]  (shared stop_id
-    → StopInput conversion — used by route_factory.py and timetable.py's
-    auto_stop_addition trial re-routes)
+    strings — the routing_mode switch lives in RailRouter.route() below;
+    the compute request validation in api/helpers/proposal_compute.py
+    reads from it)
+  build_router_stops(stop_ids, stop_infra) → list[StopInput]
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import requests
 
@@ -67,13 +109,19 @@ from models.params import (
 )
 from models.route.trip import StopType
 from models.route.routing.dynamics import apply_traction_dynamics
+from models.route.routing.gauge import resolve_trip_gauge
 from models.route.model import (
+    BLOCKED_COUNTRIES,
     HSR_TRACK_SPEED_THRESHOLD_KMH,
     HSR_TRACK_SPEED_SANITY_MAX_KMH,
     HSR_AVOIDANCE_PRIORITY_FACTOR,
     HSR_AVOIDANCE_RING_SIMPLIFY_DEG,
+    STANDARD_GAUGE_MM,
 )
 from models.utils import ms_to_min, haversine_path_m
+
+if TYPE_CHECKING:
+    from adapters.route_segment_repository import RouteSegmentRepository
 
 logger = logging.getLogger(__name__)
 
@@ -131,11 +179,12 @@ class RoutedLeg:
     calc_energy_consumption() before route_factory builds Stops.
     driving_time_min is the raw router time; the per-stop traction
     dynamics surcharge is carried separately in dynamics_time_min
-    (filled for routing_mode="fullRouting" — see routing/dynamics.py) so
-    the two stay differentiable downstream. buffer_time_min carries the
-    country buffer quota applied to driving (at parse time) and to
-    dynamics (added afterwards by apply_traction_dynamics — computed
-    strictly AFTER the dynamics' cruise speed was derived from raw
+    (filled by route_trip() for routing_mode="fullRouting" — see
+    routing/dynamics.py) so the two stay differentiable downstream.
+    buffer_time_min is 0 as returned by RailRouter.route() — the country
+    buffer quota is scenario-dependent and applied by route_trip() via
+    apply_country_buffer() (on driving) and apply_traction_dynamics()
+    (on dynamics, strictly AFTER the cruise speed was derived from raw
     driving time); never on dwell.
     """
 
@@ -148,6 +197,14 @@ class RoutedLeg:
     energy_kwh: float  # 0.0 until energy model runs
     country_distance_shares: dict[str, float]  # {country_code: share}, sums to 1.0
     country_time_shares: dict[str, float]  # {country_code: share}, sums to 1.0
+    countries: list[str] = field(default_factory=list)  # path order — see Segment
+    passages: list[str] = field(default_factory=list)  # crossings this leg owns
+    # Raw per-country apportionment the shares above are derived from —
+    # kept unrounded so scenario-dependent physics (apply_country_buffer's
+    # per-country ms_to_min rounding) reconstructs bit-identically from a
+    # cached row. "UNK" (open water/ferry) is a key like any other.
+    country_distance_m: dict[str, float] = field(default_factory=dict)
+    country_driving_ms: dict[str, float] = field(default_factory=dict)
 
     @property
     def total_time_min(self) -> int:
@@ -239,6 +296,25 @@ class CountryIndex:
             )
         return self._avoidance_rings[country_code]
 
+    def get_blocking_rings(self, country_code: str) -> list[list]:
+        """EVERY component polygon's outer ring, simplified — for the
+        BLOCKED_COUNTRIES exclusion, where get_largest_polygon() would be
+        a hole: Russia's largest clipped polygon is the western mainland,
+        and a block built from it alone leaves the Kaliningrad exclave —
+        the one part of Russia a Poland–Lithuania route could actually cut
+        through — wide open. Not cached: built once per process by
+        RailRouter._blocked_country_rules(), which caches the result."""
+        return [
+            [
+                list(coord)
+                for coord in polygon.simplify(
+                    HSR_AVOIDANCE_RING_SIMPLIFY_DEG, preserve_topology=True
+                ).exterior.coords
+            ]
+            for polygon, code in zip(self._polygons, self._codes)
+            if code == country_code
+        ]
+
     def _build_avoidance_ring(self, country_code: str) -> list | None:
         polygons = [
             polygon
@@ -256,6 +332,43 @@ class CountryIndex:
         return [list(coord) for coord in ring.coords]
 
 
+class PassageIndex:
+    """
+    Crossing polygons for routing-time passage detection — which segment of
+    a trip crosses which separately charged link (Storebælt, Øresund, the
+    Channel Tunnel).
+
+    Built once from DBDataLoader.get_passage_geometries() — see
+    api/helpers/dependencies.py. Crossing GEOMETRY is static reference data
+    (a tunnel does not move between scenarios), so like CountryIndex this
+    is a startup-time singleton; the scenario-versioned CHARGES are
+    resolved separately at evaluation time via
+    DBDataLoader.build_all_passages().
+
+    Two passage_ids may share one polygon — OERESUND_DK and OERESUND_SE,
+    each infrastructure manager billing its half of one crossing. Both
+    match, both are attributed.
+
+    Only a handful of polygons exist, so a linear intersects() scan is
+    cheaper than the R-tree CountryIndex needs for its ~178k vertices.
+    """
+
+    def __init__(self, passage_geometries: list[tuple[str, dict]]) -> None:
+        from shapely.geometry import shape
+
+        self._shapes = [(pid, shape(geom)) for pid, geom in passage_geometries]
+        logger.info("PassageIndex: loaded %d passage polygons.", len(self._shapes))
+
+    def intersecting(self, coords: list[list[float]]) -> list[str]:
+        """passage_ids whose polygon this [lon, lat] path crosses."""
+        if len(coords) < 2 or not self._shapes:
+            return []
+        from shapely.geometry import LineString
+
+        line = LineString(coords)
+        return [pid for pid, shp in self._shapes if shp.intersects(line)]
+
+
 # ---------------------------------------------------------------------------
 # Router
 # ---------------------------------------------------------------------------
@@ -270,6 +383,52 @@ class RailRoutingError(Exception):
     """Raised when the routing engine returns an error."""
 
     pass
+
+
+# --- Routing graph naming contract -------------------------------------
+#
+# One OpenRailRouting instance per routing graph. Every per-graph setting
+# is suffixed with the graph key, uppercased, so the default graph reads
+# exactly like any other and no instance is implicitly "the" router:
+#
+#   OPENRAILROUTING_URL_<KEY>             backend registry entry
+#   OPENRAILROUTING_HOST_PORT_<KEY>       published port
+#   OPENRAILROUTING_ADMIN_HOST_PORT_<KEY> published admin port
+#   GRAPH_CACHE_FILE_ID_<KEY>             Drive id of the prebuilt cache
+#
+# OPENRAILROUTING_CONTAINER_PORT is NOT suffixed: every instance binds the
+# same port inside the stack, because they share one config.yml.
+#
+# Scenarios select their graph via scenario.scenarios.routing_graph_key;
+# the key -> URL mapping is deployment configuration, never database
+# content. See api/helpers/dependencies.py and this folder's README.
+DEFAULT_ROUTING_GRAPH_KEY = "infra_2026"
+
+ROUTING_URL_ENV_PREFIX = "OPENRAILROUTING_URL_"
+
+_LOCAL_ROUTING_URL = "http://localhost:8989"
+
+
+def routing_url_env_var(graph_key: str) -> str:
+    """Environment variable holding the URL of one routing graph."""
+    return f"{ROUTING_URL_ENV_PREFIX}{graph_key.upper()}"
+
+
+def default_base_url() -> str:
+    """URL of the DEFAULT routing graph, for callers that do no scenario
+    resolution of their own — tests, host scripts, routing_context.py.
+
+    Precedence: the default graph's own suffixed variable, then the
+    unsuffixed OPENRAILROUTING_URL, then localhost. The unsuffixed name is
+    kept solely as a compatibility path for the server stacks under
+    deploy/, which set it and know nothing about graph keys; the dev stack
+    and CI use the suffixed form.
+    """
+    return (
+        os.environ.get(routing_url_env_var(DEFAULT_ROUTING_GRAPH_KEY))
+        or os.environ.get("OPENRAILROUTING_URL")
+        or _LOCAL_ROUTING_URL
+    )
 
 
 class RailRouter:
@@ -293,10 +452,21 @@ class RailRouter:
     # silently serializes calls beyond the limit, defeating the concurrency.
     _CONNECTION_POOL_SIZE = 64
 
-    def __init__(self, country_index: CountryIndex) -> None:
-        self.base_url = os.environ.get(
-            "OPENRAILROUTING_URL", "http://localhost:8989"
-        ).rstrip("/")
+    def __init__(
+        self,
+        country_index: CountryIndex,
+        passage_index: PassageIndex | None = None,
+        base_url: str | None = None,
+        graph_key: str | None = None,
+        segment_repository: "RouteSegmentRepository | None" = None,
+    ) -> None:
+        # Explicit base_url wins — the multi-graph registry
+        # (api/helpers/dependencies.py) constructs one RailRouter per
+        # routing graph in the same process, so the environment alone
+        # cannot address them. Everything single-graph (tests,
+        # routing_context.py, host scripts) keeps passing nothing and
+        # lands on the default graph.
+        self.base_url = (base_url or default_base_url()).rstrip("/")
         self.profile = os.environ.get("OPENRAILROUTING_PROFILE", "night_train")
         self.timeout = int(os.environ.get("OPENRAILROUTING_TIMEOUT", "30"))
         self._session = requests.Session()
@@ -307,6 +477,73 @@ class RailRouter:
         self._session.mount("http://", adapter)
         self._session.mount("https://", adapter)
         self._country_index = country_index
+        # Blocked-country rules+areas depend only on static geometry —
+        # built once on first use, shared by every request (route(),
+        # route_geometry(), all modes). None until built; may build to
+        # ([], {}) if polygons are missing (warned, degrades to unblocked
+        # — the country-coverage check in route_factory still 422s any
+        # route that then leaks through, see BLOCKED_COUNTRIES).
+        self._blocked_rules_cache: tuple[list, dict] | None = None
+        # Optional so a router can be built before passage_charges is
+        # seeded, and so tests that care only about geometry need not
+        # supply one — legs then carry passages=() and evaluation charges
+        # no crossings, which is the pre-0.9.21 behaviour.
+        self._passage_index = passage_index
+        # Segment cache: rows are keyed by graph, so a router only takes
+        # part when it knows which graph it is (the registry passes the
+        # key; single-graph callers — tests, host scripts — pass nothing
+        # and route live). None repository = live routing, no lookups.
+        self.graph_key = graph_key
+        self._segment_repo = segment_repository if graph_key else None
+
+    def profile_for_gauge(self, gauge_mm: int) -> str:
+        """Routing profile name for a gauge — THE naming contract with
+        docker/config.yml: the bare profile for standard gauge,
+        <profile>_<gauge_mm> for everything else. gauge.py has already
+        validated gauge_mm against SUPPORTED_GAUGES_MM."""
+        if gauge_mm == STANDARD_GAUGE_MM:
+            return self.profile
+        return f"{self.profile}_{gauge_mm}"
+
+    def _blocked_country_rules(self) -> tuple[list, dict]:
+        """(speed_rules, areas) hard-excluding BLOCKED_COUNTRIES — cached.
+
+        multiply_by 0, not the HSR 0.01: crossing Belarus or Russia is not
+        expensive, it is off the table (project decision — see
+        BLOCKED_COUNTRIES in models/route/model.py). Same ring machinery
+        as HSR avoidance; a missing polygon warns loudly and skips, since
+        an exception here would take every route down with it while the
+        country-coverage check still catches an actual leak."""
+        if self._blocked_rules_cache is not None:
+            return self._blocked_rules_cache
+        rules: list = []
+        areas: dict = {}
+        for cc in BLOCKED_COUNTRIES:
+            # Every component polygon, not the largest: Russia's clipped
+            # geometry is mainland + the Kaliningrad exclave, and the
+            # exclave is the part a Poland–Lithuania route could cut
+            # through. One area rule per component.
+            rings = self._country_index.get_blocking_rings(cc)
+            if not rings:
+                logger.warning(
+                    "No border polygon for blocked country '%s' — routes are "
+                    "NOT hard-excluded from it (country coverage still 422s "
+                    "any that pass through). Seed its geometry row.",
+                    cc,
+                )
+                continue
+            for index, ring in enumerate(rings):
+                closed_ring = ring if ring[0] == ring[-1] else ring + [ring[0]]
+                area_name = f"blocked{cc.lower()}{index}"
+                areas[area_name] = {
+                    "type": "Feature",
+                    "id": area_name,
+                    "properties": {},
+                    "geometry": {"type": "Polygon", "coordinates": [closed_ring]},
+                }
+                rules.append({"if": f"in_{area_name}", "multiply_by": "0"})
+        self._blocked_rules_cache = (rules, areas)
+        return self._blocked_rules_cache
 
     def check_server(self) -> dict:
         resp = self._session.get(
@@ -327,12 +564,20 @@ class RailRouter:
         existing trains are never evaluated (decision 23), so there is no
         composition to speak of and nothing would consume the result.
 
-        Always single-pass CH routing, like simpleRouting: no speed cap,
-        no HSR avoidance, no traction dynamics. The shape is the shape.
+        Single-pass, no speed cap, no HSR avoidance, no traction dynamics
+        — the shape is the shape. Two things do apply, as everywhere:
+        the gauge profile (resolved from the stops alone; ONTD's synthetic
+        stops carry no gauges, so they resolve standard — broad-gauge ONTD
+        lines keep failing to snap until the projection routes on catalog
+        stops) and the BLOCKED_COUNTRIES exclusion, which forces this off
+        CH and onto LM routing (a request custom model disables CH).
         """
         if len(stops) < 2:
             raise ValueError("At least 2 stops are required.")
-        raw = self._post_route(self._build_payload(stops, None))
+        profile = self.profile_for_gauge(resolve_trip_gauge(s.stop for s in stops))
+        raw = self._post_route(
+            self._build_payload(stops, self.build_custom_model(None, None), profile)
+        )
         paths = raw.get("paths") or []
         if not paths:
             raise ValueError("Router returned no path.")
@@ -341,110 +586,213 @@ class RailRouter:
     def route(
         self,
         stops: list[StopInput],
-        composition: Composition,
-        tracks: TrackInfraCollection,
+        max_speed_kmh: int | None,
+        avoid_hsr: dict[str, bool] | None,
+        gauge_mm: int,
         routing_mode: str,
     ) -> list[RoutedLeg]:
         """
-        Route a trip and return bare segment physics.
+        Layer 1 — route a trip and return RAW segment physics. Callers
+        wanting domain physics (buffer quotas, traction dynamics) use
+        route_trip() below; nothing scenario-dependent happens here, which
+        is what keeps cached segments scenario-free.
+
+        max_speed_kmh — hard cap for the custom model (the composition's own
+        max_speed_kmh; GraphHopper takes the minimum of this cap and each
+        track's permitted speed, so 300-track under a 230 cap routes at
+        230). None = no cap.
+        avoid_hsr — resolved per-country vector: True where high-speed track
+        must be penalized (caller already ANDed composition and track
+        permission — resolve_routing_params()). Ignored in simpleRouting.
+        gauge_mm — the trip gauge (routing/gauge.py, resolved by layer 2
+        from the call's own stops) → GraphHopper profile.
 
         routing_mode (no default here — defaulting is an API-boundary
-        concern, see api/helpers/proposal_compute.py; every caller passes it explicitly):
-          "fullRouting"   — speed capped at the composition's own
-                             max_speed_kmh everywhere, plus HSR avoidance:
-                             track segments whose PERMITTED speed exceeds
-                             HSR_TRACK_SPEED_THRESHOLD_KMH (see
-                             models/route/version.py) are heavily
-                             penalized in every country where HSR is not
-                             allowed (composition.hsr_allowed AND that
-                             country's track hsr_allowed — evaluated for
-                             every country, transited-only ones included).
-                             Each returned leg also carries the per-stop
-                             traction dynamics surcharge (accel/brake
-                             time loss) in its own dynamics_time_min
-                             field (see routing/dynamics.py). Two-pass routing
-                             when a custom model is needed. See
-                             _build_custom_model().
-          "simpleRouting" — bypass all of that: single-pass, no speed cap,
-                             no HSR avoidance, no traction dynamics.
-                             Cheap/fast, for quick manual checks — not
+        concern, see api/helpers/proposal_compute.py):
+          "fullRouting"   — speed cap + HSR avoidance; two-pass when
+                             live-routed (pass 1: CH snap on the gauge
+                             profile, pass 2: custom model on snapped
+                             coordinates).
+          "simpleRouting" — speed cap only (the BLOCKED_COUNTRIES rules
+                             ride on every model, so the cap is free),
+                             single pass. Cheap, for manual checks — not
                              representative of real physics.
 
-        Two-pass routing is used when a custom model is needed:
-          pass 1 — CH routing to snap stops to the rail network
-          pass 2 — custom model routing with snapped coordinates
+        Both modes are served through the segment cache when a repository
+        is attached: lookup per consecutive stop pair, live two-point
+        routing for misses, store-back. A trip's variant key differs per
+        mode only through the model (no HSR priority rules in
+        simpleRouting), so the two never collide unless they would route
+        identically anyway.
 
-        energy_kwh on all RoutedLegs is 0.0 on return — populated by
-        calc_energy_consumption() in route_factory.
+        buffer_time_min, dynamics_time_min are 0 and energy_kwh is 0.0 on
+        every returned leg — see route_trip().
         """
         if len(stops) < 2:
             raise ValueError("At least 2 stops are required.")
 
-        # routing_mode SWITCH — VALID_ROUTING_MODES is the same set
-        # the compute request validation (api/helpers/proposal_compute.py) checks against, so an unknown mode
-        # can only reach here if that validation was bypassed.
+        profile = self.profile_for_gauge(gauge_mm)
+
+        # routing_mode SWITCH — VALID_ROUTING_MODES is the same set the
+        # compute request validation (api/helpers/proposal_compute.py)
+        # checks against, so an unknown mode can only reach here if that
+        # validation was bypassed.
         if routing_mode == "simpleRouting":
-            raw = self._post_route(self._build_payload(stops, None))
-            return self._parse_response(raw, stops, tracks)
-        if routing_mode != "fullRouting":
+            custom_model = self.build_custom_model(max_speed_kmh, None)
+            two_pass = False
+        elif routing_mode == "fullRouting":
+            custom_model = self.build_custom_model(max_speed_kmh, avoid_hsr)
+            two_pass = True
+        else:
             raise ValueError(
                 f"Unknown routing_mode '{routing_mode}'. "
                 f"Supported: {sorted(VALID_ROUTING_MODES)}."
             )
 
-        vehicle_max_speed_kmh = int(composition.max_speed_kmh)
-        # HSR permission per country: high-speed line access in a country is
-        # allowed only when BOTH the composition and that country's track
-        # infrastructure say hsr_allowed — evaluated over the FULL track
-        # collection (complete over every country, see TrackInfraCollection),
-        # not just countries with a stop on this trip: a route can transit a
-        # country without stopping in it, and that country's hsr_allowed
-        # must still bind. What "avoid" means per segment (permitted track
-        # speed above HSR_TRACK_SPEED_THRESHOLD_KMH, not the whole country
-        # network) is _build_custom_model()'s concern below.
-        avoid_hsr = {
-            cc: not (composition.hsr_allowed and track.hsr_allowed)
-            for cc, track in tracks.all().items()
-        }
-        custom_model = self._build_custom_model(vehicle_max_speed_kmh, avoid_hsr)
+        if self._segment_repo is not None:
+            return self._route_via_segment_cache(stops, custom_model, profile, two_pass)
+        return self._route_live(stops, custom_model, profile, two_pass)
 
-        if custom_model:
-            snap_raw = self._post_route(self._build_payload(stops, None))
+    def _route_live(
+        self,
+        stops: list[StopInput],
+        custom_model: dict | None,
+        profile: str,
+        two_pass: bool,
+    ) -> list[RoutedLeg]:
+        """One multi-point call — the uncached path (and the per-pair
+        fallback of the cached one)."""
+        if two_pass and custom_model:
+            # Pass 1 snaps on the SAME gauge profile as pass 2 — that is
+            # what makes snapping gauge-correct (a dual-gauge station's
+            # 1435 platform vs its 1520 platform). Plain CH, no custom
+            # model: snapping is per-point nearest-edge, and the path
+            # between snapped points is discarded, so the blocked-country
+            # rules add nothing here but would cost the CH speedup.
+            snap_raw = self._post_route(self._build_payload(stops, None, profile))
             snapped_coords = snap_raw["paths"][0]["snapped_waypoints"]["coordinates"]
             raw = self._post_route(
                 self._build_payload(
-                    stops,
-                    custom_model,
-                    override_coords=snapped_coords,
+                    stops, custom_model, profile, override_coords=snapped_coords
                 )
             )
         else:
-            raw = self._post_route(self._build_payload(stops, None))
+            raw = self._post_route(self._build_payload(stops, custom_model, profile))
+        return self._parse_response(raw, len(stops))
 
-        legs = self._parse_response(raw, stops, tracks)
-        # Traction dynamics (fullRouting only): GraphHopper has no vehicle
-        # model, so parsed driving times assume the train passes every stop
-        # at cruise speed. Fill each leg's dynamics_time_min with its
-        # accel/brake time loss here — the single call site every consumer
-        # shares (trips, auto-stop candidate mini-reroutes, final reroutes)
-        # — rather than in route_factory, which would leave timetable.py's
-        # reroutes without it. driving_time_min stays raw router time;
-        # the dynamics' own buffer share (same country quota) is added to
-        # buffer_time_min there too, strictly after the cruise speed was
-        # derived from raw driving time. See routing/dynamics.py.
-        apply_traction_dynamics(legs, composition, tracks)
+    def _route_via_segment_cache(
+        self,
+        stops: list[StopInput],
+        custom_model: dict | None,
+        profile: str,
+        two_pass: bool,
+    ) -> list[RoutedLeg]:
+        """
+        Lookup-first per consecutive pair for this router's graph;
+        live-route misses pairwise (identical path to _route_live) and
+        store them back, so the table grows with every request. Passage
+        claiming replicates _parse_legs' cross-leg first-leg-wins dedupe:
+        cached rows store each pair's FULL intersecting list, the claim
+        happens here at assembly.
+        """
+        from models.route.routing.segment_cache import (
+            leg_from_cached,
+            segment_from_leg,
+        )
+
+        variant_key = route_variant_key(profile, custom_model)
+        pair_ids = [
+            (stops[i].stop.stop_id, stops[i + 1].stop.stop_id)
+            for i in range(len(stops) - 1)
+        ]
+        keys = {tuple(sorted(p)) for p in pair_ids}
+        rows = self._segment_repo.fetch_many(self.graph_key, variant_key, keys)
+
+        legs: list[RoutedLeg] = []
+        claimed: set[str] = set()
+        n_hits = 0
+        for i, (a, b) in enumerate(pair_ids):
+            lo, hi = sorted((a, b))
+            row = rows.get((lo, hi))
+            if row is not None:
+                leg = leg_from_cached(row, reverse=(a != lo))
+                n_hits += 1
+            else:
+                leg = self._route_live(
+                    [stops[i], stops[i + 1]], custom_model, profile, two_pass
+                )[0]
+                self._segment_repo.store(
+                    self.graph_key,
+                    variant_key,
+                    lo,
+                    hi,
+                    segment_from_leg(leg, reverse=(a != lo)),
+                    source="runtime",
+                )
+            leg.passages = [p for p in leg.passages if p not in claimed]
+            claimed.update(leg.passages)
+            legs.append(leg)
+
+        logger.info(
+            "segment cache [%s]: %d/%d pair(s) served, %d routed+stored (%s).",
+            self.graph_key,
+            n_hits,
+            len(pair_ids),
+            len(pair_ids) - n_hits,
+            variant_key,
+        )
         return legs
 
-    def _build_custom_model(
+    # -- precompute-script surface -----------------------------------------
+
+    def snap_point(
+        self, lon: float, lat: float, helper_lonlat: list[float], profile: str
+    ) -> list[float]:
+        """The rail-network point [lon, lat] snaps to on this graph and
+        profile — obtained from a plain CH route toward any second
+        reachable point (GraphHopper has no standalone snap endpoint in
+        this build). Snapping is per-point and deterministic given
+        (graph, profile), which is what lets the precompute script snap
+        each stop ONCE per profile instead of re-snapping in every pair's
+        pass 1."""
+        payload = {
+            "profile": profile,
+            "points": [[lon, lat], helper_lonlat],
+            "points_encoded": False,
+            "instructions": False,
+        }
+        raw = self._post_route(payload)
+        return raw["paths"][0]["snapped_waypoints"]["coordinates"][0]
+
+    def route_pair_from_snapped(
+        self,
+        snapped_pair: list[list[float]],
+        custom_model: dict | None,
+        profile: str,
+    ) -> RoutedLeg:
+        """One pair, pass 2 only — the precompute script's entry. Same
+        payload/parse path as the runtime fallback, minus pass 1 (the
+        script pre-snapped both stops via snap_point()), which halves the
+        batch's call count."""
+        payload = self._build_payload_from_coords(snapped_pair, custom_model, profile)
+        return self._parse_response(self._post_route(payload), n_stops=2)[0]
+
+    def build_custom_model(
         self,
         vehicle_max_speed_kmh: int | None,
         avoid_high_speed_lines: dict[str, bool] | None,
     ) -> dict | None:
         """
-        GraphHopper custom model for the fullRouting pass, or None when
-        nothing needs one (no speed cap, no country disallowing HSR).
+        GraphHopper custom model for a routing pass, or None only when
+        nothing needs one at all — which since 0.9.27 requires the
+        BLOCKED_COUNTRIES polygons to be missing too, as their speed-0
+        area rules are folded into every model built here (route(),
+        both modes, and route_geometry() all pass through this).
 
-        Two independent concerns:
+        Three independent concerns:
+          blocked  — BLOCKED_COUNTRIES exclusion (_blocked_country_rules):
+                     hard speed-0 over each blocked country's polygon,
+                     every mode, non-negotiable.
           speed    — hard cap at the composition's own max_speed_kmh on
                      every segment (how fast THIS train may go, everywhere).
           priority — HSR avoidance: a segment is penalized by
@@ -469,7 +817,12 @@ class RailRouter:
           - Mixed permissions — one rule per disallowing country, scoped
             to that country's border polygon (in_<area> && speed range).
         """
-        speed_rules, priority_rules, areas = [], [], {}
+        blocked_rules, blocked_areas = self._blocked_country_rules()
+        speed_rules, priority_rules, areas = (
+            list(blocked_rules),
+            [],
+            dict(blocked_areas),
+        )
 
         if vehicle_max_speed_kmh is not None:
             speed_rules.append({"if": "true", "limit_to": str(vehicle_max_speed_kmh)})
@@ -531,12 +884,16 @@ class RailRouter:
         self,
         stops: list[StopInput],
         custom_model: dict | None,
+        profile: str,
         override_coords: list[list[float]] | None = None,
     ) -> dict:
         """
-        custom_model: prebuilt by _build_custom_model() (or None for a plain
+        custom_model: prebuilt by build_custom_model() (or None for a plain
         CH pass) — passed in rather than rebuilt here, so route() builds it
         exactly once per call.
+        profile: the gauge profile from _profile_for_gauge() — always passed
+        explicitly (never defaulted to self.profile) so a call site cannot
+        silently route a broad-gauge trip on the standard-gauge graph.
         override_coords: snapped [lon, lat] pairs from pass 1, used in place
         of the original stop coordinates for pass 2 of two-pass routing.
         """
@@ -546,8 +903,25 @@ class RailRouter:
             else [[s.stop.lon, s.stop.lat] for s in stops]
         )
         payload: dict = {
-            "profile": self.profile,
+            "profile": profile,
             "points": points,
+            "points_encoded": False,
+            "instructions": False,
+            "details": self.DETAILS,
+        }
+        if custom_model:
+            payload["custom_model"] = custom_model
+            payload["ch.disable"] = True
+        return payload
+
+    def _build_payload_from_coords(
+        self, coords: list[list[float]], custom_model: dict | None, profile: str
+    ) -> dict:
+        """_build_payload for callers holding bare [lon, lat] pairs (the
+        precompute script's pre-snapped stops) instead of StopInputs."""
+        payload: dict = {
+            "profile": profile,
+            "points": coords,
             "points_encoded": False,
             "instructions": False,
             "details": self.DETAILS,
@@ -566,7 +940,7 @@ class RailRouter:
         except requests.HTTPError as exc:
             try:
                 msg = resp.json().get("message", resp.text)
-            except:
+            except ValueError:  # body not JSON — proxies, timeouts
                 msg = resp.text
             raise RailRoutingError(
                 f"Routing engine HTTP {resp.status_code}: {msg}"
@@ -576,12 +950,7 @@ class RailRouter:
             raise RailRoutingError(f"Routing engine error: {body['message']}")
         return body
 
-    def _parse_response(
-        self,
-        body: dict,
-        stops: list[StopInput],
-        tracks: TrackInfraCollection,
-    ) -> list[RoutedLeg]:
+    def _parse_response(self, body: dict, n_stops: int) -> list[RoutedLeg]:
         path_data = body["paths"][0]
         coords = path_data["points"]["coordinates"]
 
@@ -590,27 +959,34 @@ class RailRouter:
         time_detail = details.get("time", [])
 
         intervals = self._compute_country_intervals(coords, time_detail)
-        return self._parse_legs(
-            len(stops), coords, leg_distance_detail, intervals, tracks
-        )
+        return self._parse_legs(n_stops, coords, leg_distance_detail, intervals)
 
-    @staticmethod
     def _parse_legs(
+        self,
         n_stops: int,
         coords: list[list[float]],
         leg_distance_detail: list,
         intervals: list[tuple],
-        tracks: TrackInfraCollection,
     ) -> list[RoutedLeg]:
         """
         Build one RoutedLeg per consecutive stop pair.
 
         For each leg, intervals overlapping the leg's coordinate range are
-        apportioned by overlap fraction, summed per country, then converted
-        to country_distance_shares / country_time_shares (each summing to 1.0)
-        alongside the leg's total distance_m / driving_time_min / buffer_time_min.
+        apportioned by overlap fraction, summed per country into the raw
+        country_distance_m / country_driving_ms dicts, then converted to
+        country_distance_shares / country_time_shares (each summing to 1.0)
+        alongside the leg's total distance_m / driving_time_min.
+        buffer_time_min stays 0 — scenario-dependent, applied by
+        route_trip() via apply_country_buffer().
+
+        countries additionally records the order the legs entered them, which
+        the share dicts cannot express and track access charges need (see
+        Segment). Passages are attributed here too: a crossing is claimed by
+        the FIRST leg intersecting it, so one split by an intermediate stop
+        is charged once per trip rather than by every leg touching it.
         """
         legs: list[RoutedLeg] = []
+        claimed_passages: set[str] = set()
 
         for i in range(n_stops - 1):
             if i < len(leg_distance_detail):
@@ -622,6 +998,7 @@ class RailRouter:
 
             leg_cc_dist: dict[str, float] = defaultdict(float)
             leg_cc_dur_ms: dict[str, float] = defaultdict(float)
+            leg_countries: list[str] = []
 
             for iv_from, iv_to, cc, dist_m, iv_ms in intervals:
                 overlap_from = max(iv_from, from_idx)
@@ -632,13 +1009,19 @@ class RailRouter:
                 fraction = (overlap_to - overlap_from) / span if span > 0 else 1.0
                 leg_cc_dist[cc] += dist_m * fraction
                 leg_cc_dur_ms[cc] += iv_ms * fraction
+                # Intervals arrive in path order, so first-seen is
+                # entry order. A country re-entered after a detour
+                # through a neighbour keeps its first position: its
+                # shares are summed into one entry either way, and one
+                # clock window per country is what pricing needs.
+                if cc not in leg_countries:
+                    leg_countries.append(cc)
 
             total_dist_m = sum(leg_cc_dist.values())
             total_dur_ms = sum(leg_cc_dur_ms.values())
 
             country_distance_shares: dict[str, float] = {}
             country_time_shares: dict[str, float] = {}
-            total_buffer_min = 0
 
             for cc, dist_m_f in leg_cc_dist.items():
                 country_distance_shares[cc] = (
@@ -647,22 +1030,31 @@ class RailRouter:
                 country_time_shares[cc] = (
                     leg_cc_dur_ms[cc] / total_dur_ms if total_dur_ms > 0 else 0.0
                 )
-                cc_drive_min = ms_to_min(leg_cc_dur_ms[cc])
-                track = tracks.get(cc)
-                if track is None:
-                    continue  # "UNK" (open water/ferry) — no country, no buffer time
-                total_buffer_min += round(cc_drive_min * track.buffer_quota_per)
+
+            leg_geometry = coords[from_idx : to_idx + 1]
+            leg_passages: list[str] = []
+            if self._passage_index is not None:
+                leg_passages = [
+                    pid
+                    for pid in self._passage_index.intersecting(leg_geometry)
+                    if pid not in claimed_passages
+                ]
+                claimed_passages.update(leg_passages)
 
             legs.append(
                 RoutedLeg(
-                    geometry=coords[from_idx : to_idx + 1],
+                    geometry=leg_geometry,
                     distance_m=round(total_dist_m),
                     driving_time_min=ms_to_min(total_dur_ms),
                     dynamics_time_min=0,  # filled by apply_traction_dynamics()
-                    buffer_time_min=total_buffer_min,
+                    buffer_time_min=0,  # filled by apply_country_buffer()
                     energy_kwh=0.0,  # populated by calc_energy_consumption()
                     country_distance_shares=country_distance_shares,
                     country_time_shares=country_time_shares,
+                    countries=leg_countries,
+                    passages=leg_passages,
+                    country_distance_m=dict(leg_cc_dist),
+                    country_driving_ms=dict(leg_cc_dur_ms),
                 )
             )
 
@@ -686,3 +1078,129 @@ class RailRouter:
             )
             intervals.append((from_idx, to_idx, cc, dist_m, iv_ms))
         return intervals
+
+
+# ---------------------------------------------------------------------------
+# Segment-cache variant key
+# ---------------------------------------------------------------------------
+
+
+def route_variant_key(profile: str, custom_model: dict | None) -> str:
+    """
+    Stable key for one routing-geometry variant on a graph: the gauge
+    profile plus a hash of the RESOLVED custom model — the two things
+    (and the only two things) that shape what GraphHopper returns for a
+    stop pair on a given graph.
+
+    Keyed on the resolved model, never on a composition id, deliberately:
+    if a scenario ever carries mixed per-country hsr_allowed,
+    build_custom_model() switches to per-country area rings, the hash
+    differs, the lookup misses, and the request degrades to live routing
+    — degraded, never wrong. The BLOCKED_COUNTRIES areas ride on every
+    model and so on every key: a border-polygon reseed changes the hash,
+    which is correct — the routes would change too.
+
+    NOT in the key, by design: ROUTE_BUILDER_VERSION (cached rows are raw
+    physics — dynamics, buffers, energy, TAC are all applied downstream),
+    ms_to_min rounding (driving_time_min is re-derived from the raw ms at
+    read time), scenario ids (buffer quotas are recomputed per request).
+    Only a routing-graph re-import stales rows, handled per graph by
+    RouteSegmentRepository.sync_graph_import().
+    """
+    canonical = json.dumps(custom_model, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+    return f"{profile}-{digest}"
+
+
+# ---------------------------------------------------------------------------
+# Layer 2 — the shared domain entry
+# ---------------------------------------------------------------------------
+
+
+def resolve_routing_params(
+    composition: Composition,
+    tracks: TrackInfraCollection,
+    stops: list[StopInput],
+) -> tuple[int, dict[str, bool], int]:
+    """
+    (max_speed_kmh, avoid_hsr, gauge_mm) for layer 1 from the domain pair
+    and the call's own stops.
+
+    Gauge first — resolved from THIS call's stops, so every entry point
+    (trips, auto-stop mini-reroutes with a candidate spliced in) gets the
+    right profile without threading a value through; an impossible pairing
+    raises GaugeMismatchError here, before any HTTP — a domain answer, not
+    a snap error.
+
+    avoid_hsr is evaluated over the FULL track collection (complete over
+    every country, see TrackInfraCollection), not just countries with a
+    stop on the trip: a route can transit a country without stopping in
+    it, and that country's hsr_allowed must still bind. What "avoid" means
+    per segment (permitted track speed above HSR_TRACK_SPEED_THRESHOLD_KMH,
+    not the whole country network) is build_custom_model()'s concern.
+
+    Single derivation source: route_trip() below and
+    scripts/precompute_route_segments.py's variant enumeration both use
+    this, so a precomputed variant and a runtime request can never resolve
+    the same composition/tracks/stops differently.
+    """
+    gauge_mm = resolve_trip_gauge((s.stop for s in stops), composition)
+    avoid_hsr = {
+        cc: not (composition.hsr_allowed and track.hsr_allowed)
+        for cc, track in tracks.all().items()
+    }
+    return int(composition.max_speed_kmh), avoid_hsr, gauge_mm
+
+
+def apply_country_buffer(legs: list[RoutedLeg], tracks: TrackInfraCollection) -> None:
+    """
+    Fill RoutedLeg.buffer_time_min in-place with the country buffer quota
+    on raw driving time — per country, from the leg's unrounded
+    country_driving_ms, with per-country ms_to_min rounding (the exact
+    math _parse_legs applied before the segment cache moved buffer out of
+    the router). Scenario-dependent (buffer_quota_per is a pinned track
+    parameter), hence layer 2. "UNK" (open water/ferry) has no track row
+    and contributes no buffer, as before. Overwrites, so re-applying
+    against a different scenario is safe.
+    """
+    for leg in legs:
+        buffer_min = 0
+        for cc, dur_ms in leg.country_driving_ms.items():
+            track = tracks.get(cc)
+            if track is None:
+                continue
+            buffer_min += round(ms_to_min(dur_ms) * track.buffer_quota_per)
+        leg.buffer_time_min = buffer_min
+
+
+def route_trip(
+    router: RailRouter,
+    stops: list[StopInput],
+    composition: Composition,
+    tracks: TrackInfraCollection,
+    routing_mode: str,
+) -> list[RoutedLeg]:
+    """
+    Layer 2 — the entry every trip-routing call site uses
+    (route_factory._build_trip(), timetable.py's candidate mini-reroutes
+    and final reroute, adapters/routing_context.py). Resolves layer-1
+    inputs from the domain pair, routes (cache-served or live,
+    transparently), then applies the scenario-dependent physics:
+
+      1. apply_country_buffer() — quota on raw driving time
+      2. apply_traction_dynamics() (fullRouting only) — per-stop
+         accel/brake time loss, plus its own buffer share, strictly AFTER
+         the cruise speed was derived from raw driving time
+
+    This is the single call site for dynamics — nobody calls layer 1
+    directly except the cache machinery and the precompute script, so
+    every consumer keeps consistent physics.
+    """
+    max_speed_kmh, avoid_hsr, gauge_mm = resolve_routing_params(
+        composition, tracks, stops
+    )
+    legs = router.route(stops, max_speed_kmh, avoid_hsr, gauge_mm, routing_mode)
+    apply_country_buffer(legs, tracks)
+    if routing_mode == "fullRouting":
+        apply_traction_dynamics(legs, composition, tracks)
+    return legs

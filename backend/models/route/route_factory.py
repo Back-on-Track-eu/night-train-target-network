@@ -90,12 +90,19 @@ from models.params import (
     ParamVersions,
     TrackInfraCollection,
     StopInfraCollection,
+    PassageChargeCollection,
     Composition,
     CompositionCollection,
 )
 from models.route.trip import Stop, StopType, Segment, Trip, TimetableWarning
 from models.route.route import Route, TripPair, Parking, Shunting
-from models.route.routing.rail_router import RailRouter, RoutedLeg, build_router_stops
+from models.route.routing.gauge import resolve_trip_gauge
+from models.route.routing.rail_router import (
+    RailRouter,
+    RoutedLeg,
+    build_router_stops,
+    route_trip,
+)
 from models.route.timetable import (
     simple_automatic_timetable,
     simple_automatic_fixed_night_timetable,
@@ -148,6 +155,11 @@ class RouteProvenance:
     Threaded through for the same reason as compositions above — avoids
     api/proposal_calc.py's evaluate step reloading it via
     loader.build_all_stops() a second time."""
+    passages: PassageChargeCollection
+    """The scenario's separately charged crossings. Routing already
+    attributed each crossing to a segment by polygon (Segment.passages);
+    this carries the CHARGES for the evaluate step, threaded through for
+    the same reason as tracks and stop_infra above."""
 
 
 @dataclass
@@ -271,6 +283,8 @@ def _build_trip_stops_and_legs(
             country_distance_shares=routed_legs[i].country_distance_shares,
             country_time_shares=routed_legs[i].country_time_shares,
             slack_time_min=slack_per_leg[i],
+            countries=routed_legs[i].countries,
+            passages=routed_legs[i].passages,
         )
         for i in range(len(routed_legs))
     ]
@@ -281,10 +295,53 @@ def _build_trip_stops_and_legs(
 # =============================================================================
 
 
+# A full cycle is one operating day: a formation that arrives in the morning
+# leaves the same evening, and one that arrives in the evening leaves the next.
+# So a layover that computes negative has wrapped past midnight and gains a day.
+_DAY_MIN = 24 * 60
+
+
+def _layover_hours(trips: list[Trip], stop_id: str) -> float:
+    """Scheduled hours a formation stands at one terminal.
+
+    The gap between the last arrival at this stop and the next departure from
+    it, across all trips of the route — which for a trip pair is the inbound
+    arrival and the outbound departure of the following cycle. Terminal times
+    are minutes from midnight day 1 and a return trip may depart before the
+    inbound arrived in clock terms, so a negative gap wraps forward one day
+    rather than being clamped: an 06:00 arrival and a 20:00 departure is a
+    14 h layover, and a 20:00 arrival with an 06:00 departure is 10 h, not
+    minus fourteen.
+
+    Returns 0.0 where the route has no second trip to depart again — a
+    one-way route stables nothing, and pricing a layover of unknown length
+    would be an invention.
+    """
+    arrivals = [
+        t.segments[-1].to_stop.arrival_time_min
+        for t in trips
+        if t.segments and t.segments[-1].to_stop.stop_id == stop_id
+    ]
+    departures = [
+        t.segments[0].from_stop.departure_time_min
+        for t in trips
+        if t.segments and t.segments[0].from_stop.stop_id == stop_id
+    ]
+    arrivals = [a for a in arrivals if a is not None]
+    departures = [d for d in departures if d is not None]
+    if not arrivals or not departures:
+        return 0.0
+    gap = min(departures) - max(arrivals)
+    while gap < 0:
+        gap += _DAY_MIN
+    return gap / 60.0
+
+
 def _parkings(trips: list[Trip], stop_infra: StopInfraCollection) -> list[Parking]:
     """One Parking per unique terminal stop across all trips — deduplicated
     by stop_id since one formation sits there regardless of how many trips
-    share that terminal. trip_ids lists all trips parking at this stop."""
+    share that terminal. trip_ids lists all trips parking at this stop, and
+    hours is the scheduled layover (see _layover_hours)."""
     by_stop: dict[str, Parking] = {}
     for trip in trips:
         if not trip.stops:
@@ -302,6 +359,7 @@ def _parkings(trips: list[Trip], stop_infra: StopInfraCollection) -> list[Parkin
                     stop_name=sp.stop_name,
                     country_code=sp.stop_country_code,
                     trip_ids=[trip.trip_id],
+                    hours=_layover_hours(trips, stop.stop_id),
                 )
             elif trip.trip_id not in by_stop[stop.stop_id].trip_ids:
                 by_stop[stop.stop_id].trip_ids.append(trip.trip_id)
@@ -413,8 +471,19 @@ def _build_trip(
     """
     tid = _trip_id(proposal_id, proposal_version, direction, pair_index)
 
-    routed_legs = router.route(
-        stops=build_router_stops(stop_ids, stop_infra),
+    # The trip's track gauge — resolved from the USER'S stops before any
+    # router call so an impossible pairing (Kyiv 1520 + Warszawa 1435)
+    # fails as 422 gauge_mismatch, not a snap error. route() resolves
+    # again internally from whatever list it is given (auto-stop
+    # mini-reroutes included); this value is the one the Trip carries, and
+    # auto-added stops cannot change it — the candidate filter only admits
+    # stops that support it (timetable._find_nearby_candidates).
+    router_stops = build_router_stops(stop_ids, stop_infra)
+    gauge_mm = resolve_trip_gauge((rs.stop for rs in router_stops), composition)
+
+    routed_legs = route_trip(
+        router,
+        stops=router_stops,
         composition=composition,
         tracks=tracks,
         routing_mode=routing_mode,
@@ -517,6 +586,7 @@ def _build_trip(
         direction=direction,
         segments=segments,
         timetable_warnings=timetable_warnings,
+        gauge_mm=gauge_mm,
     )
     logger.info(
         "_build_trip: id=%s %dm %.0fmin", tid, trip.distance_m, trip.total_time_min
@@ -750,6 +820,7 @@ def plan_route(
     )
 
     stop_infra = loader.build_all_stops(scenario_id)
+    passages = loader.build_all_passages(scenario_id)
     parking = _parkings(
         [t for pair in trip_pairs for t in pair.trips],
         stop_infra,
@@ -778,6 +849,7 @@ def plan_route(
             tracks=tracks_used,
             compositions=compositions,
             stop_infra=stop_infra,
+            passages=passages,
         ),
         suggestions,
     )

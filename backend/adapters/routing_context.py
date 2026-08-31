@@ -106,7 +106,7 @@ def build_reference_context(
         from dev_env import resolve_service_url
         from models.route.routing.rail_router import CountryIndex, RailRouter
 
-        # RailRouter reads OPENRAILROUTING_URL at construction, so a
+        # RailRouter resolves the default graph at construction, so a
         # host-run caller needs the compose service name translated to
         # localhost before that. No-op inside the stack.
         resolve_service_url()
@@ -178,10 +178,20 @@ def _select_composition(collection, requested: Optional[str]):
 
 
 def route_stops(
-    context: ReferenceContext, points: Sequence[tuple[str, float, float]]
+    context: ReferenceContext,
+    points: Sequence[tuple],
 ) -> RoutingResult:
-    """Route an ordered (stop_id, lat, lon) sequence with the reference
-    composition, full two-pass routing.
+    """Route an ordered stop sequence with the reference composition, full
+    two-pass routing.
+
+    Each point is (stop_id, lat, lon) or (stop_id, lat, lon, gauges_mm).
+    PASS THE GAUGES WHENEVER THE CALLER HAS THEM. Without them every stop
+    looks gauge-unknown, resolve_trip_gauge() falls back to standard gauge
+    (its documented all-unknown rule), and the call routes on the
+    standard-gauge profile — which is right for ONTD's raw stops, whose
+    gauges nothing knows, but silently wrong for callers working from the
+    catalog: broad-gauge stations then fail to snap exactly as they did
+    before per-gauge profiles existed.
 
     Never raises: a failure comes back as a status, so one unroutable
     entry in a batch cannot lose the rest. The router distinguishes
@@ -191,7 +201,7 @@ def route_stops(
     real answer about the network and the first is a data problem.
     """
     from models.params import StopInfrastructure
-    from models.route.routing.rail_router import StopInput
+    from models.route.routing.rail_router import StopInput, route_trip
     from models.route.trip import StopType
 
     located = [p for p in points if p[1] is not None and p[2] is not None]
@@ -201,27 +211,41 @@ def route_stops(
     router_stops = [
         StopInput(
             stop=StopInfrastructure(
-                stop_id=stop_id,
-                stop_name=stop_id,
+                stop_id=point[0],
+                stop_name=point[0],
                 stop_country_code="",
-                lat=float(lat),
-                lon=float(lon),
+                lat=float(point[1]),
+                lon=float(point[2]),
                 # Never read while routing — charges belong to
                 # evaluation, which never runs on these.
                 stop_charge_eur=0.0,
+                # Fourth element when the caller has it; None otherwise,
+                # which resolve_trip_gauge() reads as "unknown".
+                gauges_mm=point[3] if len(point) > 3 else None,
             ),
             stop_type=StopType.BOTH,
         )
-        for stop_id, lat, lon in located
+        for point in located
     ]
     try:
-        legs = context.router.route(
-            router_stops, context.composition, context.tracks, "fullRouting"
+        legs = route_trip(
+            context.router,
+            router_stops,
+            context.composition,
+            context.tracks,
+            "fullRouting",
         )
         return RoutingResult(legs, "routed")
     except Exception as e:
         message = str(e)
-        status = "no_connection" if "Connection between" in message else "snap_failed"
+        if "Connection between" in message:
+            status = "no_connection"
+        elif "gauge" in message.lower():
+            # No single gauge serves the pair (GaugeMismatchError) — a
+            # real answer about the two networks, not a snapping failure.
+            status = "gauge_mismatch"
+        else:
+            status = "snap_failed"
         return RoutingResult([], status, message)
 
 

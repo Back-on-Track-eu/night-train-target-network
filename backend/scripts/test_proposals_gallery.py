@@ -64,7 +64,7 @@ from dev_env import api_base_url, routing_base_url  # noqa: E402
 
 API_BASE = api_base_url()
 ROUTING_URL = routing_base_url()
-CONTAINER_NAME = "openrailrouting"
+CONTAINER_NAME = "openrailrouting-infra-2026"
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "data")
 
 NAME_PREFIX = "MANUAL_TEST_GALLERY "
@@ -73,15 +73,20 @@ NAME_PREFIX = "MANUAL_TEST_GALLERY "
 # (tests/conftest.py's STOPS_* / scripts/test_scenario_comparison_paris_berlin.py
 # / scripts/test_timetable_comparison_hamburg_copenhagen.py) — every stop_id
 # here is already exercised elsewhere, so routing is expected to succeed.
-_BERLIN_WIEN = ["DE_BERLIN_HBF", "AT_WIEN_HBF"]
-_BERLIN_DRESDEN_WIEN = ["DE_BERLIN_HBF", "DE_DRESDEN_HBF", "AT_WIEN_HBF"]
-_BERLIN_ZUERICH_WIEN = ["DE_BERLIN_HBF", "CH_ZUERICH_HB", "AT_WIEN_HBF"]
-_PARIS_BERLIN = ["FR_PARIS_EST", "BE_BRUSSELS_M", "DE_HAMBURG_HBF", "DE_BERLIN_HBF"]
+_BERLIN_WIEN = ["osm:n3856100103", "osm:w423692233"]
+_BERLIN_DRESDEN_WIEN = ["osm:n3856100103", "osm:n25397500", "osm:w423692233"]
+_BERLIN_ZUERICH_WIEN = ["osm:n3856100103", "osm:n1236383343", "osm:w423692233"]
+_PARIS_BERLIN = [
+    "osm:n2506241285",
+    "osm:n17401552",
+    "osm:n2459919677",
+    "osm:n3856100103",
+]
 _MUENCHEN_COPENHAGEN = [
-    "DE_MUENCHEN_HBF",
-    "DE_BERLIN_HBF",
-    "DE_HAMBURG_HBF",
-    "DK_COPENHAGEN",
+    "osm:n2470201868",
+    "osm:n3856100103",
+    "osm:n2459919677",
+    "osm:n3739700410",
 ]
 
 # 10 combinations spanning 6 countries (DE, AT, CH, FR, BE, DK), a wide
@@ -351,7 +356,8 @@ def _run(label: str, **body):
             print(
                 f"      {props['stop_a']:<20} <-> {props['stop_b']:<20} "
                 f"proposal_count={props['proposal_count']} "
-                f"proposal_ids={props['proposal_ids']} "
+                f"existing_count={props['existing_count']} "
+                f"total_count={props['total_count']} "
                 f"avg_margin={props['avg_margin_eur_per_train_km']}"
             )
     if "map_stop_counts" in result:
@@ -477,7 +483,7 @@ def demo():
 
     # --- array-overlap filters (mode "any"/OR — the default) ---
     _run("array_overlap_countries", filter={"countries": ["DK"]})
-    _run("array_overlap_stop_ids", filter={"stop_ids": ["DE_BERLIN_HBF"]})
+    _run("array_overlap_stop_ids", filter={"stop_ids": ["osm:n3856100103"]})
 
     # --- array filter mode "all"/AND — every listed country must be
     # touched; München-Copenhagen crosses DE and DK, so "all" over
@@ -516,7 +522,7 @@ def demo():
         filter={
             "trip_windows": [
                 {
-                    "stop_id": "DE_BERLIN_HBF",
+                    "stop_id": "osm:n3856100103",
                     "departure": {"from": "18:00", "to": "23:59"},
                 }
             ]
@@ -527,7 +533,7 @@ def demo():
         filter={
             "trip_windows": [
                 {
-                    "stop_id": "DE_BERLIN_HBF",
+                    "stop_id": "osm:n3856100103",
                     "departure": {"from": "03:00", "to": "03:01"},
                 }
             ]

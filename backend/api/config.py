@@ -110,6 +110,26 @@ PROPOSALS_DEFAULT_LIMIT = _env_int("PROPOSALS_DEFAULT_LIMIT", 50)
 
 
 # =============================================================================
+# Response compression — main.py's Compress(app)
+# =============================================================================
+
+# The gallery's map sections are large GeoJSON, which compresses roughly an
+# order of magnitude; nothing in front of the app compresses (gunicorn cannot,
+# and the Caddy vhost in front of production has no `encode` directive), so
+# Flask is the only layer that covers every environment.
+#
+# Level 1, not flask-compress's default 6. Gunicorn runs SYNC workers (4 in the
+# dev stack, 2 in production), so a worker spending CPU on gzip is a worker
+# serving nobody — and on JSON of this shape level 1 already gets most of the
+# ratio for a fraction of the cost. Raise it only with a measurement in hand.
+COMPRESS_LEVEL = _env_int("COMPRESS_LEVEL", 1)
+
+# Responses below this many bytes are sent uncompressed — the round trip
+# through zlib is not worth it, and most of this API's responses are small.
+COMPRESS_MIN_SIZE = _env_int("COMPRESS_MIN_SIZE", 2048)
+
+
+# =============================================================================
 # Proposals statistics — api/proposal_stats.py
 # =============================================================================
 
@@ -155,7 +175,11 @@ def log_effective_config() -> None:
         "POSTGRES_HOST": os.environ.get("POSTGRES_HOST"),
         "POSTGRES_PORT": os.environ.get("POSTGRES_PORT"),
         "POSTGRES_DB": os.environ.get("POSTGRES_DB"),
-        "OPENRAILROUTING_URL": os.environ.get("OPENRAILROUTING_URL"),
+        # Per-graph now; the boot line reports the DEFAULT graph, and
+        # dependencies.py logs the full key -> URL map on startup.
+        "OPENRAILROUTING_URL_INFRA_2026": os.environ.get(
+            "OPENRAILROUTING_URL_INFRA_2026"
+        ),
         "API_CONTAINER_PORT": os.environ.get("API_CONTAINER_PORT", "5000"),
         "ONTD_BOOTSTRAP": os.environ.get("ONTD_BOOTSTRAP", "auto"),
         "AUTH_EMAIL_DEV_MODE": os.environ.get("AUTH_EMAIL_DEV_MODE", "false"),
@@ -173,6 +197,8 @@ def log_effective_config() -> None:
         "GUEST_TTL_DAYS": GUEST_TTL_DAYS,
         "FEEDBACK_SUBJECT_MAX_LEN": FEEDBACK_SUBJECT_MAX_LEN,
         "PROPOSALS_DEFAULT_LIMIT": PROPOSALS_DEFAULT_LIMIT,
+        "COMPRESS_LEVEL": COMPRESS_LEVEL,
+        "COMPRESS_MIN_SIZE": COMPRESS_MIN_SIZE,
         "PROPOSALS_STATS_COUNTRY_TOP": PROPOSALS_STATS_COUNTRY_TOP,
         "PROPOSALS_STATS_COUNTRY_FLOP": PROPOSALS_STATS_COUNTRY_FLOP,
         "PROPOSALS_STATS_RELATION_MAX_KM": PROPOSALS_STATS_RELATION_MAX_KM,

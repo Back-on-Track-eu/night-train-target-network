@@ -2,7 +2,7 @@
 conftest.py
 ===========
 Shared pytest fixtures. All tests are integration tests — they require the
-full Docker stack (postgres + openrailrouting + api) to be running.
+full Docker stack (postgres + openrailrouting-infra-2026 + api) to be running.
 
 Start the stack before running:
     cd backend/docker && docker-compose up -d
@@ -42,10 +42,10 @@ API_BASE = api_base_url()
 DB_CONFIG = db_config()
 
 # Canonical stop lists — every seeded stop the suite routes between.
-STOPS_BERLIN_WIEN = ["DE_BERLIN_HBF", "AT_WIEN_HBF"]
-STOPS_BERLIN_DRESDEN_WIEN = ["DE_BERLIN_HBF", "DE_DRESDEN_HBF", "AT_WIEN_HBF"]
-STOPS_BERLIN_ZUERICH_WIEN = ["DE_BERLIN_HBF", "CH_ZUERICH_HB", "AT_WIEN_HBF"]
-STOPS_COPENHAGEN_STOCKHOLM = ["DK_COPENHAGEN", "SE_STOCKHOLM_C"]
+STOPS_BERLIN_WIEN = ["osm:n3856100103", "osm:w423692233"]
+STOPS_BERLIN_DRESDEN_WIEN = ["osm:n3856100103", "osm:n25397500", "osm:w423692233"]
+STOPS_BERLIN_ZUERICH_WIEN = ["osm:n3856100103", "osm:n1236383343", "osm:w423692233"]
+STOPS_COPENHAGEN_STOCKHOLM = ["osm:n3739700410", "osm:n25948183"]
 
 # Two calibrated test compositions — one per material strategy, so the
 # suite exercises both mechanics end to end: STD-NEW operator (loco 174,
@@ -193,38 +193,81 @@ def base_scenario(db_cur):
 
 @pytest.fixture(scope="session")
 def historical_scenario(db_cur):
-    """The seeded, deprecated historical scenario (scenario_key=
-    '2026-baseline') — pins every table to version 1 (DE's original
-    lower track_tac_eur_train_km among them). is_current_scenario is
-    FALSE for this row (it's not the head of an active lineage), so it's
-    looked up by scenario_key alone. Enables scenario override tests
-    that need a known-different snapshot from the live base."""
+    """The superseded revision of the infra-2026 lineage (scenario_key=
+    'infra-2026', is_current_scenario=FALSE) — pins every table to version
+    4, carrying Germany's pre-correction track access rates. The only
+    seeded snapshot whose TARIFFS differ from the base, so it is what the
+    scenario-override tests pin to; the HSR and optimised-timetable
+    scenarios differ in routing and timetabling, not in charges."""
     db_cur.execute(
-        "SELECT * FROM scenario.scenarios WHERE scenario_key = '2026-baseline'"
+        "SELECT * FROM scenario.scenarios "
+        "WHERE scenario_key = 'infra-2026' AND is_current_scenario = FALSE"
     )
     row = db_cur.fetchone()
     assert row is not None, (
-        "Historical 2026 scenario missing — see db/dev/seed.py: "
-        "HISTORICAL_SCENARIO_2026."
+        "Superseded infra-2026 revision missing — see db/dev/seed.py: "
+        "SUPERSEDED_BASE_REVISION."
     )
     return row
 
 
 @pytest.fixture(scope="session")
 def hsr_scenario(db_cur):
-    """The seeded 'HSR allowed' scenario (scenario_key=
-    '2032-baseline-hsr-allowed') — a second current lineage head
-    (is_current_scenario=TRUE, is_current_base=FALSE), identical to the
-    live base except track_hsr_allowed=True everywhere. Enables tests of
-    the non-base 'current_scenarios' API group and of pinning to a
-    live-but-non-default scenario_id."""
+    """The seeded 'NT on HSR' scenario (scenario_key='infra-2026-hsr') —
+    a second current lineage head (is_current_scenario=TRUE,
+    is_current_base=FALSE), identical to the live base except
+    track_hsr_allowed=True everywhere. Enables tests of the non-base
+    'current_scenarios' API group and of pinning to a live-but-non-default
+    scenario_id."""
     db_cur.execute(
         "SELECT * FROM scenario.scenarios "
-        "WHERE scenario_key = '2032-baseline-hsr-allowed' AND is_current_scenario = TRUE"
+        "WHERE scenario_key = 'infra-2026-hsr' AND is_current_scenario = TRUE"
     )
     row = db_cur.fetchone()
     assert row is not None, (
-        "HSR-allowed scenario missing — see db/dev/seed.py: HSR_SCENARIO."
+        "NT-on-HSR scenario missing — see db/dev/seed.py: HSR_SCENARIO."
+    )
+    return row
+
+
+@pytest.fixture(scope="session")
+def scenarios_2032(db_cur):
+    """The three Infra 2032 lineage heads, keyed by scenario_key.
+
+    They mirror the 2026 trio's operating conditions on the infra_2032
+    routing graph and pin versions 5-7 (db/dev/seed.py's version grid).
+    Read-only in tests: computing on one needs an OpenRailRouting
+    instance for that graph, which CI deliberately does not run — see
+    the deployment-coupling note in the seed's scenario section.
+    """
+    db_cur.execute(
+        "SELECT * FROM scenario.scenarios "
+        "WHERE routing_graph_key = 'infra_2032' ORDER BY scenario_key"
+    )
+    rows = {row["scenario_key"]: row for row in db_cur.fetchall()}
+    assert set(rows) == {
+        "infra-2032",
+        "infra-2032-hsr",
+        "infra-2032-hsr-opt-tt",
+    }, f"Infra 2032 scenarios missing or renamed — got {sorted(rows)}"
+    return rows
+
+
+@pytest.fixture(scope="session")
+def opt_tt_scenario(db_cur):
+    """The seeded optimised-timetable scenario (scenario_key=
+    'infra-2026-hsr-opt-tt') — the third current lineage head, identical
+    to hsr_scenario except for a reduced track_buffer_quota_per. The only
+    seeded scenario carrying a numeric value difference from the base, so
+    it is what cross-version resolution tests pin to (see
+    models/scenarios/README.md for the reduction itself)."""
+    db_cur.execute(
+        "SELECT * FROM scenario.scenarios "
+        "WHERE scenario_key = 'infra-2026-hsr-opt-tt' AND is_current_scenario = TRUE"
+    )
+    row = db_cur.fetchone()
+    assert row is not None, (
+        "Optimised-timetable scenario missing — see db/dev/seed.py: OPT_TT_SCENARIO."
     )
     return row
 
@@ -237,7 +280,7 @@ def hsr_scenario(db_cur):
 # All fixtures pin auto_stop_addition="off": these are fixed-corridor
 # physics fixtures whose stop lists downstream tests (test_20 content
 # math, test_50 GTFS decomposition) rely on being exactly as requested —
-# the seeded CZ_BRNO_HLN would otherwise be auto-added to any corridor
+# the seeded osm:n3325029085 would otherwise be auto-added to any corridor
 # passing through Brno. The add/suggest behaviour has its own dedicated
 # tests in test_35's TestSuggestMode / TestModeSwitches-equivalent classes.
 #

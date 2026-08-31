@@ -16,7 +16,7 @@ OpenRailRouting (GraphHopper fork) container. There are two Docker Compose
 files describing the same three backend services, kept manually in sync:
 
 - `backend/docker/docker-compose.yml` — canonical backend stack (`postgres`,
-  `openrailrouting`, `api`). Used by backend developers and CI.
+  `openrailrouting-infra-2026`, `api`). Used by backend developers and CI.
 - `.devcontainer/docker-compose.yml` — self-contained duplicate for VS Code
   / frontend developers, adding a fourth `frontend` service. See that file's
   header comment: it must be updated by hand whenever the canonical file's
@@ -188,14 +188,14 @@ defaults.)
 
 - Frontend: http://localhost:5173 (`FRONTEND_HOST_PORT`; Vite HMR — edits reflect instantly)
 - Backend API: http://localhost:5050 (`API_HOST_PORT` — host side moved off 5000, macOS AirPlay Receiver squats there; container binds `API_CONTAINER_PORT`, 5000)
-- OpenRailRouting: http://localhost:8989 (`OPENRAILROUTING_HOST_PORT`; admin/metrics on `OPENRAILROUTING_ADMIN_HOST_PORT`, 8990)
+- OpenRailRouting: http://localhost:8989 (`OPENRAILROUTING_HOST_PORT_INFRA_2026`; admin/metrics on `OPENRAILROUTING_ADMIN_HOST_PORT_INFRA_2026`, 8990). Every per-graph setting is suffixed with the graph key — see `models/route/routing/rail_router.py`.
 
 ### Backend stack only (PyCharm / backend work)
 
 ```bash
 cd backend/docker
 cp .env.example .env   # first time only
-docker-compose up -d   # postgres, openrailrouting, api
+docker-compose up -d   # postgres, openrailrouting-infra-2026, api
 ```
 
 See `backend/DEVELOPMENT.md` for the full backend workflow, including
@@ -209,6 +209,18 @@ npm install
 npm run dev
 ```
 
+### Frontend tests
+
+```bash
+cd frontend
+npm test
+```
+
+Vitest, node environment, `src/**/*.test.ts` — pure logic in `src/lib` only.
+Components are never mounted (no jsdom, no `@vue/test-utils`), so logic worth
+testing gets extracted out of the SFC first. Runs in CI as the `unit-tests`
+job; `npm run ci` mirrors the whole frontend workflow locally.
+
 ### Backend tests
 
 ```bash
@@ -216,7 +228,7 @@ cd backend
 uv run --extra dev pytest tests/ -v
 ```
 
-Requires the full Docker stack (`postgres` + `openrailrouting` + `api`)
+Requires the full Docker stack (`postgres` + `openrailrouting-infra-2026` + `api`)
 running — these are integration tests against a live stack, not mocks. See
 `backend/tests/README.md` for the full test layout.
 
@@ -281,13 +293,16 @@ Full contract, `--baseline` semantics, and editorial rules:
 | `frontend/src/style.css` | Tailwind v4 import + CSS layer order declaration |
 | `frontend/src/stores/store.ts` | Pinia store — currently containing everything but might have more in the future |
 | `frontend/src/i18n/index.ts` | i18n setup; add new locales here |
-| `frontend/src/i18n/locales/en.json` | English translation strings |
+| `frontend/src/i18n/locales/en.json` | English translation strings — including the whole landing pitch (`gallery.heading`, `gallery.welcome.*`, `gallery.audience.*`, `gallery.story.*`) |
+| `frontend/src/components/LandingIntro.vue` | Landing pitch above the gallery: layout, hero sizing and scroll cue only, no copy |
 | `frontend/src/types/api.ts` | TypeScript types for backend responses |
 | `backend/docker/docker-compose.yml` | Canonical backend Docker stack |
 | `.devcontainer/docker-compose.yml` | Self-contained VS Code devcontainer stack — duplicates the above, plus `frontend` |
 | `.github/workflows/ci.yml` | Frontend/backend formatting + frontend type-check (see CI/CD below) |
 | `.github/workflows/backend-tests.yml` | Version-bump enforcement + full backend integration test run |
 | `.pre-commit-config.yaml` | Pre-commit: ruff-format (`backend/`) + prettier (`frontend/`) |
+| `docs/DEPLOY_HANDOVER.md` | Living handover to Giovanni: deploy order, staging gotchas, server capacity. Update in the same PR as any change touching deploy, capacity or server data |
+| `docs/FRONTEND_HANDOVER.md` | Living handover to Bjarne: every backend change that reaches the API contract. Update in the same PR as the change |
 
 ---
 
@@ -310,6 +325,7 @@ GET  /api/proposals
 POST /api/proposals
 GET  /api/proposal/<id>
 POST /api/proposals/compare        two sides, stored or what-if overrides, stateless
+GET  /api/proposal/<id>/share      Open Graph link-preview stub (HTML, not JSON)
 GET  /api/proposal/<id>/engagements likes + comments + event timeline
 POST/DELETE /api/proposal/<id>/like
 POST /api/proposal/<id>/comment
@@ -387,6 +403,31 @@ pre-commit install
 ```
 
 Run manually: `pre-commit run --all-files`
+
+## Handovers
+
+Two living documents in `docs/`, one per person the backend hands work to:
+
+| File | Audience | Covers |
+| ---- | -------- | ------ |
+| `docs/DEPLOY_HANDOVER.md` | Giovanni | Deploy order, staging gotchas, server capacity and sizing |
+| `docs/FRONTEND_HANDOVER.md` | Bjarne | API contract changes, new fields, new error codes, UI implications |
+
+All handovers live in `docs/` — not next to the code they describe. Deploy
+procedure documented in two places drifts into two different procedures.
+
+**Update in the same PR as the change**, not afterwards. Each entry names
+the version that introduced it (`ROUTE_BUILDER_VERSION`, `CALC_VERSION`) and
+says when it stops applying — a gotcha with no expiry becomes folklore
+nobody dares delete. When an entry is done or obsolete, delete it; git
+history is the archive.
+
+Domain handovers to a single contributor for a single task (e.g.
+`backend/models/infrastructure/stops/charges/HANDOVER.md`) stay with their
+data — they are task lists, not standing contracts, and they disappear when
+the task is done.
+
+---
 
 ## Maintaining this file
 

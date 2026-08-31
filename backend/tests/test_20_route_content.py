@@ -37,11 +37,7 @@ from tests.helpers import (
     stop_times,
     trip_by_direction,
     trip_distance_km,
-    trip_energy_kwh,
 )
-
-# Current dummy energy model: flat factor, see models/energy/calc_energy_consumption.py.
-DUMMY_KWH_PER_KM = 28.0
 
 
 # =============================================================================
@@ -172,7 +168,7 @@ class TestTimetableMath:
         boarding/alighting minimum applies, so only positivity is asserted."""
         for trip in all_trips(route_berlin_dresden_wien):
             dresden = next(
-                s for s in stop_times(trip) if s["stop_id"] == "DE_DRESDEN_HBF"
+                s for s in stop_times(trip) if s["stop_id"] == "osm:n25397500"
             )
             assert dresden["dwell_time_min"] is not None
             assert dresden["dwell_time_min"] >= 1
@@ -223,42 +219,6 @@ class TestTrackInfraDefaulting:
 # =============================================================================
 
 
-class TestEnergyModel:
-    """Pins the DUMMY flat-factor model (28 kWh/km, ignoring weight/speed/
-    terrain). Both tests here must be REPLACED when the calibrated regression
-    model lands — they exist to fail loudly the moment energy semantics change
-    without the suite being updated."""
-
-    def test_energy_is_flat_factor_times_distance(self, route_berlin_zuerich_wien):
-        """Every segment's energy equals exactly 28 kWh/km × distance."""
-        for trip in all_trips(route_berlin_zuerich_wien):
-            for seg in trip["segments"]:
-                expected = DUMMY_KWH_PER_KM * seg["distance_m"] / 1000.0
-                assert seg["energy_kwh"] == pytest.approx(expected, rel=1e-6)
-
-    def test_energy_independent_of_composition(self, api_base):
-        """The dummy model ignores composition weight entirely — same stops,
-        different compositions → identical total energy.
-
-        auto_stop_addition="off": this pins the ENERGY model's own
-        property, not the auto-add layer — see
-        TestRouteGeometry.test_distance_independent_of_composition's
-        docstring for why auto-add selection is legitimately
-        composition-dependent (stop costs include the mass-dependent
-        accel/brake pair) and must be disabled to isolate a routing/
-        energy-model invariant from it."""
-        energies = {}
-        for comp_id in ("NEW-BAL-7", "NEW-BAL-14"):
-            route = build_route(
-                api_base,
-                STOPS_BERLIN_WIEN,
-                comp_id,
-                auto_stop_addition="off",
-            )
-            energies[comp_id] = sum(trip_energy_kwh(t) for t in all_trips(route))
-        assert energies["NEW-BAL-7"] == pytest.approx(energies["NEW-BAL-14"], rel=1e-6)
-
-
 # =============================================================================
 # Parkings and shuntings
 # =============================================================================
@@ -305,33 +265,47 @@ BASE_REQUEST = {
     "stops": STOPS_BERLIN_DRESDEN_WIEN,
     "composition_id": "NEW-BAL-7",
     # Pinned off so the structural tests below see a deterministic
-    # caller's-list route — CZ_BRNO_HLN would otherwise be auto-added
+    # caller's-list route — osm:n3325029085 would otherwise be auto-added
     # (see module docstring); the add/suggest paths have their own
     # fixture/requests in TestModeSwitches.
     "auto_stop_addition": "off",
 }
 
 # The stop list the "add" default actually produces on this corridor
-# (AUTO_STOP_BUFFER_M=10km, AUTO_STOP_ANALYTIC_DETOUR_M=100m — see
-# models/route/version.py 0.9.15) — 8 catalog stops merged in at their
-# geographic positions between Dresden and Wien, everything else the
-# caller's own. Re-derive with the one-off script in the WP10 thread
-# (POST auto_stop_addition="add", read trip_pairs[0].outbound) whenever
+# (AUTO_STOP_BUFFER_M=10km, AUTO_STOP_ANALYTIC_DETOUR_M=100m) — 7 catalog
+# stops merged in at their geographic positions between Dresden and Wien,
+# everything else the caller's own. Re-derive with a POST of
+# auto_stop_addition="add" and read trip_pairs[0].outbound whenever
 # AUTO_STOP_BUFFER_M, AUTO_STOP_ANALYTIC_DETOUR_M, AUTO_STOP_MAX_DETOUR_PER,
 # or the stop catalog itself changes.
+#
+# Updated at ROUTE_BUILDER 0.9.24, which moved the detour budget onto
+# TECHNICAL trip time (driving + dynamics + dwell) instead of padded time.
+# osm:n2736023837 and osm:n3129289404 dropped out: both sat at the margin of
+# the old, larger budget. That marginality is inherent — this list pins a
+# greedy cumulative budget, so a few per cent either way moves its tail, and
+# a diff here means the budget moved, not that the search broke.
+#
+# Re-pinned when the stop classification pipeline replaced the catalog:
+# coordinates now come from OSM rather than ONTD, so marginal candidates
+# moved a little and the greedy budget resolved differently. Bad Schandau
+# (osm:n2736023837) and Ceska Trebova (osm:n3129289404) came back in, and
+# Decin (osm:n5062517821) and Breclav-area osm:n3325029085 dropped out to
+# pay for them — the same tail churn the paragraph above describes, at the
+# same count of seven. What is asserted structurally rather than by
+# identity is the invariant that matters: every stop 'add' inserts also
+# appears in 'suggest' (test_..._suggest_... below).
 STOPS_WITH_BRNO = [
-    "DE_BERLIN_HBF",
-    "DE_DRESDEN_HBF",
-    "DE_BAD_SCHANDAU",
-    "CZ_DECIN_HL_N",
-    "CZ_USTI_NAD_LABEM_HL_N",
-    "CZ_PRAHA_HOLESOVICE",
-    "CZ_KOLIN",
-    "CZ_PARDUBICE_HL_N",
-    "CZ_CESKA_TREBOVA",
-    "CZ_BRNO_HLN",
-    "CZ_BRECLAV",
-    "AT_WIEN_HBF",
+    "osm:n3856100103",
+    "osm:n25397500",
+    "osm:n2736023837",
+    "osm:n4171354660",
+    "osm:n3134733933",
+    "osm:n24684084",
+    "osm:n3129312254",
+    "osm:n3129289404",
+    "osm:n3315724401",
+    "osm:w423692233",
 ]
 
 
@@ -364,7 +338,7 @@ def plan_response(api_base):
 @pytest.fixture(scope="module")
 def plan_response_default_add(api_base):
     """Same request with auto_stop_addition omitted entirely — covers the
-    "add" default, which inserts CZ_BRNO_HLN on this corridor. Built once
+    "add" default, which inserts osm:n3325029085 on this corridor. Built once
     for this module."""
     body = {k: v for k, v in BASE_REQUEST.items() if k != "auto_stop_addition"}
     resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=90)
@@ -408,20 +382,20 @@ class TestModeSwitches:
     def test_auto_stop_addition_defaults_to_add_and_inserts_brno(
         self, plan_response_default_add
     ):
-        """With auto_stop_addition omitted (the 'add' default), 9 catalog
+        """With auto_stop_addition omitted (the 'add' default), 7 catalog
         stops along the Dresden-Wien corridor — all within
-        AUTO_STOP_BUFFER_M (10km) and comfortably within the cumulative
-        detour budget — are inserted at their geographic positions,
-        marked auto_added=true, everything else the caller's own (see
+        AUTO_STOP_BUFFER_M (10km) and within the cumulative detour budget
+        — are inserted at their geographic positions, marked
+        auto_added=true, everything else the caller's own (see
         STOPS_WITH_BRNO's own comment for how to re-derive this list:
-        12 entries total = 2 user stops + 9 auto-added + 1 user stop).
+        10 entries total = 2 user stops + 7 auto-added + 1 user stop).
         The return trip carries the same final stop list reversed with the
         same auto_added marking (the search runs once, from outbound — see
         _build_trip_pair() in route_factory.py)."""
         pair = plan_response_default_add["route"]["trip_pairs"][0]
         assert "suggested_stops" not in plan_response_default_add
 
-        expected_added = [False, False] + [True] * 9 + [False]
+        expected_added = [False, False] + [True] * 7 + [False]
         outbound = stop_times(pair["outbound"])
         assert [s["stop_id"] for s in outbound] == STOPS_WITH_BRNO
         assert [s["auto_added"] for s in outbound] == expected_added
@@ -467,9 +441,15 @@ class TestModeSwitches:
         relation, not equality: every stop 'add' inserted also appears in
         'suggest' (both start from the same candidate search), but
         'suggest' additionally surfaces the over-budget candidates 'add'
-        had to stop short of. This corridor: 14 suggested vs 10 inserted.
+        had to stop short of. This corridor: 20 suggested vs 10 inserted.
 
-        The final pair (AT_WIEN_WESTBF / AT_WIEN_MEIDLING) is asserted as
+        Re-pinned with the stop classification pipeline's catalog, which is
+        denser along the Berlin approach — Gesundbrunnen, Lichtenberg,
+        Ostbahnhof and Suedkreuz are all genuinely within AUTO_STOP_BUFFER_M
+        of the corridor and now appear, where the previous ONTD-only catalog
+        simply had no row for them.
+
+        The final pair (osm:n60093107 / osm:n66432827) is asserted as
         a set, not a strict order: both sit close together near the
         route's Vienna approach, so suggest_auto_stops()'s
         (leg_index, along_leg_fraction) sort assigns them to the routed
@@ -497,20 +477,33 @@ class TestModeSwitches:
         suggested = payload["suggested_stops"]
         suggested_ids = [s["stop_id"] for s in suggested]
         assert suggested_ids[:-2] == [
-            "DE_BERLIN_SUEDKREUZ",
-            "DE_DRESDEN_NEUSTADT",
-            "DE_BAD_SCHANDAU",
-            "CZ_DECIN_HL_N",
-            "CZ_USTI_NAD_LABEM_HL_N",
-            "CZ_PRAHA_HLN",
-            "CZ_PRAHA_HOLESOVICE",
-            "CZ_KOLIN",
-            "CZ_PARDUBICE_HL_N",
-            "CZ_CESKA_TREBOVA",
-            "CZ_BRNO_HLN",
-            "CZ_BRECLAV",
+            "osm:n267379240",
+            "osm:n3723386251",
+            "osm:n2736023837",
+            "osm:n5062517821",
+            "osm:n4171354660",
+            "osm:n3134751791",
+            "osm:n3134733933",
+            "osm:n24684084",
+            "osm:n3129312254",
+            "osm:n3129289404",
+            "osm:n3325029085",
+            "osm:n3315724401",
         ]
-        assert set(suggested_ids[-2:]) == {"AT_WIEN_WESTBF", "AT_WIEN_MEIDLING"}
+
+        # The cross-mode invariant, independent of either pinned list: 'add'
+        # and 'suggest' run the same candidate search, so everything 'add'
+        # inserted must be offered by 'suggest'. This is what actually breaks
+        # if the search regresses; the lists above only pin today's budget.
+        auto_added = [
+            s["stop_id"]
+            for s in stop_times(
+                plan_response_default_add["route"]["trip_pairs"][0]["outbound"]
+            )
+            if s["auto_added"]
+        ]
+        assert set(auto_added) <= set(suggested_ids)
+        assert set(suggested_ids[-2:]) == {"osm:n60093107", "osm:n66432827"}
         for s in suggested:
             assert set(s) == {
                 "stop_id",
@@ -576,7 +569,7 @@ FIXED_NIGHT_REQUEST = {
     # Berlin->Dresden is ~2h naturally — far shorter than the 5h night
     # window, so this interval MUST be stretched, exercising slack
     # distribution and the slow-section warning in one live response.
-    "fixed_night_interval": ["DE_BERLIN_HBF", "DE_DRESDEN_HBF"],
+    "fixed_night_interval": ["osm:n3856100103", "osm:n25397500"],
 }
 
 
@@ -666,7 +659,7 @@ class TestFixedNightMode:
         warnings, window constraints still satisfied."""
         body = {
             **FIXED_NIGHT_REQUEST,
-            "fixed_night_interval": ["DE_BERLIN_HBF", "AT_WIEN_HBF"],
+            "fixed_night_interval": ["osm:n3856100103", "osm:w423692233"],
         }
         resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=90)
         assert resp.status_code == 200, resp.text[:300]
@@ -686,11 +679,11 @@ class TestFixedNightMode:
         "interval, reason",
         [
             (None, "missing entirely"),
-            (["DE_BERLIN_HBF"], "only one stop"),
-            (["DE_BERLIN_HBF", "DE_BERLIN_HBF"], "same stop twice"),
-            (["DE_BERLIN_HBF", 42], "non-string entry"),
-            (["DE_BERLIN_HBF", "FR_PARIS_EST"], "stop not in stops list"),
-            (["AT_WIEN_HBF", "DE_BERLIN_HBF"], "wrong travel order"),
+            (["osm:n3856100103"], "only one stop"),
+            (["osm:n3856100103", "osm:n3856100103"], "same stop twice"),
+            (["osm:n3856100103", 42], "non-string entry"),
+            (["osm:n3856100103", "osm:n2506241285"], "stop not in stops list"),
+            (["osm:w423692233", "osm:n3856100103"], "wrong travel order"),
         ],
     )
     def test_invalid_interval_returns_400(self, api_base, interval, reason):
@@ -709,7 +702,7 @@ class TestFixedNightMode:
         body = {
             **BASE_REQUEST,
             "timetable_mode": "simpleAutomatic",
-            "fixed_night_interval": ["DE_BERLIN_HBF", "DE_DRESDEN_HBF"],
+            "fixed_night_interval": ["osm:n3856100103", "osm:n25397500"],
         }
         resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=30)
         assert resp.status_code == 400

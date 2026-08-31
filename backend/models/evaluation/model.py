@@ -32,7 +32,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-CALC_VERSION: str = "0.9.16"
+CALC_VERSION: str = "0.9.23"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -66,6 +66,161 @@ CALC_MODEL_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.23": {
+        "date": "2026-08-30",
+        "author": "david",
+        "changes": "VALUES CHANGE, no logic change here: the energy model "
+        "replaced its flat 28 kWh/km placeholder with the calibrated model "
+        "(ENERGY_CALC_VERSION 1.1.0), so every segment's energy_kwh moves "
+        "and every figure derived from it moves with it. Fleet-weighted "
+        "intensity is 9.19 kWh/km against the 28 assumed before, so "
+        "traction energy cost falls by roughly two thirds and every cost "
+        "total, margin and net figure that contains it changes. Energy is "
+        "now composition-dependent: a heavier or longer train costs more "
+        "to move, where the placeholder charged every train the same per "
+        "kilometre. Pricing itself is untouched - calc_energy_price.py "
+        "multiplies the same rates by different kilowatt-hours. Bumped so "
+        "the compute cache misses and stored proposals refresh rather than "
+        "serving placeholder-era energy costs as current. See "
+        "models/energy/model.py CHANGELOG 1.1.0 and "
+        "models/energy/calib/README.md.",
+    },
+    "0.9.22": {
+        "date": "2026-08-17",
+        "author": "david",
+        "changes": "VALUES CHANGE: shunting and stabling are priced from the "
+        "facility calibration instead of two flat placeholder rates. A "
+        "shunting event costs what the infrastructure manager charges plus the "
+        "market cost of what it does not supply (115-321 EUR/event across "
+        "Europe against a flat 575 before, so most routes get cheaper here). "
+        "A stabling occupation is priced on the country's own basis against "
+        "the scheduled layover and the train's length, so Norway and Croatia "
+        "cost nothing on a twelve-hour turnaround where their free allowances "
+        "cover it, and the power drawn while standing is charged on top at "
+        "14.94 EUR/stabled hour. The flat track_parking_eur_day and the "
+        "reference figures are display-only from here. Implementation: "
+        "models/infrastructure/facility/calc_facility.py.",
+    },
+    "0.9.21": {
+        "date": "2026-08-17",
+        "author": "david",
+        "changes": "VALUES CHANGE: traction energy is priced from the "
+        "calibrated energy model instead of one flat rate per country. "
+        "Three things change per country leg. The electricity price is the "
+        "calibrated one (ENERGY_PRICING_CALIBRATION.md) rather than the "
+        "placeholder the seed carried — Germany moves 0.142 to 0.2336 "
+        "EUR/kWh, Switzerland 0.165 to 0.1527, the EU fallback 0.150 to "
+        "0.1553. Austria, Switzerland and Croatia band their tariff, so the "
+        "share of a country run inside 22:00-06:00 is priced at the night "
+        "rate pro rata, the same clock mechanism the German track access "
+        "night rate uses (and independent of it — the two bands differ by "
+        "country). And the charge for using the catenary and traction "
+        "power-supply installations is now levied where a country levies "
+        "it: thirteen do, in three different units, and the track access "
+        "calibration excludes every one of them as energy, so until now "
+        "nothing priced them. Per-country cost cells also attribute energy "
+        "to the country that supplied it rather than spreading a segment "
+        "total by distance share — the same correction track access got in "
+        "0.9.18. Implementation: "
+        "models/infrastructure/energy_pricing/calc_energy_price.py.",
+    },
+    "0.9.20": {
+        "date": "2026-08-13",
+        "author": "david",
+        "changes": "VALUES CHANGE: per-country and per-OD cells now "
+        "normalise against their OWN physics instead of the whole trip "
+        "pair's. The NormalisationScope machinery already did this for "
+        "route sections; countries and OD pairs were never wired to it and "
+        "silently fell back to the pair-wide denominators, which scaled "
+        "every per-unit figure down by that cell's share of the route. On "
+        "an Amsterdam-Warsaw run, Dutch track access read 0.38 EUR/train-km "
+        "where the applied Dutch rate is 2.58, because 190 of 1,310 km were "
+        "Dutch. A country cell now divides by the kilometres run in that "
+        "country; an OD cell by the span it actually rides, not the cycle "
+        "the train runs regardless of who is aboard. per_available_place_km "
+        "and per_sold_place_km get the same treatment, so an OD pair's "
+        "per-sold figures reflect its own occupancy rather than the pair "
+        "average. per_year and per_operating_day are untouched. "
+        "CONSEQUENCE: per-unit country and OD cells no longer sum to the "
+        "route total and cannot — rates over different denominators are "
+        "not additive. The additive identity is now the weighted form, "
+        "Sum(cell rate x cell km) = route rate x route km, pinned in "
+        "tests/test_30_evaluation_content.py. No response key changes.",
+    },
+    "0.9.19": {
+        "date": "2026-08-13",
+        "author": "david",
+        "changes": "Locomotive cost is summed over the machines a "
+        "composition actually hauls, each at its operator's rate for that "
+        "machine, replacing n_locos x one flat operator rate. The rate "
+        "moves from input_params.operators to input_params."
+        "operator_loco_costs, keyed by (operator, locomotive type) — the "
+        "same shape as operator_class_costs, and for the same reason: a "
+        "lease price is a commercial term of a pairing, not a property of "
+        "either side alone. NO VALUE CHANGE at the seeded catalog: every "
+        "composition runs one machine and each operator has exactly one "
+        "priced pairing, so the sum equals the old product. An unpriced "
+        "pairing now fails the load loudly instead of resolving to a "
+        "default. Response change: the operator block exposes "
+        "loco_lease_eur_h per machine plus a locos list, in place of the "
+        "single loco_full_service_lease_eur_h field.",
+    },
+    "0.9.18": {
+        "date": "2026-08-13",
+        "author": "david",
+        "changes": "Track access charges are priced from the calibrated "
+        "component model instead of one flat per-country rate. Each "
+        "country run of a segment is now charged its own day/night "
+        "train-km rate, gross-tonne-km rate, seat-km, per-stop, flat "
+        "per-train-km and revenue-share terms, plus a peak multiplier or "
+        "congestion surcharge where the country declares peak bands; the "
+        "separately charged crossings (Storebælt, Øresund, Channel "
+        "Tunnel) are billed per traverse, attributed to one segment per "
+        "trip at routing time. Night rates split each country run pro "
+        "rata by the clock time it spends inside the national band, with "
+        "the German rule widening the night rate to the whole German run "
+        "for a train carrying night accommodation. Values are seeded in "
+        "EUR at 2032 from models/infrastructure/tac/calib. "
+        "SEQUENCING: the traffic pre-pass now runs BEFORE segment costs, "
+        "since the Swiss revenue share and the Channel Tunnel's "
+        "per-passenger fee price traffic rather than distance; "
+        "compute_segment_passenger_loads() reads the Route's segments "
+        "directly instead of the computed SegmentCosts, which is what "
+        "makes that possible. VALUES CHANGE: tac_eur moves substantially "
+        "in both directions per country, and the per-country cost view "
+        "now attributes the charge each country actually levied instead "
+        "of spreading the segment total by distance share (crossing "
+        "charges keep the distance split — they have no levying "
+        "country). No response key is added or removed; the "
+        "CALC_FORMULAS legend gains entries, which is additive. "
+        "SegmentCost carries the component breakdown internally as "
+        "SegmentCost.tac.",
+    },
+    "0.9.17": {
+        "date": "2026-08-13",
+        "author": "david",
+        "changes": "Driver and crew rates are route-dependent: the "
+        "Dienstplanwirkungsgrad (roster efficiency) is computed per trip "
+        "instead of being baked into the seeded hourly rate as a flat "
+        "60/70%. operator_driver_costs_eur_h and operator_crew_costs_eur_h "
+        "now hold RAW productive-hour wages (54.16 / 48.75 rather than "
+        "90.33 / 69.67); five new operators columns carry the roster "
+        "parameters. A duty is capped by driving time for drivers "
+        "(Directive 2005/47/EC: 8 h on a night shift) and by working time "
+        "for onboard staff, so a trip crossing a duty boundary needs relief "
+        "crews and each relief adds a fixed unproductive allowance — "
+        "efficiency steps down at every boundary and recovers as that "
+        "allowance amortises over a longer trip. VALUES CHANGE: driver_eur "
+        "and crew_eur rise on trips longer than one duty (reference night "
+        "route ~+17% on both rates, ~+4% on total operator cost) and are "
+        "unchanged on short ones; refurbished seat coaches additionally "
+        "carry 0.25 attendants for door-sensor-less despatch. No response "
+        "key is added or removed — the CALC_FORMULAS legend gains entries, "
+        "which is additive. Numbered 0.9.17 rather than 0.9.15: this work "
+        "was developed in parallel on the calib branch, where it briefly "
+        "carried 0.9.15, and staging independently used 0.9.15 and 0.9.16 "
+        "in the meantime.",
+    },
     "0.9.16": {
         "date": "2026-08-12",
         "author": "david",
@@ -510,19 +665,81 @@ CALC_FORMULAS: dict[str, Formula] = {
     # ------------------------------------------------------------------
     # OPERATOR — VARIABLE
     # ------------------------------------------------------------------
+    # Roster efficiency is not itself a cost leaf — it is documented as a
+    # formula so the driver/crew legend can link to its derivation.
+    "roster_efficiency_driver": Formula(
+        latex=r"\eta = \eta_{ref} \cdot \frac{t_{train,h}}"
+        r"{t_{train,h} + t_{relief} \cdot (n_{duty} - 1)}, \quad "
+        r"n_{duty} = \left\lceil \frac{t_{basis,h}}{t_{duty,max}} \right\rceil",
+        description="Dienstplanwirkungsgrad — the share of paid staff "
+        "hours that is actually productive. Paid time exceeds time on the "
+        "train because of sign-on and sign-off, positioning to and from "
+        "the train, rest away from the home base, and reserve cover. A "
+        "shift may not exceed a legal maximum, so a long trip has to be "
+        "worked by two or more crews in succession; each handover adds a "
+        "fixed unproductive allowance. The value therefore drops at every "
+        "shift boundary and then recovers as that fixed allowance is "
+        "spread over a longer trip.",
+        inputs=(
+            FormulaParam(
+                symbol="eta_ref",
+                ref="column:input_params.operators.operator_driver_roster_eff_ref",
+                description="Efficiency when the trip fits a single shift "
+                "(operator_crew_roster_eff_ref for onboard staff)",
+                unit="–",
+            ),
+            FormulaParam(
+                symbol="t_train,h",
+                description="Time the staff member is on the train",
+                unit="h",
+            ),
+            FormulaParam(
+                symbol="t_basis,h",
+                description="Hours measured against the shift cap — "
+                "driving time for drivers, time on train for onboard staff",
+                unit="h",
+            ),
+            FormulaParam(
+                symbol="t_duty,max",
+                ref="column:input_params.operators.operator_driver_max_duty_h",
+                description="Longest permitted shift "
+                "(operator_crew_max_duty_h for onboard staff)",
+                unit="h",
+            ),
+            FormulaParam(
+                symbol="t_relief",
+                ref="column:input_params.operators.operator_relief_allowance_h",
+                description="Unproductive hours added per crew handover",
+                unit="h",
+            ),
+        ),
+        output=FormulaParam(
+            symbol="eta",
+            description="Productive share of paid hours for this trip",
+            unit="–",
+        ),
+    ),
     "driver_eur": Formula(
-        latex=r"C_{driver} = c_{driver/h} \times \left( \sum_{seg} "
-        r"t_{drive,h} \cdot f_{driver} + \sum_{stop} t_{dwell,h} \cdot "
-        r"f_{driver} \right)",
-        description="Driver cost: the hourly driver rate times all hours "
-        "the driver is on duty — driving between stops and waiting at "
-        "them.",
+        latex=r"C_{driver} = \frac{c_{driver/h}}{\eta_{driver}} \times "
+        r"\left( \sum_{seg} t_{drive,h} \cdot f_{driver} + \sum_{stop} "
+        r"t_{dwell,h} \cdot f_{driver} \right)",
+        description="Driver cost: the driver wage per productive hour, "
+        "divided by the share of paid hours that is productive, times all "
+        "hours the driver is on duty — driving between stops and waiting "
+        "at them. Trips too long for one driver shift need a relief "
+        "driver, which lowers that share and raises the effective rate.",
         inputs=(
             FormulaParam(
                 symbol="c_driver/h",
                 ref="column:input_params.operators.operator_driver_costs_eur_h",
-                description="Driver cost per hour on duty",
+                description="Driver wage per productive hour",
                 unit="€/h",
+            ),
+            FormulaParam(
+                symbol="eta_driver",
+                ref="formula:calc.roster_efficiency_driver",
+                description="Share of paid driver hours that is productive",
+                unit="–",
             ),
             FormulaParam(
                 symbol="t_drive,h",
@@ -551,17 +768,26 @@ CALC_FORMULAS: dict[str, Formula] = {
     # n_crew includes the train manager as +1.19 attendant-equivalents —
     # see composition_type_zugchef_crew_factor.
     "crew_eur": Formula(
-        latex=r"C_{crew} = c_{crew/h} \times \left( \sum_{seg} t_{drive,h} "
-        r"\cdot n_{crew} + \sum_{stop} t_{dwell,h} \cdot n_{crew} \right)",
-        description="Cabin crew cost: the hourly rate per crew member "
-        "times all hours the crew is on board — while driving and while "
-        "waiting at stops.",
+        latex=r"C_{crew} = \frac{c_{crew/h}}{\eta_{crew}} \times \left( "
+        r"\sum_{seg} t_{drive,h} \cdot n_{crew} + \sum_{stop} "
+        r"t_{dwell,h} \cdot n_{crew} \right)",
+        description="Cabin crew cost: the crew wage per productive hour, "
+        "divided by the share of paid hours that is productive, times all "
+        "hours the crew is on board — while driving and while waiting at "
+        "stops. Trips too long for one shift need a relief crew, which "
+        "lowers that share and raises the effective rate.",
         inputs=(
             FormulaParam(
                 symbol="c_crew/h",
                 ref="column:input_params.operators.operator_crew_costs_eur_h",
-                description="Cost per crew member per hour on duty",
+                description="Crew wage per productive hour, per attendant",
                 unit="€/h",
+            ),
+            FormulaParam(
+                symbol="eta_crew",
+                ref="formula:calc.roster_efficiency_driver",
+                description="Share of paid crew hours that is productive",
+                unit="–",
             ),
             FormulaParam(
                 symbol="t_drive,h",
@@ -625,7 +851,7 @@ CALC_FORMULAS: dict[str, Formula] = {
         inputs=(
             FormulaParam(
                 symbol="c_loco,lease/h",
-                ref="column:input_params.operators.operator_loco_lease_eur_h",
+                ref="column:input_params.operator_loco_costs.operator_loco_lease_eur_h",
                 description="All-inclusive locomotive rental rate per hour in use",
                 unit="€/h",
             ),
@@ -852,21 +1078,134 @@ CALC_FORMULAS: dict[str, Formula] = {
     # INFRASTRUCTURE
     # ------------------------------------------------------------------
     "tac_eur": Formula(
-        latex=r"C_{TAC} = \sum_{seg} \sum_{l \in seg} d_{km,l} \times p_{TAC,country(l)}",
-        description="Track access charge — the 'rail toll' paid to each "
-        "country's infrastructure company: the distance driven in the "
-        "country times its per-kilometre rate.",
+        latex=r"C_{TAC} = \sum_{seg}\Big[\sum_{c \in seg} \big( "
+        r"d_{c}\,(1{-}\nu_c)\,b_{day,c}\,\mu_c + d_{c}\,\nu_c\,b_{night,c} "
+        r"+ d_{c}\,(\gamma_c m_{gross} + \sigma_c P + \phi_c + \kappa_c \pi_c) "
+        r"\big) + \sum_{stop} h_{country(stop)} "
+        r"+ \rho_{c}\,R_{seg,c} + \sum_{x \in seg}\big(F_x + f_x n_{seg}\big)\Big]",
+        description="Track access charge — what the operator pays each "
+        "country's infrastructure company for using the track. Every "
+        "country charges its own mix: a rate per kilometre driven (higher "
+        "or lower at night), a rate per tonne of train weight and "
+        "kilometre, in some countries a rate per seat, a flat "
+        "administrative add-on, a fee per stop made, a share of the "
+        "ticket revenue earned there, and a surcharge for running through "
+        "a congested area at rush hour. Crossings billed separately — the "
+        "Storebælt and Øresund links and the Channel Tunnel — are added "
+        "per crossing, one of them also per passenger carried. A term a "
+        "country does not levy is simply absent.",
         inputs=(
             FormulaParam(
-                symbol="d_km,l",
-                description="Distance driven in the country",
+                symbol="d_c",
+                description="Distance driven in this country on this segment",
                 unit="km",
             ),
             FormulaParam(
-                symbol="p_TAC,country(l)",
-                ref="column:input_params.track_infrastructures.track_tac_eur_train_km",
-                description="The country's track access charge per train-kilometre",
+                symbol="nu_c",
+                ref="formula:calc.tac_night_share",
+                description="Share of the run in this country priced at the night rate",
+                unit="–",
+            ),
+            FormulaParam(
+                symbol="b_day,c",
+                ref="column:input_params.track_infrastructures.track_tac_b_day",
+                description="The country's day rate per train-kilometre",
                 unit="€/train-km",
+            ),
+            FormulaParam(
+                symbol="b_night,c",
+                ref="column:input_params.track_infrastructures.track_tac_b_night",
+                description="The country's night rate per train-kilometre",
+                unit="€/train-km",
+            ),
+            FormulaParam(
+                symbol="gamma_c",
+                ref="column:input_params.track_infrastructures.track_tac_gamma",
+                description="The country's rate per tonne of train weight "
+                "and kilometre",
+                unit="€/(t·km)",
+            ),
+            FormulaParam(
+                symbol="m_gross",
+                ref="column:input_params.loco_types.loco_type_weight_t",
+                description="Weight of the whole train — coaches plus locomotives",
+                unit="t",
+            ),
+            FormulaParam(
+                symbol="sigma_c",
+                ref="column:input_params.track_infrastructures.track_tac_seat_km",
+                description="The country's rate per place and kilometre",
+                unit="€/(place·km)",
+            ),
+            FormulaParam(
+                symbol="P",
+                description="Places the train offers",
+                unit="places",
+            ),
+            FormulaParam(
+                symbol="phi_c",
+                ref="column:input_params.track_infrastructures.track_tac_fixed_per_train_km",
+                description="The country's flat administrative add-on per "
+                "train-kilometre",
+                unit="€/train-km",
+            ),
+            FormulaParam(
+                symbol="kappa_c",
+                ref="column:input_params.track_infrastructures.track_tac_congestion_surcharge_eur_km",
+                description="The country's congestion surcharge per train-kilometre",
+                unit="€/train-km",
+            ),
+            FormulaParam(
+                symbol="pi_c",
+                ref="formula:calc.tac_peak_share",
+                description="Share of the run in this country falling in rush hour",
+                unit="–",
+            ),
+            FormulaParam(
+                symbol="mu_c",
+                ref="column:input_params.track_infrastructures.track_tac_peak_multiplier",
+                description="Factor the day rate is multiplied by over the "
+                "rush-hour share of the run (1 outside it)",
+                unit="factor",
+            ),
+            FormulaParam(
+                symbol="h_country(stop)",
+                ref="column:input_params.track_infrastructures.track_tac_per_stop",
+                description="Fee for making one stop, at that stop's own "
+                "country rate. A trip's first segment pays for both of its "
+                "ends, since no other segment owns the starting station",
+                unit="€/stop",
+            ),
+            FormulaParam(
+                symbol="rho_c",
+                ref="column:input_params.track_infrastructures.track_tac_revenue_share",
+                description="Share of the ticket revenue earned in this "
+                "country that the infrastructure manager takes",
+                unit="fraction",
+            ),
+            FormulaParam(
+                symbol="R_seg,c",
+                description="Ticket revenue attributable to this segment in "
+                "this country, per train run",
+                unit="€/trip",
+            ),
+            FormulaParam(
+                symbol="F_x",
+                ref="column:input_params.passage_charges.passage_fixed_eur",
+                description="Charge for crossing a separately billed link, per train",
+                unit="€/traverse",
+            ),
+            FormulaParam(
+                symbol="f_x",
+                ref="column:input_params.passage_charges.passage_per_passenger_eur",
+                description="Charge for crossing a separately billed link, "
+                "per passenger",
+                unit="€/passenger",
+            ),
+            FormulaParam(
+                symbol="n_seg",
+                description="Passengers aboard on this segment, per train run",
+                unit="passengers",
             ),
         ),
         output=FormulaParam(
@@ -875,29 +1214,178 @@ CALC_FORMULAS: dict[str, Formula] = {
             unit="€/year",
         ),
     ),
-    # Energy per leg comes from the energy model (models/energy/model.py),
-    # carried on the route input.
-    "energy_eur": Formula(
-        latex=r"C_{energy} = \sum_{seg} \sum_{l \in seg} E_{kWh,l} \times p_{energy,country(l)}",
-        description="Electricity cost for traction: the energy the train "
-        "uses in each country times that country's electricity price.",
+    "tac_night_share": Formula(
+        latex=r"\nu_c = \begin{cases} 0 & \text{no night tariff} \\ "
+        r"1 & \text{widening applies} \\ "
+        r"\dfrac{|[t_{in}, t_{out}) \cap B_{night,c}|}{t_{out} - t_{in}} "
+        r"& \text{otherwise}\end{cases}",
+        description="How much of a country run is charged at the night "
+        "rate. Countries with a night tariff define a band — Germany "
+        "23:00 to 06:00, for instance — and the run is split between day "
+        "and night rate in proportion to the clock time it actually "
+        "spends inside it, rather than being priced entirely one way "
+        "based on where its middle falls. Germany adds a rule of its own: "
+        "a train carrying couchettes, sleepers or capsules is charged the "
+        "night rate over its whole German run, whatever the clock says.",
         inputs=(
             FormulaParam(
-                symbol="E_kWh,l",
+                symbol="t_in, t_out",
+                description="When the train enters and leaves the country "
+                "on this segment",
+                unit="min",
+            ),
+            FormulaParam(
+                symbol="B_night,c",
+                ref="column:input_params.track_infrastructures.track_tac_night_band_start",
+                description="The country's night tariff band (band end: "
+                "track_tac_night_band_end)",
+                unit="time of day",
+            ),
+        ),
+        output=FormulaParam(
+            symbol="nu_c",
+            description="Share of the country run priced at the night rate",
+            unit="–",
+        ),
+    ),
+    "tac_peak_share": Formula(
+        latex=r"\pi_c = w \cdot \frac{\sum_{j} |[t_{in}, t_{out}) "
+        r"\cap B_{peak,c,j}|}{t_{out} - t_{in}}, \quad "
+        r"w = \tfrac{5}{7} \text{ if weekdays only, else } 1",
+        description="How much of a country run falls in rush hour. Austria "
+        "and Switzerland charge extra for running through a congested area "
+        "during the morning or evening commuter peak. Because the tool "
+        "knows a departure's clock time but not which day of the week it "
+        "runs, a peak that applies Monday to Friday only is charged at "
+        "five sevenths of the overlap — the average over a week — rather "
+        "than all or nothing.",
+        inputs=(
+            FormulaParam(
+                symbol="t_in, t_out",
+                description="When the train enters and leaves the country "
+                "on this segment",
+                unit="min",
+            ),
+            FormulaParam(
+                symbol="B_peak,c,j",
+                ref="column:input_params.track_infrastructures.track_tac_peak_band1_start",
+                description="The country's two daily peak bands "
+                "(track_tac_peak_band1_* and track_tac_peak_band2_*)",
+                unit="time of day",
+            ),
+            FormulaParam(
+                symbol="w",
+                ref="standard:INFRASTRUCTURE.WEEKDAY_BLEND",
+                description="Weekday blend, applied where the bands run "
+                "Monday to Friday only",
+                unit="–",
+            ),
+        ),
+        output=FormulaParam(
+            symbol="pi_c",
+            description="Share of the country run falling in rush hour",
+            unit="–",
+        ),
+    ),
+    # Energy per leg comes from the energy model (models/energy/model.py),
+    # carried on the route input; this prices it.
+    "energy_night_share": Formula(
+        latex=r"\nu^{E}_{c} = \frac{|[t_{in},t_{out}] \cap B^{E}_{c}|}{t_{out}-t_{in}}",
+        description="Share of a country leg whose electricity is billed at "
+        "the night rate: how much of the time the train spends in the "
+        "country falls inside that country's electricity night tariff "
+        "window. Only Austria, Switzerland and Croatia have one. The share "
+        "of the clock is applied to the kilowatt-hours drawn, which is exact "
+        "at constant speed — the routed geometry does not record where along "
+        "the leg the clock crossed the boundary. This window is not the "
+        "track access night band: Germany discounts track access at night "
+        "and not electricity, Switzerland the reverse.",
+        inputs=(
+            FormulaParam(
+                symbol="t_in, t_out",
+                description="When the train enters and leaves the country "
+                "on this segment",
+                unit="min",
+            ),
+            FormulaParam(
+                symbol="B^E_c",
+                ref="column:input_params.track_infrastructures.track_energy_night_band_start",
+                description="The country's electricity night band "
+                "(track_energy_night_band_start and _end)",
+                unit="time of day",
+            ),
+        ),
+        output=FormulaParam(
+            symbol="nu^E_c",
+            description="Share of the country leg billed at the night rate",
+            unit="–",
+        ),
+    ),
+    "energy_eur": Formula(
+        latex=r"C_{energy} = \sum_{seg} \sum_{c \in seg} \left[ E_{kWh,c} \left( (1-\nu^{E}_{c}) p_{c} + \nu^{E}_{c} p^{night}_{c} \right) + d_{c} \left( e_{c} + e^{gt}_{c} m_{gross} \right) \right]",
+        description="Traction energy cost: the electricity the train uses in "
+        "each country at that country's price, plus what the "
+        "infrastructure manager charges for supplying it through the "
+        "catenary. The electricity is billed at the day rate outside the "
+        "national night window and at the night rate inside it. The supply "
+        "charge is levied per kilometre by nine countries and on the weight "
+        "moved by three; it is kept in the unit each one publishes rather "
+        "than converted into a price per kilowatt-hour, since converting it "
+        "would depend on an assumed consumption.",
+        inputs=(
+            FormulaParam(
+                symbol="E_kWh,c",
                 ref="formula:energy.energy_per_leg",
                 description="Energy used in the country (from the energy model)",
                 unit="kWh",
             ),
             FormulaParam(
-                symbol="p_energy,country(l)",
+                symbol="p_c",
                 ref="column:input_params.track_infrastructures.track_energy_price_eur_kwh",
-                description="The country's traction electricity price",
+                description="The country's day traction electricity price",
                 unit="€/kWh",
+            ),
+            FormulaParam(
+                symbol="p^night_c",
+                ref="column:input_params.track_infrastructures.track_energy_price_night_eur_kwh",
+                description="Its night-band price, where the tariff is banded",
+                unit="€/kWh",
+            ),
+            FormulaParam(
+                symbol="nu^E_c",
+                ref="formula:calc.energy_night_share",
+                description="Share of the country leg billed at the night rate",
+                unit="–",
+            ),
+            FormulaParam(
+                symbol="e_c",
+                ref="column:input_params.track_infrastructures.track_energy_catenary_eur_train_km",
+                description="Charge for using the catenary and traction "
+                "power-supply installations, per train-kilometre",
+                unit="€/train-km",
+            ),
+            FormulaParam(
+                symbol="e^gt_c",
+                ref="column:input_params.track_infrastructures.track_energy_catenary_eur_gross_tonne_km",
+                description="The same charge where the country levies it on "
+                "the weight moved instead",
+                unit="€/gross-tonne-km",
+            ),
+            FormulaParam(
+                symbol="m_gross",
+                description="Gross weight of the whole consist, coaches plus "
+                "locomotives",
+                unit="t",
+            ),
+            FormulaParam(
+                symbol="d_c",
+                description="Kilometres run in the country on this segment",
+                unit="km",
             ),
         ),
         output=FormulaParam(
             symbol="C_energy",
-            description="Annual traction electricity cost",
+            description="Annual traction energy cost",
             unit="€/year",
         ),
     ),

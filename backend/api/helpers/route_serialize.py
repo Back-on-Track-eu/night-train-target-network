@@ -76,6 +76,8 @@ def _segment_to_dict(seg: Segment, geometry_id: str) -> dict:
         "energy_kwh": seg.energy_kwh,
         "country_distance_shares": seg.country_distance_shares,
         "country_time_shares": seg.country_time_shares,
+        "countries": seg.countries,
+        "passages": seg.passages,
     }
 
 
@@ -113,6 +115,10 @@ def _trip_general_parameters(trip: Trip) -> dict:
         "trip_km": round(trip_km, 1),
         "route_duration_min": duration_min,
         "average_speed_kmh": round(average_speed_kmh, 1),
+        # Which per-gauge routing profile carried the trip (0.9.27) —
+        # 1435 for the whole network west of the break-of-gauge lines,
+        # informative exactly where routes were impossible before.
+        "track_gauge_mm": trip.gauge_mm,
         "timetable_warnings": [
             _timetable_warning_to_dict(w) for w in trip.timetable_warnings
         ],
@@ -175,9 +181,6 @@ def _composition_to_dict(comp: Composition) -> dict:
         "hsr_allowed": comp.hsr_allowed,
         "min_boarding_time_min": comp.min_boarding_time_min,
         "min_alighting_time_min": comp.min_alighting_time_min,
-        "energy_factor_weight": comp.energy_factor_weight,
-        "energy_factor_speed": comp.energy_factor_speed,
-        "energy_factor_terrain": comp.energy_factor_terrain,
         "total_weight_t": comp.total_weight_t,
         "total_length_m": comp.total_length_m,
         "total_crew": comp.total_crew,
@@ -297,6 +300,7 @@ def route_to_dict(route: Route, scenario_id: int, tracks: TrackInfraCollection) 
                 "stop_name": p.stop_name,
                 "country_code": p.country_code,
                 "trip_ids": p.trip_ids,
+                "hours": p.hours,
             }
             for p in route.parkings
         ],
@@ -368,6 +372,12 @@ def _segment_from_dict(d: dict, geometries_by_id: dict[str, list]) -> Segment:
         energy_kwh=float(d["energy_kwh"]),
         country_distance_shares=d["country_distance_shares"],
         country_time_shares=d["country_time_shares"],
+        # pre-0.9.21 payloads predate ordered countries and passages. The
+        # share dict's keys stand in for the ordering (calc_tac.py places
+        # its clock windows approximately in that case), and no passage is
+        # charged — a stale route stays evaluable rather than failing.
+        countries=list(d.get("countries") or d["country_distance_shares"].keys()),
+        passages=list(d.get("passages") or []),
     )
 
 
@@ -479,6 +489,11 @@ def route_from_dict(
             stop_name=p["stop_name"],
             country_code=p["country_code"],
             trip_ids=p["trip_ids"],
+            # Payloads stored before ROUTE_BUILDER 0.9.23 carry no layover.
+            # Zero prices no stabling rather than guessing a duration, so a
+            # stale route stays evaluable with its facility line understated
+            # and visibly so — see Parking in models/route/route.py.
+            hours=float(p.get("hours", 0.0)),
         )
         for p in data.get("parkings", [])
     ]

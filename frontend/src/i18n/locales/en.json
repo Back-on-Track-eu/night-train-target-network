@@ -1,18 +1,160 @@
 {
+  "errors": {
+    "offline": "You appear to be offline. Please check your connection and try again.",
+    "network": "We could not reach the server. Please try again in a moment.",
+    "timeout": "Server request timed out. Please try again.",
+    "stillWorking": "This is taking longer than usual. Our servers seem to be experiencing heightened demand.",
+    "highDemand": "We're experiencing high demand, so this is taking longer than usual.",
+    "server": "Something went wrong on our side. Please try again in a moment. Our team has been notified of a possible error.",
+    "unavailable": "The service is temporarily unavailable. Please try again in a few minutes.",
+    "malformed": "Your session may have expired. Reload the page to continue.",
+    "unauthorized": "Please log in again to continue.",
+    "forbidden": "Insufficient permissions",
+    "notFound": "It seems like we could not find what you are looking for.",
+    "badInput": "That request could not be processed. Please check your input.",
+    "retry": "Try again",
+    "cancel": "Cancel",
+    "reload": "Reload page",
+    "degraded": {
+      "title": "Connection problems",
+      "body": "Several requests to the server have failed. We may be experiencing high demand — some data may be missing or out of date."
+    },
+    "stopsUnavailable": "The station list could not be loaded.",
+    "stopsEmpty": "No stations are available right now.",
+    "compositionsUnavailable": "Train configurations could not be loaded.",
+    "scenariosUnavailable": "Scenarios could not be loaded — calculating against the live base.",
+    "calcFailed": "This route could not be evaluated.",
+    "proposalsLoadFailed": "Proposals could not be loaded.",
+    "proposalLoadFailed": "This proposal could not be loaded.",
+    "publishFailed": "Your proposal could not be saved. Please try again.",
+    "likeFailed": "Your like could not be saved. Please try again.",
+    "commentsLoadFailed": "The discussion could not be loaded.",
+    "commentFailed": "Your comment could not be saved. Please try again.",
+    "feedbackFailed": "Your feedback could not be sent. Please try again.",
+    "authGuestFailed": "We could not start a guest session. Please try again.",
+    "slug": {
+      "invalid_code": "This code is invalid or expired. Please request a new one.",
+      "rate_limited": "Too many requests. Please wait a moment and try again.",
+      "data_not_loaded": "The service is still starting up. Please try again in a minute.",
+      "email_failed": "We could not send the code. Please try again.",
+      "scenario_not_base": "That scenario cannot be saved as a proposal."
+    }
+  },
   "proposal": {
-    "heading": "So, what's your \ndream night train route?",
+    "heading": "So, what's your dream night train route?",
+    "subheading": "Sketch it, run the numbers, improve and help us build the evidence for Europe's night train target network.",
     "evaluate": "Evaluate",
+    "recalculate": "Recalculate with this selection",
+    "evaluating": "Evaluating your proposal…",
     "edit": "Edit",
     "cancelEdit": "Cancel Edit",
+    "swapDirection": "Swap travel direction",
     "mapPlaceholder": "Map",
-    "trainCardPlaceholder": "Train info",
     "searchPlaceholder": "Search stops…",
     "addStop": "Add Stop",
     "noStopsFound": "No stops found",
+    "trackGauge": "Track gauge",
+    "gaugeUnknown": "gauge unknown",
     "minStopsTooltip": "Two stops per route minimum.",
     "loading": "Fetching data…",
-    "saved": "Proposal was saved.",
-    "publishError": "The proposal could not be saved. Please try again later.",
+    "saved": "Proposal was saved automatically.",
+    "routeStats": "Route stats",
+    "comments": {
+      "title": "Discussion",
+      "loading": "Loading the discussion…",
+      "empty": "No comments yet. Be the first to say something about this route.",
+      "placeholder": "Share your thoughts on this route…",
+      "post": "Post comment",
+      "posting": "Posting…",
+      "save": "Save",
+      "saving": "Saving…",
+      "cancel": "Cancel",
+      "edit": "Edit comment",
+      "edited": "edited",
+      "delete": "Delete comment",
+      "deleteConfirm": "Delete this comment?",
+      "deleteYes": "Delete",
+      "deleteNo": "Keep",
+      "charsLeft": "{count} character left | {count} characters left",
+      "charsOver": "{count} character over the limit | {count} characters over the limit",
+      "loginToComment": "Log in with an account to join the discussion.",
+      "login": "Log in",
+      "age": {
+        "now": "just now",
+        "minutes": "{count} minute ago | {count} minutes ago",
+        "hours": "{count} hour ago | {count} hours ago",
+        "days": "{count} day ago | {count} days ago"
+      }
+    },
+    "share": {
+      "like": "Like this proposal",
+      "title": "Share this proposal",
+      "copyLink": "Copy link",
+      "copied": "Link copied",
+      "copyFailed": "Couldn't copy the link — select and copy it from the address bar.",
+      "email": "E-mail",
+      "whatsapp": "WhatsApp",
+      "more": "Share via…",
+      "stopsCount": "{count} stop | {count} stops",
+      "countriesCount": "{count} country | {count} countries",
+      "message": "Europe needs a night train from {origin} to {destination}. {km} km, {stops}, {countries} — here's what it would take:",
+      "messagePlain": "Europe needs a night train from {origin} to {destination}. Here's what it would take:",
+      "emailSubject": "Europe needs a {origin}–{destination} night train",
+      "emailBody": "This is what a {origin} – {destination} night train would look like — route, timetable and running costs, modelled on the Back-on-Track Target Network:"
+    },
+    "funFacts": {
+      "label": "Did you know?",
+      "demandLabel": "Back-on-Track calls for",
+      "linkLabel": "back-on-track.eu",
+      "targetNetwork": {
+        "fact": "Europe ran about 100 night train lines in 2025 — roughly what you are planning here.",
+        "demand": "300 lines by 2035, enough to triple the number of night train passengers."
+      },
+      "sevenInTen": {
+        "fact": "7 in 10 Europeans say they would take a night train instead of a plane, given reasonable conditions.",
+        "demand": "dominant booking platforms to be required to show every night train running in their country."
+      },
+      "euEmissions": {
+        "fact": "A comprehensive European night train network could avoid 3% of the EU's total greenhouse gas emissions.",
+        "demand": "the Connecting Europe Facility — nearly €40 billion over six years — to co-finance night train coaches and track access charges."
+      },
+      "aviation": {
+        "fact": "Moving travellers from planes to night trains could cut about a quarter of aviation emissions.",
+        "demand": "a minimum airline ticket price, to stop fares being dumped below cost."
+      },
+      "climate": {
+        "fact": "Taking a night train is about 30 times better for the climate than flying the same route.",
+        "demand": "VAT scrapped on international rail tickets — international flights are already taxed at 0%."
+      },
+      "europeanSleeper": {
+        "fact": "European Sleeper's Brussels–Berlin–Prague route carried more than 230,000 passengers on over 750 trains in its first year.",
+        "demand": "the EU to buy sleeper and couchette coaches and lease them out, so newcomers like this one carry less risk."
+      },
+      "flyLess": {
+        "fact": "Nearly half of surveyed night train passengers say they will fly less and take the train more over the next five years.",
+        "demand": "night trains prioritised when train paths are allocated, so the services people want can actually run."
+      },
+      "carpatia": {
+        "fact": "Since December 2025 the Carpatia sleeper has linked Przemyśl and Kraków with Vienna, Salzburg and Munich.",
+        "demand": "EU co-funding for pilot routes to Europe's edges — Portugal, Greece, the Nordics, the Baltics."
+      },
+      "parisBerlin": {
+        "fact": "A Paris–Brussels–Berlin sleeper has run since March 2026, and Brussels–Milan is due to follow.",
+        "demand": "closed border stations reopened — no passenger train has crossed between Irun and Hendaye since 2020."
+      },
+      "rollingStock": {
+        "fact": "Europe has roughly 1,500 night train carriages. A full network needs several thousand more by 2035.",
+        "demand": "the European Investment Bank's Green Rail Investment Platform actually funded — the budget line is still empty."
+      },
+      "reuse": {
+        "fact": "About 1,300 publicly funded carriages are being scrapped in France, while Europe is short of sleeper stock.",
+        "demand": "EU rules that make reusing second-hand rolling stock possible instead."
+      },
+      "network": {
+        "fact": "Back-on-Track is a volunteer network of around 60 active members, with groups in eleven European countries.",
+        "demand": "night trains treated as their own transport segment, exempt from track access surcharges."
+      }
+    },
     "suggestions": {
       "title": "Add stops along the way?",
       "subtitle": "We found stops on your route. Pick any you'd like to include.",
@@ -28,6 +170,63 @@
       "daily": "Daily",
       "three_per_week": "3× per week"
     },
+    "composition": {
+      "label": "Train composition",
+      "detailsAria": "Show composition details",
+      "previous": "Previous composition",
+      "next": "Next composition",
+      "formation": "Formation",
+      "loco": "Locomotive",
+      "coaches": "coaches",
+      "places": "places",
+      "hsrAllowed": "High-speed lines",
+      "serviceCoach": "Service coach — no places",
+      "coachHint": "Point at a coach to see its type data",
+      "coachPosition": "Coach {position} of {count}",
+      "moreDetails": "Crew, cost inputs and sources",
+      "sources": "Sources",
+      "strategy": {
+        "new": "New fleet",
+        "refurbished": "Refurbished fleet"
+      },
+      "equipment": {
+        "wifi": "Wi-Fi",
+        "bikes": "Bicycle spaces",
+        "aircon": "Air conditioning",
+        "plugs": "Power sockets"
+      },
+      "byClass": {
+        "title": "By class",
+        "places": "places",
+        "capacity": "capacity",
+        "cost": "cost"
+      },
+      "kpi": {
+        "title": "Indicative unit costs",
+        "perTrainKm": "Per train-km",
+        "perPlaceKm": "Per place-km",
+        "caption": "Bars compare with the dearest composition in the catalogue."
+      },
+      "sections": {
+        "crew": "Crew",
+        "cost": "Cost inputs"
+      },
+      "fields": {
+        "drivers": "Drivers",
+        "attendants": "Attendants, coaches",
+        "trainManager": "Train manager",
+        "crewTotal": "Attendants, total",
+        "staffRate": "Staff per hour",
+        "crewFactor": "crew",
+        "purchase": "Purchase, whole train",
+        "availability": "Availability",
+        "amortisation": "Write-off period",
+        "cleaning": "Cleaning per coach",
+        "maintenance": "Coach maintenance",
+        "densityLength": "Length per place",
+        "densityWeight": "Weight per place"
+      }
+    },
     "map": {
       "travelTime": "Travel time",
       "unknownDuration": "—",
@@ -37,6 +236,20 @@
     },
     "evaluation": {
       "scenario": "Scenario",
+      "sections": {
+        "inputs": {
+          "title": "Choose a scenario and a train composition",
+          "body": "Both change every figure below — pick the scenario to evaluate against, and the train composition that would run the route."
+        },
+        "impact": {
+          "title": "Key performance indicators",
+          "body": "Annual demand, modal shift and emissions for this route."
+        },
+        "finance": {
+          "title": "Costs and revenue",
+          "body": "What running the route would cost each year, what tickets would bring in, and the gap between them."
+        }
+      },
       "views": {
         "route": "Full Route",
         "per_trip_pair": "By trip pair",
@@ -80,7 +293,7 @@
         "fixed": "Fixed",
         "infrastructure": "Infrastructure",
         "revenue": "Revenue",
-        "margin": "Expected Margin"
+        "margin": "Operator Expected Margin"
       },
       "fields": {
         "driver": "Driver",
@@ -146,7 +359,6 @@
         "submit": "Send feedback",
         "submitting": "Sending…",
         "success": "Thank you! Your feedback has been sent.",
-        "error": "Something went wrong. Please try again.",
         "invalidEmail": "Please enter a valid e-mail address."
       },
       "classes": {
@@ -159,14 +371,20 @@
       "direction": {
         "outbound": "outbound",
         "return": "return"
+      },
+      "section": {
+        "startAria": "Section start",
+        "endAria": "Section end"
       }
     }
   },
   "gallery": {
+    "heading": "We believe it's time to bring them back on track — at scale.",
     "tabs": {
       "aToB": "From A to B",
       "byStation": "By Station",
-      "byCountry": "By Country"
+      "byCountry": "By Country",
+      "byRelation": "Between Countries"
     },
     "search": {
       "from": "From",
@@ -177,39 +395,120 @@
       "stationPlaceholder": "Click to select a station",
       "country": "Country",
       "countryPlaceholder": "Click to select a country",
+      "relationFrom": "Between",
+      "relationTo": "and",
+      "clear": "Clear {field}",
       "noCountries": "No countries found",
       "button": "Search"
     },
+    "welcome": {
+      "lead": "Europe was once crossed by night trains.",
+      "browse": "See what people have suggested",
+      "case": {
+        "title": "The case is simple",
+        "body": "For most trips between 500 and 3,000 kilometres, the night train is the only realistic alternative to flying — and flying is by far the most climate-damaging way to travel. In the EU, planes emit around 28 times more greenhouse gases per passenger than long-distance trains ({source}). Aviation will not decarbonise in time. Sleeping your way across the continent already works today.",
+        "source": "IEA figures, via our position paper"
+      },
+      "scale": {
+        "title": "Back-on-Track calls for doubling night train routes to 300",
+        "body": "Europe runs about 150 today. Our position paper puts the number needed at 300 — enough to triple passenger numbers within seven years and connect every major European city. But which 300? That question deserves more than a wish list. It deserves evidence."
+      },
+      "network": {
+        "title": "Target Network 2032 — a proposal for the night train network Europe needs",
+        "body": "It comes with the economics and climate effects to back every route up, built to put in front of the people who decide European and national transport policy. The routes run overwhelmingly on tracks that already exist. What’s needed isn’t a new railway — it’s the network, the right train concepts, fair operating conditions, and the political will to fund the gap."
+      }
+    },
+    "section": {
+      "title": "Gallery",
+      "subtitle": "Browse what people have suggested so far — or add the connection Europe is missing."
+    },
+    "matching": "Found {count} route | Found {count} routes",
+    "source": {
+      "all": "All routes",
+      "proposal": "Proposals",
+      "existing": "Existing"
+    },
     "sort": {
-      "direction": "Toggle sort direction",
-      "margin": "Margin",
-      "revenue": "Revenue",
-      "cost": "Cost",
-      "date": "Date",
       "distance": "Distance",
-      "duration": "Duration"
+      "co2": "CO₂ saved",
+      "stops": "Stops",
+      "likes": "Likes",
+      "comments": "Comments",
+      "created": "Created",
+      "updated": "Updated",
+      "dir": {
+        "desc": "high to low",
+        "asc": "low to high"
+      }
+    },
+    "map": {
+      "legend": {
+        "proposed": "Suggested",
+        "existing": "Existing connection"
+      }
     },
     "card": {
       "distance": "Distance",
       "proposedBy": "Proposed by {name}",
       "guest": "Guest",
-      "existing": "Existing service ↗",
+      "existing": "Existing connection",
       "km": "{value} km",
       "stops": "({count} stop) | ({count} stops)",
-      "co2PerYear": "{value} t CO₂/yr",
+      "co2PerYear": "{value} t CO₂/yr saved",
       "like": "Like",
       "loginToLike": "Log in with an account to like proposals.",
-      "likeFailed": "Could not update your like. Please try again."
+      "stat": {
+        "distance": {
+          "title": "Distance",
+          "body": "Total one-way length of the route."
+        },
+        "speed": {
+          "title": "Average speed",
+          "body": "Route length divided by total travel time, including time spent standing at stations."
+        },
+        "composition": {
+          "title": "Train composition",
+          "body": "The carriage configuration this route is planned with — it determines the seat, couchette and sleeper capacity."
+        },
+        "co2": {
+          "title": "CO₂ saved",
+          "body": "Estimated CO₂ emissions avoided each year by passengers shifting from air and car to this train. Derived from placeholder demand figures, not yet from a full demand model."
+        }
+      }
     },
     "back": "Gallery",
     "cta": {
       "create": "Suggest a new route"
     },
     "empty": "No proposals have been found for this filter. Be the first to make one!",
-    "loading": "Loading proposals…",
     "loadingMore": "Loading more…",
     "end": "That's all {count} proposals.",
-    "error": "Could not load proposals."
+    "audience": {
+      "title": "The network comes from you.",
+      "toggle": "How it works",
+      "traveller": {
+        "title": "You're a traveller who already knows the train you want.",
+        "body": "Draw it on the map, set stops and departure times, pick a train, and watch the model answer back: what it costs, who would ride it, how many flights it replaces. Five minutes. No expertise required."
+      },
+      "expert": {
+        "title": "You're a night train expert who knows how this business really works.",
+        "body": "Operations, rolling stock, infrastructure, demand — a model is only as good as what goes into it. Challenge our assumptions, bring real numbers, propose concepts nobody has costed yet. All open source, all open to argument."
+      },
+      "policy": {
+        "title": "You're a policy stakeholder who shapes where the money goes.",
+        "body": "Every proposal carries the figures a decision actually needs — costs, demand shifted off planes, CO₂ avoided — route by route and network-wide. Not a wish list. A costed one."
+      }
+    },
+    "story": {
+      "crowd": {
+        "label": "Why crowdsource it?",
+        "body": "Because the knowledge this network needs doesn't sit in one office. Travellers know which connections Europe is missing; experts carry operational, infrastructure and policy knowledge no consultancy could assemble alone. We want all of it — and a proposal the community built is one the community will defend."
+      },
+      "outcome": {
+        "label": "What happens to your route:",
+        "body": "submissions are evaluated against the measures that matter in transport policy — climate impact, demand, cost to the public. The strongest become the backbone of the target network; we close the gaps, refine the concepts, and publish it all as a study with a public map and method. Every contribution credited."
+      }
+    }
   },
   "user": {
     "guest": "Guest",
@@ -238,19 +537,13 @@
     "code": "Verification code",
     "verify": "Verify",
     "back": "Back",
-    "close": "Close",
-    "emailFailed": "Could not send the code. Please try again.",
-    "invalidCode": "Invalid or expired code. Please request a new one.",
-    "guestFailed": "Could not start a guest session. Please try again."
+    "close": "Close"
   },
   "toast": {
     "dismiss": "Dismiss",
     "loginSuccess": "Logged in successfully.",
     "registerSuccess": "Welcome! Your account was created.",
     "guestSuccess": "Continuing as guest.",
-    "logoutSuccess": "You have been logged out.",
-    "guestFailed": "Could not start a guest session. Please try again.",
-    "invalidCode": "Invalid or expired code. Please request a new one.",
-    "emailFailed": "Could not send the code. Please try again."
+    "logoutSuccess": "You have been logged out."
   }
 }

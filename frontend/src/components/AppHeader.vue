@@ -41,7 +41,21 @@ const { t } = useI18n()
       <div
         class="mx-auto flex h-[140px] w-full max-w-[1140px] items-center px-4 md:h-[201px] xl:px-0"
       >
-        <img :src="logo" :alt="t('header.logoAlt')" class="w-[240px] object-contain md:w-[350px]" />
+        <!-- New tab: this leaves the app entirely, and a proposal being built is
+             only draft-persisted — navigating away in-place would drop the
+             user's work mid-session. -->
+        <a
+          href="https://back-on-track.eu/"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="inline-block"
+        >
+          <img
+            :src="logo"
+            :alt="t('header.logoAlt')"
+            class="w-[240px] object-contain md:w-[350px]"
+          />
+        </a>
       </div>
     </div>
   </header>

@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Avatar from 'primevue/avatar'
 import AvatarGroup from 'primevue/avatargroup'
+import Popover from 'primevue/popover'
 import AppIcon from '@/components/AppIcon.vue'
+import AppSpinner from '@/components/AppSpinner.vue'
 import { useStore } from '@/stores/store'
 import { useToastStore } from '@/stores/toastStore'
 import { useLocaleFormat } from '@/composables/useLocaleFormat'
-import { likeProposal, unlikeProposal, ProposalsError } from '@/lib/proposalsApi'
+import { likeProposal, unlikeProposal } from '@/lib/proposalsApi'
+import { useApiFailure } from '@/composables/useApiFailure'
 import type { ProposalSummary } from '@/types/api'
 import {
   mdiArrowLeftRight,
@@ -20,9 +23,6 @@ import {
 
 const props = defineProps<{
   proposal: ProposalSummary
-  flash?: boolean
-  // Countries in itinerary order; falls back to the summary's alphabetical list.
-  orderedCountries?: string[]
   // Stops the active gallery search targeted (A-to-B from/to, or the single
   // by-station stop). Any that fall strictly between origin and destination are
   // pinned as always-visible itinerary anchors so the card shows why it matched.
@@ -34,6 +34,7 @@ const emit = defineEmits<{ select: [proposalId: number] }>()
 const { t } = useI18n()
 const store = useStore()
 const { formatInt } = useLocaleFormat()
+const { report } = useApiFailure()
 
 // Summaries carry stop_ids only (in travel order); resolve display names from
 // the loaded stop list, falling back to the id (existing/ONTD rows may carry
@@ -80,31 +81,96 @@ const itinerary = computed(() => {
 })
 
 // --- Lower-half stats (icon/value pairs, RouteStatsCard style) --------------
-const compositionLabel = computed(
-  () =>
-    store.compositions.find((c) => c.composition_id === props.proposal.composition_id)
-      ?.composition_id ?? props.proposal.composition_id,
-)
+// null on ONTD rows the catalogue names no composition for; the wagon stat is
+// then dropped entirely rather than shown as an icon beside a blank.
+const compositionLabel = computed(() => props.proposal.composition_id)
 
+// Each stat carries a stable `key`: it identifies the row for v-for AND selects
+// the explanation shown in the shared popover below. (The v-for used to key on
+// `icon`, which is a path string, not an identity.)
 const stats = computed(() => {
   const p = props.proposal
   const list = [
     {
+      key: 'distance',
       icon: mdiArrowLeftRight,
       value: t('gallery.card.km', { value: formatInt(p.total_distance_km) }),
     },
-    { icon: mdiSpeedometerMedium, value: `${formatInt(p.avg_speed_kmh)} km/h` },
-    { icon: mdiTrainCarPassenger, value: compositionLabel.value },
+    { key: 'speed', icon: mdiSpeedometerMedium, value: `${formatInt(p.avg_speed_kmh)} km/h` },
   ]
+  if (compositionLabel.value) {
+    list.push({
+      key: 'composition',
+      icon: mdiTrainCarPassenger,
+      value: compositionLabel.value,
+    })
+  }
   // co2 savings is a proposal-only KPI and null without an evaluation snapshot.
   if (p.source === 'proposal' && p.co2_savings_t_per_year != null) {
     list.push({
+      key: 'co2',
       icon: mdiLeaf,
       value: t('gallery.card.co2PerYear', { value: formatInt(p.co2_savings_t_per_year) }),
     })
   }
   return list
 })
+
+// --- Stat explanation popover ----------------------------------------------
+// One Popover for all four stats, driven by the hovered stat's key. Same
+// hover-intent shape as CostPanel.vue's cost-factor popover: open on enter,
+// stay open while the cursor is over the panel itself, close on a short delay
+// once it has left both — so moving from the row into the panel doesn't
+// flicker-close it. `openKey` skips a redundant show() for the same row.
+const statPopover = ref<InstanceType<typeof Popover> | null>(null)
+const activeStatKey = ref<string | null>(null)
+const openStatKey = ref<string | null>(null)
+let closeTimer: ReturnType<typeof setTimeout> | null = null
+
+function cancelClose() {
+  if (closeTimer !== null) {
+    clearTimeout(closeTimer)
+    closeTimer = null
+  }
+}
+
+function openStat(key: string, event: Event) {
+  cancelClose()
+  if (openStatKey.value === key) return
+  activeStatKey.value = key
+  statPopover.value?.show(event)
+}
+
+function scheduleClose() {
+  cancelClose()
+  closeTimer = setTimeout(() => statPopover.value?.hide(), 150)
+}
+
+// A card can be unmounted mid-delay (the gallery replaces the list on every
+// filter change), so the pending timer must not outlive it.
+onBeforeUnmount(cancelClose)
+
+const activeStat = computed(() => {
+  const key = activeStatKey.value
+  if (!key) return null
+  return {
+    title: t(`gallery.card.stat.${key}.title`),
+    body: t(`gallery.card.stat.${key}.body`),
+  }
+})
+
+// Defined once at setup rather than as an inline :pt literal, which would
+// allocate a fresh passthrough object (and fresh handler identities) on every
+// render of every card in the list. Same convention as Gallery.vue's selectPt.
+const statPopoverPt = {
+  root: {
+    class:
+      'z-50 !rounded-xl !border !border-primary-50/20 !bg-sapphire-100 !shadow-xl before:!hidden after:!hidden',
+    onMouseenter: cancelClose,
+    onMouseleave: scheduleClose,
+  },
+  content: { class: '!p-4 !bg-transparent' },
+}
 
 // --- Footer: proposer (proposals) vs ONTD catalog link (existing trains) ----
 const ontdUrl = computed(() =>
@@ -116,12 +182,24 @@ const proposerName = computed(() => {
   return p.is_guest ? t('gallery.card.guest') : p.display_name
 })
 
-// --- Whole-card click → open the proposal in ProposalViewport display mode.
-// Existing (ONTD) trains have no stored proposal to open, so only proposal
-// cards are clickable; the ONTD link / like button stop propagation.
-const isClickable = computed(() => props.proposal.source === 'proposal')
+// --- Whole-card click → the card's own destination. A proposal opens in
+// ProposalViewport display mode (via @select); an existing (ONTD) train has no
+// stored proposal, so it leaves for its back-on-track.eu catalogue entry — the
+// same target as the footer link, which stops propagation so a click on it
+// navigates once rather than twice. The like button stops propagation too.
+const isClickable = computed(() => props.proposal.source === 'proposal' || !!ontdUrl.value)
+// An existing train leaves the app, a proposal opens a view inside it — the two
+// are announced accordingly.
+const cardRole = computed(() => {
+  if (!isClickable.value) return undefined
+  return props.proposal.source === 'existing' ? 'link' : 'button'
+})
 function onCardClick() {
-  if (props.proposal.source === 'proposal') emit('select', props.proposal.proposal_id)
+  if (props.proposal.source === 'proposal') {
+    emit('select', props.proposal.proposal_id)
+  } else if (ontdUrl.value) {
+    window.open(ontdUrl.value, '_blank', 'noopener,noreferrer')
+  }
 }
 
 // Liking requires a registered account (not guest, not logged out) — an info
@@ -150,20 +228,18 @@ async function onLikeClick() {
     likeCount.value = result.count
     likedByMe.value = result.liked_by_me
   } catch (err) {
-    toastStore.addToast(
-      'error',
-      err instanceof ProposalsError ? err.message : t('gallery.card.likeFailed'),
-    )
+    // The card has nowhere sensible to put inline copy, so this failure always
+    // toasts — including the 429 the like endpoint really does rate-limit.
+    report(err, { fallbackKey: 'errors.likeFailed', force: 'toast' })
   } finally {
     likeBusy.value = false
   }
 }
 
-// Flags shown in itinerary order when available (the summary's own list is
-// alphabetical).
-const flagCountries = computed(() =>
-  props.orderedCountries?.length ? props.orderedCountries : props.proposal.countries,
-)
+// Alphabetical, as the summary carries them. Itinerary order used to come from
+// the per-proposal route fetch the gallery no longer makes (the map now rides
+// the list request), and is not worth one request per card on its own.
+const flagCountries = computed(() => props.proposal.countries)
 const flagUrl = (code: string) => `/flags/${code.toLowerCase()}.svg`
 
 // Circular flag SVGs are vendored under public/flags/. Any country without a
@@ -191,9 +267,9 @@ function avatarPt(code: string, index: number) {
 
 <template>
   <article
-    class="group flex flex-col gap-3 overflow-hidden rounded-xl p-4 transition-colors duration-500"
-    :class="[flash ? 'bg-primary-50/20' : 'bg-primary-50/5', isClickable ? 'cursor-pointer' : '']"
-    :role="isClickable ? 'button' : undefined"
+    class="group flex flex-col gap-3 overflow-hidden rounded-xl bg-primary-50/5 p-4 transition-colors duration-500"
+    :class="isClickable ? 'cursor-pointer' : ''"
+    :role="cardRole"
     :tabindex="isClickable ? 0 : undefined"
     @click="onCardClick"
     @keydown.enter="onCardClick"
@@ -225,9 +301,20 @@ function avatarPt(code: string, index: number) {
     </div>
 
     <!-- Lower half: stat pairs (left) · flags + like + proposer (right) -->
-    <div class="mt-auto flex items-start justify-between gap-3 border-t border-primary-50/10 pt-3">
+    <!-- items-stretch (not items-start) so the right-hand column spans the
+         footer's full height — that is what lets the ONTD badge's mt-auto reach
+         the bottom corner. -->
+    <div class="mt-auto flex justify-between gap-3 border-t border-primary-50/10 pt-3">
       <div class="flex flex-col gap-2 text-primary-50/70">
-        <div v-for="stat in stats" :key="stat.icon" class="flex items-center gap-2">
+        <!-- w-fit so the hover target is the stat itself, not the full column
+             width — otherwise the popover opens from empty space beside it. -->
+        <div
+          v-for="stat in stats"
+          :key="stat.key"
+          class="flex w-fit cursor-help items-center gap-2"
+          @mouseenter="openStat(stat.key, $event)"
+          @mouseleave="scheduleClose"
+        >
           <AppIcon :path="stat.icon" :size="18" />
           <span class="text-sm font-semibold text-primary-50/80">{{ stat.value }}</span>
         </div>
@@ -259,25 +346,44 @@ function avatarPt(code: string, index: number) {
             :class="likedByMe ? 'text-primary-50' : 'text-primary-50/70 hover:text-primary-50'"
             @click.stop="onLikeClick"
           >
-            <AppIcon :path="likedByMe ? mdiThumbUp : mdiThumbUpOutline" :size="22" />
+            <!-- likeBusy guarded double-clicks but drove no visual state, so the
+                 button looked inert for the whole round trip. -->
+            <AppSpinner v-if="likeBusy" :size="18" />
+            <AppIcon v-else :path="likedByMe ? mdiThumbUp : mdiThumbUpOutline" :size="22" />
           </button>
         </div>
 
-        <a
+        <!-- Where a proposal names its proposer, an existing train names itself
+             as one — the card's only marker of which kind it is. Plain text, not
+             a link: the whole card already leaves for the catalogue entry, so a
+             nested link would just be a second way to do the same thing. mt-auto
+             pins it to the card's bottom edge instead of letting it hang off the
+             flags. Kept in the badge style the "ONTD" pill used at the top. -->
+        <span
           v-if="ontdUrl"
-          :href="ontdUrl"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="text-xs text-primary-50/60 underline-offset-2 hover:underline"
-          @click.stop
+          class="mt-auto rounded-full bg-primary-50/15 px-2 py-0.5 text-[0.65rem] font-bold uppercase tracking-wider text-primary-50/70"
         >
           {{ t('gallery.card.existing') }}
-        </a>
+        </span>
         <span v-else class="text-xs text-primary-50/40">
           {{ t('gallery.card.proposedBy', { name: proposerName }) }}
         </span>
       </div>
     </div>
+
+    <!-- What each stat denominates. PrimeVue teleports this to body, so it sits
+         above the card and its own hover keeps it open (see openStat). -->
+    <Popover
+      ref="statPopover"
+      :pt="statPopoverPt"
+      @show="openStatKey = activeStatKey"
+      @hide="openStatKey = null"
+    >
+      <div v-if="activeStat" class="flex max-w-xs flex-col gap-1" @click.stop>
+        <h4 class="text-sm font-bold text-primary-50">{{ activeStat.title }}</h4>
+        <p class="text-xs leading-relaxed text-primary-50/70">{{ activeStat.body }}</p>
+      </div>
+    </Popover>
   </article>
 </template>
 

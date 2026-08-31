@@ -20,7 +20,7 @@ season governs.
 
 Locomotives are not fleet-sized here — they're utilization-based
 full-service leased and billed per segment in calc.py
-(composition.loco_full_service_lease_eur_h × segment.total_time_min),
+(composition.loco_lease_total_eur_h × segment.total_time_min),
 since lease cost scales directly with usage regardless of rotation.
 
 Operator invariant: all TripPairs in a Route must share the same operator_id.
@@ -107,12 +107,25 @@ class Shunting:
 class Parking:
     """One overnight parking location — deduplicated by stop_id.
     trip_ids lists all trips whose formation parks here (typically
-    both outbound and return of a trip pair)."""
+    both outbound and return of a trip pair).
+
+    hours is the scheduled layover: the gap between the arrival that ends one
+    trip here and the departure that starts the next. Physics, like every
+    other field on these objects — what it costs is
+    models/infrastructure/facility/calc_facility.py's business, and it needs
+    the duration because Europe prices stabling by started hour, by started
+    24 h period, or by occupation, and because a free allowance longer than
+    the layover zeroes the charge.
+
+    Defaults to 0.0 so a route payload stored before ROUTE_BUILDER 0.9.23
+    stays constructible — see api/helpers/route_serialize.py.
+    """
 
     stop_id: str
     stop_name: str
     country_code: str
     trip_ids: list[str]
+    hours: float = 0.0
 
 
 # =============================================================================
@@ -342,7 +355,7 @@ class Route:
         one loco's actual usage.
 
         Physics only — no cost, minutes not hours. calc.py converts to
-        hours and multiplies by composition.loco_full_service_lease_eur_h
+        hours and multiplies by composition.loco_lease_total_eur_h
         for route-level lease cost.
         """
         seen_segments: set[tuple[str, str]] = set()

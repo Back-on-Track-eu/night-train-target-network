@@ -11,7 +11,7 @@ and the same scenario:
        demand-wise unfavourable departure times at Berlin/Hamburg, which
        land in the middle of the night.
   B: timetable_mode="simpleAutomaticWithFixedNight"
-       fixed_night_interval=["DE_HAMBURG_HBF", "DK_COPENHAGEN"] — the
+       fixed_night_interval=["osm:n2459919677", "osm:n3739700410"] — the
        Hamburg->København section is what gets centered on 02:30 instead,
        so the German feeder (München/Berlin/Hamburg) keeps evening
        departures. The interval must depart Hamburg by 23:59 and arrive
@@ -29,7 +29,7 @@ here: the two modes draw the exact same lines on a map.
 
 Usage:
     python scripts/test_timetable_comparison_hamburg_copenhagen.py
-    python scripts/test_timetable_comparison_hamburg_copenhagen.py --interval DE_BERLIN_HBF DK_COPENHAGEN
+    python scripts/test_timetable_comparison_hamburg_copenhagen.py --interval osm:n3856100103 osm:n3739700410
     python scripts/test_timetable_comparison_hamburg_copenhagen.py --scenario 2032-baseline-hsr-allowed
 
 Writes raw route responses and a comparison summary to scripts/data/
@@ -56,14 +56,14 @@ from dev_env import api_base_url, routing_base_url  # noqa: E402
 
 API_BASE = api_base_url()
 ROUTING_URL = routing_base_url()
-CONTAINER_NAME = "openrailrouting"
+CONTAINER_NAME = "openrailrouting-infra-2026"
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "data")
 
-STOPS = ["DE_MUENCHEN_HBF", "DE_BERLIN_HBF", "DE_HAMBURG_HBF", "DK_COPENHAGEN"]
+STOPS = ["osm:n2470201868", "osm:n3856100103", "osm:n2459919677", "osm:n3739700410"]
 COMPOSITION_ID = "STD-7.1"
 
-DEFAULT_INTERVAL = ["DE_HAMBURG_HBF", "DK_COPENHAGEN"]
+DEFAULT_INTERVAL = ["osm:n2459919677", "osm:n3739700410"]
 DEFAULT_SCENARIO = "base"
 
 # Mirrors NIGHT_START_MIN / NIGHT_END_MIN in models/route/model.py —

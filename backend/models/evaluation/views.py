@@ -424,10 +424,7 @@ def build_breakdown(
         else route.loco_propulsion_min
     )
     b.cost.operator.variable.loco_eur = _ann_trip(
-        composition.n_locos
-        * composition.loco_full_service_lease_eur_h
-        * loco_min
-        / 60.0,
+        composition.loco_lease_total_eur_h * loco_min / 60.0,
         operating_days,
     )
 
@@ -492,7 +489,7 @@ def build_breakdown_per_trip_pair(
 def build_breakdown_per_trip_pair_per_country(
     route: Route,
     result: EvaluationResult,
-) -> dict[tuple[str, str], Breakdown]:
+) -> tuple[dict[tuple[str, str], Breakdown], dict[tuple[str, str], NormalisationScope]]:
     """
     Matrix keyed by (pair_key, country_code), with "all" as wildcard in either position.
 
@@ -500,7 +497,11 @@ def build_breakdown_per_trip_pair_per_country(
       driver, crew (driving)         → country_time_shares per segment
       driver, crew (dwell)           → 100% to StopCost.country_code
       loco, cleaning                 → pair-level time share (t_share)
-      coach_maintenance, tac, energy → country_distance_shares per segment
+      coach_maintenance              → country_distance_shares per segment
+      tac, energy                    → the country that levied the charge
+                                       (SegmentTac/SegmentEnergy.by_country);
+                                       crossing charges have no levying
+                                       country and keep the distance share
       coach_amortisation, financing,
       fix_overhead                   → pair-level distance share (d_share)
       shunting                       → 100% to terminal stop's country
@@ -509,6 +510,21 @@ def build_breakdown_per_trip_pair_per_country(
       svc_stockings, var_overhead,
       revenue, margin                → OD place-km share per country
                                        (from result.segment_passenger_loads)
+
+    Also returns a NormalisationScope per cell, so a country cell divides
+    by the physics OF THAT COUNTRY: €/train-km in the Netherlands means
+    per Dutch kilometre, not per kilometre of the whole route. Before CALC
+    0.9.20 country cells fell back to the pair-wide denominators, which
+    scaled every per-unit country figure down by that country's share of
+    the route — Dutch track access read as 0.38 €/train-km where the
+    applied rate was 2.58, because 190 of 1,310 km were Dutch.
+
+    CONSEQUENCE: per-unit country cells no longer sum to the route total,
+    and cannot — rates over different denominators are not additive. The
+    additive identity moves to the weighted form,
+    Σ(country rate × country km) = route rate × route km, which
+    tests/test_30_evaluation_content.py pins. per_year and
+    per_operating_day are unaffected and stay additive.
     """
     operating_days = route.schedule.operating_days_per_year
     segment_loads = result.segment_passenger_loads
@@ -516,6 +532,7 @@ def build_breakdown_per_trip_pair_per_country(
     all_countries = route.countries
 
     matrix: dict[tuple[str, str], Breakdown] = {}
+    scopes: dict[tuple[str, str], NormalisationScope] = {}
     sc_by_key = {(sc.trip_id, sc.segment_index): sc for sc in result.segment_costs}
 
     for pair in route.trip_pairs:
@@ -567,6 +584,35 @@ def build_breakdown_per_trip_pair_per_country(
             d_share = country_km / pair_total_km if pair_total_km > 0 else 0.0
             t_share = country_h / pair_total_h if pair_total_h > 0 else 0.0
 
+            # This country's own annual physics — the denominators its
+            # per-unit cells divide by. Capacity is offered over the
+            # country's kilometres; sold place-km comes straight off the
+            # loads, which already carry the per-country split.
+            country_sold_pkm = 0.0
+            country_sold_pkm_by_class: dict[str, float] = {}
+            for sl in pair_loads:
+                for ol in sl.od_loads:
+                    v = ol.place_km_by_country.get(country, 0.0)
+                    country_sold_pkm += v
+                    country_sold_pkm_by_class[ol.class_main] = (
+                        country_sold_pkm_by_class.get(ol.class_main, 0.0) + v
+                    )
+            scopes[(pair_key, country)] = NormalisationScope(
+                train_km=country_km * operating_days,
+                available_place_km=sum(composition.places_by_class.values())
+                * country_km
+                * operating_days,
+                sold_place_km=country_sold_pkm * operating_days,
+                sold_place_km_by_class={
+                    cls: v * operating_days
+                    for cls, v in country_sold_pkm_by_class.items()
+                },
+                available_place_km_by_class={
+                    cls: places * country_km * operating_days
+                    for cls, places in composition.places_by_class.items()
+                },
+            )
+
             # Segment-level variable costs — read from SegmentCost (monetary values)
             # shares from SegmentPassengerLoad (physics, same data, already on the load)
             for sl in pair_loads:
@@ -584,11 +630,23 @@ def build_breakdown_per_trip_pair_per_country(
                 b.cost.operator.variable.coach_maintenance_eur += _ann_trip(
                     sc.coach_maintenance_eur * d, operating_days
                 )
+                # Track access is attributed to the country that actually
+                # levied it, not spread by distance share: two countries on
+                # one segment can charge very differently, which is the
+                # whole point of the component model. Crossing charges have
+                # no levying country (their operator bills them), so they
+                # keep the distance-share split — see SegmentTac.by_country.
                 b.cost.infrastructure.tac_eur += _ann_trip(
-                    sc.tac_eur * d, operating_days
+                    sc.tac.by_country.get(country, 0.0) + sc.tac.passage_eur * d,
+                    operating_days,
                 )
+                # Same argument for energy: prices differ by a factor of
+                # five across Europe and half the infrastructure managers
+                # add a catenary charge, so the country that supplied the
+                # electricity is charged for it — not every country on the
+                # segment by distance share. See SegmentEnergy.by_country.
                 b.cost.infrastructure.energy_eur += _ann_trip(
-                    sc.energy_eur * d, operating_days
+                    sc.energy.by_country.get(country, 0.0), operating_days
                 )
 
             # Stop costs — 100% to stop's country
@@ -623,10 +681,7 @@ def build_breakdown_per_trip_pair_per_country(
 
             # Loco — time-based
             loco_eur = (
-                composition.n_locos
-                * composition.loco_full_service_lease_eur_h
-                * pair.loco_propulsion_min
-                / 60.0
+                composition.loco_lease_total_eur_h * pair.loco_propulsion_min / 60.0
             )
             b.cost.operator.variable.loco_eur = _ann_trip(
                 loco_eur * t_share, operating_days
@@ -680,19 +735,29 @@ def build_breakdown_per_trip_pair_per_country(
 
         matrix[(pair_key, "all")] = build_breakdown(route, result, trip_pair=pair)
 
-    # ("all", country) — sum across all pairs
+    # ("all", country) — sum across all pairs. Scopes add the same way the
+    # section view's do: physics is additive even where the rates built on
+    # it are not.
     for country in all_countries:
         b_all = Breakdown()
+        scope_all = NormalisationScope(
+            0.0, 0.0, 0.0, sold_place_km_by_class={}, available_place_km_by_class={}
+        )
         for pair in route.trip_pairs:
-            if (pair.outbound.trip_id, country) in matrix:
-                b_all += matrix[(pair.outbound.trip_id, country)]
+            cell_key = (pair.outbound.trip_id, country)
+            if cell_key in matrix:
+                b_all += matrix[cell_key]
+                scope_all = scope_all + scopes[cell_key]
         matrix[("all", country)] = b_all
+        scopes[("all", country)] = scope_all
 
+    # ("all", "all") — whole route; default (route) normalisation scope, so
+    # deliberately no scopes entry.
     matrix[("all", "all")] = build_breakdown(route, result)
     return {
         k: _round_breakdown(_apply_fix_overhead(v, composition.fix_overhead_quota_per))
         for k, v in matrix.items()
-    }
+    }, scopes
 
 
 # =============================================================================
@@ -704,7 +769,7 @@ def build_breakdown_per_trip_pair_per_od(
     route: Route,
     result: EvaluationResult,
     segment_loads: dict[tuple[str, int], SegmentPassengerLoad] | None = None,
-) -> dict[tuple[str, str], Breakdown]:
+) -> tuple[dict[tuple[str, str], Breakdown], dict[tuple[str, str], NormalisationScope]]:
     """
     Matrix keyed by (pair_key, od_key), with "all" as wildcard.
 
@@ -755,6 +820,15 @@ def build_breakdown_per_trip_pair_per_od(
         return f"{origin}__{destination}__{class_main}"
 
     matrix: dict[tuple[str, str], Breakdown] = {}
+    scopes: dict[tuple[str, str], NormalisationScope] = {}
+    # An OD pair's train-km is the span it actually rides — the segments
+    # between its origin and destination — not the whole pair cycle. The
+    # train runs the rest of the route regardless of who is aboard, so
+    # charging a Hannover-Berlin passenger against Amsterdam-Warsaw
+    # kilometres understates their per-km figure by the ratio of the two.
+    od_span_km: dict[tuple[str, str], float] = {}
+    od_sold_pkm: dict[tuple[str, str], float] = {}
+    od_sold_pkm_by_class: dict[tuple[str, str], dict[str, float]] = {}
 
     for pair in route.trip_pairs:
         pair_key = pair.outbound.trip_id
@@ -762,6 +836,25 @@ def build_breakdown_per_trip_pair_per_od(
         composition = pair.composition
 
         pair_loads = [sl for sl in segment_loads.values() if sl.trip_id in trip_ids]
+
+        # Span and sold place-km per OD cell, accumulated over exactly the
+        # segments each OD pair rides (an od_load exists on a segment only
+        # if that OD pair is aboard it).
+        for sl in pair_loads:
+            for ol in sl.od_loads:
+                key = (
+                    pair_key,
+                    od_key(
+                        ol.od_trip_id,
+                        ol.origin_stop_id,
+                        ol.destination_stop_id,
+                        ol.class_main,
+                    ),
+                )
+                od_span_km[key] = od_span_km.get(key, 0.0) + sl.distance_km
+                od_sold_pkm[key] = od_sold_pkm.get(key, 0.0) + ol.place_km
+                by_class = od_sold_pkm_by_class.setdefault(key, {})
+                by_class[ol.class_main] = by_class.get(ol.class_main, 0.0) + ol.place_km
 
         # Pre-compute per-OD totals across all segments (keyed by (trip_id, od_key))
         # We compute internally per trip_id then aggregate into od_key for output
@@ -910,10 +1003,7 @@ def build_breakdown_per_trip_pair_per_od(
             # Loco — billed once per pair cycle, allocated by weighted
             # place-hours share
             loco_eur = (
-                composition.n_locos
-                * composition.loco_full_service_lease_eur_h
-                * pair.loco_propulsion_min
-                / 60.0
+                composition.loco_lease_total_eur_h * pair.loco_propulsion_min / 60.0
             )
             b.cost.operator.variable.loco_eur += _ann_trip(
                 loco_eur * wph_share, operating_days
@@ -1010,22 +1100,52 @@ def build_breakdown_per_trip_pair_per_od(
         # (pair_key, "all") — all OD pairs for this pair
         matrix[(pair_key, "all")] = build_breakdown(route, result, trip_pair=pair)
 
+    # Per-OD scopes from the spans accumulated above. Capacity is what the
+    # train offers over that span; sold place-km is what that OD pair
+    # actually bought, so its per-sold cells are its own occupancy rather
+    # than the pair's average.
+    comp_by_pair_key = {p.outbound.trip_id: p.composition for p in route.trip_pairs}
+    for (pk, odk), span_km in od_span_km.items():
+        composition = comp_by_pair_key[pk]
+        by_class = od_sold_pkm_by_class.get((pk, odk), {})
+        scopes[(pk, odk)] = NormalisationScope(
+            train_km=span_km * operating_days,
+            available_place_km=sum(composition.places_by_class.values())
+            * span_km
+            * operating_days,
+            sold_place_km=od_sold_pkm.get((pk, odk), 0.0) * operating_days,
+            sold_place_km_by_class={
+                cls: v * operating_days for cls, v in by_class.items()
+            },
+            available_place_km_by_class={
+                cls: places * span_km * operating_days
+                for cls, places in composition.places_by_class.items()
+            },
+        )
+
     # ("all", od_key) — aggregate this OD pair across all pairs
     all_od_keys: set[str] = {odk for pk, odk in matrix if pk != "all" and odk != "all"}
     for odk in all_od_keys:
         b_all = Breakdown()
+        scope_all = NormalisationScope(
+            0.0, 0.0, 0.0, sold_place_km_by_class={}, available_place_km_by_class={}
+        )
         for pair in route.trip_pairs:
             cell = matrix.get((pair.outbound.trip_id, odk))
             if cell:
                 b_all += cell
+                cell_scope = scopes.get((pair.outbound.trip_id, odk))
+                if cell_scope is not None:
+                    scope_all = scope_all + cell_scope
         matrix[("all", odk)] = b_all
+        scopes[("all", odk)] = scope_all
 
-    # ("all", "all")
+    # ("all", "all") — whole route; default (route) scope, so no entry.
     matrix[("all", "all")] = build_breakdown(route, result)
     return {
         k: _round_breakdown(_apply_fix_overhead(v, composition.fix_overhead_quota_per))
         for k, v in matrix.items()
-    }
+    }, scopes
 
 
 # =============================================================================
@@ -1275,10 +1395,7 @@ def build_breakdown_per_trip_pair_per_section(
                     + section_dwell_min
                 )
                 b.cost.operator.variable.loco_eur += _ann_trip(
-                    composition.n_locos
-                    * composition.loco_full_service_lease_eur_h
-                    * section_loco_min
-                    / 60.0,
+                    composition.loco_lease_total_eur_h * section_loco_min / 60.0,
                     operating_days,
                 )
 
@@ -1552,8 +1669,7 @@ def build_breakdown_per_trip_per_stop(
         for fc in result.composition_fleet_costs
     )
     loco_total = _ann_trip(
-        route.trip_pairs[0].composition.n_locos
-        * route.trip_pairs[0].composition.loco_full_service_lease_eur_h
+        route.trip_pairs[0].composition.loco_lease_total_eur_h
         * route.loco_propulsion_min
         / 60.0,
         operating_days,
@@ -1734,7 +1850,9 @@ class ViewsBundle:
     bd_all: Breakdown
     bd_per_pair: dict[str, Breakdown]
     matrix_country: dict[tuple[str, str], Breakdown]
+    country_scopes: dict[tuple[str, str], NormalisationScope]
     matrix_od: dict[tuple[str, str], Breakdown]
+    od_scopes: dict[tuple[str, str], NormalisationScope]
     matrix_section: dict[tuple[str, str], Breakdown]
     section_scopes: dict[tuple[str, str], NormalisationScope]
     matrix_stop: dict[tuple[str, str], Breakdown]
@@ -1748,11 +1866,17 @@ def build_all_views(route: Route, result: EvaluationResult) -> ViewsBundle:
     matrix_section, section_scopes = build_breakdown_per_trip_pair_per_section(
         route, result
     )
+    matrix_country, country_scopes = build_breakdown_per_trip_pair_per_country(
+        route, result
+    )
+    matrix_od, od_scopes = build_breakdown_per_trip_pair_per_od(route, result)
     return ViewsBundle(
         bd_all=build_breakdown(route, result),
         bd_per_pair=build_breakdown_per_trip_pair(route, result),
-        matrix_country=build_breakdown_per_trip_pair_per_country(route, result),
-        matrix_od=build_breakdown_per_trip_pair_per_od(route, result),
+        matrix_country=matrix_country,
+        country_scopes=country_scopes,
+        matrix_od=matrix_od,
+        od_scopes=od_scopes,
         matrix_section=matrix_section,
         section_scopes=section_scopes,
         matrix_stop=build_breakdown_per_trip_per_stop(route, result),
@@ -2354,10 +2478,15 @@ _NORMALISATION_STAGES: dict[str, tuple[str, list[str]]] = {
         ["÷ operating_days_per_year"],
     ),
     "per_train_km": (
-        "Divided by annual train-km in scope (cycle distance × operating days; "
-        "a route section's own distance for section cells). Class-keyed; a "
+        "Divided by annual train-km in scope — the scope's OWN distance: a "
+        "country cell divides by the kilometres run in that country, a "
+        "section cell by that section's, an OD cell by the span it rides, "
+        "and the route/trip-pair cells by the full cycle distance. Rates "
+        "over different denominators are not additive, so per-country and "
+        "per-OD cells do not sum to the route figure; the additive form is "
+        "Σ(cell rate × cell km) = route rate × route km. Class-keyed; a "
         "train-km cannot be attributed to one class, so every class cell "
-        "shares the same divisor and class cells sum back to 'all'.",
+        "shares its cell's divisor and class cells sum back to 'all'.",
         ["÷ annual train-km in scope"],
     ),
     "per_available_place_km": (

@@ -59,6 +59,7 @@ from models.route.timetable import (
 from models.route.routing.rail_router import VALID_ROUTING_MODES
 from models.route.model import (
     DEFAULT_AUTO_STOP_ADDITION,
+    DEFAULT_COMPOSITION_ID,
     DEFAULT_ROUTING_MODE,
     DEFAULT_SCHEDULE_MODE,
     DEFAULT_TIMETABLE_MODE,
@@ -90,8 +91,10 @@ def validate_calc_body(body: dict) -> list[str]:
     elif not all(isinstance(s, str) for s in stops):
         errors.append("'stops' must be a list of stop_id strings.")
 
-    if not isinstance(body.get("composition_id"), str):
-        errors.append("'composition_id' must be a string.")
+    # Optional: an omitted composition is computed with DEFAULT_COMPOSITION_ID
+    # (resolved in _resolve_request below, before the request is hashed).
+    if "composition_id" in body and not isinstance(body["composition_id"], str):
+        errors.append("'composition_id' must be a string if provided.")
 
     timetable_mode = body.get("timetable_mode", DEFAULT_TIMETABLE_MODE)
     if timetable_mode not in VALID_TIMETABLE_MODES:
@@ -173,7 +176,7 @@ def _resolve_request(body: dict, loader) -> dict:
     posted body verbatim."""
     return {
         "stops": list(body["stops"]),
-        "composition_id": body["composition_id"],
+        "composition_id": body.get("composition_id", DEFAULT_COMPOSITION_ID),
         "scenario_id": loader.resolve_scenario_id(body.get("scenario_id")),
         "timetable_mode": body.get("timetable_mode", DEFAULT_TIMETABLE_MODE),
         "fixed_night_interval": body.get("fixed_night_interval"),
@@ -226,15 +229,19 @@ def compute_proposal(
     been checked and lets models/pipeline.py's ValueError (domain errors)
     propagate uncaught.
 
-    loader/router default to the process-wide singletons (get_loader()/
-    get_rail_router()) — every Flask caller (/calc, publish, compare, the
-    on-load refresh fallback) relies on this default and passes neither.
-    The override exists for scripts/refresh_proposals.py's concurrent
-    batch mode: DBDataLoader holds one non-thread-safe connection, so
-    each worker thread needs its OWN loader instance, while RailRouter (a
-    pooled requests.Session, explicitly built for concurrent use — see
-    api/helpers/dependencies.py's docstring) stays shared across threads
-    via the ordinary singleton default. use_cache=False exists for the
+    loader defaults to the process-wide singleton (get_loader());
+    router defaults to the registry router for the scenario's
+    routing_graph_key pin, resolved AFTER the request is (see below) —
+    every Flask caller (/calc, publish, compare, the on-load refresh
+    fallback) relies on these defaults and passes neither. The loader
+    override exists for scripts/refresh_proposals.py's concurrent batch
+    mode: DBDataLoader holds one non-thread-safe connection, so each
+    worker thread needs its OWN loader instance, while the registry's
+    RailRouters (pooled requests.Sessions, explicitly built for
+    concurrent use — see api/helpers/dependencies.py's docstring) stay
+    shared across threads via the ordinary default. The router override
+    exists for tests only — a caller passing one takes over graph
+    selection entirely. use_cache=False exists for the
     same script and the same reason (the cache repository is a singleton
     with one connection) — and costs it nothing: the script flushes the
     cache first and computes each proposal exactly once, so hits are
@@ -257,10 +264,16 @@ def compute_proposal(
     it; publish and the refresh paths ignore it).
     """
     loader = loader if loader is not None else get_loader()
-    router = router if router is not None else get_rail_router()
 
     resolved_request = _resolve_request(body, loader)
     scenario_id = resolved_request["scenario_id"]
+    # Router selection is a scenario pin (scenario.scenarios
+    # .routing_graph_key), so it can only happen after the scenario is
+    # resolved — an explicit router argument still wins, exactly like an
+    # explicit loader. Not part of the cache hash: scenario rows are
+    # immutable, so scenario_id already pins the graph.
+    if router is None:
+        router = get_rail_router(loader.resolve_routing_graph_key(scenario_id))
 
     cache = get_compute_cache() if use_cache else None
     request_hash = canonical_request_hash(resolved_request) if cache else None
@@ -277,7 +290,7 @@ def compute_proposal(
         proposal_id=NEUTRAL_PROPOSAL_ID,
         proposal_version=NEUTRAL_PROPOSAL_VERSION,
         stops=body["stops"],
-        composition_id=body["composition_id"],
+        composition_id=resolved_request["composition_id"],
         scenario_id=scenario_id,
         timetable_mode=resolved_request["timetable_mode"],
         fixed_night_interval=resolved_request["fixed_night_interval"],
@@ -343,7 +356,7 @@ def compute_proposal(
             request_hash=request_hash,
             route_fingerprint=fingerprint,
             scenario_id=scenario_id,
-            composition_id=body["composition_id"],
+            composition_id=resolved_request["composition_id"],
             resolved_request=response["request"],
             suggested_stops=response.get("suggested_stops"),
             payload={key: response[key] for key in _SHARED_PAYLOAD_KEYS},

@@ -1,7 +1,7 @@
 # Backend Test Suite
 
 Integration test suite for the night-train-target-network backend. All tests
-run against the **live Docker stack** (postgres + openrailrouting + api) —
+run against the **live Docker stack** (postgres + openrailrouting-infra-2026 + api) —
 there are no mocks.
 
 **Related documentation:** endpoints under test —
@@ -40,6 +40,7 @@ built on top of it:
 | `test_55` | `GET /api/proposals/stats` — §7.7 counts, KPI aggregates per scope, top/flop countries and country relations |
 | `test_60` | Feedback API — submit/categories |
 | `test_70`–`test_71` | Auth — integration (API + DB) and standalone units |
+| `test_72`–`test_76` | Standalone model units — no stack, no DB. Roster efficiency, the component track access charge, the locomotive catalog, the traction energy price model, and the service-facility charges. Runnable on their own with `pytest tests/test_7X_....py` |
 
 Content tests that need *controlled* demand (`test_30`, `test_40`) call
 the model layer directly (`tests/helpers.py:compute_evaluation_domain()`),
@@ -98,15 +99,24 @@ Shared code:
 | `test_stop_infrastructure_global_default_exists` | Global stop default present | pinned version, `country_code IS NULL` | ≥ 1 row |
 | `test_country_geometries_seeded` | PostGIS borders for every stop country | `country_geom IS NULL` per stop country | no missing geometries |
 | `test_exactly_one_current_base_scenario` | Base scenario uniqueness | `scenario.scenarios` | exactly 1 `is_current_base` |
-| `test_historical_scenario_pins_version_1` | Historical lineage owns its own snapshot | 2026-baseline vs base rows | all four table versions = 1, differ from base |
+| `test_base_scenario_pins_version_1` | Base lineage owns its own snapshot | Infra 2026 row | all five table versions = 1 |
+| `test_superseded_revision_pins_version_4` | Superseded revision shares the lineage key | infra-2026 non-current row | all five versions = 4, `is_current_scenario` false |
+| `test_opt_tt_reduces_buffer_quota` | Optimised timetables actually differ | v1 vs v3 buffer quotas | at least one country lower, none higher |
+| `test_scenario_key_and_routing_graph_agree` | Routing graph pin | every scenario row | `scenario_key`'s network matches `routing_graph_key` |
+| `test_infra_2032_scenarios_pin_versions_5_to_7` | Version grid, 2032 half | the three `infra_2032` rows | all five pins = 5, 6, 7 respectively |
+| `test_infra_2032_scenarios_are_current_but_not_base` | Scenario flags | the three `infra_2032` rows | `is_current_scenario` true, `is_current_base` false |
+| `test_infra_2032_snapshots_copy_their_2026_counterparts` | Full-snapshot copy | `track_infrastructures` v5-7 vs v1-3 | no value differs |
 | `test_hsr_scenario_pins_version_3` | HSR lineage owns its own snapshot | HSR-allowed vs base rows | all four table versions = 3, differ from base |
 | `test_stop_infrastructure_values_unchanged_by_hsr_scenario` | Stop charges independent of HSR policy | `stop_infrastructures` at base vs HSR version | identical values despite different version numbers |
+| `test_stop_enrichment_seeded` | The catalog's enrichment reaches the DB, not just the CSV | seeded stops at version 1 | provenance from the known vocabulary; localized country names on every stop; ≥95% carry a city; ≥90% carry gauges; **no gauge below 1435 mm** |
+| `test_stop_gauge_break_of_gauge` | Multi-gauge stops survive as sets | Kaunas | `[1435, 1520]` — standard plus Russian gauge |
 
 ## test_03_loader.py — DBDataLoader correctness
 
 | Test | Purpose | Input | Expected |
 |---|---|---|---|
 | `test_column_exists_in_schema` (parametrized ×50) | SQL schema contains every column the loader reads (static, no live DB round-trip) | parsed `db/dev/sql/*.sql` | every (table, column) pair present |
+| `test_stop_enrichment_surfaces` | Suffixed language columns arrive folded into language-keyed dicts | Berlin Hbf; every cityless stop | `country_names["it"] == "Germania"`, `city_names["it"] == "Berlino"`, gauges `[1435]`; a rural halt yields `{}` not null-valued keys |
 | `test_all_compositions_load` | Full composition load succeeds | `build_all_compositions()` | exactly the 8 calibrated compositions |
 | `test_all_stops_load` | Full stop load succeeds | `build_all_stops()` | ≥ 8 stops |
 | `test_composition_fields_match_db` | Loader values = raw DB values (incl. operator join) | STD-7.1 vs DB row | id/speed/hsr/driver-cost/ebit all match |
@@ -114,7 +124,7 @@ Shared code:
 | `test_composition_weight_matches_db_aggregation` | `total_weight_t` correct | SUM of coach gross weights | loader = DB |
 | `test_composition_density_matches_db` | Derived densities (`density_by_class_main_length/weight`, m and t per place) reproduce section sums ÷ places (`service_class_density` retired 2026-07-22) | coach section geometry | loader = section math per class |
 | `test_track_infra_fields_match_db` | Track values at pinned version, flagged non-default | DE row at pinned version | values match, `is_default=False` |
-| `test_stop_fields_match_db` | Stop identity/location correct | DE_BERLIN_HBF at pinned version | all fields match |
+| `test_stop_fields_match_db` | Stop identity/location correct | osm:n3856100103 at pinned version | all fields match |
 | `test_country_geometries_cover_stop_countries` | Runtime geometry availability for CountryIndex | `get_country_geometries()` | polygon for every stop country |
 | `test_composition_indicative_figures_present` | Seeded calibration KPIs wired through, per composition, differentiated by material strategy | `build_all_compositions()` | NEW-BAL-7 & REF-BUD-6 present with distinct positive KPIs |
 
@@ -132,8 +142,8 @@ Shared code:
 | `TestParamProvenance::test_field_descriptions_populated` | Column comments captured once per collection | `tracks.descriptions.fields` | ≥ 1 non-empty description |
 | `TestParamProvenance::test_explicit_value_is_not_default_and_has_source` | Explicit value provenance | DE tac | `is_default=False`, source populated |
 | `TestParamProvenance::test_null_value_resolves_from_default` | NULL → default resolution + value equality | SE tac vs defaults table | `is_default=True`, value = default row |
-| `TestParamProvenance::test_stop_null_charge_resolves_from_global_default` | Stop-level default resolution | SE_STOCKHOLM_C vs global default | `is_default=True`, value = global default |
-| `TestParamProvenance::test_stop_explicit_charge_is_not_default` | Explicit stop value | DE_BERLIN_HBF charge | `is_default=False` |
+| `TestParamProvenance::test_stop_null_charge_resolves_from_global_default` | Stop-level default resolution | osm:n25948183 vs global default | `is_default=True`, value = global default |
+| `TestParamProvenance::test_stop_explicit_charge_is_not_default` | Explicit stop value | osm:n3856100103 charge | `is_default=False` |
 | `test_git_sha_injected_in_ci` | CI injects GIT_SHA into all 3 model version files (skipped locally) | `GITHUB_SHA` env | all 3 `GIT_SHA` constants = commit SHA |
 
 ## test_10_params_api.py — GET /api/params/*
@@ -141,16 +151,18 @@ Shared code:
 | Test | Purpose | Input | Expected |
 |---|---|---|---|
 | `TestStopInfrastructures::test_response_layout` | Top-level shape | GET StopInfrastructures | descriptions/sources/default_stops/count/stops; count = len(stops) |
-| `TestStopInfrastructures::test_stops_have_required_fields` | Per-stop fields | all stops | id/name/country/lat/lon/charge present |
+| `TestStopInfrastructures::test_stops_have_required_fields` | Per-stop fields | all stops | id/name/country/lat/lon/charge plus the enrichment block (provenance, latin/ascii names, uic_ref, city, country_names, gauges) |
 | `TestStopInfrastructures::test_stop_charge_is_field_object` | Field-object contract | all stops | `{value, is_default, version, source_id}` |
-| `TestStopInfrastructures::test_is_default_flags_via_api` | Provenance survives serialization | SE_STOCKHOLM_C / DE_BERLIN_HBF | True / False respectively |
+| `TestStopInfrastructures::test_stop_enrichment_shapes` | Nested shapes hold both ways | all stops | `country_names` has all seven languages; `city` is a `{name, osm_id, names}` object or `null`, never a bare string; `gauges_mm` is ints ≥1435 or `null`; both the city and no-city cases occur |
+| `TestStopInfrastructures::test_multilingual_search_case` | The reason the columns exist | München Hbf | `city.names.it == "Monaco di Baviera"` |
+| `TestStopInfrastructures::test_is_default_flags_via_api` | Charge provenance survives serialization | osm:n25948183; any stop with its own charge | defaulted stop `True` and equal to `default_stops.global`; explicit stop `False`. **Skips** while no charge is calibrated — a data gap, not an API regression |
 | `TestStopInfrastructures::test_global_default_present` | Default row exposed | `default_stops.global` | present, charge > 0 |
 | `TestStopInfrastructures::test_source_ids_resolve` | Source dedup integrity | field `source_id`s | every id resolves in `sources` map |
 | `TestTrackInfrastructures::test_response_layout` | Top-level shape | GET TrackInfrastructures | descriptions/sources/default_track_infra/count/entries |
 | `TestTrackInfrastructures::test_every_field_is_field_object` | All 10 fields field-objects (guards against a field dropping out) | every country × 10 fields | dict with value + is_default |
 | `TestTrackInfrastructures::test_default_row_covers_all_fields` | EU-average default complete | `default_track_infra` | value for all 10 fields |
 | `TestTrackInfrastructures::test_is_default_flags_via_api` | Provenance via API | SE / DE tac | True / False |
-| `TestTrackInfrastructures::test_scenario_id_pins_parameter_version` | `?scenario_id=` pinning | base vs 2026-baseline request | DE tac 5.40 vs 3.10 |
+| `TestTrackInfrastructures::test_scenario_id_pins_parameter_version` | `?scenario_id=` pinning | base vs superseded revision | DE tac 5.40 vs 3.10 |
 | `TestCompositions::test_response_layout` | Top-level shape | GET compositions | descriptions/sources/count/compositions/operators |
 | `TestCompositions::test_composition_sections_present` | Restructured grouped sections | every composition | routing/staff/energy/capacity/equipment/coaches/fixed_costs/variable_km/source_ids |
 | `TestCompositions::test_capacity_non_empty_with_places_and_density` | Capacity content | every composition | ≥ 1 class; places > 0; density > 0 |
@@ -166,12 +178,14 @@ Shared code:
 | `TestScenariosResponseLayout::test_group_shape` | Group structure | response groups | each group is `{count, scenarios}`, `count` matches list length |
 | `TestScenariosResponseLayout::test_total_count_matches_group_sum` | Partition completeness | response | `total_count` = sum of group counts — every scenario in exactly one group |
 | `TestScenariosResponseLayout::test_scenarios_have_required_fields` | Field completeness | every scenario row | full column set exposed |
+| `TestScenariosRoutingGraphPin::test_every_scenario_pins_a_known_routing_graph` | Routing graph pin | every scenario, every group | `routing_graph_key` in {`infra_2026`, `infra_2032`} |
+| `TestScenariosRoutingGraphPin::test_both_networks_are_offered` | Version grid reaches the API | selectable scenarios | three per network |
 | `TestScenariosGrouping::test_current_base_group_flags` | Base group semantics | `current_base` rows | both `is_current_base` and `is_current_scenario` true |
 | `TestScenariosGrouping::test_current_scenarios_group_flags` | Current group semantics | `current_scenarios` rows | non-base current lineage heads only |
 | `TestScenariosGrouping::test_historical_scenarios_group_flags` | Historical group semantics | `historical_scenarios` rows | superseded versions only |
 | `TestScenariosGrouping::test_base_scenario_is_in_current_base_group` | Seed cross-check | seeded base scenario | appears in `current_base`, which holds exactly that row |
 | `TestScenariosGrouping::test_hsr_scenario_is_in_current_scenarios_group` | Seed cross-check | seeded HSR-allowed lineage head | appears in `current_scenarios` only |
-| `TestScenariosGrouping::test_historical_scenario_is_in_historical_scenarios_group` | Seed cross-check | seeded 2026 Base Line scenario | appears in `historical_scenarios` only |
+| `TestScenariosGrouping::test_historical_scenario_is_in_historical_scenarios_group` | Seed cross-check | superseded infra-2026 revision | appears in `historical_scenarios` only |
 
 ---
 
@@ -204,10 +218,10 @@ content, same models/route pipeline, just a different HTTP entry point).
 | `TestParkingsAndShuntings::test_parkings_deduplicated_by_stop` | Parking derivation | route parkings | ≥ 1, unique stop_ids, each with trip_ids |
 | `TestModeSwitches::test_explicit_default_values_accepted` / `test_simple_routing_mode_accepted` | Mode acceptance | explicit defaults / `simpleRouting` | 200 each |
 | `TestModeSwitches::test_invalid_mode_returns_400` (×4) | Mode validation | bad routing/timetable/schedule/auto_stop_addition mode | 400 each |
-| `TestModeSwitches::test_auto_stop_addition_defaults_to_add_and_inserts_brno` | auto_stop_addition defaults to `"add"`; CZ_BRNO_HLN sits on the corridor and fits the budget | default request (field omitted) | stops = Berlin, Dresden, **Brno**, Wien; `auto_added` true on Brno only; return trip reversed with mirrored `auto_added`; no `suggested_stops` |
+| `TestModeSwitches::test_auto_stop_addition_defaults_to_add_and_inserts_brno` | auto_stop_addition defaults to `"add"`; osm:n3325029085 sits on the corridor and fits the budget | default request (field omitted) | stops = Berlin, Dresden, **Brno**, Wien; `auto_added` true on Brno only; return trip reversed with mirrored `auto_added`; no `suggested_stops` |
 | `TestModeSwitches::test_auto_stop_addition_add_explicit_accepted` | Explicit `"add"` behaves identically to the omitted field | `auto_stop_addition="add"` | 200, Brno inserted, no `suggested_stops` |
 | `TestModeSwitches::test_auto_stop_addition_off_returns_exact_caller_list` | Explicit opt-out | `auto_stop_addition="off"` | 200, stop list unchanged, no `suggested_stops` |
-| `TestModeSwitches::test_auto_stop_addition_suggest_returns_suggested_stops_section` | `"suggest"` envelope + routing-like-off contract + cross-mode consistency with `"add"` | `auto_stop_addition="suggest"` | `suggested_stops` = exactly CZ_BRNO_HLN with full field set and `added_time_min > 0`, ordered between `request` and `route`; stop list unchanged, `auto_added=false` throughout; suggested ids == the ids `"add"` inserted |
+| `TestModeSwitches::test_auto_stop_addition_suggest_returns_suggested_stops_section` | `"suggest"` envelope + routing-like-off contract + cross-mode consistency with `"add"` | `auto_stop_addition="suggest"` | `suggested_stops` = exactly osm:n3325029085 with full field set and `added_time_min > 0`, ordered between `request` and `route`; stop list unchanged, `auto_added=false` throughout; suggested ids == the ids `"add"` inserted |
 | `TestModeSwitches::test_auto_added_field_false_throughout_when_off` | `Stop.auto_added` contract | module fixture (`auto_stop_addition="off"`) | every stop `auto_added=false` |
 | `TestModeSwitches::test_auto_stop_addition_bool_returns_400` (×2) / `test_auto_stop_addition_wrong_type_returns_400` | Pre-0.9.5 booleans and wrong types rejected, not mapped | `auto_stop_addition=true/false/"yes"` | 400 each |
 | `TestFixedNightMode::test_interval_covers_night_window_both_directions` | Night-window guarantee, interval reversed for return | fixed-night, Berlin→Dresden interval | dep(A) < 00:00, arr(B) ≥ 05:00, both directions |
@@ -238,7 +252,10 @@ Standard input: `eval_standard` (3-stop route, directional demand 40 Couchette
 | Test | Purpose | Input | Expected |
 |---|---|---|---|
 | `TestCostRecomputation::test_tac_matches_manual_calculation` | TAC model exact | per-country km × params tac rates × operating days | == `infrastructure.tac_eur` (rel 1e-3) |
-| `TestCostRecomputation::test_energy_cost_matches_manual_calculation` | Energy cost model exact | segment kWh × shares × params prices × days | == `infrastructure.energy_eur` |
+| `TestCostRecomputation::test_params_endpoint_serves_the_rates_the_evaluation_priced_from` | Cross-endpoint contract | `/params` headline rates vs the loader's, per country | equal at the pinned version |
+| `TestCostRecomputation::test_energy_cost_matches_manual_calculation` | Energy cost model bracketed | segment kWh × loader day/night prices + catenary per km/gtkm × days | `infrastructure.energy_eur` inside the day/night bracket; equality where no banded country is on the corridor |
+| `TestCostRecomputation::test_shunting_matches_manual_calculation` | Shunting model exact, and the event count | Σ events × the event's country all-in rate × days; 4 events per trip pair | == `operator.fixed.shunting_eur` |
+| `TestCostRecomputation::test_parking_matches_manual_calculation` | Stabling model exact | per parking: basis(layover, length) + hotel power × hours, annualised per operating day | == `infrastructure.parking_eur` |
 | `TestCostRecomputation::test_station_charge_matches_manual_calculation` | Station charge model exact | Σ charge per stop call × days | == `infrastructure.station_charge_eur` |
 | `TestCostRecomputation::test_coach_maintenance_matches_manual_calculation` | Variable-km cost exact | maint rate × total km × days | == `variable.coach_maintenance_eur` |
 | `TestCostRecomputation::test_revenue_matches_manual_calculation` | Revenue model exact | Σ places_sold × avg_price (no days multiplier) | == `total_revenue_eur` |
@@ -258,7 +275,7 @@ Standard input: `eval_standard` (3-stop route, directional demand 40 Couchette
 | `TestMatrixConsistency::test_traversed_countries_appear_in_matrix` | Matrix coverage | traversed countries | all appear as keys |
 | `TestMatrixConsistency::test_od_matrix_carries_directional_keys_with_revenue` | OD keys deterministic | directional demand | both direction keys present, revenue > 0 |
 | `TestMatrixConsistency::test_stop_matrix_terminal_has_station_charge` | Stop matrix content | Berlin cell | station charge > 0 |
-| `TestScenarioOverride::test_historical_override_lowers_tac` | Scenario override swaps the re-pinned table | same route, base vs 2026-baseline | TAC strictly lower; station charges unchanged |
+| `TestScenarioOverride::test_historical_override_lowers_tac` | Scenario override swaps the re-pinned table | same route, base vs superseded revision | TAC strictly lower; station charges unchanged |
 
 ## test_35_proposal_calc_api.py — POST /api/proposal/calc contract (merged)
 
@@ -343,6 +360,16 @@ the pre-storage floating-point value.
 | `TestCacheHitFlag::test_is_bool` | Flag shape (semantics live in `test_39`) | calc response | `cache_hit` is a bool |
 | `TestSummaryRow::*` | Every non-identity summary column present, metrics plausible, KPIs match the evaluation views, demand KPIs flagged placeholder, valid simplified MultiLineString | calc response | see file |
 | `TestSummaryRowSchemaConformance::test_row_inserts_cleanly` | Row shape matches `proposal_summaries` DDL | direct INSERT | insert succeeds (rolled back) |
+
+## test_38_ontd_stop_mapping.py — ONTD ↔ catalog stop bridge
+
+| Test | Purpose | Input | Expected |
+|---|---|---|---|
+| `TestTransliterate::test_folding` (parametrized) | One Latin id namespace for Latin, Cyrillic and Greek names | station names | folded id per the curated convention (Ü→UE, ø→OE, …) |
+| `TestTransliterate::test_idempotent` | Folding an id again changes nothing | folded name | unchanged |
+| `TestMintId::test_shape` / `test_folds_the_name_the_same_way_everywhere` | Legacy `{CC}_{NAME}` convention | country + name | `DE_BERLIN_HBF`, `CH_ZUERICH_HB`, … |
+| `TestDistance::test_known_pair` / `test_station_scale` | The matcher's metric | known coordinate pairs | correct metres; station-scale distances inside `MATCH_RADIUS_M`, city-scale outside |
+| `TestMappingTargetsCurrent::test_no_mapping_targets_removed_stops` | Mappings never point at stops the catalog dropped | `ontd.stop_mappings` vs the base snapshot | empty. Automatic rows self-heal on re-projection (the bootstrap detects the drift and re-runs step 3); manual/verified rows are never auto-overwritten, so those must be re-pointed or un-verified by hand |
 
 ## test_39_compute_cache.py — The §2.3 compute cache (WP13)
 
@@ -588,12 +615,13 @@ key). The only file in the suite runnable standalone.
    would let TAC-under-default be recomputed for a route that runs entirely on
    default-resolved rates.
 4. **A scenario re-pinning `stop_infrastructures` to genuinely different
-   values** — all three currently-seeded snapshots (2026-baseline / base /
-   2032-baseline-hsr-allowed) carry byte-identical stop charges, only the
+   values** — every currently-seeded snapshot (Infra 2026 / + NT on HSR /
+   + optimised timetables / superseded revision) carries byte-identical
+   stop charges, only the
    version number differs; a scenario with an actual stop-side value change
    would cover the other half of the override matrix.
 5. ~~**A stop within `AUTO_STOP_BUFFER_M` of an existing corridor**~~ —
-   **DONE**: `CZ_BRNO_HLN` (Brno hl.n., 49.191/16.613) sits ~10m off the
+   **DONE**: `osm:n3325029085` (Brno hl.n., 49.191/16.613) sits ~10m off the
    natural Berlin-Dresden-Wien routing (Dresden-Praha-Brno-Wien) and
    comfortably inside the detour budget, so the full `auto_stop_addition`
    behaviour is now pinned end to end in `test_20::TestModeSwitches`: the
@@ -611,6 +639,17 @@ key). The only file in the suite runnable standalone.
    near a corridor but with a detour cost above
    `AUTO_STOP_MAX_DETOUR_PER`) — today every near-corridor candidate fits,
    so the rejection branch is only covered implicitly.
+
+## test_79_route_segment_cache.py — Route segment cache
+
+| Test | What it checks | Fixture | Assertion |
+|---|---|---|---|
+| `test_leg_survives_store_and_load_forward` | RoutedLeg → CachedSegment → RoutedLeg round-trip is lossless; buffer/dynamics/energy come back zero | — | field equality, shares re-derived |
+| `test_reverse_flips_path_but_not_physics` | hi→lo read reverses geometry and country order only | — | reversed lists, same totals |
+| `test_store_reverse_then_load_reverse_is_identity` | A leg routed hi→lo stores canonically and reads back unchanged | — | geometry identity |
+| `test_csv_row_matches_contract` | CSV row ↔ DB row ↔ CachedSegment agree with `CSV_COLUMNS` | — | round-trip equality |
+| `test_key_order_independent` / `test_key_differs_by_model_and_profile` | `route_variant_key()` is canonical and discriminates model + profile | — | key equality/inequality |
+| `test_miss_stores_then_hit_matches_live` | Live stack: first cached call misses and stores one row, second hits; both physics-identical to a cache-less router. Runs under its own `test_<graph>` key and purges it | live stack | distance/time/buffer/dynamics/countries/passages/geometry equal, count == 1 |
 
 ## Conventions
 

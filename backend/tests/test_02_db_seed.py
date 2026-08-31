@@ -11,8 +11,10 @@ Covers:
   - Referential/structural integrity spot checks (compositions have coaches,
     coach classes have places, exactly one row per country at the pinned
     track infra version, defaults rows exist)
-  - All three seeded scenarios (2026 Base Line / 2032 Base Line / 2032 Base
-    Line + HSR allowed) are present and consistent
+  - All six seeded scenarios are present and consistent: three operating
+    conditions (baseline / + NT on HSR / + optimised timetables) on each
+    of the two networks, each pinning the routing graph its key names,
+    plus the superseded infra-2026 revision
   - Proposals redesign, schema phase 1 (2026-08-03, additive-only — see
     adapters/proposal/README.md §5.2): new sidecar/update_log/
     proposal_summaries/compute-cache tables exist, the new columns on
@@ -22,14 +24,12 @@ Covers:
 
 import pytest
 
-# The curated canonical stop list in db/dev/seed.py — the literal must
-# move with seed.py's _STOP_INFRASTRUCTURES_CANONICAL (same maintenance
-# contract the old hardcoded 174 row floor already had). The rest of the
-# catalog comes from the Drive-hosted ONTD seed CSV, whose size isn't
-# knowable here (the file lives inside the container in CI) — its
-# presence is asserted via the change_log provenance marker instead.
-N_CURATED_SEED_STOPS = 58
-ONTD_SEED_CHANGE_LOG_PREFIX = "seeded from ONTD snapshot"
+# The whole catalog now comes from the Drive-hosted stop seed CSV (the
+# curated in-file list was retired when the stop classification pipeline
+# took over), so its size isn't knowable here — the file lives inside the
+# container in CI. Presence is asserted via the change_log provenance
+# marker instead, and the floor below is deliberately loose.
+STOP_SEED_CHANGE_LOG_PREFIX = "seeded from the stop classification pipeline"
 
 # =============================================================================
 # Expectations after seeding — see db/dev/seed.py
@@ -55,12 +55,13 @@ EXPECTED_ROW_COUNTS = {
     "input_params.track_infrastructure_defaults": 3,  # 1 per scenario
     "input_params.track_infrastructures": 102,  # 3 full-table snapshots × 34 countries
     "input_params.stop_infrastructure_defaults": 3,  # 1 per scenario
-    # Floor: 3 full-table snapshots × 58 curated stops. The real total
-    # includes the ONTD-derived stops seeded from db/dev/data/
-    # ontd_seed_stops.csv — the exact count and the snapshot-set
-    # invariant are asserted by test_stop_catalog_snapshots below.
-    "input_params.stop_infrastructures": 174,
-    "scenario.scenarios": 3,  # 2026-baseline + base + 2032-baseline-hsr-allowed
+    # Floor only — the real total is 3 full-table snapshots × the catalog
+    # from db/dev/data/stop_seed_catalog.csv, minus the stops whose country
+    # COUNTRIES doesn't model (~870 stops seeded, so ~2600 rows). Kept well
+    # below that so regenerating the catalog doesn't break the suite; the
+    # snapshot-set invariant is asserted by test_stop_catalog_snapshots.
+    "input_params.stop_infrastructures": 1500,
+    "scenario.scenarios": 4,  # three current + one superseded revision
     "proposals.proposals": 1,  # one real saved example proposal — see seed_example_proposal()
     "proposals.routes": 1,
     "proposals.trips": 2,  # both directions of the one seeded proposal
@@ -106,6 +107,9 @@ REQUIRED_COLUMNS = {
         "country_code",
         "stop_lat",
         "stop_lon",
+        "stop_provenance",
+        "name_latin",
+        "name_ascii",
     ],
     "input_params.track_infrastructures": ["country_code"],
     "input_params.composition_types": [
@@ -145,38 +149,57 @@ def test_stop_catalog_snapshots(db_cur):
     """The stop catalog is complete at seed time and version-immutable:
     every stop_infra_version carries the identical stop set (the
     full-table-snapshot invariant the retired runtime mint used to
-    violate — see db/ontd/stop_mapping.py's module docstring), and the
-    ONTD-derived share is actually present — a missing share means the
-    seed's Drive download of ontd_seed_stops.csv failed (its warning
-    banner is in the container log) and downstream failures like
-    test_20's auto-stop expectations would otherwise be baffling."""
+    violate — see db/ontd/stop_mapping.py's module docstring), and every
+    stop carries the pipeline's provenance marker. A catalog that is empty
+    or unmarked means the seed's Drive download of stop_seed_catalog.csv
+    failed (its warning banner is in the container log), which would
+    otherwise surface as baffling failures in test_20's auto-stop
+    expectations."""
     db_cur.execute(
         "SELECT stop_infra_version, array_agg(stop_id ORDER BY stop_id) AS ids, "
-        "       count(*) FILTER (WHERE change_log LIKE %s) AS n_ontd "
+        "       count(*) FILTER (WHERE change_log LIKE %s) AS n_seeded "
         "FROM input_params.stop_infrastructures GROUP BY stop_infra_version",
-        (f"{ONTD_SEED_CHANGE_LOG_PREFIX}%",),
+        (f"{STOP_SEED_CHANGE_LOG_PREFIX}%",),
     )
     rows = db_cur.fetchall()
     snapshots = {row["stop_infra_version"]: row["ids"] for row in rows}
-    assert set(snapshots) == {1, 2, 3}
+
+    # Expected versions come from the scenario pins, not a literal: every
+    # scenario owns a complete snapshot, so the set of pinned versions IS
+    # the set that must exist. Hardcoding it meant adding a scenario broke
+    # this test for the wrong reason.
+    db_cur.execute(
+        "SELECT DISTINCT stop_infrastructures_version AS v FROM scenario.scenarios"
+    )
+    pinned = {row["v"] for row in db_cur.fetchall()}
+    assert set(snapshots) == pinned, (
+        "stop snapshot versions do not match the versions scenarios pin — "
+        "a scenario resolves to a snapshot that was never seeded, or a "
+        "snapshot exists that nothing pins"
+    )
     for row in rows:
         version, ids = row["stop_infra_version"], row["ids"]
         assert len(ids) == len(set(ids)), f"duplicate stop_ids in version {version}"
-        assert row["n_ontd"] > 0, (
-            f"version {version}: no ONTD-derived stops — the seed's Drive "
-            "download of ontd_seed_stops.csv failed (see the container "
-            "log's warning banner) or the CSV is empty"
+        assert row["n_seeded"] > 0, (
+            f"version {version}: no stops carry the pipeline provenance "
+            "marker — the seed's Drive download of stop_seed_catalog.csv "
+            "failed (see the container log's warning banner) or the CSV "
+            "is empty"
         )
-        assert len(ids) == N_CURATED_SEED_STOPS + row["n_ontd"], (
-            f"version {version}: {len(ids)} stops != {N_CURATED_SEED_STOPS} "
-            f"curated + {row['n_ontd']} ONTD-derived — an unmarked writer "
-            "touched the catalog"
+        assert len(ids) == row["n_seeded"], (
+            f"version {version}: {len(ids)} stops but only {row['n_seeded']} "
+            "carry the seed provenance marker — an unmarked writer touched "
+            "the catalog"
         )
-    assert snapshots[1] == snapshots[2] == snapshots[3], (
-        "stop snapshots differ between versions — the seed is the only "
-        "writer and builds every version from one list, so this points at "
-        "a runtime write into input_params.stop_infrastructures"
-    )
+    reference_version = min(snapshots)
+    reference_ids = snapshots[reference_version]
+    for version, ids in sorted(snapshots.items()):
+        assert ids == reference_ids, (
+            f"stop snapshot v{version} differs from v{reference_version} — "
+            "the seed is the only writer and builds every version from one "
+            "list, so this points at a runtime write into "
+            "input_params.stop_infrastructures"
+        )
 
 
 @pytest.mark.parametrize("table,columns", REQUIRED_COLUMNS.items())
@@ -226,6 +249,132 @@ def test_phase2_not_null_columns_enforced(db_cur, table, columns):
         row = db_cur.fetchone()
         assert row is not None, f"{table}.{col}: column not found"
         assert row["is_nullable"] == "NO", f"{table}.{col}: expected NOT NULL"
+
+
+# Known stop_provenance vocabulary — step 10's PROVENANCE_LABELS plus its
+# fallback. A new category is a deliberate pipeline change and lands here too.
+PROVENANCE_VOCABULARY = {
+    "existing night train stop",
+    "urban area currently without night train service",
+    "tourism region currently without night train service",
+    "ferry port currently without night train service",
+    "border / interchange station",
+    "network coherence addition",
+    "manual addition",
+}
+
+
+def test_stop_enrichment_seeded(db_cur):
+    """The catalog's enrichment actually lands in the DB: provenance from
+    the known vocabulary, localized country names on every stop, a city on
+    nearly all (rural halts excepted), and night-train-capable gauges on
+    most (stops whose OSM object sits off the platforms excepted)."""
+    db_cur.execute("""
+        SELECT stop_provenance, country_de, country_it, city, city_it,
+               gauges_mm
+        FROM input_params.stop_infrastructures
+        WHERE stop_infra_version = 1
+        """)
+    rows = db_cur.fetchall()
+    assert rows
+
+    bad_provenance = {r["stop_provenance"] for r in rows} - PROVENANCE_VOCABULARY
+    assert bad_provenance == set(), f"unknown provenance: {bad_provenance}"
+
+    assert all(r["country_de"] and r["country_it"] for r in rows), (
+        "localized country names must be present on every stop"
+    )
+
+    with_city = sum(1 for r in rows if r["city"])
+    assert with_city / len(rows) >= 0.95, (
+        f"only {with_city}/{len(rows)} stops resolve a city — step 7's "
+        "place fetch is incomplete (a failed Overpass country?)"
+    )
+    assert all(r["city_it"] for r in rows if r["city"]), (
+        "a resolved city must carry its localized names"
+    )
+
+    with_gauges = [r for r in rows if r["gauges_mm"] is not None]
+    assert len(with_gauges) / len(rows) >= 0.9, (
+        f"only {len(with_gauges)}/{len(rows)} stops carry gauges — "
+        "step 8 incomplete (a failed batch is resumable)"
+    )
+    narrow = [g for r in with_gauges for g in r["gauges_mm"] if g < 1435]
+    assert narrow == [], (
+        f"sub-1435 gauges seeded: {narrow} — the pipeline's night-train "
+        "capability filter (step 8 MIN_GAUGE_MM) is not being applied"
+    )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "The 13 station-charge rows are ILLUSTRATIVE-CURATED placeholders "
+        "and charges/data/station_charges.csv has no price_basis_year "
+        "column at all (7 columns; step 10's CHARGE_PROVENANCE_COLUMNS "
+        "expects it plus vat_rate_per, incl_vat and tariff_class). A charge "
+        "with a basis but no price year cannot be inflated to the 2032 "
+        "target year like every other calibration in the project. Handed to "
+        "the station-charge calibration (2026-08-29); strict=True so this "
+        "fails loudly once real tariffs land and the marker must go."
+    ),
+)
+def test_stop_charge_carries_its_price_year(db_cur):
+    """Split out of test_stop_charge_carries_its_provenance so the rest of
+    that test keeps guarding source, basis and the VAT arithmetic."""
+    db_cur.execute("""
+        SELECT stop_id, stop_charge_price_basis_year
+        FROM input_params.stop_infrastructures
+        WHERE stop_charge_eur IS NOT NULL AND stop_infra_version = 1
+        """)
+    rows = db_cur.fetchall()
+    if not rows:
+        pytest.skip("no stop carries its own station charge yet")
+    for row in rows:
+        assert row["stop_charge_price_basis_year"], (
+            f"{row['stop_id']}: a charge with no price year"
+        )
+
+
+def test_stop_charge_carries_its_provenance(db_cur):
+    """A seeded charge brings the document it came from with it. Without
+    that, a published figure cannot be traced back to a tariff, and the
+    charge columns are indistinguishable from an invented number."""
+    db_cur.execute("""
+        SELECT stop_charge_eur, stop_charge_vat_rate_per,
+               stop_charge_incl_vat_eur, stop_charge_basis,
+               stop_charge_price_basis_year, stop_charge_source
+        FROM input_params.stop_infrastructures
+        WHERE stop_charge_eur IS NOT NULL AND stop_infra_version = 1
+        """)
+    rows = db_cur.fetchall()
+    if not rows:
+        pytest.skip(
+            "no stop carries its own station charge yet — run the charge "
+            "calibration (models/infrastructure/stops/charges) and re-export"
+        )
+
+    for row in rows:
+        assert row["stop_charge_source"], "a charge with no source document"
+        assert row["stop_charge_basis"], "a charge that is not per anything"
+        # Net, rate and gross must still agree once through the database.
+        if row["stop_charge_vat_rate_per"] is not None:
+            net = float(row["stop_charge_eur"])
+            rate = float(row["stop_charge_vat_rate_per"])
+            gross = float(row["stop_charge_incl_vat_eur"])
+            assert abs(net * (1 + rate / 100) - gross) < 0.01, row
+
+
+def test_stop_gauge_break_of_gauge(db_cur):
+    """Multi-gauge stops read like the break-of-gauge who's-who they are:
+    Kaunas carries standard + Russian gauge."""
+    db_cur.execute("""
+        SELECT gauges_mm FROM input_params.stop_infrastructures
+        WHERE stop_name = 'Kaunas' AND stop_infra_version = 1
+        """)
+    row = db_cur.fetchone()
+    assert row is not None, "Kaunas missing from the catalog"
+    assert row["gauges_mm"] == [1435, 1520]
 
 
 def test_proposal_summaries_geom_is_postgis_geometry(db_cur):
@@ -376,6 +525,17 @@ def test_country_geometries_cover_maritime_zones(db_cur):
 # =============================================================================
 
 
+# The five per-table pins every scenario carries — mirrors
+# scenario.scenarios in db/schema.py.
+_SCENARIO_VERSION_COLUMNS = (
+    "track_infrastructures_version",
+    "track_infrastructure_defaults_version",
+    "stop_infrastructures_version",
+    "stop_infrastructure_defaults_version",
+    "passage_charges_version",
+)
+
+
 def test_exactly_one_current_base_scenario(db_cur):
     """Exactly one scenario carries is_current_base = TRUE — the partial
     unique index enforces at most one; the seed must supply exactly one."""
@@ -385,32 +545,139 @@ def test_exactly_one_current_base_scenario(db_cur):
     assert db_cur.fetchone()["n"] == 1
 
 
-def test_historical_scenario_pins_version_1(historical_scenario, base_scenario):
-    """The 2026 Base Line scenario pins all four infrastructure tables to
-    version 1 — its own full snapshot, not a partial diff against base."""
-    for col in (
-        "track_infrastructures_version",
-        "track_infrastructure_defaults_version",
-        "stop_infrastructures_version",
-        "stop_infrastructure_defaults_version",
-    ):
-        assert historical_scenario[col] == 1
-        assert historical_scenario[col] != base_scenario[col]
+def test_base_scenario_pins_version_1(base_scenario):
+    """Infra 2026 is the live base and pins every table to version 1 —
+    its own full snapshot, not a partial diff."""
+    assert base_scenario["scenario_key"] == "infra-2026"
+    for col in _SCENARIO_VERSION_COLUMNS:
+        assert base_scenario[col] == 1
 
 
-def test_hsr_scenario_pins_version_3(hsr_scenario, base_scenario):
-    """The 2032 Base Line + HSR allowed scenario pins all four
-    infrastructure tables to version 3 — independent from base's
-    version 2, per-table, even though only track_hsr_allowed actually
-    differs in the underlying data."""
-    for col in (
-        "track_infrastructures_version",
-        "track_infrastructure_defaults_version",
-        "stop_infrastructures_version",
-        "stop_infrastructure_defaults_version",
-    ):
-        assert hsr_scenario[col] == 3
+def test_hsr_scenario_pins_version_2(hsr_scenario, base_scenario):
+    """The NT-on-HSR scenario pins all five infrastructure tables to
+    version 2 — independent from base's version 1, per-table, even though
+    only track_hsr_allowed actually differs in the underlying data."""
+    for col in _SCENARIO_VERSION_COLUMNS:
+        assert hsr_scenario[col] == 2
         assert hsr_scenario[col] != base_scenario[col]
+
+
+def test_opt_tt_scenario_pins_version_3(opt_tt_scenario, base_scenario):
+    """The optimised-timetable scenario pins all five tables to version 3,
+    its own complete snapshot."""
+    for col in _SCENARIO_VERSION_COLUMNS:
+        assert opt_tt_scenario[col] == 3
+        assert opt_tt_scenario[col] != base_scenario[col]
+
+
+def test_superseded_revision_pins_version_4(historical_scenario, base_scenario):
+    """The superseded infra-2026 revision owns a complete version-4
+    snapshot and shares the base's scenario_key — one lineage, two
+    revisions, only one of them current."""
+    assert historical_scenario["scenario_key"] == base_scenario["scenario_key"]
+    assert historical_scenario["is_current_scenario"] is False
+    for col in _SCENARIO_VERSION_COLUMNS:
+        assert historical_scenario[col] == 4
+
+
+def test_scenario_key_and_routing_graph_agree(db_cur):
+    """A scenario's key names the network its routing graph serves.
+
+    The two are separate columns and nothing in the schema ties them
+    together, so a copy-paste slip could pin infra-2032 to the 2026 graph
+    and produce entirely plausible — and entirely wrong — numbers. This
+    is the check that would catch it."""
+    db_cur.execute("SELECT scenario_key, routing_graph_key FROM scenario.scenarios")
+    for row in db_cur.fetchall():
+        network = row["scenario_key"].split("-")[1]
+        assert row["routing_graph_key"] == f"infra_{network}", (
+            f"Scenario '{row['scenario_key']}' pins '{row['routing_graph_key']}'."
+        )
+
+
+def test_infra_2032_scenarios_pin_versions_5_to_7(scenarios_2032):
+    """The 2032 trio pins versions 5, 6 and 7 across all five tables —
+    one complete snapshot each, in the same operating-condition order as
+    the 2026 trio's 1, 2, 3 (db/dev/seed.py's version grid)."""
+    for scenario_key, expected in (
+        ("infra-2032", 5),
+        ("infra-2032-hsr", 6),
+        ("infra-2032-hsr-opt-tt", 7),
+    ):
+        scenario = scenarios_2032[scenario_key]
+        for col in _SCENARIO_VERSION_COLUMNS:
+            assert scenario[col] == expected, (
+                f"{scenario_key}.{col} = {scenario[col]}, expected {expected}"
+            )
+
+
+def test_infra_2032_scenarios_are_current_but_not_base(scenarios_2032):
+    """All three are selectable lineage heads, and none of them displaces
+    Infra 2026 as the live default."""
+    for scenario in scenarios_2032.values():
+        assert scenario["is_current_scenario"] is True
+        assert scenario["is_current_base"] is False
+
+
+def test_infra_2032_snapshots_copy_their_2026_counterparts(db_cur):
+    """Versions 5-7 are exact copies of 1-3 in the versioned tables.
+
+    What separates a 2032 scenario from its 2026 counterpart is the
+    routing graph, not a value here — so any difference in this table
+    means someone edited a snapshot in place, which the versioning
+    contract forbids outright (db/README.md). Track infrastructure is
+    the table to check: it is the only one whose values vary by operating
+    condition at all, so a copy defect shows up here first."""
+    db_cur.execute(
+        """
+        SELECT count(*) AS n FROM (
+            SELECT country_code, track_hsr_allowed, track_buffer_quota_per,
+                   track_tac_eur_train_km, track_infra_version - 4 AS src_version
+            FROM input_params.track_infrastructures
+            WHERE track_infra_version IN (5, 6, 7)
+            EXCEPT
+            SELECT country_code, track_hsr_allowed, track_buffer_quota_per,
+                   track_tac_eur_train_km, track_infra_version
+            FROM input_params.track_infrastructures
+            WHERE track_infra_version IN (1, 2, 3)
+        ) AS diff
+        """
+    )
+    assert db_cur.fetchone()["n"] == 0, (
+        "Infra 2032 track snapshots differ from their 2026 sources."
+    )
+
+
+def test_opt_tt_reduces_buffer_quota(db_cur, opt_tt_scenario, base_scenario):
+    """The optimised-timetable snapshot carries a strictly lower schedule
+    supplement than the base wherever the base sits above the benchmark,
+    and never a higher one — the only numeric difference between the three
+    seeded scenarios (models/scenarios/README.md)."""
+    db_cur.execute(
+        """
+        SELECT b.country_code,
+               b.track_buffer_quota_per AS base_quota,
+               o.track_buffer_quota_per AS opt_quota
+        FROM input_params.track_infrastructures b
+        JOIN input_params.track_infrastructures o
+          ON o.country_code = b.country_code
+         AND o.track_infra_version = %s
+        WHERE b.track_infra_version = %s
+          AND b.track_buffer_quota_per IS NOT NULL
+        """,
+        (
+            opt_tt_scenario["track_infrastructures_version"],
+            base_scenario["track_infrastructures_version"],
+        ),
+    )
+    rows = db_cur.fetchall()
+    assert rows, "No country carries a buffer quota — seed data missing."
+    assert any(r["opt_quota"] < r["base_quota"] for r in rows), (
+        "No country's schedule supplement was reduced — the optimised "
+        "timetable scenario is indistinguishable from the base."
+    )
+    for row in rows:
+        assert row["opt_quota"] <= row["base_quota"], row["country_code"]
 
 
 def test_stop_infrastructure_values_unchanged_by_hsr_scenario(

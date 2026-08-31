@@ -33,7 +33,7 @@ work now finished, and preserved in git history), plus the parked
 | `repository.py` | `ProposalRepository` — publish, refresh, load, gallery/map queries, `outdated_trigger()` |
 | `projection.py` | Pure `(route, evaluation) → summary row`; `route_fingerprint()`; `GEOM_SIMPLIFY_TOLERANCE_DEG` |
 | `gtfs_store.py` | Route ⇄ GTFS + sidecar tables (write and read-back) |
-| `compute_cache.py` | `ComputeCacheRepository` — the §2.3 two-map cache (`lookup`/`store`/`sweep`/`flush`) |
+| `compute_cache.py` | `ComputeCacheRepository` — the §2.3 two-map cache (`lookup`/`store`/`sweep`/`flush`). Underneath it, routing itself is cached per stop pair in `adapters/route_segment_repository.py` (`route_cache` schema) — a miss here no longer means re-routing every unchanged leg |
 | `engagement_repository.py` | Likes, comments, and the `UNION ALL` timeline merge |
 | `filter_builder.py` | Column-kind registry driving gallery SQL generation + validation, and the aggregate SELECT list behind §7.7's statistics |
 | `id_prefix.py` | `P{id}_V{n}_` prefix rewriting between neutral and published ID forms |
@@ -95,7 +95,9 @@ belongs to publish (§2.2).
 {
   // WHAT to compute
   "stops":              ["stop_id", "..."],        // required, min 2, plain IDs
-  "composition_id":     "REF-BAL-9",               // required
+  "composition_id":     "REF-BAL-9",               // optional; omitted = the standard
+                                                   // composition (DEFAULT_COMPOSITION_ID,
+                                                   // models/route/model.py)
   "scenario_id":        4,                         // optional; omitted = current base.
                                                    // Any scenario is computable —
                                                    // what-ifs live here and in compare;
@@ -170,6 +172,15 @@ Further notes:
   published proposals; publish assigns them. The fingerprint
   canonicalization strips prefixes anyway (§3.1), so fingerprints agree
   between ephemeral and published forms.
+- **Errors** (all JSON, `{"error", "message", …}`): `400 bad_request` /
+  `400 validation_error` (malformed request), `422 gauge_mismatch` (no
+  single track gauge serves every stop — carries `conflicting_stops:
+  {stop_id: [gauges]|null}` for every stop of the trip so the client can
+  mark them; 0.9.27), `422 routing_error` (the routing engine cannot serve
+  the request — no path on the trip's gauge network, a stop that will not
+  snap; an answer about the request, not a server fault), `422
+  domain_error` (any other model-level rejection, e.g. country coverage),
+  `500 calc_error` (genuinely unexpected).
 - **No persistence decisions.** No actions, no lookups. Request in, result
   out, forget.
 
@@ -579,8 +590,9 @@ refresh batch). Rationale for the route side (verified against
 - **rebuilt from DB anyway**: `composition` and `track_infrastructure`
   sections — `route_from_dict()` never reads them back, it reloads both via
   `scenario_id`/`composition_id`; purely informational in the JSON
-- **derived**: `general_parameters` (trip_km, duration, avg speed) —
-  recomputable from segments
+- **derived**: `general_parameters` (trip_km, duration, avg speed,
+  `track_gauge_mm` — the gauge profile the trip was routed on, 0.9.27) —
+  recomputable from segments (the gauge from the stops)
 - **genuinely irreducible route data**: per-segment physics (distance,
   driving/dynamics/buffer/slack times, energy, country distance/time
   shares, per-segment geometry), OD pairs (places_sold, avg_price,
@@ -940,7 +952,8 @@ The example below is not exhaustive — it shows one filter of each kind:
   },
   "sort":    [{"by": <any filterable column>, "dir": "asc"|"desc"}],
   "limit":   int, "offset": int,
-  "include": ["summaries", "map_lines", "map_stop_counts", "map_country_counts"]
+  "include": ["summaries", "map_lines", "map_routes",
+              "map_stop_counts", "map_country_counts"]
 }
 ```
 
@@ -969,10 +982,16 @@ Response sections:
 - `map_lines`: GeoJSON FeatureCollection, one feature per distinct
   stop-pair **corridor** (direction-agnostic — outbound and return share a
   corridor) rather than one per proposal, so a client can drive line
-  *thickness* off `proposal_count` and look up which proposals share a
-  corridor via `proposal_ids`; `avg_margin_eur_per_train_km` is the mean
-  across exactly those proposals, for optional colouring — filtered but
-  **not** paginated (the map shows the whole filtered set).
+  *thickness* off `proposal_count`; `avg_margin_eur_per_train_km` is the
+  mean across exactly those proposals, for optional colouring — filtered
+  but **not** paginated (the map shows the whole filtered set). Geometry
+  is simplified for overview zoom at query time. The contributing
+  `proposal_ids` / `existing_route_ids` are deliberately not returned —
+  unbounded in proposal count, and superseded by `map_routes`.
+- `map_routes`: GeoJSON FeatureCollection, one feature per **listed** row
+  (the projections' stored `geom_simplified`) — the only map section that
+  IS paginated, sharing `summaries`' exact filter/sort/limit/offset so the
+  two always describe the same rows. Fixed in size at the page size.
 - `map_stop_counts`: `[{stop_id, lat, lon, n}]` — routes touching each stop
   (unnest over `stop_ids`, coordinates joined from the stop catalog).
 - `map_country_counts`: GeoJSON FeatureCollection, one feature per country

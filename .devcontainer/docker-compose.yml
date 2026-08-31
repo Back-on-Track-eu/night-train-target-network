@@ -2,7 +2,7 @@
 # Devcontainer OVERLAY on backend/docker/docker-compose.yml
 # =============================================================================
 # Loaded as the SECOND file in devcontainer.json's dockerComposeFile array —
-# the base stack (postgres, openrailrouting, api) comes entirely from
+# the base stack (postgres, openrailrouting-infra-2026, api) comes entirely from
 # backend/docker/docker-compose.yml. This file only ADDS what VS Code /
 # frontend development needs: the workspace mount on the api service, the
 # routing admin port, and the Vite frontend.
@@ -21,11 +21,11 @@
 
 services:
 
-  openrailrouting:
+  openrailrouting-infra-2026:
     ports:
       # Admin/metrics endpoint, dev only. Container side 8990 mirrors the
       # engine's own config.yml (see .env.example's Ports section).
-      - "${OPENRAILROUTING_ADMIN_HOST_PORT:-8990}:8990"
+      - "${OPENRAILROUTING_ADMIN_HOST_PORT_INFRA_2026:-8990}:8990"
 
   api:
     volumes:

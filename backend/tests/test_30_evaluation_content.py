@@ -20,7 +20,10 @@ require the evaluation to match. This pins the actual cost model
 (models/evaluation/calc.py) end to end:
 
   tac_eur            = Σ segments Σ countries  km × share × tac_rate  × days
-  energy_eur         = Σ segments Σ countries  kWh × share × price   × days
+  energy_eur         = Σ segments Σ countries  kWh × (day|night price)
+                                               + catenary per km/gtkm  × days
+  shunting_eur       = Σ shunting events       all-in rate           × days
+  parking_eur        = Σ parkings  basis(layover, length) + hotel power × days
   station_charge_eur = Σ trips Σ stop calls    stop_charge           × days
   coach_maintenance  = maint_rate × total km                          × days
   ticket revenue     = Σ ODs  places_sold × avg_price   (places are ANNUAL)
@@ -30,6 +33,8 @@ normalisation divisors (unweighted place-km — density is NOT applied in
 normalisation), demand behaviour, matrix consistency, and the scenario
 override (what-if pins DE track infra v1, tac 3.10 < base 5.40).
 """
+
+import math
 
 import pytest
 import requests
@@ -57,7 +62,16 @@ REL_TOL = 1e-3  # annual EUR leaves are 2dp; normalised views round finer, scale
 @pytest.fixture(scope="module")
 def track_rates(api_base):
     """{country_code: {'tac': €/train-km, 'energy_price': €/kWh}} from
-    GET /api/params/TrackInfrastructures (base scenario)."""
+    GET /api/params/TrackInfrastructures (base scenario).
+
+    Both figures are the API's headline per-country values. Neither is what
+    the cost model prices from any more — track access is a component sum
+    (CALC 0.9.18) and energy is banded with a supply charge on top (0.9.21),
+    and both recomputations below read the components off the loader instead.
+    Kept because it pins the cross-endpoint contract this file exists to
+    check: the same parameter version the evaluation used is the one /params
+    serves.
+    """
     body = requests.get(
         f"{api_base}/api/params/TrackInfrastructures", timeout=15
     ).json()
@@ -99,42 +113,226 @@ def eval_zero(loader, route_berlin_wien):
 
 
 class TestCostRecomputation:
-    def test_tac_matches_manual_calculation(self, eval_standard, track_rates):
-        """Annual TAC equals Σ (per-country km × country tac rate) over all
-        trips, annualised — mirrors _calc_segment_cost() exactly."""
+    def test_params_endpoint_serves_the_rates_the_evaluation_priced_from(
+        self, eval_standard, loader, track_rates
+    ):
+        """The headline per-country figures /params serves are the ones the
+        evaluation's own loader resolved, at the same pinned version.
+
+        Neither recomputation below reads these — track access and energy are
+        both component models now — so without this the two endpoints could
+        drift apart unnoticed: a stale parameter version served to the
+        frontend while the evaluation prices from another.
+        """
+        costed, _ = eval_standard
+        tracks = loader.build_all_tracks(costed["scenario_id"])
+        checked = 0
+        for cc, rates in track_rates.items():
+            track = tracks.get(cc)
+            if track is None:
+                continue
+            assert rates["energy_price"] == pytest.approx(
+                track.energy_price_eur_kwh, rel=1e-4
+            ), f"{cc}: /params energy price differs from the loader's"
+            assert rates["tac"] == pytest.approx(track.tac_eur_train_km, rel=1e-4)
+            checked += 1
+        assert checked > 20, f"only {checked} countries compared — fixture too thin"
+
+    def test_tac_matches_manual_calculation(self, eval_standard, loader):
+        """Annual TAC equals Σ over every country run of its own calibrated
+        component terms, annualised.
+
+        Recomputed here from the loader's TrackInfrastructure objects
+        rather than from a single per-kilometre rate: since CALC 0.9.18 the
+        charge is a component sum, and no one rate exists to multiply
+        distance by. The night and peak SHARES are the one thing not
+        recomputed — that is clock arithmetic, pinned exhaustively in
+        test_73_calc_tac_units.py — so this test reads them back off the
+        breakdown and checks the money built on top of them, which is what
+        the annualisation and view aggregation path can actually get wrong.
+        """
         costed, result = eval_standard
         days = operating_days(costed)
-
-        expected = (
-            sum(
-                km * track_rates[cc]["tac"]
-                for trip in all_trips(costed)
-                for cc, km in country_km(trip).items()
-            )
-            * days
+        tracks = loader.build_all_tracks(costed["scenario_id"])
+        composition = next(
+            c
+            for c in loader.build_all_compositions(costed["scenario_id"]).all().values()
+            if c.comp_id == costed["trip_pairs"][0]["composition_id"]
         )
+
+        # The Berlin-Wien corridor levies no per-stop, revenue-share or
+        # seat-km term and crosses no charged passage, so the whole charge
+        # is per-kilometre: train-km at the day or night rate, plus
+        # gross-tonne-km, plus Austria's congestion surcharge on the
+        # peak-overlapping share.
+        expected = 0.0
+        for trip in all_trips(costed):
+            for cc, km in country_km(trip).items():
+                track = tracks.get(cc)
+                if track is None:
+                    continue  # UNK — open water, no infrastructure manager
+                assert track.tac_per_stop is None and track.tac_revenue_share is None, (
+                    f"{cc} gained a non-distance TAC term — this test's "
+                    "per-kilometre shortcut no longer holds"
+                )
+                rate = track.tac_b_day or 0.0
+                if track.tac_night_mode == "time_band":
+                    # Germany widens the night rate to the whole run for a
+                    # train carrying night accommodation, which every
+                    # sleeper composition on this corridor does.
+                    assert composition.has_night_accommodation
+                    rate = track.tac_b_night if track.tac_b_night is not None else rate
+                expected += km * rate
+                expected += (
+                    km * (track.tac_gamma or 0.0) * composition.total_gross_weight_t
+                )
 
         actual = route_bd(result)["cost"]["infrastructure"]["tac_eur"]
-        assert actual == pytest.approx(expected, rel=REL_TOL)
+        congestion = actual / days - expected
+        # Austria's surcharge is the only remaining term; it is applied to
+        # the peak-overlapping share of a run, so it is non-negative and
+        # bounded by charging the whole Austrian distance at the full rate.
+        at_km = sum(country_km(trip).get("AT", 0.0) for trip in all_trips(costed))
+        at_surcharge = tracks.get("AT").tac_congestion_surcharge_eur_km or 0.0
+        assert -1e-6 <= congestion <= at_km * at_surcharge + 1e-6, (
+            f"unexplained TAC residual of {congestion:.2f} EUR/trip beyond "
+            "the recomputed per-kilometre terms"
+        )
+        assert actual == pytest.approx((expected + congestion) * days, rel=REL_TOL)
 
-    def test_energy_cost_matches_manual_calculation(self, eval_standard, track_rates):
-        """Annual energy cost equals Σ (segment kWh × country distance share
-        × country energy price), annualised."""
+    def test_energy_cost_matches_manual_calculation(self, eval_standard, loader):
+        """Annual energy cost equals Σ over every country run of the energy it
+        drew at that country's price, plus what the country charges for
+        supplying it, annualised.
+
+        Recomputed from the loader's TrackInfrastructure objects rather than
+        from one price per country: since CALC 0.9.21 a banded country prices
+        the in-band share of a run at its night rate, and a country levying a
+        catenary charge adds a per-kilometre or per-gross-tonne-km term on
+        top. Same shape as the TAC test above, and for the same reason — the
+        night SHARE is clock arithmetic, pinned exhaustively in
+        test_75_calc_energy_price_units.py, so here the bill is bracketed
+        between pricing the whole run at the day rate and pricing it all at
+        the night rate. That bracket is what the annualisation and view
+        aggregation path can actually get wrong; a collapsed bracket (no
+        banded country on the corridor) becomes an equality on its own.
+        """
         costed, result = eval_standard
         days = operating_days(costed)
+        tracks = loader.build_all_tracks(costed["scenario_id"])
+        composition = next(
+            c
+            for c in loader.build_all_compositions(costed["scenario_id"]).all().values()
+            if c.comp_id == costed["trip_pairs"][0]["composition_id"]
+        )
+
+        all_day = all_night = 0.0
+        for trip in all_trips(costed):
+            for seg in trip["segments"]:
+                for cc, share in seg["country_distance_shares"].items():
+                    track = tracks.get(cc)
+                    if track is None:
+                        continue  # UNK — open water, no supplier to pay
+                    kwh = seg["energy_kwh"] * share
+                    km = seg["distance_m"] / 1000.0 * share
+                    catenary = (track.energy_catenary_eur_train_km or 0.0) * km + (
+                        track.energy_catenary_eur_gross_tonne_km or 0.0
+                    ) * composition.total_gross_weight_t * km
+                    night_rate = (
+                        track.energy_price_night_eur_kwh
+                        if track.energy_price_night_eur_kwh is not None
+                        else track.energy_price_eur_kwh
+                    )
+                    all_day += kwh * track.energy_price_eur_kwh + catenary
+                    all_night += kwh * night_rate + catenary
+
+        actual = route_bd(result)["cost"]["infrastructure"]["energy_eur"]
+        assert all_night * days - 1e-6 <= actual <= all_day * days + 1e-6, (
+            f"energy cost {actual:.2f} outside the day/night bracket "
+            f"[{all_night * days:.2f}, {all_day * days:.2f}]"
+        )
+        if all_night == pytest.approx(all_day):
+            # No banded tariff on this corridor — the bracket is a single
+            # number, so the recomputation is exact.
+            assert actual == pytest.approx(all_day * days, rel=REL_TOL)
+
+    def test_shunting_matches_manual_calculation(self, eval_standard, loader):
+        """Annual shunting equals one all-in event charge per Shunting event at
+        the event's own country rate, annualised per trip.
+
+        The event count is the calibration's reference rotation made concrete:
+        two movements per turnaround, which the route builder emits as one
+        Shunting from each trip that ends or starts at a terminal. If that ever
+        drifts to one or four per turnaround, this is the test that notices.
+        """
+        costed, result = eval_standard
+        days = operating_days(costed)
+        tracks = loader.build_all_tracks(costed["scenario_id"])
 
         expected = (
             sum(
-                seg["energy_kwh"] * share * track_rates[cc]["energy_price"]
-                for trip in all_trips(costed)
-                for seg in trip["segments"]
-                for cc, share in seg["country_distance_shares"].items()
+                tracks.get(s["country_code"]).shunting_eur_event
+                for s in costed["shuntings"]
             )
             * days
         )
-
-        actual = route_bd(result)["cost"]["infrastructure"]["energy_eur"]
+        actual = route_bd(result)["cost"]["operator"]["fixed"]["shunting_eur"]
         assert actual == pytest.approx(expected, rel=REL_TOL)
+
+        # Two per terminal, and a trip pair has two terminals.
+        assert len(costed["shuntings"]) == 4, (
+            f"{len(costed['shuntings'])} shunting events on a trip pair — the "
+            "reference rotation is two movements per turnaround"
+        )
+
+    def test_parking_matches_manual_calculation(self, eval_standard, loader):
+        """Annual stabling equals, per parking location, the country's own
+        basis applied to the scheduled layover and the train's length, plus
+        hotel power on the actual stabled hours.
+
+        Recomputed from the loader rather than from one rate per country: since
+        CALC 0.9.22 the flat track_parking_eur_day column is display-only and
+        four different arithmetics exist. The four bases are pinned exhaustively
+        in test_76_calc_facility_units.py; what this adds is that the layover
+        the route builder scheduled is the one the cost model billed, and that
+        the annualisation is per operating day.
+        """
+        costed, result = eval_standard
+        days = operating_days(costed)
+        tracks = loader.build_all_tracks(costed["scenario_id"])
+        composition = next(
+            c
+            for c in loader.build_all_compositions(costed["scenario_id"]).all().values()
+            if c.comp_id == costed["trip_pairs"][0]["composition_id"]
+        )
+
+        expected = 0.0
+        for p in costed["parkings"]:
+            track = tracks.get(p["country_code"])
+            hours = p["hours"]
+            assert hours > 0, (
+                f"parking at {p['stop_id']} has no layover — a trip pair "
+                "stables at both of its terminals"
+            )
+            billable = max(0.0, hours - (track.parking_free_hours or 0.0))
+            basis = track.parking_basis
+            if basis == "per_event":
+                facility = track.parking_eur_event or 0.0
+            elif basis == "per_hour" and billable > 0:
+                facility = (track.parking_eur_hour or 0.0) * math.ceil(billable)
+            elif basis == "per_metre_day" and billable > 0:
+                facility = (
+                    (track.parking_eur_metre_day or 0.0)
+                    * composition.total_length_m
+                    * math.ceil(billable / 24.0)
+                )
+            else:
+                facility = 0.0
+            hotel = (track.parking_hotel_power_eur_hour or 0.0) * hours
+            expected += facility + hotel
+
+        actual = route_bd(result)["cost"]["infrastructure"]["parking_eur"]
+        assert actual == pytest.approx(expected * days, rel=REL_TOL)
 
     def test_station_charge_matches_manual_calculation(
         self, eval_standard, stop_charges
@@ -297,6 +495,105 @@ class TestNormalisationDivisors:
         per_km = route_bd(result, "per_train_km")["total_cost_eur"]
         assert per_year == pytest.approx(per_km * annual_train_km, rel=REL_TOL)
 
+    def test_country_per_train_km_divides_by_that_countrys_km(self, eval_standard):
+        """A country cell's per-train-km divides by the kilometres run in
+        THAT country, not the whole route's.
+
+        Before CALC 0.9.20 country cells fell back to the pair-wide
+        denominator, so every per-unit country figure was scaled down by
+        that country's share of the route — Dutch track access reading
+        0.38 EUR/train-km where the applied rate is 2.58. The check is
+        per-country so a route where one country happens to dominate
+        cannot mask it.
+        """
+        costed, result = eval_standard
+        days = operating_days(costed)
+        countries = result["views"]["per_trip_pair_per_country"]["data"]["all"]
+
+        for cc, cell in countries.items():
+            if cc == "all":
+                continue
+            cc_km = sum(country_km(trip).get(cc, 0.0) for trip in all_trips(costed))
+            if cc_km == 0:
+                continue
+            per_year = cell["values"]["per_year"]["all"]["total_cost_eur"]
+            per_km = cell["values"]["per_train_km"]["all"]["total_cost_eur"]
+            assert per_year == pytest.approx(per_km * cc_km * days, rel=REL_TOL), (
+                f"{cc}: per_train_km is not divided by {cc}'s own km"
+            )
+
+    def test_country_per_km_cells_satisfy_the_weighted_identity(self, eval_standard):
+        """Per-unit country cells are NOT additive — rates over different
+        denominators cannot be summed — so the identity that replaces
+        'country cells sum to the route total' is the weighted one:
+        Σ(country rate × country km) == route rate × route km.
+
+        This is the invariant that catches allocation drift now that the
+        naive sum no longer holds.
+        """
+        costed, result = eval_standard
+        days = operating_days(costed)
+        countries = result["views"]["per_trip_pair_per_country"]["data"]["all"]
+
+        weighted = 0.0
+        for cc, cell in countries.items():
+            if cc == "all":
+                continue
+            cc_km = sum(country_km(trip).get(cc, 0.0) for trip in all_trips(costed))
+            weighted += (
+                cell["values"]["per_train_km"]["all"]["total_cost_eur"] * cc_km * days
+            )
+
+        route_km = sum(trip_distance_km(t) for t in all_trips(costed)) * days
+        route_per_km = route_bd(result, "per_train_km")["total_cost_eur"]
+        assert weighted == pytest.approx(route_per_km * route_km, rel=REL_TOL)
+
+    def test_country_per_km_cells_no_longer_sum_naively(self, eval_standard):
+        """The flip side, asserted deliberately rather than left implicit:
+        on a multi-country route the naive sum of per-km country cells
+        EXCEEDS the route figure, because each divides by its own smaller
+        distance. If this ever passes as an equality again, the scopes have
+        silently stopped being applied."""
+        costed, result = eval_standard
+        countries = result["views"]["per_trip_pair_per_country"]["data"]["all"]
+        cells = [
+            cell["values"]["per_train_km"]["all"]["total_cost_eur"]
+            for cc, cell in countries.items()
+            if cc != "all"
+        ]
+        if len(cells) < 2:
+            pytest.skip("single-country route — nothing to over-count")
+        route_per_km = route_bd(result, "per_train_km")["total_cost_eur"]
+        assert sum(cells) > route_per_km * 1.01
+
+    def test_od_per_train_km_divides_by_its_own_span(self, eval_standard):
+        """An OD pair's train-km is the span it rides, not the whole cycle
+        the train runs regardless of who is aboard. A passenger travelling
+        one leg of a five-stop route should not be charged against the
+        other four legs' kilometres."""
+        costed, result = eval_standard
+        days = operating_days(costed)
+        ods = result["views"]["per_trip_pair_per_od"]["data"]["all"]
+        route_km = sum(trip_distance_km(t) for t in all_trips(costed))
+
+        checked = 0
+        for od_key, cell in ods.items():
+            if od_key == "all":
+                continue
+            per_year = cell["values"]["per_year"]["all"]["total_cost_eur"]
+            per_km = cell["values"]["per_train_km"]["all"]["total_cost_eur"]
+            if per_km == 0 or per_year == 0:
+                continue
+            span_km = per_year / (per_km * days)
+            # The implied divisor must be a real span: positive, and no
+            # longer than the whole cycle.
+            assert 0 < span_km <= route_km * 1.01, (
+                f"{od_key}: implied span {span_km:.1f} km is not a "
+                f"sub-span of the {route_km:.1f} km cycle"
+            )
+            checked += 1
+        assert checked > 0, "no OD cell carried a per_train_km figure to check"
+
     def test_per_available_place_km_divisor_is_unweighted(self, eval_standard):
         """per_available_place_km divides by Σ (total places × segment km)
         × operating days — UNWEIGHTED annual capacity. Class density is
@@ -453,8 +750,8 @@ class TestMatrixConsistency:
         _, result = eval_standard
         all_ods = result["views"]["per_trip_pair_per_od"]["data"]["all"]
         for key in (
-            "DE_BERLIN_HBF__AT_WIEN_HBF__Couchette",
-            "AT_WIEN_HBF__DE_BERLIN_HBF__Couchette",
+            "osm:n3856100103__osm:w423692233__Couchette",
+            "osm:w423692233__osm:n3856100103__Couchette",
         ):
             assert key in all_ods, f"OD key missing: {key}"
             assert all_ods[key]["values"]["per_year"]["all"]["total_revenue_eur"] > 0
@@ -482,7 +779,7 @@ class TestMatrixConsistency:
         """The origin stop carries a positive station charge in the stop matrix."""
         _, result = eval_standard
         all_stops = result["views"]["per_trip_per_stop"]["data"]["all"]
-        berlin = all_stops["DE_BERLIN_HBF"]
+        berlin = all_stops["osm:n3856100103"]
         charge = berlin["values"]["per_year"]["all"]["cost"]["infrastructure"][
             "station_charge_eur"
         ]
@@ -495,7 +792,7 @@ class TestMatrixConsistency:
 
 
 class TestSectionView:
-    SECTION_ALL = "DE_BERLIN_HBF__AT_WIEN_HBF__all"
+    SECTION_ALL = "osm:n3856100103__osm:w423692233__all"
 
     def test_every_stop_range_has_a_section_cell(self, eval_standard):
         """Sections exist for EVERY ordered stop pair (CALC 0.9.16) — not only
@@ -505,16 +802,16 @@ class TestSectionView:
         _, result = eval_standard
         sections = result["views"]["per_trip_pair_per_section"]["data"]["all"]
         for key in (
-            "DE_BERLIN_HBF__AT_WIEN_HBF__all",
-            "DE_BERLIN_HBF__AT_WIEN_HBF__Couchette",
-            "DE_BERLIN_HBF__AT_WIEN_HBF__Seat",
+            "osm:n3856100103__osm:w423692233__all",
+            "osm:n3856100103__osm:w423692233__Couchette",
+            "osm:n3856100103__osm:w423692233__Seat",
             # sub-sections bounded by the intermediate stop — before 0.9.16
             # these only existed if Dresden happened to carry tickets
-            "DE_BERLIN_HBF__DE_DRESDEN_HBF__all",
-            "DE_DRESDEN_HBF__AT_WIEN_HBF__all",
+            "osm:n3856100103__osm:n25397500__all",
+            "osm:n25397500__osm:w423692233__all",
         ):
             assert key in sections, f"section key missing: {key}"
-        assert "AT_WIEN_HBF__DE_BERLIN_HBF__all" not in sections, (
+        assert "osm:w423692233__osm:n3856100103__all" not in sections, (
             "reverse-ordered key present — section keys must be canonical"
         )
 
@@ -527,7 +824,7 @@ class TestSectionView:
         cls_cells = [
             cell["values"]["per_year"]["all"]
             for key, cell in sections.items()
-            if key.startswith("DE_BERLIN_HBF__AT_WIEN_HBF__")
+            if key.startswith("osm:n3856100103__osm:w423692233__")
             and not key.endswith("__all")
         ]
         assert cls_cells, "no class cells found for section"
@@ -560,8 +857,8 @@ class TestSectionView:
             return sections[key]["values"]["per_year"]["all"]["total_revenue_eur"]
 
         assert rev(self.SECTION_ALL) == pytest.approx(
-            rev("DE_BERLIN_HBF__DE_DRESDEN_HBF__all")
-            + rev("DE_DRESDEN_HBF__AT_WIEN_HBF__all"),
+            rev("osm:n3856100103__osm:n25397500__all")
+            + rev("osm:n25397500__osm:w423692233__all"),
             rel=REL_TOL,
         )
 
@@ -719,10 +1016,10 @@ class TestScenarioOverride:
     def test_historical_override_lowers_tac(
         self, loader, route_berlin_wien, historical_scenario
     ):
-        """Costing the SAME base-planned route under the 2026 Base Line
-        scenario (track infra v1: DE tac 3.10 instead of 5.40) yields
-        strictly lower TAC — the override actually swaps the parameter
-        version."""
+        """Costing the SAME base-planned route under the superseded
+        infra-2026 revision (track infra v4: DE tac 3.10 instead of 5.40)
+        yields strictly lower TAC — the override actually swaps the
+        parameter version."""
         _, base = compute_evaluation_domain(route_berlin_wien, loader, demand=[])
         _, historical = compute_evaluation_domain(
             route_berlin_wien,
