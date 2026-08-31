@@ -106,7 +106,7 @@ def build_reference_context(
         from dev_env import resolve_service_url
         from models.route.routing.rail_router import CountryIndex, RailRouter
 
-        # RailRouter reads OPENRAILROUTING_URL at construction, so a
+        # RailRouter resolves the default graph at construction, so a
         # host-run caller needs the compose service name translated to
         # localhost before that. No-op inside the stack.
         resolve_service_url()

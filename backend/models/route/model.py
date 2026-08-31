@@ -30,7 +30,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.28"
+ROUTE_BUILDER_VERSION: str = "0.9.29"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -45,6 +45,25 @@ ROUTE_BUILDER_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.29": {
+        "date": "2026-08-31",
+        "author": "david",
+        "changes": "Routing became scenario-dependent. Each scenario pins "
+        "the routing graph it runs on (scenario.scenarios."
+        "routing_graph_key), the backend holds one RailRouter per "
+        "configured graph, and the router is resolved per request from "
+        "that pin — so a route's geometry now depends on which physical "
+        "network the scenario describes, not on its parameter versions "
+        "alone. RailRouter takes an explicit base_url; a scenario pinning "
+        "a graph the deployment does not serve raises rather than falling "
+        "back, because a silent fallback would return plausible routes "
+        "computed on the wrong infrastructure. NO OUTPUT CHANGE today: "
+        "one graph is configured (infra_2026, today's network) and every "
+        "seeded scenario pins it, so every route is byte-identical to "
+        "0.9.28. The bump records the point at which the graph became "
+        "part of what determines a route, which is what stored payloads "
+        "need to be re-evaluated against once the 2032 graph exists.",
+    },
     "0.9.28": {
         "date": "2026-08-29",
         "author": "david",

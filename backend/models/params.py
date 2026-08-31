@@ -1702,3 +1702,4 @@ class Scenario:
     stop_infrastructures_version: int
     stop_infrastructure_defaults_version: int
     passage_charges_version: int
+    routing_graph_key: str

@@ -175,7 +175,11 @@ def log_effective_config() -> None:
         "POSTGRES_HOST": os.environ.get("POSTGRES_HOST"),
         "POSTGRES_PORT": os.environ.get("POSTGRES_PORT"),
         "POSTGRES_DB": os.environ.get("POSTGRES_DB"),
-        "OPENRAILROUTING_URL": os.environ.get("OPENRAILROUTING_URL"),
+        # Per-graph now; the boot line reports the DEFAULT graph, and
+        # dependencies.py logs the full key -> URL map on startup.
+        "OPENRAILROUTING_URL_INFRA_2026": os.environ.get(
+            "OPENRAILROUTING_URL_INFRA_2026"
+        ),
         "API_CONTAINER_PORT": os.environ.get("API_CONTAINER_PORT", "5000"),
         "ONTD_BOOTSTRAP": os.environ.get("ONTD_BOOTSTRAP", "auto"),
         "AUTH_EMAIL_DEV_MODE": os.environ.get("AUTH_EMAIL_DEV_MODE", "false"),

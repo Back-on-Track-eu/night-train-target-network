@@ -64,7 +64,7 @@ from dev_env import api_base_url, routing_base_url  # noqa: E402
 
 API_BASE = api_base_url()
 ROUTING_URL = routing_base_url()
-CONTAINER_NAME = "openrailrouting"
+CONTAINER_NAME = "openrailrouting-infra-2026"
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "data")
 
 NAME_PREFIX = "MANUAL_TEST_GALLERY "

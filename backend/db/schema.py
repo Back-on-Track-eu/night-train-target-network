@@ -1583,6 +1583,8 @@ SCENARIO_TABLES: tuple[Table, ...] = (
         "All five *_version columns are per-table full-snapshot version "
         "numbers, resolved by exact match, and are NOT NULL — a scenario "
         "is always a complete, self-contained pin, never a partial diff. "
+        "routing_graph_key pins the routing graph the same way (the one "
+        "piece of infrastructure living outside the database). "
         "Compositions, coach types, and operators are catalogs, not "
         "scenario-versioned. Full versioning contract: db/README.md.",
         columns=(
@@ -1661,6 +1663,22 @@ SCENARIO_TABLES: tuple[Table, ...] = (
                 "passage_charges_version",
                 "INTEGER NOT NULL",
                 "Pinned input_params.passage_charges version (full-table snapshot).",
+            ),
+            Column(
+                "routing_graph_key",
+                "VARCHAR(50) NOT NULL",
+                "Routing graph this scenario routes on — the physical rail "
+                "network (OSM state) behind every distance and travel time, "
+                'e.g. "infra_2026" or "infra_2032". Pinned like the '
+                "*_version columns but not itself a snapshot version: the "
+                "graph lives outside the database, in an OpenRailRouting "
+                "instance. Naming contract with the deployment: key <k> is "
+                "served by the instance at env OPENRAILROUTING_URL_<K>, the "
+                "key uppercased — every graph alike, none implicit — see "
+                "models/route/routing/rail_router.py. The TAC and "
+                "passage changes an upgraded network implies are NOT carried "
+                "here; they ride this same row's track_infrastructures_version "
+                "and passage_charges_version pins.",
             ),
         ),
         indexes=(
