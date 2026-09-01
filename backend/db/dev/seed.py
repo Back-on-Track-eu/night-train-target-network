@@ -1665,6 +1665,13 @@ _STOP_SEED_CSV_COLUMNS = [
     "stop_charge_class",
     "stop_charge_source",
     "provenance",
+    # Which routing-graph infrastructure version(s) the stop belongs to
+    # ("infra-2026;infra-2032", "infra-2032", "infra-2026"), tagged in step 6
+    # of the stop pipeline. Read for the header contract only: every stop
+    # still seeds into every snapshot version below. Consuming it — a stop
+    # that exists only in the 2032 graph must not be selectable against the
+    # 2026 one — is a separate work package.
+    "infra_versions",
     "name_latin",
     "name_ascii",
     "uic_ref",

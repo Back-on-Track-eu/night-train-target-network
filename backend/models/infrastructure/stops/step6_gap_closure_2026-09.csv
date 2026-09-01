@@ -1,0 +1,164 @@
+name,search_name,osm_stop_id,lat,lon,coord_source,region,country,reason,infra_versions,note,decision
+Frankfurt (Main) Hauptbahnhof,Frankfurt (Main) Hauptbahnhof,osm:n205364328,50.10682,8.663003,schedule,GERMANY,DE,fua:Frankfurt am Main,infra-2026;infra-2032,hidden by the 2 km check: Süd is 1.8 km away. THE main station.; id from charges/sources/de_station_charges.csv (old catalog id),add
+Berlin Gesundbrunnen,Gesundbrunnen,osm:n459277140,52.548784,13.388721,schedule,GERMANY,DE,network,infra-2026;infra-2032,removed 2026-08-24 as duplicate of step 5; step 5 lost it 2026-08-28; id from charges/sources/de_station_charges.csv (old catalog id),add
+Berlin Ostbahnhof,Ostbahnhof,osm:n3419894993,52.51101,13.43461,schedule,GERMANY,DE,network,infra-2026;infra-2032,Berlin already has Hbf/Südkreuz qualified; second-tier Berlin stations are corridor stations; id from charges/sources/de_station_charges.csv (old catalog id),add
+Berlin-Lichtenberg,Lichtenberg,osm:n29805967,52.50955,13.49711,schedule,GERMANY,DE,network,infra-2026;infra-2032,eastbound terminus (Warszawa/Kyiv trains); id from charges/sources/de_station_charges.csv (old catalog id),add
+Berlin-Spandau,Spandau,osm:n3101920259,52.53456,13.19788,schedule,GERMANY,DE,network,infra-2026;infra-2032,westbound stop of Berlin–NRW/Paris trains; id from charges/sources/de_station_charges.csv (old catalog id),add
+Köln Messe/Deutz,Messe/Deutz,osm:n74880878,50.9413,6.975,corrected,GERMANY,DE,network,infra-2026;infra-2032,"HSL-side station; Köln Hbf 1.1 km — distinct station, tracks not shared; id from charges/sources/de_station_charges.csv (old catalog id)",add
+Dortmund Hauptbahnhof,Dortmund Hauptbahnhof,osm:n1458488633,51.51724,7.45918,schedule,GERMANY,DE,fua:Dortmund,infra-2026;infra-2032,id from charges/sources/de_station_charges.csv (old catalog id),add
+Lübeck Hauptbahnhof,Lübeck Hauptbahnhof,osm:n25149874,53.8671,10.670571,schedule,GERMANY,DE,fua:Lübeck,infra-2026;infra-2032,id from charges/sources/de_station_charges.csv (old catalog id),add
+Regensburg Hauptbahnhof,Regensburg Hauptbahnhof,osm:n2703868858,49.01403,12.10001,schedule,GERMANY,DE,fua:Regensburg,infra-2026;infra-2032,id from charges/sources/de_station_charges.csv (old catalog id),add
+Bamberg,Bamberg,osm:n2835627177,49.90054,10.898915,schedule,GERMANY,DE,fua:Bamberg,infra-2026;infra-2032,id from charges/sources/de_station_charges.csv (old catalog id),add
+Gießen,Gießen,osm:n2821098770,50.57997,8.662928,schedule,GERMANY,DE,fua:Gießen,infra-2026;infra-2032,id from charges/sources/de_station_charges.csv (old catalog id),add
+Siegen,Siegen,osm:n269763316,50.87607,8.016816,schedule,GERMANY,DE,fua:Siegen,infra-2026;infra-2032,id from charges/sources/de_station_charges.csv (old catalog id),add
+Mönchengladbach Hauptbahnhof,Mönchengladbach Hauptbahnhof,osm:n2631683231,51.19692,6.445413,schedule,GERMANY,DE,fua:Mönchengladbach,infra-2026;infra-2032,id from charges/sources/de_station_charges.csv (old catalog id),add
+Siegburg/Bonn,Siegburg,osm:n35879657,50.794,7.2035,corrected,GERMANY,DE,network,infra-2026;infra-2032,ICE station on the Köln–Rhein/Main HSL; Bonn Hbf is on the classic line. Export coordinate 2.7 km off; corrected. id from charges/sources/de_station_charges.csv,add
+Passau Hauptbahnhof,Passau Hauptbahnhof,osm:n14334692,48.57433,13.451643,schedule,GERMANY,DE,border,infra-2026;infra-2032,DE/AT; id from charges/sources/de_station_charges.csv (old catalog id),add
+Frankfurt (Oder),Frankfurt (Oder),osm:n321555238,52.33586,14.54707,schedule,GERMANY,DE,border,infra-2026;infra-2032,DE/PL; id from charges/sources/de_station_charges.csv (old catalog id),add
+Wittenberge,Wittenberge,osm:n3620887012,53.00204,11.7629,schedule,GERMANY,DE,network,infra-2026;infra-2032,Berlin–Hamburg junction; id from charges/sources/de_station_charges.csv (old catalog id),add
+Bad Oldesloe,Bad Oldesloe,osm:n620379882,53.80763,10.382256,schedule,GERMANY,DE,network,infra-2026;infra-2032,Hamburg–Lübeck line; id from charges/sources/de_station_charges.csv (old catalog id),add
+Neustadt (Holst),Neustadt (Holst),osm:n6771321243,54.104,10.808102,schedule,GERMANY,DE,network,infra-2026;infra-2032,Vogelfluglinie; Fehmarnbelt route from ~2029; id from charges/sources/de_station_charges.csv (old catalog id),add
+Oldenburg (Holst),Oldenburg (Holst),osm:n253313309,54.28361,10.88302,schedule,GERMANY,DE,network,infra-2026;infra-2032,Vogelfluglinie; Fehmarnbelt route from ~2029; id from charges/sources/de_station_charges.csv (old catalog id),add
+Timmendorfer Strand,Timmendorfer Strand,,53.995,10.779,corrected,GERMANY,DE,tourism:Ostsee,infra-2026;infra-2032,export coordinate was St. Pölten — wrong; corrected,add
+Rastatt,Rastatt,,48.8567,8.2098,corrected,GERMANY,DE,network,infra-2026;infra-2032,export coordinate was Wuppertal — wrong; corrected. Rheintalbahn,add
+Remscheid-Lennep,Remscheid-Lennep,osm:n4565521156,51.1936,7.2549,corrected,GERMANY,DE,network,infra-2026;infra-2032,removed 2026-08-24 as duplicate of step 5; step 5 lost it 2026-08-28. The frozen export's 'Rastatt' row actually carried THIS station's coordinate. id from charges/sources/de_station_charges.csv,add
+St. Michael in Obersteiermark,St. Michael,,47.34663,15.00919,schedule,GERMANY,AT,network,infra-2026;infra-2032,Südbahn/Schoberpass junction,add
+Selzthal,Selzthal,,47.55024,14.312841,schedule,GERMANY,AT,network,infra-2026;infra-2032,Ennstal/Pyhrn junction,add
+Baden bei Wien,Baden,,48.004,16.23,corrected,GERMANY,AT,tourism:Baden bei Wien,infra-2026;infra-2032,"the schedule name 'Baden' collapses two stations (README, still open); this is the AT one",add
+Baden (CH),Baden,,47.4764,8.3074,corrected,GERMANY,CH,network,infra-2026;infra-2032,the CH one; Zürich–Basel line,add
+Aarau,Aarau,,47.39043,8.045701,schedule,GERMANY,CH,fua:Aarau,infra-2026;infra-2032,,add
+Olten,Olten,,47.34996,7.903703,schedule,GERMANY,CH,network,infra-2026;infra-2032,CH's central junction,add
+Brugg,Brugg,,47.48674,8.21091,schedule,GERMANY,CH,network,infra-2026;infra-2032,Zürich–Basel/Bözberg junction,add
+Zug,Zug,,47.17351,8.515304,schedule,GERMANY,CH,fua:Zug,infra-2026;infra-2032,,add
+Lausanne,Lausanne,,46.51708,6.629193,schedule,GERMANY,CH,fua:Lausanne,infra-2026;infra-2032,,add
+Genève,Genève,,46.21055,6.14302,schedule,GERMANY,CH,fua:Genève,infra-2026;infra-2032,Genève-Cornavin,add
+Fribourg/Freiburg,Fribourg,,46.80321,7.151174,schedule,GERMANY,CH,fua:Fribourg,infra-2026;infra-2032,,add
+Paris Est,Paris Est,osm:n2506241285,48.87698,2.35912,schedule,FRANCE,FR,fua:Paris,infra-2026;infra-2032,hidden by the 2 km check: Gare du Nord is 490 m away. Terminus of the eastern night trains; id from illustrative charge row (retired curated catalog),add
+Paris Gare de Lyon,Paris Gare de Lyon,,48.8443,2.374,corrected,FRANCE,FR,fua:Paris,infra-2026;infra-2032,not in any schedule export — target-network addition; southbound terminus,add
+Paris Bercy,Paris Bercy,osm:n1823210835,48.8395,2.3826,corrected,FRANCE,FR,network,infra-2026;infra-2032,night train terminus (Intercités de nuit),add
+Paris Montparnasse,Gare Montparnasse,osm:n65331500,48.841,2.3199,corrected,FRANCE,FR,network,infra-2026;infra-2032,westbound terminus,add
+Aéroport Charles de Gaulle 2 TGV,Charles de Gaulle 2,,49.004,2.571,corrected,FRANCE,FR,network:airport,infra-2026;infra-2032,"the export had 'Aéroport CDG 1', an RER-only station; the mainline station is CDG 2 TGV",add
+Lyon Part-Dieu,Lyon Part-Dieu,,45.76057,4.859991,schedule,FRANCE,FR,network,infra-2026;infra-2032,Lyon's main station; Perrache is in as fua:Lyon,add
+Bordeaux Saint-Jean,Bordeaux Saint-Jean,,44.82649,-0.55605,schedule,FRANCE,FR,fua:Bordeaux,infra-2026;infra-2032,,add
+Dijon,Dijon,,47.32303,5.026256,schedule,FRANCE,FR,fua:Dijon,infra-2026;infra-2032,Dijon-Ville,add
+Lille Europe,Lille-Europe,,50.6394,3.0755,corrected,FRANCE,FR,network,infra-2026;infra-2032,HSL station; Lille-Flandres is in as fua:Lille. Export coordinate 4.9 km off; corrected,add
+Saint-Quentin,Saint-Quentin,,49.83898,3.295458,schedule,FRANCE,FR,fua:Saint-Quentin,infra-2026;infra-2032,,add
+Montpellier Sud de France,Montpellier Sud de France,,43.5952,3.924223,schedule,FRANCE,FR,network,infra-2026;infra-2032,HSL station; Saint-Roch is qualified,add
+Levanto,Levanto,,44.17411,9.616141,schedule,ITALY,IT,tourism:Cinque Terre,infra-2026;infra-2032,,add
+Saint-Pierre-des-Corps,Saint-Pierre-des-Corps,,47.38677,0.723511,schedule,FRANCE,FR,fua:Tours,infra-2026;infra-2032,Tours' mainline station; Tours itself is a terminus,add
+Morlaix,Morlaix,,48.57761,-3.828228,schedule,FRANCE,FR,network,infra-2026;infra-2032,Brittany line to Brest,add
+Ventimiglia,Ventimiglia,,43.79124,7.607586,schedule,ITALY,IT,border,infra-2026;infra-2032,FR/IT,add
+Hendaye,Hendaye,,43.35317,-1.782095,schedule,FRANCE,FR,border,infra-2026;infra-2032,FR/ES; the Spanish side Irun may already qualify,add
+Luxembourg,Luxembourg,,49.5998,6.1338,corrected,FRANCE,LU,fua:Luxembourg,infra-2026;infra-2032,export coordinate 31 km off (README); corrected,add
+Charleroi-Central,Charleroi,,50.40516,4.438631,schedule,FRANCE,BE,fua:Charleroi,infra-2026;infra-2032,,add
+Namur,Namur,,50.4686,4.8623,corrected,FRANCE,BE,fua:Namur,infra-2026;infra-2032,export coordinate 10 km off; corrected,add
+Leuven,Leuven,,50.88416,4.714259,schedule,FRANCE,BE,fua:Leuven,infra-2026;infra-2032,,add
+Eindhoven Centraal,Eindhoven,,51.44296,5.479527,schedule,FRANCE,NL,fua:Eindhoven,infra-2026;infra-2032,,add
+Apeldoorn,Apeldoorn,,52.2092,5.969479,schedule,FRANCE,NL,fua:Apeldoorn,infra-2026;infra-2032,,add
+Barcelona Sants,Sants,,41.37906,2.1402,schedule,IBERIA,ES,fua:Barcelona,infra-2026;infra-2032,,add
+Madrid Puerta de Atocha,Atocha,osm:n7499028216,40.405,-3.688327,schedule,IBERIA,ES,fua:Madrid,infra-2026;infra-2032,"removed 2026-08-24 as duplicate of step 5; step 5 lost it 2026-08-28. Take the mainline object, not Atocha-Cercanías. The resolver's name search lands on Atocha-Cercanías (the object the August note warned about) — id pinned to the mainline node",add
+Madrid Chamartín,Chamartín,,40.47118,-3.682843,schedule,IBERIA,ES,network,infra-2026;infra-2032,northbound/international terminus; Madrid FUA is Atocha,add
+Girona,Girona,,41.98266,2.826893,schedule,IBERIA,ES,fua:Girona,infra-2026;infra-2032,,add
+Figueres,Figueres,,42.26518,2.968771,schedule,IBERIA,ES,border,infra-2026;infra-2032,break-of-gauge interchange; Figueres-Vilafant is the HSL station 2 km west,add
+Lleida-Pirineus,Lleida,,41.6201,0.63367,schedule,IBERIA,ES,fua:Lleida,infra-2026;infra-2032,,add
+Zaragoza-Delicias,Delicias,,41.65869,-0.911226,schedule,IBERIA,ES,fua:Zaragoza,infra-2026;infra-2032,,add
+Burgos-Rosa Manzano,Burgos,,42.37044,-3.666142,schedule,IBERIA,ES,fua:Burgos,infra-2026;infra-2032,,add
+Valladolid-Campo Grande,Valladolid,,41.64305,-4.726651,schedule,IBERIA,ES,fua:Valladolid,infra-2026;infra-2032,,add
+Milano Lambrate,Lambrate,,45.48487,9.237202,schedule,ITALY,IT,network,infra-2026;infra-2032,second Milano station on the eastern side; Centrale is qualified,add
+Milano Rogoredo,Rogoredo,,45.43383,9.238904,schedule,ITALY,IT,network,infra-2026;infra-2032,southern Milano stop of Genova/Bologna trains,add
+Firenze Castello,Castello,,43.81944,11.218386,schedule,ITALY,IT,network,infra-2026;infra-2032,bypass station used by through night trains avoiding SMN,add
+Padova,Padova,,45.41735,11.880454,schedule,ITALY,IT,fua:Padova,infra-2026;infra-2032,,add
+Vicenza,Vicenza,,45.54108,11.539844,schedule,ITALY,IT,fua:Vicenza,infra-2026;infra-2032,,add
+Brescia,Brescia,,45.53204,10.213362,schedule,ITALY,IT,fua:Brescia,infra-2026;infra-2032,,add
+Vercelli,Vercelli,,45.3236,8.4261,corrected,ITALY,IT,fua:Vercelli,infra-2026;infra-2032,export coordinate was Grosseto — wrong; corrected,add
+Savona,Savona,,44.3055,8.474,corrected,ITALY,IT,fua:Savona,infra-2026;infra-2032,export coordinate was Aarau — wrong; corrected,add
+Imperia,Imperia,osm:n4427972085,43.89304,8.045431,schedule,ITALY,IT,tourism:Riviera dei Fiori,infra-2026;infra-2032,Imperia Oneglia (the export's stop) closed in 2016 when the new through station Imperia opened 1.2 km west — the new one is the stop,add
+Orte,Orte,,42.43755,12.408697,schedule,ITALY,IT,network,infra-2026;infra-2032,Roma–Firenze/Ancona junction,add
+Calalzo-Pieve di Cadore-Cortina,Calalzo,,46.444,12.38855,schedule,ITALY,IT,tourism:Cortina d'Ampezzo,infra-2026;infra-2032,,add
+London King's Cross,King's Cross,,51.5308,-0.1238,corrected,UNITED_KINGDOM,GB,network,infra-2026;infra-2032,removed 2026-08-24 as duplicate of step 5; step 5 lost it 2026-08-28. Caledonian Sleeper terminus is Euston; King's Cross is the ECML terminus,add
+London St Pancras International,St Pancras,,51.5315,-0.1263,corrected,UNITED_KINGDOM,GB,network,infra-2026;infra-2032,Eurostar terminus — any continental night train into London ends here,add
+Preston,Preston,,53.756,-2.708,corrected,UNITED_KINGDOM,GB,,,covered — step 5 has Preston (osm:n6677208684); the export coordinate was 20 km off,skip
+København H,København H,osm:n3739700410,55.67277,12.564812,schedule,NORDICS,DK,fua:København,infra-2026;infra-2032,the main station; only Syd and Kastrup were in. Also carried an illustrative charge row that step 10 now reports stale; id from tests/conftest.py STOPS_COPENHAGEN_STOCKHOLM and the illustrative charge row,add
+København Østerport,Østerport,,55.69335,12.58855,schedule,NORDICS,DK,,,Øresund-line terminus; keep-it-in,skip
+Høje Taastrup,Høje Taastrup,,55.648989,12.269999,schedule,NORDICS,DK,network,infra-2026;infra-2032,western Copenhagen stop of trains to Germany,add
+Køge Nord,Køge Nord,,55.49892,12.174511,schedule,NORDICS,DK,network,infra-2026;infra-2032,HSL station on the Copenhagen–Ringsted line,add
+Ringsted,Ringsted,,55.43807,11.786509,schedule,NORDICS,DK,network,infra-2026;infra-2032,Sjælland junction,add
+Slagelse,Slagelse,,55.40747,11.347582,schedule,NORDICS,DK,network,infra-2026;infra-2032,Copenhagen–Fyn line,add
+Nykøbing Falster,Nykøbing F,,54.76542,11.875492,schedule,NORDICS,DK,network,infra-2026;infra-2032,Fehmarnbelt corridor from ~2029,add
+Göteborg C,Göteborg C,,57.70918,11.973,schedule,NORDICS,SE,fua:Göteborg,infra-2026;infra-2032,the export carried this twice (Göteborg C / Göteborg Centralen station) — one entry,add
+Örebro C,Örebro,,59.2785,15.211618,schedule,NORDICS,SE,fua:Örebro,infra-2026;infra-2032,,add
+Västerås C,Västerås,,59.60781,16.552105,schedule,NORDICS,SE,fua:Västerås,infra-2026;infra-2032,,add
+Katrineholm C,Katrineholm,,58.99682,16.207819,schedule,NORDICS,SE,network,infra-2026;infra-2032,Stockholm–Göteborg/Malmö junction,add
+Kiruna C,Kiruna,,67.86964,20.205324,schedule,NORDICS,SE,tourism:Lapland,infra-2026;infra-2032,Stockholm–Narvik night train destination (was in the frozen export),add
+Gällivare,Gällivare,,67.13361,20.651682,schedule,NORDICS,SE,network,infra-2026;infra-2032,Malmbanan; night train calls,add
+Narvik,Narvik,,68.4417,17.441419,schedule,NORDICS,NO,network,infra-2026;infra-2032,Ofotbanen terminus of the Stockholm night train,add
+Fredrikstad,Fredrikstad,,59.20876,10.950421,schedule,NORDICS,NO,fua:Fredrikstad,infra-2026;infra-2032,,add
+Sarpsborg,Sarpsborg,,59.28614,11.118046,schedule,NORDICS,NO,fua:Sarpsborg,infra-2026;infra-2032,,add
+Moss,Moss,,59.4348,10.6585,corrected,NORDICS,NO,fua:Moss,infra-2026;infra-2032,export coordinate 2.5 km off; corrected,add
+Halden,Halden,,59.12024,11.383936,schedule,NORDICS,NO,border,infra-2026;infra-2032,"NO/SE, Østfoldbanen",add
+Białystok,Białystok,,53.135,23.137,corrected,CENTRAL_EUROPE,PL,fua:Białystok,infra-2026;infra-2032,the export had Białystok Starosielce (suburban); the main station is missing entirely. Rail Baltica corridor,add
+Suwałki,Suwałki,,54.106,22.94546,schedule,CENTRAL_EUROPE,PL,network,infra-2026;infra-2032,Rail Baltica corridor PL/LT,add
+Ełk,Ełk,,53.82492,22.36197,schedule,CENTRAL_EUROPE,PL,network,infra-2026;infra-2032,Rail Baltica corridor; junction,add
+Warszawa Gdańska,Warszawa Gdańska,,52.25919,20.993714,schedule,CENTRAL_EUROPE,PL,network,infra-2026;infra-2032,used by trains bypassing Centralna,add
+Rzepin,Rzepin,,52.35027,14.81547,schedule,CENTRAL_EUROPE,PL,border,infra-2026;infra-2032,"DE/PL, Berlin–Poznań",add
+Zebrzydowice,Zebrzydowice,,49.87789,18.605563,schedule,CENTRAL_EUROPE,PL,border,infra-2026;infra-2032,PL/CZ,add
+Oświęcim,Oświęcim,,50.04233,19.200698,schedule,CENTRAL_EUROPE,PL,network,infra-2026;infra-2032,Kraków–Czechowice line; memorial-site visitors,add
+České Budějovice,České Budějovice,,48.97462,14.48875,schedule,CENTRAL_EUROPE,CZ,fua:České Budějovice,infra-2026;infra-2032,,add
+Bratislava-Petržalka,Petržalka,,48.12672,17.107404,schedule,CENTRAL_EUROPE,SK,network,infra-2026;infra-2032,Wien-side station of Bratislava,add
+Budapest-Déli,Déli,,47.50043,19.024665,schedule,CENTRAL_EUROPE,HU,network,infra-2026;infra-2032,removed 2026-08-24 as duplicate of step 5; step 5 lost it 2026-08-28. Terminus toward Balaton/Croatia,add
+Kecskemét,Kecskemét,,46.91361,19.700635,schedule,CENTRAL_EUROPE,HU,fua:Kecskemét,infra-2026;infra-2032,,add
+Szeged,Szeged,,46.245,20.142,corrected,CENTRAL_EUROPE,HU,fua:Szeged,infra-2026;infra-2032,the export had Szeged-Kiskundorozsma (freight/junction); the main station is missing entirely,add
+Rīga Pasažieru,Rīga,osm:n7799405223,56.94674,24.12033,schedule,BALTICS,LV,fua:Rīga,infra-2026;infra-2032,"Rīgas Centrālā stacija; the heavy_rail node, not the station-building way beside it",add
+Rīga Airport (Rail Baltica),Airport,,56.92235,23.98331,schedule,BALTICS,LV,network:Rail Baltica,infra-2032,"not built — infra-2032 only. Not in step 3b (OSM has railway=construction, not a station object); re-run the resolver when it appears",defer
+Tallinn Balti jaam,Balti,,59.4402,24.737,corrected,BALTICS,EE,fua:Tallinn,infra-2026;infra-2032,today's main station (1520 mm),add
+Tallinn Ülemiste,Ülemiste,,59.42336,24.7945,schedule,BALTICS,EE,network:Rail Baltica terminal,infra-2032,existing Elron stop being rebuilt as the Rail Baltica terminal; as a night-train stop it is 2032,add
+Pärnu,Pärnu,,58.379,24.522,corrected,BALTICS,EE,,,"no railway station in OSM/step 3b within 6 km: Pärnu's station closed in 2018 for the Rail Baltica rebuild and rail service is suspended. Only Pärnu International (infra-2032, deferred) remains",skip
+Pärnu International (Rail Baltica),Pärnu,,58.37215,24.5562,schedule,BALTICS,EE,network:Rail Baltica,infra-2032,not built — infra-2032 only. Not in step 3b; re-run the resolver when it appears,defer
+Panevėžys,Panevėžys,,55.74582,24.35525,schedule,BALTICS,LT,fua:Panevėžys,infra-2026;infra-2032,Rail Baltica corridor,add
+Marijampolė,Marijampolė,,54.55749,23.36448,schedule,BALTICS,LT,network,infra-2026;infra-2032,Rail Baltica corridor PL/LT; existing 1435 mm station,add
+Novi Sad,Нови Сад,,45.26547,19.829566,schedule,SOUTH_EASTERN_EUROPE,RS,fua:Novi Sad,infra-2026;infra-2032,,add
+Slavonski Brod,Slavonski Brod,,45.1635,18.011662,schedule,SOUTH_EASTERN_EUROPE,HR,network,infra-2026;infra-2032,corridor X,add
+Vukovar,Vukovar,,45.36362,18.989807,schedule,SOUTH_EASTERN_EUROPE,HR,fua:Vukovar,infra-2026;infra-2032,,add
+Pirdop,Пирдоп,,42.71004,24.174061,schedule,SOUTH_EASTERN_EUROPE,BG,network,infra-2026;infra-2032,Sofia–Burgas via Karlovo line,add
+București Băneasa,Băneasa,,44.4855,26.074084,schedule,SOUTH_EASTERN_EUROPE,RO,network,infra-2026;infra-2032,northern București station,add
+Vișeu de Jos,Vișeu,,47.72238,24.368159,schedule,SOUTH_EASTERN_EUROPE,RO,network,infra-2026;infra-2032,Maramureș line toward Sighetu,add
+Sighetu Marmației,Sighetu,,47.9285,23.891,corrected,SOUTH_EASTERN_EUROPE,RO,border,infra-2026;infra-2032,RO/UA; Solotvyno is 1.7 km away across the Tisza but a different country,add
+Korosten,Коростень,,50.94876,28.64192,schedule,EASTERN_EUROPE,UA,network,infra-2026;infra-2032,Kyiv–Kovel/Warszawa junction; search in Cyrillic,add
+Kramatorsk,Краматорськ,,48.72706,37.542861,schedule,EASTERN_EUROPE,UA,fua:Kramatorsk,infra-2026;infra-2032,,add
+Sloviansk,Слов'янськ,,48.83194,37.559768,schedule,EASTERN_EUROPE,UA,fua:Sloviansk,infra-2026;infra-2032,,add
+Izium,Ізюм,,49.2166,37.302739,schedule,EASTERN_EUROPE,UA,network,infra-2026;infra-2032,,add
+Sheptytskyi (Chervonohrad),Шептицький,,50.38743,24.222816,schedule,EASTERN_EUROPE,UA,fua:Sheptytskyi,infra-2026;infra-2032,the city was renamed Шептицький in 2024 and OSM follows; the export still says Chervonohrad,add
+Dubno,Дубно,,50.38681,25.752666,schedule,EASTERN_EUROPE,UA,network,infra-2026;infra-2032,,add
+Uman,Умань,osm:n783848373,48.7328348,30.2044227,corrected,EASTERN_EUROPE,UA,fua:Uman,infra-2026;infra-2032,the export coordinate is Uman's BUS station; the railway station Умань is 3.4 km away — id pinned,add
+Konya,Konya,,37.868,32.485,corrected,EASTERN_EUROPE,TR,,,covered — catalog has Konya (osm:n5014804022); the export coordinate was Debrecen,skip
+Poltava,Полтава-Південна,,49.5594,34.575417,schedule,EASTERN_EUROPE,UA,,,"REVIEW: schedule coordinate is Полтава-Південна, the main station on Kyiv–Kharkiv; catalog has Полтава-Київська 6 km away (a step 6 pick). Both are real; Південна is the one the 19 trips called at",review
+Lutsk,Луцьк,,50.751,25.354,schedule,EASTERN_EUROPE,UA,,,"covered — step 5 has Луцьк (osm:n972024482). The step 6 pick Росинка (osm:n8220188327, fua:<city>) 1.5 km away is redundant; Josh: drop it or re-reason it",skip
+Iași / Nicolina,,,47.15723,27.603453,schedule,SOUTH_EASTERN_EUROPE,RO,,,"REVIEW: both Iași and Nicolina are in the catalog (2 km apart); fine, but the handover said Nicolina was replaced",review
+Dobrich,Добрич,,43.65571,27.827039,schedule,SOUTH_EASTERN_EUROPE,BG,,,REVIEW: catalog Добрич sits 10 km from the schedule point — one of the two coordinates is wrong,review
+Brașov,,,,,schedule,,,,,"covered — same station under another object/name within a few km, or (Burgas, Rennes) a wrong export coordinate",skip
+Kryvyi Rih,,,,,schedule,,,,,"covered — same station under another object/name within a few km, or (Burgas, Rennes) a wrong export coordinate",skip
+Kherson,,,,,schedule,,,,,"covered — same station under another object/name within a few km, or (Burgas, Rennes) a wrong export coordinate",skip
+Malatya,,,,,schedule,,,,,"covered — same station under another object/name within a few km, or (Burgas, Rennes) a wrong export coordinate",skip
+İzmir Çiğli,,,,,schedule,,,,,"covered — same station under another object/name within a few km, or (Burgas, Rennes) a wrong export coordinate",skip
+Trnava,,,,,schedule,,,,,"covered — same station under another object/name within a few km, or (Burgas, Rennes) a wrong export coordinate",skip
+Vaslui,,,,,schedule,,,,,"covered — same station under another object/name within a few km, or (Burgas, Rennes) a wrong export coordinate",skip
+Les Aubrais,,,,,schedule,,,,,"covered — same station under another object/name within a few km, or (Burgas, Rennes) a wrong export coordinate",skip
+Burgas,,,,,schedule,,,,,"covered — same station under another object/name within a few km, or (Burgas, Rennes) a wrong export coordinate",skip
+Rennes,,,,,schedule,,,,,"covered — same station under another object/name within a few km, or (Burgas, Rennes) a wrong export coordinate",skip
+Katowice Ligota,,,,,schedule,,,,,"covered — same station under another object/name within a few km, or (Burgas, Rennes) a wrong export coordinate",skip
+Kyiv Sviatoshyn,,,,,schedule,,,,,"covered — same station under another object/name within a few km, or (Burgas, Rennes) a wrong export coordinate",skip
+Genova Cornigliano,,,,,schedule,,,,,"covered — same station under another object/name within a few km, or (Burgas, Rennes) a wrong export coordinate",skip
+Erfurt,,,,,schedule,,,,,"covered — same station under another object/name within a few km, or (Burgas, Rennes) a wrong export coordinate",skip
+Albi,,,,,schedule,,,,,"covered — same station under another object/name within a few km, or (Burgas, Rennes) a wrong export coordinate",skip
+Beograd Zemun,,,,,schedule,,,,,"covered — same station under another object/name within a few km, or (Burgas, Rennes) a wrong export coordinate",skip
+Zürich Enge,,,,,schedule,,,,,"covered — same station under another object/name within a few km, or (Burgas, Rennes) a wrong export coordinate",skip
+Aéroport Charles de Gaulle 1,,,49.00975,2.56123,schedule,FRANCE,FR,,,RER-only; replaced by CDG 2 TGV above,skip
+Monte-Carlo Country Club,,,43.75438,7.448181,schedule,FRANCE,MC,,,"not a station; Monaco-Monte-Carlo would be MC, which seed.py does not model",skip
+Val-de-Fontenay,,,48.85445,2.488986,schedule,FRANCE,FR,,,RER/suburban,skip
+Budapest Ferencváros,,,47.46883,19.088732,schedule,CENTRAL_EUROPE,HU,,,freight/technical station,skip
+Køge,,,55.45753,12.182181,schedule,NORDICS,DK,,,Køge Nord is the mainline station,skip
+Orthez,,,43.48432,-0.767643,schedule,FRANCE,FR,,,small; Pau/Dax cover the corridor,skip
+Białystok Starosielce,,,53.12055,23.08742,schedule,CENTRAL_EUROPE,PL,,,replaced by Białystok main,skip
+Szeged-Kiskundorozsma,,,46.27174,20.090665,schedule,CENTRAL_EUROPE,HU,,,replaced by Szeged main,skip
+Göteborg Centralen station,,,57.70918,11.973,schedule,NORDICS,SE,,,duplicate of Göteborg C,skip
+İzmit,,,40.76,29.93,schedule,EASTERN_EUROPE,TR,,,covered — step 5 has İzmit (osm:n11065364597). The step 6 pick Kırkikievler 2.3 km away is redundant; Josh: drop it or re-reason it,skip
