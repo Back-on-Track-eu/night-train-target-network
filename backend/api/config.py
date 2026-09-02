@@ -100,6 +100,21 @@ GUEST_TTL_DAYS = _env_int("GUEST_TTL_DAYS", 30)
 # deployment without invalidating anything already stored.
 FEEDBACK_SUBJECT_MAX_LEN = _env_int("FEEDBACK_SUBJECT_MAX_LEN", 200)
 
+# The one unauthenticated endpoint that sends mail, so the only one an
+# anonymous caller can use to generate outbound traffic. Two windows: the
+# per-minute cap stops a script within seconds, the hourly one still lets a
+# reviewer working through the documentation file several corrections in a
+# sitting. Keyed per user where a local-plane token is present, per address
+# otherwise (rate_limit_key) — the form is offered to anonymous readers, so
+# most submissions count against the address bucket.
+#
+# Read these numbers per gunicorn worker, not per deployment: limiter
+# storage is in-process (api/limiter.py), so the real ceiling is
+# (limit x workers) — 10/min and 40/hour at the servers' --workers 2. That
+# is also why the six submitting tests in test_60_feedback_api.py do not
+# trip it: they spread across workers.
+FEEDBACK_RATE_LIMIT = _env_str("FEEDBACK_RATE_LIMIT", "5 per minute;20 per hour")
+
 
 # =============================================================================
 # Proposals listing — api/proposals.py
@@ -187,6 +202,7 @@ def log_effective_config() -> None:
     }
     limits = {
         "COMMENT_BODY_MAX_LEN": COMMENT_BODY_MAX_LEN,
+        "FEEDBACK_RATE_LIMIT": FEEDBACK_RATE_LIMIT,
         "COMMENT_RATE_LIMIT": COMMENT_RATE_LIMIT,
         "COMMENT_EDIT_RATE_LIMIT": COMMENT_EDIT_RATE_LIMIT,
         "LIKE_RATE_LIMIT": LIKE_RATE_LIMIT,

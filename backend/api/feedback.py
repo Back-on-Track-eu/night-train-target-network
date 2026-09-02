@@ -5,6 +5,7 @@ Feedback endpoints.
 
   POST /api/feedback             — submit feedback; mails the working
                                     group and stores the submission
+                                    (rate-limited, config.FEEDBACK_RATE_LIMIT)
   GET  /api/feedback/categories  — suggested category/sub_category values
                                     for the feedback form
 
@@ -19,19 +20,22 @@ import logging
 from flask import Blueprint, g, jsonify, request
 
 from adapters import mailer
-from api.auth_middleware import optional_auth
+from api import config
+from api.auth_middleware import optional_auth, rate_limit_key
 from api.helpers.dependencies import get_feedback_repository, get_loader
 from api.helpers.feedback_serialize import (
     build_categories_payload,
     feedback_response_to_dict,
     validate_feedback_body,
 )
+from api.limiter import limiter
 
 logger = logging.getLogger(__name__)
 bp = Blueprint("feedback", __name__)
 
 
 @bp.post("/feedback")
+@limiter.limit(config.FEEDBACK_RATE_LIMIT, key_func=rate_limit_key)
 @optional_auth
 def submit_feedback():
     """

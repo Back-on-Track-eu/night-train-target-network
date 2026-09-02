@@ -238,6 +238,7 @@ class TestRateLimitConfig:
             config.LIKE_RATE_LIMIT,
             config.AUTH_REQUEST_CODE_RATE_LIMIT,
             config.AUTH_GUEST_RATE_LIMIT,
+            config.FEEDBACK_RATE_LIMIT,
         ],
     )
     def test_limit_string_parses(self, limit):

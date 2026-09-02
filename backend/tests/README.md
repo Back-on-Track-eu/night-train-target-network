@@ -545,6 +545,12 @@ graceful-degradation behaviour) — the storage tests check
 `email_sent`/`notified_at` agree with each other rather than assuming a
 fixed value, so this file passes the same way whether or not SMTP_* is set.
 
+`POST /api/feedback` is rate-limited (`config.FEEDBACK_RATE_LIMIT`) — the
+one unauthenticated endpoint that sends mail. Run the stack under test
+with `TESTING=true` as CI does; against a stack with limits on, the six
+submitting tests skip rather than fail, the same convention
+`test_70_auth_api.py` uses for request-code.
+
 | Test | Purpose | Input | Expected |
 |---|---|---|---|
 | `test_feedback_requires_identity` | Validation | no `user_id`/`email` | `400 validation_error` |
