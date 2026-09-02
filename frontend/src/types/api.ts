@@ -380,10 +380,17 @@ export interface EvaluationViews {
 // "driver_eur") for the cost-factor detail popover; the other sections are
 // typed for completeness but unused.
 
-/** One cost-factor formula: a KaTeX-compatible LaTeX string plus a
- *  plain-English description. Both are backend-provided and shown as-is. */
+/** One cost-factor formula, as the backend documents it. All prose is
+ *  backend-provided and shown as-is — the model registry is the single
+ *  source of truth for it (each model's backend model.py).
+ *
+ *  `summary` is the one-sentence form (CALC 0.9.24 / route builder 0.9.31 /
+ *  energy 1.1.1) and the only prose the cost-breakdown popover renders;
+ *  `latex` and `description` are the long form, which now lives on the
+ *  documentation site rather than in the overlay. */
 export interface Formula {
   latex: string
+  summary: string
   description: string
 }
 

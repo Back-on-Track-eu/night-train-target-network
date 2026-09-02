@@ -36,6 +36,10 @@ for _path in (str(BACKEND), str(SCRIPTS)):
         sys.path.insert(0, _path)
 
 from model_docs import render_model_md  # noqa: E402
+from model_docs.extract import (  # noqa: E402
+    validate_calc_coverage,
+    validate_summaries,
+)
 
 # One entry per artefact: the module providing check() -> bool and
 # write() -> int, plus the path named in the "out of date" message.
@@ -59,6 +63,12 @@ def main() -> None:
         help="which artefact to render (default: all)",
     )
     args = parser.parse_args()
+
+    # Registry-level invariants, checked once before any artefact is
+    # rendered: a formula missing its place in the tree or carrying an
+    # unusable summary is a source problem, not an output problem.
+    validate_calc_coverage()
+    validate_summaries()
 
     selected = list(TARGETS) if args.target == "all" else [args.target]
 

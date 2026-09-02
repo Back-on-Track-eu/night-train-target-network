@@ -83,6 +83,7 @@ __all__ = [
     "parse_ref",
     "standard_anchor",
     "validate_calc_coverage",
+    "validate_summaries",
 ]
 
 # Formula registries keyed by the model id used in "formula:<model>.<key>"
@@ -167,6 +168,11 @@ MODEL_VERSION_ROWS: list[tuple[str, str, str, str, str]] = [
         "backend/models/infrastructure/STOP_CLASSIFICATION.md",
     ),
 ]
+
+
+# Longest summary that still fits the cost-breakdown info popover on one
+# or two lines. Raising it means re-checking that overlay.
+_SUMMARY_MAX_LEN = 110
 
 
 # ---------------------------------------------------------------------------
@@ -424,4 +430,29 @@ def validate_calc_coverage() -> None:
             f"generate_model_docs: CALC_FORMULAS keys not placed in CALC_TREE, "
             f"CALC_ALLOCATION_FORMULAS, CALC_DERIVATION_FORMULAS, or "
             f"CALC_GENERIC_FORMULAS: {sorted(missing)}"
+        )
+
+
+def validate_summaries() -> None:
+    """Formula.summary is what the reader sees where there is no room for
+    the full description — the cost-breakdown popover, a docs page
+    description, a search snippet. The dataclass makes it required; this
+    checks it is actually usable there."""
+    problems = []
+    for model, meta in REGISTRIES.items():
+        for key, formula in meta["formulas"].items():
+            summary = formula.summary.strip()
+            if not summary:
+                problems.append(f"{model}.{key}: empty summary")
+            elif not summary.endswith((".", "?")):
+                problems.append(f"{model}.{key}: summary needs a terminal period")
+            elif len(summary) > _SUMMARY_MAX_LEN:
+                problems.append(
+                    f"{model}.{key}: summary is {len(summary)} chars, "
+                    f"max {_SUMMARY_MAX_LEN} — it has to fit an info popover"
+                )
+    if problems:
+        raise SystemExit(
+            "generate_model_docs: unusable Formula.summary values:\n  "
+            + "\n  ".join(problems)
         )

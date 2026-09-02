@@ -30,7 +30,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.30"
+ROUTE_BUILDER_VERSION: str = "0.9.31"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -45,6 +45,21 @@ ROUTE_BUILDER_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.31": {
+        "date": "2026-09-02",
+        "author": "bjarne + claude",
+        "changes": "DOCUMENTATION ONLY - no value changes anywhere. Every formula in "
+        "this registry gained a Formula.summary: one self-contained sentence naming "
+        "what the value is, for places with no room for the full description (the "
+        "cost-breakdown info popover, a docs page description, a search snippet). The "
+        "field is required, so a new formula cannot ship without one. No latex, no "
+        "input legend, no computed value is touched. 14 summaries added. Bumped only "
+        "because the version-check gate self-gates this file (any diff requires the "
+        "constant to move). Note the side effect: a bump marks every stored proposal "
+        "outdated, so each one recomputes lazily on its next load and gets an "
+        "update_log entry naming this trigger - the recompute reproduces identical "
+        "numbers, and this entry is the reason it fired.",
+    },
     "0.9.30": {
         "date": "2026-08-31",
         "author": "david",
@@ -917,6 +932,8 @@ ROUTE_FORMULAS: dict[str, Formula] = {
     # ------------------------------------------------------------------
     "buffer_time": Formula(
         latex=r"t_{buffer,l} = t_{drive,l} \times q_{buffer,country(l)}",
+        summary="Safety margin added to the timetable, sized by how delay-prone each "
+        "country's network is.",
         description="Safety margin added to the timetable on top of pure "
         "driving time. Each country has its own buffer percentage, "
         "reflecting how congested and delay-prone its network is.",
@@ -945,6 +962,8 @@ ROUTE_FORMULAS: dict[str, Formula] = {
     # both driving and dynamics since 0.9.9 (see CHANGELOG).
     "total_time_per_leg": Formula(
         latex=r"t_{total,l} = t_{drive,l} + t_{dyn,l} + t_{buffer,l}",
+        summary="Scheduled time for one country leg: driving, stop braking and "
+        "acceleration, and buffer.",
         description="Scheduled travel time for one country leg: driving "
         "time, plus the time lost braking and accelerating at stops, plus "
         "the schedule buffer.",
@@ -978,6 +997,8 @@ ROUTE_FORMULAS: dict[str, Formula] = {
     # stretches a short night interval (0.9.10).
     "total_time_per_segment": Formula(
         latex=r"t_{seg} = \sum_{l \in seg} t_{total,l} + t_{slack,seg}",
+        summary="Scheduled time between two neighbouring stops, summed over its "
+        "country legs.",
         description="Scheduled travel time between two neighbouring stops: "
         "the sum of all its country legs, plus any slack added when the "
         "timetable is stretched to cover the night window.",
@@ -1002,6 +1023,8 @@ ROUTE_FORMULAS: dict[str, Formula] = {
     ),
     "avg_speed": Formula(
         latex=r"\bar{v}_{kmh} = \frac{d_{km}}{t_{drive,h}}",
+        summary="Distance over pure driving time, buffers excluded — shown for "
+        "orientation only.",
         description="Average speed over a stretch: distance divided by pure "
         "driving time, buffers excluded. Shown for orientation only.",
         inputs=(
@@ -1023,6 +1046,7 @@ ROUTE_FORMULAS: dict[str, Formula] = {
     # ------------------------------------------------------------------
     "dwell_time_boarding": Formula(
         latex=r"t_{dwell} = \max(t_{board,comp},\ t_{board,infra})",
+        summary="How long the train waits at a stop where passengers only board.",
         description="How long the train waits at a stop where passengers "
         "board: the larger of the two minimum boarding times — one set by "
         "the train, one by the station.",
@@ -1048,6 +1072,7 @@ ROUTE_FORMULAS: dict[str, Formula] = {
     ),
     "dwell_time_alighting": Formula(
         latex=r"t_{dwell} = \max(t_{alight,comp},\ t_{alight,infra})",
+        summary="How long the train waits at a stop where passengers only get off.",
         description="How long the train waits at a stop where passengers "
         "get off: the larger of the two minimum alighting times — one set "
         "by the train, one by the station.",
@@ -1074,6 +1099,8 @@ ROUTE_FORMULAS: dict[str, Formula] = {
     "dwell_time_both": Formula(
         latex=r"t_{dwell} = \max(t_{board,comp},\ t_{board,infra},"
         r"\ t_{alight,comp},\ t_{alight,infra})",
+        summary="How long the train waits at a stop where passengers both board and "
+        "get off.",
         description="How long the train waits at a stop where passengers "
         "both board and get off: the largest of all four minimum times.",
         inputs=(
@@ -1120,6 +1147,8 @@ ROUTE_FORMULAS: dict[str, Formula] = {
     "auto_stop_added_time": Formula(
         latex=r"\Delta t_{cand} = \left(\sum_{l \in reroute(a, cand, b)} "
         r"t_{total,l}\right) - t_{total,(a,b)} + t_{dwell,cand}",
+        summary="Extra travel time an additional stop would cost: detour, stop "
+        "dynamics and the wait itself.",
         description="Extra travel time a suggested additional stop would "
         "cost: the detour to reach it, the braking and accelerating it "
         "causes, and the waiting time at the stop itself. Used to "
@@ -1163,6 +1192,8 @@ ROUTE_FORMULAS: dict[str, Formula] = {
         r"\quad t_{acc},d_{acc}\ \text{from}\ "
         r"F(u)=\min\!\left(F_{loco},\ \frac{P_{loco}}{u}\right),"
         r"\ m = m_{coaches} + m_{loco}",
+        summary="Time lost braking into and accelerating out of every stop, which "
+        "routing alone ignores.",
         description="Time lost at every stop because a real train has to "
         "brake before it and accelerate after it — the routing engine "
         "alone assumes constant cruise speed. Braking uses a comfortable "
@@ -1216,6 +1247,7 @@ ROUTE_FORMULAS: dict[str, Formula] = {
     # ------------------------------------------------------------------
     "arrival_time": Formula(
         latex=r"t_{arr,i} = t_{dep,i-1} + t_{seg,i-1}",
+        summary="When the train reaches a stop.",
         description="Arrival time at a stop: departure time at the previous "
         "stop plus the scheduled travel time in between.",
         inputs=(
@@ -1240,6 +1272,7 @@ ROUTE_FORMULAS: dict[str, Formula] = {
     ),
     "departure_time": Formula(
         latex=r"t_{dep,i} = t_{arr,i} + t_{dwell,i}",
+        summary="When the train leaves an intermediate stop.",
         description="Departure time at an intermediate stop: arrival time "
         "plus the waiting time at the stop.",
         inputs=(
@@ -1267,6 +1300,7 @@ ROUTE_FORMULAS: dict[str, Formula] = {
     # ------------------------------------------------------------------
     "total_distance": Formula(
         latex=r"d_{total} = \sum_{seg} \sum_{l \in seg} d_{m,l}",
+        summary="Total trip distance across all country legs.",
         description="Total trip distance: the distances of all country legs added up.",
         inputs=(
             FormulaParam(
@@ -1283,6 +1317,8 @@ ROUTE_FORMULAS: dict[str, Formula] = {
     ),
     "total_driving_time": Formula(
         latex=r"t_{drive,total} = \sum_{seg} \sum_{l \in seg} t_{drive,l}",
+        summary="Pure driving time across all country legs, without buffers or waiting "
+        "times.",
         description="Total driving time: the pure driving times of all "
         "country legs added up, without buffers or waiting times.",
         inputs=(
@@ -1300,6 +1336,8 @@ ROUTE_FORMULAS: dict[str, Formula] = {
     ),
     "total_time": Formula(
         latex=r"t_{total} = \sum_{seg} t_{seg}",
+        summary="Total scheduled trip time, including buffers, waiting times and stop "
+        "dynamics.",
         description="Total scheduled trip time: all segment times added up "
         "— driving, braking and accelerating at stops, buffers, and any "
         "slack.",
