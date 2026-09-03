@@ -120,6 +120,8 @@ project-snapshot*.zip
 notes/
 git_status.txt
 test_output.txt
+# Claude local files
+.claude/settings.local.json
 # OS / Editor
 .DS_Store
 Thumbs.db
@@ -142,3 +144,4 @@ desktop.ini
 # first use. energy/calib/sources/ holds the route lists and stays tracked.
 backend/models/infrastructure/stops/charges/sources/
 # Jupyter autosave state
+
