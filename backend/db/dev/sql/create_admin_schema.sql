@@ -93,3 +93,62 @@ CREATE INDEX IF NOT EXISTS idx_access_code_redemptions_at
 
 COMMENT ON TABLE admin.access_codes IS 'Testing-party gate codes (2026-08-13 Decision 2). Not credentials: the gate only decides who reaches the app; identity comes from the OTP flow.';
 COMMENT ON TABLE admin.access_code_redemptions IS 'Append-only log of gate redemptions — per-tester browser attribution.';
+
+-- ------------------------------------------------------------------
+-- Request log (2026-09-06). Mirrors
+-- migrations/2026-09-06_request_log.sql, which is its counterpart for
+-- server databases (never reseeded). Both must exist, for the same
+-- reason as the testing gate above: a fresh seed followed by
+-- `migrate.py --baseline` records that migration as applied WITHOUT
+-- executing it, so a DB born from this file has to carry the table
+-- already.
+--
+-- One row per served API request. Usage evidence first, operations
+-- second, abuse detection third. No IP address is stored — client_hash
+-- is a per-day HMAC pseudonym. Written best-effort by
+-- api/request_log.py; retention is enforced by
+-- scripts/purge_request_log.py, not by the database.
+-- ------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS admin.request_log (
+    request_id      BIGSERIAL PRIMARY KEY,
+    occurred_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    user_id         INTEGER REFERENCES admin.users(user_id) ON DELETE SET NULL,
+    is_guest        BOOLEAN NOT NULL DEFAULT FALSE,
+    trust_level     SMALLINT,
+    client_hash     CHAR(64),
+    method          VARCHAR(8) NOT NULL,
+    endpoint        VARCHAR(80),
+    route_rule      VARCHAR(200),
+    status_code     SMALLINT NOT NULL,
+    duration_ms     INTEGER NOT NULL,
+    response_bytes  INTEGER,
+    user_agent      VARCHAR(400)
+);
+
+-- The three questions this table is asked, one index each. All three lead
+-- with their grouping key and end on occurred_at DESC, because every
+-- question is "over the last N days" — a plain (occurred_at) index would
+-- force a filter-then-sort on the other two.
+CREATE INDEX IF NOT EXISTS idx_request_log_at
+    ON admin.request_log (occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_request_log_endpoint_at
+    ON admin.request_log (endpoint, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_request_log_user_at
+    ON admin.request_log (user_id, occurred_at DESC)
+    WHERE user_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_request_log_client_at
+    ON admin.request_log (client_hash, occurred_at DESC)
+    WHERE client_hash IS NOT NULL;
+
+COMMENT ON TABLE  admin.request_log                IS 'One row per served API request — usage evidence first (which endpoints, by whom, when), operations second (status, latency, size), abuse detection third. Best-effort: a failed insert is swallowed, so a gap means the logger failed, not the request. Excluded by design: /api/health (polled by the frontend and by container healthchecks) and /api/gate/* (testing-party gate, hit on every page request by Caddy forward_auth) — both would dominate the table without saying anything about usage. CORS preflight (OPTIONS) is excluded for the same reason.';
+COMMENT ON COLUMN admin.request_log.occurred_at    IS 'When the response was written, not when the request arrived — the two differ by duration_ms.';
+COMMENT ON COLUMN admin.request_log.user_id        IS 'admin.users identity, registered or guest — guests get a real user row from POST /api/auth/guest, so they are attributable here like anyone else. NULL means no usable token was presented. ON DELETE SET NULL: erasing an account anonymises its history rather than deleting it, so usage counts survive a GDPR erasure.';
+COMMENT ON COLUMN admin.request_log.is_guest       IS 'TRUE for a guest session. Registered and guest users are both counted in user_id; this is what separates them when the question is "how many people committed to an account".';
+COMMENT ON COLUMN admin.request_log.trust_level    IS 'auth_utils trust ladder at request time: 0 guest, 1 contributor, 2 operator. NULL when unauthenticated. Denormalised on purpose — a user''s level changes over time and the log records what it was.';
+COMMENT ON COLUMN admin.request_log.client_hash    IS 'HMAC-SHA256(secret, "<UTC date>|<client address>") hex — a per-day pseudonym, never an address. Correlates one client''s requests within a UTC day and is unlinkable across days by construction. Use user_id, not this, to count distinct people: a guest JWT outlives the day. NULL when no address could be read or no secret is configured.';
+COMMENT ON COLUMN admin.request_log.method         IS 'HTTP method. OPTIONS never appears — CORS preflight is excluded.';
+COMMENT ON COLUMN admin.request_log.endpoint       IS 'Flask endpoint name, "<blueprint>.<view>" (e.g. proposals.list_proposals). THE grouping key: stable across URL changes, low cardinality, and blueprint-prefixed so it groups by API for free. NULL when no rule matched (404 on an unknown path).';
+COMMENT ON COLUMN admin.request_log.route_rule     IS 'The matched rule with its parameters intact, e.g. /api/proposal/<int:proposal_id>. Groups where the raw path would not; the raw path is deliberately NOT stored, nor is the query string or the request body (a /calc body is an entire proposal, and published ones are already persisted).';
+COMMENT ON COLUMN admin.request_log.duration_ms    IS 'Wall time in the Flask request, measured from before_request. 0 when the request was rejected before that hook ran — a rate-limited 429 is the normal case.';
+COMMENT ON COLUMN admin.request_log.response_bytes IS 'Response body length BEFORE gzip: this hook runs ahead of Flask-Compress (after_request functions run in reverse registration order), which makes it the payload size rather than the transfer size. NULL for streamed responses.';
+COMMENT ON COLUMN admin.request_log.user_agent     IS 'Truncated to REQUEST_LOG_USER_AGENT_MAX_LEN (api/config.py). Kept for the same reason admin.access_code_redemptions keeps it: a browser-specific bug is only findable if the browser is recorded.';

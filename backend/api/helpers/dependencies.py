@@ -82,6 +82,8 @@ import os
 from datetime import datetime, timezone
 from typing import Optional
 
+from api import config
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -96,6 +98,7 @@ _proposal_repo = None
 _feedback_repo = None
 _engagement_repo = None
 _auth_repo = None
+_request_log_repo = None
 _compute_cache = None
 _loaded: bool = False
 _loaded_at: Optional[datetime] = None
@@ -158,6 +161,7 @@ def init() -> None:
         _feedback_repo, \
         _engagement_repo, \
         _auth_repo, \
+        _request_log_repo, \
         _compute_cache, \
         _loaded, \
         _loaded_at, \
@@ -170,6 +174,7 @@ def init() -> None:
     from adapters.auth_repository import AuthRepository
     from adapters.proposal.compute_cache import ComputeCacheRepository
     from adapters.route_segment_repository import RouteSegmentRepository
+    from adapters.request_log_repository import RequestLogRepository
     from models.route.routing.rail_router import (
         CountryIndex,
         PassageIndex,
@@ -216,6 +221,7 @@ def init() -> None:
         _engagement_repo = ProposalEngagementRepository()
         _auth_repo = AuthRepository()
         _compute_cache = ComputeCacheRepository()
+        _request_log_repo = _build_request_log_repository(RequestLogRepository)
         _loaded = True
         _loaded_at = datetime.now(timezone.utc)
         _load_error = None
@@ -225,6 +231,29 @@ def init() -> None:
         _load_error = str(e)
         logger.error("Database connection failed: %s", e)
         raise
+
+
+def _build_request_log_repository(repository_cls):
+    """The usage log's connection, or None.
+
+    Its own try/except, unlike every other repository in init(): usage
+    logging is observability, and a database that will not take a
+    request_log row is not a reason to refuse to serve the API. Disabled
+    by config, or failing to connect, both degrade to None — and
+    api/request_log.py treats None as "skip", so the only symptom is a
+    missing log."""
+    if not config.REQUEST_LOG_ENABLED:
+        logger.info("Request log disabled — no repository built.")
+        return None
+    try:
+        return repository_cls()
+    except Exception as e:
+        logger.warning(
+            "Request log repository unavailable (%s). The API serves "
+            "normally; usage is not being recorded.",
+            e,
+        )
+        return None
 
 
 def get_loader():
@@ -359,6 +388,16 @@ def get_compute_cache():
     if not _loaded or _compute_cache is None:
         raise DataNotLoadedError("Data not loaded. Call POST /api/data/load first.")
     return _compute_cache
+
+
+def get_request_log_repository():
+    """Return the singleton RequestLogRepository, or None.
+
+    Deliberately does NOT raise DataNotLoadedError like its neighbours: it
+    is called from an after_request hook on every served request, and a
+    logging sink must never turn a served request into an error. None
+    means "skip this row"."""
+    return _request_log_repo
 
 
 def get_auth_repository():
