@@ -157,20 +157,13 @@ class TestStopInfrastructures:
                 "calibration (models/infrastructure/stops/charges) and re-export"
             )
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "The 13 station-charge rows are ILLUSTRATIVE-CURATED placeholders "
-            "and charges/data/station_charges.csv has no "
-            "price_basis_year column at all. See test_02_db_seed."
-            "test_stop_charge_carries_its_price_year for the full "
-            "reason. strict=True so this fails loudly once real "
-            "tariffs land."
-        ),
-    )
     def test_stop_charge_carries_its_price_year(self, stops_body):
-        """Split out of test_stop_charge_carries_provenance so that test
-        keeps guarding the key set, basis and the VAT arithmetic."""
+        """The price year survives serialization.
+
+        Split out of test_stop_charge_carries_provenance so that test
+        keeps guarding the key set, basis and the VAT arithmetic. The
+        strict xfail went with the real charges landing — see
+        test_02_db_seed.test_stop_charge_carries_its_price_year."""
         for stop in stops_body["stops"]:
             charge = stop["stop_charge_eur"]
             if charge["source"]:

@@ -20,6 +20,7 @@ infrastructure tables and the scenario container: db/README.md, section
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 
@@ -1482,9 +1483,14 @@ INPUT_PARAMS_TABLES: tuple[Table, ...] = (
             ),
             Column(
                 "uic_ref",
-                "VARCHAR(12)",
-                "UIC station code from OSM, where tagged. Join key for "
-                "station-charge tariff documents.",
+                "VARCHAR(120)",
+                "UIC station code from OSM, where tagged — the tag verbatim, "
+                "so a station holding more than one code carries them all, "
+                "semicolon-separated (Paris CDG 2 TGV: 8727149;8700147). "
+                "Intended join key for station-charge tariff documents, not "
+                "normalised yet: split on the semicolon before matching, and "
+                "note that a few stops carry a national number rather than "
+                "the country-prefixed UIC code.",
             ),
             *(
                 Column(
@@ -1769,6 +1775,36 @@ ROUTE_CACHE_TABLES: tuple[Table, ...] = (
         constraints=("PRIMARY KEY (routing_graph_key, stop_lo, stop_hi, variant_key)",),
     ),
 )
+
+
+ALL_TABLES: tuple[Table, ...] = (
+    INPUT_PARAMS_TABLES + SCENARIO_TABLES + ROUTE_CACHE_TABLES
+)
+
+
+# =============================================================================
+# Column introspection
+# =============================================================================
+
+_CHAR_LIMIT = re.compile(r"^\s*(?:VAR)?CHAR\s*\(\s*(\d+)\s*\)", re.IGNORECASE)
+
+
+def varchar_limits(qualified_table: str) -> dict[str, int]:
+    """Declared character limits of one table's CHAR/VARCHAR columns, keyed
+    by column name — read back out of the same definitions build_ddl()
+    renders, so they can never drift from the database.
+
+    seed.py uses them to name the column and the offending value behind a
+    truncation, which psycopg2 reports only as "value too long for type
+    character varying(n)". Unknown table or no character columns: empty."""
+    for table in ALL_TABLES:
+        if f"{table.schema}.{table.name}" == qualified_table:
+            return {
+                c.name: int(m.group(1))
+                for c in table.columns
+                if (m := _CHAR_LIMIT.match(c.sql_type))
+            }
+    return {}
 
 
 # =============================================================================

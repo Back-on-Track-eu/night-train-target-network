@@ -199,7 +199,7 @@ classification pipeline
 |---|---|
 | `provenance` | Why the stop is in the catalog, as a display category — `"existing night train stop"`, `"urban area currently without night train service"`, `"tourism region currently without night train service"`, ferry / border / network variants |
 | `name_latin`, `name_ascii` | Latin-script and diacritic-free forms of the station name — the search forms (`"munchen"` finds `München Hauptbahnhof`) |
-| `uic_ref` | UIC station code where OSM has one, else `null` |
+| `uic_ref` | UIC station code where OSM has one, else `null`. The OSM tag verbatim, so a station carrying more than one code returns them all in one string, semicolon-separated (`"8727149;8700147"` at Paris CDG 2 TGV) |
 | `city` | `{name, osm_id, names}` for the municipality the stop belongs to (*Berlin Gesundbrunnen → Berlin*), or `null` for rural halts beyond any city radius. `names` is keyed by language code |
 | `country_names` | The country's name keyed by language code, always all seven |
 | `gauges_mm` | Night-train-capable track gauges, several at break-of-gauge stations (`[1435, 1520]` at Kaunas); `null` where no usable track was found |
