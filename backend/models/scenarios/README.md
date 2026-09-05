@@ -151,7 +151,12 @@ a real timetable slower than the router's passage time:
 3. speed the train cannot sustain — curves, junctions, restrictions;
 4. acceleration and braking the dynamics model misses.
 
-Values run 0.346 (AT) to 0.706 (FR), European mean 0.506.
+Values run 0.113 (AT) to 0.385 (UK), European prior 0.239, France fixed
+at 0.250 as a documented exception (re-calibrated 2026-09-05 as a
+**minimum driving time** — the lower quartile of the leg-level residual
+rather than its time-weighted mean, which had been carrying the operators'
+arrival-hour stretching; that stretching now lives in the timetable layer
+as `slack_time_min` in the fixed-night timetable mode).
 
 **Better timetabling acts on 1 and 2 only.** 3 is physics and 4 is our own
 model error. This is the single most important fact about this scenario:
@@ -170,12 +175,14 @@ opt_quota = quota                                                  otherwise
 with, in `db/dev/seed.py`:
 
 ```
-OPT_TT_BENCHMARK_QUOTA  = 0.35
+OPT_TT_BENCHMARK_QUOTA  = 0.12
 OPT_TT_EXCESS_REDUCTION = 0.25
 ```
 
-**Why 0.35.** Austria measures 0.346 over 56 ONTD legs — the lowest value
-with strong evidence behind it. It represents a network where night trains
+**Why 0.12.** Austria calibrates to 0.113 over 56 ONTD legs — the lowest
+value with strong evidence behind it. (Re-based from 0.35 on 2026-09-05
+together with the calibration it tracks; the 0.35 benchmark against the
+new 0.11–0.39 quotas would have reduced nothing.) It represents a network where night trains
 are already well-pathed *and* where the router models line speeds well.
 Nothing below it is reachable by timetabling alone, so it is a floor
 rather than a target.
@@ -196,17 +203,17 @@ improved priority' scenario would move").
 allowance at 3–5 pp. A prioritised night path plausibly halves it: ~2 pp.
 Added to the 1.5 pp above: **~3.5 pp**.
 
-*What the rule produces.* A median cut of **3.9 pp** — the two agree.
+*What the rule produces.* A median cut of **3.0 pp** across the 2026-09-05 quotas (3.9 pp on the 2026-08-17 ones) — the two agree.
 
 Effect per country:
 
-| | AT | NL | DE | EU default | IT | PL | SE | FR |
+| | AT | DE | IT | PL | EU default | FR | NL | SE |
 |---|---|---|---|---|---|---|---|---|
-| base quota | 0.346 | 0.421 | 0.489 | 0.506 | 0.536 | 0.570 | 0.678 | 0.706 |
-| OPT TT quota | 0.346 | 0.403 | 0.454 | 0.467 | 0.490 | 0.515 | 0.596 | 0.617 |
-| journey time | −0% | −1.2% | −2.3% | −2.6% | −3.0% | −3.5% | −4.9% | −5.2% |
+| base quota | 0.113 | 0.189 | 0.207 | 0.220 | 0.239 | 0.250 | 0.292 | 0.349 |
+| OPT TT quota | 0.113 | 0.172 | 0.185 | 0.195 | 0.209 | 0.217 | 0.249 | 0.292 |
+| journey time | −0.0% | −1.4% | −1.8% | −2.0% | −2.4% | −2.6% | −3.3% | −4.2% |
 
-A 12-hour pure passage time is scheduled at 17h52 in scenario 1 and 17h27
+A 12-hour pure passage time is scheduled at 14h16 in scenario 1 and 14h04
 in scenario 3, using the German quota.
 
 ### Why these two numbers are PROVISIONAL

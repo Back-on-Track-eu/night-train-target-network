@@ -7,7 +7,20 @@ backend, in one place. Supersedes `deploy/HANDOVER.md` (2026-08-10),
 deleted.
 
 Updated after each change that touches deploy, capacity or server data.
-Last update 2026-08-31 (route segment cache precompute runbook, §7a.3).
+Last update 2026-09-05 (route-context re-calibration, see the note below).
+
+> **Update 2026-09-05 — schedule supplement re-calibrated.**
+> `track_buffer_quota_per` drops from 0.35–0.71 to 0.11–0.39 per country
+> (`INFRA_MODEL_VERSION` 0.9.6; no route-builder code change). Every
+> published proposal recomputes to a shorter, cheaper trip. **Staging:** a reseed picks it up — `seed.py`
+> regenerates `route_context/calib/seed/*.csv` from the notebook when they
+> are absent, so the seed job must not carry a stale copy of that directory.
+> **Production:** values are never edited in place; this needs a new
+> `track_infrastructures` snapshot version per scenario written from
+> `db/dev/seed.py`'s data structures (same pattern as
+> `scripts/migrate_scenarios_2026.py`), then `scripts/refresh_proposals.py`.
+> The compute cache must be truncated either way — a cached route carries
+> the old buffer minutes.
 
 **If you read one section:** §3 is the deploy currently queued for staging,
 §4 is a mandatory cache wipe that comes with it, and §7 is the capacity work
