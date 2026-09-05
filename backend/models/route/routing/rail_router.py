@@ -53,6 +53,10 @@ Responsibilities
   each blocked country's border polygon, attached to EVERY routing request
   in every mode — the fork registers no `country` encoded value, so the
   block cannot live in the graph (see docker/config.yml).
+- Electrification preference (NON_ELECTRIFIED_PRIORITY_FACTOR): track
+  tagged electrified=no is penalized in EVERY mode, like the country
+  block — the catalog is entirely electric, so unelectrified track is not
+  just unrealistic but mispriced by the energy model.
 - fullRouting custom model: composition speed cap + HSR avoidance — only
   track whose permitted speed exceeds HSR_TRACK_SPEED_THRESHOLD_KMH is
   penalized, and only where avoid_hsr says so. Thresholds/factor live in
@@ -75,7 +79,7 @@ Public surface
   apply_country_buffer(legs, tracks)               (quota on raw driving)
   RailRouter.route(stops, max_speed_kmh, avoid_hsr, gauge_mm, routing_mode)
       → list[RoutedLeg]                            (layer 1)
-  RailRouter.build_custom_model(max_speed_kmh, avoid_hsr) → dict | None
+  RailRouter.build_custom_model(max_speed_kmh, avoid_hsr) → dict
   RailRouter.profile_for_gauge(gauge_mm) → str
   RailRouter.snap_point() / route_pair_from_snapped()   (precompute script)
   route_variant_key(profile, custom_model) → str   (segment-cache key)
@@ -116,6 +120,7 @@ from models.route.model import (
     HSR_TRACK_SPEED_SANITY_MAX_KMH,
     HSR_AVOIDANCE_PRIORITY_FACTOR,
     HSR_AVOIDANCE_RING_SIMPLIFY_DEG,
+    NON_ELECTRIFIED_PRIORITY_FACTOR,
     STANDARD_GAUGE_MM,
 )
 from models.utils import ms_to_min, haversine_path_m
@@ -565,12 +570,16 @@ class RailRouter:
         composition to speak of and nothing would consume the result.
 
         Single-pass, no speed cap, no HSR avoidance, no traction dynamics
-        — the shape is the shape. Two things do apply, as everywhere:
+        — the shape is the shape. Three things do apply, as everywhere:
         the gauge profile (resolved from the stops alone; ONTD's synthetic
         stops carry no gauges, so they resolve standard — broad-gauge ONTD
         lines keep failing to snap until the projection routes on catalog
-        stops) and the BLOCKED_COUNTRIES exclusion, which forces this off
-        CH and onto LM routing (a request custom model disables CH).
+        stops), the BLOCKED_COUNTRIES exclusion, and the electrification
+        penalty. Any of them forces this off CH and onto LM routing (a
+        request custom model disables CH). The drawn line for an ONTD
+        train that really is diesel-hauled therefore follows electrified
+        track where one exists — acceptable, because these lines are
+        illustrative map geometry and existing trains are never evaluated.
         """
         if len(stops) < 2:
             raise ValueError("At least 2 stops are required.")
@@ -613,10 +622,11 @@ class RailRouter:
                              live-routed (pass 1: CH snap on the gauge
                              profile, pass 2: custom model on snapped
                              coordinates).
-          "simpleRouting" — speed cap only (the BLOCKED_COUNTRIES rules
-                             ride on every model, so the cap is free),
-                             single pass. Cheap, for manual checks — not
-                             representative of real physics.
+          "simpleRouting" — speed cap only (the BLOCKED_COUNTRIES and
+                             electrification rules ride on every model, so
+                             the cap is free), single pass. Cheap, for
+                             manual checks — not representative of real
+                             physics.
 
         Both modes are served through the segment cache when a repository
         is attached: lookup per consecutive stop pair, live two-point
@@ -781,20 +791,28 @@ class RailRouter:
         self,
         vehicle_max_speed_kmh: int | None,
         avoid_high_speed_lines: dict[str, bool] | None,
-    ) -> dict | None:
+    ) -> dict:
         """
-        GraphHopper custom model for a routing pass, or None only when
-        nothing needs one at all — which since 0.9.27 requires the
-        BLOCKED_COUNTRIES polygons to be missing too, as their speed-0
-        area rules are folded into every model built here (route(),
-        both modes, and route_geometry() all pass through this).
+        GraphHopper custom model for a routing pass. Never None: since
+        0.9.31 the electrification rule below is unconditional, so every
+        caller here (route(), both modes, and route_geometry()) gets a
+        model and therefore routes on LM rather than CH. Pass 1 of
+        two-pass routing is the only CH pass, and it deliberately sends no
+        model at all — see _route_live().
 
-        Three independent concerns:
+        Four independent concerns:
           blocked  — BLOCKED_COUNTRIES exclusion (_blocked_country_rules):
                      hard speed-0 over each blocked country's polygon,
                      every mode, non-negotiable.
           speed    — hard cap at the composition's own max_speed_kmh on
                      every segment (how fast THIS train may go, everywhere).
+          priority — electrification: track OSM tags electrified=no is
+                     penalized by NON_ELECTRIFIED_PRIORITY_FACTOR,
+                     unconditionally and in every mode. A preference, not
+                     a permission — hence 10x, an order of magnitude
+                     softer than the HSR factor below. Matching NO only is
+                     the point: UNSET means the tag is absent, and unknown
+                     is never treated as forbidden.
           priority — HSR avoidance: a segment is penalized by
                      HSR_AVOIDANCE_PRIORITY_FACTOR iff its PERMITTED track
                      speed (max_speed encoded value, from OSM maxspeed —
@@ -809,7 +827,7 @@ class RailRouter:
                      excludes both), so untagged track is never mistaken
                      for high-speed infrastructure.
 
-        Where the priority rule applies:
+        Where the HSR priority rule applies:
           - Every country disallows (composition-level ban, or e.g. the
             2032 Base Line where track_hsr_allowed=False everywhere) —
             ONE global rule, no area polygons at all: far smaller payload
@@ -818,11 +836,16 @@ class RailRouter:
             to that country's border polygon (in_<area> && speed range).
         """
         blocked_rules, blocked_areas = self._blocked_country_rules()
-        speed_rules, priority_rules, areas = (
-            list(blocked_rules),
-            [],
-            dict(blocked_areas),
-        )
+        speed_rules, areas = list(blocked_rules), dict(blocked_areas)
+        # The one rule with no condition attached to it anywhere: the whole
+        # composition catalog is electric, so unelectrified track is off
+        # the realistic network in every mode. NO only, never UNSET.
+        priority_rules: list = [
+            {
+                "if": "electrified == NO",
+                "multiply_by": str(NON_ELECTRIFIED_PRIORITY_FACTOR),
+            }
+        ]
 
         if vehicle_max_speed_kmh is not None:
             speed_rules.append({"if": "true", "limit_to": str(vehicle_max_speed_kmh)})
@@ -865,14 +888,12 @@ class RailRouter:
                         }
                     )
 
-        if not speed_rules and not priority_rules:
-            return None
-
-        cm: dict = {}
+        # priority always carries at least the electrification rule; speed
+        # can still be empty (route_geometry() on a deployment whose
+        # blocked-country polygons are missing).
+        cm: dict = {"priority": priority_rules}
         if speed_rules:
             cm["speed"] = speed_rules
-        if priority_rules:
-            cm["priority"] = priority_rules
         if areas:
             cm["areas"] = {
                 "type": "FeatureCollection",

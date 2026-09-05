@@ -30,7 +30,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.30"
+ROUTE_BUILDER_VERSION: str = "0.9.31"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -45,6 +45,39 @@ ROUTE_BUILDER_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.31": {
+        "date": "2026-09-05",
+        "author": "david",
+        "changes": "Electrified track is now preferred. Every routing "
+        "request, in every mode, carries a priority rule penalizing track "
+        "OSM tags electrified=no by NON_ELECTRIFIED_PRIORITY_FACTOR — the "
+        "same mechanism HSR avoidance uses, but deliberately an order of "
+        "magnitude softer (10x, not 100x): HSR avoidance encodes a "
+        "permission, this encodes a preference, and at 100x whole "
+        "diesel-worked regions would attract detours no operator would "
+        "accept in exchange for catenary. A penalty rather than a block "
+        "for the further reason that an unelectrified station throat must "
+        "not fail a trip. Only electrified == NO is penalized; UNSET (tag "
+        "absent) stays untouched, because unknown is never treated as "
+        "forbidden. Motivation is not only realism: every seeded "
+        "locomotive is electric multi-system and the energy domain prices "
+        "catenary electricity on every kilometre, so unelectrified track "
+        "was being costed as something the train could not have run on. "
+        "OUTPUT CHANGE: routed geometry, distances, times and therefore "
+        "every downstream cost can move on any trip that previously used "
+        "unelectrified track — mostly regional and branch alignments; "
+        "fully electrified corridors are unaffected. NO GRAPH RE-IMPORT: "
+        "electrified is already in graph.encoded_values. The resolved "
+        "custom model changes, so route_variant_key changes and the whole "
+        "route-segment cache re-warms (old rows are unreachable, not "
+        "wrong — purge and re-precompute per docs/DEPLOY_HANDOVER.md). "
+        "Investigated alongside this and deliberately NOT implemented: a "
+        "tram/subway/light-rail block, which OpenRailRouting's built-in "
+        "rail.json already applies as priority 0 on railway_class != RAIL "
+        "— it is first in every profile's custom_model_files, so the "
+        "exclusion has been in force since the first import (see "
+        "routing/README.md).",
+    },
     "0.9.30": {
         "date": "2026-08-31",
         "author": "david",
@@ -758,6 +791,41 @@ not: the raw EEZ rings total ~165k vertices across the seeded countries
 and would be serialized into every mixed-avoidance routing request. At
 this tolerance the same set costs ~10k vertices."""
 
+
+# --- Electrification preference (models/route/routing/rail_router.py)
+NON_ELECTRIFIED_PRIORITY_FACTOR: float = 0.1
+"""GraphHopper custom-model priority multiplier applied to track OSM tags
+electrified=no — a 10x penalty, deliberately an order of magnitude softer
+than HSR_AVOIDANCE_PRIORITY_FACTOR's 100x.
+
+The difference is intentional and worth keeping. HSR avoidance encodes a
+PERMISSION: high-speed track is off-limits where it is off-limits, so the
+penalty is set high enough to make it a veto in all but the no-alternative
+case. This rule encodes a PREFERENCE: unelectrified track is what the
+catalog cannot exploit, not what it is forbidden to touch. At 100x whole
+diesel-worked regions — the Baltics, parts of the Balkans, Scandinavian
+inland lines — would attract detours far longer than an operator would
+ever accept in exchange for catenary. At 10x an unelectrified alignment
+loses to any reasonable electrified alternative and still wins where the
+alternative is absurd or absent.
+
+A penalty rather than a hard block for the further reason that a short
+unelectrified station throat must not fail a whole trip.
+
+Applied unconditionally, in every routing mode, because it is not merely a
+realism preference. Every seeded locomotive is 'electric multi-system'
+(input_params.loco_types) and the energy domain prices catenary
+electricity on every kilometre, so a route over unelectrified track was
+being costed as something the train could not physically have done. It
+becomes composition-dependent the day a diesel locomotive enters the
+catalog — see OPEN_TODOS['diesel_traction'].
+
+The condition matches the enum member NO of the routing engine's
+`electrified` encoded value (already in graph.encoded_values, so no
+re-import), never UNSET: a missing electrified tag means unknown, and
+unknown is never treated as forbidden — the same discipline
+HSR_TRACK_SPEED_SANITY_MAX_KMH enforces for untagged maxspeed."""
+
 # --- auto_stop_addition (candidate search — models/route/timetable.py)
 AUTO_STOP_BUFFER_M: int = 10_000
 """Max distance (metres) from a stop to the already-routed path for that
@@ -874,6 +942,42 @@ OPEN_TODOS: dict[str, str] = {
         "interacts with the timetable (buffer feeds departure times which "
         "feed each leg's clock time — likely needs one fixed-point "
         "iteration or an approximation from the provisional timetable)."
+    ),
+    "diesel_traction": (
+        "(David, 2026-09-05) The electrified=no penalty "
+        "(NON_ELECTRIFIED_PRIORITY_FACTOR) rides on every routing request "
+        "unconditionally, because every seeded locomotive is 'electric "
+        "multi-system' and the energy domain has no fuel price or "
+        "emissions factor for diesel haulage (see the energy_pricing "
+        "calibration). loco_types.loco_type_traction is recorded but read "
+        "by no model. When a diesel or bi-mode locomotive enters the "
+        "catalog the penalty must become composition-dependent: resolve it "
+        "in resolve_routing_params() alongside avoid_hsr and pass it into "
+        "RailRouter.route(), exactly as the HSR vector is threaded today. "
+        "Energy and emissions need the matching work — routing is the "
+        "smaller half."
+    ),
+    "branch_line_preference": (
+        "(David, 2026-09-05) Routes still occasionally prefer a branch "
+        "line where a real operator would stay on the main corridor. OSM "
+        "carries this as usage=main|branch, but this OpenRailRouting fork "
+        "registers no encoded value for it: RailAverageSpeedParser reads "
+        "the tag at import time and folds it into rail_average_speed (main "
+        "100, branch 50) ONLY where maxspeed is untagged — where maxspeed "
+        "is tagged, rail_average_speed is 0.9*maxspeed and usage is lost. "
+        "Three options, cheapest first: (a) a soft priority penalty on low "
+        "rail_average_speed — needs no re-import but also penalizes "
+        "station throats, so it must stay soft; (b) the same plus a "
+        "two-sided max_speed band rule, better where maxspeed coverage is "
+        "good (DE/AT/CH), weaker in the Balkans; (c) patch the fork for a "
+        "real railway_usage encoded value (one EV class, one parser, one "
+        "RailImportRegistry entry, applied as a patch in the Dockerfile "
+        "builder stage) — exact, but costs a graph re-import and Drive "
+        "re-upload of BOTH instances plus a standing patch against a "
+        "third-party repo. Diagnose a concrete case first: add "
+        "max_speed/rail_average_speed/railway_class/electrified to "
+        "RailRouter.DETAILS for one run and read the per-edge values off "
+        "the offending pair, rather than guessing a threshold."
     ),
     "composition_gauge_capability": (
         "(David, 2026-08-29) composition_gauges() in routing/gauge.py "
