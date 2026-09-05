@@ -81,7 +81,7 @@ load_dotenv()
 from sql_loader import load_sql
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from db.schema import STOP_NAME_LANGS, build_ddl
+from db.schema import STOP_NAME_LANGS, build_ddl, varchar_limits
 
 DB_HOST = os.environ["POSTGRES_HOST"]
 DB_PORT = os.environ["POSTGRES_PORT"]
@@ -106,6 +106,23 @@ def _dumps(obj) -> str:
     return json.dumps(obj, cls=_PgEncoder)
 
 
+def _overlong_report(table: str, row: dict, limits: dict[str, int]) -> str:
+    """Which of the row's values outgrew their column, as a readable line.
+    Empty when none did — the caller then re-raises the original error
+    untouched, since the row was rejected for some other reason."""
+    over = [
+        f"{name}: {len(value)} characters, column holds {limits[name]} ({value!r})"
+        for name, value in row.items()
+        if isinstance(value, str) and len(value) > limits.get(name, len(value))
+    ]
+    if not over:
+        return ""
+    ident = next(
+        (f"{c}={row[c]!r}" for c in row if c.endswith("_id") and row[c]), "row"
+    )
+    return f"{table} [{ident}]: " + "; ".join(over)
+
+
 def insert_rows(cur, table: str, rows: list[dict]) -> None:
     if not rows:
         return
@@ -114,12 +131,22 @@ def insert_rows(cur, table: str, rows: list[dict]) -> None:
         f"INSERT INTO {table} ({', '.join(columns)}) "
         f"VALUES ({', '.join(['%s'] * len(columns))})"
     )
+    # Externally sourced seed data (the Drive-hosted stop catalog above all)
+    # can outgrow a column between one export and the next; psycopg2 then
+    # reports only the type, never the column or the value.
+    limits = varchar_limits(table)
     for row in rows:
         values = [
             _dumps(row[c]) if isinstance(row[c], (dict, list)) else row[c]
             for c in columns
         ]
-        cur.execute(sql, values)
+        try:
+            cur.execute(sql, values)
+        except psycopg2.DataError as exc:
+            report = _overlong_report(table, row, limits)
+            if not report:
+                raise
+            raise ValueError(f"value too long — {report}") from exc
 
 
 # ============================================================
