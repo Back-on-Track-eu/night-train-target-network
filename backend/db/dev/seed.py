@@ -81,7 +81,7 @@ load_dotenv()
 from sql_loader import load_sql
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from db.schema import STOP_NAME_LANGS, build_ddl, varchar_limits
+from db.schema import STOP_NAME_LANGS, build_ddl
 
 DB_HOST = os.environ["POSTGRES_HOST"]
 DB_PORT = os.environ["POSTGRES_PORT"]
@@ -106,23 +106,6 @@ def _dumps(obj) -> str:
     return json.dumps(obj, cls=_PgEncoder)
 
 
-def _overlong_report(table: str, row: dict, limits: dict[str, int]) -> str:
-    """Which of the row's values outgrew their column, as a readable line.
-    Empty when none did — the caller then re-raises the original error
-    untouched, since the row was rejected for some other reason."""
-    over = [
-        f"{name}: {len(value)} characters, column holds {limits[name]} ({value!r})"
-        for name, value in row.items()
-        if isinstance(value, str) and len(value) > limits.get(name, len(value))
-    ]
-    if not over:
-        return ""
-    ident = next(
-        (f"{c}={row[c]!r}" for c in row if c.endswith("_id") and row[c]), "row"
-    )
-    return f"{table} [{ident}]: " + "; ".join(over)
-
-
 def insert_rows(cur, table: str, rows: list[dict]) -> None:
     if not rows:
         return
@@ -131,22 +114,12 @@ def insert_rows(cur, table: str, rows: list[dict]) -> None:
         f"INSERT INTO {table} ({', '.join(columns)}) "
         f"VALUES ({', '.join(['%s'] * len(columns))})"
     )
-    # Externally sourced seed data (the Drive-hosted stop catalog above all)
-    # can outgrow a column between one export and the next; psycopg2 then
-    # reports only the type, never the column or the value.
-    limits = varchar_limits(table)
     for row in rows:
         values = [
             _dumps(row[c]) if isinstance(row[c], (dict, list)) else row[c]
             for c in columns
         ]
-        try:
-            cur.execute(sql, values)
-        except psycopg2.DataError as exc:
-            report = _overlong_report(table, row, limits)
-            if not report:
-                raise
-            raise ValueError(f"value too long — {report}") from exc
+        cur.execute(sql, values)
 
 
 # ============================================================
@@ -1213,13 +1186,16 @@ _TRACK_INFRA_DEFAULT_2032 = {
 # fictionally fast trains.
 #
 # What it does instead: converge each country toward a best-practice
-# benchmark. Austria's 0.346 (56 ONTD legs, the strongest-evidence low
-# value) is a network where night trains are already well-pathed AND the
-# router models the line speeds well, so nothing below it is reachable by
-# timetabling alone. A quarter of each country's excess above that floor
-# is removed — a median cut of 3.9 pp, and a country already at or below
-# the benchmark is left untouched.
-OPT_TT_BENCHMARK_QUOTA = 0.35
+# benchmark. Austria's 0.113 (56 ONTD legs, the strongest-evidence low
+# value of the 2026-09-05 minimum-driving-time calibration) is a network
+# where night trains are already well-pathed AND the router models the
+# line speeds well, so nothing below it is reachable by timetabling alone.
+# A quarter of each country's excess above that floor is removed, and a
+# country already at or below the benchmark is left untouched. Re-based
+# from 0.35 on 2026-09-05 together with the calibration it tracks: the
+# quotas dropped from 0.35-0.71 to 0.11-0.39, and a benchmark left at 0.35
+# would have reduced nothing.
+OPT_TT_BENCHMARK_QUOTA = 0.12
 OPT_TT_EXCESS_REDUCTION = 0.25
 
 
@@ -1538,18 +1514,34 @@ def _apply_facility_calibration(rows: list[dict]) -> None:
 _apply_facility_calibration(_TRACK_INFRA_CANONICAL_ROWS)
 
 
+# Placeholder countries whose ROUTE-CONTEXT fields are nevertheless filled
+# from the calibration. Their money fields (TAC, parking, energy, facility)
+# stay None and keep resolving from the defaults row; what they gain is
+# their own schedule supplement, terrain, dwell floor and HSR flag — and,
+# through the last of these, they take part in the HSR scenarios like any
+# calibrated country. Chosen 2026-09-05 because a route through any of them
+# was silently running on the European default supplement while the
+# calibration document listed a country-specific value: the Wien-Paris
+# check found the same defect one layer up, and a Wien-Roma or
+# Berlin-Warszawa comparison would have been wrong by the same mechanism.
+_ROUTE_CONTEXT_FILLED_PLACEHOLDERS = frozenset(
+    ("IT", "PL", "CZ", "NL", "RO", "HU", "HR", "SK")
+)
+
+
 def _apply_route_context_calibration(rows: list[dict]) -> None:
     """Merge the calibrated route-context values onto the canonical country
     rows, in place.
 
-    The placeholder countries are skipped on purpose. Their rows carry None in
-    every one of these fields as a deliberate fixture — they exist to prove
-    that field-by-field resolution from the defaults row works, and
+    The placeholder countries are skipped on purpose, except for the eight
+    in _ROUTE_CONTEXT_FILLED_PLACEHOLDERS. The others carry None in every
+    one of these fields as a deliberate fixture — they exist to prove that
+    field-by-field resolution from the defaults row works, and
     _with_hsr_allowed() reads a None track_hsr_allowed as the marker for
-    "leave this row alone" when building the v1 and v3 snapshots. Filling them
-    would both destroy the fixture and silently flip those countries onto
-    scenario-specific HSR permissions they were never meant to have. They
-    resolve to the defaults row, which is itself calibrated.
+    "leave this row alone" when building the v1 and v3 snapshots. Filling
+    them would both destroy the fixture and silently flip those countries
+    onto scenario-specific HSR permissions they were never meant to have.
+    They resolve to the defaults row, which is itself calibrated.
     """
     calibrated = {
         _TAC_COUNTRY_ALIASES.get(cc, cc): values
@@ -1561,7 +1553,10 @@ def _apply_route_context_calibration(rows: list[dict]) -> None:
     }
     for row in rows:
         cc = row["country_code"]
-        if cc in _TRACK_INFRA_PLACEHOLDER_COUNTRIES or cc not in calibrated:
+        if cc not in calibrated or (
+            cc in _TRACK_INFRA_PLACEHOLDER_COUNTRIES
+            and cc not in _ROUTE_CONTEXT_FILLED_PLACEHOLDERS
+        ):
             continue
         row.update(calibrated[cc])
         if cc in change_logs:
