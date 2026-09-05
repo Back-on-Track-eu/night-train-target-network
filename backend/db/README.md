@@ -74,6 +74,13 @@ uv run python scripts/export_ontd_stop_seed.py
 # (File information → Manage versions — keeps the file id) and reseed
 ```
 
+A catalogue is external data, so a new export can outgrow a column that
+every earlier one fitted — on 2026-09-05 a station carrying two UIC codes
+(`8727149;8700147`) failed the seed against a 12-character `uic_ref`.
+`insert_rows()` compares such a rejection against `schema.varchar_limits()`
+and names the column, the length and the row before re-raising, since
+psycopg2 reports only `value too long for type character varying(n)`.
+
 ---
 
 ## Country geometry artifact (built at startup)

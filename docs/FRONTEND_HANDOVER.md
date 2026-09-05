@@ -3,7 +3,7 @@
 **Living document.** Backend changes that reach the API contract or change
 what the UI should show, in one place. Updated after each change.
 
-Last update 2026-08-31. Covers 2026-08-17 → 2026-08-31:
+Last update 2026-09-05. Covers 2026-08-17 → 2026-09-05:
 `ROUTE_BUILDER_VERSION` 0.9.23 → 0.9.28, `CALC_VERSION` 0.9.22, plus the
 scenario restructure.
 
@@ -18,6 +18,7 @@ are mostly "this field now exists, show it if you want".
 | §4 | Track gauge routing | new field + new error code |
 | §5 | Scenarios and two routing graphs | new field, names changed |
 | §6 | `api.ts` audit — the actual to-do list | **start here** |
+| §7 | `uic_ref` can hold more than one code | no type change |
 
 ---
 
@@ -235,6 +236,30 @@ present and correct: `gauges_mm` on stops, `composition_id`,
 
 Also worth a look, though not a type change: the `422 gauge_mismatch`
 handler (§4), and whether `provenance` on stops is worth surfacing (§1).
+
+---
+
+## 7. `uic_ref` can hold more than one code
+
+**Backend: schema only, no version bump — 2026-09-05.**
+
+`stop.uic_ref` is OSM's tag copied verbatim, and that tag is multi-valued:
+a station registered in two referentials carries both codes in one string,
+semicolon-separated. Paris CDG 2 TGV returns `"8727149;8700147"` — the
+first is the SNCF code, the second the one Transilien uses for the same
+platform.
+
+**No type change.** It stays `string | null` in `api.ts`; nothing to do
+unless the UI treats the value as a single code. One stop in the current
+catalogue of 783 coded stops is affected, so this is a display edge case,
+not a data model change: if you ever render or link on `uic_ref`, split on
+`;` and take the first code rather than showing the raw string.
+
+The column was `VARCHAR(12)` and this value aborted the seed; it is now
+`VARCHAR(120)`. Whether multi-value eventually becomes a real array
+(`string[]`) is deferred to the station-charge calibration, which is the
+first thing that will actually join on the code — if it does, it arrives
+as one contract change in a §6 batch rather than on its own.
 
 ---
 
