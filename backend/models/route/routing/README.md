@@ -313,11 +313,68 @@ Shared settings, from `night_train.json` and `config.yml`:
 | Parameter | Value | Reason |
 |---|---|---|
 | Speed ceiling | 230 km/h | Graph-level bound, not a per-trip speed — see below |
-| Electrification | All tracks | Vectron Dual Mode supports diesel fallback |
 | Service tracks | Blocked | No routing via yards or spurs |
 | Belarus, Russia | Blocked at request time | Project decision — see note below |
+| Unelectrified track | Penalized 10× at request time | The whole composition catalog is electric — see below |
 | Routing objective | 80% time / 20% distance | Balanced for night train economics |
 | U-turn penalty | 300 seconds (5 min) | Locomotive reversal time |
+
+### What the profile chain actually applies
+
+Each profile's `custom_model_files` is
+`[rail.json, night_train.json, nt_gauge_<mm>.json, preferred_direction.json]`,
+and GraphHopper concatenates the rule lists of all four. Only the middle
+two live in `custom_models/` — `rail.json` and `preferred_direction.json`
+are resolved from OpenRailRouting's **built-in** models on the classpath
+(the same built-ins the `nt_` prefix exists to avoid shadowing). Reading
+only this folder therefore gives an incomplete picture of what is in force.
+
+`rail.json` matters most, because it carries two rules the project never
+had to write:
+
+```json
+"priority": [ { "if": "!rail_access || railway_class != RAIL", "multiply_by": "0" } ],
+"speed":    [ { "if": "true", "limit_to": "rail_average_speed" } ]
+```
+
+Consequences worth knowing before adding anything here:
+
+* **Trams, subways, light rail and narrow gauge are already hard-blocked**,
+  and have been since the first import. OpenRailRouting's `RailAccessParser`
+  does admit `railway=tram|subway|light_rail|narrow_gauge` into the graph,
+  so the block is not obvious from the access side — but `railway_class !=
+  RAIL` removes them from every profile's weighting, which also keeps stop
+  *snapping* off them. Do not add a duplicate rule for this.
+* **Speed is `rail_average_speed`, not `max_speed`.** That encoded value is
+  `0.9 × maxspeed` where OSM tags a maxspeed, and otherwise a default from
+  the way's own tags (`usage=main` → 100, `usage=branch` → 50, `service=
+  siding|yard|crossover` → 40/25/60, everything else 25). This is the only
+  trace of OSM's `usage` tag anywhere in the graph — the fork registers no
+  encoded value for it — and it survives only where `maxspeed` is untagged.
+  See `OPEN_TODOS['branch_line_preference']` in `models/route/model.py`.
+
+### Unelectrified track (request-time, 0.9.31)
+
+Every routing request in every mode carries a priority rule penalizing
+track OSM tags `electrified=no` by `NON_ELECTRIFIED_PRIORITY_FACTOR`
+(`models/route/model.py`). It is a penalty, not a block, so an
+unelectrified station throat cannot fail a trip and a route is still found
+where unelectrified track is the only physical connection.
+
+The factor is 10×, an order of magnitude softer than HSR avoidance's 100×,
+and the difference is deliberate: HSR avoidance encodes a **permission**
+and is meant to act as a veto, this encodes a **preference**. At 100×
+whole diesel-worked regions — the Baltics, parts of the Balkans,
+Scandinavian inland lines — would attract detours far longer than any
+operator would accept in exchange for catenary.
+
+Only `electrified == NO` is matched, never `UNSET`: `UNSET` means the tag
+is absent, and unknown is never treated as forbidden — the same discipline
+`HSR_TRACK_SPEED_SANITY_MAX_KMH` enforces for untagged maxspeed. This lives
+in `rail_router.build_custom_model()` rather than in `night_train.json`
+because `electrified` is already in `graph.encoded_values`, so it needs no
+re-import — and because it becomes composition-dependent the day a diesel
+locomotive enters the catalog.
 
 The 230 km/h ceiling bounds only the paths that send no composition:
 `route_geometry()` (ONTD map lines, which have no composition by design) and

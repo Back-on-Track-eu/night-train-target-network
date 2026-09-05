@@ -4,7 +4,7 @@
 what the UI should show, in one place. Updated after each change.
 
 Last update 2026-09-05. Covers 2026-08-17 → 2026-09-05:
-`ROUTE_BUILDER_VERSION` 0.9.23 → 0.9.28, `CALC_VERSION` 0.9.22, plus the
+`ROUTE_BUILDER_VERSION` 0.9.23 → 0.9.31, `CALC_VERSION` 0.9.22, plus the
 scenario restructure.
 
 **If you read one section:** §6 is the only one with a decision in it. §1–§5
@@ -19,6 +19,7 @@ are mostly "this field now exists, show it if you want".
 | §5 | Scenarios and two routing graphs | new field, names changed |
 | §6 | `api.ts` audit — the actual to-do list | **start here** |
 | §7 | `uic_ref` can hold more than one code | no type change |
+| §8 | Routes now prefer electrified track | no type change, results move |
 
 ---
 
@@ -260,6 +261,45 @@ The column was `VARCHAR(12)` and this value aborted the seed; it is now
 (`string[]`) is deferred to the station-charge calibration, which is the
 first thing that will actually join on the code — if it does, it arrives
 as one contract change in a §6 batch rather than on its own.
+
+---
+
+## 8. Routes now prefer electrified track
+
+**Backend: `ROUTE_BUILDER_VERSION` 0.9.31 — 2026-09-05. OUTPUT CHANGE, no
+contract change.**
+
+Every routing request now penalizes track that OSM tags
+`electrified=no`. Background: the router was free to send a night train
+down unelectrified branch lines, which is unrealistic and also mispriced —
+every locomotive in the catalog is electric, and the energy model bills
+catenary electricity on every kilometre.
+
+It is a 10x priority penalty, not a block. An unelectrified alignment
+loses to any reasonable electrified alternative, but is still used where
+the alternative is absurd or does not exist — so no trip that routed
+before starts failing. Track with **no** `electrified` tag is not
+penalized at all: unknown is not treated as forbidden.
+
+**Nothing in `api.ts` changes.** No new field, no removed field, no changed
+type. What changes is the numbers behind the existing ones.
+
+**What you will see.** On affected trips, geometry, `trip_km`,
+`route_duration_min` and therefore every cost and revenue figure move. The
+map line moves too. Fully electrified corridors — most of the flagship
+routes — are unaffected; the movement is concentrated on regional and
+branch alignments and on routes through less-electrified networks.
+
+**One thing to check your side:** any golden-file or snapshot test that
+pins a routed distance, duration or geometry will fail and needs
+re-baselining. Same for screenshots in the gallery if you compare them
+pixel-wise.
+
+**Stored proposals.** They keep their stored numbers until refreshed, as
+always — `scripts/refresh_proposals.py` on the backend side. A proposal
+computed before 0.9.31 and one computed after can legitimately differ for
+the same input; the version is on the payload if you need to explain it to
+a user.
 
 ---
 
