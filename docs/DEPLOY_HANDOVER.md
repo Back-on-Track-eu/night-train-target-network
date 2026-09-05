@@ -7,7 +7,7 @@ backend, in one place. Supersedes `deploy/HANDOVER.md` (2026-08-10),
 deleted.
 
 Updated after each change that touches deploy, capacity or server data.
-Last update 2026-08-31 (route segment cache precompute runbook, §7a.3).
+Last update 2026-09-05 (stop catalogue `uic_ref` widening, §3 step 1).
 
 **If you read one section:** §3 is the deploy currently queued for staging,
 §4 is a mandatory cache wipe that comes with it, and §7 is the capacity work
@@ -89,10 +89,29 @@ profile set changed at `ROUTE_BUILDER_VERSION` 0.9.28 and the routing
 container will restart-loop against the old graph. Do this before or
 alongside the merge, not after the api starts failing.
 
-**Step 1 — schema (automatic).** `db/migrate.py` applies
+**Step 1 — schema (automatic).** `db/migrate.py` applies two files.
+
 `2026-08-29_scenario_routing_graph.sql`: adds `routing_graph_key`,
 backfills every existing row to `'infra_2026'`, sets NOT NULL. Existing
 scenarios keep working — they all route on today's network.
+
+`2026-09-05_stop_uic_ref_multi_value.sql`: widens
+`input_params.stop_infrastructures.uic_ref` from `VARCHAR(12)` to
+`VARCHAR(120)`. OSM's `uic_ref` tag is multi-valued where a station is
+registered in two referentials (Paris CDG 2 TGV carries
+`8727149;8700147`), and the 2026-09-05 catalogue is the first to contain
+one — it aborted the local seed outright. Widening a varchar neither
+rewrites the table nor revalidates rows on PostgreSQL 9.2+, so it holds no
+lock worth planning around and no existing value can fail the new type.
+
+**Order matters between the two only in one direction:** the widening must
+land before any reseed that loads the new catalogue. Since migrations run
+before the api may start, and a reseed is a separate manual action, that
+happens by itself — but if you reseed staging (§5) with an image that
+predates this migration, the seeder will exit 1 on the stop table and
+restart-loop. The seed log names the column now, so it will say
+`value too long — input_params.stop_infrastructures [stop_id=...]` rather
+than only the Postgres type error.
 
 **Step 2 — scenario data (manual).**
 
@@ -233,11 +252,16 @@ catalogue that was never uploaded.
 The seed log states the count it actually loaded:
 
 ```
-downloaded stop_seed_catalog.csv (1050 stops).
+downloaded stop_seed_catalog.csv (1176 stops).
 ```
 
 Check that number against the release note — the fastest confirmation that
-staging is running the catalogue you think it is.
+staging is running the catalogue you think it is. The current catalogue
+(2026-09-01 gap closure) is that 1,176-stop one, and it also carries the
+first real station charges: Germany's 105 rows from the Stationspreisliste
+2026, replacing the illustrative placeholders. A reseed therefore changes
+what German stops cost, so published proposals want a refresh run (§3
+step 3) afterwards.
 
 *Two corrections to the note this replaces:* the variable `seed.py` reads is
 **`STOP_SEED_FILE_ID`**, not `ONTD_SEED_STOPS_FILE_ID` (that one belongs to
