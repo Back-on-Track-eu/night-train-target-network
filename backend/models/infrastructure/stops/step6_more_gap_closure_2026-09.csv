@@ -1,0 +1,22 @@
+Valga,Valga,,57.77483,26.04966,schedule,BALTICS,EE,border,infra-2026;infra-2032,EE/LV; Latvia/Estonia border station,add
+Karaman,Karaman,,37.1862,33.2204,schedule,EASTERN_EUROPE,TR,network,infra-2026;infra-2032,Konya–Adana line,add
+Alexandroupoli Port,Alexandroupoli,,40.849,25.874,schedule,SOUTH_EASTERN_EUROPE,GR,fua:Alexandroupoli,infra-2026;infra-2032,,add
+Kiato,Kiato,,38.0140255,22.7349797,schedule,SOUTH_EASTERN_EUROPE,GR,network,infra-2026;infra-2032,Piraeus–Patras line,add
+Korinthos,Korinthos,,37.9214,22.932,schedule,SOUTH_EASTERN_EUROPE,GR,network,infra-2026;infra-2032,Piraeus–Patras line,add
+Diakopto,Diakopto,,38.191,22.197,schedule,SOUTH_EASTERN_EUROPE,GR,network,infra-2026;infra-2032,Piraeus–Patras line; rack railway to Kalavryta,add
+Kalambaka,Kalambaka,,39.703,21.625,schedule,SOUTH_EASTERN_EUROPE,GR,tourism:Meteora,infra-2026;infra-2032,,add
+Dimitrovgrad,Dimitrovgrad,,43.011,22.764,schedule,SOUTH_EASTERN_EUROPE,RS,border,infra-2026;infra-2032,border station Serbia Bulgaria (not to be confused with the other Dimitrovgrad in Bulgaria),add
+Blagoevgrad,Blagoevgrad,,42.013,23.085,schedule,SOUTH_EASTERN_EUROPE,BG,network,infra-2026;infra-2032,on the railway from Sofia to Thessaloniki,add
+Shkodër,Shkodër,,42.061,19.527,schedule,SOUTH_EASTERN_EUROPE,AL,fua:Shkodër,infra-2032,big albanian city on the way to Tirane,add
+Tirana Public Transport Terminal,Tirana,,41.347,19.777,schedule,SOUTH_EASTERN_EUROPE,AL,fua:Tirana,infra-2032,capital of Albania,add
+Baqël,Baqël,,41.899,19.65,schedule,SOUTH_EASTERN_EUROPE,AL,network,infra-2026;infra-2032,tiny station in the middle of nowhere,skip
+Ploče,Ploče,,43.043,17.43,schedule,SOUTH_EASTERN_EUROPE,HR,tourism:Adrianic sea,infra-2026;infra-2032,end of the line from Bosnia to the adrianic seat,add
+Banja Luka,Banja Luka,,44.788,17.212,schedule,SOUTH_EASTERN_EUROPE,BA,fua:Banja Luka,infra-2026;infra-2032,capital of Republika Srpska entity in Bosnia and Herzegovina,add
+Prijedor,Prijedor,,44.979,16.716,schedule,SOUTH_EASTERN_EUROPE,BA,fua:Prijedor,infra-2026;infra-2032,city in Republika Srpska entity in Bosnia and Herzegovina,add
+Szczecinek,Szczecinek,,53.693,16.705,schedule,CENTRAL_EUROPE,PL,fua:Szczecinek,infra-2026;infra-2032,station with train lines in 5 directions,add
+Balatonalmádi,Balatonalmádi,,47.028,18.015,schedule,CENTRAL_EUROPE,HU,tourism:Balaton,infra-2026;infra-2032,station on lake Balaton,add
+Balatonfüred,Balatonfüred,,46.955,17.882,schedule,CENTRAL_EUROPE,HU,tourism:Balaton,infra-2026;infra-2032,station on lake Balaton,add
+Révfülöp,Révfülöp,,46.829,17.632,schedule,CENTRAL_EUROPE,HU,tourism:Balaton,infra-2026;infra-2032,station on lake Balaton,add
+Tapolca,Tapolca,,46.876,17.428,schedule,CENTRAL_EUROPE,HU,tourism:Balaton,infra-2026;infra-2032,station on lake Balaton,add
+Vididn tovarna,Vidin,,43.972,22.848,schedule,SOUTH_EASTERN_EUROPE,BG,border,infra-2026;infra-2032,BG/RO border station,add
+Charleville-Mézières,Charleville-Mézières,,49.771,4.720,schedule,FRANCE,FR,fua:Charleville-Mézières,infra-2026;infra-2032,,add
