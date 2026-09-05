@@ -3,9 +3,19 @@
 **Living document.** Backend changes that reach the API contract or change
 what the UI should show, in one place. Updated after each change.
 
-Last update 2026-09-05. Covers 2026-08-17 → 2026-09-05:
+Last update 2026-09-06. Covers 2026-08-17 → 2026-09-06:
 `ROUTE_BUILDER_VERSION` 0.9.23 → 0.9.31, `CALC_VERSION` 0.9.22, plus the
 scenario restructure.
+
+> **FYI 2026-09-06 — existing night trains all dashed.** Backend-only
+> bootstrap bug (the routing step of the ONTD load never ran on persisted
+> databases); your dashed rendering of `geometry_routed = false` was
+> correct and stays as it is. After the fix most existing routes come back
+> solid; the ones still dashed are genuine data gaps (ONTD coordinate
+> defects, Sicily until the ferry edge lands). The reason is stored per
+> route in `ontd.route_summaries.routing_status` / `routing_error` but
+> not exposed on `POST /api/proposals` — say if a tooltip would be
+> useful and it joins the next `api.ts` batch. No type change now.
 
 **If you read one section:** §6 is the only one with a decision in it. §1–§5
 are mostly "this field now exists, show it if you want".

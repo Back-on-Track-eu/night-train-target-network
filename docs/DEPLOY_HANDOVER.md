@@ -7,8 +7,36 @@ backend, in one place. Supersedes `deploy/HANDOVER.md` (2026-08-10),
 deleted.
 
 Updated after each change that touches deploy, capacity or server data.
-Last update 2026-09-05 (route-context re-calibration, and route builder
-0.9.31 — see the note below and §4a).
+Last update 2026-09-06 (existing-train geometry: ONTD bootstrap fix —
+see the first note below; also 2026-09-05 route-context re-calibration
+and route builder 0.9.31, §4a).
+
+> **Update 2026-09-06 — existing night trains drawn as dashed straight
+> lines: ONTD bootstrap fix, one-off action on every persisted database.**
+> Cause: `db/ontd/bootstrap.py` loads the timetable with placeholder
+> straight-line geometry, then runs the composition-catalog loader, then
+> the routing projection. On any database whose volume persists, the
+> catalog loader refused to overwrite its already-populated curated tables
+> and exited 1 — which bootstrap treated as fatal, so the routing step
+> never ran and the placeholder stayed. Not a router, graph or profile
+> problem (CI never sees it: fresh database, empty catalog). Two more
+> fixes ride along: existing trains now route on their catalog stop's
+> **gauge** (Finnish/Ukrainian/Baltic lines snapped on the wrong profile
+> before), and every route still on straight lines is listed at the end
+> of the projection run by `routing_status` with the router's message.
+> **Action, staging and production, once, no restart needed**
+> (container name may differ):
+>
+> ```bash
+> docker exec night-train-api python /app/db/ontd/projection.py
+> ```
+>
+> Runs the routing projection alone (~1 min with the router up; needs no
+> Drive access). After this deploy the bootstrap self-heals: a projection
+> with no routed geometry is re-routed at the next container start, and
+> the populated catalog is skipped instead of failing. No schema change,
+> no cache wipe, no version bump — `route_summaries` is rebuilt in place
+> and the compute cache never holds existing-train rows.
 
 > **Update 2026-09-05 — schedule supplement re-calibrated.**
 > `track_buffer_quota_per` drops from 0.35–0.71 to 0.11–0.39 per country
