@@ -35,7 +35,7 @@ for _path in (str(BACKEND), str(SCRIPTS)):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from model_docs import render_model_md  # noqa: E402
+from model_docs import render_model_md, render_site  # noqa: E402
 from model_docs.extract import (  # noqa: E402
     validate_calc_coverage,
     validate_summaries,
@@ -45,6 +45,7 @@ from model_docs.extract import (  # noqa: E402
 # write() -> int, plus the path named in the "out of date" message.
 TARGETS = {
     "model-md": (render_model_md, "docs/MODEL.md"),
+    "site": (render_site, "docs-site/"),
 }
 
 

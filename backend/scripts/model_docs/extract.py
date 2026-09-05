@@ -28,12 +28,21 @@ sys.path.insert(0, str(BACKEND))
 
 from db.schema import INPUT_PARAMS_TABLES, SCENARIO_TABLES  # noqa: E402
 from models.compositions.model import (  # noqa: E402
+    CHANGELOG as COMPOSITIONS_CHANGELOG,
+)
+from models.compositions.model import (  # noqa: E402
     COMPOSITIONS_MODEL_DESCRIPTION,
     COMPOSITIONS_MODEL_VERSION,
 )
 from models.demand.model import (  # noqa: E402
+    CHANGELOG as DEMAND_CHANGELOG,
+)
+from models.demand.model import (  # noqa: E402
     DEMAND_MODEL_DESCRIPTION,
     DEMAND_MODEL_VERSION,
+)
+from models.emissions.model import (  # noqa: E402
+    CHANGELOG as EMISSIONS_CHANGELOG,
 )
 from models.emissions.model import (  # noqa: E402
     EMISSION_FACTORS,
@@ -42,9 +51,15 @@ from models.emissions.model import (  # noqa: E402
     MODE_SHIFT_SHARES,
 )
 from models.energy.model import (  # noqa: E402
+    CHANGELOG as ENERGY_CHANGELOG,
+)
+from models.energy.model import (  # noqa: E402
     ENERGY_CALC_VERSION,
     ENERGY_FORMULAS,
     ENERGY_MODEL_DESCRIPTION,
+)
+from models.evaluation.model import (  # noqa: E402
+    CHANGELOG as CALC_CHANGELOG,
 )
 from models.evaluation.model import (  # noqa: E402
     CALC_FORMULAS,
@@ -52,8 +67,14 @@ from models.evaluation.model import (  # noqa: E402
     CALC_VERSION,
 )
 from models.infrastructure.model import (  # noqa: E402
+    CHANGELOG as INFRA_CHANGELOG,
+)
+from models.infrastructure.model import (  # noqa: E402
     INFRA_MODEL_DESCRIPTION,
     INFRA_MODEL_VERSION,
+)
+from models.route.model import (  # noqa: E402
+    CHANGELOG as ROUTE_CHANGELOG,
 )
 from models.route.model import (  # noqa: E402
     ROUTE_BUILDER_DESCRIPTION,
@@ -70,6 +91,7 @@ __all__ = [
     "EMISSION_FACTORS",
     "INPUT_PARAMS_TABLES",
     "MODE_SHIFT_SHARES",
+    "MODEL_CHANGELOGS",
     "MODEL_VERSION_ROWS",
     "REGISTRIES",
     "SCENARIO_TABLES",
@@ -173,6 +195,21 @@ MODEL_VERSION_ROWS: list[tuple[str, str, str, str, str]] = [
 # Longest summary that still fits the cost-breakdown info popover on one
 # or two lines. Raising it means re-checking that overlay.
 _SUMMARY_MAX_LEN = 110
+
+
+# Every model's dated CHANGELOG, keyed by the same title MODEL_VERSION_ROWS
+# uses. The public site renders these as "what changed and why": the entries
+# are already prose and already flag VALUES CHANGE where numbers moved, which
+# is exactly what a reader who quoted an older figure needs.
+MODEL_CHANGELOGS: dict[str, dict] = {
+    "Route & timetable builder": ROUTE_CHANGELOG,
+    "Energy model": ENERGY_CHANGELOG,
+    "Demand model": DEMAND_CHANGELOG,
+    "Cost & revenue evaluation": CALC_CHANGELOG,
+    "Emissions model": EMISSIONS_CHANGELOG,
+    "Composition cost model": COMPOSITIONS_CHANGELOG,
+    "Infrastructure parameter model": INFRA_CHANGELOG,
+}
 
 
 # ---------------------------------------------------------------------------
