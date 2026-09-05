@@ -1,6 +1,6 @@
 ---
-title: Traction electricity
-description: The traction electricity drawn, at each country's price, plus the catenary supply charge.
+title: "Traction electricity"
+description: "The traction electricity drawn, at each country's price, plus the catenary supply charge."
 ---
 
 # Traction electricity

@@ -1,6 +1,6 @@
 ---
-title: Variable operator cost
-description: The operator costs that scale with how much the train runs.
+title: "Variable operator cost"
+description: "The operator costs that scale with how much the train runs."
 ---
 
 # Variable operator cost

@@ -1,6 +1,6 @@
 ---
-title: Infrastructure cost
-description: Everything paid to infrastructure companies: track, power, stations and parking.
+title: "Infrastructure cost"
+description: "Everything paid to infrastructure companies: track, power, stations and parking."
 ---
 
 # Infrastructure cost

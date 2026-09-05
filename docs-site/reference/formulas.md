@@ -1,5 +1,5 @@
 ---
-title: All formulas
+title: "All formulas"
 ---
 
 # All formulas

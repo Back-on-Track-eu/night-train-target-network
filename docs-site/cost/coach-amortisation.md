@@ -1,6 +1,6 @@
 ---
-title: Coach write-off
-description: The coaches' annual write-off: purchase price spread over their useful life.
+title: "Coach write-off"
+description: "The coaches' annual write-off: purchase price spread over their useful life."
 ---
 
 # Coach write-off

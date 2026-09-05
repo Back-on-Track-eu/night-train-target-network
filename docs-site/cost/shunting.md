@@ -1,6 +1,6 @@
 ---
-title: Shunting
-description: Coupling, uncoupling and parking moves in stations and yards.
+title: "Shunting"
+description: "Coupling, uncoupling and parking moves in stations and yards."
 ---
 
 # Shunting

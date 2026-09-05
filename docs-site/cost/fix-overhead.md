@@ -1,6 +1,6 @@
 ---
-title: Fixed overhead
-description: Administration, management and planning, as a share of the operator's other costs.
+title: "Fixed overhead"
+description: "Administration, management and planning, as a share of the operator's other costs."
 ---
 
 # Fixed overhead

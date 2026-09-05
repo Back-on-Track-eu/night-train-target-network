@@ -1,6 +1,6 @@
 ---
-title: Ticket revenue
-description: Ticket income from places sold and average fare — both set by you, not predicted.
+title: "Ticket revenue"
+description: "Ticket income from places sold and average fare — both set by you, not predicted."
 ---
 
 # Ticket revenue

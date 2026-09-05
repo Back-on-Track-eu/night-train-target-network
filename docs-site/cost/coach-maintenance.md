@@ -1,6 +1,6 @@
 ---
-title: Coach maintenance
-description: Maintaining the coaches, charged per kilometre driven.
+title: "Coach maintenance"
+description: "Maintaining the coaches, charged per kilometre driven."
 ---
 
 # Coach maintenance

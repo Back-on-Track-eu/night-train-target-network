@@ -1,6 +1,6 @@
 ---
-title: Locomotive rental
-description: Renting the locomotive by the hour, maintenance and insurance included.
+title: "Locomotive rental"
+description: "Renting the locomotive by the hour, maintenance and insurance included."
 ---
 
 # Locomotive rental

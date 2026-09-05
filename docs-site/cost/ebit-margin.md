@@ -1,6 +1,6 @@
 ---
-title: Profit requirement (margin)
-description: The operator's profit requirement: deducted in the net result, not paid to anyone.
+title: "Profit requirement (margin)"
+description: "The operator's profit requirement: deducted in the net result, not paid to anyone."
 ---
 
 # Profit requirement (margin)

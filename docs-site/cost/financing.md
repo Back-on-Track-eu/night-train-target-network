@@ -1,6 +1,6 @@
 ---
-title: Financing
-description: The annual cost of financing the coaches.
+title: "Financing"
+description: "The annual cost of financing the coaches."
 ---
 
 # Financing

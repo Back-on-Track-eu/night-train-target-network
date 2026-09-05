@@ -16,12 +16,14 @@ still land on the matching heading here.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
 from .extract import (
     BACKEND,
     CALC_ALLOCATION_FORMULAS,
+    CALC_TREE,
     CALC_DERIVATION_FORMULAS,
     CALC_GENERIC_FORMULAS,
     EMISSION_FACTORS,
@@ -106,6 +108,18 @@ def _feeds_into(model: str, key: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _esc(text: str) -> str:
+    """Escape prose for a VitePress page.
+
+    VitePress compiles rendered markdown as a Vue template, so a "<" in
+    backend prose is read as an opening tag (a changelog entry naming the
+    profile "night_train_<mm>" fails the build) and "{{" as an
+    interpolation. Both are escaped here rather than sanitised upstream:
+    the model registries are written for humans and must not have to know
+    what renders them."""
+    return text.replace("<", "&lt;").replace("{{", "&#123;&#123;")
+
+
 def _legend_table(formula) -> list[str]:
     rows = [
         "| | Symbol | Meaning | Unit | Where it comes from |",
@@ -113,11 +127,13 @@ def _legend_table(formula) -> list[str]:
     ]
     for prm in formula.inputs:
         rows.append(
-            f"| Input | `{prm.symbol}` | {prm.description} | {prm.unit} "
+            f"| Input | `{prm.symbol}` | {_esc(prm.description)} | {prm.unit} "
             f"| {site_link(prm.ref)} |"
         )
     out = formula.output
-    rows.append(f"| **Result** | `{out.symbol}` | {out.description} | {out.unit} | — |")
+    rows.append(
+        f"| **Result** | `{out.symbol}` | {_esc(out.description)} | {out.unit} | — |"
+    )
     return rows
 
 
@@ -128,7 +144,7 @@ def _formula_block(model: str, key: str) -> str:
     parts = [
         f'<a id="{formula_anchor(model, key)}"></a>',
         "",
-        f.summary,
+        _esc(f.summary),
         "",
         "### The formula",
         "",
@@ -151,7 +167,7 @@ title: {heading}
 description: {summary}
 ---
 
-# {heading}
+# {h1}
 
 <!-- BEGIN GENERATED: formula -->
 <!-- END GENERATED: formula -->
@@ -177,8 +193,14 @@ def cost_pages() -> dict[Path, dict]:
         pages[path] = {
             "blocks": {"formula": _formula_block("calc", key)},
             "template": _COST_PAGE_TEMPLATE.format(
-                heading=heading,
-                summary=REGISTRIES["calc"]["formulas"][key].summary.replace('"', "'"),
+                # json.dumps: frontmatter is YAML, and a summary containing
+                # ": " or a quote is not a valid bare scalar. JSON strings are
+                # a YAML subset, so this quotes and escapes in one step.
+                heading=json.dumps(heading, ensure_ascii=False),
+                h1=heading,
+                summary=json.dumps(
+                    REGISTRIES["calc"]["formulas"][key].summary, ensure_ascii=False
+                ),
             ),
         }
     return pages
@@ -223,7 +245,7 @@ def render_changelog() -> str:
             parts += [
                 f"### `{version}` — {entry['date']}{flag}",
                 "",
-                entry["changes"],
+                _esc(entry["changes"]),
                 "",
             ]
     return "\n".join(parts).rstrip()
@@ -256,7 +278,7 @@ def render_parameters() -> str:
     parts = []
     for table in INPUT_PARAMS_TABLES + SCENARIO_TABLES:
         qualified_table = f"{table.schema}.{table.name}"
-        parts += [f"## `{qualified_table}`", "", table.description, ""]
+        parts += [f"## `{qualified_table}`", "", _esc(table.description), ""]
         parts += ["| Parameter | Meaning | Unit | Used in |", "|---|---|---|---|"]
         for col in table.columns:
             qualified = f"{qualified_table}.{col.name}"
@@ -269,7 +291,7 @@ def render_parameters() -> str:
             )
             parts.append(
                 f'| <a id="{column_anchor(qualified)}"></a>`{col.name}` '
-                f"| {col.description or '—'} | {col.unit or '—'} | {used or '—'} |"
+                f"| {_esc(col.description or '—')} | {col.unit or '—'} | {used or '—'} |"
             )
         parts.append("")
     return "\n".join(parts).rstrip()
@@ -286,7 +308,7 @@ def render_standard_values() -> str:
         for name, value, doc in values:
             parts.append(
                 f'| <a id="{standard_anchor(std_id, name)}"></a>`{name}` '
-                f"| `{value}` | {doc or '—'} |"
+                f"| `{value}` | {_esc(doc or '—')} |"
             )
         parts.append("")
     return "\n".join(parts).rstrip()
@@ -296,7 +318,7 @@ def render_emission_factors() -> str:
     parts = ["| Mode | g CO2e per passenger-km | Source |", "|---|---|---|"]
     for mode, factor in EMISSION_FACTORS.items():
         parts.append(
-            f"| {mode.replace('_', ' ')} | {factor.g_per_pax_km:g} | {factor.source} |"
+            f"| {mode.replace('_', ' ')} | {factor.g_per_pax_km:g} | {_esc(factor.source)} |"
         )
     shares = ", ".join(f"{m} {s:.0%}" for m, s in MODE_SHIFT_SHARES.items())
     parts += [
@@ -327,7 +349,7 @@ _REFERENCE_TEMPLATE = """---
 title: {title}
 ---
 
-# {title}
+# {h1}
 
 <!-- Generated from the model registries. Edit the model, not this page —
      anything outside the GENERATED markers survives regeneration. -->
@@ -346,9 +368,42 @@ def reference_pages() -> dict[Path, dict]:
         )
         pages[REFERENCE_DIR / filename] = {
             "blocks": blocks,
-            "template": _REFERENCE_TEMPLATE.format(title=title, blocks=marker_block),
+            "template": _REFERENCE_TEMPLATE.format(
+                title=json.dumps(title, ensure_ascii=False),
+                h1=title,
+                blocks=marker_block,
+            ),
         }
     return pages
+
+
+# ---------------------------------------------------------------------------
+# Sidebar — generated so it cannot drift from the tree it describes
+# ---------------------------------------------------------------------------
+
+SIDEBAR_PATH = SITE / ".vitepress" / "generated-sidebar.json"
+
+
+def _sidebar_nodes(nodes: list) -> list[dict]:
+    """CALC_TREE -> VitePress sidebar items, nesting preserved."""
+    out = []
+    for key, heading, children in nodes:
+        item: dict = {"text": heading, "link": f"/cost/{cost_slug(key)}"}
+        if children:
+            item["collapsed"] = False
+            item["items"] = _sidebar_nodes(children)
+        out.append(item)
+    return out
+
+
+def render_sidebar() -> str:
+    """The cost section of the sidebar, as JSON for .vitepress/config.ts.
+
+    Generated rather than hand-listed in the config: the sidebar IS the
+    breakdown tree, and a hand-maintained copy is exactly what the rest of
+    this pipeline exists to avoid. A formula gaining or losing its place in
+    CALC_TREE moves its page and its sidebar entry in one step."""
+    return json.dumps(_sidebar_nodes(CALC_TREE), indent=2, ensure_ascii=False) + "\n"
 
 
 # ---------------------------------------------------------------------------
@@ -386,6 +441,11 @@ def check() -> bool:
     for path, page in _all_pages().items():
         if not path.exists() or path.read_text(encoding="utf-8") != _target(page, path):
             return False
+    if (
+        not SIDEBAR_PATH.exists()
+        or SIDEBAR_PATH.read_text(encoding="utf-8") != render_sidebar()
+    ):
+        return False
     return True
 
 
@@ -397,4 +457,7 @@ def write() -> int:
         content = _target(page, path)
         path.write_text(content, encoding="utf-8")
         total += len(content)
-    return total
+    sidebar = render_sidebar()
+    SIDEBAR_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SIDEBAR_PATH.write_text(sidebar, encoding="utf-8")
+    return total + len(sidebar)

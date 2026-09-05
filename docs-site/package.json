@@ -1,0 +1,21 @@
+{
+  "name": "night-train-docs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Public documentation for the night train target network model",
+  "scripts": {
+    "dev": "vitepress dev",
+    "build": "vitepress build",
+    "preview": "vitepress preview",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "ci": "npm run format:check && npm run build"
+  },
+  "devDependencies": {
+    "@vscode/markdown-it-katex": "^1.1.2",
+    "katex": "^0.18.5",
+    "prettier": "3.5.3",
+    "vitepress": "^1.6.4"
+  }
+}

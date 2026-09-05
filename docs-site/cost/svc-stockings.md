@@ -1,6 +1,6 @@
 ---
-title: Onboard service
-description: Bedding, breakfast and amenities, charged per ticket sold.
+title: "Onboard service"
+description: "Bedding, breakfast and amenities, charged per ticket sold."
 ---
 
 # Onboard service

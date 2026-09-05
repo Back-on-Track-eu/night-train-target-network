@@ -1,6 +1,6 @@
 ---
-title: Cleaning
-description: Cleaning and preparing the train for each night of service.
+title: "Cleaning"
+description: "Cleaning and preparing the train for each night of service."
 ---
 
 # Cleaning

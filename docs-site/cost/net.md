@@ -1,6 +1,6 @@
 ---
-title: Net result
-description: Revenue minus costs minus profit requirement; if negative, the subsidy the route needs.
+title: "Net result"
+description: "Revenue minus costs minus profit requirement; if negative, the subsidy the route needs."
 ---
 
 # Net result

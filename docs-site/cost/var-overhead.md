@@ -1,6 +1,6 @@
 ---
-title: Variable overhead
-description: Ticket sales, distribution and customer service, as a share of ticket revenue.
+title: "Variable overhead"
+description: "Ticket sales, distribution and customer service, as a share of ticket revenue."
 ---
 
 # Variable overhead

@@ -1,5 +1,5 @@
 ---
-title: Parameter reference
+title: "Parameter reference"
 ---
 
 # Parameter reference
@@ -412,5 +412,5 @@ Container pinning one version of each versioned infrastructure table. Exactly on
 | <a id="p-scenario-scenarios-stop_infrastructures_version"></a>`stop_infrastructures_version` | Pinned input_params.stop_infrastructures version (full-table snapshot). | — | — |
 | <a id="p-scenario-scenarios-stop_infrastructure_defaults_version"></a>`stop_infrastructure_defaults_version` | Pinned input_params.stop_infrastructure_defaults version (full-table snapshot). | — | — |
 | <a id="p-scenario-scenarios-passage_charges_version"></a>`passage_charges_version` | Pinned input_params.passage_charges version (full-table snapshot). | — | — |
-| <a id="p-scenario-scenarios-routing_graph_key"></a>`routing_graph_key` | Routing graph this scenario routes on — the physical rail network (OSM state) behind every distance and travel time, e.g. "infra_2026" or "infra_2032". Pinned like the *_version columns but not itself a snapshot version: the graph lives outside the database, in an OpenRailRouting instance. Naming contract with the deployment: key <k> is served by the instance at env OPENRAILROUTING_URL_<K>, the key uppercased — every graph alike, none implicit — see models/route/routing/rail_router.py. The TAC and passage changes an upgraded network implies are NOT carried here; they ride this same row's track_infrastructures_version and passage_charges_version pins. | — | — |
+| <a id="p-scenario-scenarios-routing_graph_key"></a>`routing_graph_key` | Routing graph this scenario routes on — the physical rail network (OSM state) behind every distance and travel time, e.g. "infra_2026" or "infra_2032". Pinned like the *_version columns but not itself a snapshot version: the graph lives outside the database, in an OpenRailRouting instance. Naming contract with the deployment: key &lt;k> is served by the instance at env OPENRAILROUTING_URL_&lt;K>, the key uppercased — every graph alike, none implicit — see models/route/routing/rail_router.py. The TAC and passage changes an upgraded network implies are NOT carried here; they ride this same row's track_infrastructures_version and passage_charges_version pins. | — | — |
 <!-- END GENERATED: parameters -->

@@ -1,6 +1,6 @@
 ---
-title: Station charges
-description: The fee paid for every scheduled stop at a station.
+title: "Station charges"
+description: "The fee paid for every scheduled stop at a station."
 ---
 
 # Station charges

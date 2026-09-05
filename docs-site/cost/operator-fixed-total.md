@@ -1,6 +1,6 @@
 ---
-title: Fixed operator cost
-description: The operator costs that stay the same however much the train runs.
+title: "Fixed operator cost"
+description: "The operator costs that stay the same however much the train runs."
 ---
 
 # Fixed operator cost

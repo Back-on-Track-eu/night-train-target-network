@@ -1,6 +1,6 @@
 ---
-title: Total revenue
-description: The route's total annual revenue; ticket income is currently the only source.
+title: "Total revenue"
+description: "The route's total annual revenue; ticket income is currently the only source."
 ---
 
 # Total revenue

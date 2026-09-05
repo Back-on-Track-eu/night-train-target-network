@@ -1,6 +1,6 @@
 ---
-title: Cabin crew cost
-description: What the cabin crew costs per year, including the relief crew a long trip needs.
+title: "Cabin crew cost"
+description: "What the cabin crew costs per year, including the relief crew a long trip needs."
 ---
 
 # Cabin crew cost
