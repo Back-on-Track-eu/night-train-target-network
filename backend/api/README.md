@@ -51,6 +51,7 @@ its own example files.
   - [`POST /api/feedback`](#post-feedback) — submit feedback
   - [`GET /api/feedback/categories`](#feedback-categories) — suggested category/sub_category values
 - [Error responses](#error-responses)
+- [Usage logging](#usage-logging) — what every request records, and what it deliberately does not
 
 <a id="health"></a>
 
@@ -1837,3 +1838,61 @@ wrong, e.g. to the wrong distance).
 | `500` | `feedback_error` | Feedback storage failed (mail failure alone never triggers this) |
 | `503` | `infrastructure_error` | DB unreachable or unknown composition ID |
 | `501` | `not_implemented` | Endpoint exists but is not yet implemented |
+
+<a id="usage-logging"></a>
+
+## Usage logging
+
+Every served request appends one row to `admin.request_log`
+(`api/request_log.py`). No endpoint exposes it — this section documents
+what the API records about its callers, because that is worth stating
+plainly.
+
+**Why it exists**, in order of weight: usage evidence for the network
+proposal (how many people used the tool and which parts — `proposals`
+only knows what was *published*, a small fraction of what was tried);
+operations (`status_code`, `duration_ms`, `response_bytes` per endpoint);
+and abuse detection.
+
+**What a row holds:** the Flask endpoint name and matched route rule,
+method, status, duration, response size, `user_id` / `is_guest` /
+`trust_level`, a truncated user agent, and `client_hash`.
+
+**What it deliberately does not hold:** no IP address, no raw path, no
+query string, no request body. A `/api/proposal/calc` body is an entire
+proposal, and published ones are already persisted; the raw path carries
+ids the parameterised rule captures better for grouping.
+
+`client_hash` is `HMAC-SHA256(secret, "<UTC date>|<client address>")`. It
+correlates one client's requests within a UTC day and is unlinkable across
+days by construction — the date sits in the HMAC *message*, so the same
+address hashes differently tomorrow and no key rotation recovers it. To
+count distinct people use `user_id`, not this: guests get a real
+`admin.users` row from `POST /api/auth/guest` and their JWT outlives the
+day, so they are attributable like anyone else.
+
+**Not logged at all:** `OPTIONS` (CORS preflight doubles every
+cross-origin call), and anything under `/api/health` or `/api/gate/*` —
+the first is polled by the frontend and by container healthchecks, the
+second by Caddy's `forward_auth` on every page request. Both would
+dominate the table without saying anything about usage. A 404 on an
+unknown path *is* logged.
+
+**It cannot affect a response.** Writes are best-effort and swallowed;
+identity comes from `g` where a decorator already resolved it, and
+otherwise from `auth_middleware.resolve_identity_quietly()`, which treats
+everything the decorators 401 on as anonymous. An invalid token still
+fails exactly where it always did.
+
+**Retention is not automatic.** `scripts/purge_request_log.py` enforces
+`REQUEST_LOG_RETENTION_DAYS` (90) and belongs on a cron — see
+`docs/DEPLOY_HANDOVER.md` §4b. Erasing a user sets `user_id` to NULL
+rather than deleting rows, so a GDPR erasure anonymises the history and
+keeps the counts.
+
+**Known gap:** `client_hash` reads the leftmost `X-Forwarded-For` and
+falls back to the socket address, but Flask-Limiter's `rate_limit_key()`
+reads `request.remote_addr` directly. Behind Caddy that is the proxy for
+every caller, so the address-keyed rate limits (the auth endpoints) may
+currently share one bucket. Worth a `ProxyFix` pass, which is a change to
+rate-limiting behaviour and deliberately not bundled here.
