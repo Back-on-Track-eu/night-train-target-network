@@ -306,22 +306,16 @@ def test_stop_enrichment_seeded(db_cur):
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "The 13 station-charge rows are ILLUSTRATIVE-CURATED placeholders "
-        "and charges/data/station_charges.csv has no price_basis_year "
-        "column at all (7 columns; step 10's CHARGE_PROVENANCE_COLUMNS "
-        "expects it plus vat_rate_per, incl_vat and tariff_class). A charge "
-        "with a basis but no price year cannot be inflated to the 2032 "
-        "target year like every other calibration in the project. Handed to "
-        "the station-charge calibration (2026-08-29); strict=True so this "
-        "fails loudly once real tariffs land and the marker must go."
-    ),
-)
 def test_stop_charge_carries_its_price_year(db_cur):
-    """Split out of test_stop_charge_carries_its_provenance so the rest of
-    that test keeps guarding source, basis and the VAT arithmetic."""
+    """A charge without its price year cannot be inflated to the 2032
+    target year like every other calibration in the project.
+
+    Split out of test_stop_charge_carries_its_provenance so the rest of
+    that test keeps guarding source, basis and the VAT arithmetic. Was a
+    strict xfail while the catalogue carried 13 illustrative placeholder
+    charges; the 2026-09-01 calibration run replaced them with the 105
+    real German rows from the Stationspreisliste 2026, each with its
+    price year, so the marker went as its own reason instructed."""
     db_cur.execute("""
         SELECT stop_id, stop_charge_price_basis_year
         FROM input_params.stop_infrastructures
@@ -375,6 +369,31 @@ def test_stop_gauge_break_of_gauge(db_cur):
     row = db_cur.fetchone()
     assert row is not None, "Kaunas missing from the catalog"
     assert row["gauges_mm"] == [1435, 1520]
+
+
+def test_stop_uic_refs_survive_the_seed(db_cur):
+    """uic_ref is OSM's tag verbatim, and that tag is multi-valued where a
+    station holds more than one code (Paris CDG 2 TGV carries both the SNCF
+    and the Transilien code). The column has to take the whole list: at
+    VARCHAR(12) the 15-character value aborted the seed outright
+    (2026-09-05). Each code is checked on its own, since a width that
+    clipped the list would leave a short or empty one behind."""
+    db_cur.execute("""
+        SELECT stop_id, uic_ref FROM input_params.stop_infrastructures
+        WHERE stop_infra_version = 1 AND uic_ref IS NOT NULL
+        """)
+    rows = db_cur.fetchall()
+    assert rows, "no stop carries a uic_ref — step 7's OSM tag read came back empty"
+
+    for row in rows:
+        codes = [c.strip() for c in row["uic_ref"].split(";")]
+        assert all(codes), f"{row['stop_id']}: empty code in {row['uic_ref']!r}"
+        # A single code is 7 characters (a few stops carry a shorter national
+        # number); anything longer means a list was stored where a code
+        # belongs, not that one code grew.
+        assert all(len(c) <= 12 for c in codes), (
+            f"{row['stop_id']}: {row['uic_ref']!r} is not a list of codes"
+        )
 
 
 def test_proposal_summaries_geom_is_postgis_geometry(db_cur):
