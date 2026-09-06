@@ -327,28 +327,7 @@
       "calcVersion": "calc version",
       "info": {
         "iconLabel": "Show cost factor details",
-        "rateCol": "Rate",
-        "valueCol": "Value",
-        "sourceCol": "Source",
-        "defaultBadge": "default"
-      },
-      "rates": {
-        "driver_rate": "Driver hourly rate",
-        "crew_rate": "Crew hourly rate",
-        "coach_maint_km": "Coach maintenance rate",
-        "loco_lease_h": "Locomotive lease rate",
-        "svc_place": "Service cost per place",
-        "var_overhead_quota": "Variable overhead quota",
-        "coach_purchase": "Coach purchase cost",
-        "coach_amort_years": "Amortisation period",
-        "financing_quota": "Financing quota",
-        "fix_overhead_quota": "Fixed overhead quota",
-        "cleaning_day": "Daily cleaning cost",
-        "shunting_event": "Shunting cost per event",
-        "tac_km": "Track access charge",
-        "energy_kwh": "Energy price",
-        "stop_charge": "Station charge",
-        "parking_day": "Parking cost per day"
+        "readMore": "Read the full explanation"
       },
       "feedback": {
         "title": "Found a mistake? Hit us up!",
@@ -358,8 +337,7 @@
         "emailLabel": "Your e-mail",
         "submit": "Send feedback",
         "submitting": "Sending…",
-        "success": "Thank you! Your feedback has been sent.",
-        "invalidEmail": "Please enter a valid e-mail address."
+        "success": "Thank you! Your feedback has been sent."
       },
       "classes": {
         "all": "All Classes",

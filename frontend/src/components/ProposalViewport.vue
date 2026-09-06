@@ -231,8 +231,7 @@ interface BackendRoute {
   trip_pairs: BackendTripPair[]
   geometries: BackendGeometry[]
   schedule: { seasonal_schedules: BackendSeasonalSchedule[] }
-  // Countries the route runs through — feeds evaluation rate scoping
-  // (costFactorRates reads it via calcResult.input.route).
+  // Countries the route runs through, carried on calcResult.input.route.
   track_infrastructure: { country_code: string }[]
 }
 
@@ -505,7 +504,7 @@ function applyPlan(json: CalcResponse, publish = false) {
   // Assemble the panel-facing EvaluationResponse from the merged response:
   // calc_version/route_id lifted from their new positions, input.route
   // re-attached from the top-level route key (the wire carries the route
-  // exactly once — costFactorRates scopes rates through input.route).
+  // exactly once, and input.route is where consumers expect it).
   calcResult.value = {
     calc_version: json.calc_version,
     route_id: json.route.route_id,

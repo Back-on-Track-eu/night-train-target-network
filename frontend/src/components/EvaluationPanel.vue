@@ -34,12 +34,7 @@ const breakdown = ref<Breakdown | null>(null)
       @scope-change="emit('scopeChange', $event)"
       @update:breakdown="breakdown = $event"
     />
-    <CostBreakdownPanel
-      :breakdown="breakdown"
-      :formulas="result.models.evaluation.formulas"
-      :input="result.input"
-      :stops="stops"
-    />
+    <CostBreakdownPanel :breakdown="breakdown" :formulas="result.models.evaluation.formulas" />
 
     <!-- Footer: calc version -->
     <div class="flex flex-col gap-1 text-xs text-primary-50/40">

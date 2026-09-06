@@ -411,9 +411,10 @@ export interface EvaluationModels {
 
 // --- input.parameters : the per-unit rates actually loaded to cost this route
 // Backend: api/helpers/params_serialize.py (reused by input_to_dict()). Each
-// section lists EVERY loaded entity (all countries/stops/compositions), so the
-// popover scopes rates to the entities the route actually uses — see
-// src/lib/costFactorRates.ts.
+// section lists EVERY loaded entity (all countries/stops/compositions).
+// Typed for completeness but no longer read by the app: the rates table that
+// consumed it moved to the documentation site, where a rate can be shown with
+// its source and its provenance instead of squeezed into a hover box.
 
 /** A referenced data source, keyed by source_id inside each section's
  *  `sources` map. */
