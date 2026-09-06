@@ -59,7 +59,7 @@ $ExcludeDirNames = @(
     "dist",
     "build",
     "*.egg-info",
-    "graph-cache",
+    "graph-cache*",
     "htmlcov",
     "credentials",
     "export-temp"
@@ -70,6 +70,8 @@ $ExcludeDirNames = @(
 # =============================================================================
 $ExcludeRelativePaths = @(
     "backend\models\route\routing\docker\data",
+    "backend\models\route\routing\docker\data-infra-2026",
+    "backend\models\route\routing\docker\data-infra-2032",
     "backend\db\dev\data"
 )
 

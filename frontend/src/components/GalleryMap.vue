@@ -1,220 +1,183 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue'
-import maplibregl, { type FilterSpecification } from 'maplibre-gl'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 // Sets MapLibre's worker URL (maplibre-gl-js#7339). This component previously
 // lacked the call while MapView.vue had it — so opening /gallery first spawned
 // the corrupt worker and no route line rendered anywhere in that session.
 import '@/lib/maplibreWorker'
-import type { GalleryMapRoute } from '@/types/api'
+import {
+  CORRIDOR_COLORS,
+  CORRIDOR_ISOLATED_WIDTH,
+  ROUTE_DASH_PATTERN,
+  ROUTED_FILTER,
+  UNROUTED_FILTER,
+  corridorBounds,
+  corridorColorExpression,
+  corridorWidthExpression,
+  featureBounds,
+  routeColorExpression,
+  routeForRow,
+  type GalleryRowRef,
+} from '@/lib/galleryMap'
+import type { MapLinesSection, MapRouteFeature } from '@/types/api'
 
-// Draws every proposal route in the search results at once — the multi-route
-// counterpart to MapView.vue (which is single-route with scope/hover). Same
-// basemap and brand colour; lines are semi-transparent so overlaps read.
-const PRIMARY = '#2271b3'
-const PRIMARY_LIGHT = '#eef4fb'
-// Label text sits on the near-white basemap, so it needs a darker shade than
-// the bubble fill (mirrors MapView.vue's LABEL_PRIMARY).
-const LABEL_PRIMARY = '#15517f'
-// Font stacks the basemap's own glyph server already serves (see MapView.vue).
-const FONT_BOLD = ['Montserrat Medium', 'Open Sans Bold', 'Noto Sans Regular']
-const FONT_REGULAR = ['Montserrat Regular', 'Open Sans Regular', 'Noto Sans Regular']
+// Two layers, two grains, one map:
+//
+//   OVERVIEW — `map_lines`: one line per stop-pair corridor across the whole
+//   filtered set, thickness by how often it was proposed, colour by whether a
+//   real night train already runs it. Read-only; the map has no hover of its
+//   own, because a corridor is shared by many rows and so names no single card.
+//
+//   ISOLATED — `map_routes`: while a card is hovered, the corridors are hidden
+//   and that row's own route is drawn instead, flat and in its source colour.
+//   One route on screen means the count ramp has nothing to compare against, so
+//   varying thickness along it would imply a difference that isn't there.
 const EUROPE_BOUNDS: [number, number, number, number] = [-30, 27, 50, 73]
-const ROUTES_SOURCE = 'gallery-routes'
-const ROUTES_LAYER = 'gallery-routes-line'
-// Invisible wide copy of the line layer — a 2.5px line is near-impossible to
-// hover, so this is the hit target (MapLibre still hit-tests zero-opacity fills).
-const ROUTES_HIT_LAYER = 'gallery-routes-hit'
-// Stop bubbles + name labels, shown only for the route the hovered card points
-// to. Their own point source starts empty and is filled on highlight.
-const STOPS_SOURCE = 'gallery-stops'
-const STOPS_CIRCLE_LAYER = 'gallery-stops-circle'
-const STOPS_LABEL_LAYER = 'gallery-stops-label'
+const CORRIDORS_SOURCE = 'gallery-corridors'
+const CORRIDORS_LAYER = 'gallery-corridors-line'
+const CORRIDORS_LAYER_DASHED = 'gallery-corridors-line-dashed'
+const ROUTE_SOURCE = 'gallery-route'
+// Two layers over one source, split on whether the geometry is real routing.
+// `line-dasharray` is not a data-driven property in MapLibre, so the dashed
+// variant has to be its own layer behind a filter rather than an expression.
+const ROUTE_LAYER = 'gallery-route-line'
+const ROUTE_LAYER_DASHED = 'gallery-route-line-dashed'
 
-const props = defineProps<{ routes: GalleryMapRoute[]; highlightedKey?: string | null }>()
-const emit = defineEmits<{ hoverRoute: [key: string | null] }>()
+const props = defineProps<{
+  corridors: MapLinesSection | null
+  /** Routes for the rows currently listed, accumulated page by page. */
+  routes: MapRouteFeature[]
+  /** The row whose card is hovered — its route gets isolated and framed. */
+  highlightedRow?: GalleryRowRef | null
+}>()
 
+const { t } = useI18n()
 const mapContainer = ref<HTMLDivElement | null>(null)
 let map: maplibregl.Map | null = null
 let mapLoaded = false
-let hoveredKey: string | null = null
 // The map lives in a flex/sticky column whose width settles after init;
 // MapLibre doesn't watch its container, so resize it ourselves.
 let resizeObserver: ResizeObserver | null = null
 
-function routesFC() {
-  const features = props.routes.flatMap((r) =>
-    r.lines.map((line) => ({
-      type: 'Feature' as const,
-      geometry: { type: 'LineString' as const, coordinates: line },
-      // key ties every leg back to its proposal so a hover can be reported.
-      properties: { key: r.key },
-    })),
-  )
-  return { type: 'FeatureCollection' as const, features }
+const EMPTY_CORRIDORS: MapLinesSection = { type: 'FeatureCollection', features: [] }
+const EMPTY_ROUTE = { type: 'FeatureCollection' as const, features: [] as MapRouteFeature[] }
+
+const legendItems = computed(() => [
+  { color: CORRIDOR_COLORS.existing, label: t('gallery.map.legend.existing') },
+  { color: CORRIDOR_COLORS.proposed, label: t('gallery.map.legend.proposed') },
+])
+
+function fitTo(bounds: [number, number, number, number] | null, maxZoom: number) {
+  if (!map || !bounds) return
+  map.fitBounds(bounds, { padding: 60, maxZoom, duration: 600 })
 }
 
-// Point features for one route's stops (empty when none is highlighted).
-// Consecutive coordinates repeat at leg/trip boundaries, so dedupe by position;
-// the first and last survivors are the route endpoints (drawn bolder).
-function stopsFC(route: GalleryMapRoute | null) {
-  if (!route) return { type: 'FeatureCollection' as const, features: [] }
-  const seen = new Set<string>()
-  const pts: GalleryMapRoute['stops'] = []
-  for (const s of route.stops) {
-    const id = `${s.lon.toFixed(5)},${s.lat.toFixed(5)}`
-    if (seen.has(id)) continue
-    seen.add(id)
-    pts.push(s)
-  }
-  const features = pts.map((s, i) => ({
-    type: 'Feature' as const,
-    geometry: { type: 'Point' as const, coordinates: [s.lon, s.lat] },
-    properties: { name: s.name, endpoint: i === 0 || i === pts.length - 1 },
-  }))
-  return { type: 'FeatureCollection' as const, features }
+function fitAll() {
+  if (!mapLoaded) return
+  fitTo(corridorBounds(props.corridors), 9)
 }
 
-function setStops(route: GalleryMapRoute | null) {
+/**
+ * Draw the hovered row's route and hide the corridors, or the reverse when
+ * nothing is hovered. A row we have no geometry for — not on a loaded page, or
+ * an ONTD route whose routing failed — leaves the current view alone rather
+ * than blanking the map.
+ */
+function applyHighlight(row: GalleryRowRef | null) {
   if (!map || !mapLoaded) return
-  ;(map.getSource(STOPS_SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(stopsFC(route))
-}
+  const feature = routeForRow(props.routes, row)
+  if (row && !feature) return
 
-// Smoothly frame a single route, tighter than the all-routes fit so the hovered
-// line fills the view. Walks the line geometry for an accurate hull.
-function fitToRoute(route: GalleryMapRoute) {
-  if (!map || !mapLoaded) return
-  const bounds = new maplibregl.LngLatBounds()
-  let any = false
-  for (const line of route.lines)
-    for (const c of line) {
-      bounds.extend(c as [number, number])
-      any = true
-    }
-  if (!any)
-    for (const s of route.stops) {
-      bounds.extend([s.lon, s.lat])
-      any = true
-    }
-  if (any) map.fitBounds(bounds, { padding: 80, maxZoom: 10, duration: 700 })
-}
+  const routeSource = map.getSource(ROUTE_SOURCE) as maplibregl.GeoJSONSource | undefined
+  // Colour and dash both come off the feature's own properties, so there is no
+  // window in which the new geometry is drawn with the previous styling.
+  routeSource?.setData(feature ? { type: 'FeatureCollection', features: [feature] } : EMPTY_ROUTE)
+  const corridorsVisible = feature ? 'none' : 'visible'
+  map.setLayoutProperty(CORRIDORS_LAYER, 'visibility', corridorsVisible)
+  map.setLayoutProperty(CORRIDORS_LAYER_DASHED, 'visibility', corridorsVisible)
 
-// Frame all routes. Endpoint coordinates (route.stops) are enough to bound the
-// view and far cheaper than walking every geometry vertex.
-function fit() {
-  if (!map || !mapLoaded) return
-  const bounds = new maplibregl.LngLatBounds()
-  let any = false
-  for (const r of props.routes)
-    for (const s of r.stops) {
-      bounds.extend([s.lon, s.lat])
-      any = true
-    }
-  if (any) map.fitBounds(bounds, { padding: 60, maxZoom: 9, duration: 600 })
+  if (feature) fitTo(featureBounds([feature]), 10)
+  else fitAll()
 }
 
 function sync() {
   if (!map || !mapLoaded) return
-  // Features are being replaced — clear any active isolation so a departed
-  // route doesn't leave the others permanently hidden, and drop stray bubbles.
-  hoveredKey = null
-  setIsolate(null)
-  setStops(null)
-  ;(map.getSource(ROUTES_SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(routesFC())
-  fit()
-}
-
-// Isolate the focused route: show only it and hide every other route (both the
-// visible line and its hover hit-target). null shows them all again.
-function setIsolate(key: string | null) {
-  if (!map || !mapLoaded) return
-  const filter = (key ? ['==', ['get', 'key'], key] : null) as FilterSpecification | null
-  map.setFilter(ROUTES_LAYER, filter)
-  map.setFilter(ROUTES_HIT_LAYER, filter)
-}
-
-function onRouteHover(e: maplibregl.MapLayerMouseEvent) {
-  if (!map) return
-  const raw = e.features?.[0]?.properties?.key
-  const key = raw == null ? null : String(raw)
-  map.getCanvas().style.cursor = key ? 'pointer' : ''
-  if (key === hoveredKey) return
-  hoveredKey = key
-  setIsolate(key)
-  emit('hoverRoute', key)
-}
-
-function onRouteLeave() {
-  if (!map || hoveredKey === null) return
-  map.getCanvas().style.cursor = ''
-  hoveredKey = null
-  setIsolate(null)
-  emit('hoverRoute', null)
+  const source = map.getSource(CORRIDORS_SOURCE) as maplibregl.GeoJSONSource | undefined
+  source?.setData(props.corridors ?? EMPTY_CORRIDORS)
+  // Features are being replaced — drop any isolation so a departed route
+  // cannot leave the corridors permanently hidden.
+  applyHighlight(null)
+  fitAll()
 }
 
 function initLayers() {
   if (!map) return
-  map.addSource(ROUTES_SOURCE, { type: 'geojson', data: routesFC() })
-  map.addLayer({
-    id: ROUTES_LAYER,
-    type: 'line',
-    source: ROUTES_SOURCE,
-    layout: { 'line-join': 'round', 'line-cap': 'round' },
-    paint: { 'line-color': PRIMARY, 'line-width': 2.5, 'line-opacity': 0.5 },
-  })
-  map.addLayer({
-    id: ROUTES_HIT_LAYER,
-    type: 'line',
-    source: ROUTES_SOURCE,
-    layout: { 'line-join': 'round', 'line-cap': 'round' },
-    paint: { 'line-color': PRIMARY, 'line-width': 16, 'line-opacity': 0 },
-  })
-
-  // Stop bubbles + labels, on top of the lines. Filled only while a card is
-  // hovered (see applyHighlight); empty otherwise.
-  map.addSource(STOPS_SOURCE, {
+  map.addSource(CORRIDORS_SOURCE, {
     type: 'geojson',
-    data: { type: 'FeatureCollection', features: [] },
+    data: props.corridors ?? EMPTY_CORRIDORS,
   })
+  // Same split as the isolated route: a corridor whose only geometry is its two
+  // stops joined up is a placeholder, and must not read as a surveyed line at
+  // any point — not just while a card is hovered.
+  const corridorLayout = {
+    'line-join': 'round' as const,
+    // Busier corridors draw last, so a heavily-proposed line is never buried
+    // under a single-proposal one it crosses.
+    'line-sort-key': ['get', 'total_count'],
+  }
+  const corridorPaint = {
+    'line-color': corridorColorExpression(),
+    'line-width': corridorWidthExpression(),
+    // Below 1 so crossing corridors still read as two lines.
+    'line-opacity': 0.75,
+  }
   map.addLayer({
-    id: STOPS_CIRCLE_LAYER,
-    type: 'circle',
-    source: STOPS_SOURCE,
-    paint: {
-      'circle-radius': ['case', ['get', 'endpoint'], 6, 4],
-      'circle-color': PRIMARY,
-      'circle-stroke-color': PRIMARY_LIGHT,
-      'circle-stroke-width': 2.5,
-    },
-  })
+    id: CORRIDORS_LAYER,
+    type: 'line',
+    source: CORRIDORS_SOURCE,
+    filter: ROUTED_FILTER,
+    layout: { ...corridorLayout, 'line-cap': 'round' },
+    paint: corridorPaint,
+  } as maplibregl.LayerSpecification)
   map.addLayer({
-    id: STOPS_LABEL_LAYER,
-    type: 'symbol',
-    source: STOPS_SOURCE,
-    layout: {
-      'text-field': ['get', 'name'],
-      'text-font': ['case', ['get', 'endpoint'], ['literal', FONT_BOLD], ['literal', FONT_REGULAR]],
-      'text-size': ['case', ['get', 'endpoint'], 13, 11],
-      'text-max-width': 8,
-      'text-padding': 3,
-      // Radial placement puts each label on whichever side is free, so dense
-      // stop sequences keep more of their names.
-      'text-variable-anchor': ['left', 'right', 'top', 'bottom'],
-      'text-radial-offset': 0.8,
-      'text-justify': 'auto',
-      // Lower sort key wins a collision, so endpoints outrank intermediate stops.
-      'symbol-sort-key': ['case', ['get', 'endpoint'], 0, 1],
-    },
-    paint: {
-      'text-color': LABEL_PRIMARY,
-      'text-halo-color': PRIMARY_LIGHT,
-      'text-halo-width': 1.6,
-      'text-halo-blur': 0.2,
-    },
-  })
+    id: CORRIDORS_LAYER_DASHED,
+    type: 'line',
+    source: CORRIDORS_SOURCE,
+    filter: UNROUTED_FILTER,
+    // Butt caps: round ones smear the gaps shut at these widths.
+    layout: { ...corridorLayout, 'line-cap': 'butt' },
+    paint: { ...corridorPaint, 'line-dasharray': ROUTE_DASH_PATTERN },
+  } as maplibregl.LayerSpecification)
 
-  map.on('mousemove', ROUTES_HIT_LAYER, onRouteHover)
-  map.on('mouseleave', ROUTES_HIT_LAYER, onRouteLeave)
+  map.addSource(ROUTE_SOURCE, { type: 'geojson', data: EMPTY_ROUTE })
+  map.addLayer({
+    id: ROUTE_LAYER,
+    type: 'line',
+    source: ROUTE_SOURCE,
+    filter: ROUTED_FILTER,
+    layout: { 'line-join': 'round', 'line-cap': 'round' },
+    paint: {
+      'line-color': routeColorExpression(),
+      'line-width': CORRIDOR_ISOLATED_WIDTH,
+    },
+  } as maplibregl.LayerSpecification)
+  // Dashed: the ONTD catalogue could not route this one, so its "geometry" is
+  // just its stops joined up. Drawn, because hiding it would make half the
+  // existing cards do nothing on hover — but drawn as the placeholder it is.
+  map.addLayer({
+    id: ROUTE_LAYER_DASHED,
+    type: 'line',
+    source: ROUTE_SOURCE,
+    filter: UNROUTED_FILTER,
+    layout: { 'line-join': 'round', 'line-cap': 'butt' },
+    paint: {
+      'line-color': routeColorExpression(),
+      'line-width': CORRIDOR_ISOLATED_WIDTH,
+      'line-dasharray': ROUTE_DASH_PATTERN,
+    },
+  } as maplibregl.LayerSpecification)
 }
 
 onMounted(() => {
@@ -229,32 +192,20 @@ onMounted(() => {
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
   map.on('load', () => {
     mapLoaded = true
+    // The first payload usually arrives before the style finishes loading, so
+    // the source is created WITH it here; sync() handles every later change.
     initLayers()
-    fit()
+    fitAll()
+    if (props.highlightedRow) applyHighlight(props.highlightedRow)
   })
   resizeObserver = new ResizeObserver(() => map?.resize())
   resizeObserver.observe(mapContainer.value)
 })
 
-watch(() => props.routes, sync, { deep: true })
-
-// Card-driven highlight: hovering a card isolates its route, reveals that
-// route's stop bubbles + names, and smoothly frames it. Clearing the highlight
-// restores every route and eases back out to the all-routes view.
-function applyHighlight(key: string | null) {
-  if (!map || !mapLoaded) return
-  const route = key ? (props.routes.find((r) => r.key === key) ?? null) : null
-  // A card whose route isn't drawn here (e.g. a straight-line stand-in) leaves
-  // the current view untouched rather than blanking the map.
-  if (key && !route) return
-  setIsolate(route ? route.key : null)
-  setStops(route)
-  if (route) fitToRoute(route)
-  else fit()
-}
+watch(() => props.corridors, sync)
 watch(
-  () => props.highlightedKey,
-  (k) => applyHighlight(k ?? null),
+  () => props.highlightedRow,
+  (row) => applyHighlight(row ?? null),
 )
 
 onUnmounted(() => {
@@ -266,9 +217,21 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div
-    ref="mapContainer"
-    class="overflow-hidden rounded-xl"
-    style="width: 100%; height: 100%; min-height: 480px"
-  />
+  <div class="relative" style="width: 100%; height: 100%; min-height: 480px">
+    <div ref="mapContainer" class="h-full w-full overflow-hidden rounded-xl" />
+    <!-- Without this the "already served" signal reads as an arbitrary palette. -->
+    <div
+      class="bg-surface-0/90 absolute bottom-3 left-3 rounded-lg px-3 py-2 text-xs shadow-md backdrop-blur-sm"
+    >
+      <ul class="space-y-1">
+        <li v-for="item in legendItems" :key="item.label" class="flex items-center gap-2">
+          <span
+            class="inline-block h-1 w-5 shrink-0 rounded-full"
+            :style="{ backgroundColor: item.color }"
+          />
+          <span class="text-surface-700">{{ item.label }}</span>
+        </li>
+      </ul>
+    </div>
+  </div>
 </template>

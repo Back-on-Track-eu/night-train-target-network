@@ -1016,10 +1016,10 @@ class TestScenarioOverride:
     def test_historical_override_lowers_tac(
         self, loader, route_berlin_wien, historical_scenario
     ):
-        """Costing the SAME base-planned route under the 2026 Base Line
-        scenario (track infra v1: DE tac 3.10 instead of 5.40) yields
-        strictly lower TAC — the override actually swaps the parameter
-        version."""
+        """Costing the SAME base-planned route under the superseded
+        infra-2026 revision (track infra v4: DE tac 3.10 instead of 5.40)
+        yields strictly lower TAC — the override actually swaps the
+        parameter version."""
         _, base = compute_evaluation_domain(route_berlin_wien, loader, demand=[])
         _, historical = compute_evaluation_domain(
             route_berlin_wien,

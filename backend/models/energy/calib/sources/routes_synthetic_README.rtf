@@ -1,0 +1,58 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2870
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 Dataset: training_routes_100_with_coordinates.csv\
+\
+Purpose:\
+This dataset contains 100 diverse railway routes for the development of an energy consumption model.\
+\
+Preparation:\
+- Routes were selected to represent different regions of Germany.\
+- Different geographical directions are included:\
+  N-S, E-W, NE-SW, NW-SE.\
+- Different route lengths are included:\
+  short, medium, long.\
+- Station data was cleaned and S-Bahn stations were filtered where possible.\
+- DS100 station identifiers were retained for API queries.\
+\
+Columns:\
+\
+start_DS100:\
+Unique identifier of the starting station\
+\
+start_name:\
+Name of the starting station\
+\
+start_longitude / start_latitude:\
+Coordinates of the starting station\
+\
+start_region:\
+Regional classification of the starting station\
+\
+end_DS100:\
+Unique identifier of the destination station\
+\
+end_name:\
+Name of the destination station\
+\
+end_longitude / end_latitude:\
+Coordinates of the destination station\
+\
+end_region:\
+Regional classification of the destination station\
+\
+axis:\
+Geographical direction of the route\
+\
+distance_category:\
+Classification of route length (short/medium/long)\
+\
+air_distance_km:\
+Straight-line distance between start and destination station\
+\
+Next step:\
+Use the DS100 identifiers to query the Trassenfinder API and enrich the dataset with railway-specific route parameters and energy consumption values.}

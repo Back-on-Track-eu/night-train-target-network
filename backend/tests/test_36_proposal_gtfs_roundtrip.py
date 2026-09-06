@@ -171,6 +171,45 @@ class TestRouteRoundtrip:
         ]
         assert any(s["auto_added"] for s in reconstructed_stops)
 
+    def test_expert_timetable_survives_roundtrip(self, db_cur, loader, api_base):
+        """ROUTE_BUILDER 0.9.32 — a manual timetable is stored, not
+        recomputed on load: the per-leg addon_time_min and the shifted stop
+        times have to come back exactly, or a published expert timetable
+        would silently revert to the automatic one."""
+        first, second = STOPS_BERLIN_DRESDEN_WIEN[0], STOPS_BERLIN_DRESDEN_WIEN[1]
+        response = compute(
+            api_base,
+            stops=STOPS_BERLIN_DRESDEN_WIEN,
+            composition_id="NEW-BAL-7",
+            auto_stop_addition="off",
+            expert_timetable={
+                "outbound": {
+                    "departure": {"mode": "shift", "shift_min": -25},
+                    "segment_addons": [
+                        {"from_stop_id": first, "to_stop_id": second, "add_min": 13}
+                    ],
+                }
+            },
+        )
+        outbound = response["route"]["trip_pairs"][0]["outbound"]
+        assert outbound["segments"][0]["addon_time_min"] == 13, (
+            "fixture assumption: the add-on must actually have landed before "
+            "this test can say anything about storing it"
+        )
+
+        scenario_id = response["request"]["scenario_id"]
+        pid, version, published_route = _publish_fixture(db_cur, response)
+        insert_route_gtfs(db_cur, published_route)
+        reconstructed = _json_normalize(
+            route_dict_from_gtfs(pid, version, loader, scenario_id, db_cur)
+        )
+
+        assert reconstructed == _round_avg_price(published_route)
+        assert (
+            reconstructed["trip_pairs"][0]["outbound"]["segments"][0]["addon_time_min"]
+            == 13
+        )
+
     def test_od_pairs_survive_roundtrip(self, db_cur, loader, api_base):
         """Stopgap demand (distribute_demand(), always run by
         POST /api/proposal/calc) populates od_pairs — confirms the

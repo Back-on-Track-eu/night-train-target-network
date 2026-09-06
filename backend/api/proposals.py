@@ -28,6 +28,7 @@ from api.helpers.proposal_serialize import (
     DEFAULT_INCLUDE,
     map_country_counts_to_geojson,
     map_lines_to_geojson,
+    map_routes_to_geojson,
     map_stop_counts_to_dict,
     proposal_to_response_dict,
     summary_row_to_dict,
@@ -67,7 +68,8 @@ def filter_proposals():
         "filter":  {...},                          // see §7.1 for the full shape
         "sort":    [{"by": <column>, "dir": "asc"|"desc"}],
         "limit":   int (default 50), "offset": int,
-        "include": ["summaries", "map_lines", "map_stop_counts", "map_country_counts"]
+        "include": ["summaries", "map_lines", "map_routes",
+                    "map_stop_counts", "map_country_counts"]
       }
 
     filter.sources picks the gallery's source union (WP10 step 6b):
@@ -85,8 +87,14 @@ def filter_proposals():
       "map_lines":           GeoJSON FeatureCollection, one feature per
                               stop-pair corridor shared across sources
                               (proposal_count / existing_count /
-                              total_count + proposal_ids /
-                              existing_route_ids per feature)
+                              total_count per feature), geometry
+                              simplified for overview zoom
+      "map_routes":          GeoJSON FeatureCollection, one feature per
+                              LISTED row — the route behind each card on
+                              this page. The ONE section that honours
+                              limit/offset (it shares summaries' window
+                              exactly), so its size is capped by the page
+                              rather than by the result set
       "map_stop_counts":    [{"stop_id", "lat", "lon",
                               "n_proposals", "n_existing", "n"}, ...]
       "map_country_counts":  GeoJSON FeatureCollection, one feature per
@@ -161,17 +169,27 @@ def _list_response(body: dict):
     include = body.get("include") or DEFAULT_INCLUDE
 
     response = {}
+    # Shared by summaries and map_routes: the two sections must describe the
+    # SAME window, or the map draws routes for cards that are not on screen.
+    sort = body.get("sort")
+    limit = body.get("limit", config.PROPOSALS_DEFAULT_LIMIT)
+    offset = body.get("offset", 0)
+
     if "summaries" in include:
         rows, total = repo.list_summaries(
             filters=filters,
-            sort=body.get("sort"),
-            limit=body.get("limit", config.PROPOSALS_DEFAULT_LIMIT),
-            offset=body.get("offset", 0),
+            sort=sort,
+            limit=limit,
+            offset=offset,
         )
         response["summaries"] = {
             "total": total,
             "proposals": [summary_row_to_dict(row) for row in rows],
         }
+    if "map_routes" in include:
+        response["map_routes"] = map_routes_to_geojson(
+            repo.map_routes(filters, sort=sort, limit=limit, offset=offset)
+        )
     if "map_lines" in include:
         response["map_lines"] = map_lines_to_geojson(repo.map_lines(filters))
     if "map_stop_counts" in include:

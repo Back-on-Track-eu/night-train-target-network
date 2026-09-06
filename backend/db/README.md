@@ -74,6 +74,13 @@ uv run python scripts/export_ontd_stop_seed.py
 # (File information → Manage versions — keeps the file id) and reseed
 ```
 
+A catalogue is external data, so a new export can outgrow a column that
+every earlier one fitted — on 2026-09-05 a station carrying two UIC codes
+(`8727149;8700147`) failed the seed against a 12-character `uic_ref`.
+`insert_rows()` compares such a rejection against `schema.varchar_limits()`
+and names the column, the length and the row before re-raising, since
+psycopg2 reports only `value too long for type character varying(n)`.
+
 ---
 
 ## Country geometry artifact (built at startup)
@@ -212,7 +219,7 @@ entrypoint before Flask starts.
 
 ```bash
 cd backend/docker
-docker-compose up -d        # starts postgres, openrailrouting, and api
+docker-compose up -d        # starts postgres, openrailrouting-infra-2026, and api
 ```
 
 See `backend/DEVELOPMENT.md` for the full backend developer setup guide.
@@ -340,7 +347,7 @@ Four core schemas, all created and seeded by `seed.py`: `admin`, `input_params`,
 | `track_infrastructure_defaults` | EU-average fallback track parameters, versioned |
 | `track_infrastructures` | Country-level track parameters (TAC, energy price, terrain etc.), versioned, with per-field `_src` columns |
 | `stop_infrastructure_defaults` | Fallback station access charge per country (NULL = global), versioned |
-| `stop_infrastructures` | Night train stopping points with coordinates and charges, versioned |
+| `stop_infrastructures` | Night train stopping points with coordinates, station charges and their provenance (VAT rate, gross figure, basis, price year, tariff class, source document), and the stop classification pipeline's enrichment (provenance category, Latin/ASCII names, UIC ref, city and country in seven languages, track gauges), versioned |
 | `passage_charges` | Crossings billed per traverse rather than per kilometre (Storebælt, Øresund, Channel Tunnel), with the polygon routing matches them by, versioned |
 | `country_relations` | Which country pairs are close enough **by rail** for one night train to connect them — the candidate set `GET /api/proposals/stats` ranks top/flop relations over. Derived and rebuildable, not hand-maintained (see below); keyed by the stop snapshot its reference stations came from |
 
@@ -373,7 +380,7 @@ docker exec night-train-api python /app/scripts/build_country_relations.py --dry
 
 | Table | Description |
 |---|---|
-| `scenarios` | Container pinning one version of each of the five versioned `input_params` infrastructure tables (`track_infrastructures`, `track_infrastructure_defaults`, `stop_infrastructures`, `stop_infrastructure_defaults`, `passage_charges`). Every read of infrastructure data goes through a scenario — there's no other notion of "current" for those five tables. Exactly one row has `is_current_base = TRUE` (the live default used when an API call omits `scenario_id`); exactly one row per `scenario_key` has `is_current_scenario = TRUE` (the head of that what-if lineage). `scenario_id` is a surrogate key that changes on every edit; `scenario_key` (e.g. `"base"`, `"2032-baseline-hsr-allowed"`) is the stable identifier for one lineage. Compositions, coach types, locomotive types, operators, and composition references are catalogs, not scenario-versioned — see `input_params` above. |
+| `scenarios` | Container pinning one version of each of the five versioned `input_params` infrastructure tables (`track_infrastructures`, `track_infrastructure_defaults`, `stop_infrastructures`, `stop_infrastructure_defaults`, `passage_charges`). Every read of infrastructure data goes through a scenario — there's no other notion of "current" for those five tables. Exactly one row has `is_current_base = TRUE` (the live default used when an API call omits `scenario_id`); exactly one row per `scenario_key` has `is_current_scenario = TRUE` (the head of that what-if lineage). `scenario_id` is a surrogate key that changes on every edit; `scenario_key` (e.g. `"infra-2026"`, `"infra-2026-hsr"`) is the stable identifier for one lineage. Compositions, coach types, locomotive types, operators, and composition references are catalogs, not scenario-versioned — see `input_params` above. `routing_graph_key` pins the routing graph the same way — the one piece of infrastructure living outside the database (an OpenRailRouting instance per graph; key → URL mapping in `backend/docker/.env`, resolved by `api/helpers/dependencies.py`). |
 
 A version bump on any of the five pinned tables is a **full-table snapshot**,
 never a per-row diff: editing one stop's charge duplicates every other row of
@@ -383,24 +390,63 @@ never reinterpreted differently depending on which scenario is asking. This
 is what makes two scenarios branching off the same table in incompatible
 directions safe, and what makes re-evaluating a scenario next year return
 the same numbers even if the base has since moved on — nothing on a
-`scenarios` row is resolved at read time. `seed.py` seeds three scenarios,
-each pinning its own version number (in lockstep, across all five tables —
-every scenario owns a complete, independent snapshot rather than sharing
-rows with another scenario):
+`scenarios` row is resolved at read time. `seed.py` seeds three selectable
+scenarios plus one superseded revision, each pinning its own version number
+(in lockstep, across all five tables — every scenario owns a complete,
+independent snapshot rather than sharing rows with another scenario). What
+each one *means* is documented in `models/scenarios/README.md`; the pins
+are:
 
-- `"2026-baseline"` (version 1) — **2026 Base Line**, a deprecated historical
-  reference (`is_current_base = FALSE`, `is_current_scenario = FALSE`). Only
-  `track_infrastructures`/`track_infrastructure_defaults` carry genuinely
-  different figures (DE's pre-correction rates, a slightly lower EU-average
-  default); the stop-side tables are duplicated with identical values.
-- `"base"` (version 2) — **2032 Base Line**, the live default
-  (`is_current_base = TRUE`). `track_hsr_allowed = FALSE` everywhere.
-- `"2032-baseline-hsr-allowed"` (version 3) — **2032 Base Line + Night
-  Trains on HSR allowed**, a second current lineage head
-  (`is_current_scenario = TRUE`, `is_current_base = FALSE`). Identical to
-  `"base"` in every field except `track_hsr_allowed = TRUE` everywhere.
+- `"infra-2026"` (version 1) — **Infra 2026**, the live default
+  (`is_current_base = TRUE`). Today's network, `track_hsr_allowed = FALSE`
+  everywhere.
+- `"infra-2026-hsr"` (version 2) — **+ night trains on high-speed lines**, a
+  second current lineage head (`is_current_scenario = TRUE`,
+  `is_current_base = FALSE`). Identical to version 1 except
+  `track_hsr_allowed = TRUE` everywhere.
+- `"infra-2026-hsr-opt-tt"` (version 3) — **+ optimised timetables**, a third
+  current lineage head. Version 2 with a reduced `track_buffer_quota_per`.
+- `"infra-2026"` (version 4) — the **superseded revision** of the base
+  lineage (`is_current_scenario = FALSE`), carrying Germany's pre-correction
+  track access rates. Two revisions of one lineage, only one current; it is
+  not selectable, and it exists so evaluations published before the TAC
+  correction stay reproducible.
+
+Plus the matching **Infra 2032** trio on the second routing graph:
+`"infra-2032"` (version 5), `"infra-2032-hsr"` (version 6) and
+`"infra-2032-hsr-opt-tt"` (version 7), all three current lineage heads.
+They pin `routing_graph_key = "infra_2032"`; the four above pin
+`"infra_2026"`.
+
+The 2032 snapshots are exact copies of their 2026 counterparts in all
+five tables — an upgraded network is new track, and track lives in the
+routing graph, not here. Server databases receive them through
+`dev/sql/migrations/2026-08-31_infra_2032_scenarios.sql`, which copies
+versions 1-3 forward as 5-7. A deployment that does not run an
+OpenRailRouting instance for `infra_2032` cannot compute those three; the
+API answers `503 routing_graph_not_configured` rather than routing them
+on the wrong graph. See `models/scenarios/README.md` for what each
+scenario means and for the crossing-charge gap the copy leaves open.
 
 See `db/schema.py` (scenario.scenarios) for the column-level definitions.
+
+### `route_cache`
+
+A cache, not data — the routing counterpart of the §2.3 compute cache:
+UNLOGGED, disposable, never a source of truth. Declared in
+`db/schema.py` (`ROUTE_CACHE_TABLES`) and mirrored by migration
+`2026-08-31_route_segment_cache.sql`.
+
+| Table | Description |
+|---|---|
+| `route_segments` | Raw routed physics of one stop pair on one routing graph, keyed `(routing_graph_key, stop_lo, stop_hi, variant_key)` with the stop ids sorted (direction is symmetric, one row serves both). Stores unrounded per-country distance/time, geometry, countries and passages; everything scenario-dependent (buffer quotas, dynamics, energy, TAC) is applied downstream, so parameter recalibrations invalidate zero rows. Grows from precompute loads (`source=precompute`) and from every live-routed miss (`source=runtime`). Row contract: `models/route/routing/segment_cache.py`. |
+| `graph_state` | The GraphHopper `import_date` each graph's rows were routed against. `RouteSegmentRepository.sync_graph_import()` compares it with the live `/info` at API start and purges that graph's rows on a change — invalidation per graph, automatic. |
+
+Dev reseed drops the schema and bulk-loads any
+`db/dev/data/route_segments_<graph_key>.csv.gz` (optionally Drive-hosted via
+`ROUTE_SEGMENTS_FILE_ID_<KEY>`); servers load via
+`scripts/precompute_route_segments.py --load`. Not versioned: a cache row is
+either right for its graph import or purged with it.
 
 ### `proposals`
 
@@ -551,10 +597,14 @@ demand with:
 The ONTD is **seed data**: the API container's entrypoint runs
 `db/ontd/bootstrap.py` after `seed.py`, so a fresh database comes up with
 existing night trains already loaded. The bootstrap is guarded on
-`ontd.route_summaries` being empty, so restarts cost nothing, and it
-never fails the container — the API serves proposals fine without
-existing-route context, so a Drive outage or a not-yet-ready router just
-logs and moves on. `ONTD_BOOTSTRAP=auto|force|off` controls it.
+`ontd.route_summaries` being populated *with routed geometry*, so
+restarts cost nothing, while a projection left on straight-line
+placeholders (router down, or an aborted run) is re-routed at the next
+start. The curated composition catalog is loaded once and skipped
+afterwards. It never fails the container — the API serves proposals fine
+without existing-route context, so a Drive outage or a not-yet-ready
+router just logs and moves on. `ONTD_BOOTSTRAP=auto|force|off` controls
+it; `db/ontd/README.md` has the decision table.
 
 The load runs in the **background**, so the API is serving within
 seconds of the seed finishing; existing routes appear in the gallery once
@@ -589,7 +639,7 @@ python db/ontd/projection.py --no-geometry   # metadata only, no router
 
 Routing the active routes uses the same full two-pass routing as the
 live tool (custom model, speed cap, HSR avoidance), so it needs the
-`openrailrouting` container up *and* `input_params` seeded (tracks,
+`openrailrouting-infra-2026` container up *and* `input_params` seeded (tracks,
 compositions, country geometries). It takes several minutes — two
 router passes per route. The reference composition whose
 `max_speed_kmh`/`hsr_allowed` apply (the ONTD catalog carries no speed
@@ -628,8 +678,8 @@ localhost when — and only when — it is not inside a container *and* the
 configured name does not resolve. A real remote host that is merely
 unreachable keeps its name, so a DNS blip cannot silently redirect a load
 into a local database. The same translation is applied to
-`OPENRAILROUTING_URL`, where the published host port
-(`OPENRAILROUTING_HOST_PORT`) is substituted too, since it need not equal
+`OPENRAILROUTING_URL_INFRA_2026`, where the published host port
+(`OPENRAILROUTING_HOST_PORT_INFRA_2026`) is substituted too, since it need not equal
 the container port. Any route the router can't snap falls
 back to straight lines between consecutive stops and is flagged
 `geometry_routed = FALSE`, so a router outage degrades the map rather
@@ -643,7 +693,7 @@ Which workbook each loader reads comes from the environment —
 URL, picking the endpoint from `*_KIND` (`drive_file` vs `native_sheet`);
 no id is committed anywhere, so there is one place to rotate a link and
 no chance of two copies disagreeing. The routing graph cache's id is the same
-class of value and lives in the same place — `GRAPH_CACHE_FILE_ID`,
+class of value and lives in the same place — `GRAPH_CACHE_FILE_ID_INFRA_2026`,
 injected into the routing container by compose and read by
 `models/route/routing/docker/entrypoint.sh` (which keeps the current id
 as a fallback for compose stacks that don't inject it yet).

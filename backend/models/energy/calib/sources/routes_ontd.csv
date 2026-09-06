@@ -1,0 +1,97 @@
+route_name,all_routes_serving_segment,start_stop_id,start_stop_name,start_ds100,end_stop_id,end_stop_name,end_ds100,travel_duration_min,air_distance_km,n_trip_occurrences
+1856 = 1857,1856 = 1857,Augsburg Hbf,Augsburg Hbf,MA,Hannover Hbf,Hannover Hbf,HH,428,453.3,2
+1856 = 1857,1856 = 1857,Augsburg Hbf,Augsburg Hbf,MA,München-Pasing,München-Pasing,MP,41,48.9,1
+1856 = 1857,1856 = 1857; 1858 = 1859; 302/322 = 303/323; 320/324 = 321/325; NJ 492 = NJ 493,Hamburg Hbf,Hamburg Hbf,AH,Hamburg Altona,Hamburg Altona,AA,14,4.7,10
+1856 = 1857,1856 = 1857; 1858 = 1859; 302/322 = 303/323; 320/324 = 321/325,Hannover Hbf,Hannover Hbf,HH,Hamburg Hbf,Hamburg Hbf,AH,115,131.9,7
+1856 = 1857,1856 = 1857; EN 414 = EN 40237; Kálman Imre; NJ 236 = NJ 237,München Ost,München Ost,MOP,Augsburg Hbf,Augsburg Hbf,MA,52,59.5,7
+1856 = 1857,1856 = 1857,München Süd,München Süd,MS,München Ost,München Ost,MOP,15,3.9,1
+1856 = 1857,1856 = 1857,München-Pasing,München-Pasing,MP,München Süd,München Süd,MS,14,7.5,1
+1858 = 1859,1858 = 1859,Freiburg (Breisgau) Hbf,Freiburg (Breisgau) Hbf,RF,Karlsruhe Hbf,Karlsruhe Hbf,RK,93,118.2,2
+1858 = 1859,1858 = 1859,Hannover Hbf,Hannover Hbf,HH,Lüneburg,Lüneburg,ALBG,73,107.3,1
+1858 = 1859,1858 = 1859,Karlsruhe Hbf,Karlsruhe Hbf,RK,Hannover Hbf,Hannover Hbf,HH,352,387.8,2
+1858 = 1859,1858 = 1859,Lörrach Autoreisezug Terminal,Lörrach Autoreisezug Terminal,,Lörrach Hbf,Lörrach Hbf,RLR,26,0.7,2
+1858 = 1859,1858 = 1859,Lörrach Hbf,Lörrach Hbf,RLR,Freiburg (Breisgau) Hbf,Freiburg (Breisgau) Hbf,RF,51,44.7,2
+1858 = 1859,1858 = 1859,Lüneburg,Lüneburg,ALBG,Hamburg Hbf,Hamburg Hbf,AH,37,43.4,1
+302/322 = 303/323,302/322 = 303/323,München Ost,München Ost,MOP,Hannover Hbf,Hannover Hbf,HH,445,490.7,2
+304 = 305,304 = 305,München Ost,München Ost,MOP,Hamburg Hbf,Hamburg Hbf,AH,542,613.5,2
+320/324 = 321/325,320/324 = 321/325,Fulda,Fulda,FFU,Hannover Hbf,Hannover Hbf,HH,152,202.6,1
+320/324 = 321/325,320/324 = 321/325; NJ 40420 = NJ 40491; NJ 470 = NJ 471; NJ 492 = NJ 493,Göttingen,Göttingen,HG,Hannover Hbf,Hannover Hbf,HH,41,94.3,7
+320/324 = 321/325,320/324 = 321/325,Göttingen,Göttingen,HG,Fulda,Fulda,FFU,88,110.5,1
+320/324 = 321/325,320/324 = 321/325,München Ost,München Ost,MOP,Fulda,Fulda,FFU,274,303.7,2
+332/1372 = 333/1373,332/1372 = 333/1373; 334/1374 = 335/1375,Darmstadt Hbf,Darmstadt Hbf,FD,Koblenz Hbf,Koblenz Hbf,KKO,95,91.4,2
+332/1372 = 333/1373,332/1372 = 333/1373; 334/1374 = 335/1375,Koblenz Hbf,Koblenz Hbf,KKO,Köln Hbf,Köln Hbf,KK,62,79.4,4
+332/1372 = 333/1373,332/1372 = 333/1373,Koblenz Hbf,Koblenz Hbf,KKO,Mainz Hbf,Mainz Hbf,FMZ,58,61.6,1
+332/1372 = 333/1373,332/1372 = 333/1373; 334/1374 = 335/1375; NJ 402 = NJ 403,Köln Hbf,Köln Hbf,KK,Düsseldorf Hbf,Düsseldorf Hbf,KD,30,33.0,6
+332/1372 = 333/1373,332/1372 = 333/1373,Mainz Hbf,Mainz Hbf,FMZ,München Ost,München Ost,MOP,404,320.7,1
+332/1372 = 333/1373,332/1372 = 333/1373; 334/1374 = 335/1375,München Ost,München Ost,MOP,Darmstadt Hbf,Darmstadt Hbf,FD,323,291.1,2
+334/1374 = 335/1375,334/1374 = 335/1375,Aschaffenburg Hbf,Aschaffenburg Hbf,NAH,München Ost,München Ost,MOP,301,273.2,1
+334/1374 = 335/1375,334/1374 = 335/1375,Koblenz Hbf,Koblenz Hbf,KKO,Aschaffenburg Hbf,Aschaffenburg Hbf,NAH,132,118.2,1
+452 = 453,452 = 453; Canopus; NJ 456 = NJ 457,Bad Schandau,Bad Schandau,DSA,Dresden Hbf,Dresden Hbf,DH,28,31.6,6
+452 = 453,452 = 453; Canopus; Metropol; NJ 456 = NJ 457,Dresden Hbf,Dresden Hbf,DH,Dresden Neustadt,Dresden Neustadt,DN,7,2.9,8
+452 = 453,452 = 453,Dresden Neustadt,Dresden Neustadt,DN,Berlin Hbf,Berlin Hbf,BLS,130,164.3,2
+454 = 455,454 = 455; NJ 402 = NJ 403,Duisburg Hbf,Duisburg Hbf,EDG,Düsseldorf Hbf,Düsseldorf Hbf,KD,16,23.5,4
+454 = 455,454 = 455,Düsseldorf Hbf,Düsseldorf Hbf,KD,Köln Süd,Köln Süd,KKSU,,34.2,2
+456 = 457,456 = 457,Aachen Hbf,Aachen Hbf,KA,Köln Süd,Köln Süd,KKSU,52,62.0,2
+Berlinaren,Berlinaren; EN 345 = EN 346,Hamburg Hbf,Hamburg Hbf,AH,Berlin Hbf,Berlin Hbf,BLS,236,252.2,4
+Canopus,Canopus; NJ 408 = NJ 409; NJ 470 = NJ 471,Baden-Baden,Baden-Baden,RBB,Offenburg,Offenburg,RO,20,39.2,3
+Canopus,Canopus,Dresden Neustadt,Dresden Neustadt,DN,Riesa,Riesa,DR,33,41.6,2
+Canopus,Canopus,Frankfurt (Main) Süd,Frankfurt (Main) Süd,FFS,Leipzig Hbf,Leipzig Hbf,LL,321,294.7,1
+Canopus,Canopus; NJ 408 = NJ 409; NJ 470 = NJ 471,Karlsruhe Hbf,Karlsruhe Hbf,RK,Baden-Baden,Baden-Baden,RBB,22,27.4,3
+Canopus,Canopus; NJ 408 = NJ 409,Karlsruhe Hbf,Karlsruhe Hbf,RK,Mannheim Hbf,Mannheim Hbf,RM,33,54.3,3
+Canopus,Canopus,Leipzig Hbf,Leipzig Hbf,LL,Karlsruhe Hbf,Karlsruhe Hbf,RK,315,385.6,1
+Canopus,Canopus,Mannheim Hbf,Mannheim Hbf,RM,Frankfurt (Main) Süd,Frankfurt (Main) Süd,FFS,43,70.7,1
+Canopus,Canopus; NJ 402 = NJ 403; NJ 408 = NJ 409; NJ 470 = NJ 471,Offenburg,Offenburg,RO,Freiburg (Breisgau) Hbf,Freiburg (Breisgau) Hbf,RF,33,53.8,8
+Canopus,Canopus; NJ 408 = NJ 409; NJ 470 = NJ 471,Offenburg,Offenburg,RO,Karlsruhe Hbf,Karlsruhe Hbf,RK,34,66.5,3
+Canopus,Canopus,Riesa,Riesa,DR,Leipzig Hbf,Leipzig Hbf,LL,81,63.1,2
+Carpathia,Carpathia; Chopin,München Hbf,München Hbf,MH,München Ost,München Ost,MOP,10,3.9,4
+Carpathia,Carpathia; Chopin; EN 414 = EN 40237; Kálman Imre; NJ 236 = NJ 237; NJ 40420 = NJ 40491; NJ 420 = NJ 421; NJ 468 = NJ 469,Rosenheim,Rosenheim,MRO,München Ost,München Ost,MOP,36,49.1,15
+EN 414 = EN 40237,EN 414 = EN 40237; Kálman Imre; NJ 236 = NJ 237,Augsburg Hbf,Augsburg Hbf,MA,Ulm Hbf,Ulm Hbf,TU,56,66.8,6
+EN 414 = EN 40237,EN 414 = EN 40237; Kálman Imre,Ulm Hbf,Ulm Hbf,TU,Stuttgart Hbf,Stuttgart Hbf,TS,74,72.8,4
+LE 232 = LE 235,LE 232 = LE 235,Erfurt Hbf,Erfurt Hbf,UE  P,Fulda,Fulda,FFU,103,106.0,2
+LE 232 = LE 235,LE 232 = LE 235,Erfurt Hbf,Erfurt Hbf,UE  P,Leipzig Hbf,Leipzig Hbf,LL,119,102.5,1
+LE 232 = LE 235,LE 232 = LE 235,Frankfurt (Main) Süd,Frankfurt (Main) Süd,FFS,Frankfurt (Main) Flughafen Fernbahnhof,Frankfurt (Main) Flughafen Fernbahnhof,FFLF,26,9.8,2
+LE 232 = LE 235,LE 232 = LE 235,Fulda,Fulda,FFU,Hanau Hbf,Hanau Hbf,FH  N,70,72.1,2
+LE 232 = LE 235,LE 232 = LE 235; NJ 470 = NJ 471,Hanau Hbf,Hanau Hbf,FH  N,Frankfurt (Main) Süd,Frankfurt (Main) Süd,FFS,16,17.5,4
+LE 232 = LE 235,LE 232 = LE 235,Leipzig Hbf,Leipzig Hbf,LL,Dresden Hbf,Dresden Hbf,DH,107,100.0,1
+Metropol,Metropol; NJ 408 = NJ 409; NJ 456 = NJ 457,Berlin Südkreuz,Berlin Südkreuz,BPAF,Berlin Hbf,Berlin Hbf,BLS,10,5.4,6
+Metropol,Metropol; NJ 456 = NJ 457,Dresden Neustadt,Dresden Neustadt,DN,Berlin Südkreuz,Berlin Südkreuz,BPAF,96,158.9,4
+NJ 236 = NJ 237,NJ 236 = NJ 237,Göppingen,Göppingen,TGO,Stuttgart Hbf,Stuttgart Hbf,TS,27,35.5,2
+NJ 236 = NJ 237,NJ 236 = NJ 237,Ulm Hbf,Ulm Hbf,TU,Göppingen,Göppingen,TGO,36,41.9,2
+NJ 294 = NJ 295,NJ 294 = NJ 295,Rosenheim,Rosenheim,MRO,München Hbf,München Hbf,MH,44,52.9,2
+NJ 402 = NJ 403,NJ 402 = NJ 403,Bonn Hbf,Bonn Hbf,KB,Köln Hbf,Köln Hbf,KK,26,25.4,2
+NJ 402 = NJ 403,NJ 402 = NJ 403,Duisburg Hbf,Duisburg Hbf,EDG,Oberhausen Hbf,Oberhausen Hbf,EOB,8,7.0,2
+NJ 402 = NJ 403,NJ 402 = NJ 403,Offenburg,Offenburg,RO,Bonn Hbf,Bonn Hbf,KB,278,258.2,2
+NJ 40420 = NJ 40491,NJ 40420 = NJ 40491; NJ 470 = NJ 471; NJ 492 = NJ 493,Hamburg Harburg,Hamburg Harburg,AHAR,Hamburg Hbf,Hamburg Hbf,AH,12,10.7,6
+NJ 40420 = NJ 40491,NJ 40420 = NJ 40491; NJ 492 = NJ 493,Hannover Hbf,Hannover Hbf,HH,Hamburg Harburg,Hamburg Harburg,AHAR,96,121.2,4
+NJ 40420 = NJ 40491,NJ 40420 = NJ 40491; NJ 420 = NJ 421,Ingolstadt Hbf,Ingolstadt Hbf,MIH,Nürnberg Hbf,Nürnberg Hbf,NN,60,82.3,4
+NJ 40420 = NJ 40491,NJ 40420 = NJ 40491; NJ 492 = NJ 493,Kassel-Wilhelmshöhe,Kassel-Wilhelmshöhe,FKW,Göttingen,Göttingen,HG,26,41.6,4
+NJ 40420 = NJ 40491,NJ 40420 = NJ 40491; NJ 420 = NJ 421,München Ost,München Ost,MOP,Ingolstadt Hbf,Ingolstadt Hbf,MIH,81,69.7,4
+NJ 40420 = NJ 40491,NJ 40420 = NJ 40491; NJ 40421 = NJ 40490; NJ 420 = NJ 421; NJ 492 = NJ 493,Nürnberg Hbf,Nürnberg Hbf,NN,Würzburg Hbf,Würzburg Hbf,NWH,66,91.5,8
+NJ 40420 = NJ 40491,NJ 40420 = NJ 40491; NJ 40421 = NJ 40490; NJ 420 = NJ 421; NJ 492 = NJ 493,Würzburg Hbf,Würzburg Hbf,NWH,Kassel-Wilhelmshöhe,Kassel-Wilhelmshöhe,FKW,146,171.4,7
+NJ 40421 = NJ 40490,NJ 40421 = NJ 40490; NJ 420 = NJ 421,Essen Hbf,Essen Hbf,EE,Kassel-Wilhelmshöhe,Kassel-Wilhelmshöhe,FKW,148,169.6,2
+NJ 40421 = NJ 40490,NJ 40421 = NJ 40490; NJ 492 = NJ 493,Nürnberg Hbf,Nürnberg Hbf,NN,München Ost,München Ost,MOP,95,151.7,4
+NJ 40421 = NJ 40490,NJ 40421 = NJ 40490; NJ 420 = NJ 421,Oberhausen Hbf,Oberhausen Hbf,EOB,Essen Hbf,Essen Hbf,EE,13,11.6,2
+NJ 40421 = NJ 40490,NJ 40421 = NJ 40490,Würzburg Hbf,Würzburg Hbf,NWH,Oberhausen Hbf,Oberhausen Hbf,EOB,294,286.2,1
+NJ 408 = NJ 409,NJ 408 = NJ 409,Berlin Südkreuz,Berlin Südkreuz,BPAF,Lutherstadt Wittenberg Hbf,Lutherstadt Wittenberg Hbf,LW,45,83.0,1
+NJ 408 = NJ 409,NJ 408 = NJ 409,Bitterfeld,Bitterfeld,LBT,Halle (Saale) Hbf,Halle (Saale) Hbf,LH,25,27.9,1
+NJ 408 = NJ 409,NJ 408 = NJ 409,Halle (Saale) Hbf,Halle (Saale) Hbf,LH,Leipzig Hbf,Leipzig Hbf,LL,24,31.1,1
+NJ 408 = NJ 409,NJ 408 = NJ 409,Leipzig Hbf,Leipzig Hbf,LL,Mannheim Hbf,Mannheim Hbf,RM,319,346.2,2
+NJ 408 = NJ 409,NJ 408 = NJ 409,Leipzig Hbf,Leipzig Hbf,LL,Berlin Südkreuz,Berlin Südkreuz,BPAF,115,142.6,1
+NJ 408 = NJ 409,NJ 408 = NJ 409,Lutherstadt Wittenberg Hbf,Lutherstadt Wittenberg Hbf,LW,Bitterfeld,Bitterfeld,LBT,20,36.1,1
+NJ 420 = NJ 421,NJ 420 = NJ 421,Hamm (Westf) Hbf,Hamm (Westf) Hbf,EHM,Kassel-Wilhelmshöhe,Kassel-Wilhelmshöhe,FKW,,120.6,1
+NJ 420 = NJ 421,NJ 420 = NJ 421,Münster (Westf) Hbf,Münster (Westf) Hbf,EMST,Hamm (Westf) Hbf,Hamm (Westf) Hbf,EHM,22,33.1,1
+NJ 468 = NJ 469,NJ 468 = NJ 469,Aachen Hbf,Aachen Hbf,KA,Köln Hbf,Köln Hbf,KK,40,63.9,1
+NJ 468 = NJ 469,NJ 468 = NJ 469,Bonn Hbf,Bonn Hbf,KB,Köln Ehrenfeld,Köln Ehrenfeld,KKER,38,27.5,1
+NJ 468 = NJ 469,NJ 468 = NJ 469,Bonn-Beuel,Bonn-Beuel,KBB,Koblenz Hbf,Koblenz Hbf,KKO,57,54.0,1
+NJ 468 = NJ 469,NJ 468 = NJ 469,Koblenz Hbf,Koblenz Hbf,KKO,München Ost,München Ost,MOP,399,382.2,2
+NJ 468 = NJ 469,NJ 468 = NJ 469,Koblenz Hbf,Koblenz Hbf,KKO,Bonn Hbf,Bonn Hbf,KB,42,54.8,1
+NJ 468 = NJ 469,NJ 468 = NJ 469,Köln Ehrenfeld,Köln Ehrenfeld,KKER,Aachen Hbf,Aachen Hbf,KA,42,61.6,1
+NJ 468 = NJ 469,NJ 468 = NJ 469,Köln Hbf,Köln Hbf,KK,Bonn-Beuel,Bonn-Beuel,KBB,23,25.7,1
+NJ 470 = NJ 471,NJ 470 = NJ 471,Bremen Hbf,Bremen Hbf,HB,Hamburg Harburg,Hamburg Harburg,AHAR,61,88.6,2
+NJ 470 = NJ 471,NJ 470 = NJ 471,Bruchsal,Bruchsal,RBR,Heidelberg Hbf,Heidelberg Hbf,RH,23,31.7,1
+NJ 470 = NJ 471,NJ 470 = NJ 471,Darmstadt Hbf,Darmstadt Hbf,FD,Frankfurt (Main) Süd,Frankfurt (Main) Süd,FFS,15,25.6,1
+NJ 470 = NJ 471,NJ 470 = NJ 471,Frankfurt (Main) Süd,Frankfurt (Main) Süd,FFS,Karlsruhe Hbf,Karlsruhe Hbf,RK,90,124.7,1
+NJ 470 = NJ 471,NJ 470 = NJ 471,Hanau Hbf,Hanau Hbf,FH  N,Göttingen,Göttingen,HG,142,172.3,2
+NJ 470 = NJ 471,NJ 470 = NJ 471,Hannover Hbf,Hannover Hbf,HH,Bremen Hbf,Bremen Hbf,HB,70,100.4,2
+NJ 470 = NJ 471,NJ 470 = NJ 471,Heidelberg Hbf,Heidelberg Hbf,RH,Darmstadt Hbf,Darmstadt Hbf,FD,51,52.3,1
+NJ 470 = NJ 471,NJ 470 = NJ 471,Karlsruhe Hbf,Karlsruhe Hbf,RK,Bruchsal,Bruchsal,RBR,13,19.7,1

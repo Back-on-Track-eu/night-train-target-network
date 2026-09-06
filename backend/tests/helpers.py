@@ -100,7 +100,7 @@ def publish(
 def compute(
     api_base: str,
     stops: list[str],
-    composition_id: str = "NEW-BAL-7",
+    composition_id: str | None = "NEW-BAL-7",
     timeout: int = 90,
     **extra,
 ) -> dict:
@@ -113,8 +113,13 @@ def compute(
 
     Always stateless: proposal/calc never persists, so unlike build_route()/
     evaluate() there is no headers param — an Authorization header would
-    have no effect here."""
-    body = {"stops": stops, "composition_id": composition_id, **extra}
+    have no effect here.
+
+    composition_id=None posts no composition at all, so the endpoint applies
+    its own default — the only way to exercise that path."""
+    body = {"stops": stops, **extra}
+    if composition_id is not None:
+        body["composition_id"] = composition_id
     resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=timeout)
     assert resp.status_code == 200, f"proposal/calc failed: {resp.text[:300]}"
     return resp.json()

@@ -106,6 +106,12 @@ CREATE TABLE proposals.trips (
     created_at                TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- The gallery map's corridor query reaches trips by route_id, rebuilding it
+-- from the P{id}_V{version}_R1 convention (adapters/proposal/repository.py's
+-- map_lines()) — one lookup per row in the filtered set, so this grows with
+-- the proposal count. The FK above does not create an index of its own.
+CREATE INDEX idx_trips_route ON proposals.trips (route_id);
+
 COMMENT ON TABLE  proposals.trips                        IS 'GTFS trips.txt — one scheduled run of a route per proposal version. trip_id convention: P{proposal_id}_V{version}_R{route_index}_D{direction}_T{trip_index} e.g. P1_V1_R1_D0_T1.';
 COMMENT ON COLUMN proposals.trips.trip_id                IS 'GTFS trip identifier. Convention: P{proposal_id}_V{version}_R{route_index}_D{direction}_T{trip_index}.';
 COMMENT ON COLUMN proposals.trips.route_id               IS 'References proposals.routes.';
@@ -295,6 +301,7 @@ CREATE TABLE proposals.segments (
     dynamics_time_min        INTEGER NOT NULL,
     buffer_time_min          INTEGER NOT NULL,
     slack_time_min           INTEGER NOT NULL DEFAULT 0,
+    addon_time_min           INTEGER NOT NULL DEFAULT 0,
     energy_kwh                NUMERIC NOT NULL,
     country_distance_shares  JSONB NOT NULL,
     country_time_shares      JSONB NOT NULL,
@@ -314,6 +321,7 @@ COMMENT ON COLUMN proposals.segments.driving_time_min         IS 'Raw router tim
 COMMENT ON COLUMN proposals.segments.dynamics_time_min        IS 'Per-stop acceleration/braking loss. Unit: min';
 COMMENT ON COLUMN proposals.segments.buffer_time_min          IS 'Schedule buffer: country quota on driving + on dynamics. Unit: min';
 COMMENT ON COLUMN proposals.segments.slack_time_min           IS 'Deliberate schedule padding beyond routing physics — 0 everywhere except legs inside a stretched fixed-night interval. Unit: min';
+COMMENT ON COLUMN proposals.segments.addon_time_min           IS 'Manual padding the caller put on this leg in expert timetable mode (compute_request.expert_timetable.segment_addons) — kept apart from slack_time_min because the author differs: slack is the model stretching an interval, this is a person. Never negative; 0 for every automatic timetable and every route stored before ROUTE_BUILDER 0.9.32. Unit: min';
 COMMENT ON COLUMN proposals.segments.energy_kwh                IS 'Energy consumption for this segment. Unit: kWh';
 COMMENT ON COLUMN proposals.segments.country_distance_shares  IS 'Per-country share of this segment''s distance, e.g. {"DE": 0.7, "AT": 0.3}. Shares sum to 1.0.';
 COMMENT ON COLUMN proposals.segments.country_time_shares      IS 'Per-country share of this segment''s time. Can differ from country_distance_shares (e.g. a mountainous section is slower relative to its length). Shares sum to 1.0.';

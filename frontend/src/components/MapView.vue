@@ -25,6 +25,13 @@ const HIT_LAYERS = [ROUTE_LAYER_HIT, ROUTE_LAYER_DIM_HIT]
 // Persistent station-name labels, from their own point source.
 const STOPS_SOURCE = 'stops'
 const STOPS_LABEL_LAYER = 'stops-label'
+// Every stop the user could still add, in edit mode — a circle LAYER rather than
+// one DOM marker each. There are ~870 of them, and MapLibre re-transforms every
+// DOM marker on every pan frame, so markers would make the map crawl; a circle
+// layer is drawn by the GPU in one pass. Only the hovered dot is promoted to a
+// real marker (see availableHoverMarker) so it can carry the plus and the name.
+const AVAILABLE_SOURCE = 'available-stops'
+const AVAILABLE_LAYER = 'available-stops-dot'
 const PRIMARY = '#2271b3'
 const PRIMARY_LIGHT = '#eef4fb'
 // A lighter tint of PRIMARY (not grey) for out-of-scope route parts and stops.
@@ -62,6 +69,15 @@ interface SuggestedMarker {
   selected: boolean
 }
 
+// A stop that is in the catalogue but not yet on the itinerary. Shown only while
+// editing, as a small dot the user can hover to reveal a plus and a name.
+interface AvailableStop {
+  stopId: string
+  lat: number
+  lon: number
+  name: string
+}
+
 // One leg of the route: its geometry plus the endpoint names and travel time
 // shown when the leg is hovered.
 interface MapSegment {
@@ -83,9 +99,16 @@ const props = defineProps<{
   // own interactive markers, independent of `stops`/`shape` so toggling one
   // never redraws the route line or refits the map.
   suggested?: SuggestedMarker[] | null
+  // Stops the user could still add (edit mode) — everything in the catalogue
+  // that is not already on the itinerary. Never affects the map's fit: these
+  // cover most of Europe, so fitting to them would zoom out to the continent.
+  available?: AvailableStop[] | null
 }>()
 
-const emit = defineEmits<{ 'toggle-suggested': [stopId: string] }>()
+const emit = defineEmits<{
+  'toggle-suggested': [stopId: string]
+  'add-stop': [stopId: string]
+}>()
 
 const { t } = useI18n()
 
@@ -93,6 +116,10 @@ const mapContainer = ref<HTMLDivElement | null>(null)
 let map: maplibregl.Map | null = null
 let markers: maplibregl.Marker[] = []
 let suggestedMarkers: maplibregl.Marker[] = []
+// Exactly one available-stop marker exists at a time — the hovered one.
+let availableHoverMarker: maplibregl.Marker | null = null
+let availableHoverId: string | null = null
+let availableHoverTimer: ReturnType<typeof setTimeout> | null = null
 let hoverPopup: maplibregl.Popup | null = null
 let mapLoaded = false
 let initialFitDone = false
@@ -212,6 +239,120 @@ function syncSuggestedMarkers() {
       .addTo(map!)
     suggestedMarkers.push(marker)
   }
+}
+
+// --- Available stops (edit mode) -------------------------------------------
+// The hovered dot, promoted to a DOM marker so it can show a plus affordance and
+// its name. Exactly one exists at a time, whatever the catalogue size.
+//
+// There is deliberately no X here, unlike a proposed stop: a suggested stop is a
+// pending yes/no, whereas an available stop is simply not on the itinerary yet.
+// Removing a stop stays where it already lives — the itinerary table's own
+// delete control.
+function makeAvailableMarkerEl(s: AvailableStop): HTMLDivElement {
+  const el = document.createElement('div')
+  const size = 18
+  Object.assign(el.style, { width: `${size}px`, height: `${size}px`, cursor: 'pointer' })
+  const dot = document.createElement('div')
+  Object.assign(dot.style, {
+    width: '100%',
+    height: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: PRIMARY_LIGHT,
+    border: `2px solid ${PRIMARY}`,
+    borderRadius: '50%',
+    boxShadow: '0 1px 4px rgba(0,0,0,0.35)',
+  })
+  dot.appendChild(iconSvgEl(mdiPlus, LABEL_PRIMARY, 13))
+  const label = document.createElement('div')
+  label.textContent = s.name
+  Object.assign(label.style, {
+    position: 'absolute',
+    left: '100%',
+    top: '50%',
+    transform: 'translateY(-50%)',
+    marginLeft: '6px',
+    whiteSpace: 'nowrap',
+    fontSize: '11px',
+    fontWeight: '600',
+    color: LABEL_PRIMARY,
+    textShadow: `0 0 2px ${PRIMARY_LIGHT}, 0 0 2px ${PRIMARY_LIGHT}`,
+    pointerEvents: 'none',
+  })
+  el.append(dot, label)
+  // The marker sits ABOVE the canvas, so moving onto it makes MapLibre fire
+  // mouseleave for the dot underneath. Its own enter cancels the pending
+  // teardown, which is what makes the plus clickable at all.
+  el.addEventListener('mouseenter', cancelAvailableHoverClose)
+  el.addEventListener('mouseleave', scheduleAvailableHoverClose)
+  el.addEventListener('click', (e) => {
+    e.stopPropagation()
+    clearAvailableHover()
+    emit('add-stop', s.stopId)
+  })
+  return el
+}
+
+function clearAvailableHover() {
+  cancelAvailableHoverClose()
+  availableHoverMarker?.remove()
+  availableHoverMarker = null
+  availableHoverId = null
+}
+
+function cancelAvailableHoverClose() {
+  if (availableHoverTimer !== null) {
+    clearTimeout(availableHoverTimer)
+    availableHoverTimer = null
+  }
+}
+
+// Grace period so the pointer can cross the gap from dot to marker.
+function scheduleAvailableHoverClose() {
+  cancelAvailableHoverClose()
+  availableHoverTimer = setTimeout(clearAvailableHover, 120)
+}
+
+function onAvailableHover(e: maplibregl.MapLayerMouseEvent) {
+  if (!map) return
+  const f = e.features?.[0]
+  if (!f) return
+  const stopId = f.properties?.stopId as string | undefined
+  if (!stopId) return
+  cancelAvailableHoverClose()
+  // Re-entering the same dot must not rebuild the marker, or the element the
+  // cursor is currently over is destroyed under it and the hover drops.
+  if (stopId === availableHoverId) return
+  const stop = (props.available ?? []).find((s) => s.stopId === stopId)
+  if (!stop) return
+  availableHoverMarker?.remove()
+  availableHoverId = stopId
+  availableHoverMarker = new maplibregl.Marker({
+    element: makeAvailableMarkerEl(stop),
+    anchor: 'center',
+  })
+    .setLngLat([stop.lon, stop.lat])
+    .addTo(map)
+}
+
+function syncAvailableStops() {
+  if (!map || !mapLoaded) return
+  const src = map.getSource(AVAILABLE_SOURCE) as maplibregl.GeoJSONSource | undefined
+  if (!src) return
+  const list = props.available ?? []
+  // A dot that just left the list (the user added it) must not keep its hover
+  // marker floating over the map.
+  if (availableHoverId && !list.some((s) => s.stopId === availableHoverId)) clearAvailableHover()
+  src.setData({
+    type: 'FeatureCollection',
+    features: list.map((s) => ({
+      type: 'Feature' as const,
+      geometry: { type: 'Point' as const, coordinates: [s.lon, s.lat] },
+      properties: { stopId: s.stopId, name: s.name },
+    })),
+  })
 }
 
 // The station-name labels are a MapLibre symbol layer rather than DOM added to
@@ -376,12 +517,28 @@ function fitToStops(animate: boolean) {
 
 function initLayers() {
   if (!map) return
-  for (const id of [ROUTE_SOURCE_DIM, ROUTE_SOURCE, STOPS_SOURCE]) {
+  for (const id of [AVAILABLE_SOURCE, ROUTE_SOURCE_DIM, ROUTE_SOURCE, STOPS_SOURCE]) {
     map.addSource(id, {
       type: 'geojson',
       data: { type: 'FeatureCollection', features: [] },
     })
   }
+  // Added FIRST so every dot sits underneath the route line, its markers and the
+  // station labels — these are background context, not the subject of the map.
+  map.addLayer({
+    id: AVAILABLE_LAYER,
+    type: 'circle',
+    source: AVAILABLE_SOURCE,
+    paint: {
+      // Grows with zoom: readable dots when you are looking at one country,
+      // unobtrusive texture at continent scale where ~870 of them are visible.
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 2.5, 7, 4, 10, 6],
+      'circle-color': PRIMARY_LIGHT,
+      'circle-stroke-color': DIMMED,
+      'circle-stroke-width': 1.5,
+      'circle-opacity': 0.9,
+    },
+  })
   map.addLayer({
     id: ROUTE_LAYER_DIM,
     type: 'line',
@@ -436,6 +593,23 @@ function initLayers() {
 
   map.on('mousemove', HIT_LAYERS, onLegHover)
   map.on('mouseleave', HIT_LAYERS, hideLegTooltip)
+
+  map.on('mousemove', AVAILABLE_LAYER, onAvailableHover)
+  map.on('mouseleave', AVAILABLE_LAYER, scheduleAvailableHoverClose)
+  // Clicking the dot itself does the same thing as clicking the plus — the plus
+  // is the affordance, not an extra hoop.
+  map.on('click', AVAILABLE_LAYER, (e) => {
+    const stopId = e.features?.[0]?.properties?.stopId as string | undefined
+    if (!stopId) return
+    clearAvailableHover()
+    emit('add-stop', stopId)
+  })
+  map.on('mouseenter', AVAILABLE_LAYER, () => {
+    if (map) map.getCanvas().style.cursor = 'pointer'
+  })
+  map.on('mouseleave', AVAILABLE_LAYER, () => {
+    if (map) map.getCanvas().style.cursor = ''
+  })
 }
 
 onMounted(() => {
@@ -463,6 +637,7 @@ onMounted(() => {
     syncMarkers()
     syncStopLabels()
     syncSuggestedMarkers()
+    syncAvailableStops()
     syncPolyline()
     fitToStops(false)
   })
@@ -498,10 +673,21 @@ watch(
   },
   { deep: true },
 )
+// Available stops get their own watcher and deliberately never call fitToStops:
+// they blanket Europe, so refitting on them would yank the view out to the whole
+// continent every time a stop is added or removed.
+watch(
+  () => props.available,
+  () => {
+    syncAvailableStops()
+  },
+  { deep: true },
+)
 
 onUnmounted(() => {
   markers.forEach((m) => m.remove())
   suggestedMarkers.forEach((m) => m.remove())
+  clearAvailableHover()
   hoverPopup?.remove()
   hoverPopup = null
   map?.remove()

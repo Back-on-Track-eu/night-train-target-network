@@ -1,0 +1,106 @@
+stop_id,stop_name,station_printed,country_code,charge_excl_vat_eur,vat_rate_per,charge_incl_vat_eur,basis,price_basis_year,tariff_class,source_ref,note
+osm:n3070631211,Aachen Hauptbahnhof,Aachen Hbf,DE,49.71,19.0,59.15,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 17.28 EUR not used: regional traffic
+osm:n30717143,Aschaffenburg Hbf,Aschaffenburg Hbf,DE,40.58,19.0,48.29,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 14.13 EUR not used: regional traffic
+osm:n1058668074,Augsburg Hauptbahnhof,Augsburg Hbf,DE,40.58,19.0,48.29,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 14.13 EUR not used: regional traffic
+osm:n620379882,Bad Oldesloe,Bad Oldesloe,DE,78.25,19.0,93.12,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 27.18 EUR not used: regional traffic
+osm:n2736023837,Bad Schandau,Bad Schandau,DE,7.53,19.0,8.96,per_call,2026,Preisklasse 4,DE-DB-SPL-2026,SPFV share; SPNV share 2.61 EUR not used: regional traffic
+osm:n2835627177,Bamberg,Bamberg,DE,40.58,19.0,48.29,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 14.13 EUR not used: regional traffic
+osm:n31485922,Bayreuth Hbf,Bayreuth Hbf,DE,13.92,19.0,16.56,per_call,2026,Preisklasse 3,DE-DB-SPL-2026,SPFV share; SPNV share 4.90 EUR not used: regional traffic
+osm:n459277140,Berlin Gesundbrunnen,Berlin Gesundbrunnen,DE,55.96,19.0,66.59,per_call,2026,Preisklasse 1,DE-DB-SPL-2026,SPFV share; SPNV share 19.45 EUR not used: regional traffic
+osm:n3856100103,Berlin Hauptbahnhof,Berlin Hauptbahnhof,DE,55.96,19.0,66.59,per_call,2026,Preisklasse 1,DE-DB-SPL-2026,SPFV share; SPNV share 19.45 EUR not used: regional traffic
+osm:n3419894993,Berlin Ostbahnhof,Berlin Ostbahnhof,DE,55.96,19.0,66.59,per_call,2026,Preisklasse 1,DE-DB-SPL-2026,SPFV share; SPNV share 19.45 EUR not used: regional traffic
+osm:n267379240,Berlin Südkreuz,Berlin Südkreuz,DE,55.96,19.0,66.59,per_call,2026,Preisklasse 1,DE-DB-SPL-2026,SPFV share; SPNV share 19.45 EUR not used: regional traffic
+osm:n29805967,Berlin-Lichtenberg,Berlin-Lichtenberg,DE,28.72,19.0,34.18,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 9.98 EUR not used: regional traffic
+osm:n3101920259,Berlin-Spandau,Berlin-Spandau,DE,28.72,19.0,34.18,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 9.98 EUR not used: regional traffic
+osm:n1874501382,Bielefeld Hauptbahnhof,Bielefeld Hbf,DE,39.98,19.0,47.58,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 13.94 EUR not used: regional traffic
+osm:w169962296,Bonn Hauptbahnhof,Bonn Hbf,DE,49.71,19.0,59.15,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 17.28 EUR not used: regional traffic
+osm:n1271017705,Bonn-Beuel,Bonn-Beuel,DE,7.51,19.0,8.94,per_call,2026,Preisklasse 4,DE-DB-SPL-2026,SPFV share; SPNV share 2.69 EUR not used: regional traffic
+osm:w24806780,Braunschweig Hauptbahnhof,Braunschweig Hbf,DE,57.51,19.0,68.44,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 19.48 EUR not used: regional traffic
+osm:n8041901931,Bremen Hauptbahnhof,Bremen Hbf,DE,89.12,19.0,106.05,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 30.96 EUR not used: regional traffic
+osm:n26562398,Bremerhaven Hauptbahnhof,Bremerhaven Hbf,DE,30.15,19.0,35.88,per_call,2026,Preisklasse 3,DE-DB-SPL-2026,SPFV share; SPNV share 10.48 EUR not used: regional traffic
+osm:n2711388096,Böblingen,Böblingen,DE,15.12,19.0,17.99,per_call,2026,Preisklasse 3,DE-DB-SPL-2026,SPFV share; SPNV share 5.36 EUR not used: regional traffic
+osm:n3607858763,Chemnitz Hauptbahnhof,Chemnitz Hbf,DE,73.70,19.0,87.70,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 25.61 EUR not used: regional traffic
+osm:n2599505466,Cottbus Hauptbahnhof,Cottbus Hbf,DE,107.52,19.0,127.95,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 38.03 EUR not used: regional traffic
+osm:n3175310444,Darmstadt Hauptbahnhof,Darmstadt Hbf,DE,36.17,19.0,43.04,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 14.70 EUR not used: regional traffic
+osm:n1458488633,Dortmund Hbf,Dortmund Hbf,DE,45.31,19.0,53.92,per_call,2026,Preisklasse 1,DE-DB-SPL-2026,SPFV share; SPNV share 15.74 EUR not used: regional traffic
+osm:n25397500,Dresden Hbf,Dresden Hbf,DE,102.83,19.0,122.37,per_call,2026,Preisklasse 1,DE-DB-SPL-2026,SPFV share; SPNV share 35.72 EUR not used: regional traffic
+osm:n3723386251,Dresden-Neustadt,Dresden-Neustadt,DE,31.72,19.0,37.75,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 11.01 EUR not used: regional traffic
+osm:n2970328245,Duisburg Hauptbahnhof,Duisburg Hbf,DE,45.31,19.0,53.92,per_call,2026,Preisklasse 1,DE-DB-SPL-2026,SPFV share; SPNV share 15.74 EUR not used: regional traffic
+osm:n1880180223,Düsseldorf Hauptbahnhof,Düsseldorf Hbf,DE,45.31,19.0,53.92,per_call,2026,Preisklasse 1,DE-DB-SPL-2026,SPFV share; SPNV share 15.74 EUR not used: regional traffic
+osm:n2700123189,Erfurt Hauptbahnhof,Erfurt Hbf,DE,83.27,19.0,99.09,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 28.93 EUR not used: regional traffic
+osm:n3010827615,Essen Hauptbahnhof,Essen Hbf,DE,45.31,19.0,53.92,per_call,2026,Preisklasse 1,DE-DB-SPL-2026,SPFV share; SPNV share 15.74 EUR not used: regional traffic
+osm:n4189000814,Flensburg,Flensburg,DE,28.13,19.0,33.47,per_call,2026,Preisklasse 3,DE-DB-SPL-2026,SPFV share; SPNV share 9.77 EUR not used: regional traffic
+osm:n205364328,Frankfurt (Main) Hauptbahnhof,Frankfurt (Main) Hbf,DE,80.93,19.0,96.31,per_call,2026,Preisklasse 1,DE-DB-SPL-2026,SPFV share; SPNV share 28.12 EUR not used: regional traffic
+osm:n2553727757,Frankfurt (Main) Süd,Frankfurt (Main) Süd,DE,36.17,19.0,43.04,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 14.70 EUR not used: regional traffic
+osm:n321555238,Frankfurt (Oder),Frankfurt (Oder),DE,107.52,19.0,127.95,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 38.03 EUR not used: regional traffic
+osm:n21769883,Freiburg (Breisgau) Hauptbahnhof,Freiburg (Breisgau) Hbf,DE,45.30,19.0,53.91,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 15.82 EUR not used: regional traffic
+osm:n1600298350,Fulda,Fulda,DE,36.17,19.0,43.04,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 14.70 EUR not used: regional traffic
+osm:n1840958277,Gera Hauptbahnhof,Gera Hbf,DE,29.47,19.0,35.07,per_call,2026,Preisklasse 3,DE-DB-SPL-2026,SPFV share; SPNV share 10.23 EUR not used: regional traffic
+osm:n2821098770,Gießen,Gießen,DE,36.17,19.0,43.04,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 14.70 EUR not used: regional traffic
+osm:n4349314485,Göppingen,Göppingen,DE,15.12,19.0,17.99,per_call,2026,Preisklasse 3,DE-DB-SPL-2026,SPFV share; SPNV share 5.36 EUR not used: regional traffic
+osm:n1438696887,Görlitz,Görlitz,DE,95.46,19.0,113.60,per_call,2026,Preisklasse 3,DE-DB-SPL-2026,SPFV share; SPNV share 33.16 EUR not used: regional traffic
+osm:n3059639306,Göttingen,Göttingen,DE,65.79,19.0,78.29,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 23.54 EUR not used: regional traffic
+osm:n3450444902,Gütersloh Hbf,Gütersloh Hbf,DE,19.71,19.0,23.45,per_call,2026,Preisklasse 3,DE-DB-SPL-2026,SPFV share; SPNV share 7.42 EUR not used: regional traffic
+osm:n250082941,Halle (Saale) Hauptbahnhof,Halle (Saale) Hbf,DE,68.42,19.0,81.42,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 23.77 EUR not used: regional traffic
+osm:n2459919677,Hamburg Hauptbahnhof,Hamburg Hbf,DE,36.07,19.0,42.92,per_call,2026,Preisklasse 1,DE-DB-SPL-2026,SPFV share; SPNV share 12.52 EUR not used: regional traffic
+osm:n3357946758,Hamburg-Altona,Hamburg-Altona,DE,36.07,19.0,42.92,per_call,2026,Preisklasse 1,DE-DB-SPL-2026,SPFV share; SPNV share 12.52 EUR not used: regional traffic
+osm:n4725309875,Hamburg-Harburg,Hamburg-Harburg,DE,19.09,19.0,22.72,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 6.63 EUR not used: regional traffic
+osm:n2146217850,Hamm (Westf) Hbf,Hamm (Westf) Hbf,DE,39.98,19.0,47.58,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 13.94 EUR not used: regional traffic
+osm:n3059639307,Hannover Hauptbahnhof,Hannover Hbf,DE,71.09,19.0,84.60,per_call,2026,Preisklasse 1,DE-DB-SPL-2026,SPFV share; SPNV share 24.69 EUR not used: regional traffic
+osm:n2820941790,Heidelberg Hauptbahnhof,Heidelberg Hbf,DE,45.30,19.0,53.91,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 15.82 EUR not used: regional traffic
+osm:n27385328,Heilbronn Hauptbahnhof,Heilbronn Hbf,DE,45.30,19.0,53.91,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 15.82 EUR not used: regional traffic
+osm:n3616040153,Hildesheim Hauptbahnhof,Hildesheim Hbf,DE,65.79,19.0,78.29,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 23.54 EUR not used: regional traffic
+osm:n3543804400,Ingolstadt Hbf,Ingolstadt Hbf,DE,40.58,19.0,48.29,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 14.13 EUR not used: regional traffic
+osm:n1126168394,Jena Paradies,Jena Paradies,DE,29.47,19.0,35.07,per_call,2026,Preisklasse 3,DE-DB-SPL-2026,SPFV share; SPNV share 10.23 EUR not used: regional traffic
+osm:n30959690,Kaiserslautern Hauptbahnhof,Kaiserslautern Hbf,DE,48.92,19.0,58.21,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 16.99 EUR not used: regional traffic
+osm:n2574283615,Karlsruhe Hauptbahnhof,Karlsruhe Hbf,DE,71.96,19.0,85.63,per_call,2026,Preisklasse 1,DE-DB-SPL-2026,SPFV share; SPNV share 25.00 EUR not used: regional traffic
+osm:n260716557,Kassel-Wilhelmshöhe,Kassel-Wilhelmshöhe,DE,70.17,19.0,83.50,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 24.60 EUR not used: regional traffic
+osm:n4530820004,Kempten (Allgäu) Hbf,Kempten (Allgäu) Hbf,DE,13.92,19.0,16.56,per_call,2026,Preisklasse 3,DE-DB-SPL-2026,SPFV share; SPNV share 4.90 EUR not used: regional traffic
+osm:n4257641280,Kiel Hauptbahnhof,Kiel Hbf,DE,78.25,19.0,93.12,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 27.18 EUR not used: regional traffic
+osm:n3524305897,Koblenz Hbf,Koblenz Hbf,DE,53.34,19.0,63.47,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 19.06 EUR not used: regional traffic
+osm:n2399559029,Köln Hauptbahnhof,Köln Hbf,DE,52.59,19.0,62.58,per_call,2026,Preisklasse 1,DE-DB-SPL-2026,SPFV share; SPNV share 18.27 EUR not used: regional traffic
+osm:n74880878,Köln Messe/Deutz,Köln Messe/Deutz,DE,52.59,19.0,62.58,per_call,2026,Preisklasse 1,DE-DB-SPL-2026,SPFV share; SPNV share 18.27 EUR not used: regional traffic
+osm:n3044304327,Köln Süd,Köln Süd,DE,7.51,19.0,8.94,per_call,2026,Preisklasse 4,DE-DB-SPL-2026,SPFV share; SPNV share 2.69 EUR not used: regional traffic
+osm:n4551541317,Köln-Ehrenfeld,Köln-Ehrenfeld,DE,15.45,19.0,18.39,per_call,2026,Preisklasse 3,DE-DB-SPL-2026,SPFV share; SPNV share 5.43 EUR not used: regional traffic
+osm:n534753716,Landshut (Bay) Hbf,Landshut (Bay) Hbf,DE,40.58,19.0,48.29,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 14.13 EUR not used: regional traffic
+osm:n376142577,Leipzig Hauptbahnhof,Leipzig Hbf,DE,88.79,19.0,105.66,per_call,2026,Preisklasse 1,DE-DB-SPL-2026,SPFV share; SPNV share 30.84 EUR not used: regional traffic
+osm:n280139991,Lutherstadt Wittenberg Hbf,Lutherstadt Wittenberg Hbf,DE,19.18,19.0,22.82,per_call,2026,Preisklasse 3,DE-DB-SPL-2026,SPFV share; SPNV share 6.80 EUR not used: regional traffic; price list remark: Name alt: Lutherstadt Wittenberg Hauptbahnhof
+osm:n3244393949,Lörrach Hauptbahnhof,Lörrach Hbf,DE,11.31,19.0,13.46,per_call,2026,Preisklasse 4,DE-DB-SPL-2026,SPFV share; SPNV share 4.05 EUR not used: regional traffic
+osm:n25149874,Lübeck Hauptbahnhof,Lübeck Hbf,DE,78.25,19.0,93.12,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 27.18 EUR not used: regional traffic
+osm:n3594997072,Lüneburg,Lüneburg,DE,65.79,19.0,78.29,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 23.54 EUR not used: regional traffic
+osm:n3087634633,Magdeburg Hauptbahnhof,Magdeburg Hbf,DE,68.42,19.0,81.42,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 23.77 EUR not used: regional traffic
+osm:n7141879068,Mainz Hauptbahnhof,Mainz Hbf,DE,48.92,19.0,58.21,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 16.99 EUR not used: regional traffic
+osm:n25439439,Mannheim Hauptbahnhof,Mannheim Hbf,DE,45.30,19.0,53.91,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 15.82 EUR not used: regional traffic
+osm:n2631683231,Mönchengladbach Hbf,Mönchengladbach Hbf,DE,28.96,19.0,34.46,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 10.09 EUR not used: regional traffic
+osm:n2470201868,München Hauptbahnhof,München Hbf,DE,62.37,19.0,74.22,per_call,2026,Preisklasse 1,DE-DB-SPL-2026,SPFV share; SPNV share 21.67 EUR not used: regional traffic
+osm:n2465304880,München Ost,München Ost,DE,62.37,19.0,74.22,per_call,2026,Preisklasse 1,DE-DB-SPL-2026,SPFV share; SPNV share 21.67 EUR not used: regional traffic
+osm:n3374898279,Münster (Westf) Hauptbahnhof,Münster (Westf) Hbf,DE,39.98,19.0,47.58,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 13.94 EUR not used: regional traffic
+osm:n7160009313,Neumünster,Neumünster,DE,78.25,19.0,93.12,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 27.18 EUR not used: regional traffic
+osm:n6771321243,Neustadt (Holstein),Neustadt (Holst),DE,10.48,19.0,12.47,per_call,2026,Preisklasse 6,DE-DB-SPL-2026,SPFV share; SPNV share 3.64 EUR not used: regional traffic
+osm:n4543919208,Nürnberg Hauptbahnhof,Nürnberg Hbf,DE,62.37,19.0,74.22,per_call,2026,Preisklasse 1,DE-DB-SPL-2026,SPFV share; SPNV share 21.67 EUR not used: regional traffic
+osm:n2931428598,Offenburg,Offenburg,DE,45.30,19.0,53.91,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 15.82 EUR not used: regional traffic
+osm:n253313309,Oldenburg (Holstein),Oldenburg (Holst),DE,10.48,19.0,12.47,per_call,2026,Preisklasse 6,DE-DB-SPL-2026,SPFV share; SPNV share 3.64 EUR not used: regional traffic
+osm:n91753264,Oldenburg (Oldb) Hbf,Oldenburg (Oldb) Hbf,DE,65.79,19.0,78.29,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 23.54 EUR not used: regional traffic
+osm:n268894281,Osnabrück Hauptbahnhof,Osnabrück Hbf,DE,65.79,19.0,78.29,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 23.54 EUR not used: regional traffic
+osm:n2675283037,Paderborn Hauptbahnhof,Paderborn Hbf,DE,39.98,19.0,47.58,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 13.94 EUR not used: regional traffic
+osm:n14334692,Passau Hbf,Passau Hbf,DE,13.92,19.0,16.56,per_call,2026,Preisklasse 3,DE-DB-SPL-2026,SPFV share; SPNV share 4.90 EUR not used: regional traffic
+osm:n25972727,Pforzheim Hauptbahnhof,Pforzheim Hbf,DE,45.30,19.0,53.91,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 15.82 EUR not used: regional traffic
+osm:n1755712810,Plauen (Vogtl) ob Bf,Plauen (Vogtl) ob Bf,DE,44.94,19.0,53.48,per_call,2026,Preisklasse 3,DE-DB-SPL-2026,SPFV share; SPNV share 15.62 EUR not used: regional traffic
+osm:n2703868858,Regensburg Hauptbahnhof,Regensburg Hbf,DE,40.58,19.0,48.29,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 14.13 EUR not used: regional traffic
+osm:n4565521156,Remscheid-Lennep,Remscheid-Lennep,DE,6.59,19.0,7.84,per_call,2026,Preisklasse 5,DE-DB-SPL-2026,SPFV share; SPNV share 2.41 EUR not used: regional traffic
+osm:n25233549,Reutlingen Hbf,Reutlingen Hbf,DE,15.12,19.0,17.99,per_call,2026,Preisklasse 3,DE-DB-SPL-2026,SPFV share; SPNV share 5.36 EUR not used: regional traffic
+osm:n961012947,Riesa,Riesa,DE,34.99,19.0,41.64,per_call,2026,Preisklasse 3,DE-DB-SPL-2026,SPFV share; SPNV share 12.16 EUR not used: regional traffic
+osm:n2578699502,Rosenheim,Rosenheim,DE,40.58,19.0,48.29,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 14.13 EUR not used: regional traffic
+osm:n987773654,Rostock Hauptbahnhof,Rostock Hbf,DE,72.34,19.0,86.08,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 25.32 EUR not used: regional traffic
+osm:n259449966,Saarbrücken Hauptbahnhof,Saarbrücken Hbf,DE,90.05,19.0,107.16,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 31.28 EUR not used: regional traffic
+osm:n27381920,Schweinfurt Hbf,Schweinfurt Hbf,DE,13.92,19.0,16.56,per_call,2026,Preisklasse 3,DE-DB-SPL-2026,SPFV share; SPNV share 4.90 EUR not used: regional traffic
+osm:n252098248,Schwerin Hauptbahnhof,Schwerin Hbf,DE,77.39,19.0,92.09,per_call,2026,Preisklasse 3,DE-DB-SPL-2026,SPFV share; SPNV share 27.62 EUR not used: regional traffic
+osm:n35879657,Siegburg/Bonn,Siegburg/Bonn,DE,15.45,19.0,18.39,per_call,2026,Preisklasse 3,DE-DB-SPL-2026,SPFV share; SPNV share 5.43 EUR not used: regional traffic
+osm:n269763316,Siegen Hauptbahnhof,Siegen Hbf,DE,19.71,19.0,23.45,per_call,2026,Preisklasse 3,DE-DB-SPL-2026,SPFV share; SPNV share 7.42 EUR not used: regional traffic
+osm:n277350630,Stralsund Hbf,Stralsund Hbf,DE,77.39,19.0,92.09,per_call,2026,Preisklasse 3,DE-DB-SPL-2026,SPFV share; SPNV share 27.62 EUR not used: regional traffic
+osm:n1635698272,Stuttgart Hauptbahnhof,Stuttgart Hbf,DE,71.96,19.0,85.63,per_call,2026,Preisklasse 1,DE-DB-SPL-2026,SPFV share; SPNV share 25.00 EUR not used: regional traffic
+osm:n745097775,Trier Hbf,Trier Hbf,DE,53.34,19.0,63.47,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 19.06 EUR not used: regional traffic
+osm:n1384282612,Ulm Hauptbahnhof,Ulm Hbf,DE,45.30,19.0,53.91,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 15.82 EUR not used: regional traffic
+osm:n3620887012,Wittenberge,Wittenberge,DE,22.45,19.0,26.72,per_call,2026,Preisklasse 3,DE-DB-SPL-2026,SPFV share; SPNV share 7.80 EUR not used: regional traffic
+osm:n338899629,Wolfsburg Hauptbahnhof,Wolfsburg Hbf,DE,57.51,19.0,68.44,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 19.48 EUR not used: regional traffic
+osm:n27453687,Würzburg Hauptbahnhof,Würzburg Hbf,DE,40.58,19.0,48.29,per_call,2026,Preisklasse 2,DE-DB-SPL-2026,SPFV share; SPNV share 14.13 EUR not used: regional traffic

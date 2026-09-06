@@ -99,7 +99,7 @@ def great_circle_km(lat_a: float, lon_a: float, lat_b: float, lon_b: float) -> f
 
 def connect():
     """One resolver for host- and container-run alike (dev_env.py), which
-    also points OPENRAILROUTING_URL at localhost when run from the host —
+    also points the default graph URL at localhost when run from the host —
     the router and the database have to agree on which stack this is."""
     return psycopg2.connect(**db_config())
 
@@ -117,6 +117,19 @@ def reference_stations(cur, stop_infra_version: int) -> list[dict]:
     """One reference station per country: the catalog stop closest to
     that country's stop centroid.
 
+    Stops with KNOWN gauges are preferred over gauge-NULL ones at any
+    distance (ORDER BY gauges_mm IS NULL first): a NULL reference station
+    resolves standard-gauge and then fails to snap for exactly the reason
+    step 8 found no tracks — Albania's centroid-nearest stop was Tirana's
+    BUS terminal, and it silently cost the country all 19 of its
+    relations. One defective stop must not poison a country's whole row.
+
+    gauges_mm rides along: without it every reference station looks
+    gauge-unknown to the router, which then routes the whole matrix on
+    the standard-gauge profile and cannot snap a single broad-gauge
+    station (measured 2026-08-29: 102 of 302 pairs failing, every one of
+    them Finnish, Baltic, Ukrainian, Irish or Iberian).
+
     Both steps run in PostGIS on the pinned snapshot — the centroid over
     the country's own stop points, then a nearest-neighbour back onto a
     real station, so the reference is always somewhere a train can
@@ -127,7 +140,7 @@ def reference_stations(cur, stop_infra_version: int) -> list[dict]:
     cur.execute(
         """
         WITH catalog AS (
-            SELECT stop_id, stop_name, country_code,
+            SELECT stop_id, stop_name, country_code, gauges_mm,
                    ST_SetSRID(ST_MakePoint(stop_lon, stop_lat), 4326) AS geom,
                    stop_lat, stop_lon
               FROM input_params.stop_infrastructures
@@ -138,10 +151,11 @@ def reference_stations(cur, stop_infra_version: int) -> list[dict]:
           GROUP BY country_code
         )
         SELECT DISTINCT ON (c.country_code)
-               c.country_code, s.stop_id, s.stop_name, s.stop_lat, s.stop_lon
+               c.country_code, s.stop_id, s.stop_name, s.stop_lat, s.stop_lon,
+               s.gauges_mm
           FROM centroid c
           JOIN catalog s ON s.country_code = c.country_code
-      ORDER BY c.country_code, s.geom <-> c.geom
+      ORDER BY c.country_code, s.gauges_mm IS NULL, s.geom <-> c.geom
         """,
         (stop_infra_version,),
     )
@@ -266,11 +280,13 @@ def build(max_km: float, workers: int, dry_run: bool = False) -> int:
                             pair["station_a"]["stop_id"],
                             float(pair["station_a"]["stop_lat"]),
                             float(pair["station_a"]["stop_lon"]),
+                            pair["station_a"]["gauges_mm"],
                         ),
                         (
                             pair["station_b"]["stop_id"],
                             float(pair["station_b"]["stop_lat"]),
                             float(pair["station_b"]["stop_lon"]),
+                            pair["station_b"]["gauges_mm"],
                         ),
                     ],
                 )

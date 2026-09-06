@@ -51,6 +51,20 @@ def _env_str(name: str, default: str) -> str:
     return os.environ.get(name) or default
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_tuple(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    return tuple(part.strip() for part in raw.split(",") if part.strip())
+
+
 # =============================================================================
 # Engagement — api/proposal_engagement.py
 # =============================================================================
@@ -110,6 +124,58 @@ PROPOSALS_DEFAULT_LIMIT = _env_int("PROPOSALS_DEFAULT_LIMIT", 50)
 
 
 # =============================================================================
+# Expert timetable overrides — api/helpers/proposal_compute.py
+# =============================================================================
+
+# Bounds on what a caller may do to a timetable by hand. Operational caps,
+# not model assumptions: they exist so one request cannot post a thousand
+# add-ons or a departure three weeks out, and relaxing any of them
+# invalidates nothing already stored (a route computed under a tighter cap
+# stays valid under a looser one) — which is what puts them here rather
+# than in models/route/model.py's STANDARD VALUES.
+
+# Most minutes one leg may be padded by. A whole extra day on a single leg
+# is not a timetable, it is a typo.
+EXPERT_MAX_ADDON_MIN = _env_int("EXPERT_MAX_ADDON_MIN", 720)
+
+# Most add-ons one direction may carry — comfortably above any real stop
+# list, since the longest seeded corridors are a few dozen stops.
+EXPERT_MAX_ADDONS = _env_int("EXPERT_MAX_ADDONS", 100)
+
+# Furthest a "shift" departure override may displace the automatic value,
+# in either direction. Half a day: past that the caller means a different
+# departure, which is what the "absolute" mode is for.
+EXPERT_MAX_DEPARTURE_SHIFT_MIN = _env_int("EXPERT_MAX_DEPARTURE_SHIFT_MIN", 720)
+
+# Range an "absolute" departure may name, in minutes on the service-day
+# scale (models/utils.py::hhmm_to_min). Negative values are legitimate —
+# a mirrored return trip routinely departs "before" midnight of day 1 —
+# and the upper bound leaves room for a trip positioned on day 2.
+EXPERT_DEPARTURE_MIN_TIME = _env_int("EXPERT_DEPARTURE_MIN_TIME", -1440)
+EXPERT_DEPARTURE_MAX_TIME = _env_int("EXPERT_DEPARTURE_MAX_TIME", 2880)
+
+
+# =============================================================================
+# Response compression — main.py's Compress(app)
+# =============================================================================
+
+# The gallery's map sections are large GeoJSON, which compresses roughly an
+# order of magnitude; nothing in front of the app compresses (gunicorn cannot,
+# and the Caddy vhost in front of production has no `encode` directive), so
+# Flask is the only layer that covers every environment.
+#
+# Level 1, not flask-compress's default 6. Gunicorn runs SYNC workers (4 in the
+# dev stack, 2 in production), so a worker spending CPU on gzip is a worker
+# serving nobody — and on JSON of this shape level 1 already gets most of the
+# ratio for a fraction of the cost. Raise it only with a measurement in hand.
+COMPRESS_LEVEL = _env_int("COMPRESS_LEVEL", 1)
+
+# Responses below this many bytes are sent uncompressed — the round trip
+# through zlib is not worth it, and most of this API's responses are small.
+COMPRESS_MIN_SIZE = _env_int("COMPRESS_MIN_SIZE", 2048)
+
+
+# =============================================================================
 # Proposals statistics — api/proposal_stats.py
 # =============================================================================
 
@@ -138,6 +204,39 @@ PROPOSALS_STATS_RELATION_MAX_KM = float(
 
 
 # =============================================================================
+# Request log — api/request_log.py
+# =============================================================================
+
+# Off switches the hooks off entirely rather than making them cheap: a
+# deployment that does not want usage logging should not pay a branch per
+# request, and a local dev database filling with noise is a real nuisance.
+REQUEST_LOG_ENABLED = _env_bool("REQUEST_LOG_ENABLED", True)
+
+# Endpoint-name PREFIXES that are never logged. Both entries are traffic
+# that would dominate the table by volume while saying nothing about
+# usage: "health." is polled by the frontend's useApiHealth composable and
+# by container healthchecks, "gate." is hit on every page request by
+# Caddy's forward_auth and is testing scaffolding besides. Prefix rather
+# than exact match so a new view on either blueprint is excluded by
+# default — the safe direction for a table that grows per request.
+REQUEST_LOG_EXCLUDED_ENDPOINTS = _env_tuple(
+    "REQUEST_LOG_EXCLUDED_ENDPOINTS", ("health.", "gate.")
+)
+
+# User agents are long, repetitive and occasionally absurd. 400 covers
+# every real browser string with room to spare; the column is sized to
+# match, so raising this needs a migration.
+REQUEST_LOG_USER_AGENT_MAX_LEN = _env_int("REQUEST_LOG_USER_AGENT_MAX_LEN", 400)
+
+# Retention, enforced by scripts/purge_request_log.py on a cron — not by
+# the database, because it is a policy rather than a constraint. 90 days
+# is long enough to answer "how did usage change over a quarter" and
+# short enough to be a defensible answer to "why are you keeping this".
+# At roughly 200 bytes a row the table is unbounded without it.
+REQUEST_LOG_RETENTION_DAYS = _env_int("REQUEST_LOG_RETENTION_DAYS", 90)
+
+
+# =============================================================================
 # Effective-config boot log
 # =============================================================================
 
@@ -155,7 +254,11 @@ def log_effective_config() -> None:
         "POSTGRES_HOST": os.environ.get("POSTGRES_HOST"),
         "POSTGRES_PORT": os.environ.get("POSTGRES_PORT"),
         "POSTGRES_DB": os.environ.get("POSTGRES_DB"),
-        "OPENRAILROUTING_URL": os.environ.get("OPENRAILROUTING_URL"),
+        # Per-graph now; the boot line reports the DEFAULT graph, and
+        # dependencies.py logs the full key -> URL map on startup.
+        "OPENRAILROUTING_URL_INFRA_2026": os.environ.get(
+            "OPENRAILROUTING_URL_INFRA_2026"
+        ),
         "API_CONTAINER_PORT": os.environ.get("API_CONTAINER_PORT", "5000"),
         "ONTD_BOOTSTRAP": os.environ.get("ONTD_BOOTSTRAP", "auto"),
         "AUTH_EMAIL_DEV_MODE": os.environ.get("AUTH_EMAIL_DEV_MODE", "false"),
@@ -173,9 +276,20 @@ def log_effective_config() -> None:
         "GUEST_TTL_DAYS": GUEST_TTL_DAYS,
         "FEEDBACK_SUBJECT_MAX_LEN": FEEDBACK_SUBJECT_MAX_LEN,
         "PROPOSALS_DEFAULT_LIMIT": PROPOSALS_DEFAULT_LIMIT,
+        "COMPRESS_LEVEL": COMPRESS_LEVEL,
+        "COMPRESS_MIN_SIZE": COMPRESS_MIN_SIZE,
         "PROPOSALS_STATS_COUNTRY_TOP": PROPOSALS_STATS_COUNTRY_TOP,
         "PROPOSALS_STATS_COUNTRY_FLOP": PROPOSALS_STATS_COUNTRY_FLOP,
         "PROPOSALS_STATS_RELATION_MAX_KM": PROPOSALS_STATS_RELATION_MAX_KM,
+        "REQUEST_LOG_ENABLED": REQUEST_LOG_ENABLED,
+        "REQUEST_LOG_EXCLUDED_ENDPOINTS": ",".join(REQUEST_LOG_EXCLUDED_ENDPOINTS),
+        "REQUEST_LOG_USER_AGENT_MAX_LEN": REQUEST_LOG_USER_AGENT_MAX_LEN,
+        "REQUEST_LOG_RETENTION_DAYS": REQUEST_LOG_RETENTION_DAYS,
+        "EXPERT_MAX_ADDON_MIN": EXPERT_MAX_ADDON_MIN,
+        "EXPERT_MAX_ADDONS": EXPERT_MAX_ADDONS,
+        "EXPERT_MAX_DEPARTURE_SHIFT_MIN": EXPERT_MAX_DEPARTURE_SHIFT_MIN,
+        "EXPERT_DEPARTURE_MIN_TIME": EXPERT_DEPARTURE_MIN_TIME,
+        "EXPERT_DEPARTURE_MAX_TIME": EXPERT_DEPARTURE_MAX_TIME,
     }
     logger.info(
         "Effective config — wiring: %s",

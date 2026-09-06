@@ -7,7 +7,7 @@ from this file plus two derived CSV inputs: the calib seed CSVs
 (regenerated from the calibration notebook, not committed) and
 data/stop_seed_catalog.csv (the whole stop catalog, Drive-hosted and
 downloaded here when absent — produced by the stop classification
-pipeline, models/infrastructure/stops/step7_export_seed_stops.py).
+pipeline, models/infrastructure/stops/step10_export_seed_stops.py).
 Idempotent — each schema starts with DROP SCHEMA ... CASCADE.
 
 Run order:
@@ -30,24 +30,29 @@ scenario.scenarios concept for these (see db/schema.py and db/README.md). A
 version bump is a FULL-TABLE SNAPSHOT: editing one row duplicates every
 other row of that table forward into the new version number.
 
-Each of the three seeded scenarios (see the "scenario" section near the
-bottom of this file) pins its own version number, in lockstep, across all
-four tables — i.e. version 1 belongs entirely to the "2026 Base Line"
-scenario, version 2 to "2032 Base Line", version 3 to "2032 Base Line +
-Night Trains on HSR allowed":
+Each seeded scenario (see the "scenario" section near the bottom of this
+file, and models/scenarios/README.md for what they mean) pins its own
+version number, in lockstep, across all four tables. The routing graph is
+pinned the same way, via scenario.scenarios.routing_graph_key. Versions
+run as a grid — three operating conditions on each of two networks:
 
-  - version 1 — 2026 Base Line (deprecated): the original, lower-cost
-    baseline. Only track_infrastructures/track_infrastructure_defaults
-    carry deliberately different figures (DE's pre-correction rates,
-    a slightly lower EU-average default); stop_infrastructures and
-    stop_infrastructure_defaults are duplicated unchanged, since nothing
-    about stop charges differs for this scenario.
-  - version 2 — 2032 Base Line (current default, is_current_base=TRUE):
-    the current parameter set, with track_hsr_allowed=False everywhere
-    (night trains may not use HSR infrastructure).
-  - version 3 — 2032 Base Line + Night Trains on HSR allowed (the other
-    current scenario lineage head): identical to version 2 in every
-    field except track_hsr_allowed=True everywhere.
+  - versions 1, 2, 3 — Infra 2026 (today's network, routing graph
+    infra_2026). Version 1 is the live default (is_current_base=TRUE) with
+    track_hsr_allowed=False everywhere; version 2 flips that flag to True;
+    version 3 additionally converges track_buffer_quota_per toward a
+    best-practice benchmark (_with_optimized_timetable).
+  - version 4 — the superseded infra-2026 revision, outside the grid.
+  - versions 5, 6, 7 — Infra 2032 (the upgraded network, routing graph
+    infra_2032), carrying the same three operating conditions in the same
+    order.
+
+Only track_infrastructures/track_infrastructure_defaults carry different
+figures across the operating conditions; stop_infrastructures,
+stop_infrastructure_defaults and passage_charges are duplicated
+unchanged, since neither the HSR policy nor the timetable moves a stop or
+crossing charge. The 2032 half of the grid is a copy of the 2026 half in
+all five tables — an upgraded network is new track, and track lives in
+the routing graph, not here.
 
 Because each scenario owns a full, independent snapshot of all four
 tables, comparing data across scenarios must go through resolved values,
@@ -76,7 +81,7 @@ load_dotenv()
 from sql_loader import load_sql
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from db.schema import build_ddl
+from db.schema import STOP_NAME_LANGS, build_ddl
 
 DB_HOST = os.environ["POSTGRES_HOST"]
 DB_PORT = os.environ["POSTGRES_PORT"]
@@ -817,7 +822,38 @@ COUNTRIES = [
     {"country_code": "RS", "country_name": "Serbia"},
     {"country_code": "ME", "country_name": "Montenegro"},
     {"country_code": "AL", "country_name": "Albania"},
+    # Eastern and southeastern networks the ONTD catalogue reaches. Same
+    # placeholder treatment as the blocks above. Present so their stops seed
+    # at all (_build_stop_infrastructures() drops any catalog row whose
+    # country is not here) and so their track kilometres are attributed
+    # rather than falling to RailRouter's "UNK" sentinel, which
+    # _check_country_coverage() exempts — an unmodelled country is silently
+    # free of charges, which is worse than an approximate figure.
+    {"country_code": "UA", "country_name": "Ukraine"},
+    {"country_code": "TR", "country_name": "Türkiye"},
+    {"country_code": "MD", "country_name": "Moldova"},
+    {"country_code": "MK", "country_name": "North Macedonia"},
+    # Liechtenstein has no stop of ours and never will — it is 10 km of the
+    # Feldkirch–Buchs line through Schaan-Vaduz, i.e. the Arlberg corridor
+    # every Zürich–Wien night train runs. Without a row those kilometres
+    # carry no buffer quota and no track access charge, and nothing warns.
+    {"country_code": "LI", "country_name": "Liechtenstein"},
+    # Belarus and Russia are NOT modelled — no route may pass through
+    # either, under any routing mode (project decision; BLOCKED_COUNTRIES
+    # in models/route/model.py). These rows exist SOLELY to hold the
+    # border polygons that rail_router's request-time exclusion rules are
+    # built from (the graph-side `country` encoded value is not registered
+    # by this OpenRailRouting fork, so the block cannot be baked into the
+    # graph — see models/route/routing/docker/config.yml). Deliberately
+    # absent from _TRACK_INFRA_PLACEHOLDER_COUNTRIES below: their
+    # synthesized track rows keep has_row=False, so if the routing block
+    # ever failed, _check_country_coverage() would still 422 the route
+    # rather than silently pricing Belarusian kilometres. Do not "fix"
+    # either omission.
+    {"country_code": "BY", "country_name": "Belarus"},
+    {"country_code": "RU", "country_name": "Russia"},
 ]
+
 
 # Country border polygons — Marine Regions "Union of the ESRI Country
 # shapefile and the Exclusive Economic Zones" v4 (Flanders Marine
@@ -1050,15 +1086,60 @@ COACH_TYPE_CLASSES_RAW = [
 # ============================================================
 #
 # Three full-table snapshots, one per scenario (see the "scenario" section
-# near the bottom of this file):
-#   version 1 — 2026 Base Line (deprecated): the original, lower-cost
-#     figures, kept only as a frozen historical reference.
-#   version 2 — 2032 Base Line (current default): track_hsr_allowed=False
-#     everywhere — night trains may not use HSR infrastructure.
-#   version 3 — 2032 Base Line + Night Trains on HSR allowed: identical to
-#     version 2 except track_hsr_allowed=True everywhere.
+# near the bottom of this file, and models/scenarios/README.md for what
+# each one means and why):
+#   version 1 — Infra 2026: today's network, track_hsr_allowed=False
+#     everywhere (night trains may not use high-speed lines).
+#   version 2 — Infra 2026 + NT on HSR: identical to version 1 except
+#     track_hsr_allowed=True everywhere.
+#   version 3 — Infra 2026 + NT on HSR + optimised timetables: version 2
+#     plus a reduced track_buffer_quota_per (see _with_optimized_timetable).
 # A scenario pins one version NUMBER for the whole table, never a
 # per-country flag — see db/schema.py (scenario.scenarios).
+#
+# "2026" names the physical NETWORK, not the price year: every monetary
+# parameter here stays at the calibrated 2032 evaluation-year basis in all
+# three. The 2032 NETWORK scenarios carry the same figures and differ only
+# in the routing graph they pin (see the version grid below).
+
+
+# ------------------------------------------------------------------
+# Scenario version numbering
+# ------------------------------------------------------------------
+# One version number per scenario, shared across all five versioned
+# tables, and every table snapshots itself once per version — never a
+# partial diff (db/README.md). The same three OPERATING CONDITIONS are
+# snapshotted once per NETWORK, which makes the numbering a grid rather
+# than a sequence:
+#
+#                 baseline   + NT on HSR   + NT on HSR + opt. timetables
+#   infra_2026       1            2                   3
+#   infra_2032       5            6                   7
+#
+# Version 4 sits outside the grid: it is the SUPERSEDED revision of the
+# infra-2026 baseline (Germany's pre-correction track access rates), not
+# a fourth operating condition — see _TRACK_INFRA_V4_OVERRIDES.
+#
+# The two rows of the grid are byte-identical in these tables. What makes
+# a 2032 scenario different is the routing graph it pins, which is where
+# an upgraded network lives — see models/scenarios/README.md, including
+# the passage-charge gap that follows from copying the table forward
+# unchanged.
+INFRA_VERSIONS = (1, 2, 3, 4, 5, 6, 7)
+
+# The operating conditions each version carries. Version 4 mirrors
+# version 1 here; its own difference is applied separately.
+_HSR_ALLOWED_BY_VERSION = {
+    1: False,
+    2: True,
+    3: True,
+    4: False,
+    5: False,
+    6: True,
+    7: True,
+}
+_OPT_TIMETABLE_VERSIONS = frozenset({3, 7})
+_SUPERSEDED_VERSION = 4
 
 # 2032 default row. track_hsr_allowed is set per-version below (see
 # _build_track_infra_defaults) rather than baked in here.
@@ -1081,13 +1162,66 @@ _TRACK_INFRA_DEFAULT_2032 = {
     # in models/route/version.py before starting.
 }
 
-# 2026 deprecated row — a handful of values manipulated downward (same
-# spirit as DE's track_infrastructures pre-correction rates below), just
-# enough to make the two default rows distinguishable in the frozen
-# historical scenario. Everything not overridden here matches 2032.
-_TRACK_INFRA_DEFAULT_2026_OVERRIDES = {
-    "track_tac_eur_train_km": 4.20,
-}
+# --- Scenario shaping helpers ------------------------------------------
+#
+# Defined here, above the first caller: _build_track_infra_defaults()
+# runs at import time and the default row is built before the
+# per-country rows below.
+#
+# Optimised-timetable scenario (version 3)
+#
+# PROVISIONAL — the two constants below are an assumption, not yet a
+# calibration. models/scenarios/README.md states the derivation, the
+# weakness, and the re-calibration that settles them; nothing else in the
+# repository reads them.
+#
+# track_buffer_quota_per is not a pure timetable buffer. It is the whole
+# schedule supplement measured against the router's passage time, and it
+# contains four things: pathing and construction allowance, margin because
+# a night train does not hold priority, speed the train cannot sustain,
+# and dynamics the model misses (route_context/calib's
+# ROUTE_CONTEXT_CALIBRATION.md §3). Better timetabling acts on the first
+# two only, so this scenario must NOT scale the quota as a whole — doing
+# that would also optimise away the router's own error and produce
+# fictionally fast trains.
+#
+# What it does instead: converge each country toward a best-practice
+# benchmark. Austria's 0.113 (56 ONTD legs, the strongest-evidence low
+# value of the 2026-09-05 minimum-driving-time calibration) is a network
+# where night trains are already well-pathed AND the router models the
+# line speeds well, so nothing below it is reachable by timetabling alone.
+# A quarter of each country's excess above that floor is removed, and a
+# country already at or below the benchmark is left untouched. Re-based
+# from 0.35 on 2026-09-05 together with the calibration it tracks: the
+# quotas dropped from 0.35-0.71 to 0.11-0.39, and a benchmark left at 0.35
+# would have reduced nothing.
+OPT_TT_BENCHMARK_QUOTA = 0.12
+OPT_TT_EXCESS_REDUCTION = 0.25
+
+
+def _with_hsr_allowed(row: dict, hsr_allowed: bool) -> dict:
+    """Override track_hsr_allowed on a row, unless it's None (the 21
+    EU27-placeholder countries deliberately resolve every field from the
+    default row — see _TRACK_INFRA_CANONICAL_ROWS below)."""
+    if row["track_hsr_allowed"] is None:
+        return row
+    return {**row, "track_hsr_allowed": hsr_allowed}
+
+
+def _with_optimized_timetable(row: dict) -> dict:
+    """Reduce track_buffer_quota_per toward OPT_TT_BENCHMARK_QUOTA.
+
+    None is passed through for the same reason _with_hsr_allowed() passes
+    it through: a placeholder country resolves the field from the defaults
+    row, which this function has already been applied to.
+    """
+    quota = row["track_buffer_quota_per"]
+    if quota is None or quota <= OPT_TT_BENCHMARK_QUOTA:
+        return row
+    reduced = OPT_TT_BENCHMARK_QUOTA + (quota - OPT_TT_BENCHMARK_QUOTA) * (
+        1 - OPT_TT_EXCESS_REDUCTION
+    )
+    return {**row, "track_buffer_quota_per": round(reduced, 3)}
 
 
 def _build_track_infra_defaults() -> list[dict]:
@@ -1107,23 +1241,31 @@ def _build_track_infra_defaults() -> list[dict]:
     ONTD-weighted schedule supplement and the median terrain band — the
     fallback every placeholder country resolves to, since those rows are left
     NULL on purpose.
+
+    The versions differ exactly as the per-country rows do: HSR permission
+    and the optimised-timetable buffer, per the version grid above.
+    Everything else is byte-identical across all seven — including v4,
+    the superseded infra-2026 revision, which differs from v1 only in
+    Germany's own row and so takes a plain copy of the fallback.
     """
-    v2032 = {
+    base = {
         **_TRACK_INFRA_DEFAULT_2032,
         **TAC_DEFAULT,
         **ENERGY_DEFAULT,
         **FACILITY_DEFAULT,
         **ROUTE_CONTEXT_DEFAULT,
     }
-    return [
-        {
-            **v2032,
-            **_TRACK_INFRA_DEFAULT_2026_OVERRIDES,
-            "track_infra_default_version": 1,
-        },
-        {**v2032, "track_hsr_allowed": False, "track_infra_default_version": 2},
-        {**v2032, "track_hsr_allowed": True, "track_infra_default_version": 3},
-    ]
+    rows = []
+    for version in INFRA_VERSIONS:
+        # Set directly rather than through _with_hsr_allowed(): the
+        # fallback row starts without a track_hsr_allowed to flip (see
+        # _TRACK_INFRA_DEFAULT_2032), and its value is never NULL — it IS
+        # what a country row's NULL resolves to.
+        row = {**base, "track_hsr_allowed": _HSR_ALLOWED_BY_VERSION[version]}
+        if version in _OPT_TIMETABLE_VERSIONS:
+            row = _with_optimized_timetable(row)
+        rows.append({**row, "track_infra_default_version": version})
+    return rows
 
 
 TRACK_INFRA_DEFAULTS = _build_track_infra_defaults()
@@ -1224,6 +1366,13 @@ _TRACK_INFRA_PLACEHOLDER_COUNTRIES = (
     "RS",
     "ME",
     "AL",
+    # Eastern/southeastern networks and the Arlberg transit country — see
+    # the matching block in COUNTRIES above.
+    "UA",
+    "TR",
+    "MD",
+    "MK",
+    "LI",
 )
 
 _TRACK_INFRA_PLACEHOLDER_FIELDS = dict.fromkeys(
@@ -1365,18 +1514,34 @@ def _apply_facility_calibration(rows: list[dict]) -> None:
 _apply_facility_calibration(_TRACK_INFRA_CANONICAL_ROWS)
 
 
+# Placeholder countries whose ROUTE-CONTEXT fields are nevertheless filled
+# from the calibration. Their money fields (TAC, parking, energy, facility)
+# stay None and keep resolving from the defaults row; what they gain is
+# their own schedule supplement, terrain, dwell floor and HSR flag — and,
+# through the last of these, they take part in the HSR scenarios like any
+# calibrated country. Chosen 2026-09-05 because a route through any of them
+# was silently running on the European default supplement while the
+# calibration document listed a country-specific value: the Wien-Paris
+# check found the same defect one layer up, and a Wien-Roma or
+# Berlin-Warszawa comparison would have been wrong by the same mechanism.
+_ROUTE_CONTEXT_FILLED_PLACEHOLDERS = frozenset(
+    ("IT", "PL", "CZ", "NL", "RO", "HU", "HR", "SK")
+)
+
+
 def _apply_route_context_calibration(rows: list[dict]) -> None:
     """Merge the calibrated route-context values onto the canonical country
     rows, in place.
 
-    The placeholder countries are skipped on purpose. Their rows carry None in
-    every one of these fields as a deliberate fixture — they exist to prove
-    that field-by-field resolution from the defaults row works, and
+    The placeholder countries are skipped on purpose, except for the eight
+    in _ROUTE_CONTEXT_FILLED_PLACEHOLDERS. The others carry None in every
+    one of these fields as a deliberate fixture — they exist to prove that
+    field-by-field resolution from the defaults row works, and
     _with_hsr_allowed() reads a None track_hsr_allowed as the marker for
-    "leave this row alone" when building the v1 and v3 snapshots. Filling them
-    would both destroy the fixture and silently flip those countries onto
-    scenario-specific HSR permissions they were never meant to have. They
-    resolve to the defaults row, which is itself calibrated.
+    "leave this row alone" when building the v1 and v3 snapshots. Filling
+    them would both destroy the fixture and silently flip those countries
+    onto scenario-specific HSR permissions they were never meant to have.
+    They resolve to the defaults row, which is itself calibrated.
     """
     calibrated = {
         _TAC_COUNTRY_ALIASES.get(cc, cc): values
@@ -1388,7 +1553,10 @@ def _apply_route_context_calibration(rows: list[dict]) -> None:
     }
     for row in rows:
         cc = row["country_code"]
-        if cc in _TRACK_INFRA_PLACEHOLDER_COUNTRIES or cc not in calibrated:
+        if cc not in calibrated or (
+            cc in _TRACK_INFRA_PLACEHOLDER_COUNTRIES
+            and cc not in _ROUTE_CONTEXT_FILLED_PLACEHOLDERS
+        ):
             continue
         row.update(calibrated[cc])
         if cc in change_logs:
@@ -1408,84 +1576,70 @@ _apply_route_context_calibration(_TRACK_INFRA_CANONICAL_ROWS)
 for _row in _TRACK_INFRA_CANONICAL_ROWS:
     _row.setdefault("change_log", None)
 
-# Version 1 (2026 Base Line, deprecated) = the same full snapshot, except
-# DE still carries its original, lower (pre-correction) rates — exactly
-# the full-table-snapshot invariant in practice. track_hsr_allowed is
-# forced True on every non-null row, matching the pre-2032-policy figures.
-# The pre-correction DE rates. track_tac_eur_train_km is display only —
-# since the cost model prices from the components, the historical snapshot
-# has to move a COMPONENT to differ in cost at all, which is what
-# track_tac_b_night does here (Germany levies no day rate). Scaled by the
-# same 3.10/5.40 ratio the flat figure carries, so the two tell the same
-# story rather than drifting apart: the 2026 line is the cheaper,
-# pre-correction world.
-_V1_DE_TAC_RATIO = 3.10 / 5.40
 
-_TRACK_INFRA_V1_OVERRIDES = {
+# Version 4 — the SUPERSEDED revision of the infra-2026 lineage: identical
+# to v1 except Germany still carries its pre-correction track access rates.
+# Not a fourth scenario a user can pick (is_current_scenario=FALSE, so it
+# lands in the API's historical_scenarios group); it is the lineage's own
+# history, and the only snapshot in the seed whose TARIFFS differ from the
+# base. That makes it what the scenario-override tests pin to — the HSR
+# and optimised-timetable scenarios differ in routing and timetabling, not
+# in charges, so neither can prove that pinning a scenario_id actually
+# swaps a cost parameter.
+#
+# track_tac_eur_train_km is display only — the cost model prices from the
+# components, so this snapshot has to move a COMPONENT to differ in cost at
+# all, which is what track_tac_b_night does (Germany levies no day rate).
+# Scaled by the same 3.10/5.40 ratio the flat figure carries, so the two
+# tell one story rather than drifting apart.
+_V4_DE_TAC_RATIO = 3.10 / 5.40
+
+_TRACK_INFRA_V4_OVERRIDES = {
     "DE": {
         "track_tac_eur_train_km": 3.10,
-        # The 2026 snapshot keeps its own schedule supplement: the calibrated
-        # value comes from a 2026 ONTD extraction and describes today's
-        # network, not the historical one this version stands for.
-        "track_buffer_quota_per": 0.45,
         "track_tac_b_night": round(
-            TAC_BY_COUNTRY["DE"]["track_tac_b_night"] * _V1_DE_TAC_RATIO, 8
+            TAC_BY_COUNTRY["DE"]["track_tac_b_night"] * _V4_DE_TAC_RATIO, 8
         ),
     },
 }
 
 
-def _with_hsr_allowed(row: dict, hsr_allowed: bool) -> dict:
-    """Override track_hsr_allowed on a row, unless it's None (the 21
-    EU27-placeholder countries deliberately resolve every field from the
-    default row — see _TRACK_INFRA_CANONICAL_ROWS above)."""
-    if row["track_hsr_allowed"] is None:
-        return row
-    return {**row, "track_hsr_allowed": hsr_allowed}
+def _build_track_infrastructures() -> list[dict]:
+    """Every country's row at every version — one complete snapshot per
+    scenario, per the version grid at the top of this section.
 
-
-def _build_track_infrastructures_v1() -> list[dict]:
+    Versions 1-3 and 5-7 are the same three operating conditions applied
+    to the same canonical rows, so the 2026 and 2032 halves of the grid
+    come out identical here: a 2032 scenario differs by the routing graph
+    it pins, not by a value in this table. Version 4 is the superseded
+    infra-2026 revision — version 1 plus Germany's pre-correction rates.
+    """
     rows = []
-    for row in _TRACK_INFRA_CANONICAL_ROWS:
-        v1_row = {**_with_hsr_allowed(row, True), "track_infra_version": 1}
-        v1_row.update(_TRACK_INFRA_V1_OVERRIDES.get(row["country_code"], {}))
-        rows.append(v1_row)
+    for version in INFRA_VERSIONS:
+        for row in _TRACK_INFRA_CANONICAL_ROWS:
+            built = _with_hsr_allowed(row, _HSR_ALLOWED_BY_VERSION[version])
+            if version in _OPT_TIMETABLE_VERSIONS:
+                built = _with_optimized_timetable(built)
+            built = {**built, "track_infra_version": version}
+            if version == _SUPERSEDED_VERSION:
+                built.update(_TRACK_INFRA_V4_OVERRIDES.get(row["country_code"], {}))
+            rows.append(built)
     return rows
 
 
-def _build_track_infrastructures_v2() -> list[dict]:
-    """2032 Base Line — night trains may not use HSR infrastructure."""
-    return [
-        {**_with_hsr_allowed(row, False), "track_infra_version": 2}
-        for row in _TRACK_INFRA_CANONICAL_ROWS
-    ]
-
-
-def _build_track_infrastructures_v3() -> list[dict]:
-    """2032 Base Line + Night Trains on HSR allowed — identical to v2
-    except every non-null track_hsr_allowed flips to True."""
-    return [
-        {**_with_hsr_allowed(row, True), "track_infra_version": 3}
-        for row in _TRACK_INFRA_CANONICAL_ROWS
-    ]
-
-
-TRACK_INFRASTRUCTURES = (
-    _build_track_infrastructures_v1()
-    + _build_track_infrastructures_v2()
-    + _build_track_infrastructures_v3()
-)
+TRACK_INFRASTRUCTURES = _build_track_infrastructures()
 
 # ============================================================
 # stop infrastructure
 # ============================================================
 #
 # Three full-table snapshots, one per scenario — same lockstep numbering
-# as track infrastructure above (1 = 2026 Base Line, 2 = 2032 Base Line,
-# 3 = 2032 Base Line + HSR allowed). Stop charges don't depend on the HSR
-# policy, so all three versions carry byte-identical values; only the
-# version number differs, satisfying "each scenario holds its own
-# infrastructure rows" without inventing an artificial value difference.
+# as track infrastructure above (1 = Infra 2026, 2 = + NT on HSR,
+# 3 = + optimised timetables). Stop charges depend on neither the HSR
+# policy nor the timetable, so all three versions carry byte-identical
+# values; only the version number differs, satisfying "each scenario holds
+# its own infrastructure rows" without inventing an artificial value
+# difference.
 
 _STOP_INFRA_DEFAULT_CANONICAL = [
     # global default (country_code NULL)
@@ -1495,7 +1649,7 @@ _STOP_INFRA_DEFAULT_CANONICAL = [
 
 # The whole stop catalog: every stop the app can plan through. A derived
 # artifact, Drive-hosted (not in the repo — no large data in git):
-# regenerated by models/infrastructure/stops/step7_export_seed_stops.py,
+# regenerated by models/infrastructure/stops/step10_export_seed_stops.py,
 # which unions the current night train stops (step 5) with the manual
 # metropolitan/tourism/ferry additions (step 6), then uploaded to Drive as
 # a new version of the same file. The seed downloads it once into
@@ -1512,9 +1666,12 @@ STOP_SEED_FILE_ID = os.environ.get(
     "STOP_SEED_FILE_ID", "1QfkYrX5Fc5N0JqFLx5FWEaaZ6z0YCM6c"
 )
 
-# Contract with step7_export_seed_stops.py's SEED_COLUMNS — also the
+# Contract with step10_export_seed_stops.py's output columns — also the
 # validation gate for downloads (a Drive permission error returns an HTML
-# page, which must not be seeded or cached as if it were the CSV).
+# page, which must not be seeded or cached as if it were the CSV). Exact
+# match, full width: catalog and seed move in lockstep, and every column
+# is consumed (the interim prefix check from the schema transition is
+# retired).
 _STOP_SEED_CSV_COLUMNS = [
     "stop_id",
     "stop_name",
@@ -1523,11 +1680,34 @@ _STOP_SEED_CSV_COLUMNS = [
     "stop_lat",
     "stop_lon",
     "stop_charge_eur",
+    "stop_charge_vat_rate_per",
+    "stop_charge_incl_vat_eur",
+    "stop_charge_basis",
+    "stop_charge_price_basis_year",
+    "stop_charge_class",
+    "stop_charge_source",
+    "provenance",
+    # Which routing-graph infrastructure version(s) the stop belongs to
+    # ("infra-2026;infra-2032", "infra-2032", "infra-2026"), tagged in step 6
+    # of the stop pipeline. Read for the header contract only: every stop
+    # still seeds into every snapshot version below. Consuming it — a stop
+    # that exists only in the 2032 graph must not be selectable against the
+    # 2026 one — is a separate work package.
+    "infra_versions",
+    "name_latin",
+    "name_ascii",
+    "uic_ref",
+    *(f"country_{lang}" for lang in STOP_NAME_LANGS),
+    "city",
+    "city_osm_id",
+    *(f"city_{lang}" for lang in STOP_NAME_LANGS),
+    "gauges",
+    "gauge_source",
 ]
 
 _STOP_SEED_CHANGE_LOG = (
     "seeded from the stop classification pipeline "
-    "(models/infrastructure/stops, step 7) — charge resolves via country/"
+    "(models/infrastructure/stops, step 10) — charge resolves via country/"
     "global default until real station charge data lands"
 )
 
@@ -1538,11 +1718,85 @@ def _stop_seed_warning(reason: str) -> None:
         f"  #  WARNING: stop seed CSV unavailable — {reason}.\n"
         "  #  Seeding NO stops: every route will report unmatched stops\n"
         "  #  and most planning tests will fail. Regenerate with\n"
-        "  #  models/infrastructure/stops/step7_export_seed_stops.py\n"
+        "  #  models/infrastructure/stops/step10_export_seed_stops.py\n"
         "  #  (upload to Drive) or place the file at\n"
         "  #  db/dev/data/stop_seed_catalog.csv.\n"
         "  ############################################################\n"
     )
+
+
+# ---------------------------------------------------------------------------
+# route_cache — precomputed route segments (optional, one file per graph)
+# ---------------------------------------------------------------------------
+# Produced by scripts/precompute_route_segments.py (--finalize) as
+# route_segments_<graph_key>.csv.gz; local under db/dev/data/, or Drive-
+# hosted with ROUTE_SEGMENTS_FILE_ID_<KEY> (the graph naming contract in
+# models/route/routing/rail_router.py). Optional by design: no file ->
+# empty cache -> every pair live-routes once and stores itself. Dev only:
+# servers load via the script's --load; a dev reseed drops route_cache and
+# starts from these files again.
+ROUTE_SEGMENTS_DIR = Path(__file__).resolve().parent / "data"
+ROUTE_SEGMENTS_GLOB = "route_segments_*.csv.gz"
+_ROUTE_SEGMENTS_ID_PREFIX = "ROUTE_SEGMENTS_FILE_ID_"
+
+
+def _download_route_segments(graph_key: str) -> Path | None:
+    """Fetch the Drive-hosted file for one graph if an id is configured —
+    soft-failing like _download_stop_seed()."""
+    import urllib.request
+
+    file_id = os.environ.get(f"{_ROUTE_SEGMENTS_ID_PREFIX}{graph_key.upper()}", "")
+    if not file_id:
+        return None
+    target = ROUTE_SEGMENTS_DIR / f"route_segments_{graph_key}.csv.gz"
+    url = (
+        "https://drive.usercontent.google.com/download"
+        f"?id={file_id}&export=download&confirm=t"
+    )
+    print(f"  route segments for '{graph_key}' — downloading (id={file_id})...")
+    try:
+        with urllib.request.urlopen(url, timeout=600) as resp:
+            data = resp.read()
+    except Exception as e:
+        print(f"  download failed ({type(e).__name__}: {e}).")
+        return None
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+    return target
+
+
+def seed_route_segments() -> None:
+    """Bulk-load every route_segments_<graph_key>.csv.gz present (plus any
+    Drive-configured graph) through RouteSegmentRepository.load_csv() —
+    its own connection, so this runs after the main commit like
+    seed_example_proposal()."""
+    from adapters.route_segment_repository import RouteSegmentRepository
+
+    configured = {
+        var[len(_ROUTE_SEGMENTS_ID_PREFIX) :].lower()
+        for var, value in os.environ.items()
+        if var.startswith(_ROUTE_SEGMENTS_ID_PREFIX) and value.strip()
+    }
+    for graph_key in configured:
+        if not (ROUTE_SEGMENTS_DIR / f"route_segments_{graph_key}.csv.gz").is_file():
+            _download_route_segments(graph_key)
+
+    files = sorted(ROUTE_SEGMENTS_DIR.glob(ROUTE_SEGMENTS_GLOB))
+    if not files:
+        print("  route_cache: no route_segments_*.csv.gz — cache fills from traffic.")
+        return
+    repo = RouteSegmentRepository()
+    try:
+        for path in files:
+            graph_key = path.name[len("route_segments_") : -len(".csv.gz")]
+            meta_path = path.with_name(f"route_segments_{graph_key}.meta.json")
+            if meta_path.is_file():
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                repo.sync_graph_import(graph_key, meta.get("import_date"))
+            inserted = repo.load_csv(path, graph_key)
+            print(f"  route_cache [{graph_key}]: {inserted} segment(s) loaded.")
+    finally:
+        repo.close()
 
 
 def _download_stop_seed() -> bool:
@@ -1589,6 +1843,36 @@ def _parse_optional_float(value):
     return float(text) if text else None
 
 
+def _parse_optional_str(value):
+    text = (value or "").strip()
+    return text or None
+
+
+def _parse_gauges(value, stop_id):
+    """';'-separated gauge list -> Postgres INTEGER[] literal ('{1435,1520}'),
+    or None when the pipeline found no usable tracks. A literal string, not a
+    Python list, deliberately: insert_rows() JSON-dumps every list value (the
+    JSONB convention the proposal tables rely on), which would send '[1435]'
+    — not valid array syntax. A str passes through untouched and Postgres
+    casts it against the column type; reads come back as real lists either
+    way. Non-numeric leftovers (OSM words like 'broad' that step 8 keeps
+    visible rather than guessing) are dropped with a warning — a word cannot
+    be compared against a composition's gauge capability."""
+    text = (value or "").strip()
+    if not text:
+        return None
+    gauges = []
+    for part in text.split(";"):
+        part = part.strip()
+        if part.isdigit():
+            gauges.append(int(part))
+        elif part:
+            print(f"  {stop_id}: non-numeric gauge {part!r} dropped from seed.")
+    if not gauges:
+        return None
+    return "{" + ",".join(str(g) for g in sorted(gauges)) + "}"
+
+
 def _read_stop_seed() -> list[dict]:
     if not STOP_SEED_CSV.is_file() and not _download_stop_seed():
         return []
@@ -1630,6 +1914,40 @@ def _read_stop_seed() -> list[dict]:
             # country/global default. Only stops listed in the pipeline's
             # tracked station_charges.csv carry a figure.
             "stop_charge_eur": _parse_optional_float(row["stop_charge_eur"]),
+            # The charge's provenance travels with it: without these a
+            # published figure cannot say which document it came from.
+            "stop_charge_vat_rate_per": _parse_optional_float(
+                row["stop_charge_vat_rate_per"]
+            ),
+            "stop_charge_incl_vat_eur": _parse_optional_float(
+                row["stop_charge_incl_vat_eur"]
+            ),
+            "stop_charge_basis": _parse_optional_str(row["stop_charge_basis"]),
+            "stop_charge_price_basis_year": (
+                int(row["stop_charge_price_basis_year"])
+                if row["stop_charge_price_basis_year"].strip()
+                else None
+            ),
+            "stop_charge_class": _parse_optional_str(row["stop_charge_class"]),
+            "stop_charge_source": _parse_optional_str(row["stop_charge_source"]),
+            "stop_provenance": row["provenance"],
+            "name_latin": row["name_latin"],
+            "name_ascii": row["name_ascii"],
+            "uic_ref": _parse_optional_str(row["uic_ref"]),
+            **{f"country_{lang}": row[f"country_{lang}"] for lang in STOP_NAME_LANGS},
+            # City is empty for rural halts beyond any city/town radius; the
+            # localized names are then empty with it.
+            "city": _parse_optional_str(row["city"]),
+            "city_osm_id": (
+                int(row["city_osm_id"]) if row["city_osm_id"].strip() else None
+            ),
+            **{
+                f"city_{lang}": _parse_optional_str(row[f"city_{lang}"])
+                for lang in STOP_NAME_LANGS
+            },
+            # Array literal string (see _parse_gauges); None stays NULL.
+            "gauges_mm": _parse_gauges(row["gauges"], row["stop_id"]),
+            "gauge_evidence": _parse_optional_str(row["gauge_source"]),
             "change_log": _STOP_SEED_CHANGE_LOG,
         }
         for row in catalog
@@ -1641,7 +1959,7 @@ def _read_stop_seed() -> list[dict]:
 def _build_stop_infra_defaults() -> list[dict]:
     return [
         {**row, "stop_infra_default_version": version}
-        for version in (1, 2, 3)
+        for version in INFRA_VERSIONS
         for row in _STOP_INFRA_DEFAULT_CANONICAL
     ]
 
@@ -1652,7 +1970,7 @@ def _build_stop_infrastructures() -> list[dict]:
     all_stops = _read_stop_seed()
     return [
         {"change_log": None, **row, "stop_infra_version": version}
-        for version in (1, 2, 3)
+        for version in INFRA_VERSIONS
         for row in all_stops
     ]
 
@@ -1669,9 +1987,6 @@ STOP_INFRASTRUCTURES = _build_stop_infrastructures()
 # calibration — they keep the established defaults until the energy
 # model calibration workstream lands.
 _COMP_ENERGY_AND_TIMES = dict(
-    composition_type_energy_factor_weight=0.000168,
-    composition_type_energy_factor_speed=0.015123,
-    composition_type_energy_factor_terrain=0.034545,
     composition_type_min_boarding_time="00:02:00",
     composition_type_min_alighting_time="00:02:00",
 )
@@ -2009,20 +2324,39 @@ def seed_composition_type_coaches(cur):
 # Each scenario pins its own version number, in lockstep, across all four
 # infrastructure tables — every scenario row is a complete, self-contained
 # pin, no NULLs, and no table is shared/inherited between scenarios (see
-# the versioning note at the top of this file). Compositions/coach
-# types/operators/composition references aren't part of a scenario at
-# all — see db/schema.py (scenario.scenarios).
+# the versioning note at the top of this file). routing_graph_key pins the
+# routing graph the same way — a new graph arrives as NEW scenario rows,
+# never by repointing a pinned one. Compositions/coach types/operators/
+# composition references aren't part of a scenario at all — see
+# db/schema.py (scenario.scenarios).
 #
-# Three scenarios, one scenario_key each (three independent lineages, not
-# forks of one another):
-#   1. "2026-baseline"                — 2026 Base Line (deprecated: not
-#      the base, not a current lineage head — a frozen historical
-#      reference kept only for version-snapshot regression tests).
-#   2. "base"                         — 2032 Base Line (the live default;
-#      is_current_base=TRUE).
-#   3. "2032-baseline-hsr-allowed"    — 2032 Base Line + Night Trains on
-#      HSR allowed (a second current lineage head; is_current_scenario=TRUE,
-#      is_current_base=FALSE).
+# Six selectable scenarios, one scenario_key each (six independent
+# lineages, not forks of one another): the same three operating
+# conditions on each of the two networks, per the version grid above.
+# models/scenarios/README.md is the reference for what each represents
+# and how the descriptions below were written.
+#   1. "infra-2026"             — today's network, no HSR access (the live
+#      default; is_current_base=TRUE).
+#   2. "infra-2026-hsr"         — + night trains allowed on high-speed lines.
+#   3. "infra-2026-hsr-opt-tt"  — + optimised timetables (reduced schedule
+#      supplement).
+#   5. "infra-2032"             — the upgraded network, no HSR access.
+#   6. "infra-2032-hsr"         — + night trains on high-speed lines.
+#   7. "infra-2032-hsr-opt-tt"  — + optimised timetables.
+# All but the first are current lineage heads (is_current_scenario=TRUE,
+# is_current_base=FALSE).
+#
+# Plus one SUPERSEDED row on the "infra-2026" key (version 4,
+# is_current_scenario=FALSE): the lineage's pre-correction German rates.
+# Not user-selectable — see _TRACK_INFRA_V4_OVERRIDES for why it exists.
+#
+# DEPLOYMENT COUPLING: the three 2032 rows pin routing_graph_key
+# "infra_2032", so a deployment that does not run that OpenRailRouting
+# instance cannot compute them — the API answers 503
+# routing_graph_not_configured rather than routing on the wrong network
+# (api/helpers/dependencies.py, api/proposal_calc.py). Enabling the
+# instance is three lines in backend/docker/.env; see
+# models/route/routing/README.md.
 
 # ============================================================
 # passage charges
@@ -2030,9 +2364,15 @@ def seed_composition_type_coaches(cur):
 #
 # Three identical full-table snapshots, one per scenario version, in the
 # same lockstep numbering as the track and stop tables. Identical because
-# no seeded scenario varies a crossing charge — the versioning contract
+# no 2026 scenario varies a crossing charge — the versioning contract
 # still requires a complete snapshot per version rather than a shared row
 # (see db/schema.py: scenario.scenarios).
+#
+# KNOWN GAP: the Infra 2032 versions (5-7) are copies of the 2026 ones,
+# so the fixed links that network adds carry no charge. Routes crossing
+# them are therefore priced as if the crossing were free, and 2032 costs
+# are understated by exactly that amount. Closing it needs a sourced
+# tariff per new crossing, not a placeholder — models/scenarios/README.md.
 
 PASSAGE_CHARGES = [
     {
@@ -2043,7 +2383,7 @@ PASSAGE_CHARGES = [
         "passage_geom": row["passage_geom"],
         "passage_version": version,
     }
-    for version in (1, 2, 3)
+    for version in INFRA_VERSIONS
     for row in PASSAGE_CHARGES_RAW
 ]
 
@@ -2073,48 +2413,78 @@ def seed_passage_charges(cur) -> None:
         )
 
 
-HISTORICAL_SCENARIO_2026 = {
-    "scenario_key": "2026-baseline",
-    "scenario_name": "2026 Base Line",
-    "description": "Deprecated historical baseline — pre-2032-correction "
-    "parameter set. Not in active use: not the live base, and not the "
-    "head of a current what-if lineage. Kept as a frozen reference so "
-    "older evaluations stay reproducible.",
+BASE_SCENARIO = {
+    "scenario_key": "infra-2026",
+    "scenario_name": "Infra 2026",
+    "description": "Today's rail network, as it exists now. Night trains "
+    "run on conventional lines only — they are not permitted on "
+    "high-speed lines — and their timetables carry the same generous "
+    "padding real night trains carry today. This is the realistic "
+    "baseline: what a night train would cost and how long it would take "
+    "if it started running this year.",
     "change_log": "Initial seed.",
     "editor": "david",
-    "is_current_base": False,
-    "is_current_scenario": False,
+    "is_current_base": True,
+    "is_current_scenario": True,
     "track_infrastructures_version": 1,
     "track_infrastructure_defaults_version": 1,
     "stop_infrastructures_version": 1,
     "stop_infrastructure_defaults_version": 1,
     "passage_charges_version": 1,
+    "routing_graph_key": "infra_2026",
 }
 
-BASE_SCENARIO = {
-    "scenario_key": "base",
-    "scenario_name": "2032 Base Line",
-    "description": "Live default parameter set — track_hsr_allowed=False "
-    "everywhere (night trains may not use HSR infrastructure).",
+HSR_SCENARIO = {
+    "scenario_key": "infra-2026-hsr",
+    "scenario_name": "Infra 2026 + night trains on high-speed lines",
+    "description": "Today's rail network, but night trains are allowed to "
+    "use high-speed lines. Nothing new is built — this is a policy "
+    "change, asking what happens if infrastructure managers open existing "
+    "high-speed track to night trains. Journeys get shorter wherever a "
+    "high-speed line runs alongside the conventional route.",
     "change_log": "Initial seed.",
     "editor": "david",
-    "is_current_base": True,
+    "is_current_base": False,
     "is_current_scenario": True,
     "track_infrastructures_version": 2,
     "track_infrastructure_defaults_version": 2,
     "stop_infrastructures_version": 2,
     "stop_infrastructure_defaults_version": 2,
     "passage_charges_version": 2,
+    "routing_graph_key": "infra_2026",
 }
 
-HSR_SCENARIO = {
-    "scenario_key": "2032-baseline-hsr-allowed",
-    "scenario_name": "2032 Base Line + Night Trains on HSR allowed",
-    "description": "A second current lineage, independent of 'base': "
-    "identical to the 2032 Base Line in every field except "
-    "track_hsr_allowed=True everywhere. Own full snapshot of all five "
-    "tables (version 3), not a partial diff against 'base'.",
-    "change_log": "Initial seed.",
+SUPERSEDED_BASE_REVISION = {
+    "scenario_key": "infra-2026",
+    "scenario_name": "Infra 2026 (superseded revision)",
+    "description": "An earlier revision of the Infra 2026 baseline, kept "
+    "so evaluations published before the German track access charges were "
+    "corrected stay reproducible. Superseded — not selectable, and not "
+    "the basis of any new evaluation.",
+    "change_log": "Pre-correction German track access rates.",
+    "editor": "david",
+    "is_current_base": False,
+    "is_current_scenario": False,
+    "track_infrastructures_version": 4,
+    "track_infrastructure_defaults_version": 4,
+    "stop_infrastructures_version": 4,
+    "stop_infrastructure_defaults_version": 4,
+    "passage_charges_version": 4,
+    "routing_graph_key": "infra_2026",
+}
+
+OPT_TT_SCENARIO = {
+    "scenario_key": "infra-2026-hsr-opt-tt",
+    "scenario_name": "Infra 2026 + night trains on high-speed lines "
+    "+ optimised timetables",
+    "description": "As above, and night trains additionally receive "
+    "well-designed paths. Real night-train timetables carry large margins "
+    "today because a night train rarely holds priority and is routinely "
+    "planned around other traffic. This scenario asks how much time the "
+    "same trains on the same tracks would save if planners scheduled them "
+    "as carefully as the best-performing networks already do.",
+    "change_log": "Initial seed. Schedule supplement provisional — see "
+    "models/scenarios/README.md.",
     "editor": "david",
     "is_current_base": False,
     "is_current_scenario": True,
@@ -2123,7 +2493,93 @@ HSR_SCENARIO = {
     "stop_infrastructures_version": 3,
     "stop_infrastructure_defaults_version": 3,
     "passage_charges_version": 3,
+    "routing_graph_key": "infra_2026",
 }
+
+# --- Infra 2032 -------------------------------------------------------
+# The same three operating conditions on the upgraded network. The
+# infrastructure tables they pin (versions 5-7) are copies of 1-3: what
+# separates these rows from their 2026 counterparts is routing_graph_key,
+# because an upgraded network is new track, and track lives in the
+# routing graph rather than in input_params.
+
+BASE_SCENARIO_2032 = {
+    "scenario_key": "infra-2032",
+    "scenario_name": "Infra 2032",
+    "description": "The rail network as it is expected to exist in 2032, "
+    "including the fixed links and line upgrades now under construction "
+    "or firmly committed. Night trains still run on conventional lines "
+    "only, and their timetables still carry the generous padding real "
+    "night trains carry today. What changes against Infra 2026 is the "
+    "track itself: journeys that take a long detour today become direct.",
+    "change_log": "Initial seed. Mirrors Infra 2026 on the infra_2032 "
+    "routing graph; crossing charges copied unchanged — see "
+    "models/scenarios/README.md.",
+    "editor": "david",
+    "is_current_base": False,
+    "is_current_scenario": True,
+    "track_infrastructures_version": 5,
+    "track_infrastructure_defaults_version": 5,
+    "stop_infrastructures_version": 5,
+    "stop_infrastructure_defaults_version": 5,
+    "passage_charges_version": 5,
+    "routing_graph_key": "infra_2032",
+}
+
+HSR_SCENARIO_2032 = {
+    "scenario_key": "infra-2032-hsr",
+    "scenario_name": "Infra 2032 + night trains on high-speed lines",
+    "description": "The 2032 network, with night trains additionally "
+    "allowed to use high-speed lines. The same policy change as in the "
+    "2026 equivalent, asked of a network that by then has more high-speed "
+    "line to open up.",
+    "change_log": "Initial seed. Mirrors Infra 2026 + NT on HSR on the "
+    "infra_2032 routing graph.",
+    "editor": "david",
+    "is_current_base": False,
+    "is_current_scenario": True,
+    "track_infrastructures_version": 6,
+    "track_infrastructure_defaults_version": 6,
+    "stop_infrastructures_version": 6,
+    "stop_infrastructure_defaults_version": 6,
+    "passage_charges_version": 6,
+    "routing_graph_key": "infra_2032",
+}
+
+OPT_TT_SCENARIO_2032 = {
+    "scenario_key": "infra-2032-hsr-opt-tt",
+    "scenario_name": "Infra 2032 + night trains on high-speed lines "
+    "+ optimised timetables",
+    "description": "The most favourable of the six scenarios: everything "
+    "currently being built, night trains permitted on high-speed lines, "
+    "and well-designed paths rather than the residual ones they are given "
+    "today. Read it as the upper bound of what is achievable without new "
+    "projects beyond those already committed.",
+    "change_log": "Initial seed. Mirrors Infra 2026 + NT on HSR + "
+    "optimised timetables on the infra_2032 routing graph. Schedule "
+    "supplement provisional — see models/scenarios/README.md.",
+    "editor": "david",
+    "is_current_base": False,
+    "is_current_scenario": True,
+    "track_infrastructures_version": 7,
+    "track_infrastructure_defaults_version": 7,
+    "stop_infrastructures_version": 7,
+    "stop_infrastructure_defaults_version": 7,
+    "passage_charges_version": 7,
+    "routing_graph_key": "infra_2032",
+}
+
+# Insert order is display order nowhere — the API groups and sorts — but
+# keeping the grid's reading order here makes a missing row obvious.
+SCENARIOS = [
+    BASE_SCENARIO,
+    HSR_SCENARIO,
+    OPT_TT_SCENARIO,
+    SUPERSEDED_BASE_REVISION,
+    BASE_SCENARIO_2032,
+    HSR_SCENARIO_2032,
+    OPT_TT_SCENARIO_2032,
+]
 
 
 # ============================================================
@@ -2163,9 +2619,6 @@ def _composition_physics_dict(comp) -> dict:
         "hsr_allowed": comp.hsr_allowed,
         "min_boarding_time_min": comp.min_boarding_time_min,
         "min_alighting_time_min": comp.min_alighting_time_min,
-        "energy_factor_weight": comp.energy_factor_weight,
-        "energy_factor_speed": comp.energy_factor_speed,
-        "energy_factor_terrain": comp.energy_factor_terrain,
         "total_weight_t": comp.total_weight_t,
         "total_crew": comp.total_crew,
         "places_by_class": comp.places_by_class,
@@ -2659,11 +3112,7 @@ def main():
     seed_sources(cur, source_ids)
 
     print("Seeding scenario.scenarios...")
-    insert_rows(
-        cur,
-        "scenario.scenarios",
-        [HISTORICAL_SCENARIO_2026, BASE_SCENARIO, HSR_SCENARIO],
-    )
+    insert_rows(cur, "scenario.scenarios", SCENARIOS)
 
     conn.commit()
 
@@ -2671,6 +3120,9 @@ def main():
     # ProposalRepository/DBDataLoader) and needs the users/scenario rows
     # above to already be visible to them.
     seed_example_proposal(cur, conn)
+
+    print("Seeding route_cache (optional precomputed segments)...")
+    seed_route_segments()
 
     print("\nDone. Row counts:")
     for schema, table in [
@@ -2696,6 +3148,8 @@ def main():
         ("input_params", "composition_types"),
         ("input_params", "composition_type_coaches"),
         ("scenario", "scenarios"),
+        ("route_cache", "graph_state"),
+        ("route_cache", "route_segments"),
         ("proposals", "proposals"),
         ("proposals", "routes"),
         ("proposals", "trips"),

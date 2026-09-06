@@ -57,6 +57,17 @@ _DB_DEFAULTS = {
 
 _DEFAULT_API_HOST_PORT = "5050"
 _DEFAULT_ROUTING_HOST_PORT = "8989"
+
+# Routing settings are per graph, suffixed with the graph key, uppercased
+# (naming contract: models/route/routing/rail_router.py). The prefixes are
+# spelled out here rather than imported, to keep this module free of a
+# dependency on the geometry-heavy rail_router. So is the default key: it
+# is the only graph most host-run tools ever mean.
+_ROUTING_URL_PREFIX = "OPENRAILROUTING_URL_"
+_ROUTING_PORT_PREFIX = "OPENRAILROUTING_HOST_PORT_"
+_DEFAULT_ROUTING_GRAPH_KEY = "INFRA_2026"
+_DEFAULT_ROUTING_URL_VAR = _ROUTING_URL_PREFIX + _DEFAULT_ROUTING_GRAPH_KEY
+_DEFAULT_ROUTING_PORT_VAR = _ROUTING_PORT_PREFIX + _DEFAULT_ROUTING_GRAPH_KEY
 _DEFAULT_API_CONTAINER_NAME = "night-train-api"
 
 
@@ -111,15 +122,20 @@ def resolve_host(host: str) -> str:
     return "localhost"
 
 
-def resolve_service_url(var: str = "OPENRAILROUTING_URL") -> Optional[str]:
+def resolve_service_url(
+    var: str = _DEFAULT_ROUTING_URL_VAR, host_port_var: str = _DEFAULT_ROUTING_PORT_VAR
+) -> Optional[str]:
     """Point a compose service URL at localhost when run from the host.
 
     Same problem as resolve_host, one layer out: containers reach the
-    routing engine as http://openrailrouting:<container-port>, which only
-    resolves inside the stack. Compose publishes the service on the host
-    as OPENRAILROUTING_HOST_PORT, which need not equal the container port
-    — so the port is swapped along with the hostname, or the rewritten
-    URL would point at a closed port on localhost.
+    routing engine as http://openrailrouting-infra-2026:<container-port>,
+    which only resolves inside the stack. Compose publishes it on the host
+    under that graph's own port variable, which need not equal the
+    container port — so the port is swapped along with the hostname, or
+    the rewritten URL would point at a closed port on localhost.
+
+    Both arguments are per-graph (see rail_router.py's naming contract);
+    resolve_routing_urls() applies this to every configured graph at once.
 
     Rewritten in place on os.environ because RailRouter reads the
     variable itself; returns the effective URL, or None if unset.
@@ -134,14 +150,38 @@ def resolve_service_url(var: str = "OPENRAILROUTING_URL") -> Optional[str]:
     if resolved == host:
         return url
 
-    port = os.environ.get("OPENRAILROUTING_HOST_PORT") or (
-        str(parsed.port) if parsed.port else None
-    )
+    port = os.environ.get(host_port_var) or (str(parsed.port) if parsed.port else None)
     netloc = f"{resolved}:{port}" if port else resolved
     rewritten = urlunsplit(parsed._replace(netloc=netloc))
     os.environ[var] = rewritten
     print(f"  note: {var} → {rewritten}")
     return rewritten
+
+
+def resolve_routing_urls() -> dict[str, str]:
+    """Point every configured routing graph's URL at localhost when run
+    from the host.
+
+    resolve_service_url()'s rewrite applied across the whole registry
+    rather than the default graph alone: each OPENRAILROUTING_URL_<KEY> is
+    paired with its own OPENRAILROUTING_HOST_PORT_<KEY>, so a tool that
+    routes on a non-default graph works straight off backend/docker/.env
+    instead of needing the URL overridden in the shell.
+
+    Returns graph_key -> effective URL, lowercased keys to match the
+    backend registry (api/helpers/dependencies.py).
+    """
+    load_env_files()
+    resolved = {}
+    # Materialised before iterating: resolve_service_url() writes back to
+    # os.environ, which cannot be mutated mid-iteration.
+    url_vars = [var for var in os.environ if var.startswith(_ROUTING_URL_PREFIX)]
+    for var in url_vars:
+        key = var[len(_ROUTING_URL_PREFIX) :]
+        url = resolve_service_url(var, _ROUTING_PORT_PREFIX + key)
+        if url:
+            resolved[key.lower()] = url
+    return resolved
 
 
 def resolve_env() -> dict[str, str]:
@@ -153,7 +193,12 @@ def resolve_env() -> dict[str, str]:
     for key, default in _DB_DEFAULTS.items():
         os.environ.setdefault(key, default)
     os.environ["POSTGRES_HOST"] = resolve_host(os.environ["POSTGRES_HOST"])
-    resolve_service_url()
+    # Publish the default graph's URL when nothing set it: host-run tools
+    # build RailRouter with no base_url, and its own fallback assumes the
+    # standard port. Doing it here keeps a non-standard published port
+    # working without every script knowing about it.
+    os.environ.setdefault(_DEFAULT_ROUTING_URL_VAR, routing_base_url())
+    resolve_routing_urls()
     return {key: os.environ[key] for key in _DB_DEFAULTS}
 
 
@@ -184,9 +229,10 @@ def api_base_url() -> str:
 
 def routing_base_url() -> str:
     """Where host-run tools reach the routing engine directly, through its
-    published host port."""
+    published host port — the DEFAULT graph's, which is the one every
+    single-graph tool means."""
     load_env_files()
-    port = os.environ.get("OPENRAILROUTING_HOST_PORT", _DEFAULT_ROUTING_HOST_PORT)
+    port = os.environ.get(_DEFAULT_ROUTING_PORT_VAR, _DEFAULT_ROUTING_HOST_PORT)
     return f"http://localhost:{port}"
 
 

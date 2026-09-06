@@ -30,7 +30,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.25"
+ROUTE_BUILDER_VERSION: str = "0.9.32"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -45,6 +45,187 @@ ROUTE_BUILDER_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.32": {
+        "date": "2026-09-06",
+        "author": "david",
+        "changes": "Expert timetable mode. The compute request may carry an "
+        "optional expert_timetable block overriding two things the model "
+        "otherwise decides alone: the first departure of a direction "
+        "(mode 'absolute' pins a minute and survives a reroute; mode "
+        "'shift' displaces whatever the strategy computed and moves with "
+        "it), and manual extra minutes on individual legs "
+        "(segment_addons, stamped onto the new Segment.addon_time_min and "
+        "counted in total_time_min). Add-ons only ever ADD — the routed "
+        "physics stay the floor of every leg — and are keyed by ordered "
+        "stop pair, not leg index: an add-on whose pair no longer exists "
+        "after a reroute is dropped, never redistributed (OPEN_TODOS"
+        "['expert_addon_resplit']). The return direction mirrors "
+        "outbound's add-ons unless it sends its own block, exactly as "
+        "fixed_night_interval is already reversed; a departure is never "
+        "mirrored. Deliberately NOT a new timetable_mode: the overrides "
+        "compose with both existing modes as plain functions "
+        "(timetable.resolve_addons/resolve_departure/"
+        "classify_for_departure), applied in route_factory._build_trip() "
+        "after auto_stop_addition (the last step that can change the stop "
+        "list) and after the timetable_mode switch (whose mirroring and "
+        "fixed-night stretch are given the add-ons, so a padded trip "
+        "stays centred on MIRROR_MIN and a padded interval needs less "
+        "slack). An overridden departure re-runs stop classification, so "
+        "a shifted trip gets the boarding/night/alighting split — and the "
+        "dwell — of where it now sits on the clock. NO OUTPUT CHANGE for "
+        "any request without the key: every existing route is "
+        "byte-identical, and stored payloads read addon_time_min back as "
+        "0. Costs DO move for a request that uses it, correctly: track "
+        "access and electricity night bands are placed on the clock from "
+        "stop times. Ships with a proposals.segments.addon_time_min "
+        "migration (metadata-only) and a compute-cache flush — the "
+        "resolved request gained a key, so every request hash changes; "
+        "the route SEGMENT cache is untouched.",
+    },
+    "0.9.31": {
+        "date": "2026-09-05",
+        "author": "david",
+        "changes": "Electrified track is now preferred. Every routing "
+        "request, in every mode, carries a priority rule penalizing track "
+        "OSM tags electrified=no by NON_ELECTRIFIED_PRIORITY_FACTOR — the "
+        "same mechanism HSR avoidance uses, but deliberately an order of "
+        "magnitude softer (10x, not 100x): HSR avoidance encodes a "
+        "permission, this encodes a preference, and at 100x whole "
+        "diesel-worked regions would attract detours no operator would "
+        "accept in exchange for catenary. A penalty rather than a block "
+        "for the further reason that an unelectrified station throat must "
+        "not fail a trip. Only electrified == NO is penalized; UNSET (tag "
+        "absent) stays untouched, because unknown is never treated as "
+        "forbidden. Motivation is not only realism: every seeded "
+        "locomotive is electric multi-system and the energy domain prices "
+        "catenary electricity on every kilometre, so unelectrified track "
+        "was being costed as something the train could not have run on. "
+        "OUTPUT CHANGE: routed geometry, distances, times and therefore "
+        "every downstream cost can move on any trip that previously used "
+        "unelectrified track — mostly regional and branch alignments; "
+        "fully electrified corridors are unaffected. NO GRAPH RE-IMPORT: "
+        "electrified is already in graph.encoded_values. The resolved "
+        "custom model changes, so route_variant_key changes and the whole "
+        "route-segment cache re-warms (old rows are unreachable, not "
+        "wrong — purge and re-precompute per docs/DEPLOY_HANDOVER.md). "
+        "Investigated alongside this and deliberately NOT implemented: a "
+        "tram/subway/light-rail block, which OpenRailRouting's built-in "
+        "rail.json already applies as priority 0 on railway_class != RAIL "
+        "— it is first in every profile's custom_model_files, so the "
+        "exclusion has been in force since the first import (see "
+        "routing/README.md).",
+    },
+    "0.9.30": {
+        "date": "2026-08-31",
+        "author": "david",
+        "changes": "Route segment cache. Routing is served per consecutive "
+        "stop pair from route_cache.route_segments, keyed by "
+        "(routing_graph_key, stop pair, variant_key) where variant_key is "
+        "the gauge profile plus a hash of the resolved custom model; only "
+        "misses reach GraphHopper, as two-point calls, and are stored "
+        "back so the cache grows with every request. RailRouter.route() "
+        "is now the pure-physics layer (raw per-country distance/time, no "
+        "buffer, no dynamics) and route_trip() the domain entry that "
+        "applies country buffer quotas and traction dynamics on top — the "
+        "single call site every consumer shares. Cached rows are "
+        "therefore scenario-free; a graph re-import purges its own rows "
+        "automatically (route_cache.graph_state vs /info import_date). "
+        "NO OUTPUT CHANGE: per-pair stitching is identical to the former "
+        "multi-point call (via-points are hard constraints, snapping is "
+        "per-point deterministic) and buffer/dynamics math is unchanged, "
+        "recomputed from unrounded per-country ms with the same rounding. "
+        "The bump records the point at which routing stopped depending "
+        "on a live GraphHopper call per trip.",
+    },
+    "0.9.29": {
+        "date": "2026-08-31",
+        "author": "david",
+        "changes": "Routing became scenario-dependent. Each scenario pins "
+        "the routing graph it runs on (scenario.scenarios."
+        "routing_graph_key), the backend holds one RailRouter per "
+        "configured graph, and the router is resolved per request from "
+        "that pin — so a route's geometry now depends on which physical "
+        "network the scenario describes, not on its parameter versions "
+        "alone. RailRouter takes an explicit base_url; a scenario pinning "
+        "a graph the deployment does not serve raises rather than falling "
+        "back, because a silent fallback would return plausible routes "
+        "computed on the wrong infrastructure. NO OUTPUT CHANGE today: "
+        "one graph is configured (infra_2026, today's network) and every "
+        "seeded scenario pins it, so every route is byte-identical to "
+        "0.9.28. The bump records the point at which the graph became "
+        "part of what determines a route, which is what stored payloads "
+        "need to be re-evaluated against once the 2032 graph exists.",
+    },
+    "0.9.28": {
+        "date": "2026-08-29",
+        "author": "david",
+        "changes": "1520 and 1524 mm are ONE gauge family. They are 4 mm "
+        "apart, historically the same Russian gauge, and interoperable in "
+        "practice - Finnish and ex-Soviet stock runs on both - but OSM "
+        "tags them separately, so treating them as distinct networks made "
+        "the seam impassable exactly where it matters: Estonia. Tartu "
+        "carries {1520,1524}, its platform track is 1524-tagged, the "
+        "intersection with a Latvian {1520} stop resolved 1520, and the "
+        "trip then failed to snap at Tartu on the 1520 profile (measured "
+        "2026-08-29: every EE relation except EE-FI snap_failed). "
+        "GAUGE_FAMILY_MM folds 1524 into 1520 at resolution time; the "
+        "night_train_1520 profile now accepts both tags (nt_gauge_1520."
+        "json), night_train_1524 is removed, and SUPPORTED_GAUGES_MM "
+        "shrinks to four. NEEDS A GRAPH RE-IMPORT and Drive re-upload. "
+        "OUTPUT CHANGE: Finnish trips report track_gauge_mm=1520 (the "
+        "family representative) rather than 1524.",
+    },
+    "0.9.27": {
+        "date": "2026-08-29",
+        "author": "david",
+        "changes": "Gauge-aware routing + hard Belarus/Russia exclusion. "
+        "Each trip resolves ONE track gauge from its stops' gauges_mm "
+        "(routing/gauge.py: set intersection; unknown does not constrain; "
+        "ties prefer 1435) and routes on that gauge's own GraphHopper "
+        "profile (night_train_<mm>, see docker/config.yml — 0.9.26 built "
+        "the profiles, this wires them up). Broad-gauge trips that "
+        "previously failed as snap errors now route: Rovaniemi-Helsinki "
+        "(1524), Kyiv-Lviv (1520), Dublin-Cork (1600), Madrid-Lisboa "
+        "(1668). A stop pairing no single gauge serves fails BEFORE any "
+        "router call as 422 gauge_mismatch naming every stop's gauges. "
+        "auto_stop_addition candidates are filtered to the trip's gauge "
+        "(strictly: gauge-unknown stops are never auto-added). Trips carry "
+        "gauge_mm, serialized as general_parameters.track_gauge_mm. "
+        "Belarus and Russia are excluded in EVERY routing mode via "
+        "request-time area rules (speed 0 over their border polygons, "
+        "BLOCKED_COUNTRIES) — the graph-baked country rule planned in "
+        "0.9.26 is impossible in this OpenRailRouting fork (no `country` "
+        "encoded value), so the block rides in the request custom model "
+        "like HSR avoidance; input_params.countries carries BY/RU rows "
+        "solely to hold the polygons. simpleRouting consequently sends a "
+        "custom model now (block + composition speed cap) and runs LM "
+        "instead of CH: its times are capped at the composition's "
+        "max_speed_kmh like fullRouting (previously uncapped at the graph "
+        "ceiling — an OUTPUT CHANGE for simpleRouting only, and an honest "
+        "one). route_geometry() attaches the block alone.",
+    },
+    "0.9.26": {
+        "date": "2026-08-27",
+        "author": "david",
+        "changes": "OUTPUT CHANGE for 'new' compositions only: the speed "
+        "ceiling baked into the routing graph rises from 200 to 230 km/h "
+        "(MAX_COMPOSITION_SPEED_KMH, mirrored in "
+        "models/route/routing/docker/custom_models/night_train.json). The "
+        "200 predated the composition model, when there was one train and "
+        "200 was its speed; since fullRouting caps every trip at its own "
+        "composition.max_speed_kmh in the request custom model, the baked "
+        "value had become a second, lower cap that silently overrode it — "
+        "GraphHopper resolves two limit_to rules by minimum. Every "
+        "material_strategy='new' composition is specified at 230 km/h and "
+        "pays the +8% loco lease premium for it (compositions calibration "
+        "step 6b), so those trips were being charged for line speed the "
+        "router refused to use. Refurbished compositions (200 km/h) are "
+        "unaffected: their request cap still binds. simpleRouting and "
+        "route_geometry(), which send no composition, now run to 230 "
+        "rather than 200 — a change to the ONTD map geometry and to "
+        "simpleRouting times, not to any evaluated route. Requires a graph "
+        "re-import; shipped with the per-gauge routing profiles.",
+    },
     "0.9.25": {
         "date": "2026-08-18",
         "author": "david",
@@ -490,6 +671,15 @@ DEFAULT_TIMETABLE_MODE: str = "simpleAutomatic"
 DEFAULT_SCHEDULE_MODE: str = "alwaysDaily"
 DEFAULT_ROUTING_MODE: str = "fullRouting"
 DEFAULT_AUTO_STOP_ADDITION: str = "add"
+DEFAULT_COMPOSITION_ID: str = "NEW-BAL-7"
+"""Composition a request without composition_id is computed with — the
+seven-coach new-fleet balanced train. It is the middle of the catalog on
+every axis a first result is read on (places, length, cost per place-km),
+so a first evaluation neither flatters the concept with the cheapest
+formation nor burdens it with the largest. The frontend posts no
+composition until the user picks one; it reads back which one was used
+from route.trip_pairs[].composition_id. db/dev/seed.py asserts the id
+exists once the catalog is seeded."""
 
 # --- Persisted GTFS calendar window (adapters/proposal/gtfs_store.py)
 GTFS_SERVICE_START: str = "2032-12-12"
@@ -539,6 +729,69 @@ DAYS_PER_OPERATING_WEEK: dict[str, int] = {"DAILY": 7, "THREE_PER_WEEK": 3}
 """Operating days per week per Frequency name — specific days of week
 aren't modelled, they don't affect cost or fleet sizing."""
 
+# --- Routing graph ceiling (models/route/routing/docker/custom_models/night_train.json)
+MAX_COMPOSITION_SPEED_KMH: int = 230
+"""Speed ceiling baked into the routing graph — the fastest composition the
+catalog can hold. Not a per-trip value: fullRouting caps every trip at its
+own composition.max_speed_kmh in the request custom model, and that is
+always at most this, so the baked rule never binds there. What it does bound
+is the paths that send no composition at all — route_geometry() (ONTD map
+lines, which have no composition by design) and simpleRouting.
+
+230 rather than a higher number because above it the composition parameter
+breaks rather than scales: true high speed means distributed-traction
+trainsets, a different concept outside this model's scope (compositions
+calibration step 6b). It equals HSR_TRACK_SPEED_THRESHOLD_KMH by
+construction — track a night train could physically use is never treated as
+forbidden high-speed infrastructure.
+
+This value has two homes by necessity: GraphHopper reads the JSON at import
+time, not this constant. The JSON is the sanctioned mirror and carries a
+comment pointing back here — keep the two equal, and note that changing
+either requires a graph re-import."""
+
+# --- Track gauge (models/route/routing/gauge.py + docker/config.yml)
+STANDARD_GAUGE_MM: int = 1435
+"""The European mainline gauge — the tie-break winner when a trip's stops
+support several gauges, and the fallback when every stop's gauge is unknown
+(routing/gauge.py's resolution rules). Also the one gauge whose routing
+profile carries no suffix (see SUPPORTED_GAUGES_MM)."""
+
+SUPPORTED_GAUGES_MM: tuple[int, ...] = (1435, 1520, 1600, 1668)
+"""Every gauge FAMILY with a routing profile in the graph. NAMING CONTRACT
+with docker/config.yml: STANDARD_GAUGE_MM routes on the bare
+OPENRAILROUTING_PROFILE (night_train); every other member on
+<profile>_<gauge_mm> (night_train_1520, ...). Sanctioned mirror of the
+profile list in config.yml — keep the two equal; adding a gauge means a new
+profile there, a graph re-import, and the member here."""
+
+GAUGE_FAMILY_MM: dict[int, int] = {1524: 1520}
+"""Gauges folded into another gauge's profile — {tagged: representative}.
+1524 (Finnish) and 1520 (ex-Soviet) are 4 mm apart, historically the same
+gauge, and interoperable in practice: Finnish and ex-Soviet stock runs on
+both, and VR services crossed the border for decades. OSM tags them
+separately, and treating the tags as separate networks made the seam
+impassable exactly where the target network cares: Estonia, whose track is
+tagged both ways, ended up with stops the resolver put on one profile and
+platform track the graph put on the other. The night_train_1520 profile
+accepts BOTH tags (docker/custom_models/nt_gauge_1520.json — the other half
+of this mapping; keep them in step), and routing/gauge.py normalizes every
+stop's gauge set through this table before intersecting, so 1524 never
+reaches profile selection. Trips on the family report track_gauge_mm=1520."""
+
+BLOCKED_COUNTRIES: tuple[str, ...] = ("BY", "RU")
+"""Countries no route may pass through, under any routing mode — a project
+decision (Back-on-Track EU, 2026-08), not an infrastructure fact. Enforced
+at request time: rail_router attaches a speed-0 area rule over each
+country's border polygon to every routing request (the graph-side `country`
+encoded value is not registered by this OpenRailRouting fork, so the block
+cannot be baked in — see docker/config.yml). input_params.countries carries
+rows for these codes SOLELY to hold the polygons; they are deliberately NOT
+in seed.py's placeholder tuple, so if the block ever failed, the route
+would still 422 on country coverage rather than silently pricing Belarusian
+kilometres — defence in depth, not redundancy."""
+
+
 # --- fullRouting HSR avoidance (models/route/routing/rail_router.py)
 HSR_TRACK_SPEED_THRESHOLD_KMH: int = 230
 """A track segment counts as high-speed infrastructure when its permitted
@@ -574,6 +827,41 @@ contain the rail network — border precision is irrelevant, ring size is
 not: the raw EEZ rings total ~165k vertices across the seeded countries
 and would be serialized into every mixed-avoidance routing request. At
 this tolerance the same set costs ~10k vertices."""
+
+
+# --- Electrification preference (models/route/routing/rail_router.py)
+NON_ELECTRIFIED_PRIORITY_FACTOR: float = 0.1
+"""GraphHopper custom-model priority multiplier applied to track OSM tags
+electrified=no — a 10x penalty, deliberately an order of magnitude softer
+than HSR_AVOIDANCE_PRIORITY_FACTOR's 100x.
+
+The difference is intentional and worth keeping. HSR avoidance encodes a
+PERMISSION: high-speed track is off-limits where it is off-limits, so the
+penalty is set high enough to make it a veto in all but the no-alternative
+case. This rule encodes a PREFERENCE: unelectrified track is what the
+catalog cannot exploit, not what it is forbidden to touch. At 100x whole
+diesel-worked regions — the Baltics, parts of the Balkans, Scandinavian
+inland lines — would attract detours far longer than an operator would
+ever accept in exchange for catenary. At 10x an unelectrified alignment
+loses to any reasonable electrified alternative and still wins where the
+alternative is absurd or absent.
+
+A penalty rather than a hard block for the further reason that a short
+unelectrified station throat must not fail a whole trip.
+
+Applied unconditionally, in every routing mode, because it is not merely a
+realism preference. Every seeded locomotive is 'electric multi-system'
+(input_params.loco_types) and the energy domain prices catenary
+electricity on every kilometre, so a route over unelectrified track was
+being costed as something the train could not physically have done. It
+becomes composition-dependent the day a diesel locomotive enters the
+catalog — see OPEN_TODOS['diesel_traction'].
+
+The condition matches the enum member NO of the routing engine's
+`electrified` encoded value (already in graph.encoded_values, so no
+re-import), never UNSET: a missing electrified tag means unknown, and
+unknown is never treated as forbidden — the same discipline
+HSR_TRACK_SPEED_SANITY_MAX_KMH enforces for untagged maxspeed."""
 
 # --- auto_stop_addition (candidate search — models/route/timetable.py)
 AUTO_STOP_BUFFER_M: int = 10_000
@@ -643,6 +931,31 @@ prefix — see adapters/proposal/repository.py's _STRUCTURAL_ROUTE_PREFIX."""
 # =============================================================================
 
 OPEN_TODOS: dict[str, str] = {
+    "expert_addon_resplit": (
+        "(David, 2026-09-06, deliberate) An expert-mode segment add-on whose "
+        "ordered stop pair no longer exists after a reroute is DROPPED "
+        "(timetable.resolve_addons), never redistributed over the legs that "
+        "replaced it. Specified that way: splitting a person's 'this leg "
+        "needs 8 more minutes' across two legs they never saw would be an "
+        "invention, and the frontend reconciles its own add-on list from the "
+        "route it gets back, so the drop is visible rather than silent. "
+        "Revisit only if users ask for the split; the plausible rule would "
+        "be proportional-to-leg-time over the replacing legs, i.e. "
+        "_distribute_slack() applied to a sub-range."
+    ),
+    "expert_night_window_warning": (
+        "(David, 2026-09-06, future) An expert departure override can move a "
+        "timetable_mode='simpleAutomaticWithFixedNight' trip out of the "
+        "window that mode exists to guarantee (dep(A) < NIGHT_START_MIN, "
+        "arr(B) >= NIGHT_END_MIN) — the caller's prerogative, and the stops "
+        "are re-classified correctly for where they now sit, but nothing "
+        "says so explicitly. A TimetableWarning would be the natural home, "
+        "except its dataclass is fixed to the fixed_night_stretch_slow shape "
+        "(interval + two speeds + ratio); adding this means generalising "
+        "TimetableWarning first (a code plus an open detail dict, plus a "
+        "migration on proposals.timetable_warnings). Until then the frontend "
+        "can see it without help: every stop carries its stop_type."
+    ),
     "trip_pair_id": (
         "(David, 2026-07-06, future — not scheduled) Consider swapping the "
         "D/T order to trip_id = P{proposal_id}_V{version}_R1_T{pair_index}_"
@@ -691,6 +1004,64 @@ OPEN_TODOS: dict[str, str] = {
         "interacts with the timetable (buffer feeds departure times which "
         "feed each leg's clock time — likely needs one fixed-point "
         "iteration or an approximation from the provisional timetable)."
+    ),
+    "diesel_traction": (
+        "(David, 2026-09-05) The electrified=no penalty "
+        "(NON_ELECTRIFIED_PRIORITY_FACTOR) rides on every routing request "
+        "unconditionally, because every seeded locomotive is 'electric "
+        "multi-system' and the energy domain has no fuel price or "
+        "emissions factor for diesel haulage (see the energy_pricing "
+        "calibration). loco_types.loco_type_traction is recorded but read "
+        "by no model. When a diesel or bi-mode locomotive enters the "
+        "catalog the penalty must become composition-dependent: resolve it "
+        "in resolve_routing_params() alongside avoid_hsr and pass it into "
+        "RailRouter.route(), exactly as the HSR vector is threaded today. "
+        "Energy and emissions need the matching work — routing is the "
+        "smaller half."
+    ),
+    "branch_line_preference": (
+        "(David, 2026-09-05) Routes still occasionally prefer a branch "
+        "line where a real operator would stay on the main corridor. OSM "
+        "carries this as usage=main|branch, but this OpenRailRouting fork "
+        "registers no encoded value for it: RailAverageSpeedParser reads "
+        "the tag at import time and folds it into rail_average_speed (main "
+        "100, branch 50) ONLY where maxspeed is untagged — where maxspeed "
+        "is tagged, rail_average_speed is 0.9*maxspeed and usage is lost. "
+        "Three options, cheapest first: (a) a soft priority penalty on low "
+        "rail_average_speed — needs no re-import but also penalizes "
+        "station throats, so it must stay soft; (b) the same plus a "
+        "two-sided max_speed band rule, better where maxspeed coverage is "
+        "good (DE/AT/CH), weaker in the Balkans; (c) patch the fork for a "
+        "real railway_usage encoded value (one EV class, one parser, one "
+        "RailImportRegistry entry, applied as a patch in the Dockerfile "
+        "builder stage) — exact, but costs a graph re-import and Drive "
+        "re-upload of BOTH instances plus a standing patch against a "
+        "third-party repo. Diagnose a concrete case first: add "
+        "max_speed/rail_average_speed/railway_class/electrified to "
+        "RailRouter.DETAILS for one run and read the per-edge values off "
+        "the offending pair, rather than guessing a threshold."
+    ),
+    "composition_gauge_capability": (
+        "(David, 2026-08-29) composition_gauges() in routing/gauge.py "
+        "returns None — every composition may run every gauge. True for "
+        "the calibrated catalog (all standard-gauge stock, and evaluating "
+        "1520/1524 concepts is the point of the tool), but variable-gauge "
+        "stock (Talgo RD) and gauge-bound stock are real distinctions. "
+        "When compositions gain a gauge capability column, it flows into "
+        "composition_gauges() and nothing else changes."
+    ),
+    "gauge_null_stops": (
+        "(David, 2026-08-29 — mostly resolved) Of the 10 gauges_mm=NULL "
+        "stops, 7 are hand-corrected via step 8's GAUGE_OVERRIDES (DE "
+        "Oldenburg (Holstein), PL Łeba, TR Adana/Mersin at 1435 — station "
+        "nodes are correct, OSM just has no gauge-tagged track within the "
+        "150 m radius; UA Краматорськ/Слов'янськ/Росинка at 1520 — the "
+        "network is uniformly 1520, tagging is sparse or war-affected). "
+        "The remaining NULLs are INTENTIONAL: GR Ρίο (metre-gauge line, "
+        "no >=1435 track exists) and AL Durrës (network out of service, "
+        "OSM tags it disused). The Tirana entry was removed outright - it "
+        "was the city's BUS terminal. gauge.py still treats NULL as "
+        "'unknown, does not constrain', never as 1435."
     ),
     "shunting_y_shape": (
         "_shuntings() creates one Shunting per trip terminal with no "

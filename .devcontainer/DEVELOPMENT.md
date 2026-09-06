@@ -84,7 +84,7 @@ docker compose -f backend/docker/docker-compose.yml -f .devcontainer/docker-comp
 
 ## What's running
 
-Four services. `postgres`, `openrailrouting` and `api` come entirely from
+Four services. `postgres`, `openrailrouting-infra-2026` and `api` come entirely from
 `backend/docker/docker-compose.yml`; `.devcontainer/docker-compose.yml` is
 an OVERLAY that adds the workspace mount, the routing admin port, and the
 `frontend` service. One stack, two entry points — the devcontainer and
@@ -95,7 +95,7 @@ values below are the defaults:
 | Service | Container | Port(s) |
 |---|---|---|
 | `postgres` | `night_train_postgres` | `POSTGRES_HOST_PORT` (5432) |
-| `openrailrouting` | `openrailrouting` | `OPENRAILROUTING_HOST_PORT` (8989), admin/metrics `OPENRAILROUTING_ADMIN_HOST_PORT` (8990) |
+| `openrailrouting-infra-2026` | `openrailrouting-infra-2026` | `OPENRAILROUTING_HOST_PORT_INFRA_2026` (8989), admin/metrics `OPENRAILROUTING_ADMIN_HOST_PORT_INFRA_2026` (8990) |
 | `api` | `night-train-api` | `API_HOST_PORT` (5050) → `API_CONTAINER_PORT` (5000) — host side moved off 5000 to avoid macOS AirPlay Receiver |
 | `frontend` | `night-train-frontend` | `FRONTEND_HOST_PORT` (5173, Vite HMR — edits reflect instantly) |
 

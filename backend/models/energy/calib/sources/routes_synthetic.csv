@@ -1,0 +1,101 @@
+start_DS100,start_name,start_region,end_DS100,end_name,end_region,axis,distance_category,air_distance_km,DS100,start_station_check,start_longitude,start_latitude,start_region_check,DS100_end,end_station_check,end_longitude,end_latitude,end_region_check,axis_corrected
+TSG,Schwäbisch Gmünd,South,TDIH,Distelhausen,Central,Regional,short,88.97,TSG,Schwäbisch Gmünd,9.787795,48.801011,South,TDIH,Distelhausen,9.683508,49.598233,Central,N-S
+BLS,Berlin Hbf,North,LBAS,Barleber See,Central,Regional,short,122.36,BLS,Berlin Hbf,13.369545,52.525592,North,LBAS,Barleber See,11.640852,52.214328,Central,E-W
+TPH,Pforzheim Hbf,South,HN,Northeim(Han),Central,N-S,medium,325.36,TPH,Pforzheim Hbf,8.703099,48.894152,South,HN,Northeim(Han),9.986618,51.703139,Central,N-S
+SSWD,St Wendel,West,USE,Seebach(Mühlhausen),Central,NE-SW,medium,304.31,SSWD,St Wendel,7.165293,49.466952,West,USE,Seebach(Mühlhausen),10.521193,51.170012,Central,NE-SW
+UCB,Camburg(Saale),Central,TBLF,Blaufelden,Central,NE-SW,medium,231.0,UCB,Camburg(Saale),11.70468,51.050857,Central,TBLF,Blaufelden,9.96768,49.296236,Central,NW-SE
+ESOT,Soest,Central,AOPD,Oppendorf Bahnhof,North,NE-SW,medium,336.42,ESOT,Soest,8.104589,51.578419,Central,AOPD,Oppendorf Bahnhof,10.208319,54.325961,North,NE-SW
+RVL,Villingen(Schwarzw),South,AHM,Husum,North,N-S,long,714.4,RVL,Villingen(Schwarzw),8.465261,48.058022,South,AHM,Husum,9.055026,54.472271,North,N-S
+NSTN,Steinach(b Rothenburg ob der Tauber),Central,NCH,Cham(Oberpf),East,E-W,short,174.58,NSTN,Steinach(b Rothenburg ob der Tauber),10.273535,49.453218,Central,NCH,Cham(Oberpf),12.656832,49.221869,East,E-W
+HOY,Bad Oeynhausen,Central,KST,Stolberg(Rheinl)Hbf,West,NE-SW,medium,237.64,HOY,Bad Oeynhausen,8.796523,52.205398,Central,KST,Stolberg(Rheinl)Hbf,6.217478,50.79448,West,NW-SE
+ABCH,Büchen,North,MURB,Umrathshausen Bf,East,N-S,long,640.18,ABCH,Büchen,10.623298,53.474972,North,MURB,Umrathshausen Bf,12.320636,47.818772,East,N-S
+MKFB,Kaufbeuren,South,FMTN,Montabaur,West,NW-SE,medium,350.95,MKFB,Kaufbeuren,10.629496,47.875432,South,FMTN,Montabaur,7.825333,50.444834,West,NW-SE
+SHFD,Hofeld,West,BDF,Drahnsdorf,East,NE-SW,long,524.93,SHFD,Hofeld,7.159755,49.511922,West,BDF,Drahnsdorf,13.58125,51.915391,East,E-W
+MIH,Ingolstadt Hbf,South,WHEG,Heiligengrabe,North,N-S,medium,493.89,MIH,Ingolstadt Hbf,11.437337,48.744541,South,WHEG,Heiligengrabe,12.340537,53.14968,North,N-S
+TALL,Allmendingen,South,BWA,Walddrehna,East,NE-SW,medium,473.22,TALL,Allmendingen,9.722382,48.327734,South,BWA,Walddrehna,13.617249,51.772723,East,NE-SW
+AF,Flensburg,North,UGB,Gehlberg,Central,N-S,medium,463.57,AF,Flensburg,9.436526,54.774039,North,UGB,Gehlberg,10.769351,50.683768,Central,N-S
+NPA,Passau Hbf,East,AN,Neumünster,North,N-S,long,657.43,NPA,Passau Hbf,13.450776,48.573632,East,AN,Neumünster,9.979816,54.075752,North,NW-SE
+FSBN,Schimborn,Central,HBGD,Burgdorf,Central,N-S,medium,271.85,FSBN,Schimborn,9.186811,50.057764,Central,HBGD,Burgdorf,10.002837,52.448708,Central,N-S
+ABCH,Büchen,North,WSE,Sternfeld,North,E-W,short,171.03,ABCH,Büchen,10.623298,53.474972,North,WSE,Sternfeld,13.15042,53.824775,North,E-W
+KKDT,Köln Messe/Deutz Gl.11-12,West,WBRH,Brahlstorf,North,NE-SW,medium,382.28,KKDT,Köln Messe/Deutz Gl.11-12,6.974067,50.941721,West,WBRH,Brahlstorf,10.951992,53.364421,North,NE-SW
+NBA,Bamberg,Central,RLSH,Lambsheim,Central,E-W,short,193.01,NBA,Bamberg,10.899489,49.900759,Central,RLSH,Lambsheim,8.283476,49.511863,Central,E-W
+FO,Offenbach(Main)Hbf,Central,MTHB,Türkheim(Bay)Bf,South,NW-SE,medium,265.38,FO,Offenbach(Main)Hbf,8.760743,50.099264,Central,MTHB,Türkheim(Bay)Bf,10.617439,48.04569,South,NE-SW
+MA,Augsburg Hbf,South,ASID,Sierksdorf,North,N-S,long,634.21,MA,Augsburg Hbf,10.88557,48.365441,South,ASID,Sierksdorf,10.769108,54.068523,North,N-S
+HZWI,Bad Zwischenahn,North,ULIH,Lichtenhain(a d Bergbahn),Central,NW-SE,medium,359.22,HZWI,Bad Zwischenahn,8.003123,53.182547,North,ULIH,Lichtenhain(a d Bergbahn),11.132371,50.592084,Central,NE-SW
+RIM,Immendingen,South,BEBD,Berlin Eichborndamm,North,NE-SW,long,610.25,RIM,Immendingen,8.729536,47.936007,South,BEBD,Berlin Eichborndamm,13.316835,52.577722,North,NE-SW
+HO,Osnabrück Hbf,Central,RB,Basel Bad Bf,West,N-S,long,524.24,HO,Osnabrück Hbf,8.061781,52.272851,Central,RB,Basel Bad Bf,7.607805,47.567288,West,N-S
+RBSS,Baiersbronn Schule,South,LZBR,Zöberitz,East,NE-SW,medium,423.16,RBSS,Baiersbronn Schule,8.375858,48.51061,South,LZBR,Zöberitz,12.033458,51.50461,East,NE-SW
+MRO,Rosenheim,East,FBHF,Bad Hersfeld,Central,NW-SE,medium,378.14,MRO,Rosenheim,12.119202,47.850018,East,FBHF,Bad Hersfeld,9.716182,50.869632,Central,NW-SE
+HD,Delmenhorst,North,KMR,Mönchengladbach-Rheindahlen,West,NE-SW,medium,262.29,HD,Delmenhorst,8.629758,53.052792,North,KMR,Mönchengladbach-Rheindahlen,6.357894,51.150712,West,NW-SE
+MBID,Bibelöd,East,BETN,Elstal,North,N-S,long,531.66,MBID,Bibelöd,12.646681,47.771517,East,BETN,Elstal,13.000114,52.54749,North,N-S
+TFS,Freudenstadt Hbf,South,DLH,Lehndorf(Altenburg),East,NE-SW,medium,398.05,TFS,Freudenstadt Hbf,8.428803,48.460322,South,DLH,Lehndorf(Altenburg),12.425806,50.937827,East,NE-SW
+TMAG,Magstadt,South,RZ,Zell(Wiesental),West,Regional,short,141.31,TMAG,Magstadt,8.965454,48.736106,South,RZ,Zell(Wiesental),7.849149,47.705626,West,NW-SE
+AHAF,Haffkrug,North,MHEM,Heimstetten,South,N-S,long,659.36,AHAF,Haffkrug,10.742682,54.054189,North,MHEM,Heimstetten,11.759659,48.158755,South,N-S
+HP,Peine,Central,FGRN,Bad Vilbel-Gronau,Central,NE-SW,medium,257.14,HP,Peine,10.232145,52.318942,Central,FGRN,Bad Vilbel-Gronau,8.783203,50.191529,Central,NW-SE
+FMZ,Mainz Hbf,Central,RRA,Rastatt,South,Regional,short,126.87,FMZ,Mainz Hbf,8.25872,50.001117,Central,RRA,Rastatt,8.215623,48.860483,South,N-S
+BSAL,Berlin Schönhauser Allee,North,LZI,Zielitz,Central,Regional,short,120.98,BSAL,Berlin Schönhauser Allee,13.41546,52.5492,North,LZI,Zielitz,11.680214,52.296293,Central,E-W
+ALBG,Lüneburg,North,ELPP,Lippstadt,Central,NE-SW,medium,224.74,ALBG,Lüneburg,10.41989,53.249656,North,ELPP,Lippstadt,8.348785,51.670687,Central,NW-SE
+US,Saalfeld(Saale),Central,HBNT,Barnten,Central,NW-SE,medium,203.01,US,Saalfeld(Saale),11.374987,50.650316,Central,HBNT,Barnten,9.815279,52.195498,Central,NW-SE
+RIM,Immendingen,South,NSA,Sachsen(b Ansbach),Central,NE-SW,medium,207.2,RIM,Immendingen,8.729536,47.936007,South,NSA,Sachsen(b Ansbach),10.661498,49.29299,Central,NE-SW
+KKDZ,Köln Messe/Deutz,West,ADT,Hamburg Diebsteich,North,NE-SW,medium,354.82,KKDZ,Köln Messe/Deutz,6.975001,50.940874,West,ADT,Hamburg Diebsteich,9.93426,53.568569,North,NE-SW
+WAH,Althof,North,LTH,Tangerhütte,Central,N-S,short,184.35,WAH,Althof,11.922341,54.090442,North,LTH,Tangerhütte,11.809943,52.433869,Central,N-S
+WE,Eberswalde Hbf,North,MEI,Eitensheim,South,N-S,medium,479.41,WE,Eberswalde Hbf,13.797062,52.834021,North,MEI,Eitensheim,11.319259,48.815979,South,NW-SE
+FH  N,Hanau Hbf,Central,UAP,Apolda,Central,NE-SW,medium,209.44,FH  N,Hanau Hbf,8.929,50.120953,Central,UAP,Apolda,11.526136,51.03094,Central,E-W
+RHBG,Hornberg(Schwarzw),South,LGB,Griebo,East,NE-SW,long,509.96,RHBG,Hornberg(Schwarzw),8.23294,48.211895,South,LGB,Griebo,12.522977,51.880576,East,NE-SW
+HD,Delmenhorst,North,MDFN,Dorfen Bahnhof,East,NW-SE,long,587.27,HD,Delmenhorst,8.629758,53.052792,North,MDFN,Dorfen Bahnhof,12.159686,48.267048,East,NE-SW
+TF,Friedrichshafen Stadt,South,AOH,Hamburg-Othmarschen,North,N-S,long,657.36,TF,Friedrichshafen Stadt,9.4739,47.653224,South,AOH,Hamburg-Othmarschen,9.885967,53.559233,North,N-S
+NSTN,Steinach(b Rothenburg ob der Tauber),Central,WL,Ludwigslust,North,N-S,medium,439.81,NSTN,Steinach(b Rothenburg ob der Tauber),10.273535,49.453218,Central,WL,Ludwigslust,11.494491,53.334671,North,N-S
+RWE,Weinheim(Bergstr),Central,THL,Herrlingen,South,NW-SE,short,155.02,RWE,Weinheim(Bergstr),8.665351,49.553302,Central,THL,Herrlingen,9.89773,48.417731,South,NE-SW
+RRA,Rastatt,South,BPD,Potsdam Hbf,East,NE-SW,long,520.61,RRA,Rastatt,8.215623,48.860483,South,BPD,Potsdam Hbf,13.066782,52.391704,East,NE-SW
+WV,Velgast,North,KKDT,Köln Messe/Deutz Gl.11-12,West,NE-SW,long,540.49,WV,Velgast,12.803137,54.277316,North,KKDT,Köln Messe/Deutz Gl.11-12,6.974067,50.941721,West,NW-SE
+MA,Augsburg Hbf,South,RAP,Appenweier,West,E-W,medium,215.66,MA,Augsburg Hbf,10.88557,48.365441,South,RAP,Appenweier,7.97319,48.541461,West,E-W
+LW,Lutherstadt Wittenberg,East,NWIN,Windsbach,Central,NE-SW,medium,318.69,LW,Lutherstadt Wittenberg,12.662285,51.867811,East,NWIN,Windsbach,10.825716,49.249694,Central,NW-SE
+HNBG,Nienburg(Weser),North,MAFE,Aufhausen(b Erding),South,N-S,long,521.59,HNBG,Nienburg(Weser),9.217753,52.645566,North,MAFE,Aufhausen(b Erding),11.894375,48.274365,South,NE-SW
+MBG,Berchtesgaden Hbf,East,KKOE,Koblenz-Ehrenbreitstein,West,NW-SE,medium,496.85,MBG,Berchtesgaden Hbf,12.999058,47.626688,East,KKOE,Koblenz-Ehrenbreitstein,7.610202,50.361746,West,NW-SE
+SBG,Bengel,West,TBIE,Bieringen,South,NW-SE,medium,217.43,SBG,Bengel,7.05803,50.010379,West,TBIE,Bieringen,8.860915,48.449029,South,NE-SW
+DR,Riesa,East,BST,Strausberg,North,Regional,short,141.0,DR,Riesa,13.287734,51.309654,East,BST,Strausberg,13.833611,52.532204,North,N-S
+DH,Dresden Hbf,East,RM,Mannheim Hbf,Central,NE-SW,medium,412.33,DH,Dresden Hbf,13.732035,51.040563,East,RM,Mannheim Hbf,8.468921,49.479354,Central,E-W
+FTS,Treysa,Central,EDKO,Dortmund-Körne,West,Regional,short,134.28,FTS,Treysa,9.185673,50.910661,Central,EDKO,Dortmund-Körne,7.514958,51.513245,West,E-W
+HEA,Emden Außenhafen,North,HMEP,Meppen,North,Regional,short,72.49,HEA,Emden Außenhafen,7.186179,53.344469,North,HMEP,Meppen,7.298015,52.696021,North,N-S
+RHBG,Hornberg(Schwarzw),South,NKUE,Küps,Central,NE-SW,medium,311.88,RHBG,Hornberg(Schwarzw),8.23294,48.211895,South,NKUE,Küps,11.268337,50.195886,Central,NE-SW
+BWSS,Berlin Wannsee,East,SNDM,Niedermohr,West,NE-SW,long,517.87,BWSS,Berlin Wannsee,13.179336,52.421058,East,SNDM,Niedermohr,7.471588,49.458429,West,NW-SE
+MKFB,Kaufbeuren,South,FGTB,Gertenbach,Central,N-S,medium,394.16,MKFB,Kaufbeuren,10.629496,47.875432,South,FGTB,Gertenbach,9.804709,51.379732,Central,N-S
+TME,Metzingen(Württ),South,NN,Nürnberg Hbf,Central,NE-SW,short,165.09,TME,Metzingen(Württ),9.290156,48.539725,South,NN,Nürnberg Hbf,11.082989,49.445616,Central,NE-SW
+UGW,Jena-Göschwitz,Central,RF,Freiburg(Breisgau) Hbf,West,NE-SW,medium,420.13,UGW,Jena-Göschwitz,11.593537,50.883942,Central,RF,Freiburg(Breisgau) Hbf,7.84117,47.997697,West,NW-SE
+DN,Dresden-Neustadt,East,RBKR,Bad Krozingen,West,NE-SW,long,559.06,DN,Dresden-Neustadt,13.740701,51.065899,East,RBKR,Bad Krozingen,7.697632,47.919721,West,NW-SE
+HU,Uelzen,North,DSA,Bad Schandau,East,NW-SE,medium,335.24,HU,Uelzen,10.553053,52.969781,North,DSA,Bad Schandau,14.139322,50.918835,East,NE-SW
+KKO,Koblenz Hbf,West,KFOS,Forsthaus,West,Regional,short,130.47,KKO,Koblenz Hbf,7.588345,50.350929,West,KFOS,Forsthaus,6.503498,51.303412,West,NW-SE
+RN,Neustadt(Weinstr)Hbf,Central,KAND,Andernach,West,Regional,short,131.66,RN,Neustadt(Weinstr)Hbf,8.140757,49.349553,Central,KAND,Andernach,7.404839,50.434542,West,NW-SE
+HMAR,Marienhafe,North,TWID,Wieslensdorf,Central,N-S,long,508.44,HMAR,Marienhafe,7.270731,53.520893,North,TWID,Wieslensdorf,9.422118,49.149785,Central,N-S
+HP,Peine,Central,FCLD,Caldern,Central,NE-SW,short,195.48,HP,Peine,10.232145,52.318942,Central,FCLD,Caldern,8.670244,50.85297,Central,NW-SE
+TS,Stuttgart Hbf,South,DSMI,Schmilka-Hirschmühle,East,NE-SW,medium,430.93,TS,Stuttgart Hbf,9.181635,48.784084,South,DSMI,Schmilka-Hirschmühle,14.228419,50.889918,East,E-W
+WL,Ludwigslust,North,BSPD,Berlin-Spandau,North,Regional,short,144.72,WL,Ludwigslust,11.494491,53.334671,North,BSPD,Berlin-Spandau,13.197534,52.534475,North,E-W
+EHFD,Herford,Central,HMAR,Marienhafe,North,NW-SE,short,181.76,EHFD,Herford,8.663643,52.119609,Central,HMAR,Marienhafe,7.270731,53.520893,North,NW-SE
+FWAB,Wabern(Bz Kassel),Central,HEMT,Emmerthal,Central,Regional,short,104.9,FWAB,Wabern(Bz Kassel),9.35804,51.103134,Central,HEMT,Emmerthal,9.382856,52.046413,Central,N-S
+WPL,Prenzlau,North,HB,Bremen Hbf,North,E-W,medium,337.5,WPL,Prenzlau,13.866532,53.321608,North,HB,Bremen Hbf,8.813834,53.083481,North,E-W
+RSGO,St Georgen(Schwarzw),South,FBGK,Bingen(Rhein) Hbf,West,N-S,medium,207.84,RSGO,St Georgen(Schwarzw),8.341955,48.123813,South,FBGK,Bingen(Rhein) Hbf,7.884263,49.968729,West,N-S
+RK,Karlsruhe Hbf,South,TBWA,Bad Waldsee,South,NW-SE,short,154.98,RK,Karlsruhe Hbf,8.402181,48.993515,South,TBWA,Bad Waldsee,9.752274,47.925244,South,NE-SW
+KAND,Andernach,West,MTS,Traunstein,East,NW-SE,medium,475.45,KAND,Andernach,7.404839,50.434542,West,MTS,Traunstein,12.638801,47.869727,East,E-W
+MHPF,Höpfling,East,LER,Erdeborn,Central,N-S,medium,413.2,MHPF,Höpfling,12.651162,47.811226,East,LER,Erdeborn,11.636965,51.468799,Central,N-S
+UWH,Wernshausen,Central,LUS,Uchtspringe,North,N-S,medium,219.93,UWH,Wernshausen,10.353606,50.72124,Central,LUS,Uchtspringe,11.592243,52.543674,North,NE-SW
+UWM,Weimar,Central,SFI,Friedrichsthal(Saar),West,NE-SW,medium,354.42,UWM,Weimar,11.326458,50.991487,Central,SFI,Friedrichsthal(Saar),7.08913,49.320061,West,E-W
+ASID,Sierksdorf,North,LW,Lutherstadt Wittenberg,East,NW-SE,medium,275.58,ASID,Sierksdorf,10.769108,54.068523,North,LW,Lutherstadt Wittenberg,12.662285,51.867811,East,NE-SW
+EPD,Paderborn Hbf,Central,LS,Stendal,North,NE-SW,medium,233.95,EPD,Paderborn Hbf,8.740505,51.712979,Central,LS,Stendal,11.854412,52.594723,North,E-W
+ATIM,Timmendorferstrand,North,FSG,Seulberg,Central,N-S,medium,441.5,ATIM,Timmendorferstrand,10.76227,53.994212,North,FSG,Seulberg,8.646005,50.241906,Central,NW-SE
+AK,Kiel Hbf,North,ADF,Hamburg Dammtor,North,Regional,short,84.38,AK,Kiel Hbf,10.131976,54.314985,North,ADF,Hamburg Dammtor,9.989566,53.560751,North,N-S
+ANB,Niebüll,North,HWUL,Wulften,Central,N-S,medium,359.32,ANB,Niebüll,8.834572,54.789605,North,HWUL,Wulften,10.176026,51.659403,Central,N-S
+ASID,Sierksdorf,North,RK,Karlsruhe Hbf,South,N-S,long,587.5,ASID,Sierksdorf,10.769108,54.068523,North,RK,Karlsruhe Hbf,8.402181,48.993515,South,N-S
+BGS,Berlin Gesundbrunnen,North,BFP,Frankfurt(Oder),East,Regional,short,81.97,BGS,Berlin Gesundbrunnen,13.388513,52.548963,North,BFP,Frankfurt(Oder),14.546496,52.336416,East,E-W
+TAU,Aulendorf,South,AWST,Wrist,North,N-S,long,664.91,TAU,Aulendorf,9.644046,47.953052,South,AWST,Wrist,9.748128,53.932382,North,N-S
+AHM,Husum,North,MSTS,Stetten(Schwab),South,N-S,long,722.99,AHM,Husum,9.055026,54.472271,North,MSTS,Stetten(Schwab),10.43604,48.027663,South,N-S
+UAP,Apolda,Central,FB,Bebra,Central,Regional,short,121.13,UAP,Apolda,11.526136,51.03094,Central,FB,Bebra,9.797788,50.969568,Central,E-W
+HA,Altenbeken,Central,FH  N,Hanau Hbf,Central,N-S,short,182.97,HA,Altenbeken,8.943319,51.766433,Central,FH  N,Hanau Hbf,8.929,50.120953,Central,N-S
+TU,Ulm Hbf,South,HE,Emden Hbf,North,N-S,long,586.05,TU,Ulm Hbf,9.982227,48.399437,South,HE,Emden Hbf,7.195176,53.369036,North,NW-SE
+AN,Neumünster,North,MBNB,Bellenberg,South,N-S,long,647.32,AN,Neumünster,9.979816,54.075752,North,MBNB,Bellenberg,10.09039,48.254645,South,N-S
+ATIM,Timmendorferstrand,North,RBGP,Berghausen(Pfalz),Central,N-S,long,547.11,ATIM,Timmendorferstrand,10.76227,53.994212,North,RBGP,Berghausen(Pfalz),8.406173,49.295449,Central,NW-SE
+AK,Kiel Hbf,North,TT,Tübingen Hbf,South,N-S,long,649.13,AK,Kiel Hbf,10.131976,54.314985,North,TT,Tübingen Hbf,9.055407,48.515811,South,N-S
+WE,Eberswalde Hbf,North,SSB,Saarbrücken-Burbach,West,NE-SW,long,622.62,WE,Eberswalde Hbf,13.797062,52.834021,North,SSB,Saarbrücken-Burbach,6.957086,49.242167,West,NW-SE
+THB,Horb,South,AKWS,Hamburg Kornweg(Klein Borstel),North,N-S,long,585.01,THB,Horb,8.688982,48.441471,South,AKWS,Hamburg Kornweg(Klein Borstel),10.053841,53.632381,North,N-S
+BFP,Frankfurt(Oder),East,EHK,Hamminkeln,West,E-W,long,547.26,BFP,Frankfurt(Oder),14.546496,52.336416,East,EHK,Hamminkeln,6.601745,51.735104,West,E-W
+RSI,Singen(Hohentwiel),South,ASID,Sierksdorf,North,N-S,long,714.49,RSI,Singen(Hohentwiel),8.840383,47.758438,South,ASID,Sierksdorf,10.769108,54.068523,North,N-S
+MPR,Prien a Chiemsee,East,AOPD,Oppendorf Bahnhof,North,N-S,long,734.72,MPR,Prien a Chiemsee,12.346615,47.855513,East,AOPD,Oppendorf Bahnhof,10.208319,54.325961,North,N-S

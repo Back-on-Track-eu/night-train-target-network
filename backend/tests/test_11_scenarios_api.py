@@ -8,8 +8,12 @@ Response contract for the read-only scenario listing endpoint:
 Covers the three-group response layout (current_base / current_scenarios /
 historical_scenarios), per-scenario field shape, count consistency, and
 that the seeded scenarios (see conftest.py: base_scenario, hsr_scenario,
-historical_scenario) land in the groups their flags dictate.
+historical_scenario, scenarios_2032) land in the groups their flags
+dictate. Six scenarios are selectable — three operating conditions on
+each of the two networks — plus one superseded revision.
 """
+
+from collections import Counter
 
 import pytest
 import requests
@@ -32,6 +36,8 @@ SCENARIO_FIELDS = {
     "track_infrastructure_defaults_version",
     "stop_infrastructures_version",
     "stop_infrastructure_defaults_version",
+    "passage_charges_version",
+    "routing_graph_key",
 }
 
 GROUPS = ("current_base", "current_scenarios", "historical_scenarios")
@@ -71,6 +77,28 @@ class TestScenariosResponseLayout:
                     f"Scenario '{scenario.get('scenario_id')}' in "
                     f"'{group}' missing: {missing}"
                 )
+
+
+class TestScenariosRoutingGraphPin:
+    def test_every_scenario_pins_a_known_routing_graph(self, scenarios_body):
+        """routing_graph_key is one of the two seeded graphs on every
+        scenario, in every group (db/dev/seed.py's scenario section). A
+        key outside that set means the API is serving a scenario no
+        deployment can route."""
+        for group in GROUPS:
+            for scenario in scenarios_body[group]["scenarios"]:
+                assert scenario["routing_graph_key"] in {"infra_2026", "infra_2032"}
+
+    def test_both_networks_are_offered(self, scenarios_body):
+        """Both networks reach the API as selectable scenarios — three
+        operating conditions each, per the version grid in db/dev/seed.py.
+        Catches a seed that inserted only one half of it."""
+        selectable = [
+            *scenarios_body["current_base"]["scenarios"],
+            *scenarios_body["current_scenarios"]["scenarios"],
+        ]
+        by_graph = Counter(s["routing_graph_key"] for s in selectable)
+        assert by_graph == {"infra_2026": 3, "infra_2032": 3}, by_graph
 
 
 class TestScenariosGrouping:
@@ -114,7 +142,7 @@ class TestScenariosGrouping:
     def test_historical_scenario_is_in_historical_scenarios_group(
         self, scenarios_body, historical_scenario
     ):
-        """The deprecated 2026 Base Line scenario (is_current_scenario=
+        """The superseded infra-2026 revision (is_current_scenario=
         FALSE) appears in historical_scenarios, not current_base or
         current_scenarios."""
         historical_keys = {

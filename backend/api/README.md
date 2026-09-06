@@ -51,6 +51,7 @@ its own example files.
   - [`POST /api/feedback`](#post-feedback) — submit feedback
   - [`GET /api/feedback/categories`](#feedback-categories) — suggested category/sub_category values
 - [Error responses](#error-responses)
+- [Usage logging](#usage-logging) — what every request records, and what it deliberately does not
 
 <a id="health"></a>
 
@@ -154,7 +155,7 @@ Config (see `docker/.env.example`): `JWT_SECRET` (required),
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/params/StopInfrastructures` | All stops with location and per-stop charges |
+| `GET` | `/api/params/StopInfrastructures` | All stops: location, per-stop charges, and the catalog enrichment (names, city, country, gauges) |
 | `GET` | `/api/params/compositions` | All composition types with full parameters, plus their operators |
 | `GET` | `/api/params/TrackInfrastructures` | All country track infrastructure parameters |
 
@@ -183,7 +184,35 @@ documentation and sources appear **once**, not repeated per entity:
 **`StopInfrastructures`** adds `default_stops` (`global` fallback +
 `by_country` overrides for the stop charge) and `stops` — one entry per stop:
 `{stop_id, name, country_code, lat, lon, stop_charge_eur}`, where
-`stop_charge_eur` is a *field object* (see below).
+`stop_charge_eur` is a *field object* (see below) that additionally carries
+the charge's provenance — `vat_rate_per`, `incl_vat_eur`, `basis`,
+`price_basis_year`, `tariff_class` and `source` (the tariff document's id in
+the charge pipeline's register). All six are `null` for a stop resolving
+through a country or global default: a default has no document behind it. The
+model prices from `value`, which is net of VAT; `incl_vat_eur` is carried so
+both figures can be compared against whichever one the document printed.
+
+The response also carries the catalog enrichment produced by the stop
+classification pipeline
+(`models/infrastructure/stops`, steps 7–8):
+
+| Field | Description |
+|---|---|
+| `provenance` | Why the stop is in the catalog, as a display category — `"existing night train stop"`, `"urban area currently without night train service"`, `"tourism region currently without night train service"`, ferry / border / network variants |
+| `name_latin`, `name_ascii` | Latin-script and diacritic-free forms of the station name — the search forms (`"munchen"` finds `München Hauptbahnhof`) |
+| `uic_ref` | UIC station code where OSM has one, else `null`. The OSM tag verbatim, so a station carrying more than one code returns them all in one string, semicolon-separated (`"8727149;8700147"` at Paris CDG 2 TGV) |
+| `city` | `{name, osm_id, names}` for the municipality the stop belongs to (*Berlin Gesundbrunnen → Berlin*), or `null` for rural halts beyond any city radius. `names` is keyed by language code |
+| `country_names` | The country's name keyed by language code, always all seven |
+| `gauges_mm` | Night-train-capable track gauges, several at break-of-gauge stations (`[1435, 1520]` at Kaunas); `null` where no usable track was found |
+| `gauge_evidence` | How the gauge set was established: `tagged`, `untagged_tracks`, `narrow_gauge_only`, `no_tracks_nearby` |
+
+The language keys are `en, de, fr, nl, it, es, pl` — the member-organisation
+languages, defined once in `db/schema.py` as `STOP_NAME_LANGS`. They exist so
+the stop picker can be searched in any of them: an Italian user typing
+*Monaco* reaches München's stops through `city.names.it`, whatever the
+interface language. These fields are plain values, not field objects — none
+of them resolves against a default row, so there is no `is_default` to
+report.
 
 **`TrackInfrastructures`** adds `default_track_infra` (the single EU-average
 fallback row, `{value, source_id}` per field) and `track_infrastructures` —
@@ -328,6 +357,7 @@ layer of candidate stops tagged with `added_time_min`.
 | `fixed_night_interval` | array of string | (✓) | Exactly 2 distinct stop IDs from `stops`, start before end in outbound travel order — required for, and only allowed with, `timetable_mode="simpleAutomaticWithFixedNight"` (400 otherwise). May span several legs; applied reversed to the return trip automatically |
 | `schedule_mode` | string | — | Default `"alwaysDaily"` — see **Mode switches** below |
 | `auto_stop_addition` | string | — | `"off"` / `"add"` / `"suggest"`, default `"add"` — see **Mode switches** below. String enum since route builder 0.9.5; booleans are rejected with 400 |
+| `expert_timetable` | object | — | Manual departure + per-leg minutes (route builder 0.9.32) — see **Expert timetable** below. Omit or send `null` for the fully automatic timetable, which is what every request produced before this field existed |
 
 There is deliberately no `proposal_id`/`proposal_version` field — those
 are publish-only concerns (`POST /api/proposal/publish`) that have no
@@ -352,8 +382,10 @@ meaning for a call that never persists.
 
 | Value | Description |
 |---|---|
-| `"fullRouting"` (default) | Speed capped at the composition's `max_speed_kmh` everywhere, plus HSR avoidance: track segments whose *permitted* track speed exceeds `HSR_TRACK_SPEED_THRESHOLD_KMH` (strictly above 230 km/h — i.e. dedicated new-build high-speed lines only, upgraded conventional lines up to 230 stay usable; see `models/route/version.py`) are heavily penalized in every country where HSR is not allowed — allowed only when BOTH the composition's `hsr_allowed` AND that country's track-infrastructure `hsr_allowed` are true, evaluated for every country incl. transited-without-stop ones. Conventional lines are never penalized. Every leg additionally carries a per-stop traction-dynamics surcharge — the accel/brake time loss computed from composition weight plus an assumed standard locomotive against the link speeds before/after each stop (see `TRACTION_*` in `models/route/version.py`) — in its own `dynamics_time_min` field, kept separate from the raw router `driving_time_min`; `buffer_time_min` carries the country quota applied to driving and to dynamics (physics first, buffer after). Two-pass routing (snap pass, then custom-model pass) when a custom model applies. |
-| `"simpleRouting"` | Bypasses all of that — single-pass, no speed cap, no HSR avoidance, no traction dynamics. Cheap and fast, but not representative of real physics. Intended for quick manual sanity checks only. |
+| `"fullRouting"` (default) | Speed capped at the composition's `max_speed_kmh` everywhere, plus HSR avoidance: track segments whose *permitted* track speed exceeds `HSR_TRACK_SPEED_THRESHOLD_KMH` (strictly above 230 km/h — i.e. dedicated new-build high-speed lines only, upgraded conventional lines up to 230 stay usable; see `models/route/model.py`) are heavily penalized in every country where HSR is not allowed — allowed only when BOTH the composition's `hsr_allowed` AND that country's track-infrastructure `hsr_allowed` are true, evaluated for every country incl. transited-without-stop ones. Conventional lines are never penalized. Every leg additionally carries a per-stop traction-dynamics surcharge — the accel/brake time loss computed from composition weight plus an assumed standard locomotive against the link speeds before/after each stop (see `TRACTION_*` in `models/route/model.py`) — in its own `dynamics_time_min` field, kept separate from the raw router `driving_time_min`; `buffer_time_min` carries the country quota applied to driving and to dynamics (physics first, buffer after). Two-pass routing (snap pass, then custom-model pass). |
+| `"simpleRouting"` | Drops HSR avoidance and traction dynamics, and routes in a single pass. The composition speed cap still applies, as do the two rules that ride on every request in every mode: the Belarus/Russia exclusion (`BLOCKED_COUNTRIES`) and the electrification preference below. Cheap and fast, but not representative of real physics — intended for quick manual sanity checks only. |
+
+Applied in **both** modes, and in the ONTD map-line geometry projection: track that OSM tags `electrified=no` is penalized by `NON_ELECTRIFIED_PRIORITY_FACTOR` (route builder 0.9.31, a 10× priority penalty — a preference, not a veto). Track with no `electrified` tag at all is never penalized: unknown is not treated as forbidden. The rule is unconditional because every catalog locomotive is electric and the energy model prices catenary electricity on every kilometre; it becomes composition-dependent if a diesel locomotive is ever added.
 
 `timetable_mode` — controls how departure time and per-stop classification are derived. Classification is the same three-way rule for every mode (route builder 0.9.10, thresholds `NIGHT_START_MIN`/`NIGHT_END_MIN` in `models/route/version.py`): a stop **departing strictly before 00:00** is `boarding`, one **arriving at/after 05:00** is `alighting`, anything between is a `night` stop (operationally identical to `both` for dwell, but excluded from demand OD pairs). First stop is always boarding and last always alighting regardless of clock time — termini by position, not by the threshold rule. Outbound and return are scheduled independently, so their times can differ (e.g. asymmetric HSR avoidance changes duration).
 
@@ -361,6 +393,60 @@ meaning for a call that never persists.
 |---|---|
 | `"simpleAutomatic"` (default) | Routes once, then mirrors the resulting trip duration around a fixed 02:30 constant (`MIRROR_MIN`) to get the departure time. |
 | `"simpleAutomaticWithFixedNight"` | Requires `fixed_night_interval` `[A, B]`. Instead of the whole trip, the **interval's** midpoint (departure at `A` → arrival at `B`) is centered on 02:30 — so demand-strong feeder sections outside the interval keep sensible evening/morning clock times (e.g. Munich–Berlin–Hamburg as an evening feeder into a Hamburg–Copenhagen night section). Hard constraints: the interval must depart `A` by 23:59 and arrive at `B` at 05:00 or later. A naturally shorter interval (< 5h01) is stretched to exactly that window by distributing `slack_time_min` across the interval's segments proportionally to leg time (pinning dep 23:59 / arr 05:00 in the minimal-stretch case — minimal stretch wins over exact midpoint symmetry). If stretching drops the interval's timetable speed below `FIXED_NIGHT_MIN_SPEED_RATIO` (0.7) of its routing speed, the trip carries a `fixed_night_stretch_slow` entry in `general_parameters.timetable_warnings` — a warning, never an error. The return trip applies the interval reversed automatically. |
+
+**Expert timetable** (route builder 0.9.32)
+
+`expert_timetable` overrides, by hand, the two things the timetable
+strategies otherwise decide alone. It is not a `timetable_mode`: it
+composes with whichever mode runs, and an absent block leaves every
+result byte-identical to what it was before the field existed.
+
+```json
+"expert_timetable": {
+  "outbound": {
+    "departure": { "mode": "absolute", "time_min": 1290 },
+    "segment_addons": [
+      { "from_stop_id": "osm:n3856100103", "to_stop_id": "osm:n25397500", "add_min": 8 }
+    ]
+  },
+  "return": { "mirror_outbound": true }
+}
+```
+
+| Field | Rules |
+|---|---|
+| `departure.mode` | `"absolute"` — the direction departs at exactly `time_min`, whatever the strategy computed, and keeps that time through a later reroute. `"shift"` — the strategy's own departure displaced by `shift_min` (signed), which therefore *moves* when a reroute changes the trip's duration and the mirror around 02:30 re-centres. Which one applies is the caller's choice per route |
+| `departure.time_min` / `shift_min` | Integer minutes on the service-day scale (`models/utils.py::hhmm_to_min`), not wall clock: 21:30 on day 1 is `1290`, and a mirrored return trip may legitimately carry a negative absolute value. Bounds: `EXPERT_DEPARTURE_MIN_TIME`/`MAX_TIME` and `EXPERT_MAX_DEPARTURE_SHIFT_MIN` (`api/config.py`) |
+| `segment_addons[]` | Extra minutes on one leg, keyed by the **ordered stop pair** rather than a leg index. `add_min` is an integer ≥ 1 (and ≤ `EXPERT_MAX_ADDON_MIN`): an add-on can only ever slow a leg down — the routed physics stay the floor. The pair must be **adjacent, in that order, in `stops`** (400 otherwise), pairs may not repeat, and a direction may carry at most `EXPERT_MAX_ADDONS` of them |
+| `return` | Omitted or `{"mirror_outbound": true}` (the default) applies outbound's add-ons to the return with each pair reversed — the same convention `fixed_night_interval` already follows. A departure is **never** mirrored: the return has its own timetable. Send a full block instead (`departure` and/or `segment_addons`) for an asymmetric timetable; the two spellings are mutually exclusive |
+
+What the overrides do to the rest of the model:
+
+- Add-ons are resolved against the **final** stop list, i.e. after
+  `auto_stop_addition`. An add-on whose pair that step split (a stop
+  inserted between the two) is **dropped**, never redistributed over the
+  legs that replaced it — the surviving minutes are visible per leg as
+  `segments[].addon_time_min`, so a client can reconcile its own list
+  against the route it gets back.
+- They are counted by the timetable strategy, not added afterwards: a
+  padded trip stays centred on 02:30, and add-ons inside a fixed-night
+  interval reduce the `slack_time_min` that mode has to stretch it by.
+- An overridden departure **re-runs stop classification**: a trip shifted
+  two hours later has different `boarding`/`night`/`alighting` stops, and
+  therefore different dwell. It can also move a
+  `simpleAutomaticWithFixedNight` trip out of the night window that mode
+  guarantees — permitted, and not currently flagged (see
+  `OPEN_TODOS["expert_night_window_warning"]`).
+- **Costs move**, correctly: track-access night/peak bands and the
+  electricity night band are placed on the clock from stop times, so
+  padding a leg or shifting a departure moves those windows.
+
+The block is echoed back in the resolved `request` in canonical form
+(add-ons sorted, an empty direction as `null`, a mirroring return always
+spelled out), and stored verbatim as part of `compute_request` on publish.
+`POST /api/proposals/compare` accepts it as a side override, so a stored
+expert timetable can be compared against the same route computed with
+`"expert_timetable": null`.
 
 `schedule_mode` — controls the route's seasonal operating frequency:
 
@@ -401,7 +487,8 @@ stop list.
     "timetable_mode": "simpleAutomatic",
     "fixed_night_interval": null,
     "schedule_mode": "alwaysDaily",
-    "auto_stop_addition": "add"
+    "auto_stop_addition": "add",
+    "expert_timetable": null
   },
   "suggested_stops": [
     { "...": "ONLY for auto_stop_addition=\"suggest\" — see above; absent for \"off\"/\"add\"" }
@@ -526,8 +613,9 @@ stats for that trip, for quick manual reading rather than deriving them from
 | Field | Type | Description |
 |---|---|---|
 | `trip_km` | float | Total trip distance for that direction, km (`distance_m` summed across segments, /1000, 1 decimal) |
-| `route_duration_min` | int | Full elapsed time, departure → arrival — driving + dynamics + buffer + slack + dwell at intermediate stops (`Trip.total_time_min`) |
+| `route_duration_min` | int | Full elapsed time, departure → arrival — driving + dynamics + buffer + slack + addon + dwell at intermediate stops (`Trip.total_time_min`) |
 | `average_speed_kmh` | float | `trip_km` ÷ (`route_duration_min` / 60), 1 decimal. Uses elapsed time, not pure driving time |
+| `manual_addon_min` | int | Expert-mode minutes across the whole direction — `segments[].addon_time_min` summed (route builder 0.9.32). 0 for every automatic timetable |
 | `timetable_warnings` | array | Derived timetable quality annotations — `[]` for most trips. Currently only `fixed_night_stretch_slow` (fixed-night mode, interval stretched too slow): `{code, interval: [start_id, end_id], timetable_speed_kmh, routing_speed_kmh, ratio}` with `ratio` = timetable ÷ routing speed, below `FIXED_NIGHT_MIN_SPEED_RATIO` |
 
 **`route.trip_pairs[].composition`** — physics-relevant subset of the composition
@@ -553,7 +641,8 @@ excluded — see the `evaluation` block below for those):
 | `geometry_id` | string | References an entry in `route.geometries` — see below |
 | `distance_m` | int | Leg distance |
 | `driving_time_min`, `dynamics_time_min`, `buffer_time_min` | int | Leg duration components: raw router time (constant-cruise passage), per-stop accel/brake time loss (traction dynamics), and schedule buffer — the country quota applied to driving and to dynamics (the dynamics cruise speed is always derived from raw driving time first, buffer never feeds the physics) |
-| `slack_time_min` | int | Deliberate schedule padding beyond routing physics — non-zero only on legs inside a stretched fixed-night interval (see `timetable_mode`). Total leg time = driving + dynamics + buffer + slack, and stop-to-stop elapsed times always match that sum |
+| `slack_time_min` | int | Deliberate schedule padding beyond routing physics — non-zero only on legs inside a stretched fixed-night interval (see `timetable_mode`) |
+| `addon_time_min` | int | Manual minutes the caller put on this leg in expert mode (`expert_timetable.segment_addons`, route builder 0.9.32) — separate from `slack_time_min` because the author differs: slack is the model stretching an interval, this is a person. Never negative; 0 for every automatic timetable. Total leg time = driving + dynamics + buffer + slack + addon, and stop-to-stop elapsed times always match that sum |
 | `energy_kwh` | float | Currently a flat 28.0 kWh/km dummy factor — not calibrated yet. How much it *costs* is calibrated: the price side splits this between the country's day and night electricity rate by clock time and adds the catenary charge where one is levied |
 | `country_distance_shares`, `country_time_shares` | object | `{country_code: share}`, each sums to 1.0. Includes transit-only countries the leg crosses without stopping |
 
@@ -1195,8 +1284,8 @@ a malformed range/list/array-mode/trip_windows/bbox shape, an unknown
 ### `POST /api/proposals/compare`
 
 Compare two sides (`adapters/proposal/README.md` §7.3). Each side is
-anchored on one stored proposal and may override `scenario_id` and/or
-`composition_id`. A side **without** overrides is the stored proposal
+anchored on one stored proposal and may override `scenario_id`,
+`composition_id` and/or `expert_timetable`. A side **without** overrides is the stored proposal
 as-is (`published: true`); a side **with** any override is computed
 ephemerally — the anchor's stored compute request with the overridden
 fields, never persisted, `published: false`. Same anchor on both sides =
@@ -1226,9 +1315,16 @@ as a `/calc` call per overridden side; the UI needs a loading state.
 ```
 
 Exactly 2 sides (the shape allows more later). Per side: `proposal_id`
-(required, the anchor), `scenario_id`/`composition_id` (optional
-overrides) — no other keys. Any override key present routes the side
-through the compute path, even if its value equals the stored one.
+(required, the anchor), `scenario_id`/`composition_id`/`expert_timetable`
+(optional overrides) — no other keys. Any override key present routes the
+side through the compute path, even if its value equals the stored one.
+
+`expert_timetable` is the one override with a natural `null` use: a side
+sending `{"proposal_id": 123, "expert_timetable": null}` recomputes the
+same route with its manual timetable taken back out, so an expert
+timetable can be compared against its own automatic twin. Its shape is
+validated exactly as on `/api/proposal/calc`, against the anchor's stored
+`stops`.
 
 The **diff is side B minus side A** (`sides[1] - sides[0]`) throughout.
 
@@ -1807,3 +1903,61 @@ wrong, e.g. to the wrong distance).
 | `500` | `feedback_error` | Feedback storage failed (mail failure alone never triggers this) |
 | `503` | `infrastructure_error` | DB unreachable or unknown composition ID |
 | `501` | `not_implemented` | Endpoint exists but is not yet implemented |
+
+<a id="usage-logging"></a>
+
+## Usage logging
+
+Every served request appends one row to `admin.request_log`
+(`api/request_log.py`). No endpoint exposes it — this section documents
+what the API records about its callers, because that is worth stating
+plainly.
+
+**Why it exists**, in order of weight: usage evidence for the network
+proposal (how many people used the tool and which parts — `proposals`
+only knows what was *published*, a small fraction of what was tried);
+operations (`status_code`, `duration_ms`, `response_bytes` per endpoint);
+and abuse detection.
+
+**What a row holds:** the Flask endpoint name and matched route rule,
+method, status, duration, response size, `user_id` / `is_guest` /
+`trust_level`, a truncated user agent, and `client_hash`.
+
+**What it deliberately does not hold:** no IP address, no raw path, no
+query string, no request body. A `/api/proposal/calc` body is an entire
+proposal, and published ones are already persisted; the raw path carries
+ids the parameterised rule captures better for grouping.
+
+`client_hash` is `HMAC-SHA256(secret, "<UTC date>|<client address>")`. It
+correlates one client's requests within a UTC day and is unlinkable across
+days by construction — the date sits in the HMAC *message*, so the same
+address hashes differently tomorrow and no key rotation recovers it. To
+count distinct people use `user_id`, not this: guests get a real
+`admin.users` row from `POST /api/auth/guest` and their JWT outlives the
+day, so they are attributable like anyone else.
+
+**Not logged at all:** `OPTIONS` (CORS preflight doubles every
+cross-origin call), and anything under `/api/health` or `/api/gate/*` —
+the first is polled by the frontend and by container healthchecks, the
+second by Caddy's `forward_auth` on every page request. Both would
+dominate the table without saying anything about usage. A 404 on an
+unknown path *is* logged.
+
+**It cannot affect a response.** Writes are best-effort and swallowed;
+identity comes from `g` where a decorator already resolved it, and
+otherwise from `auth_middleware.resolve_identity_quietly()`, which treats
+everything the decorators 401 on as anonymous. An invalid token still
+fails exactly where it always did.
+
+**Retention is not automatic.** `scripts/purge_request_log.py` enforces
+`REQUEST_LOG_RETENTION_DAYS` (90) and belongs on a cron — see
+`docs/DEPLOY_HANDOVER.md` §4b. Erasing a user sets `user_id` to NULL
+rather than deleting rows, so a GDPR erasure anonymises the history and
+keeps the counts.
+
+**Known gap:** `client_hash` reads the leftmost `X-Forwarded-For` and
+falls back to the socket address, but Flask-Limiter's `rate_limit_key()`
+reads `request.remote_addr` directly. Behind Caddy that is the proxy for
+every caller, so the address-keyed rate limits (the auth endpoints) may
+currently share one bucket. Worth a `ProxyFix` pass, which is a change to
+rate-limiting behaviour and deliberately not bundled here.

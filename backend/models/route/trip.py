@@ -90,7 +90,15 @@ class Segment:
     (timetable_mode="simpleAutomaticWithFixedNight", see
     models/route/timetable.py). Declared last (dataclass default), listed
     with the other time components in spirit: total = driving + dynamics
-    + buffer + slack.
+    + buffer + slack + addon.
+
+    addon_time_min is the CALLER'S own padding on this leg — expert-mode
+    manual minutes (expert_timetable.segment_addons, see
+    models/route/timetable.py). Kept apart from slack_time_min because the
+    two have different authors: slack is the model stretching an interval
+    to cover the night window, addon is a person deciding this leg needs
+    more time than the physics say. Never negative — the routed time is
+    the floor of every leg; 0 on every leg nobody padded.
 
     countries is the same set as country_distance_shares' keys but IN PATH
     ORDER, which a dict of shares cannot express. Track access charges need
@@ -119,6 +127,7 @@ class Segment:
     country_distance_shares: dict[str, float]
     country_time_shares: dict[str, float]
     slack_time_min: int = 0  # fixed-night stretch padding — see class docstring
+    addon_time_min: int = 0  # expert-mode manual padding — see class docstring
     countries: list[str] = field(default_factory=list)
     passages: list[str] = field(default_factory=list)
 
@@ -129,6 +138,7 @@ class Segment:
             + self.dynamics_time_min
             + self.buffer_time_min
             + self.slack_time_min
+            + self.addon_time_min
         )
 
     def country_windows(self) -> list[CountryWindow]:
@@ -205,6 +215,11 @@ class Trip:
     direction: int
     segments: list[Segment]
     timetable_warnings: list[TimetableWarning] = field(default_factory=list)
+    # Track gauge this trip was routed on (routing/gauge.py resolution over
+    # the trip's stops) — serialized as general_parameters.track_gauge_mm.
+    # Defaulted only for dataclass field ordering; route_factory always
+    # passes the resolved value.
+    gauge_mm: int = 1435
 
     @property
     def departure_time_min(self) -> int:
@@ -235,8 +250,8 @@ class Trip:
         """driving + dynamics + buffer — every physics-derived in-motion and
         margin minute (kept under its historical name; the dynamics component
         was split out of driving in route builder 0.9.8). Deliberately
-        excludes fixed-night slack (deliberate stretch padding, not physics)
-        and dwell — total_time_min adds both on top."""
+        excludes fixed-night slack and expert-mode add-ons (deliberate
+        padding, not physics) and dwell — total_time_min adds them on top."""
         return self.driving_time_min + self.dynamics_time_min + self.buffer_time_min
 
     @property
@@ -252,10 +267,17 @@ class Trip:
         return sum(s.slack_time_min for s in self.segments)
 
     @property
+    def addon_time_min(self) -> int:
+        """Manual expert-mode minutes across the whole trip — 0 unless the
+        request carried an expert_timetable with segment_addons."""
+        return sum(s.addon_time_min for s in self.segments)
+
+    @property
     def total_time_min(self) -> int:
         return (
             self.total_driving_and_buffer_min
             + self.slack_time_min
+            + self.addon_time_min
             + self.total_dwell_min
         )
 
@@ -279,6 +301,7 @@ class Trip:
         direction: int,
         segments: list[Segment],
         timetable_warnings: list[TimetableWarning] | None = None,
+        gauge_mm: int = 1435,
     ) -> "Trip":
         """Sole constructor — called exclusively by route_factory."""
         return cls(
@@ -286,4 +309,5 @@ class Trip:
             direction=direction,
             segments=segments,
             timetable_warnings=timetable_warnings or [],
+            gauge_mm=gauge_mm,
         )

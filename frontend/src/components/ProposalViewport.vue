@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, computed, watch } from 'vue'
+import { onMounted, onBeforeUnmount, ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useStore } from '@/stores/store'
 import { useToastStore } from '@/stores/toastStore'
@@ -12,24 +12,61 @@ import type {
   Stop,
   SuggestedStop,
 } from '@/types/api'
-import { publishProposal, fetchProposalRoute, ProposalsError } from '@/lib/proposalsApi'
+import { publishProposal, fetchProposalRoute } from '@/lib/proposalsApi'
+import { apiRequest, createAbortSlot } from '@/lib/apiClient'
+import { ApiError, asApiFailure, isRetryable, type ApiFailure } from '@/lib/apiError'
+import { useApiFailure } from '@/composables/useApiFailure'
 import { resolvePrefillStops, type GallerySearchSeed } from '@/lib/proposalPrefill'
 import { readDraft, writeDraft, clearDraft } from '@/lib/proposalDraftStorage'
+import { useLocaleFormat } from '@/composables/useLocaleFormat'
+import { buildSuggestRows, settledRows, type SuggestRow } from '@/lib/suggestPlacement'
+import { formatClock, dayOffset } from '@/lib/tripClock'
+import {
+  addonFor,
+  addonsForDirection,
+  droppedAddons,
+  emptyExpert,
+  fromRequest,
+  fromRouteSegments,
+  isEmptyExpert,
+  mirrorDirection,
+  pruneExpertToStops,
+  setAddon,
+  swapDirections,
+  toRequest as expertToRequest,
+  type DepartureOverride,
+  type ExpertState,
+  type ExpertTimetableRequest,
+  type SegmentAddon,
+} from '@/lib/expertTimetable'
+import { routeFacts } from '@/lib/shareLinks'
+import { provideProposalEngagement } from '@/composables/useProposalEngagement'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Skeleton from 'primevue/skeleton'
 import AppIcon from '@/components/AppIcon.vue'
+import AppSpinner from '@/components/AppSpinner.vue'
 import StopSelect from '@/components/StopSelect.vue'
-import CompositionPanel from '@/components/CompositionPanel.vue'
+import ComputeInputsPanel from '@/components/ComputeInputsPanel.vue'
+import StopTime from '@/components/StopTime.vue'
+import ExpertTimetableControls from '@/components/ExpertTimetableControls.vue'
+import LoadingFunFact from '@/components/LoadingFunFact.vue'
 import EvaluationPanel from '@/components/EvaluationPanel.vue'
 import MapView from '@/components/MapView.vue'
+import MapShareBar from '@/components/MapShareBar.vue'
+import CommentSection from '@/components/CommentSection.vue'
+import InlineAlert from '@/components/InlineAlert.vue'
 import {
   mdiArrowLeft,
+  mdiArrowLeftRight,
+  mdiCalendarSync,
   mdiCheckCircle,
   mdiClose,
   mdiPencil,
   mdiPlus,
+  mdiSpeedometerMedium,
   mdiSwapVertical,
+  mdiTimerCogOutline,
   mdiTrashCan,
 } from '@mdi/js'
 
@@ -43,15 +80,46 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ back: []; published: [proposalId: number] }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
+const { formatInt } = useLocaleFormat()
 const store = useStore()
 const toastStore = useToastStore()
-
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5050'
+const { describe, report } = useApiFailure()
 
 const currentMode = ref<'edit' | 'loading' | 'display' | 'suggest'>(props.mode)
 const selectedCompositionId = ref<string | null>(null)
-const evaluateError = ref<string | null>(null)
+
+// --- Calc state -----------------------------------------------------------
+// The calc is the one genuinely long call in the app (routing engine, one leg
+// at a time), so it reports progress rather than just spinning: 'slow' at 8s,
+// 'verySlow' at 30s, cancellable throughout.
+const calcPhase = ref<'idle' | 'working' | 'slow' | 'verySlow'>('idle')
+const calcFailure = ref<ApiFailure | null>(null)
+const calcFailureMsg = ref<string | null>(null)
+const calcSlot = createAbortSlot()
+// Arguments of the last calc, so Retry replays it rather than guessing.
+const lastCalcArgs = ref<{ stopIds: string[]; autoStopAddition: 'off' | 'suggest' } | null>(null)
+
+// --- Expert timetable state -------------------------------------------------
+// Manual overrides on top of the computed timetable: a pinned or shifted first
+// departure, and extra minutes on individual legs. The arithmetic (mirroring,
+// pruning, request shape) lives in lib/expertTimetable.ts; what stays here is
+// the state, the reconciliation after a calc, and the recompute trigger.
+//
+// Deliberately only reachable once a route exists (display mode): both
+// controls are relative to a computed timetable — there is no automatic
+// departure to pin, and no leg to pad, before the first evaluation.
+const expertMode = ref(false)
+const expert = ref<ExpertState>(emptyExpert())
+// What the displayed results were computed with — the comparison behind
+// paramsStale below, exactly like committedCompId/committedScenarioId.
+const committedExpert = ref<ExpertState | null>(null)
+
+// Failure of loading a STORED proposal (/proposal/:id) — kept apart from the
+// calc's, because it must not fall through to the builder (see loadStored).
+const loadFailure = ref<ApiFailure | null>(null)
+const loadFailureMsg = ref<string | null>(null)
+const loadSlot = createAbortSlot()
 
 // Raw route as returned by POST /api/proposal/calc (before adaptRoute()) —
 // the map segment/highlight logic below reads it directly.
@@ -89,11 +157,34 @@ const publishRequest = ref<Record<string, unknown> | null>(null)
 // proposal_id adopted after the first publish; later saves "overwrite" it, so a
 // building session yields one proposal rather than a duplicate per re-evaluation.
 const publishedProposalId = ref<number | null>(null)
+// Whether the proposal on screen is the user's OWN — published from this
+// session, or opened from the gallery and authored by them. It is what
+// decides whether a recompute saves: the builder saves automatically, and a
+// change the user made by hand should not quietly evaporate on the way back
+// to the gallery — but recomputing SOMEONE ELSE'S proposal against another
+// scenario is a private what-if and must never overwrite their work (the
+// backend refuses it anyway, and a 403 is not an answer to a question the
+// user did not ask).
+const ownsProposal = ref(false)
 // Set when a calc finished but the user still has to pick an identity in the
 // gate — the authChoice watcher publishes once they do.
 const pendingPublish = ref(false)
 const saved = ref(false)
 const publishError = ref<string | null>(null)
+// Publish recomputes server-side, so it is as slow as a calc and escalates the
+// same way.
+const publishPhase = ref<'idle' | 'working' | 'slow' | 'verySlow'>('idle')
+
+// The proposal_id a discussion can hang off: the one we opened, or the one the
+// first publish adopted. Null in a fresh builder session, which is why neither
+// the comment section nor the map's like/share pill can exist there — there is
+// nothing to comment on, like, or link to yet.
+const storedProposalId = computed(() => props.proposalId ?? publishedProposalId.value)
+
+// Likes + comment thread for that proposal, fetched ONCE here and injected by
+// both the map pill and the discussion below (see the composable's header for
+// why it isn't a per-component fetch or a global store).
+provideProposalEngagement(storedProposalId)
 
 interface StopTimeFmt {
   stop_id: string
@@ -103,6 +194,10 @@ interface StopTimeFmt {
   lon: number
   arrival_time_fmt: string | null
   departure_time_fmt: string | null
+  // Calendar days after the trip's first departure — drives the "+1" marker, so
+  // a 20:00 → 08:00 night train doesn't read as travelling backwards in time.
+  arrival_day: number
+  departure_day: number
 }
 
 interface TripResult {
@@ -136,6 +231,10 @@ interface BackendSegment {
   to_stop: BackendStop
   geometry_id: string
   country_distance_shares: Record<string, number>
+  // Manual expert-mode minutes on this leg (ROUTE_BUILDER 0.9.32) — the
+  // authoritative record of which add-ons actually landed. Optional so a
+  // proposal stored before 0.9.32 still type-checks.
+  addon_time_min?: number
 }
 
 // Headline physics figures the backend attaches per trip (route_serialize.py
@@ -145,6 +244,10 @@ interface BackendGeneralParameters {
   trip_km: number
   route_duration_min: number
   average_speed_kmh: number
+  // Track gauge the trip was routed on (ROUTE_BUILDER 0.9.27+) — 1435 for
+  // nearly everything; 1520 on the ex-Soviet/Finnish family, 1600 Ireland,
+  // 1668 Iberia. Optional so older stored proposals still type-check.
+  track_gauge_mm?: number
 }
 
 interface BackendTripSide {
@@ -184,16 +287,7 @@ interface BackendRoute {
 // The merged calc response with its route key concretely typed.
 type CalcResponse = ProposalCalcResponse<BackendRoute>
 
-// Minutes-since-midnight (as returned by the API) -> "HH:MM" for display.
-// Wraps values outside 0-1439 (the mirror-around-02:30 timetable can produce
-// them) into a valid clock time rather than rendering "25:10".
-function formatMinutes(min: number | null): string | null {
-  if (min === null || min === undefined) return null
-  const wrapped = ((min % 1440) + 1440) % 1440
-  const h = Math.floor(wrapped / 60)
-  const m = wrapped % 60
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
-}
+// Clock formatting and the overnight day offset live in lib/tripClock.ts.
 
 // Travel time of a leg, in minutes, from the timetable the API already returns.
 // A negative difference means the leg runs over midnight, so wrap by a full day
@@ -206,15 +300,19 @@ function legTravelMinutes(seg: BackendSegment): number | null {
   return (((arrival - departure) % 1440) + 1440) % 1440
 }
 
-function toStopTimeFmt(stop: BackendStop): StopTimeFmt {
+// baseMin is the trip's own first departure — the reference the "+1" markers are
+// counted from (see lib/tripClock.ts).
+function toStopTimeFmt(stop: BackendStop, baseMin: number | null): StopTimeFmt {
   return {
     stop_id: stop.stop_id,
     stop_name: stop.stop_name,
     country_code: stop.country_code,
     lat: stop.lat,
     lon: stop.lon,
-    arrival_time_fmt: formatMinutes(stop.arrival_time_min),
-    departure_time_fmt: formatMinutes(stop.departure_time_min),
+    arrival_time_fmt: formatClock(stop.arrival_time_min),
+    departure_time_fmt: formatClock(stop.departure_time_min),
+    arrival_day: dayOffset(stop.arrival_time_min, baseMin),
+    departure_day: dayOffset(stop.departure_time_min, baseMin),
   }
 }
 
@@ -223,9 +321,10 @@ function toStopTimeFmt(stop: BackendStop): StopTimeFmt {
 // leg's to_stop).
 function buildStopTimes(segments: BackendSegment[]): StopTimeFmt[] {
   if (segments.length === 0) return []
+  const baseMin = segments[0].from_stop.departure_time_min
   return [
-    toStopTimeFmt(segments[0].from_stop),
-    ...segments.map((seg) => toStopTimeFmt(seg.to_stop)),
+    toStopTimeFmt(segments[0].from_stop, baseMin),
+    ...segments.map((seg) => toStopTimeFmt(seg.to_stop, baseMin)),
   ]
 }
 
@@ -294,6 +393,14 @@ function swapDirection() {
   }
   const live = showComputedView.value
   itinerary.value = [...itinerary.value].reverse()
+  // The expert overrides are keyed to the posted stop order, which this
+  // reversal changes — so the two directions' overrides change places with
+  // it (see swapDirections()). Without this every add-on would be measured
+  // against the opposite direction's legs and dropped on the next recompute.
+  // committedExpert is deliberately NOT swapped: it stays paired with
+  // committedItinerary, in the orientation the results were computed in, and
+  // expertChanged below compares against either orientation.
+  expert.value = swapDirections(expert.value)
   if (live) {
     const trips = routeResult.value?.trips ?? []
     const other = trips.find((t) => t.trip_id !== selectedTripId.value)
@@ -308,54 +415,253 @@ const sectionStops = computed(() => {
   return outbound?.stop_times.map((s) => ({ stop_id: s.stop_id, name: s.stop_name })) ?? []
 })
 
-// In display and suggest modes, lock the composition card to the one used for
-// the routing — a single-element list hides the card's navigation (arrows/dots)
-// and prevents desyncing the suggest-mode base route from its composition.
-const compositionCards = computed(() => {
-  if (
-    (currentMode.value === 'display' || currentMode.value === 'suggest') &&
-    selectedCompositionId.value
-  ) {
-    const sel = store.compositions.filter((c) => c.composition_id === selectedCompositionId.value)
-    if (sel.length > 0) return sel
+// --- Expert timetable: request, reconciliation, editing ---------------------
+
+// The expert_timetable block for a calc over `stopIds`, or null when nothing
+// is overridden. Pruning here rather than at edit time is what guarantees the
+// posted block is always legal for the stops it accompanies: a stop removed
+// from the itinerary takes the add-ons on the two legs it joined with it.
+function expertRequest(stopIds: string[]): Record<string, unknown> | null {
+  if (!expertMode.value || isEmptyExpert(expert.value)) return null
+  const pruned = pruneExpertToStops(expert.value, stopIds)
+  expert.value = pruned
+  return expertToRequest(pruned) as Record<string, unknown> | null
+}
+
+// The route's own view of which minutes survived, read off its segments —
+// see lib/expertTimetable.ts. The backend drops an add-on whose stop pair
+// auto_stop_addition split, so what came back is the truth and local state
+// follows it rather than the other way round.
+function reconcileExpert(
+  route: BackendRoute,
+  sentOutbound: SegmentAddon[],
+  sentReturn: SegmentAddon[],
+): SegmentAddon[] {
+  const pair = route.trip_pairs[0]
+  if (!pair) return []
+  const appliedOutbound = fromRouteSegments(pair.outbound.segments)
+  const appliedReturn = fromRouteSegments(pair.return_trip.segments)
+
+  expert.value = {
+    outbound: { ...expert.value.outbound, addons: appliedOutbound },
+    // The link is kept as the user left it: a mirroring return goes on
+    // mirroring (its minutes are outbound's), an unlinked one takes its own
+    // applied list.
+    returnTrip: expert.value.returnTrip
+      ? { ...expert.value.returnTrip, addons: appliedReturn }
+      : null,
   }
-  return store.compositions
-})
+  return [
+    ...droppedAddons(sentOutbound, appliedOutbound),
+    ...(expert.value.returnTrip ? droppedAddons(sentReturn, appliedReturn) : []),
+  ]
+}
+
+// The controls always edit expert.outbound, and expert.outbound always
+// describes the direction ON SCREEN. That holds because flipping direction
+// reverses the itinerary as well as the shown trip (swapDirection above), so
+// the trip being looked at is always the one whose stop order gets posted —
+// and swapDirection exchanges the two override slots to keep it that way.
+// The alternative (keying the slots to the route's direction ids) silently
+// checks each set of add-ons against the other direction's legs after a flip,
+// which drops all of them on the next recompute.
+const otherDirectionMirrors = computed(() => expert.value.returnTrip === null)
+
+// Stop mirroring: the opposite direction gets its own copy of what is on
+// screen, so breaking the link changes no times by itself.
+function unlinkReturn() {
+  expert.value = { ...expert.value, returnTrip: mirrorDirection(expert.value.outbound) }
+}
+
+// Back to mirroring — the opposite direction's own times are discarded, which
+// is what "mirror this direction again" means.
+function relinkReturn() {
+  expert.value = { ...expert.value, returnTrip: null }
+}
+
+// The automatic departure per direction — what a shift is measured from, what
+// "reset" returns to, and what the hint quotes. The response reports where the
+// trip actually departed, so the automatic value is recovered by backing the
+// override out of it: none means it IS the automatic value, a shift means
+// minus the shift. A PINNED departure hides it (the response only says where
+// the user put the train), so the last known value is kept instead — which is
+// exactly the case where the automatic value stopped mattering, and the next
+// calc without a pin refreshes it.
+const lastAutoDeparture = ref<[number, number]>([0, 0])
+
+function rememberAutoDeparture(route: BackendRoute, sent: ExpertState | null) {
+  const pair = route.trip_pairs[0]
+  if (!pair) return
+  const next: [number, number] = [...lastAutoDeparture.value]
+  for (const [direction, trip] of [
+    [0, pair.outbound],
+    [1, pair.return_trip],
+  ] as const) {
+    const departed = trip.segments[0]?.from_stop.departure_time_min
+    if (departed == null) continue
+    const applied = sent ? slotFor(sent, direction).departure : null
+    if (applied === null) next[direction] = departed
+    else if (applied.mode === 'shift') next[direction] = departed - applied.minutes
+  }
+  lastAutoDeparture.value = next
+}
+
+// Indexed by the ROUTE's direction id, not by which slot is on screen: the
+// route's directions do not move when the itinerary is flipped, so this
+// survives a flip without having to be swapped alongside the overrides.
+const autoDepartureMin = computed(
+  () => lastAutoDeparture.value[selectedTrip.value?.direction_id === 1 ? 1 : 0],
+)
+
+function slotFor(state: ExpertState, direction: 0 | 1) {
+  if (direction === 0) return state.outbound
+  return state.returnTrip ?? { departure: null, addons: addonsForDirection(state, 1) }
+}
+
+const currentDeparture = computed(() => expert.value.outbound.departure)
+
+function setDepartureOverride(value: DepartureOverride | null) {
+  expert.value = { ...expert.value, outbound: { ...expert.value.outbound, departure: value } }
+}
+
+// Minutes currently on the leg arriving at `stopId` from `fromStopId`, for the
+// direction on screen.
+function legAddon(fromStopId: string | null, stopId: string): number {
+  if (!fromStopId) return 0
+  return addonFor(expert.value.outbound.addons, fromStopId, stopId)
+}
+
+function setLegAddon(fromStopId: string | null, stopId: string, minutes: number) {
+  if (!fromStopId) return
+  expert.value = {
+    ...expert.value,
+    outbound: {
+      ...expert.value.outbound,
+      addons: setAddon(expert.value.outbound.addons, fromStopId, stopId, minutes),
+    },
+  }
+}
+
+function onLegAddonInput(fromStopId: string | null, stopId: string, event: Event) {
+  setLegAddon(fromStopId, stopId, Number((event.target as HTMLInputElement).value))
+}
+
+function cloneExpert(state: ExpertState): ExpertState {
+  return JSON.parse(JSON.stringify(state)) as ExpertState
+}
+
+// Add-ons the backend could not place, named by leg so the message says
+// which minutes went and why they could not simply be moved.
+function reportDroppedAddons(dropped: SegmentAddon[]) {
+  const byId = new Map(store.stops.map((s) => [s.stop_id, s.name]))
+  const legs = dropped
+    .map((a) => `${byId.get(a.fromStopId) ?? a.fromStopId} → ${byId.get(a.toStopId) ?? a.toStopId}`)
+    .join(', ')
+  toastStore.addToast('warn', t('proposal.expert.droppedAddons', { legs }))
+}
+
+// Turning expert mode off drops the overrides rather than hiding them: a
+// hidden override that still reaches the next calc is the worst of both.
+function toggleExpertMode() {
+  expertMode.value = !expertMode.value
+  if (!expertMode.value) expert.value = emptyExpert()
+}
 
 // POST /api/proposal/calc for the given stop ids and auto_stop_addition mode
 // — the merged, stateless compute endpoint: one call returns route AND
 // evaluation (no more separate plan + evaluation round trips). Returns the
-// parsed response, or null on error (having set evaluateError and dropped back
+// parsed response, or null on error (having set calcFailure and dropped back
 // to edit mode). proposal_id/proposal_version don't exist on this request —
 // persistence is publish's concern, not compute's.
 async function requestCalc(
   stopIds: string[],
   autoStopAddition: 'off' | 'suggest',
 ): Promise<CalcResponse | null> {
+  // Remember the arguments so Retry can replay exactly this call.
+  lastCalcArgs.value = { stopIds, autoStopAddition }
+  const expertBlock = expertRequest(stopIds)
+  calcPhase.value = 'working'
+  const signal = calcSlot.begin()
   try {
-    const response = await fetch(`${BASE_URL}/api/proposal/calc`, {
+    const json = await apiRequest<CalcResponse>('/api/proposal/calc', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...store.authHeaders() },
-      body: JSON.stringify({
+      headers: store.authHeaders(),
+      // composition_id is omitted until the user picks one: the first
+      // evaluation runs on the backend's standard composition
+      // (DEFAULT_COMPOSITION_ID), and applyPlan() adopts whichever one the
+      // response reports back.
+      body: {
         stops: stopIds,
-        composition_id: selectedCompositionId.value,
+        ...(selectedCompositionId.value ? { composition_id: selectedCompositionId.value } : {}),
+        // Omitted entirely while nothing is overridden: an absent block and
+        // an empty one are the same request server-side, and omitting it
+        // keeps an untouched timetable on the same compute-cache entry it
+        // was always on. Pruned first — the backend rejects an add-on whose
+        // stop pair is not a leg of the stops being posted.
+        ...(expertBlock ? { expert_timetable: expertBlock } : {}),
         auto_stop_addition: autoStopAddition,
         // Plan under the selected scenario (null = live base, resolved server-side).
         scenario_id: store.selectedScenarioId,
-      }),
+      },
+      // No deadline: the routing engine's own timeout is per leg and gunicorn
+      // allows 120s, so any client deadline we picked would sometimes kill a
+      // request that was about to succeed — and aborting wouldn't free the
+      // worker anyway. The user gets escalating copy and a Cancel button.
+      budget: 'heavy',
+      onSlow: (phase) => {
+        calcPhase.value = phase
+      },
+      signal,
     })
-    const json = await response.json()
-    if (!response.ok) {
-      evaluateError.value = json.message ?? `HTTP ${response.status}`
-      currentMode.value = 'edit'
-      return null
-    }
+    calcPhase.value = 'idle'
     return json
   } catch (err) {
-    evaluateError.value = err instanceof Error ? err.message : 'Unknown network error'
+    calcPhase.value = 'idle'
+    const failure = asApiFailure(err)
+    // The user cancelled, or a newer calc superseded this one: no error, and
+    // the caller of cancelCalc() owns the mode.
+    if (failure?.kind === 'canceled') return null
+    calcFailure.value = failure
+    // Two surfaces, never the same sentence twice. Actionable detail (the
+    // backend's own validation text) belongs inline, next to the control. A
+    // systemic failure gets a SHORT inline note plus the full explanation in a
+    // sticky toast — printing the long "something went wrong on our side…"
+    // copy inline as well is what put it on screen twice.
+    const verbatim = err instanceof ApiError ? err.verbatim : null
+    calcFailureMsg.value = verbatim ?? t('errors.calcFailed')
+    if (!verbatim) report(err)
     currentMode.value = 'edit'
     return null
   }
+}
+
+// What the map overlay says while we wait. Both the calc and publish escalate
+// through the same phases; whichever is running drives the copy.
+const progressCaption = computed(() => {
+  const phase = calcPhase.value !== 'idle' ? calcPhase.value : publishPhase.value
+  if (phase === 'verySlow') return t('errors.highDemand')
+  if (phase === 'slow') return t('errors.stillWorking')
+  return t('proposal.evaluating')
+})
+
+/** Stop waiting. Honest about what it does: the server keeps working. */
+function cancelCalc(): void {
+  calcSlot.cancel()
+  calcPhase.value = 'idle'
+  currentMode.value = 'edit'
+}
+
+/** Replay the last calc. Manual only — an automatic retry would re-queue work
+ *  on an already-saturated worker pool, which is what made the overload worse. */
+function retryCalc(): void {
+  const args = lastCalcArgs.value
+  if (!args) return
+  calcFailure.value = null
+  calcFailureMsg.value = null
+  currentMode.value = 'loading'
+  requestCalc(args.stopIds, args.autoStopAddition).then((json) => {
+    if (json) applyPlan(json, true)
+  })
 }
 
 // The raw backend trip currently shown (matches selectedTripId) — the source
@@ -387,6 +693,20 @@ const routeStats = computed(() => {
   }
 })
 
+// Headline route figures shown under the itinerary once a route exists.
+const routeStatRows = computed(() => {
+  const stats = routeStats.value
+  if (!stats) return []
+  const frequencies = stats.frequencies
+    .map((f) => (te(`proposal.frequency.${f}`) ? t(`proposal.frequency.${f}`) : f))
+    .join(', ')
+  return [
+    { icon: mdiArrowLeftRight, value: `${formatInt(stats.distanceKm)} km` },
+    { icon: mdiSpeedometerMedium, value: `${formatInt(stats.avgSpeedKmh)} km/h` },
+    { icon: mdiCalendarSync, value: frequencies },
+  ]
+})
+
 // Wire a successful calc response into the display: adapt the route, publish
 // the evaluation bundle, select the outbound trip, rebuild the itinerary from
 // the planned route (so the builder reflects what's actually on the map —
@@ -397,6 +717,32 @@ const routeStats = computed(() => {
 // creates or overwrites a proposal.
 function applyPlan(json: CalcResponse, publish = false) {
   rawRoute.value = json.route
+  // Expert overrides. Three steps, each answering a different question:
+  //   1. what did we ASK for — the state as it stands, kept for the dropped
+  //      check below;
+  //   2. what was it computed WITH — the resolved echo, which is also how a
+  //      stored proposal's own expert timetable arrives (it lives in the
+  //      compute request the proposal replays, so hydrating from it is what
+  //      stops opening one and recomputing it from silently reverting it to
+  //      the automatic timetable);
+  //   3. what actually LANDED — the route's own segments, authoritative for
+  //      add-ons, since the backend drops any whose stop pair no longer
+  //      exists once auto_stop_addition has had its say.
+  // Reconciling before the committed snapshot matters: a dropped add-on left
+  // in the state would make the results read as permanently stale.
+  const sentOutbound = expertMode.value ? expert.value.outbound.addons : []
+  const sentReturn = expertMode.value ? addonsForDirection(expert.value, 1) : []
+  const echoed = json.request?.expert_timetable as ExpertTimetableRequest | null | undefined
+  if (echoed) {
+    expertMode.value = true
+    expert.value = fromRequest(echoed)
+  }
+  rememberAutoDeparture(json.route, echoed ? expert.value : null)
+  if (expertMode.value) {
+    const dropped = reconcileExpert(json.route, sentOutbound, sentReturn)
+    if (dropped.length > 0) reportDroppedAddons(dropped)
+  }
+  committedExpert.value = cloneExpert(expert.value)
   // Assemble the panel-facing EvaluationResponse from the merged response:
   // calc_version/route_id lifted from their new positions, input.route
   // re-attached from the top-level route key (the wire carries the route
@@ -417,7 +763,19 @@ function applyPlan(json: CalcResponse, publish = false) {
     route.trips.find((t) => t.direction_id === 0)?.trip_id ?? route.trips[0]?.trip_id ?? null
   itinerary.value = itineraryFromRoute(route)
   committedItinerary.value = itinerary.value.map((s) => ({ ...s }))
+  // The first calc posts no composition, so the response is where we learn
+  // which one was used. Committing it in the same tick also keeps the
+  // recalc watcher below quiet — it only fires on a divergence from the
+  // committed value.
+  selectedCompositionId.value =
+    json.route.trip_pairs[0]?.composition_id ?? selectedCompositionId.value
   committedCompId.value = selectedCompositionId.value
+  // Same for the scenario, which also settles the selector when a STORED
+  // proposal was computed under a different one than the app currently has
+  // selected — otherwise the results would show as stale the moment they load.
+  const computedScenarioId = json.request.scenario_id
+  if (typeof computedScenarioId === 'number') store.selectedScenarioId = computedScenarioId
+  committedScenarioId.value = store.selectedScenarioId
   currentMode.value = 'display'
   if (!publish) return
   // Persist. An authenticated visitor (guest or registered) publishes right
@@ -458,23 +816,37 @@ async function doPublish() {
   }
   const isFirstPublish = publishedProposalId.value === null
   if (publishedProposalId.value) body.proposal_id = publishedProposalId.value
+  publishPhase.value = 'working'
   try {
-    const resp = await publishProposal(body, store.authHeaders())
+    const resp = await publishProposal(body, store.authHeaders(), {
+      onSlow: (phase) => {
+        publishPhase.value = phase
+      },
+    })
     publishedProposalId.value = resp.proposal_id
+    ownsProposal.value = true
     saved.value = true
+    // The gallery is kept alive, so its cached list would otherwise not contain
+    // the proposal the user just published. Flag it to refetch once on return.
+    store.galleryStale = true
     clearDraft()
     toastStore.addToast('success', t('proposal.saved'))
     if (isFirstPublish) emit('published', resp.proposal_id)
   } catch (err) {
-    publishError.value = err instanceof ProposalsError ? err.message : t('proposal.publishError')
+    if (asApiFailure(err)?.kind === 'canceled') return
+    publishError.value = describe(err, 'errors.publishFailed')
+    report(err, { fallbackKey: 'errors.publishFailed' })
+  } finally {
+    publishPhase.value = 'idle'
   }
 }
 
 async function evaluate() {
   const validStops = itinerary.value.filter((s) => s.selectedStop !== null)
-  if (validStops.length < 2 || !selectedCompositionId.value) return
+  if (validStops.length < 2) return
   currentMode.value = 'loading'
-  evaluateError.value = null
+  calcFailure.value = null
+  calcFailureMsg.value = null
   saved.value = false
   publishError.value = null
   // First pass: "suggest" routes exactly the caller's stops and reports the
@@ -507,11 +879,12 @@ async function evaluate() {
 // time. On zero suggestions this just degrades to plain 'edit' instead.
 async function restoreSuggestState(selectedIds: string[]) {
   const stopIds = currentStopIds.value
-  if (stopIds.length < 2 || !selectedCompositionId.value) return
+  if (stopIds.length < 2) return
   currentMode.value = 'loading'
-  evaluateError.value = null
+  calcFailure.value = null
+  calcFailureMsg.value = null
   const json = await requestCalc(stopIds, 'suggest')
-  if (!json) return // requestCalc already reset currentMode to 'edit' and set evaluateError
+  if (!json) return // requestCalc already reset currentMode to 'edit' and set calcFailure
   const suggestions = json.suggested_stops ?? []
   if (suggestions.length > 0) {
     basePlan.value = json
@@ -525,6 +898,15 @@ async function restoreSuggestState(selectedIds: string[]) {
   }
 }
 
+// Close the register/guest gate THIS component opened — and only that. These
+// paths used to call closeAuthModal() unconditionally, which also slammed shut a
+// "Log in / Register" the user had opened themselves from the header: they
+// opened it while a proposal was still computing, the compute settled, and their
+// modal vanished under them. A standalone login is the user's, not ours.
+function dismissEvaluationGate(): void {
+  if (store.authModal.context === 'evaluation') store.closeAuthModal()
+}
+
 // User toggled a proposed stop's bubble/marker — the single selection source
 // for both the timeline and the map (replace the Set so it stays reactive).
 function toggleSuggested(stopId: string) {
@@ -536,26 +918,34 @@ function toggleSuggested(stopId: string) {
 
 // User clicked "Continue with X additional stops". With no stops chosen, the
 // first "suggest" response already routed exactly the caller's stops, so reuse
-// it directly. Otherwise insert the chosen stops into the itinerary (by
-// proximity) and recompute with auto_stop_addition="off" — the caller has made
-// the selection, so no further suggestions are wanted.
+// it directly. Otherwise the itinerary becomes exactly what the timeline showed
+// — the caller's stops with the opted-in candidates on the leg they were listed
+// on — and we recompute with auto_stop_addition="off": the caller has made the
+// selection, so no further suggestions are wanted.
 async function confirmStopSelection(selectedIds: string[]) {
   const base = basePlan.value
-  const chosen = suggestedStops.value.filter((s) => selectedIds.includes(s.stop_id))
+  const suggestions = suggestedStops.value
+  const chosen = suggestions.filter((s) => selectedIds.includes(s.stop_id))
+  // Read the placement off the same rows the timeline rendered, before the
+  // suggest state (which baseOutbound derives from) is torn down below. Not
+  // suggestRows: that one is reversed when the user flipped the view, and the
+  // flip is a pure view change that leaves the itinerary's direction alone.
+  const confirmedStops = baseOutbound.value?.stop_times ?? []
+  const settled = settledRows(confirmedStops, suggestions, new Set(selectedIds))
   suggestedStops.value = []
   basePlan.value = null
   suggestSelected.value = new Set()
   suggestReversed.value = false
   if (!base) {
     currentMode.value = 'edit'
-    store.closeAuthModal()
+    dismissEvaluationGate()
     return
   }
   if (chosen.length === 0) {
     applyPlan(base, true) // opens the choose-phase gate for a no-choice visitor
     return
   }
-  for (const s of chosen) insertSuggestedStop(s)
+  itinerary.value = itineraryFromSettledRows(settled, confirmedStops, chosen)
   currentMode.value = 'loading'
   const stopIds = itinerary.value.filter((s) => s.selectedStop).map((s) => s.selectedStop!.stop_id)
   const json = await requestCalc(stopIds, 'off')
@@ -577,43 +967,53 @@ function cancelSuggestMode() {
   suggestSelected.value = new Set()
   suggestReversed.value = false
   currentMode.value = 'edit'
-  store.closeAuthModal()
+  dismissEvaluationGate()
 }
 
-// Turn a suggested stop into a full Stop record (preferring the loaded stop
-// list, falling back to the fields the suggestion already carries) and insert
-// it into the itinerary at the best-fitting position via addStop().
-function insertSuggestedStop(s: SuggestedStop) {
-  const stop: Stop = store.stops.find((st) => st.stop_id === s.stop_id) ?? {
-    stop_id: s.stop_id,
-    name: s.stop_name,
-    country_code: s.country_code,
-    lat: s.lat,
-    lon: s.lon,
-    stop_charge_eur: { value: 0, is_default: true },
+// Rebuild the itinerary from the settled suggest rows, keeping their order.
+// That order is the backend's own along-route order (see lib/suggestPlacement.ts)
+// and is authoritative here: re-deriving each stop's position from lat/lon —
+// which is what addStop() does for a manual pick — reorders whole clusters once
+// several stops arrive at once.
+//
+// Rows the caller already had keep their existing itinerary row, so the full
+// Stop record survives; the rest resolve against the loaded stop list, falling
+// back to the fields the response itself carries.
+function itineraryFromSettledRows(
+  rows: SuggestRow[],
+  confirmed: StopTimeFmt[],
+  chosen: SuggestedStop[],
+): ItineraryStop[] {
+  const existing = new Map(
+    itinerary.value.filter((s) => s.selectedStop).map((s) => [s.selectedStop!.stop_id, s]),
+  )
+  const byId = new Map(store.stops.map((s) => [s.stop_id, s]))
+  const fromCalc = new Map([...confirmed, ...chosen].map((s) => [s.stop_id, s]))
+  const out: ItineraryStop[] = []
+  const seen = new Set<string>()
+  for (const row of rows) {
+    if (seen.has(row.stopId)) continue
+    seen.add(row.stopId)
+    const kept = existing.get(row.stopId)
+    if (kept) {
+      out.push(kept)
+      continue
+    }
+    const known = byId.get(row.stopId)
+    const src = fromCalc.get(row.stopId)
+    if (!known && !src) continue
+    const stop: Stop = known ?? {
+      stop_id: src!.stop_id,
+      name: src!.stop_name,
+      country_code: src!.country_code,
+      lat: src!.lat,
+      lon: src!.lon,
+      stop_charge_eur: { value: 0, is_default: true },
+    }
+    out.push({ id: _nextId++, name: stop.name, selectedStop: stop })
   }
-  addStop(stop)
+  return out
 }
-
-// Keep the displayed route and evaluation on the same scenario. A scenario
-// switch is one merged /calc call with auto_stop_addition="off": the stops
-// were settled by the last evaluation, so no re-prompting for suggestions,
-// and the server-side compute cache makes repeat scenarios cheap. The former
-// cost-only shortcut (re-running evaluation alone when the track versions
-// matched) went away with the separate evaluation endpoint.
-watch(
-  () => store.selectedScenarioId,
-  async (newId, oldId) => {
-    if (!rawRoute.value || currentMode.value === 'loading') return
-    if (newId == null || newId === oldId) return
-    const stopIds = currentStopIds.value
-    if (stopIds.length < 2 || !selectedCompositionId.value) return
-    currentMode.value = 'loading'
-    evaluateError.value = null
-    const json = await requestCalc(stopIds, 'off')
-    if (json) applyPlan(json)
-  },
-)
 
 // Publish-after-auth: a no-choice visitor whose calc finished picks an identity
 // in the gate; the moment they do (authChoice leaves 'none'), persist. The gate
@@ -644,6 +1044,7 @@ let _nextId = 1
 // the user cancels an edit. Null until the first evaluation.
 const committedItinerary = ref<ItineraryStop[] | null>(null)
 const committedCompId = ref<string | null>(null)
+const committedScenarioId = ref<number | null>(null)
 
 // Ordered stop ids of the current itinerary — the basis for the dirty check.
 const currentStopIds = computed(() =>
@@ -651,12 +1052,10 @@ const currentStopIds = computed(() =>
 )
 
 // Guards the persistence watcher below against a mount-time race: while
-// onMounted is still awaiting fetchStops() to restore a draft (itinerary
-// still empty), CompositionPanel can already mount off the faster
-// compositions fetch and force-select compositions[0] (its own "keep a valid
-// selection" watch) — which, unguarded, the watcher below would read as "the
-// user cleared everything" and clearDraft() the very draft still being
-// restored. Flipped true once onMounted's initial restore/prefill decision is
+// onMounted is still awaiting fetchStops() to restore a draft, the itinerary
+// is still empty, and any watched ref settling in the meantime would be read
+// as "the user cleared everything" — clearing the very draft being restored.
+// Flipped true once onMounted's initial restore/prefill decision is
 // finalized, whichever branch it takes.
 const draftHydrated = ref(false)
 
@@ -692,7 +1091,6 @@ watch(
 // swapping direction is a free view change, not a re-sequencing.
 const isDirty = computed(() => {
   if (!committedItinerary.value) return false
-  if (selectedCompositionId.value !== committedCompId.value) return true
   const committedIds = committedItinerary.value
     .filter((s) => s.selectedStop)
     .map((s) => s.selectedStop!.stop_id)
@@ -712,6 +1110,61 @@ const showComputedView = computed(
     currentMode.value === 'display' ||
     (currentMode.value === 'edit' && routeResult.value !== null && !isDirty.value),
 )
+
+// Changing scenario or composition marks the displayed results stale instead
+// of recomputing on the spot: each arrow click through the composition
+// catalogue would otherwise be a full recompute, and the new selection should
+// be readable before it costs anything. Reverting to what the results were
+// computed with clears the flag by itself — this is a comparison, not a latch.
+// An itinerary that has itself diverged takes precedence: that path is the
+// Evaluate button's, which also re-prompts for stop suggestions.
+const paramsStale = computed(
+  () =>
+    routeResult.value !== null &&
+    currentMode.value !== 'loading' &&
+    currentMode.value !== 'suggest' &&
+    !isDirty.value &&
+    (selectedCompositionId.value !== committedCompId.value ||
+      store.selectedScenarioId !== committedScenarioId.value ||
+      expertChanged.value),
+)
+
+// An expert edit is not "dirty" — the stops are untouched — it is stale
+// results, the same state a composition switch produces, and it takes the
+// same Recalculate control. Compared structurally: the state is small, and
+// two states that differ only in add-on order mean the same timetable, which
+// toRequest() already canonicalises.
+const expertChanged = computed(() => {
+  const committed = committedExpert.value
+  if (committed === null) return false
+  const current = JSON.stringify(expertToRequest(expert.value))
+  // Either orientation counts as unchanged, for the same reason isDirty
+  // accepts a reversed stop list: flipping direction re-keys the overrides
+  // (swapDirection above) without moving a single minute of the timetable,
+  // and must not put the results behind a Recalculate button.
+  return (
+    current !== JSON.stringify(expertToRequest(committed)) &&
+    current !== JSON.stringify(expertToRequest(swapDirections(committed)))
+  )
+})
+
+// The stale results' recompute: same "stops are settled" call the scenario
+// switch used to make on its own, now behind the user's click.
+async function recomputeWithSelection() {
+  const stopIds = currentStopIds.value
+  if (stopIds.length < 2 || currentMode.value === 'loading') return
+  currentMode.value = 'loading'
+  calcFailure.value = null
+  calcFailureMsg.value = null
+  const json = await requestCalc(stopIds, 'off')
+  // Persist when the proposal is the user's own (see ownsProposal): this
+  // recompute is the only way an expert timetable — or a composition or
+  // scenario switch — reaches a stored proposal, and a change the user made
+  // by hand that survives only until they navigate away is worse than no
+  // change at all. Someone else's proposal is still never overwritten:
+  // recomputing it to look at another scenario stays a private what-if.
+  if (json) applyPlan(json, ownsProposal.value)
+}
 
 // Swap button is shown wherever there's a direction to flip: a multi-trip
 // route in display, or two or more stops while editing.
@@ -744,10 +1197,37 @@ const showEvaluationSection = computed(
     routeResult.value !== null,
 )
 
-// Shared pill styling for the itinerary controls (Add Stop / Edit / Swap /
-// Cancel), matching the direction-swap button.
+// Gate for the discussion. Keyed on routeResult ALONE, deliberately not on
+// currentMode like the evaluation section above: opening a stored proposal runs
+// 'display' -> 'loading' -> 'display' (loadStoredProposal, then applyPlan), so
+// a mode-based condition unmounts and remounts the section mid-load and it
+// fetches the thread twice, aborting the first request. routeResult is only
+// ever assigned, never cleared, so this flips false->true exactly once per
+// proposal and survives a re-evaluate. The storedProposalId !== null half of
+// the condition stays in the template, where it also narrows the prop.
+const showCommentSection = computed(() => routeResult.value !== null)
+
+// Share-message inputs. The figures are the real computed ones — never the
+// summary block's co2/demand fields, which are placeholders (see routeFacts()).
+// The names mirror derivedName(), which is what the proposal was published as,
+// so the message and the preview card's title agree.
+const shareFacts = computed(() => routeFacts(rawRoute.value))
+const shareOrigin = computed(() => sectionStops.value[0]?.name ?? '')
+const shareDestination = computed(
+  () => sectionStops.value[sectionStops.value.length - 1]?.name ?? '',
+)
+
+// Quiet pill — used by the "Gallery" back link above the workspace.
 const pillClass =
   'flex cursor-pointer items-center gap-1.5 rounded-full border border-primary-50/20 px-3 py-1.5 text-sm leading-none text-primary-50 transition hover:bg-primary-50/10'
+
+// The itinerary's own tools (Edit / Add Stop / Swap / Cancel Edit). Same shape
+// as pillClass but filled and semibold: as bare outlines tucked under the table
+// they read as decoration and were being missed. Deliberately a SEPARATE
+// constant — pillClass is shared with the back link, which should stay quiet.
+// Still not solid CTAs: four secondary tools must not compete with Evaluate.
+const toolPillClass =
+  'flex cursor-pointer items-center gap-1.5 rounded-full border border-primary-50/30 bg-primary-50/10 px-3.5 py-2 text-sm font-semibold leading-none text-primary-50 transition hover:bg-primary-50/20'
 
 // Build itinerary rows from a planned route's outbound stops, so re-editing
 // starts from the actual route (router-inserted stops included), not the
@@ -771,7 +1251,7 @@ function itineraryFromRoute(rr: RouteResult): ItineraryStop[] {
 }
 
 // Restores an itinerary from a persisted draft's bare stop ids (see
-// proposalDraftStorage.ts). Unlike itineraryFromRoute()/insertSuggestedStop(),
+// proposalDraftStorage.ts). Unlike itineraryFromRoute()/itineraryFromSettledRows(),
 // there's no synthesized-fallback data to fall back on for an id no longer in
 // the catalogue — such ids are simply dropped.
 function itineraryFromStopIds(stopIds: string[]): ItineraryStop[] {
@@ -787,13 +1267,23 @@ function itineraryFromStopIds(stopIds: string[]): ItineraryStop[] {
 // Computed times for an itinerary row, looked up from the selected trip by stop
 // id — used to keep the timetable labels beside the (still editable) stops in a
 // clean re-edit. Null when there's no computed routing to read from.
-function rowTimes(
-  stop: ItineraryStop,
-): { arrival: string | null; departure: string | null } | null {
+function rowTimes(stop: ItineraryStop): {
+  arrival: string | null
+  departure: string | null
+  arrivalDay: number
+  departureDay: number
+} | null {
   const id = stop.selectedStop?.stop_id
   if (!id || !selectedTrip.value) return null
   const st = selectedTrip.value.stop_times.find((s) => s.stop_id === id)
-  return st ? { arrival: st.arrival_time_fmt, departure: st.departure_time_fmt } : null
+  return st
+    ? {
+        arrival: st.arrival_time_fmt,
+        departure: st.departure_time_fmt,
+        arrivalDay: st.arrival_day,
+        departureDay: st.departure_day,
+      }
+    : null
 }
 
 // Enter re-edit from display: stay on the computed view, just surface the
@@ -808,6 +1298,10 @@ function cancelEdit() {
   if (committedItinerary.value) {
     itinerary.value = committedItinerary.value.map((s) => ({ ...s }))
     selectedCompositionId.value = committedCompId.value
+    // Restored together, and they have to be: committedExpert is keyed to
+    // committedItinerary's stop order, so putting one back without the other
+    // leaves the overrides describing the opposite direction.
+    if (committedExpert.value) expert.value = cloneExpert(committedExpert.value)
   }
   selectedTripId.value =
     routeResult.value?.trips.find((t) => t.direction_id === 0)?.trip_id ??
@@ -915,15 +1409,27 @@ interface ViewRow {
   name: string
   arrival: string | null
   departure: string | null
+  arrivalDay: number
+  departureDay: number
+  // Identity of the row's stop and of the stop before it — the ordered pair
+  // an expert add-on is keyed by. null on the first row, which no leg
+  // arrives at.
+  stopId: string
+  prevStopId: string | null
 }
 
 const viewRows = computed((): ViewRow[] => {
   if (showComputedView.value && selectedTrip.value) {
-    return selectedTrip.value.stop_times.map((st, i) => ({
+    const stops = selectedTrip.value.stop_times
+    return stops.map((st, i) => ({
       id: i,
       name: st.stop_name,
       arrival: st.arrival_time_fmt,
       departure: st.departure_time_fmt,
+      arrivalDay: st.arrival_day,
+      departureDay: st.departure_day,
+      stopId: st.stop_id,
+      prevStopId: i === 0 ? null : stops[i - 1].stop_id,
     }))
   }
   return itinerary.value.map((s) => ({
@@ -931,6 +1437,10 @@ const viewRows = computed((): ViewRow[] => {
     name: s.name,
     arrival: null,
     departure: null,
+    arrivalDay: 0,
+    departureDay: 0,
+    stopId: s.selectedStop?.stop_id ?? '',
+    prevStopId: null,
   }))
 })
 
@@ -945,65 +1455,15 @@ const baseOutbound = computed<TripResult | null>(() => {
 
 const suggestSelectedCount = computed(() => suggestSelected.value.size)
 
-// Best insertion index for a point among an ordered coord list, minimising the
-// added detour — the same nearest-neighbour rule as optimalInsertIndex, but over
-// a plain coord array so it can place proposed stops without touching itinerary.
-function bestInsertIndex(items: { lat: number; lon: number }[], p: { lat: number; lon: number }) {
-  const n = items.length
-  if (n === 0) return 0
-  let bestIndex = n
-  let bestExtra = Infinity
-  for (let i = 0; i <= n; i++) {
-    let extra: number
-    if (i === 0) extra = dist(p, items[0])
-    else if (i === n) extra = dist(items[n - 1], p)
-    else extra = dist(items[i - 1], p) + dist(p, items[i]) - dist(items[i - 1], items[i])
-    if (extra < bestExtra) {
-      bestExtra = extra
-      bestIndex = i
-    }
-  }
-  return bestIndex
-}
-
-interface SuggestRow {
-  kind: 'confirmed' | 'suggested'
-  stopId: string
-  name: string
-  lat: number
-  lon: number
-  selected: boolean
-  addedMin: number | null
-}
-
-// Confirmed stops (in order) interleaved with the proposed stops placed by
-// proximity — the serialized SuggestedStop carries no leg index, so proximity is
-// the robust placement. Reversed for display when the user flips direction.
+// Confirmed stops interleaved with the proposed stops along the way — see
+// lib/suggestPlacement.ts for the ordering rule. Reversed for display when the
+// user flips direction, after placement, so the flip stays a pure view change.
 const suggestRows = computed<SuggestRow[]>(() => {
-  const confirmed = baseOutbound.value?.stop_times ?? []
-  const rows: SuggestRow[] = confirmed.map(
-    (st): SuggestRow => ({
-      kind: 'confirmed',
-      stopId: st.stop_id,
-      name: st.stop_name,
-      lat: st.lat,
-      lon: st.lon,
-      selected: true,
-      addedMin: null,
-    }),
+  const rows = buildSuggestRows(
+    baseOutbound.value?.stop_times ?? [],
+    suggestedStops.value,
+    suggestSelected.value,
   )
-  for (const s of suggestedStops.value) {
-    const idx = bestInsertIndex(rows, { lat: s.lat, lon: s.lon })
-    rows.splice(idx, 0, {
-      kind: 'suggested',
-      stopId: s.stop_id,
-      name: s.stop_name,
-      lat: s.lat,
-      lon: s.lon,
-      selected: suggestSelected.value.has(s.stop_id),
-      addedMin: s.added_time_min,
-    })
-  }
   return suggestReversed.value ? [...rows].reverse() : rows
 })
 
@@ -1084,6 +1544,26 @@ const mapStops = computed(() => {
       highlighted: true,
     }))
 })
+
+// Every catalogue stop the user could still add, shown as dots on the map while
+// editing. Motivation from the field: a traveller does not know which stations
+// are even available, so the Add Stop dropdown is a search you can only use if
+// you already know the answer. Stops already on the itinerary are excluded —
+// they are drawn as route markers, and re-adding one is a no-op anyway.
+const mapAvailable = computed(() => {
+  if (currentMode.value !== 'edit') return null
+  const used = usedStopIds.value
+  return store.stops
+    .filter((s) => !used.has(s.stop_id))
+    .map((s) => ({ stopId: s.stop_id, lat: s.lat, lon: s.lon, name: s.name }))
+})
+
+// Adding from the map reuses addStop(), so a map pick lands at the same
+// geographically sensible position as one made through the dropdown.
+function onMapAddStop(stopId: string): void {
+  const stop = store.stops.find((s) => s.stop_id === stopId)
+  if (stop) addStop(stop)
+}
 
 const mapShape = computed(() => {
   // Suggest mode draws the temporary route from the base "suggest" response, as
@@ -1234,14 +1714,20 @@ const mapSegments = computed<MapSegment[] | null>(() => {
 // Load a stored proposal by id and populate display mode — same wire shape
 // as POST /api/proposal/calc (see types/api.ts's ProposalDetailResponse), so
 // applyPlan() can hydrate rawRoute/calcResult/itinerary from it exactly like
-// a fresh calc. selectedCompositionId is set first so CompositionPanel
+// a fresh calc. selectedCompositionId is set first so ComputeInputsPanel
 // locks onto the composition the stored route actually used, rather than
 // defaulting to the first one in the full catalogue.
 async function loadStoredProposal(proposalId: number) {
   currentMode.value = 'loading'
+  loadFailure.value = null
+  loadFailureMsg.value = null
   try {
-    const detail = await fetchProposalRoute<BackendRoute>(proposalId)
+    const detail = await fetchProposalRoute<BackendRoute>(proposalId, loadSlot.begin())
     publishedProposalId.value = detail.proposal_id
+    // Own work is saved on every recompute; a stranger's is never touched.
+    // user_id is null on a proposal whose author deleted their account —
+    // nobody owns it then, and null === null must not read as "mine".
+    ownsProposal.value = detail.user_id !== null && detail.user_id === store.userId
     selectedCompositionId.value = detail.route.trip_pairs[0]?.composition_id ?? null
     applyPlan(
       {
@@ -1256,10 +1742,26 @@ async function loadStoredProposal(proposalId: number) {
       false,
     )
   } catch (err) {
-    evaluateError.value = err instanceof ProposalsError ? err.message : t('proposal.publishError')
-    currentMode.value = 'edit'
+    if (asApiFailure(err)?.kind === 'canceled') return
+    // Deliberately NOT falling through to 'edit'. That is what the old code did,
+    // and it silently turned "we couldn't load proposal 42" into a route BUILDER
+    // seeded with two arbitrary prefill stops, under a message about saving —
+    // so a shared link opened during a blip looked like a working (wrong) app.
+    loadFailure.value = asApiFailure(err)
+    loadFailureMsg.value = describe(err, 'errors.proposalLoadFailed')
   }
 }
+
+function retryLoadStored(): void {
+  if (props.proposalId != null) loadStoredProposal(props.proposalId)
+}
+
+// Leaving mid-request: both rejections classify as 'canceled', so nothing is
+// reported and neither counts against backend health.
+onBeforeUnmount(() => {
+  calcSlot.cancel()
+  loadSlot.cancel()
+})
 
 onMounted(async () => {
   // App.vue loads this reference data at startup; only fetch if we arrived here
@@ -1310,12 +1812,55 @@ onMounted(async () => {
         {{ t('gallery.back') }}
       </button>
     </div>
-    <div class="flex gap-6">
-      <!-- Left panel: shrink-wrapped to its content's natural width (itinerary
-           text + composition card) rather than a fixed share of the row, so
-           MapView gets whatever width is left over. -->
+
+    <!-- A stored proposal that wouldn't load. This REPLACES the workspace
+         rather than letting it fall through to edit mode: the old behaviour
+         quietly handed the user a route builder seeded with arbitrary stops,
+         which looks like a working app showing the wrong thing. -->
+    <div
+      v-if="loadFailureMsg"
+      class="flex flex-col items-center gap-4 rounded-xl border border-red-400/30 bg-red-950/20 px-8 py-16 text-center"
+      role="alert"
+    >
+      <p class="max-w-md text-primary-50">{{ loadFailureMsg }}</p>
+      <div class="flex items-center gap-3">
+        <button
+          v-if="!loadFailure || isRetryable(loadFailure)"
+          type="button"
+          class="cursor-pointer rounded-full bg-primary-50/10 px-6 py-2 text-sm text-primary-50 transition hover:bg-primary-50/20"
+          @click="retryLoadStored"
+        >
+          {{ t('errors.retry') }}
+        </button>
+        <button
+          type="button"
+          class="cursor-pointer text-sm text-primary-50/60 underline underline-offset-2 transition hover:text-primary-50"
+          @click="emit('back')"
+        >
+          {{ t('gallery.back') }}
+        </button>
+      </div>
+    </div>
+
+    <div
+      v-else
+      class="flex gap-6 transition-opacity duration-200"
+      :class="paramsStale ? 'opacity-40' : ''"
+    >
+      <!-- Left panel: shrink-wrapped to its content's natural width (the
+           itinerary text) rather than a fixed share of the row, so MapView
+           gets whatever width is left over. -->
       <div class="flex w-fit shrink-0 flex-col justify-center gap-12">
-        <div class="itinerary-table max-w-sm">
+        <!-- The itinerary column is capped so it stays a column beside the
+             map. Expert mode adds a stepper per leg, which does not fit that
+             cap: rather than letting the table scroll sideways (a scrollbar
+             under a timetable reads as broken, and the control it hides is
+             the one being used), the cap is raised while the steppers are
+             shown. The map is flex-1 and simply gets the remaining width. -->
+        <div
+          class="itinerary-table"
+          :class="expertMode && currentMode === 'display' ? 'max-w-lg' : 'max-w-sm'"
+        >
           <!-- Edit mode table -->
           <!-- border-collapse (set in pt.table) removes default cell spacing so
                the timeline line segments in consecutive rows connect seamlessly. -->
@@ -1337,21 +1882,19 @@ onMounted(async () => {
                  re-edit); disappears the moment the builder goes dirty. -->
             <Column
               v-if="showComputedView"
-              style="width: 5rem"
+              style="width: 6rem"
               :pt="{ bodyCell: { class: '!p-0' } }"
             >
               <template #body="{ data: stop }">
                 <div class="flex flex-col items-end gap-1 py-2 pr-3">
-                  <span
-                    v-if="rowTimes(stop)?.arrival"
-                    class="text-xs tabular-nums leading-none text-primary-50"
-                    >{{ rowTimes(stop)?.arrival }}</span
-                  >
-                  <span
-                    v-if="rowTimes(stop)?.departure"
-                    class="text-xs tabular-nums leading-none text-primary-50"
-                    >{{ rowTimes(stop)?.departure }}</span
-                  >
+                  <StopTime
+                    :time="rowTimes(stop)?.arrival ?? null"
+                    :day="rowTimes(stop)?.arrivalDay"
+                  />
+                  <StopTime
+                    :time="rowTimes(stop)?.departure ?? null"
+                    :day="rowTimes(stop)?.departureDay"
+                  />
                 </div>
               </template>
             </Column>
@@ -1400,8 +1943,10 @@ onMounted(async () => {
                   <div data-row-actions class="flex items-center gap-2">
                     <StopSelect
                       :stops="store.stops"
+                      :status="store.stopsStatus"
                       :disabled-ids="usedStopIdsExcluding(stop)"
                       @select="(s) => onStopSelect(stop, s)"
+                      @retry="store.fetchStops()"
                     >
                       <AppIcon :path="mdiPencil" :size="20" color="var(--p-primary-50)" />
                     </StopSelect>
@@ -1534,9 +2079,52 @@ onMounted(async () => {
             />
           </div>
 
-          <!-- Display / Loading mode table -->
+          <!-- Expert timetable: the departure control, plus the mirror notice
+               when the return is still following outbound. The per-leg
+               minutes live in the table below, on the row the leg arrives
+               at — a leg strip cannot be lifted out of the rows it sits
+               between without duplicating the whole table. -->
+          <div v-if="expertMode && currentMode === 'display'" class="mb-4 flex flex-col gap-2">
+            <ExpertTimetableControls
+              :departure="currentDeparture"
+              :auto-min="autoDepartureMin"
+              @update="setDepartureOverride"
+            />
+            <!-- You always edit the direction on screen; this says what that
+                 does to the other one, and offers the way out of it. Use the
+                 swap button to look at the other direction — the overrides
+                 follow it. -->
+            <p class="flex flex-wrap items-center gap-2 px-1 text-xs text-primary-50/50">
+              <template v-if="otherDirectionMirrors">
+                {{ t('proposal.expert.mirrored') }}
+                <button
+                  type="button"
+                  class="cursor-pointer font-semibold text-primary-50/80 underline underline-offset-2 transition hover:text-primary-50"
+                  @click="unlinkReturn"
+                >
+                  {{ t('proposal.expert.editSeparately') }}
+                </button>
+              </template>
+              <template v-else>
+                {{ t('proposal.expert.ownTimes') }}
+                <button
+                  type="button"
+                  class="cursor-pointer font-semibold text-primary-50/80 underline underline-offset-2 transition hover:text-primary-50"
+                  @click="relinkReturn"
+                >
+                  {{ t('proposal.expert.relink') }}
+                </button>
+              </template>
+            </p>
+          </div>
+
+          <!-- Display / Loading mode table. A standalone v-if, not the tail
+               of the suggest block's chain: the expert controls above sit
+               between the two, and a v-else-if would silently bind to them
+               instead. Same condition either way — suggest mode renders the
+               table above, edit mode the one at the top. -->
           <DataTable
-            v-else-if="currentMode !== 'edit'"
+            v-if="currentMode !== 'edit' && currentMode !== 'suggest'"
             :value="viewRows"
             data-key="id"
             :pt="{
@@ -1548,7 +2136,7 @@ onMounted(async () => {
             class="mb-4"
           >
             <!-- Times column (replaces drag handle) -->
-            <Column style="width: 5rem" :pt="{ bodyCell: { class: '!p-0' } }">
+            <Column style="width: 6rem" :pt="{ bodyCell: { class: '!p-0' } }">
               <template #body="{ data: row, index }">
                 <div class="flex flex-col items-end gap-1 py-2 pr-3">
                   <template v-if="currentMode === 'loading'">
@@ -1556,16 +2144,8 @@ onMounted(async () => {
                     <Skeleton v-if="index < viewRows.length - 1" width="3.5rem" height="10px" />
                   </template>
                   <template v-else>
-                    <span
-                      v-if="row.arrival"
-                      class="text-xs tabular-nums leading-none text-primary-50"
-                      >{{ row.arrival }}</span
-                    >
-                    <span
-                      v-if="row.departure"
-                      class="text-xs tabular-nums leading-none text-primary-50"
-                      >{{ row.departure }}</span
-                    >
+                    <StopTime :time="row.arrival" :day="row.arrivalDay" />
+                    <StopTime :time="row.departure" :day="row.departureDay" />
                   </template>
                 </div>
               </template>
@@ -1590,19 +2170,84 @@ onMounted(async () => {
               </template>
             </Column>
 
-            <!-- Stop name -->
+            <!-- Stop name. min-w-0 + break-words so a long single word
+                 ("Hauptbahnhof") wraps inside the column instead of forcing
+                 the table wider than its container. -->
             <Column>
               <template #body="{ data: row, index }">
-                <div class="flex items-center px-3 py-2">
+                <div class="flex min-w-0 items-center px-3 py-2">
                   <span
                     :class="[
-                      'text-primary-50 leading-tight',
+                      'text-primary-50 leading-tight break-words',
                       index === 0 || index === viewRows.length - 1
                         ? 'text-2xl font-bold'
                         : 'text-lg font-semibold',
                     ]"
                     >{{ row.name }}</span
                   >
+                </div>
+              </template>
+            </Column>
+
+            <!-- Expert: minutes added to the leg ARRIVING at this stop. The
+                 control is a number input with min="0" plus ±1 buttons, so
+                 "never shorter than the physics" is visible in the control
+                 rather than only enforced on submit.
+                 It belongs to the leg BETWEEN two stops, not to either of
+                 them, so it is lifted half a row up onto the boundary — level
+                 with the timeline between the two names it spans. -->
+            <Column
+              v-if="expertMode && currentMode === 'display'"
+              style="width: 6.25rem"
+              :pt="{ bodyCell: { class: '!p-0 align-top' } }"
+            >
+              <template #body="{ data: row }">
+                <div
+                  v-if="row.prevStopId"
+                  class="flex -translate-y-1/2 items-center justify-end gap-1 py-2"
+                >
+                  <button
+                    type="button"
+                    class="h-5 w-5 shrink-0 cursor-pointer rounded border border-primary-50/20 text-xs leading-none text-primary-50 transition hover:bg-primary-50/15 disabled:cursor-not-allowed disabled:opacity-40"
+                    :aria-label="t('proposal.expert.lessAria', { stop: row.name })"
+                    @click="
+                      setLegAddon(
+                        row.prevStopId,
+                        row.stopId,
+                        legAddon(row.prevStopId, row.stopId) - 1,
+                      )
+                    "
+                  >
+                    −
+                  </button>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    class="expert-addon-input h-5 w-10 rounded border bg-sapphire px-1 text-right text-xs tabular-nums text-primary-50"
+                    :class="
+                      legAddon(row.prevStopId, row.stopId) > 0
+                        ? 'border-amber-300/50 text-amber-200'
+                        : 'border-primary-50/20'
+                    "
+                    :value="legAddon(row.prevStopId, row.stopId)"
+                    :aria-label="t('proposal.expert.legAria', { stop: row.name })"
+                    @change="onLegAddonInput(row.prevStopId, row.stopId, $event)"
+                  />
+                  <button
+                    type="button"
+                    class="h-5 w-5 shrink-0 cursor-pointer rounded border border-primary-50/20 text-xs leading-none text-primary-50 transition hover:bg-primary-50/15 disabled:cursor-not-allowed disabled:opacity-40"
+                    :aria-label="t('proposal.expert.moreAria', { stop: row.name })"
+                    @click="
+                      setLegAddon(
+                        row.prevStopId,
+                        row.stopId,
+                        legAddon(row.prevStopId, row.stopId) + 1,
+                      )
+                    "
+                  >
+                    +
+                  </button>
                 </div>
               </template>
             </Column>
@@ -1613,7 +2258,10 @@ onMounted(async () => {
                the middle; Cancel Edit (re-edit) on the right. The two flex-1
                spacers keep the middle group centered regardless of which side
                buttons are present. -->
-          <div v-if="currentMode !== 'loading'" class="flex items-center gap-2">
+          <div
+            v-if="currentMode !== 'loading'"
+            class="mt-5 flex items-center gap-2 border-t border-primary-50/10 pt-5"
+          >
             <div class="flex flex-1 items-center gap-2" />
 
             <div class="flex items-center gap-2">
@@ -1621,7 +2269,7 @@ onMounted(async () => {
                    untouched. -->
               <button
                 v-if="currentMode === 'suggest'"
-                :class="pillClass"
+                :class="toolPillClass"
                 @click="cancelSuggestMode"
               >
                 <AppIcon :path="mdiArrowLeft" :size="16" />
@@ -1629,7 +2277,7 @@ onMounted(async () => {
               </button>
 
               <!-- Edit (display) -->
-              <button v-if="currentMode === 'display'" :class="pillClass" @click="startEdit">
+              <button v-if="currentMode === 'display'" :class="toolPillClass" @click="startEdit">
                 <AppIcon :path="mdiPencil" :size="16" />
                 {{ t('proposal.edit') }}
               </button>
@@ -1638,61 +2286,85 @@ onMounted(async () => {
               <StopSelect
                 v-if="currentMode === 'edit'"
                 :stops="store.stops"
+                :status="store.stopsStatus"
                 :disabled-ids="usedStopIds"
                 @select="addStop"
+                @retry="store.fetchStops()"
               >
-                <button :class="pillClass">
+                <button :class="toolPillClass">
                   <AppIcon :path="mdiPlus" :size="16" />
                   {{ t('proposal.addStop') }}
                 </button>
               </StopSelect>
 
               <!-- Swap direction (all modes where applicable) -->
-              <button v-if="showSwap" :class="pillClass" @click="swapDirection">
+              <button
+                v-if="showSwap"
+                :class="toolPillClass"
+                :aria-label="t('proposal.swapDirection')"
+                @click="swapDirection"
+              >
                 <AppIcon :path="mdiSwapVertical" :size="16" />
+              </button>
+
+              <!-- Expert timetable. Sits with the itinerary's own tools, not
+                   in the evaluation panel: it changes what is BUILT, not how
+                   finished results are sliced. Only in display mode — both
+                   its controls are relative to a computed timetable, so
+                   there is nothing to pin or pad before the first
+                   evaluation. -->
+              <button
+                v-if="currentMode === 'display'"
+                :class="[toolPillClass, expertMode ? 'expert-pill-on' : '']"
+                :aria-pressed="expertMode"
+                @click="toggleExpertMode"
+              >
+                <AppIcon :path="mdiTimerCogOutline" :size="16" />
+                {{ t('proposal.expert.toggle') }}
               </button>
             </div>
 
             <div class="flex flex-1 items-center justify-end gap-2">
               <!-- Cancel Edit (re-edit) -->
-              <button v-if="showCancelEdit" :class="pillClass" @click="cancelEdit">
+              <button v-if="showCancelEdit" :class="toolPillClass" @click="cancelEdit">
                 <AppIcon :path="mdiClose" :size="16" />
                 {{ t('proposal.cancelEdit') }}
               </button>
             </div>
           </div>
+
+          <!-- Headline route figures — distance, average speed, frequency.
+               Its own panel under the itinerary controls, matching the boxes
+               in the results section, and labelled the same way so the strip
+               reads as a titled panel rather than three loose pills. -->
+          <div
+            v-if="currentMode === 'display' && routeStatRows.length > 0"
+            class="mt-8 flex flex-col items-center gap-2 rounded-xl bg-primary-50/5 px-4 py-3 text-primary-50/70"
+          >
+            <span class="text-xs tracking-wide text-primary-50/50 uppercase">
+              {{ t('proposal.routeStats') }}
+            </span>
+            <div class="flex flex-wrap justify-center gap-x-8 gap-y-3">
+              <div v-for="stat in routeStatRows" :key="stat.icon" class="flex items-center gap-2">
+                <AppIcon :path="stat.icon" :size="20" />
+                <span class="text-base font-semibold">{{ stat.value }}</span>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <!-- Composition card — switchable in edit, locked to the used one in
-             display (where it also merges in the headline route figures,
-             once a route exists) -->
-        <div
-          v-if="store.compositionsStatus === 'success' && store.compositions.length > 0"
-          class="flex flex-col gap-6"
-        >
-          <CompositionPanel
-            :compositions="compositionCards"
-            :selected-id="selectedCompositionId"
-            :compact="currentMode === 'display' || currentMode === 'suggest'"
-            :route-stats="currentMode === 'display' ? routeStats : null"
-            @select="(id) => (selectedCompositionId = id)"
-          />
-        </div>
-        <div
-          v-else
-          class="flex h-32 items-center justify-center rounded-xl bg-primary-50/5 text-sm text-primary-50/40"
-        >
-          {{ t('proposal.trainCardPlaceholder') }}
-        </div>
-
-        <div
-          v-if="store.stopsStatus === 'loading' || store.compositionsStatus === 'loading'"
-          class="text-xs text-primary-50/40"
-        >
+        <div v-if="store.stopsStatus === 'loading'" class="text-xs text-primary-50/40">
           {{ t('proposal.loading') }}
         </div>
-        <div v-if="store.stopsError || store.compositionsError" class="text-xs text-red-400">
-          {{ store.stopsError ?? store.compositionsError }}
+        <div v-if="store.stopsFailure" class="max-w-sm text-xs break-words" role="alert">
+          <span class="text-red-400">{{ t('errors.stopsUnavailable') }}</span>
+          <button
+            type="button"
+            class="ml-2 cursor-pointer font-semibold text-primary-50 underline underline-offset-2"
+            @click="store.fetchStops()"
+          >
+            {{ t('errors.retry') }}
+          </button>
         </div>
 
         <!-- Evaluate button (fresh build, dirty re-edit, or loading) -->
@@ -1709,12 +2381,23 @@ onMounted(async () => {
           >
             {{ t('proposal.evaluate') }}
             <span v-if="currentMode !== 'loading'">→</span>
-            <span
-              v-else
-              class="h-4 w-4 animate-spin rounded-full border-2 border-primary-50/30 border-t-primary-50"
-            />
+            <AppSpinner v-else :size="16" />
           </button>
-          <p v-if="evaluateError" class="text-xs text-red-400">{{ evaluateError }}</p>
+
+          <!-- max-w-sm (inside InlineAlert) matches the itinerary table's own
+               cap. The parent panel is `w-fit`, so an uncapped sentence sets
+               the panel's width and collapses the flex-1 map beside it into a
+               sliver. -->
+          <InlineAlert v-if="calcFailureMsg" :message="calcFailureMsg">
+            <button
+              v-if="calcFailure && isRetryable(calcFailure)"
+              type="button"
+              class="w-fit cursor-pointer text-xs font-semibold text-primary-50 underline underline-offset-2"
+              @click="retryCalc"
+            >
+              {{ t('errors.retry') }}
+            </button>
+          </InlineAlert>
         </div>
 
         <!-- Continue button (suggest mode) — replaces Evaluate; carries the count
@@ -1747,7 +2430,7 @@ onMounted(async () => {
             <AppIcon :path="mdiCheckCircle" :size="16" />
             {{ t('proposal.saved') }}
           </p>
-          <p v-if="publishError" class="text-xs text-red-400">{{ publishError }}</p>
+          <InlineAlert v-if="publishError" :message="publishError" />
         </div>
       </div>
 
@@ -1776,19 +2459,73 @@ onMounted(async () => {
             :shape="mapShape"
             :segments="mapSegments"
             :suggested="mapSuggested"
+            :available="mapAvailable"
             class="w-full h-full"
             @toggle-suggested="toggleSuggested"
+            @add-stop="onMapAddStop"
           />
-          <Transition name="fade">
+          <!-- Like + share, bottom-left: MapLibre's zoom control is top-right
+               and its attribution bottom-right, so this corner is free. Placed
+               BEFORE the loading scrim below, which is `absolute inset-0` and
+               should legitimately cover it while a calc runs. Unlike the
+               evaluation panel it is NOT greyed out while the builder is dirty:
+               likes and links are about the proposal as published, not about
+               the unsaved itinerary. -->
+          <MapShareBar
+            v-if="storedProposalId !== null"
+            :proposal-id="storedProposalId"
+            :origin="shareOrigin"
+            :destination="shareDestination"
+            :facts="shareFacts"
+          />
+          <!-- Deliberately NOT wrapped in <Transition>. The fade wedged its own
+               state machine here: the element kept `fade-enter-from` (opacity 0)
+               into `fade-leave-active`, so the leave animated 0 -> 0, fired no
+               transitionend, and Vue never removed the node — not even with an
+               explicit :duration. What was left behind was invisible but still
+               an `absolute inset-0` scrim over the map, swallowing every click,
+               and (once Cancel moved in here) holding a focusable phantom
+               button. A 200ms fade on a loading scrim is not worth that. -->
+          <div
+            v-if="currentMode === 'loading'"
+            class="absolute inset-0 flex items-center justify-center rounded-xl bg-black/20 px-8 backdrop-blur-sm"
+          >
+            <!-- The caption sits on its own dark panel rather than straight on
+                   the scrim: the map underneath can be near-white (light tiles,
+                   or tiles that haven't loaded), and bg-black/20 is not enough
+                   contrast for light text — the message has to be readable to be
+                   worth showing. -->
             <div
-              v-if="currentMode === 'loading'"
-              class="absolute inset-0 flex items-center justify-center rounded-xl bg-black/20 backdrop-blur-sm"
+              class="flex flex-col items-center gap-4 rounded-xl bg-sapphire-100/95 px-6 py-5 shadow-xl"
             >
               <div
                 class="h-10 w-10 animate-spin rounded-full border-4 border-primary-50/30 border-t-primary-50"
               />
+              <!-- An unchanging spinner is what felt bad during the overload,
+                     so the caption escalates: what we're doing, then that the
+                     server is busy, then that we're under load. -->
+              <p class="max-w-xs text-center text-sm text-primary-50" aria-live="polite">
+                {{ progressCaption }}
+              </p>
+              <!-- Sits BELOW the caption, never replacing it: the escalating
+                   caption is how the user learns the server is slow, and a fun
+                   fact must not push that off screen. -->
+              <LoadingFunFact />
+              <!-- Lives here, beside the spinner, rather than under the Evaluate
+                   button: a calc started from suggest mode hides that button, so
+                   anchoring Cancel to it left the longest waits uncancellable.
+                   The server keeps working either way — aborting the fetch
+                   cannot free its worker — so this only ever means "I've stopped
+                   watching", and the copy avoids claiming otherwise. -->
+              <button
+                type="button"
+                class="cursor-pointer text-xs text-primary-50/60 underline underline-offset-2 transition hover:text-primary-50"
+                @click="cancelCalc"
+              >
+                {{ t('errors.cancel') }}
+              </button>
             </div>
-          </Transition>
+          </div>
         </div>
       </div>
     </div>
@@ -1796,19 +2533,58 @@ onMounted(async () => {
     <!-- Cost/revenue results (display + re-edit). Greyed out while the builder
          is dirty, since the figures no longer match the current itinerary. -->
     <div
-      v-if="showEvaluationSection"
+      v-if="showEvaluationSection && !loadFailureMsg"
       class="w-full transition-opacity duration-200"
       :class="isDirty ? 'pointer-events-none opacity-40' : ''"
     >
-      <!-- Route and evaluation arrive in the same calc response, so calcResult
-           is always set by the time this section shows. -->
-      <EvaluationPanel
-        v-if="calcResult"
-        :result="calcResult"
-        :summary="calcSummary"
-        :stops="sectionStops"
-        @scope-change="onScopeChange"
+      <!-- What the results were computed with. Only reachable once a route
+           exists — the first evaluation runs on the standard composition.
+           Stays interactive while the results below are stale: that is how
+           you get back to the committed selection without recomputing. -->
+      <ComputeInputsPanel
+        v-if="store.compositions.length > 0 || store.scenarios.length > 0"
+        class="mb-4"
+        :compositions="store.compositions"
+        :selected-composition-id="selectedCompositionId"
+        @select-composition="(id) => (selectedCompositionId = id)"
       />
+
+      <div class="relative">
+        <!-- Route and evaluation arrive in the same calc response, so calcResult
+             is always set by the time this section shows. -->
+        <EvaluationPanel
+          v-if="calcResult"
+          :result="calcResult"
+          :summary="calcSummary"
+          :stops="sectionStops"
+          @scope-change="onScopeChange"
+        />
+
+        <!-- Stale results: the whole area is the recompute control. -->
+        <Transition name="fade">
+          <button
+            v-if="paramsStale"
+            type="button"
+            class="absolute inset-0 flex cursor-pointer items-start justify-center rounded-xl bg-sapphire/60 pt-12 backdrop-blur-[2px]"
+            @click="recomputeWithSelection"
+          >
+            <span
+              class="flex items-center gap-2 rounded-full bg-primary-500 px-6 py-2 text-md font-semibold text-white shadow-lg transition hover:bg-primary-600"
+            >
+              {{ t('proposal.recalculate') }}
+              <span>→</span>
+            </span>
+          </button>
+        </Transition>
+      </div>
+    </div>
+
+    <!-- Discussion, underneath everything. Deliberately NOT greyed out while
+         the builder is dirty, unlike the evaluation above: stale figures must
+         be greyed because they no longer describe the itinerary, but a thread
+         is about the proposal and has no business going dead mid-edit. -->
+    <div v-if="storedProposalId !== null && showCommentSection" class="w-full">
+      <CommentSection :proposal-id="storedProposalId" />
     </div>
   </div>
 </template>
@@ -1828,6 +2604,26 @@ onMounted(async () => {
 :deep(.timeline-col) {
   position: relative !important;
 }
+/* The per-leg minute field is a number input for its keyboard and its
+   min=0 clamp, not for its spinners: at 20px tall they are unusable and
+   they cost a third of the field's width. The ± buttons are the
+   affordance. */
+.expert-addon-input {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.expert-addon-input::-webkit-outer-spin-button,
+.expert-addon-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+/* Expert mode on: the same gold this app already uses for "a value you
+   chose" (ComputeInputsPanel's scenario box, ExpertTimetableControls). */
+.expert-pill-on {
+  border-color: color-mix(in srgb, #fbbf24 45%, transparent);
+  background: color-mix(in srgb, #fbbf24 14%, transparent);
+  color: #fde68a;
+}
 /* Drag handle: hover-only */
 :deep(.reorder-col > *) {
   opacity: 0;
@@ -1835,13 +2631,5 @@ onMounted(async () => {
 }
 :deep(tr:hover .reorder-col > *) {
   opacity: 1;
-}
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.2s ease;
-}
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
 }
 </style>

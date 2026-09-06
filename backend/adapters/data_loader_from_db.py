@@ -38,6 +38,7 @@ New domain model mapping
                              representation from it. input_params.countries
                              is static reference data, not scenario-versioned.
   list_all_scenarios()    → list[Scenario]  (every scenario.scenarios row)
+  resolve_routing_graph_key() → str         (a scenario's routing graph pin)
 """
 
 from __future__ import annotations
@@ -52,6 +53,7 @@ import psycopg2.extras
 
 from typing import Optional
 
+from db.schema import STOP_NAME_LANGS
 from models.params import (
     ParamsSource,
     IndicativeFigures,
@@ -248,19 +250,13 @@ class DBDataLoader:
             )
         return row["scenario_id"]
 
-    def _resolve_scenario_versions(self, scenario_id: int | None) -> dict[str, int]:
-        """
-        Resolve a scenario_id (or None → the live is_current_base scenario)
-        to its four per-table version pointers. Infrastructure only —
-        operators/coach_types/composition_types are
-        unversioned catalogs and have no scenario pointer at all (see
-        scenario.scenarios definition in db/schema.py).
-
-        Every column on scenario.scenarios is NOT NULL, so this is always a
-        single direct row fetch — no inheritance/fallback logic needed.
-        Returned dict keys match the *_version column names minus the
-        "_version" suffix, e.g. {"track_infrastructures": 2, ...}.
-        """
+    def _fetch_scenario_row(self, scenario_id: int | None):
+        """One scenario.scenarios row — scenario_id, or None → the live
+        is_current_base scenario. Every column is NOT NULL, so this is
+        always a single direct row fetch — no inheritance/fallback logic.
+        Shared by _resolve_scenario_versions() and
+        resolve_routing_graph_key(); raises ValueError when the row does
+        not exist (unknown id, or an unseeded database)."""
         with self._cursor() as cur:
             if scenario_id is None:
                 cur.execute(
@@ -279,6 +275,31 @@ class DBDataLoader:
                     "correctly seeded."
                 )
             raise ValueError(f"Scenario '{scenario_id}' not found.")
+        return row
+
+    def resolve_routing_graph_key(self, scenario_id: int | None) -> str:
+        """
+        Resolve a scenario_id (or None → the live is_current_base scenario)
+        to its routing_graph_key pin — which OpenRailRouting instance every
+        distance and travel time comes from. The compute path
+        (api/helpers/proposal_compute.py) selects the RailRouter with this;
+        the key → URL mapping lives in the deployment
+        (api/helpers/dependencies.py), not in the database.
+        """
+        return self._fetch_scenario_row(scenario_id)["routing_graph_key"]
+
+    def _resolve_scenario_versions(self, scenario_id: int | None) -> dict[str, int]:
+        """
+        Resolve a scenario_id (or None → the live is_current_base scenario)
+        to its four per-table version pointers. Infrastructure only —
+        operators/coach_types/composition_types are
+        unversioned catalogs and have no scenario pointer at all (see
+        scenario.scenarios definition in db/schema.py).
+
+        Returned dict keys match the *_version column names minus the
+        "_version" suffix, e.g. {"track_infrastructures": 2, ...}.
+        """
+        row = self._fetch_scenario_row(scenario_id)
 
         return {
             "track_infrastructures": row["track_infrastructures_version"],
@@ -325,6 +346,7 @@ class DBDataLoader:
                     "stop_infrastructure_defaults_version"
                 ],
                 passage_charges_version=row["passage_charges_version"],
+                routing_graph_key=row["routing_graph_key"],
             )
             for row in rows
         ]
@@ -1037,13 +1059,6 @@ class DBDataLoader:
                     max_speed_kmh=_f(row["composition_type_max_speed_kmh"]),
                     hsr_allowed=_b(row["composition_type_hsr_allowed"]),
                     coaches=coaches_by_comp_row.get(comp_row_id, {}),
-                    energy_factor_weight=_f(
-                        row["composition_type_energy_factor_weight"]
-                    ),
-                    energy_factor_speed=_f(row["composition_type_energy_factor_speed"]),
-                    energy_factor_terrain=_f(
-                        row["composition_type_energy_factor_terrain"]
-                    ),
                     min_boarding_time_min=_interval_to_min(
                         row["composition_type_min_boarding_time"]
                     ),
@@ -1081,9 +1096,6 @@ class DBDataLoader:
                     "max_speed_kmh": comp_type.max_speed_kmh,
                     "hsr_allowed": comp_type.hsr_allowed,
                     "driver_factor": comp_type.driver_factor,
-                    "energy_factor_weight": comp_type.energy_factor_weight,
-                    "energy_factor_speed": comp_type.energy_factor_speed,
-                    "energy_factor_terrain": comp_type.energy_factor_terrain,
                     "min_boarding_time_min": comp_type.min_boarding_time_min,
                     "min_alighting_time_min": comp_type.min_alighting_time_min,
                     "purchase_coach_eur": comp_type.purchase_coach_eur,
@@ -1859,6 +1871,22 @@ class DBDataLoader:
         if charge_is_default:
             charge_src = default.stop_charge_src
 
+        def _opt_f(value):
+            """NUMERIC columns arrive as Decimal or None; the domain wants
+            float or None."""
+            return None if value is None else float(value)
+
+        # Localized columns fold into language-keyed dicts here, so nothing
+        # downstream ever touches a column suffix. City names exist only
+        # where a city was resolved; the dict is empty otherwise, not
+        # None-valued per language.
+        country_names = {lang: row[f"country_{lang}"] for lang in STOP_NAME_LANGS}
+        city_names = {
+            lang: row[f"city_{lang}"]
+            for lang in STOP_NAME_LANGS
+            if row.get(f"city_{lang}")
+        }
+
         stop = StopInfrastructure(
             stop_id=stop_id,
             stop_name=row.get("stop_name") or "",
@@ -1866,6 +1894,23 @@ class DBDataLoader:
             lat=_f(row["stop_lat"]),
             lon=_f(row["stop_lon"]),
             stop_charge_eur=charge,
+            stop_charge_vat_rate_per=_opt_f(row.get("stop_charge_vat_rate_per")),
+            stop_charge_incl_vat_eur=_opt_f(row.get("stop_charge_incl_vat_eur")),
+            stop_charge_basis=row.get("stop_charge_basis"),
+            stop_charge_price_basis_year=row.get("stop_charge_price_basis_year"),
+            stop_charge_class=row.get("stop_charge_class"),
+            stop_charge_source=row.get("stop_charge_source"),
+            provenance=row.get("stop_provenance") or "",
+            name_latin=row.get("name_latin") or "",
+            name_ascii=row.get("name_ascii") or "",
+            uic_ref=row.get("uic_ref"),
+            country_names=country_names,
+            city=row.get("city"),
+            city_osm_id=row.get("city_osm_id"),
+            city_names=city_names,
+            # psycopg2 returns INTEGER[] as a Python list, NULL as None.
+            gauges_mm=row.get("gauges_mm"),
+            gauge_evidence=row.get("gauge_evidence"),
         )
         return stop, loc_src, charge_src, charge_is_default
 

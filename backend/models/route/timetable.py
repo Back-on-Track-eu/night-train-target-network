@@ -63,8 +63,33 @@ living in route_factory.py:
                          skipping both) is route_factory._build_trip()'s
                          switch.
 
+EXPERT TIMETABLE OVERRIDES (0.9.32) are deliberately NOT a fourth named
+strategy: they compose with whichever timetable_mode runs, so they are
+plain functions like build_final_timetable() below, not a switch.
+ExpertTimetable/DirectionOverrides/DepartureOverride/SegmentAddon are the
+domain input objects (built at the API boundary by
+api/helpers/route_serialize.py::expert_timetable_from_dict), and three
+functions consume them:
+  resolve_addons()         — manual minutes per leg, aligned with
+                             routed_legs, plus the add-ons whose ordered
+                             stop pair no longer exists in the final stop
+                             list (dropped, never redistributed).
+  resolve_departure()      — the strategy's automatic departure, replaced
+                             ("absolute") or displaced ("shift").
+  classify_for_departure() — the classification tail both strategies run,
+                             re-runnable against an overridden departure
+                             so a shifted trip is re-classified (a stop
+                             that now departs after 00:00 becomes a night
+                             stop, and gets night dwell).
+mirror_overrides() reverses one direction's add-ons for the other, the
+same way route_factory reverses fixed_night_interval. Add-on minutes go
+into the strategies' own provisional offsets (addon_per_leg below), so a
+padded trip stays centred on MIRROR_MIN and a padded fixed-night interval
+needs correspondingly less stretch slack.
+
 VALID_TIMETABLE_MODES / VALID_SCHEDULE_MODES / VALID_AUTO_STOP_ADDITION_MODES
-stay here as the single source of truth for the allowed strings —
+/ VALID_DEPARTURE_MODES stay here as the single source of truth for the
+allowed strings —
 the compute request validation (api/helpers/proposal_compute.py) and route_factory.py's dispatch both read
 from them, so a new mode is added in exactly one place (plus the function
 implementing it and the route_factory branch that calls it).
@@ -92,7 +117,13 @@ from models.params import Composition, TrackInfraCollection, StopInfraCollection
 from models.route.trip import Segment, StopType, TimetableWarning
 from models.route.route import Schedule, SeasonalSchedule, Season, Frequency
 from models.route.routing.dynamics import stop_time_loss_s
-from models.route.routing.rail_router import RailRouter, RoutedLeg, build_router_stops
+from models.route.routing.gauge import resolve_trip_gauge, stop_supports_gauge
+from models.route.routing.rail_router import (
+    RailRouter,
+    RoutedLeg,
+    build_router_stops,
+    route_trip,
+)
 from models.route.model import (
     MIRROR_MIN,
     NIGHT_START_MIN,
@@ -140,17 +171,19 @@ def classify_stop_type(arrival_min: int, departure_min: int) -> StopType:
 
 
 def _provisional_offsets(
-    pure_leg_times: list[int], slack_per_leg: list[int], min_dwell: int
+    pure_leg_times: list[int], extra_per_leg: list[int], min_dwell: int
 ) -> tuple[list[int], list[int]]:
     """Cumulative provisional (arrival, departure) offsets from trip
-    departure per stop — pure leg times plus slack per leg, min-dwell
-    approximation at intermediate stops, no dwell at termini. The common
-    positioning/classification arithmetic behind both timetable modes."""
+    departure per stop — pure leg times plus whatever non-physics minutes
+    that leg carries (fixed-night slack, expert-mode add-ons, or their
+    sum), min-dwell approximation at intermediate stops, no dwell at
+    termini. The common positioning/classification arithmetic behind both
+    timetable modes."""
     n = len(pure_leg_times) + 1
     arr_offset = [0] * n
     dep_offset = [0] * n
     for i in range(1, n):
-        arr_offset[i] = dep_offset[i - 1] + pure_leg_times[i - 1] + slack_per_leg[i - 1]
+        arr_offset[i] = dep_offset[i - 1] + pure_leg_times[i - 1] + extra_per_leg[i - 1]
         dep_offset[i] = arr_offset[i] + (min_dwell if i < n - 1 else 0)
     return arr_offset, dep_offset
 
@@ -179,6 +212,7 @@ def simple_automatic_timetable(
     stop_ids: list[str],
     composition: Composition,
     routed_legs: list[RoutedLeg],
+    addon_per_leg: list[int] | None = None,
 ) -> tuple[list[tuple[str, StopType]], int]:
     """
     Implements timetable_mode="simpleAutomatic". Derive departure time and
@@ -211,14 +245,21 @@ def simple_automatic_timetable(
     other side of the boundary once real dwell is added; not worth
     iterating to convergence here).
 
+    addon_per_leg: expert-mode manual minutes per leg (resolve_addons()) —
+    None means none anywhere. They are part of the trip's duration, so the
+    mirror is taken around the PADDED duration: padding a leg keeps the
+    trip centred on MIRROR_MIN instead of pushing its arrival late.
+
     Returns (stop_inputs with classified StopType, departure_time_min).
     """
     pure_leg_times = [leg.total_time_min for leg in routed_legs]
     min_dwell = min(
         composition.min_boarding_time_min, composition.min_alighting_time_min
     )
+    if addon_per_leg is None:
+        addon_per_leg = [0] * len(routed_legs)
     arr_offset, dep_offset = _provisional_offsets(
-        pure_leg_times, [0] * len(routed_legs), min_dwell
+        pure_leg_times, addon_per_leg, min_dwell
     )
 
     total_duration = arr_offset[-1]  # legs + min-dwell at every intermediate stop
@@ -234,6 +275,7 @@ def simple_automatic_fixed_night_timetable(
     composition: Composition,
     routed_legs: list[RoutedLeg],
     fixed_night_interval: list[str],
+    addon_per_leg: list[int] | None = None,
 ) -> tuple[list[tuple[str, StopType]], int, list[int]]:
     """
     Implements timetable_mode="simpleAutomaticWithFixedNight". Same
@@ -273,8 +315,15 @@ def simple_automatic_fixed_night_timetable(
     Provisional offsets use the same min-dwell approximation and the same
     accepted final-pass deviation as simple_automatic_timetable().
 
+    addon_per_leg: expert-mode manual minutes per leg (resolve_addons()) —
+    counted towards the interval's NATURAL span, so minutes a person added
+    inside the interval reduce the slack the night window has to stretch
+    it by (and can remove the stretch entirely). The two stay separate
+    quantities on the segment; only their sum drives the clock.
+
     Returns (stop_inputs with classified StopType, departure_time_min,
-    slack_per_leg aligned with routed_legs — zeros outside the interval).
+    slack_per_leg aligned with routed_legs — zeros outside the interval,
+    and never including addon_per_leg).
     """
     a_idx = _interval_index(stop_ids, fixed_night_interval[0], "start")
     b_idx = _interval_index(stop_ids, fixed_night_interval[1], "end")
@@ -288,9 +337,13 @@ def simple_automatic_fixed_night_timetable(
     min_dwell = min(
         composition.min_boarding_time_min, composition.min_alighting_time_min
     )
+    if addon_per_leg is None:
+        addon_per_leg = [0] * len(routed_legs)
 
     no_slack = [0] * len(routed_legs)
-    arr_natural, dep_natural = _provisional_offsets(pure_leg_times, no_slack, min_dwell)
+    arr_natural, dep_natural = _provisional_offsets(
+        pure_leg_times, addon_per_leg, min_dwell
+    )
     natural_span = arr_natural[b_idx] - dep_natural[a_idx]
 
     # dep(A) <= NIGHT_START_MIN - 1 and arr(B) >= NIGHT_END_MIN together
@@ -313,8 +366,9 @@ def simple_automatic_fixed_night_timetable(
             slack_total,
         )
 
+    extra_per_leg = [s + a for s, a in zip(slack_per_leg, addon_per_leg)]
     arr_offset, dep_offset = _provisional_offsets(
-        pure_leg_times, slack_per_leg, min_dwell
+        pure_leg_times, extra_per_leg, min_dwell
     )
     span = arr_offset[b_idx] - dep_offset[a_idx]  # natural_span + slack_total
 
@@ -391,8 +445,12 @@ def fixed_night_speed_warning(
     TimetableWarning for the trip's general_parameters.timetable_warnings;
     None otherwise. A warning, never an error — the route still returns.
 
-    Runs on the final assembled segments (real dwell, real slack), not the
-    provisional physics the timetable strategy positioned with.
+    Runs on the final assembled segments (real dwell, real slack, real
+    expert-mode add-ons), not the provisional physics the timetable
+    strategy positioned with. Manual add-ons inside the interval therefore
+    lower its timetable speed like slack does, and can trip this warning on
+    their own — correctly so: the interval IS that slow now, whoever's
+    minutes made it so.
     """
     stop_ids = [segments[0].from_stop.stop_id] + [s.to_stop.stop_id for s in segments]
     a_idx = _interval_index(stop_ids, fixed_night_interval[0], "start")
@@ -443,6 +501,180 @@ Adding a mode means: add its function above, add it to this set, add a
 branch in _build_trip(). "simpleAutomaticWithFixedNight" additionally
 requires the request's fixed_night_interval, validated in api/helpers/proposal_compute.py and
 threaded through TripPairInput."""
+
+
+# =============================================================================
+# EXPERT TIMETABLE OVERRIDES — manual departure + manual per-leg minutes,
+# applied on top of whichever timetable_mode ran. Not a mode of their own
+# (see the module docstring): plain functions route_factory._build_trip()
+# calls in a fixed order, so they compose with every strategy above.
+# =============================================================================
+
+VALID_DEPARTURE_MODES = frozenset({"absolute", "shift"})
+"""Single source of truth for expert_timetable.departure.mode — read by the
+compute request validation (api/helpers/proposal_compute.py) and by
+resolve_departure() below.
+
+"absolute": the trip departs at exactly this minute, whatever the strategy
+computed — it survives a reroute unchanged, which is what a timetabler
+pinning a departure means.
+"shift":    the strategy's own departure, displaced by this many minutes —
+it MOVES when a reroute changes the trip's duration and the mirror around
+MIRROR_MIN re-centres. Which of the two applies is the caller's choice per
+route, not a model decision."""
+
+
+@dataclass(frozen=True)
+class SegmentAddon:
+    """Manual minutes on ONE leg, keyed by the ordered stop pair rather than
+    a leg index: an index means nothing once a reroute inserts a stop, a
+    pair either still exists in the new stop list or it does not. add_min is
+    always positive — an add-on can only ever slow a leg down, the routed
+    physics stay the floor (enforced at the API boundary)."""
+
+    from_stop_id: str
+    to_stop_id: str
+    add_min: int
+
+
+@dataclass(frozen=True)
+class DepartureOverride:
+    """The caller's first-departure override for one direction. mode is one
+    of VALID_DEPARTURE_MODES; minutes is the absolute departure minute for
+    "absolute" and the signed displacement for "shift" — both on the
+    service-day scale everything else in the model uses (models/utils.py::
+    hhmm_to_min), so a mirrored return trip may legitimately carry a
+    negative absolute value."""
+
+    mode: str
+    minutes: int
+
+
+@dataclass(frozen=True)
+class DirectionOverrides:
+    """Everything one direction's timetable may be overridden with."""
+
+    departure: DepartureOverride | None
+    addons: tuple[SegmentAddon, ...]
+
+
+@dataclass(frozen=True)
+class ExpertTimetable:
+    """One trip pair's overrides. return_trip=None means "mirror outbound"
+    — the default, and the same convention route_factory already applies to
+    fixed_night_interval; mirror_overrides() below does the reversing."""
+
+    outbound: DirectionOverrides
+    return_trip: DirectionOverrides | None
+
+
+NO_OVERRIDES = DirectionOverrides(departure=None, addons=())
+"""What a direction with nothing overridden looks like — used by
+route_factory so it never has to branch on None twice."""
+
+
+def mirror_overrides(overrides: DirectionOverrides) -> DirectionOverrides:
+    """One direction's overrides as they apply to the OTHER direction: each
+    add-on's stop pair reversed, so a manual minute on A→B also pads B→A.
+
+    The departure is deliberately NOT carried over. A pinned outbound
+    departure says nothing about when the return should leave — the return
+    has its own timetable, mirrored around MIRROR_MIN by the strategy. A
+    caller who wants both pinned sends an explicit return block."""
+    return DirectionOverrides(
+        departure=None,
+        addons=tuple(
+            SegmentAddon(
+                from_stop_id=a.to_stop_id,
+                to_stop_id=a.from_stop_id,
+                add_min=a.add_min,
+            )
+            for a in overrides.addons
+        ),
+    )
+
+
+def resolve_addons(
+    stop_ids: list[str], addons: tuple[SegmentAddon, ...]
+) -> tuple[list[int], list[SegmentAddon]]:
+    """Manual minutes per leg, aligned with the FINAL stop list, plus the
+    add-ons that no longer belong to it.
+
+    An add-on survives only if its two stops are still adjacent, in that
+    order, in stop_ids. The request validation already requires that of the
+    stops the caller POSTED, so the only thing that can orphan one here is
+    auto_stop_addition="add" inserting a stop between the pair — the
+    reroute case the feature was specified around. An orphaned add-on is
+    DROPPED, never redistributed over the legs that replaced it: splitting
+    a person's "this leg needs 8 more minutes" across two legs they never
+    saw would be an invention (see OPEN_TODOS["expert_addon_resplit"]).
+
+    Returns (addon_per_leg with one entry per leg, dropped add-ons).
+    """
+    addon_per_leg = [0] * max(len(stop_ids) - 1, 0)
+    index_of_pair = {
+        (stop_ids[i], stop_ids[i + 1]): i for i in range(len(stop_ids) - 1)
+    }
+    dropped: list[SegmentAddon] = []
+    for addon in addons:
+        leg_index = index_of_pair.get((addon.from_stop_id, addon.to_stop_id))
+        if leg_index is None:
+            dropped.append(addon)
+            continue
+        addon_per_leg[leg_index] += addon.add_min
+    return addon_per_leg, dropped
+
+
+def resolve_departure(
+    auto_departure_min: int, override: DepartureOverride | None
+) -> int:
+    """The departure a trip actually gets: the strategy's own value, an
+    absolute replacement, or that value displaced by a shift. See
+    VALID_DEPARTURE_MODES for what the two modes mean across a reroute."""
+    if override is None:
+        return auto_departure_min
+    if override.mode == "absolute":
+        return override.minutes
+    if override.mode == "shift":
+        return auto_departure_min + override.minutes
+    raise ValueError(
+        f"Unknown departure override mode '{override.mode}'. "
+        f"Supported: {sorted(VALID_DEPARTURE_MODES)}."
+    )
+
+
+def classify_for_departure(
+    stop_ids: list[str],
+    routed_legs: list[RoutedLeg],
+    composition: Composition,
+    departure_time_min: int,
+    extra_per_leg: list[int],
+) -> list[tuple[str, StopType]]:
+    """The classification tail both timetable strategies run, re-runnable
+    against a departure they did not choose.
+
+    An overridden departure moves every stop on the clock, so the
+    boarding/night/alighting split has to be taken again: a stop that now
+    departs after 00:00 is a night stop and gets night dwell, and dwell is
+    what build_final_timetable() turns into real times afterwards. Uses the
+    same min-dwell provisional approximation as the strategies, so the
+    accepted provisional-vs-final deviation documented there is unchanged
+    rather than doubled.
+
+    No circularity: the automatic departure is derived from leg times plus
+    extra minutes plus MIN dwell, never from the classification it feeds —
+    so overriding the departure changes classification, but classification
+    never changes the automatic value it was derived from.
+    """
+    pure_leg_times = [leg.total_time_min for leg in routed_legs]
+    min_dwell = min(
+        composition.min_boarding_time_min, composition.min_alighting_time_min
+    )
+    arr_offset, dep_offset = _provisional_offsets(
+        pure_leg_times, extra_per_leg, min_dwell
+    )
+    stop_types = _classify_stops(departure_time_min, arr_offset, dep_offset)
+    return list(zip(stop_ids, stop_types))
 
 
 # =============================================================================
@@ -562,6 +794,7 @@ def _find_nearby_candidates(
     stop_ids: list[str],
     routed_legs: list[RoutedLeg],
     stop_infra: StopInfraCollection,
+    gauge_mm: int,
 ) -> list[_AutoStopCandidate]:
     """
     Every stop in the catalog within AUTO_STOP_BUFFER_M of the routed path,
@@ -569,7 +802,13 @@ def _find_nearby_candidates(
     kept only once, at its closest leg. Not sorted here — selection order
     is decided by the caller.
 
-    Two cheap pre-filters run before any shapely work, in order:
+    Three cheap pre-filters run before any shapely work, in order:
+      0. Gauge filter: only stops whose catalog data says they offer the
+         trip's own gauge_mm track (stop_supports_gauge — STRICT: a
+         gauge-unknown stop is never auto-added; adding it risks an
+         unsnappable route for a stop nobody asked for). This is what
+         keeps an Iberian-gauge-only stop off a standard-gauge corridor's
+         suggestions even when it sits right beside the path.
       1. Touched-country filter: the catalog is cut down to stops in
          countries the routed legs actually pass through — read straight
          off each leg's country_distance_shares, which RailRouter already
@@ -595,7 +834,9 @@ def _find_nearby_candidates(
     pool = {
         stop_id: stop
         for stop_id, stop in stop_infra.all().items()
-        if stop_id not in existing and stop.stop_country_code in touched_countries
+        if stop_id not in existing
+        and stop.stop_country_code in touched_countries
+        and stop_supports_gauge(stop, gauge_mm)
     }
 
     margin_deg = AUTO_STOP_BUFFER_M * _DEG_PER_M * 1.5  # generous safety factor
@@ -705,7 +946,8 @@ def _candidate_added_time_min(
     leg_start_id = stop_ids[candidate.leg_index]
     leg_end_id = stop_ids[candidate.leg_index + 1]
     try:
-        sub_legs = router.route(
+        sub_legs = route_trip(
+            router,
             stops=build_router_stops(
                 [leg_start_id, candidate.stop_id, leg_end_id], stop_infra
             ),
@@ -801,7 +1043,13 @@ def find_and_cost_auto_stop_candidates(
     mini-reroute failed are excluded. Selection order (cheapest-first for
     "add", geographic for "suggest") is each consumer's own concern.
     """
-    candidates = _find_nearby_candidates(stop_ids, routed_legs, stop_infra)
+    # The trip's gauge governs which stops may join it — resolved from the
+    # CURRENT stop list (identical to the trip's own resolution: candidates
+    # passing the strict filter below cannot narrow the intersection).
+    gauge_mm = resolve_trip_gauge(
+        (stop_infra.get(sid) for sid in stop_ids), composition
+    )
+    candidates = _find_nearby_candidates(stop_ids, routed_legs, stop_infra, gauge_mm)
     if not candidates:
         return []
 
@@ -958,7 +1206,8 @@ def apply_auto_stop_addition(
     )
     final_reroute_start = time.monotonic()
     final_stop_ids = [sid for sid, _ in committed]
-    final_routed_legs = router.route(
+    final_routed_legs = route_trip(
+        router,
         stops=build_router_stops(final_stop_ids, stop_infra),
         composition=composition,
         tracks=tracks,
@@ -1053,17 +1302,24 @@ def build_final_timetable(
     tracks: TrackInfraCollection,
     departure_time_min: int,
     slack_per_leg: list[int] | None = None,
+    addon_per_leg: list[int] | None = None,
 ) -> list[tuple[int | None, int | None]]:
     """
     Exact, dwell-inclusive (arrival_min, departure_min) per stop, given a
     departure time and stop types that are already fixed (typically the
-    output of a timetable_mode strategy above). Not itself a strategy —
-    there's only one correct way to turn "departure time + stop types"
-    into real clock times, so this is a plain function, not dispatched.
+    output of a timetable_mode strategy above, possibly re-classified for
+    an overridden departure). Not itself a strategy — there's only one
+    correct way to turn "departure time + stop types" into real clock
+    times, so this is a plain function, not dispatched.
 
     slack_per_leg: fixed-night stretch minutes per leg, aligned with
     routed_legs (see simple_automatic_fixed_night_timetable) — None means
     no slack anywhere, the case for every other timetable_mode.
+
+    addon_per_leg: expert-mode manual minutes per leg (resolve_addons()) —
+    None means none anywhere. Kept a separate argument from slack_per_leg
+    because the two are separate fields on Segment; the clock only ever
+    sees their sum.
 
     First stop: arrival=None (it's the origin, nothing to arrive at).
     Last stop: departure=None (journey's over). Every stop in between
@@ -1072,6 +1328,8 @@ def build_final_timetable(
     n = len(stop_types)
     if slack_per_leg is None:
         slack_per_leg = [0] * len(routed_legs)
+    if addon_per_leg is None:
+        addon_per_leg = [0] * len(routed_legs)
     clock_min = departure_time_min  # time reached so far
     times: list[tuple[int | None, int | None]] = []
 
@@ -1089,7 +1347,12 @@ def build_final_timetable(
         )
 
         if not is_last:
-            clock_min = departure_min + routed_legs[i].total_time_min + slack_per_leg[i]
+            clock_min = (
+                departure_min
+                + routed_legs[i].total_time_min
+                + slack_per_leg[i]
+                + addon_per_leg[i]
+            )
 
         times.append((arrival_min, departure_min))
 

@@ -22,9 +22,18 @@ const { t } = useI18n()
 
 <template>
   <template v-if="breakdown">
+    <div class="flex flex-col gap-1">
+      <h2 class="text-base font-semibold text-primary-50">
+        {{ t('proposal.evaluation.sections.finance.title') }}
+      </h2>
+      <p class="text-sm leading-relaxed text-primary-50/70">
+        {{ t('proposal.evaluation.sections.finance.body') }}
+      </p>
+    </div>
     <FinancialKPIPanel :breakdown="breakdown" />
 
-    <!-- Cost tree (left, EBIT margin is a point under Operator) | Revenue (right) -->
+    <!-- Cost tree (left, expected margin a top-level peer of operator and
+         infrastructure) | Revenue (right) -->
     <div class="flex items-start gap-4">
       <CostPanel :breakdown="breakdown" :formulas="formulas" :input="input" :stops="stops" />
       <RevenuePanel :breakdown="breakdown" />

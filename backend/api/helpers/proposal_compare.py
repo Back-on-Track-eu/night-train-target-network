@@ -59,7 +59,14 @@ from api.helpers.proposal_serialize import (
     summary_row_to_dict,
 )
 
-_OVERRIDE_KEYS = ("scenario_id", "composition_id")
+# expert_timetable is an override like the other two, with one extra use:
+# sending it as null recomputes the SAME route with its manual timetable
+# taken back out, so a stored expert timetable can be put beside its own
+# automatic twin and the cost of the intervention read straight off the
+# diff. Its shape is validated by validate_calc_body() in _computed_side()
+# below, like every other field of the merged request — nothing to repeat
+# in validate_compare_body().
+_OVERRIDE_KEYS = ("scenario_id", "composition_id", "expert_timetable")
 _SIDE_KEYS = frozenset({"proposal_id", *_OVERRIDE_KEYS})
 
 # The §5.4 gallery-KPI columns the "summary" diff runs over, in gallery
@@ -113,7 +120,10 @@ class SideNotFoundError(Exception):
 def validate_compare_body(body: dict) -> list[str]:
     """Structural validation of the §7.3 compare request. Two sides for
     now (the shape allows more later); each side needs a proposal_id
-    anchor and may override scenario_id/composition_id — nothing else."""
+    anchor and may override scenario_id/composition_id/expert_timetable —
+    nothing else. The expert_timetable block's own shape is checked by
+    validate_calc_body() once the side is merged onto its anchor's stored
+    request, since it is only meaningful against that request's stops."""
     sides = body.get("sides")
     if not isinstance(sides, list) or len(sides) != 2:
         return ["'sides' must be a list of exactly 2 side objects."]

@@ -20,6 +20,7 @@ infrastructure tables and the scenario container: db/README.md, section
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 
@@ -44,7 +45,9 @@ class Column:
 @dataclass(frozen=True)
 class Table:
     """One table: columns plus verbatim table-level constraint and index
-    lines. description becomes COMMENT ON TABLE."""
+    lines. description becomes COMMENT ON TABLE. unlogged marks a
+    disposable cache table — no WAL, lost on crash, never a source of
+    truth."""
 
     schema: str
     name: str
@@ -52,6 +55,14 @@ class Table:
     columns: tuple[Column, ...]
     constraints: tuple[str, ...] = ()
     indexes: tuple[str, ...] = ()
+    unlogged: bool = False
+
+
+# Member-organisation languages of the localized stop-catalog columns —
+# one entry per language, mirrored by the stop classification pipeline
+# (models/infrastructure/stops, step 7 LANGS) and by the API serializer.
+# Extending the catalog to another language starts here and in the pipeline.
+STOP_NAME_LANGS = ("en", "de", "fr", "nl", "it", "es", "pl")
 
 
 def _src(name: str, of: str) -> Column:
@@ -567,7 +578,9 @@ INPUT_PARAMS_TABLES: tuple[Table, ...] = (
                 "VARCHAR(20) NOT NULL",
                 "Why this pair does or does not carry a rail distance: "
                 "routed, prefiltered (too far apart to be worth "
-                "routing), no_connection (no rail path exists), or "
+                "routing), no_connection (no rail path exists), "
+                "gauge_mismatch (the two reference stations share no "
+                "track gauge, so no through service is possible), or "
                 "snap_failed (a reference station could not be placed "
                 "on the network).",
             ),
@@ -950,24 +963,6 @@ INPUT_PARAMS_TABLES: tuple[Table, ...] = (
                 "NUMERIC(6,2) NOT NULL",
                 "Maximum operational speed.",
                 "km/h",
-            ),
-            Column(
-                "composition_type_energy_factor_weight",
-                "NUMERIC(10,6) NOT NULL",
-                "Energy model: base factor per tonne-kilometre.",
-                "kWh/(t·km)",
-            ),
-            Column(
-                "composition_type_energy_factor_speed",
-                "NUMERIC(10,6) NOT NULL",
-                "Energy model: air resistance factor, applied to speed squared.",
-                "kWh/(t·km·(km/h)²)",
-            ),
-            Column(
-                "composition_type_energy_factor_terrain",
-                "NUMERIC(10,6) NOT NULL",
-                "Energy model: terrain factor, applied to the terrain score.",
-                "kWh/(t·km) per terrain point",
             ),
             Column(
                 "composition_type_min_boarding_time",
@@ -1427,6 +1422,129 @@ INPUT_PARAMS_TABLES: tuple[Table, ...] = (
                 "€/stop",
             ),
             _src("stop_charge_src", "the station fee"),
+            Column(
+                "stop_charge_vat_rate_per",
+                "NUMERIC(5,2)",
+                "VAT rate applying to the station charge, as a percentage "
+                "(19.00 = 19%). NULL where no charge is calibrated.",
+                "%",
+            ),
+            Column(
+                "stop_charge_incl_vat_eur",
+                "NUMERIC(10,2)",
+                "The station charge including VAT. The model prices from the "
+                "net stop_charge_eur; this is carried so both figures can be "
+                "compared against whichever one the tariff document printed.",
+                "EUR",
+            ),
+            Column(
+                "stop_charge_basis",
+                "VARCHAR(30)",
+                "What the charge is per — 'per_call' unless a country's "
+                "tariff genuinely differs.",
+            ),
+            Column(
+                "stop_charge_price_basis_year",
+                "SMALLINT",
+                "The year the published figure applies to, before any escalation.",
+            ),
+            Column(
+                "stop_charge_class",
+                "VARCHAR(60)",
+                "The country's own category for the station ('Preisklasse 2'), "
+                "which is why two stations in one country differ.",
+            ),
+            Column(
+                "stop_charge_source",
+                "VARCHAR(40)",
+                "source_id of the tariff document the charge was read from, "
+                "in the charge pipeline's own register "
+                "(models/infrastructure/stops/charges/01_source_extraction).",
+            ),
+            Column(
+                "stop_provenance",
+                "VARCHAR(60) NOT NULL",
+                "Why the stop is in the catalog, as a human-readable "
+                "category (step 10 PROVENANCE_LABELS: 'existing night train "
+                "stop', 'urban area currently without night train service', "
+                "...). The detailed per-stop reasons stay in the pipeline's "
+                "step 6 notebook.",
+            ),
+            Column(
+                "name_latin",
+                "VARCHAR(120) NOT NULL",
+                "Latin-script form of the station name (transliterated where "
+                "the original is Cyrillic/Greek, otherwise the name itself).",
+            ),
+            Column(
+                "name_ascii",
+                "VARCHAR(120) NOT NULL",
+                "ASCII fold of name_latin — the diacritic-free search form.",
+            ),
+            Column(
+                "uic_ref",
+                "VARCHAR(120)",
+                "UIC station code from OSM, where tagged — the tag verbatim, "
+                "so a station holding more than one code carries them all, "
+                "semicolon-separated (Paris CDG 2 TGV: 8727149;8700147). "
+                "Intended join key for station-charge tariff documents, not "
+                "normalised yet: split on the semicolon before matching, and "
+                "note that a few stops carry a national number rather than "
+                "the country-prefixed UIC code.",
+            ),
+            *(
+                Column(
+                    f"country_{lang}",
+                    "VARCHAR(60) NOT NULL",
+                    f"Country name in '{lang}' (ISO 3166 translation "
+                    "catalogs via the pipeline).",
+                )
+                for lang in STOP_NAME_LANGS
+            ),
+            Column(
+                "city",
+                "VARCHAR(120)",
+                "Municipality the stop belongs to (Berlin Gesundbrunnen -> "
+                "Berlin), resolved geographically against OSM place nodes. "
+                "Empty for rural halts beyond any city/town radius.",
+            ),
+            Column(
+                "city_osm_id",
+                "BIGINT",
+                "OSM node id of the resolved place — the stable key behind "
+                "the localized city names.",
+            ),
+            *(
+                Column(
+                    f"city_{lang}",
+                    "VARCHAR(120)",
+                    f"City name in '{lang}' from the place node's own "
+                    "name:* tags (exonyms as curated in OSM — an Italian "
+                    "search for 'Monaco' reaches München's stops here).",
+                )
+                for lang in STOP_NAME_LANGS
+            ),
+            Column(
+                "gauges_mm",
+                "INTEGER[]",
+                "Night-train-capable track gauges at the stop (railway=rail, "
+                ">= 1435 mm; trams/Stadtbahn/narrow gauge are excluded by "
+                "the pipeline). Several values at break-of-gauge stations "
+                "(Kaunas 1435+1520). NULL = no usable tracks found nearby.",
+                "mm",
+            ),
+            Column(
+                "gauge_evidence",
+                "VARCHAR(20) CHECK (gauge_evidence IN ('tagged', "
+                "'untagged_tracks', 'narrow_gauge_only', 'no_tracks_nearby', "
+                "'override'))",
+                "How the gauge set was established from OSM: tagged tracks, "
+                "rail present but untagged, only sub-1435 rail nearby "
+                "(review flag), no rail within the search radius, or a "
+                "hand-verified override (step 8's GAUGE_OVERRIDES — the "
+                "station node is right but OSM carries no gauge-tagged way "
+                "within the radius).",
+            ),
             _CHANGE_LOG,
             Column(
                 "stop_infra_version",
@@ -1456,6 +1574,8 @@ SCENARIO_TABLES: tuple[Table, ...] = (
         "All five *_version columns are per-table full-snapshot version "
         "numbers, resolved by exact match, and are NOT NULL — a scenario "
         "is always a complete, self-contained pin, never a partial diff. "
+        "routing_graph_key pins the routing graph the same way (the one "
+        "piece of infrastructure living outside the database). "
         "Compositions, coach types, and operators are catalogs, not "
         "scenario-versioned. Full versioning contract: db/README.md.",
         columns=(
@@ -1535,6 +1655,22 @@ SCENARIO_TABLES: tuple[Table, ...] = (
                 "INTEGER NOT NULL",
                 "Pinned input_params.passage_charges version (full-table snapshot).",
             ),
+            Column(
+                "routing_graph_key",
+                "VARCHAR(50) NOT NULL",
+                "Routing graph this scenario routes on — the physical rail "
+                "network (OSM state) behind every distance and travel time, "
+                'e.g. "infra_2026" or "infra_2032". Pinned like the '
+                "*_version columns but not itself a snapshot version: the "
+                "graph lives outside the database, in an OpenRailRouting "
+                "instance. Naming contract with the deployment: key <k> is "
+                "served by the instance at env OPENRAILROUTING_URL_<K>, the "
+                "key uppercased — every graph alike, none implicit — see "
+                "models/route/routing/rail_router.py. The TAC and "
+                "passage changes an upgraded network implies are NOT carried "
+                "here; they ride this same row's track_infrastructures_version "
+                "and passage_charges_version pins.",
+            ),
         ),
         indexes=(
             "CREATE UNIQUE INDEX idx_scenarios_one_current_base\n"
@@ -1544,6 +1680,131 @@ SCENARIO_TABLES: tuple[Table, ...] = (
         ),
     ),
 )
+
+
+# =============================================================================
+# route_cache — per-graph stop-pair routing segment cache
+# =============================================================================
+# Mirrored verbatim by db/dev/sql/migrations/2026-08-31_route_segment_cache.sql
+# (servers only ever move through migrations). A cache like the §2.3
+# compute cache, not versioned data: keyed per routing graph, purged per
+# graph when that graph's GraphHopper import changes, refilled by
+# scripts/precompute_route_segments.py and by every live-routed miss.
+
+ROUTE_CACHE_TABLES: tuple[Table, ...] = (
+    Table(
+        schema="route_cache",
+        name="graph_state",
+        description="GraphHopper import_date each graph's cached segments "
+        "were routed against. RouteSegmentRepository.sync_graph_import() "
+        "compares it with the live /info at API startup and purges that "
+        "graph's rows on a change — a re-import empties exactly the graph "
+        "it touched.",
+        columns=(
+            Column("routing_graph_key", "VARCHAR(50) PRIMARY KEY"),
+            Column("import_date", "TEXT NOT NULL"),
+            Column("synced_at", "TIMESTAMPTZ NOT NULL DEFAULT now()"),
+        ),
+    ),
+    Table(
+        schema="route_cache",
+        name="route_segments",
+        description="Raw routed physics for one stop pair on one routing "
+        "graph, canonical lo->hi orientation (stop ids sorted; direction is "
+        "symmetric, one row serves both). Scenario-independent by design: "
+        "buffer quotas, traction dynamics and energy are applied downstream, "
+        "so parameter recalibrations invalidate zero rows. Grows from "
+        "precompute loads (source=precompute) and from every live-routed "
+        "miss (source=runtime). Row contract: "
+        "models/route/routing/segment_cache.py.",
+        unlogged=True,
+        columns=(
+            Column(
+                "routing_graph_key",
+                "VARCHAR(50) NOT NULL",
+                "The graph these segments were routed on — each graph has its "
+                "own snapped points and HSR resolution, nothing is shared.",
+            ),
+            Column("stop_lo", "VARCHAR(120) NOT NULL", "Smaller stop_id of the pair."),
+            Column("stop_hi", "VARCHAR(120) NOT NULL", "Larger stop_id of the pair."),
+            Column(
+                "variant_key",
+                "VARCHAR(80) NOT NULL",
+                "route_variant_key(): gauge profile + hash of the resolved "
+                "custom model — everything that shapes the geometry on a "
+                "graph. Unknown key -> miss -> live route + store.",
+            ),
+            Column(
+                "distance_m", "INTEGER NOT NULL", "Rounded total, for screening.", "m"
+            ),
+            Column(
+                "country_distance_m",
+                "JSONB NOT NULL",
+                "Unrounded per-country distance; shares derive from this.",
+                "m",
+            ),
+            Column(
+                "country_driving_ms",
+                "JSONB NOT NULL",
+                "Unrounded per-country raw driving time — what buffer quotas "
+                "and driving_time_min are recomputed from per request.",
+                "ms",
+            ),
+            Column(
+                "countries", "JSONB NOT NULL", "Country codes in path order, lo->hi."
+            ),
+            Column(
+                "passages",
+                "JSONB NOT NULL",
+                "Full intersecting passage_id list of this pair — the cross-leg "
+                "first-claim dedupe happens at trip assembly.",
+            ),
+            Column(
+                "geometry",
+                "JSONB NOT NULL",
+                "[[lon, lat], ...] lo->hi. Deliberately the last column — large; "
+                "keep it out of ad-hoc SELECTs.",
+            ),
+            Column(
+                "source",
+                "VARCHAR(10) NOT NULL DEFAULT 'runtime'",
+                "'precompute' (bulk load) or 'runtime' (stored on a miss).",
+            ),
+            Column("routed_at", "TIMESTAMPTZ NOT NULL DEFAULT now()"),
+        ),
+        constraints=("PRIMARY KEY (routing_graph_key, stop_lo, stop_hi, variant_key)",),
+    ),
+)
+
+
+ALL_TABLES: tuple[Table, ...] = (
+    INPUT_PARAMS_TABLES + SCENARIO_TABLES + ROUTE_CACHE_TABLES
+)
+
+
+# =============================================================================
+# Column introspection
+# =============================================================================
+
+_CHAR_LIMIT = re.compile(r"^\s*(?:VAR)?CHAR\s*\(\s*(\d+)\s*\)", re.IGNORECASE)
+
+
+def varchar_limits(qualified_table: str) -> dict[str, int]:
+    """Declared character limits of one table's CHAR/VARCHAR columns, keyed
+    by column name — read back out of the same definitions build_ddl()
+    renders, so they can never drift from the database.
+
+    seed.py uses them to name the column and the offending value behind a
+    truncation, which psycopg2 reports only as "value too long for type
+    character varying(n)". Unknown table or no character columns: empty."""
+    for table in ALL_TABLES:
+        if f"{table.schema}.{table.name}" == qualified_table:
+            return {
+                c.name: int(m.group(1))
+                for c in table.columns
+                if (m := _CHAR_LIMIT.match(c.sql_type))
+            }
+    return {}
 
 
 # =============================================================================
@@ -1565,7 +1826,7 @@ def _table_ddl(table: Table) -> str:
     body_lines = [f"    {c.name} {c.sql_type}" for c in table.columns]
     body_lines += [f"    {c}" for c in table.constraints]
     lines = [
-        f"CREATE TABLE {qualified} (",
+        f"CREATE {'UNLOGGED ' if table.unlogged else ''}TABLE {qualified} (",
         ",\n".join(body_lines),
         ");",
         _comment("TABLE", qualified, table.description),
@@ -1600,4 +1861,10 @@ def build_ddl() -> str:
         "",
     ]
     parts += [_table_ddl(t) + "\n" for t in SCENARIO_TABLES]
+    parts += [
+        "DROP SCHEMA IF EXISTS route_cache CASCADE;",
+        "CREATE SCHEMA route_cache;",
+        "",
+    ]
+    parts += [_table_ddl(t) + "\n" for t in ROUTE_CACHE_TABLES]
     return "\n".join(parts)

@@ -72,8 +72,12 @@ country rather than leaving it to be inferred.
   calibration behind them.
 - **Route context is the weakest domain** and its own document says so: the
   schedule supplement is measured against a router whose speed model is
-  optimistic, and the two cannot be separated by that measurement. The
-  utilisation and punctuality inputs are calibrated and unused, waiting for a
+  optimistic, and the two cannot be separated by that measurement. Since
+  2026-09-05 it is calibrated as a *minimum driving time* (lower quartile of
+  the leg-level residual; France a documented exception) with arrival-hour
+  stretching left to the timetable layer — the Wien–Paris check that forced
+  the change is in `ROUTE_CONTEXT_CALIBRATION.md` §3. The utilisation and
+  punctuality inputs are calibrated and unused, waiting for a
   night-train-priority scenario.
 - **The energy consumption model** (`models/energy/`) is still a flat
   28 kWh/train-km placeholder. Its `f_terrain` coefficient must be fitted

@@ -78,6 +78,66 @@ catalog match stay unmapped and keep raw ONTD ids — reported by
 `build_stop_mappings()` and queryable as the gap between active ONTD
 stops and mapping rows.
 
+**After a stop-catalog change** (new Drive CSV with removed or re-pointed
+stop ids), the bootstrap repairs itself: `seed.py` DROPs `input_params`
+on every start, so a reseeded catalog can leave this schema's derived
+mappings pointing at ids that no longer exist. `bootstrap.py` detects
+exactly that (`stale_stop_mappings()`) and re-runs the projection step
+alone — the timetable and the curated composition catalog do not depend
+on the stop catalog, so nothing is re-downloaded or re-routed
+unnecessarily. A normal `docker compose up --build` is enough.
+
+The same self-repair covers an **unrouted projection**
+(`unrouted_projection()`): step 1 writes `route_summaries` with
+straight-line placeholders (`geometry_routed = FALSE` everywhere) that
+step 3 replaces. If step 3 never ran — router down, or the bootstrap
+aborted before it — the placeholder would otherwise count as "loaded"
+forever and every existing train would stay a dashed line on the gallery
+map. A projection with no routed row now re-runs step 3 at the next
+start; if the router is still down it simply tries again next time.
+
+Step 2 (`composition_loader.py`) is **skipped** when the curated tables
+already hold data — it refuses to overwrite hand-maintained tables, and
+a populated catalog is the end state the bootstrap wants. Until
+2026-09-06 that refusal was read as a failure, so on every persisted
+database (dev volume, staging, production) the bootstrap stopped before
+routing; the gallery's all-dashed map was this, not a routing problem.
+`plan_steps()` holds the decision table; `tests/test_81` pins it.
+
+The mapping stage then re-matches every active ONTD stop against the new
+snapshot and warns about manual/verified rows stranded on removed ids
+(those must be re-pointed or un-verified by hand — protection cuts both
+ways). `test_38`'s `test_no_mapping_targets_removed_stops` asserts the
+end state.
+
+The mapping is also what gives an ONTD stop its **gauge**: ONTD carries
+none, so `projection.py` builds the mapping before routing and routes
+each stop on its catalog stop's `gauges_mm` (`catalog_gauges()`).
+Unmapped stops route gauge-unknown, which does not constrain the trip.
+Without this every existing train was routed on the standard-gauge
+profile and the Finnish, Ukrainian and Baltic ones could not snap.
+
+Every route left on straight lines is listed at the end of a projection
+run grouped by `routing_status` with the router's message — the first
+place to look when a gallery route is dashed. `snap_failed` on a stop far
+from any track is usually an ONTD coordinate defect (the unmatched-stop
+report above names the same stops); `gauge_mismatch` means the mapped
+catalog stops span two networks; `no_connection` is a real answer about
+the graph (Sicily until the ferry edge lands).
+
+The detection is one-directional: it catches mappings left on removed
+stops, not a catalog that merely *added* stops which previously
+unmatched ONTD stops could now match. Those keep their raw ONTD ids
+until a full reload:
+
+```bash
+docker exec night-train-api python db/ontd/bootstrap.py --force
+```
+
+(`--force` re-runs steps 1 and 3; step 2 is still skipped while the
+curated tables hold data — use `composition_loader.py --replace`
+deliberately if the catalog itself must be re-imported.)
+
 Since WP10 step 6b, `route_summaries` and `route_corridors` are no
 longer projection-only artifacts — they are the live `"existing"`
 branch of `POST /api/proposals`' gallery union (summaries rows, corridor

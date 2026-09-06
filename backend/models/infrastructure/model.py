@@ -25,7 +25,7 @@ stop catalog is classified. A changed value alone is a data change and
 follows the DB full-snapshot versioning rules instead.
 """
 
-INFRA_MODEL_VERSION: str = "0.9.5"
+INFRA_MODEL_VERSION: str = "0.9.6"
 
 INFRA_MODEL_DESCRIPTION: str = (
     "Infrastructure parameter model: per-country track access charges, "
@@ -51,6 +51,34 @@ OPEN_TODOS['tac_weekday_blend']."""
 
 
 CHANGELOG: dict = {
+    "0.9.6": {
+        "date": "2026-09-05",
+        "author": "david",
+        "changes": "VALUES CHANGE: track_buffer_quota_per is re-calibrated "
+        "as a MINIMUM driving-time supplement — 0.11-0.39 by country "
+        "instead of 0.35-0.71. The 2026-08-17 value was the time-weighted "
+        "mean residual of real ONTD night-train legs over the router's "
+        "passage time, which on the Wien-Paris corridor produced 17:21 "
+        "against the real NJ 468's 15:25 and 0.71 for France against the "
+        "0.22 the real train needed. The clock-time analysis of the same "
+        "legs showed the mean was dominated by the one long overnight leg "
+        "per trip, i.e. by the operator's arrival-hour stretching rather "
+        "than by anything the network needs. The seeded value is now the "
+        "lower quartile of the leg-level residual, shrunk toward the "
+        "European lower-quartile prior (23.9%) by sample size and floored "
+        "at 8%; France is a documented exception at 25% because every "
+        "French ONTD leg is an SNCF Intercites de Nuit. Arrival-hour "
+        "stretching is no longer inside the supplement; the timetable "
+        "layer's fixed-night mode (slack_time_min) is where a night is "
+        "stretched, and a manual per-trip override is a planned follow-up. "
+        "Three resolution fixes ride along: the UK/GB key mismatch that "
+        "dropped Britain's 15 legs; IT, PL, CZ, NL, RO, HU, HR and SK now "
+        "carry their own route-context values instead of silently taking "
+        "the EU default (money fields unchanged, still default-resolved); "
+        "and the optimised-timetable benchmark re-based from 0.35 to 0.12 "
+        "so the scenario still reduces something. No schema change. "
+        "Calibration: models/infrastructure/route_context/calib/.",
+    },
     "0.9.5": {
         "date": "2026-08-17",
         "author": "david",

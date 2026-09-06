@@ -2,8 +2,17 @@
 # Night Train — Backend Services
 # =============================================================================
 # Services:
-#   postgres         — PostgreSQL database (seeded on API startup)
-#   openrailrouting  — rail routing engine (GraphHopper fork)
+#   postgres                   — PostgreSQL database (seeded on API startup)
+#   openrailrouting-infra-2026 — rail routing engine (GraphHopper fork),
+#                                 today's network (graph key infra_2026)
+#
+# Every per-graph setting is suffixed with the graph key — ports, URL,
+# cache file id. OPENRAILROUTING_CONTAINER_PORT is deliberately NOT:
+# all instances run the same image and config.yml, so they bind the
+# same port internally. Naming contract in rail_router.py.
+#   openrailrouting-infra-2032 — same engine on the 2032 upgraded-network
+#                                 graph; OFF until enabled via
+#                                 COMPOSE_PROFILES=infra-2032 in .env
 #   api              — Flask REST API (seeds db then starts)
 #
 # Usage:
@@ -41,19 +50,67 @@ services:
       timeout: 5s
       retries: 5
 
-  openrailrouting:
+  openrailrouting-infra-2026:
     build:
       context: ../models/route/routing/docker
       dockerfile: Dockerfile
     image: docker-openrailrouting
-    container_name: openrailrouting
+    container_name: openrailrouting-infra-2026
     environment:
-      GRAPH_CACHE_FILE_ID: ${GRAPH_CACHE_FILE_ID:-}
+      GRAPH_CACHE_FILE_ID: ${GRAPH_CACHE_FILE_ID_INFRA_2026:-}
     ports:
-      - "${OPENRAILROUTING_HOST_PORT:-8989}:${OPENRAILROUTING_CONTAINER_PORT:-8989}"
+      - "${OPENRAILROUTING_HOST_PORT_INFRA_2026:-8989}:${OPENRAILROUTING_CONTAINER_PORT:-8989}"
     volumes:
-      - ../models/route/routing/docker/data:/app/data
-      - ${GRAPH_CACHE_PATH}:/app/graph-cache
+      - ../models/route/routing/docker/data-infra-2026:/app/data
+      # Repo-relative, resolved against the compose project directory
+      # (backend/docker/) exactly like the ../models mount above. NOT an
+      # .env value: it is the same path on every laptop, in CI (where
+      # backend-tests.yml's actions/cache restores this very directory) and
+      # on the servers, so by the parameter-placement rules it has no
+      # business in .env. It was one until 2026-08-24, holding a
+      # CONTAINER-side /app/... value that silently bind-mounted an empty
+      # root-owned directory on Linux and failed outright on macOS; hard-
+      # coding it here makes a stale GRAPH_CACHE_PATH in an existing .env
+      # inert rather than actively wrong.
+      - ../models/route/routing/docker/graph-cache-infra-2026:/app/graph-cache
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${OPENRAILROUTING_CONTAINER_PORT:-8989}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  # Second routing instance — the 2032 upgraded-network graph (graph key
+  # "infra_2032"; scenario.scenarios.routing_graph_key). A GraphHopper
+  # process serves many profiles but exactly ONE graph, so a second OSM
+  # base is a second container, not a second profile. Same image, same
+  # config.yml/custom_models (identical gauge profiles); only the graph
+  # differs — own host-side data-infra-2032/ and graph-cache-infra-2032/
+  # directories, own Drive
+  # file id. OFF by default (compose profile): enable via the three
+  # _INFRA_2032 lines in .env once the graph exists (see .env.example).
+  # Deliberately NOT in api's depends_on: the api must come up with this
+  # profile disabled, and a scenario pinning the graph anyway fails
+  # loudly in the backend instead (api/helpers/dependencies.py).
+  openrailrouting-infra-2032:
+    build:
+      context: ../models/route/routing/docker
+      dockerfile: Dockerfile
+    image: docker-openrailrouting
+    container_name: openrailrouting-infra-2032
+    profiles: ["infra-2032"]
+    environment:
+      GRAPH_CACHE_FILE_ID: ${GRAPH_CACHE_FILE_ID_INFRA_2032:-}
+    ports:
+      - "${OPENRAILROUTING_HOST_PORT_INFRA_2032:-8991}:${OPENRAILROUTING_CONTAINER_PORT:-8989}"
+    volumes:
+      - ../models/route/routing/docker/data-infra-2032:/app/data
+      # Same repo-relative-not-.env reasoning as the base instance's
+      # graph-cache mount above. Both containers see /app/graph-cache;
+      # only the host-side directory differs — which is also what keeps
+      # the two caches from ever colliding on disk.
+      - ../models/route/routing/docker/graph-cache-infra-2032:/app/graph-cache
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:${OPENRAILROUTING_CONTAINER_PORT:-8989}/health"]
@@ -77,11 +134,11 @@ services:
       # the container-side ports regardless of what the host publishes.
       POSTGRES_HOST:        postgres
       POSTGRES_PORT:        "5432"
-      OPENRAILROUTING_URL:  http://openrailrouting:${OPENRAILROUTING_CONTAINER_PORT:-8989}
+      OPENRAILROUTING_URL_INFRA_2026: http://openrailrouting-infra-2026:${OPENRAILROUTING_CONTAINER_PORT:-8989}
     depends_on:
       postgres:
         condition: service_healthy
-      openrailrouting:
+      openrailrouting-infra-2026:
         condition: service_healthy
     restart: unless-stopped
 

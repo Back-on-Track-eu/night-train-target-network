@@ -6,7 +6,8 @@ scheduled; nothing here gates anything else.
 
 Retired from `docs/PROPOSALS_DESIGN.md` when that document was folded into
 [`backend/adapters/proposal/README.md`](../backend/adapters/proposal/README.md)
-(2026-08-07).
+(2026-08-07). `PROPOSALS_DESIGN.md` itself was deleted on 2026-08-29 once it
+had been superseded for three weeks; this file is what survived it.
 
 | Item | Status | Blocked by |
 |---|---|---|

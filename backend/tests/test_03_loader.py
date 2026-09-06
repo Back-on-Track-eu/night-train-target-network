@@ -72,9 +72,6 @@ LOADER_READ_COLUMNS = [
     ("input_params.composition_types", "composition_type_max_speed_kmh"),
     ("input_params.composition_types", "composition_type_min_boarding_time"),
     ("input_params.composition_types", "composition_type_min_alighting_time"),
-    ("input_params.composition_types", "composition_type_energy_factor_weight"),
-    ("input_params.composition_types", "composition_type_energy_factor_speed"),
-    ("input_params.composition_types", "composition_type_energy_factor_terrain"),
     ("input_params.composition_types", "composition_type_purchase_coach_eur"),
     ("input_params.composition_types", "composition_type_coach_avail_per"),
     ("input_params.composition_types", "composition_type_coach_amort_years"),
@@ -166,6 +163,35 @@ def test_all_stops_load(loader):
     """All seeded stops load without errors."""
     stops = loader.build_all_stops()
     assert len(stops.all()) >= 8, f"Expected >= 8 stops, got {len(stops.all())}"
+
+
+def test_stop_enrichment_surfaces(loader):
+    """The enrichment columns come through as folded, language-keyed
+    structures on the domain object — no column suffixes downstream."""
+    stops = loader.build_all_stops()
+    berlin = stops.all().get("osm:n3856100103")
+    assert berlin is not None, "Berlin Hbf missing from the catalog"
+
+    assert berlin.provenance == "existing night train stop"
+    assert berlin.name_ascii  # non-empty by contract
+    assert set(berlin.country_names) == {"en", "de", "fr", "nl", "it", "es", "pl"}
+    assert berlin.country_names["it"] == "Germania"
+    assert berlin.city == "Berlin"
+    assert berlin.city_names.get("it") == "Berlino"
+    assert berlin.gauges_mm == [1435]
+    assert berlin.gauge_evidence == "tagged"
+
+    # Charge provenance rides with the figure, or is uniformly absent for a
+    # stop resolving through a default — a default has no source document.
+    for stop in stops.all().values():
+        if stop.stop_charge_source:
+            assert stop.stop_charge_basis
+
+    # A rural halt: city is None and city_names is empty, not None-valued.
+    no_city = [s for s in stops.all().values() if s.city is None]
+    for stop in no_city:
+        assert stop.city_names == {}
+        assert stop.city_osm_id is None
 
 
 def test_composition_fields_match_db(loader, db_cur):
@@ -463,3 +489,15 @@ def test_composition_indicative_figures_present(loader):
     assert by_id["NEW-BAL-7"].total_length_m == pytest.approx(185.7)
     assert len(by_id["NEW-BAL-7"].coaches) == 7
     assert by_id["REF-BUD-6"].material_strategy == "refurbished"
+
+
+def test_stop_charge_price_year_surfaces(loader):
+    """The price year reaches the domain object, not just the table.
+
+    Split out of test_stop_enrichment_surfaces so that test keeps
+    guarding the enrichment folding it is actually about. The strict
+    xfail went with the real charges landing — see
+    test_02_db_seed.test_stop_charge_carries_its_price_year."""
+    for stop in loader.build_all_stops().all().values():
+        if stop.stop_charge_source:
+            assert stop.stop_charge_price_basis_year, stop.stop_id
