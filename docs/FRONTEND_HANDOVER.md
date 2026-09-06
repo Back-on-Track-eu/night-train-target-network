@@ -21,6 +21,35 @@ are mostly "this field now exists, show it if you want".
 
 ---
 
+## `Formula.summary` on every documented formula — CALC 0.9.24 / route builder 0.9.31 / energy 1.1.1
+
+`models.evaluation.formulas[key]` gained a **`summary`** field: one
+self-contained sentence naming what the value is. `latex` and
+`description` are unchanged and still shipped.
+
+It exists because the cost-breakdown popover has no room for the full
+description (`tac_eur`'s runs eight lines). The popover now renders
+`summary` plus a link to `/docs/cost/<slug>` and nothing else — the
+formula, the input legend and the rates table moved to the documentation
+site.
+
+**Deep-link contract:** the slug is the formula key with a trailing
+`_eur` dropped and underscores turned to hyphens (`tac_eur` →
+`/docs/cost/tac`). Implemented in `frontend/src/lib/factorFeedback.ts`
+and in `backend/scripts/model_docs/render_site.py::cost_slug`, with tests
+pinning the emitted page names. Changing one without the other is a 404
+on every popover.
+
+**Also on the API:** `POST /api/feedback` is now rate-limited
+(`config.FEEDBACK_RATE_LIMIT`, default `5 per minute;20 per hour`, per
+gunicorn worker) and can return **429**. A new `Documentation` category
+exists for docs-page feedback, with the page path as `sub_category`.
+
+**When this stops applying:** never for the summary field — it is
+required on the dataclass. The docs-link contract stops applying only if
+the site's page-per-node layout changes.
+
+
 ## 1. New stop catalog and the search it needs
 
 **Backend: `ROUTE_BUILDER_VERSION` 0.9.25 (2026-08-18), extended since.**

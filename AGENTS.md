@@ -3,12 +3,15 @@
 ## Project Overview
 
 Economic model for a future European Night Train Network.
-This is a **monorepo** with two independently deployable parts:
+This is a **monorepo**. The backend and frontend deploy independently; the
+public documentation site ships inside the frontend image and is served at
+`/docs/` on the same origin:
 
 | Part         | Location    | Language                 | Entry point             |
 | ------------ | ----------- | ------------------------ | ------------------------ |
 | Backend API  | `backend/`  | Python 3.12 (Flask, uv)  | `backend/main.py`       |
 | Frontend SPA | `frontend/` | TypeScript (Vue 3, Vite) | `frontend/src/main.ts`  |
+| Public docs  | `docs-site/`| Markdown (VitePress)     | `docs-site/.vitepress/config.ts` |
 | Server deploy | `deploy/`  | Compose + bash           | `deploy/bot-server-app/README.md` |
 
 Data lives in PostgreSQL 16/PostGIS. Routing is served by a self-hosted
@@ -114,9 +117,10 @@ files describing the same three backend services, kept manually in sync:
 - Icons: use `<AppIcon :path="mdiXxx" />` from `@/components/AppIcon.vue`
   with path constants imported from `@mdi/js` — never use
   `<i class="mdi mdi-*">` CSS font classes
-- Math/LaTeX: render backend-provided LaTeX (e.g. `models.evaluation.formulas`)
-  with **KaTeX** (`katex.renderToString` + `katex/dist/katex.min.css`) — no
-  other math renderer is bundled
+- Math/LaTeX: **not rendered in the SPA.** The cost-breakdown popover shows
+  `formula.summary` and links to the documentation site; formulas, input
+  legends and rate tables live at `/docs/`. KaTeX is a `docs-site/`
+  dependency (`@vscode/markdown-it-katex`) — do not reintroduce it here
 
 ---
 
@@ -296,11 +300,14 @@ Full contract, `--baseline` semantics, and editorial rules:
 | `frontend/src/i18n/locales/en.json` | English translation strings — including the whole landing pitch (`gallery.heading`, `gallery.welcome.*`, `gallery.audience.*`, `gallery.story.*`) |
 | `frontend/src/components/LandingIntro.vue` | Landing pitch above the gallery: layout, hero sizing and scroll cue only, no copy |
 | `frontend/src/types/api.ts` | TypeScript types for backend responses |
+| `frontend/src/lib/factorFeedback.ts` | Breakdown row → formula key, docs page path, feedback `sub_category`. The docs deep-link contract, shared with `render_site.py::cost_slug` |
+| `docs-site/.vitepress/config.ts` | Public docs site: `base: '/docs/'`, local search, nav/sidebar (cost section generated) |
+| `backend/scripts/model_docs/` | One extraction layer over the model registries, one renderer per artefact (`docs/MODEL.md`, `docs-site/`) |
 | `backend/docker/docker-compose.yml` | Canonical backend Docker stack |
 | `.devcontainer/docker-compose.yml` | Self-contained VS Code devcontainer stack — duplicates the above, plus `frontend` |
 | `.github/workflows/ci.yml` | Frontend/backend formatting + frontend type-check (see CI/CD below) |
 | `.github/workflows/backend-tests.yml` | Version-bump enforcement + full backend integration test run |
-| `.pre-commit-config.yaml` | Pre-commit: ruff-format (`backend/`) + prettier (`frontend/`) |
+| `.pre-commit-config.yaml` | Pre-commit: ruff-format (`backend/`) + prettier (`frontend/`, `docs-site/` — excluding the emitted pages) |
 | `docs/DEPLOY_HANDOVER.md` | Living handover to Giovanni: deploy order, staging gotchas, server capacity. Update in the same PR as any change touching deploy, capacity or server data |
 | `docs/FRONTEND_HANDOVER.md` | Living handover to Bjarne: every backend change that reaches the API contract. Update in the same PR as the change |
 
@@ -370,7 +377,7 @@ Name the file `<name>Store.ts`.
 
 ## CI/CD
 
-Four workflows:
+Five workflows:
 
 **`.github/workflows/ci.yml`** — runs on every push/PR to `staging`/`production`:
 
@@ -379,17 +386,21 @@ Four workflows:
 | `prettier-check` | Frontend formatting (`npm run format:check`) |
 | `ruff-check` | Backend Python formatting (`ruff format --check backend/`) |
 | `type-check` | Frontend TypeScript (`npm run type-check` via `vue-tsc`) |
+| `unit-tests` | Frontend Vitest (`npm test`) |
+| `docs-prettier` | `docs-site/` formatting — hand-written pages only |
+| `docs-build` | `vitepress build`; fails on a dead internal link |
 
 **`.github/workflows/deploy-staging.yml` / `deploy-production.yml`** — on
 push to the matching branch, deploy to the matching server environment (see
 "Branches, environments & deployment" above).
 
 **`.github/workflows/backend-tests.yml`** — runs on push to
-`staging`/`production`/`backend-dev`, only when `backend/**` or
-`.devcontainer/**` changed:
+`staging`/`production`/`backend-dev`, only when `backend/**`,
+`docs/MODEL.md`, `docs-site/**` or `.devcontainer/**` changed:
 
 | Job | What it checks |
 | --- | -------------- |
+| `model-docs-check` | Fails if `docs/MODEL.md` or `docs-site/` no longer matches the model registries (`generate_model_docs.py --check`) |
 | `version-check` | Fails if a model file (route builder, energy, or evaluation) changed without a matching version-constant bump in its `version.py` |
 | `test` | Builds and starts the full Docker stack (with `GIT_SHA` injected into `version.py` files), then runs `uv run --extra dev pytest tests/ -v --timeout=60` against it |
 
