@@ -29,6 +29,7 @@ Whether/where the flag appears on the wire stays the caller's concern
 
 Public interface:
   validate_calc_body(body: dict) -> list[str]
+  normalize_expert_timetable(block: dict | None) -> dict | None
   canonical_request_hash(resolved_request: dict) -> str
   compute_proposal(body, loader=None, router=None, use_cache=True)
       -> tuple[dict, bool]   # (§2.1 response payload, cache_hit)
@@ -48,11 +49,23 @@ from api.helpers.evaluation_serialize import (
     models_to_dict,
     views_to_dict,
 )
-from api.helpers.route_serialize import route_to_dict, suggested_stops_to_dicts
+from api.config import (
+    EXPERT_DEPARTURE_MAX_TIME,
+    EXPERT_DEPARTURE_MIN_TIME,
+    EXPERT_MAX_ADDON_MIN,
+    EXPERT_MAX_ADDONS,
+    EXPERT_MAX_DEPARTURE_SHIFT_MIN,
+)
+from api.helpers.route_serialize import (
+    expert_timetable_from_dict,
+    route_to_dict,
+    suggested_stops_to_dicts,
+)
 from models.evaluation.model import CALC_VERSION
 from models.pipeline import run_compute
 from models.route.timetable import (
     VALID_AUTO_STOP_ADDITION_MODES,
+    VALID_DEPARTURE_MODES,
     VALID_SCHEDULE_MODES,
     VALID_TIMETABLE_MODES,
 )
@@ -153,7 +166,206 @@ def validate_calc_body(body: dict) -> list[str]:
             f"of: {sorted(VALID_AUTO_STOP_ADDITION_MODES)}."
         )
 
+    errors.extend(_validate_expert_timetable(body.get("expert_timetable"), stops))
+
     return errors
+
+
+# =============================================================================
+# expert_timetable — validation + normalisation (0.9.32)
+# =============================================================================
+
+_EXPERT_KEYS = frozenset({"outbound", "return"})
+_DIRECTION_KEYS = frozenset({"departure", "segment_addons"})
+
+
+def _validate_departure(departure, where: str) -> list[str]:
+    """One direction's departure override. An absent/None block is valid —
+    it means "let the timetable_mode decide", which is the default."""
+    if departure is None:
+        return []
+    if not isinstance(departure, dict):
+        return [f"'{where}.departure' must be an object or null."]
+    mode = departure.get("mode")
+    if mode not in VALID_DEPARTURE_MODES:
+        return [
+            f"'{where}.departure.mode' = '{mode}' is invalid. Must be one of: "
+            f"{sorted(VALID_DEPARTURE_MODES)}."
+        ]
+    field = "time_min" if mode == "absolute" else "shift_min"
+    value = departure.get(field)
+    if isinstance(value, bool) or not isinstance(value, int):
+        return [f"'{where}.departure.{field}' must be an integer."]
+    if mode == "absolute" and not (
+        EXPERT_DEPARTURE_MIN_TIME <= value <= EXPERT_DEPARTURE_MAX_TIME
+    ):
+        return [
+            f"'{where}.departure.time_min' must be between "
+            f"{EXPERT_DEPARTURE_MIN_TIME} and {EXPERT_DEPARTURE_MAX_TIME} "
+            f"(minutes on the service-day scale)."
+        ]
+    if mode == "shift" and abs(value) > EXPERT_MAX_DEPARTURE_SHIFT_MIN:
+        return [
+            f"'{where}.departure.shift_min' must be within "
+            f"±{EXPERT_MAX_DEPARTURE_SHIFT_MIN} minutes."
+        ]
+    return []
+
+
+def _validate_addons(addons, stops, where: str) -> list[str]:
+    """One direction's per-leg add-ons.
+
+    Every add-on names an ORDERED stop pair that must be adjacent in the
+    posted 'stops' — the caller can always know that, so a pair that isn't
+    is a request error rather than something to silently drop. The only
+    add-on that legitimately disappears later is one whose pair
+    auto_stop_addition="add" splits server-side, which route_factory drops
+    at build time (timetable.resolve_addons).
+
+    'stops' is validated separately above; when it is malformed the
+    adjacency check is skipped rather than reported twice."""
+    if addons is None:
+        return []
+    if not isinstance(addons, list):
+        return [f"'{where}.segment_addons' must be a list."]
+    if len(addons) > EXPERT_MAX_ADDONS:
+        return [
+            f"'{where}.segment_addons' may hold at most {EXPERT_MAX_ADDONS} entries."
+        ]
+
+    errors: list[str] = []
+    stops_usable = isinstance(stops, list) and all(isinstance(s, str) for s in stops)
+    adjacent = (
+        {(stops[i], stops[i + 1]) for i in range(len(stops) - 1)}
+        if stops_usable
+        else set()
+    )
+    seen: set[tuple[str, str]] = set()
+    for i, addon in enumerate(addons):
+        at = f"'{where}.segment_addons[{i}]'"
+        if not isinstance(addon, dict):
+            errors.append(f"{at} must be an object.")
+            continue
+        from_id, to_id = addon.get("from_stop_id"), addon.get("to_stop_id")
+        if not isinstance(from_id, str) or not isinstance(to_id, str):
+            errors.append(f"{at} needs string 'from_stop_id' and 'to_stop_id'.")
+            continue
+        add_min = addon.get("add_min")
+        if isinstance(add_min, bool) or not isinstance(add_min, int):
+            errors.append(f"{at}.add_min must be an integer.")
+        elif not (1 <= add_min <= EXPERT_MAX_ADDON_MIN):
+            # The lower bound is what makes this an ADD-on: a leg can only
+            # ever be padded, never shortened below its routed physics.
+            errors.append(
+                f"{at}.add_min must be between 1 and {EXPERT_MAX_ADDON_MIN} minutes."
+            )
+        if (from_id, to_id) in seen:
+            errors.append(f"{at} repeats the stop pair '{from_id}' → '{to_id}'.")
+        seen.add((from_id, to_id))
+        if stops_usable and (from_id, to_id) not in adjacent:
+            errors.append(
+                f"{at} names '{from_id}' → '{to_id}', which is not a leg of "
+                f"'stops' — an add-on belongs to two consecutive stops, in "
+                f"travel order."
+            )
+    return errors
+
+
+def _validate_expert_timetable(block, stops) -> list[str]:
+    """The whole expert_timetable block (§ the compute request contract).
+    Absent is valid and means a fully automatic timetable."""
+    if block is None:
+        return []
+    if not isinstance(block, dict):
+        return ["'expert_timetable' must be an object."]
+
+    errors: list[str] = []
+    unknown = set(block) - _EXPERT_KEYS
+    if unknown:
+        errors.append(f"'expert_timetable' has unknown keys: {sorted(unknown)}.")
+
+    for name in ("outbound", "return"):
+        direction = block.get(name)
+        if direction is None:
+            continue
+        where = f"expert_timetable.{name}"
+        if not isinstance(direction, dict):
+            errors.append(f"'{where}' must be an object.")
+            continue
+        if name == "return" and "mirror_outbound" in direction:
+            # The default, spelled out. Mutually exclusive with the rest:
+            # a block that both mirrors and overrides is a contradiction,
+            # not something to resolve by precedence.
+            if direction.get("mirror_outbound") is not True:
+                errors.append(f"'{where}.mirror_outbound' must be true if present.")
+            if set(direction) - {"mirror_outbound"}:
+                errors.append(
+                    f"'{where}' cannot carry 'mirror_outbound' together with "
+                    f"its own overrides."
+                )
+            continue
+        unknown = set(direction) - _DIRECTION_KEYS
+        if unknown:
+            errors.append(f"'{where}' has unknown keys: {sorted(unknown)}.")
+        errors.extend(_validate_departure(direction.get("departure"), where))
+        # The return direction runs the reversed stop list.
+        direction_stops = (
+            list(reversed(stops))
+            if name == "return" and isinstance(stops, list)
+            else stops
+        )
+        errors.extend(
+            _validate_addons(direction.get("segment_addons"), direction_stops, where)
+        )
+    return errors
+
+
+def _normalize_direction(direction: dict | None) -> dict | None:
+    """One direction, in canonical form — or None when it overrides
+    nothing, so an empty block and an absent one hash the same."""
+    if not direction:
+        return None
+    departure = direction.get("departure") or None
+    if departure is not None:
+        mode = departure["mode"]
+        field = "time_min" if mode == "absolute" else "shift_min"
+        departure = {"mode": mode, field: int(departure[field])}
+    addons = sorted(
+        (
+            {
+                "from_stop_id": a["from_stop_id"],
+                "to_stop_id": a["to_stop_id"],
+                "add_min": int(a["add_min"]),
+            }
+            for a in direction.get("segment_addons") or []
+        ),
+        key=lambda a: (a["from_stop_id"], a["to_stop_id"]),
+    )
+    if departure is None and not addons:
+        return None
+    return {"departure": departure, "segment_addons": addons}
+
+
+def normalize_expert_timetable(block) -> dict | None:
+    """Canonical form of the expert_timetable block, for the resolved
+    request echo — which is also the compute cache key, so two bodies that
+    mean the same thing have to hash the same. Add-on order is irrelevant
+    (sorted), an empty direction is None, and a return that mirrors is
+    always spelled {"mirror_outbound": true} whether it was written out or
+    left implicit.
+
+    Assumes the block already passed validation above."""
+    if not block:
+        return None
+    outbound = _normalize_direction(block.get("outbound"))
+    raw_return = block.get("return")
+    if raw_return and not raw_return.get("mirror_outbound"):
+        return_block = _normalize_direction(raw_return) or {"mirror_outbound": True}
+    else:
+        return_block = {"mirror_outbound": True}
+    if outbound is None and return_block == {"mirror_outbound": True}:
+        return None  # overrides nothing — indistinguishable from no block at all
+    return {"outbound": outbound, "return": return_block}
 
 
 def canonical_request_hash(resolved_request: dict) -> str:
@@ -185,6 +397,13 @@ def _resolve_request(body: dict, loader) -> dict:
         "auto_stop_addition": body.get(
             "auto_stop_addition", DEFAULT_AUTO_STOP_ADDITION
         ),
+        # Canonicalised (see normalize_expert_timetable) so an add-on list
+        # in a different order, or a spelled-out mirroring return block,
+        # converges on the same cache entry. None for every request that
+        # doesn't override the timetable — which is the reason the key is
+        # always present: an absent and an explicitly-empty block have to
+        # be the same request.
+        "expert_timetable": normalize_expert_timetable(body.get("expert_timetable")),
     }
 
 
@@ -297,6 +516,9 @@ def compute_proposal(
         schedule_mode=resolved_request["schedule_mode"],
         routing_mode=resolved_request["routing_mode"],
         auto_stop_addition=resolved_request["auto_stop_addition"],
+        expert_timetable=expert_timetable_from_dict(
+            resolved_request["expert_timetable"]
+        ),
         loader=loader,
         router=router,
     )

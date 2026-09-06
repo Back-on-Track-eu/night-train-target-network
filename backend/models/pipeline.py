@@ -54,6 +54,7 @@ from models.route.route_factory import (
     plan_route,
 )
 from models.route.routing.rail_router import RailRouter
+from models.route.timetable import ExpertTimetable
 
 
 @dataclass
@@ -101,6 +102,7 @@ def run_compute(
     auto_stop_addition: str,
     loader,
     router: RailRouter,
+    expert_timetable: ExpertTimetable | None = None,
 ) -> ComputeResult:
     """Build a route and evaluate it in one call — the steps every compute
     path (POST /api/proposal/calc, publish, future cache misses) needs:
@@ -113,6 +115,15 @@ def run_compute(
     publish time). Every other field must already be resolved (defaults
     applied) — that resolution is an API-boundary concern, not this
     module's.
+
+    expert_timetable: the request's manual timetable overrides, already
+    turned into domain objects at the API boundary (api/helpers/
+    route_serialize.py::expert_timetable_from_dict). None — the default,
+    and what every request without the key produces — means a fully
+    automatic timetable, byte-identical to what this pipeline returned
+    before the option existed. Defaulted here (unlike the mode strings,
+    which callers must pass) because it is genuinely optional input, not
+    a mode whose default belongs at the API boundary.
     """
     route, provenance, suggestions = plan_route(
         proposal_id=proposal_id,
@@ -126,6 +137,7 @@ def run_compute(
                 routing_mode=routing_mode,
                 auto_stop_addition=auto_stop_addition,
                 fixed_night_interval=fixed_night_interval,
+                expert_timetable=expert_timetable,
             )
         ],
         loader=loader,

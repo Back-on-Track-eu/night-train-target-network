@@ -124,6 +124,38 @@ PROPOSALS_DEFAULT_LIMIT = _env_int("PROPOSALS_DEFAULT_LIMIT", 50)
 
 
 # =============================================================================
+# Expert timetable overrides — api/helpers/proposal_compute.py
+# =============================================================================
+
+# Bounds on what a caller may do to a timetable by hand. Operational caps,
+# not model assumptions: they exist so one request cannot post a thousand
+# add-ons or a departure three weeks out, and relaxing any of them
+# invalidates nothing already stored (a route computed under a tighter cap
+# stays valid under a looser one) — which is what puts them here rather
+# than in models/route/model.py's STANDARD VALUES.
+
+# Most minutes one leg may be padded by. A whole extra day on a single leg
+# is not a timetable, it is a typo.
+EXPERT_MAX_ADDON_MIN = _env_int("EXPERT_MAX_ADDON_MIN", 720)
+
+# Most add-ons one direction may carry — comfortably above any real stop
+# list, since the longest seeded corridors are a few dozen stops.
+EXPERT_MAX_ADDONS = _env_int("EXPERT_MAX_ADDONS", 100)
+
+# Furthest a "shift" departure override may displace the automatic value,
+# in either direction. Half a day: past that the caller means a different
+# departure, which is what the "absolute" mode is for.
+EXPERT_MAX_DEPARTURE_SHIFT_MIN = _env_int("EXPERT_MAX_DEPARTURE_SHIFT_MIN", 720)
+
+# Range an "absolute" departure may name, in minutes on the service-day
+# scale (models/utils.py::hhmm_to_min). Negative values are legitimate —
+# a mirrored return trip routinely departs "before" midnight of day 1 —
+# and the upper bound leaves room for a trip positioned on day 2.
+EXPERT_DEPARTURE_MIN_TIME = _env_int("EXPERT_DEPARTURE_MIN_TIME", -1440)
+EXPERT_DEPARTURE_MAX_TIME = _env_int("EXPERT_DEPARTURE_MAX_TIME", 2880)
+
+
+# =============================================================================
 # Response compression — main.py's Compress(app)
 # =============================================================================
 
@@ -253,6 +285,11 @@ def log_effective_config() -> None:
         "REQUEST_LOG_EXCLUDED_ENDPOINTS": ",".join(REQUEST_LOG_EXCLUDED_ENDPOINTS),
         "REQUEST_LOG_USER_AGENT_MAX_LEN": REQUEST_LOG_USER_AGENT_MAX_LEN,
         "REQUEST_LOG_RETENTION_DAYS": REQUEST_LOG_RETENTION_DAYS,
+        "EXPERT_MAX_ADDON_MIN": EXPERT_MAX_ADDON_MIN,
+        "EXPERT_MAX_ADDONS": EXPERT_MAX_ADDONS,
+        "EXPERT_MAX_DEPARTURE_SHIFT_MIN": EXPERT_MAX_DEPARTURE_SHIFT_MIN,
+        "EXPERT_DEPARTURE_MIN_TIME": EXPERT_DEPARTURE_MIN_TIME,
+        "EXPERT_DEPARTURE_MAX_TIME": EXPERT_DEPARTURE_MAX_TIME,
     }
     logger.info(
         "Effective config — wiring: %s",

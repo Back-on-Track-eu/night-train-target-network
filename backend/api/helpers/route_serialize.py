@@ -23,6 +23,11 @@ Public interface:
                                                     evaluations, db/dev/seed.py's example proposal)
   suggested_stops_to_dicts(suggestions)          → list[dict] (the suggested_stops section,
                                                     auto_stop_addition="suggest")
+  expert_timetable_from_dict(block)              → ExpertTimetable | None  (the request's
+                                                    expert_timetable block as domain objects —
+                                                    request-side, but the same dict↔domain job
+                                                    and the same route domain, so it lives here
+                                                    rather than in a second module)
 """
 
 from __future__ import annotations
@@ -39,7 +44,14 @@ from models.route.route import (
     ODPair,
 )
 from models.route.trip import Stop, StopType, Segment, Trip, TimetableWarning
-from models.route.timetable import AutoStopSuggestion
+from models.route.timetable import (
+    AutoStopSuggestion,
+    DepartureOverride,
+    DirectionOverrides,
+    ExpertTimetable,
+    SegmentAddon,
+    NO_OVERRIDES,
+)
 from models.params import Composition, TrackInfraCollection, CompositionCollection
 
 # =============================================================================
@@ -73,6 +85,7 @@ def _segment_to_dict(seg: Segment, geometry_id: str) -> dict:
         "dynamics_time_min": seg.dynamics_time_min,
         "buffer_time_min": seg.buffer_time_min,
         "slack_time_min": seg.slack_time_min,
+        "addon_time_min": seg.addon_time_min,
         "energy_kwh": seg.energy_kwh,
         "country_distance_shares": seg.country_distance_shares,
         "country_time_shares": seg.country_time_shares,
@@ -115,6 +128,11 @@ def _trip_general_parameters(trip: Trip) -> dict:
         "trip_km": round(trip_km, 1),
         "route_duration_min": duration_min,
         "average_speed_kmh": round(average_speed_kmh, 1),
+        # Manual expert-mode minutes across the trip (0.9.32) — 0 for every
+        # automatic timetable. Here rather than left to the reader to sum
+        # over segments, for the same reason as the figures above: it is
+        # read at a glance ("this timetable was padded by 14 minutes").
+        "manual_addon_min": trip.addon_time_min,
         # Which per-gauge routing profile carried the trip (0.9.27) —
         # 1435 for the whole network west of the break-of-gauge lines,
         # informative exactly where routes were impossible before.
@@ -369,6 +387,8 @@ def _segment_from_dict(d: dict, geometries_by_id: dict[str, list]) -> Segment:
         buffer_time_min=int(d["buffer_time_min"]),
         # pre-0.9.10 payloads predate fixed-night slack — default 0
         slack_time_min=int(d.get("slack_time_min", 0)),
+        # pre-0.9.32 payloads predate expert-mode add-ons — default 0
+        addon_time_min=int(d.get("addon_time_min", 0)),
         energy_kwh=float(d["energy_kwh"]),
         country_distance_shares=d["country_distance_shares"],
         country_time_shares=d["country_time_shares"],
@@ -516,3 +536,63 @@ def route_from_dict(
         shuntings=shuntings,
     )
     return route, compositions
+
+
+# =============================================================================
+# EXPERT TIMETABLE — request block → domain (0.9.32)
+# =============================================================================
+
+
+def _direction_overrides_from_dict(d: dict | None) -> DirectionOverrides:
+    """One direction of the request's expert_timetable block. An absent or
+    empty block is NO_OVERRIDES, i.e. a fully automatic timetable for that
+    direction."""
+    if not d:
+        return NO_OVERRIDES
+    departure = None
+    raw_departure = d.get("departure")
+    if raw_departure:
+        mode = raw_departure["mode"]
+        minutes = int(
+            raw_departure["time_min"]
+            if mode == "absolute"
+            else raw_departure["shift_min"]
+        )
+        departure = DepartureOverride(mode=mode, minutes=minutes)
+    addons = tuple(
+        SegmentAddon(
+            from_stop_id=a["from_stop_id"],
+            to_stop_id=a["to_stop_id"],
+            add_min=int(a["add_min"]),
+        )
+        for a in d.get("segment_addons", [])
+    )
+    return DirectionOverrides(departure=departure, addons=addons)
+
+
+def expert_timetable_from_dict(d: dict | None) -> ExpertTimetable | None:
+    """The compute request's expert_timetable block as domain objects —
+    the one place a dict becomes an ExpertTimetable, so models/ never sees
+    the wire shape (the same split route_from_dict() keeps for routes).
+
+    Assumes the block already passed validate_calc_body() and was
+    normalised by normalize_expert_timetable() (api/helpers/
+    proposal_compute.py): keys are known, values are the right types, and
+    a mirroring return block is exactly {"mirror_outbound": True}.
+
+    Returns None for an absent block — every request without the key gets
+    the automatic timetable it always got. A return block that mirrors is
+    represented as ExpertTimetable.return_trip=None; route_factory does the
+    reversing via timetable.mirror_overrides().
+    """
+    if not d:
+        return None
+    raw_return = d.get("return")
+    return ExpertTimetable(
+        outbound=_direction_overrides_from_dict(d.get("outbound")),
+        return_trip=(
+            None
+            if not raw_return or raw_return.get("mirror_outbound")
+            else _direction_overrides_from_dict(raw_return)
+        ),
+    )

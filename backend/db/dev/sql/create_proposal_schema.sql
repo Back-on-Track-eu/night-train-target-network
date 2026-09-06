@@ -301,6 +301,7 @@ CREATE TABLE proposals.segments (
     dynamics_time_min        INTEGER NOT NULL,
     buffer_time_min          INTEGER NOT NULL,
     slack_time_min           INTEGER NOT NULL DEFAULT 0,
+    addon_time_min           INTEGER NOT NULL DEFAULT 0,
     energy_kwh                NUMERIC NOT NULL,
     country_distance_shares  JSONB NOT NULL,
     country_time_shares      JSONB NOT NULL,
@@ -320,6 +321,7 @@ COMMENT ON COLUMN proposals.segments.driving_time_min         IS 'Raw router tim
 COMMENT ON COLUMN proposals.segments.dynamics_time_min        IS 'Per-stop acceleration/braking loss. Unit: min';
 COMMENT ON COLUMN proposals.segments.buffer_time_min          IS 'Schedule buffer: country quota on driving + on dynamics. Unit: min';
 COMMENT ON COLUMN proposals.segments.slack_time_min           IS 'Deliberate schedule padding beyond routing physics — 0 everywhere except legs inside a stretched fixed-night interval. Unit: min';
+COMMENT ON COLUMN proposals.segments.addon_time_min           IS 'Manual padding the caller put on this leg in expert timetable mode (compute_request.expert_timetable.segment_addons) — kept apart from slack_time_min because the author differs: slack is the model stretching an interval, this is a person. Never negative; 0 for every automatic timetable and every route stored before ROUTE_BUILDER 0.9.32. Unit: min';
 COMMENT ON COLUMN proposals.segments.energy_kwh                IS 'Energy consumption for this segment. Unit: kWh';
 COMMENT ON COLUMN proposals.segments.country_distance_shares  IS 'Per-country share of this segment''s distance, e.g. {"DE": 0.7, "AT": 0.3}. Shares sum to 1.0.';
 COMMENT ON COLUMN proposals.segments.country_time_shares      IS 'Per-country share of this segment''s time. Can differ from country_distance_shares (e.g. a mountainous section is slower relative to its length). Shares sum to 1.0.';

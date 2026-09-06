@@ -33,10 +33,23 @@ Pipeline for plan_route() per TripPair (_build_trip_pair()), per direction (_bui
    actually pass through must have a row in input_params.track_infrastructures
    (any field may be None and fall back to the EU-average default), or this
    raises ValueError. See that function's docstring.
+5b. Expert add-ons (this module, _build_trip()) — timetable.resolve_addons()
+   turns the request's manual per-leg minutes into one value per leg of the
+   FINAL stop list. Deliberately after step 4: auto_stop_addition is the
+   only thing that can still insert a stop between an add-on's two stops,
+   and an add-on whose ordered stop pair no longer exists is dropped, never
+   redistributed.
 6. timetable_mode switch (this module, _build_trip()) — picks which named
    timetable_mode function (models/route/timetable.py) to call for this
    direction's departure time + boarding/alighting classification. Does no
-   routing of its own.
+   routing of its own. The add-ons from 5b go in, so the mirror (and the
+   fixed-night stretch) is taken around the padded duration.
+6b. Expert departure (this module, _build_trip()) — timetable.
+   resolve_departure() replaces ("absolute") or displaces ("shift") the
+   departure the strategy chose, and timetable.classify_for_departure()
+   re-runs the boarding/night/alighting split against it. Skipped when
+   nothing was overridden, which is every request without an
+   expert_timetable key.
 7. calc_energy_consumption() enriches RoutedLeg.energy_kwh in-place.
 8. _build_trip_stops_and_legs() (DB lookups + assembly) delegates exact
    timing to timetable.build_final_timetable(), pairs the result with
@@ -111,7 +124,14 @@ from models.route.timetable import (
     apply_auto_stop_addition,
     suggest_auto_stops,
     build_final_timetable,
+    classify_for_departure,
+    mirror_overrides,
+    resolve_addons,
+    resolve_departure,
     AutoStopSuggestion,
+    DirectionOverrides,
+    ExpertTimetable,
+    NO_OVERRIDES,
     VALID_TIMETABLE_MODES,
     VALID_SCHEDULE_MODES,
     VALID_AUTO_STOP_ADDITION_MODES,
@@ -182,6 +202,11 @@ class TripPairInput:
     # order — required for timetable_mode="simpleAutomaticWithFixedNight",
     # None for every other mode (enforced at the API boundary); reversed
     # automatically for the return trip by _build_trip_pair()
+    expert_timetable: ExpertTimetable | None  # manual departure + per-leg
+    # minutes, applied on top of whichever timetable_mode runs (see
+    # timetable.py's EXPERT TIMETABLE OVERRIDES section). None means the
+    # timetable is fully automatic — the case for every request that
+    # doesn't send the key, whose output is unchanged by its existence.
 
 
 # =============================================================================
@@ -214,6 +239,7 @@ def _build_trip_stops_and_legs(
     departure_time_min: int,
     auto_added_stop_ids: frozenset[str] = frozenset(),
     slack_per_leg: list[int] | None = None,
+    addon_per_leg: list[int] | None = None,
 ) -> list[Segment]:
     """
     DB lookups + object assembly only — no timing math here, that's
@@ -232,9 +258,16 @@ def _build_trip_stops_and_legs(
     slack_time_min and fed into build_final_timetable() so stop times and
     segment components stay consistent with each other. None (every other
     timetable_mode) means 0 everywhere.
+
+    addon_per_leg: expert-mode manual minutes per leg (resolve_addons()) —
+    same treatment, onto Segment.addon_time_min. Two arguments rather than
+    one sum because the segment reports the two separately: whose minutes
+    these are is exactly what a reader of the timetable wants to know.
     """
     if slack_per_leg is None:
         slack_per_leg = [0] * len(routed_legs)
+    if addon_per_leg is None:
+        addon_per_leg = [0] * len(routed_legs)
     stop_physicals = []
     for stop_id, _ in stop_inputs:
         sp = stop_infra.get(stop_id)
@@ -251,6 +284,7 @@ def _build_trip_stops_and_legs(
         tracks=tracks,
         departure_time_min=departure_time_min,
         slack_per_leg=slack_per_leg,
+        addon_per_leg=addon_per_leg,
     )
 
     stops = [
@@ -283,6 +317,7 @@ def _build_trip_stops_and_legs(
             country_distance_shares=routed_legs[i].country_distance_shares,
             country_time_shares=routed_legs[i].country_time_shares,
             slack_time_min=slack_per_leg[i],
+            addon_time_min=addon_per_leg[i],
             countries=routed_legs[i].countries,
             passages=routed_legs[i].passages,
         )
@@ -446,6 +481,7 @@ def _build_trip(
     routing_mode: str,
     auto_stop_addition: str,
     fixed_night_interval: list[str] | None,
+    expert: DirectionOverrides = NO_OVERRIDES,
     known_auto_added_stop_ids: frozenset[str] | None = None,
 ) -> tuple[Trip, list[AutoStopSuggestion]]:
     """
@@ -457,6 +493,13 @@ def _build_trip(
     order (the caller reverses the pair input's interval for the return
     trip) — consumed only by timetable_mode="simpleAutomaticWithFixedNight",
     None for every other mode.
+
+    expert: THIS direction's manual overrides (the caller mirrors the pair
+    input's outbound block for the return trip) — NO_OVERRIDES for a fully
+    automatic timetable, which is what every request without an
+    expert_timetable key gets. Resolved AFTER auto_stop_addition, since
+    that step is the only thing that can still change the stop list and
+    therefore orphan an add-on's stop pair.
 
     known_auto_added_stop_ids: when given, skips the candidate search
     entirely regardless of auto_stop_addition — stop_ids is trusted as
@@ -533,16 +576,32 @@ def _build_trip(
 
     _check_country_coverage(routed_legs, tracks)
 
+    # EXPERT ADD-ONS — manual minutes placed on the FINAL stop list, so an
+    # add-on whose stop pair auto_stop_addition just split is dropped here
+    # rather than silently landing on the wrong leg. Zeros (and nothing
+    # dropped) for every request without an expert_timetable.
+    addon_per_leg, dropped_addons = resolve_addons(stop_ids, expert.addons)
+    if dropped_addons:
+        logger.info(
+            "_build_trip: %d expert add-on(s) dropped — stop pair no longer "
+            "adjacent after routing: %s",
+            len(dropped_addons),
+            [(a.from_stop_id, a.to_stop_id, a.add_min) for a in dropped_addons],
+        )
+
     # timetable_mode SWITCH — which named strategy computes departure time
     # + stop classification for this direction. VALID_TIMETABLE_MODES is the
     # same set the compute request validation (api/helpers/proposal_compute.py) checks against, so an unknown
     # mode can only reach here if that validation was bypassed. Only the
     # fixed-night strategy produces slack; every other mode gets zeros.
+    # Both are handed addon_per_leg: manual minutes are part of the trip's
+    # duration, so the mirror (and the fixed-night stretch) has to see them.
     if timetable_mode == "simpleAutomatic":
         stop_inputs, departure_time_min = simple_automatic_timetable(
             stop_ids=stop_ids,
             composition=composition,
             routed_legs=routed_legs,
+            addon_per_leg=addon_per_leg,
         )
         slack_per_leg = [0] * len(routed_legs)
     elif timetable_mode == "simpleAutomaticWithFixedNight":
@@ -552,11 +611,27 @@ def _build_trip(
                 composition=composition,
                 routed_legs=routed_legs,
                 fixed_night_interval=fixed_night_interval,
+                addon_per_leg=addon_per_leg,
             )
         )
     else:
         raise ValueError(
             f"Unknown timetable_mode '{timetable_mode}'. Supported: {sorted(VALID_TIMETABLE_MODES)}."
+        )
+
+    # EXPERT DEPARTURE — the strategy's value replaced or displaced, and
+    # the stops re-classified against the time they now actually depart:
+    # a trip shifted two hours later has different boarding/night stops,
+    # and therefore different dwell. Skipped entirely when nothing was
+    # overridden, so the automatic path stays byte-identical.
+    if expert.departure is not None:
+        departure_time_min = resolve_departure(departure_time_min, expert.departure)
+        stop_inputs = classify_for_departure(
+            stop_ids=stop_ids,
+            routed_legs=routed_legs,
+            composition=composition,
+            departure_time_min=departure_time_min,
+            extra_per_leg=[s + a for s, a in zip(slack_per_leg, addon_per_leg)],
         )
 
     calc_energy_consumption(routed_legs, composition)
@@ -570,6 +645,7 @@ def _build_trip(
         departure_time_min=departure_time_min,
         auto_added_stop_ids=auto_added_stop_ids,
         slack_per_leg=slack_per_leg,
+        addon_per_leg=addon_per_leg,
     )
 
     # Post-build timetable quality check — fixed-night only: did covering
@@ -683,6 +759,11 @@ def _build_trip_pair(
         routing_mode=pair_input.routing_mode,
         auto_stop_addition=pair_input.auto_stop_addition,
         fixed_night_interval=pair_input.fixed_night_interval,
+        expert=(
+            pair_input.expert_timetable.outbound
+            if pair_input.expert_timetable is not None
+            else NO_OVERRIDES
+        ),
     )
 
     final_outbound_stop_ids = [s.stop_id for s in outbound.stops]
@@ -697,6 +778,21 @@ def _build_trip_pair(
         if pair_input.fixed_night_interval is not None
         else None
     )
+
+    # Expert overrides follow the same rule as the interval above, with one
+    # extra step: an omitted return block means "mirror outbound", so its
+    # add-ons are reversed onto the return's own stop pairs
+    # (mirror_overrides()). An explicit return block wins as given —
+    # that is how an asymmetric timetable is expressed. The departure is
+    # never mirrored; see mirror_overrides()'s docstring.
+    expert = pair_input.expert_timetable
+    if expert is None:
+        return_expert = NO_OVERRIDES
+    elif expert.return_trip is not None:
+        return_expert = expert.return_trip
+    else:
+        return_expert = mirror_overrides(expert.outbound)
+
     return_trip, _ = _build_trip(
         proposal_id,
         proposal_version,
@@ -711,6 +807,7 @@ def _build_trip_pair(
         routing_mode=pair_input.routing_mode,
         auto_stop_addition=pair_input.auto_stop_addition,
         fixed_night_interval=return_fixed_night_interval,
+        expert=return_expert,
         known_auto_added_stop_ids=auto_added_stop_ids,
     )
 
