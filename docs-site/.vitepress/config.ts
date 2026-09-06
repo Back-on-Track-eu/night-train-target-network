@@ -58,7 +58,14 @@ export default defineConfig({
       { text: 'Data sources', link: '/sources/' },
       { text: 'What it costs', link: '/cost/total-cost' },
       { text: 'Reference', link: '/reference/versions' },
-      { text: 'Open the tool', link: '/../' },
+      // '/../' would be rendered as href="/docs/../". A browser normalises
+      // that to "/", but VitePress's client-side router intercepts
+      // same-origin links first and tries to resolve it as a page — which is
+      // a 404. target: '_blank' makes the router skip it and hands the URL to
+      // the browser, which resolves it correctly. The app lives at the root
+      // of this same origin; its absolute URL differs per environment, so it
+      // cannot simply be hardcoded here.
+      { text: 'Open the tool', link: '/../', target: '_blank' },
     ],
 
     sidebar: [

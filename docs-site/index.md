@@ -18,7 +18,9 @@ hero:
       link: /cost/total-cost
     - theme: alt
       text: Open the tool
+      # See the nav comment in .vitepress/config.ts — same reason.
       link: /../
+      target: _blank
 
 features:
   - title: The cost side is the modelled half
