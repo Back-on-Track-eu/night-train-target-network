@@ -18,8 +18,9 @@ python /app/db/dev/seed.py
 # immediately and existing routes appear once the load finishes (well
 # under a minute; routing runs concurrently, see db/ontd/projection.py).
 #
-# Guarded on ontd.route_summaries being empty, so restarts cost nothing,
-# and soft-failing by design: the API is fully functional without
+# Guarded on ontd.route_summaries holding ROUTED geometry (a straight-line
+# placeholder left by an earlier run is re-routed), so restarts cost
+# nothing, and soft-failing by design: the API is fully functional without
 # existing-route context, so a Drive outage or a router that is not ready
 # must not keep the container down. Its output still goes to the
 # container log. Control with ONTD_BOOTSTRAP=auto|force|off.

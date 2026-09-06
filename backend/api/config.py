@@ -51,6 +51,20 @@ def _env_str(name: str, default: str) -> str:
     return os.environ.get(name) or default
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_tuple(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    return tuple(part.strip() for part in raw.split(",") if part.strip())
+
+
 # =============================================================================
 # Engagement — api/proposal_engagement.py
 # =============================================================================
@@ -158,6 +172,39 @@ PROPOSALS_STATS_RELATION_MAX_KM = float(
 
 
 # =============================================================================
+# Request log — api/request_log.py
+# =============================================================================
+
+# Off switches the hooks off entirely rather than making them cheap: a
+# deployment that does not want usage logging should not pay a branch per
+# request, and a local dev database filling with noise is a real nuisance.
+REQUEST_LOG_ENABLED = _env_bool("REQUEST_LOG_ENABLED", True)
+
+# Endpoint-name PREFIXES that are never logged. Both entries are traffic
+# that would dominate the table by volume while saying nothing about
+# usage: "health." is polled by the frontend's useApiHealth composable and
+# by container healthchecks, "gate." is hit on every page request by
+# Caddy's forward_auth and is testing scaffolding besides. Prefix rather
+# than exact match so a new view on either blueprint is excluded by
+# default — the safe direction for a table that grows per request.
+REQUEST_LOG_EXCLUDED_ENDPOINTS = _env_tuple(
+    "REQUEST_LOG_EXCLUDED_ENDPOINTS", ("health.", "gate.")
+)
+
+# User agents are long, repetitive and occasionally absurd. 400 covers
+# every real browser string with room to spare; the column is sized to
+# match, so raising this needs a migration.
+REQUEST_LOG_USER_AGENT_MAX_LEN = _env_int("REQUEST_LOG_USER_AGENT_MAX_LEN", 400)
+
+# Retention, enforced by scripts/purge_request_log.py on a cron — not by
+# the database, because it is a policy rather than a constraint. 90 days
+# is long enough to answer "how did usage change over a quarter" and
+# short enough to be a defensible answer to "why are you keeping this".
+# At roughly 200 bytes a row the table is unbounded without it.
+REQUEST_LOG_RETENTION_DAYS = _env_int("REQUEST_LOG_RETENTION_DAYS", 90)
+
+
+# =============================================================================
 # Effective-config boot log
 # =============================================================================
 
@@ -202,6 +249,10 @@ def log_effective_config() -> None:
         "PROPOSALS_STATS_COUNTRY_TOP": PROPOSALS_STATS_COUNTRY_TOP,
         "PROPOSALS_STATS_COUNTRY_FLOP": PROPOSALS_STATS_COUNTRY_FLOP,
         "PROPOSALS_STATS_RELATION_MAX_KM": PROPOSALS_STATS_RELATION_MAX_KM,
+        "REQUEST_LOG_ENABLED": REQUEST_LOG_ENABLED,
+        "REQUEST_LOG_EXCLUDED_ENDPOINTS": ",".join(REQUEST_LOG_EXCLUDED_ENDPOINTS),
+        "REQUEST_LOG_USER_AGENT_MAX_LEN": REQUEST_LOG_USER_AGENT_MAX_LEN,
+        "REQUEST_LOG_RETENTION_DAYS": REQUEST_LOG_RETENTION_DAYS,
     }
     logger.info(
         "Effective config — wiring: %s",

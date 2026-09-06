@@ -62,13 +62,21 @@ def fetch_existing_route_ids(cur) -> set[str]:
     return {row[0] for row in cur.fetchall()}
 
 
-def assert_empty_or_replace(cur, replace: bool) -> None:
+def populated_curated_tables(cur) -> list[str]:
+    """'table (n rows)' for every curated table that holds data — empty
+    when the catalog has never been imported. Shared with bootstrap.py,
+    which skips this loader when the catalog is already there."""
     populated = []
     for table in CURATED_TABLES:
         cur.execute(f"SELECT count(*) FROM ontd.{table}")
         count = cur.fetchone()[0]
         if count:
             populated.append(f"{table} ({count} rows)")
+    return populated
+
+
+def assert_empty_or_replace(cur, replace: bool) -> None:
+    populated = populated_curated_tables(cur)
     if not populated:
         return
     if not replace:

@@ -7,7 +7,36 @@ backend, in one place. Supersedes `deploy/HANDOVER.md` (2026-08-10),
 deleted.
 
 Updated after each change that touches deploy, capacity or server data.
-Last update 2026-09-05 (route-context re-calibration, see the note below).
+Last update 2026-09-06 (existing-train geometry: ONTD bootstrap fix —
+see the first note below; also 2026-09-05 route-context re-calibration
+and route builder 0.9.31, §4a).
+
+> **Update 2026-09-06 — existing night trains drawn as dashed straight
+> lines: ONTD bootstrap fix, one-off action on every persisted database.**
+> Cause: `db/ontd/bootstrap.py` loads the timetable with placeholder
+> straight-line geometry, then runs the composition-catalog loader, then
+> the routing projection. On any database whose volume persists, the
+> catalog loader refused to overwrite its already-populated curated tables
+> and exited 1 — which bootstrap treated as fatal, so the routing step
+> never ran and the placeholder stayed. Not a router, graph or profile
+> problem (CI never sees it: fresh database, empty catalog). Two more
+> fixes ride along: existing trains now route on their catalog stop's
+> **gauge** (Finnish/Ukrainian/Baltic lines snapped on the wrong profile
+> before), and every route still on straight lines is listed at the end
+> of the projection run by `routing_status` with the router's message.
+> **Action, staging and production, once, no restart needed**
+> (container name may differ):
+>
+> ```bash
+> docker exec night-train-api python /app/db/ontd/projection.py
+> ```
+>
+> Runs the routing projection alone (~1 min with the router up; needs no
+> Drive access). After this deploy the bootstrap self-heals: a projection
+> with no routed geometry is re-routed at the next container start, and
+> the populated catalog is skipped instead of failing. No schema change,
+> no cache wipe, no version bump — `route_summaries` is rebuilt in place
+> and the compute cache never holds existing-train rows.
 
 > **Update 2026-09-05 — schedule supplement re-calibrated.**
 > `track_buffer_quota_per` drops from 0.35–0.71 to 0.11–0.39 per country
@@ -23,8 +52,8 @@ Last update 2026-09-05 (route-context re-calibration, see the note below).
 > the old buffer minutes.
 
 **If you read one section:** §3 is the deploy currently queued for staging,
-§4 is a mandatory cache wipe that comes with it, and §7 is the capacity work
-that is genuinely yours to schedule.
+§4 and §4a are mandatory cache wipes that come with it, and §7 is the
+capacity work that is genuinely yours to schedule.
 
 | | |
 |---|---|
@@ -32,6 +61,7 @@ that is genuinely yours to schedule.
 | §2 | Why your compose files need no edits |
 | §3 | Deploy order for this batch |
 | §4 | Wipe the routing graph cache — required |
+| §4a | **Route builder 0.9.31 — truncate and re-precompute the segment cache** |
 | §5 | Standing gotchas on every staging deploy |
 | §6 | How deploy relates to the backend `.env` |
 | §7 | **Capacity: routing under batch load** |
@@ -207,6 +237,56 @@ equivalent there is `graph-cache-infra-2026/`, not `graph-cache/` (one
 directory per routing graph). Server volumes are unchanged.
 
 ---
+
+---
+
+## 4a. Route builder 0.9.31 — every cached segment goes stale
+
+**Action:** one `DELETE`, then re-run the §7a.3 precompute. **Stops
+applying** once the precompute has been re-run against each configured
+graph.
+
+Routing now penalizes track OSM tags `electrified=no` (route builder
+0.9.31). The rule rides in the *request* custom model, not in the graph,
+so:
+
+* **No graph re-import.** `electrified` was already in
+  `graph.encoded_values`; the image and both graph caches stay exactly as
+  they are. §4's wipe does **not** apply again.
+* **But `variant_key` changes.** It is a hash of the resolved custom
+  model, and the model gained a rule. Every existing
+  `route_cache.route_segments` row therefore becomes unreachable — a miss,
+  which live-routes and stores under the new key. Nothing is *wrong*, but
+  the cache is effectively empty on the first request after deploy and the
+  old rows sit there forever unless removed.
+* **The compute cache must be truncated too.** A cached whole-result
+  carries the old geometry, distances and times.
+
+Order, after the API is up on 0.9.31:
+
+```bash
+# 1. Drop the now-unreachable segment rows (cheap, UNLOGGED, disposable).
+docker compose run --rm migrate psql -c \
+  "TRUNCATE route_cache.route_segments;"
+
+# 2. Truncate the compute cache — same reason as any model bump.
+#    (Same statement §3 already uses for a version bump.)
+
+# 3. Re-run the §7a.3 precompute for each configured graph.
+#    --measure-only first: the variant count should be UNCHANGED (3 for
+#    infra_2026). The new rule is unconditional, so it adds no variants —
+#    it only changes the hash of the ones already there. A different count
+#    means something else moved; stop and tell me.
+```
+
+Expect the batch to cost the same wall time as the first run — the pairs
+and variants are identical, only their keys differ.
+
+**Timing.** Nothing breaks if you deploy and re-run the precompute days
+apart: until it runs, the cache fills from live traffic exactly as it did
+before §7a existed, just more slowly. Do the `TRUNCATE` at deploy time
+though, so the dead rows are not still there at the next capacity
+measurement.
 
 ---
 

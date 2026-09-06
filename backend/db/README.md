@@ -597,10 +597,14 @@ demand with:
 The ONTD is **seed data**: the API container's entrypoint runs
 `db/ontd/bootstrap.py` after `seed.py`, so a fresh database comes up with
 existing night trains already loaded. The bootstrap is guarded on
-`ontd.route_summaries` being empty, so restarts cost nothing, and it
-never fails the container — the API serves proposals fine without
-existing-route context, so a Drive outage or a not-yet-ready router just
-logs and moves on. `ONTD_BOOTSTRAP=auto|force|off` controls it.
+`ontd.route_summaries` being populated *with routed geometry*, so
+restarts cost nothing, while a projection left on straight-line
+placeholders (router down, or an aborted run) is re-routed at the next
+start. The curated composition catalog is loaded once and skipped
+afterwards. It never fails the container — the API serves proposals fine
+without existing-route context, so a Drive outage or a not-yet-ready
+router just logs and moves on. `ONTD_BOOTSTRAP=auto|force|off` controls
+it; `db/ontd/README.md` has the decision table.
 
 The load runs in the **background**, so the API is serving within
 seconds of the seed finishing; existing routes appear in the gallery once

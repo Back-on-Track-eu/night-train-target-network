@@ -51,6 +51,7 @@ its own example files.
   - [`POST /api/feedback`](#post-feedback) — submit feedback
   - [`GET /api/feedback/categories`](#feedback-categories) — suggested category/sub_category values
 - [Error responses](#error-responses)
+- [Usage logging](#usage-logging) — what every request records, and what it deliberately does not
 
 <a id="health"></a>
 
@@ -380,8 +381,10 @@ meaning for a call that never persists.
 
 | Value | Description |
 |---|---|
-| `"fullRouting"` (default) | Speed capped at the composition's `max_speed_kmh` everywhere, plus HSR avoidance: track segments whose *permitted* track speed exceeds `HSR_TRACK_SPEED_THRESHOLD_KMH` (strictly above 230 km/h — i.e. dedicated new-build high-speed lines only, upgraded conventional lines up to 230 stay usable; see `models/route/version.py`) are heavily penalized in every country where HSR is not allowed — allowed only when BOTH the composition's `hsr_allowed` AND that country's track-infrastructure `hsr_allowed` are true, evaluated for every country incl. transited-without-stop ones. Conventional lines are never penalized. Every leg additionally carries a per-stop traction-dynamics surcharge — the accel/brake time loss computed from composition weight plus an assumed standard locomotive against the link speeds before/after each stop (see `TRACTION_*` in `models/route/version.py`) — in its own `dynamics_time_min` field, kept separate from the raw router `driving_time_min`; `buffer_time_min` carries the country quota applied to driving and to dynamics (physics first, buffer after). Two-pass routing (snap pass, then custom-model pass) when a custom model applies. |
-| `"simpleRouting"` | Bypasses all of that — single-pass, no speed cap, no HSR avoidance, no traction dynamics. Cheap and fast, but not representative of real physics. Intended for quick manual sanity checks only. |
+| `"fullRouting"` (default) | Speed capped at the composition's `max_speed_kmh` everywhere, plus HSR avoidance: track segments whose *permitted* track speed exceeds `HSR_TRACK_SPEED_THRESHOLD_KMH` (strictly above 230 km/h — i.e. dedicated new-build high-speed lines only, upgraded conventional lines up to 230 stay usable; see `models/route/model.py`) are heavily penalized in every country where HSR is not allowed — allowed only when BOTH the composition's `hsr_allowed` AND that country's track-infrastructure `hsr_allowed` are true, evaluated for every country incl. transited-without-stop ones. Conventional lines are never penalized. Every leg additionally carries a per-stop traction-dynamics surcharge — the accel/brake time loss computed from composition weight plus an assumed standard locomotive against the link speeds before/after each stop (see `TRACTION_*` in `models/route/model.py`) — in its own `dynamics_time_min` field, kept separate from the raw router `driving_time_min`; `buffer_time_min` carries the country quota applied to driving and to dynamics (physics first, buffer after). Two-pass routing (snap pass, then custom-model pass). |
+| `"simpleRouting"` | Drops HSR avoidance and traction dynamics, and routes in a single pass. The composition speed cap still applies, as do the two rules that ride on every request in every mode: the Belarus/Russia exclusion (`BLOCKED_COUNTRIES`) and the electrification preference below. Cheap and fast, but not representative of real physics — intended for quick manual sanity checks only. |
+
+Applied in **both** modes, and in the ONTD map-line geometry projection: track that OSM tags `electrified=no` is penalized by `NON_ELECTRIFIED_PRIORITY_FACTOR` (route builder 0.9.31, a 10× priority penalty — a preference, not a veto). Track with no `electrified` tag at all is never penalized: unknown is not treated as forbidden. The rule is unconditional because every catalog locomotive is electric and the energy model prices catenary electricity on every kilometre; it becomes composition-dependent if a diesel locomotive is ever added.
 
 `timetable_mode` — controls how departure time and per-stop classification are derived. Classification is the same three-way rule for every mode (route builder 0.9.10, thresholds `NIGHT_START_MIN`/`NIGHT_END_MIN` in `models/route/version.py`): a stop **departing strictly before 00:00** is `boarding`, one **arriving at/after 05:00** is `alighting`, anything between is a `night` stop (operationally identical to `both` for dwell, but excluded from demand OD pairs). First stop is always boarding and last always alighting regardless of clock time — termini by position, not by the threshold rule. Outbound and return are scheduled independently, so their times can differ (e.g. asymmetric HSR avoidance changes duration).
 
@@ -1835,3 +1838,61 @@ wrong, e.g. to the wrong distance).
 | `500` | `feedback_error` | Feedback storage failed (mail failure alone never triggers this) |
 | `503` | `infrastructure_error` | DB unreachable or unknown composition ID |
 | `501` | `not_implemented` | Endpoint exists but is not yet implemented |
+
+<a id="usage-logging"></a>
+
+## Usage logging
+
+Every served request appends one row to `admin.request_log`
+(`api/request_log.py`). No endpoint exposes it — this section documents
+what the API records about its callers, because that is worth stating
+plainly.
+
+**Why it exists**, in order of weight: usage evidence for the network
+proposal (how many people used the tool and which parts — `proposals`
+only knows what was *published*, a small fraction of what was tried);
+operations (`status_code`, `duration_ms`, `response_bytes` per endpoint);
+and abuse detection.
+
+**What a row holds:** the Flask endpoint name and matched route rule,
+method, status, duration, response size, `user_id` / `is_guest` /
+`trust_level`, a truncated user agent, and `client_hash`.
+
+**What it deliberately does not hold:** no IP address, no raw path, no
+query string, no request body. A `/api/proposal/calc` body is an entire
+proposal, and published ones are already persisted; the raw path carries
+ids the parameterised rule captures better for grouping.
+
+`client_hash` is `HMAC-SHA256(secret, "<UTC date>|<client address>")`. It
+correlates one client's requests within a UTC day and is unlinkable across
+days by construction — the date sits in the HMAC *message*, so the same
+address hashes differently tomorrow and no key rotation recovers it. To
+count distinct people use `user_id`, not this: guests get a real
+`admin.users` row from `POST /api/auth/guest` and their JWT outlives the
+day, so they are attributable like anyone else.
+
+**Not logged at all:** `OPTIONS` (CORS preflight doubles every
+cross-origin call), and anything under `/api/health` or `/api/gate/*` —
+the first is polled by the frontend and by container healthchecks, the
+second by Caddy's `forward_auth` on every page request. Both would
+dominate the table without saying anything about usage. A 404 on an
+unknown path *is* logged.
+
+**It cannot affect a response.** Writes are best-effort and swallowed;
+identity comes from `g` where a decorator already resolved it, and
+otherwise from `auth_middleware.resolve_identity_quietly()`, which treats
+everything the decorators 401 on as anonymous. An invalid token still
+fails exactly where it always did.
+
+**Retention is not automatic.** `scripts/purge_request_log.py` enforces
+`REQUEST_LOG_RETENTION_DAYS` (90) and belongs on a cron — see
+`docs/DEPLOY_HANDOVER.md` §4b. Erasing a user sets `user_id` to NULL
+rather than deleting rows, so a GDPR erasure anonymises the history and
+keeps the counts.
+
+**Known gap:** `client_hash` reads the leftmost `X-Forwarded-For` and
+falls back to the socket address, but Flask-Limiter's `rate_limit_key()`
+reads `request.remote_addr` directly. Behind Caddy that is the proxy for
+every caller, so the address-keyed rate limits (the auth endpoints) may
+currently share one bucket. Worth a `ProxyFix` pass, which is a change to
+rate-limiting behaviour and deliberately not bundled here.

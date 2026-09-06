@@ -62,6 +62,7 @@ from api import (
     proposals,
     proposal_engagement,
     proposal_share,
+    request_log,
     scenarios,
 )
 
@@ -98,6 +99,13 @@ def create_app() -> Flask:
 
     # --- rate limiter (per-endpoint limits live in api/auth.py) ---
     limiter.init_app(app)
+
+    # --- usage log (api/request_log.py) ---
+    # Registered AFTER Compress(app) on purpose: Flask runs
+    # after_request functions in reverse registration order, so this
+    # one runs first and reads the response length before gzip. It can
+    # never fail a request — see the module docstring.
+    request_log.register(app)
 
     # --- blueprints ---
     app.register_blueprint(health.bp, url_prefix="/api")
