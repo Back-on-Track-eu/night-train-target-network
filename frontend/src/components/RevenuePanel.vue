@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppIcon from '@/components/AppIcon.vue'
 import FactorInfoPopover from '@/components/FactorInfoPopover.vue'
@@ -24,6 +24,9 @@ const info = ref<InstanceType<typeof FactorInfoPopover> | null>(null)
 
 const TICKET_REVENUE_NODE = 'ticket_revenue'
 const hasInfo = () => formulaKeyForNode(TICKET_REVENUE_NODE) in props.formulas
+// Rendered as the row label and handed to the popover as its title, so the
+// two cannot drift apart.
+const ticketRevenueLabel = computed(() => t(`proposal.evaluation.fields.${TICKET_REVENUE_NODE}`))
 </script>
 
 <template>
@@ -38,15 +41,15 @@ const hasInfo = () => formulaKeyForNode(TICKET_REVENUE_NODE) in props.formulas
     </div>
     <div class="flex items-center justify-between py-1">
       <span class="flex items-center gap-1 text-sm text-primary-50/70">
-        {{ t('proposal.evaluation.fields.ticket_revenue') }}
+        {{ ticketRevenueLabel }}
         <button
           v-if="hasInfo()"
           type="button"
           class="flex cursor-pointer text-primary-50/40 transition hover:text-primary-50"
           :aria-label="t('proposal.evaluation.info.iconLabel')"
-          @mouseenter="info?.open(TICKET_REVENUE_NODE, $event)"
+          @mouseenter="info?.open(TICKET_REVENUE_NODE, ticketRevenueLabel, $event)"
           @mouseleave="info?.scheduleClose()"
-          @click="info?.open(TICKET_REVENUE_NODE, $event)"
+          @click="info?.open(TICKET_REVENUE_NODE, ticketRevenueLabel, $event)"
         >
           <AppIcon :path="mdiInformationOutline" :size="14" />
         </button>

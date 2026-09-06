@@ -1,26 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { formulaKeyForNode, docsPathForFormula, resolveFactorSubCategory } from './factorFeedback'
+import { formulaKeyForNode, docsPathForFormula } from './factorFeedback'
 
-// The cost tree's node keys, exactly as CostPanel.vue builds them, plus the
-// revenue row. If a row is added there without a mapping here, these fail.
-const LEAF_NODES = [
-  'driver',
-  'crew',
-  'coach_maintenance',
-  'loco',
-  'svc_stockings',
-  'var_overhead',
-  'coach_amortisation',
-  'financing',
-  'fix_overhead',
-  'cleaning',
-  'shunting',
-  'tac',
-  'energy',
-  'station_charge',
-  'parking',
-  'ebit_margin',
-]
+// The four subtotal rows of the cost tree, exactly as CostPanel.vue builds
+// their keys. If a row is added there without a mapping here, these fail.
 const GROUP_NODES = ['operator', 'variable', 'fixed', 'infrastructure']
 
 describe('formulaKeyForNode', () => {
@@ -70,33 +52,5 @@ describe('docsPathForFormula', () => {
 
   it('leaves a key without the suffix alone apart from hyphenation', () => {
     expect(docsPathForFormula('tac_night_share')).toBe('/docs/cost/tac-night-share')
-  })
-})
-
-describe('resolveFactorSubCategory', () => {
-  it('maps every row that shows an info icon', () => {
-    for (const node of [...LEAF_NODES, ...GROUP_NODES]) {
-      const sub = resolveFactorSubCategory(formulaKeyForNode(node))
-      expect(sub, `no sub_category for node "${node}"`).not.toBeNull()
-    }
-  })
-
-  // Regression: ebit_margin had no entry, so its feedback button submitted
-  // nothing at all — onSubmitFeedback returns early on a null sub-category.
-  it('covers the margin row', () => {
-    expect(resolveFactorSubCategory('ebit_margin_eur')).toBe('margin.ebit_margin_eur')
-  })
-
-  it('covers ticket revenue, which had no icon at all before', () => {
-    expect(resolveFactorSubCategory('ticket_revenue_eur')).toBe('revenue.ticket_revenue_eur')
-  })
-
-  it('returns null for an unmapped key so the caller can withhold', () => {
-    expect(resolveFactorSubCategory('not_a_factor_eur')).toBeNull()
-  })
-
-  it('emits dotted Breakdown paths, matching the backend tree', () => {
-    expect(resolveFactorSubCategory('driver_eur')).toBe('cost.operator.variable.driver_eur')
-    expect(resolveFactorSubCategory('operator_total_eur')).toBe('cost.operator.total_eur')
   })
 })

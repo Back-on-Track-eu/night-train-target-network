@@ -30,7 +30,6 @@
     "likeFailed": "Your like could not be saved. Please try again.",
     "commentsLoadFailed": "The discussion could not be loaded.",
     "commentFailed": "Your comment could not be saved. Please try again.",
-    "feedbackFailed": "Your feedback could not be sent. Please try again.",
     "authGuestFailed": "We could not start a guest session. Please try again.",
     "slug": {
       "invalid_code": "This code is invalid or expired. Please request a new one.",
@@ -328,16 +327,6 @@
       "info": {
         "iconLabel": "Show cost factor details",
         "readMore": "Read the full explanation"
-      },
-      "feedback": {
-        "title": "Found a mistake? Hit us up!",
-        "description": "We are doing what we can to update our data sources to base our calculations on realistic assumptions. If you, however, found a mistake or have a suggestion for improvements, please let us know! Thank you for your contribution!",
-        "messagePlaceholder": "Describe the mistake or your suggestion…",
-        "emailPlaceholder": "your.email{'@'}example.com",
-        "emailLabel": "Your e-mail",
-        "submit": "Send feedback",
-        "submitting": "Sending…",
-        "success": "Thank you! Your feedback has been sent."
       },
       "classes": {
         "all": "All Classes",

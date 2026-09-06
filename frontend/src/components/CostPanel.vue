@@ -10,8 +10,8 @@ import { useEvaluationFormat } from '@/composables/useEvaluationFormat'
 import type { Breakdown, FormulaMap } from '@/types/api'
 
 // Cost tree (left column of the cost/revenue split) plus its cost-factor
-// detail popover — a one-line summary, a link to the factor's documentation
-// page, and a feedback form scoped to the factor the popover is showing.
+// detail popover — a one-line summary and a link to the factor's
+// documentation page.
 //
 // The formula, the input legend and the resolved rates used to live in this
 // popover. They are on the documentation site now: a rates table with its
@@ -192,9 +192,9 @@ const info = ref<InstanceType<typeof FactorInfoPopover> | null>(null)
           type="button"
           class="flex cursor-pointer text-primary-50/40 transition hover:text-primary-50"
           :aria-label="t('proposal.evaluation.info.iconLabel')"
-          @mouseenter="info?.open(row.key, $event)"
+          @mouseenter="info?.open(row.key, row.label, $event)"
           @mouseleave="info?.scheduleClose()"
-          @click="info?.open(row.key, $event)"
+          @click="info?.open(row.key, row.label, $event)"
         >
           <AppIcon :path="mdiInformationOutline" :size="14" />
         </button>
