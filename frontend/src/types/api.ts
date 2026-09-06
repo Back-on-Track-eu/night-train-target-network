@@ -146,8 +146,7 @@ export interface SegmentAddonRequest {
 // "absolute" pins a service-day minute that survives a reroute; "shift"
 // displaces whatever the automatic timetable computes and moves with it.
 export type DepartureOverrideRequest =
-  | { mode: 'absolute'; time_min: number }
-  | { mode: 'shift'; shift_min: number }
+  { mode: 'absolute'; time_min: number } | { mode: 'shift'; shift_min: number }
 
 export interface DirectionExpertRequest {
   departure?: DepartureOverrideRequest | null
@@ -823,11 +822,7 @@ export type ProposalSourceKind = 'proposal' | 'existing'
  *  run their query (proposals.py::_list_response), so this is a real cost
  *  lever, not just a response filter. Backend default is ["summaries"]. */
 export type ProposalsSection =
-  | 'summaries'
-  | 'map_lines'
-  | 'map_routes'
-  | 'map_stop_counts'
-  | 'map_country_counts'
+  'summaries' | 'map_lines' | 'map_routes' | 'map_stop_counts' | 'map_country_counts'
 
 export interface ProposalsRequest {
   filter?: ProposalsFilter
