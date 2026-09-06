@@ -44,8 +44,12 @@ models/
 │   └── README.md                    # Emissions model documentation (sources, consumers, roadmap)
 ├── compositions/
 │   ├── model.py                     # COMPOSITIONS_MODEL_VERSION — cost calibration anchor (calib/CALIBRATION.md)
-│   │                                #   also the source of the loco_types catalog
-│   └── calib/                       # Calibration notebooks, data, and CALIBRATION.md
+│   ├── catalog.py                   # Loader + validator for the rolling-stock catalog (stdlib-only; used by the
+│   │                                #   calibration notebook and, through it, by db/dev/seed.py at container start)
+│   └── calib/
+│       ├── catalog/                 # THE catalog as data: loco types, coach types, class sections, compositions,
+│       │                            #   formations (calib/catalog/README.md — how to add a composition)
+│       └── ...                      # Calibration notebooks, figures, and the generated CALIBRATION.md
 ├── infrastructure/
 │   ├── model.py                     # INFRA_MODEL_VERSION + WEEKDAY_BLEND
 │   ├── STOP_CLASSIFICATION.md       # Stop catalog classification pipeline

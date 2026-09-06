@@ -499,7 +499,9 @@ def composition_collection_to_dict(compositions: CompositionCollection) -> dict:
                     }
                     for loco in c.locos
                 ],
-                "cost_per_class": c.svc_stockings_eur_place,
+                # Copied, not referenced: the merge below must not mutate
+                # the composition's own aggregate.
+                "cost_per_class": dict(c.svc_stockings_eur_place),
                 # --- sources for this operator's own values + its per-class costs ---
                 "source_ids": _source_ids_for_prefixes(
                     [
@@ -508,6 +510,19 @@ def composition_collection_to_dict(compositions: CompositionCollection) -> dict:
                     ]
                 ),
             }
+
+        # cost_per_class is an OPERATOR rate table, but the value arriving here
+        # is one composition's class_main aggregate, which carries only the
+        # classes that composition happens to have. Taking the first
+        # composition therefore truncated the table — an operator whose first
+        # composition was seat+couchette lost its sleeper and capsule rates,
+        # even though other compositions of the same operator use them. Merging
+        # across all of them restores the full table and is exact, because the
+        # underlying rate is per class_main: every composition that carries a
+        # class reports the same rate for it.
+        operators_by_id[c.operator_id]["cost_per_class"].update(
+            c.svc_stockings_eur_place
+        )
 
     coach_types_catalog: dict[str, dict] = {}
     for c in compositions.all().values():

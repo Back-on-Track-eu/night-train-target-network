@@ -1044,11 +1044,9 @@ OPERATOR_CLASS_COSTS_RAW = [
 # coach_types
 # ============================================================
 
-# Synthetic interim coach types from the calibration aggregates — one
-# virtual coach per (composition, class present). Places and crew factors
-# match the calibrated composition exactly (crew factors sum to
-# attendants + 1.19 manager-equivalents); weights are allocated by places
-# share. Replaced by the real per-coach workbook split later.
+# Real coach types from the composition catalog
+# (models/compositions/calib/catalog/*.csv, validated by
+# models/compositions/catalog.py before the notebook exports them).
 _COACHES = _read_calib_csv("coach_types.csv")
 
 COACH_TYPES = [

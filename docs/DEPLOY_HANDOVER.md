@@ -781,6 +781,45 @@ before deleting that one.
 
 ---
 
+## 11. Composition catalog moved to CSV (COMPOSITIONS 0.9.4)
+
+`db/dev/seed.py` still regenerates `calib/seed/*.csv` from
+`02_calibration.ipynb` when they are absent, exactly as before. What
+changed underneath: the notebook now reads the rolling-stock catalog from
+`backend/models/compositions/calib/catalog/*.csv` through
+`backend/models/compositions/catalog.py`, and **fails the seed** if the
+catalog has a defect (the same check the validator script runs). Twelve
+compositions are seeded instead of eight.
+
+Deployment checklist for the release carrying this:
+
+1. Reseed: the four new compositions only appear after `seed.py` runs;
+   `calib/seed/` is gitignored and regenerated, so a stale seed dir from an
+   earlier image is not a concern inside the container, but a bind-mounted
+   one would be — delete it before the first start.
+2. Watch the seed log for `catalog warning:` lines. They are expected
+   (TO_VERIFY notes on the new coaches; NEW-family section-weight quirk);
+   a `CatalogError` traceback is not, and means the CSVs on that branch
+   are inconsistent.
+3. Nothing else: no schema change, no new environment variable, no new
+   Python dependency (`catalog.py` is stdlib-only), `CALC_VERSION` and
+   `ROUTE_BUILDER_VERSION` unchanged, so the compute cache keeps its
+   entries — new composition ids simply have none yet.
+
+---
+
+## 12. Reseed for the cost re-calibration (COMPOSITIONS 0.9.5)
+
+Parameters only (operators, composition_types, class costs) — no schema
+change, no code path change. Same reseed procedure as §11; the seed log
+shows `fleet avg 21.7` where it showed 40.07. The compute cache is keyed on
+scenario pins and composition ids, **not** on the operator parameters, so
+cached calc results from before this reseed would be stale: clear
+`proposals` compute-cache entries (or bump the cache namespace) as part of
+this rollout, otherwise old and new evaluations coexist in the gallery.
+
+---
+
 ## Maintaining this document
 
 One file, updated in the same PR as the change it describes. The rule that
