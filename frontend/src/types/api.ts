@@ -127,6 +127,46 @@ export interface SuggestedStop {
   added_time_min: number
 }
 
+// Expert timetable mode (ROUTE_BUILDER 0.9.32) — the optional
+// `expert_timetable` block of POST /api/proposal/calc, and of the stored
+// compute_request a published proposal replays. Omit it for the automatic
+// timetable; an absent block and an empty one are the same request.
+//
+// The state the builder edits is a different (camelCase, direction-aware)
+// shape — see lib/expertTimetable.ts, which owns the conversion. These types
+// describe only what goes on the wire.
+export interface SegmentAddonRequest {
+  from_stop_id: string
+  to_stop_id: string
+  // Whole minutes ≥ 1. An add-on can only ever slow a leg down — the routed
+  // physics are the floor of every leg, and 0 or negative is a 400.
+  add_min: number
+}
+
+// "absolute" pins a service-day minute that survives a reroute; "shift"
+// displaces whatever the automatic timetable computes and moves with it.
+export type DepartureOverrideRequest =
+  | { mode: 'absolute'; time_min: number }
+  | { mode: 'shift'; shift_min: number }
+
+export interface DirectionExpertRequest {
+  departure?: DepartureOverrideRequest | null
+  // Each pair must be adjacent, in that order, in the posted `stops` — the
+  // backend rejects anything else rather than dropping it silently. A pair
+  // that only stops existing because auto_stop_addition inserted a stop IS
+  // dropped server-side; read the surviving minutes back off
+  // route.trip_pairs[].*.segments[].addon_time_min.
+  segment_addons?: SegmentAddonRequest[]
+}
+
+export interface ExpertTimetableRequest {
+  outbound?: DirectionExpertRequest | null
+  // The default: outbound's add-ons applied to the return with each pair
+  // reversed (a departure is never mirrored). Send a full block instead for
+  // an asymmetric timetable — the two spellings are mutually exclusive.
+  return?: DirectionExpertRequest | { mirror_outbound: true } | null
+}
+
 // A scenario is a named snapshot of infrastructure parameters (track-access
 // charges, energy prices, terrain, per-stop charges, hsr_allowed). It pins one
 // version each of four DB tables; routing-relevant data lives in the two

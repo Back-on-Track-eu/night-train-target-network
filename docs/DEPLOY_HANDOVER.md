@@ -9,7 +9,7 @@ deleted.
 Updated after each change that touches deploy, capacity or server data.
 Last update 2026-09-06 (existing-train geometry: ONTD bootstrap fix —
 see the first note below; also 2026-09-05 route-context re-calibration
-and route builder 0.9.31, §4a).
+and route builder 0.9.31, §4a; and route builder 0.9.32, §4b).
 
 > **Update 2026-09-06 — existing night trains drawn as dashed straight
 > lines: ONTD bootstrap fix, one-off action on every persisted database.**
@@ -62,6 +62,7 @@ capacity work that is genuinely yours to schedule.
 | §3 | Deploy order for this batch |
 | §4 | Wipe the routing graph cache — required |
 | §4a | **Route builder 0.9.31 — truncate and re-precompute the segment cache** |
+| §4b | Route builder 0.9.32 — one migration, compute-cache truncate only |
 | §5 | Standing gotchas on every staging deploy |
 | §6 | How deploy relates to the backend `.env` |
 | §7 | **Capacity: routing under batch load** |
@@ -287,6 +288,40 @@ apart: until it runs, the cache fills from live traffic exactly as it did
 before §7a existed, just more slowly. Do the `TRUNCATE` at deploy time
 though, so the dead rows are not still there at the next capacity
 measurement.
+
+---
+
+## 4b. Route builder 0.9.32 — one migration, one compute-cache truncate
+
+**Action:** nothing manual beyond the truncate — the migration applies
+itself. **Stops applying** once 0.9.32 is deployed to both environments.
+
+Expert timetable mode (`ROUTE_BUILDER_VERSION` 0.9.32) adds an optional
+`expert_timetable` block to the compute request. Two consequences for you,
+both small:
+
+* **One migration**, applied automatically before the API starts as usual:
+  `db/dev/sql/migrations/2026-09-06_segment_addon_time.sql` adds
+  `proposals.segments.addon_time_min INTEGER NOT NULL DEFAULT 0`. Adding a
+  NOT NULL column with a constant default is metadata-only on PostgreSQL
+  ≥ 11 — no table rewrite, no lock worth the name, however many proposals
+  are stored. Nothing to schedule around it.
+* **Truncate the compute cache**, the same statement as §4a step 2, for a
+  duller reason: the resolved request gained a key, so every request hash
+  changes and every cached whole-result becomes unreachable. Not wrong,
+  just dead weight.
+
+**The segment cache is NOT affected.** No routing change and no
+custom-model change, so `variant_key` is untouched: §4a's `TRUNCATE
+route_cache.route_segments` and its precompute must **not** be re-run for
+this bump. That is the whole difference between this one and 0.9.31 —
+routing is identical, only what happens to the resulting times afterwards
+changed.
+
+**No output change for anything already stored.** A request that sends no
+`expert_timetable` computes exactly what it computed on 0.9.31, and every
+published route reads its new column back as 0, so
+`scripts/refresh_proposals.py` is optional here rather than required.
 
 ---
 

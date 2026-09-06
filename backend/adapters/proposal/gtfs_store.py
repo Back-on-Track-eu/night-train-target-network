@@ -311,9 +311,9 @@ def _insert_segments(
             "INSERT INTO proposals.segments "
             "(trip_id, segment_sequence, from_stop_id, to_stop_id, shape_id, "
             " distance_m, driving_time_min, dynamics_time_min, buffer_time_min, "
-            " slack_time_min, energy_kwh, country_distance_shares, "
-            " country_time_shares, countries, passages) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            " slack_time_min, addon_time_min, energy_kwh, "
+            " country_distance_shares, country_time_shares, countries, passages) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             (
                 trip_id,
                 i,
@@ -325,6 +325,10 @@ def _insert_segments(
                 seg["dynamics_time_min"],
                 seg["buffer_time_min"],
                 seg["slack_time_min"],
+                # Expert-mode manual minutes — payloads planned before
+                # ROUTE_BUILDER 0.9.32 carry none, and 0 is what
+                # route_serialize.py's fallback reads back for them.
+                seg.get("addon_time_min", 0),
                 seg["energy_kwh"],
                 Json(seg["country_distance_shares"]),
                 Json(seg["country_time_shares"]),
@@ -502,7 +506,8 @@ def _build_trip(cur, trip_id: str, direction: int, stop_infra) -> Trip:
 
     cur.execute(
         "SELECT segment_sequence, shape_id, distance_m, driving_time_min, "
-        " dynamics_time_min, buffer_time_min, slack_time_min, energy_kwh, "
+        " dynamics_time_min, buffer_time_min, slack_time_min, addon_time_min, "
+        " energy_kwh, "
         " country_distance_shares, country_time_shares, countries, passages "
         "FROM proposals.segments WHERE trip_id = %s ORDER BY segment_sequence",
         (trip_id,),
@@ -524,6 +529,7 @@ def _build_trip(cur, trip_id: str, direction: int, stop_infra) -> Trip:
                 dynamics_time_min=int(srow["dynamics_time_min"]),
                 buffer_time_min=int(srow["buffer_time_min"]),
                 slack_time_min=int(srow["slack_time_min"]),
+                addon_time_min=int(srow["addon_time_min"]),
                 energy_kwh=float(srow["energy_kwh"]),
                 country_distance_shares=srow["country_distance_shares"],
                 country_time_shares=srow["country_time_shares"],

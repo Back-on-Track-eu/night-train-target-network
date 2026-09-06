@@ -4,7 +4,7 @@
 what the UI should show, in one place. Updated after each change.
 
 Last update 2026-09-06. Covers 2026-08-17 → 2026-09-06:
-`ROUTE_BUILDER_VERSION` 0.9.23 → 0.9.31, `CALC_VERSION` 0.9.22, plus the
+`ROUTE_BUILDER_VERSION` 0.9.23 → 0.9.32, `CALC_VERSION` 0.9.22, plus the
 scenario restructure.
 
 > **FYI 2026-09-06 — existing night trains all dashed.** Backend-only
@@ -30,6 +30,7 @@ are mostly "this field now exists, show it if you want".
 | §6 | `api.ts` audit — the actual to-do list | **start here** |
 | §7 | `uic_ref` can hold more than one code | no type change |
 | §8 | Routes now prefer electrified track | no type change, results move |
+| §9 | Expert timetable mode | new request block + 2 new fields |
 
 ---
 
@@ -310,6 +311,63 @@ always — `scripts/refresh_proposals.py` on the backend side. A proposal
 computed before 0.9.31 and one computed after can legitimately differ for
 the same input; the version is on the payload if you need to explain it to
 a user.
+
+---
+
+## 9. Expert timetable mode — a request block and one new segment field
+
+**Backend: `ROUTE_BUILDER_VERSION` 0.9.32 (2026-09-06).** Full contract in
+`backend/api/README.md` → "Expert timetable".
+
+The compute request may now carry an optional `expert_timetable` block that
+overrides the first departure of a direction and adds minutes to individual
+legs. **Send nothing and nothing changes** — every existing request computes
+exactly as before, which is why this is additive rather than a new mode.
+
+**New in `api.ts`:**
+
+- `segments[].addon_time_min: number` — manual minutes on that leg. 0 on
+  every automatic timetable, so it is safe to read unconditionally. Total
+  leg time is now driving + dynamics + buffer + slack + **addon**; if you
+  sum the components anywhere, add it.
+- `general_parameters.manual_addon_min: number` — the same, summed per
+  direction, so you do not have to.
+- The request type gains `expert_timetable`, all parts optional:
+  `{outbound?: {departure?: {mode: "absolute", time_min} | {mode: "shift",
+  shift_min}, segment_addons?: [{from_stop_id, to_stop_id, add_min}]},
+  return?: {mirror_outbound: true} | <same shape as outbound>}`.
+
+**Three rules the UI has to respect**, each a 400 otherwise:
+
+1. `add_min` is an integer **≥ 1**. A leg can be padded, never shortened —
+   the control should not offer a negative value at all.
+2. An add-on names two stops that are **adjacent, in that order, in
+   `stops`**. When the user edits the itinerary, prune the add-ons whose
+   legs stopped existing before you post.
+3. `return` either mirrors (`{"mirror_outbound": true}` — the default, and
+   what an omitted block means: outbound's add-ons with each pair reversed)
+   or carries its own overrides. Never both.
+
+**The reroute rule, and how to reconcile.** An add-on survives a recompute
+only if its stop pair is still adjacent in the *final* stop list. The one
+case you cannot predict client-side is `auto_stop_addition: "add"` inserting
+a stop between the pair server-side; that add-on is dropped. There is no new
+response field for it and none is needed: rebuild your add-on list from
+`route.trip_pairs[].outbound.segments[]` after every calc — each segment
+carries its stop pair and its `addon_time_min` — exactly the way the builder
+already rebuilds the itinerary from the route it gets back. Anything you
+sent that is missing from that reconstruction was dropped, which is the
+message worth showing.
+
+**Two consequences worth expecting.** An overridden departure re-runs stop
+classification, so `stop_type` can change (a stop shifted past 00:00 becomes
+`night`); and costs move with the clock, because track-access and
+electricity night bands are placed on stop times. Neither is a bug to
+report — both are what a manual timetable means.
+
+`POST /api/proposals/compare` takes `expert_timetable` as a side override,
+so `{"proposal_id": 123, "expert_timetable": null}` on one side is a
+ready-made "with vs without the manual timetable" comparison.
 
 ---
 

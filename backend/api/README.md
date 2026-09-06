@@ -357,6 +357,7 @@ layer of candidate stops tagged with `added_time_min`.
 | `fixed_night_interval` | array of string | (✓) | Exactly 2 distinct stop IDs from `stops`, start before end in outbound travel order — required for, and only allowed with, `timetable_mode="simpleAutomaticWithFixedNight"` (400 otherwise). May span several legs; applied reversed to the return trip automatically |
 | `schedule_mode` | string | — | Default `"alwaysDaily"` — see **Mode switches** below |
 | `auto_stop_addition` | string | — | `"off"` / `"add"` / `"suggest"`, default `"add"` — see **Mode switches** below. String enum since route builder 0.9.5; booleans are rejected with 400 |
+| `expert_timetable` | object | — | Manual departure + per-leg minutes (route builder 0.9.32) — see **Expert timetable** below. Omit or send `null` for the fully automatic timetable, which is what every request produced before this field existed |
 
 There is deliberately no `proposal_id`/`proposal_version` field — those
 are publish-only concerns (`POST /api/proposal/publish`) that have no
@@ -392,6 +393,60 @@ Applied in **both** modes, and in the ONTD map-line geometry projection: track t
 |---|---|
 | `"simpleAutomatic"` (default) | Routes once, then mirrors the resulting trip duration around a fixed 02:30 constant (`MIRROR_MIN`) to get the departure time. |
 | `"simpleAutomaticWithFixedNight"` | Requires `fixed_night_interval` `[A, B]`. Instead of the whole trip, the **interval's** midpoint (departure at `A` → arrival at `B`) is centered on 02:30 — so demand-strong feeder sections outside the interval keep sensible evening/morning clock times (e.g. Munich–Berlin–Hamburg as an evening feeder into a Hamburg–Copenhagen night section). Hard constraints: the interval must depart `A` by 23:59 and arrive at `B` at 05:00 or later. A naturally shorter interval (< 5h01) is stretched to exactly that window by distributing `slack_time_min` across the interval's segments proportionally to leg time (pinning dep 23:59 / arr 05:00 in the minimal-stretch case — minimal stretch wins over exact midpoint symmetry). If stretching drops the interval's timetable speed below `FIXED_NIGHT_MIN_SPEED_RATIO` (0.7) of its routing speed, the trip carries a `fixed_night_stretch_slow` entry in `general_parameters.timetable_warnings` — a warning, never an error. The return trip applies the interval reversed automatically. |
+
+**Expert timetable** (route builder 0.9.32)
+
+`expert_timetable` overrides, by hand, the two things the timetable
+strategies otherwise decide alone. It is not a `timetable_mode`: it
+composes with whichever mode runs, and an absent block leaves every
+result byte-identical to what it was before the field existed.
+
+```json
+"expert_timetable": {
+  "outbound": {
+    "departure": { "mode": "absolute", "time_min": 1290 },
+    "segment_addons": [
+      { "from_stop_id": "osm:n3856100103", "to_stop_id": "osm:n25397500", "add_min": 8 }
+    ]
+  },
+  "return": { "mirror_outbound": true }
+}
+```
+
+| Field | Rules |
+|---|---|
+| `departure.mode` | `"absolute"` — the direction departs at exactly `time_min`, whatever the strategy computed, and keeps that time through a later reroute. `"shift"` — the strategy's own departure displaced by `shift_min` (signed), which therefore *moves* when a reroute changes the trip's duration and the mirror around 02:30 re-centres. Which one applies is the caller's choice per route |
+| `departure.time_min` / `shift_min` | Integer minutes on the service-day scale (`models/utils.py::hhmm_to_min`), not wall clock: 21:30 on day 1 is `1290`, and a mirrored return trip may legitimately carry a negative absolute value. Bounds: `EXPERT_DEPARTURE_MIN_TIME`/`MAX_TIME` and `EXPERT_MAX_DEPARTURE_SHIFT_MIN` (`api/config.py`) |
+| `segment_addons[]` | Extra minutes on one leg, keyed by the **ordered stop pair** rather than a leg index. `add_min` is an integer ≥ 1 (and ≤ `EXPERT_MAX_ADDON_MIN`): an add-on can only ever slow a leg down — the routed physics stay the floor. The pair must be **adjacent, in that order, in `stops`** (400 otherwise), pairs may not repeat, and a direction may carry at most `EXPERT_MAX_ADDONS` of them |
+| `return` | Omitted or `{"mirror_outbound": true}` (the default) applies outbound's add-ons to the return with each pair reversed — the same convention `fixed_night_interval` already follows. A departure is **never** mirrored: the return has its own timetable. Send a full block instead (`departure` and/or `segment_addons`) for an asymmetric timetable; the two spellings are mutually exclusive |
+
+What the overrides do to the rest of the model:
+
+- Add-ons are resolved against the **final** stop list, i.e. after
+  `auto_stop_addition`. An add-on whose pair that step split (a stop
+  inserted between the two) is **dropped**, never redistributed over the
+  legs that replaced it — the surviving minutes are visible per leg as
+  `segments[].addon_time_min`, so a client can reconcile its own list
+  against the route it gets back.
+- They are counted by the timetable strategy, not added afterwards: a
+  padded trip stays centred on 02:30, and add-ons inside a fixed-night
+  interval reduce the `slack_time_min` that mode has to stretch it by.
+- An overridden departure **re-runs stop classification**: a trip shifted
+  two hours later has different `boarding`/`night`/`alighting` stops, and
+  therefore different dwell. It can also move a
+  `simpleAutomaticWithFixedNight` trip out of the night window that mode
+  guarantees — permitted, and not currently flagged (see
+  `OPEN_TODOS["expert_night_window_warning"]`).
+- **Costs move**, correctly: track-access night/peak bands and the
+  electricity night band are placed on the clock from stop times, so
+  padding a leg or shifting a departure moves those windows.
+
+The block is echoed back in the resolved `request` in canonical form
+(add-ons sorted, an empty direction as `null`, a mirroring return always
+spelled out), and stored verbatim as part of `compute_request` on publish.
+`POST /api/proposals/compare` accepts it as a side override, so a stored
+expert timetable can be compared against the same route computed with
+`"expert_timetable": null`.
 
 `schedule_mode` — controls the route's seasonal operating frequency:
 
@@ -432,7 +487,8 @@ stop list.
     "timetable_mode": "simpleAutomatic",
     "fixed_night_interval": null,
     "schedule_mode": "alwaysDaily",
-    "auto_stop_addition": "add"
+    "auto_stop_addition": "add",
+    "expert_timetable": null
   },
   "suggested_stops": [
     { "...": "ONLY for auto_stop_addition=\"suggest\" — see above; absent for \"off\"/\"add\"" }
@@ -557,8 +613,9 @@ stats for that trip, for quick manual reading rather than deriving them from
 | Field | Type | Description |
 |---|---|---|
 | `trip_km` | float | Total trip distance for that direction, km (`distance_m` summed across segments, /1000, 1 decimal) |
-| `route_duration_min` | int | Full elapsed time, departure → arrival — driving + dynamics + buffer + slack + dwell at intermediate stops (`Trip.total_time_min`) |
+| `route_duration_min` | int | Full elapsed time, departure → arrival — driving + dynamics + buffer + slack + addon + dwell at intermediate stops (`Trip.total_time_min`) |
 | `average_speed_kmh` | float | `trip_km` ÷ (`route_duration_min` / 60), 1 decimal. Uses elapsed time, not pure driving time |
+| `manual_addon_min` | int | Expert-mode minutes across the whole direction — `segments[].addon_time_min` summed (route builder 0.9.32). 0 for every automatic timetable |
 | `timetable_warnings` | array | Derived timetable quality annotations — `[]` for most trips. Currently only `fixed_night_stretch_slow` (fixed-night mode, interval stretched too slow): `{code, interval: [start_id, end_id], timetable_speed_kmh, routing_speed_kmh, ratio}` with `ratio` = timetable ÷ routing speed, below `FIXED_NIGHT_MIN_SPEED_RATIO` |
 
 **`route.trip_pairs[].composition`** — physics-relevant subset of the composition
@@ -584,7 +641,8 @@ excluded — see the `evaluation` block below for those):
 | `geometry_id` | string | References an entry in `route.geometries` — see below |
 | `distance_m` | int | Leg distance |
 | `driving_time_min`, `dynamics_time_min`, `buffer_time_min` | int | Leg duration components: raw router time (constant-cruise passage), per-stop accel/brake time loss (traction dynamics), and schedule buffer — the country quota applied to driving and to dynamics (the dynamics cruise speed is always derived from raw driving time first, buffer never feeds the physics) |
-| `slack_time_min` | int | Deliberate schedule padding beyond routing physics — non-zero only on legs inside a stretched fixed-night interval (see `timetable_mode`). Total leg time = driving + dynamics + buffer + slack, and stop-to-stop elapsed times always match that sum |
+| `slack_time_min` | int | Deliberate schedule padding beyond routing physics — non-zero only on legs inside a stretched fixed-night interval (see `timetable_mode`) |
+| `addon_time_min` | int | Manual minutes the caller put on this leg in expert mode (`expert_timetable.segment_addons`, route builder 0.9.32) — separate from `slack_time_min` because the author differs: slack is the model stretching an interval, this is a person. Never negative; 0 for every automatic timetable. Total leg time = driving + dynamics + buffer + slack + addon, and stop-to-stop elapsed times always match that sum |
 | `energy_kwh` | float | Currently a flat 28.0 kWh/km dummy factor — not calibrated yet. How much it *costs* is calibrated: the price side splits this between the country's day and night electricity rate by clock time and adds the catenary charge where one is levied |
 | `country_distance_shares`, `country_time_shares` | object | `{country_code: share}`, each sums to 1.0. Includes transit-only countries the leg crosses without stopping |
 
@@ -1226,8 +1284,8 @@ a malformed range/list/array-mode/trip_windows/bbox shape, an unknown
 ### `POST /api/proposals/compare`
 
 Compare two sides (`adapters/proposal/README.md` §7.3). Each side is
-anchored on one stored proposal and may override `scenario_id` and/or
-`composition_id`. A side **without** overrides is the stored proposal
+anchored on one stored proposal and may override `scenario_id`,
+`composition_id` and/or `expert_timetable`. A side **without** overrides is the stored proposal
 as-is (`published: true`); a side **with** any override is computed
 ephemerally — the anchor's stored compute request with the overridden
 fields, never persisted, `published: false`. Same anchor on both sides =
@@ -1257,9 +1315,16 @@ as a `/calc` call per overridden side; the UI needs a loading state.
 ```
 
 Exactly 2 sides (the shape allows more later). Per side: `proposal_id`
-(required, the anchor), `scenario_id`/`composition_id` (optional
-overrides) — no other keys. Any override key present routes the side
-through the compute path, even if its value equals the stored one.
+(required, the anchor), `scenario_id`/`composition_id`/`expert_timetable`
+(optional overrides) — no other keys. Any override key present routes the
+side through the compute path, even if its value equals the stored one.
+
+`expert_timetable` is the one override with a natural `null` use: a side
+sending `{"proposal_id": 123, "expert_timetable": null}` recomputes the
+same route with its manual timetable taken back out, so an expert
+timetable can be compared against its own automatic twin. Its shape is
+validated exactly as on `/api/proposal/calc`, against the anchor's stored
+`stops`.
 
 The **diff is side B minus side A** (`sides[1] - sides[0]`) throughout.
 

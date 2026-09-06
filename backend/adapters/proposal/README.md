@@ -629,8 +629,11 @@ additions:
   `segments.shape_id`); the per-trip concatenated shape is produced on GTFS
   export instead of stored (removes another duplication)
 - `proposals.segments` — trip_id, segment_sequence, from/to stop_id,
-  shape_id, distance_m, driving/dynamics/buffer/slack_time_min, energy_kwh,
-  country_distance_shares JSONB, country_time_shares JSONB
+  shape_id, distance_m, driving/dynamics/buffer/slack/addon_time_min,
+  energy_kwh, country_distance_shares JSONB, country_time_shares JSONB
+  (`addon_time_min`: the caller's own expert-mode minutes on that leg,
+  ROUTE_BUILDER 0.9.32 — 0 for every automatic timetable and for every
+  route stored before it)
 - `proposals.od_pairs` — trip-pair-scoped demand inputs: origin/destination
   stop_id, class_main, trip_id, places_sold, avg_price
 - `proposals.parkings`, `proposals.shuntings` — stop_id, stop_name,

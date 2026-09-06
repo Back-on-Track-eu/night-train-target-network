@@ -155,6 +155,25 @@
         "demand": "night trains treated as their own transport segment, exempt from track access surcharges."
       }
     },
+    "expert": {
+      "toggle": "Expert timetable",
+      "firstDeparture": "First departure",
+      "pinned": "pinned",
+      "follows": "follows automatic",
+      "automatic": "Automatic — mirrored around 02:30",
+      "pinnedHint": "Stays at this time after a recalculation (automatic: {auto})",
+      "followsHint": "Automatic {auto}, {delta} min — moves with it",
+      "reset": "Back to automatic",
+      "nudgeAria": "Move the first departure by {minutes} minutes",
+      "legAria": "Extra minutes on the leg arriving at {stop}",
+      "moreAria": "One more minute on the leg arriving at {stop}",
+      "lessAria": "One minute less on the leg arriving at {stop}",
+      "mirrored": "The opposite direction copies these added minutes, reversed.",
+      "editSeparately": "Give it its own times",
+      "ownTimes": "The opposite direction keeps its own times.",
+      "relink": "Mirror this direction again",
+      "droppedAddons": "Added minutes were dropped on {legs}: a stop was added in between, so that leg no longer exists."
+    },
     "suggestions": {
       "title": "Add stops along the way?",
       "subtitle": "We found stops on your route. Pick any you'd like to include.",

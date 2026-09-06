@@ -30,7 +30,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.31"
+ROUTE_BUILDER_VERSION: str = "0.9.32"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -45,6 +45,43 @@ ROUTE_BUILDER_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.32": {
+        "date": "2026-09-06",
+        "author": "david",
+        "changes": "Expert timetable mode. The compute request may carry an "
+        "optional expert_timetable block overriding two things the model "
+        "otherwise decides alone: the first departure of a direction "
+        "(mode 'absolute' pins a minute and survives a reroute; mode "
+        "'shift' displaces whatever the strategy computed and moves with "
+        "it), and manual extra minutes on individual legs "
+        "(segment_addons, stamped onto the new Segment.addon_time_min and "
+        "counted in total_time_min). Add-ons only ever ADD — the routed "
+        "physics stay the floor of every leg — and are keyed by ordered "
+        "stop pair, not leg index: an add-on whose pair no longer exists "
+        "after a reroute is dropped, never redistributed (OPEN_TODOS"
+        "['expert_addon_resplit']). The return direction mirrors "
+        "outbound's add-ons unless it sends its own block, exactly as "
+        "fixed_night_interval is already reversed; a departure is never "
+        "mirrored. Deliberately NOT a new timetable_mode: the overrides "
+        "compose with both existing modes as plain functions "
+        "(timetable.resolve_addons/resolve_departure/"
+        "classify_for_departure), applied in route_factory._build_trip() "
+        "after auto_stop_addition (the last step that can change the stop "
+        "list) and after the timetable_mode switch (whose mirroring and "
+        "fixed-night stretch are given the add-ons, so a padded trip "
+        "stays centred on MIRROR_MIN and a padded interval needs less "
+        "slack). An overridden departure re-runs stop classification, so "
+        "a shifted trip gets the boarding/night/alighting split — and the "
+        "dwell — of where it now sits on the clock. NO OUTPUT CHANGE for "
+        "any request without the key: every existing route is "
+        "byte-identical, and stored payloads read addon_time_min back as "
+        "0. Costs DO move for a request that uses it, correctly: track "
+        "access and electricity night bands are placed on the clock from "
+        "stop times. Ships with a proposals.segments.addon_time_min "
+        "migration (metadata-only) and a compute-cache flush — the "
+        "resolved request gained a key, so every request hash changes; "
+        "the route SEGMENT cache is untouched.",
+    },
     "0.9.31": {
         "date": "2026-09-05",
         "author": "david",
@@ -894,6 +931,31 @@ prefix — see adapters/proposal/repository.py's _STRUCTURAL_ROUTE_PREFIX."""
 # =============================================================================
 
 OPEN_TODOS: dict[str, str] = {
+    "expert_addon_resplit": (
+        "(David, 2026-09-06, deliberate) An expert-mode segment add-on whose "
+        "ordered stop pair no longer exists after a reroute is DROPPED "
+        "(timetable.resolve_addons), never redistributed over the legs that "
+        "replaced it. Specified that way: splitting a person's 'this leg "
+        "needs 8 more minutes' across two legs they never saw would be an "
+        "invention, and the frontend reconciles its own add-on list from the "
+        "route it gets back, so the drop is visible rather than silent. "
+        "Revisit only if users ask for the split; the plausible rule would "
+        "be proportional-to-leg-time over the replacing legs, i.e. "
+        "_distribute_slack() applied to a sub-range."
+    ),
+    "expert_night_window_warning": (
+        "(David, 2026-09-06, future) An expert departure override can move a "
+        "timetable_mode='simpleAutomaticWithFixedNight' trip out of the "
+        "window that mode exists to guarantee (dep(A) < NIGHT_START_MIN, "
+        "arr(B) >= NIGHT_END_MIN) — the caller's prerogative, and the stops "
+        "are re-classified correctly for where they now sit, but nothing "
+        "says so explicitly. A TimetableWarning would be the natural home, "
+        "except its dataclass is fixed to the fixed_night_stretch_slow shape "
+        "(interval + two speeds + ratio); adding this means generalising "
+        "TimetableWarning first (a code plus an open detail dict, plus a "
+        "migration on proposals.timetable_warnings). Until then the frontend "
+        "can see it without help: every stop carries its stop_type."
+    ),
     "trip_pair_id": (
         "(David, 2026-07-06, future — not scheduled) Consider swapping the "
         "D/T order to trip_id = P{proposal_id}_V{version}_R1_T{pair_index}_"
