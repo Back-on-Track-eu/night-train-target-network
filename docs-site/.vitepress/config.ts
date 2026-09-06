@@ -10,6 +10,28 @@ const BASE = '/docs/'
 
 export default defineConfig({
   base: BASE,
+
+  // 5173 is the app's dev server; the two must not collide. frontend's Vite
+  // proxies /docs here (DOCS_DEV_URL) so the popover's docs links resolve in
+  // development exactly as they do behind nginx in production. strictPort so
+  // a busy 5174 fails loudly instead of silently moving and breaking that.
+  //
+  // host: true — the app's dev server usually runs in a container and reaches
+  // this one across the boundary, which a loopback-only bind would refuse.
+  vite: {
+    server: {
+      port: 5174,
+      strictPort: true,
+      host: true,
+      // The app's dev server proxies /docs here with changeOrigin, so the
+      // Host arriving is whatever it used to reach us — host.docker.internal
+      // from inside the frontend container. Vite's host check rejects that
+      // with a 403 unless it is listed. Dev-only; the built site is static
+      // and served by nginx.
+      allowedHosts: ['localhost', 'host.docker.internal'],
+    },
+  },
+
   lang: 'en-GB',
   title: 'How the model works',
   description:

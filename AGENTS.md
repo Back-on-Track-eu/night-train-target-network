@@ -213,6 +213,26 @@ npm install
 npm run dev
 ```
 
+### Documentation site
+
+```bash
+cd docs-site
+npm install
+npm run dev        # http://localhost:5174/docs/
+```
+
+In the built image nginx serves the docs at `/docs/` ahead of the SPA
+fallback. The dev server has no such route, so `frontend/vite.config.ts`
+**proxies `/docs` to this server instead** — without it every
+`/docs/...` URL matches vue-router's catch-all and silently redirects to
+the gallery, which is where the cost-factor popover's "Read the full
+explanation" link would land you.
+
+So run this alongside the app whenever you touch a docs link. Port 5174 is
+`strictPort` and `host: true`, and the devcontainer passes
+`DOCS_DEV_URL=http://host.docker.internal:5174` because the app's dev
+server runs in a container while this one runs on the host.
+
 ### Frontend tests
 
 ```bash
