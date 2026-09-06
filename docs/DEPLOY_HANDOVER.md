@@ -73,6 +73,59 @@ capacity work that is genuinely yours to schedule.
 
 ---
 
+## The documentation site ships inside the frontend image
+
+`docs-site/` (VitePress) is built into the frontend container and served
+by its nginx at **`/docs/`** — same origin as the app.
+
+**No Caddy change is needed.** That was the point of putting it behind the
+app's own nginx rather than in its own container: the vhost still has
+exactly two `handle` blocks, `/api/*` and the catch-all.
+
+What changed on the deploy side:
+
+- `frontend/Dockerfile.demo` gained a `docs` build stage. It reads
+  `docs-site/` through a **named build context** (`docssrc`), because the
+  frontend build context is `frontend/` and widening it to the repo root
+  would ship `backend/`, `.git/` and the multi-GB routing graph cache into
+  every frontend build.
+- Both compose files supply it via `build.additional_contexts`. **This
+  needs Compose v2.17+ with BuildKit** — if a deploy fails with an
+  unrecognised `additional_contexts` key, that is the cause.
+- `frontend/nginx.conf` gained `location /docs/` **before** the SPA
+  catch-all. Order matters: without it every `/docs/*` request falls
+  through to the app's `index.html` and returns 200 with a blank page.
+
+Staging inherits the app's basic auth, so the docs are behind it there and
+public on production.
+
+**Verified locally** by building the image and running it: `/docs/`,
+`/docs/cost/tac` and `/docs/reference/parameters` serve the docs, `/`,
+`/gallery` and `/proposal/12` still serve the SPA, and `/docs/nonsense`
+returns a real 404.
+
+**When this stops applying:** if the docs ever move to their own container
+or subdomain, in which case a Caddy block does become necessary.
+
+## Dev-stack routing JVM had no heap cap
+
+`backend/docker/docker-compose.yml` started the routing container with no
+`-Xmx`, so the JVM took its default quarter of whatever Docker Desktop was
+given — about 1.9 GiB on an 8 GiB allocation, which is not enough to load
+the rail graph. It died with `OutOfMemoryError` during startup and took
+every dependent service with it (`dependency failed to start: container
+openrailrouting-infra-2026 is unhealthy`), which is how it surfaced when
+opening the devcontainer.
+
+`deploy/bot-server/docker-compose.yml` has carried the guardrail since it
+was written (`JAVA_TOOL_OPTIONS=-Xmx3g`, `mem_limit`/`memswap_limit` 4g);
+the dev stack never got it. Now mirrored. Measured after the change: the
+container settles at 2.06 GiB of its 4 GiB limit.
+
+**When this stops applying:** when the graph grows past 3 GiB of heap, at
+which point both files need raising together.
+
+
 ## 1. What this batch does
 
 Scenarios now pin the **routing graph** they route on, not just their five

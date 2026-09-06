@@ -1,0 +1,15 @@
+.vitepress/dist/
+.vitepress/cache/
+node_modules/
+*.lock
+
+# Emitter output. These files are written by
+# backend/scripts/model_docs/render_site.py and verified by its --check
+# gate; letting prettier reformat them would make the two tools fight and
+# turn every CI run into a drift failure. The same reason docs/MODEL.md
+# sits outside prettier's scope. Note cost/*.md and reference/*.md also
+# carry hand-written prose outside the GENERATED markers — the file as a
+# whole belongs to the emitter, so the exclusion is per file, not per block.
+cost/
+reference/
+.vitepress/generated-sidebar.json

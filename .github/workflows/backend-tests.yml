@@ -6,6 +6,9 @@ on:
     paths:
       - 'backend/**'
       - 'docs/MODEL.md'
+      # The site is generated from the same registries and checked by the
+      # same --target all run, so editing a generated page must trigger it.
+      - 'docs-site/**'
       - '.devcontainer/**'
       - '.github/workflows/backend-tests.yml'
   pull_request:
@@ -13,18 +16,23 @@ on:
     paths:
       - 'backend/**'
       - 'docs/MODEL.md'
+      # The site is generated from the same registries and checked by the
+      # same --target all run, so editing a generated page must trigger it.
+      - 'docs-site/**'
       - '.devcontainer/**'
       - '.github/workflows/backend-tests.yml'
 
 jobs:
 
   # ============================================================
-  # JOB 0 — docs/MODEL.md freshness
-  # Fails if the generated blocks in docs/MODEL.md no longer match the
-  # model registries (models/*/model.py) or the schema (db/schema.py).
+  # JOB 0 — generated documentation freshness
+  # Fails if the generated blocks in docs/MODEL.md or docs-site/ no longer
+  # match the model registries (models/*/model.py) or the schema
+  # (db/schema.py). One --check run covers both artefacts: they share an
+  # extraction layer, so they can differ in prose but never in facts.
   # ============================================================
   model-docs-check:
-    name: MODEL.md up-to-date check
+    name: Generated docs up-to-date check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -35,7 +43,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Check docs/MODEL.md against the registries
+      - name: Check docs/MODEL.md and docs-site/ against the registries
         run: python backend/scripts/generate_model_docs.py --check
 
   # ============================================================

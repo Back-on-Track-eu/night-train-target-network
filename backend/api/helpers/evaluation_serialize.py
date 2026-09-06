@@ -574,12 +574,14 @@ def _param_to_dict(param) -> dict:
 
 def _formulas_to_dict(formulas: dict) -> dict:
     """models.formula.Formula registry → plain dict, filtered to
-    EVALUATION_OUTPUT_FIELDS. Each entry carries latex, description, and
-    the input/output legend (additive since CALC 0.9.14 / route builder
-    0.9.18 / energy 0.9.1)."""
+    EVALUATION_OUTPUT_FIELDS. Each entry carries latex, summary,
+    description, and the input/output legend (legend additive since CALC
+    0.9.14 / route builder 0.9.18 / energy 0.9.1; summary since CALC
+    0.9.24 / route builder 0.9.31 / energy 1.1.1)."""
     return {
         key: {
             "latex": f.latex,
+            "summary": f.summary,
             "description": f.description,
             "inputs": [_param_to_dict(p) for p in f.inputs],
             "output": _param_to_dict(f.output),

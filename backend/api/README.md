@@ -1759,6 +1759,12 @@ No auth yet — a submission identifies its author either by `user_id`
 either way; mail delivery never blocks storage (see
 `adapters/mailer.py`).
 
+`POST /api/feedback` is rate-limited per client IP — per authenticated
+user where a local-plane token is present (`config.FEEDBACK_RATE_LIMIT`,
+`rate_limit_key`). It is the one unauthenticated endpoint that sends
+mail, so it is the only one an anonymous caller can use to generate
+outbound traffic. `TESTING=true` disables the limit.
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/api/feedback` | Submit feedback |
@@ -1803,7 +1809,8 @@ never loses a submission).
 
 **Errors:** `400 bad_request` (missing body) · `400 validation_error`
 (missing/invalid field — see `details`) · `422 domain_error` (`user_id`
-doesn't exist) · `500 feedback_error` (storage failed).
+doesn't exist) · `429` (rate limit, `config.FEEDBACK_RATE_LIMIT`) ·
+`500 feedback_error` (storage failed).
 
 </details>
 
@@ -1816,7 +1823,7 @@ doesn't exist) · `500 feedback_error` (storage failed).
 
 Suggested values for the feedback form's category/sub_category fields —
 not a validation source, `POST /api/feedback` accepts any non-empty
-string for both. Nine categories, four with a `sub_categories` list
+string for both. Ten categories, four with a `sub_categories` list
 derived live from the model's own definitions rather than hand-copied:
 
 | Category | sub_categories source |
@@ -1826,6 +1833,7 @@ derived live from the model's own definitions rather than hand-copied:
 | `Evaluation — calculation method` | Live — every leaf of the evaluation model's cost/revenue/margin breakdown (`models/evaluation/views.py:Breakdown`) |
 | `Evaluation — results / view` | Live — the five output views `POST /api/proposal/calc`'s evaluation section produces (`models/evaluation/views.py:VIEW_META`) |
 | `Route or timetable` | Static — no single schema object maps cleanly onto "route concepts" |
+| `Documentation` | None — free text; the `sub_category` is a documentation page path, and those live in `docs-site/`, which the backend does not read |
 | `General functionality` | Static |
 | `Bug report` / `Feature request` / `Other` | None — free text |
 

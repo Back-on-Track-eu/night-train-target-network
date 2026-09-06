@@ -10,12 +10,19 @@ repos:
       - id: ruff-format
         files: ^backend/
 
-  # JS/TS/Vue/JSON/CSS/Markdown formatting (frontend)
+  # JS/TS/Vue/JSON/CSS/Markdown formatting (frontend + docs-site)
   - repo: https://github.com/pre-commit/mirrors-prettier
     rev: v4.0.0-alpha.8
     hooks:
       - id: prettier
-        files: ^frontend/
+        files: ^(frontend|docs-site)/
+        # The emitter owns docs-site/cost/ and docs-site/reference/ and its
+        # --check gate verifies them byte for byte, so prettier reformatting
+        # them turns every CI run into a drift failure. docs-site's own
+        # .prettierignore does NOT cover this: pre-commit runs prettier from
+        # the repo root, where that file is not consulted — hence an explicit
+        # exclude here as well.
+        exclude: ^docs-site/(cost|reference)/|^docs-site/\.vitepress/generated-sidebar\.json$
         types_or: [javascript, jsx, ts, tsx, vue, json, css, markdown]
         additional_dependencies:
           - prettier@3.5.3

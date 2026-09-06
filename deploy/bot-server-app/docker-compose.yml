@@ -209,6 +209,11 @@ services:
   frontend:
     build:
       context: ../../frontend
+      # docs-site/ is outside the frontend context; naming it here keeps the
+      # main context narrow (see frontend/Dockerfile.demo). Needs Compose
+      # v2.17+ / BuildKit.
+      additional_contexts:
+        docssrc: ../../docs-site
       dockerfile: Dockerfile.demo
       args:
         VITE_API_BASE_URL: ""   # same-origin /api/* — Caddy routes to tn-<env>-api
