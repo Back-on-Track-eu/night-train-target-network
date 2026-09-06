@@ -15,7 +15,7 @@ repos:
     rev: v4.0.0-alpha.8
     hooks:
       - id: prettier
-        files: ^frontend/
+        files: ^(frontend|docs-site)/
         types_or: [javascript, jsx, ts, tsx, vue, json, css, markdown]
         additional_dependencies:
           - prettier@3.5.3
