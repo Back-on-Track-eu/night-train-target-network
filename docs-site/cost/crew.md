@@ -1,9 +1,23 @@
 ---
-title: "Cabin crew cost"
-description: "What the cabin crew costs per year, including the relief crew a long trip needs."
+title: 'Cabin crew cost'
+description: 'What the cabin crew costs per year, including the relief crew a long trip needs.'
 ---
 
 # Cabin crew cost
+
+<!-- Everything between here and the next marker is hand-written and
+     survives regeneration. The generated block below carries the formula,
+     the input legend and the cross-links. -->
+
+## What this is
+
+What the on-board staff cost over a year — the people who make up berths,
+serve breakfast and look after passengers overnight.
+
+Priced the same way as the driver: a wage per productive hour divided by
+the share of paid hours that is productive, times the hours the crew is on
+board. Long trips need relief crew, which lowers that share and raises the
+effective hourly cost.
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-crew_eur"></a>
@@ -26,13 +40,4 @@ $$ C_{crew} = \frac{c_{crew/h}}{\eta_{crew}} \times \left( \sum_{seg} t_{drive,h
 **Feeds into:** [operator_variable_total_eur](/cost/operator-variable-total)
 <!-- END GENERATED: formula -->
 
-## In plain language
-
-<!-- Hand-written. The generated block above carries the formula, the
-     legend and the links; this section is where the number is explained
-     to someone who will never read the code. Not yet written. -->
-
-## Where the numbers come from
-
-<!-- Hand-written: which calibration this draws on, what is sourced and
-     what is assumed. See the methodology pages. -->
+<FeedbackForm />

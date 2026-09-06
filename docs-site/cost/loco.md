@@ -1,9 +1,22 @@
 ---
-title: "Locomotive rental"
-description: "Renting the locomotive by the hour, maintenance and insurance included."
+title: 'Locomotive rental'
+description: 'Renting the locomotive by the hour, maintenance and insurance included.'
 ---
 
 # Locomotive rental
+
+<!-- Everything between here and the next marker is hand-written and
+     survives regeneration. The generated block below carries the formula,
+     the input legend and the cross-links. -->
+
+## What this is
+
+Renting the locomotive, charged by the hour with maintenance and
+insurance included.
+
+Hours in use, not hours owned: a locomotive shared between several trips
+is counted once. That matters for a network of routes that can share
+traction rather than each holding its own.
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-loco_eur"></a>
@@ -23,13 +36,4 @@ $$ C_{loco} = c_{loco,lease/h} \times \frac{t_{loco,propulsion,min}}{60} $$
 **Feeds into:** [operator_variable_total_eur](/cost/operator-variable-total)
 <!-- END GENERATED: formula -->
 
-## In plain language
-
-<!-- Hand-written. The generated block above carries the formula, the
-     legend and the links; this section is where the number is explained
-     to someone who will never read the code. Not yet written. -->
-
-## Where the numbers come from
-
-<!-- Hand-written: which calibration this draws on, what is sourced and
-     what is assumed. See the methodology pages. -->
+<FeedbackForm />

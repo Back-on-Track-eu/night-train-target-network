@@ -1,9 +1,34 @@
 ---
-title: "Traction electricity"
+title: 'Traction electricity'
 description: "The traction electricity drawn, at each country's price, plus the catenary supply charge."
 ---
 
 # Traction electricity
+
+<!-- Everything between here and the next marker is hand-written and
+     survives regeneration. The generated block below carries the formula,
+     the input legend and the cross-links. -->
+
+## What this is
+
+The electricity the train draws, at each country's price, plus what the
+infrastructure manager charges for delivering it through the overhead line.
+
+Two separate things are being priced. How much energy the train uses comes
+from a model calibrated against Deutsche Bahn Trassenfinder technical
+runs: start-stop energy for the train's weight, rolling resistance over
+the distance, air resistance rising with length and the square of speed,
+and the on-board supply that keeps heating, air conditioning and light
+running all night. What that energy costs comes from each country's
+traction electricity tariff.
+
+Like track access, electricity is split by the clock where a country has a
+night tariff — only Austria, Switzerland and Croatia do.
+
+One assumption worth naming: coach hotel power is an estimate, not a
+measurement. The calibration runs were queried with it switched off, so
+the figure for keeping a sleeping train warm and lit was added afterwards
+rather than measured. See [how energy was calibrated](/methodology/energy).
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-energy_eur"></a>
@@ -29,13 +54,4 @@ $$ C_{energy} = \sum_{seg} \sum_{c \in seg} \left[ E_{kWh,c} \left( (1-\nu^{E}_{
 **Feeds into:** [infrastructure_total_eur](/cost/infrastructure-total)
 <!-- END GENERATED: formula -->
 
-## In plain language
-
-<!-- Hand-written. The generated block above carries the formula, the
-     legend and the links; this section is where the number is explained
-     to someone who will never read the code. Not yet written. -->
-
-## Where the numbers come from
-
-<!-- Hand-written: which calibration this draws on, what is sourced and
-     what is assumed. See the methodology pages. -->
+<FeedbackForm />

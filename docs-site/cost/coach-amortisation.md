@@ -1,9 +1,23 @@
 ---
-title: "Coach write-off"
+title: 'Coach write-off'
 description: "The coaches' annual write-off: purchase price spread over their useful life."
 ---
 
 # Coach write-off
+
+<!-- Everything between here and the next marker is hand-written and
+     survives regeneration. The generated block below carries the formula,
+     the input legend and the cross-links. -->
+
+## What this is
+
+The annual write-off of the coaches — their purchase price spread over the
+years they will be in service.
+
+The count includes a reserve: some coaches are always in the workshop, so
+a service needs more of them than it puts on the rails on any given night.
+Prices come from the composition cost calibration, which builds a
+per-metre purchase cost for new and refurbished vehicles at 2032 prices.
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-coach_amortisation_eur"></a>
@@ -24,13 +38,4 @@ $$ C_{coach,amort} = \frac{C_{coach,purchase}}{T_{coach,amort}} \times n $$
 **Feeds into:** [operator_fixed_total_eur](/cost/operator-fixed-total)
 <!-- END GENERATED: formula -->
 
-## In plain language
-
-<!-- Hand-written. The generated block above carries the formula, the
-     legend and the links; this section is where the number is explained
-     to someone who will never read the code. Not yet written. -->
-
-## Where the numbers come from
-
-<!-- Hand-written: which calibration this draws on, what is sourced and
-     what is assumed. See the methodology pages. -->
+<FeedbackForm />

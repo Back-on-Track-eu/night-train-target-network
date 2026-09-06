@@ -1,9 +1,22 @@
 ---
-title: "Onboard service"
-description: "Bedding, breakfast and amenities, charged per ticket sold."
+title: 'Onboard service'
+description: 'Bedding, breakfast and amenities, charged per ticket sold.'
 ---
 
 # Onboard service
+
+<!-- Everything between here and the next marker is hand-written and
+     survives regeneration. The generated block below carries the formula,
+     the input legend and the cross-links. -->
+
+## What this is
+
+Bedding, breakfast, and the amenities that make a night train a night
+train — charged per passenger, at a rate that differs by accommodation
+class.
+
+A sleeper passenger costs more to serve than a seated one, which is part
+of why the classes are priced differently.
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-svc_stockings_eur"></a>
@@ -23,13 +36,4 @@ $$ C_{svc} = \sum_{od} c_{svc,class(od)/place} \times n_{places\_sold,od} $$
 **Feeds into:** [operator_variable_total_eur](/cost/operator-variable-total)
 <!-- END GENERATED: formula -->
 
-## In plain language
-
-<!-- Hand-written. The generated block above carries the formula, the
-     legend and the links; this section is where the number is explained
-     to someone who will never read the code. Not yet written. -->
-
-## Where the numbers come from
-
-<!-- Hand-written: which calibration this draws on, what is sourced and
-     what is assumed. See the methodology pages. -->
+<FeedbackForm />

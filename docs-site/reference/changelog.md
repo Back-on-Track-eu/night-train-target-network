@@ -1,5 +1,5 @@
 ---
-title: "What changed"
+title: 'What changed'
 ---
 
 # What changed
@@ -298,3 +298,5 @@ Track access charges become a calibrated component model instead of one flat rat
 
 Initial consolidation as its own model anchor: per-country track parameters (TAC €/train-km, parking, shunting, energy price, terrain, HSR permission, buffer quota, minimum dwell) and station charges with EU-average defaults, versioned as full-table snapshots pinned by scenarios; ONTD-derived stop catalog seeded from Drive (stop classification steps 1–3, STOP_CLASSIFICATION.md).
 <!-- END GENERATED: changelog -->
+
+<FeedbackForm />

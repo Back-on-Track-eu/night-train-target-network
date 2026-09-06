@@ -1,9 +1,29 @@
 ---
-title: "Driver cost"
-description: "What the drivers cost per year, including the relief driver a long trip needs."
+title: 'Driver cost'
+description: 'What the drivers cost per year, including the relief driver a long trip needs.'
 ---
 
 # Driver cost
+
+<!-- Everything between here and the next marker is hand-written and
+     survives regeneration. The generated block below carries the formula,
+     the input legend and the cross-links. -->
+
+## What this is
+
+What the drivers cost over a year.
+
+The subtlety is that paid hours exceed hours on the train. A driver signs
+on before departure, signs off after arrival, travels to and from the
+train, rests away from home base, and has to be covered by a reserve. The
+model prices this through a roster efficiency: the share of paid hours
+that is actually productive.
+
+That share is not constant. A shift may not exceed a legal maximum, so a
+long trip has to be split, and every additional shift boundary adds
+another fixed allowance. A route just over the limit therefore costs
+noticeably more per hour than one just under — which is a real effect, not
+an artefact.
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-driver_eur"></a>
@@ -26,13 +46,4 @@ $$ C_{driver} = \frac{c_{driver/h}}{\eta_{driver}} \times \left( \sum_{seg} t_{d
 **Feeds into:** [operator_variable_total_eur](/cost/operator-variable-total)
 <!-- END GENERATED: formula -->
 
-## In plain language
-
-<!-- Hand-written. The generated block above carries the formula, the
-     legend and the links; this section is where the number is explained
-     to someone who will never read the code. Not yet written. -->
-
-## Where the numbers come from
-
-<!-- Hand-written: which calibration this draws on, what is sourced and
-     what is assumed. See the methodology pages. -->
+<FeedbackForm />

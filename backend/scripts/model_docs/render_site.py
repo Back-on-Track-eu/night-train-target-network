@@ -169,19 +169,18 @@ description: {summary}
 
 # {h1}
 
+<!-- Everything between here and the next marker is hand-written and
+     survives regeneration. The generated block below carries the formula,
+     the input legend and the cross-links. -->
+
+## What this is
+
+_Not yet written._
+
 <!-- BEGIN GENERATED: formula -->
 <!-- END GENERATED: formula -->
 
-## In plain language
-
-<!-- Hand-written. The generated block above carries the formula, the
-     legend and the links; this section is where the number is explained
-     to someone who will never read the code. Not yet written. -->
-
-## Where the numbers come from
-
-<!-- Hand-written: which calibration this draws on, what is sourced and
-     what is assumed. See the methodology pages. -->
+<FeedbackForm />
 """
 
 
@@ -355,6 +354,8 @@ title: {title}
      anything outside the GENERATED markers survives regeneration. -->
 
 {blocks}
+
+<FeedbackForm />
 """
 
 

@@ -1,9 +1,21 @@
 ---
-title: "Cleaning"
-description: "Cleaning and preparing the train for each night of service."
+title: 'Cleaning'
+description: 'Cleaning and preparing the train for each night of service.'
 ---
 
 # Cleaning
+
+<!-- Everything between here and the next marker is hand-written and
+     survives regeneration. The generated block below carries the formula,
+     the input legend and the cross-links. -->
+
+## What this is
+
+Cleaning and preparing the train for the next night — a daily rate per
+coach, over the operating days in a year.
+
+Charged per coach rather than per train, so a longer train costs
+proportionally more to turn around.
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-cleaning_eur"></a>
@@ -24,13 +36,4 @@ $$ C_{clean} = c_{clean/day} \times n \times d_{op} $$
 **Feeds into:** [operator_fixed_total_eur](/cost/operator-fixed-total)
 <!-- END GENERATED: formula -->
 
-## In plain language
-
-<!-- Hand-written. The generated block above carries the formula, the
-     legend and the links; this section is where the number is explained
-     to someone who will never read the code. Not yet written. -->
-
-## Where the numbers come from
-
-<!-- Hand-written: which calibration this draws on, what is sourced and
-     what is assumed. See the methodology pages. -->
+<FeedbackForm />

@@ -33,6 +33,7 @@ export default defineConfig({
 
     nav: [
       { text: 'Start here', link: '/' },
+      { text: 'Data sources', link: '/sources/' },
       { text: 'What it costs', link: '/cost/total-cost' },
       { text: 'Reference', link: '/reference/versions' },
       { text: 'Open the tool', link: '/../' },
@@ -44,10 +45,33 @@ export default defineConfig({
         items: [
           { text: 'What this tool computes', link: '/' },
           { text: 'How to read our numbers', link: '/reading-the-numbers' },
+          { text: "What we don't yet model", link: '/not-modelled' },
+        ],
+      },
+      {
+        text: 'Where the numbers come from',
+        items: [
+          { text: 'Data sources', link: '/sources/' },
+          { text: 'How a route is planned', link: '/routing' },
+          { text: 'The stop catalogue', link: '/stops' },
+          { text: 'Revenue and demand', link: '/demand' },
+          { text: 'Emissions', link: '/emissions' },
+          { text: 'Scenarios', link: '/scenarios' },
         ],
       },
       // Generated from CALC_TREE — see render_site.py::render_sidebar.
       { text: 'What it costs', items: costSidebar },
+      {
+        text: 'How it was calibrated',
+        items: [
+          { text: 'Track access', link: '/methodology/track-access' },
+          { text: 'Energy consumption', link: '/methodology/energy' },
+          { text: 'Traction electricity', link: '/methodology/energy-pricing' },
+          { text: 'Shunting and stabling', link: '/methodology/facility' },
+          { text: 'Terrain and buffers', link: '/methodology/route-context' },
+          { text: 'Rolling stock', link: '/methodology/compositions' },
+        ],
+      },
       {
         text: 'Reference',
         items: [

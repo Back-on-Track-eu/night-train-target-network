@@ -1,9 +1,21 @@
 ---
-title: "Variable operator cost"
-description: "The operator costs that scale with how much the train runs."
+title: 'Variable operator cost'
+description: 'The operator costs that scale with how much the train runs.'
 ---
 
 # Variable operator cost
+
+<!-- Everything between here and the next marker is hand-written and
+     survives regeneration. The generated block below carries the formula,
+     the input legend and the cross-links. -->
+
+## What this is
+
+The operator costs that move with how much the train actually runs: hours
+on duty, kilometres driven, tickets sold.
+
+Add a stop and these grow. Run the service on fewer nights and they
+shrink. They are the costs that respond to the timetable.
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-operator_variable_total_eur"></a>
@@ -27,13 +39,4 @@ $$ C_{op,var} = C_{driver} + C_{crew} + C_{coach,maint} + C_{loco} + C_{svc} + C
 **Feeds into:** [operator_total_eur](/cost/operator-total)
 <!-- END GENERATED: formula -->
 
-## In plain language
-
-<!-- Hand-written. The generated block above carries the formula, the
-     legend and the links; this section is where the number is explained
-     to someone who will never read the code. Not yet written. -->
-
-## Where the numbers come from
-
-<!-- Hand-written: which calibration this draws on, what is sourced and
-     what is assumed. See the methodology pages. -->
+<FeedbackForm />

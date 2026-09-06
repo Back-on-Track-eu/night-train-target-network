@@ -1,9 +1,23 @@
 ---
-title: "Variable overhead"
-description: "Ticket sales, distribution and customer service, as a share of ticket revenue."
+title: 'Variable overhead'
+description: 'Ticket sales, distribution and customer service, as a share of ticket revenue.'
 ---
 
 # Variable overhead
+
+<!-- Everything between here and the next marker is hand-written and
+     survives regeneration. The generated block below carries the formula,
+     the input legend and the cross-links. -->
+
+## What this is
+
+Selling the tickets: distribution, payment handling, customer service.
+
+Charged as a share of ticket revenue rather than a fixed sum, because
+these costs genuinely scale with sales rather than with running the train.
+Note the consequence: because it is a share of revenue, and revenue rests
+on the [demand assumption](/cost/ticket-revenue), this line inherits that
+assumption too.
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-var_overhead_eur"></a>
@@ -23,13 +37,4 @@ $$ C_{var,oh} = \sum_{od} R_{od} \times q_{var,oh} $$
 **Feeds into:** [fix_overhead_eur](/cost/fix-overhead), [operator_variable_total_eur](/cost/operator-variable-total)
 <!-- END GENERATED: formula -->
 
-## In plain language
-
-<!-- Hand-written. The generated block above carries the formula, the
-     legend and the links; this section is where the number is explained
-     to someone who will never read the code. Not yet written. -->
-
-## Where the numbers come from
-
-<!-- Hand-written: which calibration this draws on, what is sourced and
-     what is assumed. See the methodology pages. -->
+<FeedbackForm />

@@ -1,9 +1,22 @@
 ---
-title: "Coach maintenance"
-description: "Maintaining the coaches, charged per kilometre driven."
+title: 'Coach maintenance'
+description: 'Maintaining the coaches, charged per kilometre driven.'
 ---
 
 # Coach maintenance
+
+<!-- Everything between here and the next marker is hand-written and
+     survives regeneration. The generated block below carries the formula,
+     the input legend and the cross-links. -->
+
+## What this is
+
+Keeping the coaches serviceable, charged as a rate per kilometre driven.
+
+Locomotive maintenance is **not** here — it is bundled into the
+[locomotive rental](/cost/loco), which is quoted all-inclusive. Counting
+it in both places is a mistake worth naming, because the two lines look
+like they should be symmetrical and are not.
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-coach_maintenance_eur"></a>
@@ -23,13 +36,4 @@ $$ C_{coach,maint} = \sum_{seg} c_{coach,maint/km} \times d_{km,seg} $$
 **Feeds into:** [operator_variable_total_eur](/cost/operator-variable-total)
 <!-- END GENERATED: formula -->
 
-## In plain language
-
-<!-- Hand-written. The generated block above carries the formula, the
-     legend and the links; this section is where the number is explained
-     to someone who will never read the code. Not yet written. -->
-
-## Where the numbers come from
-
-<!-- Hand-written: which calibration this draws on, what is sourced and
-     what is assumed. See the methodology pages. -->
+<FeedbackForm />

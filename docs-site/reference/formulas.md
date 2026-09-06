@@ -1,5 +1,5 @@
 ---
-title: "All formulas"
+title: 'All formulas'
 ---
 
 # All formulas
@@ -482,3 +482,5 @@ $$ x_{total} = \sum_i x_i $$
 | Input | `x_i` | The individual items on that level | €/year | computed upstream |
 | **Result** | `x_total` | Sum of the level's items | €/year | — |
 <!-- END GENERATED: formulas -->
+
+<FeedbackForm />

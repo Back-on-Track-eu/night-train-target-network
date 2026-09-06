@@ -1,9 +1,25 @@
 ---
-title: "Shunting"
-description: "Coupling, uncoupling and parking moves in stations and yards."
+title: 'Shunting'
+description: 'Coupling, uncoupling and parking moves in stations and yards.'
 ---
 
 # Shunting
+
+<!-- Everything between here and the next marker is hand-written and
+     survives regeneration. The generated block below carries the formula,
+     the input legend and the cross-links. -->
+
+## What this is
+
+Moving the train around stations and yards: coupling, uncoupling and
+positioning moves.
+
+Priced per movement, and the movement count is currently **fixed at two
+per trip**. Real shunting depends on the shape of the service — whether
+portions split, whether the train reverses — and the model does not yet
+derive that from the route. A route with unusual shunting needs will be
+priced as though it had ordinary ones. This is listed in
+[what we don't yet model](/not-modelled).
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-shunting_eur"></a>
@@ -23,13 +39,4 @@ $$ C_{shunt} = c_{shunt/event} \times n_{events} $$
 **Feeds into:** [operator_fixed_total_eur](/cost/operator-fixed-total)
 <!-- END GENERATED: formula -->
 
-## In plain language
-
-<!-- Hand-written. The generated block above carries the formula, the
-     legend and the links; this section is where the number is explained
-     to someone who will never read the code. Not yet written. -->
-
-## Where the numbers come from
-
-<!-- Hand-written: which calibration this draws on, what is sourced and
-     what is assumed. See the methodology pages. -->
+<FeedbackForm />

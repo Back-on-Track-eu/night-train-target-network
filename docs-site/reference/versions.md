@@ -1,5 +1,5 @@
 ---
-title: "Model versions"
+title: 'Model versions'
 ---
 
 # Model versions
@@ -18,3 +18,5 @@ title: "Model versions"
 | Composition cost model | `0.9.3` | Composition cost model: calibrated purchase, maintenance, cleaning, crew, and availability parameters per train composition, in a 'new' and a 'refurbished' rolling stock family, at 2032 prices. |
 | Infrastructure parameter model | `0.9.5` | Infrastructure parameter model: per-country track access charges, station charges, traction energy prices, shunting and stabling, terrain, schedule supplements and minimum stopping times, with EU-average fallbacks — plus the catalog of possible night train stops. Four calibrated domains, each a package under models/infrastructure/ with its own source register, notebooks and published calibration document. |
 <!-- END GENERATED: versions -->
+
+<FeedbackForm />

@@ -1,9 +1,28 @@
 ---
-title: "Profit requirement (margin)"
+title: 'Profit requirement (margin)'
 description: "The operator's profit requirement: deducted in the net result, not paid to anyone."
 ---
 
 # Profit requirement (margin)
+
+<!-- Everything between here and the next marker is hand-written and
+     survives regeneration. The generated block below carries the formula,
+     the input legend and the cross-links. -->
+
+## What this is
+
+The operator's profit requirement: a share of ticket revenue that has to
+remain as operating profit.
+
+This is **not a cost paid to anyone**. Nobody sends an invoice for it. It
+is the return an operator would need for the service to be worth running,
+and it is deducted in the net result alongside the real costs — which is
+why it sits as a peer of the operator and infrastructure totals rather
+than inside either.
+
+A state-owned operator run at cost and a commercial one seeking a return
+differ here. Setting it to zero asks a different question: what would this
+route cost to run, rather than what would it take to attract an operator.
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-ebit_margin_eur"></a>
@@ -23,13 +42,4 @@ $$ C_{EBIT} = \sum_{od} R_{od} \times q_{EBIT} $$
 **Feeds into:** [net_eur](/cost/net)
 <!-- END GENERATED: formula -->
 
-## In plain language
-
-<!-- Hand-written. The generated block above carries the formula, the
-     legend and the links; this section is where the number is explained
-     to someone who will never read the code. Not yet written. -->
-
-## Where the numbers come from
-
-<!-- Hand-written: which calibration this draws on, what is sourced and
-     what is assumed. See the methodology pages. -->
+<FeedbackForm />

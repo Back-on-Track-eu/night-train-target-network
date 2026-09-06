@@ -1,9 +1,23 @@
 ---
-title: "Fixed operator cost"
-description: "The operator costs that stay the same however much the train runs."
+title: 'Fixed operator cost'
+description: 'The operator costs that stay the same however much the train runs.'
 ---
 
 # Fixed operator cost
+
+<!-- Everything between here and the next marker is hand-written and
+     survives regeneration. The generated block below carries the formula,
+     the input legend and the cross-links. -->
+
+## What this is
+
+The operator costs that stay put however much the train runs — the
+coaches have to be bought, financed and cleaned whether they are moving or
+standing.
+
+"Fixed" here means fixed with respect to the timetable, not fixed forever.
+A longer train needs more coaches, so these still scale with the size of
+the service; they just do not scale with how far it goes.
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-operator_fixed_total_eur"></a>
@@ -26,13 +40,4 @@ $$ C_{op,fix} = C_{coach,amort} + C_{fin} + C_{fix,oh} + C_{clean} + C_{shunt} $
 **Feeds into:** [operator_total_eur](/cost/operator-total)
 <!-- END GENERATED: formula -->
 
-## In plain language
-
-<!-- Hand-written. The generated block above carries the formula, the
-     legend and the links; this section is where the number is explained
-     to someone who will never read the code. Not yet written. -->
-
-## Where the numbers come from
-
-<!-- Hand-written: which calibration this draws on, what is sourced and
-     what is assumed. See the methodology pages. -->
+<FeedbackForm />

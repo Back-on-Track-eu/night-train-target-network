@@ -1,5 +1,5 @@
 ---
-title: "Standard values"
+title: 'Standard values'
 ---
 
 # Standard values
@@ -55,3 +55,5 @@ title: "Standard values"
 |---|---|---|
 | <a id="s-infrastructure-weekday_blend"></a>`WEEKDAY_BLEND` | `5.0 / 7.0` | Share of departures assumed to fall on a weekday. Austria and Switzerland levy their congestion surcharge and peak multiplier Monday to Friday only, but a Segment carries clock minutes and no service date, so a weekday-only tariff window is priced at five sevenths of its overlap rather than all or nothing — see calc_tac.py and OPEN_TODOS['tac_weekday_blend']. |
 <!-- END GENERATED: standard_values -->
+
+<FeedbackForm />
