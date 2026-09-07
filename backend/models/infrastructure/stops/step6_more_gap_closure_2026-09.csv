@@ -19,4 +19,22 @@ Balatonfüred,Balatonfüred,,46.955,17.882,schedule,CENTRAL_EUROPE,HU,tourism:Ba
 Révfülöp,Révfülöp,,46.829,17.632,schedule,CENTRAL_EUROPE,HU,tourism:Balaton,infra-2026;infra-2032,station on lake Balaton,add
 Tapolca,Tapolca,,46.876,17.428,schedule,CENTRAL_EUROPE,HU,tourism:Balaton,infra-2026;infra-2032,station on lake Balaton,add
 Vididn tovarna,Vidin,,43.972,22.848,schedule,SOUTH_EASTERN_EUROPE,BG,border,infra-2026;infra-2032,BG/RO border station,add
-Charleville-Mézières,Charleville-Mézières,,49.771,4.720,schedule,FRANCE,FR,fua:Charleville-Mézières,infra-2026;infra-2032,,add
+Charleville-Mézières,Charleville-Mézières,,49.767,4.725,schedule,FRANCE,FR,network,infra-2026;infra-2032,,add
+Sassnitz,Sassnitz,,54.516,13.637,schedule,GERMANY,DE,tourism:island Rügen,infra-2026;infra-2032,former ferry port to scandinavia,add
+Westerland (Sylt),Westerland,,54.905,8.313,schedule,GERMANY,DE,tourism:island Sylt,infra-2026;infra-2032,holliday destination for tourists,add
+Pozzallo,Pozzallo,,36.733,14.847,schedule,SOUTHERN_EUROPE,IT,tourism:beach,infra-2026;infra-2032,connection for ferry to Malta,add
+Bochum,Bochum,,51.478,7.223,schedule,GERMANY,DE,fua:Bochum,infra-2026;infra-2032,holliday destination for tourists,add
+Oberstdorf,Oberstdorf,,47.411,10.278,schedule,GERMANY,DE,tourism:Alps,infra-2026;infra-2032,holliday destination for tourists,add
+Garmisch-Partenkirchen,Garmisch-Partenkirchen,,47.491,11.097,schedule,GERMANY,DE,tourism:Alps,infra-2026;infra-2032,holliday destination for tourists,add
+Friedrichshafen,Friedrichshafen,,47.653,9.473,schedule,GERMANY,DE,tourism:Lake Constance,infra-2026;infra-2032,holliday destination for tourists,add
+Konstanz,Konstanz,,47.658,9.177,schedule,GERMANY,DE,tourism:Lake Constance,infra-2026;infra-2032,holliday destination for tourists,add
+Chur,Chur,,46.853,9.529,schedule,SWITZERLAND,CH,tourism:Alps,infra-2026;infra-2032,connection to Rhätische Bahn with Bernina Express to Italy,add
+Lagos Train Station,Lagos Train Station,,37.108,-8.671,schedule,SOUTHERN_EUROPE,PT,tourism:beach,infra-2026;infra-2032,holliday destination for tourists,add
+Stratford International,Stratford International,,51.544,-0.008,schedule,UNITED_KINGDOM,GB,fua:London,infra-2026;infra-2032,possible station for open access operator through channel tunnel,add
+Ebbsfleet International,Ebbsfleet,,51.443,0.321,schedule,UNITED_KINGDOM,GB,fua:London,infra-2026;infra-2032,possible station for open access operator through channel tunnel,add
+Potsdam Hbf,Potsdam Hbf,,52.391,13.067,schedule,GERMANY,DE,fua:Berlin,infra-2026;infra-2032,,add
+Napoli Afragola,Napoli Afragola,,40.931,14.331,schedule,SOUTHERN_EUROPE,IT,fua:Napoli,infra-2026;infra-2032,better stop for night trains in Napoli,add
+Ludwigslust,Ludwigslust,,53.334,11.494,schedule,GERMANY,DE,fua:Ludwigslust,infra-2026;infra-2032,station between Berlin and Hamburg,add
+Haparanda,Haparanda,,65.828,24.130,schedule,NORTHERN_EUROPE,SE,border,infra-2026;infra-2032,SE/FI border station,add
+Tornio,Tornio,,65.845,24.163,schedule,NORTHERN_EUROPE,FI,border,infra-2026;infra-2032,FI/SE border station,add
+Stuttgart Flughafen,Stuttgart Flughafen,,48.692,9.195,schedule,GERMANY,DE,fua:Stuttgart,infra-2032,new stop after inauguration of S21,add
