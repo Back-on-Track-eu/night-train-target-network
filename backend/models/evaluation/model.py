@@ -32,7 +32,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-CALC_VERSION: str = "0.9.24"
+CALC_VERSION: str = "0.9.25"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -66,6 +66,22 @@ CALC_MODEL_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.25": {
+        "date": "2026-09-07",
+        "author": "david + claude",
+        "changes": "Summary row (models/evaluation/summary.py) gains five columns, "
+        "no existing value changes: net_eur_per_year (the SIGNED annual net - "
+        "negative is the shortfall subsidy_eur_per_year already reports, positive "
+        "is a surplus beyond the target margin, so a profitable route can be "
+        "shown as one instead of as 'subsidy 0'), operating_days_per_year, "
+        "train_km_per_year, available_place_km_per_year and sold_place_km_per_year "
+        "(the annual denominators behind the per-unit normalisations, re-derived "
+        "from the route dict so a composition comparison can show EUR/place-km and "
+        "utilisation from the summary alone). All five also land in "
+        "proposals.proposal_summaries (migration 2026-09-07_proposal_summaries_"
+        "supply_kpis.sql); scripts/refresh_proposals.py backfills stored rows. "
+        "Bumped because summary.py is gated on this constant.",
+    },
     "0.9.24": {
         "date": "2026-09-02",
         "author": "bjarne + claude",

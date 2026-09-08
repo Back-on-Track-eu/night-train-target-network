@@ -491,7 +491,13 @@ CREATE TABLE proposals.proposal_summaries (
     cost_eur_per_train_km       NUMERIC(10, 2) NOT NULL,
     revenue_eur_per_train_km    NUMERIC(10, 2) NOT NULL,
     margin_eur_per_train_km     NUMERIC(10, 2) NOT NULL,
+    net_eur_per_year            NUMERIC(14, 2) NOT NULL DEFAULT 0,
     subsidy_eur_per_year        NUMERIC(14, 2) NOT NULL,
+
+    operating_days_per_year     SMALLINT NOT NULL DEFAULT 0,
+    train_km_per_year           NUMERIC(12, 0) NOT NULL DEFAULT 0,
+    available_place_km_per_year NUMERIC(16, 0) NOT NULL DEFAULT 0,
+    sold_place_km_per_year      NUMERIC(16, 0) NOT NULL DEFAULT 0,
 
     demand_trips_per_year       NUMERIC(12, 0),
     demand_trip_km_per_year     NUMERIC(16, 0),
@@ -518,6 +524,11 @@ CREATE INDEX idx_summaries_geom      ON proposals.proposal_summaries USING GIST 
 COMMENT ON TABLE  proposals.proposal_summaries                        IS 'Derived projection over proposals.proposals — one row per proposal, NOT a source of truth. Written in the same transaction as every publish (and, from WP8 on, the version-refresh batch); rebuildable at any time by a backfill script.';
 COMMENT ON COLUMN proposals.proposal_summaries.route_fingerprint      IS 'Route identity fingerprint (§3.1) — informational only, same as proposals.proposals.route_fingerprint.';
 COMMENT ON COLUMN proposals.proposal_summaries.subsidy_eur_per_year   IS 'max(0, -net_eur): gap to target margin. Unit: EUR/year';
+COMMENT ON COLUMN proposals.proposal_summaries.net_eur_per_year       IS 'Signed annual net after the target margin (CALC 0.9.25): negative is the shortfall subsidy_eur_per_year reports, positive is a surplus. Unit: EUR/year';
+COMMENT ON COLUMN proposals.proposal_summaries.operating_days_per_year IS 'Operating days from the seasonal schedule (CALC 0.9.25) — the annualisation factor behind every per-year figure.';
+COMMENT ON COLUMN proposals.proposal_summaries.train_km_per_year      IS 'Annual train-km, both directions, all pairs (CALC 0.9.25) — the per_train_km divisor. Unit: km/year';
+COMMENT ON COLUMN proposals.proposal_summaries.available_place_km_per_year IS 'Annual capacity place-km (CALC 0.9.25) — the per_available_place_km divisor. Unit: place-km/year';
+COMMENT ON COLUMN proposals.proposal_summaries.sold_place_km_per_year IS 'Annual sold place-km from the OD loads (CALC 0.9.25) — sold / available is the utilisation. Unit: place-km/year';
 COMMENT ON COLUMN proposals.proposal_summaries.geom_simplified        IS 'Per-segment shapes concatenated and simplified (Douglas-Peucker, tolerance tuned for gallery-map zoom levels) — small enough to ship all proposals in one map response for a long time.';
 COMMENT ON COLUMN proposals.proposal_summaries.country_relations      IS 'Country-to-country relations this proposal actually serves, as sorted "AA__BB" keys — derived from od_pairs (boarding-capable origin before alighting-capable destination), so a merely transited country contributes nothing. Ranking dimension of GET /api/proposals/stats (§7.7); written by models/evaluation/summary.py''s build_summary_row().';
 COMMENT ON COLUMN proposals.proposal_summaries.demand_kpis_placeholder IS 'TRUE while demand_*/shift_*/co2_* columns are placeholder-faked (§8) — no demand model exists yet.';
