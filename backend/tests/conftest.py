@@ -174,9 +174,8 @@ def loader():
 
     from adapters.data_loader_from_db import DBDataLoader
 
-    _loader = DBDataLoader()
-    yield _loader
-    _loader.close()
+    # Borrows from the process-wide DBPool per query — nothing to close.
+    yield DBDataLoader()
 
 
 @pytest.fixture(scope="session")

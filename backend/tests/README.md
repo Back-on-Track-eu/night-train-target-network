@@ -26,7 +26,7 @@ built on top of it:
 
 | Prefix | Layer |
 |---|---|
-| `test_01`–`test_04` | Stack build-up: containers → seeded DB → loader → versioning |
+| `test_01`–`test_05` | Stack build-up: containers → seeded DB → loader → versioning → the shared DB pool (`adapters/db_pool.py`, WP14) |
 | `test_10`–`test_11` | Read-only params + scenarios APIs |
 | `test_20` | Route-building content logic (via `POST /api/proposal/calc`) |
 | `test_30` | Evaluation content logic (model-layer — `compute_evaluation_domain()`) |
@@ -35,6 +35,7 @@ built on top of it:
 | `test_37` | Fingerprint + gallery-summary projection (`adapters/proposal/projection.py`) |
 | `test_39` | The §2.3 compute cache (`adapters/proposal/compute_cache.py`, WP13) |
 | `test_40` | End-to-end pipeline smoke |
+| `test_41` | `POST /api/proposal/calc/matrix` — scenario × composition grid, document + NDJSON stream (§2.5). On a one-instance stack every `infra_2032` cell is an error cell by design |
 | `test_50` | `POST /api/proposal/publish` + proposals list/load (the only write path) |
 | `test_51` | Proposal engagement — likes + comments |
 | `test_55` | `GET /api/proposals/stats` — §7.7 counts, KPI aggregates per scope, top/flop countries and country relations |

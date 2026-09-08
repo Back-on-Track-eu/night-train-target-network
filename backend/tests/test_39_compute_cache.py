@@ -88,9 +88,7 @@ def cache_repo():
     os.environ.setdefault("POSTGRES_DB", DB_CONFIG["dbname"])
     os.environ.setdefault("POSTGRES_USER", DB_CONFIG["user"])
     os.environ.setdefault("POSTGRES_PASSWORD", DB_CONFIG["password"])
-    repo = ComputeCacheRepository()
-    yield repo
-    repo.close()
+    yield ComputeCacheRepository()
 
 
 # =============================================================================
@@ -248,18 +246,15 @@ class TestSweep:
         certain: a single store() must take the expired rows with it."""
         _insert_synthetic_rows(db_cur, db_conn, "old", age_hours=4)
         repo = ComputeCacheRepository(cleanup_probability=1.0)
-        try:
-            repo.store(
-                request_hash="fresh",
-                route_fingerprint="sha256:fresh",
-                scenario_id=1,
-                composition_id="TEST-COMP",
-                resolved_request={},
-                suggested_stops=None,
-                payload={},
-            )
-        finally:
-            repo.close()
+        repo.store(
+            request_hash="fresh",
+            route_fingerprint="sha256:fresh",
+            scenario_id=1,
+            composition_id="TEST-COMP",
+            resolved_request={},
+            suggested_stops=None,
+            payload={},
+        )
         db_cur.execute(f"SELECT request_hash FROM {_POINTER}")
         assert [row["request_hash"] for row in db_cur.fetchall()] == ["fresh"]
         assert _count(db_cur, db_conn, _RESULT) == 1

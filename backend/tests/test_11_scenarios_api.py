@@ -38,6 +38,42 @@ SCENARIO_FIELDS = {
     "stop_infrastructure_defaults_version",
     "passage_charges_version",
     "routing_graph_key",
+    "dimensions",
+}
+
+# scenario_key → dimensions, for every seeded row (db/dev/seed.py) — the
+# derivation contract of scenario_serialize.scenario_dimensions().
+EXPECTED_DIMENSIONS = {
+    "infra-2026": {
+        "network": "2026",
+        "hsr_allowed": False,
+        "optimised_timetable": False,
+    },
+    "infra-2026-hsr": {
+        "network": "2026",
+        "hsr_allowed": True,
+        "optimised_timetable": False,
+    },
+    "infra-2026-hsr-opt-tt": {
+        "network": "2026",
+        "hsr_allowed": True,
+        "optimised_timetable": True,
+    },
+    "infra-2032": {
+        "network": "2032",
+        "hsr_allowed": False,
+        "optimised_timetable": False,
+    },
+    "infra-2032-hsr": {
+        "network": "2032",
+        "hsr_allowed": True,
+        "optimised_timetable": False,
+    },
+    "infra-2032-hsr-opt-tt": {
+        "network": "2032",
+        "hsr_allowed": True,
+        "optimised_timetable": True,
+    },
 }
 
 GROUPS = ("current_base", "current_scenarios", "historical_scenarios")
@@ -99,6 +135,33 @@ class TestScenariosRoutingGraphPin:
         ]
         by_graph = Counter(s["routing_graph_key"] for s in selectable)
         assert by_graph == {"infra_2026": 3, "infra_2032": 3}, by_graph
+
+
+class TestScenarioDimensions:
+    def test_every_seeded_scenario_has_grid_coordinates(self, scenarios_body):
+        """dimensions is derived from scenario_key + routing_graph_key
+        (scenario_serialize.py) — every seeded row, superseded revision
+        included, lands on its grid position."""
+        for group in GROUPS:
+            for scenario in scenarios_body[group]["scenarios"]:
+                key = scenario["scenario_key"]
+                assert scenario["dimensions"] == EXPECTED_DIMENSIONS[key], key
+
+    def test_selectable_scenarios_cover_the_grid_once(self, scenarios_body):
+        """2 networks × 3 operating conditions, each exactly once among the
+        selectable rows — what the frontend's switches map onto."""
+        selectable = [
+            *scenarios_body["current_base"]["scenarios"],
+            *scenarios_body["current_scenarios"]["scenarios"],
+        ]
+        cells = Counter(
+            (d["network"], d["hsr_allowed"], d["optimised_timetable"])
+            for d in (s["dimensions"] for s in selectable)
+        )
+        assert set(cells.values()) == {1}
+        assert len(cells) == 6
+        # opt-tt never appears without HSR in the seed
+        assert all(hsr or not opt for _, hsr, opt in cells)
 
 
 class TestScenariosGrouping:

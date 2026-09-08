@@ -118,7 +118,12 @@ class TestSummaryRow:
             "cost_eur_per_train_km",
             "revenue_eur_per_train_km",
             "margin_eur_per_train_km",
+            "net_eur_per_year",
             "subsidy_eur_per_year",
+            "operating_days_per_year",
+            "train_km_per_year",
+            "available_place_km_per_year",
+            "sold_place_km_per_year",
             "demand_trips_per_year",
             "demand_trip_km_per_year",
             "shift_air_trips_per_year",
@@ -162,7 +167,25 @@ class TestSummaryRow:
             per_train_km["total_revenue_eur"], 2
         )
         assert row["margin_eur_per_train_km"] == round(per_train_km["net_eur"], 2)
+        assert row["net_eur_per_year"] == round(per_year["net_eur"], 2)
         assert row["subsidy_eur_per_year"] == round(max(0.0, -per_year["net_eur"]), 2)
+
+    def test_supply_kpis_match_the_normalisation_divisors(self, calc_response, row):
+        """CALC 0.9.25: the annual denominators are the ones the route view
+        was normalised with, so per_year / per_train_km (and per
+        available-place-km) reproduce them — within the leaves' rounding."""
+        route_data = calc_response["evaluation"]["views"]["route"]["data"]
+        cost_year = route_data["per_year"]["all"]["total_cost_eur"]
+        cost_train_km = route_data["per_train_km"]["all"]["total_cost_eur"]
+        cost_place_km = route_data["per_available_place_km"]["all"]["total_cost_eur"]
+        assert row["operating_days_per_year"] in (7 * 52, 3 * 52, 5 * 52)
+        assert row["train_km_per_year"] == pytest.approx(
+            cost_year / cost_train_km, rel=1e-3
+        )
+        assert row["available_place_km_per_year"] == pytest.approx(
+            cost_year / cost_place_km, rel=1e-3
+        )
+        assert 0 < row["sold_place_km_per_year"] <= row["available_place_km_per_year"]
 
     def test_demand_kpis_are_placeholder(self, row):
         assert row["demand_kpis_placeholder"] is True
@@ -235,7 +258,9 @@ class TestSummaryRowSchemaConformance:
                 calc_version, total_distance_km, total_time_h, avg_speed_kmh,
                 n_stops, countries, stop_ids, geom_simplified,
                 cost_eur_per_train_km, revenue_eur_per_train_km,
-                margin_eur_per_train_km, subsidy_eur_per_year,
+                margin_eur_per_train_km, net_eur_per_year, subsidy_eur_per_year,
+                operating_days_per_year, train_km_per_year,
+                available_place_km_per_year, sold_place_km_per_year,
                 demand_trips_per_year, demand_trip_km_per_year,
                 shift_air_trips_per_year, shift_air_trip_km_per_year,
                 shift_car_trips_per_year, shift_car_trip_km_per_year,
@@ -248,7 +273,9 @@ class TestSummaryRowSchemaConformance:
                 %(n_stops)s, %(countries)s, %(stop_ids)s,
                 ST_SetSRID(ST_GeomFromGeoJSON(%(geom_simplified)s), 4326),
                 %(cost_eur_per_train_km)s, %(revenue_eur_per_train_km)s,
-                %(margin_eur_per_train_km)s, %(subsidy_eur_per_year)s,
+                %(margin_eur_per_train_km)s, %(net_eur_per_year)s, %(subsidy_eur_per_year)s,
+                %(operating_days_per_year)s, %(train_km_per_year)s,
+                %(available_place_km_per_year)s, %(sold_place_km_per_year)s,
                 %(demand_trips_per_year)s, %(demand_trip_km_per_year)s,
                 %(shift_air_trips_per_year)s, %(shift_air_trip_km_per_year)s,
                 %(shift_car_trips_per_year)s, %(shift_car_trip_km_per_year)s,
