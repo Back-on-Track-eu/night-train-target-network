@@ -82,8 +82,9 @@ import os
 import random
 from typing import Optional
 
-import psycopg2
 import psycopg2.extras
+
+from adapters.db_pool import DBPool, default_pool
 
 COMPUTE_CACHE_TTL_HOURS = float(os.environ.get("COMPUTE_CACHE_TTL_HOURS", "3"))
 COMPUTE_CACHE_CLEANUP_PROBABILITY = float(
@@ -131,50 +132,22 @@ _STORE_POINTER_SQL = """
 
 
 class ComputeCacheRepository:
-    """Read/write access to the two §2.3 cache tables — thin connection
-    wrapper mirroring ProposalRepository's construction (same env vars,
-    one connection per process/worker). Errors propagate: the tables live
-    in the same database every compute already depends on, so a failure
-    here means the request was doomed regardless — and swallowing would
-    hide a missing migration forever."""
+    """Read/write access to the two §2.3 cache tables. Every call borrows
+    a connection from the shared DBPool (adapters/db_pool.py) for exactly
+    its own transaction, so the repository is thread-safe without a lock.
+    Errors propagate: the tables live in the same database every compute
+    already depends on, so a failure here means the request was doomed
+    regardless — and swallowing would hide a missing migration forever."""
 
     def __init__(
         self,
         ttl_hours: float = COMPUTE_CACHE_TTL_HOURS,
         cleanup_probability: float = COMPUTE_CACHE_CLEANUP_PROBABILITY,
+        pool: DBPool | None = None,
     ) -> None:
         self._ttl_hours = ttl_hours
         self._cleanup_probability = cleanup_probability
-        self._conn = self._connect()
-
-    def _connect(self):
-        required = {
-            "POSTGRES_HOST": os.environ.get("POSTGRES_HOST"),
-            "POSTGRES_PORT": os.environ.get("POSTGRES_PORT"),
-            "POSTGRES_DB": os.environ.get("POSTGRES_DB"),
-            "POSTGRES_USER": os.environ.get("POSTGRES_USER"),
-            "POSTGRES_PASSWORD": os.environ.get("POSTGRES_PASSWORD"),
-        }
-        missing = [key for key, value in required.items() if not value]
-        if missing:
-            raise RuntimeError(
-                f"Missing required environment variable(s) for DB connection: "
-                f"{', '.join(missing)}."
-            )
-        return psycopg2.connect(
-            host=required["POSTGRES_HOST"],
-            port=required["POSTGRES_PORT"],
-            dbname=required["POSTGRES_DB"],
-            user=required["POSTGRES_USER"],
-            password=required["POSTGRES_PASSWORD"],
-        )
-
-    def _cursor(self):
-        return self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-
-    def close(self) -> None:
-        if self._conn and not self._conn.closed:
-            self._conn.close()
+        self._pool = pool or default_pool()
 
     # -------------------------------------------------------------------------
     # Read
@@ -186,21 +159,12 @@ class ComputeCacheRepository:
         suggested_stops, payload} or None on a miss. A pointer whose
         result row is gone (TTL raced between the two tables) simply
         fails the JOIN and reads as a miss."""
-        try:
-            with self._cursor() as cur:
-                cur.execute(
-                    _LOOKUP_SQL,
-                    {"request_hash": request_hash, "ttl_hours": self._ttl_hours},
-                )
-                row = cur.fetchone()
-            self._conn.rollback()
-        except Exception:
-            # Never leave the long-lived singleton connection inside an
-            # aborted transaction — one failed SELECT would otherwise
-            # cascade "current transaction is aborted" into every later
-            # request on this worker.
-            self._conn.rollback()
-            raise
+        with self._pool.cursor() as cur:
+            cur.execute(
+                _LOOKUP_SQL,
+                {"request_hash": request_hash, "ttl_hours": self._ttl_hours},
+            )
+            row = cur.fetchone()
         return dict(row) if row is not None else None
 
     # -------------------------------------------------------------------------
@@ -221,8 +185,8 @@ class ComputeCacheRepository:
         sampled TTL sweep, in one transaction. suggested_stops is None
         for non-suggest requests (SQL NULL, distinct from an empty
         suggest-mode list)."""
-        try:
-            with self._cursor() as cur:
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
                 cur.execute(
                     _STORE_RESULT_SQL,
                     {
@@ -249,10 +213,7 @@ class ComputeCacheRepository:
                 )
                 if random.random() < self._cleanup_probability:
                     self._sweep(cur)
-            self._conn.commit()
-        except Exception:
-            self._conn.rollback()
-            raise
+            conn.commit()
 
     # -------------------------------------------------------------------------
     # Maintenance
@@ -270,13 +231,10 @@ class ComputeCacheRepository:
         """The TTL sweep as a standalone transaction — the same DELETEs
         store() runs probabilistically. Exposed for tests and for any
         future external scheduler (a known non-goal today, §2.3)."""
-        try:
-            with self._cursor() as cur:
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
                 self._sweep(cur)
-            self._conn.commit()
-        except Exception:
-            self._conn.rollback()
-            raise
+            conn.commit()
 
     def flush(self) -> None:
         """§2.3/§4.2: empties both cache tables — UNLOGGED, never a
@@ -284,13 +242,10 @@ class ComputeCacheRepository:
         refresh_proposals.py as the first step of every version bump /
         base-scenario move (moved here from ProposalRepository in WP13:
         the tables now have a dedicated owning adapter)."""
-        try:
-            with self._cursor() as cur:
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
                 cur.execute(
                     "TRUNCATE proposals.compute_cache_pointer, "
                     "proposals.compute_cache_result"
                 )
-            self._conn.commit()
-        except Exception:
-            self._conn.rollback()
-            raise
+            conn.commit()

@@ -1784,17 +1784,14 @@ def seed_route_segments() -> None:
         print("  route_cache: no route_segments_*.csv.gz — cache fills from traffic.")
         return
     repo = RouteSegmentRepository()
-    try:
-        for path in files:
-            graph_key = path.name[len("route_segments_") : -len(".csv.gz")]
-            meta_path = path.with_name(f"route_segments_{graph_key}.meta.json")
-            if meta_path.is_file():
-                meta = json.loads(meta_path.read_text(encoding="utf-8"))
-                repo.sync_graph_import(graph_key, meta.get("import_date"))
-            inserted = repo.load_csv(path, graph_key)
-            print(f"  route_cache [{graph_key}]: {inserted} segment(s) loaded.")
-    finally:
-        repo.close()
+    for path in files:
+        graph_key = path.name[len("route_segments_") : -len(".csv.gz")]
+        meta_path = path.with_name(f"route_segments_{graph_key}.meta.json")
+        if meta_path.is_file():
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            repo.sync_graph_import(graph_key, meta.get("import_date"))
+        inserted = repo.load_csv(path, graph_key)
+        print(f"  route_cache [{graph_key}]: {inserted} segment(s) loaded.")
 
 
 def _download_stop_seed() -> bool:
@@ -2973,26 +2970,17 @@ def seed_example_proposal(cur, conn) -> None:
         user_id = cur.fetchone()[0]
 
         loader = DBDataLoader()
-        try:
-            composition = loader.build_all_compositions(scenario_id).get("NEW-BAL-7")
-            tracks = loader.build_all_tracks(scenario_id)
-            route_dict = _build_example_route(scenario_id, composition, tracks)
-            computed = _compute_example_proposal(
-                route_dict, scenario_id, loader, tracks
-            )
-        finally:
-            loader.close()
+        composition = loader.build_all_compositions(scenario_id).get("NEW-BAL-7")
+        tracks = loader.build_all_tracks(scenario_id)
+        route_dict = _build_example_route(scenario_id, composition, tracks)
+        computed = _compute_example_proposal(route_dict, scenario_id, loader, tracks)
 
-        repo = ProposalRepository()
-        try:
-            repo.publish(
-                mode="new",
-                user_id=user_id,
-                name="Berlin – Dresden – Wien (seed example)",
-                computed=computed,
-            )
-        finally:
-            repo.close()
+        ProposalRepository().publish(
+            mode="new",
+            user_id=user_id,
+            name="Berlin – Dresden – Wien (seed example)",
+            computed=computed,
+        )
     except Exception as e:
         print(f"  WARNING: example proposal seed failed, skipping: {e}")
         conn.rollback()

@@ -45,13 +45,10 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from datetime import time, timedelta
-
-import psycopg2
-import psycopg2.extras
-
 from typing import Optional
+
+from adapters.db_pool import DBPool, default_pool
 
 from db.schema import STOP_NAME_LANGS
 from models.params import (
@@ -183,44 +180,14 @@ class DBDataLoader:
     WARNING is logged for every substituted default.
     """
 
-    def __init__(self) -> None:
-        self._conn = self._connect()
-
-    def _connect(self):
-        """
-        Connect using environment variables only — no defaults.
-        Raises KeyError with a clear message if any required variable is missing.
-        Required: POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DB,
-                  POSTGRES_USER, POSTGRES_PASSWORD.
-        Set these in .env (loaded by python-dotenv in main.py).
-        """
-        required = [
-            "POSTGRES_HOST",
-            "POSTGRES_PORT",
-            "POSTGRES_DB",
-            "POSTGRES_USER",
-            "POSTGRES_PASSWORD",
-        ]
-        missing = [k for k in required if not os.environ.get(k)]
-        if missing:
-            raise KeyError(
-                f"Missing required environment variable(s) for DB connection: {', '.join(missing)}. "
-                f"Check your .env file."
-            )
-        return psycopg2.connect(
-            host=os.environ["POSTGRES_HOST"],
-            port=int(os.environ["POSTGRES_PORT"]),
-            dbname=os.environ["POSTGRES_DB"],
-            user=os.environ["POSTGRES_USER"],
-            password=os.environ["POSTGRES_PASSWORD"],
-        )
+    def __init__(self, pool: DBPool | None = None) -> None:
+        self._pool = pool or default_pool()
 
     def _cursor(self):
-        return self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-
-    def close(self) -> None:
-        if self._conn and not self._conn.closed:
-            self._conn.close()
+        """A cursor on a freshly borrowed connection — every loader query
+        is a single read, released when the block ends. No connection is
+        held between calls, so one loader serves any number of threads."""
+        return self._pool.cursor()
 
     # ------------------------------------------------------------------
     # SCENARIO RESOLUTION
@@ -1133,7 +1100,6 @@ class DBDataLoader:
                 result[comp_id] = comp
             except Exception as e:
                 logger.warning("Skipping composition '%s': %s", comp_id, e)
-                self._conn.rollback()
 
         logger.info(
             "Built %d compositions (%d with indicative figures).",

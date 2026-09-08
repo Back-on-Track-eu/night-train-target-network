@@ -60,11 +60,16 @@ services:
     # Skip the image's seed-on-start entrypoint (it begins with
     # DROP SCHEMA ... CASCADE): seed once manually via `compose run`,
     # then this stack only ever starts gunicorn.
+    # gthread worker model (WP14): GUNICORN_WORKERS processes x
+    # GUNICORN_THREADS request threads each; adapters share one DB pool
+    # per process (DB_POOL_MAX). Sizing rules in docs/DEPLOY_HANDOVER.md.
     command:
       [
         "gunicorn",
         "--bind", "0.0.0.0:5000",
-        "--workers", "2",
+        "--worker-class", "gthread",
+        "--workers", "${GUNICORN_WORKERS:-2}",
+        "--threads", "${GUNICORN_THREADS:-8}",
         "--timeout", "120",
         "main:create_app()",
       ]

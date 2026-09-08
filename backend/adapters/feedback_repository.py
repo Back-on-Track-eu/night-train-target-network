@@ -2,8 +2,9 @@
 feedback_repository.py
 =======================
 Write-path database adapter for feedback submissions — mirrors
-ProposalRepository (adapters/proposal/repository.py): its own connection
-to the same database, so DBDataLoader stays strictly read-only. See
+ProposalRepository (adapters/proposal/repository.py): borrows a
+connection from the shared DBPool per call, so DBDataLoader stays
+strictly read-only and no adapter holds a connection between calls. See
 db/dev/sql/create_admin_schema.sql for the admin.feedback schema this
 module writes to.
 
@@ -17,51 +18,27 @@ lose a stored feedback row.
 from __future__ import annotations
 
 import logging
-import os
 from typing import Optional
 
-import psycopg2
-import psycopg2.extras
+from psycopg2.extras import RealDictCursor
+
+from adapters.db_pool import DBPool, default_pool
 
 logger = logging.getLogger(__name__)
 
 
 class FeedbackRepository:
-    """Persists feedback submissions — thin connection wrapper mirroring
-    ProposalRepository's construction (same env vars, one connection per
-    process/worker)."""
+    """Persists feedback submissions — one borrowed DBPool connection per
+    call, mirroring ProposalRepository."""
 
-    def __init__(self) -> None:
-        self._conn = self._connect()
-
-    def _connect(self):
-        required = {
-            "POSTGRES_HOST": os.environ.get("POSTGRES_HOST"),
-            "POSTGRES_PORT": os.environ.get("POSTGRES_PORT"),
-            "POSTGRES_DB": os.environ.get("POSTGRES_DB"),
-            "POSTGRES_USER": os.environ.get("POSTGRES_USER"),
-            "POSTGRES_PASSWORD": os.environ.get("POSTGRES_PASSWORD"),
-        }
-        missing = [key for key, value in required.items() if not value]
-        if missing:
-            raise RuntimeError(
-                f"Missing required environment variable(s) for DB connection: "
-                f"{', '.join(missing)}."
-            )
-        return psycopg2.connect(
-            host=required["POSTGRES_HOST"],
-            port=required["POSTGRES_PORT"],
-            dbname=required["POSTGRES_DB"],
-            user=required["POSTGRES_USER"],
-            password=required["POSTGRES_PASSWORD"],
-        )
+    def __init__(self, pool: DBPool | None = None) -> None:
+        self._pool = pool or default_pool()
 
     def _cursor(self):
-        return self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-
-    def close(self) -> None:
-        if self._conn and not self._conn.closed:
-            self._conn.close()
+        """A cursor on a freshly borrowed connection — single-query reads.
+        The transaction is released when the block ends. Writes borrow a
+        connection explicitly and commit inside the block."""
+        return self._pool.cursor()
 
     # ------------------------------------------------------------------
     # Users
@@ -83,7 +60,6 @@ class FeedbackRepository:
                 (user_id,),
             )
             row = cur.fetchone()
-        self._conn.rollback()  # release the read-only transaction
         return dict(row) if row else None
 
     # ------------------------------------------------------------------
@@ -103,8 +79,8 @@ class FeedbackRepository:
         the author — enforced by validate_feedback_body() before this is
         called, and by feedback_identity_present at the DB level either
         way. Returns {feedback_id, created_at}."""
-        try:
-            with self._cursor() as cur:
+        with self._pool.connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
                     "INSERT INTO admin.feedback "
                     "(user_id, email, category, sub_category, subject, message) "
@@ -113,10 +89,7 @@ class FeedbackRepository:
                     (user_id, email, category, sub_category, subject, message),
                 )
                 row = cur.fetchone()
-            self._conn.commit()
-        except Exception:
-            self._conn.rollback()
-            raise
+            conn.commit()
 
         logger.info(
             "feedback stored: feedback_id=%s user_id=%s category=%s",
@@ -131,8 +104,8 @@ class FeedbackRepository:
         the new notified_at timestamp, or None if feedback_id doesn't
         exist (should not happen — called immediately after insert() with
         the id it just returned)."""
-        try:
-            with self._cursor() as cur:
+        with self._pool.connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
                     "UPDATE admin.feedback SET notified_at = now() "
                     "WHERE feedback_id = %s "
@@ -140,8 +113,5 @@ class FeedbackRepository:
                     (feedback_id,),
                 )
                 row = cur.fetchone()
-            self._conn.commit()
-        except Exception:
-            self._conn.rollback()
-            raise
+            conn.commit()
         return row["notified_at"] if row else None

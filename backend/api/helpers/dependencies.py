@@ -3,6 +3,13 @@ dependencies.py
 ===============
 Singleton state for the Flask API.
 
+One DBPool (adapters/db_pool.py, WP14) is built first and handed to every
+adapter below: none of them holds a psycopg2 connection any more, each
+borrows one per unit of work and returns it. That is what makes the
+singletons safe to share across gunicorn `gthread` request threads and
+the calc-matrix fan-out. Route handlers call get_db_pool() only for
+diagnostics; data access always goes through an adapter.
+
 A DBDataLoader is created once at startup and held for the lifetime of the
 process. All route handlers call get_loader() to access it.
 
@@ -53,13 +60,14 @@ A ProposalRepository (write path for saved proposals), a
 FeedbackRepository (write path for feedback submissions), a
 ProposalEngagementRepository (write path for proposal likes/comments),
 and a ComputeCacheRepository (the §2.3 compute cache, WP13) are
-created alongside them — each holds its own connection to the same
-database, keeping DBDataLoader strictly read-only. Route handlers call
-get_proposal_repository() / get_feedback_repository() /
+created alongside them — all on the same pool, keeping DBDataLoader
+strictly read-only by convention rather than by connection. Route
+handlers call get_proposal_repository() / get_feedback_repository() /
 get_proposal_engagement_repository() to access them.
 
 State
 -----
+  _db_pool         : DBPool instance (built first at startup)
   _loader          : DBDataLoader instance (created at startup)
   _country_index   : CountryIndex instance (built at startup from the loader)
   _passage_index   : PassageIndex instance (crossing polygons, same lifetime)
@@ -89,6 +97,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Singleton state
 # ---------------------------------------------------------------------------
+_db_pool = None
 _loader = None
 _country_index = None
 _passage_index = None
@@ -152,6 +161,7 @@ def init() -> None:
     Called once from main.py before the Flask app starts serving requests.
     """
     global \
+        _db_pool, \
         _loader, \
         _country_index, \
         _passage_index, \
@@ -168,6 +178,7 @@ def init() -> None:
         _load_error
 
     from adapters.data_loader_from_db import DBDataLoader
+    from adapters.db_pool import default_pool
     from adapters.proposal.repository import ProposalRepository
     from adapters.feedback_repository import FeedbackRepository
     from adapters.proposal.engagement_repository import ProposalEngagementRepository
@@ -184,7 +195,10 @@ def init() -> None:
     logger.info("Connecting to database...")
 
     try:
-        _loader = DBDataLoader()
+        # The process-wide default pool, so adapters constructed elsewhere
+        # in this process (scripts importing the API helpers) share it.
+        _db_pool = default_pool()
+        _loader = DBDataLoader(_db_pool)
         _country_index = CountryIndex(_loader.get_country_geometries())
         # Crossing polygons are static reference data like the country
         # borders — a tunnel does not move between scenarios — so the index
@@ -196,7 +210,7 @@ def init() -> None:
         # planet, not of an OSM snapshot. Construction is cheap (a
         # Session each, no network call), so even a graph no scenario
         # pins yet costs nothing until routed on.
-        _segment_repo = _build_segment_repository(RouteSegmentRepository)
+        _segment_repo = _build_segment_repository(RouteSegmentRepository, _db_pool)
         _rail_routers = {
             key: RailRouter(
                 _country_index,
@@ -216,12 +230,14 @@ def init() -> None:
                 for key, router in sorted(_rail_routers.items())
             ),
         )
-        _proposal_repo = ProposalRepository()
-        _feedback_repo = FeedbackRepository()
-        _engagement_repo = ProposalEngagementRepository()
-        _auth_repo = AuthRepository()
-        _compute_cache = ComputeCacheRepository()
-        _request_log_repo = _build_request_log_repository(RequestLogRepository)
+        _proposal_repo = ProposalRepository(_db_pool)
+        _feedback_repo = FeedbackRepository(_db_pool)
+        _engagement_repo = ProposalEngagementRepository(_db_pool)
+        _auth_repo = AuthRepository(_db_pool)
+        _compute_cache = ComputeCacheRepository(pool=_db_pool)
+        _request_log_repo = _build_request_log_repository(
+            RequestLogRepository, _db_pool
+        )
         _loaded = True
         _loaded_at = datetime.now(timezone.utc)
         _load_error = None
@@ -233,20 +249,22 @@ def init() -> None:
         raise
 
 
-def _build_request_log_repository(repository_cls):
-    """The usage log's connection, or None.
+def _build_request_log_repository(repository_cls, pool):
+    """The usage log's repository, or None.
 
     Its own try/except, unlike every other repository in init(): usage
     logging is observability, and a database that will not take a
     request_log row is not a reason to refuse to serve the API. Disabled
-    by config, or failing to connect, both degrade to None — and
-    api/request_log.py treats None as "skip", so the only symptom is a
-    missing log."""
+    by config, or a table that does not exist (the probing count()
+    fails), both degrade to None — and api/request_log.py treats None as
+    "skip", so the only symptom is a missing log."""
     if not config.REQUEST_LOG_ENABLED:
         logger.info("Request log disabled — no repository built.")
         return None
     try:
-        return repository_cls()
+        repo = repository_cls(pool)
+        repo.count()
+        return repo
     except Exception as e:
         logger.warning(
             "Request log repository unavailable (%s). The API serves "
@@ -254,6 +272,14 @@ def _build_request_log_repository(repository_cls):
             e,
         )
         return None
+
+
+def get_db_pool():
+    """Return the shared DBPool (diagnostics, tests). Data access goes
+    through the adapters, never through the pool directly."""
+    if not _loaded or _db_pool is None:
+        raise DataNotLoadedError("Data not loaded. Call POST /api/data/load first.")
+    return _db_pool
 
 
 def get_loader():
@@ -276,10 +302,11 @@ def get_country_index():
     return _country_index
 
 
-def _build_segment_repository(repository_cls):
+def _build_segment_repository(repository_cls, pool):
     """The shared segment-cache repository, or None when disabled by env
-    or unreachable — routing then runs live, which is slower but never
-    wrong, so a cache problem must not take the API down."""
+    or when the route_cache schema is missing (the probing count() fails)
+    — routing then runs live, which is slower but never wrong, so a cache
+    problem must not take the API down."""
     if os.environ.get("ROUTE_SEGMENT_CACHE_ENABLED", "true").strip().lower() in (
         "0",
         "false",
@@ -288,7 +315,9 @@ def _build_segment_repository(repository_cls):
         logger.info("Route segment cache disabled (ROUTE_SEGMENT_CACHE_ENABLED).")
         return None
     try:
-        return repository_cls()
+        repo = repository_cls(pool)
+        repo.count("__probe__")  # any key: proves route_cache.route_segments exists
+        return repo
     except Exception as e:
         logger.warning(
             "Route segment cache unavailable (%s: %s) — live routing only. "

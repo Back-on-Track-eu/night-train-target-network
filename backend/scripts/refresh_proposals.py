@@ -36,15 +36,12 @@ models/route/routing/rail_router.py's RailRouter already falls back to
 http://localhost:8989 on its own when that variable is unset, so
 nothing extra is needed there as long as this script leaves it alone.
 
-Concurrency (see docs/PARKED_WORK.md): only the
-live-routing compute step is parallelized across --concurrency worker
-threads, each with its own DBDataLoader (cheap — one psycopg2 connection,
-no heavy precompute) sharing the one process-wide RailRouter, which is
-explicitly built for concurrent use (pooled requests.Session — see
-api/helpers/dependencies.py). DB writes (refresh_proposal()) stay
-sequential on the main thread against the single shared
-ProposalRepository connection, which is NOT thread-safe — writes were
-never the bottleneck (routing calls are), and serializing them here also
+Concurrency: only the live-routing compute step is parallelized across
+--concurrency worker threads. Since WP14 every adapter borrows its
+connection from the shared DBPool per call, so the singleton
+DBDataLoader and RailRouter are simply used from every thread. DB writes
+(refresh_proposal()) stay sequential on the main thread — writes were
+never the bottleneck (routing calls are), and serializing them also
 means only one FOR UPDATE lock is ever held at a time.
 
 Compute-cache flush: §4.2 calls for flushing the compute cache first on
@@ -52,10 +49,7 @@ every version bump / base move so stale cached results can't leak back
 into a fresh /calc — ComputeCacheRepository.flush() (called below before
 processing starts). The compute calls themselves run with
 use_cache=False: the flush just emptied both maps and each outdated
-proposal is computed exactly once, so hits are impossible here — and
-skipping the cache also keeps the singleton cache connection off the
-worker threads (the same one-connection-per-thread rule that gives each
-worker its own DBDataLoader).
+proposal is computed exactly once, so hits are impossible here.
 
 Usage:
     uv run --extra dev python -m scripts.refresh_proposals [--dry-run] [--limit N] [--concurrency N]
@@ -68,7 +62,6 @@ import logging
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from adapters.data_loader_from_db import DBDataLoader
 from adapters.proposal.repository import outdated_trigger
 from api.helpers import dependencies
 from api.helpers.proposal_compute import compute_proposal
@@ -77,11 +70,10 @@ logger = logging.getLogger(__name__)
 
 
 def _compute_one(row: dict) -> tuple[dict, dict]:
-    """Runs on a worker thread — its own DBDataLoader; the RailRouter is
+    """Runs on a worker thread on the shared singletons; the RailRouter is
     resolved per proposal by compute_proposal() from the scenario's
-    routing_graph_key pin (registry routers are shared and thread-safe —
-    see api/helpers/dependencies.py). Returns (computed, trigger); the
-    DB write happens back on the main thread."""
+    routing_graph_key pin (see api/helpers/dependencies.py). Returns
+    (computed, trigger); the DB write happens back on the main thread."""
     trigger = outdated_trigger(row)
     # Can't happen in practice — list_outdated() already filtered to
     # exactly the rows outdated_trigger() agrees are outdated — but a
@@ -92,23 +84,14 @@ def _compute_one(row: dict) -> tuple[dict, dict]:
         "outdated_trigger() found nothing outdated about it."
     )
 
-    thread_loader = DBDataLoader()
-    try:
-        refresh_request = dict(row["compute_request"])
-        # Re-resolve fresh against the current base rather than replaying
-        # the stored (possibly stale) scenario_id — a refresh always lands
-        # on whatever base is current NOW, regardless of which trigger
-        # fired (see api/proposals.py's on-load fallback for the same
-        # rule applied on the read path).
-        refresh_request["scenario_id"] = None
-        computed, _ = compute_proposal(
-            refresh_request,
-            loader=thread_loader,
-            use_cache=False,
-        )
-    finally:
-        thread_loader.close()
-
+    refresh_request = dict(row["compute_request"])
+    # Re-resolve fresh against the current base rather than replaying
+    # the stored (possibly stale) scenario_id — a refresh always lands
+    # on whatever base is current NOW, regardless of which trigger
+    # fired (see api/proposals.py's on-load fallback for the same
+    # rule applied on the read path).
+    refresh_request["scenario_id"] = None
+    computed, _ = compute_proposal(refresh_request, use_cache=False)
     return computed, trigger
 
 

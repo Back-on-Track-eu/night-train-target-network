@@ -64,39 +64,28 @@ def main() -> int:
         return 1
 
     repo = RequestLogRepository()
-    try:
-        before = repo.count()
-        logger.info("admin.request_log holds %d row(s).", before)
+    before = repo.count()
+    logger.info("admin.request_log holds %d row(s).", before)
 
-        if args.dry_run:
-            # Counted the same way purge_older_than() deletes, so the dry
-            # run cannot disagree with the real one about the boundary.
-            with repo._conn.cursor() as cur:
-                cur.execute(
-                    "SELECT count(*) FROM admin.request_log "
-                    "WHERE occurred_at < now() - make_interval(days => %s)",
-                    (args.days,),
-                )
-                stale = int(cur.fetchone()[0])
-            logger.info(
-                "Dry run: %d row(s) older than %d day(s) would be deleted, "
-                "%d would remain.",
-                stale,
-                args.days,
-                before - stale,
-            )
-            return 0
-
-        deleted = repo.purge_older_than(args.days)
+    if args.dry_run:
+        stale = repo.count_older_than(args.days)
         logger.info(
-            "Deleted %d row(s) older than %d day(s); %d remain.",
-            deleted,
+            "Dry run: %d row(s) older than %d day(s) would be deleted, "
+            "%d would remain.",
+            stale,
             args.days,
-            before - deleted,
+            before - stale,
         )
         return 0
-    finally:
-        repo.close()
+
+    deleted = repo.purge_older_than(args.days)
+    logger.info(
+        "Deleted %d row(s) older than %d day(s); %d remain.",
+        deleted,
+        args.days,
+        before - deleted,
+    )
+    return 0
 
 
 if __name__ == "__main__":

@@ -38,5 +38,14 @@ python /app/db/ontd/bootstrap.py &
 echo "Building country relations in the background..."
 python /app/scripts/build_country_relations.py &
 
+# gthread since WP14: every adapter borrows a pooled connection per call,
+# so one worker process serves GUNICORN_THREADS requests concurrently (a
+# quick /like no longer waits behind a slow /calc) and the calc-matrix
+# endpoint can fan out cells. Sizing: DB_POOL_MAX >= GUNICORN_THREADS +
+# CALC_MATRIX_WORKERS per process — see backend/docker/.env.example.
 echo "Starting API..."
-exec gunicorn --bind "0.0.0.0:${API_CONTAINER_PORT:-5000}" --workers 4 --timeout 120 "main:create_app()"
+exec gunicorn --bind "0.0.0.0:${API_CONTAINER_PORT:-5000}" \
+  --worker-class gthread \
+  --workers "${GUNICORN_WORKERS:-2}" \
+  --threads "${GUNICORN_THREADS:-8}" \
+  --timeout 120 "main:create_app()"

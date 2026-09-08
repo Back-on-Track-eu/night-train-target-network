@@ -41,12 +41,11 @@ staleness detection now lives here, internally, for that purpose only.
 from __future__ import annotations
 
 import logging
-import os
-from contextlib import contextmanager
 from typing import Optional
 
-import psycopg2
-import psycopg2.extras
+from psycopg2.extras import RealDictCursor
+
+from adapters.db_pool import DBPool, default_pool
 from psycopg2.extras import Json
 
 from adapters.proposal.filter_builder import (
@@ -140,60 +139,19 @@ class ProposalForbiddenError(Exception):
 
 
 class ProposalRepository:
-    """Persists proposals — thin connection wrapper mirroring DBDataLoader's
-    construction (same env vars, one connection per process/worker)."""
+    """Persists proposals. Every public method borrows one connection
+    from the shared DBPool (adapters/db_pool.py) for exactly its own
+    transaction — thread-safe without locks, nothing held between
+    calls."""
 
-    def __init__(self) -> None:
-        self._conn = self._connect()
+    def __init__(self, pool: DBPool | None = None) -> None:
+        self._pool = pool or default_pool()
 
-    def _connect(self):
-        required = {
-            "POSTGRES_HOST": os.environ.get("POSTGRES_HOST"),
-            "POSTGRES_PORT": os.environ.get("POSTGRES_PORT"),
-            "POSTGRES_DB": os.environ.get("POSTGRES_DB"),
-            "POSTGRES_USER": os.environ.get("POSTGRES_USER"),
-            "POSTGRES_PASSWORD": os.environ.get("POSTGRES_PASSWORD"),
-        }
-        missing = [key for key, value in required.items() if not value]
-        if missing:
-            raise RuntimeError(
-                f"Missing required environment variable(s) for DB connection: "
-                f"{', '.join(missing)}."
-            )
-        return psycopg2.connect(
-            host=required["POSTGRES_HOST"],
-            port=required["POSTGRES_PORT"],
-            dbname=required["POSTGRES_DB"],
-            user=required["POSTGRES_USER"],
-            password=required["POSTGRES_PASSWORD"],
-        )
-
-    @contextmanager
     def _cursor(self):
-        """One cursor on this repository's single connection, rolled back
-        if the block raises.
-
-        The rollback is the point. psycopg2's own cursor context manager
-        closes the cursor but leaves the transaction open, so one failed
-        statement puts the connection into "current transaction is
-        aborted" and EVERY later call on this worker fails until the
-        process restarts — a single bad query in a read path takes the
-        publish path down with it. Rolling back here confines a failure
-        to the call that caused it. Commits stay the caller's business:
-        the write paths commit explicitly after their block.
-        """
-        cursor = self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        try:
-            yield cursor
-        except Exception:
-            self._conn.rollback()
-            raise
-        finally:
-            cursor.close()
-
-    def close(self) -> None:
-        if self._conn and not self._conn.closed:
-            self._conn.close()
+        """A cursor on a freshly borrowed connection — single-query reads.
+        The transaction is released when the block ends. Writes borrow a
+        connection explicitly and commit inside the block."""
+        return self._pool.cursor()
 
     @staticmethod
     def _next_proposal_id(cur) -> int:
@@ -320,8 +278,8 @@ class ProposalRepository:
         if mode not in ("new", "overwrite"):
             raise ValueError(f"publish: unknown mode '{mode}'.")
 
-        try:
-            with self._cursor() as cur:
+        with self._pool.connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 if mode == "overwrite":
                     new_pid, new_version = self._lock_for_overwrite(
                         cur, proposal_id, user_id
@@ -353,10 +311,7 @@ class ProposalRepository:
                     based_on_proposal_id=based_on_proposal_id,
                 )
 
-            self._conn.commit()
-        except Exception:
-            self._conn.rollback()
-            raise
+            conn.commit()
 
         logger.info(
             "proposal publish: mode=%s proposal_id=%s version=%s user_id=%s",
@@ -404,8 +359,8 @@ class ProposalRepository:
         Raises ProposalNotFoundError if proposal_id doesn't exist (a
         proposal deleted manually between list_outdated() and this call).
         """
-        try:
-            with self._cursor() as cur:
+        with self._pool.connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
                     "SELECT proposal_version, user_id, name "
                     "FROM proposals.proposals WHERE proposal_id = %s FOR UPDATE",
@@ -438,10 +393,7 @@ class ProposalRepository:
                     detail=detail,
                 )
 
-            self._conn.commit()
-        except Exception:
-            self._conn.rollback()
-            raise
+            conn.commit()
 
         logger.info(
             "proposal refresh: proposal_id=%s version=%s trigger=%s",
@@ -727,7 +679,6 @@ class ProposalRepository:
                 (proposal_id,),
             )
             row = cur.fetchone()
-        self._conn.rollback()
         return dict(row) if row else None
 
     def reconstruct_route(
@@ -742,7 +693,6 @@ class ProposalRepository:
             route_dict = route_dict_from_gtfs(
                 proposal_id, proposal_version, loader, scenario_id, cur
             )
-        self._conn.rollback()
         return route_dict
 
     def reconstruct_evaluation(self, container: dict, loader) -> dict:
@@ -773,7 +723,6 @@ class ProposalRepository:
                 (proposal_id,),
             )
             row = cur.fetchone()
-        self._conn.rollback()
         return row["user_id"] if row else None
 
     def share_name(self, proposal_id: int) -> Optional[str]:
@@ -788,7 +737,6 @@ class ProposalRepository:
                 (proposal_id,),
             )
             row = cur.fetchone()
-        self._conn.rollback()
         return row["name"] if row else None
 
     def list_outdated(self, limit: Optional[int] = None) -> list[dict]:
@@ -818,7 +766,6 @@ class ProposalRepository:
                 + ((limit,) if limit is not None else ()),
             )
             rows = cur.fetchall()
-        self._conn.rollback()
         return [dict(row) for row in rows]
 
     # Every proposal_summaries column the `summaries` section returns.
@@ -829,7 +776,9 @@ class ProposalRepository:
         "total_time_h, avg_speed_kmh, n_stops, countries, country_relations, "
         "stop_ids, "
         "cost_eur_per_train_km, revenue_eur_per_train_km, "
-        "margin_eur_per_train_km, subsidy_eur_per_year, "
+        "margin_eur_per_train_km, net_eur_per_year, subsidy_eur_per_year, "
+        "operating_days_per_year, train_km_per_year, "
+        "available_place_km_per_year, sold_place_km_per_year, "
         "demand_trips_per_year, demand_trip_km_per_year, "
         "shift_air_trips_per_year, shift_air_trip_km_per_year, "
         "shift_car_trips_per_year, shift_car_trip_km_per_year, "
@@ -886,7 +835,9 @@ class ProposalRepository:
         "       total_time_h, avg_speed_kmh, n_stops, countries, "
         "       country_relations, stop_ids, "
         "       cost_eur_per_train_km, revenue_eur_per_train_km, "
-        "       margin_eur_per_train_km, subsidy_eur_per_year, "
+        "       margin_eur_per_train_km, net_eur_per_year, subsidy_eur_per_year, "
+        "       operating_days_per_year, train_km_per_year, "
+        "       available_place_km_per_year, sold_place_km_per_year, "
         "       demand_trips_per_year, demand_trip_km_per_year, "
         "       shift_air_trips_per_year, shift_air_trip_km_per_year, "
         "       shift_car_trips_per_year, shift_car_trip_km_per_year, "
@@ -909,7 +860,12 @@ class ProposalRepository:
         "       NULL::numeric AS cost_eur_per_train_km, "
         "       NULL::numeric AS revenue_eur_per_train_km, "
         "       NULL::numeric AS margin_eur_per_train_km, "
+        "       NULL::numeric AS net_eur_per_year, "
         "       NULL::numeric AS subsidy_eur_per_year, "
+        "       NULL::smallint AS operating_days_per_year, "
+        "       NULL::numeric AS train_km_per_year, "
+        "       NULL::numeric AS available_place_km_per_year, "
+        "       NULL::numeric AS sold_place_km_per_year, "
         "       NULL::numeric AS demand_trips_per_year, "
         "       NULL::numeric AS demand_trip_km_per_year, "
         "       NULL::numeric AS shift_air_trips_per_year, "
@@ -980,7 +936,6 @@ class ProposalRepository:
                 page_params += [limit, offset]
             cur.execute(sql, page_params)
             rows = cur.fetchall()
-        self._conn.rollback()
         return [dict(row) for row in rows], total
 
     def map_lines(self, filters: Optional[dict] = None) -> list[dict]:
@@ -1099,7 +1054,6 @@ class ProposalRepository:
                 list(params) + [MAP_LINES_SIMPLIFY_TOLERANCE_DEG],
             )
             rows = cur.fetchall()
-        self._conn.rollback()
         return [dict(row) for row in rows]
 
     def map_routes(
@@ -1142,7 +1096,6 @@ class ProposalRepository:
         with self._cursor() as cur:
             cur.execute(sql, page_params)
             rows = cur.fetchall()
-        self._conn.rollback()
         return [dict(row) for row in rows]
 
     def map_stop_counts(self, filters: Optional[dict] = None) -> list[dict]:
@@ -1178,7 +1131,6 @@ class ProposalRepository:
                 params,
             )
             rows = cur.fetchall()
-        self._conn.rollback()
         return [dict(row) for row in rows]
 
     def map_country_counts(self, filters: Optional[dict] = None) -> list[dict]:
@@ -1212,7 +1164,6 @@ class ProposalRepository:
                 params,
             )
             rows = cur.fetchall()
-        self._conn.rollback()
         return [dict(row) for row in rows]
 
     # =========================================================================
@@ -1252,7 +1203,6 @@ class ProposalRepository:
                 params,
             )
             rows = cur.fetchall()
-        self._conn.rollback()
         return [dict(row) for row in rows]
 
     def stats_reach(self, filters: Optional[dict] = None) -> list[dict]:
@@ -1282,7 +1232,6 @@ class ProposalRepository:
                 params,
             )
             rows = cur.fetchall()
-        self._conn.rollback()
         return [dict(row) for row in rows]
 
     def stats_country_counts(self, filters: Optional[dict] = None) -> list[dict]:
@@ -1325,7 +1274,6 @@ class ProposalRepository:
                 params,
             )
             rows = cur.fetchall()
-        self._conn.rollback()
         return [dict(row) for row in rows]
 
     def stats_relation_counts(
@@ -1367,7 +1315,6 @@ class ProposalRepository:
                 params + [max_relation_km],
             )
             rows = cur.fetchall()
-        self._conn.rollback()
         return [dict(row) for row in rows]
 
     def stats_relation_universe(self, max_relation_km: float = 1600.0) -> dict:
@@ -1415,5 +1362,4 @@ class ProposalRepository:
                 "ORDER BY refs.country"
             )
             stations = [dict(row) for row in cur.fetchall()]
-        self._conn.rollback()
         return {**counts, "reference_stations": stations}
