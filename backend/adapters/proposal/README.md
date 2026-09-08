@@ -414,6 +414,52 @@ above), so a `ROUTE_BUILDER_VERSION`/`CALC_VERSION` bump just
 
 ---
 
+### 2.5 Matrix compute — `POST /api/proposal/calc/matrix`
+
+The same compute as §2.1, repeated over a grid: **every selected scenario ×
+every selected composition** for one route, delivered as typed records
+(`header`, `shared*`, `cell*`, `done`) so the frontend can show a
+comparative overview — subsidy per scenario, cost per composition —
+without knowing the axes and without 72 round trips. Record shapes and
+the request contract are in `api/README.md`; this section is the design.
+
+- **One compute path.** Every cell is a `compute_proposal()` call
+  (`api/helpers/proposal_compute.py`) with the matrix's HOW fields and the
+  cell's `composition_id`/`scenario_id`. It therefore lands in the §2.3
+  compute cache: a drill-down `/calc` on a cell is a `cache_hit`, a second
+  matrix over the same route is all hits, and a cell error carries exactly
+  the code `/calc` would answer (`classify_compute_error()`).
+- **Axes.** Default scenario axis = current base + every
+  `is_current_scenario` row, base first then by key (GET /api/scenarios'
+  order); superseded revisions only when named. Default composition axis =
+  the whole catalog in catalog order. Explicit lists keep the caller's
+  order. `CALC_MATRIX_MAX_CELLS` caps the grid.
+- **Baseline first.** The (base scenario, standard composition) cell runs
+  synchronously before the fan-out — first result fast, and the route
+  segment cache is warm before `CALC_MATRIX_WORKERS` threads live-route
+  the same legs. Needs WP14 (§ `adapters/db_pool.py`): every adapter
+  borrows a pooled connection per call, so the singletons are shared by
+  the worker threads without locks.
+- **Size.** `detail: "summary"` (default) carries the §5.4 summary block
+  per cell — nothing else. `detail: "full"` additionally carries the
+  route and the evaluation views, with geometry coordinate paths and the
+  three parameter blocks moved into content-addressed `shared` records
+  emitted once each, before the first cell that references them.
+- **Streaming.** With `Accept: application/x-ndjson` the records are
+  written as they are produced (gunicorn `gthread` keeps the heartbeat
+  independent of request duration; Flask-Compress never touches the
+  mimetype; Caddy streams anything without `Content-Length`). Errors after
+  the first byte cannot change the HTTP status, so request-level checks
+  (validation, axis resolution, cell cap, data loaded) all happen before
+  it. A client disconnect closes the generator: queued cells are dropped,
+  running ones finish and still warm the cache.
+- **Not in scope.** A third "price & regulatory measures" axis (VAT
+  exemption, energy-tax exemption, TAC at direct cost) is `docs/
+  PARKED_WORK.md` §3 — evaluation-only parameters that are not scenario
+  rows. A job/polling mode is the escape hatch if grids outgrow one
+  connection; the compute cache already stores every cell, so a job table
+  would be a list of request hashes.
+
 ## 3. Identity model
 
 ### 3.1 Route fingerprint
@@ -547,11 +593,10 @@ Mechanisms, in order of preference:
    `update_log` 'recalculated' with `user_id NULL`). Run after every
    version bump / base scenario move; idempotent, resumable, dry-run mode.
    The live-routing compute step is parallelized across a configurable
-   `--concurrency` worker threads (each with its own `DBDataLoader` —
-   cheap, no heavy precompute — sharing the one process-wide `RailRouter`,
-   already built for concurrent use); DB writes stay sequential on the
-   single `ProposalRepository` connection, which is not thread-safe (see
-   `docs/PARKED_WORK.md` for pooling every connection properly).
+   `--concurrency` worker threads on the shared singletons (every adapter
+   borrows a pooled connection per call since WP14 —
+   `adapters/db_pool.py`); DB writes stay sequential on the main thread so
+   only one `FOR UPDATE` lock is ever held at a time.
 2. **On-load fallback**: `GET /api/proposal/<id>` detects an outdated
    proposal (`outdated_trigger()`) and refreshes before returning —
    correctness for anything the batch hasn't reached, at the cost of one
@@ -724,7 +769,15 @@ CREATE TABLE proposals.proposal_summaries (
     cost_eur_per_train_km       NUMERIC(10,2) NOT NULL,
     revenue_eur_per_train_km    NUMERIC(10,2) NOT NULL,
     margin_eur_per_train_km     NUMERIC(10,2) NOT NULL,
+    net_eur_per_year            NUMERIC(14,2) NOT NULL,  -- signed (CALC 0.9.25): negative = shortfall, positive = surplus
     subsidy_eur_per_year        NUMERIC(14,2) NOT NULL,  -- max(0, -net_eur): gap to target margin
+
+    -- annual supply denominators (CALC 0.9.25) — what per_train_km /
+    -- per_available_place_km divide by; sold / available = utilisation
+    operating_days_per_year     SMALLINT NOT NULL,
+    train_km_per_year           NUMERIC(12,0) NOT NULL,
+    available_place_km_per_year NUMERIC(16,0) NOT NULL,
+    sold_place_km_per_year      NUMERIC(16,0) NOT NULL,
 
     -- demand KPIs (placeholder-faked until the demand model exists — §8)
     demand_trips_per_year       NUMERIC(12,0),

@@ -7,9 +7,9 @@ backend, in one place. Supersedes `deploy/HANDOVER.md` (2026-08-10),
 deleted.
 
 Updated after each change that touches deploy, capacity or server data.
-Last update 2026-09-06 (existing-train geometry: ONTD bootstrap fix —
-see the first note below; also 2026-09-05 route-context re-calibration
-and route builder 0.9.31, §4a; and route builder 0.9.32, §4b).
+Last update 2026-09-07 (WP14 connection pool + gunicorn gthread, the calc
+matrix endpoint and CALC 0.9.25 — §4c; before that 2026-09-06, ONTD
+bootstrap fix below; 2026-09-05 route builder 0.9.31 §4a; 0.9.32 §4b).
 
 > **Update 2026-09-06 — existing night trains drawn as dashed straight
 > lines: ONTD bootstrap fix, one-off action on every persisted database.**
@@ -375,6 +375,83 @@ changed.
 `expert_timetable` computes exactly what it computed on 0.9.31, and every
 published route reads its new column back as 0, so
 `scripts/refresh_proposals.py` is optional here rather than required.
+
+---
+
+## 4c. WP14 pool + gthread, calc matrix, CALC 0.9.25 — one migration, one env review
+
+**Action:** review the new env knobs against Postgres `max_connections`
+(defaults are safe on the current VPS), let the migration apply, truncate
+the compute cache, run `refresh_proposals.py` once. **Stops applying** once
+this batch is on both environments.
+
+### What changed on the server side
+
+1. **Every adapter now borrows from one connection pool per API process**
+   (`backend/adapters/db_pool.py`) instead of holding its own psycopg2
+   connection. gunicorn moved from `sync` workers to **`gthread`** in
+   `backend/docker/entrypoint.sh` and both `deploy/*/docker-compose.yml`
+   `command:` lists: `--worker-class gthread --workers ${GUNICORN_WORKERS:-2}
+   --threads ${GUNICORN_THREADS:-8}`. A quick `/like` no longer waits behind
+   a slow `/calc` on the same worker, and the matrix endpoint below computes
+   its cells concurrently.
+2. **`POST /api/proposal/calc/matrix`** — one route under every scenario ×
+   every composition (6 × 12 = 72 cells today), streamed as NDJSON. Each
+   cell is an ordinary `/calc` compute through the compute cache, so the
+   first matrix on a route costs up to 72 computes (baseline first, then
+   `CALC_MATRIX_WORKERS` at a time); every later `/calc` on that route is a
+   cache hit. On a deployment running only the 2026 OpenRailRouting
+   instance, the 36 `infra_2032` cells are error cells by design (HTTP 200,
+   `routing_graph_not_configured` per cell) — nothing to fix.
+3. **`CALC_VERSION` 0.9.25** — `proposals.proposal_summaries` gains five
+   columns (`net_eur_per_year`, `operating_days_per_year`,
+   `train_km_per_year`, `available_place_km_per_year`,
+   `sold_place_km_per_year`).
+
+### Env knobs (all optional, documented in `backend/docker/.env.example`)
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `GUNICORN_WORKERS` | 2 | API processes |
+| `GUNICORN_THREADS` | 8 | request threads per process |
+| `DB_POOL_MIN` / `DB_POOL_MAX` | 2 / 16 | pool size per process |
+| `DB_POOL_ACQUIRE_TIMEOUT_S` | 10 | how long a request waits for a free connection before failing |
+| `CALC_MATRIX_MAX_CELLS` | 96 | largest grid one matrix request may ask for |
+| `CALC_MATRIX_WORKERS` | 4 | cells computed concurrently after the baseline |
+
+**Sizing rule.** Per process `DB_POOL_MAX ≥ GUNICORN_THREADS +
+CALC_MATRIX_WORKERS` (16 ≥ 8 + 4 ✓). Across the deployment
+`GUNICORN_WORKERS × DB_POOL_MAX` + migrate/bootstrap scripts + Mathesar
+must stay under Postgres `max_connections` (100 by default): the defaults
+use at most 32 from the API. If you raise workers or threads, raise
+`max_connections` or lower `DB_POOL_MAX` accordingly — pool exhaustion
+shows up as `PoolTimeoutError` 500s after 10 s, never as a hang.
+
+### Steps, both environments
+
+1. Deploy as usual — the migration
+   `db/dev/sql/migrations/2026-09-07_proposal_summaries_supply_kpis.sql`
+   applies before the API starts (`ADD COLUMN … NOT NULL DEFAULT 0`,
+   metadata-only, no rewrite).
+2. Truncate the compute cache (§4a step 2 statement): the summary block
+   changed shape, and a cached pre-0.9.25 result would be served without
+   the new keys.
+3. `docker exec <api> python -m scripts.refresh_proposals` — every stored
+   proposal is outdated by the CALC bump; this backfills the five columns
+   with real values (they read 0 until then). Safe to run any time, resumable.
+4. **Caddy check, once:** open a proposal in the frontend and watch the
+   network tab — `calc/matrix` must show cells arriving over several
+   seconds, not one body at the end. The response has no `Content-Length`
+   and `Content-Type: application/x-ndjson`; Caddy streams that without
+   configuration. If it buffers, the vhost has an `encode` or buffering
+   directive on `/api/*` that must exclude this path.
+
+### Rollback
+
+`--worker-class sync` still works with the pool (it is worker-model
+agnostic); the matrix endpoint then computes its cells sequentially in
+the request thread and still streams. The migration is additive; leaving
+the columns in place on a rollback to 0.9.24 is harmless.
 
 ---
 

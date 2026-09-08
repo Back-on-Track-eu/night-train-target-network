@@ -12,7 +12,8 @@ had been superseded for three weeks; this file is what survived it.
 | Item | Status | Blocked by |
 |---|---|---|
 | Bundle analyze endpoint | Designed 2026-08-04, postponed 2026-08-07 | Nothing — the compute cache prerequisite is done |
-| Connection pooling / intra-worker concurrency | Scoped, not started | Nothing |
+| Connection pooling / intra-worker concurrency | **Shipped** 2026-09-07 as WP14 (`adapters/db_pool.py`, gunicorn gthread) — §2 kept for the reasoning | — |
+| Price & regulatory measures axis (WP17) | Designed 2026-09-07, not started | Nothing — the matrix endpoint is the natural carrier |
 | `input_params` schema split | **Dropped** 2026-08-07 | — |
 
 ---
@@ -179,9 +180,12 @@ stays the default.
 
 ## 2. Connection pooling / intra-worker concurrency
 
-Scoped but not started. Independent of everything above; touches the whole
-app rather than proposals specifically, which is why it was repeatedly
-deferred.
+**Shipped 2026-09-07 as WP14** — `backend/adapters/db_pool.py` (one
+`ThreadedConnectionPool` per process, every adapter borrows per unit of
+work), gunicorn `gthread`, `tests/test_05_db_pool.py`; deploy notes in
+`docs/DEPLOY_HANDOVER.md` §4c. The section is kept as the record of why
+it was done the way it was; the "what closing it needs" list below is
+what landed, with one deviation noted inline.
 
 **The gap.** Production runs `gunicorn --workers 4`, and
 `api/helpers/dependencies.py`'s `init()` builds one long-lived connection
@@ -236,3 +240,42 @@ time.
 Consequence of dropping it: the flat per-mode emission factors stay
 constants in `models/emissions` indefinitely — which locked decision 24
 already permits as the single source. Nothing else depended on the split.
+
+---
+
+## 3. Price & regulatory measures axis (WP17)
+
+Designed 2026-09-07 with the viewport rearrangement; the frontend ships
+the three toggles disabled with a "coming soon" hint
+(`frontend/src/components/ScenarioSwitches.vue`, `VITE_FEATURE_MEASURES`).
+
+**What it is.** Three policy measures a lay user reads as scenarios but
+that are not scenario rows: **VAT exemption on tickets** (revenue side:
+ticket revenue net of VAT rises, or fares fall and demand responds),
+**energy tax exemption** (energy price component), **track access at
+direct costs only** (the TAC tariff replaced by a marginal-cost rate).
+Every combination of the three on top of the six network × condition
+scenarios gives the sketch's 6 × 8 = 48 grid.
+
+**Why not scenario rows.** `scenario.scenarios` pins full-table snapshots
+of infrastructure parameters; VAT and energy tax are not infrastructure
+parameters, and 48 snapshots × 5 tables for three booleans would defeat
+the versioning contract. They are **evaluation-only inputs**: routing and
+timetabling are untouched, only `models/evaluation/calc.py` changes.
+
+**Shape.** A `measures` block on the compute request —
+`{"vat_exempt": bool, "energy_tax_exempt": bool, "tac_direct_cost": bool}`,
+all default false — that (1) joins `_resolve_request()` and therefore the
+compute-cache hash, (2) is echoed on the response request, (3) is refused
+by publish unless all false (proposals represent today's rules, like the
+base-scenario rule), (4) becomes a third axis of `/calc/matrix`
+(`measure_sets: [...]`, default `[all false]`; cell index = scenarios ×
+measures × compositions). The three rates it needs (VAT rate on tickets,
+energy tax share of the energy price, direct-cost TAC rate) are calibrated
+domain parameters → DB tables with sources, per the parameter placement
+rule, not constants in `model.py`.
+
+**What it costs.** `CALC_VERSION` bump (calc.py), three calibrated rates
+with sources (Juri/Josh), a compute-cache flush, the frontend measures row
+switched on and the grid view extended from scenario × composition to
+scenario × measures for the selected composition (the sketch's heatmap).

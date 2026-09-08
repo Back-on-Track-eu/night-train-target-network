@@ -32,6 +32,7 @@ its own example files.
 - [Input Parameters](#input-parameters)
 - [Proposal Compute (merged)](#proposal-compute) — route + evaluation in one call, stateless
   - [`POST /api/proposal/calc`](#proposal-calc) — plan a route and evaluate it
+  - [`POST /api/proposal/calc/matrix`](#proposal-calc-matrix) — the same route under every scenario × composition, streamed
 - [Scenarios](#scenarios)
   - [`GET /api/scenarios`](#scenarios) — list all scenarios, grouped by current status
 - [Proposals](#proposals) — publish and load
@@ -305,6 +306,7 @@ database is documented in [`../db/README.md`](../db/README.md).
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/api/proposal/calc` | Plan a route **and** evaluate it in one call — stateless, no persistence |
+| `POST` | `/api/proposal/calc/matrix` | The same route under every selected scenario × composition — one JSON document or an NDJSON stream of cells |
 
 <a id="proposal-calc"></a>
 
@@ -802,6 +804,103 @@ and which frontend filter selection maps to which view
 </details>
 
 ---
+
+<a id="proposal-calc-matrix"></a>
+
+### `POST /api/proposal/calc/matrix`
+
+One route computed under **every selected scenario × every selected
+composition** (`adapters/proposal/README.md` §2.5). Every cell is an
+ordinary `/calc` compute — same HOW fields, same compute cache — so a
+drill-down `/calc` on any cell afterwards is a `cache_hit`, and a second
+matrix over the same route is served from cache entirely. Stateless, no
+auth.
+
+**Request**
+
+```jsonc
+{
+  "stops": ["osm:n3856100103", "osm:n25397500", "osm:w423692233"],   // required, min 2
+
+  "composition_ids": null,   // null/omitted → whole catalog; [] → 400; unknown id → 400
+  "scenario_ids": null,      // null/omitted → current base + every current what-if;
+                             //   superseded scenarios only when named explicitly
+  "detail": "summary",       // "summary" (default) | "full"
+
+  // HOW fields — identical semantics and validation to /calc
+  "timetable_mode": "simpleAutomatic",
+  "fixed_night_interval": null,
+  "schedule_mode": "alwaysDaily",
+  "routing_mode": "fullRouting",
+  "auto_stop_addition": "add",       // "suggest" allowed; suggestions carried in "full" only
+  "expert_timetable": null
+}
+```
+
+Limits (`api/config.py`, env-overridable): `CALC_MATRIX_MAX_CELLS`
+(default 96 — the default grid is 6 × 12 = 72) and `CALC_MATRIX_WORKERS`
+(default 4 cells computed concurrently after the baseline cell).
+
+**Two encodings of one record sequence.** With
+`Accept: application/x-ndjson` the response is streamed, one JSON record
+per line, uncompressed, without `Content-Length`; anything else returns
+one JSON document with the same records folded (header fields at the top
+level, `shared` keyed by kind then id, `cells` sorted by `index`, `status`
++ `stats`). Request-level errors (bad JSON, validation, unknown axis id,
+cell cap → 400; data not loaded → 503) are decided before the first byte.
+After that, a failing cell is a cell record with `status: "error"` and the
+HTTP status stays 200.
+
+```jsonc
+// 1. header — exactly once, first
+{ "type": "header",
+  "route_builder_version": "0.9.33", "calc_version": "0.9.25",
+  "request": { "stops": [...], "composition_ids": [...resolved...], "scenario_ids": [...resolved...],
+               "detail": "summary", "timetable_mode": "...", ... , "expert_timetable": null },
+  "axes": {
+    "scenarios":    [ { "scenario_id": 1, "scenario_key": "infra-2026", "scenario_name": "Infra 2026",
+                        "is_current_base": true, "routing_graph_key": "infra_2026",
+                        "dimensions": { "network": "2026", "hsr_allowed": false, "optimised_timetable": false } } ],
+    "compositions": [ { "composition_id": "NEW-BAL-7", "description": "...", "material_strategy": "new",
+                        "operator_id": "...", "operator_name": "...", "hsr_allowed": true,
+                        "max_speed_kmh": 230, "places_by_class": { "Sleeper": 60, ... }, "places_total": 288 } ]
+  },
+  "n_cells": 72,
+  "baseline_index": 0,
+  "models": { ... }            // "full" only — the static models block, once
+}
+
+// 2. shared — zero or more, each BEFORE the first cell referencing it ("full" only)
+{ "type": "shared", "kind": "geometry",              "id": "g:3f9c…", "data": [[lon, lat], ...] }
+{ "type": "shared", "kind": "track_infrastructures", "id": "p:71ab…", "data": { ... } }
+{ "type": "shared", "kind": "stop_infrastructures",  "id": "p:0d21…", "data": { ... } }
+{ "type": "shared", "kind": "compositions",          "id": "p:9e44…", "data": { ... } }
+
+// 3. cell — one per grid position; stream order = completion order,
+//    baseline_index always first. index = scenario position × n_compositions
+//    + composition position (scenarios outer, compositions inner).
+{ "type": "cell", "index": 0, "scenario_id": 1, "composition_id": "NEW-BAL-7",
+  "status": "ok", "cache_hit": false, "route_fingerprint": "sha256:…",
+  "summary": { ...the /calc summary block... },
+  // "full" only:
+  "suggested_stops": [ ... ],                       // only when auto_stop_addition = "suggest"
+  "route": { ...route minus "geometries"; every segment.geometry_id is a shared "g:" id... },
+  "evaluation": { "parameters_refs": { "track_infrastructures": "p:71ab…", ... }, "views": { ... } } }
+{ "type": "cell", "index": 7, "scenario_id": 5, "composition_id": "NEW-BAL-7",
+  "status": "error", "error": "routing_graph_not_configured", "message": "…" }
+  // same codes as /calc; gauge_mismatch cells also carry "conflicting_stops"
+
+// 4. done — exactly once, last
+{ "type": "done", "status": "complete",             // | "aborted" (fatal executor failure)
+  "stats": { "n_cells": 72, "n_ok": 36, "n_error": 36, "n_cache_hit": 12, "elapsed_s": 21.4 } }
+```
+
+Shared ids are content-addressed (`g:`/`p:` + 16 hex of the canonical
+SHA-256 of the block), so identical geometry across scenarios or
+compositions is sent once. On a deployment running one OpenRailRouting
+instance every `infra_2032` cell is a `routing_graph_not_configured`
+error cell — the request still succeeds. Closing the connection cancels
+queued cells; running ones finish and still warm the cache.
 
 <a id="scenarios"></a>
 

@@ -3,9 +3,10 @@
 **Living document.** Backend changes that reach the API contract or change
 what the UI should show, in one place. Updated after each change.
 
-Last update 2026-09-06. Covers 2026-08-17 → 2026-09-06:
-`ROUTE_BUILDER_VERSION` 0.9.23 → 0.9.32, `CALC_VERSION` 0.9.22, plus the
-scenario restructure.
+Last update 2026-09-07. Covers 2026-08-17 → 2026-09-07:
+`ROUTE_BUILDER_VERSION` 0.9.23 → 0.9.33, `CALC_VERSION` 0.9.22 → 0.9.25,
+the scenario restructure, and the calc matrix (§12 — **start there if you
+are looking at the viewport rearrangement**).
 
 > **FYI 2026-09-06 — existing night trains all dashed.** Backend-only
 > bootstrap bug (the routing step of the ONTD load never ran on persisted
@@ -31,6 +32,7 @@ are mostly "this field now exists, show it if you want".
 | §7 | `uic_ref` can hold more than one code | no type change |
 | §8 | Routes now prefer electrified track | no type change, results move |
 | §9 | Expert timetable mode | new request block + 2 new fields |
+| §12 | Calc matrix, scenario `dimensions`, five summary KPIs, the viewport rearrangement | **implemented in `frontend/` on this branch — review, not to-do** |
 
 ---
 
@@ -273,7 +275,7 @@ present and correct: `gauges_mm` on stops, `composition_id`,
 | `track_gauge_mm` | inside above | §4 |
 | `timetable_warnings` | inside above | Derived quality annotations, e.g. `fixed_night_stretch_slow`. Empty for most trips. |
 | `hours` | `parkings[]` | §2, the layover |
-| `routing_graph_key` | `Scenario` | §5. Additive; harmless at runtime, but it belongs in the type. |
+| `routing_graph_key` | `Scenario` | §5. **Done on this branch (§12).** |
 
 Also worth a look, though not a type change: the `422 gauge_mismatch`
 handler (§4), and whether `provenance` on stops is worth surfacing (§1).
@@ -440,6 +442,116 @@ to change on your side beyond expecting different numbers — `CALC_VERSION`
 is unchanged because no formula changed, only parameters.
 
 ---
+
+## 12. Calc matrix + viewport rearrangement — CALC 0.9.25, backend 0.4.0
+
+This one is different from the entries above: the frontend side is already
+on the branch (`ProposalResults.vue` and the zone components, see
+`frontend/README.md`), so what you have is a review and the `api.ts`
+ownership question, not a to-do. Everything below is what the backend now
+serves and what the branch does with it.
+
+### 12.1 `Scenario.dimensions` (GET /api/scenarios)
+
+Every scenario carries `dimensions: {network: "2026"|"2032", hsr_allowed,
+optimised_timetable} | null`, derived server-side from `scenario_key` +
+`routing_graph_key`. `frontend/src/lib/scenarioAxes.ts` maps the three
+switches of the new scenario card onto `scenario_id` and back; which
+switch is enabled is data-driven (a switch state without a scenario is
+disabled — today "optimised timetables" only exists with HSR on). Also
+now typed: `passage_charges_version`, `routing_graph_key` (closes the §6
+row).
+
+### 12.2 Five new summary KPIs (calc `summary`, GET /api/proposal/<id>, gallery rows)
+
+| Field | What |
+|---|---|
+| `net_eur_per_year` | **signed** annual net after the target margin — negative is the shortfall `subsidy_eur_per_year` already reports, positive is a surplus |
+| `operating_days_per_year` | from the seasonal schedule |
+| `train_km_per_year` | both directions, all pairs — the `per_train_km` divisor |
+| `available_place_km_per_year` | capacity place-km — the `per_available_place_km` divisor |
+| `sold_place_km_per_year` | from the OD loads; sold / available is the utilisation |
+
+The surplus rule the branch applies everywhere (`lib/compareKpis.ts`
+`subsidyDisplay`): a profitable route reads "none · surplus X M €", never a
+negative subsidy. Stored proposals read the five columns as 0 until
+Giovanni's `refresh_proposals.py` run — the branch treats 0/absent as
+"unknown" (a dash), not as a surplus.
+
+### 12.3 `POST /api/proposal/calc/matrix`
+
+Full contract in `backend/api/README.md`. The short version: stops + the
+`/calc` HOW fields, optional `composition_ids` / `scenario_ids` (null =
+default axes: 6 current scenarios × the whole catalog), `detail`
+`"summary"` (default) | `"full"`. With `Accept: application/x-ndjson` the
+response streams one record per line — `header`, then cells in completion
+order (baseline first), `shared` blocks before the first cell referencing
+them (full only), `done` last. Types: `MatrixRecord`, `MatrixHeader`,
+`MatrixCell` (`ok | error` union), `MatrixDocument` in `api.ts`.
+
+What the branch does with it (`composables/useCalcMatrix.ts`): after every
+successful calc `ProposalViewport` requests **two** grids for the route on
+screen, both as JSON documents, both keyed on route fingerprint + HOW fields
++ axes, both reset when the itinerary is edited:
+
+| grid | axes | detail | feeds |
+|---|---|---|---|
+| `gridMatrix` | offered scenarios × every composition | summary | zone B bars + combination grid, zone D supply table |
+| `scenarioMatrix` | offered scenarios × the composition on screen | **full** | zone A deltas — and a **scenario switch with no API call at all** |
+
+The full cells carry route, views and parameters, so switching scenario is
+served entirely from memory: `cellAsCalcResponse()` (`lib/calcMatrix.ts`)
+rebuilds the cell into the `/calc` response it is equivalent to and hands it
+to the existing `applyPlan()`, which commits the new scenario — so the stale
+flag never appears and nothing is recomputed. Composition switches still go
+through `/calc` (36 full evaluations would be megabytes), but land on a cache
+entry `gridMatrix` has already created. Error cells (a scenario this
+deployment cannot route) simply leave that switch position on the ordinary
+Recalculate path.
+
+The endpoint also speaks NDJSON and streams cells as they complete; the
+client asks for the document instead, so the call goes through `apiRequest`
+with the same classification, budget, health tracking and cancel semantics as
+every other request. `lib/calcMatrix.ts` keeps the reader (`readNdjson`,
+`foldMatrixRecords`) for the day a grid is big enough that progressive
+rendering beats one response.
+
+### 12.4 What is deliberately disabled
+
+* **Price & regulatory measures** (VAT exemption, energy-tax exemption, TAC
+  at direct cost): rendered as greyed toggles with a "coming soon" hint in
+  `ScenarioSwitches.vue`; `VITE_FEATURE_MEASURES=off` hides the row. The
+  backend does not model them — `docs/PARKED_WORK.md` §3.
+* **Fit to demand** column in the supply table: header present, not
+  selectable, "coming soon" — the demand stopgap gives every composition
+  the same utilisation.
+* **Infra 2032**: shown in the network picker, not selectable, with a
+  "coming soon" chip beside (not inside) the segmented control and an ⓘ
+  hover hint (`InfoHint.vue`). The routing instance and its graph cache run and the backend
+  evaluates against 2032 scenarios fine — the infrastructure data behind
+  them is simply not at publishable quality yet. Frontend-only:
+  `PREVIEW_NETWORKS` in `lib/scenarioAxes.ts`, overridable with
+  `VITE_PREVIEW_NETWORKS` (empty string = release everything). While a
+  network is held back, its scenarios are also left out of the comparison
+  bars/grid **and** the matrix request's `scenario_ids`, so the grid is
+  3 × 12 instead of 6 × 12 — releasing 2032 doubles the matrix cost, which
+  is the moment to re-check `CALC_MATRIX_WORKERS` (DEPLOY_HANDOVER §4c).
+
+### 12.5 For you specifically
+
+* `api.ts` — the additions are yours to review: `Scenario` (3 fields),
+  `ProposalCalcSummary` (route/financial/supply fields typed), the
+  `Matrix*` block. Nothing was renamed or removed.
+* `en.json` — new namespaces `proposal.compare`, `proposal.supply`,
+  `proposal.settings`, `proposal.breakdown`, `proposal.ownership`.
+* Retired: `ComputeInputsPanel.vue`, `EvaluationPanel.vue`,
+  `EffectPanel.vue`, `CompositionPanel.vue` (their pieces live on in
+  `ProposalResults.vue`, `MainKpiGrid.vue`, `SupplyTable.vue`,
+  `CostRevenueBreakdown.vue`; `ViewRow`, `CostBreakdownPanel`,
+  `CompositionFormation`, `CompositionDetailOverlay` unchanged).
+* This joins the pending `backend-dev → staging` contract batch; the
+  summary columns need Giovanni's refresh (DEPLOY_HANDOVER §4c) before the
+  supply figures show on stored proposals.
 
 ## Maintaining this document
 
