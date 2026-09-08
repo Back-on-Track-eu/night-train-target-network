@@ -21,6 +21,9 @@ import { readDraft, writeDraft, clearDraft } from '@/lib/proposalDraftStorage'
 import { useLocaleFormat } from '@/composables/useLocaleFormat'
 import { buildSuggestRows, settledRows, type SuggestRow } from '@/lib/suggestPlacement'
 import { formatClock, dayOffset } from '@/lib/tripClock'
+import { useCalcMatrix } from '@/composables/useCalcMatrix'
+import { buildScenarioAxes } from '@/lib/scenarioAxes'
+import { cellAsCalcResponse } from '@/lib/calcMatrix'
 import {
   addonFor,
   addonsForDirection,
@@ -47,11 +50,12 @@ import Skeleton from 'primevue/skeleton'
 import AppIcon from '@/components/AppIcon.vue'
 import AppSpinner from '@/components/AppSpinner.vue'
 import StopSelect from '@/components/StopSelect.vue'
-import ComputeInputsPanel from '@/components/ComputeInputsPanel.vue'
+import ProposalResults from '@/components/ProposalResults.vue'
+import OwnershipLine from '@/components/OwnershipLine.vue'
+import CountryFlags from '@/components/CountryFlags.vue'
 import StopTime from '@/components/StopTime.vue'
 import ExpertTimetableControls from '@/components/ExpertTimetableControls.vue'
 import LoadingFunFact from '@/components/LoadingFunFact.vue'
-import EvaluationPanel from '@/components/EvaluationPanel.vue'
 import MapView from '@/components/MapView.vue'
 import MapShareBar from '@/components/MapShareBar.vue'
 import CommentSection from '@/components/CommentSection.vue'
@@ -59,8 +63,8 @@ import InlineAlert from '@/components/InlineAlert.vue'
 import {
   mdiArrowLeft,
   mdiArrowLeftRight,
-  mdiCalendarSync,
   mdiCheckCircle,
+  mdiMapMarkerMultipleOutline,
   mdiClose,
   mdiPencil,
   mdiPlus,
@@ -80,8 +84,8 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ back: []; published: [proposalId: number] }>()
 
-const { t, te } = useI18n()
-const { formatInt } = useLocaleFormat()
+const { t } = useI18n()
+const { formatInt, countryName } = useLocaleFormat()
 const store = useStore()
 const toastStore = useToastStore()
 const { describe, report } = useApiFailure()
@@ -124,11 +128,11 @@ const loadSlot = createAbortSlot()
 // Raw route as returned by POST /api/proposal/calc (before adaptRoute()) —
 // the map segment/highlight logic below reads it directly.
 const rawRoute = ref<BackendRoute | null>(null)
-// Evaluation bundle rendered by EvaluationPanel — assembled in applyPlan()
+// Evaluation bundle rendered by ProposalResults — assembled in applyPlan()
 // from the same merged calc response the route came from.
 const calcResult = ref<EvaluationResponse | null>(null)
 // Gallery KPI summary block of the same calc response — route-level demand /
-// modal-shift / emissions figures the EvaluationPanel renders alongside the
+// modal-shift / emissions figures the results' KPI grid renders alongside the
 // financial KPIs (currently placeholder values; see summary.py).
 const calcSummary = ref<ProposalCalcSummary | null>(null)
 // Which part of the route the evaluation panel is currently scoped to — drives
@@ -165,7 +169,14 @@ const publishedProposalId = ref<number | null>(null)
 // scenario is a private what-if and must never overwrite their work (the
 // backend refuses it anyway, and a 403 is not an answer to a question the
 // user did not ask).
-const ownsProposal = ref(false)
+//
+// THREE states, not a boolean: opening a proposal from the gallery gives us
+// its id immediately and its author only once the load returns, so a boolean
+// defaulting to false made the header assert "someone else's proposal" for
+// the length of every load — a claim we had not checked yet, and the wrong
+// one most of the time. 'unknown' is what the header renders nothing for.
+const proposalOwnership = ref<'unknown' | 'own' | 'other'>('unknown')
+const ownsProposal = computed(() => proposalOwnership.value === 'own')
 // Set when a calc finished but the user still has to pick an identity in the
 // gate — the authChoice watcher publishes once they do.
 const pendingPublish = ref(false)
@@ -174,6 +185,32 @@ const publishError = ref<string | null>(null)
 // Publish recomputes server-side, so it is as slow as a calc and escalates the
 // same way.
 const publishPhase = ref<'idle' | 'working' | 'slow' | 'verySlow'>('idle')
+
+// --- Calc matrix (comparison views) -----------------------------------------
+// Started after every successful calc for the route on screen: the same
+// stops and HOW fields under every scenario × composition, streamed cell by
+// cell (composables/useCalcMatrix.ts). Comparison-only — the figures on
+// screen always come from /calc, which the matrix warms in the compute
+// cache. Keyed on the route fingerprint + HOW fields, so recomputing the
+// same route for another scenario/composition does not restart it; aborted
+// as soon as the itinerary is edited, because its cells would describe a
+// route that no longer exists.
+// Two grids, one route (composables/useCalcMatrix.ts):
+//   gridMatrix — summary cells for every offered scenario × every
+//     composition. Feeds the comparison bars, the combination grid and the
+//     supply table.
+//   scenarioMatrix — FULL cells (route, views, parameters) for every offered
+//     scenario × the composition on screen. This is what makes a scenario
+//     switch free: the answer is already here, so no /calc, no Recalculate,
+//     no waiting. A composition switch still goes through /calc — carrying
+//     36 full evaluations would be megabytes — but lands on a cache entry
+//     gridMatrix already created.
+const gridMatrix = useCalcMatrix()
+const scenarioMatrix = useCalcMatrix<BackendRoute>()
+// The author's display name of a loaded proposal, for the ownership line.
+const authorName = ref<string | null>(null)
+// Fingerprint of the route on screen — the matrix key's first half.
+const lastFingerprint = ref<string | null>(null)
 
 // The proposal_id a discussion can hang off: the one we opened, or the one the
 // first publish adopted. Null in a fresh builder session, which is why neither
@@ -684,27 +721,80 @@ const routeStats = computed(() => {
   const rr = rawRoute.value
   if (!trip || !rr) return null
   const gp = trip.general_parameters
-  const frequencies = [...new Set(rr.schedule.seasonal_schedules.map((s) => s.frequency))]
+  const countries = [
+    ...new Set(trip.segments.flatMap((seg) => Object.keys(seg.country_distance_shares))),
+  ]
   return {
     distanceKm: gp.trip_km,
     avgSpeedKmh: gp.average_speed_kmh,
-    frequencies,
+    nStops: trip.segments.length + 1,
+    countries,
   }
 })
 
-// Headline route figures shown under the itinerary once a route exists.
+// Headline route figures shown under the itinerary once a route exists:
+// distance, speed, stops. The countries sit next to them as flags
+// (CountryFlags.vue, the same discs the gallery cards use) rather than as
+// another icon-and-text row — codes read as an abbreviation, flags as a
+// route. Frequency moved to the results' "evaluated with" line: it is an
+// evaluation input, not a route fact.
 const routeStatRows = computed(() => {
   const stats = routeStats.value
   if (!stats) return []
-  const frequencies = stats.frequencies
-    .map((f) => (te(`proposal.frequency.${f}`) ? t(`proposal.frequency.${f}`) : f))
-    .join(', ')
   return [
-    { icon: mdiArrowLeftRight, value: `${formatInt(stats.distanceKm)} km` },
-    { icon: mdiSpeedometerMedium, value: `${formatInt(stats.avgSpeedKmh)} km/h` },
-    { icon: mdiCalendarSync, value: frequencies },
+    { icon: mdiArrowLeftRight, value: `${formatInt(stats.distanceKm)} km`, title: undefined },
+    { icon: mdiSpeedometerMedium, value: `${formatInt(stats.avgSpeedKmh)} km/h`, title: undefined },
+    { icon: mdiMapMarkerMultipleOutline, value: `${stats.nStops}`, title: t('proposal.stops') },
   ]
 })
+
+// Scenarios the comparison may cover: the offered ones, so a network still
+// held back as "coming soon" (lib/scenarioAxes.ts) costs neither a bar the
+// user cannot select nor half the matrix's cells. Empty (scenarios not
+// loaded yet) means "omit the axis" and let the backend use its default.
+const matrixScenarioIds = computed(() =>
+  buildScenarioAxes(store.scenarios).ordered.map((s) => s.scenario_id),
+)
+
+// The matrix request for a calc response: the resolved request's stops and
+// HOW fields. auto_stop_addition is pinned off — the stops are settled by the
+// time a route is on screen, and "add" could route a different itinerary per
+// cell.
+function startMatrix(json: CalcResponse) {
+  const req = json.request
+  const stops = req.stops as string[]
+  const how = {
+    timetable_mode: req.timetable_mode as string,
+    fixed_night_interval: (req.fixed_night_interval as string[] | null) ?? null,
+    schedule_mode: req.schedule_mode as string,
+    routing_mode: req.routing_mode as string,
+    ...(req.expert_timetable
+      ? { expert_timetable: req.expert_timetable as ExpertTimetableRequest }
+      : {}),
+  }
+  const scenarioIds = matrixScenarioIds.value
+  const axis = scenarioIds.length > 0 ? { scenario_ids: scenarioIds } : {}
+  const base = { stops, auto_stop_addition: 'off' as const, ...axis, ...how }
+  const key = `${json.route_fingerprint}|${JSON.stringify(how)}|${scenarioIds.join(',')}`
+  const headers = store.authHeaders()
+  gridMatrix.start(key, base, headers)
+
+  const compositionId = json.route.trip_pairs[0]?.composition_id
+  if (compositionId) {
+    scenarioMatrix.start(
+      `${key}|${compositionId}`,
+      { ...base, composition_ids: [compositionId], detail: 'full' },
+      headers,
+    )
+  }
+}
+
+// Retry after a matrix-level failure (network, 503): rebuilds the request
+// from the last applied calc — the route on screen — and starts over.
+function retryMatrix() {
+  gridMatrix.retry()
+  scenarioMatrix.retry()
+}
 
 // Wire a successful calc response into the display: adapt the route, publish
 // the evaluation bundle, select the outbound trip, rebuild the itinerary from
@@ -776,6 +866,8 @@ function applyPlan(json: CalcResponse, publish = false) {
   if (typeof computedScenarioId === 'number') store.selectedScenarioId = computedScenarioId
   committedScenarioId.value = store.selectedScenarioId
   currentMode.value = 'display'
+  lastFingerprint.value = json.route_fingerprint
+  startMatrix(json)
   if (!publish) return
   // Persist. An authenticated visitor (guest or registered) publishes right
   // away; a not-yet-decided one gets the register/guest gate first and the
@@ -823,7 +915,7 @@ async function doPublish() {
       },
     })
     publishedProposalId.value = resp.proposal_id
-    ownsProposal.value = true
+    proposalOwnership.value = 'own'
     saved.value = true
     // The gallery is kept alive, so its cached list would otherwise not contain
     // the proposal the user just published. Flag it to refetch once on return.
@@ -1713,20 +1805,27 @@ const mapSegments = computed<MapSegment[] | null>(() => {
 // Load a stored proposal by id and populate display mode — same wire shape
 // as POST /api/proposal/calc (see types/api.ts's ProposalDetailResponse), so
 // applyPlan() can hydrate rawRoute/calcResult/itinerary from it exactly like
-// a fresh calc. selectedCompositionId is set first so ComputeInputsPanel
+// a fresh calc. selectedCompositionId is set first so the supply table
 // locks onto the composition the stored route actually used, rather than
 // defaulting to the first one in the full catalogue.
 async function loadStoredProposal(proposalId: number) {
   currentMode.value = 'loading'
   loadFailure.value = null
   loadFailureMsg.value = null
+  // Whose it is is a property of the proposal being loaded, so a retry — or
+  // opening a different one without leaving the workspace — starts from
+  // "not known yet" rather than keeping the previous answer on screen.
+  proposalOwnership.value = 'unknown'
+  authorName.value = null
   try {
     const detail = await fetchProposalRoute<BackendRoute>(proposalId, loadSlot.begin())
     publishedProposalId.value = detail.proposal_id
     // Own work is saved on every recompute; a stranger's is never touched.
     // user_id is null on a proposal whose author deleted their account —
     // nobody owns it then, and null === null must not read as "mine".
-    ownsProposal.value = detail.user_id !== null && detail.user_id === store.userId
+    proposalOwnership.value =
+      detail.user_id !== null && detail.user_id === store.userId ? 'own' : 'other'
+    authorName.value = detail.user_name
     selectedCompositionId.value = detail.route.trip_pairs[0]?.composition_id ?? null
     applyPlan(
       {
@@ -1760,7 +1859,41 @@ function retryLoadStored(): void {
 onBeforeUnmount(() => {
   calcSlot.cancel()
   loadSlot.cancel()
+  gridMatrix.reset()
+  scenarioMatrix.reset()
 })
+
+// An edited itinerary invalidates every matrix cell (they describe the
+// previous route); the next successful calc starts fresh ones.
+watch(isDirty, (dirty) => {
+  if (dirty) {
+    gridMatrix.reset()
+    scenarioMatrix.reset()
+  }
+})
+
+// A scenario switch is served from scenarioMatrix when its cell is there:
+// applyPlan() with the cell rebuilt into the /calc response it is equivalent
+// to, which commits the new scenario and therefore never raises the stale
+// flag. Without a cell — grid still loading, that scenario errored, the
+// switch happened before the matrix returned — nothing happens here and the
+// ordinary Recalculate path takes over.
+watch(
+  () => store.selectedScenarioId,
+  (scenarioId) => {
+    if (scenarioId === null || scenarioId === committedScenarioId.value) return
+    if (isDirty.value || currentMode.value === 'loading') return
+    const compositionId = committedCompId.value
+    const document = scenarioMatrix.document.value
+    if (!document || !compositionId || compositionId !== selectedCompositionId.value) return
+    const cell = scenarioMatrix.okCell(scenarioId, compositionId)
+    if (!cell) return
+    const response = cellAsCalcResponse(document, cell)
+    // Not persisted: switching scenario is a look, not an edit. The user's
+    // own proposal is saved by the calc paths that do change it.
+    if (response) applyPlan(response)
+  },
+)
 
 onMounted(async () => {
   // App.vue loads this reference data at startup; only fetch if we arrived here
@@ -1805,11 +1938,19 @@ onMounted(async () => {
 
 <template>
   <div class="flex flex-col gap-6">
-    <div class="flex">
+    <div class="flex flex-wrap items-center justify-between gap-3">
       <button type="button" :class="pillClass" @click="emit('back')">
         <AppIcon :path="mdiArrowLeft" :size="16" />
         {{ t('gallery.back') }}
       </button>
+      <!-- Whose proposal this is, and what a change does to it (copy-on-edit
+           in words). Only once there IS a stored proposal and we know whose it
+           is — saying nothing during the load beats saying the wrong thing. -->
+      <OwnershipLine
+        v-if="storedProposalId !== null && proposalOwnership !== 'unknown'"
+        :owned="ownsProposal"
+        :author-name="authorName"
+      />
     </div>
 
     <!-- A stored proposal that wouldn't load. This REPLACES the workspace
@@ -2344,10 +2485,20 @@ onMounted(async () => {
               {{ t('proposal.routeStats') }}
             </span>
             <div class="flex flex-wrap justify-center gap-x-8 gap-y-3">
-              <div v-for="stat in routeStatRows" :key="stat.icon" class="flex items-center gap-2">
+              <div
+                v-for="stat in routeStatRows"
+                :key="stat.icon"
+                class="flex items-center gap-2"
+                :title="stat.title"
+              >
                 <AppIcon :path="stat.icon" :size="20" />
                 <span class="text-base font-semibold">{{ stat.value }}</span>
               </div>
+              <CountryFlags
+                v-if="routeStats"
+                :countries="routeStats.countries"
+                :title="routeStats.countries.map((c) => countryName(c)).join(', ')"
+              />
             </div>
           </div>
         </div>
@@ -2529,61 +2680,40 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- Cost/revenue results (display + re-edit). Greyed out while the builder
-         is dirty, since the figures no longer match the current itinerary. -->
+    <!-- Results (display + re-edit): scenario switches + main KPIs, the
+         scenario/composition comparison, the discussion, and the collapsible
+         detail settings and cost breakdown — ProposalResults.vue. Greyed out
+         while the builder is dirty, since the figures no longer match the
+         current itinerary. The discussion is slotted in so it is NEVER greyed:
+         a thread is about the proposal and has no business going dead
+         mid-edit, and it hangs off storedProposalId, which only this
+         component knows. -->
     <div
-      v-if="showEvaluationSection && !loadFailureMsg"
-      class="w-full transition-opacity duration-200"
-      :class="isDirty ? 'pointer-events-none opacity-40' : ''"
+      v-if="showEvaluationSection && !loadFailureMsg && calcResult && calcSummary"
+      class="w-full"
     >
-      <!-- What the results were computed with. Only reachable once a route
-           exists — the first evaluation runs on the standard composition.
-           Stays interactive while the results below are stale: that is how
-           you get back to the committed selection without recomputing. -->
-      <ComputeInputsPanel
-        v-if="store.compositions.length > 0 || store.scenarios.length > 0"
-        class="mb-4"
+      <ProposalResults
+        :result="calcResult"
+        :summary="calcSummary"
+        :stops="sectionStops"
         :compositions="store.compositions"
         :selected-composition-id="selectedCompositionId"
+        :grid-matrix="gridMatrix"
+        :scenario-matrix="scenarioMatrix"
+        :params-stale="paramsStale"
+        :dimmed="isDirty"
+        :schedule-mode="(publishRequest?.schedule_mode as string | undefined) ?? null"
         @select-composition="(id) => (selectedCompositionId = id)"
-      />
-
-      <div class="relative">
-        <!-- Route and evaluation arrive in the same calc response, so calcResult
-             is always set by the time this section shows. -->
-        <EvaluationPanel
-          v-if="calcResult"
-          :result="calcResult"
-          :summary="calcSummary"
-          :stops="sectionStops"
-          @scope-change="onScopeChange"
-        />
-
-        <!-- Stale results: the whole area is the recompute control. -->
-        <Transition name="fade">
-          <button
-            v-if="paramsStale"
-            type="button"
-            class="absolute inset-0 flex cursor-pointer items-start justify-center rounded-xl bg-sapphire/60 pt-12 backdrop-blur-[2px]"
-            @click="recomputeWithSelection"
-          >
-            <span
-              class="flex items-center gap-2 rounded-full bg-primary-500 px-6 py-2 text-md font-semibold text-white shadow-lg transition hover:bg-primary-600"
-            >
-              {{ t('proposal.recalculate') }}
-              <span>→</span>
-            </span>
-          </button>
-        </Transition>
-      </div>
-    </div>
-
-    <!-- Discussion, underneath everything. Deliberately NOT greyed out while
-         the builder is dirty, unlike the evaluation above: stale figures must
-         be greyed because they no longer describe the itinerary, but a thread
-         is about the proposal and has no business going dead mid-edit. -->
-    <div v-if="storedProposalId !== null && showCommentSection" class="w-full">
-      <CommentSection :proposal-id="storedProposalId" />
+        @recalculate="recomputeWithSelection"
+        @scope-change="onScopeChange"
+        @retry-matrix="retryMatrix"
+      >
+        <template #discussion>
+          <div v-if="storedProposalId !== null && showCommentSection" class="w-full">
+            <CommentSection :proposal-id="storedProposalId" />
+          </div>
+        </template>
+      </ProposalResults>
     </div>
   </div>
 </template>
@@ -2617,7 +2747,7 @@ onMounted(async () => {
   margin: 0;
 }
 /* Expert mode on: the same gold this app already uses for "a value you
-   chose" (ComputeInputsPanel's scenario box, ExpertTimetableControls). */
+   chose" (ProposalResults' scenario card, ExpertTimetableControls). */
 .expert-pill-on {
   border-color: color-mix(in srgb, #fbbf24 45%, transparent);
   background: color-mix(in srgb, #fbbf24 14%, transparent);

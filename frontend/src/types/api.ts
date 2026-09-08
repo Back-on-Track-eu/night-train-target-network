@@ -184,6 +184,21 @@ export interface Scenario {
   track_infrastructure_defaults_version: number
   stop_infrastructures_version: number
   stop_infrastructure_defaults_version: number
+  passage_charges_version: number
+  // Which OpenRailRouting graph the scenario routes on ("infra_2026" /
+  // "infra_2032"). A deployment without that instance answers 503
+  // routing_graph_not_configured for the scenario.
+  routing_graph_key: string
+  // Grid coordinates the backend derives from scenario_key + routing_graph_key
+  // (scenario_serialize.py): the three switches of the scenario picker. null
+  // for a key outside the `infra-<network>[-hsr[-opt-tt]]` vocabulary.
+  dimensions: ScenarioDimensions | null
+}
+
+export interface ScenarioDimensions {
+  network: string
+  hsr_allowed: boolean
+  optimised_timetable: boolean
 }
 
 interface ScenarioGroup {
@@ -598,6 +613,26 @@ export interface EvaluationResponse {
 // is read by the builder (the auth gate); the rest passes through untyped.
 export interface ProposalCalcSummary {
   co2_savings_t_per_year: number | null
+  // Route metrics and financial KPIs (models/evaluation/summary.py).
+  total_distance_km?: number
+  total_time_h?: number
+  avg_speed_kmh?: number
+  n_stops?: number
+  countries?: string[]
+  cost_eur_per_train_km?: number
+  revenue_eur_per_train_km?: number
+  margin_eur_per_train_km?: number
+  // Signed annual net after the target margin (CALC 0.9.25): negative is the
+  // shortfall subsidy_eur_per_year reports, positive is a surplus. The UI
+  // never shows a negative subsidy — a surplus is worded as one.
+  net_eur_per_year?: number
+  subsidy_eur_per_year?: number
+  // Annual supply denominators (CALC 0.9.25) — what the per-unit
+  // normalisations divide by; sold / available is the utilisation.
+  operating_days_per_year?: number
+  train_km_per_year?: number
+  available_place_km_per_year?: number
+  sold_place_km_per_year?: number
   // Demand & modal-shift KPIs — route-level, annual. PLACEHOLDER values
   // (deterministic fakes derived from route metrics) until models/demand/
   // lands; demand_kpis_placeholder stays true, so the UI must present these as
@@ -626,7 +661,7 @@ export interface ProposalCalcResponse<TRoute = unknown> {
   // Only present when the request used auto_stop_addition="suggest".
   suggested_stops?: SuggestedStop[]
   // Gallery KPI summary — read by the auth gate (co2_savings_t_per_year) and
-  // the EvaluationPanel's demand/modal-shift box. Also returned by GET
+  // the results' KPI grid (MainKpiGrid.vue). Also returned by GET
   // /api/proposal/<id> (see ProposalDetailResponse), so a loaded proposal
   // populates the same box.
   summary?: ProposalCalcSummary
@@ -636,6 +671,130 @@ export interface ProposalCalcResponse<TRoute = unknown> {
     input: { parameters: EvaluationParameters }
     views: EvaluationViews
   }
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/proposal/calc/matrix — one route under every scenario × composition
+// (api/README.md "calc/matrix"). Two encodings of one record sequence: NDJSON
+// (Accept: application/x-ndjson, one MatrixRecord per line) or a folded
+// MatrixDocument. lib/calcMatrix.ts reads the stream and folds it.
+// ---------------------------------------------------------------------------
+
+export type MatrixDetail = 'summary' | 'full'
+
+export interface MatrixRequest {
+  stops: string[]
+  composition_ids?: string[] | null
+  scenario_ids?: number[] | null
+  detail?: MatrixDetail
+  timetable_mode?: string
+  fixed_night_interval?: string[] | null
+  schedule_mode?: string
+  routing_mode?: string
+  auto_stop_addition?: 'off' | 'add' | 'suggest'
+  expert_timetable?: ExpertTimetableRequest | null
+}
+
+export interface MatrixScenarioAxisEntry {
+  scenario_id: number
+  scenario_key: string
+  scenario_name: string
+  is_current_base: boolean
+  routing_graph_key: string
+  dimensions: ScenarioDimensions | null
+}
+
+export interface MatrixCompositionAxisEntry {
+  composition_id: string
+  description: string
+  material_strategy: string
+  operator_id: string
+  operator_name: string
+  hsr_allowed: boolean
+  max_speed_kmh: number
+  places_by_class: Record<string, number>
+  places_total: number
+}
+
+export interface MatrixHeader {
+  type: 'header'
+  route_builder_version: string
+  calc_version: string
+  request: Record<string, unknown>
+  axes: { scenarios: MatrixScenarioAxisEntry[]; compositions: MatrixCompositionAxisEntry[] }
+  n_cells: number
+  // Grid position of the cell that is always computed and streamed first.
+  baseline_index: number
+  // detail "full" only — the static models block, once.
+  models?: EvaluationModels
+}
+
+export type SharedKind =
+  'geometry' | 'track_infrastructures' | 'stop_infrastructures' | 'compositions'
+
+export interface SharedRecord {
+  type: 'shared'
+  kind: SharedKind
+  id: string
+  data: unknown
+}
+
+interface MatrixCellBase {
+  index: number
+  scenario_id: number
+  composition_id: string
+}
+
+export interface MatrixCellOk<TRoute = unknown> extends MatrixCellBase {
+  status: 'ok'
+  cache_hit: boolean
+  route_fingerprint: string
+  summary: ProposalCalcSummary
+  // detail "full" only. route: segment.geometry_id values are shared "g:" ids
+  // and route.geometries is absent; evaluation carries "p:" references in
+  // place of input.parameters.
+  suggested_stops?: SuggestedStop[]
+  route?: TRoute
+  evaluation?: { parameters_refs: Record<SharedKind, string>; views: EvaluationViews }
+}
+
+export interface MatrixCellError extends MatrixCellBase {
+  status: 'error'
+  // Same codes as /calc: gauge_mismatch | routing_graph_not_configured |
+  // routing_error | domain_error | calc_error
+  error: string
+  message: string
+  conflicting_stops?: string[]
+}
+
+export type MatrixCell<TRoute = unknown> = MatrixCellOk<TRoute> | MatrixCellError
+
+export type MatrixCellRecord<TRoute = unknown> = MatrixCell<TRoute> & { type: 'cell' }
+
+export interface MatrixStats {
+  n_cells: number
+  n_ok: number
+  n_error: number
+  n_cache_hit: number
+  elapsed_s: number
+}
+
+export interface MatrixDone {
+  type: 'done'
+  status: 'complete' | 'aborted'
+  stats: MatrixStats
+}
+
+export type MatrixRecord<TRoute = unknown> =
+  MatrixHeader | SharedRecord | MatrixCellRecord<TRoute> | MatrixDone
+
+// The folded (non-stream) shape: header fields at the top level, shared blocks
+// keyed by kind then id, cells sorted by index.
+export interface MatrixDocument<TRoute = unknown> extends Omit<MatrixHeader, 'type'> {
+  status: MatrixDone['status']
+  stats: MatrixStats
+  shared?: Partial<Record<SharedKind, Record<string, unknown>>>
+  cells: MatrixCell<TRoute>[]
 }
 
 // The geographic scope currently selected in the evaluation panel — emitted so

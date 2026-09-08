@@ -3,8 +3,9 @@
 // budget class, and type the response.
 
 import { apiRequest } from './apiClient'
-import { ApiError } from './apiError'
 import type {
+  MatrixDocument,
+  MatrixRequest,
   ProposalsRequest,
   ProposalsResponse,
   ProposalDetailResponse,
@@ -16,7 +17,7 @@ import type {
 } from '@/types/api'
 
 /** Every failure is an ApiError; re-exported so callers need one import. */
-export { ApiError }
+export { ApiError } from './apiError'
 
 /**
  * The gallery's one read: list page AND map in a single request. The response
@@ -163,5 +164,33 @@ export function deleteComment(
     method: 'DELETE',
     headers: authHeaders,
     allowEmpty: true,
+  })
+}
+
+/**
+ * POST /api/proposal/calc/matrix — the whole grid as ONE JSON document.
+ *
+ * The endpoint also speaks NDJSON (Accept: application/x-ndjson) and streams
+ * cells as they complete. We ask for the document instead: it goes through
+ * apiRequest like every other call, so it inherits the classification, the
+ * budget, the health tracking and the cancel semantics rather than
+ * re-implementing them around a ReadableStream — and the frontend's use of
+ * the matrix is all-or-nothing anyway (a comparison of a partial grid would
+ * be misleading). Progressive rendering is what the stream is for; when a
+ * grid gets big enough to need it, lib/calcMatrix.ts still has the reader.
+ */
+export function calcMatrix<TRoute = unknown>(
+  body: MatrixRequest,
+  headers: Record<string, string>,
+  signal?: AbortSignal,
+  onSlow?: (phase: 'slow' | 'verySlow') => void,
+): Promise<MatrixDocument<TRoute>> {
+  return apiRequest<MatrixDocument<TRoute>>('/api/proposal/calc/matrix', {
+    method: 'POST',
+    headers,
+    body,
+    budget: 'heavy',
+    signal,
+    onSlow,
   })
 }

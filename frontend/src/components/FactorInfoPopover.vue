@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import Popover from 'primevue/popover'
+import InfoPopover from '@/components/InfoPopover.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import { mdiOpenInNew } from '@mdi/js'
 import { useI18n } from 'vue-i18n'
@@ -10,8 +10,9 @@ import type { FormulaMap } from '@/types/api'
 // The info popover shared by the cost tree and the revenue panel: the row's
 // label, a one-line summary of it, and a link to its documentation page.
 //
-// Shared rather than duplicated so the hover-intent timing and the overlay
-// styling have one home.
+// The overlay itself — hover-intent timing, styling — is InfoPopover.vue,
+// which InfoHint.vue also uses; this component is only the factor content
+// and the key → formula lookup behind it.
 //
 // Parents render this once and drive it from their own info icons, passing
 // the label they already render so the popover title cannot disagree with
@@ -25,42 +26,25 @@ const props = defineProps<{
 
 const { t } = useI18n()
 
-const popover = ref<InstanceType<typeof Popover> | null>(null)
+const popover = ref<InstanceType<typeof InfoPopover> | null>(null)
 const activeKey = ref<string | null>(null)
 const activeLabel = ref('')
-// Key whose popover is currently shown — lets us skip a redundant show()
-// (and the flicker it causes) when the cursor re-enters the same icon.
-const openKey = ref<string | null>(null)
-let closeTimer: ReturnType<typeof setTimeout> | null = null
 
-function cancelClose() {
-  if (closeTimer !== null) {
-    clearTimeout(closeTimer)
-    closeTimer = null
-  }
-}
-
-// Hover-intent: open on icon hover, keep open while the cursor is over the
-// popover, and close only after a short delay once it has left both — so
-// moving from the icon into the popover doesn't flicker-close it.
+// The label comes from the icon the cursor is on, so it is refreshed even
+// when the overlay is already open on that key (InfoPopover skips the
+// redundant show()).
 function open(nodeKey: string, label: string, event: Event) {
-  cancelClose()
   activeLabel.value = label
-  if (openKey.value === nodeKey) return
   activeKey.value = nodeKey
-  popover.value?.show(event)
+  popover.value?.open(event, nodeKey)
 }
 
 function scheduleClose() {
-  cancelClose()
-  closeTimer = setTimeout(() => popover.value?.hide(), 150)
+  popover.value?.scheduleClose()
 }
 
-function onShow() {
-  openKey.value = activeKey.value
-}
-function onHide() {
-  openKey.value = null
+function cancelClose() {
+  popover.value?.cancelClose()
 }
 
 defineExpose({ open, scheduleClose, cancelClose })
@@ -84,19 +68,7 @@ const activeFactor = computed(() => {
 </script>
 
 <template>
-  <Popover
-    ref="popover"
-    :pt="{
-      root: {
-        class: 'cost-info-overlay !rounded-xl !shadow-2xl',
-        onMouseenter: cancelClose,
-        onMouseleave: scheduleClose,
-      },
-      content: { class: '!p-6 !bg-transparent' },
-    }"
-    @show="onShow"
-    @hide="onHide"
-  >
+  <InfoPopover ref="popover">
     <div v-if="activeFactor" class="flex w-96 flex-col gap-3">
       <div class="flex items-center gap-2">
         <h3 class="text-xl font-semibold text-primary-50">{{ activeFactor.title }}</h3>
@@ -119,15 +91,5 @@ const activeFactor = computed(() => {
         {{ activeFactor.summary }}
       </p>
     </div>
-  </Popover>
+  </InfoPopover>
 </template>
-
-<style>
-.cost-info-overlay {
-  background: #23263d !important;
-  border: 1px solid color-mix(in srgb, var(--p-primary-50) 20%, transparent) !important;
-  /* One fixed-width column; the viewport is the only bound that still
-     matters on a narrow screen. */
-  max-width: calc(100vw - 2rem);
-}
-</style>

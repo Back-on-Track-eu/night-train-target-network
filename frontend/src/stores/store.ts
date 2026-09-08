@@ -150,7 +150,7 @@ export const useStore = defineStore('store', () => {
       scenariosStatus.value = 'error'
       // Consumers MUST surface this: with no scenario loaded, selectedScenarioId
       // stays null and the calc silently runs against the live base instead of
-      // the scenario the user thinks is selected. ComputeInputsPanel says so.
+      // the scenario the user thinks is selected. ProposalResults says so.
       scenariosFailure.value = asApiFailure(err)
     }
   }

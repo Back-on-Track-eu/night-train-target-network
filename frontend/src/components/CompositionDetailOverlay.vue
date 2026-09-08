@@ -20,7 +20,7 @@ import type { Composition } from '@/types/api'
 // Detail overlay for the composition card: the formation drawn as a platform
 // display, the hovered coach's type data, and the per-class and unit-cost
 // figures. Everything that is a model input rather than a headline figure sits
-// behind the details toggle. Opened from CompositionPanel's info icon through
+// behind the details toggle. Opened from SupplyTable's info icon through
 // the exposed handlers — the same hover-intent pattern the cost-factor popover
 // uses.
 const props = defineProps<{ composition: Composition }>()

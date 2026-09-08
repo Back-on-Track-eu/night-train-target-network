@@ -361,6 +361,155 @@
       "section": {
         "startAria": "Section start",
         "endAria": "Section end"
+      },
+      "impact": {
+        "placeholder": "Demand, modal-shift and CO₂ figures are interim estimates until the demand model lands."
+      }
+    },
+    "stops": "Stops",
+    "ownership": {
+      "ownLabel": "Your proposal",
+      "ownNote": "changes are saved automatically",
+      "copyLabel": "{name}'s proposal",
+      "copyNote": "any change you make is saved as your own copy",
+      "someone": "Someone"
+    },
+    "compare": {
+      "scenarioTitle": "Scenario and main figures",
+      "scenarioBody": "Simulate the network, operating conditions and further potential political measures.",
+      "title": "Compare across scenarios",
+      "body": "How the selected train fares under every scenario, and every train under the selected one.",
+      "complete": "Every combination computed.",
+      "kpiPicker": "Figure to compare",
+      "viewBars": "Scenarios",
+      "viewGrid": "All combinations",
+      "pending": "Not computed yet",
+      "zeroLine": "0 — below the line no subsidy is needed",
+      "worse": "worse",
+      "better": "better",
+      "none": "none",
+      "surplus": "surplus {value}",
+      "surplusShort": "surplus",
+      "noSubsidy": "no subsidy",
+      "isBaseline": "baseline",
+      "noBaselineYet": "baseline pending",
+      "vsBaseline": "vs. baseline",
+      "measuresNone": "Measures: none — today's prices and taxes",
+      "evaluatedWith": "Evaluated with {composition} · {frequency}",
+      "change": "change ↓",
+      "staleMarker": "results outdated",
+      "comingSoon": "coming soon",
+      "axes": {
+        "network": "Rail network",
+        "infra": "Infra {network}",
+        "networkPreviewHint": "We're currently preparing to route on the 2032 network, including estimated infrastructure upgrades. Stay tuned!",
+        "conditions": "Operating conditions",
+        "hsr": "Night trains may use high-speed lines",
+        "optTt": "Optimised timetables",
+        "optTtNeedsHsr": "Optimised timetables are only modelled together with high-speed lines.",
+        "measures": "Price & regulatory measures",
+        "measuresHint": "We're currently preparing to add further political measures to our scenario analysis. Stay tuned!",
+        "measure": {
+          "vat": "VAT exemption on tickets",
+          "energyTax": "Energy tax exemption",
+          "tac": "Track access at direct costs only"
+        }
+      },
+      "conditionsShort": {
+        "base": "Base",
+        "hsr": "HSR",
+        "hsrOptTt": "HSR + tt"
+      },
+      "kpis": {
+        "subsidy": "Necessary subsidy",
+        "co2": "CO₂ saved",
+        "subsidyPerT": "Subsidy per t CO₂",
+        "pax": "Passenger trips",
+        "paxKm": "Passenger-km",
+        "shiftAir": "Shifted from air",
+        "shiftCar": "Shifted from car",
+        "journeyTime": "Journey time"
+      },
+      "units": {
+        "millionEurYear": "/ year",
+        "ktYear": "kt / year",
+        "eurPerT": "€ / t",
+        "perYear": "/ year",
+        "kmYear": "km / year"
+      },
+      "cellErrors": {
+        "routing_graph_not_configured": "This scenario needs a routing instance this deployment does not run.",
+        "gauge_mismatch": "The stops are on different track gauges.",
+        "routing_error": "No route could be found for this combination.",
+        "domain_error": "This combination could not be evaluated.",
+        "calc_error": "Something went wrong computing this combination."
+      },
+      "loading": "Computing every combination …",
+      "partial": "{received} of {total} combinations available — the rest could not be computed."
+    },
+    "supply": {
+      "filters": {
+        "all": "All",
+        "new": "New fleet",
+        "refurbished": "Refurbished",
+        "hsr": "HSR-capable"
+      },
+      "columns": {
+        "composition": "Composition",
+        "places": "Places",
+        "eurTrainKm": "€ / train-km",
+        "ctPlaceKm": "ct / place-km",
+        "fit": "Fit to demand",
+        "subsidy": "Subsidy / year"
+      },
+      "fitHint": "Coming soon — needs the demand model. Today every train is evaluated at the same utilisation, so this column cannot tell them apart.",
+      "schedule": {
+        "alwaysDaily": "Daily",
+        "alwaysThreePerWeek": "3× per week"
+      },
+      "sidebar": {
+        "title": "Frequency & supply",
+        "frequency": "Frequency",
+        "perYear": "Per year, both directions",
+        "departures": "Departures",
+        "trainKm": "Train-km",
+        "places": "Places offered",
+        "placeKm": "Place-km offered",
+        "utilisation": "Places sold",
+        "utilisationNote": "Places sold follow the interim demand assumption until the demand model lands."
+      }
+    },
+    "settings": {
+      "divider": "Detail settings and the full cost breakdown",
+      "title": "Detail settings",
+      "body": "Compare and choose the train composition; what the demand figures rest on.",
+      "tabs": {
+        "supply": "Supply",
+        "demand": "Demand"
+      },
+      "selectedFormation": "Selected: {composition}",
+      "mobileCard": "Settings and the full cost breakdown need a bigger screen — evaluated with {composition}, {frequency}.",
+      "demand": {
+        "intro": "Passenger numbers are an interim assumption, not a demand model: every train is filled to the same share of its places on every leg, and ticket prices follow a per-km fare by class.",
+        "source": "Demand source: uniform utilisation of the offered places (interim), to be replaced by a mode-choice model.",
+        "prices": "Prices: per-km fares by accommodation class, calibrated on current operators.",
+        "modes": "Competing modes: air and car shares are fixed factors until the demand model lands.",
+        "placeholder": "Demand settings become editable once the demand model exists."
+      }
+    },
+    "breakdown": {
+      "cost": "Cost",
+      "revenue": "Revenue",
+      "gapSubsidy": "Necessary subsidy {value}",
+      "gapSurplus": "Revenue exceeds cost by {value}",
+      "segments": {
+        "operatorVariable": "Operator variable",
+        "operatorFixed": "Operator fixed",
+        "trackAccess": "Track access",
+        "stationCharges": "Station charges",
+        "energy": "Energy",
+        "margin": "Operator margin",
+        "tickets": "Ticket revenue"
       }
     }
   },

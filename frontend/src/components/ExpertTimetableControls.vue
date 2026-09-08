@@ -154,7 +154,7 @@ function onTimeInput(event: Event) {
 </template>
 
 <style scoped>
-/* The same gold wash ComputeInputsPanel uses for the scenario box: in this
+/* The same gold wash ProposalResults uses for the scenario card: in this
    app that colour already means "a value you chose", which is exactly what
    a manual departure is. */
 .expert-box {

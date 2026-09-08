@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import Avatar from 'primevue/avatar'
-import AvatarGroup from 'primevue/avatargroup'
 import Popover from 'primevue/popover'
 import AppIcon from '@/components/AppIcon.vue'
 import AppSpinner from '@/components/AppSpinner.vue'
+import CountryFlags from '@/components/CountryFlags.vue'
 import { useStore } from '@/stores/store'
 import { useToastStore } from '@/stores/toastStore'
 import { useLocaleFormat } from '@/composables/useLocaleFormat'
@@ -238,31 +237,9 @@ async function onLikeClick() {
 
 // Alphabetical, as the summary carries them. Itinerary order used to come from
 // the per-proposal route fetch the gallery no longer makes (the map now rides
-// the list request), and is not worth one request per card on its own.
+// the list request), and is not worth one request per card on its own. The
+// discs themselves are CountryFlags.vue, shared with the route stats panel.
 const flagCountries = computed(() => props.proposal.countries)
-const flagUrl = (code: string) => `/flags/${code.toLowerCase()}.svg`
-
-// Circular flag SVGs are vendored under public/flags/. Any country without a
-// vendored flag (image load fails) falls back to its code shown as a label.
-const failedFlags = ref(new Set<string>())
-function markFailed(code: string) {
-  failedFlags.value = new Set(failedFlags.value).add(code)
-}
-// Border matches the card's own background (bg-primary-50/5 over the page's
-// sapphire) so overlapping flags read as cleanly "cut out" rather than
-// outlined in a mismatched color. Earlier (leftmost) flags stack above later
-// ones — reversed z-index, since AvatarGroup's own negative-margin overlap
-// would otherwise put the rightmost flag on top.
-const FLAG_BORDER_COLOR = 'color-mix(in srgb, var(--p-primary-50) 5%, var(--color-sapphire))'
-function avatarPt(code: string, index: number) {
-  return {
-    root: {
-      class: 'overflow-hidden rounded-full',
-      style: `width:1.55rem;height:1.55rem;border:2px solid ${FLAG_BORDER_COLOR};font-size:0.65rem;background:#2b2e4a;color:var(--p-primary-50);position:relative;z-index:${flagCountries.value.length - index};`,
-    },
-    image: { onError: () => markFailed(code) },
-  }
-}
 </script>
 
 <template>
@@ -321,16 +298,7 @@ function avatarPt(code: string, index: number) {
       </div>
 
       <div class="flex flex-col items-end gap-2">
-        <AvatarGroup class="flag-group">
-          <Avatar
-            v-for="(c, index) in flagCountries"
-            :key="c"
-            :image="failedFlags.has(c) ? undefined : flagUrl(c)"
-            :label="failedFlags.has(c) ? c : undefined"
-            shape="circle"
-            :pt="avatarPt(c, index)"
-          />
-        </AvatarGroup>
+        <CountryFlags :countries="flagCountries" />
 
         <!-- Like button — proposal-only. Count sits left of the thumb; the
              icon fills in once the current user has liked it. -->
@@ -386,17 +354,3 @@ function avatarPt(code: string, index: number) {
     </Popover>
   </article>
 </template>
-
-<style>
-/* Circular flag images fill their avatar disc. PrimeVue's Lara preset (unlike
-   some other presets) doesn't give AvatarGroup any built-in overlap, so it's
-   applied explicitly here; z-index (avatarPt, above) puts earlier flags on top. */
-.flag-group .p-avatar img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.flag-group .p-avatar + .p-avatar {
-  margin-left: -0.6rem;
-}
-</style>
