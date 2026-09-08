@@ -1,0 +1,116 @@
+[
+  {
+    "text": "Total cost",
+    "link": "/cost/total-cost",
+    "collapsed": false,
+    "items": [
+      {
+        "text": "Operator cost",
+        "link": "/cost/operator-total",
+        "collapsed": false,
+        "items": [
+          {
+            "text": "Variable operator cost",
+            "link": "/cost/operator-variable-total",
+            "collapsed": false,
+            "items": [
+              {
+                "text": "Driver cost",
+                "link": "/cost/driver"
+              },
+              {
+                "text": "Cabin crew cost",
+                "link": "/cost/crew"
+              },
+              {
+                "text": "Coach maintenance",
+                "link": "/cost/coach-maintenance"
+              },
+              {
+                "text": "Locomotive rental",
+                "link": "/cost/loco"
+              },
+              {
+                "text": "Onboard service",
+                "link": "/cost/svc-stockings"
+              },
+              {
+                "text": "Variable overhead",
+                "link": "/cost/var-overhead"
+              }
+            ]
+          },
+          {
+            "text": "Fixed operator cost",
+            "link": "/cost/operator-fixed-total",
+            "collapsed": false,
+            "items": [
+              {
+                "text": "Coach write-off",
+                "link": "/cost/coach-amortisation"
+              },
+              {
+                "text": "Financing",
+                "link": "/cost/financing"
+              },
+              {
+                "text": "Fixed overhead",
+                "link": "/cost/fix-overhead"
+              },
+              {
+                "text": "Cleaning",
+                "link": "/cost/cleaning"
+              },
+              {
+                "text": "Shunting",
+                "link": "/cost/shunting"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "text": "Infrastructure cost",
+        "link": "/cost/infrastructure-total",
+        "collapsed": false,
+        "items": [
+          {
+            "text": "Track access charge",
+            "link": "/cost/tac"
+          },
+          {
+            "text": "Traction electricity",
+            "link": "/cost/energy"
+          },
+          {
+            "text": "Station charges",
+            "link": "/cost/station-charge"
+          },
+          {
+            "text": "Overnight parking",
+            "link": "/cost/parking"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "text": "Total revenue",
+    "link": "/cost/total-revenue",
+    "collapsed": false,
+    "items": [
+      {
+        "text": "Ticket revenue",
+        "link": "/cost/ticket-revenue"
+      }
+    ]
+  },
+  {
+    "text": "Profit requirement (margin)",
+    "link": "/cost/ebit-margin"
+  },
+  {
+    "text": "Net result",
+    "link": "/cost/net"
+  }
+]

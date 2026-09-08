@@ -44,6 +44,11 @@ This repo hosts the technical side of the project — backend, frontend, and ser
 | **Staging** (test) | `https://targetnetwork.65.109.137.97.sslip.io` (basic-auth) | every merge to the `staging` branch |
 | **Production** | `https://targetnetwork.back-on-track.eu` | every merge to the `production` branch |
 
+Both environments also serve the public model documentation at `/docs/` —
+how the calculation works, where the data comes from, and what is still
+assumed. It ships inside the frontend image; see
+[`docs-site/`](docs-site/).
+
 There is no `main` branch: all work lands in `staging` via pull request, and `staging` is merged into `production` once tested. Merges deploy automatically — see [`deploy/bot-server-app/README.md`](deploy/bot-server-app/README.md) for how that works, including a one-command local rehearsal (`./local.sh`).
 
 ## Running the app locally

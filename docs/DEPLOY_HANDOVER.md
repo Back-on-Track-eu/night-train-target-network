@@ -73,6 +73,59 @@ capacity work that is genuinely yours to schedule.
 
 ---
 
+## The documentation site ships inside the frontend image
+
+`docs-site/` (VitePress) is built into the frontend container and served
+by its nginx at **`/docs/`** — same origin as the app.
+
+**No Caddy change is needed.** That was the point of putting it behind the
+app's own nginx rather than in its own container: the vhost still has
+exactly two `handle` blocks, `/api/*` and the catch-all.
+
+What changed on the deploy side:
+
+- `frontend/Dockerfile.demo` gained a `docs` build stage. It reads
+  `docs-site/` through a **named build context** (`docssrc`), because the
+  frontend build context is `frontend/` and widening it to the repo root
+  would ship `backend/`, `.git/` and the multi-GB routing graph cache into
+  every frontend build.
+- Both compose files supply it via `build.additional_contexts`. **This
+  needs Compose v2.17+ with BuildKit** — if a deploy fails with an
+  unrecognised `additional_contexts` key, that is the cause.
+- `frontend/nginx.conf` gained `location /docs/` **before** the SPA
+  catch-all. Order matters: without it every `/docs/*` request falls
+  through to the app's `index.html` and returns 200 with a blank page.
+
+Staging inherits the app's basic auth, so the docs are behind it there and
+public on production.
+
+**Verified locally** by building the image and running it: `/docs/`,
+`/docs/cost/tac` and `/docs/reference/parameters` serve the docs, `/`,
+`/gallery` and `/proposal/12` still serve the SPA, and `/docs/nonsense`
+returns a real 404.
+
+**When this stops applying:** if the docs ever move to their own container
+or subdomain, in which case a Caddy block does become necessary.
+
+## Dev-stack routing JVM had no heap cap
+
+`backend/docker/docker-compose.yml` started the routing container with no
+`-Xmx`, so the JVM took its default quarter of whatever Docker Desktop was
+given — about 1.9 GiB on an 8 GiB allocation, which is not enough to load
+the rail graph. It died with `OutOfMemoryError` during startup and took
+every dependent service with it (`dependency failed to start: container
+openrailrouting-infra-2026 is unhealthy`), which is how it surfaced when
+opening the devcontainer.
+
+`deploy/bot-server/docker-compose.yml` has carried the guardrail since it
+was written (`JAVA_TOOL_OPTIONS=-Xmx3g`, `mem_limit`/`memswap_limit` 4g);
+the dev stack never got it. Now mirrored. Measured after the change: the
+container settles at 2.06 GiB of its 4 GiB limit.
+
+**When this stops applying:** when the graph grows past 3 GiB of heap, at
+which point both files need raising together.
+
+
 ## 1. What this batch does
 
 Scenarios now pin the **routing graph** they route on, not just their five
@@ -778,6 +831,45 @@ before deleting that one.
 3. Do you want a soak period between step 3 and step 4 of §3?
 4. §9.2 — should the servers load ONTD reference data at all?
 5. §9.3 — delete the two legacy deploy directories?
+
+---
+
+## 11. Composition catalog moved to CSV (COMPOSITIONS 0.9.4)
+
+`db/dev/seed.py` still regenerates `calib/seed/*.csv` from
+`02_calibration.ipynb` when they are absent, exactly as before. What
+changed underneath: the notebook now reads the rolling-stock catalog from
+`backend/models/compositions/calib/catalog/*.csv` through
+`backend/models/compositions/catalog.py`, and **fails the seed** if the
+catalog has a defect (the same check the validator script runs). Twelve
+compositions are seeded instead of eight.
+
+Deployment checklist for the release carrying this:
+
+1. Reseed: the four new compositions only appear after `seed.py` runs;
+   `calib/seed/` is gitignored and regenerated, so a stale seed dir from an
+   earlier image is not a concern inside the container, but a bind-mounted
+   one would be — delete it before the first start.
+2. Watch the seed log for `catalog warning:` lines. They are expected
+   (TO_VERIFY notes on the new coaches; NEW-family section-weight quirk);
+   a `CatalogError` traceback is not, and means the CSVs on that branch
+   are inconsistent.
+3. Nothing else: no schema change, no new environment variable, no new
+   Python dependency (`catalog.py` is stdlib-only), `CALC_VERSION` and
+   `ROUTE_BUILDER_VERSION` unchanged, so the compute cache keeps its
+   entries — new composition ids simply have none yet.
+
+---
+
+## 12. Reseed for the cost re-calibration (COMPOSITIONS 0.9.5)
+
+Parameters only (operators, composition_types, class costs) — no schema
+change, no code path change. Same reseed procedure as §11; the seed log
+shows `fleet avg 21.7` where it showed 40.07. The compute cache is keyed on
+scenario pins and composition ids, **not** on the operator parameters, so
+cached calc results from before this reseed would be stale: clear
+`proposals` compute-cache entries (or bump the cache namespace) as part of
+this rollout, otherwise old and new evaluations coexist in the gallery.
 
 ---
 

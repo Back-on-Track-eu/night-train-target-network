@@ -56,8 +56,17 @@ services:
       dockerfile: Dockerfile
     image: docker-openrailrouting
     container_name: openrailrouting-infra-2026
+    # JVM guardrail, mirroring deploy/bot-server/docker-compose.yml. Without
+    # an explicit -Xmx the JVM takes a quarter of whatever Docker Desktop was
+    # given, which on an 8 GiB allocation is ~1.9 GiB — not enough to load the
+    # rail graph, so the container OOMs during startup and every dependent
+    # service fails with "dependency failed to start". The graph itself loads
+    # at well under 1 GiB; 3g is headroom, not a requirement.
     environment:
       GRAPH_CACHE_FILE_ID: ${GRAPH_CACHE_FILE_ID_INFRA_2026:-}
+      JAVA_TOOL_OPTIONS: -Xmx3g
+    mem_limit: 4g
+    memswap_limit: 4g
     ports:
       - "${OPENRAILROUTING_HOST_PORT_INFRA_2026:-8989}:${OPENRAILROUTING_CONTAINER_PORT:-8989}"
     volumes:
@@ -100,8 +109,17 @@ services:
     image: docker-openrailrouting
     container_name: openrailrouting-infra-2032
     profiles: ["infra-2032"]
+    # JVM guardrail, mirroring deploy/bot-server/docker-compose.yml. Without
+    # an explicit -Xmx the JVM takes a quarter of whatever Docker Desktop was
+    # given, which on an 8 GiB allocation is ~1.9 GiB — not enough to load the
+    # rail graph, so the container OOMs during startup and every dependent
+    # service fails with "dependency failed to start". The graph itself loads
+    # at well under 1 GiB; 3g is headroom, not a requirement.
     environment:
       GRAPH_CACHE_FILE_ID: ${GRAPH_CACHE_FILE_ID_INFRA_2032:-}
+      JAVA_TOOL_OPTIONS: -Xmx3g
+    mem_limit: 4g
+    memswap_limit: 4g
     ports:
       - "${OPENRAILROUTING_HOST_PORT_INFRA_2032:-8991}:${OPENRAILROUTING_CONTAINER_PORT:-8989}"
     volumes:

@@ -20,6 +20,12 @@ Isolation: inserts commit through the API's own connection, so the
 per-test rollback fixture can't undo them (same situation as
 test_50_proposals_api.py). This module's own rows are tagged with a
 _TEST_SUBJECT_PREFIX and purged before and after the module.
+
+Rate limits: POST /api/feedback is limited (config.FEEDBACK_RATE_LIMIT)
+because it is the one unauthenticated endpoint that sends mail. The stack
+under test should run TESTING=true (CI does); against a stack with limits
+on, the submitting tests skip rather than fail — same convention as
+test_70_auth_api.py.
 """
 
 import pytest
@@ -28,6 +34,11 @@ import requests
 from tests.helpers import FEEDBACK_CATEGORIES_URL, FEEDBACK_URL
 
 _TEST_SUBJECT_PREFIX = "TEST_FEEDBACK_60_"
+
+
+def _skip_if_rate_limited(resp):
+    if resp.status_code == 429:
+        pytest.skip("feedback endpoint rate-limited on this stack (TESTING!=true)")
 
 
 def _purge_test_feedback(db_cur, db_conn):
@@ -69,6 +80,7 @@ def test_feedback_requires_identity(api_base):
         "message": "Missing identity.",
     }
     resp = requests.post(f"{api_base}{FEEDBACK_URL}", json=body, timeout=15)
+    _skip_if_rate_limited(resp)
     assert resp.status_code == 400
     data = resp.json()
     assert data["error"] == "validation_error"
@@ -84,6 +96,7 @@ def test_feedback_rejects_invalid_email(api_base):
         "message": "Invalid email format.",
     }
     resp = requests.post(f"{api_base}{FEEDBACK_URL}", json=body, timeout=15)
+    _skip_if_rate_limited(resp)
     assert resp.status_code == 400
     assert any("email" in d for d in resp.json()["details"])
 
@@ -91,6 +104,7 @@ def test_feedback_rejects_invalid_email(api_base):
 def test_feedback_requires_subject_category_message(api_base):
     body = {"email": "someone@example.com"}
     resp = requests.post(f"{api_base}{FEEDBACK_URL}", json=body, timeout=15)
+    _skip_if_rate_limited(resp)
     assert resp.status_code == 400
     details = " ".join(resp.json()["details"])
     for field in ("subject", "category", "sub_category", "message"):
@@ -106,6 +120,7 @@ def test_feedback_unknown_user_id_is_domain_error(api_base):
         "message": "This user_id should not exist.",
     }
     resp = requests.post(f"{api_base}{FEEDBACK_URL}", json=body, timeout=15)
+    _skip_if_rate_limited(resp)
     assert resp.status_code == 422
     assert resp.json()["error"] == "domain_error"
 
@@ -124,6 +139,7 @@ def test_feedback_anonymous_submission_is_stored(api_base, db_cur):
         "message": "The DE TAC rate looks out of date.",
     }
     resp = requests.post(f"{api_base}{FEEDBACK_URL}", json=body, timeout=15)
+    _skip_if_rate_limited(resp)
     assert resp.status_code == 201
     data = resp.json()
     assert isinstance(data["feedback_id"], int)
@@ -161,6 +177,7 @@ def test_feedback_logged_in_submission_is_stored(api_base, db_cur):
         "message": "Would love a CSV export of proposal summaries.",
     }
     resp = requests.post(f"{api_base}{FEEDBACK_URL}", json=body, timeout=15)
+    _skip_if_rate_limited(resp)
     assert resp.status_code == 201
     data = resp.json()
 
@@ -190,6 +207,7 @@ def test_feedback_categories_lists_all_categories(api_base):
         "Evaluation — calculation method",
         "Evaluation — results / view",
         "Route or timetable",
+        "Documentation",
         "General functionality",
         "Bug report",
         "Feature request",

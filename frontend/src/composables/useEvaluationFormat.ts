@@ -1,6 +1,5 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { RateRow } from '@/lib/costFactorRates'
 
 // Number formatting shared by the evaluation panel's sub-components (KPI /
 // cost / revenue / demand figures, cost-factor rate table). Every formatter
@@ -19,7 +18,6 @@ export function useEvaluationFormat() {
   const fmtPct = computed(
     () => new Intl.NumberFormat(locale.value, { style: 'percent', maximumFractionDigits: 1 }),
   )
-  const fmtRate = computed(() => new Intl.NumberFormat(locale.value, { maximumFractionDigits: 4 }))
 
   // Monetary figures — compact once large, integer above 100, else a few
   // significant digits so small fares/charges don't collapse to "0 €".
@@ -40,12 +38,5 @@ export function useEvaluationFormat() {
     return Math.abs(value) >= 10_000 ? fmtCompact.value.format(value) : fmtInt.value.format(value)
   }
 
-  // Quota fields are stored as fractions (0.1) but described in "%" — render
-  // them as a percentage for readability; other units are shown verbatim.
-  function formatRateValue(row: RateRow): string {
-    const value = row.unit.startsWith('%') ? row.value * 100 : row.value
-    return fmtRate.value.format(value)
-  }
-
-  return { formatEur, formatShare, formatCount, formatRateValue }
+  return { formatEur, formatShare, formatCount }
 }

@@ -5,9 +5,9 @@ Shared formula-documentation dataclasses for every model under models/.
 
 Each model's model.py documents its calculations in a formula registry
 (ROUTE_FORMULAS, ENERGY_FORMULAS, CALC_FORMULAS) keyed by output field
-name. One registry entry is a Formula: the LaTeX expression, a short
-plain-language description written for tool users (not developers), and
-a full input/output legend with units.
+name. One registry entry is a Formula: the LaTeX expression, a one-line
+summary, a longer plain-language description — both written for tool
+users, not developers — and a full input/output legend with units.
 
 Serialization into API responses lives in
 api/helpers/evaluation_serialize.py (models_to_dict()), per the
@@ -49,13 +49,20 @@ class Formula:
     """One documented calculation step of a model.
 
     latex       — KaTeX/MathJax-compatible LaTeX string
-    description — short plain-language explanation for tool users;
+    summary     — ONE self-contained sentence naming what the value is,
+                  in the reader's terms. It is the whole explanation
+                  wherever there is no room for more: the cost-breakdown
+                  info popover, a docs page description, a search
+                  snippet. Required, so a new formula cannot ship
+                  without one
+    description — the full plain-language explanation for tool users;
                   developer detail belongs in code comments or READMEs
     inputs      — legend of every symbol on the right-hand side
     output      — the left-hand side: what comes out, in which unit
     """
 
     latex: str
+    summary: str
     description: str
     inputs: tuple[FormulaParam, ...]
     output: FormulaParam

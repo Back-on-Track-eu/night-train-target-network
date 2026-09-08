@@ -34,6 +34,35 @@ are mostly "this field now exists, show it if you want".
 
 ---
 
+## `Formula.summary` on every documented formula — CALC 0.9.24 / route builder 0.9.31 / energy 1.1.1
+
+`models.evaluation.formulas[key]` gained a **`summary`** field: one
+self-contained sentence naming what the value is. `latex` and
+`description` are unchanged and still shipped.
+
+It exists because the cost-breakdown popover has no room for the full
+description (`tac_eur`'s runs eight lines). The popover now renders
+`summary` plus a link to `/docs/cost/<slug>` and nothing else — the
+formula, the input legend and the rates table moved to the documentation
+site.
+
+**Deep-link contract:** the slug is the formula key with a trailing
+`_eur` dropped and underscores turned to hyphens (`tac_eur` →
+`/docs/cost/tac`). Implemented in `frontend/src/lib/factorFeedback.ts`
+and in `backend/scripts/model_docs/render_site.py::cost_slug`, with tests
+pinning the emitted page names. Changing one without the other is a 404
+on every popover.
+
+**Also on the API:** `POST /api/feedback` is now rate-limited
+(`config.FEEDBACK_RATE_LIMIT`, default `5 per minute;20 per hour`, per
+gunicorn worker) and can return **429**. A new `Documentation` category
+exists for docs-page feedback, with the page path as `sub_category`.
+
+**When this stops applying:** never for the summary field — it is
+required on the dataclass. The docs-link contract stops applying only if
+the site's page-per-node layout changes.
+
+
 ## 1. New stop catalog and the search it needs
 
 **Backend: `ROUTE_BUILDER_VERSION` 0.9.25 (2026-08-18), extended since.**
@@ -368,6 +397,47 @@ report — both are what a manual timetable means.
 `POST /api/proposals/compare` takes `expert_timetable` as a side override,
 so `{"proposal_id": 123, "expert_timetable": null}` on one side is a
 ready-made "with vs without the manual timetable" comparison.
+
+---
+
+## 10. Four more compositions in the catalog (COMPOSITIONS 0.9.4)
+
+`GET /api/params/compositions` now returns twelve compositions instead of
+eight: `REF-NOR-7`, `REF-ROOM-14`, `REF-POD-7`, `REF-POD-14`. No shape
+change — same keys, same class taxonomy. Two things to expect:
+
+- **Capsule-only trains exist now.** `REF-ROOM-14` carries 504 places, all
+  `Capsule`, and no `Seat` at all. Anything that assumes every composition
+  has a seat class (fare fallbacks, "from €" labels keyed on Seat,
+  formation legends) needs the same "class may be absent" handling the
+  refurbished sleepers already needed for Capsule.
+- **All twelve compositions stay on the two existing speed tiers** (200
+  refurbished / 230 new) — no third tier was introduced. `REF-NOR-7`'s real
+  Norwegian sleeper is speed-limited below that in reality, but that's a
+  backend modelling note, not something the API surfaces or the frontend
+  needs to branch on.
+
+Nine new `coach_type_id` values appear in formations (`B5-3`, `B5-7`,
+`BC5-3`, `FR5-1`, `WLAB-2`, `NOX-36`, `LR-SEATPOD-66`, `LR-HOTELPOD-31`,
+`LR-HOTELPOD-42`). `FR5-1` is a service coach (bistro) with no classes,
+like `ARkimmbz`. Coach `remarks` now carry the coach description and its
+source ids instead of a fixed workbook note.
+
+The catalog itself moved from notebook literals to
+`backend/models/compositions/calib/catalog/*.csv`; if you ever need to
+look up a coach, that is the place.
+
+---
+
+## 11. Cost parameters re-calibrated (COMPOSITIONS 0.9.5)
+
+No shape change, but **every evaluation result moves**: operator costs drop
+~45% fleet-wide (maintenance, cleaning, overhead, crew rate and staffing rule), and the
+required-revenue gross-up drops from 1.22 to 1.149 (EBIT target 10% → 5%).
+Stored proposals evaluated before this reseed are not comparable to ones
+evaluated after; gallery KPIs and compare views will show the shift. Nothing
+to change on your side beyond expecting different numbers — `CALC_VERSION`
+is unchanged because no formula changed, only parameters.
 
 ---
 

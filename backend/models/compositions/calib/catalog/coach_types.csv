@@ -1,0 +1,34 @@
+coach_type_id,description,length_m,weight_t,svc_length_m,svc_weight_t,crew,wifi,bikes,aircon,plugs,source_ids,notes
+A10tuh,56× 1st class  - seat (large room),26.4,54.48,0,0,0,False,False,True,True,S47,composition workbook 2026-07-22
+A9c9ux,36× couchette (4-berth),26.4,52.88,0,0,0.25,True,False,True,True,S47,composition workbook 2026-07-22
+ABbmpvz,26× 2nd class - seat (large room); 4× couchette (4-berth) PRM,26.5,45.5,0,0,0,True,True,True,True,S47,composition workbook 2026-07-22
+ARkimmbz,"Dining car (service coach, no revenue sections)",26.4,50,26.4,50,1,False,False,True,False,S47,composition workbook 2026-07-22
+Am,66× 2nd class - compartments,26.4,55.28,0,0,0,False,False,True,False,S47,composition workbook 2026-07-22
+Apm,60× 1st class  - seat (large room),26.4,54.8,0,0,0,False,False,True,True,S47,composition workbook 2026-07-22
+B (78),78× 2nd class - seat (large room),26.4,56.24,0,0,0,False,False,True,True,S47,composition workbook 2026-07-22
+B10c10ux,60× couchette (6-berth),26.4,54.8,0,0,0.25,True,False,True,True,S47,composition workbook 2026-07-22
+B8c8ux,48× couchette (6-berth),26.4,53.84,0,0,0.25,True,True,True,True,S47,composition workbook 2026-07-22
+Bc (36),36× couchette (4-berth),26.4,52.88,0,0,0.25,False,False,True,False,S47,composition workbook 2026-07-22
+Bcmz (54),54× couchette (6-berth),26.4,54.32,0,0,0.25,False,False,True,True,S47,composition workbook 2026-07-22
+Bcmz_5291,12× couchette (4-berth); 28× Mini-Cabin (bed),26.5,45.5,0,0,0.25,True,False,True,True,S47,composition workbook 2026-07-22
+Bfmpz,70× 2nd class - seat (large room),26.8,46,0,0,0,True,False,True,True,S47,composition workbook 2026-07-22
+Bmpz (74),74× 2nd class - seat (large room),26.4,55.92,0,0,0,False,False,True,True,S47,composition workbook 2026-07-22
+Bmz,66× 2nd class - compartments,26.4,55.28,0,0,0,False,False,True,True,S47,composition workbook 2026-07-22
+Bpm (78),78× 2nd class - seat (large room),26.4,56.24,0,0,0,False,True,True,True,S47,composition workbook 2026-07-22
+Bvcmbz,50× 48 * couchette (6-berth) + 2 couchette PRM (2-berth),26.4,54,0,0,0.25,False,False,True,True,S47,composition workbook 2026-07-22
+Bvcmz (50),50× couchette (5-berth),26.4,54,0,0,0.25,False,False,True,False,S47,composition workbook 2026-07-22
+Bvcmz (60),60× couchette (6-berth),26.4,54.8,0,0,0.25,False,False,True,True,S47,composition workbook 2026-07-22
+WLABee,30× Sleeper (3-berth) with basin,26.4,52.4,0,0,0.5,False,False,True,False,S47,composition workbook 2026-07-22
+WLABm (36),36× sleeper (unspecified),26.4,52.88,0,0,0.5,False,False,True,False,S47,composition workbook 2026-07-22
+WLABmz (DD),30× 18 * Sleeper (2-berth) with basin + 8 * Sleeper (2-berth) with shower & WC + 4 * Sleeper (4-berth) with basin,26.4,62.4,0,0,0.5,False,False,True,True,S47,composition workbook 2026-07-22
+WLAmz_7091,20× 18 * Sleeper (2-berth) with shower option & WC + 2 * Sleeper (2-berth) with shower & WC,26.45,45.5,0,0,0.5,True,False,True,True,S47,composition workbook 2026-07-22
+WLBmz (DD),42× 34 * Sleeper (2-berth) with basin + 8 * Sleeper (4-berth) with basin,26.4,63.36,0,0,0.5,False,False,True,True,S47,composition workbook 2026-07-22
+B5-3,"Norske tog Class 5 (Strømmen 1977-81, upgraded 2011-13), 2nd class open-plan seat coach, 68 seats — as run on the Norwegian night trains",25.3,50.0,0,0,0,True,False,True,True,S48;S50,tare 43.2 t (S48) + 0.1 t/place; wifi/plugs per the 2011-13 upgrade TO_VERIFY
+B5-7,Norske tog Class 5 seat coach refitted 2022 with 30 reclining seats (sold as the night seat product),25.3,46.0,0,0,0,True,False,True,True,S48,tare 43 t (S48) + 0.1 t/place
+BC5-3,"Norske tog Class 5 family coach: 40 seats, children's play area and wheelchair space",25.3,47.0,0,0,0,True,False,True,True,S48;S50,tare 43 t (S48) + 0.1 t/place; play area kept inside the revenue space like the catalog's PRM sections; the 32 seats in the 2026-09 proposal contradict S50 (40) TO_VERIFY
+FR5-1,"Norske tog Class 5 bistro coach with staff room and luggage compartment — service coach, no revenue sections",25.3,44.0,25.3,44.0,1.0,True,False,True,True,S48,tare 44 t (S48); crew 1.0 per the catering-coach rule
+WLAB-2,"Norske tog WLAB2 sleeping coach (Strømmen 1986-87): 14 two-berth compartments + 1 wheelchair-accessible compartment, Norwegian loading gauge, 150 km/h",27.0,53.0,0,0,0.5,True,False,True,True,S49,tare 50 t (S49) + 0.1 t/place; 30 places = 15 compartments as twins
+NOX-36,"Private-room coach after the Nox concept: converted ex-InterCity open-plan coach, single/double loft rooms and double vista rooms either side of a centre aisle, 36 places",26.4,52.4,0,0,0.25,True,False,True,True,S51;S52;S53,"tare 48.8 t (catalog Apm) + 0.1 t/place; 36 places = 500 per 14-coach train (S51) and the S52 layout estimate; room mix, staff space and crew per coach TO_VERIFY"
+LR-SEATPOD-66,"Seat Pod coach after the Luna Rail concept: private single pods (seat by day, lie-flat bed by night) around a centre corridor in a converted coach, 66 places",26.4,55.4,0,0,0.25,True,False,True,True,S54;S55,"tare 48.8 t (catalog Apm) + 0.1 t/place; 66 places is the 2026-09 proposal figure, consistent with S54 'comparable to a six-berth couchette coach' — source TO_VERIFY"
+LR-HOTELPOD-31,"Hotel Pod coach after the Luna Rail concept: private single cabins with sofa/bed conversion in a converted coach, 31 places",26.4,51.9,0,0,0.5,True,False,True,True,S54;S55,tare 48.8 t (catalog Apm) + 0.1 t/place; 31 places is the 2026-09 proposal figure — source TO_VERIFY
+LR-HOTELPOD-42,"Hotel Pod coach after the Luna Rail concept in the two- and three-passenger cabin variants, 42 places",26.4,53.0,0,0,0.5,True,False,True,True,S54;S55,tare 48.8 t (catalog Apm) + 0.1 t/place; 42 places and the cabin mix are the 2026-09 proposal figures — source TO_VERIFY

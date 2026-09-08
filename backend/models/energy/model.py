@@ -29,7 +29,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-ENERGY_CALC_VERSION: str = "1.1.0"
+ENERGY_CALC_VERSION: str = "1.1.1"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -55,6 +55,21 @@ ENERGY_MODEL_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "1.1.1": {
+        "date": "2026-09-02",
+        "author": "bjarne + claude",
+        "changes": "DOCUMENTATION ONLY - no value changes anywhere. Every formula in "
+        "this registry gained a Formula.summary: one self-contained sentence naming "
+        "what the value is, for places with no room for the full description (the "
+        "cost-breakdown info popover, a docs page description, a search snippet). The "
+        "field is required, so a new formula cannot ship without one. No latex, no "
+        "input legend, no computed value is touched. 5 summaries added. Bumped only "
+        "because the version-check gate self-gates this file (any diff requires the "
+        "constant to move). Note the side effect: a bump marks every stored proposal "
+        "outdated, so each one recomputes lazily on its next load and gets an "
+        "update_log entry naming this trigger - the recompute reproduces identical "
+        "numbers, and this entry is the reason it fired.",
+    },
     "1.1.0": {
         "date": "2026-08-30",
         "author": "david + claude",
@@ -118,6 +133,8 @@ ENERGY_FORMULAS: dict[str, Formula] = {
         latex=r"E_{kWh,l} = A \cdot m_t + d_{km,l} \left( B + C \cdot m_t "
         r"+ (K_m m_t + K_L L_m) \cdot \bar{v}^2_{kmh,l} \right) "
         r"+ (P_{loco} + P_{hotel} \cdot n_{coach}) \cdot t_{h,l}",
+        summary="Electricity used on one country leg: traction, rolling and air "
+        "resistance, and on-board power.",
         description="Electricity used on one country leg: start/stop "
         "energy for the train's weight, rolling resistance over the "
         "distance, air resistance growing with train length and the "
@@ -174,6 +191,8 @@ ENERGY_FORMULAS: dict[str, Formula] = {
     ),
     "energy_per_km": Formula(
         latex=r"e_{kWh/km,l} = \frac{E_{kWh,l}}{d_{km,l}}",
+        summary="Energy use per kilometre on a country leg, for display and comparison "
+        "between countries.",
         description="Energy use per kilometre on a country leg: total "
         "energy divided by distance. Used for display and for comparing "
         "countries.",
@@ -198,6 +217,7 @@ ENERGY_FORMULAS: dict[str, Formula] = {
     ),
     "total_energy": Formula(
         latex=r"E_{total} = \sum_{seg} \sum_{l \in seg} E_{kWh,l}",
+        summary="Total electricity used across the whole trip.",
         description="Total electricity used on the trip: the energy of "
         "all country legs added up.",
         inputs=(
@@ -219,6 +239,8 @@ ENERGY_FORMULAS: dict[str, Formula] = {
     # ------------------------------------------------------------------
     "avg_speed": Formula(
         latex=r"\bar{v}_{kmh,l} = \frac{d_{km,l}}{t_{drive,h,l}}",
+        summary="Average speed on a country leg; feeds the air-resistance term of the "
+        "energy model.",
         description="Average speed per country leg: distance divided by "
         "driving time. Feeds the air resistance term of the energy "
         "model.",
@@ -242,6 +264,8 @@ ENERGY_FORMULAS: dict[str, Formula] = {
     ),
     "train_weight": Formula(
         latex=r"m_t = \sum_{coach} m_{coach,t}",
+        summary="Train weight as the energy model uses it: coaches at 80% load, "
+        "locomotive excluded.",
         description="Train weight as the energy model uses it: all coach "
         "gross weights at 80% load added up, WITHOUT the locomotive. The "
         "calibration data was collected on this basis (Trassenfinder's "

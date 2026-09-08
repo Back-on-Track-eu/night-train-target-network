@@ -65,3 +65,43 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npm test
+
+  # docs-site/ is a third independent island: every job above is scoped by
+  # working-directory (frontend) or an explicit path (backend/), so without
+  # these two the documentation site would have no CI at all.
+  docs-prettier:
+    name: Prettier (docs-site)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docs-site
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: docs-site/package-lock.json
+      - run: npm ci
+      # Only the hand-written pages: cost/ and reference/ belong to the
+      # emitter and are verified by its own --check gate in backend-tests.yml.
+      - run: npm run format:check
+
+  docs-build:
+    name: VitePress build (docs-site)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docs-site
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: docs-site/package-lock.json
+      - run: npm ci
+      # ignoreDeadLinks is off, so this also fails on a link to a page that
+      # does not exist — which is how a formula moving without its page
+      # moving with it shows up.
+      - run: npm run build

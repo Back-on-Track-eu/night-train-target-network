@@ -154,8 +154,9 @@ STOP_ID = "osm:n3856100103"
 def test_all_compositions_load(loader):
     """All seeded compositions load without errors."""
     comps = loader.build_all_compositions()
-    assert len(comps) == 8, (
-        f"Expected the eight calibrated compositions, got {len(comps)}"
+    assert len(comps) == 12, (
+        f"Expected the twelve catalog compositions "
+        f"(models/compositions/calib/catalog), got {len(comps)}"
     )
 
 

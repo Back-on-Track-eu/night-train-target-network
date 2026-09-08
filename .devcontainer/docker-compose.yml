@@ -47,6 +47,11 @@ services:
       - "${FRONTEND_HOST_PORT:-5173}:${FRONTEND_CONTAINER_PORT:-5173}"
     environment:
       VITE_API_BASE_URL: http://localhost:${API_HOST_PORT:-5050}
+      # /docs/ is served by nginx in the built image; the dev server proxies
+      # it instead (frontend/vite.config.ts). docs-site/ is not mounted here,
+      # so the docs dev server runs on the host and is reached across the
+      # container boundary. Start it with: cd docs-site && npm run dev
+      DOCS_DEV_URL: http://host.docker.internal:${DOCS_DEV_HOST_PORT:-5174}
       FRONTEND_CONTAINER_PORT: ${FRONTEND_CONTAINER_PORT:-5173}
       FRONTEND_HOST_PORT: ${FRONTEND_HOST_PORT:-5173}
     volumes:

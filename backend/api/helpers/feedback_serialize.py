@@ -16,7 +16,8 @@ always be a new kind of feedback), not a closed enum — see
 build_categories_payload()'s docstring. GET /api/feedback/categories
 exists to give the frontend a populated dropdown.
 
-Taxonomy (2026-07-10, David): nine categories split by what a submitter
+Taxonomy (2026-07-10, David; Documentation added 2026-09-02): ten
+categories split by what a submitter
 is actually reacting to, each with a sub_categories list sourced from
 wherever that concept's own definition already lives, so none of these
 lists is a hand-maintained copy that can drift:
@@ -59,6 +60,7 @@ _CATEGORY_COMPOSITIONS = "Compositions"
 _CATEGORY_CALC_METHOD = "Evaluation — calculation method"
 _CATEGORY_EVAL_VIEW = "Evaluation — results / view"
 _CATEGORY_ROUTE_TIMETABLE = "Route or timetable"
+_CATEGORY_DOCUMENTATION = "Documentation"
 _CATEGORY_GENERAL = "General functionality"
 _CATEGORY_BUG = "Bug report"
 _CATEGORY_FEATURE = "Feature request"
@@ -70,6 +72,7 @@ _STATIC_CATEGORIES = (
     _CATEGORY_CALC_METHOD,
     _CATEGORY_EVAL_VIEW,
     _CATEGORY_ROUTE_TIMETABLE,
+    _CATEGORY_DOCUMENTATION,
     _CATEGORY_GENERAL,
     _CATEGORY_BUG,
     _CATEGORY_FEATURE,
@@ -341,6 +344,11 @@ def build_categories_payload(loader, scenario_id: int | None = None) -> dict:
                     _ROUTE_TIMETABLE_SUB_CATEGORIES
                 ),
             },
+            # Empty by design, like the three below: the sub_category is a
+            # documentation page path, and those live in docs-site/, which the
+            # backend does not read. Enumerating them here would be exactly the
+            # hand-maintained copy the rest of this taxonomy avoids.
+            {"category": _CATEGORY_DOCUMENTATION, "sub_categories": []},
             {
                 "category": _CATEGORY_GENERAL,
                 "sub_categories": _static_sub_categories(_GENERAL_SUB_CATEGORIES),

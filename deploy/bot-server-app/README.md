@@ -138,3 +138,14 @@ stopped — not removed — after a final dump to `/opt/targetnetwork/backups/`
 stays up as the shared engine. The demo stack (`tn-demo-*`,
 `/opt/targetnetwork-demo`) is replaced by the staging environment and its
 vhost `targetnetwork-demo.…sslip.io` removed.
+
+## The `/docs/` path
+
+The frontend container also serves the public model documentation at
+`/docs/` — a VitePress site built from `docs-site/` in a separate stage of
+`frontend/Dockerfile.demo`, via the `docssrc` named build context declared
+under `build.additional_contexts` here. Needs Compose v2.17+ / BuildKit.
+
+Nothing to add to Caddy: the vhost's catch-all `handle` already reaches
+the frontend container, and `frontend/nginx.conf` routes `/docs/` ahead of
+its SPA fallback. Staging's `basic_auth` therefore covers the docs too.

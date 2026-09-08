@@ -146,8 +146,7 @@ export interface SegmentAddonRequest {
 // "absolute" pins a service-day minute that survives a reroute; "shift"
 // displaces whatever the automatic timetable computes and moves with it.
 export type DepartureOverrideRequest =
-  | { mode: 'absolute'; time_min: number }
-  | { mode: 'shift'; shift_min: number }
+  { mode: 'absolute'; time_min: number } | { mode: 'shift'; shift_min: number }
 
 export interface DirectionExpertRequest {
   departure?: DepartureOverrideRequest | null
@@ -420,10 +419,17 @@ export interface EvaluationViews {
 // "driver_eur") for the cost-factor detail popover; the other sections are
 // typed for completeness but unused.
 
-/** One cost-factor formula: a KaTeX-compatible LaTeX string plus a
- *  plain-English description. Both are backend-provided and shown as-is. */
+/** One cost-factor formula, as the backend documents it. All prose is
+ *  backend-provided and shown as-is — the model registry is the single
+ *  source of truth for it (each model's backend model.py).
+ *
+ *  `summary` is the one-sentence form (CALC 0.9.24 / route builder 0.9.31 /
+ *  energy 1.1.1) and the only prose the cost-breakdown popover renders;
+ *  `latex` and `description` are the long form, which now lives on the
+ *  documentation site rather than in the overlay. */
 export interface Formula {
   latex: string
+  summary: string
   description: string
 }
 
@@ -444,9 +450,10 @@ export interface EvaluationModels {
 
 // --- input.parameters : the per-unit rates actually loaded to cost this route
 // Backend: api/helpers/params_serialize.py (reused by input_to_dict()). Each
-// section lists EVERY loaded entity (all countries/stops/compositions), so the
-// popover scopes rates to the entities the route actually uses — see
-// src/lib/costFactorRates.ts.
+// section lists EVERY loaded entity (all countries/stops/compositions).
+// Typed for completeness but no longer read by the app: the rates table that
+// consumed it moved to the documentation site, where a rate can be shown with
+// its source and its provenance instead of squeezed into a hover box.
 
 /** A referenced data source, keyed by source_id inside each section's
  *  `sources` map. */
@@ -823,11 +830,7 @@ export type ProposalSourceKind = 'proposal' | 'existing'
  *  run their query (proposals.py::_list_response), so this is a real cost
  *  lever, not just a response filter. Backend default is ["summaries"]. */
 export type ProposalsSection =
-  | 'summaries'
-  | 'map_lines'
-  | 'map_routes'
-  | 'map_stop_counts'
-  | 'map_country_counts'
+  'summaries' | 'map_lines' | 'map_routes' | 'map_stop_counts' | 'map_country_counts'
 
 export interface ProposalsRequest {
   filter?: ProposalsFilter

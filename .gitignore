@@ -120,6 +120,13 @@ project-snapshot*.zip
 notes/
 git_status.txt
 test_output.txt
+# VitePress build artefacts. dist/ is already matched by the bare pattern
+# above; the cache is not.
+docs-site/.vitepress/cache/
+docs-site/.vitepress/dist/
+
+# Claude local files
+.claude/settings.local.json
 # OS / Editor
 .DS_Store
 Thumbs.db
@@ -142,3 +149,4 @@ desktop.ini
 # first use. energy/calib/sources/ holds the route lists and stays tracked.
 backend/models/infrastructure/stops/charges/sources/
 # Jupyter autosave state
+

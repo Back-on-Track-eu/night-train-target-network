@@ -32,7 +32,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-CALC_VERSION: str = "0.9.23"
+CALC_VERSION: str = "0.9.24"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -66,6 +66,22 @@ CALC_MODEL_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.24": {
+        "date": "2026-09-02",
+        "author": "bjarne + claude",
+        "changes": "DOCUMENTATION ONLY - no value changes anywhere. Every formula in "
+        "this registry gained a Formula.summary: one self-contained sentence naming "
+        "what the value is, for places with no room for the full description (the "
+        "cost-breakdown info popover, a docs page description, a search snippet). The "
+        "field is required, so a new formula cannot ship without one. No latex, no "
+        "input legend, no computed value is touched. 31 summaries added, one per "
+        "cost, revenue, subtotal and upstream-derivation formula. Bumped only because "
+        "the version-check gate self-gates this file (any diff requires the constant "
+        "to move). Note the side effect: a bump marks every stored proposal outdated, "
+        "so each one recomputes lazily on its next load and gets an update_log entry "
+        "naming this trigger - the recompute reproduces identical numbers, and this "
+        "entry is the reason it fired.",
+    },
     "0.9.23": {
         "date": "2026-08-30",
         "author": "david",
@@ -566,6 +582,8 @@ CALC_FORMULAS: dict[str, Formula] = {
     "class_main_allocation": Formula(
         latex=r"s_{c} = (1-f_{svc})\left(X \frac{L_c}{L_{rev}} "
         r"+ (1-X)\frac{W_c}{W_{rev}}\right) + f_{svc}\frac{P_c}{P}",
+        summary="How costs shared by the whole train are split between accommodation "
+        "classes.",
         description="How costs shared by the whole train are split between "
         "accommodation classes (seat, couchette, sleeper, ...): mostly by "
         "how much of the train's length and weight a class occupies; "
@@ -627,6 +645,8 @@ CALC_FORMULAS: dict[str, Formula] = {
     ),
     "per_sold_place_km_by_class": Formula(
         latex=r"c_{c} = \frac{s_{c} \cdot C}{pkm^{sold}_{c}}",
+        summary="A class's cost per sold place-kilometre; empty berths make the sold "
+        "ones dearer.",
         description="Cost per sold place-kilometre of one class: the "
         "class's share of a cost divided by the place-kilometres it "
         "actually sells. Empty berths make the sold ones more expensive.",
@@ -671,6 +691,7 @@ CALC_FORMULAS: dict[str, Formula] = {
         latex=r"\eta = \eta_{ref} \cdot \frac{t_{train,h}}"
         r"{t_{train,h} + t_{relief} \cdot (n_{duty} - 1)}, \quad "
         r"n_{duty} = \left\lceil \frac{t_{basis,h}}{t_{duty,max}} \right\rceil",
+        summary="The share of paid staff hours that is actually productive.",
         description="Dienstplanwirkungsgrad — the share of paid staff "
         "hours that is actually productive. Paid time exceeds time on the "
         "train because of sign-on and sign-off, positioning to and from "
@@ -723,6 +744,8 @@ CALC_FORMULAS: dict[str, Formula] = {
         latex=r"C_{driver} = \frac{c_{driver/h}}{\eta_{driver}} \times "
         r"\left( \sum_{seg} t_{drive,h} \cdot f_{driver} + \sum_{stop} "
         r"t_{dwell,h} \cdot f_{driver} \right)",
+        summary="What the drivers cost per year, including the relief driver a long "
+        "trip needs.",
         description="Driver cost: the driver wage per productive hour, "
         "divided by the share of paid hours that is productive, times all "
         "hours the driver is on duty — driving between stops and waiting "
@@ -771,6 +794,8 @@ CALC_FORMULAS: dict[str, Formula] = {
         latex=r"C_{crew} = \frac{c_{crew/h}}{\eta_{crew}} \times \left( "
         r"\sum_{seg} t_{drive,h} \cdot n_{crew} + \sum_{stop} "
         r"t_{dwell,h} \cdot n_{crew} \right)",
+        summary="What the cabin crew costs per year, including the relief crew a long "
+        "trip needs.",
         description="Cabin crew cost: the crew wage per productive hour, "
         "divided by the share of paid hours that is productive, times all "
         "hours the crew is on board — while driving and while waiting at "
@@ -816,6 +841,7 @@ CALC_FORMULAS: dict[str, Formula] = {
     ),
     "coach_maintenance_eur": Formula(
         latex=r"C_{coach,maint} = \sum_{seg} c_{coach,maint/km} \times d_{km,seg}",
+        summary="Maintaining the coaches, charged per kilometre driven.",
         description="Coach maintenance: a per-kilometre rate for the whole "
         "train times the distance driven. Locomotive maintenance is "
         "included in the locomotive rental instead.",
@@ -844,6 +870,8 @@ CALC_FORMULAS: dict[str, Formula] = {
     # once, not once per pair.
     "loco_eur": Formula(
         latex=r"C_{loco} = c_{loco,lease/h} \times \frac{t_{loco,propulsion,min}}{60}",
+        summary="Renting the locomotive by the hour, maintenance and insurance "
+        "included.",
         description="Locomotive rental: an all-inclusive hourly rate "
         "(maintenance and insurance included) times the hours the "
         "locomotive is in use. A locomotive shared between several trips "
@@ -869,6 +897,7 @@ CALC_FORMULAS: dict[str, Formula] = {
     ),
     "svc_stockings_eur": Formula(
         latex=r"C_{svc} = \sum_{od} c_{svc,class(od)/place} \times n_{places\_sold,od}",
+        summary="Bedding, breakfast and amenities, charged per ticket sold.",
         description="Onboard service cost — bedding, breakfast, amenities: "
         "a per-passenger rate for each accommodation class times the "
         "tickets sold in that class.",
@@ -894,6 +923,8 @@ CALC_FORMULAS: dict[str, Formula] = {
     ),
     "var_overhead_eur": Formula(
         latex=r"C_{var,oh} = \sum_{od} R_{od} \times q_{var,oh}",
+        summary="Ticket sales, distribution and customer service, as a share of ticket "
+        "revenue.",
         description="Variable overhead — ticket sales, distribution, "
         "customer service: a fixed share of ticket revenue.",
         inputs=(
@@ -921,6 +952,8 @@ CALC_FORMULAS: dict[str, Formula] = {
     # ------------------------------------------------------------------
     "coach_amortisation_eur": Formula(
         latex=r"C_{coach,amort} = \frac{C_{coach,purchase}}{T_{coach,amort}} \times n",
+        summary="The coaches' annual write-off: purchase price spread over their "
+        "useful life.",
         description="Annual write-off of the coaches: purchase price "
         "divided by their useful life, times the number of coaches the "
         "service needs — including a reserve for coaches in the "
@@ -952,6 +985,7 @@ CALC_FORMULAS: dict[str, Formula] = {
     ),
     "financing_eur": Formula(
         latex=r"C_{fin} = C_{coach,purchase} \times q_{fin} \times n",
+        summary="The annual cost of financing the coaches.",
         description="Cost of financing the coaches: purchase price times "
         "an annual financing rate, times the number of coaches.",
         inputs=(
@@ -984,6 +1018,8 @@ CALC_FORMULAS: dict[str, Formula] = {
     "fix_overhead_eur": Formula(
         latex=r"C_{fix,oh} = q_{fix,oh} \times "
         r"\left(C_{op,var} - C_{var,oh} + C_{op,fix}\right)",
+        summary="Administration, management and planning, as a share of the operator's "
+        "other costs.",
         description="Fixed overhead — administration, management, "
         "planning: a fixed share on top of all other operator costs. "
         "Charges paid to infrastructure companies are not part of the "
@@ -1020,6 +1056,7 @@ CALC_FORMULAS: dict[str, Formula] = {
     ),
     "cleaning_eur": Formula(
         latex=r"C_{clean} = c_{clean/day} \times n \times d_{op}",
+        summary="Cleaning and preparing the train for each night of service.",
         description="Cleaning and preparing the train for the next night: "
         "a daily rate per coach times the number of coaches and the "
         "operating days per year.",
@@ -1052,6 +1089,7 @@ CALC_FORMULAS: dict[str, Formula] = {
     # models/route/model.py.
     "shunting_eur": Formula(
         latex=r"C_{shunt} = c_{shunt/event} \times n_{events}",
+        summary="Coupling, uncoupling and parking moves in stations and yards.",
         description="Moving the train around in stations and yards — "
         "coupling, uncoupling, parking moves: a rate per movement times "
         "the number of movements.",
@@ -1083,6 +1121,8 @@ CALC_FORMULAS: dict[str, Formula] = {
         r"+ d_{c}\,(\gamma_c m_{gross} + \sigma_c P + \phi_c + \kappa_c \pi_c) "
         r"\big) + \sum_{stop} h_{country(stop)} "
         r"+ \rho_{c}\,R_{seg,c} + \sum_{x \in seg}\big(F_x + f_x n_{seg}\big)\Big]",
+        summary="What the operator pays each country's infrastructure company for "
+        "using the track.",
         description="Track access charge — what the operator pays each "
         "country's infrastructure company for using the track. Every "
         "country charges its own mix: a rate per kilometre driven (higher "
@@ -1219,6 +1259,8 @@ CALC_FORMULAS: dict[str, Formula] = {
         r"1 & \text{widening applies} \\ "
         r"\dfrac{|[t_{in}, t_{out}) \cap B_{night,c}|}{t_{out} - t_{in}} "
         r"& \text{otherwise}\end{cases}",
+        summary="How much of a country run is charged at that country's night track "
+        "rate.",
         description="How much of a country run is charged at the night "
         "rate. Countries with a night tariff define a band — Germany "
         "23:00 to 06:00, for instance — and the run is split between day "
@@ -1252,6 +1294,7 @@ CALC_FORMULAS: dict[str, Formula] = {
         latex=r"\pi_c = w \cdot \frac{\sum_{j} |[t_{in}, t_{out}) "
         r"\cap B_{peak,c,j}|}{t_{out} - t_{in}}, \quad "
         r"w = \tfrac{5}{7} \text{ if weekdays only, else } 1",
+        summary="How much of a country run falls inside a rush-hour surcharge window.",
         description="How much of a country run falls in rush hour. Austria "
         "and Switzerland charge extra for running through a congested area "
         "during the morning or evening commuter peak. Because the tool "
@@ -1291,6 +1334,7 @@ CALC_FORMULAS: dict[str, Formula] = {
     # carried on the route input; this prices it.
     "energy_night_share": Formula(
         latex=r"\nu^{E}_{c} = \frac{|[t_{in},t_{out}] \cap B^{E}_{c}|}{t_{out}-t_{in}}",
+        summary="How much of a country leg's electricity is billed at the night rate.",
         description="Share of a country leg whose electricity is billed at "
         "the night rate: how much of the time the train spends in the "
         "country falls inside that country's electricity night tariff "
@@ -1323,6 +1367,8 @@ CALC_FORMULAS: dict[str, Formula] = {
     ),
     "energy_eur": Formula(
         latex=r"C_{energy} = \sum_{seg} \sum_{c \in seg} \left[ E_{kWh,c} \left( (1-\nu^{E}_{c}) p_{c} + \nu^{E}_{c} p^{night}_{c} \right) + d_{c} \left( e_{c} + e^{gt}_{c} m_{gross} \right) \right]",
+        summary="The traction electricity drawn, at each country's price, plus the "
+        "catenary supply charge.",
         description="Traction energy cost: the electricity the train uses in "
         "each country at that country's price, plus what the "
         "infrastructure manager charges for supplying it through the "
@@ -1391,6 +1437,7 @@ CALC_FORMULAS: dict[str, Formula] = {
     ),
     "station_charge_eur": Formula(
         latex=r"C_{station} = \sum_{stop} c_{stop,charge}",
+        summary="The fee paid for every scheduled stop at a station.",
         description="Station charge: the fee paid for every scheduled "
         "stop at a station, added up over all stops.",
         inputs=(
@@ -1409,6 +1456,8 @@ CALC_FORMULAS: dict[str, Formula] = {
     ),
     "parking_eur": Formula(
         latex=r"C_{park} = \sum_{l \in \text{endpoints}} p_{park,country(l)}",
+        summary="Parking the train at each end of the route between two nights of "
+        "service.",
         description="Overnight parking of the train between two nights of "
         "service: a daily rate at each end point of the route.",
         inputs=(
@@ -1430,6 +1479,8 @@ CALC_FORMULAS: dict[str, Formula] = {
     # ------------------------------------------------------------------
     "ticket_revenue_eur": Formula(
         latex=r"R = \sum_{od} n_{places\_sold,od} \times \bar{f}_{od}",
+        summary="Ticket income from places sold and average fare — both set by you, "
+        "not predicted.",
         description="Ticket income: tickets sold per connection times the "
         "average ticket price. Both are set by the user of the tool — "
         "they are not yet predicted by a demand model.",
@@ -1455,6 +1506,8 @@ CALC_FORMULAS: dict[str, Formula] = {
     ),
     "ebit_margin_eur": Formula(
         latex=r"C_{EBIT} = \sum_{od} R_{od} \times q_{EBIT}",
+        summary="The operator's profit requirement: deducted in the net result, not "
+        "paid to anyone.",
         description="The operator's profit requirement: a share of ticket "
         "revenue that must remain as operating profit. It is deducted in "
         "the net result — it is not a cost paid to anyone.",
@@ -1490,6 +1543,7 @@ CALC_FORMULAS: dict[str, Formula] = {
     "operator_variable_total_eur": Formula(
         latex=r"C_{op,var} = C_{driver} + C_{crew} + C_{coach,maint} + "
         r"C_{loco} + C_{svc} + C_{var,oh}",
+        summary="The operator costs that scale with how much the train runs.",
         description="Costs that scale with how much the train runs — "
         "driving and staffing hours, kilometres, tickets sold.",
         inputs=(
@@ -1539,6 +1593,7 @@ CALC_FORMULAS: dict[str, Formula] = {
     "operator_fixed_total_eur": Formula(
         latex=r"C_{op,fix} = C_{coach,amort} + C_{fin} + C_{fix,oh} + "
         r"C_{clean} + C_{shunt}",
+        summary="The operator costs that stay the same however much the train runs.",
         description="Costs that stay the same regardless of how much the train runs.",
         inputs=(
             FormulaParam(
@@ -1580,6 +1635,7 @@ CALC_FORMULAS: dict[str, Formula] = {
     ),
     "operator_total_eur": Formula(
         latex=r"C_{operator} = C_{op,var} + C_{op,fix}",
+        summary="Everything the operator spends: variable costs plus fixed costs.",
         description="Everything the operator spends: variable costs plus fixed costs.",
         inputs=(
             FormulaParam(
@@ -1603,6 +1659,8 @@ CALC_FORMULAS: dict[str, Formula] = {
     ),
     "infrastructure_total_eur": Formula(
         latex=r"C_{infrastructure} = C_{TAC} + C_{energy} + C_{station} + C_{park}",
+        summary="Everything paid to infrastructure companies: track, power, stations "
+        "and parking.",
         description="Everything paid to infrastructure companies: track "
         "access charges, traction electricity, station charges, and "
         "overnight parking.",
@@ -1643,6 +1701,7 @@ CALC_FORMULAS: dict[str, Formula] = {
     # ------------------------------------------------------------------
     "total_eur": Formula(
         latex=r"x_{total} = \sum_i x_i",
+        summary="The sum of the items directly below this one in the breakdown.",
         description="Sum of the items directly below it in the cost "
         "breakdown — the same rule applies at every level.",
         inputs=(
@@ -1660,6 +1719,7 @@ CALC_FORMULAS: dict[str, Formula] = {
     ),
     "total_cost_eur": Formula(
         latex=r"C_{total} = C_{operator} + C_{infrastructure}",
+        summary="The route's total annual cost: operator plus infrastructure.",
         description="Total annual cost: everything the operator spends "
         "plus everything paid to infrastructure companies.",
         inputs=(
@@ -1684,6 +1744,8 @@ CALC_FORMULAS: dict[str, Formula] = {
     ),
     "total_revenue_eur": Formula(
         latex=r"R_{total} = R_{ticket}",
+        summary="The route's total annual revenue; ticket income is currently the only "
+        "source.",
         description="Total annual revenue — currently ticket income is "
         "the only revenue source.",
         inputs=(
@@ -1702,6 +1764,8 @@ CALC_FORMULAS: dict[str, Formula] = {
     ),
     "net_eur": Formula(
         latex=r"N = R_{total} - C_{total} - C_{EBIT}",
+        summary="Revenue minus costs minus profit requirement; if negative, the "
+        "subsidy the route needs.",
         description="Net annual result: revenue minus all costs minus the "
         "operator's profit requirement. A negative value is the subsidy "
         "the route would need.",

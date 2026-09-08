@@ -346,9 +346,9 @@ class TestCompositions:
         # coach_types catalog (composition wo_service totals are internal)
         ark = compositions_body["coach_types"]["ARkimmbz"]
         assert ark["length_wo_service_m"] == 0.0
-        assert ark["places_total"] == 0 and ark["crew_factor"] == 2.0
+        assert ark["places_total"] == 0 and ark["crew_factor"] == 1.0
         assert comps["NEW-BAL-7"]["staff"]["zugchef_crew_factor"] == 1.19
-        assert comps["NEW-BAL-14"]["staff"]["zugchef_crew_factor"] == 2.38
+        assert comps["NEW-BAL-14"]["staff"]["zugchef_crew_factor"] == 1.19
         # allocation value pin: REF-PREM-12 seat carries its dining-car
         # per-head slice on top of the pure space share
         prem_mix = comps["REF-PREM-12"]["cost_allocation"]["by_class_main"]
@@ -358,7 +358,7 @@ class TestCompositions:
         """Top-level coach_types: every referenced type once, equipment
         keys complete, class_ids resolve into the classes section."""
         cts = compositions_body["coach_types"]
-        assert len(cts) == 24
+        assert len(cts) == 33  # catalog coach types (2026-09-06)
         all_class_ids = {
             e["class_id"] for lst in compositions_body["classes"].values() for e in lst
         }
@@ -379,7 +379,7 @@ class TestCompositions:
         assert set(classes) <= {"Seat", "Couchette", "Sleeper", "Capsule"}
         all_ids = [e["class_id"] for lst in classes.values() for e in lst]
         assert len(all_ids) == len(set(all_ids)), "class_ids must be unique"
-        assert len(all_ids) == 25  # one per coach section (2026-07-22)
+        assert len(all_ids) == 33  # one per coach section (catalog 2026-09-06)
         for cm, lst in classes.items():
             for e in lst:
                 assert e["places"] > 0 and e["coach_type_id"]
@@ -420,6 +420,24 @@ class TestCompositions:
             assert op is not None, f"{comp['composition_id']}: unknown operator"
             assert op["driver_costs_eur_h"] > 0
             assert op["crew_costs_eur_h"] > 0
+
+    def test_operator_cost_per_class_covers_every_class_it_carries(
+        self, compositions_body
+    ):
+        """cost_per_class is the operator's rate table, not one
+        composition's: every class_main any of its compositions carries
+        must have a rate."""
+        operators = {o["operator_id"]: o for o in compositions_body["operators"]}
+        carried: dict[str, set] = {}
+        for comp in compositions_body["compositions"]:
+            carried.setdefault(comp["operator_id"], set()).update(
+                comp["capacity"]["by_class"]
+            )
+        for operator_id, class_mains in carried.items():
+            rates = operators[operator_id]["cost_per_class"]
+            missing = class_mains - set(rates)
+            assert not missing, f"{operator_id}: no rate for {sorted(missing)}"
+            assert all(v > 0 for v in rates.values())
 
     def test_indicative_kpis_present(self, compositions_body):
         """Indicative block carries the seeded calibration KPIs (per-train-km

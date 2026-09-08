@@ -3,7 +3,7 @@ import { useI18n } from 'vue-i18n'
 import FinancialKPIPanel from '@/components/FinancialKPIPanel.vue'
 import CostPanel from '@/components/CostPanel.vue'
 import RevenuePanel from '@/components/RevenuePanel.vue'
-import type { Breakdown, EvaluationInput, FormulaMap } from '@/types/api'
+import type { Breakdown, FormulaMap } from '@/types/api'
 
 // The landed cube cell (ViewRow's currentBreakdown), rendered as the
 // financial KPI strip plus its cost tree | revenue split — or a "no data"
@@ -12,9 +12,6 @@ import type { Breakdown, EvaluationInput, FormulaMap } from '@/types/api'
 defineProps<{
   breakdown: Breakdown | null
   formulas: FormulaMap
-  input: EvaluationInput
-  // Ordered stops (outbound) — costFactorRates scopes rates to the route.
-  stops: { stop_id: string; name: string }[]
 }>()
 
 const { t } = useI18n()
@@ -35,8 +32,8 @@ const { t } = useI18n()
     <!-- Cost tree (left, expected margin a top-level peer of operator and
          infrastructure) | Revenue (right) -->
     <div class="flex items-start gap-4">
-      <CostPanel :breakdown="breakdown" :formulas="formulas" :input="input" :stops="stops" />
-      <RevenuePanel :breakdown="breakdown" />
+      <CostPanel :breakdown="breakdown" :formulas="formulas" />
+      <RevenuePanel :breakdown="breakdown" :formulas="formulas" />
     </div>
   </template>
   <div v-else class="rounded-xl bg-primary-50/5 p-4 text-sm text-primary-50/60">
