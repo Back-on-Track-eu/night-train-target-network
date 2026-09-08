@@ -29,7 +29,14 @@ Whether/where the flag appears on the wire stays the caller's concern
 
 Public interface:
   validate_calc_body(body: dict) -> list[str]
+  validate_how_fields(body: dict, stops) -> list[str]
+      the HOW-field subset (timetable_mode … expert_timetable), shared
+      with the calc matrix (proposal_matrix.py) whose WHAT fields differ
+  classify_compute_error(exc) -> (error_code, http_status, extra) | None
+      the one mapping from pipeline exceptions to wire error codes, used
+      by /calc's error arms and by the matrix's per-cell error records
   normalize_expert_timetable(block: dict | None) -> dict | None
+  canonical_sha256(obj) -> str            # "sha256:…" over canonical JSON
   canonical_request_hash(resolved_request: dict) -> str
   compute_proposal(body, loader=None, router=None, use_cache=True)
       -> tuple[dict, bool]   # (§2.1 response payload, cache_hit)
@@ -43,7 +50,14 @@ import json
 from adapters.proposal.id_prefix import rewrite_id_prefix
 from adapters.proposal.projection import route_fingerprint
 from models.evaluation.summary import build_summary_row
-from api.helpers.dependencies import get_compute_cache, get_loader, get_rail_router
+from models.route.routing.gauge import GaugeMismatchError
+from models.route.routing.rail_router import RailRoutingError
+from api.helpers.dependencies import (
+    RoutingGraphNotConfiguredError,
+    get_compute_cache,
+    get_loader,
+    get_rail_router,
+)
 from api.helpers.evaluation_serialize import (
     input_to_dict,
     models_to_dict,
@@ -109,6 +123,20 @@ def validate_calc_body(body: dict) -> list[str]:
     if "composition_id" in body and not isinstance(body["composition_id"], str):
         errors.append("'composition_id' must be a string if provided.")
 
+    errors.extend(validate_how_fields(body, stops))
+    return errors
+
+
+def validate_how_fields(body: dict, stops) -> list[str]:
+    """The HOW fields every compute request carries — timetable_mode,
+    fixed_night_interval, schedule_mode, routing_mode, auto_stop_addition,
+    expert_timetable — checked the same way for /calc (via
+    validate_calc_body) and /calc/matrix (api/helpers/proposal_matrix.py),
+    whose WHAT fields are axes instead of one composition/scenario.
+    `stops` is passed separately because the fixed-night and add-on
+    checks refer to it and the caller has already validated it."""
+    errors = []
+
     timetable_mode = body.get("timetable_mode", DEFAULT_TIMETABLE_MODE)
     if timetable_mode not in VALID_TIMETABLE_MODES:
         errors.append(
@@ -167,8 +195,35 @@ def validate_calc_body(body: dict) -> list[str]:
         )
 
     errors.extend(_validate_expert_timetable(body.get("expert_timetable"), stops))
-
     return errors
+
+
+def classify_compute_error(exc: BaseException) -> tuple[str, int, dict] | None:
+    """Map a compute_proposal() failure to (error_code, http_status,
+    extra_fields), or None for anything that is our own fault (the caller
+    logs it with a traceback and answers calc_error/500). One mapping for
+    /calc's HTTP arms and the matrix's per-cell error records, so a cell
+    reports exactly the code the same request would get on /calc:
+
+      gauge_mismatch / 422 (+ conflicting_stops, which the frontend marks
+        on the map) — checked before the generic ValueError arm because
+        GaugeMismatchError subclasses it;
+      routing_graph_not_configured / 503 — the scenario pins a graph this
+        deployment runs no instance for: a configuration gap, not a bad
+        request, and not a crash for monitoring;
+      routing_error / 422 — the router cannot serve the pair (no path on
+        this gauge's network, a stop that does not snap);
+      domain_error / 422 — models/pipeline.py's ValueError.
+    """
+    if isinstance(exc, GaugeMismatchError):
+        return "gauge_mismatch", 422, {"conflicting_stops": exc.conflicting_stops}
+    if isinstance(exc, RoutingGraphNotConfiguredError):
+        return "routing_graph_not_configured", 503, {}
+    if isinstance(exc, RailRoutingError):
+        return "routing_error", 422, {}
+    if isinstance(exc, ValueError):
+        return "domain_error", 422, {}
+    return None
 
 
 # =============================================================================
@@ -368,16 +423,24 @@ def normalize_expert_timetable(block) -> dict | None:
     return {"outbound": outbound, "return": return_block}
 
 
-def canonical_request_hash(resolved_request: dict) -> str:
-    """§2.3's request hash: SHA-256 over the canonical JSON form of the
-    RESOLVED request (sorted keys, no whitespace). Hashing the resolved
-    form — not the posted body — is what makes an omitted field and an
-    explicitly-posted default converge on the same cache entry. All
-    request values are strings/ints/lists of strings, so JSON encoding is
-    trivially stable; the sha256: prefix matches the fingerprint format
-    (§3.1) for at-a-glance recognizability in the DB."""
-    canonical = json.dumps(resolved_request, sort_keys=True, separators=(",", ":"))
+def canonical_sha256(obj) -> str:
+    """ "sha256:<hex>" over the canonical JSON form of a JSON-serialisable
+    value (sorted keys, no whitespace) — the one hashing convention behind
+    the compute-cache request hash below and the matrix's content-
+    addressed shared blocks (api/helpers/matrix_serialize.py). The
+    sha256: prefix matches the fingerprint format (§3.1) for at-a-glance
+    recognizability in the DB."""
+    canonical = json.dumps(obj, sort_keys=True, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def canonical_request_hash(resolved_request: dict) -> str:
+    """§2.3's request hash: canonical_sha256() over the RESOLVED request.
+    Hashing the resolved form — not the posted body — is what makes an
+    omitted field and an explicitly-posted default converge on the same
+    cache entry. All request values are strings/ints/lists of strings, so
+    JSON encoding is trivially stable."""
+    return canonical_sha256(resolved_request)
 
 
 def _resolve_request(body: dict, loader) -> dict:
@@ -451,20 +514,16 @@ def compute_proposal(
     loader defaults to the process-wide singleton (get_loader());
     router defaults to the registry router for the scenario's
     routing_graph_key pin, resolved AFTER the request is (see below) —
-    every Flask caller (/calc, publish, compare, the on-load refresh
-    fallback) relies on these defaults and passes neither. The loader
-    override exists for scripts/refresh_proposals.py's concurrent batch
-    mode: DBDataLoader holds one non-thread-safe connection, so each
-    worker thread needs its OWN loader instance, while the registry's
-    RailRouters (pooled requests.Sessions, explicitly built for
-    concurrent use — see api/helpers/dependencies.py's docstring) stay
-    shared across threads via the ordinary default. The router override
-    exists for tests only — a caller passing one takes over graph
-    selection entirely. use_cache=False exists for the
-    same script and the same reason (the cache repository is a singleton
-    with one connection) — and costs it nothing: the script flushes the
-    cache first and computes each proposal exactly once, so hits are
-    impossible there anyway.
+    every Flask caller (/calc, publish, compare, the matrix fan-out, the
+    on-load refresh fallback) relies on these defaults and passes
+    neither. Since WP14 every singleton is thread-safe (adapters borrow a
+    pooled connection per call), so the overrides are not a threading
+    tool: the loader override exists for tests and scripts that bring
+    their own instance, the router override for tests only — a caller
+    passing one takes over graph selection entirely. use_cache=False is
+    what scripts/refresh_proposals.py uses: it flushes the cache first
+    and computes each proposal exactly once, so hits are impossible
+    there anyway.
 
     Cache flow (§2.3, WP13): resolved request -> canonical hash ->
     pointer lookup. A hit whose stored payload matches the running

@@ -93,6 +93,11 @@ def create_app() -> Flask:
     # at all. So Flask is the only layer that covers every environment — which
     # matters most for the gallery's map sections, large GeoJSON that gzips by
     # roughly an order of magnitude. Level/threshold: api/config.py.
+    # application/x-ndjson (POST /api/proposal/calc/matrix) is deliberately
+    # NOT in COMPRESS_MIMETYPES: Flask-Compress would gzip the streamed
+    # response as one body and the client would see nothing until the
+    # last cell. Flask-Compress' default list already excludes it — this
+    # is the documented reason it must stay that way.
     app.config["COMPRESS_LEVEL"] = config.COMPRESS_LEVEL
     app.config["COMPRESS_MIN_SIZE"] = config.COMPRESS_MIN_SIZE
     Compress(app)
