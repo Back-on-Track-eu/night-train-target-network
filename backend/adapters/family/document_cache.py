@@ -7,8 +7,8 @@ table. Strictly a performance layer — a family is a pure function of its
 pins, so every row can be rebuilt and the table is safe to TRUNCATE at
 any time.
 
-Same discipline as the member cache (adapters/proposal/compute_cache.py,
-which it will join under this package in B2b): TTL is enforced on READ
+Same discipline as the member cache next door (member_cache.py): TTL is
+enforced on READ
 (an expired-but-unswept row is a miss, never a stale hit), writes upsert
 and refresh created_at, and the sweep is opportunistic — a sampled DELETE
 on the write path, no scheduler. The version guard is in the key itself:

@@ -541,7 +541,7 @@ def route_from_dict(
 
     Returns (Route, CompositionCollection) — the collection is returned
     alongside the Route (rather than just the Route, as before 2026-07-06)
-    so callers (api/helpers/proposal_compute.py, tests) can reuse it to document the actual
+    so callers (api/helpers/member_compute.py, tests) can reuse it to document the actual
     composition/operator parameters an evaluation was costed with, without
     a second DB round-trip.
     """
@@ -671,7 +671,7 @@ def expert_timetable_from_dict(d: dict | None) -> ExpertTimetable | None:
 
     Assumes the block already passed validate_calc_body() and was
     normalised by normalize_expert_timetable() (api/helpers/
-    proposal_compute.py): keys are known, values are the right types, and
+    member_compute.py): keys are known, values are the right types, and
     a mirroring return block is exactly {"mirror_outbound": True}.
 
     Returns None for an absent block — every request without the key gets

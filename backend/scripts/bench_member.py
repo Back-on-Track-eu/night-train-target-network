@@ -7,7 +7,8 @@ cached, attributed to the layers the design separates, and what a whole
 family costs and weighs when route legs and catalogs are shared across
 members. Kept as the family's regression bench — rerun after every phase.
 
-    A  the /calc path            compute_proposal(): the number a user sees today
+    A  one member                compute_member(): what publish, compare and
+                                 the views endpoint each pay
     B  run_compute() domain      plain, catalogs memoised, legs memoised, both —
                                  "both" is the family's per-member cost
     C  outside the domain        per-catalog load, per-step serialisation —
@@ -65,9 +66,9 @@ from api.helpers.family_compute import (  # noqa: E402
     resolve_presented,
 )
 from api.helpers.family_serialize import family_document  # noqa: E402
-from api.helpers.proposal_compute import (  # noqa: E402
+from api.helpers.member_compute import (  # noqa: E402
     classify_compute_error,
-    compute_proposal,
+    compute_member,
 )
 from api.helpers.route_serialize import route_to_dict  # noqa: E402
 from models.evaluation.summary import build_summary_row  # noqa: E402
@@ -151,15 +152,15 @@ def member(args, scenario_id: int, loader, router, composition_id: str):
 
 
 def section_calc_path(args, body: dict) -> tuple[list[float], list[float]]:
-    print("A. the /calc path — compute_proposal(), request cache bypassed")
-    cold = timed(lambda: compute_proposal(body, use_cache=False), 1)
+    print("A. one member — compute_member(), member cache bypassed")
+    cold = timed(lambda: compute_member(body, use_cache=False), 1)
     row("member, first time (legs may route live)", cold)
-    warm = timed(lambda: compute_proposal(body, use_cache=False), args.repeat)
+    warm = timed(lambda: compute_member(body, use_cache=False), args.repeat)
     row("member, legs cached", warm)
     other = {**body, "composition_id": args.second_composition}
     row(
         "member, other composition, legs cached",
-        timed(lambda: compute_proposal(other, use_cache=False), args.repeat),
+        timed(lambda: compute_member(other, use_cache=False), args.repeat),
     )
     return cold, warm
 
@@ -205,9 +206,9 @@ def section_domain(args, scenario_id: int, loader, router) -> dict[str, float]:
 def section_outside_domain(args, scenario_id: int, loader, warm_ms: float) -> None:
     """The plain member's non-domain cost: each catalog load run_compute()
     makes (stops twice — _build_trip_pair() and plan_route()'s parkings)
-    and each serialisation step compute_proposal() performs, none of which
+    and each serialisation step compute_member() performs, none of which
     the family document pays per member."""
-    print("\nC. outside the domain — what the plain /calc member also spends")
+    print("\nC. outside the domain — what a plain member also spends")
     print("  catalog loads per member (× = calls per run_compute)")
     loads = {
         "build_all_compositions ×1": lambda: loader.build_all_compositions(
@@ -227,7 +228,7 @@ def section_outside_domain(args, scenario_id: int, loader, warm_ms: float) -> No
         row("  " + label, values)
         total_loads += median_ms(values) * (2 if "×2" in label else 1)
 
-    print("  serialisation per member (compute_proposal's payload)")
+    print("  serialisation per member (compute_member's payload)")
     result = member(
         args,
         scenario_id,
@@ -238,21 +239,11 @@ def section_outside_domain(args, scenario_id: int, loader, warm_ms: float) -> No
     prov = result.provenance
     route_dict = route_to_dict(result.route, scenario_id, prov.tracks)
     views = views_to_dict(result.views, result.route)
-    evaluation = {
-        "models": models_to_dict(),
-        "input": input_to_dict(
-            route_dict, prov.tracks, prov.stop_infra, prov.compositions, False
-        ),
-        "views": views,
-    }
+    evaluation = {"views": views}
     payload = {"route": route_dict, "evaluation": evaluation}
     steps = {
         "route_to_dict": lambda: route_to_dict(result.route, scenario_id, prov.tracks),
         "route_fingerprint": lambda: route_fingerprint(route_dict),
-        "input_to_dict (full catalogs → input.parameters)": lambda: input_to_dict(
-            route_dict, prov.tracks, prov.stop_infra, prov.compositions, False
-        ),
-        "models_to_dict": models_to_dict,
         "views_to_dict": lambda: views_to_dict(result.views, result.route),
         "build_summary_row": lambda: build_summary_row(route_dict, evaluation),
         "rewrite_id_prefix (whole payload)": lambda: rewrite_id_prefix(
@@ -265,15 +256,34 @@ def section_outside_domain(args, scenario_id: int, loader, warm_ms: float) -> No
         row("  " + label, values)
         total_ser += median_ms(values)
 
-    print("  wire weight of the /calc payload parts")
+    # What a member stopped carrying in WP18 B2b — timed and weighed so
+    # the saving stays visible, NOT counted in the sum below: the models
+    # registry is GET /api/models and the parameters are GET /api/params/*
+    # for the member's scenario.
+    print("  no longer in the payload (their own endpoints since B2b)")
+    parameters = input_to_dict(
+        route_dict, prov.tracks, prov.stop_infra, prov.compositions, False
+    )
+    row(
+        "  input_to_dict (full catalogs → GET /api/params/*)",
+        timed(
+            lambda: input_to_dict(
+                route_dict, prov.tracks, prov.stop_infra, prov.compositions, False
+            ),
+            args.repeat,
+        ),
+    )
+    row("  models_to_dict (→ GET /api/models)", timed(models_to_dict, args.repeat))
+
+    print("  wire weight of the member payload")
     print(f"    route (full)                   {kb(json_bytes(route_dict))}")
-    print(f"    evaluation.input.parameters    {kb(json_bytes(evaluation['input']))}")
-    print(f"    evaluation.models              {kb(json_bytes(evaluation['models']))}")
     print(f"    evaluation.views               {kb(json_bytes(views))}")
+    print(f"    (dropped) input.parameters     {kb(json_bytes(parameters))}")
+    print(f"    (dropped) models               {kb(json_bytes(models_to_dict()))}")
     print(
         f"\n  sum check: catalog loads {total_loads:.0f} ms + serialisation "
         f"{total_ser:.0f} ms = {total_loads + total_ser:.0f} ms of the "
-        f"{warm_ms:.0f} ms /calc member"
+        f"{warm_ms:.0f} ms member"
     )
 
 
@@ -415,7 +425,7 @@ def main() -> int:
     family = domain["family"]
     print("\nderived")
     print(
-        f"  /calc member − plain run_compute        "
+        f"  member − plain run_compute              "
         f"{median_ms(warm) - plain:8.0f} ms  (serialisation + request resolution)"
     )
     print(

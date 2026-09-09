@@ -86,10 +86,10 @@ def scenario_to_dict(scenario: Scenario) -> dict:
 
 
 def scenario_axis_entry(scenario: Scenario) -> dict:
-    """The scenario as a matrix-axis entry (api/helpers/matrix_serialize.py):
-    identity, display name, the two things a cell needs to be understood
-    (which graph it routed on, where it sits in the grid) — nothing the
-    frontend already holds from GET /api/scenarios."""
+    """The scenario as an axis entry (scenario_variant_to_dict below inlines
+    it into every variant): identity, display name, the two things a member
+    needs to be understood (which graph it routed on, where it sits in the
+    grid) — nothing the frontend already holds from GET /api/scenarios."""
     return {
         "scenario_id": scenario.scenario_id,
         "scenario_key": scenario.scenario_key,

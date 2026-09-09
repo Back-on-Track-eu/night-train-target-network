@@ -2,9 +2,10 @@
 evaluation_serialize.py
 ========================
 Serialization (domain → dict) for the cost/revenue evaluation pipeline —
-Breakdown trees, matrix views, and the "models" / "input" documentation
-sections of the merged POST /api/proposal/calc response's "evaluation"
-block (api/helpers/proposal_compute.py).
+Breakdown trees, matrix views (a member's "evaluation.views", api/helpers/
+member_compute.py), and the "models" / "input" documentation sections —
+served by GET /api/models and GET /api/params/* since WP18 B2b, no longer
+inlined in every member.
 
 Split out of the former serialize.py (2026-07-06) into two domain files —
 this one for evaluation output, route_serialize.py for Route (de)serialization
@@ -652,9 +653,9 @@ def input_to_dict(
     """Everything that went into this evaluation.
 
     route: the route dict this evaluation costed — included verbatim.
-    include_route=False for POST /api/proposal/calc (api/helpers/
-    proposal_compute.py, adapters/proposal/README.md §2.1): the merged response
-    already carries the route once, as a sibling key of "evaluation" — a
+    include_route=False wherever the caller already carries the route
+    once as a sibling key of "evaluation" (the seed's example proposal,
+    tests/helpers.py's compute_evaluation_domain) — a
     second copy under evaluation.input would violate the "route appears
     exactly once" rule. include_route=True is the model-layer default
     (tests/helpers.py's controlled-demand evaluations keep the old

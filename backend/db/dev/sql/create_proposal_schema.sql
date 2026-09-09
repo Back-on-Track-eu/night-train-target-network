@@ -535,48 +535,5 @@ COMMENT ON COLUMN proposals.proposal_summaries.demand_kpis_placeholder IS 'TRUE 
 COMMENT ON COLUMN proposals.proposal_summaries.co2_g_per_pax_km      IS 'Night-train GHG intensity (§8, decision 24): the flat models/emissions factor until the energy-based, country-resolved model enriches it per route. Unit: g CO2e / pax-km';
 COMMENT ON COLUMN proposals.proposal_summaries.created_at             IS 'Set once at the proposal''s first publish, never touched by an overwrite-publish or refresh — repository.py''s _upsert_summary() excludes it from the ON CONFLICT UPDATE. Gallery filter/sort target (WP6.1).';
 
--- ---------------------------------------------------------------
--- compute_cache_pointer / compute_cache_result (§2.3) — server-side
--- TTL-bounded compute cache. UNLOGGED: disposable, no WAL overhead,
--- safe to lose on crash (a miss just costs one recompute). No FKs —
--- both key off value tuples, never off a proposals.proposals row.
---
--- Two tables because the fingerprint that keys a result is only known
--- AFTER routing: the pointer table answers "have I seen this exact
--- request before" (keyed by a hash of the request), the result table
--- answers "do I already have this result, regardless of which request
--- asked for it" (keyed by the route's own identity). One table would
--- force picking a single key that can't do both jobs — see the
--- implementation note in §2.3 for the full read/write/cleanup
--- algorithm (request hashing, write order, 1% opportunistic TTL
--- sweep, version-bump flush). Empty until WP13 wires the logic in;
--- this migration only lands the shape.
--- ---------------------------------------------------------------
-CREATE UNLOGGED TABLE proposals.compute_cache_pointer (
-    request_hash       TEXT PRIMARY KEY,
-    route_fingerprint  TEXT NOT NULL,
-    scenario_id        INTEGER NOT NULL,
-    composition_id     TEXT NOT NULL,
-    resolved_request   JSON NOT NULL,
-    suggested_stops    JSON,
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE UNLOGGED TABLE proposals.compute_cache_result (
-    route_fingerprint  TEXT NOT NULL,
-    scenario_id        INTEGER NOT NULL,
-    composition_id     TEXT NOT NULL,
-    payload            JSON NOT NULL,
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (route_fingerprint, scenario_id, composition_id)
-);
-
-CREATE INDEX idx_cache_pointer_created ON proposals.compute_cache_pointer (created_at);
-CREATE INDEX idx_cache_result_created  ON proposals.compute_cache_result (created_at);
-
-COMMENT ON TABLE  proposals.compute_cache_pointer            IS 'Compute cache, pointer side (§2.3): request_hash -> which result it resolves to, plus the request-specific response parts (resolved request echo, suggested_stops). UNLOGGED — a disposable performance layer, never a source of truth, safe to flush at any time.';
-COMMENT ON COLUMN proposals.compute_cache_pointer.request_hash      IS 'Hash of the canonicalized resolved compute request (sorted keys, stable number formatting).';
-COMMENT ON COLUMN proposals.compute_cache_pointer.resolved_request  IS 'The request echo for this specific request — request-specific, so it lives on the pointer side, never on the shared result row.';
-COMMENT ON COLUMN proposals.compute_cache_pointer.suggested_stops   IS 'auto_stop_addition="suggest" output for this specific request. NULL outside suggest mode.';
-COMMENT ON TABLE  proposals.compute_cache_result             IS 'Compute cache, result side (§2.3): (route_fingerprint, scenario_id, composition_id) -> the shared route + evaluation payload, stored once per distinct result no matter how many requests converge on it. UNLOGGED — same disposability as compute_cache_pointer.';
-COMMENT ON COLUMN proposals.compute_cache_result.payload             IS 'Route + evaluation core (route + evaluation_output shape), shared across every request that resolves to this exact result.';
+-- The member cache (WP13's compute_cache_pointer/_result) lives in the
+-- family schema since WP18 B2b — db/schema.py FAMILY_TABLES.

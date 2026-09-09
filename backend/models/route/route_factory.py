@@ -83,7 +83,7 @@ ID convention
   models/route/version.py. Not started here.
 
   proposal_id/version are always concrete ints by the time they reach here
-  — ephemeral compute (POST /api/proposal/calc) passes the fixed neutral
+  — ephemeral compute (a family member) passes the fixed neutral
   placeholders NEUTRAL_PROPOSAL_ID/VERSION (models/route/version.py, both
   0) and publish later rewrites the resulting bare structural ids up to
   the real P{proposal_id}_V{version}_ prefix (adapters/proposal/
@@ -185,7 +185,7 @@ class TripPairInput:
     pairs share one schedule, passed to plan_route() directly.
 
     No field here has a default — mode/flag defaulting is an API-boundary
-    concern (see api/helpers/proposal_compute.py), not something route_factory.py or its
+    concern (see api/helpers/member_compute.py), not something route_factory.py or its
     callers should need to know about. Every field must be explicitly
     supplied by the caller."""
 
@@ -574,7 +574,7 @@ def _build_trip(
 
     # timetable_mode SWITCH — which named strategy computes departure time
     # + stop classification for this direction. VALID_TIMETABLE_MODES is the
-    # same set the compute request validation (api/helpers/proposal_compute.py) checks against, so an unknown
+    # same set the compute request validation (api/helpers/member_compute.py) checks against, so an unknown
     # mode can only reach here if that validation was bypassed. Only the
     # fixed-night strategy produces slack; every other mode gets zeros.
     # Both are handed addon_per_leg: manual minutes are part of the trip's

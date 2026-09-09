@@ -139,7 +139,7 @@ PROPOSALS_DEFAULT_LIMIT = _env_int("PROPOSALS_DEFAULT_LIMIT", 50)
 
 
 # =============================================================================
-# Expert timetable overrides — api/helpers/proposal_compute.py
+# Expert timetable overrides — api/helpers/member_compute.py
 # =============================================================================
 
 # Bounds on what a caller may do to a timetable by hand. Operational caps,
@@ -283,22 +283,6 @@ FAMILY_WORKERS = _env_int("FAMILY_WORKERS", 4)
 
 
 # =============================================================================
-# Calc matrix (api/helpers/proposal_matrix.py)
-# =============================================================================
-
-# Largest scenario × composition grid one POST /api/proposal/calc/matrix may
-# ask for. The default axes today are 6 current scenarios × 12 catalog
-# compositions = 72 cells; the cap leaves headroom for one more scenario
-# pair without bounding a request by whatever the seed happens to hold.
-CALC_MATRIX_MAX_CELLS = _env_int("CALC_MATRIX_MAX_CELLS", 96)
-
-# Cells one request computes concurrently after the baseline cell has run
-# alone (it warms the segment cache for the shared legs). Bounded by the
-# DB pool: DB_POOL_MAX must cover GUNICORN_THREADS + this per process.
-CALC_MATRIX_WORKERS = _env_int("CALC_MATRIX_WORKERS", 4)
-
-
-# =============================================================================
 # Effective-config boot log
 # =============================================================================
 
@@ -356,8 +340,6 @@ def log_effective_config() -> None:
         "MODELS_CACHE_MAX_AGE_S": MODELS_CACHE_MAX_AGE_S,
         "FAMILY_MAX_MEMBERS": FAMILY_MAX_MEMBERS,
         "FAMILY_WORKERS": FAMILY_WORKERS,
-        "CALC_MATRIX_MAX_CELLS": CALC_MATRIX_MAX_CELLS,
-        "CALC_MATRIX_WORKERS": CALC_MATRIX_WORKERS,
     }
     logger.info(
         "Effective config — wiring: %s",

@@ -59,7 +59,7 @@ profile names are identical on every instance.
 A ProposalRepository (write path for saved proposals), a
 FeedbackRepository (write path for feedback submissions), a
 ProposalEngagementRepository (write path for proposal likes/comments),
-and a ComputeCacheRepository (the §2.3 compute cache, WP13) are
+and the two family caches (adapters/family/, WP18) are
 created alongside them — all on the same pool, keeping DBDataLoader
 strictly read-only by convention rather than by connection. Route
 handlers call get_proposal_repository() / get_feedback_repository() /
@@ -77,7 +77,8 @@ State
   _proposal_repo   : ProposalRepository instance (created at startup)
   _feedback_repo   : FeedbackRepository instance (created at startup)
   _engagement_repo : ProposalEngagementRepository instance (created at startup)
-  _compute_cache   : ComputeCacheRepository instance (created at startup)
+  _member_cache    : FamilyMemberCache instance (created at startup)
+  _family_document_cache : FamilyDocumentCache instance (created at startup)
   _loaded          : bool — True after successful DB connection
   _loaded_at       : datetime | None — UTC timestamp of startup
   _load_error      : str | None — error message if startup failed
@@ -108,7 +109,7 @@ _feedback_repo = None
 _engagement_repo = None
 _auth_repo = None
 _request_log_repo = None
-_compute_cache = None
+_member_cache = None
 _family_document_cache = None
 _loaded: bool = False
 _loaded_at: Optional[datetime] = None
@@ -173,7 +174,7 @@ def init() -> None:
         _engagement_repo, \
         _auth_repo, \
         _request_log_repo, \
-        _compute_cache, \
+        _member_cache, \
         _family_document_cache, \
         _loaded, \
         _loaded_at, \
@@ -185,8 +186,8 @@ def init() -> None:
     from adapters.feedback_repository import FeedbackRepository
     from adapters.proposal.engagement_repository import ProposalEngagementRepository
     from adapters.auth_repository import AuthRepository
-    from adapters.proposal.compute_cache import ComputeCacheRepository
     from adapters.family.document_cache import FamilyDocumentCache
+    from adapters.family.member_cache import FamilyMemberCache
     from adapters.route_segment_repository import RouteSegmentRepository
     from adapters.request_log_repository import RequestLogRepository
     from models.route.routing.rail_router import (
@@ -237,7 +238,7 @@ def init() -> None:
         _feedback_repo = FeedbackRepository(_db_pool)
         _engagement_repo = ProposalEngagementRepository(_db_pool)
         _auth_repo = AuthRepository(_db_pool)
-        _compute_cache = ComputeCacheRepository(pool=_db_pool)
+        _member_cache = FamilyMemberCache(pool=_db_pool)
         _family_document_cache = FamilyDocumentCache(pool=_db_pool)
         _request_log_repo = _build_request_log_repository(
             RequestLogRepository, _db_pool
@@ -413,14 +414,15 @@ def get_proposal_engagement_repository():
     return _engagement_repo
 
 
-def get_compute_cache():
+def get_member_cache():
     """
-    Return the singleton ComputeCacheRepository (§2.3 compute cache).
-    Raises DataNotLoadedError if init() has not completed successfully.
+    Return the singleton FamilyMemberCache (family.members — the member
+    cache behind compute_member()). Raises DataNotLoadedError if init()
+    has not completed successfully.
     """
-    if not _loaded or _compute_cache is None:
+    if not _loaded or _member_cache is None:
         raise DataNotLoadedError("Data not loaded. Call POST /api/data/load first.")
-    return _compute_cache
+    return _member_cache
 
 
 def get_family_document_cache():

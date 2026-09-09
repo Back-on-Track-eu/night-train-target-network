@@ -24,7 +24,7 @@ Public interface:
 from __future__ import annotations
 
 from api.helpers.dependencies import get_loader, get_proposal_repository
-from api.helpers.proposal_compute import compute_proposal, validate_calc_body
+from api.helpers.member_compute import compute_member, validate_calc_body
 
 
 class ScenarioNotBaseError(Exception):
@@ -35,7 +35,7 @@ class ScenarioNotBaseError(Exception):
 def validate_publish_body(body: dict) -> list[str]:
     """Structural validation of the publish envelope itself (§2.2) —
     compute_request's own fields are validated separately via
-    proposal_compute.validate_calc_body(), since that's exactly the same
+    member_compute.validate_calc_body(), since that's exactly the same
     request shape /calc already validates."""
     errors = []
 
@@ -43,18 +43,20 @@ def validate_publish_body(body: dict) -> list[str]:
         errors.append("'name' must be a non-empty string.")
 
     mode = body.get("mode")
-    if mode not in ("new", "overwrite"):
-        errors.append("'mode' must be 'new' or 'overwrite'.")
+    if mode not in ("new", "overwrite", "copy"):
+        errors.append("'mode' must be 'new', 'overwrite' or 'copy'.")
 
     proposal_id = body.get("proposal_id")
-    if mode == "new" and proposal_id is not None:
-        errors.append("'proposal_id' is forbidden when mode is 'new'.")
+    if mode in ("new", "copy") and proposal_id is not None:
+        errors.append(f"'proposal_id' is forbidden when mode is '{mode}'.")
     if mode == "overwrite" and not isinstance(proposal_id, int):
         errors.append("'proposal_id' is required (integer) when mode is 'overwrite'.")
 
     based_on = body.get("based_on_proposal_id")
     if based_on is not None and not isinstance(based_on, int):
         errors.append("'based_on_proposal_id' must be an integer if provided.")
+    if mode == "copy" and based_on is None:
+        errors.append("'based_on_proposal_id' is required when mode is 'copy'.")
 
     compute_request = body.get("compute_request")
     if not isinstance(compute_request, dict):
@@ -77,7 +79,10 @@ def dispatch_publish(body: dict, user_id: int) -> dict:
     into the final HTTP response.
     """
     compute_request = body["compute_request"]
-    mode = body["mode"]
+    # "copy" is "new" with a required based_on_proposal_id: the repository
+    # knows one write path for a fresh row, and which proposal it was
+    # copied from is a fact for the update log, not a different write.
+    mode = "new" if body["mode"] == "copy" else body["mode"]
     name = body["name"].strip()
     proposal_id = body.get("proposal_id")
     based_on_proposal_id = body.get("based_on_proposal_id")
@@ -93,11 +98,11 @@ def dispatch_publish(body: dict, user_id: int) -> dict:
 
     # Integrity rule (§2.2, locked decision 5): the server never persists
     # a client-supplied result — compute_request carries inputs only, the
-    # result stored below always comes from compute_proposal(). A §2.3
+    # result stored below always comes from compute_member(). A §2.3
     # cache hit satisfies the rule the same way a fresh compute does
     # (cached payloads are exclusively server-written), so the cache_hit
     # flag is irrelevant here — publish never exposes it.
-    computed, _ = compute_proposal(compute_request)
+    computed, _ = compute_member(compute_request)
 
     repo = get_proposal_repository()
     return repo.publish(

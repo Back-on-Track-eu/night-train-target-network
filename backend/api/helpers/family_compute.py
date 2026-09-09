@@ -3,13 +3,13 @@ family_compute.py
 =================
 Validation + resolution + orchestration for POST /api/proposal/family and
 its two GETs (api/proposal_family.py) — the family-level counterpart of
-proposal_compute.py, and Flask-free apart from dependencies.py.
+member_compute.py, and Flask-free apart from dependencies.py.
 
 Flow of a POST:
   validate_family_body()   stops, HOW fields (shared with /calc), the two
                            optional axis lists, the optional `presented`
   resolve_family_request() the resolved echo — stops + the HOW fields as
-                           proposal_compute resolves them, no composition
+                           member_compute resolves them, no composition
                            or scenario (those are the axes)
   resolve_family_axes()    ids → domain: variants (default: every variant
                            of a current scenario, base first), compositions
@@ -22,7 +22,7 @@ Flow of a POST:
                            miss → run_family() on a fresh FamilyContext,
                            serialise, store, return
 
-member_views() serves GET …/members/<sv>/<comp>/views: compute_proposal()
+member_views() serves GET …/members/<sv>/<comp>/views: compute_member()
 for that one member — member-cache hit or ≈350 ms — so the family never
 writes 72 members into the member cache it does not need (D9).
 
@@ -50,9 +50,9 @@ from api.helpers.family_serialize import (
     error_member,
     family_document,
 )
-from api.helpers.proposal_compute import (
+from api.helpers.member_compute import (
     classify_compute_error,
-    compute_proposal,
+    compute_member,
     resolve_how_fields,
     validate_how_fields,
     validate_stops,
@@ -295,13 +295,13 @@ def build_or_load_family(body: dict) -> dict:
 def member_views(
     document_request: dict, scenario_variant_id: int, composition_id: str
 ) -> dict:
-    """{views} for one member — the full six views via compute_proposal()
+    """{views} for one member — the full six views via compute_member()
     on the member's request, served from the member cache when it is
     there and computed once (≈350 ms) when it is not.
 
     document_request is the family's request echo; the member's scenario
     comes from its variant, its measure set with it (bypassing the member
-    cache while it is not the empty one — see compute_proposal)."""
+    cache while it is not the empty one — see compute_member)."""
     loader = get_loader()
     try:
         scenario, measure_set = loader.resolve_scenario_variant(scenario_variant_id)
@@ -318,5 +318,5 @@ def member_views(
         # A member's route never carries suggestions; the family's did.
         "auto_stop_addition": "off",
     }
-    payload, _ = compute_proposal(body, measures=measure_set)
+    payload, _ = compute_member(body, measures=measure_set)
     return {"views": payload["evaluation"]["views"]}

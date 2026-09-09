@@ -99,8 +99,7 @@ SEED_VERSIONS = (1, 2, 3)
 SCENARIO_REFERENCES = (
     "proposals.proposals",
     "proposals.proposal_summaries",
-    "proposals.compute_cache_pointer",
-    "proposals.compute_cache_result",
+    "family.members",
 )
 
 
@@ -173,11 +172,11 @@ def install(cur, dry_run: bool) -> None:
         "WHERE scenario_key NOT IN %s",
         (tuple(s["scenario_key"] for s in NEW_SCENARIOS),),
     )
-    # The compute cache keys on scenario_id and is disposable by design
-    # (UNLOGGED) — clearing it costs a recompute and avoids reasoning about
-    # which entries survived a base move.
-    cur.execute("TRUNCATE proposals.compute_cache_pointer")
-    cur.execute("TRUNCATE proposals.compute_cache_result")
+    # Both family caches key on scenario pins and are disposable by design
+    # (UNLOGGED) — clearing them costs a recompute and avoids reasoning
+    # about which entries survived a base move.
+    cur.execute("TRUNCATE family.members")
+    cur.execute("TRUNCATE family.documents")
     print("\nInstalled. Next: uv run python scripts/refresh_proposals.py")
 
 

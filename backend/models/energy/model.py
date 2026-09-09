@@ -43,7 +43,7 @@ GIT_SHA: str = "unknown"  # injected by CI
 # in calibrated_coefficients.py.
 
 # Short, plain-language summary of what this model computes — embedded as-is
-# in the "models" section of POST /api/proposal/calc's response, alongside
+# in GET /api/models' registry (once the "models" section of every compute response), alongside
 # ENERGY_CALC_VERSION and ENERGY_FORMULAS.
 ENERGY_MODEL_DESCRIPTION: str = (
     "Traction energy model calibrated against Deutsche Bahn Trassenfinder "

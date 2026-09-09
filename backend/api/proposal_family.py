@@ -16,8 +16,8 @@ scenario variant × composition of a stop list + HOW.
 
 Thin delegation: every decision is in api/helpers/family_compute.py, every
 dict in api/helpers/family_serialize.py. This view only maps the helper
-layer's exceptions to status codes — the same codes /calc answers for
-the same failures.
+layer's exceptions to status codes (classify_compute_error — the one
+mapping from pipeline exceptions to wire codes).
 """
 
 import logging
@@ -33,7 +33,7 @@ from api.helpers.family_compute import (
     member_views,
     validate_family_body,
 )
-from api.helpers.proposal_compute import classify_compute_error
+from api.helpers.member_compute import classify_compute_error
 
 logger = logging.getLogger(__name__)
 bp = Blueprint("proposal_family", __name__)

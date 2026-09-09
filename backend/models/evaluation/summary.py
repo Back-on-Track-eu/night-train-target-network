@@ -2,7 +2,7 @@
 summary.py
 ==========
 Gallery-summary KPI derivation (adapters/proposal/README.md §5.4) — pure
-functions over the same dicts POST /api/proposal/calc returns
+functions over the same dicts a member payload carries
 (route_to_dict() shape + the evaluation "views" block). No DB access, no
 domain-object construction, and no geometry: the simplified gallery-map
 geometry is deliberately NOT part of this row — the calc response
@@ -12,7 +12,7 @@ adds a `geom_simplified` for `proposals.proposal_summaries`.
 
 Moved out of adapters/proposal/projection.py with WP10 step 5: the same
 derivation now feeds the calc response's "summary" block
-(api/helpers/proposal_compute.py), the compare sides
+(api/helpers/member_compute.py), the compare sides
 (api/helpers/proposal_compare.py, via that block), and the publish-time
 proposal_summaries write (adapters/proposal/repository.py via
 projection.py) — and api/helpers must never import calculation code from
@@ -59,7 +59,7 @@ def ordered_stops(trip: dict) -> list[dict]:
 
 def build_summary_row(route: dict, evaluation: dict) -> dict:
     """The §5.4 gallery-KPI columns for one (route, evaluation) pair —
-    exactly the shape POST /api/proposal/calc returns as "summary" and
+    exactly the shape a member (and each family member) carries as "summary" and
     the publish repository merges with its identity columns
     (proposal_id, user_id, composition_id, scenario_id, name, versions)
     and geom_simplified."""

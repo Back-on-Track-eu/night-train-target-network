@@ -60,7 +60,7 @@ from .context import FamilyContext
 @dataclass(frozen=True)
 class FamilyRequest:
     """The resolved WHAT + HOW every member shares — the request echo of
-    api/helpers/proposal_compute.py as domain values. scenario and
+    api/helpers/member_compute.py as domain values. scenario and
     composition are deliberately absent: those are the axes."""
 
     stops: list[str]
@@ -147,7 +147,7 @@ def _build_route(
     auto_stop_addition: str,
 ) -> ComputeResult:
     """One run_compute() on the shared context — the same call
-    api/helpers/proposal_compute.py makes, with the memoised loader and
+    api/helpers/member_compute.py makes, with the memoised loader and
     router in place of the singletons."""
     return run_compute(
         proposal_id=NEUTRAL_PROPOSAL_ID,

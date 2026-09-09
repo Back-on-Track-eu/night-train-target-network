@@ -22,7 +22,7 @@ What the document carries, and only once:
 Not here by design (D11): provenance, parameter blocks, the models
 registry, per-member views, and — since D13 — route fingerprints. Views
 are GET …/members/<sv>/<comp>/views; the fingerprint stays on
-compute_proposal(), which publish and refresh call.
+compute_member(), which publish and refresh call.
 
 Public interface:
   family_document(result, family_key, request_echo, cache_hit) -> dict

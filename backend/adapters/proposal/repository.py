@@ -20,7 +20,7 @@ publish()'s transaction via the same cursor. This module owns the
 proposals.proposals / proposal_summaries / update_log rows and the
 transaction boundary around all of it. The prefixed-ID rewrite it applies
 at publish time lives in id_prefix.py (shared with api/helpers/
-proposal_compute.py, which strips the neutral prefix for /calc).
+member_compute.py, which strips the neutral prefix for /calc).
 
 Version refresh (README.md §4.2): publish()'s "write the state" middle
 section (prefix rewrite, GTFS write, summary upsert) is factored into
@@ -55,7 +55,6 @@ from adapters.proposal.filter_builder import (
     build_where,
 )
 from adapters.proposal.gtfs_store import (
-    input_parameters_from_scenario,
     insert_route_gtfs,
     route_dict_from_gtfs,
 )
@@ -67,7 +66,7 @@ from models.route.model import ROUTE_BUILDER_VERSION
 logger = logging.getLogger(__name__)
 
 # Every ID route_factory.py mints for a route starts with this — see
-# api/helpers/proposal_compute.py's _NEUTRAL_PREFIX docstring. Publish
+# api/helpers/member_compute.py's _NEUTRAL_PREFIX docstring. Publish
 # rewrites this bare structural form up to the real P{id}_V{version}_
 # prefix; single-route proposals only (today's only reachable case — see
 # gtfs_store.py and route_factory.py), so "R1" is precise, not a
@@ -191,13 +190,13 @@ class ProposalRepository:
         )
         route_dict = prefixed["route"]
         evaluation_full = prefixed["evaluation"]
-        # §5.1 — only models + views are irreducible/stored; input.parameters
-        # is rebuilt on read via the scenario pin
-        # (gtfs_store.input_parameters_from_scenario()).
-        storage_evaluation = {
-            "models": evaluation_full["models"],
-            "views": evaluation_full["views"],
-        }
+        # §5.1 — the views are the irreducible output and the only thing
+        # stored. The models registry is GET /api/models and the parameters
+        # a proposal was priced from are GET /api/params/* for its scenario
+        # pin; neither is copied into every row (WP18 B2b — rows written
+        # before it still carry a "models" key, harmless until the next
+        # refresh rewrites them).
+        storage_evaluation = {"views": evaluation_full["views"]}
 
         if is_new:
             timestamps = self._insert_container(
@@ -254,11 +253,11 @@ class ProposalRepository:
         transaction: container row + GTFS/sidecars + summary row +
         update_log, prefixed IDs assigned here.
 
-        computed: api/helpers/proposal_compute.compute_proposal()'s
+        computed: api/helpers/member_compute.compute_member()'s
         output — bare structural ids ("R1", "R1_D0_T1", ...), NOT yet
         persistence-eligible. Publish is what mints the real
         P{proposal_id}_V{version}_ prefix (the reverse of what
-        compute_proposal() stripped off for /calc).
+        compute_member() stripped off for the member payload).
 
         mode: "new" | "overwrite". "new" ignores proposal_id (a fresh one
         is allocated from the sequence); "overwrite" requires it and
@@ -695,23 +694,13 @@ class ProposalRepository:
             )
         return route_dict
 
-    def reconstruct_evaluation(self, container: dict, loader) -> dict:
-        """Full evaluation shape (models/input/views) for a loaded
-        proposal — models/views come back verbatim from the stored
-        evaluation_output column (§5.1: irreducible, stored as-is);
-        input.parameters is rebuilt fresh via the scenario pin
-        (gtfs_store.input_parameters_from_scenario()), never
-        stored (would duplicate the params tables into every row)."""
-        stored = container["evaluation_output"]
-        # input_parameters_from_scenario() returns the whole {"parameters":
-        # {...}} input dict already (see its own docstring), not just the
-        # inner parameters — so it slots straight under "input" below.
-        input_section = input_parameters_from_scenario(container["scenario_id"], loader)
-        return {
-            "models": stored["models"],
-            "input": input_section,
-            "views": stored["views"],
-        }
+    def reconstruct_evaluation(self, container: dict) -> dict:
+        """The evaluation of a loaded proposal — {views}, verbatim from the
+        stored evaluation_output column (§5.1: irreducible, stored as-is).
+        Nothing else: the models registry and the parameters have their
+        own endpoints (WP18 B2b). Reads only the views key, so rows written
+        before B2b, which also carry "models", load unchanged."""
+        return {"views": container["evaluation_output"]["views"]}
 
     def owner(self, proposal_id: int) -> Optional[int]:
         """user_id of a proposal's owner, or None if unknown — a cheap
@@ -747,7 +736,7 @@ class ProposalRepository:
         (rather than fetching every proposal and checking in Python) since
         the steady-state case, most of the time, is that nothing is
         outdated. Returns just enough per row for outdated_trigger() and
-        compute_proposal(): proposal_id, the three stale-checkable
+        compute_member(): proposal_id, the three stale-checkable
         columns, current_base_scenario_id (see get_container()'s
         docstring for why it travels alongside rather than a second
         query), and compute_request (the recompute input)."""

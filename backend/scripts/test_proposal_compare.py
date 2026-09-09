@@ -192,16 +192,15 @@ def seed(force: bool = False) -> list[int]:
             session = _guest_session()
 
         print(f"[ ] Computing + publishing: {name} ...")
-        calc = requests.post(
-            f"{API_BASE}/api/proposal/calc",
-            json={"stops": _STOPS, "composition_id": anchor["composition_id"]},
-            timeout=180,
-        )
-        calc.raise_for_status()
+        # Publish computes the member itself from the request; defaults
+        # are resolved at the boundary, so the minimal request is enough.
         pub = requests.post(
             f"{API_BASE}/api/proposal/publish",
             json={
-                "compute_request": calc.json()["request"],
+                "compute_request": {
+                    "stops": _STOPS,
+                    "composition_id": anchor["composition_id"],
+                },
                 "name": name,
                 "mode": "new",
             },

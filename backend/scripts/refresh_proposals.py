@@ -44,12 +44,13 @@ DBDataLoader and RailRouter are simply used from every thread. DB writes
 never the bottleneck (routing calls are), and serializing them also
 means only one FOR UPDATE lock is ever held at a time.
 
-Compute-cache flush: §4.2 calls for flushing the compute cache first on
-every version bump / base move so stale cached results can't leak back
-into a fresh /calc — ComputeCacheRepository.flush() (called below before
-processing starts). The compute calls themselves run with
-use_cache=False: the flush just emptied both maps and each outdated
-proposal is computed exactly once, so hits are impossible here.
+Cache flush: §4.2 calls for flushing every cache derived from the pins
+first on every version bump / base move, so nothing stale can leak back
+into a fresh compute — both family caches (adapters/family/: members and
+documents) are truncated below before processing starts. The compute
+calls themselves run with use_cache=False: the flush just emptied the
+member cache and each outdated proposal is computed exactly once, so
+hits are impossible here.
 
 Usage:
     uv run --extra dev python -m scripts.refresh_proposals [--dry-run] [--limit N] [--concurrency N]
@@ -64,14 +65,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from adapters.proposal.repository import outdated_trigger
 from api.helpers import dependencies
-from api.helpers.proposal_compute import compute_proposal
+from api.helpers.member_compute import compute_member
 
 logger = logging.getLogger(__name__)
 
 
 def _compute_one(row: dict) -> tuple[dict, dict]:
     """Runs on a worker thread on the shared singletons; the RailRouter is
-    resolved per proposal by compute_proposal() from the scenario's
+    resolved per proposal by compute_member() from the scenario's
     routing_graph_key pin (see api/helpers/dependencies.py). Returns
     (computed, trigger); the DB write happens back on the main thread."""
     trigger = outdated_trigger(row)
@@ -91,7 +92,7 @@ def _compute_one(row: dict) -> tuple[dict, dict]:
     # fired (see api/proposals.py's on-load fallback for the same
     # rule applied on the read path).
     refresh_request["scenario_id"] = None
-    computed, _ = compute_proposal(refresh_request, use_cache=False)
+    computed, _ = compute_member(refresh_request, use_cache=False)
     return computed, trigger
 
 
@@ -133,7 +134,8 @@ def run(
             )
         return 0
 
-    dependencies.get_compute_cache().flush()
+    dependencies.get_member_cache().flush()
+    dependencies.get_family_document_cache().flush()
 
     failures = 0
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:

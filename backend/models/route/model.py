@@ -708,7 +708,7 @@ CHANGELOG: dict = {
 # change and warrants a version bump above.
 # =============================================================================
 
-# --- API request defaults (applied once, at the API boundary — api/helpers/proposal_compute.py)
+# --- API request defaults (applied once, at the API boundary — api/helpers/member_compute.py)
 DEFAULT_TIMETABLE_MODE: str = "simpleAutomatic"
 DEFAULT_SCHEDULE_MODE: str = "alwaysDaily"
 DEFAULT_ROUTING_MODE: str = "fullRouting"
@@ -953,12 +953,12 @@ deceleration); 0.5 m/s² is a comfortable service value appropriate for
 sleeping passengers — full emergency capability is far higher and
 irrelevant for timetabling."""
 
-# --- Neutral placeholder ids (api/helpers/proposal_compute.py, adapters/proposal/README.md §2.1)
+# --- Neutral placeholder ids (api/helpers/member_compute.py, adapters/proposal/README.md §2.1)
 NEUTRAL_PROPOSAL_ID: int = 0
 NEUTRAL_PROPOSAL_VERSION: int = 0
 """Fixed (not random) placeholder used only to satisfy plan_route()'s
-id-building signature for POST /api/proposal/calc. Never risks colliding
-with anything: /api/proposal/calc never persists, so its P{id}_V{version}_
+id-building signature for ephemeral compute (the family's members). Never
+risks colliding with anything: a member never persists, so its P{id}_V{version}_
 prefix exists only for the instant it takes rewrite_id_prefix() (adapters/
 proposal/id_prefix.py) to strip it back off into the neutral R1/T.../
 structural IDs §2.1 specifies. A fixed value keeps that round trip

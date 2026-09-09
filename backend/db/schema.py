@@ -1856,9 +1856,9 @@ ROUTE_CACHE_TABLES: tuple[Table, ...] = (
 # =============================================================================
 # family — layer L5 caches: everything derived from the pins, rebuildable
 # =============================================================================
-# Mirrored verbatim by db/dev/sql/migrations/2026-09-10_family_schema.sql.
-# The member cache (today proposals.compute_cache_*) joins this schema in
-# WP18 phase B2b as family.members.
+# Mirrored verbatim by db/dev/sql/migrations/2026-09-10_family_schema.sql
+# (documents) and 2026-09-10_family_members.sql (members, which replaced
+# the WP13 compute cache under proposals).
 
 FAMILY_TABLES: tuple[Table, ...] = (
     Table(
@@ -1904,6 +1904,56 @@ FAMILY_TABLES: tuple[Table, ...] = (
         ),
         indexes=(
             "CREATE INDEX idx_family_documents_created ON family.documents (created_at);",
+        ),
+    ),
+    Table(
+        schema="family",
+        name="members",
+        description="The member cache: one cached compute_member() result "
+        "per resolved request (api/helpers/member_compute.py), keyed by a "
+        "hash of the resolved request plus the measure set. Read by the "
+        "family views endpoint, publish, compare and refresh. UNLOGGED, TTL "
+        "on read (COMPUTE_CACHE_TTL_HOURS), swept on write, truncated by "
+        "scripts/refresh_proposals.py on every version bump. Never a source "
+        "of truth.",
+        unlogged=True,
+        columns=(
+            Column(
+                "request_hash",
+                "VARCHAR(80) PRIMARY KEY",
+                "canonical_request_hash(): sha256 over the resolved request "
+                "echo and the measure_set_id.",
+            ),
+            Column(
+                "route_fingerprint",
+                "VARCHAR(80) NOT NULL",
+                "The member's route fingerprint, for a targeted manual sweep "
+                "and for reading which requests converged on one route.",
+            ),
+            Column("scenario_id", "INTEGER NOT NULL"),
+            Column("measure_set_id", "INTEGER NOT NULL"),
+            Column("composition_id", "VARCHAR(50) NOT NULL"),
+            Column(
+                "resolved_request",
+                "JSONB NOT NULL",
+                "The request echo for this member — defaults applied, "
+                "scenario_id concrete.",
+            ),
+            Column(
+                "suggested_stops",
+                "JSONB",
+                'auto_stop_addition="suggest" output for this request. NULL '
+                "outside suggest mode.",
+            ),
+            Column(
+                "payload",
+                "JSONB NOT NULL",
+                "The member payload: versions, summary, route, evaluation.views.",
+            ),
+            Column("created_at", "TIMESTAMPTZ NOT NULL DEFAULT now()"),
+        ),
+        indexes=(
+            "CREATE INDEX idx_family_members_created ON family.members (created_at);",
         ),
     ),
 )

@@ -10,7 +10,7 @@ overrides IS that proposal — reconstructed exactly like GET
 plus its gallery summary row, marked published: true. A side WITH
 overrides (scenario_id and/or composition_id) is computed ephemerally:
 the anchor's stored compute_request with the overridden fields, through
-the same compute_proposal() every other compute path uses — never
+the same compute_member() every other compute path uses — never
 persisted, marked published: false, its summary taken straight from the
 calc response's own "summary" block (models/evaluation/summary.py's
 build_summary_row() — the same derivation publish runs), so stored and
@@ -52,7 +52,7 @@ Public interface:
 from __future__ import annotations
 
 from adapters.proposal.id_prefix import rewrite_id_prefix
-from api.helpers.proposal_compute import compute_proposal, validate_calc_body
+from api.helpers.member_compute import compute_member, validate_calc_body
 from api.helpers.proposal_load import load_current_container
 from api.helpers.proposal_serialize import (
     proposal_to_response_dict,
@@ -180,7 +180,7 @@ def _stored_side(container: dict, repo, loader) -> dict:
         container["scenario_id"],
         loader,
     )
-    evaluation = repo.reconstruct_evaluation(container, loader)
+    evaluation = repo.reconstruct_evaluation(container)
     # Summary fetched through the ordinary gallery machinery so the row
     # carries exactly the §5.4 shape incl. engagement counts. publish() writes
     # container + summary in one transaction, so the row always exists.
@@ -195,19 +195,19 @@ def _stored_side(container: dict, repo, loader) -> dict:
 
 
 def _computed_side(container: dict, overrides: dict) -> dict:
-    """The POST /api/proposal/calc response shape plus published: false,
-    the anchor proposal_id, the applied overrides, and an on-the-fly
-    summary. Nothing is persisted — the compute goes through the same
-    compute_proposal() as /calc, publish, and the refresh paths, and
-    therefore through the §2.3 compute cache: comparing warms the editor
-    and vice versa."""
+    """The member payload shape plus published: false, the anchor
+    proposal_id, the applied overrides, and an on-the-fly summary. Nothing
+    is persisted — the compute goes through the same compute_member() as
+    the family's views endpoint, publish and the refresh paths, and
+    therefore through the member cache (family.members): comparing warms
+    the editor and vice versa."""
     request = dict(container["compute_request"])
     request.update(overrides)
     errors = validate_calc_body(request)
     if errors:
         raise ValueError(" ".join(errors))
 
-    computed, cache_hit = compute_proposal(request)
+    computed, cache_hit = compute_member(request)
 
     # The calc response's own §5.4 KPI block (same build_summary_row()
     # the publish projection runs — WP10 step 5), minus what only exists
@@ -255,7 +255,7 @@ def _structural_views(side: dict) -> dict:
     views_unmatched, silently, however similar the two routes were.
     Neutralising both sides first makes the diff compare like with like.
 
-    Computed sides are already structural (compute_proposal() strips the
+    Computed sides are already structural (compute_member() strips the
     neutral prefix), so only published sides need rewriting. The side's
     own views are left untouched — the response still shows each side's
     real prefixed ids, per §2.2's ID convention; only the diff input is

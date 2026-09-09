@@ -1207,7 +1207,7 @@ class TrackInfrastructure:
     field_is_default: {field_name: was_this_field_defaulted} — kept ON
     this object (unlike source/version) because api/helpers/route_serialize.py
     reads it directly to build the "defaulted_fields" list in the
-    route response (POST /api/proposal/calc, formerly POST /api/route/plan).
+    route response (a member's route — compute_member(); formerly POST /api/route/plan).
     Individual defaulted fields are expected and
     fine — that's what track_infrastructure_defaults is for.
 

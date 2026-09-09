@@ -1,48 +1,43 @@
 """
-proposal_compute.py
-====================
+member_compute.py
+=================
 Validation + serialization wrapper around models/pipeline.py's
-run_compute() (adapters/proposal/README.md §2.1) — the single place that turns a
-compute request body into the merged route+evaluation response dict. Used
-by POST /api/proposal/calc (api/proposal_calc.py), publish
+run_compute() — the L1–L4 primitive with the member cache: one member
+(one scenario, one composition, one measure set) of one stop list + HOW,
+as a wire-shaped dict. Every path that turns a request into a stored or
+served result goes through here so they can never drift: the family's
+views endpoint (api/helpers/family_compute.py), publish
 (api/helpers/publish_dispatch.py), the on-load refresh fallback
-(api/proposals.py), and scripts/refresh_proposals.py (§4.2, WP8) — every
-path that turns a compute_request into a stored proposal state goes
-through here, so they can never drift from what a live /calc call would
-have returned for the same request — and every one of them rides the
-same §2.3 compute cache (WP13), wired in below: hash the resolved
-request, serve a fresh-enough cached result, compute only on a miss.
+(api/helpers/proposal_load.py), compare's override sides
+(api/helpers/proposal_compare.py) and scripts/refresh_proposals.py. The
+family itself (models/family/builder.py) runs the same run_compute() on a
+shared context and serialises its own document; it does not write here.
 
-validate_calc_body() lives here (not in the view module) so both entry
-points import their shared validation from the helper layer — api/*.py
-blueprints stay thin delegation and are never imported by helpers.
+Until WP18 B2b this was proposal_compute.py behind POST /api/proposal/calc.
+The endpoint is gone; the function is what remains of it, and its payload
+lost the two blocks that have their own endpoints since then:
+evaluation.models (GET /api/models) and evaluation.input.parameters
+(GET /api/params/*). What is left is what a member IS:
 
-compute_proposal() does the serialization steps: route_to_dict()/
-views_to_dict()/models_to_dict()/input_to_dict(), the route fingerprint,
-the resolved-request echo, and stripping the neutral P0_V0_ ID prefix
-down to the structural R1/T.../ form §2.1 specifies. It returns the
-payload TOGETHER with the cache_hit flag rather than embedding the flag
-in the payload — publish and the refresh paths persist the payload dict
-verbatim, and a cache_hit key in it would leak into stored state.
-Whether/where the flag appears on the wire stays the caller's concern
-(/calc and compare expose it; publish never does).
+  {route_builder_version, calc_version, route_fingerprint, request,
+   suggested_stops?, summary, route, evaluation: {views}}
+
+validate_calc_body() keeps its name: it validates a member request (stops,
+composition, scenario, HOW), which is what publish's compute_request and
+compare's override sides still post.
 
 Public interface:
   validate_calc_body(body: dict) -> list[str]
   validate_stops(body: dict) -> list[str]
   validate_how_fields(body: dict, stops) -> list[str]
-      the HOW-field subset (timetable_mode … expert_timetable), shared
-      with the calc matrix (proposal_matrix.py) whose WHAT fields differ
   classify_compute_error(exc) -> (error_code, http_status, extra) | None
-      the one mapping from pipeline exceptions to wire error codes, used
-      by /calc's error arms and by the matrix's per-cell error records
   normalize_expert_timetable(block: dict | None) -> dict | None
   canonical_sha256(obj) -> str            # re-exported from models/utils.py
-  canonical_request_hash(resolved_request: dict) -> str
+  canonical_request_hash(resolved_request, measure_set_id) -> str
   resolve_how_fields(body: dict) -> dict  # the HOW subset of the echo
-  compute_proposal(body, loader=None, router=None, use_cache=True,
-                   measures=NO_MEASURES)
-      -> tuple[dict, bool]   # (§2.1 response payload, cache_hit)
+  compute_member(body, loader=None, router=None, use_cache=True,
+                 measures=NO_MEASURES)
+      -> tuple[dict, bool]   # (member payload, cache_hit)
 """
 
 from __future__ import annotations
@@ -54,15 +49,11 @@ from models.route.routing.gauge import GaugeMismatchError
 from models.route.routing.rail_router import RailRoutingError
 from api.helpers.dependencies import (
     RoutingGraphNotConfiguredError,
-    get_compute_cache,
     get_loader,
+    get_member_cache,
     get_rail_router,
 )
-from api.helpers.evaluation_serialize import (
-    input_to_dict,
-    models_to_dict,
-    views_to_dict,
-)
+from api.helpers.evaluation_serialize import views_to_dict
 from api.config import (
     EXPERT_DEPARTURE_MAX_TIME,
     EXPERT_DEPARTURE_MIN_TIME,
@@ -101,12 +92,12 @@ _NEUTRAL_PREFIX = f"P{NEUTRAL_PROPOSAL_ID}_V{NEUTRAL_PROPOSAL_VERSION}_"
 
 
 def validate_calc_body(body: dict) -> list[str]:
-    """Request validation for the merged compute request (§2.1) — the
-    former plan request's WHAT/HOW fields, minus proposal_id/
-    proposal_version (publish-only, not a compute concern). Shared by
-    api/proposal_calc.py and api/helpers/publish_dispatch.py so both
-    entry points reject the same malformed compute_request the same
-    way."""
+    """Request validation for one member request — stops, composition,
+    scenario and the HOW fields, minus proposal_id/proposal_version
+    (publish-only, not a compute concern). Shared by publish
+    (api/helpers/publish_dispatch.py) and compare's override sides
+    (api/helpers/proposal_compare.py) so both reject the same malformed
+    compute_request the same way."""
     errors = []
 
     if body.get("scenario_id") is not None and not isinstance(body["scenario_id"], int):
@@ -140,9 +131,10 @@ def validate_stops(body: dict) -> list[str]:
 def validate_how_fields(body: dict, stops) -> list[str]:
     """The HOW fields every compute request carries — timetable_mode,
     fixed_night_interval, schedule_mode, routing_mode, auto_stop_addition,
-    expert_timetable — checked the same way for /calc (via
-    validate_calc_body) and /calc/matrix (api/helpers/proposal_matrix.py),
-    whose WHAT fields are axes instead of one composition/scenario.
+    expert_timetable — checked the same way for a member request (via
+    validate_calc_body) and a family request (api/helpers/
+    family_compute.py), whose WHAT fields are axes instead of one
+    composition/scenario.
     `stops` is passed separately because the fixed-night and add-on
     checks refer to it and the caller has already validated it."""
     errors = []
@@ -209,11 +201,12 @@ def validate_how_fields(body: dict, stops) -> list[str]:
 
 
 def classify_compute_error(exc: BaseException) -> tuple[str, int, dict] | None:
-    """Map a compute_proposal() failure to (error_code, http_status,
+    """Map a compute_member() failure to (error_code, http_status,
     extra_fields), or None for anything that is our own fault (the caller
     logs it with a traceback and answers calc_error/500). One mapping for
-    /calc's HTTP arms and the matrix's per-cell error records, so a cell
-    reports exactly the code the same request would get on /calc:
+    the views endpoint's HTTP arms and the family's per-member error
+    records, so a member reports exactly the code the views endpoint
+    would answer for the same request:
 
       gauge_mismatch / 422 (+ conflicting_stops, which the frontend marks
         on the map) — checked before the generic ValueError arm because
@@ -434,13 +427,17 @@ def normalize_expert_timetable(block) -> dict | None:
     return {"outbound": outbound, "return": return_block}
 
 
-def canonical_request_hash(resolved_request: dict) -> str:
-    """§2.3's request hash: canonical_sha256() over the RESOLVED request.
-    Hashing the resolved form — not the posted body — is what makes an
-    omitted field and an explicitly-posted default converge on the same
-    cache entry. All request values are strings/ints/lists of strings, so
-    JSON encoding is trivially stable."""
-    return canonical_sha256(resolved_request)
+def canonical_request_hash(resolved_request: dict, measure_set_id: int) -> str:
+    """The member cache key: canonical_sha256() over the RESOLVED request
+    and the measure set. Hashing the resolved form — not the posted body —
+    is what makes an omitted field and an explicitly-posted default
+    converge on the same cache entry. The measure set is part of the key
+    and not of the echo: the echo names a scenario and a composition, the
+    variant names the measures, and two members of one scenario under
+    different measures must not share a row."""
+    return canonical_sha256(
+        {"request": resolved_request, "measure_set_id": measure_set_id}
+    )
 
 
 def resolve_how_fields(body: dict) -> dict:
@@ -480,22 +477,9 @@ def _resolve_request(body: dict, loader) -> dict:
     }
 
 
-# Response parts shared between every request converging on one result —
-# what compute_cache_result.payload carries. Everything else (the request
-# echo, suggested_stops) is request-specific and lives on the pointer row.
-_SHARED_PAYLOAD_KEYS = (
-    "route_builder_version",
-    "calc_version",
-    "summary",
-    "route",
-    "evaluation",
-)
-
-
 def _response_from_cache(entry: dict) -> dict:
-    """Reassemble the §2.1 response from a cache hit: shared payload +
-    this pointer's request-specific parts, in the exact key order the
-    miss path produces."""
+    """Reassemble the member payload from a cache hit, in the exact key
+    order the miss path produces."""
     payload = entry["payload"]
     response = {
         "route_builder_version": payload["route_builder_version"],
@@ -510,50 +494,45 @@ def _response_from_cache(entry: dict) -> dict:
     return response
 
 
-def compute_proposal(
+def compute_member(
     body: dict,
     loader=None,
     router=None,
     use_cache: bool = True,
     measures: MeasureSet = NO_MEASURES,
 ) -> tuple[dict, bool]:
-    """Resolve + serve-from-cache-or-compute one request body (§2.1's
-    WHAT/HOW fields — stops, composition_id, scenario_id, timetable_mode,
-    fixed_night_interval, schedule_mode, routing_mode,
-    auto_stop_addition). Callers validate the body first
-    (validate_calc_body() above) — this function assumes it's already
-    been checked and lets models/pipeline.py's ValueError (domain errors)
-    propagate uncaught.
+    """Resolve + serve-from-cache-or-compute one member request (stops,
+    composition_id, scenario_id, the HOW fields). Callers validate the body
+    first (validate_calc_body() above) — this function assumes it has been
+    checked and lets models/pipeline.py's ValueError (domain errors)
+    propagate uncaught; the API layer maps them with
+    classify_compute_error().
 
-    loader defaults to the process-wide singleton (get_loader());
-    router defaults to the registry router for the scenario's
-    routing_graph_key pin, resolved AFTER the request is (see below) —
-    every Flask caller (/calc, publish, compare, the matrix fan-out, the
-    on-load refresh fallback) relies on these defaults and passes
-    neither. Since WP14 every singleton is thread-safe (adapters borrow a
-    pooled connection per call), so the overrides are not a threading
-    tool: the loader override exists for tests and scripts that bring
-    their own instance, the router override for tests only — a caller
-    passing one takes over graph selection entirely. use_cache=False is
-    what scripts/refresh_proposals.py uses: it flushes the cache first
-    and computes each proposal exactly once, so hits are impossible
-    there anyway.
+    loader defaults to the process-wide singleton (get_loader()); router
+    defaults to the registry router for the scenario's routing_graph_key
+    pin, resolved AFTER the request is (see below) — every Flask caller
+    relies on these defaults and passes neither. The overrides exist for
+    tests and scripts that bring their own instance; a caller passing a
+    router takes over graph selection entirely. use_cache=False is what
+    scripts/refresh_proposals.py uses: it flushes the cache first and
+    computes each proposal exactly once.
 
-    Cache flow (§2.3, WP13): resolved request -> canonical hash ->
-    pointer lookup. A hit whose stored payload matches the running
-    ROUTE_BUILDER_VERSION/CALC_VERSION is served with zero routing and
-    zero evaluation; a version mismatch is treated as a miss (defense in
-    depth for a forgotten flush — the recompute below overwrites the
-    stale rows). On a miss, the freshly computed response is split into
-    the shared payload and the request-specific pointer parts and written
-    back through ComputeCacheRepository.store().
+    measures: the variant's measure set — only the evaluate half reads it
+    (models/pipeline.py). Part of the cache key, not of the echo.
 
-    Returns (payload, cache_hit): the full §2.1 response shape
+    Cache flow: resolved request + measure set -> canonical hash ->
+    family.members lookup (adapters/family/member_cache.py). A hit whose
+    stored payload matches the running ROUTE_BUILDER_VERSION/CALC_VERSION
+    is served with zero routing and zero evaluation; a version mismatch is
+    a miss (defence in depth for a forgotten flush — the recompute below
+    overwrites the stale row). On a miss the fresh payload is stored under
+    the same key.
+
+    Returns (payload, cache_hit):
       {route_builder_version, calc_version, route_fingerprint, request,
-       suggested_stops?, summary, route, evaluation}
-    plus whether it came from the cache. cache_hit's placement in the
-    wire response stays the caller's concern (/calc and compare expose
-    it; publish and the refresh paths ignore it).
+       suggested_stops?, summary, route, evaluation: {views}}
+    cache_hit's placement on the wire stays the caller's concern (compare
+    exposes it; publish and the refresh paths ignore it).
     """
     loader = loader if loader is not None else get_loader()
 
@@ -567,13 +546,12 @@ def compute_proposal(
     if router is None:
         router = get_rail_router(loader.resolve_routing_graph_key(scenario_id))
 
-    # The member cache is keyed on the request alone, which names no
-    # measure set: a member under any set but the empty one bypasses it
-    # until B2b folds measure_set_id into the key (family.members).
-    if measures is not NO_MEASURES:
-        use_cache = False
-    cache = get_compute_cache() if use_cache else None
-    request_hash = canonical_request_hash(resolved_request) if cache else None
+    cache = get_member_cache() if use_cache else None
+    request_hash = (
+        canonical_request_hash(resolved_request, measures.measure_set_id)
+        if cache
+        else None
+    )
     if cache is not None:
         entry = cache.lookup(request_hash)
         if (
@@ -626,20 +604,10 @@ def compute_proposal(
     }
     if resolved_request["auto_stop_addition"] == "suggest":
         payload["suggested_stops"] = suggested_stops_to_dicts(result.suggestions)
-    evaluation = {
-        "models": models_to_dict(),
-        # include_route=False: the route already appears once in the
-        # payload, as a sibling of "evaluation" — see input_to_dict()'s
-        # docstring.
-        "input": input_to_dict(
-            route_dict,
-            result.provenance.tracks,
-            result.provenance.stop_infra,
-            result.provenance.compositions,
-            include_route=False,
-        ),
-        "views": views_to_dict(result.views, result.route),
-    }
+    # Views only: the models registry is GET /api/models and the
+    # parameters a member was priced from are GET /api/params/* for its
+    # scenario — neither belongs in every member (D11).
+    evaluation = {"views": views_to_dict(result.views, result.route)}
     # §5.4 gallery KPIs, derived from the exact route/evaluation dicts
     # this response carries — the same build_summary_row() the publish
     # projection uses, so the calc "summary" and a published gallery row
@@ -657,10 +625,20 @@ def compute_proposal(
             request_hash=request_hash,
             route_fingerprint=fingerprint,
             scenario_id=scenario_id,
+            measure_set_id=measures.measure_set_id,
             composition_id=resolved_request["composition_id"],
             resolved_request=response["request"],
             suggested_stops=response.get("suggested_stops"),
-            payload={key: response[key] for key in _SHARED_PAYLOAD_KEYS},
+            payload={
+                key: response[key]
+                for key in (
+                    "route_builder_version",
+                    "calc_version",
+                    "summary",
+                    "route",
+                    "evaluation",
+                )
+            },
         )
 
     return response, False

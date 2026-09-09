@@ -104,7 +104,7 @@ class _SingleFlight:
 class MemoLoader:
     """Build-scoped memo over DBDataLoader. Only the methods named in
     _MEMOISED are cached — the catalog builders run_compute() calls and
-    the two scenario-row resolutions api/helpers/proposal_compute.py
+    the two scenario-row resolutions api/helpers/member_compute.py
     makes; everything else delegates to the wrapped loader untouched."""
 
     _MEMOISED = frozenset(

@@ -252,7 +252,7 @@ class DBDataLoader:
         Resolve a scenario_id (or None → the live is_current_base scenario)
         to its routing_graph_key pin — which OpenRailRouting instance every
         distance and travel time comes from. The compute path
-        (api/helpers/proposal_compute.py) selects the RailRouter with this;
+        (api/helpers/member_compute.py) selects the RailRouter with this;
         the key → URL mapping lives in the deployment
         (api/helpers/dependencies.py), not in the database.
         """

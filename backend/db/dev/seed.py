@@ -2880,7 +2880,7 @@ def _compute_example_proposal(
     """Run the hand-crafted example route dict through the real
     evaluation pipeline — distribute_demand() (models/demand) ->
     models.pipeline.evaluate_and_build_views() — and serialize the result
-    into exactly the shape api/helpers/proposal_compute.compute_proposal()
+    into exactly the shape api/helpers/member_compute.compute_member()
     produces (§2.1), so ProposalRepository.publish() can't tell the
     difference from a live compute. Deliberately does NOT go through
     run_compute() itself (whose plan_route() step requires a live
@@ -2962,7 +2962,7 @@ def seed_example_proposal(cur, conn) -> None:
     evaluate_and_build_views) instead of the old no-demand illustrative
     stub, so cost/revenue on the seeded example are real computed numbers,
     not absent. It still deliberately does NOT go through the full
-    compute_proposal()/run_compute() pipeline (which needs a live
+    compute_member()/run_compute() pipeline (which needs a live
     RailRouter/OpenRailRouting) — see _compute_example_proposal()'s
     docstring.
 

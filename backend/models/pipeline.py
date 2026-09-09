@@ -9,7 +9,7 @@ WP13, model-level tests, and the DB seed's example proposal) shares one
 implementation instead of each re-assembling the same steps.
 
 Serialization stays out of this module on purpose — that's api/helpers/
-proposal_compute.py's job (dicts, fingerprinting, ID-prefix stripping).
+member_compute.py's job (dicts, fingerprinting, ID-prefix stripping).
 This module only ever hands back domain objects.
 
 Public interface:
@@ -63,7 +63,7 @@ from models.route.timetable import ExpertTimetable
 class ComputeResult:
     """Everything one compute pass produces — route, provenance, and the
     full evaluation, all still domain objects. Callers serialize whatever
-    subset they need (api/helpers/proposal_compute.py serializes all of
+    subset they need (api/helpers/member_compute.py serializes all of
     it; a model-level test typically only reads views.bd_all/bd_per_pair).
     """
 
@@ -120,7 +120,7 @@ def run_compute(
     measures: MeasureSet = NO_MEASURES,
 ) -> ComputeResult:
     """Build a route and evaluate it in one call — the steps every compute
-    path (POST /api/proposal/calc, publish, future cache misses) needs:
+    path (the family's members, publish, member-cache misses) needs:
     plan → stopgap demand → evaluate → views.
 
     proposal_id/proposal_version: purely ID-building placeholders for
