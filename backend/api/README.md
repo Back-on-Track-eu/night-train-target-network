@@ -34,7 +34,9 @@ its own example files.
   - [`POST /api/proposal/calc`](#proposal-calc) — plan a route and evaluate it
   - [`POST /api/proposal/calc/matrix`](#proposal-calc-matrix) — the same route under every scenario × composition, streamed
 - [Scenarios](#scenarios)
-  - [`GET /api/scenarios`](#scenarios) — list all scenarios, grouped by current status
+  - [`GET /api/scenarios`](#scenarios) — scenarios grouped by current status, plus measure sets and the variant axis
+- [Models](#models)
+  - [`GET /api/models`](#models) — versions, descriptions and the formula registry
 - [Proposals](#proposals) — publish and load
   - [`POST /api/proposal/publish`](#proposal-publish) — publish a computed proposal, the only write path
   - [`GET /api/proposal/<id>`](#get-proposal) — load a proposal
@@ -946,6 +948,87 @@ response is split into three groups instead, each with its own `count`:
 
 Every scenario appears in exactly one group. `current_base` holds zero
 rows only if the database is not correctly seeded.
+
+### Measure sets and the variant axis (WP18)
+
+Two more top-level keys sit beside the groups, flat rather than nested,
+because a variant spans the grouping and clients address variants by id:
+
+```json
+{
+  "measure_sets": [
+    { "measure_set_id": 1, "key": "none", "description": "No political measures — today's tax and charging regime.",
+      "vat_exempt": false, "energy_tax_exempt": false, "tac_direct_cost": false,
+      "factors": { "ticket_revenue": 1.0, "energy_cost": 1.0, "track_access": 1.0 } }
+  ],
+  "scenario_variants": [
+    { "scenario_variant_id": 1, "scenario_id": 1, "measure_set_id": 1,
+      "scenario_key": "infra-2026", "scenario_name": "Infra 2026",
+      "is_current_base": true, "routing_graph_key": "infra_2026",
+      "dimensions": { "network": "2026", "hsr_allowed": false, "optimised_timetable": false } }
+  ]
+}
+```
+
+A **scenario** pins what the infrastructure is; a **measure set** says
+what the state does about it (VAT exemption, energy-tax exemption,
+direct-cost track access). A **scenario variant** is the flattened cross
+product of the two — one dropdown value instead of two, and the axis a
+proposal family is computed over.
+
+One measure set is seeded, `none`: no lever pulled, every factor `1.0`,
+which is the regime every evaluation before WP18 implicitly ran under.
+The `factors` block is on the wire so a reader never has to know which
+flag scales what; WP17 changes the flags and the factors together, and
+adds the versioned rate table behind them.
+
+`scenario_variants` is materialised (`db/dev/seed.py`
+`materialise_scenario_variants()`), so with one measure set there is
+exactly one variant per scenario, including historical ones.
+
+</details>
+
+---
+
+<a id="models"></a>
+
+## Models
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/models` | Version, description and formula registry for every model in the pipeline |
+
+<details>
+<summary>Request &amp; response details</summary>
+
+No request body, no query params, no scenario: the body depends on
+nothing but the running code.
+
+```json
+{
+  "models": {
+    "route_builder": { "version": "0.9.33", "description": "...", "formulas": {} },
+    "energy":        { "version": "1.1.1",  "description": "...", "formulas": {} },
+    "evaluation":    { "version": "0.9.26", "description": "...",
+                       "formulas": { "tac_eur": { "latex": "...", "summary": "...",
+                                                  "description": "...",
+                                                  "inputs": [ ... ], "output": { ... } } } },
+    "emissions":     { "version": "...", "description": "...", "factors": { ... } }
+  }
+}
+```
+
+Every entry carries `version` and `description`. What comes with them
+differs by model: a formula registry for the computed ones (keyed by the
+same field names the evaluation views use, so a breakdown row maps
+straight to its formula), and an emission-factor table for `emissions`.
+
+This block used to be inlined under `evaluation.models` in every compute
+response — roughly 26 KB repeated per member of a proposal family. It is
+an endpoint so a client fetches it once per session; the response carries
+`Cache-Control: public, max-age=…` (`api/config.py`
+`MODELS_CACHE_MAX_AGE_S`), short enough that a deploy corrects an open
+tab the same working day.
 
 </details>
 

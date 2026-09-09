@@ -950,6 +950,51 @@ this rollout, otherwise old and new evaluations coexist in the gallery.
 
 ---
 
+## 13. WP18 phase A — one migration, no data change (CALC 0.9.26)
+
+Ships `2026-09-10_scenario_variants.sql`: two new tables in the existing
+`scenario` schema (`measure_sets`, `scenario_variants`), one seeded row,
+and the cross product of it with every existing scenario row. No existing
+table is touched, no column is added anywhere else, no stored number
+changes.
+
+**Deploy:** nothing special. `db/migrate.py` applies the file before the
+api starts, as always. It is small (two `CREATE TABLE`s, two inserts) and
+safe on a live database.
+
+**Do not truncate the compute cache for this one.** CALC moves 0.9.25 →
+0.9.26, which normally means stale cached results — but this bump is a
+signature change with every factor at 1.0, so the numbers behind cached
+payloads are unchanged. The version guard treats 0.9.25 entries as misses
+and recomputes them anyway, which is correct but wasteful; if the cache is
+large and the api feels slow in the first minutes after deploy, that is
+why, and truncating is then the faster path rather than a correctness fix.
+
+**`scripts/refresh_proposals.py` is not required.** Stored proposals carry
+`calc_version: "0.9.25"` and read as outdated in the gallery until the
+next refresh run. Since the numbers are identical, that refresh can ride
+along with phase B rather than being its own deploy — your call which is
+less disruptive.
+
+**No new environment variables.** `MODELS_CACHE_MAX_AGE_S` (the
+`Cache-Control` on the new `GET /api/models`) has a code default of 3600
+and appears name-only, commented out, in `.env.example` like every other
+code-defaulted setting.
+
+**One adjacent thing to check before the next fresh database:**
+`deploy/bot-server-app/docker-compose.yml`, `bot-server-demo` and
+`bot-server` still bind-mount
+`backend/db/dev/sql/create_input_params_schema.sql` and
+`create_scenario_schema.sql` into `docker-entrypoint-initdb.d`. Those files
+no longer exist — `db/schema.py::build_ddl()` replaced them — so Docker
+creates empty *directories* in their place. Existing volumes are
+unaffected (init scripts only run on an empty data directory), so this is
+dormant on staging and production, but a brand-new environment would come
+up without `input_params` or `scenario`. Not part of this deploy; worth
+fixing before the next fresh install.
+
+---
+
 ## Maintaining this document
 
 One file, updated in the same PR as the change it describes. The rule that

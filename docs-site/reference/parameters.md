@@ -413,6 +413,29 @@ Container pinning one version of each versioned infrastructure table. Exactly on
 | <a id="p-scenario-scenarios-stop_infrastructure_defaults_version"></a>`stop_infrastructure_defaults_version` | Pinned input_params.stop_infrastructure_defaults version (full-table snapshot). | — | — |
 | <a id="p-scenario-scenarios-passage_charges_version"></a>`passage_charges_version` | Pinned input_params.passage_charges version (full-table snapshot). | — | — |
 | <a id="p-scenario-scenarios-routing_graph_key"></a>`routing_graph_key` | Routing graph this scenario routes on — the physical rail network (OSM state) behind every distance and travel time, e.g. "infra_2026" or "infra_2032". Pinned like the *_version columns but not itself a snapshot version: the graph lives outside the database, in an OpenRailRouting instance. Naming contract with the deployment: key &lt;k> is served by the instance at env OPENRAILROUTING_URL_&lt;K>, the key uppercased — every graph alike, none implicit — see models/route/routing/rail_router.py. The TAC and passage changes an upgraded network implies are NOT carried here; they ride this same row's track_infrastructures_version and passage_charges_version pins. | — | — |
+
+## `scenario.measure_sets`
+
+A named bundle of political measures an evaluation runs under — what the state DOES, where a scenario pins what the infrastructure IS. Unversioned definitions: the flags say which levers are pulled, never by how much. The rates themselves (VAT per country of sale, electricity tax share, direct-cost floor per infrastructure manager) get their own versioned input_params table with WP17 and are pinned by the scenario like every other calibrated parameter. One row today, 'none' — no lever pulled, which is what every evaluation before WP18 implicitly ran under.
+
+| Parameter | Meaning | Unit | Used in |
+|---|---|---|---|
+| <a id="p-scenario-measure_sets-measure_set_id"></a>`measure_set_id` | — | — | — |
+| <a id="p-scenario-measure_sets-key"></a>`key` | Stable identifier, e.g. "none", "vat-exempt". What the API and the frontend name a measure set by; ids are database-assigned and not portable between environments. | — | — |
+| <a id="p-scenario-measure_sets-vat_exempt"></a>`vat_exempt` | Night train fares exempt from value-added tax. Raises the operator's retained revenue per ticket. | — | — |
+| <a id="p-scenario-measure_sets-energy_tax_exempt"></a>`energy_tax_exempt` | Traction electricity exempt from energy/electricity tax. Lowers the energy price the operator pays. | — | — |
+| <a id="p-scenario-measure_sets-tac_direct_cost"></a>`tac_direct_cost` | Track access charged at the direct cost of running the train only, the floor Directive 2012/34/EU permits — not a discount on the full charge but a different component selection (models/infrastructure/tac/calc_tac.py). | — | — |
+| <a id="p-scenario-measure_sets-description"></a>`description` | What this bundle of measures represents, in the words a reader of the results needs. | — | — |
+
+## `scenario.scenario_variants`
+
+The flattened (scenario x measure set) axis the API and the frontend address by a single id — one dropdown value instead of two. Materialised as the full cross product (db/dev/seed.py materialise_scenario_variants(), re-run after every scenario or measure-set insert), so it is derived data: truncating and rebuilding it loses nothing except the ids themselves, which nothing persists.
+
+| Parameter | Meaning | Unit | Used in |
+|---|---|---|---|
+| <a id="p-scenario-scenario_variants-scenario_variant_id"></a>`scenario_variant_id` | — | — | — |
+| <a id="p-scenario-scenario_variants-scenario_id"></a>`scenario_id` | The infrastructure pin this variant evaluates on. | — | — |
+| <a id="p-scenario-scenario_variants-measure_set_id"></a>`measure_set_id` | The measures this variant evaluates under. | — | — |
 <!-- END GENERATED: parameters -->
 
 <FeedbackForm />

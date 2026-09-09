@@ -168,6 +168,10 @@ Stopgap demand model moved out of models/route/ into its own models/demand/ pack
 
 ## Cost & revenue evaluation
 
+### `0.9.26` — 2026-09-10
+
+Measure sets (WP18 phase A): evaluate_route() takes a MeasureSet (models/params.py, scenario.measure_sets) and records it on EvaluationResult.measures. Three factors enter the calculation — on ticket revenue (_calc_od_pair_results), on traction energy and on track access (_calc_segment_cost) — and all three are 1.0 under NO_MEASURES, the default and the only seeded set, so EVERY NUMBER IS UNCHANGED: the bump is for the signature and the recorded field, not for a value. What each factor will carry once WP17 seeds rates is documented on MeasureSet; the direct-cost track access regime in particular is a different component selection inside models/infrastructure/tac/calc_tac.py, not a wider factor here, because the per-country views read SegmentTac.by_country rather than these totals. Migration 2026-09-10_scenario_variants.sql adds the two tables; the (scenario x measure set) cross product is the scenario_variant axis the proposal family is built over.
+
 ### `0.9.25` — 2026-09-07
 
 Summary row (models/evaluation/summary.py) gains five columns, no existing value changes: net_eur_per_year (the SIGNED annual net - negative is the shortfall subsidy_eur_per_year already reports, positive is a surplus beyond the target margin, so a profitable route can be shown as one instead of as 'subsidy 0'), operating_days_per_year, train_km_per_year, available_place_km_per_year and sold_place_km_per_year (the annual denominators behind the per-unit normalisations, re-derived from the route dict so a composition comparison can show EUR/place-km and utilisation from the summary alone). All five also land in proposals.proposal_summaries (migration 2026-09-07_proposal_summaries_supply_kpis.sql); scripts/refresh_proposals.py backfills stored rows. Bumped because summary.py is gated on this constant.

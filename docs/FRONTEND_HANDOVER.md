@@ -553,6 +553,97 @@ rendering beats one response.
   summary columns need Giovanni's refresh (DEPLOY_HANDOVER §4c) before the
   supply figures show on stored proposals.
 
+## 13. Measure sets, the variant axis, and `GET /api/models` — CALC 0.9.26
+
+WP18 phase A. Additive: nothing is removed, nothing changes shape, no
+number moves. This lands ahead of the proposal family (phase B), which is
+what the variant axis exists for — §13 gets rewritten when that ships, so
+treat what follows as the pieces you can already type against, not as the
+final family contract.
+
+### 13.1 `GET /api/scenarios` gains two keys
+
+Beside the three existing groups the body now carries `measure_sets` and
+`scenario_variants`:
+
+```ts
+interface MeasureSet {
+  measure_set_id: number
+  key: string                 // 'none' is the only seeded one today
+  description: string | null
+  vat_exempt: boolean
+  energy_tax_exempt: boolean
+  tac_direct_cost: boolean
+  factors: { ticket_revenue: number; energy_cost: number; track_access: number }
+}
+
+interface ScenarioVariant {
+  scenario_variant_id: number
+  scenario_id: number
+  measure_set_id: number
+  // inlined from the variant's scenario, so a switch renders from this
+  // list alone — the same fields as the matrix axis entry you have:
+  scenario_key: string
+  scenario_name: string
+  is_current_base: boolean
+  routing_graph_key: string
+  dimensions: ScenarioDimensions | null
+}
+```
+
+A **scenario** pins what the infrastructure is; a **measure set** says what
+the state does about it (VAT, energy tax, direct-cost track access); a
+**scenario variant** is the flattened cross product — one value instead of
+two. One measure set is seeded (`none`, every factor `1.0`), so today there
+is exactly one variant per scenario and `scenario_variant_id` is
+effectively an alias for `scenario_id`. Do not rely on that: it stops
+being true with WP17, which is the reason the id exists at all.
+
+What this means now: `lib/scenarioAxes.ts` can start mapping the three
+switches onto `scenario_variant_id` instead of `scenario_id`, and the
+family endpoint (phase B) addresses members by that id. Nothing forces the
+change yet.
+
+### 13.2 `GET /api/models` — new
+
+The `models` block every calc response inlines under `evaluation.models`
+is now also its own endpoint:
+
+```ts
+GET /api/models -> { models: Record<string, ModelEntry> }
+
+interface ModelEntry {
+  version: string
+  description: string
+  formulas?: Record<string, Formula>   // route_builder, energy, evaluation
+  factors?: Record<string, unknown>    // emissions
+}
+```
+
+Same content, same formula keys the breakdown rows already map to
+(`lib/factorFeedback.ts`). It is static — the response carries
+`Cache-Control: max-age=3600` — so fetch it once per session.
+
+Why it matters before phase B: a family of 72 members would otherwise
+carry ~26 KB of identical registry per member. Phase B drops `models` (and
+`evaluation.input.parameters`) from the per-member payload entirely, so a
+`useModels()` composable fetched once is the shape to move to. The calc
+response still inlines it today; nothing breaks if you wait.
+
+### 13.3 CALC 0.9.26 — no value changes
+
+`evaluate_route()` now takes a measure set and records it. Every factor is
+1.0 under `none`, so every KPI, breakdown and summary is byte-identical to
+0.9.25. The bump is for the signature. If a number moves after this
+deploy, it is not this change — tell me.
+
+### 13.4 `api.ts`
+
+Additive only: `MeasureSet`, `ScenarioVariant`, the two new arrays on the
+scenario list response, and `ModelsResponse`. No existing type changes.
+
+---
+
 ## Maintaining this document
 
 One file, updated in the same PR as the backend change. Each entry says

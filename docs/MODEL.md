@@ -70,7 +70,7 @@ station parameters).
 | Route & timetable builder | `0.9.33` | Route and timetable builder: turns a list of stops, a train composition, and a few mode selections into a complete route — trip pairs, travel and stopping times with schedule buffers, and a mirrored outbound/return night schedule. | [`model.py`](../backend/models/route/model.py) | [README.md](../backend/models/README.md) |
 | Energy model | `1.1.1` | Traction energy model calibrated against Deutsche Bahn Trassenfinder technical runs: start/stop energy per leg, rolling resistance per tonne-kilometre, air resistance growing with train length and the square of average speed, plus a constant auxiliary and hotel-power draw for the running time. Coach hotel power is an assumption, not a measurement - Trassenfinder was queried with it switched off. | [`model.py`](../backend/models/energy/model.py) | [README.md](../backend/models/energy/README.md) |
 | Demand model | `0.0.2` | Demand model (placeholder): assumes every accommodation class is 70% booked at a flat per-kilometre fare, spread evenly across all connections — a stand-in until a real demand model with directional demand, price sensitivity, and competition from other modes replaces it. | [`model.py`](../backend/models/demand/model.py) | [README.md](../backend/models/demand/README.md) |
-| Cost & revenue evaluation | `0.9.25` | Cost and revenue evaluation: computes the operator's fixed and variable costs, the charges paid to infrastructure companies, and the ticket revenue of a route, then aggregates the result into views per route, trip pair, country, connection, route section, and stop. | [`model.py`](../backend/models/evaluation/model.py) | [README.md](../backend/models/evaluation/README.md) |
+| Cost & revenue evaluation | `0.9.26` | Cost and revenue evaluation: computes the operator's fixed and variable costs, the charges paid to infrastructure companies, and the ticket revenue of a route, then aggregates the result into views per route, trip pair, country, connection, route section, and stop. | [`model.py`](../backend/models/evaluation/model.py) | [README.md](../backend/models/evaluation/README.md) |
 | Emissions model | `0.1.1` | Climate impact factors: how many grams of CO2-equivalent one passenger-kilometre causes by night train, plane, and car — used for the mode comparison and the CO2-savings estimate. The night-train value is a European average until a country-resolved, energy-based model replaces it. | [`model.py`](../backend/models/emissions/model.py) | [README.md](../backend/models/emissions/README.md) |
 | Composition cost model | `0.9.5` | Composition cost model: calibrated purchase, maintenance, cleaning, crew, and availability parameters per train composition, in a 'new' and a 'refurbished' rolling stock family, at 2032 prices. | [`model.py`](../backend/models/compositions/model.py) | [CALIBRATION.md](../backend/models/compositions/calib/CALIBRATION.md) |
 | Infrastructure parameter model | `0.9.6` | Infrastructure parameter model: per-country track access charges, station charges, traction energy prices, shunting and stabling, terrain, schedule supplements and minimum stopping times, with EU-average fallbacks — plus the catalog of possible night train stops. Four calibrated domains, each a package under models/infrastructure/ with its own source register, notebooks and published calibration document. | [`model.py`](../backend/models/infrastructure/model.py) | [STOP_CLASSIFICATION.md](../backend/models/infrastructure/STOP_CLASSIFICATION.md) |
@@ -1432,6 +1432,29 @@ Container pinning one version of each versioned infrastructure table. Exactly on
 | <a id="p-scenario-scenarios-stop_infrastructure_defaults_version"></a>`stop_infrastructure_defaults_version` | Pinned input_params.stop_infrastructure_defaults version (full-table snapshot). | — | — |
 | <a id="p-scenario-scenarios-passage_charges_version"></a>`passage_charges_version` | Pinned input_params.passage_charges version (full-table snapshot). | — | — |
 | <a id="p-scenario-scenarios-routing_graph_key"></a>`routing_graph_key` | Routing graph this scenario routes on — the physical rail network (OSM state) behind every distance and travel time, e.g. "infra_2026" or "infra_2032". Pinned like the *_version columns but not itself a snapshot version: the graph lives outside the database, in an OpenRailRouting instance. Naming contract with the deployment: key <k> is served by the instance at env OPENRAILROUTING_URL_<K>, the key uppercased — every graph alike, none implicit — see models/route/routing/rail_router.py. The TAC and passage changes an upgraded network implies are NOT carried here; they ride this same row's track_infrastructures_version and passage_charges_version pins. | — | — |
+
+#### `scenario.measure_sets`
+
+A named bundle of political measures an evaluation runs under — what the state DOES, where a scenario pins what the infrastructure IS. Unversioned definitions: the flags say which levers are pulled, never by how much. The rates themselves (VAT per country of sale, electricity tax share, direct-cost floor per infrastructure manager) get their own versioned input_params table with WP17 and are pinned by the scenario like every other calibrated parameter. One row today, 'none' — no lever pulled, which is what every evaluation before WP18 implicitly ran under.
+
+| Column | Meaning | Unit | Used in |
+|---|---|---|---|
+| <a id="p-scenario-measure_sets-measure_set_id"></a>`measure_set_id` | — | — | — |
+| <a id="p-scenario-measure_sets-key"></a>`key` | Stable identifier, e.g. "none", "vat-exempt". What the API and the frontend name a measure set by; ids are database-assigned and not portable between environments. | — | — |
+| <a id="p-scenario-measure_sets-vat_exempt"></a>`vat_exempt` | Night train fares exempt from value-added tax. Raises the operator's retained revenue per ticket. | — | — |
+| <a id="p-scenario-measure_sets-energy_tax_exempt"></a>`energy_tax_exempt` | Traction electricity exempt from energy/electricity tax. Lowers the energy price the operator pays. | — | — |
+| <a id="p-scenario-measure_sets-tac_direct_cost"></a>`tac_direct_cost` | Track access charged at the direct cost of running the train only, the floor Directive 2012/34/EU permits — not a discount on the full charge but a different component selection (models/infrastructure/tac/calc_tac.py). | — | — |
+| <a id="p-scenario-measure_sets-description"></a>`description` | What this bundle of measures represents, in the words a reader of the results needs. | — | — |
+
+#### `scenario.scenario_variants`
+
+The flattened (scenario x measure set) axis the API and the frontend address by a single id — one dropdown value instead of two. Materialised as the full cross product (db/dev/seed.py materialise_scenario_variants(), re-run after every scenario or measure-set insert), so it is derived data: truncating and rebuilding it loses nothing except the ids themselves, which nothing persists.
+
+| Column | Meaning | Unit | Used in |
+|---|---|---|---|
+| <a id="p-scenario-scenario_variants-scenario_variant_id"></a>`scenario_variant_id` | — | — | — |
+| <a id="p-scenario-scenario_variants-scenario_id"></a>`scenario_id` | The infrastructure pin this variant evaluates on. | — | — |
+| <a id="p-scenario-scenario_variants-measure_set_id"></a>`measure_set_id` | The measures this variant evaluates under. | — | — |
 <!-- END GENERATED: parameters -->
 
 ---

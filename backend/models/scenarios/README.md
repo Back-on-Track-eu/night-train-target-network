@@ -17,6 +17,33 @@ and `_with_optimized_timetable()`.
 
 ---
 
+## Measures — the third axis, not a fourth scenario
+
+A scenario says what the infrastructure *is*. It deliberately does not
+say what the state *does* about it: whether night train fares are exempt
+from VAT, whether traction electricity is exempt from energy tax,
+whether track access is charged at direct cost only. Those are political
+measures, and they are orthogonal — any measure can apply on any
+network under any operating condition.
+
+Expressing them as scenario rows would multiply the grid by every
+combination and hide the orthogonality, so they live in their own table
+(`scenario.measure_sets`) and the two multiply into
+`scenario.scenario_variants`, the axis the API and the frontend address
+(`db/README.md`, `db/schema.py`). A variant is one (scenario, measure
+set) pair.
+
+One measure set is seeded, `none` — no lever pulled. It is what every
+evaluation before this existed implicitly ran under, so its three
+factors are 1.0 and adding it changed no number anywhere (CALC 0.9.26,
+`models/params.py` `MeasureSet`). WP17 seeds the rates and the versioned
+table behind them; the direct-cost regime in particular is not a
+discount on the full charge but a different component selection, so it
+lands inside `models/infrastructure/tac/calc_tac.py` rather than as a
+wider factor.
+
+---
+
 ## The two axes
 
 Every scenario is a point on two axes.
