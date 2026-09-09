@@ -30,7 +30,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.33"
+ROUTE_BUILDER_VERSION: str = "0.9.34"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -45,6 +45,30 @@ ROUTE_BUILDER_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.34": {
+        "date": "2026-09-10",
+        "author": "david + claude",
+        "changes": "auto_stop_addition mode 'add' REMOVED (WP18 phase B1). The route "
+        "builder no longer adds stops of its own: VALID_AUTO_STOP_ADDITION_MODES is "
+        "{off, suggest}, timetable.apply_auto_stop_addition() is deleted, and "
+        "DEFAULT_AUTO_STOP_ADDITION moves from 'add' to 'off'. Two reasons. A route "
+        "the user did not ask for is not the user's route — 'suggest' already offers "
+        "the same candidates, costed, and lets them accept the ones they want, after "
+        "which those stops are ordinary posted stops. And a proposal family compares "
+        "one stop list across every scenario and composition, which it cannot do if "
+        "each member may pick its own stops within its own detour budget. "
+        "WHAT CHANGES: a request that posted 'add', or omitted the field and took the "
+        "old default, is now 400 or builds the caller's stops exactly — its route can "
+        "differ from what the same request returned on 0.9.33. Every request that "
+        "posted 'off' or 'suggest' is byte-identical. The frontend only ever posted "
+        "'suggest' then 'off', so no live client is affected. Migration "
+        "2026-09-10_auto_stop_add_removed.sql asserts no stored proposal carries "
+        "'add'. Stop.auto_added and proposals.stop_times.auto_added stay (a stored "
+        "route must round-trip) and are always false from here on. The candidate "
+        "search, its costing and AUTO_STOP_MAX_DETOUR_PER are unchanged — the budget "
+        "now only bounds how much router time costing may spend, never what is "
+        "suggested.",
+    },
     "0.9.33": {
         "date": "2026-09-06",
         "author": "bjarne + claude",
@@ -85,8 +109,7 @@ CHANGELOG: dict = {
         "compose with both existing modes as plain functions "
         "(timetable.resolve_addons/resolve_departure/"
         "classify_for_departure), applied in route_factory._build_trip() "
-        "after auto_stop_addition (the last step that can change the stop "
-        "list) and after the timetable_mode switch (whose mirroring and "
+        "after auto_stop_addition and after the timetable_mode switch (whose mirroring and "
         "fixed-night stretch are given the add-ons, so a padded trip "
         "stays centred on MIRROR_MIN and a padded interval needs less "
         "slack). An overridden departure re-runs stop classification, so "
@@ -689,7 +712,7 @@ CHANGELOG: dict = {
 DEFAULT_TIMETABLE_MODE: str = "simpleAutomatic"
 DEFAULT_SCHEDULE_MODE: str = "alwaysDaily"
 DEFAULT_ROUTING_MODE: str = "fullRouting"
-DEFAULT_AUTO_STOP_ADDITION: str = "add"
+DEFAULT_AUTO_STOP_ADDITION: str = "off"
 DEFAULT_COMPOSITION_ID: str = "NEW-BAL-7"
 """Composition a request without composition_id is computed with — the
 seven-coach new-fleet balanced train. It is the middle of the catalog on
@@ -1002,14 +1025,6 @@ OPEN_TODOS: dict[str, str] = {
         "whether to include regions adjacent to the path, which would close "
         "this gap too."
     ),
-    "return_detour_budget": (
-        "auto_stop_addition's search-and-cost pass runs once per TripPair, "
-        "from outbound; return reuses the decision (reversed). Accepted "
-        "trade-off: return gets no independent detour-budget check against "
-        "its own baseline trip time. Revisit only if asymmetric routing "
-        "(e.g. one-directional HSR avoidance) is ever observed pushing "
-        "return trips materially past the budget."
-    ),
     "buffer_quota_time_of_day": (
         "buffer_quota_per is a flat per-country figure today. Congestion is "
         "daypart-dependent — after ~05:00 the morning rush builds while the "
@@ -1321,9 +1336,9 @@ ROUTE_FORMULAS: dict[str, Formula] = {
         "dynamics and the wait itself.",
         description="Extra travel time a suggested additional stop would "
         "cost: the detour to reach it, the braking and accelerating it "
-        "causes, and the waiting time at the stop itself. Used to "
-        "automatically pick extra stops that fit the time budget, and to "
-        "report suggestions.",
+        "causes, and the waiting time at the stop itself. Reported with "
+        "every suggestion, so the figure a reader accepts a stop on is the "
+        "one the timetable then charges.",
         inputs=(
             FormulaParam(
                 symbol="Σ t_total (reroute)",

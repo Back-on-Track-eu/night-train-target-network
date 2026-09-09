@@ -8,19 +8,18 @@ Pipeline for plan_route() per TripPair (_build_trip_pair()), per direction (_bui
 1. Load composition + ParamVersions from DB.
 2. Load tracks + stops + ParamVersions from DB.
 3. RailRouter.route() — routes the stop list as given.
-4. auto_stop_addition switch (this module, _build_trip()) — three modes
+4. auto_stop_addition switch (this module, _build_trip()) — two modes
    (VALID_AUTO_STOP_ADDITION_MODES in models/route/timetable.py):
      "off"     — step skipped entirely, caller's stop list unmodified.
-     "add"     — apply_auto_stop_addition() looks for catalog stops close
-                 to the routed path and greedily adds any that fit within
-                 the detour time budget, re-routing internally as needed.
      "suggest" — routes like "off" (nothing added, nothing rerouted), but
-                 suggest_auto_stops() runs the same candidate search +
-                 costing and its AutoStopSuggestions are bubbled up
-                 through plan_route()'s return value for the API to
-                 attach to the response.
-   Either way the routed_legs used from here on match the (possibly
-   extended) stop list, so no separate re-route call is ever needed here.
+                 suggest_auto_stops() runs the candidate search + costing
+                 and its AutoStopSuggestions are bubbled up through
+                 plan_route()'s return value for the API to attach to the
+                 response.
+   Neither mode changes the stop list, so routed_legs always match the
+   caller's stops and no separate re-route call is ever needed here.
+   ("add", which let the builder add stops itself, was removed in 0.9.34 —
+   see VALID_AUTO_STOP_ADDITION_MODES.)
    The full search-and-cost pass only ever runs for the OUTBOUND direction —
    _build_trip_pair() reuses its result (reversed) for return via
    _build_trip()'s known_auto_added_stop_ids, rather than re-running the
@@ -35,10 +34,9 @@ Pipeline for plan_route() per TripPair (_build_trip_pair()), per direction (_bui
    raises ValueError. See that function's docstring.
 5b. Expert add-ons (this module, _build_trip()) — timetable.resolve_addons()
    turns the request's manual per-leg minutes into one value per leg of the
-   FINAL stop list. Deliberately after step 4: auto_stop_addition is the
-   only thing that can still insert a stop between an add-on's two stops,
-   and an add-on whose ordered stop pair no longer exists is dropped, never
-   redistributed.
+   stop list. An add-on whose ordered stop pair does not exist is dropped,
+   never redistributed — a possibility since 0.9.34 only when the caller
+   posts one, nothing in the pipeline reorders stops any more.
 6. timetable_mode switch (this module, _build_trip()) — picks which named
    timetable_mode function (models/route/timetable.py) to call for this
    direction's departure time + boarding/alighting classification. Does no
@@ -121,7 +119,6 @@ from models.route.timetable import (
     simple_automatic_fixed_night_timetable,
     fixed_night_speed_warning,
     always_daily_schedule,
-    apply_auto_stop_addition,
     suggest_auto_stops,
     build_final_timetable,
     classify_for_departure,
@@ -249,9 +246,11 @@ def _build_trip_stops_and_legs(
     stops into Segments — each Stop is shared by reference between the two
     segments touching it.
 
-    auto_added_stop_ids: stop_ids that auto_stop_addition inserted beyond
-    what the caller originally supplied — stamped onto the matching Stop's
-    auto_added field. Empty by default.
+    auto_added_stop_ids: stop_ids the builder inserted beyond what the
+    caller supplied — stamped onto the matching Stop's auto_added field.
+    Always empty since 0.9.34 removed mode "add"; the field and this
+    parameter stay because proposals.stop_times.auto_added persists it and
+    a stored route must still round-trip.
 
     slack_per_leg: fixed-night stretch minutes per leg (see
     simple_automatic_fixed_night_timetable) — stamped onto each Segment's
@@ -497,20 +496,16 @@ def _build_trip(
     expert: THIS direction's manual overrides (the caller mirrors the pair
     input's outbound block for the return trip) — NO_OVERRIDES for a fully
     automatic timetable, which is what every request without an
-    expert_timetable key gets. Resolved AFTER auto_stop_addition, since
-    that step is the only thing that can still change the stop list and
-    therefore orphan an add-on's stop pair.
+    expert_timetable key gets.
 
     known_auto_added_stop_ids: when given, skips the candidate search
-    entirely regardless of auto_stop_addition — stop_ids is trusted as
-    already final (the search decision was already made elsewhere, e.g. by
-    the outbound direction of this same TripPair; see _build_trip_pair()),
-    and this set is used as-is to mark which of those stops get
-    Stop.auto_added=True. The routing call below still always happens for
-    whichever direction this is — reusing a decision about WHICH stops to
-    add never skips getting THIS direction's own real physics for its own
-    (possibly asymmetric) path, only the expensive candidate-search-and-
-    cost pass that decided the stop list in the first place.
+    entirely regardless of auto_stop_addition — the search already ran for
+    this TripPair, on the outbound direction (see _build_trip_pair()), and
+    re-running it for the return would spend the same router calls on the
+    same corridor reversed. The set itself is empty since 0.9.34; what the
+    parameter still carries is the DECISION not to search again. The
+    routing call below always happens either way, so this direction keeps
+    its own (possibly asymmetric) physics.
     """
     tid = _trip_id(proposal_id, proposal_version, direction, pair_index)
 
@@ -532,11 +527,9 @@ def _build_trip(
         routing_mode=routing_mode,
     )
 
-    # auto_stop_addition SWITCH — which (if any) auto-stop behaviour runs.
-    # The timetable.py functions themselves have no mode gate; "add" always
-    # returns routed_legs matching whatever stop_ids it hands back
-    # (unchanged for "off"/"suggest"), so no separate re-route is ever
-    # needed after this block regardless of which branch ran.
+    # auto_stop_addition SWITCH — whether the candidate search runs.
+    # Neither mode changes stop_ids since 0.9.34, so routed_legs above
+    # stay authoritative and no re-route is ever needed after this block.
     # VALID_AUTO_STOP_ADDITION_MODES is the same set the compute request
     # validation checks against, so an unknown mode can only reach here if
     # that validation was bypassed.
@@ -545,18 +538,6 @@ def _build_trip(
         auto_added_stop_ids = known_auto_added_stop_ids
     elif auto_stop_addition == "off":
         auto_added_stop_ids = frozenset()
-    elif auto_stop_addition == "add":
-        original_stop_ids = stop_ids
-        stop_ids, routed_legs = apply_auto_stop_addition(
-            stop_ids,
-            routed_legs,
-            composition=composition,
-            tracks=tracks,
-            stop_infra=stop_infra,
-            router=router,
-            routing_mode=routing_mode,
-        )
-        auto_added_stop_ids = frozenset(stop_ids) - frozenset(original_stop_ids)
     elif auto_stop_addition == "suggest":
         suggestions = suggest_auto_stops(
             stop_ids,
@@ -576,9 +557,11 @@ def _build_trip(
 
     _check_country_coverage(routed_legs, tracks)
 
-    # EXPERT ADD-ONS — manual minutes placed on the FINAL stop list, so an
-    # add-on whose stop pair auto_stop_addition just split is dropped here
-    # rather than silently landing on the wrong leg. Zeros (and nothing
+    # EXPERT ADD-ONS — manual minutes placed on the stop list. An add-on
+    # whose ordered stop pair is not adjacent is dropped here rather than
+    # silently landing on the wrong leg; since 0.9.34 nothing in the
+    # pipeline can orphan one, so that only happens when the caller posts
+    # a pair its own stop list does not contain. Zeros (and nothing
     # dropped) for every request without an expert_timetable.
     addon_per_leg, dropped_addons = resolve_addons(stop_ids, expert.addons)
     if dropped_addons:
@@ -729,22 +712,16 @@ def _build_trip_pair(
     # deviate rather than being forced to share one value.
     #
     # auto_stop_addition is the one exception: its candidate search + per-
-    # candidate costing (modes "add"/"suggest") is decided ONCE, from
-    # outbound, not re-run independently for return. The costing means one
-    # real RailRouter.route() call per nearby candidate — for a long
-    # corridor with many candidates nearby, that's the dominant cost of
-    # planning a route (measured: ~14s per direction on a Stockholm-Roma
-    # request with 9 candidates found, against <1s for routing itself),
-    # and outbound/return cover the same physical corridor reversed, so
-    # running that full search twice is mostly redundant work for the same
-    # answer. Accepted trade-off: return no longer gets its own independent
-    # detour-budget check against its own baseline trip time, only
-    # outbound's — see OPEN_TODOS["return_detour_budget"] in version.py and
-    # _build_trip()'s known_auto_added_stop_ids docstring. Return still
-    # gets a real routing call for its own (possibly asymmetric) physical
-    # path over the shared final stop list; only the search-and-cost pass
-    # that decided which stops to add (or which to suggest) is shared, not
-    # the routing itself.
+    # candidate costing (mode "suggest") runs ONCE, on outbound, and is
+    # not repeated for return. The costing means one real
+    # RailRouter.route() call per nearby candidate — for a long corridor
+    # with many candidates nearby, that's the dominant cost of planning a
+    # route (measured: ~14s per direction on a Stockholm-Roma request with
+    # 9 candidates found, against <1s for routing itself) — and both
+    # directions cover the same physical corridor reversed, so the second
+    # pass would buy a near-identical answer. Return still gets a real
+    # routing call for its own (possibly asymmetric) physical path over
+    # the shared stop list; only the search is shared, not the routing.
     outbound, suggestions = _build_trip(
         proposal_id,
         proposal_version,

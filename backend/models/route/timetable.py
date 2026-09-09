@@ -48,20 +48,17 @@ living in route_factory.py:
                              sequential whole-trip reroute per candidate
                              doesn't scale to the ~50 stops a busy corridor
                              can add). Shared by both modes below.
-                           apply_auto_stop_addition() — mode "add": greedy
-                             cheapest-first acceptance within the
-                             AUTO_STOP_MAX_DETOUR_PER budget, then one real
-                             reroute of the final stop list; always returns
-                             routed_legs matching the returned stop_ids so
-                             route_factory never re-routes itself.
                            suggest_auto_stops() — mode "suggest": no
                              selection, no budget, no reroute — just every
                              costed candidate as an AutoStopSuggestion
                              (with added_time_min), in geographic order
                              along the route, for the caller to decide.
-                         Whether either is called at all (and mode "off"
-                         skipping both) is route_factory._build_trip()'s
-                         switch.
+                         Whether it is called at all (mode "off" skips it)
+                         is route_factory._build_trip()'s switch. The
+                         route builder never adds a stop by itself: mode
+                         "add" was removed in 0.9.34, so a suggestion only
+                         becomes a stop once the user accepts it and posts
+                         it in the stop list.
 
 EXPERT TIMETABLE OVERRIDES (0.9.32) are deliberately NOT a fourth named
 strategy: they compose with whichever timetable_mode runs, so they are
@@ -704,18 +701,23 @@ set + a plan_route() branch) without changing the request shape."""
 
 
 # =============================================================================
-# auto_stop_addition IMPLEMENTATION — search + costing shared by modes "add"
-# (apply_auto_stop_addition) and "suggest" (suggest_auto_stops); route_
-# factory._build_trip() decides which of them to call, if any ("off").
+# auto_stop_addition IMPLEMENTATION — the candidate search + costing behind
+# mode "suggest" (suggest_auto_stops); route_factory._build_trip() decides
+# whether to run it at all ("off" skips it).
 # =============================================================================
 
-VALID_AUTO_STOP_ADDITION_MODES = frozenset({"off", "add", "suggest"})
+VALID_AUTO_STOP_ADDITION_MODES = frozenset({"off", "suggest"})
 """Single source of truth for allowed auto_stop_addition strings — read by
-both the compute request validation (api/helpers/proposal_compute.py) and route_factory._build_trip()'s
-switch. "off": caller's stop list returned unmodified, no search. "add":
-search + cost + greedy addition within the detour budget. "suggest":
-search + cost like "add", but nothing is added — every costed candidate is
-returned as an AutoStopSuggestion instead, budget deliberately not applied."""
+both the compute request validation (api/helpers/proposal_compute.py) and
+route_factory._build_trip()'s switch. "off": caller's stop list returned
+unmodified, no search. "suggest": search + cost, but nothing is added —
+every costed candidate is returned as an AutoStopSuggestion instead, the
+detour budget deliberately not applied.
+
+"add" (the builder picking stops itself, within the budget) was removed in
+0.9.34: a route the user did not ask for is not the user's route, and a
+family of members must be comparable across compositions, which it cannot
+be if each member may choose its own stop list."""
 
 _DEG_PER_M = 1 / 111_000
 """Rough metres-per-degree constant (~111km/degree of latitude) — only
@@ -733,8 +735,8 @@ class _AutoStopCandidate:
     (it belongs between stop_ids[leg_index] and stop_ids[leg_index + 1]);
     along_leg_fraction (0..1) orders multiple candidates that land on the
     same leg. Both stay fixed to the ORIGINAL geometry even as candidates
-    get committed one by one — see apply_auto_stop_addition()'s sort-key
-    merge for why that's safe.
+    stay fixed to the ORIGINAL geometry, which is what lets suggestions be
+    reported in geographic order without re-routing anything.
     """
 
     stop_id: str
@@ -1059,8 +1061,10 @@ def find_and_cost_auto_stop_candidates(
 
     # Exact-prune bound for the routed refinement: a candidate whose
     # analytic LOWER BOUND already exceeds the whole trip's detour budget
-    # can never be accepted by mode "add", so measuring it precisely buys
-    # nothing — its estimate is kept as the reported figure instead.
+    # is one no reader would accept, so spending a router call to measure
+    # it precisely buys nothing — its estimate is kept as the reported
+    # figure instead. The budget bounds the COSTING effort here; it never
+    # filters what is suggested (see suggest_auto_stops).
     budget_min = (
         _estimate_technical_trip_time_min(
             stop_ids, routed_legs, composition, tracks, stop_infra
@@ -1113,112 +1117,6 @@ def find_and_cost_auto_stop_candidates(
         for candidate in candidates
         if candidate.stop_id in added_by_stop
     ]
-
-
-def apply_auto_stop_addition(
-    stop_ids: list[str],
-    routed_legs: list[RoutedLeg],
-    composition: Composition,
-    tracks: TrackInfraCollection,
-    stop_infra: StopInfraCollection,
-    router: RailRouter,
-    routing_mode: str,
-) -> tuple[list[str], list[RoutedLeg]]:
-    """
-    Implements auto_stop_addition="add": adds worthwhile stops along the
-    already-routed path, beyond what the caller supplied. Always runs the
-    full algorithm — route_factory._build_trip() only calls this for mode
-    "add"; this function itself has no mode gate.
-
-    Algorithm:
-      1./2. Shared search + concurrent costing —
-         find_and_cost_auto_stop_candidates() above.
-      3. Sort by added_time_min ascending (cheapest first) and greedily
-         accumulate — pure arithmetic now, no further I/O — stopping at
-         the first candidate that would push the running total over
-         AUTO_STOP_MAX_DETOUR_PER of the original trip's time. Later
-         (more expensive) candidates are not added even if they'd
-         individually fit, matching the original "stop at first rejection"
-         rule now applied to accumulated rather than per-step cost.
-      4. One single full-trip reroute of the final stop list, once, for
-         the authoritative routed_legs the rest of the pipeline uses — a
-         deliberate simplicity trade-off over re-stitching the individual
-         mini-routes from step 2 (which would save this one call but need
-         special-casing legs with 2+ accepted candidates).
-
-    Each accepted candidate is merged back into the stop sequence by
-    (leg_index, along_leg_fraction), so the final stop list always follows
-    the route's actual geography regardless of selection order.
-
-    Returns (final_stop_ids, final_routed_legs) — routed_legs always
-    matches final_stop_ids, whether or not anything was actually added, so
-    route_factory._build_trip() never needs to re-route itself afterwards.
-    """
-    costed_candidates = find_and_cost_auto_stop_candidates(
-        stop_ids, routed_legs, composition, tracks, stop_infra, router, routing_mode
-    )
-    if not costed_candidates:
-        return stop_ids, routed_legs
-    costed_candidates.sort(key=lambda pair: pair[1])
-
-    baseline_time_min = _estimate_technical_trip_time_min(
-        stop_ids, routed_legs, composition, tracks, stop_infra
-    )
-    max_extra_min = baseline_time_min * AUTO_STOP_MAX_DETOUR_PER
-
-    committed = [(sid, (i, -1.0)) for i, sid in enumerate(stop_ids)]
-    running_extra_min = 0.0
-    added_stop_ids: list[str] = []
-
-    for candidate, candidate_time_min in costed_candidates:
-        if running_extra_min + candidate_time_min > max_extra_min:
-            logger.info(
-                "apply_auto_stop_addition: stopping at '%s' (+%.1fmin) — would "
-                "push cumulative added time past budget %.1fmin.",
-                candidate.stop_id,
-                candidate_time_min,
-                max_extra_min,
-            )
-            break
-
-        # (stop_id, sort_key) merge — original stops carry sort_key=(index,
-        # -1.0), which always sorts before any candidate assigned to that
-        # same leg (candidates carry fraction in [0, 1]) and after the
-        # previous leg's candidates, keeping geographic order regardless
-        # of the cheapest-first order candidates were accepted in.
-        committed = sorted(
-            committed
-            + [
-                (candidate.stop_id, (candidate.leg_index, candidate.along_leg_fraction))
-            ],
-            key=lambda entry: entry[1],
-        )
-        running_extra_min += candidate_time_min
-        added_stop_ids.append(candidate.stop_id)
-
-    if not added_stop_ids:
-        return stop_ids, routed_legs
-
-    logger.info(
-        "apply_auto_stop_addition: added %d stop(s): %s",
-        len(added_stop_ids),
-        added_stop_ids,
-    )
-    final_reroute_start = time.monotonic()
-    final_stop_ids = [sid for sid, _ in committed]
-    final_routed_legs = route_trip(
-        router,
-        stops=build_router_stops(final_stop_ids, stop_infra),
-        composition=composition,
-        tracks=tracks,
-        routing_mode=routing_mode,
-    )
-    logger.info(
-        "apply_auto_stop_addition: final reroute of %d stop(s) took %.2fs.",
-        len(final_stop_ids),
-        time.monotonic() - final_reroute_start,
-    )
-    return final_stop_ids, final_routed_legs
 
 
 def suggest_auto_stops(

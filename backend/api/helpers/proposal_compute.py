@@ -272,10 +272,11 @@ def _validate_addons(addons, stops, where: str) -> list[str]:
 
     Every add-on names an ORDERED stop pair that must be adjacent in the
     posted 'stops' — the caller can always know that, so a pair that isn't
-    is a request error rather than something to silently drop. The only
-    add-on that legitimately disappears later is one whose pair
-    auto_stop_addition="add" splits server-side, which route_factory drops
-    at build time (timetable.resolve_addons).
+    is a request error rather than something to silently drop. Since route
+    builder 0.9.34 nothing on the server can split a pair either (mode
+    "add" is gone), so an add-on accepted here always reaches the leg it
+    names; timetable.resolve_addons' drop path is a safety net rather than
+    an expected case.
 
     'stops' is validated separately above; when it is malformed the
     adjacency check is skipped rather than reported twice."""
