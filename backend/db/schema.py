@@ -1853,8 +1853,64 @@ ROUTE_CACHE_TABLES: tuple[Table, ...] = (
 )
 
 
+# =============================================================================
+# family — layer L5 caches: everything derived from the pins, rebuildable
+# =============================================================================
+# Mirrored verbatim by db/dev/sql/migrations/2026-09-10_family_schema.sql.
+# The member cache (today proposals.compute_cache_*) joins this schema in
+# WP18 phase B2b as family.members.
+
+FAMILY_TABLES: tuple[Table, ...] = (
+    Table(
+        schema="family",
+        name="documents",
+        description="One serialised family document per family key "
+        "(models/family/key.py): every member of one stop list + HOW under "
+        "the current pins, as POST /api/proposal/family returns it. A pure "
+        "function of the pins, so a cache: UNLOGGED, TTL enforced on read "
+        "(COMPUTE_CACHE_TTL_HOURS), swept opportunistically on write, "
+        "truncated by scripts/refresh_proposals.py on every version bump. "
+        "Never a source of truth.",
+        unlogged=True,
+        columns=(
+            Column(
+                "family_key",
+                "VARCHAR(80) PRIMARY KEY",
+                "sha256 over the resolved request, the resolved axes and the "
+                "two model versions — a version bump changes the key, so a "
+                "stale document is never found again.",
+            ),
+            Column(
+                "route_builder_version",
+                "VARCHAR(20) NOT NULL",
+                "ROUTE_BUILDER_VERSION the document was built under. "
+                "Informational: the key already carries it; kept as a column "
+                "so a sweep can target a version by hand.",
+            ),
+            Column(
+                "calc_version",
+                "VARCHAR(20) NOT NULL",
+                "CALC_VERSION the document was built under. Same role as "
+                "route_builder_version.",
+            ),
+            Column(
+                "payload",
+                "JSONB NOT NULL",
+                "The document (api/helpers/family_serialize.py): request echo, "
+                "suggestions, axes, geometry pool, compact routes, members "
+                "with summaries, stats.",
+            ),
+            Column("created_at", "TIMESTAMPTZ NOT NULL DEFAULT now()"),
+        ),
+        indexes=(
+            "CREATE INDEX idx_family_documents_created ON family.documents (created_at);",
+        ),
+    ),
+)
+
+
 ALL_TABLES: tuple[Table, ...] = (
-    INPUT_PARAMS_TABLES + SCENARIO_TABLES + ROUTE_CACHE_TABLES
+    INPUT_PARAMS_TABLES + SCENARIO_TABLES + ROUTE_CACHE_TABLES + FAMILY_TABLES
 )
 
 
@@ -1919,7 +1975,8 @@ def _table_ddl(table: Table) -> str:
 def build_ddl() -> str:
     """Render the input_params and scenario schemas as one DDL script —
     the exact replacement for the former create_input_params_schema.sql
-    and create_scenario_schema.sql files, executed by seed.py.
+    and create_scenario_schema.sql files, executed by seed.py — plus the
+    route_cache and family cache schemas, which are disposable.
     Idempotent: each schema starts with DROP SCHEMA ... CASCADE."""
     parts = [
         "DROP SCHEMA IF EXISTS input_params CASCADE;",
@@ -1943,4 +2000,10 @@ def build_ddl() -> str:
         "",
     ]
     parts += [_table_ddl(t) + "\n" for t in ROUTE_CACHE_TABLES]
+    parts += [
+        "DROP SCHEMA IF EXISTS family CASCADE;",
+        "CREATE SCHEMA family;",
+        "",
+    ]
+    parts += [_table_ddl(t) + "\n" for t in FAMILY_TABLES]
     return "\n".join(parts)

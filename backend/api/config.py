@@ -264,6 +264,25 @@ MODELS_CACHE_MAX_AGE_S = _env_int("MODELS_CACHE_MAX_AGE_S", 3600)
 
 
 # =============================================================================
+# Proposal family (api/helpers/family_compute.py)
+# =============================================================================
+
+# Largest scenario-variant × composition family one POST may ask for. The
+# default axes are 6 current scenarios × 1 measure set × 12 compositions =
+# 72 members; the cap leaves room for the measure sets WP17 adds (up to
+# 54 variants × 12 = 648) without bounding a request by whatever the seed
+# happens to hold.
+FAMILY_MAX_MEMBERS = _env_int("FAMILY_MAX_MEMBERS", 1000)
+
+# Threads for the family's PREWARM phase only — catalog loads per scenario
+# and the distinct leg variants, the two I/O-bound steps. The member loop
+# that follows is ~4 ms of pure Python per member and runs serially
+# (scripts/bench_member.py: threads there only contend). Bounded by the
+# DB pool: DB_POOL_MAX must cover GUNICORN_THREADS + this per process.
+FAMILY_WORKERS = _env_int("FAMILY_WORKERS", 4)
+
+
+# =============================================================================
 # Calc matrix (api/helpers/proposal_matrix.py)
 # =============================================================================
 
@@ -335,6 +354,8 @@ def log_effective_config() -> None:
         "EXPERT_DEPARTURE_MIN_TIME": EXPERT_DEPARTURE_MIN_TIME,
         "EXPERT_DEPARTURE_MAX_TIME": EXPERT_DEPARTURE_MAX_TIME,
         "MODELS_CACHE_MAX_AGE_S": MODELS_CACHE_MAX_AGE_S,
+        "FAMILY_MAX_MEMBERS": FAMILY_MAX_MEMBERS,
+        "FAMILY_WORKERS": FAMILY_WORKERS,
         "CALC_MATRIX_MAX_CELLS": CALC_MATRIX_MAX_CELLS,
         "CALC_MATRIX_WORKERS": CALC_MATRIX_WORKERS,
     }

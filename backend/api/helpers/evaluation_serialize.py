@@ -23,6 +23,7 @@ Public interface:
                                                     → dict  (all normalisations of one Breakdown, each class-keyed with 'all' —
                                                              CALC 0.9.9; scope = a cell's own annual denominators for
                                                              route-section cells, None otherwise)
+  route_view_to_dict(bd_all, route)               → dict  (the whole-route view alone — what build_summary_row() reads)
   views_to_dict(views, route)                     → dict  (the full "views" section from a ViewsBundle: description +
                                                              normalisations + data per view, views_meta merged in)
   models_to_dict()                                 → dict  (version + description + formulas for route_builder / energy / evaluation,
@@ -275,9 +276,15 @@ def _section_value(stop_names: dict[str, str], section_key: str) -> str | dict:
 # =============================================================================
 
 
-def _route_view_to_dict(bd_all: Breakdown, route: Route) -> dict:
+def route_view_to_dict(bd_all: Breakdown, route: Route) -> dict:
     """The whole-route view has nothing to filter by — a single Breakdown,
-    no "filter" label needed."""
+    no "filter" label needed.
+
+    Public on its own (not only through views_to_dict) because it is the
+    one view models/evaluation/summary.py's build_summary_row() reads: a
+    family builds 72 summaries and must not pay for the other five views
+    to get them (scripts/bench_member.py — the full views_to_dict is
+    ~50 ms, this is ~3)."""
     meta = VIEW_META["route"]
     return {
         "description": meta["description"],
@@ -493,7 +500,7 @@ def views_to_dict(views: ViewsBundle, route: Route) -> dict:
     (\u2192 for the OD pair itself — a ticket is genuinely one-way)."""
     trip_pair_by_key = {p.outbound.trip_id: p for p in route.trip_pairs}
     return {
-        "route": _route_view_to_dict(views.bd_all, route),
+        "route": route_view_to_dict(views.bd_all, route),
         "per_trip_pair": _per_trip_pair_view_to_dict(
             views.bd_per_pair, route, trip_pair_by_key
         ),

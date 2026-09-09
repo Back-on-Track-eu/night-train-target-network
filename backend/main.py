@@ -16,6 +16,9 @@ Endpoints — see api/README.md for full documentation.
   POST /api/feedback
   GET  /api/feedback/categories
   POST /api/proposal/calc
+  POST /api/proposal/family
+  GET  /api/proposal/family/<key>
+  GET  /api/proposal/family/<key>/members/<sv>/<comp>/views
   POST /api/proposal/publish
   GET  /api/proposals
   POST /api/proposals
@@ -56,6 +59,7 @@ from api import (
     params,
     proposal_calc,
     proposal_compare,
+    proposal_family,
     proposal_publish,
     proposal_stats,
     auth,
@@ -120,6 +124,10 @@ def create_app() -> Flask:
     # Merged ephemeral compute (calc) + the only user write path
     # (publish) — adapters/proposal/README.md §2.
     app.register_blueprint(proposal_calc.bp, url_prefix="/api/proposal")
+    # The proposal family — every scenario variant × composition of one
+    # stop list in one document (adapters/family/README.md). Replaces
+    # /calc and /calc/matrix in WP18 phase B2b; all three coexist until.
+    app.register_blueprint(proposal_family.bp, url_prefix="/api/proposal")
     app.register_blueprint(proposal_publish.bp, url_prefix="/api/proposal")
     app.register_blueprint(auth.bp, url_prefix="/api/auth")
     app.register_blueprint(feedback.bp, url_prefix="/api")

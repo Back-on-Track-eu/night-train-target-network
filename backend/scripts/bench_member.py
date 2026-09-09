@@ -13,15 +13,16 @@ members. Kept as the family's regression bench — rerun after every phase.
     C  outside the domain        per-catalog load, per-step serialisation —
                                  what the plain member spends that the family
                                  document never pays
-    D  family                    every (scenario, composition) on one shared
-                                 context, serial and threaded, plus the §2.5
-                                 document size estimate
+    D  family                    run_family() on a real FamilyContext, twice
+                                 (fresh context each time), the serialised
+                                 document weighed, then the endpoint's own
+                                 build_or_load_family() as a cache miss and
+                                 a cache hit
 
-MemoLoader / MemoRouter below are throwaway stand-ins for
-models/family/context.py (Phase B2): the same memo boundary
-(loader catalog builders; RailRouter.route(), copies handed out) without the
-package. Section D's compactor is likewise an estimate of
-route_compact_to_dict() and is replaced by it in B2.
+Sections B–C run on models/family/context.py's MemoLoader / MemoRouter;
+section D runs the real builder (models/family/builder.py) and weighs the
+real document (api/helpers/family_serialize.py), so the numbers here are
+the endpoint's, not an estimate of it.
 
 Run inside the api container against the live stack:
 
@@ -34,15 +35,12 @@ Run inside the api container against the live stack:
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import gzip
 import json
 import logging
 import statistics
 import sys
-import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -53,21 +51,28 @@ dev_env.resolve_env()
 
 from adapters.proposal.id_prefix import rewrite_id_prefix  # noqa: E402
 from adapters.proposal.projection import route_fingerprint  # noqa: E402
-from api.config import CALC_MATRIX_WORKERS  # noqa: E402
+from api.config import FAMILY_WORKERS  # noqa: E402
 from api.helpers import dependencies  # noqa: E402
 from api.helpers.evaluation_serialize import (  # noqa: E402
     input_to_dict,
     models_to_dict,
     views_to_dict,
 )
+from api.helpers.family_compute import (  # noqa: E402
+    build_or_load_family,
+    resolve_family_axes,
+    resolve_family_request,
+    resolve_presented,
+)
+from api.helpers.family_serialize import family_document  # noqa: E402
 from api.helpers.proposal_compute import (  # noqa: E402
-    canonical_sha256,
     classify_compute_error,
     compute_proposal,
 )
-from api.helpers.proposal_matrix import resolve_matrix_axes  # noqa: E402
 from api.helpers.route_serialize import route_to_dict  # noqa: E402
-from models.evaluation.summary import build_summary_row, ordered_stops  # noqa: E402
+from models.evaluation.summary import build_summary_row  # noqa: E402
+from models.family.builder import FamilyRequest, run_family  # noqa: E402
+from models.family.context import FamilyContext, MemoLoader, MemoRouter  # noqa: E402
 from models.pipeline import evaluate_and_build_views, run_compute  # noqa: E402
 from models.route.model import (  # noqa: E402
     DEFAULT_COMPOSITION_ID,
@@ -76,108 +81,11 @@ from models.route.model import (  # noqa: E402
     DEFAULT_TIMETABLE_MODE,
     NEUTRAL_PROPOSAL_ID,
     NEUTRAL_PROPOSAL_VERSION,
-    ROUTE_BUILDER_VERSION,
 )
-from models.evaluation.model import CALC_VERSION  # noqa: E402
 
 BERLIN_WIEN = ["osm:n3856100103", "osm:w423692233"]
 SECOND_COMPOSITION = "REF-POD-14"
 _NEUTRAL_PREFIX = f"P{NEUTRAL_PROPOSAL_ID}_V{NEUTRAL_PROPOSAL_VERSION}_"
-
-# Response parts route_compact_to_dict() (§2.5) leaves out: catalog data,
-# evaluation input, provenance, and the geometries that move to the pool.
-_COMPACT_DROPS_ROUTE = ("track_infrastructure", "geometries")
-_COMPACT_DROPS_PAIR = ("composition", "od_pairs")
-_COMPACT_DROPS_SEGMENT = ("from_stop", "to_stop")
-
-
-# =============================================================================
-# Throwaway memo layer — the boundary models/family/context.py will own
-# =============================================================================
-
-
-class MemoLoader:
-    """Build-scoped memo over DBDataLoader's per-scenario catalog builders
-    and the two scenario-row resolutions compute_proposal() makes. One
-    instance per family build: catalogs are read-only collections, so
-    every member can share one object per (builder, scenario).
-    Everything else delegates to the wrapped loader untouched."""
-
-    _MEMOISED = frozenset(
-        {
-            "build_all_compositions",
-            "build_all_tracks",
-            "build_all_stops",
-            "build_all_passages",
-            "resolve_scenario_id",
-            "resolve_routing_graph_key",
-        }
-    )
-
-    def __init__(self, loader) -> None:
-        self._loader = loader
-        self._memo: dict = {}
-        self._lock = threading.Lock()
-        self.calls = 0
-        self.hits = 0
-
-    def __getattr__(self, name):
-        target = getattr(self._loader, name)
-        if name not in self._MEMOISED:
-            return target
-
-        def memoised(*args, **kwargs):
-            key = (name, args, tuple(sorted(kwargs.items())))
-            with self._lock:
-                self.calls += 1
-                if key in self._memo:
-                    self.hits += 1
-                    return self._memo[key]
-            value = target(*args, **kwargs)
-            with self._lock:
-                return self._memo.setdefault(key, value)
-
-        return memoised
-
-
-class MemoRouter:
-    """Build-scoped memo over RailRouter.route() — the L1 boundary: raw
-    legs are a pure function of (stops, speed cap, HSR vector, gauge,
-    mode) on one graph. route_trip() and calc_energy_consumption() fill
-    buffer/dynamics/energy IN PLACE on the legs they get, so the memo
-    hands out copies (dataclasses.replace — a shallow copy suffices, only
-    scalar fields are mutated downstream)."""
-
-    def __init__(self, router) -> None:
-        self._router = router
-        self._memo: dict = {}
-        self._lock = threading.Lock()
-        self.calls = 0
-        self.hits = 0
-
-    def __getattr__(self, name):
-        return getattr(self._router, name)
-
-    def route(self, stops, max_speed_kmh, avoid_hsr, gauge_mm, routing_mode):
-        key = (
-            tuple(s.stop.stop_id for s in stops),
-            max_speed_kmh,
-            None if avoid_hsr is None else tuple(sorted(avoid_hsr.items())),
-            gauge_mm,
-            routing_mode,
-        )
-        with self._lock:
-            self.calls += 1
-            legs = self._memo.get(key)
-            if legs is not None:
-                self.hits += 1
-        if legs is None:
-            legs = self._router.route(
-                stops, max_speed_kmh, avoid_hsr, gauge_mm, routing_mode
-            )
-            with self._lock:
-                legs = self._memo.setdefault(key, legs)
-        return [dataclasses.replace(leg) for leg in legs]
 
 
 # =============================================================================
@@ -235,41 +143,6 @@ def member(args, scenario_id: int, loader, router, composition_id: str):
         loader=loader,
         router=router,
     )
-
-
-def compact_route(route_dict: dict, pool: dict[str, list]) -> dict:
-    """§2.5 estimate: stops once per trip, segments by stop index,
-    geometries content-addressed into the shared pool, catalog/demand/
-    provenance blocks dropped. Replaced by route_compact_to_dict() in B2."""
-    geometries = {g["id"]: g["coords"] for g in route_dict["geometries"]}
-
-    def trip(t: dict) -> dict:
-        segments = []
-        for i, seg in enumerate(t["segments"]):
-            coords = geometries[seg["geometry_id"]]
-            gid = "g:" + canonical_sha256(coords)[7:23]
-            pool.setdefault(gid, coords)
-            compact = {k: v for k, v in seg.items() if k not in _COMPACT_DROPS_SEGMENT}
-            compact.update({"from": i, "to": i + 1, "geometry_id": gid})
-            segments.append(compact)
-        return {
-            "trip_id": t["trip_id"],
-            "direction": t["direction"],
-            "general_parameters": t["general_parameters"],
-            "stops": ordered_stops(t),
-            "segments": segments,
-        }
-
-    out = {k: v for k, v in route_dict.items() if k not in _COMPACT_DROPS_ROUTE}
-    out["trip_pairs"] = [
-        {
-            **{k: v for k, v in pair.items() if k not in _COMPACT_DROPS_PAIR},
-            "outbound": trip(pair["outbound"]),
-            "return_trip": trip(pair["return_trip"]),
-        }
-        for pair in route_dict["trip_pairs"]
-    ]
-    return out
 
 
 # =============================================================================
@@ -408,173 +281,92 @@ def dependencies_router(loader, scenario_id: int):
     return dependencies.get_rail_router(loader.resolve_routing_graph_key(scenario_id))
 
 
-class FamilyRun:
-    """One family build on shared memos: a MemoLoader per scenario, a
-    MemoRouter per routing graph, members = run_compute() per
-    (scenario, composition), errors classified like the API would."""
-
-    def __init__(self, args, loader, axes) -> None:
-        self.args = args
-        self.axes = axes
-        self.loaders = {s.scenario_id: MemoLoader(loader) for s in axes.scenarios}
-        self.routers: dict[str, MemoRouter] = {}
-        self._lock = threading.Lock()
-        self.members: dict[tuple[int, str], dict] = {}
-        self.domain_s: list[float] = []
-
-    def router_for(self, scenario) -> MemoRouter:
-        key = scenario.routing_graph_key
-        with self._lock:
-            if key not in self.routers:
-                self.routers[key] = MemoRouter(dependencies.get_rail_router(key))
-            return self.routers[key]
-
-    def build(self, scenario, composition) -> None:
-        sid = scenario.scenario_id
-        cid = composition.comp_id
-        t = time.perf_counter()
-        try:
-            result = member(
-                self.args, sid, self.loaders[sid], self.router_for(scenario), cid
-            )
-        except Exception as exc:  # noqa: BLE001 — every failure becomes an error member
-            classified = classify_compute_error(exc)
-            code = classified[0] if classified else "calc_error"
-            with self._lock:
-                self.members[(sid, cid)] = {"status": "error", "error": code}
-            return
-        elapsed = time.perf_counter() - t
-        prov = result.provenance
-        route_dict = route_to_dict(result.route, sid, prov.tracks)
-        views = views_to_dict(result.views, result.route)
-        with self._lock:
-            self.members[(sid, cid)] = {
-                "status": "ok",
-                "route_dict": route_dict,
-                "fingerprint": route_fingerprint(route_dict),
-                "summary": build_summary_row(route_dict, {"views": views}),
-            }
-            self.domain_s.append(elapsed)
-
-    def run(self, workers: int) -> float:
-        cells = [(s, c) for s in self.axes.scenarios for c in self.axes.compositions]
-        t = time.perf_counter()
-        if workers <= 1:
-            for s, c in cells:
-                self.build(s, c)
-        else:
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                list(pool.map(lambda sc: self.build(*sc), cells))
-        return time.perf_counter() - t
-
-    def report(self, label: str, wall_s: float) -> None:
-        ok = sum(1 for m in self.members.values() if m["status"] == "ok")
-        errors: dict[str, int] = {}
-        for m in self.members.values():
-            if m["status"] == "error":
-                errors[m["error"]] = errors.get(m["error"], 0) + 1
-        per_member = median_ms(self.domain_s) if self.domain_s else 0.0
-        print(
-            f"  {label:<28}{wall_s:6.2f} s   ok={ok} err={sum(errors.values())}"
-            f"   member median {per_member:.0f} ms"
-        )
-        if errors:
-            print(f"    errors: {errors}")
-        route_calls = sum(r.calls for r in self.routers.values())
-        route_hits = sum(r.hits for r in self.routers.values())
-        loader_calls = sum(ld.calls for ld in self.loaders.values())
-        loader_hits = sum(ld.hits for ld in self.loaders.values())
-        print(
-            f"    route(): {route_calls} calls, {route_hits} memo hits, "
-            f"{route_calls - route_hits} distinct (stops, variant) routed; "
-            f"loader: {loader_calls} calls, {loader_hits} memo hits"
-        )
-
-    def document_estimate(self) -> None:
-        """Assemble the §2.5 document from the ok members and weigh its
-        parts — the number that decides whether the family goes over the
-        wire as one JSON document."""
-        pool: dict[str, list] = {}
-        routes: dict[str, dict] = {}
-        members = []
-        for (sid, cid), m in self.members.items():
-            if m["status"] != "ok":
-                members.append(
-                    {
-                        "scenario_variant_id": sid,
-                        "composition_id": cid,
-                        "status": "error",
-                        "error": m["error"],
-                    }
-                )
-                continue
-            ref = f"r:{sid}:{cid}"
-            routes[ref] = compact_route(m["route_dict"], pool)
-            members.append(
-                {
-                    "scenario_variant_id": sid,
-                    "composition_id": cid,
-                    "status": "ok",
-                    "route_ref": ref,
-                    "route_fingerprint": m["fingerprint"],
-                    "summary": m["summary"],
-                }
-            )
-        document = {
-            "family_key": "sha256:" + "0" * 64,
-            "route_builder_version": ROUTE_BUILDER_VERSION,
-            "calc_version": CALC_VERSION,
-            "request": {"stops": self.args.stops},
-            # Phase A's variant axis is scenario × measure set; with the
-            # single "none" set the variant ids coincide with scenario ids.
-            "axes": {
-                "scenario_variants": [
-                    {
-                        "scenario_variant_id": s.scenario_id,
-                        "scenario_id": s.scenario_id,
-                        "measure_set_id": 1,
-                        "scenario_key": s.scenario_key,
-                        "scenario_name": s.scenario_name,
-                        "is_current_base": s.is_current_base,
-                        "routing_graph_key": s.routing_graph_key,
-                    }
-                    for s in self.axes.scenarios
-                ],
-                "compositions": [c.comp_id for c in self.axes.compositions],
-            },
-            "geometries": pool,
-            "routes": routes,
-            "members": members,
-        }
-        n_ok = sum(1 for m in members if m["status"] == "ok")
-        summaries = [m["summary"] for m in members if m["status"] == "ok"]
-        print("  document estimate (§2.5)")
-        print(f"    members                {n_ok:4d} ok of {len(members)}")
-        print(f"    summaries              {kb(json_bytes(summaries))}")
-        print(f"    compact routes         {kb(json_bytes(routes))}  ({len(routes)})")
-        print(
-            f"    geometries (pool)      {kb(json_bytes(pool))}  ({len(pool)} distinct)"
-        )
-        print(f"    document, raw          {kb(json_bytes(document))}")
-        print(f"    document, gzip -6      {kb(gzip_bytes(document))}")
-        if n_ok:
-            print(
-                f"    per ok member: summary {json_bytes(summaries) / n_ok:.0f} B, "
-                f"compact route {json_bytes(routes) / n_ok:.0f} B"
-            )
-
-
 def section_family(args, loader) -> None:
-    axes = resolve_matrix_axes({}, loader)
-    print(
-        f"\nD. family — {len(axes.scenarios)} scenarios × "
-        f"{len(axes.compositions)} compositions = {axes.n_cells} members, legs cached"
+    """The real thing: models/family/builder.run_family() on a fresh
+    FamilyContext, then api/helpers/family_serialize.family_document()
+    on the result — the two halves of POST /api/proposal/family without
+    the HTTP and the cache. Run twice: fresh context each time, so the
+    second run shows what route_cache alone buys."""
+    body = {"stops": args.stops, "auto_stop_addition": "off"}
+    request_echo = resolve_family_request(body)
+    axes = resolve_family_axes(body, loader)
+    presented = resolve_presented(body, axes, loader)
+    request = FamilyRequest(
+        stops=request_echo["stops"],
+        timetable_mode=request_echo["timetable_mode"],
+        fixed_night_interval=request_echo["fixed_night_interval"],
+        schedule_mode=request_echo["schedule_mode"],
+        routing_mode=request_echo["routing_mode"],
+        auto_stop_addition=request_echo["auto_stop_addition"],
+        expert_timetable=None,
     )
-    serial = FamilyRun(args, loader, axes)
-    serial.report("serial, fresh memos", serial.run(1))
-    threaded = FamilyRun(args, loader, axes)
-    threaded.report(f"{args.workers} workers, fresh memos", threaded.run(args.workers))
-    threaded.document_estimate()
+    print(
+        f"\nD. family — {len(axes.variants)} variants × "
+        f"{len(axes.compositions)} compositions = {axes.n_members} members, "
+        f"{args.workers} prewarm workers"
+    )
+
+    for label in ("first run (legs may route live)", "second run (legs cached)"):
+        context = FamilyContext(loader, dependencies.get_rail_router)
+        t = time.perf_counter()
+        result = run_family(request, axes, context, presented, args.workers)
+        build_s = time.perf_counter() - t
+
+        errors: dict[str, int] = {}
+        error_records = {}
+        for m in result.members:
+            if m.status == "error":
+                classified = classify_compute_error(m.error)
+                code = classified[0] if classified else "calc_error"
+                errors[code] = errors.get(code, 0) + 1
+                error_records[(m.scenario_variant_id, m.composition_id)] = {
+                    "scenario_variant_id": m.scenario_variant_id,
+                    "composition_id": m.composition_id,
+                    "status": "error",
+                    "error": code,
+                    "message": str(m.error),
+                }
+        t = time.perf_counter()
+        document = family_document(
+            result, "sha256:bench", request_echo, False, error_records
+        )
+        serialise_s = time.perf_counter() - t
+
+        stats = result.context_stats
+        print(f"  {label}")
+        print(
+            f"    build {build_s:6.2f} s   serialise {serialise_s:5.2f} s   "
+            f"ok={result.n_ok} err={result.n_error}" + (f"  {errors}" if errors else "")
+        )
+        print(
+            f"    route(): {stats['route_calls']} calls, {stats['route_hits']} hits, "
+            f"{stats['n_leg_variants']} routed;  loader: "
+            f"{stats['loader_calls']} calls, "
+            f"{stats['loader_hits']} hits"
+        )
+
+    print("  document (the wire shape)")
+    print(f"    routes                 {len(document['routes'])}")
+    print(f"    geometries (pool)      {len(document['geometries'])}")
+    print(
+        f"    summaries              "
+        f"{kb(json_bytes([m['summary'] for m in document['members'] if m['status'] == 'ok']))}"
+    )
+    print(f"    compact routes         {kb(json_bytes(document['routes']))}")
+    print(f"    geometries             {kb(json_bytes(document['geometries']))}")
+    print(f"    document, raw          {kb(json_bytes(document))}")
+    print(f"    document, gzip -6      {kb(gzip_bytes(document))}")
+
+    # And through the front door, cache included: the second call is the
+    # document cache hit a returning client sees.
+    print("  build_or_load_family() (the endpoint's path, with the caches)")
+    for label in ("miss", "hit"):
+        t = time.perf_counter()
+        document = build_or_load_family(body)
+        print(
+            f"    {label:<5}{(time.perf_counter() - t) * 1000:8.0f} ms   "
+            f"cache_hit={document['stats']['cache_hit']}"
+        )
 
 
 # =============================================================================
@@ -588,7 +380,7 @@ def main() -> int:
     parser.add_argument("--repeat", type=int, default=5)
     parser.add_argument("--composition", default=DEFAULT_COMPOSITION_ID)
     parser.add_argument("--second-composition", default=SECOND_COMPOSITION)
-    parser.add_argument("--workers", type=int, default=CALC_MATRIX_WORKERS)
+    parser.add_argument("--workers", type=int, default=FAMILY_WORKERS)
     parser.add_argument(
         "--no-family",
         dest="family",

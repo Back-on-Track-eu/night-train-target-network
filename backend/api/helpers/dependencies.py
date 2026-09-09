@@ -109,6 +109,7 @@ _engagement_repo = None
 _auth_repo = None
 _request_log_repo = None
 _compute_cache = None
+_family_document_cache = None
 _loaded: bool = False
 _loaded_at: Optional[datetime] = None
 _load_error: Optional[str] = None
@@ -173,6 +174,7 @@ def init() -> None:
         _auth_repo, \
         _request_log_repo, \
         _compute_cache, \
+        _family_document_cache, \
         _loaded, \
         _loaded_at, \
         _load_error
@@ -184,6 +186,7 @@ def init() -> None:
     from adapters.proposal.engagement_repository import ProposalEngagementRepository
     from adapters.auth_repository import AuthRepository
     from adapters.proposal.compute_cache import ComputeCacheRepository
+    from adapters.family.document_cache import FamilyDocumentCache
     from adapters.route_segment_repository import RouteSegmentRepository
     from adapters.request_log_repository import RequestLogRepository
     from models.route.routing.rail_router import (
@@ -235,6 +238,7 @@ def init() -> None:
         _engagement_repo = ProposalEngagementRepository(_db_pool)
         _auth_repo = AuthRepository(_db_pool)
         _compute_cache = ComputeCacheRepository(pool=_db_pool)
+        _family_document_cache = FamilyDocumentCache(pool=_db_pool)
         _request_log_repo = _build_request_log_repository(
             RequestLogRepository, _db_pool
         )
@@ -417,6 +421,17 @@ def get_compute_cache():
     if not _loaded or _compute_cache is None:
         raise DataNotLoadedError("Data not loaded. Call POST /api/data/load first.")
     return _compute_cache
+
+
+def get_family_document_cache():
+    """
+    Return the singleton FamilyDocumentCache (family.documents — the
+    §2.5 document cache). Raises DataNotLoadedError if init() has not
+    completed successfully.
+    """
+    if not _loaded or _family_document_cache is None:
+        raise DataNotLoadedError("Data not loaded. Call POST /api/data/load first.")
+    return _family_document_cache
 
 
 def get_request_log_repository():

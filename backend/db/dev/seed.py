@@ -3179,6 +3179,7 @@ def main():
         ("scenario", "scenario_variants"),  # scenarios x measure sets
         ("route_cache", "graph_state"),
         ("route_cache", "route_segments"),
+        ("family", "documents"),
         ("proposals", "proposals"),
         ("proposals", "routes"),
         ("proposals", "trips"),

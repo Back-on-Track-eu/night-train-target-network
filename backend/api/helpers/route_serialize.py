@@ -21,6 +21,9 @@ Public interface:
   route_from_dict(data, loader, scenario_id)     → (Route, CompositionCollection)  (rebuilds domain
                                                     objects from a route dict — model-layer test
                                                     evaluations, db/dev/seed.py's example proposal)
+  route_compact_to_dict(route_dict, geometries)  → dict       (the family document's route shape: stops once
+                                                                per trip, segments by index, geometry in a
+                                                                shared pool — see the function)
   suggested_stops_to_dicts(suggestions)          → list[dict] (the suggested_stops section,
                                                     auto_stop_addition="suggest")
   expert_timetable_from_dict(block)              → ExpertTimetable | None  (the request's
@@ -53,6 +56,8 @@ from models.route.timetable import (
     NO_OVERRIDES,
 )
 from models.params import Composition, TrackInfraCollection, CompositionCollection
+from models.evaluation.summary import ordered_stops
+from models.utils import canonical_sha256
 
 # =============================================================================
 # ROUTE — serialize
@@ -343,6 +348,95 @@ def route_to_dict(route: Route, scenario_id: int, tracks: TrackInfraCollection) 
         ],
         "geometries": geometries,  # last — keeps the bulky coordinate data out of the way when scanning the rest of route
     }
+
+
+# =============================================================================
+# ROUTE — compact (family document)
+# =============================================================================
+
+# route_to_dict() keys the family document does not carry, and why:
+#   composition          catalog — GET /api/params/compositions
+#   od_pairs             demand, an evaluation input — the views endpoint
+#   track_infrastructure provenance — GET /api/params/TrackInfrastructures
+#   geometries           shared across members — the document's pool
+_COMPACT_DROPS_ROUTE = ("track_infrastructure", "geometries")
+_COMPACT_DROPS_PAIR = ("composition", "od_pairs")
+_COMPACT_DROPS_SEGMENT = ("from_stop", "to_stop")
+
+
+# Decimal places the geometry pool id is hashed at — the same 5 dp
+# (~1 m) adapters/proposal/projection.py::route_fingerprint() rounds to,
+# and for the same reason: a leg served from route_cache and the same leg
+# routed live agree to within float noise, not bit for bit, so an id taken
+# over raw coordinates would split one corridor into two pool entries.
+GEOMETRY_ID_NDIGITS = 5
+
+
+def route_compact_to_dict(
+    route_dict: dict,
+    geometries: dict[str, list],
+    id_cache: dict[int, str] | None = None,
+) -> dict:
+    """The family document's route: route_to_dict()'s shape with everything
+    a member can fetch elsewhere removed and every stop serialised ONCE.
+
+    id_cache: optional {id(coords) -> geometry_id} memo for one build.
+    The router memo hands every member of a family the same coordinate
+    LIST object for a given leg variant (models/family/context.py returns
+    shallow copies), so hashing it once per variant instead of once per
+    member is the difference between ~1 s and ~0.1 s on a 72-member family
+    (scripts/bench_member.py). Safe because `geometries` keeps a reference
+    to every list whose id is memoised, so no id can be reused.
+
+    Built from the full dict rather than from the Route so the summary and
+    the fingerprint, which read fields this drops (od_pairs, the
+    composition's places_by_class, the geometry), can be taken from the
+    same dict first. Per trip, `stops` holds each Stop once in travel
+    order and every segment refers to its ends by index (`from`, `to`)
+    instead of inlining both dicts — route_to_dict() carries every
+    intermediate stop twice per trip. Geometry goes into `geometries`,
+    content-addressed: a member's route on the same graph and variant
+    shares the pool entry, and the 72 members of a family reference about
+    eight of them. Everything else — ids, schedule, general_parameters
+    with its timetable_warnings, parkings, shuntings — is verbatim.
+    """
+
+    def compact_trip(trip: dict) -> dict:
+        stops = ordered_stops(trip)
+        segments = []
+        for i, seg in enumerate(trip["segments"]):
+            coords = geometry_by_id[seg["geometry_id"]]
+            geometry_id = id_cache.get(id(coords)) if id_cache is not None else None
+            if geometry_id is None:
+                rounded = [
+                    [round(c, GEOMETRY_ID_NDIGITS) for c in point] for point in coords
+                ]
+                geometry_id = "g:" + canonical_sha256(rounded)[len("sha256:") :][:16]
+                if id_cache is not None:
+                    id_cache[id(coords)] = geometry_id
+            geometries.setdefault(geometry_id, coords)
+            compact = {k: v for k, v in seg.items() if k not in _COMPACT_DROPS_SEGMENT}
+            compact.update({"from": i, "to": i + 1, "geometry_id": geometry_id})
+            segments.append(compact)
+        return {
+            "trip_id": trip["trip_id"],
+            "direction": trip["direction"],
+            "general_parameters": trip["general_parameters"],
+            "stops": stops,
+            "segments": segments,
+        }
+
+    geometry_by_id = {g["id"]: g["coords"] for g in route_dict["geometries"]}
+    out = {k: v for k, v in route_dict.items() if k not in _COMPACT_DROPS_ROUTE}
+    out["trip_pairs"] = [
+        {
+            **{k: v for k, v in pair.items() if k not in _COMPACT_DROPS_PAIR},
+            "outbound": compact_trip(pair["outbound"]),
+            "return_trip": compact_trip(pair["return_trip"]),
+        }
+        for pair in route_dict["trip_pairs"]
+    ]
+    return out
 
 
 # =============================================================================

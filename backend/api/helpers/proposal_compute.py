@@ -29,6 +29,7 @@ Whether/where the flag appears on the wire stays the caller's concern
 
 Public interface:
   validate_calc_body(body: dict) -> list[str]
+  validate_stops(body: dict) -> list[str]
   validate_how_fields(body: dict, stops) -> list[str]
       the HOW-field subset (timetable_mode … expert_timetable), shared
       with the calc matrix (proposal_matrix.py) whose WHAT fields differ
@@ -36,16 +37,15 @@ Public interface:
       the one mapping from pipeline exceptions to wire error codes, used
       by /calc's error arms and by the matrix's per-cell error records
   normalize_expert_timetable(block: dict | None) -> dict | None
-  canonical_sha256(obj) -> str            # "sha256:…" over canonical JSON
+  canonical_sha256(obj) -> str            # re-exported from models/utils.py
   canonical_request_hash(resolved_request: dict) -> str
-  compute_proposal(body, loader=None, router=None, use_cache=True)
+  resolve_how_fields(body: dict) -> dict  # the HOW subset of the echo
+  compute_proposal(body, loader=None, router=None, use_cache=True,
+                   measures=NO_MEASURES)
       -> tuple[dict, bool]   # (§2.1 response payload, cache_hit)
 """
 
 from __future__ import annotations
-
-import hashlib
-import json
 
 from adapters.proposal.id_prefix import rewrite_id_prefix
 from adapters.proposal.projection import route_fingerprint
@@ -76,7 +76,9 @@ from api.helpers.route_serialize import (
     suggested_stops_to_dicts,
 )
 from models.evaluation.model import CALC_VERSION
+from models.params import NO_MEASURES, MeasureSet
 from models.pipeline import run_compute
+from models.utils import canonical_sha256
 from models.route.timetable import (
     VALID_AUTO_STOP_ADDITION_MODES,
     VALID_DEPARTURE_MODES,
@@ -110,13 +112,8 @@ def validate_calc_body(body: dict) -> list[str]:
     if body.get("scenario_id") is not None and not isinstance(body["scenario_id"], int):
         errors.append("'scenario_id' must be an integer if provided.")
 
+    errors.extend(validate_stops(body))
     stops = body.get("stops")
-    if not isinstance(stops, list):
-        errors.append("'stops' must be a list of stop_id strings.")
-    elif len(stops) < 2:
-        errors.append("'stops' must contain at least 2 entries.")
-    elif not all(isinstance(s, str) for s in stops):
-        errors.append("'stops' must be a list of stop_id strings.")
 
     # Optional: an omitted composition is computed with DEFAULT_COMPOSITION_ID
     # (resolved in _resolve_request below, before the request is hashed).
@@ -125,6 +122,19 @@ def validate_calc_body(body: dict) -> list[str]:
 
     errors.extend(validate_how_fields(body, stops))
     return errors
+
+
+def validate_stops(body: dict) -> list[str]:
+    """The stop list every compute request carries — shared by the calc
+    request and the family request (api/helpers/family_compute.py)."""
+    stops = body.get("stops")
+    if not isinstance(stops, list):
+        return ["'stops' must be a list of stop_id strings."]
+    if len(stops) < 2:
+        return ["'stops' must contain at least 2 entries."]
+    if not all(isinstance(s, str) for s in stops):
+        return ["'stops' must be a list of stop_id strings."]
+    return []
 
 
 def validate_how_fields(body: dict, stops) -> list[str]:
@@ -424,17 +434,6 @@ def normalize_expert_timetable(block) -> dict | None:
     return {"outbound": outbound, "return": return_block}
 
 
-def canonical_sha256(obj) -> str:
-    """ "sha256:<hex>" over the canonical JSON form of a JSON-serialisable
-    value (sorted keys, no whitespace) — the one hashing convention behind
-    the compute-cache request hash below and the matrix's content-
-    addressed shared blocks (api/helpers/matrix_serialize.py). The
-    sha256: prefix matches the fingerprint format (§3.1) for at-a-glance
-    recognizability in the DB."""
-    canonical = json.dumps(obj, sort_keys=True, separators=(",", ":"))
-    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
 def canonical_request_hash(resolved_request: dict) -> str:
     """§2.3's request hash: canonical_sha256() over the RESOLVED request.
     Hashing the resolved form — not the posted body — is what makes an
@@ -444,16 +443,14 @@ def canonical_request_hash(resolved_request: dict) -> str:
     return canonical_sha256(resolved_request)
 
 
-def _resolve_request(body: dict, loader) -> dict:
-    """The §2.1 resolved-request echo — defaults applied, scenario_id
-    concrete — built BEFORE the compute so it can double as the cache key
-    input. An omitted field and an explicitly-posted default must compare
-    (and hash) equal, so this is built explicitly rather than echoing the
-    posted body verbatim."""
+def resolve_how_fields(body: dict) -> dict:
+    """The HOW fields with defaults applied, in echo order — the part of
+    the resolved request that does not name a scenario or composition,
+    which is why the family request (api/helpers/family_compute.py) is
+    exactly this plus the stops. An omitted field and an explicitly-posted
+    default must compare (and hash) equal, so this is built explicitly
+    rather than echoing the posted body verbatim."""
     return {
-        "stops": list(body["stops"]),
-        "composition_id": body.get("composition_id", DEFAULT_COMPOSITION_ID),
-        "scenario_id": loader.resolve_scenario_id(body.get("scenario_id")),
         "timetable_mode": body.get("timetable_mode", DEFAULT_TIMETABLE_MODE),
         "fixed_night_interval": body.get("fixed_night_interval"),
         "schedule_mode": body.get("schedule_mode", DEFAULT_SCHEDULE_MODE),
@@ -468,6 +465,18 @@ def _resolve_request(body: dict, loader) -> dict:
         # always present: an absent and an explicitly-empty block have to
         # be the same request.
         "expert_timetable": normalize_expert_timetable(body.get("expert_timetable")),
+    }
+
+
+def _resolve_request(body: dict, loader) -> dict:
+    """The §2.1 resolved-request echo — defaults applied, scenario_id
+    concrete — built BEFORE the compute so it can double as the cache key
+    input."""
+    return {
+        "stops": list(body["stops"]),
+        "composition_id": body.get("composition_id", DEFAULT_COMPOSITION_ID),
+        "scenario_id": loader.resolve_scenario_id(body.get("scenario_id")),
+        **resolve_how_fields(body),
     }
 
 
@@ -502,7 +511,11 @@ def _response_from_cache(entry: dict) -> dict:
 
 
 def compute_proposal(
-    body: dict, loader=None, router=None, use_cache: bool = True
+    body: dict,
+    loader=None,
+    router=None,
+    use_cache: bool = True,
+    measures: MeasureSet = NO_MEASURES,
 ) -> tuple[dict, bool]:
     """Resolve + serve-from-cache-or-compute one request body (§2.1's
     WHAT/HOW fields — stops, composition_id, scenario_id, timetable_mode,
@@ -554,6 +567,11 @@ def compute_proposal(
     if router is None:
         router = get_rail_router(loader.resolve_routing_graph_key(scenario_id))
 
+    # The member cache is keyed on the request alone, which names no
+    # measure set: a member under any set but the empty one bypasses it
+    # until B2b folds measure_set_id into the key (family.members).
+    if measures is not NO_MEASURES:
+        use_cache = False
     cache = get_compute_cache() if use_cache else None
     request_hash = canonical_request_hash(resolved_request) if cache else None
     if cache is not None:
@@ -581,6 +599,7 @@ def compute_proposal(
         ),
         loader=loader,
         router=router,
+        measures=measures,
     )
 
     # route_dict carries the neutral-prefixed ids (P0_V0_R1...) exactly
