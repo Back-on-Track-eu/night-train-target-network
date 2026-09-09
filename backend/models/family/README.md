@@ -46,7 +46,7 @@ trip build, timetable, stopgap demand and evaluation together. So:
 
 It does not serialise (`api/helpers/family_serialize.py`), does not
 compute its fingerprint (D13 — no consumer in the document; publish gets
-it from `compute_proposal()`), and does not run the full `views_to_dict`
+it from `compute_member()`), and does not run the full `views_to_dict`
 (the summary needs only the whole-route view,
 `evaluation_serialize.route_view_to_dict`, at ~3 ms instead of ~50). The
 full views of one member are `GET …/members/<sv>/<comp>/views`, computed

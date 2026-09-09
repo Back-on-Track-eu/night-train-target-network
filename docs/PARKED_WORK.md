@@ -150,7 +150,7 @@ seconds. Analyze is therefore a **job**, not a synchronous call:
 - v1 executor: one in-process background worker, FIFO queue, one job at
   a time — matches the self-hosted process model; a real queue
   (RQ/Celery) is the documented escalation path, not v1. Each member
-  compute goes through `compute_proposal()`, so the compute cache does the
+  compute goes through `compute_member()`, so the compute cache does the
   heavy lifting for the dominant workflow (toggling scenarios over the
   same bundle). The compute cache is a hard prerequisite (**done**);
   connection pooling (§2 below) helps but doesn't gate.
@@ -195,7 +195,7 @@ run fully in parallel, and raising `--workers` scales it further, cheaply.
 
 What is missing is **intra**-worker concurrency. One worker process handles
 exactly one request at a time (sync worker model), so a slow live-routing
-`/calc` blocks a quick `/like` toggle that happens to land on the same
+compute blocks a quick `/like` toggle that happens to land on the same
 worker.
 
 **What closing it needs**
@@ -212,13 +212,13 @@ worker.
    throughout `adapters/*.py` stops holding once a connection isn't
    exclusively owned by one long-lived object.
 
-**Testable by**: a concurrent integration test issuing a slow `/calc` and a
-fast `/like` simultaneously against a single worker, asserting the fast one
+**Testable by**: a concurrent integration test issuing a slow family build
+and a fast `/like` simultaneously against a single worker, asserting the fast one
 doesn't wait on the slow one; plus connection-pool exhaustion behaviour
 under load.
 
 **Partial precedent already in the tree.** `scripts/refresh_proposals.py`
-parallelizes only its live-routing step: `compute_proposal()` takes optional
+parallelizes only its live-routing step: `compute_member()` takes optional
 `loader=`/`router=` arguments so each worker thread gets its own
 `DBDataLoader` (cheap — one connection, no heavy precompute) while sharing
 the one process-wide `RailRouter` (a pooled `requests.Session`, explicitly
@@ -263,19 +263,22 @@ parameters, and 48 snapshots × 5 tables for three booleans would defeat
 the versioning contract. They are **evaluation-only inputs**: routing and
 timetabling are untouched, only `models/evaluation/calc.py` changes.
 
-**Shape.** A `measures` block on the compute request —
-`{"vat_exempt": bool, "energy_tax_exempt": bool, "tac_direct_cost": bool}`,
-all default false — that (1) joins `_resolve_request()` and therefore the
-compute-cache hash, (2) is echoed on the response request, (3) is refused
-by publish unless all false (proposals represent today's rules, like the
-base-scenario rule), (4) becomes a third axis of `/calc/matrix`
-(`measure_sets: [...]`, default `[all false]`; cell index = scenarios ×
-measures × compositions). The three rates it needs (VAT rate on tickets,
+**Shape — WP18 already landed the plumbing.** `scenario.measure_sets`
+holds the three flags per named set, `scenario.scenario_variants` is the
+materialised scenario × measure-set axis the family is built over, and
+`evaluate_route()` takes a `MeasureSet` whose three factors are 1.0 today
+(`models/params.py`, CALC 0.9.26). The member cache keys on the measure
+set; publish still refuses anything but the empty set until proposals may
+represent a measure. What remains is the pricing: the three rates (VAT
+rate on tickets,
 energy tax share of the energy price, direct-cost TAC rate) are calibrated
 domain parameters → DB tables with sources, per the parameter placement
 rule, not constants in `model.py`.
 
-**What it costs.** `CALC_VERSION` bump (calc.py), three calibrated rates
-with sources (Juri/Josh), a compute-cache flush, the frontend measures row
-switched on and the grid view extended from scenario × composition to
+**What it costs.** `CALC_VERSION` bump (calc.py — and the real pricing
+belongs inside `calc_tac.py`/`calc_energy_price.py`, where the per-country
+components are, not in the three factors: the per-country views read the
+components), three calibrated rates with sources (Juri/Josh), a flush of
+both family caches, the frontend measures row switched on and the family's
+variant axis multiplying from scenario × composition to
 scenario × measures for the selected composition (the sketch's heatmap).

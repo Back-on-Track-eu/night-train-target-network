@@ -33,7 +33,7 @@ work now finished, and preserved in git history), plus the parked
 | `repository.py` | `ProposalRepository` — publish, refresh, load, gallery/map queries, `outdated_trigger()` |
 | `projection.py` | Pure `(route, evaluation) → summary row`; `route_fingerprint()`; `GEOM_SIMPLIFY_TOLERANCE_DEG` |
 | `gtfs_store.py` | Route ⇄ GTFS + sidecar tables (write and read-back) |
-| `compute_cache.py` | `ComputeCacheRepository` — the §2.3 two-map cache (`lookup`/`store`/`sweep`/`flush`). Underneath it, routing itself is cached per stop pair in `adapters/route_segment_repository.py` (`route_cache` schema) — a miss here no longer means re-routing every unchanged leg |
+| *(moved)* | The member cache is `adapters/family/member_cache.py` (`family.members`) since WP18 B2b — §2.3. Underneath it, routing itself is cached per stop pair in `adapters/route_segment_repository.py` (`route_cache` schema) — a miss there no longer means re-routing every unchanged leg |
 | `engagement_repository.py` | Likes, comments, and the `UNION ALL` timeline merge |
 | `filter_builder.py` | Column-kind registry driving gallery SQL generation + validation, and the aggregate SELECT list behind §7.7's statistics |
 | `id_prefix.py` | `P{id}_V{n}_` prefix rewriting between neutral and published ID forms |
@@ -60,10 +60,11 @@ Design of the proposal lifecycle and storage for the public tool, supporting:
 Three architecture decisions supersede the earlier persist-on-calc concept
 and shape everything below:
 
-1. **Merged compute API** (2026-07-31). Route planning and evaluation are
-   one endpoint (`POST /api/proposal/calc`), one pipeline, one response.
-   There are no half-states: a result always contains route *and*
-   evaluation.
+1. **Merged compute API** (2026-07-31; family since 2026-09-10). Route
+   planning and evaluation are one endpoint (`POST /api/proposal/family`),
+   one pipeline, one response — and since WP18 every scenario variant ×
+   composition of a stop list in that one response. There are no
+   half-states: a member always contains route *and* evaluation.
 2. **Ephemeral compute, explicit publish** (2026-07-31). Computing writes
    nothing to the database. Proposals come into existence only through an
    explicit `POST /api/proposal/publish`. The database contains deliberate
@@ -79,114 +80,55 @@ and shape everything below:
 
 ## 2. Compute / publish architecture
 
-### 2.1 `POST /api/proposal/calc` — ephemeral compute
+### 2.1 `POST /api/proposal/family` — ephemeral compute
 
-One stateless request → route + evaluation, no side effects.
+*(Rewritten in WP18 B2b. Until then this section described
+`POST /api/proposal/calc`, one member per request; that endpoint and its
+matrix variant are gone. The mechanics of the family live in
+`adapters/family/README.md` and `models/family/README.md`; this section
+keeps the design decisions.)*
 
-**Request** — the former plan request minus all persistence identity
-(`proposal_id`/`proposal_version` are publish concerns; drafts do not exist
-server-side). Verified against the current endpoints: `/api/evaluation/calc`
-carried **no** evaluation-only user inputs beyond the route and an optional
-`scenario_id` override, so the merged request is exactly this. Proposal
-*metadata* (name, provenance) is **not** part of the compute request — it
-belongs to publish (§2.2).
+One stateless request → **every member** of one stop list + HOW under the
+current pins: one member per (scenario variant, composition), all built
+on one shared context, returned as one document. No side effects.
 
-```jsonc
-{
-  // WHAT to compute
-  "stops":              ["stop_id", "..."],        // required, min 2, plain IDs
-  "composition_id":     "REF-BAL-9",               // optional; omitted = the standard
-                                                   // composition (DEFAULT_COMPOSITION_ID,
-                                                   // models/route/model.py)
-  "scenario_id":        4,                         // optional; omitted = current base.
-                                                   // Any scenario is computable —
-                                                   // what-ifs live here and in compare;
-                                                   // only PUBLISH is base-restricted (§2.2)
+**Request** — the member request's WHAT/HOW fields minus `composition_id`
+and `scenario_id`, which are axes here (both optional; default = every
+variant of a current scenario × the whole catalog), plus an optional
+`presented` member. Proposal *metadata* is **not** part of it — it belongs
+to publish (§2.2). `auto_stop_addition: "suggest"` runs on the presented
+member only and is part of the family key: accepting a suggestion posts a
+new stop list, which is a new family.
 
-  // HOW to compute (all optional, defaults + validation rules as today)
-  "timetable_mode":       "simpleAutomatic" | "simpleAutomaticWithFixedNight",
-  "fixed_night_interval": ["stop_id", "stop_id"],  // required for, and only allowed
-                                                   // with, ...WithFixedNight
-  "schedule_mode":        "alwaysDaily",
-  "routing_mode":         "simpleRouting" | "fullRouting",
-  "auto_stop_addition":   "off" | "add" | "suggest"
-}
-```
+**Response** — the §2.5-shaped document: the resolved request echo (what
+publish sends back), the axes, a content-addressed geometry pool, one
+compact route per (scenario, composition), and one summary per member.
+Error members carry the code the views endpoint would answer; the
+document is 200 regardless. What a member does not carry: provenance and
+parameters (`GET /api/params/*`), the models registry (`GET /api/models`),
+its views (`GET …/members/<sv>/<comp>/views`, computed on demand and
+member-cached), its fingerprint (publish computes its own).
 
-**Response** — the merged plan + calc result:
+**Why a family and not a member.** A member costs ~238 ms on the plain
+loader and router, ~208 ms of which is reloading catalogs and ~35 ms
+fetching legs; once both are shared it costs 4 ms
+(`scripts/bench_member.py`). Seventy-two members on one context are
+~1.5 s and ~400 KB gzipped, and after that every scenario or composition
+switch in the builder is a lookup, not a request.
 
-```jsonc
-{
-  "route_builder_version": "0.9.13",
-  "calc_version":          "0.9.10",               // both version tracks stay separate
-  "route_fingerprint":     "sha256:…",             // §3.1, informational + compare context
+**What a member is** stays `compute_member()`
+(`api/helpers/member_compute.py`): the same `run_compute()` the family
+runs per member, serialised as
+`{route_builder_version, calc_version, route_fingerprint, request,
+suggested_stops?, summary, route, evaluation: {views}}`. Publish, the
+on-load refresh, compare's override sides and the refresh script all go
+through it, so they can never drift from what the family shows.
 
-  "request": { … },                                // the RESOLVED request: defaults
-                                                   // applied, scenario_id concrete.
-                                                   // Canonical form — what publish takes
-                                                   // as compute_request, what the cache
-                                                   // (§2.3) hashes, what §5.3 stores
-
-  "suggested_stops": [ … ],                        // ONLY when auto_stop_addition="suggest"
-
-  "route": { … },                                  // today's route_to_dict shape,
-                                                   // neutral structural IDs
-
-  "evaluation": {
-    "models": { "route_builder": {…}, "energy": {…}, "evaluation": {…} },
-    "input":  { "parameters": { "track_infrastructures": {…},
-                                "stop_infrastructures":  {…},
-                                "compositions":          {…} } },
-    "views":  { "route": {…}, "per_trip_pair": {…},
-                "per_trip_pair_per_country": {…}, "per_trip_pair_per_od": {…},
-                "per_trip_pair_per_section": {…}, "per_trip_per_stop": {…} }
-  }
-}
-```
-
-**Provenance placement** — each section documents what *it* used, at two
-deliberate depths:
-
-- under `route`: resolved `scenario_id`, per-trip-pair `composition`, and
-  per-country `track_infrastructure` — the **physics-relevant subsets**
-  (all `*_eur*` cost fields deliberately excluded; the old "no monetary
-  values in the plan response" principle becomes "no monetary values under
-  `route`"). Informational only — never read back, rebuilt from DB via the
-  scenario pin.
-- under `evaluation`: `models` (static model documentation — versions,
-  descriptions, formulas) and `input.parameters` — the **full sourced
-  parameter sets** via `params_serialize.py`, every field with
-  description, source, and `is_default`. Costing provenance in full depth.
-
-Tracks and composition therefore appear twice at different depths — kept
-deliberately, each section stays self-describing. There is **no route copy
-under `evaluation.input`** anywhere (the route is a sibling key; the old
-calc response only carried one because it was a standalone endpoint):
-stored and computed responses share one shape with the route appearing
-exactly once.
-
-Further notes:
-
-- **IDs**: compute responses carry neutral structural IDs (`R1`, `T1`, …,
-  no proposal prefix). Prefixed IDs (`P{id}_V{n}_…`) exist only on
-  published proposals; publish assigns them. The fingerprint
-  canonicalization strips prefixes anyway (§3.1), so fingerprints agree
-  between ephemeral and published forms.
-- **Errors** (all JSON, `{"error", "message", …}`): `400 bad_request` /
-  `400 validation_error` (malformed request), `422 gauge_mismatch` (no
-  single track gauge serves every stop — carries `conflicting_stops:
-  {stop_id: [gauges]|null}` for every stop of the trip so the client can
-  mark them; 0.9.27), `422 routing_error` (the routing engine cannot serve
-  the request — no path on the trip's gauge network, a stop that will not
-  snap; an answer about the request, not a server fault), `422
-  domain_error` (any other model-level rejection, e.g. country coverage),
-  `500 calc_error` (genuinely unexpected).
-- **No persistence decisions.** No actions, no lookups. Request in, result
-  out, forget.
-
-The frontend holds the current result in memory; unsaved exploration dies
-with the session. Mitigation (frontend concern):
-draft caching in the client, warn-on-navigate for unsaved changes.
+**Locked decisions carried over unchanged:** stateless (nothing written,
+ever); neutral structural ids (`R1`, `R1_D0_T1`, …) rewritten with the
+proposal prefix only at publish; `expert_timetable` canonicalised at the
+boundary so an omitted block and an explicitly-empty one are one request;
+the resolved echo is what publish posts back as `compute_request`.
 
 ### 2.2 `POST /api/proposal/publish` — the only user write path
 
@@ -240,166 +182,37 @@ returns it), including the server-assigned `proposal_id` and prefixed row
 IDs — the frontend adopts this id as its loaded proposal, so a follow-up
 save is an ordinary `overwrite` against it.
 
-### 2.3 Compute cache
+### 2.3 The two family caches
 
-A server-side, TTL-bounded cache (default 3 h, configurable) over compute
-results, so that "playing around" — toggling scenarios, compositions, and
-settings back and forth, in the editor **and** in compare — hits routing
-only once per distinct input state. With stored variants gone (§1,
-decision 3), this cache is the designated home of every non-base,
-non-published result. Strictly a performance layer: invisible to the data
-model, never a source of truth, safe to flush at any time.
+*(Rewritten in WP18 B2b; the two-table compute cache under `proposals`
+this section used to specify is `family.members` now. Mechanics and
+rationale: `adapters/family/README.md`.)*
 
-**Fed by every compute path**: direct `POST /api/proposal/calc` calls and
-the ephemeral computes inside `POST /api/proposals/compare` (§7.3) go
-through the same compute function and the same cache — comparing warms the
-editor and vice versa.
+Two server-side, TTL-bounded (default 3 h) caches, both UNLOGGED, both
+strictly a performance layer — never a source of truth, safe to flush at
+any time, flushed by `scripts/refresh_proposals.py` on every version bump:
 
-**Cache identity of a computed result =
-`(route_fingerprint, scenario_id, composition_id)`.** The fingerprint alone
-is not sufficient: the same physical route under two scenarios (identical
-infrastructure in both) or two same-speed compositions hashes identically
-but evaluates differently, so scenario and composition stay in the triple.
+- **`family.documents`** — one serialised document per family key
+  (`models/family/key.py`: the resolved request, the sorted axes, both
+  model versions and the document's own shape version). A returning
+  client with the same stops and HOW gets the document back without a
+  build. `presented` is not in the key.
+- **`family.members`** — one `compute_member()` payload per resolved
+  request + measure set. Fills lazily with the members whose views someone
+  opened, and is what publish, compare's override sides and the refresh
+  paths read through.
 
-Because the fingerprint is only known **after** routing, the cache is two
-small maps:
+**Why two.** A family build never writes its 72 members into the member
+cache: the client reads every member's summary from the document and the
+views of one or two. Writing 72 × ~700 KB of views nobody asked for would
+cost more than the family itself.
 
-1. **Pointer map**: `request_hash → (fingerprint, scenario_id,
-   composition_id)` — written the first time a distinct resolved request
-   is computed; tiny rows. Request-*specific* response parts (the resolved
-   `request` echo, `suggested_stops` in suggest mode) belong on this side
-   / are assembled at response time — the shared result core must never
-   carry another request's echo, since publish reads it.
-2. **Result map**: `(fingerprint, scenario_id, composition_id) → route +
-   evaluation core` — the payload, stored **once per distinct result** no
-   matter how many requests converge on it (settings that do not change
-   the output, independent users planning the same route).
-
-Lookup: hash the resolved request → pointer hit → result fetch, zero
-compute. Pointer miss → compute → write both. Compare sides (§7.3) and
-publish (§2.2) resolve through the same two maps.
-
-**No version constants in the key.** With a TTL of hours, guarding keys
-against events that happen every few weeks is backwards: instead the cache
-is **flushed on every `ROUTE_BUILDER_VERSION`/`CALC_VERSION` bump** — an
-explicit first step of the version-bump procedure, natural home in the
-refresh script (§4.2). Base-scenario moves need no flush at all: the new
-base has a new `scenario_id`, so old entries never match again and age out
-via TTL.
-
-The compute response carries a `cache_hit: bool` meta field — directly
-assertable in tests and useful frontend telemetry.
-
-Key correctness: scenario rows are immutable snapshots (edits create new
-`scenario_id`s), so `scenario_id` is a sound key component. Assumption to
-verify in implementation: all parameter tables feeding evaluation are
-reachable through the scenario pin — anything that is not must join the
-key. Optional future extension: a route-stage cache keyed by the
-routing-relevant request subset, relevant only if evaluation-only inputs
-ever exist.
-
-**Storage**: shared across gunicorn workers, so not per-process memory. To
-avoid new infrastructure, two `UNLOGGED` PostgreSQL tables (pointer,
-result; created_at + TTL cleanup on write) are sufficient; a memory store
-(e.g. Redis) stays a drop-in upgrade if response sizes or traffic ever
-demand it.
-
-**Implementation** (agreed 2026-08-03)
-
-```sql
-CREATE UNLOGGED TABLE proposals.compute_cache_pointer (
-    request_hash       TEXT PRIMARY KEY,
-    route_fingerprint  TEXT NOT NULL,
-    scenario_id        INTEGER NOT NULL,
-    composition_id     TEXT NOT NULL,
-    resolved_request   JSON NOT NULL,   -- request echo, request-specific
-    suggested_stops    JSON,            -- suggest-mode only, request-specific
-    created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE UNLOGGED TABLE proposals.compute_cache_result (
-    route_fingerprint  TEXT NOT NULL,
-    scenario_id        INTEGER NOT NULL,
-    composition_id     TEXT NOT NULL,
-    payload            JSON NOT NULL,   -- route + evaluation core, shared
-    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (route_fingerprint, scenario_id, composition_id)
-);
-
-CREATE INDEX idx_cache_pointer_created ON proposals.compute_cache_pointer (created_at);
-CREATE INDEX idx_cache_result_created  ON proposals.compute_cache_result (created_at);
-```
-
-No FKs on either table — both key off value tuples
-(`route_fingerprint`/`scenario_id`/`composition_id`, `request_hash`), never
-off a `proposals.proposals` row, so the usual logged/unlogged FK
-restriction doesn't come up. The `created_at` indexes exist for the
-cleanup sweep below, not for lookups.
-
-**Read path** *(revised 2026-08-07)*. Canonicalize the resolved
-compute request (sorted keys, stable number formatting) → `request_hash`.
-Look up `compute_cache_pointer`, **TTL-filtered on both rows** — an
-expired-but-not-yet-swept row reads as a miss, never as a stale hit, so
-correctness never depends on the sweep having run (the sweep below is
-disk hygiene only). A hit additionally requires the stored payload's
-version constants to match the running `ROUTE_BUILDER_VERSION`/
-`CALC_VERSION` — defense in depth for a forgotten version-bump flush; a
-mismatch reads as a miss and the recompute overwrites the stale rows.
-- **miss** → run the compute pipeline, which yields `(fingerprint,
-  scenario_id, composition_id, payload)`
-- **hit** → fetch `compute_cache_result` by the pointer row's
-  `(route_fingerprint, scenario_id, composition_id)`; assemble the
-  response from that shared `payload` plus the pointer row's
-  request-specific `resolved_request`/`suggested_stops`; set
-  `cache_hit: true`
-
-**Write path** *(revised 2026-08-07 — upsert, not the original
-`DO NOTHING`)*, both writes after a successful compute, result before
-pointer:
-
-```sql
-INSERT INTO compute_cache_result (route_fingerprint, scenario_id, composition_id, payload)
-VALUES (...)
-ON CONFLICT (route_fingerprint, scenario_id, composition_id)
-DO UPDATE SET payload = EXCLUDED.payload, created_at = now();
-
-INSERT INTO compute_cache_pointer (request_hash, route_fingerprint, scenario_id, composition_id, resolved_request, suggested_stops)
-VALUES (...)
-ON CONFLICT (request_hash)
-DO UPDATE SET route_fingerprint = EXCLUDED.route_fingerprint, ...,
-              created_at = now();
-```
-
-The original draft said `DO NOTHING` on both; the read-side TTL filter
-above forced the revision: with `DO NOTHING`, an expired row would
-permanently block its own key — every recompute's write would no-op
-against it, so that request/result could never re-prime until a sweep
-happened to delete the corpse. `DO UPDATE` refreshing `created_at` fixes
-that and is equally race-safe under concurrent identical computes (last
-write wins with identical content). The design's essential property is
-preserved: **no refresh-on-READ** — a cache hit never touches
-`created_at` (no LRU semantics); only a write after a miss does. A hot
-result that ages past the TTL is simply recomputed and re-primed by the
-next miss, keeping the read path free of any read-then-update branching.
-
-**TTL cleanup — opportunistic, not a scheduled job.** Attached to the
-write path, run probabilistically on **1% of writes** (not every write, to
-avoid paying a `DELETE` scan per request), in the same transaction as the
-write:
-
-```sql
-DELETE FROM compute_cache_pointer WHERE created_at < now() - INTERVAL '3 hours';
-DELETE FROM compute_cache_result  WHERE created_at < now() - INTERVAL '3 hours';
-```
-
-TTL value (default 3 h) and the 1% sampling rate are both config constants,
-overridable via env for tests. No pg_cron, no external scheduler — the
-table self-bounds in size purely from ordinary traffic.
-
-**Flush on version bump.** No version constants in the cache key (see
-above), so a `ROUTE_BUILDER_VERSION`/`CALC_VERSION` bump just
-`TRUNCATE`s both tables as the first step of `refresh_proposals.py`
-(§4.2) — a full flush, not a TTL-aware partial one.
+**Locked decisions carried over:** TTL on read (an expired-but-unswept
+row is a miss, never a stale hit); upserts refresh `created_at`; a
+sampled sweep on the write path rather than a scheduler; the member
+cache's version guard compares the stored payload's versions to the
+running ones (defence in depth for a forgotten flush), the document
+cache's is in its key.
 
 ### 2.4 What this removes (vs. the persist-on-calc design)
 
@@ -414,51 +227,14 @@ above), so a `ROUTE_BUILDER_VERSION`/`CALC_VERSION` bump just
 
 ---
 
-### 2.5 Matrix compute — `POST /api/proposal/calc/matrix`
+### 2.5 Matrix compute — retired
 
-The same compute as §2.1, repeated over a grid: **every selected scenario ×
-every selected composition** for one route, delivered as typed records
-(`header`, `shared*`, `cell*`, `done`) so the frontend can show a
-comparative overview — subsidy per scenario, cost per composition —
-without knowing the axes and without 72 round trips. Record shapes and
-the request contract are in `api/README.md`; this section is the design.
-
-- **One compute path.** Every cell is a `compute_proposal()` call
-  (`api/helpers/proposal_compute.py`) with the matrix's HOW fields and the
-  cell's `composition_id`/`scenario_id`. It therefore lands in the §2.3
-  compute cache: a drill-down `/calc` on a cell is a `cache_hit`, a second
-  matrix over the same route is all hits, and a cell error carries exactly
-  the code `/calc` would answer (`classify_compute_error()`).
-- **Axes.** Default scenario axis = current base + every
-  `is_current_scenario` row, base first then by key (GET /api/scenarios'
-  order); superseded revisions only when named. Default composition axis =
-  the whole catalog in catalog order. Explicit lists keep the caller's
-  order. `CALC_MATRIX_MAX_CELLS` caps the grid.
-- **Baseline first.** The (base scenario, standard composition) cell runs
-  synchronously before the fan-out — first result fast, and the route
-  segment cache is warm before `CALC_MATRIX_WORKERS` threads live-route
-  the same legs. Needs WP14 (§ `adapters/db_pool.py`): every adapter
-  borrows a pooled connection per call, so the singletons are shared by
-  the worker threads without locks.
-- **Size.** `detail: "summary"` (default) carries the §5.4 summary block
-  per cell — nothing else. `detail: "full"` additionally carries the
-  route and the evaluation views, with geometry coordinate paths and the
-  three parameter blocks moved into content-addressed `shared` records
-  emitted once each, before the first cell that references them.
-- **Streaming.** With `Accept: application/x-ndjson` the records are
-  written as they are produced (gunicorn `gthread` keeps the heartbeat
-  independent of request duration; Flask-Compress never touches the
-  mimetype; Caddy streams anything without `Content-Length`). Errors after
-  the first byte cannot change the HTTP status, so request-level checks
-  (validation, axis resolution, cell cap, data loaded) all happen before
-  it. A client disconnect closes the generator: queued cells are dropped,
-  running ones finish and still warm the cache.
-- **Not in scope.** A third "price & regulatory measures" axis (VAT
-  exemption, energy-tax exemption, TAC at direct cost) is `docs/
-  PARKED_WORK.md` §3 — evaluation-only parameters that are not scenario
-  rows. A job/polling mode is the escape hatch if grids outgrow one
-  connection; the compute cache already stores every cell, so a job table
-  would be a list of request hashes.
+`POST /api/proposal/calc/matrix` (the scenario × composition grid,
+streamed as NDJSON or folded into a document) was the family's precursor
+and was removed with `/calc` in WP18 B2b. Everything it did the family
+does with one document and no per-cell recompute; the document shape it
+introduced (content-addressed shared blocks, cells keyed by axes) carried
+over as the family document's geometry pool and member list.
 
 ## 3. Identity model
 
@@ -1071,9 +847,10 @@ convenience.
   timestamps)
 
 Scenario/composition switching from a loaded proposal is a frontend concern:
-it takes the returned resolved `request`, changes the field, and calls
-`POST /api/proposal/calc` (cache-backed) — no stored variants exist to
-enumerate, so there is no variants section.
+it takes the returned resolved `request` (stops + HOW), posts it as a
+family (`POST /api/proposal/family`, document-cached) and switches inside
+the document — no stored variants exist to enumerate, so there is no
+variants section.
 
 ### 7.3 `POST /api/proposals/compare`
 
@@ -1207,10 +984,12 @@ function in a `before_request` hook, before `@require_auth` has set
 
 ### 7.6 Replaced endpoints
 
-`POST /api/route/plan` and `POST /api/evaluation/calc` are replaced by
-`POST /api/proposal/calc` + `POST /api/proposal/publish`. Removal, not
-deprecation — see `docs/FRONTEND_API_HANDOVER_2026-08-07.md`;
-`test_stub_endpoints_return_501` and the API README change accordingly.
+`POST /api/route/plan` and `POST /api/evaluation/calc` were replaced by
+`POST /api/proposal/calc` + `POST /api/proposal/publish` (WP5), and
+`/calc` together with `/calc/matrix` by `POST /api/proposal/family`
+(WP18 B2b). Removal, not deprecation, every time —
+`docs/FRONTEND_HANDOVER.md`; `test_no_stub_endpoints_remain` and the API
+README change accordingly.
 
 ### 7.7 `GET /api/proposals/stats` — descriptive statistics
 

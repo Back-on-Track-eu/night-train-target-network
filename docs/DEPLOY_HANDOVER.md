@@ -1111,6 +1111,59 @@ before B2b makes it the only compute path; I'll ask for that with B2b.
 
 ---
 
+## 16. WP18 phase B2b — backend 0.5.0: the family is the only compute path
+
+**Coupled deploy.** 0.5.0 removes `POST /api/proposal/calc` and
+`/calc/matrix`. A frontend built against 0.4.x cannot compute against it,
+so this backend goes to staging **together with** the frontend's phase C
+(`FRONTEND_HANDOVER.md` §16) and not before. Everything else — gallery,
+load, compare, publish, engagement — keeps working with either frontend.
+
+**Migration `2026-09-10_family_members.sql`.** Creates `family.members`
+(the member cache, one table) and **drops** `proposals.compute_cache_pointer`
+and `proposals.compute_cache_result`. Both are caches, so nothing is
+migrated across; the new table starts empty and fills on demand. Applies in
+milliseconds.
+
+**After the deploy, run the refresh** — this is the one that needs it:
+
+```bash
+docker compose run --rm migrate python scripts/refresh_proposals.py
+```
+
+Two reasons. Stored `evaluation_output` rows still carry a `models` key from
+before B2b (harmless — the reader ignores it — but the refresh rewrites
+them to `{views}` and keeps the column honest), and every proposal marked
+outdated by B1's ROUTE_BUILDER bump is still waiting for its recompute.
+The script flushes both family caches first; nothing else to truncate by
+hand any more.
+
+**Cache truncation on future bumps** is now exactly this:
+
+```sql
+TRUNCATE family.members, family.documents;
+```
+
+`proposals.compute_cache_*` no longer exist; `scripts/refresh_proposals.py`
+and `scripts/migrate_scenarios_2026.py` both know the new names.
+
+**No new environment variables.** `CALC_MATRIX_MAX_CELLS` and
+`CALC_MATRIX_WORKERS` are gone (ignored if still set); `FAMILY_MAX_MEMBERS`
+and `FAMILY_WORKERS` (§15) are the only knobs.
+
+**Capacity, for §7.** The family is now the cost of every compute: ≈1.5 s
+warm and ≈400 KB gzipped per new stop list, then document-cache hits
+(~110 ms) for every returning client; the views endpoint is ≈350 ms cold
+per member opened and a member-cache hit after. A soak on the VPS with a
+handful of concurrent family builds is worth doing before production —
+each borrows `FAMILY_WORKERS` pooled connections during its prewarm.
+
+**The `route_cache` note from §15 still stands** and matters more now:
+the family's prewarm routes both directions of a pair in order, so a cold
+family already produces what the warm one will.
+
+---
+
 ## Maintaining this document
 
 One file, updated in the same PR as the change it describes. The rule that

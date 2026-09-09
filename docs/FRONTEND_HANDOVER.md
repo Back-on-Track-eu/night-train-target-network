@@ -754,6 +754,83 @@ Additive: `FamilyRequest`, `FamilyDocument`, `FamilyMember` (ok | error),
 
 ---
 
+## 16. The cutover — `/calc` and `/calc/matrix` are gone (backend 0.5.0, WP18 B2b)
+
+This is the breaking one. Everything §15 described is now the only way to
+compute, and this section is what changes for a client that still speaks
+`/calc`. It goes to staging together with your phase C; until then a
+client built against 0.4.x cannot compute against 0.5.0.
+
+### 16.1 Removed
+
+- `POST /api/proposal/calc` → 404. `useProposalCalc` / `requestCalc` /
+  `recomputeWithSelection` post `POST /api/proposal/family` (§15.1) and
+  read the presented member from the document.
+- `POST /api/proposal/calc/matrix` → 404. `useCalcMatrix`,
+  `lib/calcMatrix.ts` (the NDJSON reader and the fold) and the `Matrix*`
+  types are dead code; the document IS the matrix.
+- `ProposalCalcResponse`, `MatrixDocument`, `MatrixCell`, and
+  `evaluation.models` / `evaluation.input` anywhere.
+
+### 16.2 What `evaluation` carries now — views only
+
+Everywhere a member appears — `GET …/views`, `GET /api/proposal/<id>`,
+the publish response, both sides of `POST /api/proposals/compare` —
+`evaluation` is `{ views }`. The models registry is `GET /api/models`
+(§13.2), the parameters a member was priced from are `GET /api/params/*`
+for its scenario. `lib/factorFeedback.ts` and anything reading
+`evaluation.input.parameters` for provenance move to those two.
+
+`GET /api/proposal/<id>` keeps the **full** route shape (not the compact
+one) — loading a stored proposal is unchanged apart from `evaluation`;
+the family POST you make next carries the compact route for switching.
+
+### 16.3 Errors are members, not responses
+
+`/calc` answered a failed compute with 422 (`gauge_mismatch`,
+`routing_error`, `domain_error`) or 503 (`routing_graph_not_configured`).
+The family answers **200** and the member says so:
+
+```ts
+{ status: 'error', error: 'gauge_mismatch', message: '…', conflicting_stops?: {...} }
+```
+
+`handleCalcError` becomes a check on the presented member's `status`; the
+codes and `conflicting_stops` are the same, so the stop-marking logic
+keeps working. Validation errors (a bad HOW field, an unknown axis id,
+`family_too_large`) are still 400. The views endpoint still answers
+422/503 with the same codes when a member fails there.
+
+### 16.4 Publish: `mode: "copy"`
+
+`"copy"` is `"new"` with `based_on_proposal_id` **required** — the
+"copy to my proposals" action on someone else's proposal. `compute_request`
+is the family document's `request` plus the presented member's
+`composition_id` (and `scenario_id`, which must still be the base). The
+response shape is unchanged apart from §16.2.
+
+### 16.5 `api.ts`
+
+- Remove: `ProposalCalcRequest`/`Response`, every `Matrix*` type,
+  `EvaluationModels`, `EvaluationInput`.
+- `EvaluationSection` → `{ views: EvaluationViews }`.
+- `PublishRequest.mode` → `'new' | 'overwrite' | 'copy'`.
+- `FamilyMember` is a union: `{ status: 'ok', route_ref, summary } |
+  { status: 'error', error, message, conflicting_stops? }`.
+
+### 16.6 Checklist for phase C
+
+1. `requestCalc` → family POST; presented member → zone A/B/D; compact
+   route through `adaptRoute()` (§15.2).
+2. Scenario/composition switches read the document; no request.
+3. Zone E → `GET …/views`, cached per family key on the client.
+4. `handleCalcError` → member status.
+5. Models and parameters → `GET /api/models`, `GET /api/params/*`.
+6. Delete `useCalcMatrix`, `lib/calcMatrix.ts`, the `Matrix*` types.
+7. `vite build`, not only `vue-tsc`.
+
+---
+
 ## Maintaining this document
 
 One file, updated in the same PR as the backend change. Each entry says

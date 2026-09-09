@@ -453,13 +453,13 @@ either right for its graph import or purged with it.
 ### `family`
 
 Layer L5 caches — everything derived from the pins. UNLOGGED, TTL on
-read, flushed by `scripts/refresh_proposals.py` on every version bump;
-a fresh database starts with it empty. `adapters/family/README.md`.
+read, both flushed by `scripts/refresh_proposals.py` on every version
+bump; a fresh database starts with them empty. `adapters/family/README.md`.
 
 | Table | Description |
 |---|---|
 | `documents` | One serialised family document per family key (`models/family/key.py`): every member of one stop list + HOW under the current pins, as `POST /api/proposal/family` returns it. The key folds both model versions in, so a bump never finds an old row again. |
-| *(B2b)* `members` | The member cache — today `proposals.compute_cache_pointer` / `compute_cache_result`, moving here as one table. |
+| `members` | The member cache — one `compute_member()` payload per resolved request + measure set, keyed by `canonical_request_hash()`. Read by the family's views endpoint, publish, compare and refresh; fills lazily with the members whose views someone opened. Replaced the two-table compute cache under `proposals` in WP18 B2b. |
 
 ### `proposals`
 
@@ -568,8 +568,6 @@ cutover. The sidecars are written/read by
 | `seasonal_schedules` | One row per `SeasonalSchedule` (`models/route/route.py`) — operating frequency (daily/three_per_week) per season on a route |
 | `update_log` | Append-only timeline event log (published/overwritten/recalculated/branched_from/branched_to) — preserves state transitions that `proposals.proposals` itself prunes on overwrite. Written by `publish()`/`refresh_proposal()` (`adapters/proposal/repository.py`), read as the third timeline source by `adapters/proposal/engagement_repository.py`. A NULL `user_id` marks a system event, which is what distinguishes a refresh from a user overwrite |
 | `proposal_summaries` | Derived projection over `proposals.proposals` for the gallery/map — route metrics, financial KPIs, placeholder demand KPIs, simplified PostGIS geometry, and `country_relations` (the sorted `"AA__BB"` keys of every country-to-country relation the proposal actually serves — derived from `od_pairs`, so a merely transited country contributes nothing; ranked by `GET /api/proposals/stats` against `input_params.country_relations`). Not a source of truth; rebuildable at any time. Row-building logic: `adapters/proposal/projection.py`'s `build_summary_row()` (WP4, `tests/test_37_proposal_projection.py`); upserted by `publish()`, one row per proposal |
-| `compute_cache_pointer` | Compute cache, pointer side — `request_hash` → which result it resolves to, plus request-specific response parts. `UNLOGGED`. Still unpopulated — lands with WP13 |
-| `compute_cache_result` | Compute cache, result side — `(route_fingerprint, scenario_id, composition_id)` → the shared route + evaluation payload, stored once per distinct result. `UNLOGGED`. Still unpopulated — lands with WP13 |
 
 Segments/od_pairs/timetable_warnings key off `trip_id`; parkings/shuntings/
 seasonal_schedules key off `route_id` — matching where each field lives on

@@ -30,9 +30,7 @@ its own example files.
 - [Health](#health)
 - [Auth](#auth)
 - [Input Parameters](#input-parameters)
-- [Proposal Compute (merged)](#proposal-compute) — route + evaluation in one call, stateless
-  - [`POST /api/proposal/calc`](#proposal-calc) — plan a route and evaluate it
-  - [`POST /api/proposal/calc/matrix`](#proposal-calc-matrix) — the same route under every scenario × composition, streamed
+- [Proposal Compute (merged)](#proposal-compute) — retired in WP18 B2b; see the family
 - [Proposal Family](#proposal-family) — every scenario variant × composition of one stop list, one document
   - [`POST /api/proposal/family`](#proposal-family) — build or load the family
   - [`GET /api/proposal/family/<key>`](#proposal-family) — the document again
@@ -108,7 +106,7 @@ Dual-plane model, normalized to one trust ladder
 
 Endpoint protection: decorators in `api/auth_middleware.py`
 (`@require_auth`, `@optional_auth`, `@require_trust(level)`).
-`POST /api/proposal/calc` runs **no** auth decorator at all — it never
+`POST /api/proposal/family` runs **no** auth decorator at all — it never
 persists anything, so there is no bearer identity to branch on and an
 `Authorization` header has no effect. `POST /api/proposal/publish` (the
 only write path — [below](#proposal-publish)) runs `@require_auth` at the
@@ -307,615 +305,24 @@ database is documented in [`../db/README.md`](../db/README.md).
 
 <a id="proposal-compute"></a>
 
-## Proposal Compute (merged)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/proposal/calc` | Plan a route **and** evaluate it in one call — stateless, no persistence |
-| `POST` | `/api/proposal/calc/matrix` | The same route under every selected scenario × composition — one JSON document or an NDJSON stream of cells |
-
-<a id="proposal-calc"></a>
-
-### `POST /api/proposal/calc`
-
-The merged compute endpoint (`adapters/proposal/README.md` §2.1). One
-request → route + evaluation, one response, no side effects: it never
-writes to the database and never touches `admin.users` identity, so
-there is no `proposal` block in the response and no auth header has any
-effect. This is the sole route-planning-and-costing entry point —
-the former two-call `POST /api/route/plan` + `POST /api/evaluation/calc`
-pair was removed in the 2026-08-03 cutover.
-
-To persist a computed result as a proposal, take this endpoint's
-`request` block unchanged and post it as `compute_request` to
-[`POST /api/proposal/publish`](#proposal-publish) below — the server
-recomputes it itself rather than trusting anything client-supplied
-(§2.2's integrity rule).
-
-How the route builder pipeline works internally (routing, timetabling,
-auto-stop addition, mode switches) is documented in
-[`../models/README.md`](../models/README.md); the evaluation model, cost
-allocation rules, and view semantics in
-[`../models/evaluation/README.md`](../models/evaluation/README.md).
-
-Worked example — Berlin – Dresden – Wien (the fixture predates route
-builder 0.9.34 and was captured under the removed `"add"` mode, so its
-route carries stops the builder chose; the response SHAPE is current):
-request [`tc_1_route_input.json`](../scripts/data/tc_1_route_input.json),
-full response [`tc_1_route_input_output.json`](../scripts/data/tc_1_route_input_output.json)
-(produced by [`../scripts/test_proposal_calc.py`](../scripts/test_proposal_calc.py),
-which also prints/validates the evaluation block and writes a QGIS-ready
-`tc_1_route_input_lines.geojson` + `tc_1_route_input_stops.geojson` pair
-alongside it — stops carry `auto_added` so caller-supplied vs. auto-added
-stops can be styled differently). A `"suggest"`-mode request lives alongside it as
-[`tc_2_route_input_suggest.json`](../scripts/data/tc_2_route_input_suggest.json),
-which additionally produces a `tc_2_route_input_suggest_suggested_stops.geojson`
-layer of candidate stops tagged with `added_time_min`.
-
-<details>
-<summary>Request &amp; response details</summary>
-
-**Request body**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `stops` | array of string | ✓ | Ordered list of stop IDs, min 2 — plain strings, e.g. `["osm:n3856100103", "osm:w423692233"]`. No per-stop type or time; both are derived automatically, see `timetable_mode` |
-| `composition_id` | string | ✓ | From `/api/params/compositions` |
-| `scenario_id` | int | — | Pins which version of every parameter table to use. Omit for the current live base scenario |
-| `routing_mode` | string | — | Default `"fullRouting"` — see **Mode switches** below |
-| `timetable_mode` | string | — | Default `"simpleAutomatic"` — see **Mode switches** below |
-| `fixed_night_interval` | array of string | (✓) | Exactly 2 distinct stop IDs from `stops`, start before end in outbound travel order — required for, and only allowed with, `timetable_mode="simpleAutomaticWithFixedNight"` (400 otherwise). May span several legs; applied reversed to the return trip automatically |
-| `schedule_mode` | string | — | Default `"alwaysDaily"` — see **Mode switches** below |
-| `auto_stop_addition` | string | — | `"off"` / `"suggest"`, default `"off"` — see **Mode switches** below. String enum since route builder 0.9.5; booleans are rejected with 400. `"add"` was removed in 0.9.34 and is now rejected with 400 like any unknown mode |
-| `expert_timetable` | object | — | Manual departure + per-leg minutes (route builder 0.9.32) — see **Expert timetable** below. Omit or send `null` for the fully automatic timetable, which is what every request produced before this field existed |
-
-There is deliberately no `proposal_id`/`proposal_version` field — those
-are publish-only concerns (`POST /api/proposal/publish`) that have no
-meaning for a call that never persists.
-
-**Example request**
-```json
-{
-  "scenario_id": null,
-  "stops": ["osm:n3856100103", "osm:n25397500", "osm:w423692233"],
-  "composition_id": "STD-7.1",
-  "routing_mode": "fullRouting",
-  "timetable_mode": "simpleAutomatic",
-  "schedule_mode": "alwaysDaily",
-  "auto_stop_addition": "off"
-}
-```
-
-**Mode switches**
-
-`routing_mode` — controls how much routing complexity is applied:
-
-| Value | Description |
-|---|---|
-| `"fullRouting"` (default) | Speed capped at the composition's `max_speed_kmh` everywhere, plus HSR avoidance: track segments whose *permitted* track speed exceeds `HSR_TRACK_SPEED_THRESHOLD_KMH` (strictly above 230 km/h — i.e. dedicated new-build high-speed lines only, upgraded conventional lines up to 230 stay usable; see `models/route/model.py`) are heavily penalized in every country where HSR is not allowed — allowed only when BOTH the composition's `hsr_allowed` AND that country's track-infrastructure `hsr_allowed` are true, evaluated for every country incl. transited-without-stop ones. Conventional lines are never penalized. Every leg additionally carries a per-stop traction-dynamics surcharge — the accel/brake time loss computed from composition weight plus an assumed standard locomotive against the link speeds before/after each stop (see `TRACTION_*` in `models/route/model.py`) — in its own `dynamics_time_min` field, kept separate from the raw router `driving_time_min`; `buffer_time_min` carries the country quota applied to driving and to dynamics (physics first, buffer after). Two-pass routing (snap pass, then custom-model pass). |
-| `"simpleRouting"` | Drops HSR avoidance and traction dynamics, and routes in a single pass. The composition speed cap still applies, as do the two rules that ride on every request in every mode: the Belarus/Russia exclusion (`BLOCKED_COUNTRIES`) and the electrification preference below. Cheap and fast, but not representative of real physics — intended for quick manual sanity checks only. |
-
-Applied in **both** modes, and in the ONTD map-line geometry projection: track that OSM tags `electrified=no` is penalized by `NON_ELECTRIFIED_PRIORITY_FACTOR` (route builder 0.9.31, a 10× priority penalty — a preference, not a veto). Track with no `electrified` tag at all is never penalized: unknown is not treated as forbidden. The rule is unconditional because every catalog locomotive is electric and the energy model prices catenary electricity on every kilometre; it becomes composition-dependent if a diesel locomotive is ever added.
-
-`timetable_mode` — controls how departure time and per-stop classification are derived. Classification is the same three-way rule for every mode (route builder 0.9.10, thresholds `NIGHT_START_MIN`/`NIGHT_END_MIN` in `models/route/version.py`): a stop **departing strictly before 00:00** is `boarding`, one **arriving at/after 05:00** is `alighting`, anything between is a `night` stop (operationally identical to `both` for dwell, but excluded from demand OD pairs). First stop is always boarding and last always alighting regardless of clock time — termini by position, not by the threshold rule. Outbound and return are scheduled independently, so their times can differ (e.g. asymmetric HSR avoidance changes duration).
-
-| Value | Description |
-|---|---|
-| `"simpleAutomatic"` (default) | Routes once, then mirrors the resulting trip duration around a fixed 02:30 constant (`MIRROR_MIN`) to get the departure time. |
-| `"simpleAutomaticWithFixedNight"` | Requires `fixed_night_interval` `[A, B]`. Instead of the whole trip, the **interval's** midpoint (departure at `A` → arrival at `B`) is centered on 02:30 — so demand-strong feeder sections outside the interval keep sensible evening/morning clock times (e.g. Munich–Berlin–Hamburg as an evening feeder into a Hamburg–Copenhagen night section). Hard constraints: the interval must depart `A` by 23:59 and arrive at `B` at 05:00 or later. A naturally shorter interval (< 5h01) is stretched to exactly that window by distributing `slack_time_min` across the interval's segments proportionally to leg time (pinning dep 23:59 / arr 05:00 in the minimal-stretch case — minimal stretch wins over exact midpoint symmetry). If stretching drops the interval's timetable speed below `FIXED_NIGHT_MIN_SPEED_RATIO` (0.7) of its routing speed, the trip carries a `fixed_night_stretch_slow` entry in `general_parameters.timetable_warnings` — a warning, never an error. The return trip applies the interval reversed automatically. |
-
-**Expert timetable** (route builder 0.9.32)
-
-`expert_timetable` overrides, by hand, the two things the timetable
-strategies otherwise decide alone. It is not a `timetable_mode`: it
-composes with whichever mode runs, and an absent block leaves every
-result byte-identical to what it was before the field existed.
-
-```json
-"expert_timetable": {
-  "outbound": {
-    "departure": { "mode": "absolute", "time_min": 1290 },
-    "segment_addons": [
-      { "from_stop_id": "osm:n3856100103", "to_stop_id": "osm:n25397500", "add_min": 8 }
-    ]
-  },
-  "return": { "mirror_outbound": true }
-}
-```
-
-| Field | Rules |
-|---|---|
-| `departure.mode` | `"absolute"` — the direction departs at exactly `time_min`, whatever the strategy computed, and keeps that time through a later reroute. `"shift"` — the strategy's own departure displaced by `shift_min` (signed), which therefore *moves* when a reroute changes the trip's duration and the mirror around 02:30 re-centres. Which one applies is the caller's choice per route |
-| `departure.time_min` / `shift_min` | Integer minutes on the service-day scale (`models/utils.py::hhmm_to_min`), not wall clock: 21:30 on day 1 is `1290`, and a mirrored return trip may legitimately carry a negative absolute value. Bounds: `EXPERT_DEPARTURE_MIN_TIME`/`MAX_TIME` and `EXPERT_MAX_DEPARTURE_SHIFT_MIN` (`api/config.py`) |
-| `segment_addons[]` | Extra minutes on one leg, keyed by the **ordered stop pair** rather than a leg index. `add_min` is an integer ≥ 1 (and ≤ `EXPERT_MAX_ADDON_MIN`): an add-on can only ever slow a leg down — the routed physics stay the floor. The pair must be **adjacent, in that order, in `stops`** (400 otherwise), pairs may not repeat, and a direction may carry at most `EXPERT_MAX_ADDONS` of them |
-| `return` | Omitted or `{"mirror_outbound": true}` (the default) applies outbound's add-ons to the return with each pair reversed — the same convention `fixed_night_interval` already follows. A departure is **never** mirrored: the return has its own timetable. Send a full block instead (`departure` and/or `segment_addons`) for an asymmetric timetable; the two spellings are mutually exclusive |
-
-What the overrides do to the rest of the model:
-
-- Add-ons are resolved against the **final** stop list, i.e. after
-  `auto_stop_addition`. An add-on whose pair that step split (a stop
-  inserted between the two) is **dropped**, never redistributed over the
-  legs that replaced it — the surviving minutes are visible per leg as
-  `segments[].addon_time_min`, so a client can reconcile its own list
-  against the route it gets back.
-- They are counted by the timetable strategy, not added afterwards: a
-  padded trip stays centred on 02:30, and add-ons inside a fixed-night
-  interval reduce the `slack_time_min` that mode has to stretch it by.
-- An overridden departure **re-runs stop classification**: a trip shifted
-  two hours later has different `boarding`/`night`/`alighting` stops, and
-  therefore different dwell. It can also move a
-  `simpleAutomaticWithFixedNight` trip out of the night window that mode
-  guarantees — permitted, and not currently flagged (see
-  `OPEN_TODOS["expert_night_window_warning"]`).
-- **Costs move**, correctly: track-access night/peak bands and the
-  electricity night band are placed on the clock from stop times, so
-  padding a leg or shifting a departure moves those windows.
-
-The block is echoed back in the resolved `request` in canonical form
-(add-ons sorted, an empty direction as `null`, a mirroring return always
-spelled out), and stored verbatim as part of `compute_request` on publish.
-`POST /api/proposals/compare` accepts it as a side override, so a stored
-expert timetable can be compared against the same route computed with
-`"expert_timetable": null`.
-
-`schedule_mode` — controls the route's seasonal operating frequency:
-
-| Value | Description |
-|---|---|
-| `"alwaysDaily"` (default, only value) | Daily frequency in both seasons, regardless of actual demand. Reserved: a future demand-aware strategy can be added without changing this request shape. |
-
-`auto_stop_addition` — whether to propose additional stops along the routed path:
-
-| Value | Description |
-|---|---|
-| `"off"` (default) | Returns exactly the caller's own stop list, unmodified — no candidate search at all. |
-| `"suggest"` | Routes exactly like `"off"` (nothing added, nothing rerouted), but runs the candidate search + costing and returns every costed candidate in a top-level `suggested_stops` list, placed between `request` and `route` in the response (see **Response** below) — each with the `added_time_min` the stop would cost if implemented. The detour budget is deliberately **not** applied: suggestion is informational, selection is the caller's. Present even when empty (a real "searched, found nothing" answer). |
-
-`"add"` — the builder picking stops itself within the detour budget — was
-**removed in route builder 0.9.34** and is now rejected with 400 like any
-unknown mode. A route the user did not ask for is not the user's route:
-`"suggest"` offers the same candidates, costed, and an accepted one becomes
-an ordinary posted stop. Stops therefore always come back with
-`auto_added: false`; the field stays because routes published while `"add"`
-existed are stored with it (`proposals.stop_times.auto_added`) and must keep
-reading back as they were built.
-
-For `"suggest"`: the candidate search prefilters the stop catalog to
-countries the routed legs actually pass through (attribution the router
-already computed), buffer distance and max detour % are fixed constants in
-`models/route/model.py` (`AUTO_STOP_BUFFER_M`, `AUTO_STOP_MAX_DETOUR_PER`),
-not request fields, and the search runs once per `TripPair`, against the
-outbound direction — both directions cover the same corridor reversed, so a
-second pass would spend the same router calls for a near-identical answer.
-Each direction still gets its own real routed physics.
-
-**Response**
-
-```json
-{
-  "route_builder_version": "0.9.13",
-  "calc_version": "0.9.11",
-  "route_fingerprint": "sha256:3f9a1c...",
-  "cache_hit": false,            // true when served from the compute cache (§2.3)
-  "request": {
-    "stops": ["osm:n3856100103", "osm:n25397500", "osm:w423692233"],
-    "composition_id": "NEW-BAL-7",
-    "scenario_id": 1,
-    "timetable_mode": "simpleAutomatic",
-    "fixed_night_interval": null,
-    "schedule_mode": "alwaysDaily",
-    "auto_stop_addition": "off",
-    "expert_timetable": null
-  },
-  "suggested_stops": [
-    { "...": "ONLY for auto_stop_addition=\"suggest\" — see above; absent for \"off\"" }
-  ],
-  "summary": {
-    "total_distance_km": 683.4, "total_time_h": 9.0, "avg_speed_kmh": 76.0,
-    "n_stops": 3, "countries": ["AT", "DE"], "stop_ids": ["osm:n3856100103", "..."],
-    "cost_eur_per_train_km": 12.4, "revenue_eur_per_train_km": 14.1,
-    "margin_eur_per_train_km": 1.7, "subsidy_eur_per_year": 0.0,
-    "demand_trips_per_year": 4200, "demand_trip_km_per_year": 2870000,
-    "shift_air_trips_per_year": 1470, "shift_air_trip_km_per_year": 1004000,
-    "shift_car_trips_per_year": 840, "shift_car_trip_km_per_year": 574000,
-    "co2_savings_t_per_year": 210.4, "subsidy_eur_per_t_co2": null,
-    "demand_kpis_placeholder": true, "co2_g_per_pax_km": 33.0
-  },
-  "route": {
-    "route_id": "R1",
-    "scenario_id": 1,
-    "schedule": {
-      "seasonal_schedules": [
-        { "season": "summer", "frequency": "daily" },
-        { "season": "winter", "frequency": "daily" }
-      ]
-    },
-    "trip_pairs": [
-      {
-        "composition_id": "STD-7.1",
-        "composition": { "...": "physics-relevant Composition fields, see below" },
-        "od_pairs": [ { "...": "populated automatically by the stopgap demand model, see below" } ],
-        "outbound": {
-          "trip_id": "R1_D0_T1",
-          "direction": 0,
-          "general_parameters": { "trip_km": 353.2, "route_duration_min": 267, "average_speed_kmh": 79.4, "timetable_warnings": [] },
-          "segments": [ "...Segment, see below..." ]
-        },
-        "return_trip": {
-          "trip_id": "R1_D1_T1",
-          "direction": 1,
-          "general_parameters": { "trip_km": 353.2, "route_duration_min": 271, "average_speed_kmh": 78.2, "timetable_warnings": [] },
-          "segments": [ "..." ]
-        }
-      }
-    ],
-    "parkings": [
-      { "stop_id": "...", "stop_name": "...", "country_code": "...", "trip_ids": ["..."], "hours": 14.0 }
-    ],
-    "shuntings": [
-      { "stop_id": "...", "stop_name": "...", "country_code": "...", "trip_id": "..." }
-    ],
-
-    "track_infrastructure": [
-      { "...": "one entry per country the route actually touches, see below" }
-    ],
-    "geometries": [
-      { "id": "R1_D0_T1_L0", "coords": [[13.366, 52.523, "..."]] }
-    ]
-  },
-  "evaluation": {
-    "models": { "...": "static model documentation — see below" },
-    "input": { "parameters": { "...": "every track/stop/composition parameter actually used — see below" } },
-    "views": { "...": "cost/revenue breakdown, six views — see below" }
-  }
-}
-```
-
-`od_pairs` comes back populated: `plan_route()` itself leaves it empty
-(demand is not part of planning), but the endpoint then runs a stopgap
-demand distribution (`distribute_demand()`, flat utilization and per-km
-fares — see `OPEN_TODOS["demand_model"]` in `models/route/version.py`) so
-that `evaluation` carries non-zero revenue. There is no way to supply
-custom demand through this endpoint — it always builds fresh from
-`stops`/`composition_id` and runs the stopgap model internally. `route_id`/`trip_id`
-carry no `P{proposal_id}_V{version}_` prefix here — see point 2 below.
-
-Five things worth calling out explicitly (`adapters/proposal/README.md` §2.1):
-
-1. **`request` is resolved, not echoed raw** — every optional field is
-   present with its default applied and `scenario_id` is always a
-   concrete int, so an omitted field and an explicitly-posted default
-   compare equal. This is exactly the shape `compute_request` expects on
-   [`POST /api/proposal/publish`](#proposal-publish).
-2. **IDs are neutral** — `route_id`/`trip_id`/`geometry_id` (and the
-   evaluation views' dict keys that reuse `trip_id`, e.g.
-   `views.per_trip_pair.data`) carry no `P{id}_V{version}_` prefix here;
-   `route_id` is simply `"R1"`. Prefixed IDs only exist on published
-   proposals — publish assigns them (`P{proposal_id}_V{proposal_version}_R1`).
-3. **No duplicate route** — `evaluation.input` has no `route` key. The
-   route already appears once, as a sibling of `evaluation`.
-4. **`route_fingerprint` and `cache_hit`** — `route_fingerprint` (§3.1) is
-   a SHA-256 over the route's resolved stops/times/geometry, computed by
-   `adapters/proposal/projection.py`; it agrees between ephemeral and
-   published forms of the identical route by construction (the canonical
-   extract never reads `route_id`/`trip_id`/`geometry_id`). `cache_hit`
-   is `true` when the response was served from the §2.3 compute cache
-   (WP13): identical resolved requests within the cache TTL (default
-   3 h) skip routing and evaluation entirely and return the byte-
-   identical stored result. The cache is invisible otherwise — a hit and
-   the compute it replays differ in no other field. Every compute path
-   shares it (`/calc`, both compare sides, publish, the on-load refresh),
-   so e.g. comparing warms the editor and vice versa.
-5. **`summary` is the gallery row's KPI set** (WP10 step 5) — built by
-   the exact same `models/evaluation/summary.py: build_summary_row()`
-   the publish projection uses, so everything a `source: "proposal"`
-   gallery row shows is retrievable straight from this response. The two
-   shapes are deliberately non-identical in one respect: `summary` here
-   carries **no `geom_simplified`** (this response already has full
-   per-segment geometry under `route.geometries`; the gallery row needs
-   the simplified copy precisely because it has no segments) and none of
-   the DB-side identity/engagement fields (`proposal_id`, `name`,
-   `likes_count`, `comments_count`, timestamps).
-
-**Errors:** `400 bad_request` / `400 validation_error` (see
-[Error responses](#error-responses)), `422 domain_error` (route or
-evaluation domain failure — e.g. a route through a country with **no
-row at all** in `track_infrastructures`), `500 calc_error` (unexpected
-pipeline failure).
-
-**`outbound`/`return_trip`.`general_parameters`** — headline physics
-stats for that trip, for quick manual reading rather than deriving them from
-`segments[]` yourself, plus derived timetable quality warnings:
-
-| Field | Type | Description |
-|---|---|---|
-| `trip_km` | float | Total trip distance for that direction, km (`distance_m` summed across segments, /1000, 1 decimal) |
-| `route_duration_min` | int | Full elapsed time, departure → arrival — driving + dynamics + buffer + slack + addon + dwell at intermediate stops (`Trip.total_time_min`) |
-| `average_speed_kmh` | float | `trip_km` ÷ (`route_duration_min` / 60), 1 decimal. Uses elapsed time, not pure driving time |
-| `manual_addon_min` | int | Expert-mode minutes across the whole direction — `segments[].addon_time_min` summed (route builder 0.9.32). 0 for every automatic timetable |
-| `timetable_warnings` | array | Derived timetable quality annotations — `[]` for most trips. Currently only `fixed_night_stretch_slow` (fixed-night mode, interval stretched too slow): `{code, interval: [start_id, end_id], timetable_speed_kmh, routing_speed_kmh, ratio}` with `ratio` = timetable ÷ routing speed, below `FIXED_NIGHT_MIN_SPEED_RATIO` |
-
-**`route.trip_pairs[].composition`** — physics-relevant subset of the composition
-used, not the full object (cost fields like `driver_costs_eur_h` are deliberately
-excluded — see the `evaluation` block below for those):
-
-| Field | Description |
-|---|---|
-| `composition_id`, `description`, `operator_id` | Identity (renamed from `comp_id`/`comp_description` 2026-08-07 — one wire name across the whole API; the enclosing `trip_pairs[]` entry already keys this object by `composition_id`) |
-| `max_speed_kmh`, `hsr_allowed` | Routing inputs |
-| `min_boarding_time_min`, `min_alighting_time_min` | Dwell time inputs |
-| `energy_factor_weight`, `energy_factor_speed`, `energy_factor_terrain` | Energy model inputs |
-| `total_weight_t`, `total_crew` | Physical properties |
-| `places_by_class` | Capacity, keyed by class_main |
-| `density_by_class_main_length`, `density_by_class_main_weight` | Derived densities (m and t per place) from real section geometry |
-| `total_length_m` | Composition length (m) |
-
-**`segments[]`** (on `outbound`/`return_trip`) — one entry per leg between two consecutive stops:
-
-| Field | Type | Description |
-|---|---|---|
-| `from_stop`, `to_stop` | object | `Stop`, see below |
-| `geometry_id` | string | References an entry in `route.geometries` — see below |
-| `distance_m` | int | Leg distance |
-| `driving_time_min`, `dynamics_time_min`, `buffer_time_min` | int | Leg duration components: raw router time (constant-cruise passage), per-stop accel/brake time loss (traction dynamics), and schedule buffer — the country quota applied to driving and to dynamics (the dynamics cruise speed is always derived from raw driving time first, buffer never feeds the physics) |
-| `slack_time_min` | int | Deliberate schedule padding beyond routing physics — non-zero only on legs inside a stretched fixed-night interval (see `timetable_mode`) |
-| `addon_time_min` | int | Manual minutes the caller put on this leg in expert mode (`expert_timetable.segment_addons`, route builder 0.9.32) — separate from `slack_time_min` because the author differs: slack is the model stretching an interval, this is a person. Never negative; 0 for every automatic timetable. Total leg time = driving + dynamics + buffer + slack + addon, and stop-to-stop elapsed times always match that sum |
-| `energy_kwh` | float | Currently a flat 28.0 kWh/km dummy factor — not calibrated yet. How much it *costs* is calibrated: the price side splits this between the country's day and night electricity rate by clock time and adds the catenary charge where one is levied |
-| `country_distance_shares`, `country_time_shares` | object | `{country_code: share}`, each sums to 1.0. Includes transit-only countries the leg crosses without stopping |
-
-**`Stop`** (embedded in every `from_stop`/`to_stop`):
-
-| Field | Type | Description |
-|---|---|---|
-| `stop_id`, `stop_name`, `country_code`, `lat`, `lon` | | Identity/location |
-| `stop_type` | string | `"boarding"`, `"night"`, `"alighting"`, or `"both"` — see `timetable_mode` above. `night`: departs at/after 00:00 and arrives before 05:00; dwells like `both`, excluded from demand OD pairs |
-| `arrival_time_min` | int or null | `null` only at the first stop of a trip |
-| `departure_time_min` | int or null | `null` only at the last stop of a trip |
-| `auto_added` | bool | `true` if `auto_stop_addition` inserted this stop — always `false` for stops the caller supplied directly |
-
-**`route.track_infrastructure[]`** — one entry per country the route's stops
-and transited legs actually touch (not every country in the DB), physics-relevant
-subset of `TrackInfrastructure` (cost fields like `tac_eur_train_km` excluded):
-
-| Field | Type | Description |
-|---|---|---|
-| `country_code` | string | |
-| `defaulted_fields` | array of string | Which of the fields below came from the EU-average default rather than this country's own seeded data. Empty if all real. A route through a country with **no row at all** in `track_infrastructures` is rejected outright with a `422 domain_error` — see [Error responses](#error-responses) — so `defaulted_fields` only ever reflects individual missing columns on an existing row, never a whole missing country |
-| `hsr_allowed` | bool | |
-| `min_boarding_time_min`, `min_alighting_time_min` | int | |
-| `terrain_score`, `terrain_category` | float, string | |
-| `buffer_quota_per` | float | |
-
-**`route.geometries[]`** — every segment's full coordinate polyline, pulled out of
-`segments[]` into one flat list rather than embedded inline (same total data,
-easier to scan the rest of the route without wading through coordinate arrays):
-
-| Field | Type | Description |
-|---|---|---|
-| `id` | string | Matches a `segments[].geometry_id` |
-| `coords` | array | `[[lon, lat], ...]` |
-
-**`evaluation.models`** — version + description + formula registry for
-every model that contributed:
-
-```json
-{
-  "route_builder": {"version": "...", "description": "...", "formulas": {"...": "..."}},
-  "energy":         {"version": "...", "description": "...", "formulas": {"...": "..."}},
-  "evaluation":      {"version": "...", "description": "...", "formulas": {"...": "..."}},
-  "emissions":       {"version": "...", "description": "...", "factors": {
-    "night_train": {"g_per_pax_km": 33.0,  "source": "..."},
-    "air":          {"g_per_pax_km": 160.0, "source": "..."},
-    "car":          {"g_per_pax_km": 143.0, "source": "..."}
-  }}
-}
-```
-
-The `emissions` entry carries `factors` instead of `formulas` — the
-model is a set of sourced per-mode constants (`models/emissions`,
-decision 24), not calculation steps. These are the reference values the
-frontend renders next to a proposal's night-train `co2_g_per_pax_km`.
-
-**`evaluation.views`** — six views, each `{description, normalisations,
-data}`:
-
-```json
-{
-  "route":                     {"description": "...", "normalisations": {"...": "..."}, "data": { "<normalised breakdown>": "see below" }},
-  "per_trip_pair":              {"description": "...", "normalisations": {"...": "..."}, "data": {"<pair_key>": {"filter": {"...": "..."}, "values": { "<normalised breakdown>": "see below" }}, "all": { "...": "..." }}},
-  "per_trip_pair_per_country":  {"description": "...", "normalisations": {"...": "..."}, "data": {"<pair_key>": {"<country_code>": {"filter": {"...": "..."}, "values": {"...": "..."}}}, "all": { "...": "..." }}},
-  "per_trip_pair_per_od":       {"description": "...", "normalisations": {"...": "..."}, "data": {"<pair_key>": {"<od_key>": {"filter": {"...": "..."}, "values": {"...": "..."}}}, "all": { "...": "..." }}},
-  "per_trip_pair_per_section":  {"description": "...", "normalisations": {"...": "..."}, "data": {"<pair_key>": {"<section_key>": {"filter": {"...": "..."}, "values": {"...": "..."}}}, "all": { "...": "..." }}},
-  "per_trip_per_stop":          {"description": "...", "normalisations": {"...": "..."}, "data": {"<trip_id>": {"<stop_id>": {"filter": {"...": "..."}, "values": {"...": "..."}}}, "all": { "...": "..." }}}
-}
-```
-
-`views.route.data` holds the normalised breakdown directly (no filter
-dimension — it's the whole-route aggregate); the other five views nest a
-`{filter, values}` pair per key, where `values` holds the same normalised
-breakdown shape, plus an `"all"` entry aggregating across that view's
-dimension. `od_key` format: `"{origin_stop_id}__{destination_stop_id}__{class_main}"`.
-
-**`filter` values.** One entry per drill dimension. Proper-noun dimensions are
-ready-to-display strings: `trip_pair` (`"Berlin ↔ Wien"`), `stop` (a stop
-name), `country` (an ISO code — the frontend resolves the localised name),
-`class_main` (a class code). The dimensions carrying a translatable token are
-sent **structured** so the client composes and localises them itself, rather
-than the backend baking English words into the string:
-
-- `trip` → `{"origin", "destination", "direction"}`, `direction ∈ {"outbound", "return"}` → client renders `"origin → destination (localised direction)"`
-- `od_pair` / `section` → `{"origin", "destination", "class_main"}` (`class_main` may be `"all"`) → client renders `"origin → destination (localised class)"`
-
-Every dimension still sends the literal string `"all"` for its wildcard cell.
-
-Each cell contains the same breakdown under five **normalisations** (not to be confused with the six *views* above — a view selects *what scope* the money belongs to, a normalisation selects *what unit* it is expressed in). All per-unit denominators are annual, matching the €/year leaves; route-section cells divide by the section's own annual physics:
-
-| Key | Unit | Description |
-|-----|------|-------------|
-| `per_year` | €/year | Annual totals |
-| `per_operating_day` | €/operating-day | Per day the service runs |
-| `per_train_km` | €/train-km | Per annual train-km (cycle distance × operating days; a section's own distance for section cells) |
-| `per_available_place_km` | €/available-place-km | Per capacity × distance |
-| `per_sold_place_km` | €/sold-place-km | Each class's allocated cost ÷ its OWN sold place-km — 50% occupancy doubles the per-sold cost; classes without sales omitted |
-
-**Every normalisation above is itself class-keyed** (CALC 0.9.9): each of
-the five keys maps to `{"all": <breakdown>, <class_main>: <breakdown>, ...}`,
-not a bare breakdown — `"all"` is the whole-cell aggregate, read it for a
-total; each `class_main` key is that class's own share. For `per_year`/
-`per_operating_day`/`per_train_km` the class cells sum back to `"all"`
-exactly (the divisor is class-independent); for the two place-km
-normalisations they don't (each divides by that class's own place-km).
-So the actual bottom line for a route is
-`evaluation.views.route.data.per_year.all.net_eur`, not
-`...data.per_year.net_eur` — there is no bare-breakdown form at any level.
-(There used to be a separate `by_class_main` normalisation key; it was
-retired as redundant with `per_year`'s own class cells.)
-
-Each `class_main` key (including `"all"`) under a normalisation holds this
-nested cost/revenue/margin breakdown:
-
-```json
-{
-  "cost": {
-    "operator": {
-      "variable": {
-        "driver_eur": 0.0, "crew_eur": 0.0, "coach_maintenance_eur": 0.0,
-        "loco_eur": 0.0, "svc_stockings_eur": 0.0, "var_overhead_eur": 0.0,
-        "total_eur": 0.0
-      },
-      "fixed": {
-        "coach_amortisation_eur": 0.0, "financing_eur": 0.0,
-        "fix_overhead_eur": 0.0, "cleaning_eur": 0.0, "shunting_eur": 0.0,
-        "total_eur": 0.0
-      },
-      "total_eur": 0.0
-    },
-    "infrastructure": {
-      "tac_eur": 0.0, "energy_eur": 0.0,
-      "station_charge_eur": 0.0, "parking_eur": 0.0,
-      "total_eur": 0.0
-    },
-    "total_eur": 0.0
-  },
-  "revenue": { "ticket_revenue_eur": 0.0, "total_eur": 0.0 },
-  "margin":  { "ebit_margin_eur": 0.0, "total_eur": 0.0 },
-  "total_cost_eur": 0.0,
-  "total_revenue_eur": 0.0,
-  "net_eur": 0.0
-}
-```
-
-`net_eur` = `total_revenue_eur` − `total_cost_eur` − `margin.total_eur` —
-the actual bottom line after the EBIT margin target is deducted. This is
-the field the proposal summary/list endpoints read as `margin_eur_per_train_km`'s
-`net_eur` counterpart (see [Proposals](#proposals)).
-
-See [`../models/evaluation/README.md`](../models/evaluation/README.md) for full
-documentation of the evaluation model, cost allocation rules, and view
-semantics — including a plain-language explanation of what each view displays
-and which frontend filter selection maps to which view
-([Views, explained for display](../models/evaluation/README.md#views-explained-for-display)).
-
-</details>
+## Proposal Compute (merged) — retired
+
+`POST /api/proposal/calc` and `POST /api/proposal/calc/matrix` were removed
+in WP18 phase B2b (backend 0.5.0). Their job — one member, or a grid of
+members, of one stop list — is `POST /api/proposal/family` below, which
+returns every scenario variant × composition at once and serves a member's
+full evaluation views on demand. What a member IS (`compute_member()`,
+`api/helpers/member_compute.py`) is unchanged underneath: publish, compare,
+the on-load refresh and the refresh script all still go through it.
+
+For the shapes those endpoints returned, see the family document
+(compact route, summary per member) and the views endpoint (the six
+evaluation views). The two blocks that every `/calc` response carried and
+no member carries any more have endpoints of their own: the models
+registry is `GET /api/models`, the parameters a member was priced from are
+`GET /api/params/*` for its scenario.
 
 ---
-
-<a id="proposal-calc-matrix"></a>
-
-### `POST /api/proposal/calc/matrix`
-
-One route computed under **every selected scenario × every selected
-composition** (`adapters/proposal/README.md` §2.5). Every cell is an
-ordinary `/calc` compute — same HOW fields, same compute cache — so a
-drill-down `/calc` on any cell afterwards is a `cache_hit`, and a second
-matrix over the same route is served from cache entirely. Stateless, no
-auth.
-
-**Request**
-
-```jsonc
-{
-  "stops": ["osm:n3856100103", "osm:n25397500", "osm:w423692233"],   // required, min 2
-
-  "composition_ids": null,   // null/omitted → whole catalog; [] → 400; unknown id → 400
-  "scenario_ids": null,      // null/omitted → current base + every current what-if;
-                             //   superseded scenarios only when named explicitly
-  "detail": "summary",       // "summary" (default) | "full"
-
-  // HOW fields — identical semantics and validation to /calc
-  "timetable_mode": "simpleAutomatic",
-  "fixed_night_interval": null,
-  "schedule_mode": "alwaysDaily",
-  "routing_mode": "fullRouting",
-  "auto_stop_addition": "off",       // "suggest" allowed; suggestions carried in "full" only
-  "expert_timetable": null
-}
-```
-
-Limits (`api/config.py`, env-overridable): `CALC_MATRIX_MAX_CELLS`
-(default 96 — the default grid is 6 × 12 = 72) and `CALC_MATRIX_WORKERS`
-(default 4 cells computed concurrently after the baseline cell).
-
-**Two encodings of one record sequence.** With
-`Accept: application/x-ndjson` the response is streamed, one JSON record
-per line, uncompressed, without `Content-Length`; anything else returns
-one JSON document with the same records folded (header fields at the top
-level, `shared` keyed by kind then id, `cells` sorted by `index`, `status`
-+ `stats`). Request-level errors (bad JSON, validation, unknown axis id,
-cell cap → 400; data not loaded → 503) are decided before the first byte.
-After that, a failing cell is a cell record with `status: "error"` and the
-HTTP status stays 200.
-
-```jsonc
-// 1. header — exactly once, first
-{ "type": "header",
-  "route_builder_version": "0.9.33", "calc_version": "0.9.25",
-  "request": { "stops": [...], "composition_ids": [...resolved...], "scenario_ids": [...resolved...],
-               "detail": "summary", "timetable_mode": "...", ... , "expert_timetable": null },
-  "axes": {
-    "scenarios":    [ { "scenario_id": 1, "scenario_key": "infra-2026", "scenario_name": "Infra 2026",
-                        "is_current_base": true, "routing_graph_key": "infra_2026",
-                        "dimensions": { "network": "2026", "hsr_allowed": false, "optimised_timetable": false } } ],
-    "compositions": [ { "composition_id": "NEW-BAL-7", "description": "...", "material_strategy": "new",
-                        "operator_id": "...", "operator_name": "...", "hsr_allowed": true,
-                        "max_speed_kmh": 230, "places_by_class": { "Sleeper": 60, ... }, "places_total": 288 } ]
-  },
-  "n_cells": 72,
-  "baseline_index": 0,
-  "models": { ... }            // "full" only — the static models block, once
-}
-
-// 2. shared — zero or more, each BEFORE the first cell referencing it ("full" only)
-{ "type": "shared", "kind": "geometry",              "id": "g:3f9c…", "data": [[lon, lat], ...] }
-{ "type": "shared", "kind": "track_infrastructures", "id": "p:71ab…", "data": { ... } }
-{ "type": "shared", "kind": "stop_infrastructures",  "id": "p:0d21…", "data": { ... } }
-{ "type": "shared", "kind": "compositions",          "id": "p:9e44…", "data": { ... } }
-
-// 3. cell — one per grid position; stream order = completion order,
-//    baseline_index always first. index = scenario position × n_compositions
-//    + composition position (scenarios outer, compositions inner).
-{ "type": "cell", "index": 0, "scenario_id": 1, "composition_id": "NEW-BAL-7",
-  "status": "ok", "cache_hit": false, "route_fingerprint": "sha256:…",
-  "summary": { ...the /calc summary block... },
-  // "full" only:
-  "suggested_stops": [ ... ],                       // only when auto_stop_addition = "suggest"
-  "route": { ...route minus "geometries"; every segment.geometry_id is a shared "g:" id... },
-  "evaluation": { "parameters_refs": { "track_infrastructures": "p:71ab…", ... }, "views": { ... } } }
-{ "type": "cell", "index": 7, "scenario_id": 5, "composition_id": "NEW-BAL-7",
-  "status": "error", "error": "routing_graph_not_configured", "message": "…" }
-  // same codes as /calc; gauge_mismatch cells also carry "conflicting_stops"
-
-// 4. done — exactly once, last
-{ "type": "done", "status": "complete",             // | "aborted" (fatal executor failure)
-  "stats": { "n_cells": 72, "n_ok": 36, "n_error": 36, "n_cache_hit": 12, "elapsed_s": 21.4 } }
-```
-
-Shared ids are content-addressed (`g:`/`p:` + 16 hex of the canonical
-SHA-256 of the block), so identical geometry across scenarios or
-compositions is sent once. On a deployment running one OpenRailRouting
-instance every `infra_2032` cell is a `routing_graph_not_configured`
-error cell — the request still succeeds. Closing the connection cancels
-queued cells; running ones finish and still warm the cache.
 
 <a id="proposal-family"></a>
 
@@ -928,14 +335,13 @@ queued cells; running ones finish and still warm the cache.
 | `GET` | `/api/proposal/family/<key>/members/<scenario_variant_id>/<composition_id>/views` | `{views}` for one member — the six evaluation views, computed on demand and member-cached |
 
 Introduced in WP18 phase B2a (`adapters/family/README.md`,
-`models/family/README.md`). `POST /api/proposal/calc` and `/calc/matrix`
-still exist alongside it; phase B2b retires both, and every client moves
-here.
+`models/family/README.md`); since B2b the only compute endpoint —
+`/calc` and `/calc/matrix` are gone.
 
 <details>
 <summary>Request &amp; response details</summary>
 
-**Request** — the `/calc` body minus `composition_id` and `scenario_id`,
+**Request** — a member request (stops + the HOW fields) minus `composition_id` and `scenario_id`,
 which are axes here, plus the optional axis lists and the optional
 presented member:
 
@@ -954,7 +360,7 @@ presented member:
 }
 ```
 
-Validation is `/calc`'s for stops and the HOW fields; axis lists must be
+Validation is a member request's for stops and the HOW fields (`member_compute.validate_stops`/`validate_how_fields`); axis lists must be
 non-empty, unique and known; `presented` must lie on the axes. A family
 larger than `FAMILY_MAX_MEMBERS` (`api/config.py`) is 400
 `family_too_large`.
@@ -997,7 +403,8 @@ anyway.
 ```
 
 Members are ordered scenario variants outer, compositions inner. Error
-codes are `/calc`'s (`classify_compute_error`): a member on a graph this
+codes are `classify_compute_error()`'s — the one mapping from pipeline
+exceptions to wire codes: a member on a graph this
 deployment does not run is `routing_graph_not_configured`, a stop pair the
 router cannot serve `routing_error`, a gauge clash `gauge_mismatch`. The
 document is 200 regardless — on a one-instance stack every `infra_2032`
@@ -1030,10 +437,12 @@ changed number does.
 **Member views** — `GET …/members/<sv>/<comp>/views` returns
 `{ "views": { ...views_to_dict... } }` and nothing else: the parameters it
 was priced from are `GET /api/params/*` for the variant's scenario, the
-formulas are `GET /api/models`. Served from the member cache when the
-member has been opened before, computed once (≈350 ms) when not. 404 for
-an expired key or a member outside the family's axes; compute failures
-carry `/calc`'s codes.
+formulas are `GET /api/models`. Served from the member cache
+(`family.members`) when the member has been opened before, computed once
+(≈350 ms) when not. 404 for an expired key or a member outside the
+family's axes; compute failures carry `classify_compute_error()`'s codes
+(`gauge_mismatch` and `routing_error` 422, `routing_graph_not_configured`
+503, `domain_error` 422).
 
 Sizes measured on Berlin–Wien, 6 × 12 (`scripts/bench_member.py`):
 summaries 72 × ~0.8 KB, compact routes 72 × ~3 KB, geometry 8 × ~150 KB —
@@ -1179,7 +588,7 @@ tab the same working day.
 
 Publish and load night train proposals — the public proposal tool's
 storage layer (`adapters/proposal/README.md` §2.2, §7). Computing
-(`POST /api/proposal/calc`, above) never writes anything; a proposal only
+(`POST /api/proposal/family`, above) never writes anything; a proposal only
 comes into existence through an explicit publish. Browsing lives in the
 [Gallery](#gallery) section, comparison in [Analytics](#analytics).
 
@@ -1207,7 +616,7 @@ The only user write path. `@require_auth` at the `TRUST_GUEST` floor — a
 guest token is enough. The acting user always comes from the token, never
 from the request body: **the server never persists a client-supplied
 result** — `compute_request` carries inputs only, the server recomputes
-it itself (via the exact same pipeline `POST /api/proposal/calc` uses)
+it itself (via `compute_member()`, the same member the family's views endpoint serves)
 and persists what it computed.
 
 <details>
@@ -1217,11 +626,11 @@ and persists what it computed.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `compute_request` | object | ✓ | The exact **resolved** `request` block from a `POST /api/proposal/calc` response — defaults applied, `scenario_id` concrete |
+| `compute_request` | object | ✓ | A member request: the family document's `request` echo plus the presented member's `composition_id` (and `scenario_id`, which must be the current base — the publish rule below). Defaults resolve at the boundary; an omitted field and its explicit default publish identically |
 | `name` | string | ✓ | Proposal name, non-empty |
-| `mode` | string | ✓ | `"new"` or `"overwrite"` |
-| `proposal_id` | int | (✓) | Required for `mode: "overwrite"` (the owned proposal to replace); forbidden for `mode: "new"` (server-assigned) |
-| `based_on_proposal_id` | int | — | Optional, informational only — timeline provenance ("built on this foreign proposal"), never used for lookup |
+| `mode` | string | ✓ | `"new"`, `"overwrite"` or `"copy"` |
+| `proposal_id` | int | (✓) | Required for `mode: "overwrite"` (the owned proposal to replace); forbidden for `"new"` and `"copy"` (server-assigned) |
+| `based_on_proposal_id` | int | (✓) | Required for `mode: "copy"`, optional otherwise — timeline provenance ("built on this proposal"), never used for lookup. `"copy"` is `"new"` with the provenance made mandatory: the builder's "copy to my proposals" on someone else's proposal, so the update log always records where a copy came from |
 
 **Base-scenario rule**: `compute_request.scenario_id` must be the
 *current* base scenario, or the request is rejected — published
@@ -1261,9 +670,11 @@ and the gallery's like sort and filter rank on real engagement alone.
 
 ### `GET /api/proposal/<id>`
 
-Reconstructed compute-response shape (§2.1) plus proposal metadata — the
-route is rebuilt from GTFS + sidecar tables, `evaluation.input.parameters`
-rebuilt fresh via the `scenario_id` pin (never stored verbatim, §5.1).
+The member shape plus proposal metadata — the route is rebuilt from GTFS
++ sidecar tables, the views come back verbatim from publish time (§5.1).
+Since WP18 B2b `evaluation` carries `views` only: the models registry is
+`GET /api/models` and the parameters the proposal was priced from are
+`GET /api/params/*` for its `scenario_id` pin.
 
 **On-load refresh** (§4.2): if the stored proposal's `route_builder_
 version`/`calc_version` has fallen behind the running code, or its
@@ -1288,10 +699,8 @@ No request body.
   "route_builder_version": "0.9.13", "calc_version": "0.9.10",
   "route_fingerprint": "sha256:...",
   "request": { "...": "the resolved compute_request this proposal was published from" },
-  "route": { "route_id": "P5_V1_R1", "...": "identical shape to POST /api/proposal/calc's route block" },
+  "route": { "route_id": "P5_V1_R1", "...": "the full route shape (route_serialize.route_to_dict)" },
   "evaluation": {
-    "models": { "...": "..." },
-    "input": { "parameters": { "...": "rebuilt fresh from the scenario_id pin" } },
     "views": { "...": "stored verbatim from publish time" }
   }
 }
@@ -1615,13 +1024,14 @@ anchors = cross-proposal compare. Overriding never touches the stored
 proposal — publishing remains its own explicit act
 (`POST /api/proposal/publish`, base-scenario rule applies).
 
-Stateless and unauthenticated, same policy as `POST /api/proposal/calc`.
+Stateless and unauthenticated, same policy as `POST /api/proposal/family`.
 Each side's anchor runs the on-load refresh (§4.2) first, so stored
 sides — and the stored compute requests that override sides replay —
 are always at the current base scenario and current code versions.
 Override sides run a live compute each (through the same pipeline as
-`/calc` — cache-backed once WP13 lands), so responses can take as long
-as a `/calc` call per overridden side; the UI needs a loading state.
+`compute_member()`, member-cache-backed), so responses can take as long
+as one member compute (≈350 ms cold) per overridden side; the UI needs a
+loading state.
 
 <details>
 <summary>Request &amp; response details</summary>
@@ -1644,7 +1054,7 @@ side through the compute path, even if its value equals the stored one.
 sending `{"proposal_id": 123, "expert_timetable": null}` recomputes the
 same route with its manual timetable taken back out, so an expert
 timetable can be compared against its own automatic twin. Its shape is
-validated exactly as on `/api/proposal/calc`, against the anchor's stored
+validated exactly as a member request, against the anchor's stored
 `stops`.
 
 The **diff is side B minus side A** (`sides[1] - sides[0]`) throughout.
@@ -1699,7 +1109,7 @@ The **diff is side B minus side A** (`sides[1] - sides[0]`) throughout.
 }
 ```
 
-Each side is the full `POST /api/proposal/calc` response shape (stored
+Each side is the member payload shape (stored
 sides additionally carry the load endpoint's metadata block, computed
 sides the anchor `proposal_id` + applied `overrides`), plus a `summary`
 block so the compare view can render the same headline KPIs as the
@@ -2152,7 +1562,7 @@ derived live from the model's own definitions rather than hand-copied:
 | `Infrastructure` | Live — `TrackInfrastructures` + `StopInfrastructures` fields (same collections `GET /api/params/*` serves) |
 | `Compositions` | Live — composition/operator/coach fields (`CompositionCollection`) |
 | `Evaluation — calculation method` | Live — every leaf of the evaluation model's cost/revenue/margin breakdown (`models/evaluation/views.py:Breakdown`) |
-| `Evaluation — results / view` | Live — the five output views `POST /api/proposal/calc`'s evaluation section produces (`models/evaluation/views.py:VIEW_META`) |
+| `Evaluation — results / view` | Live — the output views a member's evaluation section produces (`models/evaluation/views.py:VIEW_META`) |
 | `Route or timetable` | Static — no single schema object maps cleanly onto "route concepts" |
 | `Documentation` | None — free text; the `sub_category` is a documentation page path, and those live in `docs-site/`, which the backend does not read |
 | `General functionality` | Static |
@@ -2253,7 +1663,7 @@ method, status, duration, response size, `user_id` / `is_guest` /
 `trust_level`, a truncated user agent, and `client_hash`.
 
 **What it deliberately does not hold:** no IP address, no raw path, no
-query string, no request body. A `/api/proposal/calc` body is an entire
+query string, no request body. A member request body is an entire
 proposal, and published ones are already persisted; the raw path carries
 ids the parameterised rule captures better for grouping.
 

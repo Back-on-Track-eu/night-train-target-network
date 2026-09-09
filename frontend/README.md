@@ -123,6 +123,13 @@ and composition therefore only appear once a route exists: the scenario as
 switches at the top of `ProposalResults` (zone A), the composition in the
 supply table of the collapsible settings (zone D).
 
+> **Backend 0.5.0 (WP18 B2b) removed `POST /api/proposal/calc` and
+> `/calc/matrix`.** Until phase C of the family work lands in this client,
+> the two paragraphs below describe code that has no endpoint to talk to:
+> the replacement is one `POST /api/proposal/family` per stop list, with
+> every scenario variant × composition in the document —
+> `docs/FRONTEND_HANDOVER.md` §15 and §16.
+
 **Comparison matrix.** After every successful calc `ProposalViewport` starts
 `POST /api/proposal/calc/matrix` (`composables/useCalcMatrix.ts`) for the
 route on screen — every scenario × every composition, streamed cell by cell

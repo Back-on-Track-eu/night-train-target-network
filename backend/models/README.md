@@ -169,7 +169,7 @@ build_all_views(route, result)             → ViewsBundle         [evaluation/v
 `evaluate_and_build_views()` is the post-routing half, for callers that
 bring their own `Route`/demand (the DB seed's hand-crafted example,
 model-layer tests with controlled demand). Serialization stays out of
-`pipeline.py` — that's `api/helpers/proposal_compute.py`.
+`pipeline.py` — that's `api/helpers/member_compute.py`.
 
 `timetable_mode`, `schedule_mode`, and `auto_stop_addition` each have their
 switch (which named behaviour runs) in `route_factory.py`, at whichever
@@ -201,7 +201,7 @@ itself — see that module's docstring. `VALID_TIMETABLE_MODES` /
 `VALID_SCHEDULE_MODES` / `VALID_AUTO_STOP_ADDITION_MODES` in `timetable.py`
 and `VALID_ROUTING_MODES` in `rail_router.py` are the single sources of
 truth both the compute request validation
-(`api/helpers/proposal_compute.py`) and the switches read from. Every
+(`api/helpers/member_compute.py`) and the switches read from. Every
 standard value the route model assumes (mode defaults, mirror time,
 auto-stop thresholds, schedule constants) and every open TODO on the route
 model are consolidated in `route/model.py` (`STANDARD VALUES` /
