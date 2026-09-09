@@ -32,7 +32,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-CALC_VERSION: str = "0.9.25"
+CALC_VERSION: str = "0.9.26"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -66,6 +66,24 @@ CALC_MODEL_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.26": {
+        "date": "2026-09-10",
+        "author": "david + claude",
+        "changes": "Measure sets (WP18 phase A): evaluate_route() takes a MeasureSet "
+        "(models/params.py, scenario.measure_sets) and records it on "
+        "EvaluationResult.measures. Three factors enter the calculation — on ticket "
+        "revenue (_calc_od_pair_results), on traction energy and on track access "
+        "(_calc_segment_cost) — and all three are 1.0 under NO_MEASURES, the "
+        "default and the only seeded set, so EVERY NUMBER IS UNCHANGED: the bump is "
+        "for the signature and the recorded field, not for a value. What each factor "
+        "will carry once WP17 seeds rates is documented on MeasureSet; the direct-cost "
+        "track access regime in particular is a different component selection inside "
+        "models/infrastructure/tac/calc_tac.py, not a wider factor here, because the "
+        "per-country views read SegmentTac.by_country rather than these totals. "
+        "Migration 2026-09-10_scenario_variants.sql adds the two tables; the "
+        "(scenario x measure set) cross product is the scenario_variant axis the "
+        "proposal family is built over.",
+    },
     "0.9.25": {
         "date": "2026-09-07",
         "author": "david + claude",

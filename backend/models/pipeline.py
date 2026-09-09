@@ -42,6 +42,8 @@ from models.demand.model import (
 from models.evaluation.calc import EvaluationResult, evaluate_route
 from models.evaluation.views import ViewsBundle, build_all_views
 from models.params import (
+    MeasureSet,
+    NO_MEASURES,
     PassageChargeCollection,
     StopInfraCollection,
     TrackInfraCollection,
@@ -77,13 +79,25 @@ def evaluate_and_build_views(
     tracks: TrackInfraCollection,
     stop_infra: StopInfraCollection,
     passages: PassageChargeCollection,
+    measures: MeasureSet = NO_MEASURES,
 ) -> tuple[EvaluationResult, ViewsBundle]:
     """Evaluate an already-built, already-demand-populated Route and build
     every breakdown view — the post-routing half of run_compute(), exposed
     for callers that construct their Route another way (the seed's
-    hand-crafted example route, tests applying controlled demand)."""
+    hand-crafted example route, tests applying controlled demand).
+
+    measures: the measure set to price under (models/params.py). Defaults
+    to NO_MEASURES, which is what every caller before WP18 asked for
+    implicitly — and what a family member gets for every scenario variant
+    until WP17 seeds a second set. The one thing measure sets multiply is
+    this half of the pipeline: a variant re-evaluates a route it does not
+    rebuild."""
     result = evaluate_route(
-        route=route, tracks=tracks, stop_infra=stop_infra, passages=passages
+        route=route,
+        tracks=tracks,
+        stop_infra=stop_infra,
+        passages=passages,
+        measures=measures,
     )
     return result, build_all_views(route, result)
 
@@ -103,6 +117,7 @@ def run_compute(
     loader,
     router: RailRouter,
     expert_timetable: ExpertTimetable | None = None,
+    measures: MeasureSet = NO_MEASURES,
 ) -> ComputeResult:
     """Build a route and evaluate it in one call — the steps every compute
     path (POST /api/proposal/calc, publish, future cache misses) needs:
@@ -124,6 +139,12 @@ def run_compute(
     before the option existed. Defaulted here (unlike the mode strings,
     which callers must pass) because it is genuinely optional input, not
     a mode whose default belongs at the API boundary.
+
+    measures: the scenario variant's measure set, defaulted here for the
+    same reason as expert_timetable — genuinely optional input, not a mode
+    string. Only the evaluate half reads it; routing, timetable and demand
+    are measure-independent, which is why a family builds one route per
+    (scenario, composition) and evaluates it once per measure set.
     """
     route, provenance, suggestions = plan_route(
         proposal_id=proposal_id,
@@ -154,7 +175,7 @@ def run_compute(
     )
 
     evaluation_result, views = evaluate_and_build_views(
-        route, provenance.tracks, provenance.stop_infra, provenance.passages
+        route, provenance.tracks, provenance.stop_infra, provenance.passages, measures
     )
 
     return ComputeResult(

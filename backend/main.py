@@ -33,6 +33,7 @@ Endpoints — see api/README.md for full documentation.
   GET  /api/params/compositions
   GET  /api/params/TrackInfrastructures
   GET  /api/scenarios
+  GET  /api/models
 
 POST /api/proposal/calc is the merged ephemeral compute endpoint and
 POST /api/proposal/publish the only user write path (adapters/proposal/README.md
@@ -51,6 +52,7 @@ from api.helpers.dependencies import DataNotLoadedError, init
 from api.limiter import limiter
 from api import (
     health,
+    models,
     params,
     proposal_calc,
     proposal_compare,
@@ -130,6 +132,9 @@ def create_app() -> Flask:
     # here (api/proposal_share.py).
     app.register_blueprint(proposal_share.bp, url_prefix="/api")
     app.register_blueprint(scenarios.bp, url_prefix="/api")
+    # Static model registry — the versions/formulas block that used to be
+    # inlined in every compute response (api/models.py).
+    app.register_blueprint(models.bp, url_prefix="/api")
     # Testing gate (2026-08-13 Decision 2). Registered without a prefix:
     # it owns both /gate (the page) and /api/gate/* (check + redeem), and
     # all three must stay reachable without a gate cookie — everything

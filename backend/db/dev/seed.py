@@ -2577,6 +2577,43 @@ SCENARIOS = [
 ]
 
 
+# Measure sets — what the state DOES, where a scenario pins what the
+# infrastructure IS (db/schema.py: scenario.measure_sets). One row until
+# WP17 prices the levers: "none" is the regime every evaluation before
+# WP18 implicitly ran under, so seeding it changes no number.
+MEASURE_SETS = [
+    {
+        "key": "none",
+        "vat_exempt": False,
+        "energy_tax_exempt": False,
+        "tac_direct_cost": False,
+        "description": "No political measures — today's tax and charging regime.",
+    },
+]
+
+
+def materialise_scenario_variants(cur) -> None:
+    """Rebuild scenario.scenario_variants as the full cross product of
+    scenario.scenarios x scenario.measure_sets.
+
+    Derived data, so this is a plain insert of what is missing rather
+    than a truncate-and-refill: variant ids are handed out by a sequence
+    and nothing persists them across a reseed, but re-running this inside
+    one seed must not renumber the rows an earlier step already inserted.
+    The same statement runs in
+    db/dev/sql/migrations/2026-09-10_scenario_variants.sql, which is how
+    server databases get their rows — call this after every scenario or
+    measure-set insert."""
+    cur.execute(
+        "INSERT INTO scenario.scenario_variants (scenario_id, measure_set_id) "
+        "SELECT s.scenario_id, m.measure_set_id "
+        "FROM scenario.scenarios s "
+        "CROSS JOIN scenario.measure_sets m "
+        "ORDER BY s.scenario_id, m.measure_set_id "
+        "ON CONFLICT (scenario_id, measure_set_id) DO NOTHING"
+    )
+
+
 # ============================================================
 # Example proposal — seeded via the real save code path
 # ============================================================
@@ -3100,6 +3137,10 @@ def main():
     print("Seeding scenario.scenarios...")
     insert_rows(cur, "scenario.scenarios", SCENARIOS)
 
+    print("Seeding scenario.measure_sets + scenario.scenario_variants...")
+    insert_rows(cur, "scenario.measure_sets", MEASURE_SETS)
+    materialise_scenario_variants(cur)
+
     conn.commit()
 
     # Must run after commit — it opens its own connections (via
@@ -3134,6 +3175,8 @@ def main():
         ("input_params", "composition_types"),
         ("input_params", "composition_type_coaches"),
         ("scenario", "scenarios"),
+        ("scenario", "measure_sets"),
+        ("scenario", "scenario_variants"),  # scenarios x measure sets
         ("route_cache", "graph_state"),
         ("route_cache", "route_segments"),
         ("proposals", "proposals"),

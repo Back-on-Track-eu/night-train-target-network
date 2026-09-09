@@ -32,6 +32,16 @@ Revenue, cost, and margin (OD pair level)
 All costs in EUR. evaluate_route() walks a Route and returns a flat
 EvaluationResult — one cost object per segment, one per trip pair, one
 per route, one revenue object per OD pair. No grouping or filtering here.
+
+Measures
+--------
+evaluate_route(..., measures) prices the route under one MeasureSet
+(models/params.py) — the political levers a scenario variant carries.
+Three factors enter the calculation, on ticket revenue, traction energy
+and track access; all three are 1.0 until WP17 seeds real rates, so
+NO_MEASURES (the default, and the only seeded set) reproduces every
+number this model returned before measure sets existed. The set that was
+used is recorded on EvaluationResult.measures.
 """
 
 from __future__ import annotations
@@ -51,6 +61,8 @@ from models.infrastructure.facility.calc_facility import (
 from models.infrastructure.tac.calc_tac import SegmentTac, calc_segment_tac
 from models.params import (
     Composition,
+    MeasureSet,
+    NO_MEASURES,
     PassageChargeCollection,
     StopInfraCollection,
     TrackInfraCollection,
@@ -439,6 +451,11 @@ class EvaluationResult:
     od_pair_costs: list[ODPairCost]
     od_pair_margins: list[ODPairMargin]
     segment_passenger_loads: dict[tuple[str, int], "SegmentPassengerLoad"]
+    measures: MeasureSet = NO_MEASURES
+    """The measure set this evaluation was priced under — recorded so a
+    result carries its own political assumptions, the same way
+    RouteProvenance carries the parameter versions a route was built
+    with."""
 
 
 # =============================================================================
@@ -485,6 +502,7 @@ def _calc_segment_cost(
     crew_rate_eur_h: float,
     segment_revenue_eur: float,
     segment_passengers: float,
+    measures: MeasureSet,
 ) -> SegmentCost:
     distance_km = segment.distance_m / 1000.0
     # Time in motion = raw router driving + traction dynamics (accel/brake is
@@ -530,8 +548,14 @@ def _calc_segment_cost(
         crew_hours=crew_hours,
         driver_eur=driver_eur,
         crew_eur=crew_eur,
-        tac_eur=tac.total_eur,
-        energy_eur=energy.total_eur,
+        # The measure factors apply here, on the totals this SegmentCost
+        # reports — both are 1.0 today (models/params.py MeasureSet). The
+        # SegmentTac/SegmentEnergy objects below stay as priced, so the
+        # per-country views keep reading untouched components; WP17 moves
+        # the pricing into calc_tac.py/calc_energy_price.py, where the
+        # components are, rather than widening these two factors.
+        tac_eur=tac.total_eur * measures.track_access_factor,
+        energy_eur=energy.total_eur * measures.energy_cost_factor,
         tac=tac,
         energy=energy,
     )
@@ -671,6 +695,7 @@ def _calc_shunting_costs(
 
 def _calc_od_pair_results(
     route: Route,
+    measures: MeasureSet,
 ) -> tuple[list[ODPairRevenue], list[ODPairCost], list[ODPairMargin]]:
     """
     Computes revenue, cost, and margin per OD pair.
@@ -679,6 +704,14 @@ def _calc_od_pair_results(
 
     od.places_sold is annual, so all outputs are €/year directly —
     no frequency multiplier (operating_days_per_year) is needed here.
+
+    measures.ticket_revenue_factor is what the operator keeps of the fare
+    (1.0 today) — applied before the two shares derived from revenue, so
+    variable overhead and the EBIT margin allocation scale with the
+    revenue actually earned rather than with a gross figure nobody
+    receives. The track access revenue base is deliberately not factored:
+    compute_segment_passenger_loads() prices the CH contribution margin
+    off turnover, which a fare tax exemption does not change.
     """
     revenues: list[ODPairRevenue] = []
     costs: list[ODPairCost] = []
@@ -687,7 +720,7 @@ def _calc_od_pair_results(
     for pair in route.trip_pairs:
         composition = pair.composition
         for od in pair.od_pairs:
-            revenue_eur = od.places_sold * od.avg_price
+            revenue_eur = od.places_sold * od.avg_price * measures.ticket_revenue_factor
             svc_stockings_eur = (
                 composition.svc_stockings_eur_place.get(od.class_main, 0.0)
                 * od.places_sold
@@ -846,9 +879,15 @@ def evaluate_route(
     tracks: TrackInfraCollection,
     stop_infra: StopInfraCollection,
     passages: PassageChargeCollection,
+    measures: MeasureSet = NO_MEASURES,
 ) -> EvaluationResult:
     """Compute flat cost and revenue for a Route. No aggregation or
     normalisation — see views.py.
+
+    measures: the political levers this evaluation runs under (see the
+    module docstring). Defaults to NO_MEASURES — every factor 1.0, the
+    regime every caller before WP18 implicitly asked for — so a caller
+    that does not know about measure sets gets the numbers it always got.
 
     The traffic pre-pass runs FIRST, before any cost: two track access
     terms price traffic rather than distance — the Swiss contribution
@@ -891,6 +930,7 @@ def evaluate_route(
                 )
                 segment_costs.append(
                     _calc_segment_cost(
+                        measures=measures,
                         trip_id=trip.trip_id,
                         segment_index=i,
                         segment=segment,
@@ -927,7 +967,9 @@ def evaluate_route(
                     )
                 )
 
-    od_pair_revenues, od_pair_costs, od_pair_margins = _calc_od_pair_results(route)
+    od_pair_revenues, od_pair_costs, od_pair_margins = _calc_od_pair_results(
+        route, measures
+    )
 
     result = EvaluationResult(
         route_cost=_calc_route_cost(route, tracks),
@@ -940,5 +982,6 @@ def evaluate_route(
         od_pair_costs=od_pair_costs,
         od_pair_margins=od_pair_margins,
         segment_passenger_loads=segment_passenger_loads,
+        measures=measures,
     )
     return result

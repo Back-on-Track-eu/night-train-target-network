@@ -1560,7 +1560,8 @@ INPUT_PARAMS_TABLES: tuple[Table, ...] = (
 
 
 # =============================================================================
-# scenario — the container pinning parameter versions
+# scenario — the container pinning parameter versions, and the measure
+# sets it multiplies with into the variant axis
 # =============================================================================
 
 SCENARIO_TABLES: tuple[Table, ...] = (
@@ -1678,6 +1679,81 @@ SCENARIO_TABLES: tuple[Table, ...] = (
             "CREATE UNIQUE INDEX idx_scenarios_one_current_per_key\n"
             "    ON scenario.scenarios (scenario_key) WHERE is_current_scenario;",
         ),
+    ),
+    Table(
+        schema="scenario",
+        name="measure_sets",
+        description="A named bundle of political measures an evaluation "
+        "runs under — what the state DOES, where a scenario pins what the "
+        "infrastructure IS. Unversioned definitions: the flags say which "
+        "levers are pulled, never by how much. The rates themselves (VAT "
+        "per country of sale, electricity tax share, direct-cost floor per "
+        "infrastructure manager) get their own versioned input_params "
+        "table with WP17 and are pinned by the scenario like every other "
+        "calibrated parameter. One row today, 'none' — no lever pulled, "
+        "which is what every evaluation before WP18 implicitly ran under.",
+        columns=(
+            Column("measure_set_id", "SERIAL PRIMARY KEY"),
+            Column(
+                "key",
+                "VARCHAR(50) NOT NULL",
+                'Stable identifier, e.g. "none", "vat-exempt". What the '
+                "API and the frontend name a measure set by; ids are "
+                "database-assigned and not portable between environments.",
+            ),
+            Column(
+                "vat_exempt",
+                "BOOLEAN NOT NULL DEFAULT FALSE",
+                "Night train fares exempt from value-added tax. Raises the "
+                "operator's retained revenue per ticket.",
+            ),
+            Column(
+                "energy_tax_exempt",
+                "BOOLEAN NOT NULL DEFAULT FALSE",
+                "Traction electricity exempt from energy/electricity tax. "
+                "Lowers the energy price the operator pays.",
+            ),
+            Column(
+                "tac_direct_cost",
+                "BOOLEAN NOT NULL DEFAULT FALSE",
+                "Track access charged at the direct cost of running the "
+                "train only, the floor Directive 2012/34/EU permits — not "
+                "a discount on the full charge but a different component "
+                "selection (models/infrastructure/tac/calc_tac.py).",
+            ),
+            Column(
+                "description",
+                "TEXT",
+                "What this bundle of measures represents, in the words a "
+                "reader of the results needs.",
+            ),
+        ),
+        constraints=("UNIQUE (key)",),
+    ),
+    Table(
+        schema="scenario",
+        name="scenario_variants",
+        description="The flattened (scenario x measure set) axis the API "
+        "and the frontend address by a single id — one dropdown value "
+        "instead of two. Materialised as the full cross product "
+        "(db/dev/seed.py materialise_scenario_variants(), re-run after "
+        "every scenario or measure-set insert), so it is derived data: "
+        "truncating and rebuilding it loses nothing except the ids "
+        "themselves, which nothing persists.",
+        columns=(
+            Column("scenario_variant_id", "SERIAL PRIMARY KEY"),
+            Column(
+                "scenario_id",
+                "INTEGER NOT NULL REFERENCES scenario.scenarios(scenario_id)",
+                "The infrastructure pin this variant evaluates on.",
+            ),
+            Column(
+                "measure_set_id",
+                "INTEGER NOT NULL REFERENCES scenario.measure_sets(measure_set_id)",
+                "The measures this variant evaluates under.",
+            ),
+        ),
+        constraints=("UNIQUE (scenario_id, measure_set_id)",),
     ),
 )
 

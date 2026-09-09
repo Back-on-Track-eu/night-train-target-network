@@ -252,6 +252,18 @@ REQUEST_LOG_RETENTION_DAYS = _env_int("REQUEST_LOG_RETENTION_DAYS", 90)
 
 
 # =============================================================================
+# Model registry (api/models.py)
+# =============================================================================
+
+# Cache-Control max-age on GET /api/models. The body changes only with a
+# deployed model version bump, so this is not about load — it bounds how
+# long a client can show formulas that no longer match the numbers next to
+# them. One hour: long enough that a session fetches it once, short enough
+# that a deploy corrects every open tab the same working day.
+MODELS_CACHE_MAX_AGE_S = _env_int("MODELS_CACHE_MAX_AGE_S", 3600)
+
+
+# =============================================================================
 # Calc matrix (api/helpers/proposal_matrix.py)
 # =============================================================================
 
@@ -322,6 +334,7 @@ def log_effective_config() -> None:
         "EXPERT_MAX_DEPARTURE_SHIFT_MIN": EXPERT_MAX_DEPARTURE_SHIFT_MIN,
         "EXPERT_DEPARTURE_MIN_TIME": EXPERT_DEPARTURE_MIN_TIME,
         "EXPERT_DEPARTURE_MAX_TIME": EXPERT_DEPARTURE_MAX_TIME,
+        "MODELS_CACHE_MAX_AGE_S": MODELS_CACHE_MAX_AGE_S,
         "CALC_MATRIX_MAX_CELLS": CALC_MATRIX_MAX_CELLS,
         "CALC_MATRIX_WORKERS": CALC_MATRIX_WORKERS,
     }

@@ -80,6 +80,9 @@ from models.params import (
     StopInfraCollection,
     StopInfraDescriptions,
     Scenario,
+    MeasureSet,
+    MeasureSetCollection,
+    ScenarioVariant,
 )
 
 logger = logging.getLogger(__name__)
@@ -293,30 +296,118 @@ class DBDataLoader:
             )
             rows = cur.fetchall()
 
+        return [self._scenario(row) for row in rows]
+
+    @staticmethod
+    def _scenario(row) -> Scenario:
+        """One scenario.scenarios row → Scenario. Shared by
+        list_all_scenarios() and resolve_scenario_variant()'s join, so a
+        column added to the table is picked up by both at once."""
+        return Scenario(
+            scenario_id=row["scenario_id"],
+            scenario_key=row["scenario_key"],
+            scenario_name=row["scenario_name"],
+            description=row["description"],
+            change_log=row["change_log"],
+            editor=row["editor"],
+            created_at=row["created_at"].isoformat(),
+            is_current_base=row["is_current_base"],
+            is_current_scenario=row["is_current_scenario"],
+            track_infrastructures_version=row["track_infrastructures_version"],
+            track_infrastructure_defaults_version=row[
+                "track_infrastructure_defaults_version"
+            ],
+            stop_infrastructures_version=row["stop_infrastructures_version"],
+            stop_infrastructure_defaults_version=row[
+                "stop_infrastructure_defaults_version"
+            ],
+            passage_charges_version=row["passage_charges_version"],
+            routing_graph_key=row["routing_graph_key"],
+        )
+
+    # ------------------------------------------------------------------
+    # MEASURE SETS AND SCENARIO VARIANTS
+    # ------------------------------------------------------------------
+
+    def build_all_measure_sets(self) -> MeasureSetCollection:
+        """
+        Every scenario.measure_sets row, keyed by measure_set_id. Not
+        scenario-versioned and not scenario-filtered: a measure set is a
+        definition of which levers are pulled, orthogonal to the pins a
+        scenario carries (models/params.py MeasureSet).
+        """
+        with self._cursor() as cur:
+            cur.execute("SELECT * FROM scenario.measure_sets ORDER BY measure_set_id")
+            rows = cur.fetchall()
+
+        return MeasureSetCollection(
+            {row["measure_set_id"]: self._measure_set(row) for row in rows}
+        )
+
+    @staticmethod
+    def _measure_set(row) -> MeasureSet:
+        return MeasureSet(
+            measure_set_id=row["measure_set_id"],
+            key=row["key"],
+            vat_exempt=row["vat_exempt"],
+            energy_tax_exempt=row["energy_tax_exempt"],
+            tac_direct_cost=row["tac_direct_cost"],
+            description=row["description"],
+        )
+
+    def list_scenario_variants(self) -> list[ScenarioVariant]:
+        """
+        Every scenario.scenario_variants row, ordered by scenario then
+        measure set — the order the family axis and GET /api/scenarios
+        present. Ids only; resolve_scenario_variant() below turns one into
+        the objects a compute needs.
+        """
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT * FROM scenario.scenario_variants "
+                "ORDER BY scenario_id, measure_set_id"
+            )
+            rows = cur.fetchall()
+
         return [
-            Scenario(
+            ScenarioVariant(
+                scenario_variant_id=row["scenario_variant_id"],
                 scenario_id=row["scenario_id"],
-                scenario_key=row["scenario_key"],
-                scenario_name=row["scenario_name"],
-                description=row["description"],
-                change_log=row["change_log"],
-                editor=row["editor"],
-                created_at=row["created_at"].isoformat(),
-                is_current_base=row["is_current_base"],
-                is_current_scenario=row["is_current_scenario"],
-                track_infrastructures_version=row["track_infrastructures_version"],
-                track_infrastructure_defaults_version=row[
-                    "track_infrastructure_defaults_version"
-                ],
-                stop_infrastructures_version=row["stop_infrastructures_version"],
-                stop_infrastructure_defaults_version=row[
-                    "stop_infrastructure_defaults_version"
-                ],
-                passage_charges_version=row["passage_charges_version"],
-                routing_graph_key=row["routing_graph_key"],
+                measure_set_id=row["measure_set_id"],
             )
             for row in rows
         ]
+
+    def resolve_scenario_variant(
+        self, scenario_variant_id: int
+    ) -> tuple[Scenario, MeasureSet]:
+        """
+        One variant id → the (Scenario, MeasureSet) pair an evaluation runs
+        under. Two round trips rather than one aliased join, so both halves
+        come out of the same builders every other caller uses (_scenario(),
+        _measure_set()) — the table is tiny and read once per family build.
+        Raises ValueError naming the unknown id, the same shape
+        resolve_scenario_id() raises for an unseeded database, so the API
+        boundary classifies both as domain errors.
+        """
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT s.*, v.measure_set_id "
+                "FROM scenario.scenario_variants v "
+                "JOIN scenario.scenarios s ON s.scenario_id = v.scenario_id "
+                "WHERE v.scenario_variant_id = %s",
+                (scenario_variant_id,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                raise ValueError(f"Scenario variant '{scenario_variant_id}' not found.")
+            cur.execute(
+                "SELECT * FROM scenario.measure_sets WHERE measure_set_id = %s",
+                (row["measure_set_id"],),
+            )
+            measure_row = cur.fetchone()
+
+        return self._scenario(row), self._measure_set(measure_row)
 
     # ------------------------------------------------------------------
     # SOURCES
