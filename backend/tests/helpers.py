@@ -16,6 +16,7 @@ import requests
 
 PROPOSAL_URL = "/api/proposal"
 PROPOSAL_CALC_URL = "/api/proposal/calc"
+PROPOSAL_FAMILY_URL = "/api/proposal/family"
 PROPOSAL_PUBLISH_URL = "/api/proposal/publish"
 PROPOSALS_URL = "/api/proposals"
 PROPOSALS_COMPARE_URL = "/api/proposals/compare"
@@ -123,6 +124,31 @@ def compute(
     resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=timeout)
     assert resp.status_code == 200, f"proposal/calc failed: {resp.text[:300]}"
     return resp.json()
+
+
+def post_family(api_base: str, body: dict, timeout: int = 300):
+    """POST /api/proposal/family and return the raw response — callers
+    assert the status themselves, since the family's error shapes (400
+    family_too_large, 404 on an expired key) are part of what the tests
+    pin. The generous timeout covers a cold family whose legs are not in
+    route_cache yet."""
+    return requests.post(f"{api_base}{PROPOSAL_FAMILY_URL}", json=body, timeout=timeout)
+
+
+def family(api_base: str, stops: list[str], timeout: int = 300, **extra) -> dict:
+    """POST /api/proposal/family for the given stops (plus any request
+    fields — scenario_variant_ids, composition_ids, presented, the HOW
+    fields) and return the document. Asserts 200."""
+    resp = post_family(api_base, {"stops": stops, **extra}, timeout=timeout)
+    assert resp.status_code == 200, f"proposal/family failed: {resp.text[:300]}"
+    return resp.json()
+
+
+def member_views_url(key: str, scenario_variant_id: int, composition_id: str) -> str:
+    return (
+        f"{PROPOSAL_FAMILY_URL}/{key}/members/{scenario_variant_id}/"
+        f"{composition_id}/views"
+    )
 
 
 def compare_sides(api_base: str, sides: list[dict], timeout: int = 120) -> dict:

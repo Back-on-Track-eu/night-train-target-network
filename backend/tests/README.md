@@ -15,7 +15,13 @@ locked design decisions —
 # 1. Start the stack
 cd backend/docker && docker-compose up -d
 
-# 2. Run tests (from backend/)
+# 2. After ANY change to backend code: rebuild the api image.
+#    The api service has no bind mount — the Dockerfile's COPY bakes the
+#    code in — so without this the suite tests the host's files against
+#    the container's older code and reads the difference as a failure.
+docker-compose up -d --build api
+
+# 3. Run tests (from backend/)
 uv run --extra dev python -m pytest tests/ -v
 ```
 
@@ -26,7 +32,7 @@ built on top of it:
 
 | Prefix | Layer |
 |---|---|
-| `test_01`–`test_05` | Stack build-up: containers → seeded DB → loader → versioning → the shared DB pool (`adapters/db_pool.py`, WP14) |
+| `test_01`–`test_06` | Stack build-up: containers → seeded DB → loader → versioning → the shared DB pool (`adapters/db_pool.py`, WP14) → the family's shared context (`models/family/context.py`) |
 | `test_10`–`test_11` | Read-only reference APIs: params + models (`test_10`), scenarios + measure sets + the variant axis (`test_11`) |
 | `test_20` | Route-building content logic (via `POST /api/proposal/calc`) |
 | `test_30` | Evaluation content logic (model-layer — `compute_evaluation_domain()`) |
@@ -35,7 +41,8 @@ built on top of it:
 | `test_37` | Fingerprint + gallery-summary projection (`adapters/proposal/projection.py`) |
 | `test_39` | The §2.3 compute cache (`adapters/proposal/compute_cache.py`, WP13) |
 | `test_40` | End-to-end pipeline smoke |
-| `test_41` | `POST /api/proposal/calc/matrix` — scenario × composition grid, document + NDJSON stream (§2.5). On a one-instance stack every `infra_2032` cell is an error cell by design |
+| `test_41` | `POST /api/proposal/calc/matrix` — scenario × composition grid, document + NDJSON stream. Retired in WP18 B2b together with the endpoint |
+| `test_42` | The proposal family — `POST /api/proposal/family`, the document contract, the two GETs, the caches. On a one-instance stack every `infra_2032` member is an error member by design |
 | `test_50` | `POST /api/proposal/publish` + proposals list/load (the only write path) |
 | `test_51` | Proposal engagement — likes + comments |
 | `test_55` | `GET /api/proposals/stats` — §7.7 counts, KPI aggregates per scope, top/flop countries and country relations |
@@ -147,6 +154,18 @@ Shared code:
 | `TestParamProvenance::test_stop_null_charge_resolves_from_global_default` | Stop-level default resolution | osm:n25948183 vs global default | `is_default=True`, value = global default |
 | `TestParamProvenance::test_stop_explicit_charge_is_not_default` | Explicit stop value | osm:n3856100103 charge | `is_default=False` |
 | `test_git_sha_injected_in_ci` | CI injects GIT_SHA into all 3 model version files (skipped locally) | `GITHUB_SHA` env | all 3 `GIT_SHA` constants = commit SHA |
+
+## test_06_family_context.py — the family's shared context
+
+| Test | Purpose | Input | Expected |
+|---|---|---|---|
+| `TestSingleFlight::test_concurrent_callers_share_one_computation` | The memo primitive | 8 threads, one key | one computation, eight identical results |
+| `TestSingleFlight::test_a_raising_computation_leaves_nothing_behind` | Failure is not cached | first call raises | second call computes and stores |
+| `TestMemoRouter::test_routes_once_per_variant` | L1 memo boundary | same stops/speed/HSR/gauge/mode twice; then a different cap; then reversed | 1 → 2 → 3 router calls |
+| `TestMemoRouter::test_hands_out_independent_copies` | `route_trip()` mutates legs in place | write buffer/energy on one hand-out | the next hand-out is untouched |
+| `TestMemoRouter::test_delegates_everything_else` / `TestMemoLoader::*` | Delegation and per-scenario identity | fakes | same object per key; unlisted methods pass through |
+| `TestFamilyContextLive::test_prewarm_fills_both_memos_then_members_hit` | The ~4 ms member | prewarm base × default composition, then `run_compute()` on the context | no catalog loaded, nothing routed live after prewarm |
+| `TestFamilyContextLive::test_one_router_per_graph` | Router identity | same graph key twice | same `MemoRouter` |
 
 ## test_10_params_api.py — GET /api/params/*, GET /api/models
 
@@ -430,6 +449,28 @@ The "cost" half runs at the model layer (`compute_evaluation_domain()`)
 | `test_pipeline_revenue_and_cost_positive` | Both ledger sides populated | pipeline result | revenue > 0, cost > 0 |
 
 ---
+
+## test_42_proposal_family_api.py — the proposal family
+
+Two families shared by module fixtures: a narrow one (base + 2026-HSR
+variants × 2 compositions = 4 members) for the structural cases, and the
+default-axes one for counts, error members and size.
+
+| Test | Purpose | Input | Expected |
+|---|---|---|---|
+| `TestValidation::test_bad_requests_are_400` (×11) | Stops, HOW, axis lists, presented | one bad field each | 400 `validation_error` |
+| `TestValidation::test_presented_outside_the_axes_is_400` | A presented member must be built | 2032 variant on a 2026 family | 400 naming the axes |
+| `TestDocument::test_top_level_shape` / `test_request_echo_is_resolved_and_carries_no_axis` | §2.5 envelope | narrow family | exact key set; echo has no scenario/composition |
+| `TestDocument::test_axes_keep_request_order` / `test_members_variants_outer_compositions_inner` | Order contract | explicit axes | axes as posted; members variants-outer |
+| `TestDocument::test_member_count_and_stats_agree` / `test_ok_member_shape` | Counts and the ok record | narrow family | 4 ok; `route_ref` resolves; summary has the gallery KPIs, no geometry |
+| `TestDocument::test_every_reference_resolves_and_no_geometry_repeats` | The pool | every segment | points into `geometries`; no coordinate list stored twice |
+| `TestDocument::test_compact_route_shape` | `route_compact_to_dict` | every route | stops once, segments by index, no catalog/demand/provenance, neutral ids |
+| `TestDocument::test_routes_differ_across_variants` | Variants are not one route repeated | base vs HSR, same composition | different `route_ref` |
+| `TestDocument::test_presented_defaults_to_base_and_default_composition` / `test_presented_member_summary_equals_calc` | A member ≡ `/calc` | presented member vs `POST /calc` | identical summary |
+| `TestDefaultFamily::*` | Default axes, 2032 handling, size | default family | variants × catalog; 2032 members all ok or all `routing_graph_not_configured`; < 4 MB raw |
+| `TestSuggestions::*` | `suggest` on the presented member only | narrow family, `suggest` | `suggested_stops` list with costs; 4 ok members; absent for `off` |
+| `TestCache::*` | Key semantics and the GET | a family with randomised add-on minutes (new key every run); repeat POST; `presented` change; expert shift; `GET <key>`; unknown key | miss then hit; hit with same key; hit with new presented; new key with the same route refs and a departure shifted by 30 min; 200; 404 |
+| `TestMemberViews::*` | The views endpoint | presented member; unknown member; unknown key | `{views}` identical to `/calc`'s; 404; 404 |
 
 ## test_50_proposals_api.py — POST /api/proposal/publish + proposals read endpoints
 

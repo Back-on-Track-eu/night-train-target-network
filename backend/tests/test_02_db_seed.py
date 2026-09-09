@@ -35,7 +35,14 @@ STOP_SEED_CHANGE_LOG_PREFIX = "seeded from the stop classification pipeline"
 # Expectations after seeding — see db/dev/seed.py
 # =============================================================================
 
-EXPECTED_SCHEMAS = {"admin", "input_params", "scenario", "proposals"}
+EXPECTED_SCHEMAS = {
+    "admin",
+    "input_params",
+    "scenario",
+    "route_cache",
+    "family",
+    "proposals",
+}
 
 # Minimum row counts. Deliberately >= (not ==) so adding seed data doesn't
 # break the suite, while dropping seed data still fails loudly.
@@ -127,11 +134,14 @@ REQUIRED_COLUMNS = {
 
 
 def test_schemas_exist(db_cur):
-    """All four project schemas exist in the database."""
-    db_cur.execute("""
-        SELECT schema_name FROM information_schema.schemata
-        WHERE schema_name IN ('admin', 'input_params', 'scenario', 'proposals')
-        """)
+    """Every project schema exists in the database — the four the
+    seed's SQL files and db/schema.py define, plus the two caches
+    (route_cache, family) db/schema.py renders alongside them."""
+    db_cur.execute(
+        "SELECT schema_name FROM information_schema.schemata "
+        "WHERE schema_name = ANY(%s)",
+        (sorted(EXPECTED_SCHEMAS),),
+    )
     found = {row["schema_name"] for row in db_cur.fetchall()}
     assert found == EXPECTED_SCHEMAS, f"Missing schemas: {EXPECTED_SCHEMAS - found}"
 
