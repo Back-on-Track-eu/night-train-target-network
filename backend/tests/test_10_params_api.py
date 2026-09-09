@@ -1,16 +1,19 @@
 """
 test_10_params_api.py
 =====================
-Response contracts for the three read-only parameter endpoints:
+Response contracts for the read-only reference endpoints:
 
   GET /api/params/StopInfrastructures
   GET /api/params/TrackInfrastructures
   GET /api/params/compositions
+  GET /api/models
 
 Covers the response layout (descriptions/sources/defaults/count/entities),
 field-object shape ({value, is_default, version, source_id}), is_default
 propagation through the API, source deduplication via source_id, and the
-?scenario_id= query parameter.
+?scenario_id= query parameter. /api/models is here rather than with the
+compute tests because it is the same kind of endpoint: static reference
+data, no request body, no scenario.
 """
 
 import pytest
@@ -487,3 +490,62 @@ class TestCompositions:
         desc = compositions_body["descriptions"]
         ind_desc = desc["indicative"]["kpis"]["cost_eur_per_train_km"]
         assert "S41" in ind_desc and "2032" in ind_desc
+
+
+# =============================================================================
+# GET /api/models — the static model registry (WP18)
+# =============================================================================
+
+
+@pytest.fixture(scope="module")
+def models_body(api_base):
+    resp = requests.get(f"{api_base}/api/models", timeout=15)
+    assert resp.status_code == 200
+    return resp.json()
+
+
+class TestModels:
+    """The versions/descriptions/formulas block that used to be inlined
+    under evaluation.models in every compute response."""
+
+    def test_response_layout(self, models_body):
+        assert "models" in models_body
+        assert models_body["models"], "registry is empty"
+
+    def test_every_model_carries_version_and_description(self, models_body):
+        """Version and description are the two every entry has. What
+        comes with them differs by model: a formula registry for the
+        computed ones, an emission-factor table for emissions."""
+        for name, model in models_body["models"].items():
+            assert model.get("version"), f"{name} has no version"
+            assert model.get("description"), f"{name} has no description"
+            assert "formulas" in model or "factors" in model, (
+                f"{name} carries neither formulas nor factors"
+            )
+
+    def test_the_evaluation_model_is_present_with_formulas(self, models_body):
+        """The registry the cost breakdown keys into — an evaluation view
+        field maps to models.evaluation.formulas[<field>]."""
+        evaluation = models_body["models"]["evaluation"]
+        assert evaluation["formulas"], "evaluation model exposes no formulas"
+
+    def test_formula_entries_carry_the_full_legend(self, models_body):
+        """latex + summary + description + input/output legend — what the
+        cost-factor popover renders (CALC 0.9.24)."""
+        for model in models_body["models"].values():
+            for key, formula in model.get("formulas", {}).items():
+                missing = {
+                    "latex",
+                    "summary",
+                    "description",
+                    "inputs",
+                    "output",
+                } - set(formula)
+                assert missing == set(), f"formula '{key}' missing: {missing}"
+
+    def test_response_is_cacheable(self, api_base):
+        """The body only changes with a deployed version bump, so the
+        client fetches it once per session — api/config.py
+        MODELS_CACHE_MAX_AGE_S."""
+        resp = requests.get(f"{api_base}/api/models", timeout=15)
+        assert "max-age=" in resp.headers.get("Cache-Control", "")

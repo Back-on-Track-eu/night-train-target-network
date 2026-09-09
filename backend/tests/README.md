@@ -27,7 +27,7 @@ built on top of it:
 | Prefix | Layer |
 |---|---|
 | `test_01`–`test_05` | Stack build-up: containers → seeded DB → loader → versioning → the shared DB pool (`adapters/db_pool.py`, WP14) |
-| `test_10`–`test_11` | Read-only params + scenarios APIs |
+| `test_10`–`test_11` | Read-only reference APIs: params + models (`test_10`), scenarios + measure sets + the variant axis (`test_11`) |
 | `test_20` | Route-building content logic (via `POST /api/proposal/calc`) |
 | `test_30` | Evaluation content logic (model-layer — `compute_evaluation_domain()`) |
 | `test_35` | `POST /api/proposal/calc` — the merged compute endpoint (contract) |
@@ -148,7 +148,7 @@ Shared code:
 | `TestParamProvenance::test_stop_explicit_charge_is_not_default` | Explicit stop value | osm:n3856100103 charge | `is_default=False` |
 | `test_git_sha_injected_in_ci` | CI injects GIT_SHA into all 3 model version files (skipped locally) | `GITHUB_SHA` env | all 3 `GIT_SHA` constants = commit SHA |
 
-## test_10_params_api.py — GET /api/params/*
+## test_10_params_api.py — GET /api/params/*, GET /api/models
 
 | Test | Purpose | Input | Expected |
 |---|---|---|---|
@@ -171,8 +171,13 @@ Shared code:
 | `TestCompositions::test_coach_list_matches_count` | Coach list consistency | every composition | count = len(list); unique positions |
 | `TestCompositions::test_operators_referenced_by_compositions` | Operator join integrity | operator_id per composition | resolves; positive staff rates |
 | `TestCompositions::test_indicative_kpis_present` | Indicative KPIs exposed (placeholder model) | compositions with reference | positive KPIs |
+| `TestModels::test_response_layout` | Top-level shape | `GET /api/models` | non-empty `models` map |
+| `TestModels::test_every_model_carries_version_and_description` | Registry completeness | every model entry | `version` + `description`, plus `formulas` (computed models) or `factors` (emissions) |
+| `TestModels::test_the_evaluation_model_is_present_with_formulas` | The registry the breakdown keys into | `models.evaluation` | non-empty formula map |
+| `TestModels::test_formula_entries_carry_the_full_legend` | Popover contract (CALC 0.9.24) | every formula | latex + summary + description + inputs + output |
+| `TestModels::test_response_is_cacheable` | Fetched once per session | response headers | `Cache-Control: …max-age=…` |
 
-## test_11_scenarios_api.py — GET /api/scenarios
+## test_11_scenarios_api.py — GET /api/scenarios (scenarios, measure sets, variants)
 
 | Test | Purpose | Input | Expected |
 |---|---|---|---|
@@ -188,6 +193,16 @@ Shared code:
 | `TestScenariosGrouping::test_base_scenario_is_in_current_base_group` | Seed cross-check | seeded base scenario | appears in `current_base`, which holds exactly that row |
 | `TestScenariosGrouping::test_hsr_scenario_is_in_current_scenarios_group` | Seed cross-check | seeded HSR-allowed lineage head | appears in `current_scenarios` only |
 | `TestScenariosGrouping::test_historical_scenario_is_in_historical_scenarios_group` | Seed cross-check | superseded infra-2026 revision | appears in `historical_scenarios` only |
+| `TestMeasureSets::test_measure_sets_present_and_shaped` | Second axis exposed | `measure_sets` | full field set incl. the three `factors` |
+| `TestMeasureSets::test_only_the_empty_set_is_seeded` | Seed cross-check | `measure_sets` keys | exactly `['none']` — a second row means WP17 landed |
+| `TestMeasureSets::test_no_lever_is_pulled_and_every_factor_is_identity` | Why CALC 0.9.26 changes no value | the `none` set | three flags false, three factors 1.0 |
+| `TestScenarioVariants::test_variants_present_and_shaped` | Variant axis exposed | `scenario_variants` | the three id fields |
+| `TestScenarioVariants::test_variant_count_is_the_full_cross_product` | Materialisation is complete | counts | variants = scenarios × measure sets |
+| `TestScenarioVariants::test_every_pair_appears_exactly_once` | No duplicate pair | (scenario, measure set) pairs | unique |
+| `TestScenarioVariants::test_variant_ids_are_unique` | Addressable by id | variant ids | unique |
+| `TestScenarioVariants::test_variants_reference_known_scenarios_and_measure_sets` | Referential integrity over the wire | every variant | both ids resolve in this same body |
+| `TestScenarioVariants::test_variants_inline_their_scenario_display_fields` | Switch renders from this list alone | every variant | key/name/base flag/graph/dimensions inlined |
+| `TestScenarioVariants::test_the_base_scenario_has_a_variant` | The one variant nothing works without | seeded base scenario | one variant per measure set, flagged as base |
 
 ---
 
@@ -247,6 +262,13 @@ compute step entirely.
 
 Costs are recomputed **by hand** from the route JSON physics plus the rates
 served by `/api/params/*`, so these tests also pin cross-endpoint consistency.
+
+`TestMeasureSetsAreIdentityToday` (CALC 0.9.26) is the exception to the
+by-hand rule: it evaluates one route twice, once with the default
+measures and once with `NO_MEASURES` passed explicitly, and requires the
+serialized views to be equal. That is the claim the version bump makes —
+the signature changed, no number did — and it is what fails the day a
+factor stops being 1.0 without the changelog saying so.
 
 Standard input: `eval_standard` (3-stop route, directional demand 40 Couchette
 + 30 Seat per trip; `places_sold` is annual).

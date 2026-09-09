@@ -30,8 +30,9 @@ require the evaluation to match. This pins the actual cost model
 
 Also covers: mathematical identities of the breakdown tree, exact
 normalisation divisors (unweighted place-km — density is NOT applied in
-normalisation), demand behaviour, matrix consistency, and the scenario
-override (what-if pins DE track infra v1, tac 3.10 < base 5.40).
+normalisation), demand behaviour, matrix consistency, the scenario
+override (what-if pins DE track infra v1, tac 3.10 < base 5.40), and —
+since CALC 0.9.26 — that evaluating under NO_MEASURES changes nothing.
 """
 
 import math
@@ -40,6 +41,7 @@ import pytest
 import requests
 
 from tests.helpers import (
+    add_directional_domain_demand,
     all_trips,
     compute_evaluation_domain,
     country_km,
@@ -1040,3 +1042,78 @@ class TestScenarioOverride:
             "station_charge_eur"
         ]
         assert sc_historical == pytest.approx(sc_base, rel=REL_TOL)
+
+
+# =============================================================================
+# Measure sets (CALC 0.9.26)
+# =============================================================================
+
+
+class TestMeasureSetsAreIdentityToday:
+    """The WP18 hook: evaluate_route() takes a MeasureSet and records it.
+    Until WP17 seeds rates every factor is 1.0, so the numbers must be
+    byte-identical to what the model returned before the parameter
+    existed. These tests are what makes that claim checkable — and what
+    fails loudly the day WP17 changes a factor without saying so."""
+
+    @pytest.fixture(scope="class")
+    def evaluated_route(self, loader, route_berlin_dresden_wien):
+        """The domain Route behind route_berlin_dresden_wien with
+        STANDARD_DEMAND applied, plus the collections to evaluate it —
+        built once so both evaluations below run on the SAME objects and
+        any difference can only come from the measure set."""
+        from tests.conftest import STANDARD_DEMAND
+        from api.helpers.route_serialize import route_from_dict
+
+        scenario_id = route_berlin_dresden_wien["scenario_id"]
+        route, _ = route_from_dict(
+            route_berlin_dresden_wien, loader, scenario_id=scenario_id
+        )
+        for pair in route.trip_pairs:
+            pair.od_pairs = []
+        for class_main, places_sold, avg_price in STANDARD_DEMAND:
+            add_directional_domain_demand(route, class_main, places_sold, avg_price)
+        return (
+            route,
+            loader.build_all_tracks(scenario_id),
+            loader.build_all_stops(scenario_id),
+            loader.build_all_passages(scenario_id),
+        )
+
+    def test_no_measures_is_the_default(self, evaluated_route):
+        """Omitting measures and passing NO_MEASURES explicitly produce
+        the identical views — the property every caller that has not
+        heard of measure sets relies on."""
+        from api.helpers.evaluation_serialize import views_to_dict
+        from models.params import NO_MEASURES
+        from models.pipeline import evaluate_and_build_views
+
+        route, tracks, stop_infra, passages = evaluated_route
+        _, default_views = evaluate_and_build_views(route, tracks, stop_infra, passages)
+        _, explicit_views = evaluate_and_build_views(
+            route, tracks, stop_infra, passages, NO_MEASURES
+        )
+        assert views_to_dict(default_views, route) == views_to_dict(
+            explicit_views, route
+        )
+
+    def test_result_records_the_measure_set_it_was_priced_under(self, evaluated_route):
+        """A result carries its own political assumptions, the way
+        RouteProvenance carries its parameter versions."""
+        from models.params import NO_MEASURES
+        from models.pipeline import evaluate_and_build_views
+
+        route, tracks, stop_infra, passages = evaluated_route
+        result, _ = evaluate_and_build_views(route, tracks, stop_infra, passages)
+        assert result.measures is NO_MEASURES
+        assert result.measures.key == "none"
+
+    def test_every_factor_is_one(self):
+        """The three hooks, stated as a test rather than only as a
+        comment: ticket revenue, energy cost and track access are all
+        unscaled today (models/params.py MeasureSet)."""
+        from models.params import NO_MEASURES
+
+        assert NO_MEASURES.ticket_revenue_factor == 1.0
+        assert NO_MEASURES.energy_cost_factor == 1.0
+        assert NO_MEASURES.track_access_factor == 1.0

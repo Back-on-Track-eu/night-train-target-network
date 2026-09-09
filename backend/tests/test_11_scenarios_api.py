@@ -11,6 +11,10 @@ that the seeded scenarios (see conftest.py: base_scenario, hsr_scenario,
 historical_scenario, scenarios_2032) land in the groups their flags
 dictate. Six scenarios are selectable — three operating conditions on
 each of the two networks — plus one superseded revision.
+
+Since WP18 the body also carries the second axis: measure_sets (what the
+state does) and scenario_variants, the materialised cross product the
+proposal family is computed over.
 """
 
 from collections import Counter
@@ -77,6 +81,19 @@ EXPECTED_DIMENSIONS = {
 }
 
 GROUPS = ("current_base", "current_scenarios", "historical_scenarios")
+
+# Mirrors scenario_serialize.measure_set_to_dict() / scenario_variant_to_dict().
+MEASURE_SET_FIELDS = {
+    "measure_set_id",
+    "key",
+    "description",
+    "vat_exempt",
+    "energy_tax_exempt",
+    "tac_direct_cost",
+    "factors",
+}
+MEASURE_SET_FACTORS = {"ticket_revenue", "energy_cost", "track_access"}
+VARIANT_FIELDS = {"scenario_variant_id", "scenario_id", "measure_set_id"}
 
 
 @pytest.fixture(scope="module")
@@ -213,3 +230,90 @@ class TestScenariosGrouping:
             for s in scenarios_body["historical_scenarios"]["scenarios"]
         }
         assert historical_scenario["scenario_key"] in historical_keys
+
+
+class TestMeasureSets:
+    """The measure-set axis: one seeded row until WP17 prices the levers."""
+
+    def test_measure_sets_present_and_shaped(self, scenarios_body):
+        assert "measure_sets" in scenarios_body
+        for measure_set in scenarios_body["measure_sets"]:
+            assert MEASURE_SET_FIELDS - set(measure_set) == set()
+            assert set(measure_set["factors"]) == MEASURE_SET_FACTORS
+
+    def test_only_the_empty_set_is_seeded(self, scenarios_body):
+        """db/dev/seed.py MEASURE_SETS and the migration seed exactly
+        'none'. A second row here means WP17 landed and the identity
+        assertions below need revisiting, not silent passing."""
+        assert [m["key"] for m in scenarios_body["measure_sets"]] == ["none"]
+
+    def test_no_lever_is_pulled_and_every_factor_is_identity(self, scenarios_body):
+        """'none' is the regime every evaluation before WP18 ran under —
+        so its three flags are false and its three factors are 1.0. This
+        is what makes CALC 0.9.26 a signature change and not a value
+        change (models/params.py MeasureSet)."""
+        none = scenarios_body["measure_sets"][0]
+        assert not none["vat_exempt"]
+        assert not none["energy_tax_exempt"]
+        assert not none["tac_direct_cost"]
+        assert set(none["factors"].values()) == {1.0}
+
+
+class TestScenarioVariants:
+    """The flattened (scenario x measure set) axis the family is built
+    over — materialised as the full cross product."""
+
+    def test_variants_present_and_shaped(self, scenarios_body):
+        assert "scenario_variants" in scenarios_body
+        for variant in scenarios_body["scenario_variants"]:
+            assert VARIANT_FIELDS - set(variant) == set()
+
+    def test_variant_count_is_the_full_cross_product(self, scenarios_body):
+        expected = scenarios_body["total_count"] * len(scenarios_body["measure_sets"])
+        assert len(scenarios_body["scenario_variants"]) == expected
+
+    def test_every_pair_appears_exactly_once(self, scenarios_body):
+        pairs = [
+            (v["scenario_id"], v["measure_set_id"])
+            for v in scenarios_body["scenario_variants"]
+        ]
+        assert len(set(pairs)) == len(pairs)
+
+    def test_variant_ids_are_unique(self, scenarios_body):
+        ids = [v["scenario_variant_id"] for v in scenarios_body["scenario_variants"]]
+        assert len(set(ids)) == len(ids)
+
+    def test_variants_reference_known_scenarios_and_measure_sets(self, scenarios_body):
+        scenario_ids = {
+            s["scenario_id"]
+            for group in GROUPS
+            for s in scenarios_body[group]["scenarios"]
+        }
+        measure_set_ids = {m["measure_set_id"] for m in scenarios_body["measure_sets"]}
+        for variant in scenarios_body["scenario_variants"]:
+            assert variant["scenario_id"] in scenario_ids
+            assert variant["measure_set_id"] in measure_set_ids
+
+    def test_variants_inline_their_scenario_display_fields(self, scenarios_body):
+        """A variant carries scenario_key/name/graph/dimensions, so the
+        frontend renders its switch from this list alone rather than
+        joining it against the three groups."""
+        for variant in scenarios_body["scenario_variants"]:
+            assert {
+                "scenario_key",
+                "scenario_name",
+                "is_current_base",
+                "routing_graph_key",
+                "dimensions",
+            } - set(variant) == set()
+
+    def test_the_base_scenario_has_a_variant(self, scenarios_body, base_scenario):
+        """Every family defaults to the base scenario's variant, so it
+        must exist — the one variant nothing works without."""
+        base_variants = [
+            v
+            for v in scenarios_body["scenario_variants"]
+            if v["scenario_id"] == base_scenario["scenario_id"]
+        ]
+        assert len(base_variants) == len(scenarios_body["measure_sets"])
+        assert any(v["is_current_base"] for v in base_variants)
