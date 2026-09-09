@@ -132,27 +132,29 @@ class TestRouteRoundtrip:
         assert _json_normalize(reconstructed) == _round_avg_price(published_route)
 
     def test_auto_added_stop_survives_roundtrip(self, db_cur, loader, api_base):
-        """The gap this file's migration (phase1b) closed — a stop
-        auto_stop_addition inserted must come back with auto_added=true,
-        not silently downgraded to false."""
+        """The gap this file's migration (phase1b) closed — a stop marked
+        auto_added must come back true, not silently downgraded to false.
+
+        ROUTE_BUILDER 0.9.34 removed the mode that set the flag, so no
+        request can produce one any more and the flag is marked by hand
+        here. The round trip still has to carry it: routes published while
+        'add' existed are stored with auto_added stops and must keep
+        reading back as they were built, and proposals.stop_times.auto_added
+        exists for exactly that."""
         response = compute(
             api_base,
             stops=STOPS_BERLIN_DRESDEN_WIEN,
             composition_id="NEW-BAL-7",
-            auto_stop_addition="add",
+            auto_stop_addition="off",
         )
-        stops_in_route = [
-            s
-            for pair in response["route"]["trip_pairs"]
-            for s in (
-                [seg["from_stop"] for seg in pair["outbound"]["segments"]]
-                + [pair["outbound"]["segments"][-1]["to_stop"]]
-            )
-        ]
-        assert any(s["auto_added"] for s in stops_in_route), (
-            "fixture assumption: osm:n3325029085 should auto-add on this "
-            "corridor — see test_20_route_content.py's module docstring"
-        )
+        # Mark the middle stop of every trip, the way a pre-0.9.34 build
+        # would have: the flag lives on the Stop object, which each pair of
+        # adjacent segments shares by reference — so both the to_stop of
+        # one segment and the from_stop of the next carry it.
+        for pair in response["route"]["trip_pairs"]:
+            for trip in (pair["outbound"], pair["return_trip"]):
+                trip["segments"][0]["to_stop"]["auto_added"] = True
+                trip["segments"][1]["from_stop"]["auto_added"] = True
 
         scenario_id = response["request"]["scenario_id"]
         pid, version, published_route = _publish_fixture(db_cur, response)

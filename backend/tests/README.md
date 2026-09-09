@@ -235,10 +235,11 @@ content, same models/route pipeline, just a different HTTP entry point).
 | `TestParkingsAndShuntings::test_parkings_deduplicated_by_stop` | Parking derivation | route parkings | ≥ 1, unique stop_ids, each with trip_ids |
 | `TestModeSwitches::test_explicit_default_values_accepted` / `test_simple_routing_mode_accepted` | Mode acceptance | explicit defaults / `simpleRouting` | 200 each |
 | `TestModeSwitches::test_invalid_mode_returns_400` (×4) | Mode validation | bad routing/timetable/schedule/auto_stop_addition mode | 400 each |
-| `TestModeSwitches::test_auto_stop_addition_defaults_to_add_and_inserts_brno` | auto_stop_addition defaults to `"add"`; osm:n3325029085 sits on the corridor and fits the budget | default request (field omitted) | stops = Berlin, Dresden, **Brno**, Wien; `auto_added` true on Brno only; return trip reversed with mirrored `auto_added`; no `suggested_stops` |
-| `TestModeSwitches::test_auto_stop_addition_add_explicit_accepted` | Explicit `"add"` behaves identically to the omitted field | `auto_stop_addition="add"` | 200, Brno inserted, no `suggested_stops` |
+| `TestModeSwitches::test_add_is_rejected` | `"add"` removed in ROUTE_BUILDER 0.9.34 | `auto_stop_addition="add"` | 400, like any unknown mode |
+| `TestModeSwitches::test_omitted_field_builds_the_callers_stops` | The API-boundary default is `"off"` since 0.9.34 | default request (field omitted) | resolved echo says `"off"`; stop list exactly as posted; `auto_added` false throughout; no `suggested_stops` |
+
 | `TestModeSwitches::test_auto_stop_addition_off_returns_exact_caller_list` | Explicit opt-out | `auto_stop_addition="off"` | 200, stop list unchanged, no `suggested_stops` |
-| `TestModeSwitches::test_auto_stop_addition_suggest_returns_suggested_stops_section` | `"suggest"` envelope + routing-like-off contract + cross-mode consistency with `"add"` | `auto_stop_addition="suggest"` | `suggested_stops` sits between `request` and `route`, each entry carrying the full field set and `added_time_min > 0`; no duplicates and nothing the caller already asked for; everything `"add"` inserted is offered, as a subsequence in route order; stop list unchanged, `auto_added=false` throughout. **Catalog-independent by design** — the pinned id list was re-cut twice for catalog changes and is gone |
+| `TestModeSwitches::test_auto_stop_addition_suggest_returns_suggested_stops_section` | `"suggest"` envelope + routing-like-off contract | `auto_stop_addition="suggest"` | `suggested_stops` sits between `request` and `route`, each entry carrying the full field set and `added_time_min > 0`; no duplicates and nothing the caller already asked for; suggestions ordered along the corridor (monotone distance from the origin); stop list unchanged, `auto_added=false` throughout. **Catalog-independent by design** — the pinned id list was re-cut twice for catalog changes and is gone, and the cross-check against `"add"` went with that mode in 0.9.34 |
 | `TestModeSwitches::test_auto_added_field_false_throughout_when_off` | `Stop.auto_added` contract | module fixture (`auto_stop_addition="off"`) | every stop `auto_added=false` |
 | `TestModeSwitches::test_auto_stop_addition_bool_returns_400` (×2) / `test_auto_stop_addition_wrong_type_returns_400` | Pre-0.9.5 booleans and wrong types rejected, not mapped | `auto_stop_addition=true/false/"yes"` | 400 each |
 | `TestFixedNightMode::test_interval_covers_night_window_both_directions` | Night-window guarantee, interval reversed for return | fixed-night, Berlin→Dresden interval | dep(A) < 00:00, arr(B) ≥ 05:00, both directions |
@@ -363,7 +364,7 @@ the pre-storage floating-point value.
 |---|---|---|---|
 | `TestRouteRoundtrip::test_two_stop_route_deep_equals_after_roundtrip` | Baseline round-trip | 2-stop route, `auto_stop_addition="off"` | reconstructed route deep-equals published (mod ID prefix + avg_price rounding) |
 | `TestRouteRoundtrip::test_three_stop_route_with_intermediate_stop_deep_equals` | Longer segment chain, a night-classified intermediate stop | 3-stop route | same deep-equal contract |
-| `TestRouteRoundtrip::test_auto_added_stop_survives_roundtrip` | The gap phase 1b closed | `auto_stop_addition="add"` (Brno auto-added) | `auto_added=true` survives on the inserted stop, both directions |
+| `TestRouteRoundtrip::test_auto_added_stop_survives_roundtrip` | The gap phase 1b closed | route built with `"off"`, one stop per trip marked `auto_added` by hand (0.9.34 removed the mode that set it; routes published before it are still stored with the flag) | `auto_added=true` survives the round trip |
 | `TestRouteRoundtrip::test_od_pairs_survive_roundtrip` | `proposals.od_pairs` carries real content | stopgap demand always populates `od_pairs` | reconstructed od_pairs (compared against the **published**, ID-rewritten copy — od_pairs carry `trip_id` references) match, avg_price rounded |
 | `TestRouteRoundtrip::test_unknown_proposal_raises` | Domain check | nonexistent `proposal_id` | `ValueError` |
 | `TestInputParametersRoundtrip::test_input_parameters_deep_equal_original` | `input_parameters_from_scenario()` — parameters rebuilt from scenario pin alone, no GTFS insert needed | same scenario_id as the original compute | rebuilt `evaluation.input.parameters` deep-equals original (JSON-normalized) |
@@ -652,23 +653,21 @@ key). The only file in the suite runnable standalone.
    would cover the other half of the override matrix.
 5. ~~**A stop within `AUTO_STOP_BUFFER_M` of an existing corridor**~~ —
    **DONE**: `osm:n3325029085` (Brno hl.n., 49.191/16.613) sits ~10m off the
-   natural Berlin-Dresden-Wien routing (Dresden-Praha-Brno-Wien) and
-   comfortably inside the detour budget, so the full `auto_stop_addition`
-   behaviour is now pinned end to end in `test_20::TestModeSwitches`: the
-   actual insertion at geographic position with `auto_added=true`, the
-   outbound-and-return-carry-the-same-added-stops rule (search runs once,
-   from outbound — see `_build_trip_pair()` in `route_factory.py`), a
-   populated `suggested_stops` list with a real `added_time_min`, and
-   cross-mode consistency (`"suggest"` lists exactly what `"add"`
-   inserts). Because of this, every fixed-corridor fixture in
-   `conftest.py` and `test_20`'s structural `BASE_REQUEST` pin
-   `auto_stop_addition="off"` — otherwise Brno (and, for the 2-stop
-   Berlin-Wien fixture, Dresden too) would be auto-added into routes whose
-   exact stop lists downstream tests rely on. Still open within this
-   topic: a candidate that gets *rejected* by the budget check (a stop
-   near a corridor but with a detour cost above
-   `AUTO_STOP_MAX_DETOUR_PER`) — today every near-corridor candidate fits,
-   so the rejection branch is only covered implicitly.
+   natural Berlin-Dresden-Wien routing (Dresden-Praha-Brno-Wien), so the
+   candidate search has something real to find and `test_20::TestModeSwitches`
+   pins `"suggest"` end to end: a populated `suggested_stops` list with a
+   real `added_time_min`, ordered along the corridor, offering nothing the
+   caller already asked for.
+
+   ROUTE_BUILDER 0.9.34 removed `"add"`, which retired the insertion
+   assertions (and the pinned stop list behind them) — nothing on the
+   server changes a stop list any more. That also makes the explicit
+   `auto_stop_addition="off"` on every fixed-corridor fixture in
+   `conftest.py` and on `test_20`'s `BASE_REQUEST` belt-and-braces rather
+   than load-bearing: it is now the default. Keep it anyway — it says what
+   the fixture depends on. The budget's rejection branch is likewise no
+   longer a gap: `AUTO_STOP_MAX_DETOUR_PER` only bounds how much router
+   time costing may spend, and never filters what is suggested.
 
 ## test_79_route_segment_cache.py — Route segment cache
 

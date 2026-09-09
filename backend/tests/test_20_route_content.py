@@ -271,44 +271,6 @@ BASE_REQUEST = {
     "auto_stop_addition": "off",
 }
 
-# The stop list the "add" default actually produces on this corridor
-# (AUTO_STOP_BUFFER_M=10km, AUTO_STOP_ANALYTIC_DETOUR_M=100m) — 7 catalog
-# stops merged in at their geographic positions between Dresden and Wien,
-# everything else the caller's own. Re-derive with a POST of
-# auto_stop_addition="add" and read trip_pairs[0].outbound whenever
-# AUTO_STOP_BUFFER_M, AUTO_STOP_ANALYTIC_DETOUR_M, AUTO_STOP_MAX_DETOUR_PER,
-# or the stop catalog itself changes.
-#
-# Updated at ROUTE_BUILDER 0.9.24, which moved the detour budget onto
-# TECHNICAL trip time (driving + dynamics + dwell) instead of padded time.
-# osm:n2736023837 and osm:n3129289404 dropped out: both sat at the margin of
-# the old, larger budget. That marginality is inherent — this list pins a
-# greedy cumulative budget, so a few per cent either way moves its tail, and
-# a diff here means the budget moved, not that the search broke.
-#
-# Re-pinned when the stop classification pipeline replaced the catalog:
-# coordinates now come from OSM rather than ONTD, so marginal candidates
-# moved a little and the greedy budget resolved differently. Bad Schandau
-# (osm:n2736023837) and Ceska Trebova (osm:n3129289404) came back in, and
-# Decin (osm:n5062517821) and Breclav-area osm:n3325029085 dropped out to
-# pay for them — the same tail churn the paragraph above describes, at the
-# same count of seven. What is asserted structurally rather than by
-# identity is the invariant that matters: every stop 'add' inserts also
-# appears in 'suggest' (test_..._suggest_... below).
-STOPS_WITH_BRNO = [
-    "osm:n3856100103",
-    "osm:n25397500",
-    "osm:n2736023837",
-    "osm:n4171354660",
-    "osm:n3134733933",
-    "osm:n24684084",
-    "osm:n3129312254",
-    "osm:n3129289404",
-    "osm:n3315724401",
-    "osm:w423692233",
-]
-
-
 # The merged compute response's top-level envelope (api/proposal_calc.py) —
 # used by the suggest-mode key-set assertion below.
 _CALC_ENVELOPE_KEYS = {
@@ -335,17 +297,6 @@ def plan_response(api_base):
     return resp.json()
 
 
-@pytest.fixture(scope="module")
-def plan_response_default_add(api_base):
-    """Same request with auto_stop_addition omitted entirely — covers the
-    "add" default, which inserts osm:n3325029085 on this corridor. Built once
-    for this module."""
-    body = {k: v for k, v in BASE_REQUEST.items() if k != "auto_stop_addition"}
-    resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=90)
-    assert resp.status_code == 200, f"Route build failed: {resp.text[:300]}"
-    return resp.json()
-
-
 class TestModeSwitches:
     def test_explicit_default_values_accepted(self, api_base):
         """Spelling out every default mode explicitly is accepted."""
@@ -354,7 +305,7 @@ class TestModeSwitches:
             "routing_mode": "fullRouting",
             "timetable_mode": "simpleAutomatic",
             "schedule_mode": "alwaysDaily",
-            "auto_stop_addition": "add",
+            "auto_stop_addition": "off",
         }
         resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=90)
         assert resp.status_code == 200
@@ -379,41 +330,29 @@ class TestModeSwitches:
 
     # --- auto_stop_addition — one case per enum value + bool rejection ------
 
-    def test_auto_stop_addition_defaults_to_add_and_inserts_brno(
-        self, plan_response_default_add
-    ):
-        """With auto_stop_addition omitted (the 'add' default), 7 catalog
-        stops along the Dresden-Wien corridor — all within
-        AUTO_STOP_BUFFER_M (10km) and within the cumulative detour budget
-        — are inserted at their geographic positions, marked
-        auto_added=true, everything else the caller's own (see
-        STOPS_WITH_BRNO's own comment for how to re-derive this list:
-        10 entries total = 2 user stops + 7 auto-added + 1 user stop).
-        The return trip carries the same final stop list reversed with the
-        same auto_added marking (the search runs once, from outbound — see
-        _build_trip_pair() in route_factory.py)."""
-        pair = plan_response_default_add["route"]["trip_pairs"][0]
-        assert "suggested_stops" not in plan_response_default_add
-
-        expected_added = [False, False] + [True] * 7 + [False]
-        outbound = stop_times(pair["outbound"])
-        assert [s["stop_id"] for s in outbound] == STOPS_WITH_BRNO
-        assert [s["auto_added"] for s in outbound] == expected_added
-
-        return_stops = stop_times(pair["return_trip"])
-        assert [s["stop_id"] for s in return_stops] == list(reversed(STOPS_WITH_BRNO))
-        assert [s["auto_added"] for s in return_stops] == list(reversed(expected_added))
-
-    def test_auto_stop_addition_add_explicit_accepted(self, api_base):
-        """Explicit 'add' (the default spelled out) behaves identically to
-        the omitted field — Brno inserted — and does not carry a
-        suggested_stops section (that's exclusive to 'suggest')."""
+    def test_add_is_rejected(self, api_base):
+        """'add' — the builder choosing stops itself — was removed in
+        ROUTE_BUILDER 0.9.34 and is now an ordinary unknown mode: 400, not
+        a silently different route (migration
+        2026-09-10_auto_stop_add_removed.sql asserts no stored proposal
+        still asks for it)."""
         body = {**BASE_REQUEST, "auto_stop_addition": "add"}
+        resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=10)
+        assert resp.status_code == 400
+
+    def test_omitted_field_builds_the_callers_stops(self, api_base):
+        """The API-boundary default is 'off' since 0.9.34, so a request
+        that says nothing about auto stops gets exactly the stops it
+        posted — and no suggestions."""
+        body = {k: v for k, v in BASE_REQUEST.items() if k != "auto_stop_addition"}
         resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=90)
         assert resp.status_code == 200
-        assert "suggested_stops" not in resp.json()
-        outbound = resp.json()["route"]["trip_pairs"][0]["outbound"]
-        assert [s["stop_id"] for s in stop_times(outbound)] == STOPS_WITH_BRNO
+        payload = resp.json()
+        assert payload["request"]["auto_stop_addition"] == "off"
+        assert "suggested_stops" not in payload
+        outbound = payload["route"]["trip_pairs"][0]["outbound"]
+        assert [s["stop_id"] for s in stop_times(outbound)] == STOPS_BERLIN_DRESDEN_WIEN
+        assert all(not s["auto_added"] for s in stop_times(outbound))
 
     def test_auto_stop_addition_off_returns_exact_caller_list(self, api_base):
         """Explicit opt-out: auto_stop_addition='off' skips the candidate
@@ -426,33 +365,25 @@ class TestModeSwitches:
         outbound = resp.json()["route"]["trip_pairs"][0]["outbound"]
         assert [s["stop_id"] for s in stop_times(outbound)] == STOPS_BERLIN_DRESDEN_WIEN
 
-    def test_auto_stop_addition_suggest_returns_suggested_stops_section(
-        self, api_base, plan_response_default_add
-    ):
+    def test_auto_stop_addition_suggest_returns_suggested_stops_section(self, api_base):
         """auto_stop_addition='suggest' routes exactly like 'off' (caller's
         own stop list, nothing added, auto_added false throughout) but
         carries a top-level suggested_stops list placed between request and
         route.
 
-        Mode 'suggest' deliberately ignores AUTO_STOP_MAX_DETOUR_PER (see
-        apply_auto_stop_addition()'s docstring), so at the wide
-        AUTO_STOP_BUFFER_M=10km buffer it surfaces MORE candidates than
-        'add' actually inserts — cross-mode consistency is a subset
-        relation, not equality: every stop 'add' inserted also appears in
-        'suggest' (both start from the same candidate search), but
-        'suggest' additionally surfaces the over-budget candidates 'add'
-        had to stop short of.
+        Nothing is pinned by stop id here. Which stops sit within
+        AUTO_STOP_BUFFER_M of a corridor is a property of the stop catalog,
+        which is external, Drive-hosted and re-exported whenever the
+        classification pipeline runs — a pinned list asserts the catalog's
+        density rather than the search this test targets, and was re-cut
+        twice for exactly that reason. The invariants below hold at any
+        density: suggestions are unique, ordered along the route, costed,
+        never a stop the caller already asked for, and never actually
+        added.
 
-        Asserted against 'add' rather than against a pinned id list. Which
-        stops sit within the corridor buffer is a property of the stop
-        catalog, which is external, Drive-hosted and re-exported whenever
-        the classification pipeline runs — the pinned list was re-cut for
-        the ONTD-to-pipeline catalog and again for the 2026-09 gap closure
-        (1,050 -> 1,176 stops), each time asserting the catalog's density
-        rather than the auto-stop logic this test targets. The invariants
-        below hold at any density: 'suggest' offers everything 'add'
-        inserted, in the order the route builder placed them, and offers
-        nothing the caller already asked for."""
+        Until 0.9.34 this test cross-checked 'suggest' against what 'add'
+        inserted. That mode is gone, so the ordering invariant is asserted
+        against the route's own geography instead."""
         body = {**BASE_REQUEST, "auto_stop_addition": "suggest"}
         resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=90)
         assert resp.status_code == 200
@@ -475,27 +406,37 @@ class TestModeSwitches:
             "a stop the caller already asked for was offered as a suggestion"
         )
 
-        # The cross-mode invariant: 'add' and 'suggest' run the same
-        # candidate search, so everything 'add' inserted must be offered by
-        # 'suggest'. This is what actually breaks if the search regresses.
-        auto_added = [
-            s["stop_id"]
-            for s in stop_times(
-                plan_response_default_add["route"]["trip_pairs"][0]["outbound"]
-            )
-            if s["auto_added"]
+        # Ordered along the route: suggest_auto_stops() sorts by
+        # (leg_index, along_leg_fraction), so consecutive suggestions never
+        # jump backwards along the corridor. Measured the same way the sort
+        # does — as a position ALONG the routed polyline, not as distance
+        # from a point: this corridor runs Berlin-Dresden-Praha-Brno-Wien,
+        # so a suggestion late on the route can sit closer to Berlin as the
+        # crow flies than an early one. Geometry the catalog cannot change,
+        # unlike the id list this assertion used to compare against.
+        outbound = payload["route"]["trip_pairs"][0]["outbound"]
+        coords_by_id = {g["id"]: g["coords"] for g in payload["route"]["geometries"]}
+        path = [
+            point
+            for segment in outbound["segments"]
+            for point in coords_by_id[segment["geometry_id"]]
         ]
-        assert auto_added, "'add' inserted nothing — nothing left to cross-check"
-        assert set(auto_added) <= set(suggested_ids)
 
-        # And in the same order. suggest_auto_stops() sorts by (leg_index,
-        # along_leg_fraction), the route builder inserts by position along
-        # the trip: the shared stops must therefore appear as a subsequence,
-        # which pins the sort without pinning the catalog's contents.
-        positions = [suggested_ids.index(stop_id) for stop_id in auto_added]
+        def along_path(stop: dict) -> int:
+            """Index of the polyline point nearest this stop — its position
+            along the route. Plain squared degrees: only the ordering
+            matters, and the candidates are kilometres apart."""
+            return min(
+                range(len(path)),
+                key=lambda i: (
+                    (path[i][0] - stop["lon"]) ** 2 + (path[i][1] - stop["lat"]) ** 2
+                ),
+            )
+
+        positions = [along_path(s) for s in suggested]
         assert positions == sorted(positions), (
-            "suggestions are not ordered along the route: "
-            f"'add' placed {auto_added} at suggestion indices {positions}"
+            f"suggestions are not ordered along the route: "
+            f"{list(zip(suggested_ids, positions))}"
         )
 
         for s in suggested:
@@ -514,17 +455,6 @@ class TestModeSwitches:
         assert [s["stop_id"] for s in stop_times(outbound)] == STOPS_BERLIN_DRESDEN_WIEN
         for stop in stop_times(outbound):
             assert stop["auto_added"] is False
-
-        # Cross-mode consistency: every 'add'-inserted stop is a subset of
-        # 'suggest's fuller candidate list (not equality — see docstring).
-        added = {
-            s["stop_id"]
-            for s in stop_times(
-                plan_response_default_add["route"]["trip_pairs"][0]["outbound"]
-            )
-            if s["auto_added"]
-        }
-        assert added <= {s["stop_id"] for s in suggested}
 
     def test_auto_added_field_false_throughout_when_off(self, plan_response):
         """With auto_stop_addition='off' (the module fixture), every stop is

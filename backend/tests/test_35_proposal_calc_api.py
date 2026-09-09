@@ -178,7 +178,7 @@ class TestResolvedRequest:
             timetable_mode="simpleAutomatic",
             schedule_mode="alwaysDaily",
             routing_mode="fullRouting",
-            auto_stop_addition="add",
+            auto_stop_addition="off",
         )
         assert implicit["request"] == explicit["request"]
 

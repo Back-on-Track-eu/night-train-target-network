@@ -190,24 +190,24 @@ class TestRoutingErrorIsNotA500:
 
 
 class TestAutoStopGaugeFilter:
-    def test_no_gauge_foreign_stop_is_ever_auto_added(self, db_conn):
-        # Any broad-gauge trip with auto_stop_addition="add": every stop
-        # of the result must support the trip's gauge. Data-driven — the
-        # concrete corridor doesn't matter, the invariant does.
-        # Same connectivity-aware selection as the routing tests — this
-        # test is about the gauge filter, not about which pair connects.
-        # Reuse the connectivity-aware selection, then re-route the same
-        # pair with auto-stop addition on — this test is about the gauge
-        # filter, not about which pair connects.
+    def test_no_gauge_foreign_stop_is_ever_suggested(self, db_conn):
+        # Any broad-gauge trip: every stop the candidate search offers must
+        # support the trip's gauge (_find_nearby_candidates filters on
+        # stop_supports_gauge, strictly — a gauge-unknown stop is never
+        # offered). Data-driven: the concrete corridor doesn't matter, the
+        # invariant does, so this reuses the connectivity-aware pair
+        # selection the routing tests use.
+        #
+        # Asserted on "suggest" since ROUTE_BUILDER 0.9.34 removed "add".
+        # Same filter, and now the only way a catalog stop can reach a
+        # user's route at all — an offered stop is one they may accept.
         _, a, b = _route_any_pair(db_conn, "FI", 1524)
-        resp = _calc([a["stop_id"], b["stop_id"]], auto_stop_addition="add")
+        resp = _calc([a["stop_id"], b["stop_id"]], auto_stop_addition="suggest")
         assert resp.status_code == 200, resp.text[:400]
-        route = resp.json()["route"]
-        stop_ids = [
-            s["stop_id"]
-            for seg in route["trip_pairs"][0]["outbound"]["segments"]
-            for s in (seg["from_stop"], seg["to_stop"])
-        ]
+        payload = resp.json()
+        stop_ids = [s["stop_id"] for s in payload.get("suggested_stops", [])]
+        if not stop_ids:
+            pytest.skip("corridor offers no candidate — nothing to filter")
         cur = db_conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute(
             """
@@ -224,6 +224,6 @@ class TestAutoStopGaugeFilter:
         family = {1520, 1524}  # GAUGE_FAMILY_MM — either tag supports the trip
         for stop_id in stop_ids:
             assert gauges.get(stop_id) and family & set(gauges[stop_id]), (
-                f"{stop_id} on a 1520-family trip without 1520/1524 support "
-                f"(gauges: {gauges.get(stop_id)})"
+                f"{stop_id} suggested for a 1520-family trip without "
+                f"1520/1524 support (gauges: {gauges.get(stop_id)})"
             )
