@@ -644,6 +644,41 @@ scenario list response, and `ModelsResponse`. No existing type changes.
 
 ---
 
+## 14. `auto_stop_addition: "add"` is gone — ROUTE_BUILDER 0.9.34
+
+WP18 phase B1. The mode where the backend added stops of its own is
+removed. `auto_stop_addition` is now `"off" | "suggest"`, the API-boundary
+default moved from `"add"` to `"off"`, and posting `"add"` gets a 400 like
+any unknown mode.
+
+**You are almost certainly unaffected.** `requestCalc` /
+`recomputeWithSelection` only ever send `"suggest"` then `"off"`, so the
+running client never used the removed mode and never relied on the old
+default. What to do:
+
+- `types/api.ts`: narrow the union to `'off' | 'suggest'`.
+- Anywhere you rely on the default by omitting the field: it now means
+  "build exactly my stops" instead of "add what you think fits". That is
+  the behaviour the builder already wanted; nothing to change, but it is
+  the one silent difference.
+- `Stop.auto_added` stays in the response and is now always `false`. Keep
+  reading it: proposals published before 0.9.34 are stored with
+  auto-added stops and still come back with the flag set. If any UI
+  renders those stops differently, that rendering is still correct for
+  old proposals and simply never fires for new ones.
+
+Suggestions are unchanged: same candidate search, same `added_time_min`,
+same `suggested_stops` block. What changed is that accepting one is now
+the only way a catalog stop joins a route — which is what the builder's
+suggestion flow already does.
+
+Why: a route the user did not ask for is not the user's route, and a
+proposal family (phase B2) compares one stop list across every scenario
+and composition, which it cannot do if each member may pick its own stops
+within its own detour budget.
+
+---
+
 ## Maintaining this document
 
 One file, updated in the same PR as the backend change. Each entry says

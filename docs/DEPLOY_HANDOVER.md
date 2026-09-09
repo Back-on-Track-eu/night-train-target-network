@@ -995,6 +995,65 @@ fixing before the next fresh install.
 
 ---
 
+## 14. WP18 phase B1 — an assertion migration and a fresh-install fix
+
+Ships `2026-09-10_auto_stop_add_removed.sql` (ROUTE_BUILDER 0.9.34).
+
+**What the migration does.** Nothing to the schema. It asserts that no
+stored proposal's `compute_request` asks for `auto_stop_addition: 'add'`,
+a mode the route builder no longer has, and that none omits the field
+(which would have taken the old `'add'` default). Either case **fails the
+deploy** before the api container starts, with a message naming the
+counts — a proposal like that would otherwise silently rebuild as a
+different route on its next recompute. It also prints a `NOTICE` with the
+number of published proposals carrying auto-added stops: those lose the
+stops on their next recompute, so their KPIs move. Informational, never
+fatal.
+
+**You can check before deploying**, though nothing requires it — the
+migration is the real gate:
+
+```bash
+docker exec tn-staging-db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
+SELECT count(*) FILTER (WHERE compute_request->>''auto_stop_addition'' = ''add'')  AS echo_add,
+       count(*) FILTER (WHERE compute_request->>''auto_stop_addition'' IS NULL) AS echo_missing,
+       count(*)                                                                  AS proposals
+FROM proposals.proposals;"'
+```
+
+Swap `tn-production-db` for production (`docker ps --filter name=tn-` if
+the names differ). Both counts zero means the migration passes silently.
+If not, and the environment still holds only test data, reseeding is the
+cheapest fix — see the pre-V1 section of
+`deploy/bot-server-app/README.md`.
+
+**Version bump handling.** ROUTE_BUILDER 0.9.33 → 0.9.34 marks every
+stored proposal outdated, so each recomputes on its next load. Unlike the
+CALC bump in §13, this one **can** change numbers: any proposal built
+under `'add'` loses the stops the builder chose. That is the intended
+correction, not a regression. `scripts/refresh_proposals.py` may be run to
+get it over with in one pass rather than lazily.
+
+**Fresh-install fix, changed blind.** All three deploy compose files
+(`bot-server-app`, `bot-server-demo`, `bot-server`) mounted
+`backend/db/dev/sql/create_input_params_schema.sql` and
+`create_scenario_schema.sql` into `docker-entrypoint-initdb.d`. Those
+files no longer exist — `db/schema.py::build_ddl()` replaced them — so
+Docker created *directories* in their place, `psql -f` on a directory
+fails, and the postgres entrypoint runs under `set -e`: **a database on an
+empty volume would never have finished initialising.** Existing volumes
+never run initdb, so staging and production are unaffected and always
+have been. The two mounts are now removed.
+
+Neither David nor I can test this: it only fires on a genuinely fresh
+volume, which is your first-time-setup path. Please verify on the next
+new environment. Expected: `docker compose up -d db` comes up healthy,
+`create_admin_schema.sql` and `create_proposal_schema.sql` run, and the
+documented `seed.py` step then creates all four schemas as before. If the
+db container dies during init, the mounts are the first place to look.
+
+---
+
 ## Maintaining this document
 
 One file, updated in the same PR as the change it describes. The rule that

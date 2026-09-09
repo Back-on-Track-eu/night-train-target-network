@@ -334,7 +334,9 @@ auto-stop addition, mode switches) is documented in
 allocation rules, and view semantics in
 [`../models/evaluation/README.md`](../models/evaluation/README.md).
 
-Worked example — Berlin – Dresden – Wien with `auto_stop_addition="add"`:
+Worked example — Berlin – Dresden – Wien (the fixture predates route
+builder 0.9.34 and was captured under the removed `"add"` mode, so its
+route carries stops the builder chose; the response SHAPE is current):
 request [`tc_1_route_input.json`](../scripts/data/tc_1_route_input.json),
 full response [`tc_1_route_input_output.json`](../scripts/data/tc_1_route_input_output.json)
 (produced by [`../scripts/test_proposal_calc.py`](../scripts/test_proposal_calc.py),
@@ -360,7 +362,7 @@ layer of candidate stops tagged with `added_time_min`.
 | `timetable_mode` | string | — | Default `"simpleAutomatic"` — see **Mode switches** below |
 | `fixed_night_interval` | array of string | (✓) | Exactly 2 distinct stop IDs from `stops`, start before end in outbound travel order — required for, and only allowed with, `timetable_mode="simpleAutomaticWithFixedNight"` (400 otherwise). May span several legs; applied reversed to the return trip automatically |
 | `schedule_mode` | string | — | Default `"alwaysDaily"` — see **Mode switches** below |
-| `auto_stop_addition` | string | — | `"off"` / `"add"` / `"suggest"`, default `"add"` — see **Mode switches** below. String enum since route builder 0.9.5; booleans are rejected with 400 |
+| `auto_stop_addition` | string | — | `"off"` / `"suggest"`, default `"off"` — see **Mode switches** below. String enum since route builder 0.9.5; booleans are rejected with 400. `"add"` was removed in 0.9.34 and is now rejected with 400 like any unknown mode |
 | `expert_timetable` | object | — | Manual departure + per-leg minutes (route builder 0.9.32) — see **Expert timetable** below. Omit or send `null` for the fully automatic timetable, which is what every request produced before this field existed |
 
 There is deliberately no `proposal_id`/`proposal_version` field — those
@@ -376,7 +378,7 @@ meaning for a call that never persists.
   "routing_mode": "fullRouting",
   "timetable_mode": "simpleAutomatic",
   "schedule_mode": "alwaysDaily",
-  "auto_stop_addition": "add"
+  "auto_stop_addition": "off"
 }
 ```
 
@@ -462,19 +464,26 @@ expert timetable can be compared against the same route computed with
 
 | Value | Description |
 |---|---|
-| `"off"` | Returns exactly the caller's own stop list, unmodified — no candidate search at all. |
-| `"add"` (default) | Looks for stops from the full stop catalog that sit close to the routed path (on the line or nearby), and greedily adds any that fit within a fixed detour time budget — cheapest detour first, stopping at the first candidate that would exceed the budget. Added stops come back with `auto_added: true` on their `Stop` in the response (see below) so the frontend can render them differently. |
-| `"suggest"` | Routes exactly like `"off"` (nothing added, nothing rerouted), but runs the same candidate search + costing as `"add"` and returns every costed candidate in a top-level `suggested_stops` list, placed between `request` and `route` in the response (see **Response** below) — each with the `added_time_min` the stop would cost if implemented. The detour budget is deliberately **not** applied: suggestion is informational, selection is the caller's. Present even when empty (a real "searched, found nothing" answer). |
+| `"off"` (default) | Returns exactly the caller's own stop list, unmodified — no candidate search at all. |
+| `"suggest"` | Routes exactly like `"off"` (nothing added, nothing rerouted), but runs the candidate search + costing and returns every costed candidate in a top-level `suggested_stops` list, placed between `request` and `route` in the response (see **Response** below) — each with the `added_time_min` the stop would cost if implemented. The detour budget is deliberately **not** applied: suggestion is informational, selection is the caller's. Present even when empty (a real "searched, found nothing" answer). |
 
-For `"add"` and `"suggest"`: the candidate search prefilters the stop catalog
-to countries the routed legs actually pass through (attribution the router
+`"add"` — the builder picking stops itself within the detour budget — was
+**removed in route builder 0.9.34** and is now rejected with 400 like any
+unknown mode. A route the user did not ask for is not the user's route:
+`"suggest"` offers the same candidates, costed, and an accepted one becomes
+an ordinary posted stop. Stops therefore always come back with
+`auto_added: false`; the field stays because routes published while `"add"`
+existed are stored with it (`proposals.stop_times.auto_added`) and must keep
+reading back as they were built.
+
+For `"suggest"`: the candidate search prefilters the stop catalog to
+countries the routed legs actually pass through (attribution the router
 already computed), buffer distance and max detour % are fixed constants in
-`models/route/version.py` (`AUTO_STOP_BUFFER_M`, `AUTO_STOP_MAX_DETOUR_PER`),
-not request fields, and the search only runs once per `TripPair`, against the
-outbound direction — for `"add"` the return trip always adds the same stops
-(reversed), rather than running its own independent search against its own
-budget; each direction still gets its own real routed physics for the shared
-stop list.
+`models/route/model.py` (`AUTO_STOP_BUFFER_M`, `AUTO_STOP_MAX_DETOUR_PER`),
+not request fields, and the search runs once per `TripPair`, against the
+outbound direction — both directions cover the same corridor reversed, so a
+second pass would spend the same router calls for a near-identical answer.
+Each direction still gets its own real routed physics.
 
 **Response**
 
@@ -491,11 +500,11 @@ stop list.
     "timetable_mode": "simpleAutomatic",
     "fixed_night_interval": null,
     "schedule_mode": "alwaysDaily",
-    "auto_stop_addition": "add",
+    "auto_stop_addition": "off",
     "expert_timetable": null
   },
   "suggested_stops": [
-    { "...": "ONLY for auto_stop_addition=\"suggest\" — see above; absent for \"off\"/\"add\"" }
+    { "...": "ONLY for auto_stop_addition=\"suggest\" — see above; absent for \"off\"" }
   ],
   "summary": {
     "total_distance_km": 683.4, "total_time_h": 9.0, "avg_speed_kmh": 76.0,
@@ -834,7 +843,7 @@ auth.
   "fixed_night_interval": null,
   "schedule_mode": "alwaysDaily",
   "routing_mode": "fullRouting",
-  "auto_stop_addition": "add",       // "suggest" allowed; suggestions carried in "full" only
+  "auto_stop_addition": "off",       // "suggest" allowed; suggestions carried in "full" only
   "expert_timetable": null
 }
 ```

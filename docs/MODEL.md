@@ -67,7 +67,7 @@ station parameters).
 <!-- BEGIN GENERATED: versions -->
 | Model | Version | What it computes | Anchor file | Documentation |
 |---|---|---|---|---|
-| Route & timetable builder | `0.9.33` | Route and timetable builder: turns a list of stops, a train composition, and a few mode selections into a complete route — trip pairs, travel and stopping times with schedule buffers, and a mirrored outbound/return night schedule. | [`model.py`](../backend/models/route/model.py) | [README.md](../backend/models/README.md) |
+| Route & timetable builder | `0.9.34` | Route and timetable builder: turns a list of stops, a train composition, and a few mode selections into a complete route — trip pairs, travel and stopping times with schedule buffers, and a mirrored outbound/return night schedule. | [`model.py`](../backend/models/route/model.py) | [README.md](../backend/models/README.md) |
 | Energy model | `1.1.1` | Traction energy model calibrated against Deutsche Bahn Trassenfinder technical runs: start/stop energy per leg, rolling resistance per tonne-kilometre, air resistance growing with train length and the square of average speed, plus a constant auxiliary and hotel-power draw for the running time. Coach hotel power is an assumption, not a measurement - Trassenfinder was queried with it switched off. | [`model.py`](../backend/models/energy/model.py) | [README.md](../backend/models/energy/README.md) |
 | Demand model | `0.0.2` | Demand model (placeholder): assumes every accommodation class is 70% booked at a flat per-kilometre fare, spread evenly across all connections — a stand-in until a real demand model with directional demand, price sensitivity, and competition from other modes replaces it. | [`model.py`](../backend/models/demand/model.py) | [README.md](../backend/models/demand/README.md) |
 | Cost & revenue evaluation | `0.9.26` | Cost and revenue evaluation: computes the operator's fixed and variable costs, the charges paid to infrastructure companies, and the ticket revenue of a route, then aggregates the result into views per route, trip pair, country, connection, route section, and stop. | [`model.py`](../backend/models/evaluation/model.py) | [README.md](../backend/models/evaluation/README.md) |
@@ -197,7 +197,7 @@ How long the train waits at a stop where passengers both board and get off: the 
 
 $$ \Delta t_{cand} = \left(\sum_{l \in reroute(a, cand, b)} t_{total,l}\right) - t_{total,(a,b)} + t_{dwell,cand} $$
 
-Extra travel time a suggested additional stop would cost: the detour to reach it, the braking and accelerating it causes, and the waiting time at the stop itself. Used to automatically pick extra stops that fit the time budget, and to report suggestions.
+Extra travel time a suggested additional stop would cost: the detour to reach it, the braking and accelerating it causes, and the waiting time at the stop itself. Reported with every suggestion, so the figure a reader accepts a stop on is the one the timetable then charges.
 
 | | Symbol | Meaning | Unit | Source |
 |---|---|---|---|---|
@@ -964,7 +964,7 @@ model's version. Each constant lives in its model's `model.py`.
 | <a id="s-route-default_timetable_mode"></a>`DEFAULT_TIMETABLE_MODE` | `'simpleAutomatic'` | — |
 | <a id="s-route-default_schedule_mode"></a>`DEFAULT_SCHEDULE_MODE` | `'alwaysDaily'` | — |
 | <a id="s-route-default_routing_mode"></a>`DEFAULT_ROUTING_MODE` | `'fullRouting'` | — |
-| <a id="s-route-default_auto_stop_addition"></a>`DEFAULT_AUTO_STOP_ADDITION` | `'add'` | — |
+| <a id="s-route-default_auto_stop_addition"></a>`DEFAULT_AUTO_STOP_ADDITION` | `'off'` | — |
 | <a id="s-route-default_composition_id"></a>`DEFAULT_COMPOSITION_ID` | `'NEW-BAL-7'` | Composition a request without composition_id is computed with — the seven-coach new-fleet balanced train. It is the middle of the catalog on every axis a first result is read on (places, length, cost per place-km), so a first evaluation neither flatters the concept with the cheapest formation nor burdens it with the largest. The frontend posts no composition until the user picks one; it reads back which one was used from route.trip_pairs[].composition_id. db/dev/seed.py asserts the id exists once the catalog is seeded. |
 | <a id="s-route-gtfs_service_start"></a>`GTFS_SERVICE_START` | `'2032-12-12'` | — |
 | <a id="s-route-gtfs_service_end"></a>`GTFS_SERVICE_END` | `'2033-12-10'` | Nominal GTFS calendar window for persisted services — the project's target timetable year, 2032 (per the December-to-December European rail timetable-change convention: 2nd Sunday of December through the day before the following year's 2nd Sunday). GTFS requires concrete dates; the model itself only knows seasonal frequencies, so every saved service is pinned to this window until real timetable-year handling exists. Changing it changes persisted GTFS calendars, hence a version bump. If "2032" means the timetable period covering most of calendar year 2032 (starting Dec 2031) rather than the one starting Dec 2032, use "2031-12-14" / "2032-12-11". |
