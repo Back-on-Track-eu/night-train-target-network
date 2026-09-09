@@ -3,8 +3,11 @@ test_20_route_content.py
 ========================
 Content-logic tests for route-building — verifies the numbers a route
 carries are internally consistent and match the models that produced them,
-using only data present in the response. Routes are built via
-POST /api/proposal/calc (tests/helpers.py:build_route()).
+using only data present in the member payload. Members are built in-process
+through compute_member() — the same call behind POST /api/proposal/family
+and publish — via tests/helpers.py's compute_body()/build_route(); the wire
+contract of the family itself is test_42's. Validation errors are asserted
+on the wire, as a 1×1 family (post_member()).
 
 Covers:
   - Country attribution: shares sum to 1, expected countries present,
@@ -25,11 +28,11 @@ Covers:
 """
 
 import pytest
-import requests
 
 from tests.conftest import STOPS_BERLIN_DRESDEN_WIEN, STOPS_BERLIN_WIEN
 from tests.helpers import (
-    PROPOSAL_CALC_URL,
+    compute_body,
+    post_member,
     all_trips,
     build_route,
     country_km,
@@ -271,13 +274,12 @@ BASE_REQUEST = {
     "auto_stop_addition": "off",
 }
 
-# The merged compute response's top-level envelope (api/proposal_calc.py) —
-# used by the suggest-mode key-set assertion below.
+# The member payload's top-level envelope (api/helpers/member_compute.py
+# compute_member) — used by the suggest-mode key-set assertion below.
 _CALC_ENVELOPE_KEYS = {
     "route_builder_version",
     "calc_version",
     "route_fingerprint",
-    "cache_hit",
     "request",
     "summary",
     "route",
@@ -287,14 +289,10 @@ _CALC_ENVELOPE_KEYS = {
 
 @pytest.fixture(scope="module")
 def plan_response(api_base):
-    """One full compute response (POST /api/proposal/calc) for the standard
-    3-stop request with auto_stop_addition="off" — built once for this
-    module."""
-    resp = requests.post(
-        f"{api_base}{PROPOSAL_CALC_URL}", json=BASE_REQUEST, timeout=90
-    )
-    assert resp.status_code == 200, f"Route build failed: {resp.text[:300]}"
-    return resp.json()
+    """One member payload (compute_member, in-process — see
+    tests/helpers.py) for the standard 3-stop request with
+    auto_stop_addition="off" — built once for this module."""
+    return compute_body(BASE_REQUEST)
 
 
 class TestModeSwitches:
@@ -307,16 +305,13 @@ class TestModeSwitches:
             "schedule_mode": "alwaysDaily",
             "auto_stop_addition": "off",
         }
-        resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=90)
-        assert resp.status_code == 200
+        assert compute_body(body)["route"]["trip_pairs"]
 
     def test_simple_routing_mode_accepted(self, api_base):
         """routing_mode='simpleRouting' (cheap single-pass routing) is a
         valid alternative and still produces a full route."""
         body = {**BASE_REQUEST, "routing_mode": "simpleRouting"}
-        resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=90)
-        assert resp.status_code == 200
-        assert len(resp.json()["route"]["trip_pairs"]) == 1
+        assert len(compute_body(body)["route"]["trip_pairs"]) == 1
 
     @pytest.mark.parametrize(
         "field",
@@ -325,7 +320,7 @@ class TestModeSwitches:
     def test_invalid_mode_returns_400(self, api_base, field):
         """An unknown value for any mode switch is rejected at validation."""
         body = {**BASE_REQUEST, field: "not-a-real-mode"}
-        resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=10)
+        resp = post_member(api_base, body, timeout=10)
         assert resp.status_code == 400
 
     # --- auto_stop_addition — one case per enum value + bool rejection ------
@@ -337,7 +332,7 @@ class TestModeSwitches:
         2026-09-10_auto_stop_add_removed.sql asserts no stored proposal
         still asks for it)."""
         body = {**BASE_REQUEST, "auto_stop_addition": "add"}
-        resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=10)
+        resp = post_member(api_base, body, timeout=10)
         assert resp.status_code == 400
 
     def test_omitted_field_builds_the_callers_stops(self, api_base):
@@ -345,9 +340,7 @@ class TestModeSwitches:
         that says nothing about auto stops gets exactly the stops it
         posted — and no suggestions."""
         body = {k: v for k, v in BASE_REQUEST.items() if k != "auto_stop_addition"}
-        resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=90)
-        assert resp.status_code == 200
-        payload = resp.json()
+        payload = compute_body(body)
         assert payload["request"]["auto_stop_addition"] == "off"
         assert "suggested_stops" not in payload
         outbound = payload["route"]["trip_pairs"][0]["outbound"]
@@ -359,10 +352,9 @@ class TestModeSwitches:
         search entirely and returns exactly the caller's own stop list,
         with no suggested_stops section."""
         body = {**BASE_REQUEST, "auto_stop_addition": "off"}
-        resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=90)
-        assert resp.status_code == 200
-        assert "suggested_stops" not in resp.json()
-        outbound = resp.json()["route"]["trip_pairs"][0]["outbound"]
+        payload = compute_body(body)
+        assert "suggested_stops" not in payload
+        outbound = payload["route"]["trip_pairs"][0]["outbound"]
         assert [s["stop_id"] for s in stop_times(outbound)] == STOPS_BERLIN_DRESDEN_WIEN
 
     def test_auto_stop_addition_suggest_returns_suggested_stops_section(self, api_base):
@@ -385,9 +377,7 @@ class TestModeSwitches:
         inserted. That mode is gone, so the ordering invariant is asserted
         against the route's own geography instead."""
         body = {**BASE_REQUEST, "auto_stop_addition": "suggest"}
-        resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=90)
-        assert resp.status_code == 200
-        payload = resp.json()
+        payload = compute_body(body)
 
         assert set(payload) == _CALC_ENVELOPE_KEYS | {"suggested_stops"}
         keys = list(payload)
@@ -468,12 +458,12 @@ class TestModeSwitches:
         """Pre-0.9.5 booleans are rejected, not silently mapped to
         'add'/'off' — the request contract is the string enum only."""
         body = {**BASE_REQUEST, "auto_stop_addition": legacy_bool}
-        resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=10)
+        resp = post_member(api_base, body, timeout=10)
         assert resp.status_code == 400
 
     def test_auto_stop_addition_wrong_type_returns_400(self, api_base):
         body = {**BASE_REQUEST, "auto_stop_addition": "yes"}
-        resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=10)
+        resp = post_member(api_base, body, timeout=10)
         assert resp.status_code == 400
 
 
@@ -501,11 +491,7 @@ FIXED_NIGHT_REQUEST = {
 def fixed_night_response(api_base):
     """One full fixed-night response for the Berlin-Dresden interval on the
     standard corridor — built once for this module."""
-    resp = requests.post(
-        f"{api_base}{PROPOSAL_CALC_URL}", json=FIXED_NIGHT_REQUEST, timeout=90
-    )
-    assert resp.status_code == 200, f"Route build failed: {resp.text[:300]}"
-    return resp.json()
+    return compute_body(FIXED_NIGHT_REQUEST)
 
 
 class TestFixedNightMode:
@@ -585,9 +571,7 @@ class TestFixedNightMode:
             **FIXED_NIGHT_REQUEST,
             "fixed_night_interval": ["osm:n3856100103", "osm:w423692233"],
         }
-        resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=90)
-        assert resp.status_code == 200, resp.text[:300]
-        for trip in all_trips(resp.json()["route"]):
+        for trip in all_trips(compute_body(body)["route"]):
             interval = (
                 body["fixed_night_interval"]
                 if trip["direction"] == 0
@@ -616,7 +600,7 @@ class TestFixedNightMode:
             body.pop("fixed_night_interval")
         else:
             body["fixed_night_interval"] = interval
-        resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=30)
+        resp = post_member(api_base, body, timeout=30)
         assert resp.status_code == 400, f"{reason}: {resp.text[:200]}"
         assert resp.json()["error"] == "validation_error"
 
@@ -628,7 +612,7 @@ class TestFixedNightMode:
             "timetable_mode": "simpleAutomatic",
             "fixed_night_interval": ["osm:n3856100103", "osm:n25397500"],
         }
-        resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=30)
+        resp = post_member(api_base, body, timeout=30)
         assert resp.status_code == 400
         assert resp.json()["error"] == "validation_error"
 
@@ -651,6 +635,4 @@ class TestScenarioHandling:
         """An explicit scenario_id (the seeded HSR-allowed scenario) is
         embedded verbatim."""
         body = {**BASE_REQUEST, "scenario_id": hsr_scenario["scenario_id"]}
-        resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=90)
-        assert resp.status_code == 200
-        assert resp.json()["route"]["scenario_id"] == hsr_scenario["scenario_id"]
+        assert compute_body(body)["route"]["scenario_id"] == hsr_scenario["scenario_id"]

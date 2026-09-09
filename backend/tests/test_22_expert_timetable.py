@@ -30,10 +30,8 @@ exactly what the drop rule is about, and would otherwise make the
 leg-by-leg assertions non-deterministic (see test_20's module docstring).
 """
 
-import requests
-
 from tests.conftest import STOPS_BERLIN_DRESDEN_WIEN
-from tests.helpers import PROPOSAL_CALC_URL, compute, stop_times, trip_by_direction
+from tests.helpers import compute, post_member, stop_times, trip_by_direction
 
 BASE = {"stops": STOPS_BERLIN_DRESDEN_WIEN, "auto_stop_addition": "off"}
 
@@ -65,7 +63,9 @@ def _elapsed(seg: dict) -> int:
 
 
 def _post(api_base: str, body: dict, timeout: int = 90):
-    return requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=timeout)
+    """The wire view of a member request — a 1×1 family — for the
+    validation cases; content cases use compute() in-process."""
+    return post_member(api_base, body, timeout=timeout)
 
 
 # =============================================================================

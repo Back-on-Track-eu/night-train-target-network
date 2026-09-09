@@ -89,8 +89,6 @@ EXPECTED_PHASE1_TABLES = {
     "proposals.seasonal_schedules",
     "proposals.update_log",
     "proposals.proposal_summaries",
-    "proposals.compute_cache_pointer",
-    "proposals.compute_cache_result",
 }
 
 # Columns WP5's finalizing migration (2026-08-04_proposal_schema_phase2_
@@ -422,19 +420,17 @@ def test_proposal_summaries_geom_is_postgis_geometry(db_cur):
     assert row["udt_name"] == "geometry"
 
 
-def test_compute_cache_tables_are_unlogged(db_cur):
-    """Both compute cache tables are UNLOGGED (adapters/proposal/README.md
-    §2.3) — a disposable performance layer, no WAL overhead, safe to lose
-    on crash."""
+def test_family_cache_tables_are_unlogged(db_cur):
+    """Both family caches are UNLOGGED (adapters/family/README.md) — a
+    disposable performance layer, no WAL overhead, safe to lose on
+    crash."""
     db_cur.execute(
-        "SELECT relname, relpersistence FROM pg_class "
-        "WHERE relname IN ('compute_cache_pointer', 'compute_cache_result')"
+        "SELECT c.relname, c.relpersistence FROM pg_class c "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = 'family' AND c.relkind = 'r'"
     )
     persistence = {row["relname"]: row["relpersistence"] for row in db_cur.fetchall()}
-    assert persistence == {
-        "compute_cache_pointer": "u",
-        "compute_cache_result": "u",
-    }
+    assert persistence == {"documents": "u", "members": "u"}
 
 
 # =============================================================================

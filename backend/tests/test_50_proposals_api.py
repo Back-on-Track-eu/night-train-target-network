@@ -115,7 +115,7 @@ class TestPublishNew:
         assert published["user_id"] == script_user_id
         assert published["name"] == "Berlin \u2013 Wien (test)"
         assert published["route"]["route_id"] == f"P{published['proposal_id']}_V1_R1"
-        assert set(published["evaluation"]) == {"models", "input", "views"}
+        assert set(published["evaluation"]) == {"views"}
 
     def test_publish_new_forbids_proposal_id(self, api_base, script_headers):
         resp = requests.post(
@@ -367,7 +367,7 @@ class TestLoad:
             "route",
             "evaluation",
         }
-        assert set(body["evaluation"]) == {"models", "input", "views"}
+        assert set(body["evaluation"]) == {"views"}
 
     def test_timestamps_are_well_formed(self, api_base, published):
         # published (the publish response) and the load response should

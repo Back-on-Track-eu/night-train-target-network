@@ -3,9 +3,11 @@ test_36_proposal_gtfs_roundtrip.py
 ====================================
 Round-trip tests (adapters/proposal/README.md §5.1/§5.2):
 adapters/proposal/gtfs_store.py's insert_route_gtfs() +
-route_dict_from_gtfs() must deep-equal the original POST /api/proposal/calc
-(WP2) route it was given, and input_parameters_from_scenario() must
-deep-equal the original evaluation.input.parameters.
+route_dict_from_gtfs() must deep-equal the original member route it was
+given (compute_member(), in-process via tests/helpers.py). The
+evaluation's parameters are not round-tripped since WP18 B2b: they are
+not stored per proposal and not served with one — GET /api/params/* for
+the scenario pin is where a reader finds them.
 
 No publish endpoint exists yet (WP5) — this file calls the write/read
 functions directly against the DB, exactly as the design doc's WP3
@@ -35,14 +37,13 @@ from adapters.proposal.repository import ProposalRepository
 from adapters.proposal.gtfs_store import (
     insert_route_gtfs,
     route_dict_from_gtfs,
-    input_parameters_from_scenario,
 )
 from tests.conftest import STOPS_BERLIN_DRESDEN_WIEN, STOPS_BERLIN_WIEN
 from tests.helpers import compute
 
 
 def _json_normalize(obj):
-    """route_dict_from_gtfs()/input_parameters_from_scenario() return
+    """route_dict_from_gtfs() returns
     native Python objects straight out of the DB/domain layer; the
     "original" side of every comparison in this file came back through
     an actual HTTP response, i.e. already round-tripped through JSON
@@ -271,26 +272,3 @@ class TestFingerprintRoundtrip:
         assert ephemeral_fp == route_fingerprint(response["route"])
         assert ephemeral_fp == route_fingerprint(published_route)
         assert ephemeral_fp == route_fingerprint(reconstructed)
-
-
-class TestInputParametersRoundtrip:
-    def test_input_parameters_deep_equal_original(self, db_cur, loader, api_base):
-        """input_parameters_from_scenario() doesn't touch the GTFS tables
-        at all (§5.1: parameters are rebuilt from the scenario pin alone)
-        — no insert needed, just compare against the original compute
-        response's own evaluation.input.parameters."""
-        response = compute(
-            api_base,
-            stops=STOPS_BERLIN_WIEN,
-            composition_id="NEW-BAL-7",
-            auto_stop_addition="off",
-        )
-        scenario_id = response["request"]["scenario_id"]
-        original_parameters = response["evaluation"]["input"]["parameters"]
-
-        rebuilt = input_parameters_from_scenario(scenario_id, loader)
-
-        # See _json_normalize()'s docstring — same reasoning applies here.
-        rebuilt_normalized = _json_normalize(rebuilt)
-
-        assert rebuilt_normalized["parameters"] == original_parameters

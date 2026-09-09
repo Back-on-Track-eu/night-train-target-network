@@ -34,14 +34,12 @@ built on top of it:
 |---|---|
 | `test_01`–`test_06` | Stack build-up: containers → seeded DB → loader → versioning → the shared DB pool (`adapters/db_pool.py`, WP14) → the family's shared context (`models/family/context.py`) |
 | `test_10`–`test_11` | Read-only reference APIs: params + models (`test_10`), scenarios + measure sets + the variant axis (`test_11`) |
-| `test_20` | Route-building content logic (via `POST /api/proposal/calc`) |
+| `test_20` | Route-building content logic (one member in-process via `compute_member()`; validation on the wire as a 1×1 family) |
 | `test_30` | Evaluation content logic (model-layer — `compute_evaluation_domain()`) |
-| `test_35` | `POST /api/proposal/calc` — the merged compute endpoint (contract) |
 | `test_36` | GTFS+sidecar round-trip (`adapters/proposal/gtfs_store.py`) — the write path `publish()` calls |
 | `test_37` | Fingerprint + gallery-summary projection (`adapters/proposal/projection.py`) |
-| `test_39` | The §2.3 compute cache (`adapters/proposal/compute_cache.py`, WP13) |
+| `test_39` | The member cache (`family.members`, `adapters/family/member_cache.py`) and the caches' flush |
 | `test_40` | End-to-end pipeline smoke |
-| `test_41` | `POST /api/proposal/calc/matrix` — scenario × composition grid, document + NDJSON stream. Retired in WP18 B2b together with the endpoint |
 | `test_42` | The proposal family — `POST /api/proposal/family`, the document contract, the two GETs, the caches. On a one-instance stack every `infra_2032` member is an error member by design |
 | `test_50` | `POST /api/proposal/publish` + proposals list/load (the only write path) |
 | `test_51` | Proposal engagement — likes + comments |
@@ -52,7 +50,7 @@ built on top of it:
 
 Content tests that need *controlled* demand (`test_30`, `test_40`) call
 the model layer directly (`tests/helpers.py:compute_evaluation_domain()`),
-since `POST /api/proposal/calc` deliberately offers no way to inject
+since a member request deliberately offers no way to inject
 custom demand into an already-built route — it always runs the stopgap
 demand model (`models/demand/`) internally.
 
@@ -61,10 +59,10 @@ Shared code:
 - **`conftest.py`** — DB/loader/scenario fixtures and the four **session-scoped
   route fixtures** (`route_berlin_wien`, `route_berlin_dresden_wien`,
   `route_berlin_zuerich_wien`, `route_copenhagen_stockholm` — built via
-  `POST /api/proposal/calc`) plus `eval_standard` (model-layer, see below).
+  `compute_member()`) plus `eval_standard` (model-layer, see below).
   Route builds are expensive (live OpenRailRouting) — tests that only
   *read* a route must reuse these instead of building their own.
-- **`helpers.py`** — HTTP wrappers (`build_route` for `POST /api/proposal/calc`
+- **`helpers.py`** — wrappers (`build_route`/`compute` for one member in-process via `compute_member()`, `post_member`/`family` for the wire
   — route section only; `compute` for the same endpoint's full response;
   `publish` for `POST /api/proposal/publish`, the only write path),
   model-layer evaluation with controlled demand
@@ -90,7 +88,7 @@ Shared code:
 | `test_data_status_loaded` | DB loader initialised at startup | `GET /api/data/status` | 200, `loaded=True`, `loaded_at` set, no `error` |
 | `test_openrailrouting_health` | Routing engine reachable | `GET :8989/health` (host port) | 200 |
 | `test_unknown_endpoint_returns_json_404` | Global JSON error handler | `GET /api/does-not-exist` | 404 with `error=not_found` JSON body |
-| `test_wrong_method_returns_json_405` | Global JSON error handler | `GET /api/proposal/calc` | 405 with `error=method_not_allowed` JSON body |
+| `test_wrong_method_returns_json_405` | Global JSON error handler | `GET /api/proposal/family` | 405 with `error=method_not_allowed` JSON body |
 | `test_stub_endpoints_return_501` | Remaining stubs are honest | auth endpoints | every stub returns 501 |
 
 ## test_02_db_seed.py — Database seeding
@@ -227,7 +225,7 @@ Shared code:
 
 ## test_20_route_content.py — Route content logic
 
-Built via `POST /api/proposal/calc` (WP5 removed the standalone
+Built in-process via `compute_member()` (WP5 removed the standalone
 `POST /api/route/plan` this originally targeted — same route-building
 content, same models/route pipeline, just a different HTTP entry point).
 
@@ -272,7 +270,7 @@ content, same models/route pipeline, just a different HTTP entry point).
 
 ## test_30_evaluation_content.py — Evaluation content logic
 
-Controlled demand scenarios need an override `POST /api/proposal/calc`
+Controlled demand scenarios need an override a member request
 deliberately doesn't offer (it always builds fresh and runs the stopgap
 demand model internally), so these tests call the model layer directly
 (`tests/helpers.py:compute_evaluation_domain()` — `route_from_dict()` ->
@@ -321,37 +319,6 @@ Standard input: `eval_standard` (3-stop route, directional demand 40 Couchette
 | `TestMatrixConsistency::test_stop_matrix_terminal_has_station_charge` | Stop matrix content | Berlin cell | station charge > 0 |
 | `TestScenarioOverride::test_historical_override_lowers_tac` | Scenario override swaps the re-pinned table | same route, base vs superseded revision | TAC strictly lower; station charges unchanged |
 
-## test_35_proposal_calc_api.py — POST /api/proposal/calc contract (merged)
-
-The merged compute endpoint (`adapters/proposal/README.md` §2.1) — one
-call, route + evaluation, no persistence. Covers response-structure and
-validation, plus assertions specific to the merge itself (resolved
-request, neutral IDs, no duplicate route under `evaluation.input`,
-statelessness). Content-level route/evaluation correctness lives
-elsewhere — `test_20` (route-building) and `test_30` (evaluation
-formulas) — rather than being duplicated here.
-
-| Test | Purpose | Input | Expected |
-|---|---|---|---|
-| `TestResponseStructure::test_top_level_keys` | Response envelope | standard request | `route_builder_version, calc_version, request, route, evaluation` present |
-| `TestResponseStructure::test_calc_version_is_semver` / `test_route_builder_version_is_semver` | Version strings | response | both `x.y.z` |
-| `TestResponseStructure::test_no_suggested_stops_when_off` | Conditional key | `auto_stop_addition="off"` | `suggested_stops` absent |
-| `TestResponseStructure::test_evaluation_has_models_input_views` | Evaluation envelope | response | exactly `models, input, views` |
-| `TestResponseStructure::test_views_has_all_six` | View completeness | response | all 6 view dimensions |
-| `TestResponseStructure::test_input_has_no_route_copy` | §2.1: no duplicate route | `evaluation.input` | no `route` key, exactly `{parameters}` |
-| `TestResponseStructure::test_input_parameters_present` | Parameter documentation | `evaluation.input.parameters` | tracks/stops/compositions present |
-| `TestResolvedRequest::test_request_has_no_proposal_identity` | Publish concerns excluded | `request` | no `proposal_id`/`proposal_version` |
-| `TestResolvedRequest::test_request_echoes_composition_and_stops` | Echo fidelity | `request` | matches posted stops/composition |
-| `TestResolvedRequest::test_request_scenario_id_is_concrete` | Scenario resolution | `request.scenario_id` | concrete int even when omitted |
-| `TestResolvedRequest::test_omitted_defaults_resolved_explicitly` | §2.1 resolved-request contract | implicit vs explicit-default requests | identical `request` echo |
-| `TestNeutralIds::test_route_id_has_no_proposal_prefix` | §2.1 neutral IDs | `route.route_id` | `"R1"`, no `P{id}_V{n}_` prefix |
-| `TestNeutralIds::test_trip_ids_have_no_proposal_prefix` | Neutral trip IDs | every trip | starts with `"R1_"`, not `"P"` |
-| `TestNeutralIds::test_per_trip_pair_view_keys_are_neutral` | Prefix stripped from dict **keys** too | `views.per_trip_pair.data` keys | no `P` prefix |
-| `TestValidation::*` (7 tests) | Request validation | missing stops / too few stops / missing composition_id / invalid timetable_mode / boolean auto_stop_addition / non-int scenario_id / non-JSON body | 400 each |
-| `TestSuggestMode::test_suggest_returns_suggested_stops_key` / `test_suggest_does_not_modify_stops` | `"suggest"` mode | `auto_stop_addition="suggest"` | `suggested_stops` present, list; stop list unchanged |
-| `TestStatelessness::test_no_persistence_metadata_in_response` | No `proposal` block | response | key absent (unlike `/api/route/plan`/`/api/evaluation/calc`) |
-| `TestStatelessness::test_repeated_identical_requests_are_independent` | No shared state | same request twice | identical resolved `request` and `route_id` both calls |
-
 ## test_36_proposal_gtfs_roundtrip.py — GTFS+sidecar round-trip
 
 `adapters/proposal/gtfs_store.py`'s `insert_route_gtfs()` (write) and
@@ -359,7 +326,7 @@ formulas) — rather than being duplicated here.
 (`adapters/proposal/README.md` §5.1/§5.2) that `adapters/proposal/
 repository.py`'s `publish()` and `GET /api/proposal/<id>`
 (`api/proposals.py`) call directly. This file still tests the two functions standalone
-(writing real `POST /api/proposal/calc` responses into the DB under real
+(writing real member payloads into the DB under real
 `proposal_id`s, allocated from the live `proposals.proposals` sequence
 via `ProposalRepository._next_proposal_id()`, and reconstructing them
 back) rather than through the endpoints, so it stays focused purely on
@@ -392,7 +359,7 @@ the pre-storage floating-point value.
 
 `adapters/proposal/projection.py`'s pure functions (`route_fingerprint()`,
 `build_summary_row()`) plus the fingerprint/`cache_hit` wiring in the
-`POST /api/proposal/calc` response.
+member payload.
 
 | Test | Purpose | Input | Expected |
 |---|---|---|---|
@@ -401,7 +368,6 @@ the pre-storage floating-point value.
 | `TestFingerprint::test_differs_for_a_different_route` | Sensitivity | different stop list | different fingerprint |
 | `TestFingerprint::test_matches_direct_call_on_route_dict` | Wiring = direct function call | response route dict | `route_fingerprint()` matches response field |
 | `TestFingerprint::test_ignores_id_prefix` | Prefix independence by construction | prefixed vs bare route dict | identical fingerprints |
-| `TestCacheHitFlag::test_is_bool` | Flag shape (semantics live in `test_39`) | calc response | `cache_hit` is a bool |
 | `TestSummaryRow::*` | Every non-identity summary column present, metrics plausible, KPIs match the evaluation views, demand KPIs flagged placeholder, valid simplified MultiLineString | calc response | see file |
 | `TestSummaryRowSchemaConformance::test_row_inserts_cleanly` | Row shape matches `proposal_summaries` DDL | direct INSERT | insert succeeds (rolled back) |
 
@@ -415,32 +381,33 @@ the pre-storage floating-point value.
 | `TestDistance::test_known_pair` / `test_station_scale` | The matcher's metric | known coordinate pairs | correct metres; station-scale distances inside `MATCH_RADIUS_M`, city-scale outside |
 | `TestMappingTargetsCurrent::test_no_mapping_targets_removed_stops` | Mappings never point at stops the catalog dropped | `ontd.stop_mappings` vs the base snapshot | empty. Automatic rows self-heal on re-projection (the bootstrap detects the drift and re-runs step 3); manual/verified rows are never auto-overwritten, so those must be re-pointed or un-verified by hand |
 
-## test_39_compute_cache.py — The §2.3 compute cache (WP13)
+## test_39_family_cache.py — the member cache
 
-Hit/miss semantics of the two-map compute cache, exercised through live
-`POST /api/proposal/calc` calls plus direct `ComputeCacheRepository`
-access for flush/sweep. Every test starts behind its own cache TRUNCATE
-(autouse fixture), which is why cache_hit VALUE assertions live only
-here — the other suites (`test_35`/`test_37`/`test_54`) assert shape
-only, since session fixtures may have warmed the cache in any order.
+Hit/miss semantics of `family.members` (`adapters/family/member_cache.py`),
+exercised in-process through `compute_member()` with the cache ON — the
+same call the family's views endpoint, publish and compare make — plus
+direct `FamilyMemberCache` access for flush/sweep. Every test starts
+behind its own TRUNCATE of both family tables (autouse fixture), which is
+why cache-hit VALUE assertions live only here.
 
 | Test | Purpose | Input | Expected |
 |---|---|---|---|
-| `TestHitMiss::test_repeat_request_hits_and_is_identical` | Basic hit + byte-identity | same request twice | miss then hit; responses equal minus `cache_hit` |
-| `TestHitMiss::test_miss_on_each_output_changing_field` | Key sensitivity | stops order / composition / routing_mode varied | each a miss; base entry survives |
-| `TestHitMiss::test_convergent_requests_share_one_result_row` | §2.3 storage dedup | `off` vs `suggest` twin requests | 2 pointer rows, 1 result row; `suggested_stops` only on the suggest hit |
-| `TestHitMiss::test_omitted_field_and_explicit_default_share_one_entry` | Hash over the RESOLVED request | default omitted vs posted | one entry; second call hits; echo identical |
+| `TestHitMiss::test_repeat_request_hits_and_is_identical` | Basic hit + identity | same request twice | miss then hit; payloads equal |
+| `TestHitMiss::test_miss_on_each_output_changing_field` | Key sensitivity | composition / routing_mode / schedule / suggest / stops order varied | each a miss; base entry survives |
+| `TestHitMiss::test_omitted_field_and_explicit_default_share_one_entry` | Hash over the RESOLVED request | default omitted vs posted | one row; second call hits |
+| `TestHitMiss::test_suggest_and_off_are_two_rows` | One table, one row per request | `off` then `suggest` twin | two rows; each hits itself |
+| `TestHitMiss::test_measure_set_is_part_of_the_key` | The echo names no measure set | same request under a made-up second set | separate row (`measure_set_id` 999), its own hit |
 | `TestExpiryAndFlush::test_ttl_expiry_is_a_miss_then_reprimes` | Read-side TTL filter + upsert re-prime | backdated rows | miss, then hit again |
 | `TestExpiryAndFlush::test_stale_version_payload_is_a_miss` | Version guard (forgotten-flush backstop) | payload's `calc_version` mutated | miss; recompute re-primes |
-| `TestExpiryAndFlush::test_flush_empties_both_maps` | `flush()` | primed cache | both tables empty; next call a miss |
+| `TestExpiryAndFlush::test_flush_empties_the_members` | `flush()` | primed cache | table empty; next call a miss |
 | `TestSweep::test_sweep_deletes_only_expired_rows` | Standalone sweep | synthetic old + fresh rows | only expired rows deleted |
-| `TestSweep::test_sweep_rides_the_write_path` | §2.3 opportunistic cleanup | `cleanup_probability=1.0` + one `store()` | expired rows gone after the write |
+| `TestSweep::test_sweep_rides_the_write_path` | Opportunistic cleanup | `cleanup_probability=1.0` + one `store()` | expired rows gone after the write |
 
 ## test_40_pipeline.py — End-to-end smoke
 
 The "cost" half runs at the model layer (`compute_evaluation_domain()`)
 — see `test_30`'s note above. "Plan" goes through a live
-`POST /api/proposal/calc`.
+`compute_member()`.
 
 | Test | Purpose | Input | Expected |
 |---|---|---|---|
@@ -664,7 +631,7 @@ key). The only file in the suite runnable standalone.
   and are marked for replacement when the calibrated model lands.
 - **model_versions / calc_formulas skip-stubs** — the evaluation response now
   serialises a full `models` section, so these became *real* tests
-  (now `test_35::TestModelsSection`). The route-JSON variants stayed dropped
+  (then `test_35::TestModelsSection`, retired with `/calc` in WP18 B2b — `GET /api/models` is `test_10::TestModels`). The route-JSON variants stayed dropped
   (model versions are still not embedded in route JSON).
 - **Duplicate 200-status tests** — fixtures already assert 200 on build;
   repeating the POST purely to assert the status wasted a full routing call.
@@ -674,7 +641,7 @@ key). The only file in the suite runnable standalone.
   `country_distance_shares`, and energy at segment level.
 - **`test_pipeline_country_breakdown_infrastructure_only`** — its original
   claim (a `scope` field) never existed; its structural remainder is covered
-  by `test_35::test_views_has_all_six`.
+  by `test_42::TestMemberViews` (the family's views endpoint).
 
 ## Suggested seed-data additions (not yet implemented)
 
@@ -682,7 +649,7 @@ key). The only file in the suite runnable standalone.
    allow a manual recomputation test for driver/crew cost (the multiplier bug
    class already hit once) analogous to the TAC/energy tests.
 2. **A composition on that second operator** — enables comparing operator
-   staff rates end to end through `/api/proposal/calc`'s evaluation section.
+   staff rates end to end through a member's evaluation views.
 3. **A stop pair inside a single defaulted country (e.g. two SE stops)** —
    would let TAC-under-default be recomputed for a route that runs entirely on
    default-resolved rates.

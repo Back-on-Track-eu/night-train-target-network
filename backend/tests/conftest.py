@@ -10,8 +10,8 @@ Start the stack before running:
 Run tests from backend/:
     uv run --extra dev pytest tests/ -v
 
-Expensive route builds (a POST /api/proposal/calc can take tens of seconds
-against live OpenRailRouting) are session-scoped here and shared across
+Expensive route builds (a cold member can take tens of seconds against
+live OpenRailRouting) are session-scoped here and shared across
 files — a test that only reads a route must use one of these fixtures
 instead of building its own.
 """
@@ -25,7 +25,7 @@ import requests
 
 from dev_env import api_base_url, db_config
 from tests.helpers import (
-    PROPOSAL_CALC_URL,
+    compute_body,
     build_route,
     compute_evaluation_domain,
     purge_saved_proposals,
@@ -110,7 +110,7 @@ def rollback_after_test():
 #
 # The suite authenticates as the seeded 'test_script' user so published
 # rows from test runs are identifiable (and purgeable) by owner. The
-# session route fixtures below are TOKENLESS: POST /api/proposal/calc is
+# session route fixtures below are TOKENLESS: compute_member() is
 # stateless and leaves no rows — persistence is exercised solely by the
 # dedicated publish tests (test_50, test_70).
 
@@ -281,10 +281,10 @@ def opt_tt_scenario(db_cur):
 # math, test_50 GTFS decomposition) rely on being exactly as requested —
 # the seeded osm:n3325029085 would otherwise be auto-added to any corridor
 # passing through Brno. The add/suggest behaviour has its own dedicated
-# tests in test_35's TestSuggestMode / TestModeSwitches-equivalent classes.
+# tests in test_20's TestModeSwitches.
 #
-# WP5: these are now built via POST /api/proposal/calc (stateless,
-# neutral structural ids) — proposal_id/proposal_version no longer exist
+# Since WP18 B2b these are built in-process through compute_member()
+# (tests/helpers.py — stateless, neutral structural ids) — proposal_id/proposal_version no longer exist
 # as request fields (those are publish-only concerns, §2.1), so the old
 # draft-placeholder-id range convention that used to live here is gone.
 @pytest.fixture(scope="session")
@@ -337,15 +337,15 @@ def route_copenhagen_stockholm(api_base):
         "composition_id": DEFAULT_COMPOSITION,
         "auto_stop_addition": "off",
     }
-    resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=90)
-    if resp.status_code != 200:
+    try:
+        return compute_body(body)["route"]
+    except Exception as exc:  # noqa: BLE001 — a routing failure is a skip here
         pytest.skip(
-            "Copenhagen→Stockholm did not build "
-            f"(HTTP {resp.status_code}: {resp.text[:150]}) — likely the routing "
-            "graph doesn't cover the Nordic network on this stack. SE default "
-            "resolution is still tested at loader/params/eval level."
+            f"Copenhagen→Stockholm did not build ({type(exc).__name__}: "
+            f"{str(exc)[:150]}) — likely the routing graph doesn't cover the "
+            "Nordic network on this stack. SE default resolution is still "
+            "tested at loader/params/eval level."
         )
-    return resp.json()["route"]
 
 
 # =============================================================================

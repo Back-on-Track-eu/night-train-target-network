@@ -12,10 +12,13 @@ the segments a trip carries. Fields the API genuinely does not expose have
 no helper here — tests for such fields don't exist in this suite.
 """
 
+import json
+
 import requests
 
+from models.route.model import DEFAULT_COMPOSITION_ID
+
 PROPOSAL_URL = "/api/proposal"
-PROPOSAL_CALC_URL = "/api/proposal/calc"
 PROPOSAL_FAMILY_URL = "/api/proposal/family"
 PROPOSAL_PUBLISH_URL = "/api/proposal/publish"
 PROPOSALS_URL = "/api/proposals"
@@ -48,6 +51,54 @@ _WEEKS_PER_SEASON = 26
 # =============================================================================
 
 
+# =============================================================================
+# One member, in-process
+# =============================================================================
+#
+# POST /api/proposal/calc is gone (WP18 B2b). What the content tests need
+# from it — the FULL route dict (route_from_dict() reads geometries and
+# od_pairs), the summary and the views — is exactly what compute_member()
+# returns, and the wire only carries the family's compact route now
+# (test_42 covers that contract). So compute() and build_route() call
+# compute_member() in-process, through the same singletons the API uses,
+# with the member cache bypassed so a test never reads a stale row. The
+# api_base/timeout parameters stay so the ~100 call sites are untouched;
+# they are not used. Error paths post a 1×1 family instead — post_member().
+
+_dependencies_ready = False
+
+
+def _member_compute():
+    """compute_member with the API's singletons initialised once per
+    process — the same call scripts/bench_member.py makes."""
+    global _dependencies_ready
+    from api.helpers import dependencies
+    from api.helpers.member_compute import compute_member
+
+    if not _dependencies_ready:
+        dependencies.init()
+        _dependencies_ready = True
+    return compute_member
+
+
+def compute_body(body: dict) -> dict:
+    """One member for a raw request body, in-process: the member payload
+    {route_builder_version, calc_version, route_fingerprint, request,
+    suggested_stops?, summary, route, evaluation: {views}}. Domain errors
+    propagate as the pipeline raises them (GaugeMismatchError,
+    RailRoutingError, ValueError) — tests asserting wire codes use
+    post_member() instead."""
+    from api.helpers.member_compute import validate_calc_body
+
+    errors = validate_calc_body(body)
+    assert not errors, f"invalid member request: {errors}"
+    payload, _ = _member_compute()(body, use_cache=False)
+    # Through JSON and back, so the dict is exactly what the wire would
+    # have carried (keys as strings, tuples as lists, floats as floats):
+    # every comparison in the suite was written against HTTP responses.
+    return json.loads(json.dumps(payload))
+
+
 def build_route(
     api_base: str,
     stops: list[str],
@@ -55,18 +106,12 @@ def build_route(
     timeout: int = 90,
     **extra,
 ) -> dict:
-    """POST /api/proposal/calc with the given stops/composition (plus any
-    extra request fields, e.g. scenario_id or routing_mode) and return the
-    route dict. Asserts 200 — callers testing error paths post directly
-    instead.
-
-    The evaluation is always included alongside the route in the merged
-    response — callers that only want the route just ignore the rest.
-    Always stateless — no headers/persistence concept exists here."""
-    body = {"stops": stops, "composition_id": composition_id, **extra}
-    resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=timeout)
-    assert resp.status_code == 200, f"proposal/calc failed: {resp.text[:300]}"
-    return resp.json()["route"]
+    """The full route dict for stops/composition (plus any request fields,
+    e.g. scenario_id or routing_mode). See the section comment: in-process
+    since B2b; api_base and timeout are unused."""
+    return compute_body({"stops": stops, "composition_id": composition_id, **extra})[
+        "route"
+    ]
 
 
 def publish(
@@ -105,25 +150,76 @@ def compute(
     timeout: int = 90,
     **extra,
 ) -> dict:
-    """POST /api/proposal/calc (WP2's merged endpoint) with the given
-    stops/composition (plus any extra request fields, e.g. scenario_id,
-    routing_mode, auto_stop_addition) and return the full response body
-    (route_builder_version, calc_version, request, route, evaluation —
-    and suggested_stops when auto_stop_addition="suggest"). Asserts 200 —
-    callers testing error paths post directly instead.
+    """One member for the given stops/composition (plus any request
+    fields — scenario_id, routing_mode, auto_stop_addition, …): the member
+    payload compute_body() documents. In-process since B2b; api_base and
+    timeout are unused (see the section comment).
 
-    Always stateless: proposal/calc never persists, so unlike build_route()/
-    evaluate() there is no headers param — an Authorization header would
-    have no effect here.
-
-    composition_id=None posts no composition at all, so the endpoint applies
-    its own default — the only way to exercise that path."""
+    composition_id=None posts no composition at all, so the boundary
+    applies its own default — the only way to exercise that path."""
     body = {"stops": stops, **extra}
     if composition_id is not None:
         body["composition_id"] = composition_id
-    resp = requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=timeout)
-    assert resp.status_code == 200, f"proposal/calc failed: {resp.text[:300]}"
-    return resp.json()
+    return compute_body(body)
+
+
+def post_member(api_base: str, body: dict, timeout: int = 300):
+    """A member request on the wire: the same body /calc took (stops,
+    composition_id, scenario_id, the HOW fields) posted as a 1×1 family,
+    returned raw. The way to assert what a client sees — a 400 for a bad
+    HOW field comes back exactly as it did from /calc; a compute failure
+    is a 200 whose one member has status "error" and /calc's code
+    (see member_of()).
+
+    BOTH axes are always narrowed to one value, including when the body
+    names neither: an omitted composition_id or scenario_id means "the
+    boundary's default" for a member, but "every composition" / "every
+    current variant" for a family, and a 6- or 72-member document is not
+    what the caller asked about."""
+    body = dict(body)
+    composition_id = body.pop("composition_id", None) or DEFAULT_COMPOSITION_ID
+    scenario_id = body.pop("scenario_id", None)
+    axes = {
+        "composition_ids": [composition_id],
+        "scenario_variant_ids": [_variant_id_for(api_base, scenario_id)],
+        "presented": {"composition_id": composition_id},
+    }
+    return post_family(api_base, {**body, **axes}, timeout=timeout)
+
+
+def member_of(document: dict) -> dict:
+    """The single member of a 1×1 family document."""
+    assert len(document["members"]) == 1, document["members"]
+    return document["members"][0]
+
+
+_variants_cache: dict[str, dict] = {}
+
+
+def _variant_id_for(api_base: str, scenario_id: int | None) -> int:
+    """scenario_id → its variant under the empty measure set, from GET
+    /api/scenarios, cached per api_base. None → the base scenario's
+    variant, which is what a member request without a scenario_id
+    resolves to."""
+    if api_base not in _variants_cache:
+        body = requests.get(f"{api_base}{SCENARIOS_URL}", timeout=15).json()
+        none_set = next(
+            m["measure_set_id"] for m in body["measure_sets"] if m["key"] == "none"
+        )
+        _variants_cache[api_base] = {
+            "by_scenario": {
+                v["scenario_id"]: v["scenario_variant_id"]
+                for v in body["scenario_variants"]
+                if v["measure_set_id"] == none_set
+            },
+            "base": next(
+                v["scenario_variant_id"]
+                for v in body["scenario_variants"]
+                if v["measure_set_id"] == none_set and v["is_current_base"]
+            ),
+        }
+    cached = _variants_cache[api_base]
+    return cached["base"] if scenario_id is None else cached["by_scenario"][scenario_id]
 
 
 def post_family(api_base: str, body: dict, timeout: int = 300):

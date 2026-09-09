@@ -16,13 +16,23 @@ import pytest
 import requests
 
 from tests.conftest import API_BASE
-from tests.helpers import PROPOSAL_CALC_URL
-
-CALC_URL = f"{API_BASE}{PROPOSAL_CALC_URL}"
+from tests.helpers import member_of, post_member
 
 # Generous: a broad-gauge fullRouting call does the same two-pass work as
 # the suite's other routes, plus LM instead of CH for the custom-model pass.
 CALC_TIMEOUT = 180
+
+# What /calc used to answer for a failed member, now carried as the error
+# member's code inside a 200 family document (api/helpers/family_serialize
+# .py): the HTTP status is the one classify_compute_error() maps that code
+# to on the views endpoint — kept here so the assertions below read as
+# the wire contract they always were.
+_STATUS_BY_ERROR = {
+    "gauge_mismatch": 422,
+    "routing_error": 422,
+    "domain_error": 422,
+    "routing_graph_not_configured": 503,
+}
 
 
 def _query_stops_by_gauge(db_conn, country_code: str, gauge_mm: int):
@@ -59,9 +69,38 @@ def _stops_by_gauge(db_conn, country_code: str, gauge_mm: int, n: int = 2):
     return [rows[0], rows[-1]]
 
 
-def _calc(stop_ids: list[str], **extra) -> requests.Response:
+class _MemberResponse:
+    """A 1×1 family, read the way a /calc response was: status_code is 200
+    for an ok member or the code's HTTP status for an error member;
+    json() is the member's route (the family's compact shape — general_
+    parameters verbatim), its suggested_stops, or the error record."""
+
+    def __init__(self, resp: requests.Response) -> None:
+        self.text = resp.text
+        if resp.status_code != 200:
+            self.status_code = resp.status_code
+            self._body = resp.json()
+            return
+        document = resp.json()
+        member = member_of(document)
+        if member["status"] == "ok":
+            self.status_code = 200
+            self._body = {
+                "route": document["routes"][member["route_ref"]],
+                "suggested_stops": document.get("suggested_stops", []),
+            }
+        else:
+            self.status_code = _STATUS_BY_ERROR.get(member["error"], 500)
+            self._body = member
+            self.text = str(member)
+
+    def json(self) -> dict:
+        return self._body
+
+
+def _calc(stop_ids: list[str], **extra) -> _MemberResponse:
     body = {"stops": stop_ids, "composition_id": "NEW-BAL-7", **extra}
-    return requests.post(CALC_URL, json=body, timeout=CALC_TIMEOUT)
+    return _MemberResponse(post_member(API_BASE, body, timeout=CALC_TIMEOUT))
 
 
 def _route_any_pair(db_conn, country_code: str, gauge_mm: int, attempts: int = 6):
@@ -205,7 +244,7 @@ class TestAutoStopGaugeFilter:
         resp = _calc([a["stop_id"], b["stop_id"]], auto_stop_addition="suggest")
         assert resp.status_code == 200, resp.text[:400]
         payload = resp.json()
-        stop_ids = [s["stop_id"] for s in payload.get("suggested_stops", [])]
+        stop_ids = [s["stop_id"] for s in payload["suggested_stops"]]
         if not stop_ids:
             pytest.skip("corridor offers no candidate — nothing to filter")
         cur = db_conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)

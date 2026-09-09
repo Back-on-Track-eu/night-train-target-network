@@ -6,7 +6,7 @@ adapters/proposal/projection.py's route_fingerprint() and
 build_summary_db_row(), models/evaluation/summary.py's
 build_summary_row() (the shared §5.4 KPI derivation, WP10 step 5), plus
 their wiring into POST /api/proposal/calc's response (route_fingerprint,
-cache_hit, summary).
+summary).
 
 The schema-conformance case at the bottom inserts a
 build_summary_db_row() row directly into proposals.proposal_summaries,
@@ -87,13 +87,6 @@ class TestFingerprint:
 
         prefixed = rewrite_id_prefix(calc_response["route"], "R1", "P999_V1_R1")
         assert route_fingerprint(prefixed) == calc_response["route_fingerprint"]
-
-
-class TestCacheHitFlag:
-    def test_is_bool(self, calc_response):
-        """Shape only — hit/miss semantics live in
-        test_39_compute_cache.py, behind its own cache flush."""
-        assert isinstance(calc_response["cache_hit"], bool)
 
 
 # =============================================================================
