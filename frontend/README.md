@@ -82,7 +82,7 @@ frontend/
     ├── lib/
     │   ├── apiClient.ts       # One classified HTTP boundary for every backend call
     │   ├── apiError.ts        # Failure classification shared by every consumer
-    │   ├── calcMatrix.ts      # NDJSON reader + fold + ref re-inlining for /calc/matrix
+    │   ├── proposalFamily.ts  # the family document on the client: inflateRoute, member keys, error mapping
     │   ├── compareKpis.ts     # The comparison KPIs, deltas and the surplus rule
     │   ├── scenarioAxes.ts    # Scenario switches (network / HSR / opt. tt) ↔ scenario_id
     │   ├── compositionFormation.ts  # Composition → drawable formation; class colours/glyphs
@@ -123,20 +123,29 @@ and composition therefore only appear once a route exists: the scenario as
 switches at the top of `ProposalResults` (zone A), the composition in the
 supply table of the collapsible settings (zone D).
 
-> **Backend 0.5.0 (WP18 B2b) removed `POST /api/proposal/calc` and
-> `/calc/matrix`.** Until phase C of the family work lands in this client,
-> the two paragraphs below describe code that has no endpoint to talk to:
-> the replacement is one `POST /api/proposal/family` per stop list, with
-> every scenario variant × composition in the document —
-> `docs/FRONTEND_HANDOVER.md` §15 and §16.
+**The family.** Every evaluation is one `POST /api/proposal/family`
+(`composables/useProposalFamily.ts`): the stops and HOW fields under every
+offered scenario × every composition, returned as one document — a summary
+per member, a compact route per (scenario, composition), the geometry once.
+`ProposalViewport` puts the presented member on screen (its compact route
+inflated back into the full shape by `lib/proposalFamily.ts`, so the map,
+the itinerary and the expert timetable read what they always read), and a
+scenario or composition switch afterwards is a lookup in the document, not a
+request. The comparisons (zone A's deltas, B's bars and grid, D's table) read
+the other members. A member's six evaluation views are not in the document:
+zone E fetches the member on screen's from
+`GET /api/proposal/family/<key>/members/<sv>/<comp>/views` and shows a
+skeleton until they arrive. Editing the itinerary resets the family. A
+loaded proposal arrives with its full route and views inline
+(`GET /api/proposal/<id>`) and builds its family in the background so that
+switching on it is just as instant.
 
-**Comparison matrix.** After every successful calc `ProposalViewport` starts
-`POST /api/proposal/calc/matrix` (`composables/useCalcMatrix.ts`) for the
-route on screen — every scenario × every composition, streamed cell by cell
-as NDJSON. The matrix is comparison-only (zones A's deltas, B's bars and
-grid, D's table); the figures on screen always come from `/calc`, which the
-matrix has warmed in the backend's compute cache, so switching scenario or
-composition afterwards is a cache hit. Editing the itinerary aborts it.
+A member the backend could not compute (a gauge clash, an unroutable pair, a
+graph this deployment does not run) is not a failed request but a member with
+`status: 'error'` and a code — `lib/proposalFamily.ts` turns the presented
+one into the same `ApiFailure` a 422 used to be, and the grid renders the
+others as `cellErrors.<code>`.
+
 **Coming-soon surfaces.** Three things are shown but disabled, each for a
 different reason: the "price & regulatory measures" toggles (the backend
 does not model them — `docs/PARKED_WORK.md` §3), the "fit to demand" column
@@ -147,7 +156,7 @@ Only the last one is a release switch rather than missing code:
 `PREVIEW_NETWORKS` in `lib/scenarioAxes.ts`, overridable per deployment with
 `VITE_PREVIEW_NETWORKS` (comma-separated; empty string releases every
 network). A held-back network is also left out of the comparison views and
-of the matrix request's `scenario_ids`, so nothing is computed for it.
+of the family request's `scenario_variant_ids`, so nothing is computed for it.
 
 Changing either does **not** recompute on the spot: `ProposalViewport` marks
 the results stale (`paramsStale`) and covers them with a recompute control, so

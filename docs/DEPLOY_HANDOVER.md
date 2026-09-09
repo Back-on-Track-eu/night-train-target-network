@@ -1113,10 +1113,11 @@ before B2b makes it the only compute path; I'll ask for that with B2b.
 
 ## 16. WP18 phase B2b — backend 0.5.0: the family is the only compute path
 
-**Coupled deploy.** 0.5.0 removes `POST /api/proposal/calc` and
-`/calc/matrix`. A frontend built against 0.4.x cannot compute against it,
-so this backend goes to staging **together with** the frontend's phase C
-(`FRONTEND_HANDOVER.md` §16) and not before. Everything else — gallery,
+**Coupled deploy — now unblocked.** 0.5.0 removes `POST /api/proposal/calc`
+and `/calc/matrix`. A frontend built against 0.4.x cannot compute against
+it, so this backend goes to staging **together with** the frontend's phase
+C (`FRONTEND_HANDOVER.md` §16, done in §17): both halves are on
+`proposal-builder-redesign`, so one deploy of that branch carries both. Everything else — gallery,
 load, compare, publish, engagement — keeps working with either frontend.
 
 **Migration `2026-09-10_family_members.sql`.** Creates `family.members`

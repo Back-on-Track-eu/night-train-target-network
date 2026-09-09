@@ -831,6 +831,58 @@ response shape is unchanged apart from §16.2.
 
 ---
 
+## 17. Phase C — done (frontend on the family)
+
+§15 and §16 were written as a handover; the work was then done in-house, so
+this section records what landed and where, for whoever reads the client
+next.
+
+- **One composable, `composables/useProposalFamily.ts`**, replaces the two
+  `useCalcMatrix` instances. Same query surface the results components used
+  (`okMember`/`byScenario`/`byComposition`/`cells`/`status`/`failure`),
+  keyed by scenario id as before, plus `views(sv, comp)` — fetched on demand
+  and cached per family.
+- **The full route stays the viewport's internal shape.**
+  `lib/proposalFamily.ts::inflateRoute()` rebuilds `from_stop`/`to_stop` and
+  `geometries[]` from the compact route and the pool (unit-tested), so
+  `adaptRoute`, the map, the itinerary and the expert reconciliation are
+  untouched. `routeFacts()` (share links) now reads countries from the legs'
+  `country_distance_shares`, since `track_infrastructure` is provenance the
+  document does not carry.
+- **`requestCalc` → `requestFamily` + `memberPlanFor`.** The family request
+  names the offered scenarios' variants (`store.variantFor`), omits the
+  composition axis (whole catalog) and presents the selected member. A
+  presented scenario the family does not cover (a preview network) falls
+  back to the backend's default rather than 400.
+- **Both switches are lookups.** Scenario and composition watchers apply
+  the member from the document when it is there; `paramsStale` and
+  Recalculate remain for expert edits and for members the document lacks.
+- **Zone E loads after the document.** `EvaluationResponse.views` is
+  `EvaluationViews | null`; `CostRevenueBreakdown` shows a skeleton while
+  null and takes its formulas from `store.models` (`GET /api/models`,
+  fetched at startup with the other reference data).
+- **Errors are members.** `lib/proposalFamily.ts::memberFailure()` maps an
+  error member to the `ApiFailure` a 422/503 used to be, so
+  `calcFailure`/`calcFailureMsg` and their copy paths are unchanged.
+- **Publish `copy`.** Evaluating someone else's proposal publishes with
+  `mode: 'copy'` and `based_on_proposal_id`.
+- **A loaded proposal** hydrates from `GET /api/proposal/<id>` as before
+  (full route, views inline) and builds its family in the background.
+- **Removed:** `composables/useCalcMatrix.ts`, `lib/calcMatrix.ts` (+ test),
+  `proposalsApi.calcMatrix`, `ProposalCalcResponse`, every `Matrix*` type,
+  `EvaluationInput`/`EvaluationParameters`.
+- **`api.ts` audit** covered this branch's backend: `ScenariosResponse`
+  gains `measure_sets`/`scenario_variants`, `ModelsResponse` and the family
+  types are new, `PublishRequest.mode` gains `'copy'`, `auto_stop_addition`
+  is `'off' | 'suggest'`. The `backend-dev` coordination batch
+  (`per_trip_km → per_train_km`, `comp_id → composition_id`,
+  `fix_overhead_eur`, …) is a separate pass when that branch merges.
+
+Gate: `vue-tsc`, `eslint`, `prettier --check`, `vitest` (224) and
+`vite build` — all green.
+
+---
+
 ## Maintaining this document
 
 One file, updated in the same PR as the backend change. Each entry says
