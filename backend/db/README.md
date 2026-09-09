@@ -450,6 +450,17 @@ Dev reseed drops the schema and bulk-loads any
 `scripts/precompute_route_segments.py --load`. Not versioned: a cache row is
 either right for its graph import or purged with it.
 
+### `family`
+
+Layer L5 caches — everything derived from the pins. UNLOGGED, TTL on
+read, flushed by `scripts/refresh_proposals.py` on every version bump;
+a fresh database starts with it empty. `adapters/family/README.md`.
+
+| Table | Description |
+|---|---|
+| `documents` | One serialised family document per family key (`models/family/key.py`): every member of one stop list + HOW under the current pins, as `POST /api/proposal/family` returns it. The key folds both model versions in, so a bump never finds an old row again. |
+| *(B2b)* `members` | The member cache — today `proposals.compute_cache_pointer` / `compute_cache_result`, moving here as one table. |
+
 ### `proposals`
 
 GTFS-compatible tables plus a thin project-specific `proposals` version

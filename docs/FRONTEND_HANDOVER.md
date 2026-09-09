@@ -679,6 +679,81 @@ within its own detour budget.
 
 ---
 
+## 15. The proposal family — `POST /api/proposal/family` (WP18 phase B2a)
+
+Additive. `/calc` and `/calc/matrix` still work exactly as before; B2b
+removes them, so this is the endpoint to build zone C–E on now. Full
+contract in `backend/api/README.md` → Proposal Family; what follows is
+the client-side shape of it.
+
+### 15.1 One POST, then no requests for switching
+
+`POST /api/proposal/family` with the `/calc` body minus `composition_id`
+and `scenario_id` (those become axes; both optional, default = every
+current scenario variant × the whole catalog), plus an optional
+`presented`. Back comes one document — ≈400 KB gzipped for the full
+6 × 12 — with every member's summary, one compact route per
+(scenario, composition), and the geometry pool. Switching scenario
+variant or composition in the UI is a lookup:
+
+```ts
+const member = doc.members.find(m => m.scenario_variant_id === sv && m.composition_id === comp)
+const route  = doc.routes[member.route_ref]        // compact route
+const coords = doc.geometries[segment.geometry_id] // per segment
+```
+
+`useCalcMatrix` / `lib/calcMatrix.ts` map onto this almost 1:1 —
+`gridMatrix` is `members[].summary`, `scenarioMatrix` is
+`routes[route_ref]`. The plan's `lib/proposalFamily.ts` (`memberKey`,
+`routeFor(document, member)`, `byScenarioVariant`, `byComposition`,
+`baselineMember`) is the shape.
+
+### 15.2 The compact route — the one change with surface
+
+`routes[ref]` is `route_to_dict()`'s shape with three edits, and
+`adaptRoute()` in `ProposalViewport.vue` has to know about them:
+
+- **stops once per trip**: `trip.stops[]` in travel order; a segment has
+  `from` and `to` (indices into `stops`), not `from_stop`/`to_stop`.
+- **geometry by reference**: `segment.geometry_id` → `doc.geometries`.
+- **gone**: `trip_pairs[].composition` (use `GET /api/params/compositions`
+  by `composition_id`), `od_pairs`, `track_infrastructure`, route-level
+  `geometries`.
+
+Everything else — `schedule`, `general_parameters` incl.
+`timetable_warnings`, `parkings`, `shuntings`, ids — is verbatim.
+
+### 15.3 Views on demand
+
+`GET …/members/<sv>/<comp>/views` → `{ views }`, the same six views
+`/calc` returns under `evaluation.views` — and nothing else. Parameters
+are `GET /api/params/*` for that variant's scenario; formulas are
+`GET /api/models` (§13.2). Open zone E → fetch; cache per family key on
+the client. ≈350 ms first time, a member-cache hit after.
+
+### 15.4 Errors and the 2032 case
+
+A member the backend cannot compute is an **error member**, not a failed
+request: `{ status: 'error', error: 'routing_graph_not_configured' | 'routing_error' | 'gauge_mismatch' | 'domain_error', message }`.
+On a one-instance stack every `infra_2032` member is one. The document is
+still 200; `stats.n_ok / n_error` say how many.
+
+### 15.5 Keys and caching
+
+`family_key` identifies the document; `GET /api/proposal/family/<key>`
+returns it again until its TTL (3 h) passes, then 404 — POST again with
+the same body, the key is the same. `presented` is not in the key, so
+changing it never rebuilds. Expert-timetable edits, mode changes and a
+new stop list are new keys.
+
+### 15.6 `api.ts`
+
+Additive: `FamilyRequest`, `FamilyDocument`, `FamilyMember` (ok | error),
+`CompactRoute` / `CompactTrip` / `CompactSegment`, `FamilyViewsResponse`.
+`Matrix*` and `ProposalCalcResponse` stay until B2b.
+
+---
+
 ## Maintaining this document
 
 One file, updated in the same PR as the backend change. Each entry says

@@ -1054,6 +1054,63 @@ db container dies during init, the mounts are the first place to look.
 
 ---
 
+## 15. WP18 phase B2a — the `family` schema, and two more threads per process
+
+Ships `2026-09-10_family_schema.sql`: a new `family` schema with one
+UNLOGGED table, `family.documents`. Cache only — a fresh database starts
+with it empty, and it is safe to `TRUNCATE family.documents` at any time.
+
+**Deploy:** nothing special; the migration is two statements and applies
+in milliseconds. `proposals.compute_cache_*` keep working unchanged.
+
+**Cache truncation on future version bumps** now covers two schemas:
+
+```sql
+TRUNCATE proposals.compute_cache_pointer, proposals.compute_cache_result;
+TRUNCATE family.documents;
+```
+
+`scripts/refresh_proposals.py` will do both from B2b; until then the
+second line is yours when you truncate by hand. Forgetting it is
+harmless: the family key folds both model versions AND the document's own
+shape version into itself, so a stale document is never served, only left
+for the sweep. That is deliberate — a deploy that reshapes the document
+must not keep serving the old shape to a frontend whose types describe
+the new one.
+
+**Pool sizing.** The family build fans out its prewarm over
+`FAMILY_WORKERS` threads (default 4), each borrowing a pooled connection.
+Same rule as the matrix workers it replaces in B2b: `DB_POOL_MAX ≥
+GUNICORN_THREADS + FAMILY_WORKERS` per process. With today's defaults
+(8 + 4) you are inside the pool you already run; if you raised
+`GUNICORN_THREADS`, check.
+
+**No new environment variables required.** `FAMILY_MAX_MEMBERS` (1000)
+and `FAMILY_WORKERS` (4) have code defaults and appear name-only in
+`.env.example`.
+
+**One property of `route_cache` worth knowing, unrelated to this deploy.**
+A stop pair is stored once, `lo→hi`, and the other direction is served by
+reversing it — so whichever direction is routed FIRST decides the corridor
+for both. If two directions of the same pair are routed concurrently
+before either is stored, each gets its own live path, and the return trip
+of that one build differs from the return trip of every later build (which
+reverses the outbound). Measured here as a family whose geometry changed
+between a cold and a warm build. Nothing is wrong — the cache's
+"direction is symmetric" rule is deliberate — but it means a route's
+fingerprint can change on a recompute after a cold first build, which a
+refresh run would record as a changed route. The family builder now warms
+the two directions in order so it never triggers this; the precompute
+script already loads pairs one at a time.
+
+**Capacity, for §7:** a full 6 × 12 family costs one request ≈2 s warm
+on the dev box (`scripts/bench_member.py`, section D) and returns
+≈1.5 MB raw / ≈400 KB gzipped. Cold — legs not yet in `route_cache` —
+add the corridor's live routing on top, once. Worth a soak on the VPS
+before B2b makes it the only compute path; I'll ask for that with B2b.
+
+---
+
 ## Maintaining this document
 
 One file, updated in the same PR as the change it describes. The rule that

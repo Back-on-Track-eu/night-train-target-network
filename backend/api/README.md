@@ -33,6 +33,10 @@ its own example files.
 - [Proposal Compute (merged)](#proposal-compute) — route + evaluation in one call, stateless
   - [`POST /api/proposal/calc`](#proposal-calc) — plan a route and evaluate it
   - [`POST /api/proposal/calc/matrix`](#proposal-calc-matrix) — the same route under every scenario × composition, streamed
+- [Proposal Family](#proposal-family) — every scenario variant × composition of one stop list, one document
+  - [`POST /api/proposal/family`](#proposal-family) — build or load the family
+  - [`GET /api/proposal/family/<key>`](#proposal-family) — the document again
+  - [`GET /api/proposal/family/<key>/members/<sv>/<comp>/views`](#proposal-family) — one member's views
 - [Scenarios](#scenarios)
   - [`GET /api/scenarios`](#scenarios) — scenarios grouped by current status, plus measure sets and the variant axis
 - [Models](#models)
@@ -912,6 +916,132 @@ compositions is sent once. On a deployment running one OpenRailRouting
 instance every `infra_2032` cell is a `routing_graph_not_configured`
 error cell — the request still succeeds. Closing the connection cancels
 queued cells; running ones finish and still warm the cache.
+
+<a id="proposal-family"></a>
+
+## Proposal Family
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/proposal/family` | Every member (scenario variant × composition) of one stop list + HOW, as one document. Built once per family key, served from `family.documents` afterwards |
+| `GET` | `/api/proposal/family/<key>` | The document again; 404 once its TTL has passed — post again with the same body |
+| `GET` | `/api/proposal/family/<key>/members/<scenario_variant_id>/<composition_id>/views` | `{views}` for one member — the six evaluation views, computed on demand and member-cached |
+
+Introduced in WP18 phase B2a (`adapters/family/README.md`,
+`models/family/README.md`). `POST /api/proposal/calc` and `/calc/matrix`
+still exist alongside it; phase B2b retires both, and every client moves
+here.
+
+<details>
+<summary>Request &amp; response details</summary>
+
+**Request** — the `/calc` body minus `composition_id` and `scenario_id`,
+which are axes here, plus the optional axis lists and the optional
+presented member:
+
+```json
+{
+  "stops": ["osm:n3856100103", "osm:w423692233"],
+  "timetable_mode": "simpleAutomatic",
+  "fixed_night_interval": null,
+  "schedule_mode": "alwaysDaily",
+  "routing_mode": "fullRouting",
+  "auto_stop_addition": "off",
+  "expert_timetable": null,
+  "scenario_variant_ids": [1, 2],          // optional — default: every variant of a current scenario, base first
+  "composition_ids": ["NEW-BAL-7"],        // optional — default: the whole catalog (no indicative KPIs)
+  "presented": { "scenario_variant_id": 1, "composition_id": "NEW-BAL-7" }  // optional, either half
+}
+```
+
+Validation is `/calc`'s for stops and the HOW fields; axis lists must be
+non-empty, unique and known; `presented` must lie on the axes. A family
+larger than `FAMILY_MAX_MEMBERS` (`api/config.py`) is 400
+`family_too_large`.
+
+`auto_stop_addition: "suggest"` runs the candidate search on the
+presented member only; every other member builds with `"off"`, and the
+suggestions ride on the document. The mode is part of the family key —
+accepting a suggestion posts a new stop list, which is a new family
+anyway.
+
+**Response** — everything once:
+
+```json
+{
+  "family_key": "sha256:…",                 // models/family/key.py: request + axes + both versions
+  "route_builder_version": "0.9.34",
+  "calc_version": "0.9.26",
+  "request": { "stops": [...], "timetable_mode": "…", ... },   // the resolved echo — what publish sends back
+  "suggested_stops": [ ... ],               // "suggest" only
+  "axes": {
+    "scenario_variants": [ { "scenario_variant_id": 1, "scenario_id": 1, "measure_set_id": 1,
+                             "scenario_key": "infra-2026", "scenario_name": "…",
+                             "is_current_base": true, "routing_graph_key": "infra_2026",
+                             "dimensions": { ... } } ],
+    "compositions": ["NEW-BAL-7", "…"]      // ids — the catalog is GET /api/params/compositions
+  },
+  "presented": { "scenario_variant_id": 1, "composition_id": "NEW-BAL-7" },
+  "geometries": { "g:3f9a1c…": [[lon, lat], ...] },          // content-addressed, ≈8 for 72 members
+  "routes":     { "r:1:NEW-BAL-7": { ...compact route... } }, // one per (scenario, composition)
+  "members": [
+    { "scenario_variant_id": 1, "composition_id": "NEW-BAL-7", "status": "ok",
+      "route_ref": "r:1:NEW-BAL-7", "summary": { ...the §5.4 gallery KPIs... } },
+    { "scenario_variant_id": 5, "composition_id": "NEW-BAL-7", "status": "error",
+      "error": "routing_graph_not_configured", "message": "…" }
+  ],
+  "stats": { "n_members": 72, "n_ok": 72, "n_error": 0, "n_routes": 72, "n_geometries": 8,
+             "elapsed_s": 1.9, "cache_hit": false,
+             "loader_calls": 360, "loader_hits": 336, "route_calls": 144, "route_hits": 132, "n_routes": 12 }
+}
+```
+
+Members are ordered scenario variants outer, compositions inner. Error
+codes are `/calc`'s (`classify_compute_error`): a member on a graph this
+deployment does not run is `routing_graph_not_configured`, a stop pair the
+router cannot serve `routing_error`, a gauge clash `gauge_mismatch`. The
+document is 200 regardless — on a one-instance stack every `infra_2032`
+member is an error member.
+
+**The compact route** (`route_serialize.route_compact_to_dict`) is
+`route_to_dict()`'s shape with everything a member can fetch elsewhere
+removed: per trip, `stops[]` holds each stop once in travel order and
+every segment refers to its ends by index (`from`, `to`); segment
+`geometry_id`s point into the document's `geometries`; the composition
+block, `od_pairs` and `track_infrastructure` are gone (catalog, demand,
+provenance — `GET /api/params/*` and the views endpoint). `schedule`,
+`general_parameters` with its `timetable_warnings`, `parkings` and
+`shuntings` are verbatim.
+
+**Not in the document, by design:** provenance and parameter blocks
+(`GET /api/params/*` per scenario), the models registry
+(`GET /api/models`), per-member views (the views endpoint), and route
+fingerprints (publish computes its own).
+
+**Caching.** The document is stored under its key with the compute
+cache's TTL; a second POST with the same stops, HOW and axes is a hit
+(`stats.cache_hit`). `presented` is not in the key — choosing another
+member never rebuilds. A model version bump changes every key, and so
+does a change to the document's own shape
+(`family_serialize.FAMILY_DOCUMENT_FORMAT`): the cache stores a
+serialised body, so a reshaped document has to invalidate it exactly as a
+changed number does.
+
+**Member views** — `GET …/members/<sv>/<comp>/views` returns
+`{ "views": { ...views_to_dict... } }` and nothing else: the parameters it
+was priced from are `GET /api/params/*` for the variant's scenario, the
+formulas are `GET /api/models`. Served from the member cache when the
+member has been opened before, computed once (≈350 ms) when not. 404 for
+an expired key or a member outside the family's axes; compute failures
+carry `/calc`'s codes.
+
+Sizes measured on Berlin–Wien, 6 × 12 (`scripts/bench_member.py`):
+summaries 72 × ~0.8 KB, compact routes 72 × ~3 KB, geometry 8 × ~150 KB —
+≈1.5 MB raw, ≈400 KB gzipped (Flask-Compress applies).
+
+</details>
+
+---
 
 <a id="scenarios"></a>
 
