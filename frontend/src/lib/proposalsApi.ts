@@ -4,8 +4,9 @@
 
 import { apiRequest } from './apiClient'
 import type {
-  MatrixDocument,
-  MatrixRequest,
+  FamilyDocument,
+  FamilyRequest,
+  FamilyViewsResponse,
   ProposalsRequest,
   ProposalsResponse,
   ProposalDetailResponse,
@@ -168,24 +169,18 @@ export function deleteComment(
 }
 
 /**
- * POST /api/proposal/calc/matrix — the whole grid as ONE JSON document.
- *
- * The endpoint also speaks NDJSON (Accept: application/x-ndjson) and streams
- * cells as they complete. We ask for the document instead: it goes through
- * apiRequest like every other call, so it inherits the classification, the
- * budget, the health tracking and the cancel semantics rather than
- * re-implementing them around a ReadableStream — and the frontend's use of
- * the matrix is all-or-nothing anyway (a comparison of a partial grid would
- * be misleading). Progressive rendering is what the stream is for; when a
- * grid gets big enough to need it, lib/calcMatrix.ts still has the reader.
+ * The proposal family — every scenario variant × composition of one stop
+ * list + HOW as one document (backend/api/README.md "Proposal Family"). The
+ * only compute endpoint since backend 0.5.0. 'heavy' with no deadline, like
+ * publish: a cold family routes the corridor live, and a warm one is ~1.5 s.
  */
-export function calcMatrix<TRoute = unknown>(
-  body: MatrixRequest,
+export function postFamily(
+  body: FamilyRequest,
   headers: Record<string, string>,
   signal?: AbortSignal,
   onSlow?: (phase: 'slow' | 'verySlow') => void,
-): Promise<MatrixDocument<TRoute>> {
-  return apiRequest<MatrixDocument<TRoute>>('/api/proposal/calc/matrix', {
+): Promise<FamilyDocument> {
+  return apiRequest<FamilyDocument>('/api/proposal/family', {
     method: 'POST',
     headers,
     body,
@@ -193,4 +188,21 @@ export function calcMatrix<TRoute = unknown>(
     signal,
     onSlow,
   })
+}
+
+/**
+ * One member's six evaluation views, computed on demand and member-cached
+ * server-side (≈350 ms cold, a cache hit after). 404 once the family's key
+ * has expired — the caller posts the family again.
+ */
+export function fetchFamilyViews(
+  familyKey: string,
+  scenarioVariantId: number,
+  compositionId: string,
+  signal?: AbortSignal,
+): Promise<FamilyViewsResponse> {
+  return apiRequest<FamilyViewsResponse>(
+    `/api/proposal/family/${familyKey}/members/${scenarioVariantId}/${encodeURIComponent(compositionId)}/views`,
+    { budget: 'heavy', ...(signal ? { signal } : {}) },
+  )
 }

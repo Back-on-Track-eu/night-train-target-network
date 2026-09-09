@@ -5,15 +5,17 @@ import { useStore } from '@/stores/store'
 import { useToastStore } from '@/stores/toastStore'
 import type {
   EvaluationResponse,
+  EvaluationViews,
+  FamilyDocument,
+  FamilyRequest,
   MapScope,
-  ProposalCalcResponse,
   ProposalCalcSummary,
   PublishRequest,
   Stop,
   SuggestedStop,
 } from '@/types/api'
 import { publishProposal, fetchProposalRoute } from '@/lib/proposalsApi'
-import { apiRequest, createAbortSlot } from '@/lib/apiClient'
+import { createAbortSlot } from '@/lib/apiClient'
 import { ApiError, asApiFailure, isRetryable, type ApiFailure } from '@/lib/apiError'
 import { useApiFailure } from '@/composables/useApiFailure'
 import { resolvePrefillStops, type GallerySearchSeed } from '@/lib/proposalPrefill'
@@ -21,9 +23,9 @@ import { readDraft, writeDraft, clearDraft } from '@/lib/proposalDraftStorage'
 import { useLocaleFormat } from '@/composables/useLocaleFormat'
 import { buildSuggestRows, settledRows, type SuggestRow } from '@/lib/suggestPlacement'
 import { formatClock, dayOffset } from '@/lib/tripClock'
-import { useCalcMatrix } from '@/composables/useCalcMatrix'
+import { useProposalFamily } from '@/composables/useProposalFamily'
 import { buildScenarioAxes } from '@/lib/scenarioAxes'
-import { cellAsCalcResponse } from '@/lib/calcMatrix'
+import { inflateRoute, memberFailure, routeFor } from '@/lib/proposalFamily'
 import {
   addonFor,
   addonsForDirection,
@@ -93,10 +95,10 @@ const { describe, report } = useApiFailure()
 const currentMode = ref<'edit' | 'loading' | 'display' | 'suggest'>(props.mode)
 const selectedCompositionId = ref<string | null>(null)
 
-// --- Calc state -----------------------------------------------------------
-// The calc is the one genuinely long call in the app (routing engine, one leg
-// at a time), so it reports progress rather than just spinning: 'slow' at 8s,
-// 'verySlow' at 30s, cancellable throughout.
+// --- Compute state --------------------------------------------------------
+// The family build is the one genuinely long call in the app (routing engine,
+// one leg at a time, once per corridor), so it reports progress rather than
+// just spinning: 'slow' at 8s, 'verySlow' at 30s, cancellable throughout.
 const calcPhase = ref<'idle' | 'working' | 'slow' | 'verySlow'>('idle')
 const calcFailure = ref<ApiFailure | null>(null)
 const calcFailureMsg = ref<string | null>(null)
@@ -125,7 +127,8 @@ const loadFailure = ref<ApiFailure | null>(null)
 const loadFailureMsg = ref<string | null>(null)
 const loadSlot = createAbortSlot()
 
-// Raw route as returned by POST /api/proposal/calc (before adaptRoute()) —
+// Raw route in the full shape (a loaded proposal's, or the family's compact
+// route inflated by lib/proposalFamily.ts) before adaptRoute() —
 // the map segment/highlight logic below reads it directly.
 const rawRoute = ref<BackendRoute | null>(null)
 // Evaluation bundle rendered by ProposalResults — assembled in applyPlan()
@@ -147,7 +150,7 @@ const evalScope = ref<MapScope>({ kind: 'all' })
 // adding them automatically. basePlan holds that first "suggest" response so it
 // can be reused directly when the user adds nothing.
 const suggestedStops = ref<SuggestedStop[]>([])
-const basePlan = ref<CalcResponse | null>(null)
+const basePlan = ref<MemberPlan | null>(null)
 // Suggested stop ids the user has opted in (default none). Single source of
 // truth driving both the timeline bubbles and the map markers.
 const suggestSelected = ref<Set<string>>(new Set())
@@ -186,31 +189,19 @@ const publishError = ref<string | null>(null)
 // same way.
 const publishPhase = ref<'idle' | 'working' | 'slow' | 'verySlow'>('idle')
 
-// --- Calc matrix (comparison views) -----------------------------------------
-// Started after every successful calc for the route on screen: the same
-// stops and HOW fields under every scenario × composition, streamed cell by
-// cell (composables/useCalcMatrix.ts). Comparison-only — the figures on
-// screen always come from /calc, which the matrix warms in the compute
-// cache. Keyed on the route fingerprint + HOW fields, so recomputing the
-// same route for another scenario/composition does not restart it; aborted
-// as soon as the itinerary is edited, because its cells would describe a
-// route that no longer exists.
-// Two grids, one route (composables/useCalcMatrix.ts):
-//   gridMatrix — summary cells for every offered scenario × every
-//     composition. Feeds the comparison bars, the combination grid and the
-//     supply table.
-//   scenarioMatrix — FULL cells (route, views, parameters) for every offered
-//     scenario × the composition on screen. This is what makes a scenario
-//     switch free: the answer is already here, so no /calc, no Recalculate,
-//     no waiting. A composition switch still goes through /calc — carrying
-//     36 full evaluations would be megabytes — but lands on a cache entry
-//     gridMatrix already created.
-const gridMatrix = useCalcMatrix()
-const scenarioMatrix = useCalcMatrix<BackendRoute>()
+// --- The family (composables/useProposalFamily.ts) --------------------------
+// Every evaluation is one POST /api/proposal/family: the stops and HOW fields
+// under every offered scenario × every composition, as one document. The
+// presented member is what applyPlan() puts on screen; the rest is what
+// makes a scenario or composition switch a lookup rather than a request
+// (the watchers below), and what feeds the comparison bars, the combination
+// grid and the supply table. A member's six evaluation views are not in the
+// document — they are fetched for the member on screen (loadViews) and
+// cached per family. Reset as soon as the itinerary is edited: its members
+// would describe a route that no longer exists.
+const family = useProposalFamily()
 // The author's display name of a loaded proposal, for the ownership line.
 const authorName = ref<string | null>(null)
-// Fingerprint of the route on screen — the matrix key's first half.
-const lastFingerprint = ref<string | null>(null)
 
 // The proposal_id a discussion can hang off: the one we opened, or the one the
 // first publish adopted. Null in a fresh builder session, which is why neither
@@ -250,9 +241,11 @@ interface RouteResult {
   trips: TripResult[]
 }
 
-// --- Shapes of POST /api/proposal/calc's "route" key, before adapting into
-//     the RouteResult/TripResult/StopTimeFmt shape the rest of this component
-//     already renders against. Kept minimal — only the fields used below. ---
+// --- The full route shape (route_serialize.route_to_dict(): GET /api/
+//     proposal/<id>'s route, and what inflateRoute() rebuilds from the
+//     family document), before adapting into the RouteResult/TripResult/
+//     StopTimeFmt shape the rest of this component already renders against.
+//     Kept minimal — only the fields used below. ---
 interface BackendStop {
   stop_id: string
   stop_name: string
@@ -316,12 +309,23 @@ interface BackendRoute {
   trip_pairs: BackendTripPair[]
   geometries: BackendGeometry[]
   schedule: { seasonal_schedules: BackendSeasonalSchedule[] }
-  // Countries the route runs through, carried on calcResult.input.route.
-  track_infrastructure: { country_code: string }[]
 }
 
-// The merged calc response with its route key concretely typed.
-type CalcResponse = ProposalCalcResponse<BackendRoute>
+// What applyPlan() puts on screen: one member of the family, in the shape
+// the rest of this component was built around — a FULL route (the document's
+// compact one inflated by lib/proposalFamily.ts), the resolved request with
+// this member's composition and scenario filled in, its summary, and its
+// views if they are already known (a stored proposal carries them inline; a
+// family member's are fetched after — null until then).
+interface MemberPlan {
+  route_builder_version: string
+  calc_version: string
+  request: Record<string, unknown>
+  suggested_stops?: SuggestedStop[]
+  summary: ProposalCalcSummary | undefined
+  route: BackendRoute
+  views: EvaluationViews | null
+}
 
 // Clock formatting and the overnight day offset live in lib/tripClock.ts.
 
@@ -603,72 +607,155 @@ function toggleExpertMode() {
   if (!expertMode.value) expert.value = emptyExpert()
 }
 
-// POST /api/proposal/calc for the given stop ids and auto_stop_addition mode
-// — the merged, stateless compute endpoint: one call returns route AND
-// evaluation (no more separate plan + evaluation round trips). Returns the
-// parsed response, or null on error (having set calcFailure and dropped back
-// to edit mode). proposal_id/proposal_version don't exist on this request —
-// persistence is publish's concern, not compute's.
-async function requestCalc(
+// The offered scenarios' variants, in the picker's order — the family's
+// scenario axis. A network still held back as "coming soon"
+// (lib/scenarioAxes.ts) costs neither a switch the user cannot flip nor a
+// member nobody can see. Empty (scenarios not loaded yet) means "omit the
+// axis" and let the backend use its default.
+const familyVariantIds = computed(() =>
+  buildScenarioAxes(store.scenarios)
+    .ordered.map((sc) => store.variantFor(sc.scenario_id)?.scenario_variant_id)
+    .filter((id): id is number => id !== undefined),
+)
+
+// The family request for the given stop ids: the HOW fields as the builder
+// has them, the offered scenarios, every composition, and the member the
+// user is looking at as `presented` — the only member whose "suggest"
+// search runs. composition_id is omitted until the user picks one, so the
+// first evaluation presents the backend's standard composition
+// (DEFAULT_COMPOSITION_ID) and applyPlan() adopts whichever it reports back.
+function familyRequest(
   stopIds: string[],
   autoStopAddition: 'off' | 'suggest',
-): Promise<CalcResponse | null> {
+  expertBlock: ExpertTimetableRequest | null,
+): FamilyRequest {
+  const variantIds = familyVariantIds.value
+  const selectedVariant = store.variantFor(store.selectedScenarioId)?.scenario_variant_id
+  // A presented member has to be on the axes, or the backend answers 400:
+  // a scenario the picker offers but the family does not cover (a preview
+  // network) falls back to the backend's default, the base scenario.
+  const presentedVariant =
+    selectedVariant !== undefined &&
+    (variantIds.length === 0 || variantIds.includes(selectedVariant))
+      ? selectedVariant
+      : undefined
+  return {
+    stops: stopIds,
+    // Omitted entirely while nothing is overridden: an absent block and an
+    // empty one are the same request server-side. Pruned first — the
+    // backend rejects an add-on whose stop pair is not a leg of the stops
+    // being posted.
+    ...(expertBlock ? { expert_timetable: expertBlock } : {}),
+    auto_stop_addition: autoStopAddition,
+    ...(variantIds.length > 0 ? { scenario_variant_ids: variantIds } : {}),
+    presented: {
+      ...(presentedVariant !== undefined ? { scenario_variant_id: presentedVariant } : {}),
+      ...(selectedCompositionId.value ? { composition_id: selectedCompositionId.value } : {}),
+    },
+  }
+}
+
+// Stops + HOW + axes — what identifies a family. `presented` is deliberately
+// not in it: choosing another member never rebuilds.
+function familyKey(body: FamilyRequest): string {
+  const { presented: _presented, ...identity } = body
+  void _presented
+  return JSON.stringify(identity)
+}
+
+// POST /api/proposal/family for the given stop ids and auto_stop_addition
+// mode. Returns the document, or null on error (having set calcFailure and
+// dropped back to edit mode). proposal_id/proposal_version don't exist on
+// this request — persistence is publish's concern, not compute's.
+async function requestFamily(
+  stopIds: string[],
+  autoStopAddition: 'off' | 'suggest',
+): Promise<FamilyDocument | null> {
   // Remember the arguments so Retry can replay exactly this call.
   lastCalcArgs.value = { stopIds, autoStopAddition }
   const expertBlock = expertRequest(stopIds)
+  const body = familyRequest(stopIds, autoStopAddition, expertBlock)
   calcPhase.value = 'working'
-  const signal = calcSlot.begin()
-  try {
-    const json = await apiRequest<CalcResponse>('/api/proposal/calc', {
-      method: 'POST',
-      headers: store.authHeaders(),
-      // composition_id is omitted until the user picks one: the first
-      // evaluation runs on the backend's standard composition
-      // (DEFAULT_COMPOSITION_ID), and applyPlan() adopts whichever one the
-      // response reports back.
-      body: {
-        stops: stopIds,
-        ...(selectedCompositionId.value ? { composition_id: selectedCompositionId.value } : {}),
-        // Omitted entirely while nothing is overridden: an absent block and
-        // an empty one are the same request server-side, and omitting it
-        // keeps an untouched timetable on the same compute-cache entry it
-        // was always on. Pruned first — the backend rejects an add-on whose
-        // stop pair is not a leg of the stops being posted.
-        ...(expertBlock ? { expert_timetable: expertBlock } : {}),
-        auto_stop_addition: autoStopAddition,
-        // Plan under the selected scenario (null = live base, resolved server-side).
-        scenario_id: store.selectedScenarioId,
-      },
-      // No deadline: the routing engine's own timeout is per leg and gunicorn
-      // allows 120s, so any client deadline we picked would sometimes kill a
-      // request that was about to succeed — and aborting wouldn't free the
-      // worker anyway. The user gets escalating copy and a Cancel button.
-      budget: 'heavy',
-      onSlow: (phase) => {
-        calcPhase.value = phase
-      },
-      signal,
-    })
-    calcPhase.value = 'idle'
-    return json
-  } catch (err) {
-    calcPhase.value = 'idle'
-    const failure = asApiFailure(err)
-    // The user cancelled, or a newer calc superseded this one: no error, and
-    // the caller of cancelCalc() owns the mode.
-    if (failure?.kind === 'canceled') return null
-    calcFailure.value = failure
-    // Two surfaces, never the same sentence twice. Actionable detail (the
-    // backend's own validation text) belongs inline, next to the control. A
-    // systemic failure gets a SHORT inline note plus the full explanation in a
-    // sticky toast — printing the long "something went wrong on our side…"
-    // copy inline as well is what put it on screen twice.
-    const verbatim = err instanceof ApiError ? err.verbatim : null
-    calcFailureMsg.value = verbatim ?? t('errors.calcFailed')
-    if (!verbatim) report(err)
+  calcSlot.begin()
+  // No deadline: the routing engine's own timeout is per leg and gunicorn
+  // allows 120s, so any client deadline we picked would sometimes kill a
+  // request that was about to succeed — and aborting wouldn't free the
+  // worker anyway. The user gets escalating copy and a Cancel button.
+  const document = await family.start(familyKey(body), body, store.authHeaders(), (phase) => {
+    calcPhase.value = phase
+  })
+  calcPhase.value = 'idle'
+  if (document) return document
+  const failure = family.failure.value
+  // The user cancelled, or a newer build superseded this one: no error, and
+  // the caller of cancelCalc() owns the mode.
+  if (!failure || failure.kind === 'canceled') return null
+  calcFailure.value = failure
+  // Two surfaces, never the same sentence twice. Actionable detail (the
+  // backend's own validation text) belongs inline, next to the control. A
+  // systemic failure gets a SHORT inline note plus the full explanation in a
+  // sticky toast — printing the long "something went wrong on our side…"
+  // copy inline as well is what put it on screen twice.
+  const verbatim = new ApiError(failure).verbatim
+  calcFailureMsg.value = verbatim ?? t('errors.calcFailed')
+  if (!verbatim) report(new ApiError(failure))
+  currentMode.value = 'edit'
+  return null
+}
+
+// The member of `document` for a scenario and composition, as the plan
+// applyPlan() consumes — or null, with calcFailure set, when that member is
+// an error member (a gauge clash, an unroutable pair, a graph this
+// deployment does not run). A failed member is a 200 on the wire; this is
+// where it becomes the failure the builder's copy paths already know.
+// null/undefined selections fall back to the document's own presented
+// member, which is what the backend resolved the defaults to.
+function memberPlanFor(
+  document: FamilyDocument,
+  scenarioId: number | null,
+  compositionId: string | null,
+): MemberPlan | null {
+  const variant =
+    (scenarioId !== null ? family.variantOf.value.get(scenarioId) : undefined) ??
+    document.axes.scenario_variants.find(
+      (v) => v.scenario_variant_id === document.presented.scenario_variant_id,
+    )
+  if (!variant) return null
+  const comp = compositionId ?? document.presented.composition_id
+  const member = family.member(variant.scenario_id, comp)
+  if (!member) return null
+  if (member.status === 'error') {
+    calcFailure.value = memberFailure(member)
+    calcFailureMsg.value = member.message
     currentMode.value = 'edit'
     return null
   }
+  const isPresented =
+    variant.scenario_variant_id === document.presented.scenario_variant_id &&
+    comp === document.presented.composition_id
+  return {
+    route_builder_version: document.route_builder_version,
+    calc_version: document.calc_version,
+    request: { ...document.request, composition_id: comp, scenario_id: variant.scenario_id },
+    // Suggestions were searched for the presented member only.
+    ...(isPresented && document.suggested_stops
+      ? { suggested_stops: document.suggested_stops }
+      : {}),
+    summary: member.summary,
+    route: inflateRoute(document, routeFor(document, member)) as unknown as BackendRoute,
+    views: null,
+  }
+}
+
+// One evaluation, start to plan: the family, then the presented member of
+// it. What evaluate(), the suggest flow and Recalculate all call.
+async function requestPlan(
+  stopIds: string[],
+  autoStopAddition: 'off' | 'suggest',
+): Promise<MemberPlan | null> {
+  const document = await requestFamily(stopIds, autoStopAddition)
+  if (!document) return null
+  return memberPlanFor(document, store.selectedScenarioId, selectedCompositionId.value)
 }
 
 // What the map overlay says while we wait. Both the calc and publish escalate
@@ -683,6 +770,7 @@ const progressCaption = computed(() => {
 /** Stop waiting. Honest about what it does: the server keeps working. */
 function cancelCalc(): void {
   calcSlot.cancel()
+  family.abort()
   calcPhase.value = 'idle'
   currentMode.value = 'edit'
 }
@@ -695,8 +783,8 @@ function retryCalc(): void {
   calcFailure.value = null
   calcFailureMsg.value = null
   currentMode.value = 'loading'
-  requestCalc(args.stopIds, args.autoStopAddition).then((json) => {
-    if (json) applyPlan(json, true)
+  requestPlan(args.stopIds, args.autoStopAddition).then((plan) => {
+    if (plan) applyPlan(plan, true)
   })
 }
 
@@ -748,63 +836,41 @@ const routeStatRows = computed(() => {
   ]
 })
 
-// Scenarios the comparison may cover: the offered ones, so a network still
-// held back as "coming soon" (lib/scenarioAxes.ts) costs neither a bar the
-// user cannot select nor half the matrix's cells. Empty (scenarios not
-// loaded yet) means "omit the axis" and let the backend use its default.
-const matrixScenarioIds = computed(() =>
-  buildScenarioAxes(store.scenarios).ordered.map((s) => s.scenario_id),
-)
+// Retry after a family-level failure (network, 503): re-runs the last
+// request — the route on screen — from the start.
+function retryFamily() {
+  family.retry()
+}
 
-// The matrix request for a calc response: the resolved request's stops and
-// HOW fields. auto_stop_addition is pinned off — the stops are settled by the
-// time a route is on screen, and "add" could route a different itinerary per
-// cell.
-function startMatrix(json: CalcResponse) {
-  const req = json.request
-  const stops = req.stops as string[]
-  const how = {
-    timetable_mode: req.timetable_mode as string,
-    fixed_night_interval: (req.fixed_night_interval as string[] | null) ?? null,
-    schedule_mode: req.schedule_mode as string,
-    routing_mode: req.routing_mode as string,
-    ...(req.expert_timetable
-      ? { expert_timetable: req.expert_timetable as ExpertTimetableRequest }
-      : {}),
-  }
-  const scenarioIds = matrixScenarioIds.value
-  const axis = scenarioIds.length > 0 ? { scenario_ids: scenarioIds } : {}
-  const base = { stops, auto_stop_addition: 'off' as const, ...axis, ...how }
-  const key = `${json.route_fingerprint}|${JSON.stringify(how)}|${scenarioIds.join(',')}`
-  const headers = store.authHeaders()
-  gridMatrix.start(key, base, headers)
-
-  const compositionId = json.route.trip_pairs[0]?.composition_id
-  if (compositionId) {
-    scenarioMatrix.start(
-      `${key}|${compositionId}`,
-      { ...base, composition_ids: [compositionId], detail: 'full' },
-      headers,
-    )
+// The views of the member on screen, fetched after the document (they are
+// not in it) and cached per family. Guarded by a token: a switch that
+// arrives while a fetch is out must not have the older member's figures
+// land on top of it.
+let viewsToken = 0
+async function loadViews(scenarioId: number | null, compositionId: string | null) {
+  const token = ++viewsToken
+  if (scenarioId === null || compositionId === null) return
+  try {
+    const views = await family.views(scenarioId, compositionId)
+    if (token !== viewsToken || !views || !calcResult.value) return
+    calcResult.value = { ...calcResult.value, views }
+  } catch (err) {
+    if (token !== viewsToken) return
+    // Zone E stays on its skeleton; the rest of the page — route, KPIs,
+    // comparisons — is unaffected, so this is a toast, not a mode change.
+    report(err, { fallbackKey: 'errors.viewsFailed' })
   }
 }
 
-// Retry after a matrix-level failure (network, 503): rebuilds the request
-// from the last applied calc — the route on screen — and starts over.
-function retryMatrix() {
-  gridMatrix.retry()
-  scenarioMatrix.retry()
-}
-
-// Wire a successful calc response into the display: adapt the route, publish
-// the evaluation bundle, select the outbound trip, rebuild the itinerary from
+// Wire a member onto the display: adapt the route, publish the evaluation
+// bundle, select the outbound trip, rebuild the itinerary from
 // the planned route (so the builder reflects what's actually on the map —
 // including any stops the user chose to add) and commit it as the clean state
 // so the builder isn't "dirty" and Cancel Edit can restore exactly this.
 // `publish` is true only for user-initiated evaluations (Evaluate button, stop
 // selection) — a passive scenario-switch recompute passes false so it never
 // creates or overwrites a proposal.
-function applyPlan(json: CalcResponse, publish = false) {
+function applyPlan(json: MemberPlan, publish = false) {
   rawRoute.value = json.route
   // Expert overrides. Three steps, each answering a different question:
   //   1. what did we ASK for — the state as it stands, kept for the dropped
@@ -832,16 +898,13 @@ function applyPlan(json: CalcResponse, publish = false) {
     if (dropped.length > 0) reportDroppedAddons(dropped)
   }
   committedExpert.value = cloneExpert(expert.value)
-  // Assemble the panel-facing EvaluationResponse from the merged response:
-  // calc_version/route_id lifted from their new positions, input.route
-  // re-attached from the top-level route key (the wire carries the route
-  // exactly once, and input.route is where consumers expect it).
+  // The panel-facing EvaluationResponse: views are inline for a loaded
+  // proposal and fetched below for a family member (null meanwhile — the
+  // cost/revenue zone shows its skeleton, everything else is already here).
   calcResult.value = {
     calc_version: json.calc_version,
     route_id: json.route.route_id,
-    models: json.evaluation.models,
-    input: { route: json.route, parameters: json.evaluation.input.parameters },
-    views: json.evaluation.views,
+    views: json.views,
   }
   calcSummary.value = json.summary ?? null
   // Keep the resolved request so publish can send it verbatim (server recomputes).
@@ -866,8 +929,7 @@ function applyPlan(json: CalcResponse, publish = false) {
   if (typeof computedScenarioId === 'number') store.selectedScenarioId = computedScenarioId
   committedScenarioId.value = store.selectedScenarioId
   currentMode.value = 'display'
-  lastFingerprint.value = json.route_fingerprint
-  startMatrix(json)
+  if (json.views === null) loadViews(committedScenarioId.value, committedCompId.value)
   if (!publish) return
   // Persist. An authenticated visitor (guest or registered) publishes right
   // away; a not-yet-decided one gets the register/guest gate first and the
@@ -900,13 +962,19 @@ async function doPublish() {
   const req = publishRequest.value
   if (!req) return
   publishError.value = null
+  // Someone else's proposal, evaluated by this user: a COPY into their own
+  // proposals, with the provenance recorded — never an overwrite of the
+  // original, which ownsProposal already guarantees. Their own work, and
+  // anything already published from this session, overwrites.
+  const copying = proposalOwnership.value === 'other' && props.proposalId != null
   const body: PublishRequest = {
-    mode: publishedProposalId.value ? 'overwrite' : 'new',
+    mode: publishedProposalId.value && !copying ? 'overwrite' : copying ? 'copy' : 'new',
     name: derivedName(),
     compute_request: { ...req, scenario_id: null },
   }
-  const isFirstPublish = publishedProposalId.value === null
-  if (publishedProposalId.value) body.proposal_id = publishedProposalId.value
+  const isFirstPublish = publishedProposalId.value === null || copying
+  if (copying) body.based_on_proposal_id = props.proposalId!
+  else if (publishedProposalId.value) body.proposal_id = publishedProposalId.value
   publishPhase.value = 'working'
   try {
     const resp = await publishProposal(body, store.authHeaders(), {
@@ -944,7 +1012,7 @@ async function evaluate() {
   // candidate stops along the way, without adding any automatically. The calc
   // itself runs tokenless (compute-only); the register/guest prompt only
   // appears once a result is ready, in applyPlan().
-  const json = await requestCalc(
+  const json = await requestPlan(
     validStops.map((s) => s.selectedStop!.stop_id),
     'suggest',
   )
@@ -974,8 +1042,8 @@ async function restoreSuggestState(selectedIds: string[]) {
   currentMode.value = 'loading'
   calcFailure.value = null
   calcFailureMsg.value = null
-  const json = await requestCalc(stopIds, 'suggest')
-  if (!json) return // requestCalc already reset currentMode to 'edit' and set calcFailure
+  const json = await requestPlan(stopIds, 'suggest')
+  if (!json) return // requestPlan already reset currentMode to 'edit' and set calcFailure
   const suggestions = json.suggested_stops ?? []
   if (suggestions.length > 0) {
     basePlan.value = json
@@ -1039,7 +1107,7 @@ async function confirmStopSelection(selectedIds: string[]) {
   itinerary.value = itineraryFromSettledRows(settled, confirmedStops, chosen)
   currentMode.value = 'loading'
   const stopIds = itinerary.value.filter((s) => s.selectedStop).map((s) => s.selectedStop!.stop_id)
-  const json = await requestCalc(stopIds, 'off')
+  const json = await requestPlan(stopIds, 'off')
   if (!json) return
   applyPlan(json, true)
 }
@@ -1247,7 +1315,7 @@ async function recomputeWithSelection() {
   currentMode.value = 'loading'
   calcFailure.value = null
   calcFailureMsg.value = null
-  const json = await requestCalc(stopIds, 'off')
+  const json = await requestPlan(stopIds, 'off')
   // Persist when the proposal is the user's own (see ownsProposal): this
   // recompute is the only way an expert timetable — or a composition or
   // scenario switch — reaches a stored proposal, and a change the user made
@@ -1802,12 +1870,14 @@ const mapSegments = computed<MapSegment[] | null>(() => {
   return out
 })
 
-// Load a stored proposal by id and populate display mode — same wire shape
-// as POST /api/proposal/calc (see types/api.ts's ProposalDetailResponse), so
-// applyPlan() can hydrate rawRoute/calcResult/itinerary from it exactly like
-// a fresh calc. selectedCompositionId is set first so the supply table
-// locks onto the composition the stored route actually used, rather than
-// defaulting to the first one in the full catalogue.
+// Load a stored proposal by id and populate display mode. GET /api/proposal/
+// <id> carries the FULL route and the views inline (types/api.ts's
+// ProposalDetailResponse), so applyPlan() hydrates rawRoute/calcResult/
+// itinerary from it directly — no inflation, no views fetch. The family for
+// its request is then built in the background, so that switching scenario
+// or composition on a loaded proposal is the same lookup it is on a fresh
+// one. selectedCompositionId is set first so the supply table locks onto
+// the composition the stored route actually used.
 async function loadStoredProposal(proposalId: number) {
   currentMode.value = 'loading'
   loadFailure.value = null
@@ -1831,14 +1901,14 @@ async function loadStoredProposal(proposalId: number) {
       {
         route_builder_version: detail.route_builder_version,
         calc_version: detail.calc_version,
-        route_fingerprint: detail.route_fingerprint,
         request: detail.request,
         summary: detail.summary,
         route: detail.route,
-        evaluation: detail.evaluation,
+        views: detail.evaluation.views,
       },
       false,
     )
+    startFamilyInBackground(detail.request)
   } catch (err) {
     if (asApiFailure(err)?.kind === 'canceled') return
     // Deliberately NOT falling through to 'edit'. That is what the old code did,
@@ -1850,6 +1920,26 @@ async function loadStoredProposal(proposalId: number) {
   }
 }
 
+// The family for a loaded proposal's request — its stops and HOW fields, the
+// same axes a fresh evaluation posts — without touching the mode or the
+// progress overlay: the proposal is already on screen, this only makes the
+// switches instant. Failures are the family's own (the compare zone shows
+// them); the proposal stays loaded.
+function startFamilyInBackground(request: Record<string, unknown>) {
+  const stops = request.stops as string[] | undefined
+  if (!stops || stops.length < 2) return
+  const expertBlock =
+    (request.expert_timetable as ExpertTimetableRequest | null | undefined) ?? null
+  const body: FamilyRequest = {
+    ...familyRequest(stops, 'off', expertBlock),
+    timetable_mode: request.timetable_mode as string | undefined,
+    fixed_night_interval: (request.fixed_night_interval as string[] | null | undefined) ?? null,
+    schedule_mode: request.schedule_mode as string | undefined,
+    routing_mode: request.routing_mode as string | undefined,
+  }
+  family.start(familyKey(body), body, store.authHeaders())
+}
+
 function retryLoadStored(): void {
   if (props.proposalId != null) loadStoredProposal(props.proposalId)
 }
@@ -1859,41 +1949,46 @@ function retryLoadStored(): void {
 onBeforeUnmount(() => {
   calcSlot.cancel()
   loadSlot.cancel()
-  gridMatrix.reset()
-  scenarioMatrix.reset()
+  family.reset()
 })
 
-// An edited itinerary invalidates every matrix cell (they describe the
-// previous route); the next successful calc starts fresh ones.
+// An edited itinerary invalidates every member (they describe the previous
+// route); the next evaluation builds a fresh family.
 watch(isDirty, (dirty) => {
-  if (dirty) {
-    gridMatrix.reset()
-    scenarioMatrix.reset()
-  }
+  if (dirty) family.reset()
 })
 
-// A scenario switch is served from scenarioMatrix when its cell is there:
-// applyPlan() with the cell rebuilt into the /calc response it is equivalent
-// to, which commits the new scenario and therefore never raises the stale
-// flag. Without a cell — grid still loading, that scenario errored, the
-// switch happened before the matrix returned — nothing happens here and the
-// ordinary Recalculate path takes over.
+// A scenario or composition switch is served from the family when that
+// member is there: applyPlan() with the member, which commits the new
+// selection and therefore never raises the stale flag. Without a member —
+// family still loading, that member errored, the switch happened before the
+// document returned — nothing happens here and the ordinary Recalculate path
+// takes over (recomputeWithSelection presents the new selection).
+function applyMemberFromFamily(scenarioId: number | null, compositionId: string | null) {
+  if (scenarioId === null || compositionId === null) return
+  if (isDirty.value || currentMode.value === 'loading') return
+  const document = family.document.value
+  if (!document) return
+  const member = family.okMember(scenarioId, compositionId)
+  if (!member) return
+  const plan = memberPlanFor(document, scenarioId, compositionId)
+  // Not persisted: switching is a look, not an edit. The user's own
+  // proposal is saved by the paths that do change it.
+  if (plan) applyPlan(plan)
+}
+
 watch(
   () => store.selectedScenarioId,
   (scenarioId) => {
-    if (scenarioId === null || scenarioId === committedScenarioId.value) return
-    if (isDirty.value || currentMode.value === 'loading') return
-    const compositionId = committedCompId.value
-    const document = scenarioMatrix.document.value
-    if (!document || !compositionId || compositionId !== selectedCompositionId.value) return
-    const cell = scenarioMatrix.okCell(scenarioId, compositionId)
-    if (!cell) return
-    const response = cellAsCalcResponse(document, cell)
-    // Not persisted: switching scenario is a look, not an edit. The user's
-    // own proposal is saved by the calc paths that do change it.
-    if (response) applyPlan(response)
+    if (scenarioId === committedScenarioId.value) return
+    applyMemberFromFamily(scenarioId, selectedCompositionId.value)
   },
 )
+
+watch(selectedCompositionId, (compositionId) => {
+  if (compositionId === committedCompId.value) return
+  applyMemberFromFamily(store.selectedScenarioId, compositionId)
+})
 
 onMounted(async () => {
   // App.vue loads this reference data at startup; only fetch if we arrived here
@@ -2698,15 +2793,14 @@ onMounted(async () => {
         :stops="sectionStops"
         :compositions="store.compositions"
         :selected-composition-id="selectedCompositionId"
-        :grid-matrix="gridMatrix"
-        :scenario-matrix="scenarioMatrix"
+        :family="family"
         :params-stale="paramsStale"
         :dimmed="isDirty"
         :schedule-mode="(publishRequest?.schedule_mode as string | undefined) ?? null"
         @select-composition="(id) => (selectedCompositionId = id)"
         @recalculate="recomputeWithSelection"
         @scope-change="onScopeChange"
-        @retry-matrix="retryMatrix"
+        @retry-family="retryFamily"
       >
         <template #discussion>
           <div v-if="storedProposalId !== null && showCommentSection" class="w-full">

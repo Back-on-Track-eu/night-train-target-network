@@ -5,6 +5,10 @@ import type {
   Composition,
   CompositionCatalog,
   Scenario,
+  ScenarioVariant,
+  MeasureSet,
+  EvaluationModels,
+  ModelsResponse,
   StopsResponse,
   CompositionsResponse,
   ScenariosResponse,
@@ -46,12 +50,25 @@ export const useStore = defineStore('store', () => {
   const compositionsFailure = ref<ApiFailure | null>(null)
 
   // Base + current scenarios only (historical/superseded are hidden). The
-  // selected id threads into the merged proposal/calc call so routing and cost
-  // always reflect one scenario.
+  // selected id names the presented member of the family the builder posts,
+  // so routing and cost always reflect one scenario.
   const scenarios = ref<Scenario[]>([])
   const scenariosStatus = ref<LoadStatus>('idle')
   const scenariosFailure = ref<ApiFailure | null>(null)
   const selectedScenarioId = ref<number | null>(null)
+  // The second axis (WP18): the (scenario × measure set) variants the family
+  // is computed over, and the measure sets themselves. With one seeded set
+  // there is one variant per scenario; variantFor() is the lookup the family
+  // request and the presented member use, so nothing else has to know that.
+  const scenarioVariants = ref<ScenarioVariant[]>([])
+  const measureSets = ref<MeasureSet[]>([])
+
+  // The static model registry (versions, descriptions, formulas) — fetched
+  // once per session from GET /api/models; until backend 0.5.0 every compute
+  // response carried it. The cost/revenue breakdown keys its popovers into
+  // models.evaluation.formulas.
+  const models = ref<EvaluationModels | null>(null)
+  const modelsStatus = ref<LoadStatus>('idle')
 
   // Gallery's search-bar state at the moment "Suggest a new route" was
   // clicked, handed to ProposalWorkspace/ProposalViewport off-URL so a fresh
@@ -141,6 +158,8 @@ export const useStore = defineStore('store', () => {
       const json = await apiRequest<ScenariosResponse>('/api/scenarios', { budget: 'reference' })
       // Base first, then the other current what-if scenarios.
       scenarios.value = [...json.current_base.scenarios, ...json.current_scenarios.scenarios]
+      scenarioVariants.value = json.scenario_variants
+      measureSets.value = json.measure_sets
       selectedScenarioId.value =
         scenarios.value.find((s) => s.is_current_base)?.scenario_id ??
         scenarios.value[0]?.scenario_id ??
@@ -152,6 +171,33 @@ export const useStore = defineStore('store', () => {
       // stays null and the calc silently runs against the live base instead of
       // the scenario the user thinks is selected. ProposalResults says so.
       scenariosFailure.value = asApiFailure(err)
+    }
+  }
+
+  /** The scenario's variant under the base measure set — the one the family
+   *  request names for a scenario, and the presented member's id. null while
+   *  the scenarios have not loaded or the scenario is not on the axis. */
+  function variantFor(scenarioId: number | null): ScenarioVariant | null {
+    if (scenarioId === null) return null
+    const baseSet = measureSets.value.find((m) => m.key === 'none') ?? measureSets.value[0]
+    return (
+      scenarioVariants.value.find(
+        (v) =>
+          v.scenario_id === scenarioId && (!baseSet || v.measure_set_id === baseSet.measure_set_id),
+      ) ?? null
+    )
+  }
+
+  async function fetchModels(): Promise<void> {
+    modelsStatus.value = 'loading'
+    try {
+      const json = await apiRequest<ModelsResponse>('/api/models', { budget: 'reference' })
+      models.value = json.models
+      modelsStatus.value = 'success'
+    } catch {
+      // No registry means no formula popovers — a degraded breakdown, not a
+      // broken one. Retried the next time a viewport mounts.
+      modelsStatus.value = 'error'
     }
   }
 
@@ -288,6 +334,12 @@ export const useStore = defineStore('store', () => {
     scenarios,
     scenariosStatus,
     scenariosFailure,
+    scenarioVariants,
+    measureSets,
+    variantFor,
+    models,
+    modelsStatus,
+    fetchModels,
     selectedScenarioId,
     pendingProposalSeed,
     galleryStale,

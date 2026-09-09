@@ -85,7 +85,7 @@ describe('apiRequest — unreadable error bodies never leak a parser message', (
         .fn()
         .mockResolvedValue(reply(504, '<html><body>Gateway Timeout</body></html>', 'text/html')),
     )
-    const err = await expectFailure(apiRequest('/api/proposal/calc', { method: 'POST' }))
+    const err = await expectFailure(apiRequest('/api/proposal/family', { method: 'POST' }))
     expect(err.failure.kind).toBe('unavailable')
     expect(err.verbatim).toBeNull()
     expect(err.message).not.toMatch(/<html>/)
@@ -104,7 +104,7 @@ describe('apiRequest — unreadable error bodies never leak a parser message', (
         ),
       ),
     )
-    const err = await expectFailure(apiRequest('/api/proposal/calc', { method: 'POST' }))
+    const err = await expectFailure(apiRequest('/api/proposal/family', { method: 'POST' }))
     expect(err.failure).toMatchObject({ kind: 'server', status: 500, slug: 'calc_error' })
     expect(err.verbatim).toBeNull()
   })
@@ -118,7 +118,7 @@ describe('apiRequest — unreadable error bodies never leak a parser message', (
           reply(400, JSON.stringify({ error: 'validation_error', details: ['Need two stops.'] })),
         ),
     )
-    const err = await expectFailure(apiRequest('/api/proposal/calc', { method: 'POST' }))
+    const err = await expectFailure(apiRequest('/api/proposal/family', { method: 'POST' }))
     expect(err.verbatim).toBe('Need two stops.')
     // A bad request is not evidence the server is unwell.
     expect(health).toHaveBeenCalledWith('ignore')
@@ -216,7 +216,7 @@ describe('apiRequest — deadlines', () => {
     const { fetchImpl, resolve } = pending()
     vi.stubGlobal('fetch', vi.fn(fetchImpl))
 
-    const promise = apiRequest('/api/proposal/calc', { method: 'POST', budget: 'heavy' })
+    const promise = apiRequest('/api/proposal/family', { method: 'POST', budget: 'heavy' })
     await vi.advanceTimersByTimeAsync(300_000)
     resolve(reply(200, '{"route":{}}'))
     await expect(promise).resolves.toEqual({ route: {} })
@@ -230,7 +230,7 @@ describe('apiRequest — slow-progress escalation', () => {
     vi.stubGlobal('fetch', vi.fn(fetchImpl))
     const onSlow = vi.fn()
 
-    const promise = apiRequest('/api/proposal/calc', { budget: 'heavy', onSlow })
+    const promise = apiRequest('/api/proposal/family', { budget: 'heavy', onSlow })
 
     await vi.advanceTimersByTimeAsync(SLOW_AT_MS - 1)
     expect(onSlow).not.toHaveBeenCalled()
@@ -251,7 +251,7 @@ describe('apiRequest — slow-progress escalation', () => {
     vi.stubGlobal('fetch', vi.fn(fetchImpl))
     const onSlow = vi.fn()
 
-    const promise = apiRequest('/api/proposal/calc', { budget: 'heavy', onSlow })
+    const promise = apiRequest('/api/proposal/family', { budget: 'heavy', onSlow })
     await vi.advanceTimersByTimeAsync(3_000)
     resolve(reply(200, '{}'))
     await promise
@@ -287,7 +287,7 @@ describe('apiRequest — caller-driven cancellation', () => {
     )
 
     const settled = expectFailure(
-      apiRequest('/api/proposal/calc', { budget: 'heavy', signal: controller.signal }),
+      apiRequest('/api/proposal/family', { budget: 'heavy', signal: controller.signal }),
     )
     controller.abort()
 

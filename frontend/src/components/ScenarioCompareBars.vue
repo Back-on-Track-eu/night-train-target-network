@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { MatrixCell, Scenario } from '@/types/api'
+import type { FamilyMember, Scenario } from '@/types/api'
 import { buildScenarioAxes, conditionLabelKey } from '@/lib/scenarioAxes'
 import { compareKpi, type CompareKpiKey } from '@/lib/compareKpis'
 import { useCompareFormat } from '@/composables/useCompareFormat'
@@ -14,7 +14,7 @@ import { useCompareFormat } from '@/composables/useCompareFormat'
 // bar; clicking a bar selects that scenario.
 const props = defineProps<{
   scenarios: Scenario[]
-  cells: Map<number, MatrixCell>
+  cells: Map<number, FamilyMember>
   kpi: CompareKpiKey
   selectedScenarioId: number | null
 }>()

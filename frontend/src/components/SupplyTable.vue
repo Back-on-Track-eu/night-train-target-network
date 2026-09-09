@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { Composition, MatrixCell } from '@/types/api'
+import type { Composition, FamilyMember } from '@/types/api'
 import { subsidyDisplay } from '@/lib/compareKpis'
 import { CLASS_ICONS, classColor } from '@/lib/compositionFormation'
 import { useCompareFormat } from '@/composables/useCompareFormat'
@@ -21,7 +21,7 @@ import { mdiInformationOutline } from '@mdi/js'
 // once models/demand/ lands.
 const props = defineProps<{
   compositions: Composition[]
-  cells: Map<string, MatrixCell>
+  cells: Map<string, FamilyMember>
   selectedCompositionId: string | null
 }>()
 const emit = defineEmits<{ select: [compositionId: string] }>()

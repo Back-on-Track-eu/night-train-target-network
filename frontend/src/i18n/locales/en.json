@@ -37,7 +37,8 @@
       "data_not_loaded": "The service is still starting up. Please try again in a minute.",
       "email_failed": "We could not send the code. Please try again.",
       "scenario_not_base": "That scenario cannot be saved as a proposal."
-    }
+    },
+    "viewsFailed": "The cost and revenue detail could not be loaded. The route and its headline figures are unaffected."
   },
   "proposal": {
     "heading": "So, what's your dream night train route?",
@@ -364,7 +365,8 @@
       },
       "impact": {
         "placeholder": "Demand, modal-shift and CO₂ figures are interim estimates until the demand model lands."
-      }
+      },
+      "viewsLoading": "Loading the cost and revenue detail…"
     },
     "stops": "Stops",
     "ownership": {

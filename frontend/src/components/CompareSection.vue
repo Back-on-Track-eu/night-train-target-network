@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { MatrixCompositionAxisEntry, MatrixCell, Scenario } from '@/types/api'
-import type { MatrixStatus } from '@/composables/useCalcMatrix'
+import type { Composition, FamilyMember, Scenario } from '@/types/api'
+import type { FamilyStatus } from '@/composables/useProposalFamily'
 import { COMPARE_KPIS, type CompareKpiKey } from '@/lib/compareKpis'
 import ScenarioCompareBars from '@/components/ScenarioCompareBars.vue'
 import ScenarioCompositionGrid from '@/components/ScenarioCompositionGrid.vue'
@@ -15,10 +15,10 @@ import InlineAlert from '@/components/InlineAlert.vue'
 // rather than passed off as the whole picture.
 defineProps<{
   scenarios: Scenario[]
-  compositions: MatrixCompositionAxisEntry[]
-  cellsByScenario: Map<number, MatrixCell>
-  cells: Map<string, MatrixCell>
-  status: MatrixStatus
+  compositions: Composition[]
+  cellsByScenario: Map<number, FamilyMember>
+  cells: Map<string, FamilyMember>
+  status: FamilyStatus
   received: number
   nCells: number | null
   selectedScenarioId: number | null

@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useStore } from '@/stores/store'
 import type { Breakdown, EvaluationResponse, MapScope } from '@/types/api'
 import { useEvaluationFormat } from '@/composables/useEvaluationFormat'
 import { fundedCostEur } from '@/lib/breakdownTotals'
 import ViewRow from '@/components/ViewRow.vue'
 import CostBreakdownPanel from '@/components/CostBreakdownPanel.vue'
 import AppIcon from '@/components/AppIcon.vue'
+import Skeleton from 'primevue/skeleton'
 import { mdiChevronDown } from '@mdi/js'
 
 // Zone E — the collapsible cost/revenue detail ("Kassenzettel"). Two
@@ -16,6 +18,11 @@ import { mdiChevronDown } from '@mdi/js'
 // subsidy" or green "revenue exceeds cost". Below it the existing cube
 // selectors (ViewRow) and the ledgers (CostBreakdownPanel) unchanged —
 // the drill-down is exactly what it was, only folded away by default.
+//
+// The views arrive on their own request after the family document (see
+// ProposalViewport's loadViews); until then result.views is null and this
+// zone shows a skeleton. The formulas the ledgers' popovers key into are the
+// store's model registry (GET /api/models), no longer part of a member.
 defineProps<{
   result: EvaluationResponse
   stops: { stop_id: string; name: string }[]
@@ -25,6 +32,8 @@ const emit = defineEmits<{ scopeChange: [scope: MapScope] }>()
 
 const { t } = useI18n()
 const { formatEur } = useEvaluationFormat()
+const store = useStore()
+const formulas = computed(() => store.models?.evaluation.formulas ?? {})
 const open = ref(false)
 const breakdown = ref<Breakdown | null>(null)
 
@@ -70,7 +79,16 @@ const bars = computed(() => {
         class="text-primary-50/60 transition group-open:rotate-180"
       />
     </summary>
-    <div class="flex flex-col gap-4 border-t border-primary-50/10 px-4 py-3">
+    <div
+      v-if="result.views === null"
+      class="flex flex-col gap-3 border-t border-primary-50/10 px-4 py-3"
+      :aria-label="t('proposal.evaluation.viewsLoading')"
+    >
+      <Skeleton height="2rem" class="w-full" />
+      <Skeleton height="6rem" class="w-full" />
+      <Skeleton height="12rem" class="w-full" />
+    </div>
+    <div v-else class="flex flex-col gap-4 border-t border-primary-50/10 px-4 py-3">
       <ViewRow
         :views="result.views"
         :stops="stops"
@@ -142,7 +160,7 @@ const bars = computed(() => {
         </div>
       </div>
 
-      <CostBreakdownPanel :breakdown="breakdown" :formulas="result.models.evaluation.formulas" />
+      <CostBreakdownPanel :breakdown="breakdown" :formulas="formulas" />
       <div class="text-xs text-primary-50/40">
         {{ t('proposal.evaluation.calcVersion') }} {{ result.calc_version }}
       </div>

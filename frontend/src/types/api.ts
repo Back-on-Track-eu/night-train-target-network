@@ -115,8 +115,8 @@ export interface StopsResponse {
   stops: Stop[]
 }
 
-// One candidate stop along the routed path, returned by POST
-// /api/proposal/calc only when auto_stop_addition="suggest". added_time_min is
+// One candidate stop along the routed path, carried by the family document
+// only when auto_stop_addition="suggest". added_time_min is
 // the full trip-time increase (detour + dwell) the stop would cost if added.
 export interface SuggestedStop {
   stop_id: string
@@ -128,8 +128,8 @@ export interface SuggestedStop {
 }
 
 // Expert timetable mode (ROUTE_BUILDER 0.9.32) — the optional
-// `expert_timetable` block of POST /api/proposal/calc, and of the stored
-// compute_request a published proposal replays. Omit it for the automatic
+// `expert_timetable` block of a family request (POST /api/proposal/family) and
+// of the stored compute_request a published proposal replays. Omit it for the automatic
 // timetable; an absent block and an empty one are the same request.
 //
 // The state the builder edits is a different (camelCase, direction-aware)
@@ -206,11 +206,42 @@ interface ScenarioGroup {
   scenarios: Scenario[]
 }
 
+// A named bundle of political measures an evaluation runs under (WP18 phase
+// A) — what the state DOES, where a scenario pins what the infrastructure
+// IS. One row until WP17 prices the levers, 'none', with every factor 1.0.
+export interface MeasureSet {
+  measure_set_id: number
+  key: string
+  description: string | null
+  vat_exempt: boolean
+  energy_tax_exempt: boolean
+  tac_direct_cost: boolean
+  factors: { ticket_revenue: number; energy_cost: number; track_access: number }
+}
+
+// The flattened (scenario × measure set) axis the family is computed over —
+// one dropdown value instead of two. With one measure set there is exactly
+// one variant per scenario; do not rely on that, it ends with WP17. The
+// scenario's display fields are inlined so a switch renders from this list
+// alone.
+export interface ScenarioVariant {
+  scenario_variant_id: number
+  scenario_id: number
+  measure_set_id: number
+  scenario_key: string
+  scenario_name: string
+  is_current_base: boolean
+  routing_graph_key: string
+  dimensions: ScenarioDimensions | null
+}
+
 export interface ScenariosResponse {
   current_base: ScenarioGroup
   current_scenarios: ScenarioGroup
   historical_scenarios: ScenarioGroup
   total_count: number
+  measure_sets: MeasureSet[]
+  scenario_variants: ScenarioVariant[]
 }
 
 /** One accommodation section of a coach type, listed under
@@ -289,10 +320,11 @@ export interface CompositionsResponse {
  *  themselves — the shared catalog the detail overlay resolves against. */
 export type CompositionCatalog = Omit<CompositionsResponse, 'count' | 'compositions'>
 
-// --- POST /api/proposal/calc : "evaluation" block ---------------------------
+// --- The evaluation views ---------------------------------------------------
 // Response shapes as produced by backend/api/helpers/evaluation_serialize.py,
-// carried under the merged calc response's "evaluation" key (see
-// ProposalCalcResponse below). The evaluation is a cube: view (grouping) ×
+// served by GET /api/proposal/family/<key>/members/<sv>/<comp>/views and
+// carried under evaluation.views by GET /api/proposal/<id> and publish (see
+// FamilyViewsResponse below). The evaluation is a cube: view (grouping) ×
 // filter selection (drill-down keys) × normalisation (unit) → one Breakdown
 // per cell.
 
@@ -463,12 +495,13 @@ export interface EvaluationModels {
   evaluation: EvaluationModelSection
 }
 
-// --- input.parameters : the per-unit rates actually loaded to cost this route
-// Backend: api/helpers/params_serialize.py (reused by input_to_dict()). Each
-// section lists EVERY loaded entity (all countries/stops/compositions).
-// Typed for completeness but no longer read by the app: the rates table that
-// consumed it moved to the documentation site, where a rate can be shown with
-// its source and its provenance instead of squeezed into a hover box.
+// --- GET /api/params/* : the per-unit rates a member was priced from --------
+// Backend: api/helpers/params_serialize.py. Each section lists EVERY loaded
+// entity (all countries/stops/compositions) for a scenario pin. Until backend
+// 0.5.0 this block also travelled inside every compute response as
+// evaluation.input.parameters; now it is the params endpoints' shape only.
+// Typed for completeness but not read by the app: the rates table that
+// consumed it moved to the documentation site.
 
 /** A referenced data source, keyed by source_id inside each section's
  *  `sources` map. */
@@ -572,45 +605,23 @@ export interface CompositionsSection {
   operators: OperatorParam[]
 }
 
-export interface EvaluationParameters {
-  track_infrastructures: TrackInfraSection
-  stop_infrastructures: StopInfraSection
-  compositions: CompositionsSection
-}
-
-/** The subset of the route we read to scope rates to the entities the route
- *  actually uses (countries it runs through, composition per trip pair). The
- *  merged calc response carries the route once, as a top-level sibling of
- *  "evaluation" — ProposalViewport re-attaches it here when assembling the
- *  EvaluationResponse the panel renders. */
-export interface EvaluationInputRoute {
-  track_infrastructure: { country_code: string }[]
-  trip_pairs: { composition_id: string }[]
-}
-
-export interface EvaluationInput {
-  route: EvaluationInputRoute
-  parameters: EvaluationParameters
-}
-
 // Panel-facing evaluation bundle. Not a wire shape: ProposalViewport assembles
-// it from one ProposalCalcResponse (calc_version and route_id lifted from the
-// top level / route, input.route re-attached from the response's route key).
+// it from the presented family member (calc_version and route_id) and the
+// member's views, which arrive on their own request
+// (GET /api/proposal/family/<key>/members/<sv>/<comp>/views) — null until
+// they do, and the cost/revenue zone shows its skeleton meanwhile. The
+// formulas the breakdown keys into are the store's ModelsResponse, not part
+// of any member since backend 0.5.0.
 export interface EvaluationResponse {
   calc_version: string
   route_id: string
-  models: EvaluationModels
-  input: EvaluationInput
-  views: EvaluationViews
+  views: EvaluationViews | null
 }
 
-// --- POST /api/proposal/calc : full wire response ----------------------------
-// The merged compute endpoint (route + evaluation in one stateless call,
-// PROPOSALS_DESIGN.md §2.1). TRoute stays generic — the route shape is typed
-// where it is consumed (ProposalViewport's BackendRoute), only the fields the
-// frontend reads.
-// Gallery KPI summary block of the calc response. Only co2_savings_t_per_year
-// is read by the builder (the auth gate); the rest passes through untyped.
+// --- The gallery KPI summary block ------------------------------------------
+// Carried by every ok family member, by GET /api/proposal/<id> and by the
+// publish response (models/evaluation/summary.py). Only co2_savings_t_per_year
+// is read by the builder's auth gate; the rest feeds the results' KPI grid.
 export interface ProposalCalcSummary {
   co2_savings_t_per_year: number | null
   // Route metrics and financial KPIs (models/evaluation/summary.py).
@@ -648,153 +659,140 @@ export interface ProposalCalcSummary {
   [key: string]: unknown
 }
 
-export interface ProposalCalcResponse<TRoute = unknown> {
-  route_builder_version: string
-  calc_version: string
-  route_fingerprint: string
-  // True when served from the server-side compute cache. Only present on a
-  // fresh calc — a proposal hydrated from GET /api/proposal/<id> (same shape,
-  // reused by ProposalViewport's applyPlan()) has no cache concept.
-  cache_hit?: boolean
-  // Resolved request echo — defaults applied, scenario_id concrete.
-  request: Record<string, unknown>
-  // Only present when the request used auto_stop_addition="suggest".
-  suggested_stops?: SuggestedStop[]
-  // Gallery KPI summary — read by the auth gate (co2_savings_t_per_year) and
-  // the results' KPI grid (MainKpiGrid.vue). Also returned by GET
-  // /api/proposal/<id> (see ProposalDetailResponse), so a loaded proposal
-  // populates the same box.
-  summary?: ProposalCalcSummary
-  route: TRoute
-  evaluation: {
-    models: EvaluationModels
-    input: { parameters: EvaluationParameters }
-    views: EvaluationViews
-  }
-}
-
 // ---------------------------------------------------------------------------
-// POST /api/proposal/calc/matrix — one route under every scenario × composition
-// (api/README.md "calc/matrix"). Two encodings of one record sequence: NDJSON
-// (Accept: application/x-ndjson, one MatrixRecord per line) or a folded
-// MatrixDocument. lib/calcMatrix.ts reads the stream and folds it.
+// POST /api/proposal/family — every scenario variant × composition of one stop
+// list + HOW, as one document (backend/api/README.md "Proposal Family";
+// adapters/family/README.md). The only compute endpoint since backend 0.5.0:
+// a member's route is in `routes` (compact — see CompactRoute), its summary on
+// the member, and its six evaluation views on GET …/members/<sv>/<comp>/views.
 // ---------------------------------------------------------------------------
 
-export type MatrixDetail = 'summary' | 'full'
-
-export interface MatrixRequest {
+export interface FamilyRequest {
   stops: string[]
-  composition_ids?: string[] | null
-  scenario_ids?: number[] | null
-  detail?: MatrixDetail
   timetable_mode?: string
   fixed_night_interval?: string[] | null
   schedule_mode?: string
   routing_mode?: string
-  auto_stop_addition?: 'off' | 'add' | 'suggest'
+  auto_stop_addition?: 'off' | 'suggest'
   expert_timetable?: ExpertTimetableRequest | null
+  // Axes. Omitted = every variant of a current scenario (base first) /
+  // the whole composition catalog. An explicit list keeps its order.
+  scenario_variant_ids?: number[]
+  composition_ids?: string[]
+  // Which member the client shows first — the only one whose "suggest"
+  // search runs. Either half may be omitted (base variant, default
+  // composition). Not part of the family key: choosing another never rebuilds.
+  presented?: { scenario_variant_id?: number; composition_id?: string }
 }
 
-export interface MatrixScenarioAxisEntry {
-  scenario_id: number
-  scenario_key: string
-  scenario_name: string
-  is_current_base: boolean
-  routing_graph_key: string
-  dimensions: ScenarioDimensions | null
+// Stops once per trip, in travel order; segments refer to their ends by
+// index into `stops`; geometry by id into the document's pool. Everything
+// else (general_parameters incl. timetable_warnings, parkings, shuntings,
+// schedule, ids) is the full route's, verbatim. lib/proposalFamily.ts
+// inflateRoute() turns this back into the shape ProposalViewport reads.
+export interface CompactStop {
+  stop_id: string
+  stop_name: string
+  country_code: string
+  lat: number
+  lon: number
+  arrival_time_min: number | null
+  departure_time_min: number | null
+  auto_added: boolean
+  [key: string]: unknown
 }
 
-export interface MatrixCompositionAxisEntry {
+export interface CompactSegment {
+  from: number
+  to: number
+  geometry_id: string
+  country_distance_shares: Record<string, number>
+  addon_time_min?: number
+  [key: string]: unknown
+}
+
+export interface CompactTrip {
+  trip_id: string
+  direction: number
+  general_parameters: Record<string, unknown>
+  stops: CompactStop[]
+  segments: CompactSegment[]
+}
+
+export interface CompactTripPair {
   composition_id: string
-  description: string
-  material_strategy: string
-  operator_id: string
-  operator_name: string
-  hsr_allowed: boolean
-  max_speed_kmh: number
-  places_by_class: Record<string, number>
-  places_total: number
+  outbound: CompactTrip
+  return_trip: CompactTrip
 }
 
-export interface MatrixHeader {
-  type: 'header'
-  route_builder_version: string
-  calc_version: string
-  request: Record<string, unknown>
-  axes: { scenarios: MatrixScenarioAxisEntry[]; compositions: MatrixCompositionAxisEntry[] }
-  n_cells: number
-  // Grid position of the cell that is always computed and streamed first.
-  baseline_index: number
-  // detail "full" only — the static models block, once.
-  models?: EvaluationModels
-}
-
-export type SharedKind =
-  'geometry' | 'track_infrastructures' | 'stop_infrastructures' | 'compositions'
-
-export interface SharedRecord {
-  type: 'shared'
-  kind: SharedKind
-  id: string
-  data: unknown
-}
-
-interface MatrixCellBase {
-  index: number
+export interface CompactRoute {
+  route_id: string
   scenario_id: number
-  composition_id: string
+  schedule: { seasonal_schedules: { season: string; frequency: string }[] }
+  trip_pairs: CompactTripPair[]
+  parkings: unknown[]
+  shuntings: unknown[]
 }
 
-export interface MatrixCellOk<TRoute = unknown> extends MatrixCellBase {
+export interface FamilyMemberOk {
+  scenario_variant_id: number
+  composition_id: string
   status: 'ok'
-  cache_hit: boolean
-  route_fingerprint: string
+  route_ref: string
   summary: ProposalCalcSummary
-  // detail "full" only. route: segment.geometry_id values are shared "g:" ids
-  // and route.geometries is absent; evaluation carries "p:" references in
-  // place of input.parameters.
-  suggested_stops?: SuggestedStop[]
-  route?: TRoute
-  evaluation?: { parameters_refs: Record<SharedKind, string>; views: EvaluationViews }
 }
 
-export interface MatrixCellError extends MatrixCellBase {
+export interface FamilyMemberError {
+  scenario_variant_id: number
+  composition_id: string
   status: 'error'
-  // Same codes as /calc: gauge_mismatch | routing_graph_not_configured |
-  // routing_error | domain_error | calc_error
+  // classify_compute_error()'s codes: gauge_mismatch | routing_error |
+  // domain_error | routing_graph_not_configured | calc_error
   error: string
   message: string
-  conflicting_stops?: string[]
+  conflicting_stops?: Record<string, number[]>
 }
 
-export type MatrixCell<TRoute = unknown> = MatrixCellOk<TRoute> | MatrixCellError
+export type FamilyMember = FamilyMemberOk | FamilyMemberError
 
-export type MatrixCellRecord<TRoute = unknown> = MatrixCell<TRoute> & { type: 'cell' }
-
-export interface MatrixStats {
-  n_cells: number
+export interface FamilyStats {
+  n_members: number
   n_ok: number
   n_error: number
-  n_cache_hit: number
+  n_routes: number
+  n_geometries: number
   elapsed_s: number
+  cache_hit: boolean
+  context?: Record<string, number>
 }
 
-export interface MatrixDone {
-  type: 'done'
-  status: 'complete' | 'aborted'
-  stats: MatrixStats
+export interface FamilyDocument {
+  family_key: string
+  route_builder_version: string
+  calc_version: string
+  // The resolved echo: stops + HOW, defaults applied. What publish posts back
+  // as compute_request together with the presented composition_id.
+  request: Record<string, unknown>
+  // "suggest" only — the presented member's candidates.
+  suggested_stops?: SuggestedStop[]
+  axes: { scenario_variants: ScenarioVariant[]; compositions: string[] }
+  presented: { scenario_variant_id: number; composition_id: string }
+  geometries: Record<string, number[][]>
+  routes: Record<string, CompactRoute>
+  members: FamilyMember[]
+  stats: FamilyStats
 }
 
-export type MatrixRecord<TRoute = unknown> =
-  MatrixHeader | SharedRecord | MatrixCellRecord<TRoute> | MatrixDone
+export interface FamilyViewsResponse {
+  views: EvaluationViews
+}
 
-// The folded (non-stream) shape: header fields at the top level, shared blocks
-// keyed by kind then id, cells sorted by index.
-export interface MatrixDocument<TRoute = unknown> extends Omit<MatrixHeader, 'type'> {
-  status: MatrixDone['status']
-  stats: MatrixStats
-  shared?: Partial<Record<SharedKind, Record<string, unknown>>>
-  cells: MatrixCell<TRoute>[]
+// --- GET /api/models — the static model registry --------------------------
+// Versions, descriptions and the formula registry the breakdown keys into.
+// Fetched once per session (Cache-Control max-age); formerly inlined in every
+// compute response as evaluation.models.
+export interface ModelsResponse {
+  models: EvaluationModels
 }
 
 // The geographic scope currently selected in the evaluation panel — emitted so
@@ -1129,7 +1127,9 @@ export interface ProposalsResponse {
 // dedup: mode "new" always creates a proposal; the returned proposal_id is then
 // adopted so later saves "overwrite" it.
 export interface PublishRequest {
-  mode: 'new' | 'overwrite'
+  // 'copy' is 'new' with based_on_proposal_id required — "copy to my
+  // proposals" on someone else's proposal (backend 0.5.0).
+  mode: 'new' | 'overwrite' | 'copy'
   // Non-empty (backend rejects blank). Auto-derived "Origin – Destination".
   name: string
   // The resolved `request` echo from a /calc response (with scenario_id nulled).
@@ -1218,9 +1218,7 @@ export interface ProposalDetailResponse<TRoute> {
   // same figures /calc did.
   summary?: ProposalCalcSummary
   route: TRoute
-  evaluation: {
-    models: EvaluationModels
-    input: { parameters: EvaluationParameters }
-    views: EvaluationViews
-  }
+  // Views only since backend 0.5.0: the models registry is GET /api/models,
+  // the parameters GET /api/params/* for the scenario pin.
+  evaluation: { views: EvaluationViews }
 }

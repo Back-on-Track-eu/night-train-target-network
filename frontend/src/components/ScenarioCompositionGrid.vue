@@ -1,21 +1,21 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { MatrixCell, MatrixCompositionAxisEntry, Scenario } from '@/types/api'
+import type { Composition, FamilyMember, Scenario } from '@/types/api'
 import { buildScenarioAxes, conditionLabelKey } from '@/lib/scenarioAxes'
 import { compareKpi, goodness, type CompareKpiKey } from '@/lib/compareKpis'
 import { useCompareFormat } from '@/composables/useCompareFormat'
 
 // Zone B, "all combinations" view: rows = scenarios (network × operating
-// condition), columns = every composition the matrix computed, colour =
+// condition), columns = every composition the family computed, colour =
 // worse → better for the picked KPI. Clicking a cell selects both the
 // scenario and the composition above. This replaces the sketch's
 // measures heatmap until the measures axis exists (WP17) — it is exactly
-// the grid POST /api/proposal/calc/matrix delivers.
+// the members POST /api/proposal/family delivers.
 const props = defineProps<{
   scenarios: Scenario[]
-  compositions: MatrixCompositionAxisEntry[]
-  cells: Map<string, MatrixCell>
+  compositions: Composition[]
+  cells: Map<string, FamilyMember>
   kpi: CompareKpiKey
   selectedScenarioId: number | null
   selectedCompositionId: string | null

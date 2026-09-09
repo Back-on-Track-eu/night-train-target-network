@@ -5,11 +5,10 @@ import type { ProposalCalcSummary } from '@/types/api'
 import { COMPARE_KPIS, isImprovement, relativeDelta, subsidyDisplay } from '@/lib/compareKpis'
 import { useCompareFormat } from '@/composables/useCompareFormat'
 
-// Zone A's headline: the eight main KPIs of the selected cell, each with its
-// change against the baseline cell (base network, nothing switched on, same
-// composition) when the matrix has delivered that cell. Values come from the
-// /calc summary of what is on screen, never from the matrix — the matrix is
-// comparison-only. Surplus rule (lib/compareKpis.ts subsidyDisplay): a
+// Zone A's headline: the eight main KPIs of the member on screen, each with
+// its change against the baseline member (base network, nothing switched on,
+// same composition) once the family has delivered it. Values come from the
+// summary of the member on screen; the baseline is a comparison only. Surplus rule (lib/compareKpis.ts subsidyDisplay): a
 // profitable route reads "none · surplus X", never a negative subsidy.
 const props = defineProps<{
   summary: ProposalCalcSummary

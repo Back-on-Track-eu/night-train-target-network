@@ -27,6 +27,7 @@ onMounted(() => {
   store.fetchStops()
   store.fetchCompositions()
   store.fetchScenarios()
+  store.fetchModels()
 })
 </script>
 

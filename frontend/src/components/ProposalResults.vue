@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useStore } from '@/stores/store'
 import type { Composition, EvaluationResponse, MapScope, ProposalCalcSummary } from '@/types/api'
-import type { CalcMatrix } from '@/composables/useCalcMatrix'
+import type { ProposalFamily } from '@/composables/useProposalFamily'
 import { messageKey } from '@/lib/apiError'
 import ScenarioSwitches from '@/components/ScenarioSwitches.vue'
 import MainKpiGrid from '@/components/MainKpiGrid.vue'
@@ -20,9 +20,9 @@ import Skeleton from 'primevue/skeleton'
 //   D  detail settings (supply / demand)            — collapsible, desktop
 //   E  costs and revenue in detail                  — collapsible, desktop
 //
-// The parent (ProposalViewport) still owns the calc, the stale flag and the
-// selections: this component reads the selected cell's figures from the
-// /calc response and the comparisons from the matrix, and reports every
+// The parent (ProposalViewport) still owns the family, the stale flag and the
+// selections: this component reads the member on screen's figures from the
+// evaluation bundle and the comparisons from the family, and reports every
 // choice back up. Zones A/B/D/E are greyed and put behind the Recalculate
 // control while the selection differs from what was computed; C never is —
 // a thread is about the proposal, not about the figures.
@@ -32,11 +32,10 @@ const props = defineProps<{
   stops: { stop_id: string; name: string }[]
   compositions: Composition[]
   selectedCompositionId: string | null
-  // Summary grid (bars, combination grid, supply table) and the full-detail
-  // scenario matrix (the KPI baseline, and what makes a scenario switch
-  // instant — see ProposalViewport).
-  gridMatrix: CalcMatrix
-  scenarioMatrix: CalcMatrix
+  // Every scenario × composition of the route on screen (the KPI baseline,
+  // the bars, the combination grid, the supply table, and what makes a
+  // switch instant — see ProposalViewport).
+  family: ProposalFamily
   paramsStale: boolean
   // The itinerary has been edited: figures no longer describe it. Greys the
   // same zones as paramsStale, without the Recalculate control (that path
@@ -48,7 +47,7 @@ const emit = defineEmits<{
   selectComposition: [compositionId: string]
   recalculate: []
   scopeChange: [scope: MapScope]
-  retryMatrix: []
+  retryFamily: []
 }>()
 
 const { t, te } = useI18n()
@@ -67,32 +66,35 @@ const frequencyLabel = computed(() => {
 
 // Baseline for the delta arrows: base network, nothing switched on, SAME
 // composition as on screen — the comparison a visitor expects when they
-// flip a switch. Comes from the matrix; null until that cell has arrived.
+// flip a switch. Comes from the family; null until the document is here.
 const baseScenario = computed(() => store.scenarios.find((s) => s.is_current_base) ?? null)
 const baselineSummary = computed(() => {
   if (!baseScenario.value || !props.selectedCompositionId) return null
   return (
-    props.scenarioMatrix.okCell(baseScenario.value.scenario_id, props.selectedCompositionId)
-      ?.summary ??
-    props.gridMatrix.okCell(baseScenario.value.scenario_id, props.selectedCompositionId)?.summary ??
+    props.family.okMember(baseScenario.value.scenario_id, props.selectedCompositionId)?.summary ??
     null
   )
 })
 const isBaseline = computed(() => store.selectedScenarioId === baseScenario.value?.scenario_id)
 
 const cellsByScenario = computed(() =>
-  props.selectedCompositionId
-    ? props.gridMatrix.byScenario(props.selectedCompositionId)
-    : new Map(),
+  props.selectedCompositionId ? props.family.byScenario(props.selectedCompositionId) : new Map(),
 )
 const cellsByComposition = computed(() =>
   store.selectedScenarioId !== null
-    ? props.gridMatrix.byComposition(store.selectedScenarioId)
+    ? props.family.byComposition(store.selectedScenarioId)
     : new Map(),
 )
-const axisCompositions = computed(() => props.gridMatrix.document.value?.axes.compositions ?? [])
-const matrixError = computed(() => {
-  const f = props.gridMatrix.failure.value ?? props.scenarioMatrix.failure.value
+// The document's composition axis carries ids only; the catalog entries
+// (description, formation) are the store's, in the axis order.
+const axisCompositions = computed(() => {
+  const ids = props.family.document.value?.axes.compositions ?? []
+  return ids
+    .map((id) => props.compositions.find((c) => c.composition_id === id))
+    .filter((c): c is Composition => c !== undefined)
+})
+const familyError = computed(() => {
+  const f = props.family.failure.value
   return f ? t(messageKey(f)) : null
 })
 
@@ -192,13 +194,13 @@ function scrollToSettings() {
           :scenarios="store.scenarios"
           :compositions="axisCompositions"
           :cells-by-scenario="cellsByScenario"
-          :cells="gridMatrix.cells.value"
-          :status="gridMatrix.status.value"
-          :received="gridMatrix.received.value"
-          :n-cells="gridMatrix.document.value?.n_cells ?? null"
+          :cells="family.cells.value"
+          :status="family.status.value"
+          :received="family.received.value"
+          :n-cells="family.document.value?.stats.n_members ?? null"
           :selected-scenario-id="store.selectedScenarioId"
           :selected-composition-id="selectedCompositionId"
-          :error-message="matrixError"
+          :error-message="familyError"
           :grid-available="axisCompositions.length > 1"
           @select-scenario="(id) => (store.selectedScenarioId = id)"
           @select-cell="
@@ -207,7 +209,7 @@ function scrollToSettings() {
               emit('selectComposition', compositionId)
             }
           "
-          @retry="emit('retryMatrix')"
+          @retry="emit('retryFamily')"
         />
       </div>
 

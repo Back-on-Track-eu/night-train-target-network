@@ -11,8 +11,8 @@ import AppIcon from '@/components/AppIcon.vue'
 import { mdiChevronDown } from '@mdi/js'
 
 // Zone D — collapsible "Detail settings", tabs Supply / Demand. Supply is
-// where a composition is compared and chosen (SupplyTable over the matrix
-// row for the current scenario, the formation drawing of the selected one,
+// where a composition is compared and chosen (SupplyTable over the family's
+// members for the current scenario, the formation drawing of the selected one,
 // the frequency & supply sidebar). Demand explains what the demand figures
 // rest on rather than shipping empty — the model is a stopgap.
 const props = defineProps<{
