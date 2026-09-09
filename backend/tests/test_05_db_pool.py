@@ -117,9 +117,12 @@ class TestBorrowReturn:
         the transaction back before the connection is reused."""
         with small_pool.connection() as conn:
             with conn.cursor() as cur:
+                # duration_ms is NOT NULL (db/dev/sql/create_admin_schema.sql)
+                # — the probe row only exists to be rolled back, so 0.
                 cur.execute(
-                    "INSERT INTO admin.request_log (method, endpoint, status_code) "
-                    "VALUES ('POOL', 'pool_probe', 200)"
+                    "INSERT INTO admin.request_log "
+                    "(method, endpoint, status_code, duration_ms) "
+                    "VALUES ('POOL', 'pool_probe', 200, 0)"
                 )
             # no commit
         db_cur.execute(

@@ -165,7 +165,12 @@ def calc_matrix():
         return jsonify({"error": "data_not_loaded", "message": str(e)}), 503
 
     records = iter_matrix_records(body)
-    if NDJSON_MIMETYPE in request.accept_mimetypes:
+    # Streaming is opt-in by NAMING the mimetype, not by accepting it:
+    # `NDJSON_MIMETYPE in request.accept_mimetypes` is a MATCH test, and
+    # the wildcard `Accept: */*` that both `requests` and browser `fetch`
+    # send by default matches it — so every default client got the stream
+    # while asking for the document.
+    if NDJSON_MIMETYPE in request.headers.get("Accept", ""):
         return Response(
             stream_with_context(_ndjson_lines(records)),
             mimetype=NDJSON_MIMETYPE,
