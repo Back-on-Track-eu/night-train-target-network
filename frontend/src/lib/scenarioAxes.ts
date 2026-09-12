@@ -60,8 +60,9 @@ export interface ScenarioAxes {
   /** Whether the whole network switch has an offered target for `state`. */
   canSelectNetwork(state: ScenarioSwitchState, network: string): boolean
   /** The scenarios a visitor can actually land on — grid coordinates,
-   *  preview networks excluded — in network → hsr → optTt order. What the
-   *  comparison bars, the grid and the matrix's scenario axis use. */
+   *  preview networks excluded — in reading order within each network:
+   *  Base, timetable only, HSR only, then both. What the comparison bars,
+   *  the grid and the matrix's scenario axis use. */
   ordered: Scenario[]
 }
 
@@ -95,11 +96,14 @@ export function buildScenarioAxes(
   const ordered = networks
     .filter((n) => !n.preview)
     .flatMap(({ network }) =>
+      // Base, then one lever, then the other, then both — the order a reader
+      // compares them in. Before this it went Base, HSR, both, timetable,
+      // which put the two single-lever cases at opposite ends of the row.
       [
         { hsr: false, optTt: false },
+        { hsr: false, optTt: true },
         { hsr: true, optTt: false },
         { hsr: true, optTt: true },
-        { hsr: false, optTt: true },
       ]
         .map((flags) => scenarioFor({ network, ...flags }))
         .filter((s): s is Scenario => s !== undefined),
@@ -117,8 +121,13 @@ export function buildScenarioAxes(
   }
 }
 
-/** Short label parts for chart axes: "Base", "HSR", "HSR + tt". */
-export function conditionLabelKey(state: ScenarioSwitchState): 'base' | 'hsr' | 'hsrOptTt' {
-  if (state.optTt) return 'hsrOptTt'
+/** Short label parts for chart axes: "Base", "HSR", "tt", "HSR + tt".
+ *  Four, not three: the two levers are independent in the seed since
+ *  2026-09-09, so optimised timetables can be on with HSR off. */
+export function conditionLabelKey(
+  state: ScenarioSwitchState,
+): 'base' | 'hsr' | 'optTt' | 'hsrOptTt' {
+  if (state.hsr && state.optTt) return 'hsrOptTt'
+  if (state.optTt) return 'optTt'
   return state.hsr ? 'hsr' : 'base'
 }

@@ -4,11 +4,16 @@
 // formatting. Surplus rule: a subsidy of 0 with a positive net is a SURPLUS
 // and is worded as one — no negative subsidy reaches a lay user (see
 // subsidyDisplay).
+//
+// The array order is also the DISPLAY order: Zone A's tile grid renders it
+// four abreast (what the route delivers, then what it costs; what it shifts,
+// then what that is worth in CO2), and Zone B's picker lists it the same way.
+// Reordering here reorders both — nothing else encodes a sequence.
 
 import type { ProposalCalcSummary } from '@/types/api'
 
 export type CompareKpiKey =
-  'subsidy' | 'co2' | 'subsidyPerT' | 'pax' | 'paxKm' | 'shiftAir' | 'shiftCar' | 'journeyTime'
+  'journeyTime' | 'pax' | 'paxKm' | 'subsidy' | 'shiftAir' | 'shiftCar' | 'co2' | 'subsidyPerT'
 
 export interface CompareKpi {
   key: CompareKpiKey
@@ -36,28 +41,12 @@ const M = 1_000_000
 
 export const COMPARE_KPIS: readonly CompareKpi[] = [
   {
-    key: 'subsidy',
-    labelKey: 'subsidy',
+    key: 'journeyTime',
+    labelKey: 'journeyTime',
     lowerIsBetter: true,
-    value: (s) => (s.net_eur_per_year == null ? null : -s.net_eur_per_year / M),
-    format: (v, f) => f.millionEur(v),
-    unitKey: 'millionEurYear',
-  },
-  {
-    key: 'co2',
-    labelKey: 'co2',
-    lowerIsBetter: false,
-    value: (s) => (s.co2_savings_t_per_year == null ? null : s.co2_savings_t_per_year / 1000),
-    format: (v, f) => f.millionEur(v).replace(' €', ''),
-    unitKey: 'ktYear',
-  },
-  {
-    key: 'subsidyPerT',
-    labelKey: 'subsidyPerT',
-    lowerIsBetter: true,
-    value: (s) => s.subsidy_eur_per_t_co2 ?? null,
-    format: (v, f) => f.int(v),
-    unitKey: 'eurPerT',
+    // Journey time of ONE direction: total_time_h sums both trips of the pair.
+    value: (s) => (s.total_time_h == null ? null : s.total_time_h / 2),
+    format: (v, f) => f.hours(v),
   },
   {
     key: 'pax',
@@ -76,6 +65,14 @@ export const COMPARE_KPIS: readonly CompareKpi[] = [
     unitKey: 'kmYear',
   },
   {
+    key: 'subsidy',
+    labelKey: 'subsidy',
+    lowerIsBetter: true,
+    value: (s) => (s.net_eur_per_year == null ? null : -s.net_eur_per_year / M),
+    format: (v, f) => f.millionEur(v),
+    unitKey: 'millionEurYear',
+  },
+  {
     key: 'shiftAir',
     labelKey: 'shiftAir',
     lowerIsBetter: false,
@@ -92,17 +89,29 @@ export const COMPARE_KPIS: readonly CompareKpi[] = [
     unitKey: 'perYear',
   },
   {
-    key: 'journeyTime',
-    labelKey: 'journeyTime',
+    key: 'co2',
+    labelKey: 'co2',
+    lowerIsBetter: false,
+    value: (s) => (s.co2_savings_t_per_year == null ? null : s.co2_savings_t_per_year / 1000),
+    format: (v, f) => f.millionEur(v).replace(' €', ''),
+    unitKey: 'ktYear',
+  },
+  {
+    key: 'subsidyPerT',
+    labelKey: 'subsidyPerT',
     lowerIsBetter: true,
-    // Journey time of ONE direction: total_time_h sums both trips of the pair.
-    value: (s) => (s.total_time_h == null ? null : s.total_time_h / 2),
-    format: (v, f) => f.hours(v),
+    value: (s) => s.subsidy_eur_per_t_co2 ?? null,
+    format: (v, f) => f.int(v),
+    unitKey: 'eurPerT',
   },
 ]
 
 export function compareKpi(key: CompareKpiKey): CompareKpi {
-  return COMPARE_KPIS.find((k) => k.key === key) ?? COMPARE_KPIS[0]
+  const found = COMPARE_KPIS.find((k) => k.key === key)
+  if (found) return found
+  // Unreachable for a typed key. Named rather than positional so reordering
+  // COMPARE_KPIS cannot silently change what an unknown key lands on.
+  return COMPARE_KPIS.find((k) => k.key === 'subsidy') ?? COMPARE_KPIS[0]
 }
 
 /** Signed relative change of `value` against `baseline`, in percent, or null

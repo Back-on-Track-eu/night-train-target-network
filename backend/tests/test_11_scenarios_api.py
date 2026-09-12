@@ -63,6 +63,11 @@ EXPECTED_DIMENSIONS = {
         "hsr_allowed": True,
         "optimised_timetable": True,
     },
+    "infra-2026-opt-tt": {
+        "network": "2026",
+        "hsr_allowed": False,
+        "optimised_timetable": True,
+    },
     "infra-2032": {
         "network": "2032",
         "hsr_allowed": False,
@@ -76,6 +81,11 @@ EXPECTED_DIMENSIONS = {
     "infra-2032-hsr-opt-tt": {
         "network": "2032",
         "hsr_allowed": True,
+        "optimised_timetable": True,
+    },
+    "infra-2032-opt-tt": {
+        "network": "2032",
+        "hsr_allowed": False,
         "optimised_timetable": True,
     },
 }
@@ -143,15 +153,15 @@ class TestScenariosRoutingGraphPin:
                 assert scenario["routing_graph_key"] in {"infra_2026", "infra_2032"}
 
     def test_both_networks_are_offered(self, scenarios_body):
-        """Both networks reach the API as selectable scenarios — three
-        operating conditions each, per the version grid in db/dev/seed.py.
-        Catches a seed that inserted only one half of it."""
+        """Both networks reach the API as selectable scenarios — four
+        operating-lever combinations each, per the version grid in
+        db/dev/seed.py. Catches a seed that inserted only one half of it."""
         selectable = [
             *scenarios_body["current_base"]["scenarios"],
             *scenarios_body["current_scenarios"]["scenarios"],
         ]
         by_graph = Counter(s["routing_graph_key"] for s in selectable)
-        assert by_graph == {"infra_2026": 3, "infra_2032": 3}, by_graph
+        assert by_graph == {"infra_2026": 4, "infra_2032": 4}, by_graph
 
 
 class TestScenarioDimensions:
@@ -165,8 +175,11 @@ class TestScenarioDimensions:
                 assert scenario["dimensions"] == EXPECTED_DIMENSIONS[key], key
 
     def test_selectable_scenarios_cover_the_grid_once(self, scenarios_body):
-        """2 networks × 3 operating conditions, each exactly once among the
-        selectable rows — what the frontend's switches map onto."""
+        """2 networks × 2 independent operating levers, each cell exactly
+        once among the selectable rows — what the frontend's switches map
+        onto. A full 2x2 per network is what lets the two switches be
+        flipped independently: lib/scenarioAxes.ts enables a toggle exactly
+        when the state it would produce exists here."""
         selectable = [
             *scenarios_body["current_base"]["scenarios"],
             *scenarios_body["current_scenarios"]["scenarios"],
@@ -176,9 +189,16 @@ class TestScenarioDimensions:
             for d in (s["dimensions"] for s in selectable)
         )
         assert set(cells.values()) == {1}
-        assert len(cells) == 6
-        # opt-tt never appears without HSR in the seed
-        assert all(hsr or not opt for _, hsr, opt in cells)
+        assert len(cells) == 8
+        networks = {network for network, _, _ in cells}
+        for network in networks:
+            corners = {(hsr, opt) for n, hsr, opt in cells if n == network}
+            assert corners == {
+                (False, False),
+                (True, False),
+                (False, True),
+                (True, True),
+            }, f"network {network} is missing an operating-lever combination: {corners}"
 
 
 class TestScenariosGrouping:

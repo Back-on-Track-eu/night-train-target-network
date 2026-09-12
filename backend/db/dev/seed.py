@@ -36,14 +36,16 @@ version number, in lockstep, across all four tables. The routing graph is
 pinned the same way, via scenario.scenarios.routing_graph_key. Versions
 run as a grid — three operating conditions on each of two networks:
 
-  - versions 1, 2, 3 — Infra 2026 (today's network, routing graph
+  - versions 1, 2, 3, 8 — Infra 2026 (today's network, routing graph
     infra_2026). Version 1 is the live default (is_current_base=TRUE) with
     track_hsr_allowed=False everywhere; version 2 flips that flag to True;
-    version 3 additionally converges track_buffer_quota_per toward a
-    best-practice benchmark (_with_optimized_timetable).
+    version 3 additionally lowers track_buffer_quota_per to the
+    calibrated optimised-timetable value (_with_optimized_timetable);
+    version 8 applies that lower value WITHOUT the high-speed permission.
+    The two levers are independent, so the grid is 2x2 per network.
   - version 4 — the superseded infra-2026 revision, outside the grid.
-  - versions 5, 6, 7 — Infra 2032 (the upgraded network, routing graph
-    infra_2032), carrying the same three operating conditions in the same
+  - versions 5, 6, 7, 9 — Infra 2032 (the upgraded network, routing graph
+    infra_2032), carrying the same four operating conditions in the same
     order.
 
 Only track_infrastructures/track_infrastructure_defaults carry different
@@ -238,31 +240,52 @@ def _run_notebook_for_seed_csvs(
     print(f"  seed CSVs regenerated from {nb_path.name}.")
 
 
-def _ensure_seed_csvs(
-    seed_dir: Path, names: tuple[str, ...], notebooks: tuple[Path, ...]
+def _run_script_for_seed_csvs(
+    script_path: Path, targets: Path, names: tuple[str, ...]
 ) -> None:
-    """Regenerate a domain's seed CSVs from its notebooks when absent.
+    """Run a calibration written as a plain module rather than a notebook.
 
-    notebooks run in order; only the last one writes the seed CSVs, but an
+    Simpler than its notebook sibling because there are no prose cells and
+    no pandas to filter around: a calibration script is stdlib-only by the
+    same container constraint, so it can just be exec'd in this process.
+    """
+    print(f"  seed CSVs missing — regenerating from {script_path.name}...")
+    namespace = {"__name__": "__main__", "__file__": str(script_path)}
+    exec(
+        compile(script_path.read_text(encoding="utf-8"), str(script_path), "exec"),
+        namespace,
+    )
+    missing = [name for name in names if not (targets / name).is_file()]
+    assert not missing, f"{script_path.name} did not produce {missing}"
+
+
+def _ensure_seed_csvs(
+    seed_dir: Path, names: tuple[str, ...], producers: tuple[Path, ...]
+) -> None:
+    """Regenerate a domain's seed CSVs from its calibration when absent.
+
+    producers run in order; only the last one writes the seed CSVs, but an
     earlier one may write files it reads (the TAC calibration reads the
-    source register that 01 produces).
+    source register that 01 produces). A producer is a notebook or a plain
+    `.py` calibration script — same contract either way.
     """
     if all((seed_dir / name).is_file() for name in names):
         return
-    for nb_path in notebooks:
-        assert nb_path.is_file(), (
-            f"seed CSVs missing and {nb_path} not found — cannot "
-            "regenerate; restore the notebook"
+    for path in producers:
+        assert path.is_file(), (
+            f"seed CSVs missing and {path} not found — cannot "
+            "regenerate; restore the calibration"
         )
-    for i, nb_path in enumerate(notebooks):
-        _run_notebook_for_seed_csvs(
-            nb_path,
-            workdir=nb_path.parent,
-            targets=seed_dir,
-            # Only the last notebook is expected to produce the targets;
-            # the earlier ones run to completion for their side effects.
-            names=names if i == len(notebooks) - 1 else (),
-        )
+    for i, path in enumerate(producers):
+        # Only the last producer is expected to write the targets; the
+        # earlier ones run to completion for their side effects.
+        expected = names if i == len(producers) - 1 else ()
+        if path.suffix == ".py":
+            _run_script_for_seed_csvs(path, targets=seed_dir, names=expected)
+        else:
+            _run_notebook_for_seed_csvs(
+                path, workdir=path.parent, targets=seed_dir, names=expected
+            )
 
 
 _ensure_seed_csvs(
@@ -688,6 +711,57 @@ _ROUTE_CONTEXT_CHANGE_LOGS = {
 ROUTE_CONTEXT_SOURCES = _read_route_context_csv("sources.csv")
 
 
+# ============================================================
+# optimised-timetable buffer reduction
+# ============================================================
+# The one value that distinguishes an optimised-timetable scenario from
+# its own baseline: a lower track_buffer_quota_per per country, exported
+# by models/scenarios/calib/opt_tt_calibration.py. Derivation and sources:
+# models/scenarios/calib/OPT_TT_CALIBRATION.md.
+#
+# Read rather than computed here on purpose. The reduction is a modelling
+# claim about what better pathing can deliver, sized against published
+# practice; it belongs with the calibration that argues for it, not in a
+# two-constant helper in the seeder. This file only applies it.
+
+OPT_TT_SEED_DIR = (
+    Path(__file__).resolve().parents[2] / "models" / "scenarios" / "calib" / "seed"
+)
+
+_OPT_TT_SEED_CSVS = ("opt_tt_buffer_reduction.csv",)
+
+# Regenerated on EVERY seed, not only when the CSV is missing — the one
+# domain that does. Its calibration is a stdlib function of two committed
+# files that runs in milliseconds, where the other domains' are notebooks
+# that want a database and minutes; there is no reason to let a stale CSV
+# survive a change to SUPPLEMENT_REDUCTION or to the quotas underneath it,
+# and every reason not to, since nothing else would notice.
+#
+# Both its inputs are in the image: route_context's SEED CSVs (calib/seed/
+# is deliberately not .dockerignored) and its own committed
+# calib/sources/timetable_buffer_theory.csv. It reads no calib/data/ table,
+# which the image drops.
+for _name in _OPT_TT_SEED_CSVS:
+    (OPT_TT_SEED_DIR / _name).unlink(missing_ok=True)
+_ensure_seed_csvs(
+    OPT_TT_SEED_DIR,
+    _OPT_TT_SEED_CSVS,
+    (OPT_TT_SEED_DIR.parent / "opt_tt_calibration.py",),
+)
+
+# country_code -> the scenario's reduced supplement. Carries "_default"
+# for the EU fallback row, which is reduced in its own right so that a
+# country resolving the column from it still gets an optimised timetable.
+OPT_TT_QUOTA_BY_COUNTRY = {
+    row["country_code"]: float(row["opt_quota_per"])
+    for row in _read_seed_csv(
+        OPT_TT_SEED_DIR,
+        "opt_tt_buffer_reduction.csv",
+        "models/scenarios/calib/opt_tt_calibration.py",
+    )
+}
+
+
 def _num(row: dict, *keys: str) -> dict:
     """Return a copy of row with the given keys coerced to float."""
     out = dict(row)
@@ -1110,9 +1184,16 @@ COACH_TYPE_CLASSES_RAW = [
 # snapshotted once per NETWORK, which makes the numbering a grid rather
 # than a sequence:
 #
-#                 baseline   + NT on HSR   + NT on HSR + opt. timetables
-#   infra_2026       1            2                   3
-#   infra_2032       5            6                   7
+#                 baseline   + NT on HSR   + both   + opt. TT only
+#   infra_2026       1            2             3           8
+#   infra_2032       5            6             7           9
+#
+# The two levers are independent, so the grid is 2x2 per network, not a
+# ladder: versions 8 and 9 are optimised timetables WITHOUT the high-speed
+# permission. Better pathing is a planning decision and needs no policy
+# change on high-speed lines, so there was never a reason for the one to
+# require the other — the earlier three-condition grid was an artefact of
+# the scenario_key suffix nesting, not a modelling claim.
 #
 # Version 4 sits outside the grid: it is the SUPERSEDED revision of the
 # infra-2026 baseline (Germany's pre-correction track access rates), not
@@ -1123,7 +1204,7 @@ COACH_TYPE_CLASSES_RAW = [
 # an upgraded network lives — see models/scenarios/README.md, including
 # the passage-charge gap that follows from copying the table forward
 # unchanged.
-INFRA_VERSIONS = (1, 2, 3, 4, 5, 6, 7)
+INFRA_VERSIONS = (1, 2, 3, 4, 5, 6, 7, 8, 9)
 
 # The operating conditions each version carries. Version 4 mirrors
 # version 1 here; its own difference is applied separately.
@@ -1135,8 +1216,10 @@ _HSR_ALLOWED_BY_VERSION = {
     5: False,
     6: True,
     7: True,
+    8: False,
+    9: False,
 }
-_OPT_TIMETABLE_VERSIONS = frozenset({3, 7})
+_OPT_TIMETABLE_VERSIONS = frozenset({3, 7, 8, 9})
 _SUPERSEDED_VERSION = 4
 
 # 2032 default row. track_hsr_allowed is set per-version below (see
@@ -1166,35 +1249,23 @@ _TRACK_INFRA_DEFAULT_2032 = {
 # runs at import time and the default row is built before the
 # per-country rows below.
 #
-# Optimised-timetable scenario (version 3)
+# Optimised-timetable scenario (versions 3 and 7)
 #
-# PROVISIONAL — the two constants below are an assumption, not yet a
-# calibration. models/scenarios/README.md states the derivation, the
-# weakness, and the re-calibration that settles them; nothing else in the
-# repository reads them.
+# PROVISIONAL — see models/scenarios/calib/OPT_TT_CALIBRATION.md for what
+# is and is not settled. The values themselves are calibrated in
+# models/scenarios/calib/opt_tt_calibration.py and read above as
+# OPT_TT_QUOTA_BY_COUNTRY; nothing here derives them.
 #
-# track_buffer_quota_per is not a pure timetable buffer. It is the whole
+# What the scenario must NOT do is worth restating where it is applied.
+# track_buffer_quota_per is not a pure timetable buffer — it is the whole
 # schedule supplement measured against the router's passage time, and it
-# contains four things: pathing and construction allowance, margin because
-# a night train does not hold priority, speed the train cannot sustain,
-# and dynamics the model misses (route_context/calib's
-# ROUTE_CONTEXT_CALIBRATION.md §3). Better timetabling acts on the first
-# two only, so this scenario must NOT scale the quota as a whole — doing
-# that would also optimise away the router's own error and produce
-# fictionally fast trains.
-#
-# What it does instead: converge each country toward a best-practice
-# benchmark. Austria's 0.113 (56 ONTD legs, the strongest-evidence low
-# value of the 2026-09-05 minimum-driving-time calibration) is a network
-# where night trains are already well-pathed AND the router models the
-# line speeds well, so nothing below it is reachable by timetabling alone.
-# A quarter of each country's excess above that floor is removed, and a
-# country already at or below the benchmark is left untouched. Re-based
-# from 0.35 on 2026-09-05 together with the calibration it tracks: the
-# quotas dropped from 0.35-0.71 to 0.11-0.39, and a benchmark left at 0.35
-# would have reduced nothing.
-OPT_TT_BENCHMARK_QUOTA = 0.12
-OPT_TT_EXCESS_REDUCTION = 0.25
+# contains pathing and construction allowance, priority margin, speed the
+# train cannot sustain, and dynamics the model misses
+# (route_context/calib's ROUTE_CONTEXT_CALIBRATION.md §3). Better
+# timetabling acts on the first two, so the reduction is sized off the
+# calibrated theoretical supplement rather than scaled off the quota as a
+# whole; scaling the quota would optimise away the router's own error and
+# produce fictionally fast trains.
 
 
 def _with_hsr_allowed(row: dict, hsr_allowed: bool) -> dict:
@@ -1207,19 +1278,24 @@ def _with_hsr_allowed(row: dict, hsr_allowed: bool) -> dict:
 
 
 def _with_optimized_timetable(row: dict) -> dict:
-    """Reduce track_buffer_quota_per toward OPT_TT_BENCHMARK_QUOTA.
+    """Swap track_buffer_quota_per for the country's calibrated
+    optimised-timetable value.
 
     None is passed through for the same reason _with_hsr_allowed() passes
     it through: a placeholder country resolves the field from the defaults
-    row, which this function has already been applied to.
+    row, which this function has already been applied to. The defaults row
+    itself carries no country_code and takes the calibration's "_default".
     """
-    quota = row["track_buffer_quota_per"]
-    if quota is None or quota <= OPT_TT_BENCHMARK_QUOTA:
+    if row["track_buffer_quota_per"] is None:
         return row
-    reduced = OPT_TT_BENCHMARK_QUOTA + (quota - OPT_TT_BENCHMARK_QUOTA) * (
-        1 - OPT_TT_EXCESS_REDUCTION
+    country = row.get("country_code", "_default")
+    quota = OPT_TT_QUOTA_BY_COUNTRY.get(country)
+    assert quota is not None, (
+        f"no optimised-timetable quota for {country!r} — the calibration "
+        "seeds one per country that carries a supplement; re-run "
+        "models/scenarios/calib/opt_tt_calibration.py"
     )
-    return {**row, "track_buffer_quota_per": round(reduced, 3)}
+    return {**row, "track_buffer_quota_per": quota}
 
 
 def _build_track_infra_defaults() -> list[dict]:
@@ -2325,7 +2401,7 @@ def seed_composition_type_coaches(cur):
 # composition references aren't part of a scenario at all — see
 # db/schema.py (scenario.scenarios).
 #
-# Six selectable scenarios, one scenario_key each (six independent
+# Eight selectable scenarios, one scenario_key each (eight independent
 # lineages, not forks of one another): the same three operating
 # conditions on each of the two networks, per the version grid above.
 # models/scenarios/README.md is the reference for what each represents
@@ -2564,16 +2640,71 @@ OPT_TT_SCENARIO_2032 = {
     "routing_graph_key": "infra_2032",
 }
 
+# --- Optimised timetables WITHOUT the high-speed permission ------------
+# Versions 8 and 9. The two operating levers are independent: better
+# pathing is a planning decision by the infrastructure manager and does
+# not depend on whether night trains may use high-speed lines. Seeding
+# the combination is what lets the frontend's two switches be flipped
+# independently — lib/scenarioAxes.ts enables a toggle exactly when the
+# state it would produce exists here.
+
+OPT_TT_ONLY_SCENARIO = {
+    "scenario_key": "infra-2026-opt-tt",
+    "scenario_name": "Infra 2026 + optimised timetables",
+    "description": "Today's network and today's rules on high-speed "
+    "lines, but night trains receive well-designed paths. Real "
+    "night-train timetables carry large margins because a night train "
+    "rarely holds priority and is routinely planned around other "
+    "traffic. This scenario isolates what better planning alone is "
+    "worth, without assuming any change to which lines a night train "
+    "may use.",
+    "change_log": "Seeded 2026-09-09 to make the two operating levers "
+    "independent. Schedule supplement per "
+    "models/scenarios/calib/OPT_TT_CALIBRATION.md.",
+    "editor": "david",
+    "is_current_base": False,
+    "is_current_scenario": True,
+    "track_infrastructures_version": 8,
+    "track_infrastructure_defaults_version": 8,
+    "stop_infrastructures_version": 8,
+    "stop_infrastructure_defaults_version": 8,
+    "passage_charges_version": 8,
+    "routing_graph_key": "infra_2026",
+}
+
+OPT_TT_ONLY_SCENARIO_2032 = {
+    "scenario_key": "infra-2032-opt-tt",
+    "scenario_name": "Infra 2032 + optimised timetables",
+    "description": "The upgraded network with well-designed night-train "
+    "paths, and today's rules on high-speed lines. The same question as "
+    "the 2026 case asked of the network as it is expected to be built.",
+    "change_log": "Seeded 2026-09-09 to make the two operating levers "
+    "independent. Schedule supplement per "
+    "models/scenarios/calib/OPT_TT_CALIBRATION.md.",
+    "editor": "david",
+    "is_current_base": False,
+    "is_current_scenario": True,
+    "track_infrastructures_version": 9,
+    "track_infrastructure_defaults_version": 9,
+    "stop_infrastructures_version": 9,
+    "stop_infrastructure_defaults_version": 9,
+    "passage_charges_version": 9,
+    "routing_graph_key": "infra_2032",
+}
+
+
 # Insert order is display order nowhere — the API groups and sorts — but
 # keeping the grid's reading order here makes a missing row obvious.
 SCENARIOS = [
     BASE_SCENARIO,
     HSR_SCENARIO,
     OPT_TT_SCENARIO,
+    OPT_TT_ONLY_SCENARIO,
     SUPERSEDED_BASE_REVISION,
     BASE_SCENARIO_2032,
     HSR_SCENARIO_2032,
     OPT_TT_SCENARIO_2032,
+    OPT_TT_ONLY_SCENARIO_2032,
 ]
 
 
@@ -2902,6 +3033,7 @@ def _compute_example_proposal(
         STOPGAP_UTILIZATION_PER,
     )
     from models.evaluation.model import CALC_VERSION
+    from models.evaluation.operations import build_operations
     from models.pipeline import evaluate_and_build_views
     from models.route.model import ROUTE_BUILDER_VERSION
 
@@ -2913,7 +3045,9 @@ def _compute_example_proposal(
     )
     stop_infra = loader.build_all_stops(scenario_id)
     passages = loader.build_all_passages(scenario_id)
-    _, views = evaluate_and_build_views(route, tracks, stop_infra, passages)
+    evaluation_result, views = evaluate_and_build_views(
+        route, tracks, stop_infra, passages
+    )
 
     serialized_route = route_to_dict(route, scenario_id, tracks)
     evaluation = {
@@ -2922,6 +3056,7 @@ def _compute_example_proposal(
             serialized_route, tracks, stop_infra, compositions, include_route=False
         ),
         "views": views_to_dict(views, route),
+        "operations": build_operations(route, evaluation_result),
     }
 
     return {

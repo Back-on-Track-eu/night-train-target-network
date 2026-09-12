@@ -119,6 +119,7 @@ from models.route.timetable import (
     simple_automatic_fixed_night_timetable,
     fixed_night_speed_warning,
     always_daily_schedule,
+    custom_schedule,
     suggest_auto_stops,
     build_final_timetable,
     classify_for_departure,
@@ -134,7 +135,7 @@ from models.route.timetable import (
     VALID_AUTO_STOP_ADDITION_MODES,
 )
 from models.energy.calc_energy_consumption import calc_energy_consumption
-from models.route.model import ROUTE_BUILDER_VERSION
+from models.route.model import DEFAULT_MIN_TURNAROUND_MIN, ROUTE_BUILDER_VERSION
 from models.energy.model import ENERGY_CALC_VERSION
 
 logger = logging.getLogger(__name__)
@@ -810,6 +811,8 @@ def plan_route(
     proposal_id: int,
     proposal_version: int,
     scenario_id: int,
+    schedule: dict | None = None,
+    min_turnaround_min: int = DEFAULT_MIN_TURNAROUND_MIN,
 ) -> tuple[Route, RouteProvenance, list[AutoStopSuggestion]]:
     """
     Build a Route from scratch. One TripPair per entry in trip_pair_inputs
@@ -834,7 +837,8 @@ def plan_route(
     schedule_mode: this function's switch — which named schedule_mode
     function (models/route/timetable.py) to call. Decided once here, at
     route level, since Schedule is shared across every TripPair rather
-    than being a per-trip concern (currently only "alwaysDaily").
+    than being a per-trip concern. "custom" takes the days-per-week-by-
+    month block from the request; both modes take min_turnaround_min.
 
     scenario_id: stored as-is in RouteProvenance so the Route stays
     reproducible even if the live base scenario later moves on.
@@ -844,7 +848,11 @@ def plan_route(
     # validation checks against, so an unknown mode can only reach here if
     # that validation was bypassed.
     if schedule_mode == "alwaysDaily":
-        schedule = always_daily_schedule()
+        schedule = always_daily_schedule(min_turnaround_min)
+    elif schedule_mode == "custom":
+        if schedule is None:
+            raise ValueError("schedule_mode 'custom' needs a schedule block.")
+        schedule = custom_schedule(schedule, min_turnaround_min)
     else:
         raise ValueError(
             f"Unknown schedule_mode '{schedule_mode}'. Supported: {sorted(VALID_SCHEDULE_MODES)}."

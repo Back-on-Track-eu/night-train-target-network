@@ -3,7 +3,8 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Composition, FamilyMember, Scenario } from '@/types/api'
 import { buildScenarioAxes, conditionLabelKey } from '@/lib/scenarioAxes'
-import { compareKpi, goodness, type CompareKpiKey } from '@/lib/compareKpis'
+import { compareKpi, type CompareKpiKey } from '@/lib/compareKpis'
+import { buildHeatScale } from '@/lib/compareHeat'
 import { useCompareFormat } from '@/composables/useCompareFormat'
 
 // Zone B, "all combinations" view: rows = scenarios (network × operating
@@ -40,47 +41,59 @@ const rows = computed(() => {
           composition,
           cell,
           value: cell?.status === 'ok' ? kpiDef.value.value(cell.summary) : null,
+          // The route builder ANDs the composition's own hsr_allowed with the
+          // scenario's, so a 160 km/h loco-hauled rake gains nothing from the
+          // permission: the cell is a copy of the same composition without it.
+          // Dimmed, not removed — the member is real and still selectable.
+          hsrInert: (state?.hsr ?? false) && !composition.routing.hsr_allowed,
         }
       }),
     }
   })
 })
 
-const range = computed(() => {
+const scale = computed(() => {
   const values = rows.value
     .flatMap((r) => r.cells.map((c) => c.value))
     .filter((v): v is number => v !== null)
-  return { min: Math.min(...values), max: Math.max(...values) }
+  return buildHeatScale(kpiDef.value, values)
 })
-
-function lerp(a: number[], b: number[], t: number) {
-  return a.map((c, i) => Math.round(c + (b[i] - c) * t))
-}
-// 0..1 → dark blue → sky blue → yellow-green (the brand's "better" colour).
-function heat(value: number): string {
-  const t = goodness(kpiDef.value, value, range.value.min, range.value.max)
-  const c =
-    t < 0.5
-      ? lerp([32, 53, 90], [34, 113, 179], t * 2)
-      : lerp([34, 113, 179], [146, 208, 81], (t - 0.5) * 2)
-  return `rgb(${c.join(',')})`
-}
 
 function label(value: number): string {
   if (props.kpi === 'subsidy' && value < 0) return fmt.millionEur(-value)
   return kpiDef.value.format(value, fmt)
 }
 
-const bestLabel = computed(() => {
-  if (!Number.isFinite(range.value.min)) return null
-  const best = kpiDef.value.lowerIsBetter ? range.value.min : range.value.max
-  const worst = kpiDef.value.lowerIsBetter ? range.value.max : range.value.min
+// Which cell actually holds the best value, so the grid can point at it
+// rather than leaving the reader to compare twelve shades. Ties keep the
+// first in reading order — naming one winner is the whole point.
+const bestCell = computed(() => {
+  const best = scale.value.best
+  if (best === null) return null
+  for (const row of rows.value) {
+    for (const entry of row.cells) {
+      if (entry.value === best) {
+        return {
+          value: best,
+          scenarioId: row.scenario.scenario_id,
+          compositionId: entry.composition.composition_id,
+          where: `${entry.composition.composition_id} · ${t('proposal.compare.axes.infra', { network: row.network })} · ${row.condition}`,
+        }
+      }
+    }
+  }
+  return null
+})
+
+const legend = computed(() => {
+  const { best, worst } = scale.value
+  if (best === null || worst === null) return null
   return { best: label(best), worst: label(worst) }
 })
 </script>
 
 <template>
-  <div class="flex flex-col gap-2 overflow-x-auto">
+  <div class="thin-scroll flex flex-col gap-2 overflow-x-auto">
     <table class="w-full border-separate border-spacing-1 text-[11px]">
       <thead>
         <tr>
@@ -110,14 +123,23 @@ const bestLabel = computed(() => {
               v-if="entry.value !== null"
               type="button"
               class="h-9 w-full cursor-pointer rounded px-1 text-center text-white"
-              :class="
+              :class="[
                 row.scenario.scenario_id === selectedScenarioId &&
                 entry.composition.composition_id === selectedCompositionId
                   ? 'ring-2 ring-amber-400'
-                  : ''
+                  : '',
+                entry.hsrInert ? 'opacity-35' : '',
+                bestCell &&
+                bestCell.scenarioId === row.scenario.scenario_id &&
+                bestCell.compositionId === entry.composition.composition_id
+                  ? 'font-semibold outline outline-1 outline-primary-50/70'
+                  : '',
+              ]"
+              :style="{ background: scale.color(entry.value) }"
+              :title="
+                `${row.scenario.scenario_name} · ${entry.composition.description}` +
+                (entry.hsrInert ? ` — ${t('proposal.compare.hsrInert')}` : '')
               "
-              :style="{ background: heat(entry.value) }"
-              :title="`${row.scenario.scenario_name} · ${entry.composition.description}`"
               @click="emit('select', row.scenario.scenario_id, entry.composition.composition_id)"
             >
               <small
@@ -144,15 +166,28 @@ const bestLabel = computed(() => {
         </tr>
       </tbody>
     </table>
-    <div v-if="bestLabel" class="flex items-center gap-2 text-[10px] text-primary-50/50">
-      <span>{{ t('proposal.compare.worse') }} {{ bestLabel.worst }}</span>
-      <span
-        class="h-2 flex-1 rounded"
-        style="
-          background: linear-gradient(90deg, rgb(32, 53, 90), rgb(34, 113, 179), rgb(146, 208, 81));
-        "
-      />
-      <span>{{ bestLabel.best }} {{ t('proposal.compare.better') }}</span>
+    <div v-if="legend" class="flex flex-col gap-1">
+      <div class="flex items-center gap-2 text-[10px] text-primary-50/50">
+        <span>{{ t('proposal.compare.worse') }} {{ legend.worst }}</span>
+        <!-- The bar carries the scale's own gradient, so a diverging KPI shows
+             its break-even boundary here too, in the right place. -->
+        <span class="relative h-2 flex-1 rounded" :style="{ background: scale.gradient }">
+          <span
+            v-if="scale.zeroAt !== null"
+            class="absolute -top-0.5 h-3 w-px bg-primary-50/70"
+            :style="{ left: `${scale.zeroAt * 100}%` }"
+          />
+        </span>
+        <span>{{ legend.best }} {{ t('proposal.compare.better') }}</span>
+      </div>
+      <div class="flex flex-wrap items-center gap-x-3 text-[10px]">
+        <span v-if="scale.zeroAt !== null" class="text-primary-50/50">
+          {{ t('proposal.compare.breakEven') }}
+        </span>
+        <span v-if="bestCell" class="text-primary-50/70">
+          {{ t('proposal.compare.bestIs', { where: bestCell.where }) }}
+        </span>
+      </div>
     </div>
   </div>
 </template>

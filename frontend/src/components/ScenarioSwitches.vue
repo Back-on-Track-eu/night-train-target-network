@@ -11,6 +11,11 @@ import InfoHint from '@/components/InfoHint.vue'
 // produce. The value is the scenario_id, so the store's selectedScenarioId
 // stays the single source of truth.
 //
+// The two operating switches are independent: every combination of
+// network x HSR x optimised timetables is seeded, so neither disables the
+// other. What is still data-driven is the network switch and the measures
+// row below — a toggle offers only states a scenario exists for.
+//
 // The third row — price & regulatory measures (VAT exemption, energy-tax
 // exemption, track access at direct cost) — is rendered disabled with a
 // "coming soon" hint: those are evaluation-only parameters the backend does
@@ -50,11 +55,11 @@ function setNetwork(network: string) {
 
 function toggle(key: 'hsr' | 'optTt') {
   if (!state.value) return
-  const next = { ...state.value, [key]: !state.value[key] }
-  // Turning HSR off takes optimised timetables with it — it does not exist
-  // without HSR in the offered grid (scenarioAxes decides, this only tidies).
-  if (key === 'hsr' && !next.hsr && next.optTt) next.optTt = false
-  select(next)
+  // Each switch moves only itself. Turning HSR off used to drag optimised
+  // timetables off with it, because no scenario offered the one without the
+  // other; both combinations are seeded now, so the tidy-up would be
+  // silently changing a choice the user did not make.
+  select({ ...state.value, [key]: !state.value[key] })
 }
 
 const previewNetwork = computed(() => axes.value.networks.find((n) => n.preview) ?? null)
@@ -71,13 +76,24 @@ const knobClass = (on: boolean) =>
     'absolute top-0.5 h-3.5 w-3.5 rounded-full transition',
     on ? 'left-[1.15rem] bg-sapphire' : 'left-0.5 bg-primary-50',
   ].join(' ')
+
+// The three columns are independent flex stacks, so their rows only line up if
+// their headings occupy the same height. One legend carries a "coming soon"
+// chip and the other two are bare text, which is a five-pixel difference and
+// enough to make the two switch columns visibly out of step. A fixed row for
+// the heading fixes both columns at once; the chips set `leading-none` so they
+// stay inside it.
+const legendClass =
+  'mb-3 flex min-h-6 items-center gap-2 text-xs tracking-wide text-primary-50/50 uppercase'
+const comingSoonChipClass =
+  'flex items-center gap-1 rounded-full border border-primary-50/20 px-2 py-0.5 text-[10px] leading-none'
 </script>
 
 <template>
   <div v-if="state" class="grid gap-x-10 gap-y-6 sm:grid-cols-3">
     <!-- Rail network -->
     <fieldset class="flex flex-col gap-3">
-      <legend class="mb-3 text-xs tracking-wide text-primary-50/50 uppercase">
+      <legend :class="legendClass">
         {{ t('proposal.compare.axes.network') }}
       </legend>
       <div class="flex flex-wrap items-center gap-2">
@@ -107,10 +123,7 @@ const knobClass = (on: boolean) =>
         </div>
         <!-- Outside the control, so the segmented bar stays the width of its
              two labels. The ⓘ carries the "why" on hover. -->
-        <span
-          v-if="previewNetwork"
-          class="flex items-center gap-1 rounded-full border border-primary-50/20 px-2 py-0.5 text-[10px] text-primary-50/50"
-        >
+        <span v-if="previewNetwork" :class="`${comingSoonChipClass} text-primary-50/50`">
           {{ t('proposal.compare.comingSoon') }}
           <InfoHint :text="t('proposal.compare.axes.networkPreviewHint')" />
         </span>
@@ -119,7 +132,7 @@ const knobClass = (on: boolean) =>
 
     <!-- Operating conditions -->
     <fieldset class="flex flex-col gap-3">
-      <legend class="mb-3 text-xs tracking-wide text-primary-50/50 uppercase">
+      <legend :class="legendClass">
         {{ t('proposal.compare.axes.conditions') }}
       </legend>
       <label class="flex cursor-pointer items-center gap-2.5 text-sm text-primary-50/85">
@@ -162,13 +175,9 @@ const knobClass = (on: boolean) =>
 
     <!-- Price & regulatory measures — not modelled yet (WP17). -->
     <fieldset v-if="showMeasures" class="flex flex-col gap-3" aria-disabled="true">
-      <legend
-        class="mb-3 flex items-center gap-2 text-xs tracking-wide text-primary-50/50 uppercase"
-      >
+      <legend :class="legendClass">
         {{ t('proposal.compare.axes.measures') }}
-        <span
-          class="flex items-center gap-1 rounded-full border border-primary-50/20 px-2 py-0.5 text-[10px] normal-case tracking-normal"
-        >
+        <span :class="`${comingSoonChipClass} normal-case tracking-normal`">
           {{ t('proposal.compare.comingSoon') }}
           <InfoHint :text="t('proposal.compare.axes.measuresHint')" />
         </span>

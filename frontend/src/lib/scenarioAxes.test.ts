@@ -97,9 +97,15 @@ describe('preview networks', () => {
 })
 
 describe('conditionLabelKey', () => {
-  it('names the three operating conditions', () => {
+  it('names all four operating-lever combinations', () => {
     expect(conditionLabelKey({ network: '2026', hsr: false, optTt: false })).toBe('base')
     expect(conditionLabelKey({ network: '2026', hsr: true, optTt: false })).toBe('hsr')
     expect(conditionLabelKey({ network: '2026', hsr: true, optTt: true })).toBe('hsrOptTt')
+  })
+
+  it('names optimised timetables without HSR', () => {
+    // The levers are independent in the seed since 2026-09-09; before that
+    // this state had no scenario and so no label.
+    expect(conditionLabelKey({ network: '2026', hsr: false, optTt: true })).toBe('optTt')
   })
 })

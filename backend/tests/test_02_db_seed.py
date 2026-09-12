@@ -621,13 +621,14 @@ def test_scenario_key_and_routing_graph_agree(db_cur):
 
 
 def test_infra_2032_scenarios_pin_versions_5_to_7(scenarios_2032):
-    """The 2032 trio pins versions 5, 6 and 7 across all five tables —
+    """The 2032 rows pin versions 5, 6, 7 and 9 across all five tables —
     one complete snapshot each, in the same operating-condition order as
-    the 2026 trio's 1, 2, 3 (db/dev/seed.py's version grid)."""
+    the 2026 rows' 1, 2, 3, 8 (db/dev/seed.py's version grid)."""
     for scenario_key, expected in (
         ("infra-2032", 5),
         ("infra-2032-hsr", 6),
         ("infra-2032-hsr-opt-tt", 7),
+        ("infra-2032-opt-tt", 9),
     ):
         scenario = scenarios_2032[scenario_key]
         for col in _SCENARIO_VERSION_COLUMNS:
@@ -637,7 +638,7 @@ def test_infra_2032_scenarios_pin_versions_5_to_7(scenarios_2032):
 
 
 def test_infra_2032_scenarios_are_current_but_not_base(scenarios_2032):
-    """All three are selectable lineage heads, and none of them displaces
+    """All four are selectable lineage heads, and none of them displaces
     Infra 2026 as the live default."""
     for scenario in scenarios_2032.values():
         assert scenario["is_current_scenario"] is True
@@ -675,9 +676,18 @@ def test_infra_2032_snapshots_copy_their_2026_counterparts(db_cur):
 
 def test_opt_tt_reduces_buffer_quota(db_cur, opt_tt_scenario, base_scenario):
     """The optimised-timetable snapshot carries a strictly lower schedule
-    supplement than the base wherever the base sits above the benchmark,
-    and never a higher one — the only numeric difference between the three
-    seeded scenarios (models/scenarios/README.md)."""
+    supplement than the base in EVERY country — the only numeric
+    difference between the three seeded scenarios
+    (models/scenarios/README.md).
+
+    Strictly lower everywhere, not merely somewhere: the reduction is a
+    percentage-point cut off each country's calibrated theoretical
+    timetable supplement, which is positive for every seeded country. The
+    previous benchmark rule left a country sitting at the floor untouched
+    and could only be asserted as "at least one" — that weaker assertion
+    would now pass on a calibration that had silently stopped reducing
+    most of Europe.
+    """
     db_cur.execute(
         """
         SELECT b.country_code,
@@ -697,12 +707,12 @@ def test_opt_tt_reduces_buffer_quota(db_cur, opt_tt_scenario, base_scenario):
     )
     rows = db_cur.fetchall()
     assert rows, "No country carries a buffer quota — seed data missing."
-    assert any(r["opt_quota"] < r["base_quota"] for r in rows), (
-        "No country's schedule supplement was reduced — the optimised "
-        "timetable scenario is indistinguishable from the base."
+    unreduced = [r["country_code"] for r in rows if r["opt_quota"] >= r["base_quota"]]
+    assert not unreduced, (
+        f"schedule supplement not reduced for {unreduced} — every country "
+        "carries a theoretical timetable supplement, so every country's "
+        "quota must fall (models/scenarios/calib/OPT_TT_CALIBRATION.md)."
     )
-    for row in rows:
-        assert row["opt_quota"] <= row["base_quota"], row["country_code"]
 
 
 def test_stop_infrastructure_values_unchanged_by_hsr_scenario(

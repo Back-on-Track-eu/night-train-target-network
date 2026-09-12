@@ -34,25 +34,30 @@ from models.params import MeasureSet, Scenario, ScenarioVariant
 
 _KEY_PREFIX = "infra-"
 _HSR_SUFFIX = "-hsr"
-_OPT_TT_SUFFIX = "-hsr-opt-tt"
+_OPT_TT_SUFFIX = "-opt-tt"
 
 
 def scenario_dimensions(scenario: Scenario) -> dict | None:
     """{network, hsr_allowed, optimised_timetable} for a key in the
-    `infra-<network>[-hsr[-opt-tt]]` vocabulary — network is the graph
+    `infra-<network>[-hsr][-opt-tt]` vocabulary — network is the graph
     key's suffix ("infra_2026" → "2026"), so it stays consistent with
-    what the scenario actually routes on. None for any other key."""
+    what the scenario actually routes on. None for any other key.
+
+    The two lever suffixes are stripped from the right in the order they
+    may appear, so each is optional and independent of the other.
+    """
     key = scenario.scenario_key
     graph = scenario.routing_graph_key or ""
     if not key.startswith(_KEY_PREFIX) or not graph.startswith("infra_"):
         return None
     rest = key[len(_KEY_PREFIX) :]
-    if rest.endswith(_OPT_TT_SUFFIX):
-        network, hsr, opt_tt = rest[: -len(_OPT_TT_SUFFIX)], True, True
-    elif rest.endswith(_HSR_SUFFIX):
-        network, hsr, opt_tt = rest[: -len(_HSR_SUFFIX)], True, False
-    else:
-        network, hsr, opt_tt = rest, False, False
+    opt_tt = rest.endswith(_OPT_TT_SUFFIX)
+    if opt_tt:
+        rest = rest[: -len(_OPT_TT_SUFFIX)]
+    hsr = rest.endswith(_HSR_SUFFIX)
+    if hsr:
+        rest = rest[: -len(_HSR_SUFFIX)]
+    network = rest
     if not network or network != graph[len("infra_") :]:
         return None
     return {"network": network, "hsr_allowed": hsr, "optimised_timetable": opt_tt}

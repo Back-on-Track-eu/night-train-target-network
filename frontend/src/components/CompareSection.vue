@@ -4,6 +4,8 @@ import { useI18n } from 'vue-i18n'
 import type { Composition, FamilyMember, Scenario } from '@/types/api'
 import type { FamilyStatus } from '@/composables/useProposalFamily'
 import { COMPARE_KPIS, type CompareKpiKey } from '@/lib/compareKpis'
+import Select from 'primevue/select'
+import { selectPillPt } from '@/lib/selectPillPt'
 import ScenarioCompareBars from '@/components/ScenarioCompareBars.vue'
 import ScenarioCompositionGrid from '@/components/ScenarioCompositionGrid.vue'
 import InlineAlert from '@/components/InlineAlert.vue'
@@ -13,7 +15,7 @@ import InlineAlert from '@/components/InlineAlert.vue'
 // scenario × composition grid. The grid arrives in one response; a partial
 // one (a scenario this deployment cannot route, say) is labelled as such
 // rather than passed off as the whole picture.
-defineProps<{
+const props = defineProps<{
   scenarios: Scenario[]
   compositions: Composition[]
   cellsByScenario: Map<number, FamilyMember>
@@ -33,6 +35,14 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+// A composition that cannot use high-speed lines makes the HSR scenarios
+// inert — the route builder ANDs the two flags. Resolved once here and passed
+// to both views so they dim the same cells.
+const selectedHsrAllowed = computed(
+  () =>
+    props.compositions.find((c) => c.composition_id === props.selectedCompositionId)?.routing
+      .hsr_allowed ?? true,
+)
 const kpi = ref<CompareKpiKey>('subsidy')
 const view = ref<'bars' | 'grid'>('bars')
 const kpiOptions = computed(() =>
@@ -57,20 +67,15 @@ const kpiOptions = computed(() =>
         </p>
       </div>
       <div class="flex items-center gap-2">
-        <select
+        <Select
           v-model="kpi"
-          class="rounded-full border border-primary-50/20 bg-transparent px-3 py-1 text-sm text-primary-50"
+          :options="kpiOptions"
+          option-value="key"
+          option-label="label"
+          :unstyled="true"
+          :pt="selectPillPt"
           :aria-label="t('proposal.compare.kpiPicker')"
-        >
-          <option
-            v-for="option in kpiOptions"
-            :key="option.key"
-            :value="option.key"
-            class="text-sapphire"
-          >
-            {{ option.label }}
-          </option>
-        </select>
+        />
         <div class="inline-flex rounded-full border border-primary-50/15 p-0.5" role="group">
           <button
             type="button"
@@ -111,6 +116,7 @@ const kpiOptions = computed(() =>
       :cells="cellsByScenario"
       :kpi="kpi"
       :selected-scenario-id="selectedScenarioId"
+      :hsr-allowed="selectedHsrAllowed"
       @select="(id) => emit('selectScenario', id)"
     />
     <ScenarioCompositionGrid
