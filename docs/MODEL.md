@@ -67,13 +67,13 @@ station parameters).
 <!-- BEGIN GENERATED: versions -->
 | Model | Version | What it computes | Anchor file | Documentation |
 |---|---|---|---|---|
-| Route & timetable builder | `0.9.34` | Route and timetable builder: turns a list of stops, a train composition, and a few mode selections into a complete route — trip pairs, travel and stopping times with schedule buffers, and a mirrored outbound/return night schedule. | [`model.py`](../backend/models/route/model.py) | [README.md](../backend/models/README.md) |
+| Route & timetable builder | `0.9.36` | Route and timetable builder: turns a list of stops, a train composition, and a few mode selections into a complete route — trip pairs, travel and stopping times with schedule buffers, and a mirrored outbound/return night schedule. | [`model.py`](../backend/models/route/model.py) | [README.md](../backend/models/README.md) |
 | Energy model | `1.1.1` | Traction energy model calibrated against Deutsche Bahn Trassenfinder technical runs: start/stop energy per leg, rolling resistance per tonne-kilometre, air resistance growing with train length and the square of average speed, plus a constant auxiliary and hotel-power draw for the running time. Coach hotel power is an assumption, not a measurement - Trassenfinder was queried with it switched off. | [`model.py`](../backend/models/energy/model.py) | [README.md](../backend/models/energy/README.md) |
-| Demand model | `0.0.2` | Demand model (placeholder): assumes every accommodation class is 70% booked at a flat per-kilometre fare, spread evenly across all connections — a stand-in until a real demand model with directional demand, price sensitivity, and competition from other modes replaces it. | [`model.py`](../backend/models/demand/model.py) | [README.md](../backend/models/demand/README.md) |
-| Cost & revenue evaluation | `0.9.26` | Cost and revenue evaluation: computes the operator's fixed and variable costs, the charges paid to infrastructure companies, and the ticket revenue of a route, then aggregates the result into views per route, trip pair, country, connection, route section, and stop. | [`model.py`](../backend/models/evaluation/model.py) | [README.md](../backend/models/evaluation/README.md) |
+| Demand model | `0.0.4` | Demand model (placeholder): assumes every accommodation class is 70% booked at a flat per-kilometre fare, spread evenly across all connections — a stand-in until a real demand model with directional demand, price sensitivity, and competition from other modes replaces it. | [`model.py`](../backend/models/demand/model.py) | [README.md](../backend/models/demand/README.md) |
+| Cost & revenue evaluation | `0.9.31` | Cost and revenue evaluation: computes the operator's fixed and variable costs, the charges paid to infrastructure companies, and the ticket revenue of a route, then aggregates the result into views per route, trip pair, country, connection, route section, and stop. | [`model.py`](../backend/models/evaluation/model.py) | [README.md](../backend/models/evaluation/README.md) |
 | Emissions model | `0.1.1` | Climate impact factors: how many grams of CO2-equivalent one passenger-kilometre causes by night train, plane, and car — used for the mode comparison and the CO2-savings estimate. The night-train value is a European average until a country-resolved, energy-based model replaces it. | [`model.py`](../backend/models/emissions/model.py) | [README.md](../backend/models/emissions/README.md) |
 | Composition cost model | `0.9.5` | Composition cost model: calibrated purchase, maintenance, cleaning, crew, and availability parameters per train composition, in a 'new' and a 'refurbished' rolling stock family, at 2032 prices. | [`model.py`](../backend/models/compositions/model.py) | [CALIBRATION.md](../backend/models/compositions/calib/CALIBRATION.md) |
-| Infrastructure parameter model | `0.9.6` | Infrastructure parameter model: per-country track access charges, station charges, traction energy prices, shunting and stabling, terrain, schedule supplements and minimum stopping times, with EU-average fallbacks — plus the catalog of possible night train stops. Four calibrated domains, each a package under models/infrastructure/ with its own source register, notebooks and published calibration document. | [`model.py`](../backend/models/infrastructure/model.py) | [STOP_CLASSIFICATION.md](../backend/models/infrastructure/STOP_CLASSIFICATION.md) |
+| Infrastructure parameter model | `0.9.7` | Infrastructure parameter model: per-country track access charges, station charges, traction energy prices, shunting and stabling, terrain, schedule supplements and minimum stopping times, with EU-average fallbacks — plus the catalog of possible night train stops. Four calibrated domains, each a package under models/infrastructure/ with its own source register, notebooks and published calibration document. | [`model.py`](../backend/models/infrastructure/model.py) | [STOP_CLASSIFICATION.md](../backend/models/infrastructure/STOP_CLASSIFICATION.md) |
 <!-- END GENERATED: versions -->
 
 ---
@@ -568,15 +568,15 @@ Costs that scale with how much the train runs — driving and staffing hours, ki
 <a id="f-calc-driver_eur"></a>
 ####### Driver cost — `driver_eur`
 
-$$ C_{driver} = \frac{c_{driver/h}}{\eta_{driver}} \times \left( \sum_{seg} t_{drive,h} \cdot f_{driver} + \sum_{stop} t_{dwell,h} \cdot f_{driver} \right) $$
+$$ C_{driver} = \frac{c_{driver/h}}{\eta_{driver}} \times \left( \sum_{seg} t_{seg,h} \cdot f_{driver} + \sum_{stop} t_{dwell,h} \cdot f_{driver} \right) $$
 
-Driver cost: the driver wage per productive hour, divided by the share of paid hours that is productive, times all hours the driver is on duty — driving between stops and waiting at them. Trips too long for one driver shift need a relief driver, which lowers that share and raises the effective rate.
+Driver cost: the driver wage per productive hour, divided by the share of paid hours that is productive, times all hours the driver is on the train — the whole running time between stops, buffer included, and the waiting at them. Trips too long for one driver shift need a relief driver, which lowers that share and raises the effective rate.
 
 | | Symbol | Meaning | Unit | Source |
 |---|---|---|---|---|
 | Input | `c_driver/h` | Driver wage per productive hour | €/h | parameter [`operator_driver_costs_eur_h`](#p-input_params-operators-operator_driver_costs_eur_h) |
 | Input | `eta_driver` | Share of paid driver hours that is productive | – | formula [`roster_efficiency_driver`](#f-calc-roster_efficiency_driver) |
-| Input | `t_drive,h` | Driving time between stops | h | computed upstream |
+| Input | `t_seg,h` | Running time between stops, buffer included | h | computed upstream |
 | Input | `t_dwell,h` | Waiting time at stops | h | formula [`dwell_time_both`](#f-route-dwell_time_both) |
 | Input | `f_driver` | Number of drivers the train needs | persons | parameter [`composition_type_driver_factor`](#p-input_params-composition_types-composition_type_driver_factor) |
 | **Output** | `C_driver` | Annual driver cost | €/year | — |
@@ -586,15 +586,15 @@ Driver cost: the driver wage per productive hour, divided by the share of paid h
 <a id="f-calc-crew_eur"></a>
 ####### Cabin crew cost — `crew_eur`
 
-$$ C_{crew} = \frac{c_{crew/h}}{\eta_{crew}} \times \left( \sum_{seg} t_{drive,h} \cdot n_{crew} + \sum_{stop} t_{dwell,h} \cdot n_{crew} \right) $$
+$$ C_{crew} = \frac{c_{crew/h}}{\eta_{crew}} \times \left( \sum_{seg} t_{seg,h} \cdot n_{crew} + \sum_{stop} t_{dwell,h} \cdot n_{crew} \right) $$
 
-Cabin crew cost: the crew wage per productive hour, divided by the share of paid hours that is productive, times all hours the crew is on board — while driving and while waiting at stops. Trips too long for one shift need a relief crew, which lowers that share and raises the effective rate.
+Cabin crew cost: the crew wage per productive hour, divided by the share of paid hours that is productive, times all hours the crew is on board — the whole running time between stops, buffer included, and the waiting at them. Trips too long for one shift need a relief crew, which lowers that share and raises the effective rate.
 
 | | Symbol | Meaning | Unit | Source |
 |---|---|---|---|---|
 | Input | `c_crew/h` | Crew wage per productive hour, per attendant | €/h | parameter [`operator_crew_costs_eur_h`](#p-input_params-operators-operator_crew_costs_eur_h) |
 | Input | `eta_crew` | Share of paid crew hours that is productive | – | formula [`roster_efficiency_driver`](#f-calc-roster_efficiency_driver) |
-| Input | `t_drive,h` | Driving time between stops | h | computed upstream |
+| Input | `t_seg,h` | Running time between stops, buffer included | h | computed upstream |
 | Input | `t_dwell,h` | Waiting time at stops | h | formula [`dwell_time_both`](#f-route-dwell_time_both) |
 | Input | `n_crew` | Crew members on board (train manager counted with a factor) | persons | parameter [`coach_type_crew_factor`](#p-input_params-coach_types-coach_type_crew_factor) |
 | **Output** | `C_crew` | Annual cabin crew cost | €/year | — |
@@ -859,19 +859,21 @@ Overnight parking of the train between two nights of service: a daily rate at ea
 <a id="f-calc-total_revenue_eur"></a>
 #### Total revenue — `total_revenue_eur`
 
-$$ R_{total} = R_{ticket} $$
+$$ R_{total} = R_{ticket} + R_{svc} + R_{cat} $$
 
-Total annual revenue — currently ticket income is the only revenue source.
+Total annual revenue — the base fares, the additional services sold alongside them, and the signed net contribution of the on-board catering.
 
 | | Symbol | Meaning | Unit | Source |
 |---|---|---|---|---|
 | Input | `R_ticket` | Annual ticket revenue | €/year | formula [`ticket_revenue_eur`](#f-calc-ticket_revenue_eur) |
+| Input | `R_svc` | Annual additional-services revenue | €/year | formula [`services_revenue_eur`](#f-calc-services_revenue_eur) |
+| Input | `R_cat` | Annual net catering contribution, signed | €/year | formula [`catering_contribution_eur`](#f-calc-catering_contribution_eur) |
 | **Output** | `R_total` | Total annual revenue | €/year | — |
 
 **Used by:** [`net_eur`](#f-calc-net_eur)
 
 <a id="f-calc-ticket_revenue_eur"></a>
-##### Ticket revenue — `ticket_revenue_eur`
+##### Base fare revenue — `ticket_revenue_eur`
 
 $$ R = \sum_{od} n_{places\_sold,od} \times \bar{f}_{od} $$
 
@@ -884,6 +886,36 @@ Ticket income: tickets sold per connection times the average ticket price. Both 
 | **Output** | `R` | Annual ticket revenue | €/year | — |
 
 **Used by:** [`ebit_margin_eur`](#f-calc-ebit_margin_eur), [`total_revenue_eur`](#f-calc-total_revenue_eur), [`var_overhead_eur`](#f-calc-var_overhead_eur)
+
+<a id="f-calc-services_revenue_eur"></a>
+##### Additional services — `services_revenue_eur`
+
+$$ R_{svc} = \sum_{od} n_{places\_sold,od} \times s_{class} $$
+
+Revenue from the additional services sold with a ticket: bicycle carriage, oversized luggage, pets, reservations. Ordinary ticket revenue rather than a net figure — what it costs to carry a bicycle is either nothing or already paid for in the lower place density of the coach that carries it, and the cost model prices that density elsewhere. It therefore counts towards the variable-overhead and profit-requirement bases, unlike the catering contribution, which does not.
+
+| | Symbol | Meaning | Unit | Source |
+|---|---|---|---|---|
+| Input | `n_places_sold,od` | Places sold per connection and year | places/year | set by the tool user |
+| Input | `s_class` | Additional-services revenue per passenger of that class, overridable per proposal | €/passenger | standard value [`STOPGAP_SERVICES_EUR_PER_PAX_BY_CLASS`](#s-demand-stopgap_services_eur_per_pax_by_class) |
+| **Output** | `R_svc` | Annual additional-services revenue | €/year | — |
+
+**Used by:** [`total_revenue_eur`](#f-calc-total_revenue_eur)
+
+<a id="f-calc-catering_contribution_eur"></a>
+##### Catering contribution — `catering_contribution_eur`
+
+$$ R_{cat} = \sum_{od} n_{places\_sold,od} \times c_{cat} $$
+
+The on-board catering as one net figure per passenger carried: its own sales less its own service, stocking and overhead costs. The restaurant is not modelled as a business of its own, so a single signed value carries it. Positive means the service pays for itself and contributes; negative means the tickets it helps sell carry it, which is the usual night-train case. Counted as revenue in the net result, but left out of the variable-overhead and profit-requirement bases — those are shares of ticket revenue, and this figure already nets its own overhead.
+
+| | Symbol | Meaning | Unit | Source |
+|---|---|---|---|---|
+| Input | `n_places_sold,od` | Places sold per connection and year | places/year | set by the tool user |
+| Input | `c_cat` | Net catering contribution per passenger of that class, overridable per proposal | €/passenger | standard value [`STOPGAP_CATERING_EUR_PER_PAX_BY_CLASS`](#s-demand-stopgap_catering_eur_per_pax_by_class) |
+| **Output** | `R_cat` | Annual net catering contribution | €/year | — |
+
+**Used by:** [`total_revenue_eur`](#f-calc-total_revenue_eur)
 
 <a id="f-calc-ebit_margin_eur"></a>
 #### Profit requirement (margin) — `ebit_margin_eur`
@@ -972,6 +1004,8 @@ model's version. Each constant lives in its model's `model.py`.
 | <a id="s-route-night_start_min"></a>`NIGHT_START_MIN` | `24 * 60` | 00:00 next day (1440) — threshold X of the night window. Boarding is judged on DEPARTURE time: a stop departing strictly before this classifies boarding; the fixed-night interval's start stop must depart strictly before this (23:59 at the latest). |
 | <a id="s-route-night_end_min"></a>`NIGHT_END_MIN` | `29 * 60` | 05:00 next day (1740) — threshold Y of the night window. Alighting is judged on ARRIVAL time: a stop arriving at/after this classifies alighting; anything neither boarding nor alighting is a night stop. The fixed-night interval's end stop must arrive no earlier than this. |
 | <a id="s-route-fixed_night_min_speed_ratio"></a>`FIXED_NIGHT_MIN_SPEED_RATIO` | `0.7` | timetable_mode='simpleAutomaticWithFixedNight' only: minimum acceptable ratio of the fixed interval's timetable speed (incl. slack + dwell) to its pure routing speed (driving + dynamics + buffer). Stretching a short interval to cover the night window can make it arbitrarily slow — below this ratio the trip carries a 'fixed_night_stretch_slow' entry in general_parameters.timetable_warnings (a warning, never an error). |
+| <a id="s-route-default_min_turnaround_min"></a>`DEFAULT_MIN_TURNAROUND_MIN` | `180` | Shortest stand a rake is given at a terminal between arriving and departing again, minutes. Default for the request's min_turnaround_min; decides trainsets via TripPair.cycle_days(). |
+| <a id="s-route-evaluation_year"></a>`EVALUATION_YEAR` | `2032` | Calendar year the schedule counts days in — the same year every price is expressed in. Only the month lengths matter (whether February has 29 days). |
 | <a id="s-route-weeks_per_season"></a>`WEEKS_PER_SEASON` | `26` | SUMMER (April–Sep) and WINTER (Oct–Mar) are each a fixed 26 weeks. |
 | <a id="s-route-days_per_operating_week"></a>`DAYS_PER_OPERATING_WEEK` | `{'DAILY': 7, 'THREE_PER_WEEK': 3}` | Operating days per week per Frequency name — specific days of week aren't modelled, they don't affect cost or fleet sizing. |
 | <a id="s-route-max_composition_speed_kmh"></a>`MAX_COMPOSITION_SPEED_KMH` | `230` | Speed ceiling baked into the routing graph — the fastest composition the catalog can hold. Not a per-trip value: fullRouting caps every trip at its own composition.max_speed_kmh in the request custom model, and that is always at most this, so the baked rule never binds there. What it does bound is the paths that send no composition at all — route_geometry() (ONTD map lines, which have no composition by design) and simpleRouting. 230 rather than a higher number because above it the composition parameter breaks rather than scales: true high speed means distributed-traction trainsets, a different concept outside this model's scope (compositions calibration step 6b). It equals HSR_TRACK_SPEED_THRESHOLD_KMH by construction — track a night train could physically use is never treated as forbidden high-speed infrastructure. This value has two homes by necessity: GraphHopper reads the JSON at import time, not this constant. The JSON is the sanctioned mirror and carries a comment pointing back here — keep the two equal, and note that changing either requires a graph re-import. |
@@ -997,7 +1031,11 @@ model's version. Each constant lives in its model's `model.py`.
 | Constant | Value | Meaning |
 |---|---|---|
 | <a id="s-demand-stopgap_utilization_per"></a>`STOPGAP_UTILIZATION_PER` | `0.7` | Placeholder scalar utilization applied uniformly to every class until a real demand model lands. |
-| <a id="s-demand-stopgap_fare_per_km_by_class"></a>`STOPGAP_FARE_PER_KM_BY_CLASS` | `{'Seat': 0.1, 'Couchette': 0.13, 'Sleeper': 0.18, 'Capsule': 0.12, 'Catering': 0.0}` | Placeholder flat per-km fares by class_main — same caveat as above. |
+| <a id="s-demand-stopgap_fare_per_km_by_class"></a>`STOPGAP_FARE_PER_KM_BY_CLASS` | `{'Seat': 0.1, 'Couchette': 0.13, 'Sleeper': 0.18, 'Capsule': 0.12, 'Catering': 0.0}` | Placeholder flat per-km fares by class_main — same caveat as above. Since CALC 0.9.27 these are the DEFAULTS: a request may carry its own `fares_eur_per_km` (api/helpers/member_compute.py), per proposal and part of the family key. Catering is not a fare class and is pinned to 0 whatever the request says. |
+| <a id="s-demand-fare_class_mains"></a>`FARE_CLASS_MAINS` | `('Seat', 'Couchette', 'Sleeper', 'Capsule')` | The class_mains a request may price. Everything else in STOPGAP_FARE_PER_KM_BY_CLASS is fixed. |
+| <a id="s-demand-stopgap_fare_per_pax_by_class"></a>`STOPGAP_FARE_PER_PAX_BY_CLASS` | `{'Seat': 8.0, 'Couchette': 12.0, 'Sleeper': 18.0, 'Capsule': 12.0}` | Placeholder FIXED part of the base fare, EUR per passenger carried. The tariff is two-part: a ticket costs `fare_per_pax + fare_per_km x km`. Real night-train tariffs are not proportional to distance — a berth has a price of admission that a 300 km journey pays as surely as a 1,300 km one — and pricing on distance alone made short OD pairs implausibly cheap and long ones implausibly dear. Overridable per proposal as `fares_eur_per_pax`. Ticket revenue: inside every overhead and margin base. Placeholder, like the per-km rates beside it: these are plausible round numbers, not a calibration (DEMAND 0.0.4). |
+| <a id="s-demand-stopgap_services_eur_per_pax_by_class"></a>`STOPGAP_SERVICES_EUR_PER_PAX_BY_CLASS` | `{'Seat': 1.5, 'Couchette': 2.0, 'Sleeper': 3.0, 'Capsule': 2.0}` | Placeholder revenue from additional services, EUR per passenger carried. Bicycle carriage, oversized luggage, pets, seat reservations bought alongside the ticket. NOT signed and NOT a net figure, which is what separates it from catering: its cost is either zero or already paid for in the lower place density of the coach that carries the bikes, so it is already in the cost model elsewhere and must not be netted here again. Being ordinary ticket revenue, it stays INSIDE the variable-overhead and EBIT-margin bases. Overridable as `services_eur_per_pax`. |
+| <a id="s-demand-stopgap_catering_eur_per_pax_by_class"></a>`STOPGAP_CATERING_EUR_PER_PAX_BY_CLASS` | `{'Seat': 1.2, 'Couchette': 1.2, 'Sleeper': 0.6, 'Capsule': 1.2}` | Placeholder NET catering contribution per passenger carried, EUR, by class. Signed, and a NET figure: the restaurant is not modelled as a business of its own, so one number per class carries its sales less its own service, stocking and overhead costs. Positive means the service pays for itself and contributes; negative means the tickets it helps sell carry it, which is the usual night-train case. Per class since DEMAND 0.0.4 because the classes differ in what their base fare already includes — a sleeper fare that covers breakfast leaves less to buy on board than a seat fare that covers nothing, so the same restaurant nets differently from the two. A class at 0.00 is a claim that its passengers buy nothing, not an absence of data. Deliberately outside the variable-overhead and EBIT-margin bases, which stay on ticket revenue (models/evaluation/model.py): charging distribution overhead on a figure that already nets its own overhead would count it twice. Overridable as `catering_eur_per_pax`. |
 
 #### Infrastructure model — [`model.py`](../backend/models/infrastructure/model.py)
 

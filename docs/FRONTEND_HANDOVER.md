@@ -3,7 +3,7 @@
 **Living document.** Backend changes that reach the API contract or change
 what the UI should show, in one place. Updated after each change.
 
-Last update 2026-09-07. Covers 2026-08-17 → 2026-09-07:
+Last update 2026-09-12. Covers 2026-08-17 → 2026-09-12:
 `ROUTE_BUILDER_VERSION` 0.9.23 → 0.9.33, `CALC_VERSION` 0.9.22 → 0.9.25,
 the scenario restructure, and the calc matrix (§12 — **start there if you
 are looking at the viewport rearrangement**).
@@ -776,7 +776,9 @@ client built against 0.4.x cannot compute against 0.5.0.
 
 Everywhere a member appears — `GET …/views`, `GET /api/proposal/<id>`,
 the publish response, both sides of `POST /api/proposals/compare` —
-`evaluation` is `{ views }`. The models registry is `GET /api/models`
+`evaluation` is `{ views }`. One exception since CALC 0.9.28: the member
+views endpoint answers `{ views, operations }` — the physical side of the
+same evaluation, served on demand and never persisted (§18). The models registry is `GET /api/models`
 (§13.2), the parameters a member was priced from are `GET /api/params/*`
 for its scenario. `lib/factorFeedback.ts` and anything reading
 `evaluation.input.parameters` for provenance move to those two.
@@ -880,6 +882,40 @@ next.
 
 Gate: `vue-tsc`, `eslint`, `prettier --check`, `vitest` (224) and
 `vite build` — all green.
+
+---
+
+## 18. Catering, and `operations` per trip — CALC 0.9.29
+
+Two additive changes on the `backend-dev` branch, both for the Details
+card (zone D). The request gains one optional signed field,
+`catering_eur_per_pax`; `Breakdown.revenue` gains a second leaf,
+`catering_contribution_eur`; the summary row gains that leaf plus
+`passengers_per_year`; and `operations.trip_pairs[]` gains a per-direction
+`trips[]` and a `fleet` basis block. `FAMILY_DOCUMENT_FORMAT` is 4, so no
+cached family document survives the deploy. `ROUTE_BUILDER_VERSION` goes to
+0.9.36 with **no output change at all** — a lint cleanup touched one import
+in a gated file, and the gate demands a bump; the changelog entry records
+that every number is identical.
+
+Nothing is renamed or removed, so nothing breaks on your side before you
+choose to read the new keys. Two existing behaviours do move, and both are
+worth knowing:
+
+* **`total_revenue_eur` is no longer equal to `ticket_revenue_eur`.**
+  Anything that reconstructs revenue by hand, or labels the total "ticket
+  revenue", needs the second leaf. `net_eur` already includes it.
+* **`operations` was never views-only** — it has been on the member views
+  response since 0.9.28 and now carries more. If `api.ts` types that
+  endpoint as `{ views }`, it is wrong today, not just after this change.
+
+Full shapes, the exact JSON, and the three places the sketch and the wire
+deliberately differ: **`docs/FRONTEND_HANDOVER_SUPPLY_SETTINGS_ADDENDUM.md`**,
+which supplements `docs/FRONTEND_HANDOVER_SUPPLY_SETTINGS.md` (revision 2)
+and its design reference `docs/design/2026-09-12_details-sketch.html`.
+
+This grows the pending `backend-dev` coordination batch by the `api.ts`
+entries listed in §5 of that addendum.
 
 ---
 

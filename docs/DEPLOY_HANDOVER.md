@@ -7,8 +7,9 @@ backend, in one place. Supersedes `deploy/HANDOVER.md` (2026-08-10),
 deleted.
 
 Updated after each change that touches deploy, capacity or server data.
-Last update 2026-09-07 (WP14 connection pool + gunicorn gthread, the calc
-matrix endpoint and CALC 0.9.25 — §4c; before that 2026-09-06, ONTD
+Last update 2026-09-12 (CALC 0.9.29 — catering on the summary, two new
+columns, §4d; before that 2026-09-07 WP14 connection pool + gunicorn
+gthread, the calc matrix endpoint and CALC 0.9.25 — §4c; 2026-09-06 ONTD
 bootstrap fix below; 2026-09-05 route builder 0.9.31 §4a; 0.9.32 §4b).
 
 > **Update 2026-09-06 — existing night trains drawn as dashed straight
@@ -452,6 +453,64 @@ shows up as `PoolTimeoutError` 500s after 10 s, never as a hang.
 agnostic); the matrix endpoint then computes its cells sequentially in
 the request thread and still streams. The migration is additive; leaving
 the columns in place on a rollback to 0.9.24 is harmless.
+
+---
+
+## 4d. CALC 0.9.29 — catering on the summary: one migration, nothing else
+
+**Action:** let the migration apply with the deploy, then truncate the
+compute cache as after any model bump. **Stops applying** once this batch
+is on both environments.
+
+### What changed on the server side
+
+1. **One migration**, `backend/db/dev/sql/migrations/2026-09-12_summary_catering.sql`
+   — two additive columns on `proposals.proposal_summaries`
+   (`catering_contribution_eur`, `passengers_per_year`), both
+   `NOT NULL DEFAULT 0`, `ADD COLUMN IF NOT EXISTS`. Seconds on a table this
+   size, no lock worth planning around.
+
+   **Order matters, and `deploy.sh` already gets it right:** the publish
+   projection writes every summary key as a column, so an api image that
+   produces these two keys against a database without the columns fails
+   every publish. Migrations run before the api starts. Nothing for you to
+   sequence by hand — this is a note for the case where someone is tempted
+   to restart the api first.
+
+2. **`ROUTE_BUILDER_VERSION` 0.9.35 → 0.9.36 — no output change.** A lint
+   cleanup removed one unused import from a file the CI version gate
+   watches, so the constant had to move with it. Nothing a route computes
+   differs. It is listed here only because it appears in every response and
+   in `proposals.proposal_summaries.route_builder_version`, and you should
+   not read it as a second model change to plan around.
+
+3. **`CALC_VERSION` 0.9.28 → 0.9.29.** Every route's revenue moves: the
+   on-board catering now contributes a signed net figure per passenger
+   (default +1.20 €). Cost is unchanged. As with any model bump, truncate
+   the compute cache so nothing is served from before it — same statement
+   §3 already uses:
+
+   ```sql
+   TRUNCATE proposals.compute_cache;
+   ```
+
+   The family document cache needs no action: the calc version and the
+   document format are both folded into the family key, so pre-deploy
+   documents are simply never found again and the sweep drops them.
+
+4. **Stored proposals read 0 in both new columns until refreshed.** They
+   were priced without a catering assumption, so 0 is the honest value —
+   there is nothing to backfill without recomputing. `refresh_proposals.py`
+   fills them with real figures whenever it next runs for the version bump;
+   it is not urgent and not required for this deploy.
+
+**No new env knobs, no image or capacity change, no routing-graph work.**
+
+### Rollback
+
+The migration is additive; leaving the columns in place on a rollback to
+0.9.28 is harmless — the older api never writes them and the older gallery
+query never selects them.
 
 ---
 
