@@ -35,13 +35,13 @@ Public interface:
 
 from __future__ import annotations
 
+from models.route.timetable import (
+    legacy_seasonal_schedules,
+    schedule_from_dict,
+)
 from models.route.route import (
     Route,
     TripPair,
-    Schedule,
-    SeasonalSchedule,
-    Season,
-    Frequency,
     Parking,
     Shunting,
     ODPair,
@@ -311,10 +311,13 @@ def route_to_dict(route: Route, scenario_id: int, tracks: TrackInfraCollection) 
         "route_id": route.route_id,
         "scenario_id": scenario_id,
         "schedule": {
-            "seasonal_schedules": [
-                {"season": ss.season.value, "frequency": ss.frequency.value}
-                for ss in route.schedule.seasonal_schedules
-            ]
+            "days_per_week_by_month": {
+                str(m): d for m, d in route.schedule.days_per_week_by_month.items()
+            },
+            "min_turnaround_min": route.schedule.min_turnaround_min,
+            # Pre-0.9.35 readers still find the two-season shape; derived
+            # from the month map so both describe the same plan.
+            "seasonal_schedules": legacy_seasonal_schedules(route.schedule),
         },
         "trip_pairs": trip_pairs,
         "parkings": [
@@ -555,15 +558,7 @@ def route_from_dict(
             "track/stop infrastructure version to reconstruct the route with."
         )
 
-    schedule = Schedule(
-        seasonal_schedules=[
-            SeasonalSchedule(
-                season=Season(ss["season"]),
-                frequency=Frequency(ss["frequency"]),
-            )
-            for ss in data["schedule"]["seasonal_schedules"]
-        ]
-    )
+    schedule = schedule_from_dict(data["schedule"])
 
     geometries_by_id = {g["id"]: g["coords"] for g in data.get("geometries", [])}
 

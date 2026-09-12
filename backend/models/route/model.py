@@ -30,7 +30,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.34"
+ROUTE_BUILDER_VERSION: str = "0.9.36"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -45,6 +45,46 @@ ROUTE_BUILDER_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.36": {
+        "date": "2026-09-12",
+        "author": "david + claude",
+        "changes": "NO OUTPUT CHANGE. One unused import removed from "
+        "route.py (enum.Enum, left behind when StopType moved to trip.py). "
+        "The version moves only because the CI version gate treats any "
+        "diff to a route-builder file as a model change, and riding along "
+        "with CALC 0.9.29 — which invalidates every family key and the "
+        "compute cache anyway — makes the bump free. Every number a route "
+        "produces is identical to 0.9.35.",
+    },
+    "0.9.35": {
+        "date": "2026-09-09",
+        "author": "david + claude",
+        "changes": "SCHEDULE per month and TRAINSETS from a cycle-time rule. "
+        "Schedule is now days-per-week for each of the twelve months "
+        "(0 = not running) plus min_turnaround_min, replacing the fixed "
+        "summer/winter x daily/three_per_week enums; operating days are "
+        "days_in_month x d/7, so the year no longer has exactly 364 days. "
+        "New schedule_mode 'custom' takes the month map from the request "
+        "({'1': 7, ..., '12': 0}); 'alwaysDaily' stays the default and means "
+        "7 everywhere. min_turnaround_min (default 180) is a request field "
+        "under either mode. TripPair.composition_count() no longer returns "
+        "'2 if daily else 1' / availability: it walks one rake through the "
+        "pair's own timetable, gives it at least min_turnaround_min at each "
+        "terminal and takes the next scheduled slot that fits (losing a day "
+        "when the slot is too close), which yields cycle_days; the physical "
+        "count is max over months of ceil(cycle_days x d/7) "
+        "(TripPair.trainsets(), new), and the cost basis divides that by "
+        "coach_avail_per as before. A normal night train has a two-day "
+        "cycle, so daily -> 2 and three-a-week -> 1 exactly as the old rule "
+        "said; four-a-week -> 2 and a too-short turnaround -> 3, which it "
+        "could not say. ASSUMPTION stated in OPEN_TODOS: departure days are "
+        "spread evenly through the week. Wire: route.schedule carries "
+        "days_per_week_by_month and min_turnaround_min and STILL writes the "
+        "legacy seasonal_schedules block derived from them; route_from_dict "
+        "reads either shape, widening a legacy block onto its months. "
+        "Schedule and min_turnaround_min join the family key. No schema "
+        "change.",
+    },
     "0.9.34": {
         "date": "2026-09-10",
         "author": "david + claude",
@@ -764,6 +804,15 @@ this ratio the trip carries a 'fixed_night_stretch_slow' entry in
 general_parameters.timetable_warnings (a warning, never an error)."""
 
 # --- Schedule (seasonal model — models/route/route.py)
+DEFAULT_MIN_TURNAROUND_MIN: int = 180
+"""Shortest stand a rake is given at a terminal between arriving and
+departing again, minutes. Default for the request's min_turnaround_min;
+decides trainsets via TripPair.cycle_days()."""
+
+EVALUATION_YEAR: int = 2032
+"""Calendar year the schedule counts days in — the same year every price is
+expressed in. Only the month lengths matter (whether February has 29 days)."""
+
 WEEKS_PER_SEASON: int = 26
 """SUMMER (April–Sep) and WINTER (Oct–Mar) are each a fixed 26 weeks."""
 
@@ -973,6 +1022,15 @@ prefix — see adapters/proposal/repository.py's _STRUCTURAL_ROUTE_PREFIX."""
 # =============================================================================
 
 OPEN_TODOS: dict[str, str] = {
+    "schedule_weekday_pattern": (
+        "Schedule models days PER WEEK per month, not WHICH days. "
+        "TripPair.trainsets() therefore assumes departure days are spread "
+        "evenly through the week: three-a-week on Mon/Wed/Fri needs one rake "
+        "with a two-day cycle, Mon/Tue/Wed would need two. A weekday pattern "
+        "per month would settle it, at the cost of a heavier request and UI; "
+        "until then the even-spread figure is the one an operator planning "
+        "a new service would use too."
+    ),
     "expert_addon_resplit": (
         "(David, 2026-09-06, deliberate) An expert-mode segment add-on whose "
         "ordered stop pair no longer exists after a reroute is DROPPED "

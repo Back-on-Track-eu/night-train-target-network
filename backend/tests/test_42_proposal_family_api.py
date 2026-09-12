@@ -462,7 +462,40 @@ class TestMemberViews:
         )
         assert resp.status_code == 200, resp.text[:300]
         body = resp.json()
-        assert set(body) == {"views"}
+        # CALC 0.9.28: the member's views response carries its operations
+        # block too — the physical side of the same evaluation. The
+        # STORED evaluation stays views-only (test_50); operations are
+        # served on demand like views, never persisted with the proposal.
+        assert set(body) == {"views", "operations"}
+        ops = body["operations"]
+        assert set(ops) == {"trip_pairs", "route", "infrastructure"}
+        pair = ops["trip_pairs"][0]
+        assert pair["trainsets"]["physical"] >= 1
+        assert pair["trainsets"]["theoretical"] >= pair["trainsets"]["physical"]
+        assert pair["loco_hours"]["per_year"] > 0
+        staff = pair["staffing"]
+        assert staff["drivers"]["on_board"] >= 1
+        assert staff["total"]["hours_per_trip_cycle"] > 0
+        assert staff["total"]["eur_per_year"] > 0
+        assert ops["route"]["trainsets_physical"] == pair["trainsets"]["physical"]
+        # CALC 0.9.29: the per-direction split the receipts read, the fleet
+        # basis behind them, and the two annualisers the strips multiply by.
+        assert [t["direction"] for t in pair["trips"]] == ["outbound", "return"]
+        outbound = pair["trips"][0]
+        assert outbound["loco_hours"]["total"] > 0
+        driver = outbound["staffing"]["drivers"]
+        assert driver["paid_hours"] >= driver["hours_on_train"] > 0
+        assert 0 < driver["roster_efficiency"] <= 1
+        assert pair["fleet"]["coaches_needed"] > 0
+        assert ops["route"]["departures_per_year"] == (
+            ops["route"]["operating_days_per_year"] * 2 * len(ops["trip_pairs"])
+        )
+        # Handover §6.5: the "charged on" detail behind the infrastructure
+        # leaves, per trip, with the tariff the served member was priced at.
+        infra = ops["infrastructure"]
+        assert [t["direction"] for t in infra["trips"]] == ["outbound", "return"]
+        assert infra["trips"][0]["track_access"]["countries"][0]["terms"]
+        assert "tariff" in infra["trips"][0]["energy"]["countries"][0]
         calc = compute(
             api_base,
             STOPS_BERLIN_WIEN,

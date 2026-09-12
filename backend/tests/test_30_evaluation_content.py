@@ -40,6 +40,7 @@ import math
 import pytest
 import requests
 
+from models.demand.model import FARE_CLASS_MAINS
 from tests.helpers import (
     add_directional_domain_demand,
     all_trips,
@@ -100,6 +101,21 @@ def maint_rates(api_base):
     return {
         c["composition_id"]: c["variable_km"]["coach_maint_eur_km"]
         for c in body["compositions"]
+    }
+
+
+@pytest.fixture(scope="module")
+def overhead_quotas(api_base):
+    """{composition_id: fix_overhead_quota_per} from GET /api/params/
+    compositions — the operator factor the Overhead tab renders next to
+    the euros. The quota is an operator property, so it is read off the
+    catalog's operators section by way of each composition's operator_id."""
+    body = requests.get(f"{api_base}/api/params/compositions", timeout=15).json()
+    by_operator = {
+        o["operator_id"]: o["fix_overhead_quota_per"] for o in body["operators"]
+    }
+    return {
+        c["composition_id"]: by_operator[c["operator_id"]] for c in body["compositions"]
     }
 
 
@@ -374,16 +390,26 @@ class TestCostRecomputation:
         assert actual == pytest.approx(expected, rel=REL_TOL)
 
     def test_revenue_matches_manual_calculation(self, eval_standard):
-        """Annual revenue equals Σ places_sold × avg_price over all OD pairs
-        — places_sold is annual, so no operating-days multiplier applies."""
+        """Annual BASE FARE revenue equals Σ places_sold × avg_price over all
+        OD pairs — places_sold is annual, so no operating-days multiplier
+        applies, and avg_price already carries both terms of the two-part
+        tariff. Total revenue is that plus the other two leaves (CALC
+        0.9.30), which TestThreePartTariff pins on their own."""
         costed, result = eval_standard
         expected = sum(
             od["places_sold"] * od["avg_price"]
             for tp in costed["trip_pairs"]
             for od in tp["od_pairs"]
         )
-        assert route_bd(result)["total_revenue_eur"] == pytest.approx(
+        bd = route_bd(result)
+        assert bd["revenue"]["ticket_revenue_eur"] == pytest.approx(
             expected, rel=REL_TOL
+        )
+        assert bd["total_revenue_eur"] == pytest.approx(
+            expected
+            + bd["revenue"]["services_revenue_eur"]
+            + bd["revenue"]["catering_contribution_eur"],
+            rel=REL_TOL,
         )
 
 
@@ -682,16 +708,22 @@ class TestDemandBehaviour:
         assert route_bd(eval_zero, "per_available_place_km")["total_cost_eur"] > 0
 
     def test_fare_scales_revenue_linearly(self, loader, route_berlin_wien):
-        """Revenue is linear in avg_price: tripling the fare triples revenue
-        exactly (places held constant)."""
+        """Ticket revenue is linear in avg_price: tripling the fare triples
+        it exactly (places held constant). Not total revenue — the catering
+        contribution rides on the passengers, which did not move."""
         _, cheap = compute_evaluation_domain(
             route_berlin_wien, loader, demand=[("Seat", 30, 33.0)]
         )
         _, pricey = compute_evaluation_domain(
             route_berlin_wien, loader, demand=[("Seat", 30, 99.0)]
         )
-        assert route_bd(pricey)["total_revenue_eur"] == pytest.approx(
-            route_bd(cheap)["total_revenue_eur"] * 3.0, rel=REL_TOL
+        assert route_bd(pricey)["revenue"]["ticket_revenue_eur"] == pytest.approx(
+            route_bd(cheap)["revenue"]["ticket_revenue_eur"] * 3.0, rel=REL_TOL
+        )
+        assert route_bd(pricey)["revenue"][
+            "catering_contribution_eur"
+        ] == pytest.approx(
+            route_bd(cheap)["revenue"]["catering_contribution_eur"], rel=REL_TOL
         )
 
 
@@ -1117,3 +1149,583 @@ class TestMeasureSetsAreIdentityToday:
         assert NO_MEASURES.ticket_revenue_factor == 1.0
         assert NO_MEASURES.energy_cost_factor == 1.0
         assert NO_MEASURES.track_access_factor == 1.0
+
+
+# =============================================================================
+# Catering — one signed net figure per passenger (CALC 0.9.29)
+# =============================================================================
+
+
+class TestCateringContribution:
+    """The contribution is revenue, rides on passengers rather than on
+    fares, and stays out of the two bases that are shares of ticket
+    revenue. Every assertion here is about that separation."""
+
+    @staticmethod
+    def _passengers(costed):
+        return sum(
+            od["places_sold"] for tp in costed["trip_pairs"] for od in tp["od_pairs"]
+        )
+
+    def test_contribution_is_passengers_times_the_rate(self, loader, route_berlin_wien):
+        """Per class since CALC 0.9.30 — the route total is the sum over the
+        classes it actually carries, not one rate times everybody."""
+        from models.demand.model import STOPGAP_CATERING_EUR_PER_PAX_BY_CLASS
+
+        costed, result = compute_evaluation_domain(
+            route_berlin_wien, loader, demand=[("Seat", 30, 49.0)]
+        )
+        expected = sum(
+            od["places_sold"] * STOPGAP_CATERING_EUR_PER_PAX_BY_CLASS[od["class_main"]]
+            for tp in costed["trip_pairs"]
+            for od in tp["od_pairs"]
+        )
+        assert route_bd(result)["revenue"][
+            "catering_contribution_eur"
+        ] == pytest.approx(expected, rel=REL_TOL)
+
+    def test_a_negative_rate_is_carried_through_signed(self, loader, route_berlin_wien):
+        """The ordinary night-train case: the restaurant is carried by the
+        tickets it helps sell, so the leaf is negative and total revenue
+        falls below what the other two leaves earned. Compared against
+        ticket + services rather than ticket alone — services are revenue
+        too, and on this route they more than cover the restaurant."""
+        costed, result = compute_evaluation_domain(
+            route_berlin_wien,
+            loader,
+            demand=[("Seat", 30, 49.0)],
+            catering_eur_per_pax=dict.fromkeys(FARE_CLASS_MAINS, -0.80),
+        )
+        bd = route_bd(result)
+        assert bd["revenue"]["catering_contribution_eur"] == pytest.approx(
+            self._passengers(costed) * -0.80, rel=REL_TOL
+        )
+        assert (
+            bd["total_revenue_eur"]
+            < bd["revenue"]["ticket_revenue_eur"]
+            + bd["revenue"]["services_revenue_eur"]
+        )
+
+    def test_it_moves_the_net_result_and_nothing_else(self, loader, route_berlin_wien):
+        """Between two evaluations differing only in the catering rate,
+        cost, variable overhead and the margin are untouched — they are
+        shares of ticket revenue, and the contribution already nets its own
+        overhead."""
+        costed, with_cat = compute_evaluation_domain(
+            route_berlin_wien,
+            loader,
+            demand=[("Seat", 30, 49.0)],
+            catering_eur_per_pax=dict.fromkeys(FARE_CLASS_MAINS, 2.50),
+        )
+        _, without = compute_evaluation_domain(
+            route_berlin_wien,
+            loader,
+            demand=[("Seat", 30, 49.0)],
+            catering_eur_per_pax=dict.fromkeys(FARE_CLASS_MAINS, 0.0),
+        )
+        a, b = route_bd(with_cat), route_bd(without)
+        assert a["total_cost_eur"] == pytest.approx(b["total_cost_eur"], rel=REL_TOL)
+        assert a["cost"]["operator"]["variable"]["var_overhead_eur"] == pytest.approx(
+            b["cost"]["operator"]["variable"]["var_overhead_eur"], rel=REL_TOL
+        )
+        assert a["margin"]["ebit_margin_eur"] == pytest.approx(
+            b["margin"]["ebit_margin_eur"], rel=REL_TOL
+        )
+        assert a["net_eur"] - b["net_eur"] == pytest.approx(
+            self._passengers(costed) * 2.50, rel=REL_TOL
+        )
+
+    def test_no_passengers_no_contribution(self, eval_zero):
+        """Nobody on board, nobody in the restaurant — whatever the rate."""
+        assert route_bd(eval_zero)["revenue"]["catering_contribution_eur"] == 0.0
+
+    def test_the_views_allocate_it_like_ticket_revenue(self, eval_standard):
+        """Every OD cell's contribution sums back to the route's, the same
+        identity the ticket leaf satisfies — it is allocated on the same
+        key, so a country/section/stop view cannot lose or invent any."""
+        _, result = eval_standard
+        route_total = route_bd(result)["revenue"]["catering_contribution_eur"]
+        data = result["views"]["per_trip_pair_per_od"]["data"]
+        pair_key = next(k for k in data if k != "all")
+        summed = sum(
+            cell["values"]["per_year"]["all"]["revenue"]["catering_contribution_eur"]
+            for key, cell in data[pair_key].items()
+            if key != "all"
+        )
+        assert route_total != 0
+        assert summed == pytest.approx(route_total, rel=REL_TOL)
+
+
+# =============================================================================
+# Overhead and margin reach the per-trip-pair view (handover §6.4)
+# =============================================================================
+
+
+class TestOverheadFieldsInViews:
+    """The Overhead tab reads its three receipts off the per_trip_pair
+    view and builds the fixed-overhead base from the two operator
+    subtotals. Pinned here so a reshaping of the view cannot silently take
+    them away."""
+
+    def test_per_trip_pair_carries_overhead_margin_and_the_subtotals(
+        self, eval_standard
+    ):
+        _, result = eval_standard
+        data = result["views"]["per_trip_pair"]["data"]
+        for key, cell in data.items():
+            bd = cell["values"]["per_year"]["all"]
+            variable = bd["cost"]["operator"]["variable"]
+            fixed = bd["cost"]["operator"]["fixed"]
+            assert "var_overhead_eur" in variable, key
+            assert "fix_overhead_eur" in fixed, key
+            assert "ebit_margin_eur" in bd["margin"], key
+            # The base the fixed-overhead receipt lists row by row.
+            assert "total_eur" in variable and "total_eur" in fixed, key
+
+    def test_fixed_overhead_is_the_quota_on_the_documented_base(
+        self, eval_standard, overhead_quotas
+    ):
+        """q_fix,oh × (operator variable excl. variable overhead + operator
+        fixed excl. the leaf itself) — infrastructure stays outside."""
+        _, result = eval_standard
+        bd = route_bd(result)
+        variable = bd["cost"]["operator"]["variable"]
+        fixed = bd["cost"]["operator"]["fixed"]
+        base = (
+            variable["total_eur"]
+            - variable["var_overhead_eur"]
+            + fixed["total_eur"]
+            - fixed["fix_overhead_eur"]
+        )
+        costed, _ = eval_standard
+        comp_id = costed["trip_pairs"][0]["composition"]["composition_id"]
+        assert fixed["fix_overhead_eur"] == pytest.approx(
+            overhead_quotas[comp_id] * base, rel=REL_TOL
+        )
+
+
+# =============================================================================
+# Operations — the physical side, per pair and per trip (CALC 0.9.29)
+# =============================================================================
+
+
+class TestOperationsPerTrip:
+    """The pair figures are what they always were; the trips[] entries are
+    the per-direction split the receipts read. The two must agree, or the
+    panel and the strip above it would disagree on the same train."""
+
+    @pytest.fixture(scope="class")
+    def ops(self, loader, route_berlin_dresden_wien):
+        from tests.conftest import STANDARD_DEMAND
+        from api.helpers.route_serialize import route_from_dict
+        from models.evaluation.operations import build_operations
+        from models.pipeline import evaluate_and_build_views
+
+        scenario_id = route_berlin_dresden_wien["scenario_id"]
+        route, _ = route_from_dict(
+            route_berlin_dresden_wien, loader, scenario_id=scenario_id
+        )
+        for pair in route.trip_pairs:
+            pair.od_pairs = []
+        for class_main, places_sold, avg_price in STANDARD_DEMAND:
+            add_directional_domain_demand(route, class_main, places_sold, avg_price)
+        result, _ = evaluate_and_build_views(
+            route,
+            loader.build_all_tracks(scenario_id),
+            loader.build_all_stops(scenario_id),
+            loader.build_all_passages(scenario_id),
+        )
+        return build_operations(route, result)
+
+    @pytest.fixture(scope="class")
+    def priced(self, loader, route_berlin_dresden_wien):
+        """The route and its raw evaluation, for the assertions that go
+        beneath the operations block."""
+        from api.helpers.route_serialize import route_from_dict
+        from models.pipeline import evaluate_and_build_views
+
+        scenario_id = route_berlin_dresden_wien["scenario_id"]
+        route, _ = route_from_dict(
+            route_berlin_dresden_wien, loader, scenario_id=scenario_id
+        )
+        result, _ = evaluate_and_build_views(
+            route,
+            loader.build_all_tracks(scenario_id),
+            loader.build_all_stops(scenario_id),
+            loader.build_all_passages(scenario_id),
+        )
+        return route, result
+
+    def test_staff_are_paid_for_the_whole_segment(self, priced):
+        """CALC 0.9.31 — the buffer is on the clock. A segment's staff hours
+        are its total time, not its driving time: a 10 h trip no longer pays
+        its driver for 8 h."""
+        route, result = priced
+        by_key = {(c.trip_id, c.segment_index): c for c in result.segment_costs}
+        for pair in route.trip_pairs:
+            for trip in pair.trips:
+                for i, seg in enumerate(trip.segments):
+                    cost = by_key[(trip.trip_id, i)]
+                    assert cost.driver_hours == pytest.approx(
+                        seg.total_time_min / 60.0 * pair.composition.driver_factor,
+                        rel=REL_TOL,
+                    )
+                    assert (
+                        seg.total_time_min
+                        > seg.driving_time_min + seg.dynamics_time_min
+                    )
+
+    def test_every_role_is_on_board_for_the_whole_trip(self, ops):
+        """hours_on_train is headcount x trip time — a figure the reader can
+        check against the loco's own hours — and the factor is nowhere in
+        it."""
+        for pair in ops["trip_pairs"]:
+            for trip in pair["trips"]:
+                trip_h = trip["loco_hours"]["total"]
+                for role in ("drivers", "train_chief", "attendants"):
+                    r = trip["staffing"][role]
+                    assert r["hours_on_train"] == pytest.approx(
+                        r["on_board"] * trip_h, abs=0.05
+                    )
+                # The chief in particular: one person, one trip's hours.
+                chief = trip["staffing"]["train_chief"]
+                if chief["on_board"]:
+                    assert chief["hours_on_train"] == pytest.approx(trip_h, abs=0.05)
+                    assert chief["factor"] > 1.0
+
+    def test_every_pair_has_both_directions_in_order(self, ops):
+        for pair in ops["trip_pairs"]:
+            assert [t["direction"] for t in pair["trips"]] == ["outbound", "return"]
+            assert len({t["trip_id"] for t in pair["trips"]}) == 2
+
+    def test_trip_loco_hours_sum_to_the_cycle(self, ops):
+        for pair in ops["trip_pairs"]:
+            assert sum(
+                t["loco_hours"]["total"] for t in pair["trips"]
+            ) == pytest.approx(pair["loco_hours"]["per_trip_cycle"], rel=REL_TOL)
+
+    def test_loco_running_and_dwell_make_up_the_total(self, ops):
+        for pair in ops["trip_pairs"]:
+            for trip in pair["trips"]:
+                lh = trip["loco_hours"]
+                assert lh["running"] + lh["at_stops"] == pytest.approx(
+                    lh["total"], rel=REL_TOL
+                )
+
+    def test_trip_staff_hours_and_euros_sum_to_the_cycle(self, ops):
+        for pair in ops["trip_pairs"]:
+            trips = pair["trips"]
+            assert sum(
+                t["staffing"]["total"]["hours_on_train"] for t in trips
+            ) == pytest.approx(
+                pair["staffing"]["total"]["hours_per_trip_cycle"], rel=REL_TOL
+            )
+            assert sum(t["staffing"]["total"]["eur"] for t in trips) == pytest.approx(
+                pair["staffing"]["total"]["eur_per_trip_cycle"], rel=REL_TOL
+            )
+
+    def test_the_train_chief_is_one_person_at_a_factor(self, ops):
+        """1.19 is attendant-equivalents, never a head count — the panel
+        shows "1 x 1.19" and must be able to."""
+        for pair in ops["trip_pairs"]:
+            for trip in pair["trips"]:
+                chief = trip["staffing"]["train_chief"]
+                assert chief["on_board"] in (0.0, 1.0)
+                assert chief["factor"] >= 1.0
+
+    def test_paid_hours_exceed_hours_on_train(self, ops):
+        """Roster efficiency is below 1 by construction: sign-on, sign-off,
+        positioning and reserve cover are paid and not on the train."""
+        for pair in ops["trip_pairs"]:
+            for trip in pair["trips"]:
+                for role in ("drivers", "train_chief", "attendants"):
+                    r = trip["staffing"][role]
+                    if r["hours_on_train"] == 0:
+                        continue
+                    assert 0 < r["roster_efficiency"] <= 1
+                    assert r["paid_hours"] >= r["hours_on_train"]
+
+    def test_role_euros_sum_to_the_trip_total(self, ops):
+        for pair in ops["trip_pairs"]:
+            for trip in pair["trips"]:
+                staffing = trip["staffing"]
+                assert sum(
+                    staffing[role]["eur"]
+                    for role in ("drivers", "train_chief", "attendants")
+                ) == pytest.approx(staffing["total"]["eur"], rel=REL_TOL)
+
+    def test_fleet_reports_the_basis_the_cost_model_used(self, ops):
+        """coaches_needed is the cost model's own n — coaches per rake times
+        the theoretical trainsets, not the physical ones. Compared against
+        the unrounded quotient: `theoretical` is reported at two decimals
+        for the reader, and multiplying that by seven coaches would drift
+        by more than the figure itself is worth."""
+        for pair in ops["trip_pairs"]:
+            fleet, sets = pair["fleet"], pair["trainsets"]
+            exact = sets["physical"] / sets["coach_avail_per"]
+            assert fleet["coaches_needed"] == pytest.approx(
+                fleet["coaches_per_set"] * exact, abs=0.01
+            )
+            assert fleet["coaches_needed"] > fleet["coaches_per_set"] * sets["physical"]
+            assert fleet["amort_years"] > 0
+            assert fleet["shunting_events_per_trip_cycle"] == 4
+
+    def test_route_total_carries_the_two_annualisers(self, ops):
+        """A per-trip figure reaches the year on the backend's own numbers,
+        not on a schedule the reader re-derives."""
+        total = ops["route"]
+        assert total["departures_per_year"] == (
+            total["operating_days_per_year"] * 2 * len(ops["trip_pairs"])
+        )
+
+
+# =============================================================================
+# The three-part tariff (CALC 0.9.30)
+# =============================================================================
+
+
+class TestThreePartTariff:
+    """Base fare (fixed + per km), additional services, catering. What
+    separates them is which bases they enter, so that is what is pinned."""
+
+    @staticmethod
+    def _passengers(costed):
+        return sum(
+            od["places_sold"] for tp in costed["trip_pairs"] for od in tp["od_pairs"]
+        )
+
+    def test_services_are_passengers_times_the_class_rate(
+        self, loader, route_berlin_wien
+    ):
+        costed, result = compute_evaluation_domain(
+            route_berlin_wien,
+            loader,
+            demand=[("Seat", 30, 49.0)],
+            services_eur_per_pax=dict.fromkeys(FARE_CLASS_MAINS, 2.0),
+        )
+        assert route_bd(result)["revenue"]["services_revenue_eur"] == pytest.approx(
+            self._passengers(costed) * 2.0, rel=REL_TOL
+        )
+
+    def test_services_enter_the_overhead_and_margin_bases(
+        self, loader, route_berlin_wien
+    ):
+        """The one thing that separates services from catering: a bike fare
+        is ticket revenue, so it carries distribution overhead and the
+        profit requirement like any other ticket."""
+        _, with_svc = compute_evaluation_domain(
+            route_berlin_wien,
+            loader,
+            demand=[("Seat", 30, 49.0)],
+            services_eur_per_pax=dict.fromkeys(FARE_CLASS_MAINS, 5.0),
+        )
+        _, without = compute_evaluation_domain(
+            route_berlin_wien,
+            loader,
+            demand=[("Seat", 30, 49.0)],
+            services_eur_per_pax=dict.fromkeys(FARE_CLASS_MAINS, 0.0),
+        )
+        a, b = route_bd(with_svc), route_bd(without)
+        assert (
+            a["cost"]["operator"]["variable"]["var_overhead_eur"]
+            > b["cost"]["operator"]["variable"]["var_overhead_eur"]
+        )
+        assert a["margin"]["ebit_margin_eur"] > b["margin"]["ebit_margin_eur"]
+
+    def test_catering_still_enters_neither(self, loader, route_berlin_wien):
+        _, rich = compute_evaluation_domain(
+            route_berlin_wien,
+            loader,
+            demand=[("Seat", 30, 49.0)],
+            catering_eur_per_pax=dict.fromkeys(FARE_CLASS_MAINS, 5.0),
+        )
+        _, none = compute_evaluation_domain(
+            route_berlin_wien,
+            loader,
+            demand=[("Seat", 30, 49.0)],
+            catering_eur_per_pax=dict.fromkeys(FARE_CLASS_MAINS, 0.0),
+        )
+        a, b = route_bd(rich), route_bd(none)
+        assert a["cost"]["operator"]["variable"]["var_overhead_eur"] == pytest.approx(
+            b["cost"]["operator"]["variable"]["var_overhead_eur"], rel=REL_TOL
+        )
+        assert a["margin"]["ebit_margin_eur"] == pytest.approx(
+            b["margin"]["ebit_margin_eur"], rel=REL_TOL
+        )
+
+    def test_the_three_leaves_sum_to_total_revenue(self, eval_standard):
+        _, result = eval_standard
+        revenue = route_bd(result)["revenue"]
+        assert revenue["total_eur"] == pytest.approx(
+            revenue["ticket_revenue_eur"]
+            + revenue["services_revenue_eur"]
+            + revenue["catering_contribution_eur"],
+            rel=REL_TOL,
+        )
+
+    def test_the_base_fare_has_a_fixed_part(self, loader, route_berlin_wien):
+        """Two OD pairs of different length no longer differ by the full
+        ratio of their distances — the fixed term is paid by both."""
+        from models.demand.model import STOPGAP_FARE_PER_PAX_BY_CLASS
+
+        costed, _ = compute_evaluation_domain(
+            route_berlin_wien, loader, demand=[("Seat", 30, 49.0)]
+        )
+        prices = sorted(
+            od["avg_price"]
+            for tp in costed["trip_pairs"]
+            for od in tp["od_pairs"]
+            if od["places_sold"] > 0
+        )
+        assert prices[0] >= STOPGAP_FARE_PER_PAX_BY_CLASS["Seat"]
+
+    def test_services_allocate_like_the_other_leaves(self, eval_standard):
+        """Same allocator, so the OD cells still sum to the route total."""
+        _, result = eval_standard
+        route_total = route_bd(result)["revenue"]["services_revenue_eur"]
+        data = result["views"]["per_trip_pair_per_od"]["data"]
+        pair_key = next(k for k in data if k != "all")
+        summed = sum(
+            cell["values"]["per_year"]["all"]["revenue"]["services_revenue_eur"]
+            for key, cell in data[pair_key].items()
+            if key != "all"
+        )
+        assert route_total > 0
+        assert summed == pytest.approx(route_total, rel=REL_TOL)
+
+
+# =============================================================================
+# Operations — the infrastructure block (handover §6.5)
+# =============================================================================
+
+
+class TestOperationsInfrastructure:
+    """What each country charged on, per trip, folded from the same component
+    records the cost model priced. Every total here has to agree with the
+    breakdown leaf it explains."""
+
+    @pytest.fixture(scope="class")
+    def built(self, loader, route_berlin_dresden_wien):
+        from tests.conftest import STANDARD_DEMAND
+        from api.helpers.route_serialize import route_from_dict
+        from models.evaluation.operations import build_operations
+        from models.pipeline import evaluate_and_build_views
+
+        scenario_id = route_berlin_dresden_wien["scenario_id"]
+        route, _ = route_from_dict(
+            route_berlin_dresden_wien, loader, scenario_id=scenario_id
+        )
+        for pair in route.trip_pairs:
+            pair.od_pairs = []
+        for class_main, places_sold, avg_price in STANDARD_DEMAND:
+            add_directional_domain_demand(route, class_main, places_sold, avg_price)
+        tracks = loader.build_all_tracks(scenario_id)
+        stop_infra = loader.build_all_stops(scenario_id)
+        result, views = evaluate_and_build_views(
+            route,
+            tracks,
+            stop_infra,
+            loader.build_all_passages(scenario_id),
+        )
+        return result, views, build_operations(route, result, tracks, stop_infra)
+
+    def test_every_trip_is_there_in_order(self, built):
+        _, _, ops = built
+        trips = ops["infrastructure"]["trips"]
+        assert [t["direction"] for t in trips] == ["outbound", "return"]
+
+    def test_track_access_sums_to_the_leaf(self, built):
+        """Both trips' track access, countries and crossings together, is
+        the breakdown's per-cycle tac_eur."""
+        result, _, ops = built
+        per_cycle = sum(seg.tac_eur for seg in result.segment_costs)
+        summed = sum(t["track_access"]["eur"] for t in ops["infrastructure"]["trips"])
+        assert summed == pytest.approx(per_cycle, rel=REL_TOL)
+
+    def test_the_charged_on_list_adds_up_to_the_country(self, built):
+        """The terms a country lists are the ones it levied, and they sum to
+        that country's figure — nothing charged is left off the list."""
+        _, _, ops = built
+        for trip in ops["infrastructure"]["trips"]:
+            for country in trip["track_access"]["countries"]:
+                assert country["terms"], country["country_code"]
+                assert sum(term["eur"] for term in country["terms"]) == pytest.approx(
+                    country["eur"], abs=0.05
+                )
+                assert country["km"] > 0
+                assert 0 <= country["night_km"] <= country["km"] + 0.1
+
+    def test_energy_sums_to_the_leaf_and_carries_the_tariff(self, built):
+        result, _, ops = built
+        per_cycle = sum(seg.energy_eur for seg in result.segment_costs)
+        trips = ops["infrastructure"]["trips"]
+        assert sum(t["energy"]["eur"] for t in trips) == pytest.approx(
+            per_cycle, rel=REL_TOL
+        )
+        for trip in trips:
+            assert trip["energy"]["kwh"] > 0
+            for country in trip["energy"]["countries"]:
+                assert country["price_eur"] + country["catenary_eur"] == pytest.approx(
+                    country["eur"], abs=0.02
+                )
+                assert "tariff" in country
+                assert country["tariff"]["day_eur_kwh"] > 0
+
+    def test_stations_are_every_call_and_sum_to_the_leaf(self, built):
+        result, _, ops = built
+        per_cycle = sum(c.station_charge_eur for c in result.stop_costs)
+        trips = ops["infrastructure"]["trips"]
+        assert sum(t["stations"]["eur"] for t in trips) == pytest.approx(
+            per_cycle, rel=REL_TOL
+        )
+        assert sum(len(t["stations"]["calls"]) for t in trips) == len(result.stop_costs)
+        for trip in trips:
+            for call in trip["stations"]["calls"]:
+                assert call["stop_name"]
+                assert len(call["country_code"]) == 2
+                # Provenance travels with the figure: whether the charge is
+                # the stop's own or the global default, and its category.
+                assert isinstance(call["defaulted"], bool)
+                assert "category" in call
+
+    def test_every_figure_says_whether_it_is_a_default(self, built):
+        _, _, ops = built
+        for trip in ops["infrastructure"]["trips"]:
+            for country in trip["track_access"]["countries"]:
+                assert isinstance(country["defaulted"], bool)
+            for country in trip["energy"]["countries"]:
+                assert isinstance(country["tariff"]["defaulted"], bool)
+        for p in ops["infrastructure"]["parkings"]:
+            assert isinstance(p["defaulted"], bool)
+
+    def test_parkings_are_per_location_and_sum_to_the_leaf(self, built):
+        result, _, ops = built
+        parkings = ops["infrastructure"]["parkings"]
+        assert len(parkings) == len(result.parking_costs)
+        assert sum(p["eur_per_operating_day"] for p in parkings) == pytest.approx(
+            sum(p.parking_eur for p in result.parking_costs), rel=REL_TOL
+        )
+        for p in parkings:
+            assert p["facility_eur"] + p["hotel_power_eur"] == pytest.approx(
+                p["eur_per_operating_day"], abs=0.02
+            )
+            assert p["basis"]
+
+    def test_without_the_tracks_the_tariff_is_simply_absent(
+        self, built, loader, route_berlin_dresden_wien
+    ):
+        """A caller that has no track infrastructure to hand still gets the
+        kWh and the euros — only the tariff fields are missing."""
+        from models.evaluation.operations import build_operations
+        from api.helpers.route_serialize import route_from_dict
+
+        result, _, _ = built
+        scenario_id = route_berlin_dresden_wien["scenario_id"]
+        route, _ = route_from_dict(
+            route_berlin_dresden_wien, loader, scenario_id=scenario_id
+        )
+        ops = build_operations(route, result)
+        for trip in ops["infrastructure"]["trips"]:
+            for country in trip["energy"]["countries"]:
+                assert "tariff" not in country
+                assert country["kwh"] > 0

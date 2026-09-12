@@ -54,6 +54,16 @@ from models.energy.model import (
     ENERGY_MODEL_DESCRIPTION,
     ENERGY_FORMULAS,
 )
+from models.demand.model import (
+    DEMAND_MODEL_DESCRIPTION,
+    DEMAND_MODEL_VERSION,
+    FARE_CLASS_MAINS,
+    STOPGAP_CATERING_EUR_PER_PAX_BY_CLASS,
+    STOPGAP_FARE_PER_KM_BY_CLASS,
+    STOPGAP_FARE_PER_PAX_BY_CLASS,
+    STOPGAP_SERVICES_EUR_PER_PAX_BY_CLASS,
+    STOPGAP_UTILIZATION_PER,
+)
 from models.emissions.model import (
     EMISSION_FACTORS,
     EMISSIONS_MODEL_DESCRIPTION,
@@ -116,6 +126,8 @@ def breakdown_to_dict(b: Breakdown) -> dict:
         },
         "revenue": {
             "ticket_revenue_eur": b.revenue.ticket_revenue_eur,
+            "services_revenue_eur": b.revenue.services_revenue_eur,
+            "catering_contribution_eur": b.revenue.catering_contribution_eur,
             "total_eur": b.revenue.total_eur,
         },
         "margin": {
@@ -553,6 +565,8 @@ EVALUATION_OUTPUT_FIELDS: frozenset[str] = frozenset(
         "station_charge_eur",
         "parking_eur",
         "ticket_revenue_eur",
+        "services_revenue_eur",
+        "catering_contribution_eur",
         "ebit_margin_eur",
         "operator_variable_total_eur",
         "operator_fixed_total_eur",
@@ -610,7 +624,13 @@ def models_to_dict() -> dict:
     model is a set of sourced per-mode constants (decision 24), not
     calculation steps — these are the per-mode reference values the
     frontend renders next to a proposal's night-train
-    co2_g_per_pax_km."""
+    co2_g_per_pax_km.
+
+    The demand entry carries "defaults" for the same kind of reason: the
+    stopgap model is neither steps nor sourced constants but overridable
+    standard values, and CALC 0.9.27 made the fares among them a request
+    field. Three shapes, one rule — every entry has version, description,
+    and exactly one of formulas / factors / defaults."""
     return {
         "route_builder": {
             "version": ROUTE_BUILDER_VERSION,
@@ -626,6 +646,36 @@ def models_to_dict() -> dict:
             "version": CALC_VERSION,
             "description": CALC_MODEL_DESCRIPTION,
             "formulas": _formulas_to_dict(CALC_FORMULAS),
+        },
+        "demand": {
+            "version": DEMAND_MODEL_VERSION,
+            "description": DEMAND_MODEL_DESCRIPTION,
+            # "defaults" rather than "formulas" or "factors": the stopgap
+            # demand model has no calculation steps to expose and no sourced
+            # factor table — it has standard values a request may override.
+            # The pricing panel reads fares_eur_per_km from here so it never
+            # hard-codes them. Fare classes only; Catering cannot be priced.
+            "defaults": {
+                "fares_eur_per_km": {
+                    k: STOPGAP_FARE_PER_KM_BY_CLASS[k] for k in FARE_CLASS_MAINS
+                },
+                # The three per-passenger tariff parts, each per class
+                # (CALC 0.9.30). The fixed fare joins the per-km rates above
+                # as the base fare; services are ordinary ticket revenue;
+                # catering is signed and already net of its own costs.
+                "fares_eur_per_pax": {
+                    k: STOPGAP_FARE_PER_PAX_BY_CLASS[k] for k in FARE_CLASS_MAINS
+                },
+                "services_eur_per_pax": {
+                    k: STOPGAP_SERVICES_EUR_PER_PAX_BY_CLASS[k]
+                    for k in FARE_CLASS_MAINS
+                },
+                "catering_eur_per_pax": {
+                    k: STOPGAP_CATERING_EUR_PER_PAX_BY_CLASS[k]
+                    for k in FARE_CLASS_MAINS
+                },
+                "utilization_per": STOPGAP_UTILIZATION_PER,
+            },
         },
         "emissions": {
             "version": EMISSIONS_MODEL_VERSION,

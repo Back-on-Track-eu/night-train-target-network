@@ -266,6 +266,12 @@ def build_or_load_family(body: dict) -> dict:
             timetable_mode=request["timetable_mode"],
             fixed_night_interval=request["fixed_night_interval"],
             schedule_mode=request["schedule_mode"],
+            schedule=request["schedule"],
+            min_turnaround_min=request["min_turnaround_min"],
+            fares_eur_per_km=request["fares_eur_per_km"],
+            fares_eur_per_pax=request["fares_eur_per_pax"],
+            services_eur_per_pax=request["services_eur_per_pax"],
+            catering_eur_per_pax=request["catering_eur_per_pax"],
             routing_mode=request["routing_mode"],
             auto_stop_addition=request["auto_stop_addition"],
             expert_timetable=expert_timetable_from_dict(request["expert_timetable"]),
@@ -319,4 +325,7 @@ def member_views(
         "auto_stop_addition": "off",
     }
     payload, _ = compute_member(body, measures=measure_set)
-    return {"views": payload["evaluation"]["views"]}
+    return {
+        "views": payload["evaluation"]["views"],
+        "operations": payload["evaluation"]["operations"],
+    }

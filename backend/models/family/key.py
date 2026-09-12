@@ -9,7 +9,10 @@ document_cache.py). What goes into the key is therefore exactly what can
 change a member's numbers:
 
   - the resolved request: stops and every HOW field (timetable_mode,
-    fixed_night_interval, schedule_mode, routing_mode, auto_stop_addition,
+    fixed_night_interval, schedule_mode, schedule, min_turnaround_min,
+    fares_eur_per_km, fares_eur_per_pax, services_eur_per_pax,
+    catering_eur_per_pax, routing_mode,
+    auto_stop_addition,
     the canonicalised expert_timetable) — as api/helpers/member_compute.
     py resolves it, so an omitted field and its explicit default hash
     alike;
@@ -47,6 +50,12 @@ REQUEST_KEY_FIELDS = (
     "timetable_mode",
     "fixed_night_interval",
     "schedule_mode",
+    "schedule",
+    "min_turnaround_min",
+    "fares_eur_per_km",
+    "fares_eur_per_pax",
+    "services_eur_per_pax",
+    "catering_eur_per_pax",
     "routing_mode",
     "auto_stop_addition",
     "expert_timetable",

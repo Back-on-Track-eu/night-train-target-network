@@ -22,6 +22,7 @@ def distribute_demand(
     route: Route,
     utilization_per: float,
     fare_per_km_by_class: dict[str, float],
+    fare_per_pax_by_class: dict[str, float] | None = None,
 ) -> Route:
     """
     Proxy demand model: distributes uniform demand across all valid OD pairs
@@ -37,9 +38,14 @@ def distribute_demand(
       destination in the trip's stop sequence. Stops that are boarding-only
       (e.g. pre-midnight city stops) cannot be destinations; stops that are
       alighting-only (e.g. early-morning terminus) cannot be origins.
-    - avg_price per OD pair is derived as fare_per_km_by_class[class] ×
+    - avg_price per OD pair is the two-part base fare (DEMAND 0.0.4):
+      fare_per_pax_by_class[class] + fare_per_km_by_class[class] ×
       distance_km between origin and destination stop (sum of segment
-      distances between those stop indices in the outbound trip).
+      distances between those stop indices in the outbound trip). A berth
+      has a price of admission a short journey pays as surely as a long
+      one, so distance alone made short OD pairs implausibly cheap.
+      fare_per_pax_by_class=None keeps the pre-0.0.4 behaviour (no fixed
+      part) for callers that predate it.
     - places_sold per OD pair (annual) = floor(
           composition_places_by_class[class] × utilization_per
           / n_valid_od_pairs_for_class
@@ -85,7 +91,10 @@ def distribute_demand(
             for class_main, total_places in places_by_class.items():
                 fare_per_km = fare_per_km_by_class.get(class_main, 0.0)
                 n_pairs = len(valid_pairs)
-                if n_pairs == 0 or fare_per_km == 0.0:
+                fare_per_pax = (fare_per_pax_by_class or {}).get(class_main, 0.0)
+                # A class priced at nothing on BOTH terms sells nothing; one
+                # priced only per passenger still does.
+                if n_pairs == 0 or (fare_per_km == 0.0 and fare_per_pax == 0.0):
                     continue
 
                 # Annual places sold per OD pair: distribute uniformly.
@@ -98,7 +107,7 @@ def distribute_demand(
                     origin = stops[origin_idx]
                     destination = stops[dest_idx]
                     distance_km = cumulative_km[dest_idx] - cumulative_km[origin_idx]
-                    avg_price = fare_per_km * distance_km
+                    avg_price = fare_per_pax + fare_per_km * distance_km
 
                     od_pairs.append(
                         ODPair(

@@ -44,6 +44,7 @@ from __future__ import annotations
 
 from adapters.proposal.id_prefix import rewrite_id_prefix
 from adapters.proposal.projection import route_fingerprint
+from models.evaluation.operations import build_operations
 from models.evaluation.summary import build_summary_row
 from models.route.routing.gauge import GaugeMismatchError
 from models.route.routing.rail_router import RailRoutingError
@@ -77,10 +78,18 @@ from models.route.timetable import (
     VALID_TIMETABLE_MODES,
 )
 from models.route.routing.rail_router import VALID_ROUTING_MODES
+from models.demand.model import (
+    FARE_CLASS_MAINS,
+    resolve_catering,
+    resolve_fares,
+    resolve_fares_per_pax,
+    resolve_services,
+)
 from models.route.model import (
     DEFAULT_AUTO_STOP_ADDITION,
     DEFAULT_COMPOSITION_ID,
     DEFAULT_ROUTING_MODE,
+    DEFAULT_MIN_TURNAROUND_MIN,
     DEFAULT_SCHEDULE_MODE,
     DEFAULT_TIMETABLE_MODE,
     NEUTRAL_PROPOSAL_ID,
@@ -182,6 +191,18 @@ def validate_how_fields(body: dict, stops) -> list[str]:
         errors.append(
             f"'schedule_mode' = '{schedule_mode}' is invalid. Must be one of: {sorted(VALID_SCHEDULE_MODES)}."
         )
+    errors.extend(validate_schedule(schedule_mode, body.get("schedule")))
+    turnaround = body.get("min_turnaround_min", DEFAULT_MIN_TURNAROUND_MIN)
+    if (
+        not isinstance(turnaround, int)
+        or isinstance(turnaround, bool)
+        or turnaround < 0
+    ):
+        errors.append("'min_turnaround_min' must be a non-negative integer (minutes).")
+    errors.extend(validate_fares(body.get("fares_eur_per_km")))
+    errors.extend(validate_fares_per_pax(body.get("fares_eur_per_pax")))
+    errors.extend(validate_services(body.get("services_eur_per_pax")))
+    errors.extend(validate_catering(body.get("catering_eur_per_pax")))
 
     routing_mode = body.get("routing_mode", DEFAULT_ROUTING_MODE)
     if routing_mode not in VALID_ROUTING_MODES:
@@ -440,6 +461,143 @@ def canonical_request_hash(resolved_request: dict, measure_set_id: int) -> str:
     )
 
 
+MONTHS = tuple(str(m) for m in range(1, 13))
+
+
+def validate_schedule(schedule_mode: str, schedule) -> list[str]:
+    """The `schedule` block: required with schedule_mode 'custom', rejected
+    with any other mode. Twelve month keys, each 0..7 days a week, and at
+    least one month running — a train that never runs has no evaluation."""
+    if schedule_mode != "custom":
+        return (
+            ["'schedule' is only allowed with schedule_mode 'custom'."]
+            if schedule
+            else []
+        )
+    if not isinstance(schedule, dict):
+        return ["'schedule' must be an object of month → days per week."]
+    errors = []
+    keys = {str(k) for k in schedule}
+    if keys != set(MONTHS):
+        errors.append("'schedule' must carry exactly the months '1'..'12'.")
+    for k, v in schedule.items():
+        if isinstance(v, bool) or not isinstance(v, int) or not 0 <= v <= 7:
+            errors.append(f"'schedule[{k}]' must be an integer 0..7 (days per week).")
+    if not errors and not any(int(v) > 0 for v in schedule.values()):
+        errors.append("'schedule' must have at least one month with days > 0.")
+    return errors
+
+
+def normalize_schedule(schedule_mode: str, schedule) -> dict | None:
+    """String month keys in calendar order, or None for a mode that does
+    not read the block — so the echo, and therefore the family key, is the
+    same however the client spelled it."""
+    if schedule_mode != "custom" or not isinstance(schedule, dict):
+        return None
+    return {m: int(schedule[m] if m in schedule else schedule[int(m)]) for m in MONTHS}
+
+
+def validate_fares(fares) -> list[str]:
+    """`fares_eur_per_km`: an object of class_main → €/km, only the four
+    fare classes, each a non-negative number. Partial is fine — the rest
+    take the defaults."""
+    if fares is None:
+        return []
+    if not isinstance(fares, dict):
+        return ["'fares_eur_per_km' must be an object of class_main → EUR per km."]
+    errors = []
+    unknown = sorted(set(fares) - set(FARE_CLASS_MAINS))
+    if unknown:
+        errors.append(
+            f"'fares_eur_per_km' has unknown classes {unknown}; "
+            f"allowed: {list(FARE_CLASS_MAINS)}."
+        )
+    for k, v in fares.items():
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or v < 0:
+            errors.append(f"'fares_eur_per_km[{k}]' must be a non-negative number.")
+    return errors
+
+
+def _validate_per_class(value, field: str, *, signed: bool) -> list[str]:
+    """The shape the three per-passenger tariff parts share: an object of
+    class_main → EUR, only the four fare classes, partial allowed.
+
+    `signed` is the one difference between them, and it is a modelling
+    statement rather than a nicety: catering may be negative because a
+    restaurant can be carried by the tickets it helps sell; a base fare and
+    a bicycle charge cannot, because nobody is paid to travel."""
+    if value is None:
+        return []
+    if not isinstance(value, dict):
+        # Until CALC 0.9.30 catering_eur_per_pax was a single number for the
+        # whole train. Say so, rather than letting a stored request fail as a
+        # bare type error.
+        if field == "catering_eur_per_pax" and isinstance(value, (int, float)):
+            return [
+                "'catering_eur_per_pax' is now an object of class_main → EUR "
+                "per passenger (CALC 0.9.30), not a single number: the classes "
+                "differ in what their base fare already includes."
+            ]
+        return [f"'{field}' must be an object of class_main → EUR per passenger."]
+    errors = []
+    unknown = sorted(set(value) - set(FARE_CLASS_MAINS))
+    if unknown:
+        errors.append(
+            f"'{field}' has unknown classes {unknown}; "
+            f"allowed: {list(FARE_CLASS_MAINS)}."
+        )
+    for k, v in value.items():
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            errors.append(f"'{field}[{k}]' must be a number.")
+        elif not signed and v < 0:
+            errors.append(f"'{field}[{k}]' must be a non-negative number.")
+    return errors
+
+
+def validate_catering(catering) -> list[str]:
+    """`catering_eur_per_pax`: class_main → EUR per passenger, either sign."""
+    return _validate_per_class(catering, "catering_eur_per_pax", signed=True)
+
+
+def validate_services(services) -> list[str]:
+    """`services_eur_per_pax`: class_main → EUR per passenger, non-negative.
+    It is the fare for carrying a bike, not a net figure."""
+    return _validate_per_class(services, "services_eur_per_pax", signed=False)
+
+
+def validate_fares_per_pax(fares) -> list[str]:
+    """`fares_eur_per_pax`: the fixed part of the base fare, non-negative."""
+    return _validate_per_class(fares, "fares_eur_per_pax", signed=False)
+
+
+def _normalize_per_class(value, resolver) -> dict[str, float]:
+    """The complete resolved map in FARE_CLASS_MAINS order, rounded to the
+    cent — what the echo carries and the family key hashes. Ordering and
+    rounding together keep an omitted field, a partial override and an
+    explicit full default hashing alike."""
+    resolved = resolver(value if isinstance(value, dict) else None)
+    return {k: round(float(resolved[k]), 2) for k in FARE_CLASS_MAINS}
+
+
+def normalize_catering(catering) -> dict[str, float]:
+    return _normalize_per_class(catering, resolve_catering)
+
+
+def normalize_services(services) -> dict[str, float]:
+    return _normalize_per_class(services, resolve_services)
+
+
+def normalize_fares_per_pax(fares) -> dict[str, float]:
+    return _normalize_per_class(fares, resolve_fares_per_pax)
+
+
+def normalize_fares(fares) -> dict[str, float]:
+    """The complete resolved fare dict in FARE_CLASS_MAINS order — what the
+    echo carries and the family key hashes."""
+    resolved = resolve_fares(fares if isinstance(fares, dict) else None)
+    return {k: round(float(resolved[k]), 4) for k in FARE_CLASS_MAINS}
+
+
 def resolve_how_fields(body: dict) -> dict:
     """The HOW fields with defaults applied, in echo order — the part of
     the resolved request that does not name a scenario or composition,
@@ -451,6 +609,25 @@ def resolve_how_fields(body: dict) -> dict:
         "timetable_mode": body.get("timetable_mode", DEFAULT_TIMETABLE_MODE),
         "fixed_night_interval": body.get("fixed_night_interval"),
         "schedule_mode": body.get("schedule_mode", DEFAULT_SCHEDULE_MODE),
+        # Canonicalised to string month keys so a posted {1: 7} and {"1": 7}
+        # hash the same; None unless the mode reads it, for the same reason
+        # expert_timetable is always present.
+        "schedule": normalize_schedule(
+            body.get("schedule_mode", DEFAULT_SCHEDULE_MODE), body.get("schedule")
+        ),
+        "min_turnaround_min": int(
+            body.get("min_turnaround_min", DEFAULT_MIN_TURNAROUND_MIN)
+        ),
+        # Always the complete, resolved dict — defaults filled in and keys
+        # in a fixed order — so a request naming one class and a request
+        # spelling out all four with the same values hash the same.
+        "fares_eur_per_km": normalize_fares(body.get("fares_eur_per_km")),
+        # The three per-passenger tariff parts, each per class and each
+        # resolved here like the per-km fares, so the key cannot tell an
+        # omitted field from a posted default (models/demand/model.py).
+        "fares_eur_per_pax": normalize_fares_per_pax(body.get("fares_eur_per_pax")),
+        "services_eur_per_pax": normalize_services(body.get("services_eur_per_pax")),
+        "catering_eur_per_pax": normalize_catering(body.get("catering_eur_per_pax")),
         "routing_mode": body.get("routing_mode", DEFAULT_ROUTING_MODE),
         "auto_stop_addition": body.get(
             "auto_stop_addition", DEFAULT_AUTO_STOP_ADDITION
@@ -570,6 +747,12 @@ def compute_member(
         timetable_mode=resolved_request["timetable_mode"],
         fixed_night_interval=resolved_request["fixed_night_interval"],
         schedule_mode=resolved_request["schedule_mode"],
+        schedule=resolved_request["schedule"],
+        min_turnaround_min=resolved_request["min_turnaround_min"],
+        fares_eur_per_km=resolved_request["fares_eur_per_km"],
+        fares_eur_per_pax=resolved_request["fares_eur_per_pax"],
+        services_eur_per_pax=resolved_request["services_eur_per_pax"],
+        catering_eur_per_pax=resolved_request["catering_eur_per_pax"],
         routing_mode=resolved_request["routing_mode"],
         auto_stop_addition=resolved_request["auto_stop_addition"],
         expert_timetable=expert_timetable_from_dict(
@@ -607,7 +790,18 @@ def compute_member(
     # Views only: the models registry is GET /api/models and the
     # parameters a member was priced from are GET /api/params/* for its
     # scenario — neither belongs in every member (D11).
-    evaluation = {"views": views_to_dict(result.views, result.route)}
+    evaluation = {
+        "views": views_to_dict(result.views, result.route),
+        # CALC 0.9.28: the physical side of the same evaluation — rakes,
+        # loco hours, people on board — read from the records the cost
+        # model priced, so it cannot disagree with the breakdown.
+        "operations": build_operations(
+            result.route,
+            result.evaluation_result,
+            result.provenance.tracks,
+            result.provenance.stop_infra,
+        ),
+    }
     # §5.4 gallery KPIs, derived from the exact route/evaluation dicts
     # this response carries — the same build_summary_row() the publish
     # projection uses, so the calc "summary" and a published gallery row

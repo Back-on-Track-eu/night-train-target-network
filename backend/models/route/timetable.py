@@ -112,7 +112,8 @@ from dataclasses import dataclass
 
 from models.params import Composition, TrackInfraCollection, StopInfraCollection
 from models.route.trip import Segment, StopType, TimetableWarning
-from models.route.route import Schedule, SeasonalSchedule, Season, Frequency
+from models.route.model import DEFAULT_MIN_TURNAROUND_MIN
+from models.route.route import Schedule
 from models.route.routing.dynamics import stop_time_loss_s
 from models.route.routing.gauge import resolve_trip_gauge, stop_supports_gauge
 from models.route.routing.rail_router import (
@@ -682,18 +683,74 @@ def classify_for_departure(
 # =============================================================================
 
 
-def always_daily_schedule() -> Schedule:
-    """Implements schedule_mode='alwaysDaily': daily frequency in both
-    seasons, regardless of actual demand."""
+def always_daily_schedule(min_turnaround_min: int) -> Schedule:
+    """Implements schedule_mode='alwaysDaily': seven days a week in every
+    month, regardless of actual demand."""
     return Schedule(
-        seasonal_schedules=[
-            SeasonalSchedule(season=Season.SUMMER, frequency=Frequency.DAILY),
-            SeasonalSchedule(season=Season.WINTER, frequency=Frequency.DAILY),
-        ]
+        days_per_week_by_month={m: 7 for m in range(1, 13)},
+        min_turnaround_min=min_turnaround_min,
     )
 
 
-VALID_SCHEDULE_MODES = frozenset({"alwaysDaily"})
+def custom_schedule(days_per_week_by_month: dict, min_turnaround_min: int) -> Schedule:
+    """Implements schedule_mode='custom': the caller's days per week for
+    each month, already validated at the API boundary
+    (api/helpers/member_compute.py validate_schedule)."""
+    return Schedule(
+        days_per_week_by_month=days_per_week_by_month,
+        min_turnaround_min=min_turnaround_min,
+    )
+
+
+# Reading a schedule back from a stored payload — here rather than in
+# api/helpers/route_serialize.py because models/evaluation/summary.py needs
+# the same widening and models/ never imports from api/.
+#
+# Two-season legacy shape. ROUTE_BUILDER < 0.9.35 stored a schedule as
+# summer/winter × daily/three_per_week; the month map replaced it. Written
+# alongside the month map for readers that still expect it, and read when a
+# stored payload has nothing else — SUMMER is April–September.
+_LEGACY_SUMMER_MONTHS = frozenset(range(4, 10))
+
+
+def legacy_seasonal_schedules(schedule: Schedule) -> list[dict]:
+    def frequency(months: frozenset[int]) -> str:
+        peak = max(schedule.days_per_week(m) for m in months)
+        return "daily" if peak >= 7 else "three_per_week"
+
+    return [
+        {"season": "summer", "frequency": frequency(_LEGACY_SUMMER_MONTHS)},
+        {
+            "season": "winter",
+            "frequency": frequency(frozenset(range(1, 13)) - _LEGACY_SUMMER_MONTHS),
+        },
+    ]
+
+
+def schedule_from_dict(data: dict) -> Schedule:
+    """Either shape. The month map wins when present; a legacy two-season
+    block is widened onto its months (daily → 7, three_per_week → 3)."""
+    turnaround = int(data.get("min_turnaround_min", DEFAULT_MIN_TURNAROUND_MIN))
+    if "days_per_week_by_month" in data:
+        return Schedule(
+            days_per_week_by_month=data["days_per_week_by_month"],
+            min_turnaround_min=turnaround,
+        )
+    by_season = {ss["season"]: ss["frequency"] for ss in data["seasonal_schedules"]}
+    days = {"daily": 7, "three_per_week": 3}
+    return Schedule(
+        days_per_week_by_month={
+            m: days.get(
+                by_season.get("summer" if m in _LEGACY_SUMMER_MONTHS else "winter", ""),
+                0,
+            )
+            for m in range(1, 13)
+        },
+        min_turnaround_min=turnaround,
+    )
+
+
+VALID_SCHEDULE_MODES = frozenset({"alwaysDaily", "custom"})
 """Single source of truth for allowed schedule_mode strings — read by both
 the compute request validation (api/helpers/member_compute.py) and route_factory.plan_route()'s switch.
 Reserved: a future demand-aware mode can be added here (new function + this

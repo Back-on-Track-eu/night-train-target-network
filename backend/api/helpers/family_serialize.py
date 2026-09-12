@@ -61,7 +61,14 @@ _NEUTRAL_PREFIX = f"P{NEUTRAL_PROPOSAL_ID}_V{NEUTRAL_PROPOSAL_VERSION}_"
 #   1  WP18 B2a, first shape
 #   2  stats.context nested — the build context's counters collided with
 #      the document's own n_routes
-FAMILY_DOCUMENT_FORMAT = 2
+#   3  the summary row gains departures_per_year and trainsets_physical
+#      (CALC 0.9.28)
+#   4  the summary row gains catering_contribution_eur and
+#      passengers_per_year (CALC 0.9.29) — the row is part of the stored
+#      document, so its shape has to invalidate the cache
+#   5  the summary row gains services_revenue_eur and the tariff becomes
+#      three parts per class (CALC 0.9.30)
+FAMILY_DOCUMENT_FORMAT = 5
 
 
 def route_ref(scenario_id: int, composition_id: str) -> str:

@@ -36,9 +36,9 @@ Public interface:
 
 from __future__ import annotations
 
+from models.route.route import cycle_days_between, trainsets_for_cycle
+from models.route.timetable import schedule_from_dict
 from models.emissions.model import EMISSION_FACTORS, MODE_SHIFT_SHARES
-from models.route.model import WEEKS_PER_SEASON
-from models.route.route import Frequency
 
 # Placeholder demand-KPI assumption (§8.1: "deterministic fakes derived
 # from route metrics ... plausible orders of magnitude for UI
@@ -57,6 +57,17 @@ def ordered_stops(trip: dict) -> list[dict]:
     return [segments[0]["from_stop"]] + [seg["to_stop"] for seg in segments]
 
 
+def _terminal_times(trip: dict) -> tuple[int, int]:
+    """(departure at the first stop, arrival at the last) of a full-route
+    trip dict — the shape every build_summary_row() caller hands in, and
+    the one ordered_stops() below already assumes."""
+    first = trip["segments"][0]["from_stop"]
+    last = trip["segments"][-1]["to_stop"]
+    dep = first.get("departure_time_min") or 0
+    arr = last.get("arrival_time_min") or dep
+    return int(dep), int(arr)
+
+
 def build_summary_row(route: dict, evaluation: dict) -> dict:
     """The §5.4 gallery-KPI columns for one (route, evaluation) pair —
     exactly the shape a member (and each family member) carries as "summary" and
@@ -66,12 +77,15 @@ def build_summary_row(route: dict, evaluation: dict) -> dict:
     metrics = _route_metrics(route)
     financials = _financial_kpis(evaluation)
     supply = _supply_kpis(route)
-    annual_revenue_eur = evaluation["views"]["route"]["data"]["per_year"]["all"][
-        "total_revenue_eur"
-    ]
+    # Ticket revenue, not the total: the placeholder trip count divides by
+    # an average FARE, so a catering contribution in the numerator would
+    # invent passengers who bought nothing.
+    annual_ticket_revenue_eur = evaluation["views"]["route"]["data"]["per_year"]["all"][
+        "revenue"
+    ]["ticket_revenue_eur"]
     demand = _placeholder_demand_kpis(
         metrics["total_distance_km"],
-        annual_revenue_eur,
+        annual_ticket_revenue_eur,
         financials["subsidy_eur_per_year"],
     )
     return {
@@ -169,6 +183,15 @@ def _financial_kpis(evaluation: dict) -> dict:
     per_year = route_data["per_year"]["all"]
     net_eur_per_year = round(per_year["net_eur"], 2)
     return {
+        # The two non-accommodation revenue leaves, both already inside
+        # net_eur/total_revenue_eur, reported on their own so a panel can
+        # show what each contributed without re-deriving it. Services are
+        # ordinary ticket revenue; catering is signed and already net
+        # (CALC 0.9.30).
+        "services_revenue_eur": round(per_year["revenue"]["services_revenue_eur"], 2),
+        "catering_contribution_eur": round(
+            per_year["revenue"]["catering_contribution_eur"], 2
+        ),
         "cost_eur_per_train_km": round(per_train_km["total_cost_eur"], 2),
         "revenue_eur_per_train_km": round(per_train_km["total_revenue_eur"], 2),
         "margin_eur_per_train_km": round(per_train_km["net_eur"], 2),
@@ -181,18 +204,46 @@ def _supply_kpis(route: dict) -> dict:
     """The annual supply side the per-unit normalisations divide by
     (models/evaluation/views.py's normalise_per_train_km /
     normalise_per_available_place_km, re-derived here from the route
-    dict): operating days from the seasonal schedule, train-km and
+    dict): operating days from the schedule, train-km and
     capacity place-km over every trip of every pair × operating days,
     and sold place-km from the OD loads (places_sold is already annual).
     Exposed so a comparison table can show €/place-km and utilisation
     per composition without the full views block."""
-    operating_days = sum(
-        Frequency(ss["frequency"]).days_per_week * WEEKS_PER_SEASON
-        for ss in route["schedule"]["seasonal_schedules"]
+    # Through the domain object so the legacy two-season shape a stored
+    # payload may still carry is widened the same way route_from_dict does.
+    schedule = schedule_from_dict(route["schedule"])
+    operating_days = schedule.operating_days_per_year
+    # ROUTE_BUILDER 0.9.35 fleet rule, from the dict: each pair's terminal
+    # times are on its first and last segment. The route's fleet is the
+    # busiest pair's.
+    trainsets = max(
+        (
+            trainsets_for_cycle(
+                cycle_days_between(
+                    *_terminal_times(pair["outbound"]),
+                    *_terminal_times(pair["return_trip"]),
+                    schedule.min_turnaround_min,
+                ),
+                schedule,
+            )
+            for pair in route["trip_pairs"]
+        ),
+        default=0,
     )
+    if not schedule.is_operating:
+        trainsets = 0
     cycle_km = 0.0
     cycle_place_km = 0.0
     sold_place_km = 0.0
+    # Counted over every OD pair unconditionally, unlike sold_place_km
+    # below, which needs both of a pair's stops on the trip to have a
+    # distance: a ticket is a passenger whether or not its ride range
+    # resolves.
+    passengers = sum(
+        od["places_sold"]
+        for pair in route["trip_pairs"]
+        for od in pair.get("od_pairs", [])
+    )
     for pair in route["trip_pairs"]:
         places = sum(pair["composition"]["places_by_class"].values())
         for trip in (pair["outbound"], pair["return_trip"]):
@@ -213,9 +264,15 @@ def _supply_kpis(route: dict) -> dict:
                 sold_place_km += od["places_sold"] * sum(segment_km[start:end])
     return {
         "operating_days_per_year": operating_days,
+        # Every operating day sees one departure per trip of every pair.
+        "departures_per_year": round(
+            operating_days * sum(2 for _ in route["trip_pairs"])
+        ),
+        "trainsets_physical": trainsets,
         "train_km_per_year": round(cycle_km * operating_days),
         "available_place_km_per_year": round(cycle_place_km * operating_days),
         "sold_place_km_per_year": round(sold_place_km),
+        "passengers_per_year": round(passengers),
     }
 
 

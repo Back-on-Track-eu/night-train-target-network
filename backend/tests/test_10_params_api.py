@@ -515,12 +515,16 @@ class TestModels:
     def test_every_model_carries_version_and_description(self, models_body):
         """Version and description are the two every entry has. What
         comes with them differs by model: a formula registry for the
-        computed ones, an emission-factor table for emissions."""
+        computed ones, an emission-factor table for emissions, and (CALC
+        0.9.27) overridable standard values for the stopgap demand model,
+        which has neither steps nor sourced constants to show."""
         for name, model in models_body["models"].items():
             assert model.get("version"), f"{name} has no version"
             assert model.get("description"), f"{name} has no description"
-            assert "formulas" in model or "factors" in model, (
-                f"{name} carries neither formulas nor factors"
+            kinds = {"formulas", "factors", "defaults"} & set(model)
+            assert len(kinds) == 1, (
+                f"{name} must carry exactly one of formulas / factors / "
+                f"defaults, got {sorted(kinds) or 'none'}"
             )
 
     def test_the_evaluation_model_is_present_with_formulas(self, models_body):

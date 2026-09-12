@@ -32,11 +32,15 @@ Public interface:
 
 from __future__ import annotations
 
+from models.route.model import DEFAULT_MIN_TURNAROUND_MIN
 from dataclasses import dataclass
 
 from models.demand.stopgap import distribute_demand
 from models.demand.model import (
-    STOPGAP_FARE_PER_KM_BY_CLASS,
+    resolve_catering,
+    resolve_fares,
+    resolve_fares_per_pax,
+    resolve_services,
     STOPGAP_UTILIZATION_PER,
 )
 from models.evaluation.calc import EvaluationResult, evaluate_route
@@ -80,6 +84,8 @@ def evaluate_and_build_views(
     stop_infra: StopInfraCollection,
     passages: PassageChargeCollection,
     measures: MeasureSet = NO_MEASURES,
+    catering_eur_per_pax: dict | None = None,
+    services_eur_per_pax: dict | None = None,
 ) -> tuple[EvaluationResult, ViewsBundle]:
     """Evaluate an already-built, already-demand-populated Route and build
     every breakdown view — the post-routing half of run_compute(), exposed
@@ -91,13 +97,21 @@ def evaluate_and_build_views(
     implicitly — and what a family member gets for every scenario variant
     until WP17 seeds a second set. The one thing measure sets multiply is
     this half of the pipeline: a variant re-evaluates a route it does not
-    rebuild."""
+    rebuild.
+
+    catering_eur_per_pax / services_eur_per_pax: the two per-class tariff
+    parts that ride on passengers rather than on distance
+    (models/demand/model.py). None takes the demand model's own standard
+    values, for the same reason measures defaults to NO_MEASURES.
+    """
     result = evaluate_route(
         route=route,
         tracks=tracks,
         stop_infra=stop_infra,
         passages=passages,
         measures=measures,
+        catering_eur_per_pax=resolve_catering(catering_eur_per_pax),
+        services_eur_per_pax=resolve_services(services_eur_per_pax),
     )
     return result, build_all_views(route, result)
 
@@ -112,6 +126,12 @@ def run_compute(
     timetable_mode: str,
     fixed_night_interval: list[str] | None,
     schedule_mode: str,
+    schedule: dict | None = None,
+    min_turnaround_min: int = DEFAULT_MIN_TURNAROUND_MIN,
+    fares_eur_per_km: dict | None = None,
+    fares_eur_per_pax: dict | None = None,
+    catering_eur_per_pax: dict | None = None,
+    services_eur_per_pax: dict | None = None,
     routing_mode: str,
     auto_stop_addition: str,
     loader,
@@ -150,6 +170,8 @@ def run_compute(
         proposal_id=proposal_id,
         proposal_version=proposal_version,
         schedule_mode=schedule_mode,
+        schedule=schedule,
+        min_turnaround_min=min_turnaround_min,
         trip_pair_inputs=[
             TripPairInput(
                 stop_ids=stops,
@@ -171,11 +193,18 @@ def run_compute(
     distribute_demand(
         route,
         utilization_per=STOPGAP_UTILIZATION_PER,
-        fare_per_km_by_class=STOPGAP_FARE_PER_KM_BY_CLASS,
+        fare_per_km_by_class=resolve_fares(fares_eur_per_km),
+        fare_per_pax_by_class=resolve_fares_per_pax(fares_eur_per_pax),
     )
 
     evaluation_result, views = evaluate_and_build_views(
-        route, provenance.tracks, provenance.stop_infra, provenance.passages, measures
+        route,
+        provenance.tracks,
+        provenance.stop_infra,
+        provenance.passages,
+        measures,
+        catering_eur_per_pax,
+        services_eur_per_pax,
     )
 
     return ComputeResult(

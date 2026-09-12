@@ -103,12 +103,22 @@ class TestHitMiss:
 
     def test_miss_on_each_output_changing_field(self, hsr_scenario):
         cached(BASE_REQUEST)
-        # Every field here changes the OUTPUT, so every one must miss.
-        # schedule_mode is absent on purpose: "alwaysDaily" is the only
-        # valid value (models/route/timetable.py VALID_SCHEDULE_MODES), so
-        # there is nothing to vary until a second mode exists.
+        # Every field here changes the OUTPUT, so every one must miss —
+        # including the four HOW fields added in ROUTE_BUILDER 0.9.35 /
+        # CALC 0.9.27 / CALC 0.9.29: a custom schedule, a longer turnaround
+        # (which can change the fleet), a re-priced class, and a catering
+        # contribution that lands in the net result.
         for patch in (
             {"composition_id": "REF-BUD-6"},
+            {
+                "schedule_mode": "custom",
+                "schedule": {str(m): (7 if m != 2 else 0) for m in range(1, 13)},
+            },
+            {"min_turnaround_min": 600},
+            {"fares_eur_per_km": {"Sleeper": 0.25}},
+            {"catering_eur_per_pax": {"Sleeper": -0.80}},
+            {"services_eur_per_pax": {"Seat": 4.50}},
+            {"fares_eur_per_pax": {"Couchette": 25.0}},
             {"routing_mode": "simpleRouting"},
             {"scenario_id": hsr_scenario["scenario_id"]},
             {"auto_stop_addition": "suggest"},

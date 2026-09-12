@@ -67,6 +67,12 @@ class FamilyRequest:
     timetable_mode: str
     fixed_night_interval: list[str] | None
     schedule_mode: str
+    schedule: dict | None
+    min_turnaround_min: int
+    fares_eur_per_km: dict
+    fares_eur_per_pax: dict
+    services_eur_per_pax: dict
+    catering_eur_per_pax: dict
     routing_mode: str
     auto_stop_addition: str
     expert_timetable: ExpertTimetable | None
@@ -158,6 +164,12 @@ def _build_route(
         timetable_mode=request.timetable_mode,
         fixed_night_interval=request.fixed_night_interval,
         schedule_mode=request.schedule_mode,
+        schedule=request.schedule,
+        min_turnaround_min=request.min_turnaround_min,
+        fares_eur_per_km=request.fares_eur_per_km,
+        fares_eur_per_pax=request.fares_eur_per_pax,
+        services_eur_per_pax=request.services_eur_per_pax,
+        catering_eur_per_pax=request.catering_eur_per_pax,
         routing_mode=request.routing_mode,
         auto_stop_addition=auto_stop_addition,
         expert_timetable=request.expert_timetable,
@@ -246,6 +258,8 @@ def run_family(
                     prov.stop_infra,
                     prov.passages,
                     measures,
+                    request.catering_eur_per_pax,
+                    request.services_eur_per_pax,
                 )
             member.route = computed.route
             member.provenance = computed.provenance

@@ -331,7 +331,13 @@ class ProposalRepository:
             "calc_version": prefixed["calc_version"],
             "request": request_echo,
             "route": route_dict,
-            "evaluation": evaluation_full,
+            # The proposal as stored, not as computed: views only, the same
+            # shape GET /api/proposal/<id> serves. A compute response also
+            # carries `operations` (CALC 0.9.28); like the models registry
+            # before it, that is on-demand data — the member views endpoint
+            # — and copying it here would make the publish reply the one
+            # place it appeared alongside a stored proposal.
+            "evaluation": {"views": evaluation_full["views"]},
             "created_at": state["created_at"],
             "updated_at": state["updated_at"],
         }
@@ -766,8 +772,11 @@ class ProposalRepository:
         "stop_ids, "
         "cost_eur_per_train_km, revenue_eur_per_train_km, "
         "margin_eur_per_train_km, net_eur_per_year, subsidy_eur_per_year, "
-        "operating_days_per_year, train_km_per_year, "
+        "services_revenue_eur, catering_contribution_eur, "
+        "operating_days_per_year, departures_per_year, trainsets_physical, "
+        "train_km_per_year, "
         "available_place_km_per_year, sold_place_km_per_year, "
+        "passengers_per_year, "
         "demand_trips_per_year, demand_trip_km_per_year, "
         "shift_air_trips_per_year, shift_air_trip_km_per_year, "
         "shift_car_trips_per_year, shift_car_trip_km_per_year, "
@@ -825,8 +834,11 @@ class ProposalRepository:
         "       country_relations, stop_ids, "
         "       cost_eur_per_train_km, revenue_eur_per_train_km, "
         "       margin_eur_per_train_km, net_eur_per_year, subsidy_eur_per_year, "
-        "       operating_days_per_year, train_km_per_year, "
+        "       services_revenue_eur, catering_contribution_eur, "
+        "       operating_days_per_year, departures_per_year, trainsets_physical, "
+        "       train_km_per_year, "
         "       available_place_km_per_year, sold_place_km_per_year, "
+        "       passengers_per_year, "
         "       demand_trips_per_year, demand_trip_km_per_year, "
         "       shift_air_trips_per_year, shift_air_trip_km_per_year, "
         "       shift_car_trips_per_year, shift_car_trip_km_per_year, "
@@ -851,10 +863,15 @@ class ProposalRepository:
         "       NULL::numeric AS margin_eur_per_train_km, "
         "       NULL::numeric AS net_eur_per_year, "
         "       NULL::numeric AS subsidy_eur_per_year, "
+        "       NULL::numeric AS services_revenue_eur, "
+        "       NULL::numeric AS catering_contribution_eur, "
         "       NULL::smallint AS operating_days_per_year, "
+        "       NULL::integer AS departures_per_year, "
+        "       NULL::smallint AS trainsets_physical, "
         "       NULL::numeric AS train_km_per_year, "
         "       NULL::numeric AS available_place_km_per_year, "
         "       NULL::numeric AS sold_place_km_per_year, "
+        "       NULL::numeric AS passengers_per_year, "
         "       NULL::numeric AS demand_trips_per_year, "
         "       NULL::numeric AS demand_trip_km_per_year, "
         "       NULL::numeric AS shift_air_trips_per_year, "

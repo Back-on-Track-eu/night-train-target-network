@@ -248,6 +248,7 @@ def scenarios_2032(db_cur):
         "infra-2032",
         "infra-2032-hsr",
         "infra-2032-hsr-opt-tt",
+        "infra-2032-opt-tt",
     }, f"Infra 2032 scenarios missing or renamed — got {sorted(rows)}"
     return rows
 

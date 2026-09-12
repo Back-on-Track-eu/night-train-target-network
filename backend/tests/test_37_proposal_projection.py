@@ -113,10 +113,15 @@ class TestSummaryRow:
             "margin_eur_per_train_km",
             "net_eur_per_year",
             "subsidy_eur_per_year",
+            "services_revenue_eur",
+            "catering_contribution_eur",
             "operating_days_per_year",
+            "departures_per_year",
+            "trainsets_physical",
             "train_km_per_year",
             "available_place_km_per_year",
             "sold_place_km_per_year",
+            "passengers_per_year",
             "demand_trips_per_year",
             "demand_trip_km_per_year",
             "shift_air_trips_per_year",
@@ -171,7 +176,12 @@ class TestSummaryRow:
         cost_year = route_data["per_year"]["all"]["total_cost_eur"]
         cost_train_km = route_data["per_train_km"]["all"]["total_cost_eur"]
         cost_place_km = route_data["per_available_place_km"]["all"]["total_cost_eur"]
-        assert row["operating_days_per_year"] in (7 * 52, 3 * 52, 5 * 52)
+        # ROUTE_BUILDER 0.9.35: operating days are counted per calendar
+        # month (days_in_month x days_per_week / 7), not 52 x d, so a daily
+        # service is the evaluation year's day count — 366 in 2032 — and
+        # any schedule lands somewhere in [0, 366]. The exact value is the
+        # schedule's own arithmetic, pinned in test_21.
+        assert 0 < row["operating_days_per_year"] <= 366
         assert row["train_km_per_year"] == pytest.approx(
             cost_year / cost_train_km, rel=1e-3
         )
@@ -252,8 +262,11 @@ class TestSummaryRowSchemaConformance:
                 n_stops, countries, stop_ids, geom_simplified,
                 cost_eur_per_train_km, revenue_eur_per_train_km,
                 margin_eur_per_train_km, net_eur_per_year, subsidy_eur_per_year,
-                operating_days_per_year, train_km_per_year,
+                services_revenue_eur, catering_contribution_eur,
+                operating_days_per_year, departures_per_year, trainsets_physical,
+                train_km_per_year,
                 available_place_km_per_year, sold_place_km_per_year,
+                passengers_per_year,
                 demand_trips_per_year, demand_trip_km_per_year,
                 shift_air_trips_per_year, shift_air_trip_km_per_year,
                 shift_car_trips_per_year, shift_car_trip_km_per_year,
@@ -267,8 +280,11 @@ class TestSummaryRowSchemaConformance:
                 ST_SetSRID(ST_GeomFromGeoJSON(%(geom_simplified)s), 4326),
                 %(cost_eur_per_train_km)s, %(revenue_eur_per_train_km)s,
                 %(margin_eur_per_train_km)s, %(net_eur_per_year)s, %(subsidy_eur_per_year)s,
-                %(operating_days_per_year)s, %(train_km_per_year)s,
+                %(services_revenue_eur)s, %(catering_contribution_eur)s,
+                %(operating_days_per_year)s, %(departures_per_year)s, %(trainsets_physical)s,
+                %(train_km_per_year)s,
                 %(available_place_km_per_year)s, %(sold_place_km_per_year)s,
+                %(passengers_per_year)s,
                 %(demand_trips_per_year)s, %(demand_trip_km_per_year)s,
                 %(shift_air_trips_per_year)s, %(shift_air_trip_km_per_year)s,
                 %(shift_car_trips_per_year)s, %(shift_car_trip_km_per_year)s,

@@ -72,6 +72,10 @@ COMMENT ON COLUMN proposals.shapes.length_km IS 'Total route length derived from
 -- ---------------------------------------------------------------
 -- routes
 -- ---------------------------------------------------------------
+-- schedule_months / min_turnaround_min (ROUTE_BUILDER 0.9.35): the per-month
+-- operating plan. proposals.seasonal_schedules keeps the two-season
+-- projection for readers that still expect it; this is the authoritative
+-- shape, and gtfs_store reads it first.
 CREATE TABLE proposals.routes (
     route_id          TEXT PRIMARY KEY,
     agency_id         TEXT,
@@ -81,9 +85,14 @@ CREATE TABLE proposals.routes (
     route_type        SMALLINT NOT NULL DEFAULT 105,
     route_color       TEXT,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+,
+    schedule_months      JSONB,
+    min_turnaround_min   INTEGER
 );
 
 COMMENT ON TABLE  proposals.routes                IS 'GTFS routes.txt — one row per proposal version route. route_id follows convention P{proposal_id}_V{version}_R{route_index} e.g. P1_V1_R1. route_type 105 = Sleeper Rail Service (GTFS extended HVT code).';
+COMMENT ON COLUMN proposals.routes.schedule_months  IS 'Days per week for each month, {"1": 7, ..., "12": 0} (models/route/route.py Schedule). NULL on rows written before ROUTE_BUILDER 0.9.35 — read seasonal_schedules instead.';
+COMMENT ON COLUMN proposals.routes.min_turnaround_min IS 'Minimum terminal turnaround the fleet was sized with, minutes. NULL before 0.9.35 (default 180).';
 COMMENT ON COLUMN proposals.routes.route_id         IS 'GTFS route identifier. Convention: P{proposal_id}_V{version}_R{route_index} e.g. P1_V1_R1.';
 COMMENT ON COLUMN proposals.routes.agency_id        IS 'GTFS agency_id — nullable; populate on GTFS export from input_params.operators.';
 COMMENT ON COLUMN proposals.routes.route_short_name IS 'Short public name of the route (e.g. train number "NJ 470").';
@@ -493,11 +502,16 @@ CREATE TABLE proposals.proposal_summaries (
     margin_eur_per_train_km     NUMERIC(10, 2) NOT NULL,
     net_eur_per_year            NUMERIC(14, 2) NOT NULL DEFAULT 0,
     subsidy_eur_per_year        NUMERIC(14, 2) NOT NULL,
+    services_revenue_eur        NUMERIC(14, 2) NOT NULL DEFAULT 0,
+    catering_contribution_eur   NUMERIC(14, 2) NOT NULL DEFAULT 0,
 
     operating_days_per_year     SMALLINT NOT NULL DEFAULT 0,
+    departures_per_year         INTEGER NOT NULL DEFAULT 0,
+    trainsets_physical          SMALLINT NOT NULL DEFAULT 0,
     train_km_per_year           NUMERIC(12, 0) NOT NULL DEFAULT 0,
     available_place_km_per_year NUMERIC(16, 0) NOT NULL DEFAULT 0,
     sold_place_km_per_year      NUMERIC(16, 0) NOT NULL DEFAULT 0,
+    passengers_per_year         NUMERIC(12, 0) NOT NULL DEFAULT 0,
 
     demand_trips_per_year       NUMERIC(12, 0),
     demand_trip_km_per_year     NUMERIC(16, 0),
@@ -526,8 +540,13 @@ COMMENT ON COLUMN proposals.proposal_summaries.route_fingerprint      IS 'Route 
 COMMENT ON COLUMN proposals.proposal_summaries.subsidy_eur_per_year   IS 'max(0, -net_eur): gap to target margin. Unit: EUR/year';
 COMMENT ON COLUMN proposals.proposal_summaries.net_eur_per_year       IS 'Signed annual net after the target margin (CALC 0.9.25): negative is the shortfall subsidy_eur_per_year reports, positive is a surplus. Unit: EUR/year';
 COMMENT ON COLUMN proposals.proposal_summaries.operating_days_per_year IS 'Operating days from the seasonal schedule (CALC 0.9.25) — the annualisation factor behind every per-year figure.';
+COMMENT ON COLUMN proposals.proposal_summaries.departures_per_year    IS 'Departures per year, every trip of every pair on every operating day (CALC 0.9.28).';
+COMMENT ON COLUMN proposals.proposal_summaries.trainsets_physical     IS 'Physical rakes the busiest pair needs in its busiest month — the cycle-time rule, ROUTE_BUILDER 0.9.35 (CALC 0.9.28). The cost model charges physical / coach_avail_per; see the operations block.';
 COMMENT ON COLUMN proposals.proposal_summaries.train_km_per_year      IS 'Annual train-km, both directions, all pairs (CALC 0.9.25) — the per_train_km divisor. Unit: km/year';
 COMMENT ON COLUMN proposals.proposal_summaries.available_place_km_per_year IS 'Annual capacity place-km (CALC 0.9.25) — the per_available_place_km divisor. Unit: place-km/year';
+COMMENT ON COLUMN proposals.proposal_summaries.services_revenue_eur IS 'Revenue from additional services sold with the ticket — bicycles, oversized luggage, reservations (CALC 0.9.30). Ordinary ticket revenue: not signed, and inside the variable-overhead and EBIT-margin bases. Unit: EUR/year';
+COMMENT ON COLUMN proposals.proposal_summaries.catering_contribution_eur IS 'Signed net contribution of the on-board catering, already inside net_eur_per_year (CALC 0.9.29): positive means the service pays for itself, negative that the tickets carry it. Unit: EUR/year';
+COMMENT ON COLUMN proposals.proposal_summaries.passengers_per_year   IS 'Places actually sold, summed over every OD pair (CALC 0.9.29) — the base catering_contribution_eur multiplies. Not demand_trips_per_year, which is a placeholder derived from revenue.';
 COMMENT ON COLUMN proposals.proposal_summaries.sold_place_km_per_year IS 'Annual sold place-km from the OD loads (CALC 0.9.25) — sold / available is the utilisation. Unit: place-km/year';
 COMMENT ON COLUMN proposals.proposal_summaries.geom_simplified        IS 'Per-segment shapes concatenated and simplified (Douglas-Peucker, tolerance tuned for gallery-map zoom levels) — small enough to ship all proposals in one map response for a long time.';
 COMMENT ON COLUMN proposals.proposal_summaries.country_relations      IS 'Country-to-country relations this proposal actually serves, as sorted "AA__BB" keys — derived from od_pairs (boarding-capable origin before alighting-capable destination), so a merely transited country contributes nothing. Ranking dimension of GET /api/proposals/stats (§7.7); written by models/evaluation/summary.py''s build_summary_row().';

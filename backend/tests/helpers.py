@@ -41,11 +41,6 @@ def engagements_url(proposal_id: int) -> str:
     return f"{PROPOSAL_URL}/{proposal_id}/engagements"
 
 
-# Mirrors models/route/version.py: DAYS_PER_OPERATING_WEEK / WEEKS_PER_SEASON.
-_DAYS_PER_WEEK = {"daily": 7, "three_per_week": 3}
-_WEEKS_PER_SEASON = 26
-
-
 # =============================================================================
 # HTTP wrappers
 # =============================================================================
@@ -334,13 +329,14 @@ def route_countries(route: dict) -> set[str]:
     }
 
 
-def operating_days(route: dict) -> int:
-    """Operating days per year from the route's embedded schedule — mirrors
-    Schedule.operating_days_per_year (days_per_week × 26 weeks per season)."""
-    return sum(
-        _DAYS_PER_WEEK[ss["frequency"]] * _WEEKS_PER_SEASON
-        for ss in route["schedule"]["seasonal_schedules"]
-    )
+def operating_days(route: dict) -> float:
+    """Operating days per year from the route's embedded schedule, through
+    the same reader the backend uses — so a test asserts against the
+    model's arithmetic (days_in_month × d/7 per month, ROUTE_BUILDER
+    0.9.35) rather than a second copy of it."""
+    from models.route.timetable import schedule_from_dict
+
+    return schedule_from_dict(route["schedule"]).operating_days_per_year
 
 
 # =============================================================================
@@ -390,6 +386,8 @@ def compute_evaluation_domain(
     loader,
     demand: list[tuple[str, int, float]],
     scenario_id: int | None = None,
+    catering_eur_per_pax: dict | None = None,
+    services_eur_per_pax: dict | None = None,
 ) -> tuple[dict, dict]:
     """Reconstruct route_dict (a POST /api/proposal/calc route section,
     e.g. from a session route fixture) as a domain Route via
@@ -398,6 +396,11 @@ def compute_evaluation_domain(
     serialize into the standalone evaluation-response shape the suite's
     content tests assert on ({calc_version, route_id, scenario_id, models,
     input, views}).
+
+    catering_eur_per_pax / services_eur_per_pax: optional per-class
+    overrides for the two tariff parts that ride on passengers (CALC
+    0.9.30). None leaves the demand model's standard values in place,
+    which is what a request without the field resolves to.
 
     scenario_id: optional override, same semantics as route_from_dict()'s
     own parameter — costs the route under a different scenario than it
@@ -435,7 +438,14 @@ def compute_evaluation_domain(
     tracks = loader.build_all_tracks(resolved_scenario_id)
     stop_infra = loader.build_all_stops(resolved_scenario_id)
     passages = loader.build_all_passages(resolved_scenario_id)
-    _, views = evaluate_and_build_views(route, tracks, stop_infra, passages)
+    _, views = evaluate_and_build_views(
+        route,
+        tracks,
+        stop_infra,
+        passages,
+        catering_eur_per_pax=catering_eur_per_pax,
+        services_eur_per_pax=services_eur_per_pax,
+    )
 
     costed = route_to_dict(route, resolved_scenario_id, tracks)
 

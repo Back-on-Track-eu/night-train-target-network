@@ -351,6 +351,10 @@ presented member:
   "timetable_mode": "simpleAutomatic",
   "fixed_night_interval": null,
   "schedule_mode": "alwaysDaily",
+  "fares_eur_per_km":     { "Sleeper": 0.25 },   // optional, per class_main — defaults: GET /api/models
+  "fares_eur_per_pax":    { "Sleeper": 22.0 },   // optional, fixed part of the base fare
+  "services_eur_per_pax": { "Sleeper": 3.50 },   // optional, bikes/luggage/reservations
+  "catering_eur_per_pax": { "Sleeper": -0.80 },  // optional, SIGNED net contribution
   "routing_mode": "fullRouting",
   "auto_stop_addition": "off",
   "expert_timetable": null,
@@ -364,6 +368,28 @@ Validation is a member request's for stops and the HOW fields (`member_compute.v
 non-empty, unique and known; `presented` must lie on the axes. A family
 larger than `FAMILY_MAX_MEMBERS` (`api/config.py`) is 400
 `family_too_large`.
+
+The tariff is three parts, each an object of `class_main` → EUR and each
+partial (a request that prices one class leaves the others at the model's
+defaults, `GET /api/models`):
+
+* **Base fare** — `fares_eur_per_km` × distance **plus** `fares_eur_per_pax`.
+  A berth has a price of admission a short journey pays as surely as a long
+  one, so distance alone made short OD pairs implausibly cheap.
+* **`services_eur_per_pax`** — bicycles, oversized luggage, reservations.
+  Ordinary ticket revenue: never negative, and INSIDE the variable-overhead
+  and EBIT-margin bases, because what it costs to carry a bike is either
+  nothing or already paid for in the lower place density of the coach that
+  carries it.
+* **`catering_eur_per_pax`** — one SIGNED net figure per passenger of that
+  class: the restaurant's own sales less its own costs. Negative is the
+  ordinary night-train case and is accepted as posted. Revenue — inside
+  `total_revenue_eur` and `net_eur` — but deliberately OUTSIDE the two
+  bases above, because charging distribution overhead on a figure that
+  already nets its own overhead would count it twice.
+
+`catering_eur_per_pax` was a single number until CALC 0.9.30; posting one
+now returns a 400 naming the new shape.
 
 `auto_stop_addition: "suggest"` runs the candidate search on the
 presented member only; every other member builds with `"off"`, and the
@@ -435,9 +461,14 @@ serialised body, so a reshaped document has to invalidate it exactly as a
 changed number does.
 
 **Member views** — `GET …/members/<sv>/<comp>/views` returns
-`{ "views": { ...views_to_dict... } }` and nothing else: the parameters it
-was priced from are `GET /api/params/*` for the variant's scenario, the
-formulas are `GET /api/models`. Served from the member cache
+`{ "views": { ...views_to_dict... }, "operations": { ...build_operations... } }`
+and nothing else: the parameters it was priced from are
+`GET /api/params/*` for the variant's scenario, the formulas are
+`GET /api/models`. `operations` (CALC 0.9.28, per trip since 0.9.29) is
+the physical side of the same evaluation — trainsets, loco hours, people
+on board and their paid hours, per trip pair and per single trip, read
+off the very records the cost breakdown was priced from. It is never
+persisted with a proposal and never enters the family document. Served from the member cache
 (`family.members`) when the member has been opened before, computed once
 (≈350 ms) when not. 404 for an expired key or a member outside the
 family's axes; compute failures carry `classify_compute_error()`'s codes
