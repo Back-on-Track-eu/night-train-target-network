@@ -131,7 +131,17 @@ def _route_any_pair(db_conn, country_code: str, gauge_mm: int, attempts: int = 6
     tried = []
     for offset in range(min(attempts, len(central) // 2)):
         a, b = central[2 * offset], central[2 * offset + 1]
-        resp = _calc([a["stop_id"], b["stop_id"]])
+        try:
+            resp = _calc([a["stop_id"], b["stop_id"]])
+        except requests.exceptions.ConnectionError as exc:
+            # The worker went away mid-request — a dropped connection, not
+            # an answer about this pair. Under the full suite the routing
+            # container is busy and one long route can outlast a worker;
+            # the same pair routes in ~2 s when this file runs alone. Try
+            # the next pair rather than reporting a gauge failure that
+            # never happened, and name it if nothing works.
+            tried.append(f"{a['stop_name']} -> {b['stop_name']}: dropped ({exc})")
+            continue
         if resp.status_code == 200:
             return resp, a, b
         tried.append(
