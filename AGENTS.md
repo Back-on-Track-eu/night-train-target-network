@@ -108,12 +108,22 @@ files describing the same three backend services, kept manually in sync:
 ### CSS / Styling
 
 - Tailwind CSS v4 (no `tailwind.config.js` — uses `@tailwindcss/vite` plugin)
-- PrimeVue 4 in styled mode with Lara theme preset (`@primeuix/themes/lara`)
+- PrimeVue 4 in styled mode with Lara, overridden by `BotPreset`
+  (`frontend/src/main.ts`) — the primary ramp is Back-on-Track blue, anchored
+  on `#2271b3`, **not** Lara's stock emerald
 - CSS layer order declared in `frontend/src/style.css` and
   `frontend/src/main.ts` must stay in sync:
   `tailwind-base → primevue → tailwind-utilities`
-- Use PrimeVue design tokens (`text-primary-700`, `bg-surface-50`) for brand
-  colours; Tailwind for layout/spacing
+- **The app is a single fixed dark look.** `body` is sapphire `#1d1e33` and
+  `primary-50` `#eef4fb` is the *ink*, used at many opacities
+  (`text-primary-50/70`, `bg-primary-50/5`, `border-primary-50/10`). Surfaces
+  are that ink composited over sapphire, not a token ramp — which is why
+  `ProposalCard.vue` reconstructs one by hand with `color-mix`. `surface-*`
+  is stock-light and appears twice in the whole app, both over the light
+  basemap. There is no dark-mode toggle
+- Use the primary ramp for brand colour, Tailwind for layout/spacing.
+  `primary-500`–`700` are solid CTA fills under white; everything else is
+  `primary-50` at an opacity
 - Icons: use `<AppIcon :path="mdiXxx" />` from `@/components/AppIcon.vue`
   with path constants imported from `@mdi/js` — never use
   `<i class="mdi mdi-*">` CSS font classes
@@ -121,6 +131,12 @@ files describing the same three backend services, kept manually in sync:
   `formula.summary` and links to the documentation site; formulas, input
   legends and rate tables live at `/docs/`. KaTeX is a `docs-site/`
   dependency (`@vscode/markdown-it-katex`) — do not reintroduce it here
+- The docs site wears the same identity, but the palette is **duplicated**
+  into `docs-site/.vitepress/theme/custom.css` (separate npm packages,
+  separate build contexts). Change a brand colour in `frontend/` and you must
+  change it there too; the file's header comment says so. Its masthead
+  (`theme/components/SiteBrandBar.vue`) must keep its height in sync with
+  `--vp-layout-top-height`
 
 ---
 

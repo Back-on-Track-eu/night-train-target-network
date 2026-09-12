@@ -44,6 +44,35 @@ export default defineConfig({
     'where its data comes from, and what it assumes.',
   cleanUrls: true,
 
+  // The app has exactly one look: a fixed dark page, no light mode and no
+  // toggle (frontend/src/style.css:3-5). Offering a light theme here would
+  // mean inventing a second palette the brand does not have, so the switch
+  // is removed rather than left to produce something unbranded.
+  appearance: 'force-dark',
+
+  // Tab icon and link preview, mirroring frontend/index.html. The app inlines
+  // these as data URIs; here they are files under public/, so BASE has to be
+  // applied by hand — head entries are emitted verbatim.
+  head: [
+    ['link', { rel: 'icon', type: 'image/jpeg', sizes: '32x32', href: `${BASE}favicon-32.jpg` }],
+    ['link', { rel: 'icon', type: 'image/jpeg', sizes: '192x192', href: `${BASE}favicon-192.jpg` }],
+    ['link', { rel: 'apple-touch-icon', href: `${BASE}favicon-192.jpg` }],
+    ['meta', { name: 'theme-color', content: '#1d1e33' }],
+    ['meta', { property: 'og:type', content: 'website' }],
+    ['meta', { property: 'og:site_name', content: 'Back-on-Track Target Network' }],
+    ['meta', { property: 'og:title', content: 'How the model works' }],
+    [
+      'meta',
+      {
+        property: 'og:description',
+        content:
+          'Every number the night train tool produces, and where it comes from: ' +
+          'the data, the formulas, and the assumptions we have not yet replaced ' +
+          'with measurements.',
+      },
+    ],
+  ],
+
   // Fail the build on a link to a page that does not exist. The emitter
   // generates most links from the model registries, so a dead one means a
   // formula moved without its page moving with it.
@@ -63,14 +92,9 @@ export default defineConfig({
       { text: 'Data sources', link: '/sources/' },
       { text: 'What it costs', link: '/cost/total-cost' },
       { text: 'Reference', link: '/reference/versions' },
-      // '/../' would be rendered as href="/docs/../". A browser normalises
-      // that to "/", but VitePress's client-side router intercepts
-      // same-origin links first and tries to resolve it as a page — which is
-      // a 404. target: '_blank' makes the router skip it and hands the URL to
-      // the browser, which resolves it correctly. The app lives at the root
-      // of this same origin; its absolute URL differs per environment, so it
-      // cannot simply be hardcoded here.
-      { text: 'Open the tool', link: '/../', target: '_blank' },
+      // "Open the tool" used to sit here. It is in the masthead now
+      // (.vitepress/theme/components/SiteBrandBar.vue), which is where the
+      // app puts its own outbound links.
     ],
 
     sidebar: [

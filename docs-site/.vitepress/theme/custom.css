@@ -1,0 +1,297 @@
+/* =============================================================================
+ * Back-on-Track brand layer over VitePress's default theme
+ * =============================================================================
+ * SOURCE OF TRUTH: frontend/src/style.css (the @theme block) and
+ * frontend/src/main.ts (BotPreset's primary ramp). The values below are
+ * DUPLICATED from there on purpose — frontend/ and docs-site/ are separate npm
+ * packages with separate Docker build contexts, and sharing one file between
+ * them would cost a second named build context for a palette that changes
+ * about never. If you change a brand colour there, change it here.
+ *
+ * The app has exactly one look — a fixed dark page, no light mode and no
+ * toggle (frontend/src/style.css:3-5 sets body background #1d1e33 outright).
+ * So this site forces dark too (appearance: 'force-dark' in config.ts) and
+ * retints VitePress's own dark scheme rather than inverting its light one.
+ *
+ * The app's surface system is ALPHA-OVER-SAPPHIRE, not a colour ramp: panels
+ * are the near-white ink at 5% over the page, hairlines at 10%, hover at
+ * 10-20%. That is reproduced here with color-mix, the same way
+ * frontend/src/components/ProposalCard.vue:256 has to reconstruct it.
+ * ========================================================================== */
+
+/* --- Mark Pro, self-hosted. Two real faces; 600 is synthesised. -----------
+ * Referenced relatively so Vite fingerprints and rewrites them: a path under
+ * public/ would have to hardcode the '/docs/' base here in plain CSS.
+ * ------------------------------------------------------------------------- */
+@font-face {
+  font-family: 'Mark Pro';
+  src: url('./fonts/Mark Pro.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Mark Pro';
+  src: url('./fonts/Mark Pro Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* Brand constants, mirroring frontend/src/style.css:36-46 */
+  --bot-sapphire: #1d1e33;
+  --bot-sapphire-100: #23263d;
+  --bot-sapphire-200: #2b2e4a;
+
+  /* BotPreset primary ramp, mirroring frontend/src/main.ts:7-40 */
+  --bot-primary-50: #eef4fb;
+  --bot-primary-100: #d5e6f4;
+  --bot-primary-200: #add0e8;
+  --bot-primary-300: #7db5d9;
+  --bot-primary-400: #4e96c9;
+  --bot-primary-500: #2271b3;
+  --bot-primary-600: #1c5d96;
+  --bot-primary-700: #164b7b;
+
+  /* The composites the app writes as bg-primary-50/5, /10, /20 */
+  --bot-lift-5: color-mix(in srgb, var(--bot-primary-50) 5%, var(--bot-sapphire));
+  --bot-lift-10: color-mix(in srgb, var(--bot-primary-50) 10%, var(--bot-sapphire));
+  --bot-hairline: color-mix(in srgb, var(--bot-primary-50) 10%, transparent);
+  --bot-hairline-strong: color-mix(in srgb, var(--bot-primary-50) 20%, transparent);
+
+  /* Ink at the opacities the app uses. Body copy sits at full strength here,
+     not the app's /70: the app uses /70 for dense UI chrome, these are 45
+     pages of long-form reading. */
+  --bot-ink: var(--bot-primary-50);
+  --bot-ink-70: color-mix(in srgb, var(--bot-primary-50) 70%, transparent);
+  --bot-ink-50: color-mix(in srgb, var(--bot-primary-50) 50%, transparent);
+
+  --bot-radius-panel: 12px;
+
+  /* Height of the fixed masthead in the layout-top slot. VitePress offsets
+     its own fixed nav, sidebar and content by this — see VPNav.vue and
+     VPSidebar.vue, which are `position: fixed; top: var(--vp-layout-top-height)`.
+     That is also why the masthead has to be fixed rather than scroll away:
+     the value is static, so a masthead that scrolled would leave the nav
+     stranded mid-viewport. Must match SiteBrandBar's height. */
+  --vp-layout-top-height: 52px;
+}
+
+@media (min-width: 768px) {
+  :root {
+    --vp-layout-top-height: 64px;
+  }
+}
+
+/* --- VitePress token mapping ---------------------------------------------
+ * force-dark means only the .dark scope is ever active, but :root is written
+ * too so the tokens are correct if appearance is ever relaxed.
+ * ------------------------------------------------------------------------- */
+:root,
+.dark {
+  --vp-c-bg: var(--bot-sapphire);
+  --vp-c-bg-alt: var(--bot-sapphire-100);
+  --vp-c-bg-soft: var(--bot-lift-5);
+  --vp-c-bg-elv: var(--bot-sapphire-100);
+  --vp-c-bg-elv-mute: var(--bot-sapphire-200);
+
+  --vp-c-divider: var(--bot-hairline);
+  --vp-c-border: var(--bot-hairline-strong);
+  --vp-c-gutter: var(--bot-hairline);
+
+  --vp-c-text-1: var(--bot-ink);
+  --vp-c-text-2: var(--bot-ink-70);
+  --vp-c-text-3: var(--bot-ink-50);
+
+  /* brand-1 is LINK TEXT and must clear AA on sapphire. #2271b3, the app's
+     anchor colour, is only ~3.1:1 there — fine as a button fill under white,
+     not as text. primary-300 is ~7.7:1. The app never sets brand-coloured
+     text on its own background, so this is the one place where copying its
+     tokens verbatim would regress accessibility. */
+  --vp-c-brand-1: var(--bot-primary-300);
+  --vp-c-brand-2: var(--bot-primary-200);
+  --vp-c-brand-3: var(--bot-primary-500);
+  --vp-c-brand-soft: color-mix(in srgb, var(--bot-primary-50) 10%, transparent);
+
+  --vp-c-default-1: var(--bot-ink-70);
+  --vp-c-default-soft: var(--bot-lift-10);
+  --vp-c-tip-1: var(--bot-primary-300);
+  --vp-c-tip-soft: color-mix(in srgb, var(--bot-primary-300) 12%, transparent);
+  --vp-c-note-1: var(--bot-primary-300);
+  --vp-c-note-soft: color-mix(in srgb, var(--bot-primary-300) 12%, transparent);
+  --vp-c-warning-1: #eaf044; /* brand sulphur yellow */
+  --vp-c-warning-soft: color-mix(in srgb, #eaf044 12%, transparent);
+  --vp-c-danger-1: #f3a2a2;
+  --vp-c-danger-soft: color-mix(in srgb, #f3a2a2 12%, transparent);
+
+  --vp-font-family-base: 'Mark Pro', ui-sans-serif, system-ui, sans-serif;
+
+  /* Buttons: solid fill is the app's one use of primary-500, under white —
+     see frontend/src/components/CommentSection.vue:180 */
+  --vp-button-brand-bg: var(--bot-primary-500);
+  --vp-button-brand-hover-bg: var(--bot-primary-600);
+  --vp-button-brand-active-bg: var(--bot-primary-700);
+  --vp-button-brand-text: #ffffff;
+  --vp-button-brand-hover-text: #ffffff;
+  --vp-button-brand-active-text: #ffffff;
+  --vp-button-brand-border: transparent;
+  --vp-button-alt-bg: var(--bot-lift-10);
+  --vp-button-alt-text: var(--bot-ink);
+  --vp-button-alt-hover-bg: color-mix(in srgb, var(--bot-primary-50) 20%, var(--bot-sapphire));
+  --vp-button-alt-hover-text: var(--bot-ink);
+  --vp-button-alt-border: transparent;
+
+  /* Home hero. The app's headline treatment is text-4xl font-light on white
+     (frontend/src/components/LandingIntro.vue:126) — no gradient. */
+  --vp-home-hero-name-color: #ffffff;
+  --vp-home-hero-name-background: none;
+
+  --vp-nav-bg-color: var(--bot-sapphire-100);
+  --vp-sidebar-bg-color: var(--bot-sapphire);
+  --vp-code-block-bg: var(--bot-lift-5);
+  --vp-code-copy-code-bg: var(--bot-lift-10);
+  --vp-custom-block-font-size: 0.9375rem;
+}
+
+/* --- Typography -----------------------------------------------------------
+ * The app's public-facing scale is three steps: text-4xl font-light for page
+ * titles, text-base font-semibold for sub-heads, text-sm for body. Docs need
+ * a longer scale than that, but the light page title is the brand's voice and
+ * is kept.
+ * ------------------------------------------------------------------------- */
+.vp-doc h1,
+.VPHome .name,
+.VPHome .text {
+  font-weight: 300;
+  letter-spacing: -0.01em;
+}
+
+.vp-doc h2 {
+  font-weight: 400;
+  letter-spacing: -0.005em;
+}
+
+.vp-doc h3,
+.vp-doc h4 {
+  font-weight: 600;
+}
+
+.vp-doc p,
+.vp-doc li {
+  line-height: 1.7;
+}
+
+/* --- Tables ---------------------------------------------------------------
+ * The widest content on the site (reference/parameters). Contain the
+ * horizontal scroll so the page body never scrolls sideways, and align
+ * numbers so a rate column reads as a column.
+ * ------------------------------------------------------------------------- */
+.vp-doc table {
+  display: table;
+  width: 100%;
+  margin: 1.25rem 0;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.vp-doc .vp-table-wrapper,
+.vp-doc div[class*='table'] {
+  overflow-x: auto;
+}
+
+.vp-doc th {
+  background: var(--bot-lift-10);
+  color: var(--bot-ink);
+  font-weight: 600;
+  text-align: left;
+}
+
+.vp-doc th,
+.vp-doc td {
+  border: none;
+  border-bottom: 1px solid var(--bot-hairline);
+  padding: 0.5rem 0.75rem;
+}
+
+.vp-doc tr {
+  background: transparent;
+  border: none;
+}
+
+.vp-doc tbody tr:hover {
+  background: color-mix(in srgb, var(--bot-primary-50) 4%, transparent);
+}
+
+/* Rate and parameter tables are mostly numbers; tabular figures keep the
+   decimal points aligned down a column. */
+.vp-doc td {
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Formulas -------------------------------------------------------------
+ * KaTeX display blocks get the app's panel recipe: ink at 5% over sapphire,
+ * 12px radius. Long formulas scroll inside the panel rather than widening
+ * the page.
+ * ------------------------------------------------------------------------- */
+.vp-doc .katex-display {
+  margin: 1.25rem 0;
+  padding: 1.25rem 1rem;
+  border-radius: var(--bot-radius-panel);
+  background: var(--bot-lift-5);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.vp-doc .katex {
+  color: var(--bot-ink);
+}
+
+/* Inline maths must not inherit the panel treatment. */
+.vp-doc :not(.katex-display) > .katex {
+  background: none;
+  padding: 0;
+}
+
+/* --- Panels, code, containers --------------------------------------------- */
+.vp-doc div[class*='language-'] {
+  border-radius: var(--bot-radius-panel);
+}
+
+.vp-doc .custom-block {
+  border-radius: var(--bot-radius-panel);
+  border-width: 0 0 0 3px;
+}
+
+.vp-doc blockquote {
+  border-left: 2px solid var(--bot-hairline-strong);
+  color: var(--bot-ink-70);
+}
+
+/* --- Chrome --------------------------------------------------------------- */
+.VPNav {
+  border-bottom: 1px solid var(--bot-hairline);
+}
+
+.VPSidebar {
+  border-right: 1px solid var(--bot-hairline);
+}
+
+/* The brand band scrolls away with the page, exactly like the app's header
+   (frontend/src/components/AppHeader.vue sets no position). VitePress's own
+   nav row stays pinned beneath it. */
+.VPLocalNav,
+.VPNav {
+  background-color: var(--bot-sapphire-100);
+}
+
+/* Search, which VitePress renders in its own overlay. */
+.VPLocalSearchBox .shell {
+  border-radius: var(--bot-radius-panel);
+}
+
+/* --- Footer --------------------------------------------------------------- */
+.VPFooter {
+  background-color: var(--bot-sapphire-100) !important;
+  border-top: 1px solid var(--bot-hairline);
+}
