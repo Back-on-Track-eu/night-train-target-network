@@ -234,6 +234,9 @@
  * 12px radius. Long formulas scroll inside the panel rather than widening
  * the page.
  * ------------------------------------------------------------------------- */
+/* katex.css makes .katex-display a block and .katex-display > .katex
+   nowrap; this only adds the app's panel around it. Both rules must come
+   from katex.min.css — see theme/index.ts. */
 .vp-doc .katex-display {
   margin: 1.25rem 0;
   padding: 1.25rem 1rem;
@@ -245,12 +248,6 @@
 
 .vp-doc .katex {
   color: var(--bot-ink);
-}
-
-/* Inline maths must not inherit the panel treatment. */
-.vp-doc :not(.katex-display) > .katex {
-  background: none;
-  padding: 0;
 }
 
 /* --- Panels, code, containers --------------------------------------------- */
