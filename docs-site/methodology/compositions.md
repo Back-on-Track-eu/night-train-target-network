@@ -25,6 +25,26 @@ Prices are stated at the **2032 evaluation year**, escalated from their
 source year exactly once in the calibration — see
 [where the data comes from](/sources/).
 
+## Where the prices come from
+
+There is no network statement for rolling stock. Vehicle prices are
+commercial, so the calibration triangulates from whatever is on the public
+record: audited accounts and annual reports (ÖBB, Italo, ELL, RDC),
+procurement awards and orders (Trafikverket's night train tender, Norske tog's
+FLIRT Nordic Express, the Caledonian Sleeper Mk5 order, Trenitalia's Intercity
+Notte framework, ÖBB's Nightjet orders), studies (the UIC Night Trains 2.0
+study, Ramboll's Nachtzugstudie for the BMDV, Steer & KCW for DG MOVE), and
+trade press where a contract value was reported but never published.
+
+Crew pay is built the same way, from collective agreements where they exist
+(DB–EVG, SJ's Seko scale) and from salary aggregators where they do not.
+Escalation to 2032 uses the ECB's Eurosystem staff projections.
+
+Every one of these is listed, with a link where a public one exists, under
+[rolling stock and operating costs](/sources/#rolling-stock-and-operating-costs).
+Read that list knowing what is in it: audited accounts and aggregated job-board
+salaries sit side by side, and they do not deserve equal weight.
+
 ## Class allocation
 
 Some costs belong to the whole train rather than to any one class of

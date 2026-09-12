@@ -25,6 +25,12 @@ distinct from the energy, and omitting it would understate the cost.
 these come from published network statements and supply tariffs rather
 than from estimates.
 
+The documents are listed under
+[traction electricity](/sources/#traction-electricity): nineteen national
+network statements and supply tariffs, plus Eurostat's non-household
+electricity price series, CE Delft's European transport taxes database and the
+UK fuel price tables, which fill in where no rail-specific price is published.
+
 ## Night bands
 
 Only **Austria, Switzerland and Croatia** operate a traction electricity

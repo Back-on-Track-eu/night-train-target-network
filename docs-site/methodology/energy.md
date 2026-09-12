@@ -10,8 +10,8 @@ How much electricity a night train draws is, unusually for this model, a
 
 ## The source
 
-**Deutsche Bahn Trassenfinder** returns the technical energy consumption
-of a specified train over a specified route. Querying it systematically —
+**[Deutsche Bahn Trassenfinder](https://trassenfinder.de)** returns the
+technical energy consumption of a specified train over a specified route. Querying it systematically —
 across many routes, train weights, lengths and speed profiles — produced a
 dataset of real consumption figures, which the model is fitted to.
 

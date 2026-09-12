@@ -19,8 +19,11 @@ Every other country falls back to a single flat rate per call. A route
 whose stops are mostly outside Germany has a station charge figure that is
 a placeholder wearing a number's clothes.
 
-Station tariffs exist and are public in most countries; they simply have
-not been transcribed yet. Seventeen countries are outstanding.
+Germany's figures come from DB InfraGO's **Stationspreisliste 2026**,
+transcribed in full for all 5,412 German stations. Station tariffs exist and
+are public in most countries; they simply have not been transcribed yet.
+Seventeen countries are outstanding. See
+[where the data comes from](/sources/#shunting-stabling-and-station-charges).
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-station_charge_eur"></a>

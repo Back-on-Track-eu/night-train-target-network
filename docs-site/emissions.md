@@ -10,7 +10,7 @@ things of very different quality, and the difference matters.
 
 ## The factors: sourced
 
-Per-passenger-kilometre emission factors come from **EEA TERM 2020**:
+Per-passenger-kilometre emission factors come from **EEA TERM 2020** ([Transport and environment report 2020 — "Train or plane?"](https://www.eea.europa.eu/en/analysis/publications/transport-and-environment-report-2020)):
 
 | Mode                     | g CO2e per passenger-km |
 | ------------------------ | ----------------------- |

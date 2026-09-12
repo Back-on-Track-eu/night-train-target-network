@@ -16,6 +16,12 @@ back on a European default rather than a national figure. This is the
 weakest-sourced of the charge domains apart from station charges, and it
 is worth knowing before quoting either line.
 
+The fourteen documents are listed under
+[shunting, stabling and station charges](/sources/#shunting-stabling-and-station-charges).
+The market top-up described below is not read from any of them: it comes from
+Ramboll's Nachtzugstudie and an operator business case, both listed there as
+cross-check sources.
+
 ## The assumption that dominates it
 
 Infrastructure managers publish what _they_ charge for a shunting

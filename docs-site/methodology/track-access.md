@@ -19,6 +19,10 @@ That is the strongest ratio of any domain in the model. When a track
 access figure here is wrong, it is far more likely to be wrong because a
 tariff changed than because nobody looked it up.
 
+All thirty are listed by country, with links, under
+[track access](/sources/#track-access), together with the cross-check sources
+behind the exchange-rate table and the escalation to 2032 prices.
+
 ## What was collected
 
 Every European infrastructure manager must publish a network statement

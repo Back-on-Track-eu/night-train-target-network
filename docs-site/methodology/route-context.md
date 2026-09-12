@@ -22,6 +22,12 @@ This is the weakest-founded domain in the model. There is no equivalent of
 a network statement for "how much slack does this country's timetable
 carry" — infrastructure managers do not publish it.
 
+The five registered sources are listed under
+[terrain and buffers](/sources/#terrain-and-buffers): the European Commission's
+rail market monitoring report, a UIC leaflet on recovery margins, the Open
+Night Train Database's observed timings, and an internal corridor topography
+assessment.
+
 ## What was used instead
 
 **Observed timetables.** The buffer calibration works backwards from real
