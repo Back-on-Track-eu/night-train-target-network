@@ -39,9 +39,6 @@ onMounted(() => {
         <h1 class="text-center text-4xl font-light text-white">{{ t('proposal.heading') }}</h1>
         <!-- max-w-2xl: the sub-line is the page's only full sentence, and it
              reads badly stretched to the width of the workspace below it. -->
-        <p class="max-w-2xl text-center text-base leading-relaxed text-primary-50/70">
-          {{ t('proposal.subheading') }}
-        </p>
       </div>
       <!-- Gallery only. Opening a proposal used to UNMOUNT the gallery, throwing
            away the loaded pages, the pagination offset and every per-card route

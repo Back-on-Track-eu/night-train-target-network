@@ -89,6 +89,7 @@ export default defineConfig({
 
     nav: [
       { text: 'Start here', link: '/' },
+      { text: 'About', link: '/about' },
       { text: 'Data sources', link: '/sources/' },
       { text: 'What it costs', link: '/cost/total-cost' },
       { text: 'Reference', link: '/reference/versions' },
@@ -102,6 +103,7 @@ export default defineConfig({
         text: 'Start here',
         items: [
           { text: 'What this tool computes', link: '/' },
+          { text: 'About the Target Network', link: '/about' },
           { text: 'How to read our numbers', link: '/reading-the-numbers' },
           { text: "What we don't yet model", link: '/not-modelled' },
         ],

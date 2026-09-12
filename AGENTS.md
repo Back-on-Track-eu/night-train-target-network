@@ -343,8 +343,8 @@ Full contract, `--baseline` semantics, and editorial rules:
 | `frontend/src/style.css` | Tailwind v4 import + CSS layer order declaration |
 | `frontend/src/stores/store.ts` | Pinia store — currently containing everything but might have more in the future |
 | `frontend/src/i18n/index.ts` | i18n setup; add new locales here |
-| `frontend/src/i18n/locales/en.json` | English translation strings — including the whole landing pitch (`gallery.heading`, `gallery.welcome.*`, `gallery.audience.*`, `gallery.story.*`) |
-| `frontend/src/components/LandingIntro.vue` | Landing pitch above the gallery: layout, hero sizing and scroll cue only, no copy |
+| `frontend/src/i18n/locales/en.json` | English translation strings — including the whole landing pitch (`gallery.heading`, `gallery.welcome.*`) |
+| `frontend/src/components/LandingIntro.vue` | Landing hero above the gallery: layout, hero sizing and the four onward buttons only, no copy. The long-form pitch it used to carry lives at `docs-site/about.md` |
 | `frontend/src/types/api.ts` | TypeScript types for backend responses |
 | `frontend/src/lib/factorFeedback.ts` | Breakdown row → formula key, docs page path, feedback `sub_category`. The docs deep-link contract, shared with `render_site.py::cost_slug` |
 | `docs-site/.vitepress/config.ts` | Public docs site: `base: '/docs/'`, local search, nav/sidebar (cost section generated) |

@@ -524,10 +524,10 @@ onActivated(() => {
        the scroll — see the results row's comment below. Keep the two in sync: if
        App.vue's bottom padding changes, this offset has to change with it. -->
   <div class="-mb-6 flex w-full max-w-6xl flex-col gap-6">
-    <!-- Landing pitch: viewport-filling opening band, then who the tool is for
-         and what happens to a submission. Self-contained — it owns its own
-         sizing, scroll cue and h1 (App.vue's centred heading steps aside for
-         this route). -->
+    <!-- Landing pitch: one viewport-filling opening band, the statement beside
+         the argument and the four ways onward. Self-contained — it owns its own
+         sizing and h1 (App.vue's centred heading steps aside for this route);
+         the longer story lives at /docs/about. -->
     <LandingIntro @create="createProposal" @browse="scrollToGallery" />
 
     <!-- The gallery proper: search bar, result count, then the list + map. The
