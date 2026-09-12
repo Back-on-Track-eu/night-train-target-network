@@ -1,5 +1,5 @@
 /// <reference types="vitest/config" />
-import { defineConfig } from 'vite'
+import { defineConfig, type ViteDevServer } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
 import { resolve, dirname } from 'node:path'
@@ -12,8 +12,29 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 // reaching the docs container's published port (or a host-run docs server).
 const DOCS_DEV_URL = process.env.DOCS_DEV_URL ?? 'http://localhost:5174'
 
+// nginx redirects a bare /docs to /docs/ in the built image (its automatic
+// directory redirect, since /docs is a real directory there). The dev server
+// has no such behaviour: /docs would be proxied verbatim and VitePress, which
+// is mounted at the /docs/ base, answers with its "did you mean to visit
+// /docs/ instead?" notice. Send the redirect ourselves so both environments
+// behave the same.
+//
+// configureServer without a returned post-hook runs before Vite's internal
+// middlewares, so this fires ahead of the proxy below.
+const docsTrailingSlash = {
+  name: 'docs-trailing-slash',
+  configureServer(server: ViteDevServer) {
+    server.middlewares.use((req, res, next) => {
+      const [path, query] = (req.url ?? '').split('?')
+      if (path !== '/docs') return next()
+      res.writeHead(301, { Location: '/docs/' + (query ? `?${query}` : '') })
+      res.end()
+    })
+  },
+}
+
 export default defineConfig({
-  plugins: [vue(), tailwindcss()],
+  plugins: [vue(), tailwindcss(), docsTrailingSlash],
   resolve: {
     alias: [
       {
