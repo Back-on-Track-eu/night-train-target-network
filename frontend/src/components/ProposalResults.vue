@@ -5,10 +5,13 @@ import { useStore } from '@/stores/store'
 import type { Composition, EvaluationResponse, MapScope, ProposalCalcSummary } from '@/types/api'
 import type { ProposalFamily } from '@/composables/useProposalFamily'
 import { messageKey } from '@/lib/apiError'
+import type { ExampleOd } from '@/lib/detailsScope'
+import { operatingDaysPerYear, presetOf, scheduleFromRequest } from '@/lib/detailsScope'
+import { useCompareFormat } from '@/composables/useCompareFormat'
 import ScenarioSwitches from '@/components/ScenarioSwitches.vue'
 import MainKpiGrid from '@/components/MainKpiGrid.vue'
 import CompareSection from '@/components/CompareSection.vue'
-import SettingsSection from '@/components/SettingsSection.vue'
+import DetailsSection from '@/components/DetailsSection.vue'
 import MobileSettingsCard from '@/components/MobileSettingsCard.vue'
 import CostRevenueBreakdown from '@/components/CostRevenueBreakdown.vue'
 import Skeleton from 'primevue/skeleton'
@@ -17,15 +20,22 @@ import Skeleton from 'primevue/skeleton'
 //   A  scenario switches + main KPIs (gold card)   — what every visitor wants
 //   B  compare across scenarios / compositions      — the matrix
 //   C  discussion                                    — slot, owned by the parent
-//   D  detail settings (supply / demand)            — collapsible, desktop
 //   E  costs and revenue in detail                  — collapsible, desktop
+//   D  details (supply / operation / … / demand)    — collapsible, desktop
+//
+// E before D on purpose: the headline question is what the route costs and
+// what it earns, and only a reader who has that wants the receipts and the
+// inputs behind it. The letters are the zones' original names and are kept
+// so the plan documents still resolve; the ORDER is the one below.
 //
 // The parent (ProposalViewport) still owns the family, the stale flag and the
 // selections: this component reads the member on screen's figures from the
 // evaluation bundle and the comparisons from the family, and reports every
-// choice back up. Zones A/B/D/E are greyed and put behind the Recalculate
+// choice back up. Zones A/B/E are greyed and put behind the Recalculate
 // control while the selection differs from what was computed; C never is —
-// a thread is about the proposal, not about the figures.
+// a thread is about the proposal, not about the figures — and neither is D,
+// which is where the inputs live: greying it would make the stale state
+// unfixable. D greys its own panels instead, per scope (DetailsSection).
 const props = defineProps<{
   result: EvaluationResponse
   summary: ProposalCalcSummary
@@ -42,6 +52,12 @@ const props = defineProps<{
   // is the Evaluate button's).
   dimmed: boolean
   scheduleMode: string | null
+  // Zone D: what the figures were computed with, and the two journeys the
+  // price table prices a fare on (ProposalViewport owns the route).
+  committedRequest: Record<string, unknown> | null
+  cycleDistanceKm: number
+  longestOd: ExampleOd | null
+  shortestOd: ExampleOd | null
 }>()
 const emit = defineEmits<{
   selectComposition: [compositionId: string]
@@ -50,7 +66,8 @@ const emit = defineEmits<{
   retryFamily: []
 }>()
 
-const { t, te } = useI18n()
+const { t } = useI18n()
+const fmt = useCompareFormat()
 const store = useStore()
 
 const selectedScenario = computed(
@@ -59,9 +76,49 @@ const selectedScenario = computed(
 const selectedComposition = computed(
   () => props.compositions.find((c) => c.composition_id === props.selectedCompositionId) ?? null,
 )
+// What the figures were computed with, in the reader's words rather than the
+// request's. The schedule is named by its preset where the grid matches one
+// ("Every day", "Summer only") and by its operating days where it does not —
+// "custom" tells nobody anything.
 const frequencyLabel = computed(() => {
-  const key = props.scheduleMode ? `proposal.supply.schedule.${props.scheduleMode}` : null
-  return key && te(key) ? t(key) : props.scheduleMode
+  const months = scheduleFromRequest(
+    props.committedRequest?.schedule as Record<string, number> | null | undefined,
+  )
+  const preset = presetOf(months)
+  if (preset !== 'custom') return t(`proposal.details.schedule.presets.${preset}`)
+  return t('proposal.compare.customSchedule', {
+    days: Math.round(operatingDaysPerYear(months)),
+  })
+})
+
+// The prices behind the revenue: the fare span across the classes the train
+// carries, and the catering contribution when it is not zero.
+const priceLabel = computed(() => {
+  const fares = props.committedRequest?.fares_eur_per_km as Record<string, number> | undefined
+  if (!fares) return null
+  const carried = Object.entries(fares).filter(
+    ([classMain]) => (selectedComposition.value?.capacity.by_class[classMain]?.places ?? 0) > 0,
+  )
+  if (carried.length === 0) return null
+  const rates = carried.map(([, rate]) => rate)
+  const span =
+    Math.min(...rates) === Math.max(...rates)
+      ? fmt.dec2(rates[0])
+      : `${fmt.dec2(Math.min(...rates))}–${fmt.dec2(Math.max(...rates))}`
+  // Catering is per class now; the line names the span rather than pretending
+  // there is one figure.
+  const catering = Object.values(
+    (props.committedRequest?.catering_eur_per_pax as Record<string, number>) ?? {},
+  )
+  const cateringPart = catering.some((v) => v !== 0)
+    ? t('proposal.compare.cateringPart', {
+        value:
+          Math.min(...catering) === Math.max(...catering)
+            ? fmt.eur2(catering[0])
+            : `${fmt.eur2(Math.min(...catering))}–${fmt.eur2(Math.max(...catering))}`,
+      })
+    : ''
+  return t('proposal.compare.pricePart', { span }) + cateringPart
 })
 
 // Baseline for the delta arrows: base network, nothing switched on, SAME
@@ -104,7 +161,7 @@ const greyed = computed(() =>
 
 function scrollToSettings() {
   document
-    .getElementById('proposal-settings')
+    .getElementById('proposal-details')
     ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 </script>
@@ -158,14 +215,18 @@ function scrollToSettings() {
             <div class="reg">{{ t('proposal.compare.measuresNone') }}</div>
           </div>
 
+          <!-- The composition is named by its id, not its description: the id
+               is what the comparison grid's columns, the supply table and the
+               published proposal all use, and a sentence is not a name. The
+               description stays reachable as the element's title. -->
           <p class="inputs-line">
-            <span>
+            <span :title="selectedComposition?.description ?? undefined">
               {{
                 t('proposal.compare.evaluatedWith', {
-                  composition: selectedComposition?.description ?? selectedCompositionId ?? '—',
+                  composition: selectedCompositionId ?? '—',
                   frequency: frequencyLabel ?? '—',
                 })
-              }}
+              }}<template v-if="priceLabel">{{ priceLabel }}</template>
             </span>
             <button
               type="button"
@@ -235,36 +296,45 @@ function scrollToSettings() {
     <slot name="discussion" />
 
     <!-- Divider -->
-    <div class="hidden items-center gap-3 text-xs text-primary-50/40 sm:flex">
+    <div class="hidden items-center gap-3 text-xs text-primary-50/40 lg:flex">
       <span class="h-px flex-1 bg-primary-50/10" />
       {{ t('proposal.settings.divider') }}
       <span class="h-px flex-1 bg-primary-50/10" />
     </div>
 
-    <!-- Zones D + E — desktop -->
-    <div
-      id="proposal-settings"
-      class="hidden flex-col gap-4 transition-opacity duration-200 sm:flex"
-      :class="greyed"
-    >
-      <SettingsSection
+    <!-- Zones E then D — desktop and tablet, lg and up. Below that the two
+         fold away entirely: a receipt with six columns and a twelve-month
+         slider grid cannot be made readable at phone width, and the card
+         below says so rather than pretending. -->
+    <div id="proposal-details-zone" class="hidden flex-col gap-4 lg:flex">
+      <!-- E — greyed behind the Recalculate control while stale, like A and B. -->
+      <div class="transition-opacity duration-200" :class="greyed">
+        <CostRevenueBreakdown
+          :result="result"
+          :stops="stops"
+          @scope-change="emit('scopeChange', $event)"
+        />
+      </div>
+
+      <!-- D — never greyed: it owns the inputs that make the rest stale. -->
+      <DetailsSection
         :compositions="compositions"
         :cells-by-composition="cellsByComposition"
         :selected-composition-id="selectedCompositionId"
         :summary="summary"
-        :schedule-mode="scheduleMode"
-        @select-composition="(id) => emit('selectComposition', id)"
-      />
-      <CostRevenueBreakdown
         :result="result"
-        :stops="stops"
-        @scope-change="emit('scopeChange', $event)"
+        :committed-request="committedRequest"
+        :cycle-distance-km="cycleDistanceKm"
+        :longest-od="longestOd"
+        :shortest-od="shortestOd"
+        @select-composition="(id) => emit('selectComposition', id)"
+        @recalculate="emit('recalculate')"
       />
     </div>
 
     <!-- Mobile replacement -->
     <MobileSettingsCard
-      class="sm:hidden"
+      class="lg:hidden"
       :composition="selectedComposition?.description ?? null"
       :frequency="frequencyLabel"
     />

@@ -1,7 +1,15 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, computed, watch } from 'vue'
+import { onMounted, onBeforeUnmount, ref, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useStore } from '@/stores/store'
+import {
+  scheduleFromRequest,
+  scheduleRequest,
+  sameTariff,
+  tariffFromRequest,
+  tariffRequest,
+  type Tariff,
+} from '@/lib/detailsScope'
 import { useToastStore } from '@/stores/toastStore'
 import type {
   EvaluationResponse,
@@ -24,8 +32,8 @@ import { useLocaleFormat } from '@/composables/useLocaleFormat'
 import { buildSuggestRows, settledRows, type SuggestRow } from '@/lib/suggestPlacement'
 import { formatClock, dayOffset } from '@/lib/tripClock'
 import { useProposalFamily } from '@/composables/useProposalFamily'
-import { buildScenarioAxes } from '@/lib/scenarioAxes'
-import { inflateRoute, memberFailure, routeFor } from '@/lib/proposalFamily'
+import { buildScenarioAxes, conditionLabelKey } from '@/lib/scenarioAxes'
+import { alternativeRoutes, inflateRoute, memberFailure, routeFor } from '@/lib/proposalFamily'
 import {
   addonFor,
   addonsForDirection,
@@ -59,6 +67,7 @@ import StopTime from '@/components/StopTime.vue'
 import ExpertTimetableControls from '@/components/ExpertTimetableControls.vue'
 import LoadingFunFact from '@/components/LoadingFunFact.vue'
 import MapView from '@/components/MapView.vue'
+import TripPairComingSoon from '@/components/TripPairComingSoon.vue'
 import MapShareBar from '@/components/MapShareBar.vue'
 import CommentSection from '@/components/CommentSection.vue'
 import InlineAlert from '@/components/InlineAlert.vue'
@@ -449,6 +458,32 @@ function swapDirection() {
 }
 
 // Ordered stops (outbound direction) backing the route-section slider.
+// The route's two example journeys, priced by the Supply tab's fare table:
+// the longest OD pair the route sells (its terminals) and the shortest (the
+// closest two consecutive stops). Computed here because only the raw route
+// carries per-segment distances; a fare in €/km means little without them.
+const exampleOdPairs = computed(() => {
+  const pair = rawRoute.value?.trip_pairs?.[0]
+  const segments = pair?.outbound?.segments ?? []
+  if (segments.length === 0) return { longest: null, shortest: null }
+  const first = segments[0].from_stop
+  const last = segments[segments.length - 1].to_stop
+  const totalKm = segments.reduce((sum, seg) => sum + seg.distance_m / 1000, 0)
+  let shortest = segments[0]
+  for (const seg of segments) if (seg.distance_m < shortest.distance_m) shortest = seg
+  return {
+    longest: { name: `${first.stop_name} – ${last.stop_name}`, km: totalKm },
+    shortest: {
+      name: `${shortest.from_stop.stop_name} – ${shortest.to_stop.stop_name}`,
+      km: shortest.distance_m / 1000,
+    },
+  }
+})
+
+// Both directions, which is what the summary's total_distance_km counts and
+// therefore what one operating day covers.
+const cycleDistanceKm = computed(() => calcSummary.value?.total_distance_km ?? 0)
+
 const sectionStops = computed(() => {
   const trips = routeResult.value?.trips ?? []
   const outbound = trips.find((t) => t.direction_id === 0) ?? trips[0]
@@ -639,6 +674,11 @@ function familyRequest(
     (variantIds.length === 0 || variantIds.includes(selectedVariant))
       ? selectedVariant
       : undefined
+  // The Details card's three inputs (zone D). They are HOW fields: part of
+  // the family key, echoed in the resolved request, and saved with the
+  // proposal. A flat seven posts no month map at all, so a proposal nobody
+  // has touched still hashes to the family it always did.
+  const schedule = scheduleRequest(store.scheduleMonths)
   return {
     stops: stopIds,
     // Omitted entirely while nothing is overridden: an absent block and an
@@ -646,6 +686,11 @@ function familyRequest(
     // backend rejects an add-on whose stop pair is not a leg of the stops
     // being posted.
     ...(expertBlock ? { expert_timetable: expertBlock } : {}),
+    ...schedule,
+    // The four tariff maps, posted only once the model registry has seeded
+    // them: an empty object would price every class at nothing, which is not
+    // what an unanswered request means.
+    ...(Object.keys(store.faresEurPerKm).length > 0 ? tariffRequest(currentTariff.value) : {}),
     auto_stop_addition: autoStopAddition,
     ...(variantIds.length > 0 ? { scenario_variant_ids: variantIds } : {}),
     presented: {
@@ -851,9 +896,9 @@ async function loadViews(scenarioId: number | null, compositionId: string | null
   const token = ++viewsToken
   if (scenarioId === null || compositionId === null) return
   try {
-    const views = await family.views(scenarioId, compositionId)
-    if (token !== viewsToken || !views || !calcResult.value) return
-    calcResult.value = { ...calcResult.value, views }
+    const bundle = await family.views(scenarioId, compositionId)
+    if (token !== viewsToken || !bundle || !calcResult.value) return
+    calcResult.value = { ...calcResult.value, views: bundle.views, operations: bundle.operations }
   } catch (err) {
     if (token !== viewsToken) return
     // Zone E stays on its skeleton; the rest of the page — route, KPIs,
@@ -870,6 +915,25 @@ async function loadViews(scenarioId: number | null, compositionId: string | null
 // `publish` is true only for user-initiated evaluations (Evaluate button, stop
 // selection) — a passive scenario-switch recompute passes false so it never
 // creates or overwrites a proposal.
+/** The three Details inputs as the resolved request echo has them. */
+function restoreDetailInputs(request: Record<string, unknown>) {
+  store.scheduleMonths = scheduleFromRequest(
+    request.schedule as Record<string, number> | null | undefined,
+  )
+  const tariff = tariffFromRequest(request)
+  // Only what the echo actually carries: a request written before CALC
+  // 0.9.30 has no fixed-fare or services map, and overwriting the seeded
+  // defaults with {} would price those parts at nothing.
+  if (Object.keys(tariff.faresPerKm).length) store.faresEurPerKm = { ...tariff.faresPerKm }
+  if (Object.keys(tariff.faresPerPax).length) store.faresEurPerPax = { ...tariff.faresPerPax }
+  if (Object.keys(tariff.servicesPerPax).length) {
+    store.servicesEurPerPax = { ...tariff.servicesPerPax }
+  }
+  if (Object.keys(tariff.cateringPerPax).length) {
+    store.cateringEurPerPax = { ...tariff.cateringPerPax }
+  }
+}
+
 function applyPlan(json: MemberPlan, publish = false) {
   rawRoute.value = json.route
   // Expert overrides. Three steps, each answering a different question:
@@ -909,6 +973,11 @@ function applyPlan(json: MemberPlan, publish = false) {
   calcSummary.value = json.summary ?? null
   // Keep the resolved request so publish can send it verbatim (server recomputes).
   publishRequest.value = json.request
+  // Put the Details inputs back where the echo says they were. This is what
+  // makes a STORED proposal open with its own schedule and prices rather than
+  // the defaults — without it a reload would recompute against defaults and
+  // report itself stale the moment it finished loading.
+  restoreDetailInputs(json.request)
   const route = adaptRoute(json.route)
   routeResult.value = route
   selectedTripId.value =
@@ -1285,8 +1354,32 @@ const paramsStale = computed(
     !isDirty.value &&
     (selectedCompositionId.value !== committedCompId.value ||
       store.selectedScenarioId !== committedScenarioId.value ||
-      expertChanged.value),
+      expertChanged.value ||
+      detailsChanged.value),
 )
+
+// The Details card's own inputs (zone D) are stale results in exactly the
+// same sense as a composition switch: the figures above no longer describe
+// what the fields say. The card is deliberately NOT greyed with the rest —
+// it is where the inputs live — so it carries its own Recalculate and its
+// own per-panel waiting state; this flag is what greys zones A, B and E.
+const detailsChanged = computed(() => {
+  const request = publishRequest.value
+  if (!request) return false
+  const committedMonths = scheduleFromRequest(
+    request.schedule as Record<string, number> | null | undefined,
+  )
+  if (committedMonths.some((d, i) => d !== store.scheduleMonths[i])) return true
+  return !sameTariff(currentTariff.value, tariffFromRequest(request))
+})
+
+/** The tariff as the fields currently have it. */
+const currentTariff = computed<Tariff>(() => ({
+  faresPerKm: store.faresEurPerKm,
+  faresPerPax: store.faresEurPerPax,
+  servicesPerPax: store.servicesEurPerPax,
+  cateringPerPax: store.cateringEurPerPax,
+}))
 
 // An expert edit is not "dirty" — the stops are untouched — it is stale
 // results, the same state a composition switch produces, and it takes the
@@ -1309,9 +1402,17 @@ const expertChanged = computed(() => {
 
 // The stale results' recompute: same "stops are settled" call the scenario
 // switch used to make on its own, now behind the user's click.
+//
+// The results section unmounts while the compute is out (currentMode is
+// 'loading'), so the page collapses to the builder and the browser puts the
+// reader back at the top. Remembering the scroll offset and restoring it once
+// the new figures are mounted keeps a Recalculate pressed inside the Details
+// card where it was pressed — the card's own open state and tab survive in
+// the store for the same reason.
 async function recomputeWithSelection() {
   const stopIds = currentStopIds.value
   if (stopIds.length < 2 || currentMode.value === 'loading') return
+  const scrollY = window.scrollY
   currentMode.value = 'loading'
   calcFailure.value = null
   calcFailureMsg.value = null
@@ -1323,6 +1424,10 @@ async function recomputeWithSelection() {
   // change at all. Someone else's proposal is still never overwritten:
   // recomputing it to look at another scenario stays a private what-if.
   if (json) applyPlan(json, ownsProposal.value)
+  // After the results are back on the page, not before — the offset means
+  // nothing while the section is unmounted.
+  await nextTick()
+  window.scrollTo({ top: scrollY })
 }
 
 // Swap button is shown wherever there's a direction to flip: a multi-trip
@@ -1870,6 +1975,70 @@ const mapSegments = computed<MapSegment[] | null>(() => {
   return out
 })
 
+// --- The family's other corridors on the map -------------------------------
+// Every other member's route, faded, under the one on screen — so a switch is
+// something you can see before you make it. The document already carries all
+// of them (one compact route per scenario × composition over a shared geometry
+// pool), so this costs a lookup, not a request.
+//
+// Which corridor is "the one on screen" comes from the family member, not from
+// rawRoute: a route loaded through GET /api/proposal/<id> carries per-trip
+// geometry ids (`<trip>_L3`), while the document's pool is content-addressed
+// (`g:<hash>`), and only the member's route_ref names the same thing in both
+// worlds. No member, no alternatives — showing all of them would paint one
+// straight over the route.
+interface MapAlternative {
+  key: string
+  scenarioId: number
+  compositionId: string
+  label: string
+  lines: [number, number][][]
+}
+
+const mapAlternatives = computed<MapAlternative[] | null>(() => {
+  const doc = family.document.value
+  const scenarioId = committedScenarioId.value
+  const compositionId = committedCompId.value
+  if (!doc || scenarioId === null || compositionId === null) return null
+  if (currentMode.value !== 'display' || !showComputedView.value) return null
+  const current = family.okMember(scenarioId, compositionId)
+  if (!current) return null
+
+  const axes = buildScenarioAxes(store.scenarios)
+  return alternativeRoutes(doc, current.route_ref, compositionId)
+    .map((alt) => {
+      const state = axes.stateOf(alt.scenarioId)
+      const scenario = [
+        t('proposal.compare.axes.infra', { network: state?.network ?? '' }),
+        state ? t(`proposal.compare.conditionsShort.${conditionLabelKey(state)}`) : null,
+      ]
+        .filter(Boolean)
+        .join(' · ')
+      return {
+        key: alt.key,
+        scenarioId: alt.scenarioId,
+        compositionId: alt.compositionId,
+        // The composition is only worth naming when it is not the one already
+        // on screen — otherwise every label would end in the same id.
+        label:
+          alt.compositionId === compositionId ? scenario : `${scenario} · ${alt.compositionId}`,
+        lines: alt.geometryIds
+          .map((id) => (doc.geometries[id] ?? []) as [number, number][])
+          .filter((coords) => coords.length > 1),
+      }
+    })
+    .filter((alt) => alt.lines.length > 0)
+})
+
+// Clicking a faded corridor is the same switch the scenario switches and the
+// comparison grid make: set the selection and let the watchers below serve the
+// member from the family. applyPlan commits both, so whichever watcher runs
+// second finds nothing left to do.
+function onSelectAlternative(scenarioId: number, compositionId: string) {
+  store.selectedScenarioId = scenarioId
+  selectedCompositionId.value = compositionId
+}
+
 // Load a stored proposal by id and populate display mode. GET /api/proposal/
 // <id> carries the FULL route and the views inline (types/api.ts's
 // ProposalDetailResponse), so applyPlan() hydrates rawRoute/calcResult/
@@ -1934,7 +2103,6 @@ function startFamilyInBackground(request: Record<string, unknown>) {
     ...familyRequest(stops, 'off', expertBlock),
     timetable_mode: request.timetable_mode as string | undefined,
     fixed_night_interval: (request.fixed_night_interval as string[] | null | undefined) ?? null,
-    schedule_mode: request.schedule_mode as string | undefined,
     routing_mode: request.routing_mode as string | undefined,
   }
   family.start(familyKey(body), body, store.authHeaders())
@@ -2077,15 +2245,19 @@ onMounted(async () => {
       </div>
     </div>
 
+    <!-- Itinerary beside the map, stacked below `lg`. The two only coexist
+         above about 900px — a max-w-sm itinerary column plus MapView's 480px
+         minimum plus the gap — and below that the row used to overflow the
+         page rather than wrap. -->
     <div
       v-else
-      class="flex gap-6 transition-opacity duration-200"
+      class="flex flex-col gap-6 transition-opacity duration-200 lg:flex-row"
       :class="paramsStale ? 'opacity-40' : ''"
     >
       <!-- Left panel: shrink-wrapped to its content's natural width (the
            itinerary text) rather than a fixed share of the row, so MapView
-           gets whatever width is left over. -->
-      <div class="flex w-fit shrink-0 flex-col justify-center gap-12">
+           gets whatever width is left over. Full width once stacked. -->
+      <div class="flex w-full flex-col justify-center gap-12 lg:w-fit lg:shrink-0">
         <!-- The itinerary column is capped so it stays a column beside the
              map. Expert mode adds a stepper per leg, which does not fit that
              cap: rather than letting the table scroll sideways (a scrollbar
@@ -2096,6 +2268,11 @@ onMounted(async () => {
           class="itinerary-table"
           :class="expertMode && currentMode === 'display' ? 'max-w-lg' : 'max-w-sm'"
         >
+          <!-- What this band becomes: more than one trip pair, i.e. Y- and
+               X-shaped routes. Above the itinerary because that is where the
+               control will go. -->
+          <TripPairComingSoon />
+
           <!-- Edit mode table -->
           <!-- border-collapse (set in pt.table) removes default cell spacing so
                the timeline line segments in consecutive rows connect seamlessly. -->
@@ -2695,8 +2872,11 @@ onMounted(async () => {
            (see MapView.vue) and would otherwise escape the rounded corners
            while loading. -->
       <div class="flex-1">
+        <!-- Sticky only in the two-column layout: stacked, the map is a block
+             the page scrolls past like any other, and pinning it would park it
+             over the results below. -->
         <div
-          class="sticky top-6 relative isolate h-full max-h-[calc(100vh-3rem)] overflow-hidden rounded-xl border border-primary-50/10"
+          class="relative isolate h-full overflow-hidden rounded-xl border border-primary-50/10 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)]"
           style="clip-path: inset(0 round 0.75rem)"
         >
           <MapView
@@ -2705,9 +2885,11 @@ onMounted(async () => {
             :segments="mapSegments"
             :suggested="mapSuggested"
             :available="mapAvailable"
+            :alternatives="mapAlternatives"
             class="w-full h-full"
             @toggle-suggested="toggleSuggested"
             @add-stop="onMapAddStop"
+            @select-alternative="onSelectAlternative"
           />
           <!-- Like + share, bottom-left: MapLibre's zoom control is top-right
                and its attribution bottom-right, so this corner is free. Placed
@@ -2797,6 +2979,10 @@ onMounted(async () => {
         :params-stale="paramsStale"
         :dimmed="isDirty"
         :schedule-mode="(publishRequest?.schedule_mode as string | undefined) ?? null"
+        :committed-request="publishRequest"
+        :cycle-distance-km="cycleDistanceKm"
+        :longest-od="exampleOdPairs.longest"
+        :shortest-od="exampleOdPairs.shortest"
         @select-composition="(id) => (selectedCompositionId = id)"
         @recalculate="recomputeWithSelection"
         @scope-change="onScopeChange"

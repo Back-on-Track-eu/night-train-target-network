@@ -115,15 +115,7 @@ watch(filtered, () => {
         @keydown.up.prevent="move(-1)"
       />
     </div>
-    <div
-      ref="listRef"
-      class="overflow-y-auto p-1.5"
-      style="
-        max-height: 20rem;
-        scrollbar-width: thin;
-        scrollbar-color: color-mix(in srgb, var(--p-primary-50) 50%, transparent) transparent;
-      "
-    >
+    <div ref="listRef" class="thin-scroll overflow-y-auto p-1.5" style="max-height: 20rem">
       <p v-if="!filtered.length" class="px-4 py-3 text-base text-primary-50/70">
         {{ t('gallery.search.noCountries') }}
       </p>
@@ -145,18 +137,5 @@ watch(filtered, () => {
 .country-select-overlay {
   background: #23263d !important;
   border: 1px solid var(--p-primary-50) !important;
-}
-.country-select-overlay *::-webkit-scrollbar {
-  width: 5px !important;
-}
-.country-select-overlay *::-webkit-scrollbar-track {
-  background: transparent !important;
-}
-.country-select-overlay *::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--p-primary-50) 50%, transparent) !important;
-  border-radius: 99px !important;
-}
-.country-select-overlay *::-webkit-scrollbar-button {
-  display: none !important;
 }
 </style>

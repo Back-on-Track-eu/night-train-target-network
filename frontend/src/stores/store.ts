@@ -23,6 +23,7 @@ import { i18n } from '@/i18n'
 import type { GallerySearchSeed } from '@/lib/proposalPrefill'
 import { apiRequest } from '@/lib/apiClient'
 import { asApiFailure, type ApiFailure } from '@/lib/apiError'
+import { DAILY_SCHEDULE } from '@/lib/detailsScope'
 
 export type LoadStatus = 'idle' | 'loading' | 'success' | 'error'
 
@@ -188,11 +189,58 @@ export const useStore = defineStore('store', () => {
     )
   }
 
+  // --- Details inputs (zone D) ----------------------------------------------
+  // The three HOW fields the Details card edits. They are part of the family
+  // key and are saved with the proposal (they ride in compute_request), so
+  // they live here rather than in the card: ProposalViewport posts them with
+  // every family request and restores them when a stored proposal loads.
+  //
+  // Days per week for each month, January first. A flat seven is the
+  // backend's own default and posts no month map at all — see
+  // lib/detailsScope.ts::scheduleRequest.
+  const scheduleMonths = ref<number[]>([...DAILY_SCHEDULE])
+  // The tariff, four maps of class_main → EUR (CALC 0.9.30). Empty until the
+  // model registry lands, then seeded from demand.defaults so the fields
+  // never hard-code a rate the backend owns.
+  //
+  //   faresEurPerKm    the distance part of the base fare
+  //   faresEurPerPax   the fixed part — a berth's price of admission
+  //   servicesEurPerPax  bikes, oversized luggage, reservations
+  //   cateringEurPerPax  the restaurant, SIGNED and already net
+  const faresEurPerKm = ref<Record<string, number>>({})
+  const faresEurPerPax = ref<Record<string, number>>({})
+  const servicesEurPerPax = ref<Record<string, number>>({})
+  const cateringEurPerPax = ref<Record<string, number>>({})
+
+  const demandDefaults = computed(() => models.value?.demand?.defaults ?? null)
+
+  // Where the reader was in the Details card. Held here rather than in the
+  // component because a recalculation unmounts the whole results section
+  // while it loads: keeping this in the card meant every Recalculate closed
+  // the card it was pressed in and threw the reader back to the top.
+  const detailsOpen = ref(false)
+  const detailsTab = ref<string>('supply')
+
+  /** Put the model's own standard values into the fields. Called once the
+   *  registry is here and again whenever the user asks for a reset. */
+  function resetDetailInputsToDefaults(): void {
+    const defaults = demandDefaults.value
+    if (!defaults) return
+    faresEurPerKm.value = { ...defaults.fares_eur_per_km }
+    faresEurPerPax.value = { ...defaults.fares_eur_per_pax }
+    servicesEurPerPax.value = { ...defaults.services_eur_per_pax }
+    cateringEurPerPax.value = { ...defaults.catering_eur_per_pax }
+  }
+
   async function fetchModels(): Promise<void> {
     modelsStatus.value = 'loading'
     try {
       const json = await apiRequest<ModelsResponse>('/api/models', { budget: 'reference' })
       models.value = json.models
+      // Seed the price fields from the registry, unless a stored proposal has
+      // already put its own values there (loading one can resolve first on a
+      // warm cache).
+      if (Object.keys(faresEurPerKm.value).length === 0) resetDetailInputsToDefaults()
       modelsStatus.value = 'success'
     } catch {
       // No registry means no formula popovers — a degraded breakdown, not a
@@ -340,6 +388,16 @@ export const useStore = defineStore('store', () => {
     models,
     modelsStatus,
     fetchModels,
+    // details inputs
+    scheduleMonths,
+    faresEurPerKm,
+    faresEurPerPax,
+    servicesEurPerPax,
+    cateringEurPerPax,
+    demandDefaults,
+    resetDetailInputsToDefaults,
+    detailsOpen,
+    detailsTab,
     selectedScenarioId,
     pendingProposalSeed,
     galleryStale,

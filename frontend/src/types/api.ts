@@ -395,7 +395,19 @@ export interface Breakdown {
     infrastructure: BreakdownInfrastructure
     total_eur: number
   }
-  revenue: { ticket_revenue_eur: number; total_eur: number }
+  // catering_contribution_eur is SIGNED (CALC 0.9.29): the on-board service's
+  // own sales less its own costs, one net figure per passenger carried. It is
+  // inside total_revenue_eur and net_eur, and deliberately outside the
+  // var_overhead_eur and ebit_margin_eur bases, which stay shares of tickets.
+  revenue: {
+    // The base fare — its fixed part plus its distance part.
+    ticket_revenue_eur: number
+    // Bikes, oversized luggage, reservations. Ordinary ticket revenue, so
+    // unlike catering it IS inside the overhead and margin bases.
+    services_revenue_eur: number
+    catering_contribution_eur: number
+    total_eur: number
+  }
   margin: { ebit_margin_eur: number; total_eur: number }
   total_cost_eur: number
   total_revenue_eur: number
@@ -489,10 +501,27 @@ export interface EvaluationModelSection {
   formulas: FormulaMap
 }
 
+/** The stopgap demand model carries overridable STANDARD VALUES rather than
+ *  formulas — the Supply tab's price fields read their defaults here so they
+ *  never hard-code a number the backend owns. */
+export interface DemandModelSection {
+  version: string
+  description: string
+  defaults: {
+    fares_eur_per_km: Record<string, number>
+    fares_eur_per_pax: Record<string, number>
+    services_eur_per_pax: Record<string, number>
+    // Signed net contribution per passenger of that class (CALC 0.9.30).
+    catering_eur_per_pax: Record<string, number>
+    utilization_per: number
+  }
+}
+
 export interface EvaluationModels {
   route_builder: EvaluationModelSection
   energy: EvaluationModelSection
   evaluation: EvaluationModelSection
+  demand?: DemandModelSection
 }
 
 // --- GET /api/params/* : the per-unit rates a member was priced from --------
@@ -616,6 +645,10 @@ export interface EvaluationResponse {
   calc_version: string
   route_id: string
   views: EvaluationViews | null
+  // Fetched with the views for a family member; absent for a stored proposal
+  // until its member views call lands (GET /api/proposal/<id> serves views
+  // only). Zone D's train-operation receipts read it.
+  operations?: Operations | null
 }
 
 // --- The gallery KPI summary block ------------------------------------------
@@ -656,6 +689,12 @@ export interface ProposalCalcSummary {
   subsidy_eur_per_t_co2?: number | null
   co2_g_per_pax_km?: number
   demand_kpis_placeholder?: boolean
+  // CALC 0.9.29. The contribution is signed and already inside net_eur_per_year;
+  // passengers_per_year is the base it multiplies (places actually sold) — NOT
+  // demand_trips_per_year, which stays the revenue-derived placeholder above.
+  services_revenue_eur?: number
+  catering_contribution_eur?: number
+  passengers_per_year?: number
   [key: string]: unknown
 }
 
@@ -783,8 +822,188 @@ export interface FamilyDocument {
   stats: FamilyStats
 }
 
+// --- operations: the physical side of the same evaluation -------------------
+// Trainsets, locomotive hours, people on board and their paid hours, read off
+// the very records the cost breakdown was priced from (CALC 0.9.29, backend
+// models/evaluation/operations.py). Served on demand with a member's views,
+// never persisted with a proposal and never part of the family document.
+
+/** One role on one trip (CALC 0.9.31): hours_on_train = on_board × trip
+ *  hours, paid_hours = hours_on_train / roster_efficiency — person-hours a
+ *  reader can check against the clock. The attendant-equivalent factor (the
+ *  train chief is one person paid at 1.19 attendants) is applied only in
+ *  the euros, never in the hours. */
+export interface TripStaffRole {
+  on_board: number
+  factor: number
+  hours_on_train: number
+  roster_efficiency: number
+  paid_hours: number
+  eur: number
+}
+
+export interface TripOperations {
+  trip_id: string
+  direction: 'outbound' | 'return'
+  // "at_stops" is the dwell at intermediate stops, where the loco stays
+  // coupled. Terminal standing time is NOT loco time in this model — it is
+  // priced as parking, an infrastructure leaf.
+  loco_hours: { running: number; at_stops: number; total: number }
+  staffing: Record<string, TripStaffRole> & {
+    total: {
+      on_board: number
+      factor_equivalents: number
+      hours_on_train: number
+      paid_hours: number
+      eur: number
+    }
+  }
+}
+
+/** The basis behind the fleet receipt's lines — the euros themselves stay
+ *  breakdown leaves, so there is no second copy free to drift. */
+export interface FleetBasis {
+  coaches_per_set: number
+  // The cost model's own n: coaches per rake × the THEORETICAL trainsets.
+  coaches_needed: number
+  purchase_coach_eur: number
+  amort_years: number
+  financing_quota_per: number
+  coach_maint_eur_km: number
+  cleaning_eur_coach_day: number
+  shunting_events_per_trip_cycle: number
+}
+
+export interface PairStaffRole {
+  on_board: number
+  hours_per_trip_cycle: number
+  effective_rate_eur_h: number | null
+  eur_per_trip_cycle: number
+  eur_per_year: number
+}
+
+export interface PairOperations {
+  composition_id: string
+  trainsets: {
+    physical: number
+    theoretical: number
+    coach_avail_per: number
+    cycle_days: number | null
+    peak_month: number
+    min_turnaround_min: number
+  }
+  fleet: FleetBasis
+  loco_hours: { per_trip_cycle: number; per_year: number; n_locos: number }
+  staffing: Record<string, PairStaffRole> & {
+    total: {
+      on_board: number
+      factor_equivalents: number
+      hours_per_trip_cycle: number
+      paid_hours_per_trip_cycle: number
+      eur_per_trip_cycle: number
+      eur_per_year: number
+    }
+  }
+  trips: TripOperations[]
+}
+
+// --- infrastructure: what each country charged on (handover §6.5) ----------
+// Per trip, folded from the same component records the cost model priced,
+// so every total here agrees with the breakdown leaf it explains.
+
+export type TacTerm =
+  | 'distance'
+  | 'gross_weight'
+  | 'places'
+  | 'fixed_add_on'
+  | 'stop_fee'
+  | 'revenue_share'
+  | 'congestion'
+
+export interface TrackAccessCountry {
+  country_code: string
+  km: number
+  night_km: number
+  /** Only the terms this country actually levied, in tariff order — the
+   *  "charged on" list. */
+  terms: { term: TacTerm; eur: number }[]
+  eur: number
+  /** The whole country priced from the EU-average defaults — no row of its
+   *  own. */
+  defaulted: boolean
+}
+
+export interface EnergyCountry {
+  country_code: string
+  km: number
+  kwh: number
+  night_kwh: number
+  price_eur: number
+  catenary_eur: number
+  eur: number
+  /** The tariff it was priced at. Absent when the caller had no track
+   *  infrastructure to hand. No VAT: the model prices net and the
+   *  parameters carry no rate. */
+  tariff?: { day_eur_kwh: number; night_eur_kwh: number | null; defaulted: boolean }
+}
+
+export interface TripInfrastructure {
+  trip_id: string
+  direction: 'outbound' | 'return'
+  track_access: {
+    countries: TrackAccessCountry[]
+    passages: { passage_id: string; fixed_eur: number; per_passenger_eur: number; eur: number }[]
+    eur: number
+  }
+  energy: { countries: EnergyCountry[]; kwh: number; eur: number }
+  stations: {
+    calls: {
+      stop_id: string
+      stop_name: string
+      country_code: string
+      /** The station's charge class ("Cat. 1", "Gold") where the source
+       *  names one. */
+      category: string | null
+      eur: number
+      /** Priced at the global default because the stop has no charge of
+       *  its own. */
+      defaulted?: boolean
+    }[]
+    eur: number
+  }
+}
+
+export interface ParkingEntry {
+  stop_id: string
+  stop_name: string
+  country_code: string
+  trip_ids: string[]
+  basis: string
+  hours: number
+  billable_hours: number
+  facility_eur: number
+  hotel_power_eur: number
+  eur_per_operating_day: number
+  defaulted: boolean
+}
+
+export interface Operations {
+  trip_pairs: PairOperations[]
+  infrastructure: { trips: TripInfrastructure[]; parkings: ParkingEntry[] }
+  route: {
+    operating_days_per_year: number
+    departures_per_year: number
+    trainsets_physical: number
+    trainsets_theoretical: number
+    loco_hours_per_year: number
+    staff_hours_per_trip_cycle: number
+    staff_eur_per_year: number
+  }
+}
+
 export interface FamilyViewsResponse {
   views: EvaluationViews
+  operations: Operations
 }
 
 // --- GET /api/models — the static model registry --------------------------

@@ -32,7 +32,12 @@ const popover = ref<InstanceType<typeof InfoPopover> | null>(null)
       <AppIcon :path="mdiInformationOutline" :size="14" />
     </button>
     <InfoPopover ref="popover">
-      <p class="w-0 min-w-full max-w-72 text-sm text-primary-50/75">{{ text }}</p>
+      <!-- A definite width, not `w-0 min-w-full`: the overlay is shrink-to-fit,
+           so a percentage min-width resolves against a containing block that is
+           itself sized by this element, collapses to zero, and leaves the text
+           wrapping at its longest word. The overlay's own max-width keeps this
+           inside a narrow viewport. -->
+      <p class="w-72 text-sm text-primary-50/75">{{ text }}</p>
     </InfoPopover>
   </span>
 </template>

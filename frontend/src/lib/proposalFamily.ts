@@ -5,6 +5,9 @@
 //   memberKey(sv, comp)            the map key every member lookup uses
 //   inflateRoute(document, route)  the document's compact route back into
 //                                  the full shape ProposalViewport reads
+//   alternativeRoutes(...)         the corridors the other members take,
+//                                  reduced to what diverges from the one
+//                                  on screen — the map's faded lines
 //   memberFailure(member)          an error member as the ApiFailure the
 //                                  builder's copy paths already handle
 //
@@ -88,6 +91,73 @@ export function inflateRoute(document: FamilyDocument, route: CompactRoute): Inf
 /** The document's route for an ok member. */
 export function routeFor(document: FamilyDocument, member: FamilyMemberOk): CompactRoute {
   return document.routes[member.route_ref]
+}
+
+/** Every geometry id a compact route draws, both directions of every pair. */
+export function geometryIdsOf(route: CompactRoute): Set<string> {
+  const ids = new Set<string>()
+  for (const pair of route.trip_pairs) {
+    for (const trip of [pair.outbound, pair.return_trip]) {
+      for (const seg of trip.segments) ids.add(seg.geometry_id)
+    }
+  }
+  return ids
+}
+
+/** One corridor the family found that the route on screen does not take. */
+export interface AlternativeRoute {
+  /** `${scenarioId}:${compositionId}` — stable identity for hover state. */
+  key: string
+  scenarioId: number
+  compositionId: string
+  /** Only the geometry the shown route does NOT draw: what actually diverges. */
+  geometryIds: string[]
+}
+
+/** The corridors of every OTHER member of `document`, ready to draw underneath
+ *  the one on screen.
+ *
+ *  Two reductions, both of which matter on a 72-member family. Each route is
+ *  reduced to the geometry the current one does not already draw, so a variant
+ *  that only differs over one border shows as that one branch rather than as a
+ *  second copy of the whole line; and routes left with the same geometry are
+ *  one alternative, not one per member — the family's ~12 routes share about
+ *  eight geometries, so most of them are the same corridor twice over.
+ *
+ *  `preferCompositionId` decides which member represents a shared corridor:
+ *  the one whose composition already matches means clicking it changes the
+ *  scenario only. Insertion order is the document's route order. */
+export function alternativeRoutes(
+  document: FamilyDocument,
+  currentRouteRef: string,
+  preferCompositionId: string | null = null,
+): AlternativeRoute[] {
+  const current = document.routes[currentRouteRef]
+  if (!current) return []
+  const shown = geometryIdsOf(current)
+
+  const byCorridor = new Map<string, AlternativeRoute>()
+  for (const [ref, route] of Object.entries(document.routes)) {
+    if (ref === currentRouteRef) continue
+    const compositionId = route.trip_pairs[0]?.composition_id
+    if (compositionId === undefined) continue
+    const geometryIds = [...geometryIdsOf(route)].filter((id) => !shown.has(id)).sort()
+    if (geometryIds.length === 0) continue
+
+    const corridor = geometryIds.join('|')
+    const existing = byCorridor.get(corridor)
+    if (existing && existing.compositionId === preferCompositionId) continue
+    if (existing && compositionId !== preferCompositionId) continue
+    byCorridor.set(corridor, {
+      // Scenario id, not variant id: the same key the comparison grid's
+      // cells use, and what the viewport's selection is expressed in.
+      key: `${route.scenario_id}:${compositionId}`,
+      scenarioId: route.scenario_id,
+      compositionId,
+      geometryIds,
+    })
+  }
+  return [...byCorridor.values()]
 }
 
 export function isOk(member: FamilyMember | undefined): member is FamilyMemberOk {

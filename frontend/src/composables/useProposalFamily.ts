@@ -24,6 +24,7 @@ import { asApiFailure, type ApiFailure } from '@/lib/apiError'
 import { memberKey } from '@/lib/proposalFamily'
 import type {
   EvaluationViews,
+  Operations,
   FamilyDocument,
   FamilyMember,
   FamilyMemberOk,
@@ -60,8 +61,13 @@ export interface ProposalFamily {
     headers: Record<string, string>,
     onSlow?: (phase: 'slow' | 'verySlow') => void,
   ): Promise<FamilyDocument | null>
-  /** One member's six views, fetched once per family and cached. */
-  views(scenarioId: number, compositionId: string): Promise<EvaluationViews | null>
+  /** One member's six views AND its operations block, fetched together once
+   *  per family and cached — the endpoint serves both (CALC 0.9.29) and zone
+   *  D's receipts need the second half. */
+  views(
+    scenarioId: number,
+    compositionId: string,
+  ): Promise<{ views: EvaluationViews; operations: Operations } | null>
   retry(): void
   abort(): void
   reset(): void
@@ -72,7 +78,7 @@ export function useProposalFamily(): ProposalFamily {
   const document = shallowRef<FamilyDocument | null>(null)
   const failure = ref<ApiFailure | null>(null)
   const members = shallowRef(new Map<string, FamilyMember>())
-  const viewsCache = new Map<string, EvaluationViews>()
+  const viewsCache = new Map<string, { views: EvaluationViews; operations: Operations }>()
 
   let controller: AbortController | null = null
   let currentKey: string | null = null
@@ -206,7 +212,10 @@ export function useProposalFamily(): ProposalFamily {
     return out
   }
 
-  async function views(scenarioId: number, compositionId: string): Promise<EvaluationViews | null> {
+  async function views(
+    scenarioId: number,
+    compositionId: string,
+  ): Promise<{ views: EvaluationViews; operations: Operations } | null> {
     const doc = document.value
     const variant = variantOf.value.get(scenarioId)
     if (!doc || !variant) return null
@@ -222,8 +231,9 @@ export function useProposalFamily(): ProposalFamily {
       // The family may have been reset while the fetch was out; a stale
       // answer must not land in a newer family's cache.
       if (document.value !== doc) return null
-      viewsCache.set(key, resp.views)
-      return resp.views
+      const bundle = { views: resp.views, operations: resp.operations }
+      viewsCache.set(key, bundle)
+      return bundle
     } catch (err) {
       if (asApiFailure(err)?.kind === 'canceled') return null
       throw err

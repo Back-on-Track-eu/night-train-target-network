@@ -5,15 +5,19 @@ import type { Composition, FamilyMember } from '@/types/api'
 import { subsidyDisplay } from '@/lib/compareKpis'
 import { CLASS_ICONS, classColor } from '@/lib/compositionFormation'
 import { useCompareFormat } from '@/composables/useCompareFormat'
-import AppIcon from '@/components/AppIcon.vue'
-import CompositionDetailOverlay from '@/components/CompositionDetailOverlay.vue'
-import { mdiInformationOutline } from '@mdi/js'
 
-// Zone D, Supply tab: the catalog as a table to compare and choose from —
+// Zone D, Train operation tab: the catalog as a table to compare and choose
+// from —
 // every composition evaluated on the current route under the selected
 // scenario (the matrix row byComposition(scenarioId)). Filters by fleet
-// kind, sortable columns, the selected row pinned under the header. The
-// info icon opens the existing detail overlay.
+// kind, sortable columns, the selected row highlighted in place. The
+// selected one's own figures are the panel below it, not an overlay: the
+// overlay is gone, and with it the ⓘ column that opened it.
+//
+// Trainsets lead, because that is the first question a reader has about a
+// composition on THIS route rather than in the catalog; the two density
+// columns (m and t per place) replace the catalog's indicative unit costs,
+// which said the same thing about every route.
 //
 // "Fit to demand" is in the header but not selectable (a "coming soon"
 // chip): the demand stopgap applies one uniform utilisation to every
@@ -30,13 +34,17 @@ const { t } = useI18n()
 const fmt = useCompareFormat()
 
 type Filter = 'all' | 'new' | 'refurbished' | 'hsr'
-type SortKey = 'subsidy' | 'eurTrainKm' | 'eurPlaceKm' | 'places'
+type SortKey =
+  | 'subsidy'
+  | 'eurTrainKm'
+  | 'eurPlaceKm'
+  | 'places'
+  | 'trainsets'
+  | 'densityLength'
+  | 'densityWeight'
 const filter = ref<Filter>('all')
 const sortKey = ref<SortKey>('subsidy')
 const sortDir = ref<1 | -1>(1)
-
-const detailOverlay = ref<InstanceType<typeof CompositionDetailOverlay> | null>(null)
-const detailComposition = ref<Composition | null>(null)
 
 const rows = computed(() =>
   props.compositions
@@ -59,6 +67,11 @@ const rows = computed(() =>
         error: cell?.status === 'error' ? cell.error : null,
         pending: cell === undefined,
         places: composition.capacity.total_places,
+        // This route's own fleet under the current schedule — the summary's,
+        // not a catalog figure.
+        trainsets: summary?.trainsets_physical ?? null,
+        densityLength: composition.capacity.avg_density_length_m_per_place,
+        densityWeight: composition.capacity.avg_density_weight_t_per_place,
         eurTrainKm: cost,
         // €/place-km from the annual totals, in cents: cost per train-km ×
         // train-km / available place-km.
@@ -89,10 +102,17 @@ const sorted = computed(() => {
         ? (r.eurTrainKm ?? Infinity)
         : key === 'eurPlaceKm'
           ? (r.ctPlaceKm ?? Infinity)
-          : r.places
-  const list = [...rows.value].sort((a, b) => (value(a) - value(b)) * dir)
-  const selected = list.find((r) => r.composition.composition_id === props.selectedCompositionId)
-  return selected ? [selected, ...list.filter((r) => r !== selected)] : list
+          : key === 'trainsets'
+            ? (r.trainsets ?? Infinity)
+            : key === 'densityLength'
+              ? r.densityLength
+              : key === 'densityWeight'
+                ? r.densityWeight
+                : r.places
+  // The selected row keeps its place in the order. It used to be lifted to the
+  // top, which made "where does my train rank" — the question this table is
+  // for — unanswerable at a glance; the highlight is what marks it.
+  return [...rows.value].sort((a, b) => (value(a) - value(b)) * dir)
 })
 
 function sortBy(key: SortKey) {
@@ -101,11 +121,6 @@ function sortBy(key: SortKey) {
     sortKey.value = key
     sortDir.value = key === 'places' ? -1 : 1
   }
-}
-
-function openDetail(event: Event, composition: Composition) {
-  detailComposition.value = composition
-  requestAnimationFrame(() => detailOverlay.value?.open(event))
 }
 
 const FILTERS: Filter[] = ['all', 'new', 'refurbished', 'hsr']
@@ -136,7 +151,11 @@ const headerClass =
     <div class="overflow-x-auto">
       <table class="w-full text-xs">
         <thead class="sticky top-0 bg-sapphire">
-          <tr>
+          <tr class="align-bottom">
+            <th :class="headerClass" @click="sortBy('trainsets')">
+              {{ t('proposal.supply.columns.trainsets')
+              }}<span v-if="sortKey === 'trainsets'">{{ sortDir === 1 ? ' ↑' : ' ↓' }}</span>
+            </th>
             <th :class="headerClass">{{ t('proposal.supply.columns.composition') }}</th>
             <th :class="headerClass" @click="sortBy('places')">
               {{ t('proposal.supply.columns.places')
@@ -145,10 +164,30 @@ const headerClass =
             <th :class="headerClass" @click="sortBy('eurTrainKm')">
               {{ t('proposal.supply.columns.eurTrainKm')
               }}<span v-if="sortKey === 'eurTrainKm'">{{ sortDir === 1 ? ' ↑' : ' ↓' }}</span>
+              <span class="block text-[9px] text-primary-50/40">
+                {{ t('proposal.supply.units.eurPerTrainKm') }}
+              </span>
+            </th>
+            <th :class="headerClass" @click="sortBy('densityLength')">
+              {{ t('proposal.supply.columns.densityLength')
+              }}<span v-if="sortKey === 'densityLength'">{{ sortDir === 1 ? ' ↑' : ' ↓' }}</span>
+              <span class="block text-[9px] text-primary-50/40">
+                {{ t('proposal.supply.units.metresPerPlace') }}
+              </span>
+            </th>
+            <th :class="headerClass" @click="sortBy('densityWeight')">
+              {{ t('proposal.supply.columns.densityWeight')
+              }}<span v-if="sortKey === 'densityWeight'">{{ sortDir === 1 ? ' ↑' : ' ↓' }}</span>
+              <span class="block text-[9px] text-primary-50/40">
+                {{ t('proposal.supply.units.tonnesPerPlace') }}
+              </span>
             </th>
             <th :class="headerClass" @click="sortBy('eurPlaceKm')">
               {{ t('proposal.supply.columns.ctPlaceKm')
               }}<span v-if="sortKey === 'eurPlaceKm'">{{ sortDir === 1 ? ' ↑' : ' ↓' }}</span>
+              <span class="block text-[9px] text-primary-50/40">
+                {{ t('proposal.supply.units.centPerPlaceKm') }}
+              </span>
             </th>
             <!-- Not selectable: the demand stopgap cannot distinguish compositions. -->
             <th
@@ -164,8 +203,10 @@ const headerClass =
             <th :class="headerClass" @click="sortBy('subsidy')">
               {{ t('proposal.supply.columns.subsidy')
               }}<span v-if="sortKey === 'subsidy'">{{ sortDir === 1 ? ' ↑' : ' ↓' }}</span>
+              <span class="block text-[9px] text-primary-50/40">
+                {{ t('proposal.supply.units.perYear') }}
+              </span>
             </th>
-            <th class="px-2 py-1.5"></th>
           </tr>
         </thead>
         <tbody>
@@ -178,6 +219,9 @@ const headerClass =
             "
             @click="emit('select', row.composition.composition_id)"
           >
+            <td class="px-2 py-1.5 font-semibold tabular-nums text-primary-50">
+              {{ row.trainsets === null ? '…' : fmt.int(row.trainsets) }}
+            </td>
             <td class="px-2 py-1.5">
               <div class="flex flex-col gap-1">
                 <span class="font-semibold text-primary-50">{{
@@ -207,9 +251,15 @@ const headerClass =
               >
               <span v-else class="text-primary-50/30">…</span>
             </td>
+            <td class="px-2 py-1.5 tabular-nums text-primary-50/70">
+              {{ fmt.dec2(row.densityLength) }}
+            </td>
+            <td class="px-2 py-1.5 tabular-nums text-primary-50/70">
+              {{ fmt.dec2(row.densityWeight) }}
+            </td>
             <td class="px-2 py-1.5 text-primary-50/85">
               <template v-if="row.ctPlaceKm !== null">
-                {{ fmt.eur2(row.ctPlaceKm).replace('€', 'ct') }}
+                {{ fmt.dec2(row.ctPlaceKm) }}
               </template>
               <span v-else class="text-primary-50/30">…</span>
             </td>
@@ -227,24 +277,9 @@ const headerClass =
               </template>
               <span v-else class="text-primary-50/30">…</span>
             </td>
-            <td class="px-2 py-1.5">
-              <button
-                type="button"
-                class="cursor-pointer text-primary-50/60 hover:text-primary-50"
-                :aria-label="t('proposal.composition.detailsAria')"
-                @click.stop="openDetail($event, row.composition)"
-              >
-                <AppIcon :path="mdiInformationOutline" :size="16" />
-              </button>
-            </td>
           </tr>
         </tbody>
       </table>
     </div>
-    <CompositionDetailOverlay
-      v-if="detailComposition"
-      ref="detailOverlay"
-      :composition="detailComposition"
-    />
   </div>
 </template>

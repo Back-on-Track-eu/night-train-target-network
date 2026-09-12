@@ -7,6 +7,7 @@ import {
   mdiBike,
   mdiAirConditioner,
   mdiPowerSocketEu,
+  mdiSilverwareForkKnife,
 } from '@mdi/js'
 import type {
   ClassEntry,
@@ -38,6 +39,14 @@ export const CLASS_COLORS: Record<string, string> = {
 }
 
 export const SERVICE_COLOR = '#2b2e4a'
+
+// The restaurant car. Catering sells no places, so it is not in CLASS_COLORS
+// and never appears in a class share — but it does appear as a row on the
+// prices table, as a service area in the formation drawing, and as a signed
+// contribution on the demand panel, and it has to look the same in all three.
+// Warm neutral against the four class colours, which are the comfort ramp.
+export const CATERING_COLOR = '#d9a05b'
+export const CATERING_ICON = mdiSilverwareForkKnife
 
 const DARK_INK = '#1d1e33'
 const LIGHT_INK = '#f1f3f6'

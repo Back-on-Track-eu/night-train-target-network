@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { inflateRoute, isOk, memberFailure, memberKey, routeFor } from './proposalFamily'
+import {
+  alternativeRoutes,
+  inflateRoute,
+  isOk,
+  memberFailure,
+  memberKey,
+  routeFor,
+} from './proposalFamily'
 import type { CompactRoute, FamilyDocument, FamilyMemberError } from '@/types/api'
 
 const stop = (id: string, dep: number | null, arr: number | null) => ({
@@ -193,5 +200,71 @@ describe('memberFailure', () => {
       status: 500,
       slug: 'calc_error',
     })
+  })
+})
+
+// A second route in the same family: one segment of the outbound leg goes a
+// different way (g:9 instead of g:2), everything else is shared.
+function variantRoute(scenarioId: number, compositionId: string, divergent: string): CompactRoute {
+  return {
+    ...compactRoute,
+    route_id: `R${scenarioId}`,
+    scenario_id: scenarioId,
+    trip_pairs: [
+      {
+        composition_id: compositionId,
+        outbound: {
+          ...compactRoute.trip_pairs[0].outbound,
+          segments: [
+            { from: 0, to: 1, geometry_id: 'g:1', country_distance_shares: { DE: 1 } },
+            { from: 1, to: 2, geometry_id: divergent, country_distance_shares: { DE: 1 } },
+          ],
+        },
+        return_trip: compactRoute.trip_pairs[0].return_trip,
+      },
+    ],
+  }
+}
+
+function withRoutes(routes: Record<string, CompactRoute>): FamilyDocument {
+  return { ...document, routes: { ...document.routes, ...routes } }
+}
+
+describe('alternativeRoutes', () => {
+  it('keeps only the geometry the shown route does not already draw', () => {
+    const doc = withRoutes({ 'r:2:NEW-BAL-7': variantRoute(2, 'NEW-BAL-7', 'g:9') })
+    const alts = alternativeRoutes(doc, 'r:1:NEW-BAL-7')
+    expect(alts).toHaveLength(1)
+    expect(alts[0].geometryIds).toEqual(['g:9'])
+    expect(alts[0].scenarioId).toBe(2)
+    expect(alts[0].key).toBe('2:NEW-BAL-7')
+  })
+
+  it('drops a route that takes the same corridor as the shown one', () => {
+    const doc = withRoutes({ 'r:2:NEW-BAL-7': variantRoute(2, 'NEW-BAL-7', 'g:2') })
+    expect(alternativeRoutes(doc, 'r:1:NEW-BAL-7')).toEqual([])
+  })
+
+  it('collapses routes that diverge identically into one alternative', () => {
+    const doc = withRoutes({
+      'r:2:NEW-BAL-7': variantRoute(2, 'NEW-BAL-7', 'g:9'),
+      'r:2:REF-BAL-9': variantRoute(2, 'REF-BAL-9', 'g:9'),
+    })
+    expect(alternativeRoutes(doc, 'r:1:NEW-BAL-7')).toHaveLength(1)
+  })
+
+  it('represents a shared corridor by the member on the current composition', () => {
+    const doc = withRoutes({
+      'r:2:REF-BAL-9': variantRoute(2, 'REF-BAL-9', 'g:9'),
+      'r:2:NEW-BAL-7': variantRoute(2, 'NEW-BAL-7', 'g:9'),
+    })
+    // Insertion order puts REF first; the preference overrides it, so clicking
+    // the line changes the scenario only.
+    expect(alternativeRoutes(doc, 'r:1:NEW-BAL-7', 'NEW-BAL-7')[0].compositionId).toBe('NEW-BAL-7')
+  })
+
+  it('is empty when the shown route is not in the document', () => {
+    const doc = withRoutes({ 'r:2:NEW-BAL-7': variantRoute(2, 'NEW-BAL-7', 'g:9') })
+    expect(alternativeRoutes(doc, 'r:99:NOPE')).toEqual([])
   })
 })
