@@ -38,10 +38,10 @@ export default defineConfig({
   },
 
   lang: 'en-GB',
-  title: 'How the model works',
+  title: 'Night Train Target Network',
   description:
-    'How the European night train network tool computes what a route would cost, ' +
-    'where its data comes from, and what it assumes.',
+    'Back-on-Track’s proposal for a European night train network, and the model ' +
+    'behind it: what a route costs, where the data comes from, and what it assumes.',
   cleanUrls: true,
 
   // The app has exactly one look: a fixed dark page, no light mode and no
@@ -60,15 +60,15 @@ export default defineConfig({
     ['meta', { name: 'theme-color', content: '#1d1e33' }],
     ['meta', { property: 'og:type', content: 'website' }],
     ['meta', { property: 'og:site_name', content: 'Back-on-Track Target Network' }],
-    ['meta', { property: 'og:title', content: 'How the model works' }],
+    ['meta', { property: 'og:title', content: 'Night Train Target Network' }],
     [
       'meta',
       {
         property: 'og:description',
         content:
           'Every number the night train tool produces, and where it comes from: ' +
-          'the data, the formulas, and the assumptions we have not yet replaced ' +
-          'with measurements.',
+          'the data, the formulas, and the assumptions still standing in for ' +
+          'measurements.',
       },
     ],
   ],
@@ -88,59 +88,49 @@ export default defineConfig({
     search: { provider: 'local' },
 
     nav: [
-      { text: 'Start here', link: '/' },
-      { text: 'About', link: '/about' },
+      { text: 'About', link: '/' },
       { text: 'Data sources', link: '/sources/' },
-      { text: 'What it costs', link: '/cost/total-cost' },
-      { text: 'Reference', link: '/reference/versions' },
+      { text: 'Costs', link: '/cost/total-cost' },
       // "Open the tool" used to sit here. It is in the masthead now
       // (.vitepress/theme/components/SiteBrandBar.vue), which is where the
       // app puts its own outbound links.
     ],
 
+    // One flat sidebar for every page, including the landing one: the site
+    // has no home layout, so the tree is visible wherever a reader lands.
+    //
+    // The reference pages (formulas, parameters, versions, changelog,
+    // standard values, emission factors) are deliberately absent here. They
+    // are still built and still published: every input row of every cost
+    // page's legend links into them, 122 links in all. They are reached from
+    // a formula rather than browsed.
     sidebar: [
+      // About is the landing page, so it sits above the groups rather than
+      // heading a group of one.
+      { text: 'About', link: '/' },
       {
-        text: 'Start here',
-        items: [
-          { text: 'What this tool computes', link: '/' },
-          { text: 'About the Target Network', link: '/about' },
-          { text: 'How to read our numbers', link: '/reading-the-numbers' },
-          { text: "What we don't yet model", link: '/not-modelled' },
-        ],
-      },
-      {
-        text: 'Where the numbers come from',
+        text: 'The model',
         items: [
           { text: 'Data sources', link: '/sources/' },
-          { text: 'How a route is planned', link: '/routing' },
-          { text: 'The stop catalogue', link: '/stops' },
-          { text: 'Revenue and demand', link: '/demand' },
+          { text: 'Route planning', link: '/routing' },
+          { text: 'Stop catalogue', link: '/stops' },
+          { text: 'Demand and revenue', link: '/demand' },
           { text: 'Emissions', link: '/emissions' },
           { text: 'Scenarios', link: '/scenarios' },
+          { text: 'Known gaps', link: '/not-modelled' },
         ],
       },
       // Generated from CALC_TREE — see render_site.py::render_sidebar.
-      { text: 'What it costs', items: costSidebar },
+      { text: 'Costs', items: costSidebar },
       {
-        text: 'How it was calibrated',
+        text: 'Calibration',
         items: [
           { text: 'Track access', link: '/methodology/track-access' },
-          { text: 'Energy consumption', link: '/methodology/energy' },
+          { text: 'Energy', link: '/methodology/energy' },
           { text: 'Traction electricity', link: '/methodology/energy-pricing' },
           { text: 'Shunting and stabling', link: '/methodology/facility' },
           { text: 'Terrain and buffers', link: '/methodology/route-context' },
           { text: 'Rolling stock', link: '/methodology/compositions' },
-        ],
-      },
-      {
-        text: 'Reference',
-        items: [
-          { text: 'Model versions', link: '/reference/versions' },
-          { text: 'What changed', link: '/reference/changelog' },
-          { text: 'All formulas', link: '/reference/formulas' },
-          { text: 'Parameter reference', link: '/reference/parameters' },
-          { text: 'Standard values', link: '/reference/standard-values' },
-          { text: 'Emission factors', link: '/reference/emission-factors' },
         ],
       },
     ],

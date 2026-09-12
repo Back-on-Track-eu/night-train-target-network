@@ -527,7 +527,7 @@ onActivated(() => {
     <!-- Landing pitch: one viewport-filling opening band, the statement beside
          the argument and the four ways onward. Self-contained — it owns its own
          sizing and h1 (App.vue's centred heading steps aside for this route);
-         the longer story lives at /docs/about. -->
+         the longer story lives at /docs/. -->
     <LandingIntro @create="createProposal" @browse="scrollToGallery" />
 
     <!-- The gallery proper: search bar, result count, then the list + map. The

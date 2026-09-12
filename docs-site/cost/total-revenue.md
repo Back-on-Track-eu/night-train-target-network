@@ -11,12 +11,11 @@ description: "The route's total annual revenue; ticket income is currently the o
 
 ## What this is
 
-What the service would take in over a year. Today ticket sales are the
-only source — no catering margin, no freight, no public service payment.
+What the service would take in over a year. Ticket sales are currently the
+only source: no catering margin, no freight, no public service payment.
 
-Read this number differently from the cost side. Costs are modelled;
-revenue is an assumption you are setting. See
-[ticket revenue](/cost/ticket-revenue).
+Read this differently from the cost side. Costs are modelled; revenue is an
+assumption you are setting. See [ticket revenue](/cost/ticket-revenue).
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-total_revenue_eur"></a>

@@ -11,13 +11,13 @@ description: "Administration, management and planning, as a share of the operato
 
 ## What this is
 
-Administration, management, planning — the operator's own running costs,
+Administration, management and planning: the operator's own running costs,
 charged as a share on top of its other costs.
 
 The base deliberately excludes charges paid to infrastructure companies.
 Marking up track access charges as though they were an operator cost would
 inflate overhead on exactly the routes that cross the most borders, which
-would be an artefact of the charging regime rather than a real cost.
+would reflect the charging regime rather than a real cost.
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-fix_overhead_eur"></a>

@@ -11,12 +11,11 @@ description: 'Bedding, breakfast and amenities, charged per ticket sold.'
 
 ## What this is
 
-Bedding, breakfast, and the amenities that make a night train a night
-train — charged per passenger, at a rate that differs by accommodation
-class.
+Bedding, breakfast and the amenities that make a night train a night train,
+charged per passenger at a rate that differs by accommodation class.
 
-A sleeper passenger costs more to serve than a seated one, which is part
-of why the classes are priced differently.
+A sleeper passenger costs more to serve than a seated one, which is part of
+why the classes are priced differently.
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-svc_stockings_eur"></a>

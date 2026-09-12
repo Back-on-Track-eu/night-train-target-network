@@ -1,8 +1,8 @@
 ---
-title: 'What changed'
+title: 'Changelog'
 ---
 
-# What changed
+# Changelog
 
 <!-- Generated from the model registries. Edit the model, not this page —
      anything outside the GENERATED markers survives regeneration. -->

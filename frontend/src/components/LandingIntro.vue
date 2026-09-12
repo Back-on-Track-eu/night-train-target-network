@@ -14,9 +14,12 @@ const emit = defineEmits<{ create: []; browse: [] }>()
 const POSITION_PAPER_URL = 'https://back-on-track.eu/back-on-track-europes-general-position-paper/'
 
 // The documentation site: a separate static site served at /docs/ on this
-// origin, so plain anchors and root-relative paths, not router links.
-const DOCS_ABOUT_URL = '/docs/about'
-const DOCS_HOME_URL = '/docs/'
+// origin, so plain anchors and root-relative paths, not router links. Its
+// landing page is the About page, so that is the bare /docs/ link; "how it
+// works" goes to the top of the cost breakdown, which is what the model
+// actually computes and the root of every formula page.
+const DOCS_ABOUT_URL = '/docs/'
+const DOCS_HOW_URL = '/docs/cost/total-cost'
 
 // The three quieter buttons next to the one filled call to action. Same shape
 // so the row reads as one set, one weight down so "suggest a route" stays the
@@ -108,7 +111,7 @@ onActivated(measureHero)
           <a :href="DOCS_ABOUT_URL" target="_blank" rel="noopener" :class="quietButtonClass">
             {{ t('gallery.welcome.about') }}
           </a>
-          <a :href="DOCS_HOME_URL" target="_blank" rel="noopener" :class="quietButtonClass">
+          <a :href="DOCS_HOW_URL" target="_blank" rel="noopener" :class="quietButtonClass">
             {{ t('gallery.welcome.how') }}
           </a>
         </div>

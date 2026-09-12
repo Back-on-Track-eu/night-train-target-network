@@ -14,15 +14,14 @@ description: "The operator's profit requirement: deducted in the net result, not
 The operator's profit requirement: a share of ticket revenue that has to
 remain as operating profit.
 
-This is **not a cost paid to anyone**. Nobody sends an invoice for it. It
-is the return an operator would need for the service to be worth running,
-and it is deducted in the net result alongside the real costs — which is
-why it sits as a peer of the operator and infrastructure totals rather
-than inside either.
+This is not a cost paid to anyone. Nobody sends an invoice for it. It is the
+return an operator would need for the service to be worth running, and it is
+deducted in the net result alongside the real costs, which is why it sits as
+a peer of the operator and infrastructure totals rather than inside either.
 
 A state-owned operator run at cost and a commercial one seeking a return
-differ here. Setting it to zero asks a different question: what would this
-route cost to run, rather than what would it take to attract an operator.
+differ here. Setting it to zero asks a different question: what the route
+would cost to run, rather than what it would take to attract an operator.
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-ebit_margin_eur"></a>

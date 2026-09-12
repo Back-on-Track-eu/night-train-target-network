@@ -13,17 +13,15 @@ description: 'What the drivers cost per year, including the relief driver a long
 
 What the drivers cost over a year.
 
-The subtlety is that paid hours exceed hours on the train. A driver signs
-on before departure, signs off after arrival, travels to and from the
-train, rests away from home base, and has to be covered by a reserve. The
-model prices this through a roster efficiency: the share of paid hours
-that is actually productive.
+Paid hours exceed hours on the train. A driver signs on before departure,
+signs off after arrival, travels to and from the train, rests away from home
+base, and has to be covered by a reserve. The model prices this through a
+roster efficiency: the share of paid hours that is productive.
 
-That share is not constant. A shift may not exceed a legal maximum, so a
-long trip has to be split, and every additional shift boundary adds
-another fixed allowance. A route just over the limit therefore costs
-noticeably more per hour than one just under — which is a real effect, not
-an artefact.
+That share is not constant. A shift may not exceed a legal maximum, so a long
+trip has to be split, and every additional shift boundary adds a fixed
+allowance. A route just over the limit costs noticeably more per hour than
+one just under, which is a real effect rather than an artefact.
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-driver_eur"></a>

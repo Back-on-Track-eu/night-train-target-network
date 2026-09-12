@@ -14,12 +14,11 @@ description: 'Coupling, uncoupling and parking moves in stations and yards.'
 Moving the train around stations and yards: coupling, uncoupling and
 positioning moves.
 
-Priced per movement, and the movement count is currently **fixed at two
-per trip**. Real shunting depends on the shape of the service — whether
-portions split, whether the train reverses — and the model does not yet
-derive that from the route. A route with unusual shunting needs will be
-priced as though it had ordinary ones. This is listed in
-[what we don't yet model](/not-modelled).
+Priced per movement, and the movement count is currently fixed at two per
+trip. Real shunting depends on the shape of the service, such as whether
+portions split or the train reverses, and the model does not yet derive that
+from the route. A route with unusual shunting needs is priced as though it
+had ordinary ones. See [known gaps](/not-modelled).
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-shunting_eur"></a>

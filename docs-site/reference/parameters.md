@@ -1,8 +1,8 @@
 ---
-title: 'Parameter reference'
+title: 'Parameters'
 ---
 
-# Parameter reference
+# Parameters
 
 <!-- Generated from the model registries. Edit the model, not this page —
      anything outside the GENERATED markers survives regeneration. -->

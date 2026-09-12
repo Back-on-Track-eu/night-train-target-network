@@ -11,13 +11,12 @@ description: 'The operator costs that stay the same however much the train runs.
 
 ## What this is
 
-The operator costs that stay put however much the train runs — the
-coaches have to be bought, financed and cleaned whether they are moving or
-standing.
+The operator costs that stay put however much the train runs. The coaches
+have to be bought, financed and cleaned whether they are moving or standing.
 
-"Fixed" here means fixed with respect to the timetable, not fixed forever.
-A longer train needs more coaches, so these still scale with the size of
-the service; they just do not scale with how far it goes.
+Fixed here means fixed with respect to the timetable, not fixed forever. A
+longer train needs more coaches, so these still scale with the size of the
+service. They do not scale with how far it goes.
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-operator_fixed_total_eur"></a>

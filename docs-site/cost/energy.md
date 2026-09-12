@@ -14,21 +14,21 @@ description: "The traction electricity drawn, at each country's price, plus the 
 The electricity the train draws, at each country's price, plus what the
 infrastructure manager charges for delivering it through the overhead line.
 
-Two separate things are being priced. How much energy the train uses comes
-from a model calibrated against Deutsche Bahn Trassenfinder technical
-runs: start-stop energy for the train's weight, rolling resistance over
-the distance, air resistance rising with length and the square of speed,
-and the on-board supply that keeps heating, air conditioning and light
-running all night. What that energy costs comes from each country's
-traction electricity tariff.
+Two separate things are priced. How much energy the train uses comes from a
+model calibrated against Deutsche Bahn Trassenfinder technical runs:
+start-stop energy for the train's weight, rolling resistance over the
+distance, air resistance rising with length and the square of speed, and the
+on-board supply that keeps heating, air conditioning and light running all
+night. What that energy costs comes from each country's traction electricity
+tariff.
 
 Like track access, electricity is split by the clock where a country has a
-night tariff — only Austria, Switzerland and Croatia do.
+night tariff. Only Austria, Switzerland and Croatia do.
 
-One assumption worth naming: coach hotel power is an estimate, not a
-measurement. The calibration runs were queried with it switched off, so
-the figure for keeping a sleeping train warm and lit was added afterwards
-rather than measured. See [how energy was calibrated](/methodology/energy).
+Coach hotel power is an estimate rather than a measurement: the calibration
+runs were queried with it switched off, so the figure for keeping a sleeping
+train warm and lit was added afterwards. See
+[energy calibration](/methodology/energy).
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-energy_eur"></a>

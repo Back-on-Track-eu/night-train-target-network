@@ -13,10 +13,10 @@ description: 'Maintaining the coaches, charged per kilometre driven.'
 
 Keeping the coaches serviceable, charged as a rate per kilometre driven.
 
-Locomotive maintenance is **not** here — it is bundled into the
-[locomotive rental](/cost/loco), which is quoted all-inclusive. Counting
-it in both places is a mistake worth naming, because the two lines look
-like they should be symmetrical and are not.
+Locomotive maintenance is not here. It is bundled into the
+[locomotive rental](/cost/loco), which is quoted all-inclusive. The two lines
+look like they should be symmetrical and are not, so counting locomotive
+maintenance in both places is an easy mistake.
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-coach_maintenance_eur"></a>
