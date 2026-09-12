@@ -21,9 +21,9 @@ files describing the same three backend services, kept manually in sync:
 - `backend/docker/docker-compose.yml` — canonical backend stack (`postgres`,
   `openrailrouting-infra-2026`, `api`). Used by backend developers and CI.
 - `.devcontainer/docker-compose.yml` — self-contained duplicate for VS Code
-  / frontend developers, adding a fourth `frontend` service. See that file's
-  header comment: it must be updated by hand whenever the canonical file's
-  service definitions change.
+  / frontend developers, adding the `frontend` and `docs` services. See
+  that file's header comment: it must be updated by hand whenever the
+  canonical file's service definitions change.
 
 ---
 
@@ -191,6 +191,7 @@ other wiring come from `backend/docker/.env`; values below are the
 defaults.)
 
 - Frontend: http://localhost:5173 (`FRONTEND_HOST_PORT`; Vite HMR — edits reflect instantly)
+- Docs: http://localhost:5174/docs/ (`DOCS_HOST_PORT`; also proxied at http://localhost:5173/docs/)
 - Backend API: http://localhost:5050 (`API_HOST_PORT` — host side moved off 5000, macOS AirPlay Receiver squats there; container binds `API_CONTAINER_PORT`, 5000)
 - OpenRailRouting: http://localhost:8989 (`OPENRAILROUTING_HOST_PORT_INFRA_2026`; admin/metrics on `OPENRAILROUTING_ADMIN_HOST_PORT_INFRA_2026`, 8990). Every per-graph setting is suffixed with the graph key — see `models/route/routing/rail_router.py`.
 
@@ -215,6 +216,12 @@ npm run dev
 
 ### Documentation site
 
+The full-stack command above brings it up as the `docs` service — nothing
+else to start. Reachable at http://localhost:5174/docs/ (`DOCS_HOST_PORT`)
+and, through the app's dev server, at http://localhost:5173/docs/.
+
+Standalone (backend not needed):
+
 ```bash
 cd docs-site
 npm install
@@ -222,16 +229,19 @@ npm run dev        # http://localhost:5174/docs/
 ```
 
 In the built image nginx serves the docs at `/docs/` ahead of the SPA
-fallback. The dev server has no such route, so `frontend/vite.config.ts`
-**proxies `/docs` to this server instead** — without it every
-`/docs/...` URL matches vue-router's catch-all and silently redirects to
-the gallery, which is where the cost-factor popover's "Read the full
-explanation" link would land you.
+fallback (`frontend/Dockerfile.demo` builds them from the `docssrc` named
+context into the same nginx image — `docs-site/Dockerfile` is dev only).
+The dev server has no such route, so `frontend/vite.config.ts` **proxies
+`/docs` to the docs server instead** — without it every `/docs/...` URL
+matches vue-router's catch-all and silently redirects to the gallery,
+which is where the cost-factor popover's docs link would land you.
 
-So run this alongside the app whenever you touch a docs link. Port 5174 is
-`strictPort` and `host: true`, and the devcontainer passes
-`DOCS_DEV_URL=http://host.docker.internal:5174` because the app's dev
-server runs in a container while this one runs on the host.
+The proxy target is `DOCS_DEV_URL`: the devcontainer sets
+`http://docs:5174` (compose service name, container to container), and the
+fallback `http://localhost:5174` covers a host-run `npm run dev` in
+`frontend/`. Port 5174 is `strictPort` and `host: true`, so a busy port
+fails loudly rather than moving and breaking the proxy. If the docs are
+down the proxy answers 503 with the command to fix it, not a redirect.
 
 ### Frontend tests
 
@@ -324,7 +334,7 @@ Full contract, `--baseline` semantics, and editorial rules:
 | `docs-site/.vitepress/config.ts` | Public docs site: `base: '/docs/'`, local search, nav/sidebar (cost section generated) |
 | `backend/scripts/model_docs/` | One extraction layer over the model registries, one renderer per artefact (`docs/MODEL.md`, `docs-site/`) |
 | `backend/docker/docker-compose.yml` | Canonical backend Docker stack |
-| `.devcontainer/docker-compose.yml` | Self-contained VS Code devcontainer stack — duplicates the above, plus `frontend` |
+| `.devcontainer/docker-compose.yml` | Self-contained VS Code devcontainer stack — duplicates the above, plus `frontend` and `docs` |
 | `.github/workflows/ci.yml` | Frontend/backend formatting + frontend type-check (see CI/CD below) |
 | `.github/workflows/backend-tests.yml` | Version-bump enforcement + full backend integration test run |
 | `.pre-commit-config.yaml` | Pre-commit: ruff-format (`backend/`) + prettier (`frontend/`, `docs-site/` — excluding the emitted pages) |

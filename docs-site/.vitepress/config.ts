@@ -20,15 +20,20 @@ export default defineConfig({
   // this one across the boundary, which a loopback-only bind would refuse.
   vite: {
     server: {
-      port: 5174,
+      // Overridden by the compose docs service (DOCS_CONTAINER_PORT); the
+      // fallback mirrors backend/docker/.env.example and must stay equal to it.
+      port: Number(process.env.DOCS_CONTAINER_PORT ?? 5174),
       strictPort: true,
       host: true,
       // The app's dev server proxies /docs here with changeOrigin, so the
-      // Host arriving is whatever it used to reach us — host.docker.internal
-      // from inside the frontend container. Vite's host check rejects that
-      // with a 403 unless it is listed. Dev-only; the built site is static
-      // and served by nginx.
-      allowedHosts: ['localhost', 'host.docker.internal'],
+      // Host arriving is whatever it used to reach us: the `docs` compose
+      // service name from the frontend container, or host.docker.internal
+      // when the docs server runs on the host instead. Vite's host check
+      // rejects either with a 403 unless listed. Dev-only; the built site is
+      // static and served by nginx.
+      allowedHosts: ['localhost', 'docs', 'host.docker.internal'],
+      // Polling is required for HMR to see edits through the Docker bind mount.
+      watch: { usePolling: true },
     },
   },
 

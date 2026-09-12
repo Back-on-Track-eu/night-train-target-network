@@ -5,7 +5,8 @@
 # the base stack (postgres, openrailrouting-infra-2026, api) comes entirely from
 # backend/docker/docker-compose.yml. This file only ADDS what VS Code /
 # frontend development needs: the workspace mount on the api service, the
-# routing admin port, and the Vite frontend.
+# routing admin port, the Vite frontend, and the VitePress docs server it
+# proxies /docs to.
 #
 # One stack, two entry points: the compose project directory is the FIRST
 # file's directory (backend/docker/), so its .env feeds ${...} interpolation
@@ -48,13 +49,35 @@ services:
     environment:
       VITE_API_BASE_URL: http://localhost:${API_HOST_PORT:-5050}
       # /docs/ is served by nginx in the built image; the dev server proxies
-      # it instead (frontend/vite.config.ts). docs-site/ is not mounted here,
-      # so the docs dev server runs on the host and is reached across the
-      # container boundary. Start it with: cd docs-site && npm run dev
-      DOCS_DEV_URL: http://host.docker.internal:${DOCS_DEV_HOST_PORT:-5174}
+      # it instead (frontend/vite.config.ts). In this stack the target is the
+      # docs service below, reached by its compose service name on the shared
+      # network.
+      DOCS_DEV_URL: http://docs:${DOCS_CONTAINER_PORT:-5174}
       FRONTEND_CONTAINER_PORT: ${FRONTEND_CONTAINER_PORT:-5173}
       FRONTEND_HOST_PORT: ${FRONTEND_HOST_PORT:-5173}
     volumes:
       - ../../frontend:/app
+      - /app/node_modules
+    restart: unless-stopped
+
+  # Documentation site (VitePress dev server). Third deployable in its own
+  # right — in production frontend/Dockerfile.demo builds it into the nginx
+  # image at /docs/, so this container exists only for development, where
+  # the app's Vite server proxies /docs here.
+  #
+  # Published on the host as well as reachable on the network, so
+  # `cd frontend && npm run dev` on the host (the "Frontend only" workflow)
+  # still finds it at the DOCS_DEV_URL default of http://localhost:5174.
+  docs:
+    build:
+      context: ../../docs-site
+      dockerfile: Dockerfile
+    container_name: night-train-docs
+    ports:
+      - "${DOCS_HOST_PORT:-5174}:${DOCS_CONTAINER_PORT:-5174}"
+    environment:
+      DOCS_CONTAINER_PORT: ${DOCS_CONTAINER_PORT:-5174}
+    volumes:
+      - ../../docs-site:/app
       - /app/node_modules
     restart: unless-stopped
