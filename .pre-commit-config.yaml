@@ -3,11 +3,15 @@
 # Run manually: pre-commit run --all-files
 
 repos:
-  # Python formatting (backend)
+  # Python formatting and linting (backend) — mirrors the ci.yml jobs of the
+  # same names. ruff-format rewrites; ruff only reports (no --fix), so a
+  # commit is never silently altered by a rule.
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.21
     hooks:
       - id: ruff-format
+        files: ^backend/
+      - id: ruff
         files: ^backend/
 
   # JS/TS/Vue/JSON/CSS/Markdown formatting (frontend + docs-site)

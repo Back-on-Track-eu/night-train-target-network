@@ -568,7 +568,9 @@ def _check_composition(
     # routing setup does not carry. This check only guards against the
     # composition outrunning its own locomotive.
     loco_speeds = [
-        loco_types[l].max_speed_kmh for l in k.loco_type_ids if l in loco_types
+        loco_types[loco_id].max_speed_kmh
+        for loco_id in k.loco_type_ids
+        if loco_id in loco_types
     ]
     if loco_speeds and k.max_speed_kmh > min(loco_speeds):
         errors.append(
