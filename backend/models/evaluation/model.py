@@ -32,7 +32,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-CALC_VERSION: str = "0.9.24"
+CALC_VERSION: str = "0.9.31"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -56,7 +56,7 @@ NORMALISATION_NDIGITS: dict[str, int] = {
 BREAKDOWN_TOTAL_NDIGITS: int = 6
 
 # Short, plain-language summary of what this model computes — embedded as-is
-# in the "models" section of POST /api/proposal/calc's response, alongside
+# in GET /api/models' registry (once the "models" section of every compute response), alongside
 # CALC_VERSION and CALC_FORMULAS.
 CALC_MODEL_DESCRIPTION: str = (
     "Cost and revenue evaluation: computes the operator's fixed and "
@@ -66,6 +66,151 @@ CALC_MODEL_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.31": {
+        "date": "2026-09-12",
+        "author": "david + claude",
+        "changes": "STAFF ARE PAID FOR THE WHOLE SEGMENT. driver_hours and "
+        "crew_hours per segment were driving + dynamics only; the timetable "
+        "buffer and any padding — about a sixth of a night trip — were "
+        "unpaid, so a 10 h trip paid its driver for 8 h. They now use the "
+        "segment's total_time_min, the same figure the loco lease and the "
+        "reader's own clock use. Dwell at stops is unchanged (charged in "
+        "_calc_stop_cost). The roster efficiency's duty-count basis stays "
+        "driving time, because that is what the driving-time directive "
+        "caps. Staff cost rises for every route, by the buffer share. "
+        "operations.trips[].staffing now reports hours_on_train as "
+        "HEADCOUNT x trip hours and paid_hours as those hours over the "
+        "roster efficiency — person-hours a reader can check against the "
+        "clock — with the attendant-equivalent factor applied only in the "
+        "euros, where the cost model applies it.",
+    },
+    "0.9.30": {
+        "date": "2026-09-12",
+        "author": "david + claude",
+        "changes": "THE TARIFF IS THREE PARTS, each per class_main. The base "
+        "fare gains a FIXED term beside the per-km one (request field "
+        "fares_eur_per_pax): a ticket is now fare_per_pax + fare_per_km x "
+        "km, because a berth has a price of admission a short journey pays "
+        "as surely as a long one. A new revenue leaf, "
+        "services_revenue_eur (services_eur_per_pax), carries bicycles, "
+        "oversized luggage and reservations — ordinary ticket revenue, not "
+        "signed and not net, so unlike catering it is INSIDE the "
+        "var_overhead_eur and ebit_margin_eur bases, which are now shares "
+        "of (base fare + services). It is left outside "
+        "ticket_revenue_factor: a fare measure discounts accommodation, "
+        "not the bike. catering_eur_per_pax becomes a per-class MAP — a "
+        "breaking request-shape change, rejected with a message naming the "
+        "new shape — because the classes differ in what their base fare "
+        "already includes, so their passengers differ in what they buy on "
+        "board. Numbers move for every route on all three counts. The "
+        "summary row gains services_revenue_eur.",
+    },
+    "0.9.29": {
+        "date": "2026-09-12",
+        "author": "david + claude",
+        "changes": "CATERING as a second revenue leaf, and the operations "
+        "block split per trip. Revenue gains "
+        "catering_contribution_eur = places_sold x catering_eur_per_pax "
+        "(request field, default models/demand/model.py "
+        "STOPGAP_CATERING_EUR_PER_PAX): one SIGNED net figure for the "
+        "on-board service, its own sales less its own costs, allocated "
+        "across every view on the same key as ticket revenue. It enters "
+        "total_revenue_eur and therefore net_eur, and is deliberately "
+        "OUTSIDE the var_overhead_eur and ebit_margin_eur bases, which "
+        "stay on ticket revenue — charging distribution overhead on a "
+        "figure that already nets its own overhead would count it twice. "
+        "Numbers move for every route: a default-priced proposal now "
+        "earns 1.20 EUR per passenger carried on top of its tickets. The "
+        "summary row gains catering_contribution_eur and "
+        "passengers_per_year (the places actually sold — the base the "
+        "contribution multiplies, not the placeholder "
+        "demand_trips_per_year). operations.trip_pairs[] gains trips[]: "
+        "loco hours and staffing per SINGLE trip with the roster "
+        "efficiency and paid hours behind the euros, because the two "
+        "trips of a pair differ in running time and duty boundaries; the "
+        "per-cycle figures stay. operations also reports the fleet basis "
+        "(coaches, purchase, write-off, availability, rates) and the "
+        "route's operating days and departures, so a per-trip receipt "
+        "divides by the number the backend used. Dead code removed while "
+        "here, no output change: calc.py carried TWO dataclasses named "
+        "ShuntingCost — the first (route_id / shunting_count / "
+        "shunting_eur_event, the superseded per-route rule) was shadowed "
+        "by the second and unreachable, and the per-stop view builder "
+        "computed a trip-id set and a stop index it never read.",
+    },
+    "0.9.28": {
+        "date": "2026-09-10",
+        "author": "david + claude",
+        "changes": "OPERATIONS block and supply KPIs. A member's evaluation "
+        "gains `operations` (models/evaluation/operations.py) next to "
+        "`views`: per trip pair the physical trainsets from the cycle-time "
+        "rule AND the theoretical figure the cost model charges "
+        "(physical / coach_avail_per) side by side, loco hours per trip "
+        "cycle and per year, and staffing — drivers, train chief, attendants "
+        "with headcount, person-hours per trip cycle and euros, read from the "
+        "very SegmentCost/StopCost records the cost breakdown was priced "
+        "from so the two cannot disagree. Served on the member's views "
+        "response only, never in the family document (D9). The summary row "
+        "gains departures_per_year and trainsets_physical, both derivable "
+        "from the route dict alone (the fleet rule is now module-level in "
+        "models/route/route.py for that reason); theoretical trainsets and "
+        "loco hours need the composition and live in operations. "
+        "FAMILY_DOCUMENT_FORMAT 2 -> 3 (summary shape). Storage: "
+        "proposals.routes gains schedule_months JSONB and min_turnaround_min "
+        "(migrations/2026-09-10_route_schedule_months.sql); a per-month "
+        "plan now survives publish, and the peak-7 publish restriction from "
+        "0.9.35's hotfix is gone. No cost formula changes.",
+    },
+    "0.9.27": {
+        "date": "2026-09-10",
+        "author": "david + claude",
+        "changes": "FARES become a request input. `fares_eur_per_km` "
+        "({class_main: EUR/km} for Seat, Couchette, Sleeper, Capsule) is "
+        "accepted on every compute request, validated, resolved against "
+        "STOPGAP_FARE_PER_KM_BY_CLASS for the classes it does not name, "
+        "echoed complete in the resolved request and therefore part of the "
+        "family key: a re-priced route is a different family. "
+        "distribute_demand() is unchanged — it always took the dict — only "
+        "the caller stops passing the constant. GET /api/models gains a "
+        "`demand` entry carrying the defaults so the frontend's pricing "
+        "panel reads them rather than hard-coding them. Catering stays 0 "
+        "and cannot be priced. No number changes for a request that sends "
+        "no fares.",
+    },
+    "0.9.26": {
+        "date": "2026-09-10",
+        "author": "david + claude",
+        "changes": "Measure sets (WP18 phase A): evaluate_route() takes a MeasureSet "
+        "(models/params.py, scenario.measure_sets) and records it on "
+        "EvaluationResult.measures. Three factors enter the calculation — on ticket "
+        "revenue (_calc_od_pair_results), on traction energy and on track access "
+        "(_calc_segment_cost) — and all three are 1.0 under NO_MEASURES, the "
+        "default and the only seeded set, so EVERY NUMBER IS UNCHANGED: the bump is "
+        "for the signature and the recorded field, not for a value. What each factor "
+        "will carry once WP17 seeds rates is documented on MeasureSet; the direct-cost "
+        "track access regime in particular is a different component selection inside "
+        "models/infrastructure/tac/calc_tac.py, not a wider factor here, because the "
+        "per-country views read SegmentTac.by_country rather than these totals. "
+        "Migration 2026-09-10_scenario_variants.sql adds the two tables; the "
+        "(scenario x measure set) cross product is the scenario_variant axis the "
+        "proposal family is built over.",
+    },
+    "0.9.25": {
+        "date": "2026-09-07",
+        "author": "david + claude",
+        "changes": "Summary row (models/evaluation/summary.py) gains five columns, "
+        "no existing value changes: net_eur_per_year (the SIGNED annual net - "
+        "negative is the shortfall subsidy_eur_per_year already reports, positive "
+        "is a surplus beyond the target margin, so a profitable route can be "
+        "shown as one instead of as 'subsidy 0'), operating_days_per_year, "
+        "train_km_per_year, available_place_km_per_year and sold_place_km_per_year "
+        "(the annual denominators behind the per-unit normalisations, re-derived "
+        "from the route dict so a composition comparison can show EUR/place-km and "
+        "utilisation from the summary alone). All five also land in "
+        "proposals.proposal_summaries (migration 2026-09-07_proposal_summaries_"
+        "supply_kpis.sql); scripts/refresh_proposals.py backfills stored rows. "
+        "Bumped because summary.py is gated on this constant.",
+    },
     "0.9.24": {
         "date": "2026-09-02",
         "author": "bjarne + claude",
@@ -742,15 +887,16 @@ CALC_FORMULAS: dict[str, Formula] = {
     ),
     "driver_eur": Formula(
         latex=r"C_{driver} = \frac{c_{driver/h}}{\eta_{driver}} \times "
-        r"\left( \sum_{seg} t_{drive,h} \cdot f_{driver} + \sum_{stop} "
+        r"\left( \sum_{seg} t_{seg,h} \cdot f_{driver} + \sum_{stop} "
         r"t_{dwell,h} \cdot f_{driver} \right)",
         summary="What the drivers cost per year, including the relief driver a long "
         "trip needs.",
         description="Driver cost: the driver wage per productive hour, "
         "divided by the share of paid hours that is productive, times all "
-        "hours the driver is on duty — driving between stops and waiting "
-        "at them. Trips too long for one driver shift need a relief "
-        "driver, which lowers that share and raises the effective rate.",
+        "hours the driver is on the train — the whole running time between "
+        "stops, buffer included, and the waiting at them. Trips too long "
+        "for one driver shift need a relief driver, which lowers that "
+        "share and raises the effective rate.",
         inputs=(
             FormulaParam(
                 symbol="c_driver/h",
@@ -765,8 +911,8 @@ CALC_FORMULAS: dict[str, Formula] = {
                 unit="–",
             ),
             FormulaParam(
-                symbol="t_drive,h",
-                description="Driving time between stops",
+                symbol="t_seg,h",
+                description="Running time between stops, buffer included",
                 unit="h",
             ),
             FormulaParam(
@@ -792,14 +938,15 @@ CALC_FORMULAS: dict[str, Formula] = {
     # see composition_type_zugchef_crew_factor.
     "crew_eur": Formula(
         latex=r"C_{crew} = \frac{c_{crew/h}}{\eta_{crew}} \times \left( "
-        r"\sum_{seg} t_{drive,h} \cdot n_{crew} + \sum_{stop} "
+        r"\sum_{seg} t_{seg,h} \cdot n_{crew} + \sum_{stop} "
         r"t_{dwell,h} \cdot n_{crew} \right)",
         summary="What the cabin crew costs per year, including the relief crew a long "
         "trip needs.",
         description="Cabin crew cost: the crew wage per productive hour, "
         "divided by the share of paid hours that is productive, times all "
-        "hours the crew is on board — while driving and while waiting at "
-        "stops. Trips too long for one shift need a relief crew, which "
+        "hours the crew is on board — the whole running time between "
+        "stops, buffer included, and the waiting at them. Trips too long "
+        "for one shift need a relief crew, which "
         "lowers that share and raises the effective rate.",
         inputs=(
             FormulaParam(
@@ -815,8 +962,8 @@ CALC_FORMULAS: dict[str, Formula] = {
                 unit="–",
             ),
             FormulaParam(
-                symbol="t_drive,h",
-                description="Driving time between stops",
+                symbol="t_seg,h",
+                description="Running time between stops, buffer included",
                 unit="h",
             ),
             FormulaParam(
@@ -1504,6 +1651,74 @@ CALC_FORMULAS: dict[str, Formula] = {
             unit="€/year",
         ),
     ),
+    "services_revenue_eur": Formula(
+        latex=r"R_{svc} = \sum_{od} n_{places\_sold,od} \times s_{class}",
+        summary="What passengers pay for bicycles, oversized luggage and "
+        "reservations alongside the ticket.",
+        description="Revenue from the additional services sold with a "
+        "ticket: bicycle carriage, oversized luggage, pets, reservations. "
+        "Ordinary ticket revenue rather than a net figure — what it costs "
+        "to carry a bicycle is either nothing or already paid for in the "
+        "lower place density of the coach that carries it, and the cost "
+        "model prices that density elsewhere. It therefore counts towards "
+        "the variable-overhead and profit-requirement bases, unlike the "
+        "catering contribution, which does not.",
+        inputs=(
+            FormulaParam(
+                symbol="n_places_sold,od",
+                ref="user",
+                description="Places sold per connection and year",
+                unit="places/year",
+            ),
+            FormulaParam(
+                symbol="s_class",
+                ref="standard:DEMAND.STOPGAP_SERVICES_EUR_PER_PAX_BY_CLASS",
+                description="Additional-services revenue per passenger of that "
+                "class, overridable per proposal",
+                unit="€/passenger",
+            ),
+        ),
+        output=FormulaParam(
+            symbol="R_svc",
+            description="Annual additional-services revenue",
+            unit="€/year",
+        ),
+    ),
+    "catering_contribution_eur": Formula(
+        latex=r"R_{cat} = \sum_{od} n_{places\_sold,od} \times c_{cat}",
+        summary="What the on-board catering adds up to, net of what it costs to "
+        "run — positive or negative.",
+        description="The on-board catering as one net figure per passenger "
+        "carried: its own sales less its own service, stocking and "
+        "overhead costs. The restaurant is not modelled as a business of "
+        "its own, so a single signed value carries it. Positive means the "
+        "service pays for itself and contributes; negative means the "
+        "tickets it helps sell carry it, which is the usual night-train "
+        "case. Counted as revenue in the net result, but left out of the "
+        "variable-overhead and profit-requirement bases — those are "
+        "shares of ticket revenue, and this figure already nets its own "
+        "overhead.",
+        inputs=(
+            FormulaParam(
+                symbol="n_places_sold,od",
+                ref="user",
+                description="Places sold per connection and year",
+                unit="places/year",
+            ),
+            FormulaParam(
+                symbol="c_cat",
+                ref="standard:DEMAND.STOPGAP_CATERING_EUR_PER_PAX_BY_CLASS",
+                description="Net catering contribution per passenger of that "
+                "class, overridable per proposal",
+                unit="€/passenger",
+            ),
+        ),
+        output=FormulaParam(
+            symbol="R_cat",
+            description="Annual net catering contribution",
+            unit="€/year",
+        ),
+    ),
     "ebit_margin_eur": Formula(
         latex=r"C_{EBIT} = \sum_{od} R_{od} \times q_{EBIT}",
         summary="The operator's profit requirement: deducted in the net result, not "
@@ -1743,16 +1958,29 @@ CALC_FORMULAS: dict[str, Formula] = {
         ),
     ),
     "total_revenue_eur": Formula(
-        latex=r"R_{total} = R_{ticket}",
-        summary="The route's total annual revenue; ticket income is currently the only "
-        "source.",
-        description="Total annual revenue — currently ticket income is "
-        "the only revenue source.",
+        latex=r"R_{total} = R_{ticket} + R_{svc} + R_{cat}",
+        summary="The route's total annual revenue: the base fares, the extras "
+        "sold with them, and what the catering nets.",
+        description="Total annual revenue — the base fares, the additional "
+        "services sold alongside them, and the signed net contribution of "
+        "the on-board catering.",
         inputs=(
             FormulaParam(
                 symbol="R_ticket",
                 ref="formula:calc.ticket_revenue_eur",
                 description="Annual ticket revenue",
+                unit="€/year",
+            ),
+            FormulaParam(
+                symbol="R_svc",
+                ref="formula:calc.services_revenue_eur",
+                description="Annual additional-services revenue",
+                unit="€/year",
+            ),
+            FormulaParam(
+                symbol="R_cat",
+                ref="formula:calc.catering_contribution_eur",
+                description="Annual net catering contribution, signed",
                 unit="€/year",
             ),
         ),

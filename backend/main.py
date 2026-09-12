@@ -15,7 +15,9 @@ Endpoints — see api/README.md for full documentation.
   POST /api/auth/guest
   POST /api/feedback
   GET  /api/feedback/categories
-  POST /api/proposal/calc
+  POST /api/proposal/family
+  GET  /api/proposal/family/<key>
+  GET  /api/proposal/family/<key>/members/<sv>/<comp>/views
   POST /api/proposal/publish
   GET  /api/proposals
   POST /api/proposals
@@ -33,10 +35,12 @@ Endpoints — see api/README.md for full documentation.
   GET  /api/params/compositions
   GET  /api/params/TrackInfrastructures
   GET  /api/scenarios
+  GET  /api/models
 
-POST /api/proposal/calc is the merged ephemeral compute endpoint and
-POST /api/proposal/publish the only user write path (adapters/proposal/README.md
-§2).
+POST /api/proposal/family is the ephemeral compute endpoint — every
+scenario variant × composition of one stop list in one document — and
+POST /api/proposal/publish the only user write path
+(adapters/proposal/README.md §2).
 """
 
 import logging
@@ -51,9 +55,10 @@ from api.helpers.dependencies import DataNotLoadedError, init
 from api.limiter import limiter
 from api import (
     health,
+    models,
     params,
-    proposal_calc,
     proposal_compare,
+    proposal_family,
     proposal_publish,
     proposal_stats,
     auth,
@@ -93,6 +98,9 @@ def create_app() -> Flask:
     # at all. So Flask is the only layer that covers every environment — which
     # matters most for the gallery's map sections, large GeoJSON that gzips by
     # roughly an order of magnitude. Level/threshold: api/config.py.
+    # The family document (POST /api/proposal/family, ~1.5 MB raw) is JSON
+    # and gzips to about a quarter; it is the largest body this app sends
+    # and the reason the compression stays on.
     app.config["COMPRESS_LEVEL"] = config.COMPRESS_LEVEL
     app.config["COMPRESS_MIN_SIZE"] = config.COMPRESS_MIN_SIZE
     Compress(app)
@@ -110,9 +118,10 @@ def create_app() -> Flask:
     # --- blueprints ---
     app.register_blueprint(health.bp, url_prefix="/api")
     app.register_blueprint(params.bp, url_prefix="/api/params")
-    # Merged ephemeral compute (calc) + the only user write path
-    # (publish) — adapters/proposal/README.md §2.
-    app.register_blueprint(proposal_calc.bp, url_prefix="/api/proposal")
+    # The proposal family — every scenario variant × composition of one
+    # stop list in one document (adapters/family/README.md) — and the only
+    # user write path (publish), adapters/proposal/README.md §2.
+    app.register_blueprint(proposal_family.bp, url_prefix="/api/proposal")
     app.register_blueprint(proposal_publish.bp, url_prefix="/api/proposal")
     app.register_blueprint(auth.bp, url_prefix="/api/auth")
     app.register_blueprint(feedback.bp, url_prefix="/api")
@@ -125,6 +134,9 @@ def create_app() -> Flask:
     # here (api/proposal_share.py).
     app.register_blueprint(proposal_share.bp, url_prefix="/api")
     app.register_blueprint(scenarios.bp, url_prefix="/api")
+    # Static model registry — the versions/formulas block that used to be
+    # inlined in every compute response (api/models.py).
+    app.register_blueprint(models.bp, url_prefix="/api")
     # Testing gate (2026-08-13 Decision 2). Registered without a prefix:
     # it owns both /gate (the page) and /api/gate/* (check + redeem), and
     # all three must stay reachable without a gate cookie — everything

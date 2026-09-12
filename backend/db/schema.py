@@ -1560,7 +1560,8 @@ INPUT_PARAMS_TABLES: tuple[Table, ...] = (
 
 
 # =============================================================================
-# scenario — the container pinning parameter versions
+# scenario — the container pinning parameter versions, and the measure
+# sets it multiplies with into the variant axis
 # =============================================================================
 
 SCENARIO_TABLES: tuple[Table, ...] = (
@@ -1679,6 +1680,81 @@ SCENARIO_TABLES: tuple[Table, ...] = (
             "    ON scenario.scenarios (scenario_key) WHERE is_current_scenario;",
         ),
     ),
+    Table(
+        schema="scenario",
+        name="measure_sets",
+        description="A named bundle of political measures an evaluation "
+        "runs under — what the state DOES, where a scenario pins what the "
+        "infrastructure IS. Unversioned definitions: the flags say which "
+        "levers are pulled, never by how much. The rates themselves (VAT "
+        "per country of sale, electricity tax share, direct-cost floor per "
+        "infrastructure manager) get their own versioned input_params "
+        "table with WP17 and are pinned by the scenario like every other "
+        "calibrated parameter. One row today, 'none' — no lever pulled, "
+        "which is what every evaluation before WP18 implicitly ran under.",
+        columns=(
+            Column("measure_set_id", "SERIAL PRIMARY KEY"),
+            Column(
+                "key",
+                "VARCHAR(50) NOT NULL",
+                'Stable identifier, e.g. "none", "vat-exempt". What the '
+                "API and the frontend name a measure set by; ids are "
+                "database-assigned and not portable between environments.",
+            ),
+            Column(
+                "vat_exempt",
+                "BOOLEAN NOT NULL DEFAULT FALSE",
+                "Night train fares exempt from value-added tax. Raises the "
+                "operator's retained revenue per ticket.",
+            ),
+            Column(
+                "energy_tax_exempt",
+                "BOOLEAN NOT NULL DEFAULT FALSE",
+                "Traction electricity exempt from energy/electricity tax. "
+                "Lowers the energy price the operator pays.",
+            ),
+            Column(
+                "tac_direct_cost",
+                "BOOLEAN NOT NULL DEFAULT FALSE",
+                "Track access charged at the direct cost of running the "
+                "train only, the floor Directive 2012/34/EU permits — not "
+                "a discount on the full charge but a different component "
+                "selection (models/infrastructure/tac/calc_tac.py).",
+            ),
+            Column(
+                "description",
+                "TEXT",
+                "What this bundle of measures represents, in the words a "
+                "reader of the results needs.",
+            ),
+        ),
+        constraints=("UNIQUE (key)",),
+    ),
+    Table(
+        schema="scenario",
+        name="scenario_variants",
+        description="The flattened (scenario x measure set) axis the API "
+        "and the frontend address by a single id — one dropdown value "
+        "instead of two. Materialised as the full cross product "
+        "(db/dev/seed.py materialise_scenario_variants(), re-run after "
+        "every scenario or measure-set insert), so it is derived data: "
+        "truncating and rebuilding it loses nothing except the ids "
+        "themselves, which nothing persists.",
+        columns=(
+            Column("scenario_variant_id", "SERIAL PRIMARY KEY"),
+            Column(
+                "scenario_id",
+                "INTEGER NOT NULL REFERENCES scenario.scenarios(scenario_id)",
+                "The infrastructure pin this variant evaluates on.",
+            ),
+            Column(
+                "measure_set_id",
+                "INTEGER NOT NULL REFERENCES scenario.measure_sets(measure_set_id)",
+                "The measures this variant evaluates under.",
+            ),
+        ),
+        constraints=("UNIQUE (scenario_id, measure_set_id)",),
+    ),
 )
 
 
@@ -1777,8 +1853,114 @@ ROUTE_CACHE_TABLES: tuple[Table, ...] = (
 )
 
 
+# =============================================================================
+# family — layer L5 caches: everything derived from the pins, rebuildable
+# =============================================================================
+# Mirrored verbatim by db/dev/sql/migrations/2026-09-10_family_schema.sql
+# (documents) and 2026-09-10_family_members.sql (members, which replaced
+# the WP13 compute cache under proposals).
+
+FAMILY_TABLES: tuple[Table, ...] = (
+    Table(
+        schema="family",
+        name="documents",
+        description="One serialised family document per family key "
+        "(models/family/key.py): every member of one stop list + HOW under "
+        "the current pins, as POST /api/proposal/family returns it. A pure "
+        "function of the pins, so a cache: UNLOGGED, TTL enforced on read "
+        "(COMPUTE_CACHE_TTL_HOURS), swept opportunistically on write, "
+        "truncated by scripts/refresh_proposals.py on every version bump. "
+        "Never a source of truth.",
+        unlogged=True,
+        columns=(
+            Column(
+                "family_key",
+                "VARCHAR(80) PRIMARY KEY",
+                "sha256 over the resolved request, the resolved axes and the "
+                "two model versions — a version bump changes the key, so a "
+                "stale document is never found again.",
+            ),
+            Column(
+                "route_builder_version",
+                "VARCHAR(20) NOT NULL",
+                "ROUTE_BUILDER_VERSION the document was built under. "
+                "Informational: the key already carries it; kept as a column "
+                "so a sweep can target a version by hand.",
+            ),
+            Column(
+                "calc_version",
+                "VARCHAR(20) NOT NULL",
+                "CALC_VERSION the document was built under. Same role as "
+                "route_builder_version.",
+            ),
+            Column(
+                "payload",
+                "JSONB NOT NULL",
+                "The document (api/helpers/family_serialize.py): request echo, "
+                "suggestions, axes, geometry pool, compact routes, members "
+                "with summaries, stats.",
+            ),
+            Column("created_at", "TIMESTAMPTZ NOT NULL DEFAULT now()"),
+        ),
+        indexes=(
+            "CREATE INDEX idx_family_documents_created ON family.documents (created_at);",
+        ),
+    ),
+    Table(
+        schema="family",
+        name="members",
+        description="The member cache: one cached compute_member() result "
+        "per resolved request (api/helpers/member_compute.py), keyed by a "
+        "hash of the resolved request plus the measure set. Read by the "
+        "family views endpoint, publish, compare and refresh. UNLOGGED, TTL "
+        "on read (COMPUTE_CACHE_TTL_HOURS), swept on write, truncated by "
+        "scripts/refresh_proposals.py on every version bump. Never a source "
+        "of truth.",
+        unlogged=True,
+        columns=(
+            Column(
+                "request_hash",
+                "VARCHAR(80) PRIMARY KEY",
+                "canonical_request_hash(): sha256 over the resolved request "
+                "echo and the measure_set_id.",
+            ),
+            Column(
+                "route_fingerprint",
+                "VARCHAR(80) NOT NULL",
+                "The member's route fingerprint, for a targeted manual sweep "
+                "and for reading which requests converged on one route.",
+            ),
+            Column("scenario_id", "INTEGER NOT NULL"),
+            Column("measure_set_id", "INTEGER NOT NULL"),
+            Column("composition_id", "VARCHAR(50) NOT NULL"),
+            Column(
+                "resolved_request",
+                "JSONB NOT NULL",
+                "The request echo for this member — defaults applied, "
+                "scenario_id concrete.",
+            ),
+            Column(
+                "suggested_stops",
+                "JSONB",
+                'auto_stop_addition="suggest" output for this request. NULL '
+                "outside suggest mode.",
+            ),
+            Column(
+                "payload",
+                "JSONB NOT NULL",
+                "The member payload: versions, summary, route, evaluation.views.",
+            ),
+            Column("created_at", "TIMESTAMPTZ NOT NULL DEFAULT now()"),
+        ),
+        indexes=(
+            "CREATE INDEX idx_family_members_created ON family.members (created_at);",
+        ),
+    ),
+)
+
+
 ALL_TABLES: tuple[Table, ...] = (
-    INPUT_PARAMS_TABLES + SCENARIO_TABLES + ROUTE_CACHE_TABLES
+    INPUT_PARAMS_TABLES + SCENARIO_TABLES + ROUTE_CACHE_TABLES + FAMILY_TABLES
 )
 
 
@@ -1843,7 +2025,8 @@ def _table_ddl(table: Table) -> str:
 def build_ddl() -> str:
     """Render the input_params and scenario schemas as one DDL script —
     the exact replacement for the former create_input_params_schema.sql
-    and create_scenario_schema.sql files, executed by seed.py.
+    and create_scenario_schema.sql files, executed by seed.py — plus the
+    route_cache and family cache schemas, which are disposable.
     Idempotent: each schema starts with DROP SCHEMA ... CASCADE."""
     parts = [
         "DROP SCHEMA IF EXISTS input_params CASCADE;",
@@ -1867,4 +2050,10 @@ def build_ddl() -> str:
         "",
     ]
     parts += [_table_ddl(t) + "\n" for t in ROUTE_CACHE_TABLES]
+    parts += [
+        "DROP SCHEMA IF EXISTS family CASCADE;",
+        "CREATE SCHEMA family;",
+        "",
+    ]
+    parts += [_table_ddl(t) + "\n" for t in FAMILY_TABLES]
     return "\n".join(parts)

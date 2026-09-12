@@ -7,9 +7,10 @@ backend, in one place. Supersedes `deploy/HANDOVER.md` (2026-08-10),
 deleted.
 
 Updated after each change that touches deploy, capacity or server data.
-Last update 2026-09-06 (existing-train geometry: ONTD bootstrap fix —
-see the first note below; also 2026-09-05 route-context re-calibration
-and route builder 0.9.31, §4a; and route builder 0.9.32, §4b).
+Last update 2026-09-12 (CALC 0.9.29 — catering on the summary, two new
+columns, §4d; before that 2026-09-07 WP14 connection pool + gunicorn
+gthread, the calc matrix endpoint and CALC 0.9.25 — §4c; 2026-09-06 ONTD
+bootstrap fix below; 2026-09-05 route builder 0.9.31 §4a; 0.9.32 §4b).
 
 > **Update 2026-09-06 — existing night trains drawn as dashed straight
 > lines: ONTD bootstrap fix, one-off action on every persisted database.**
@@ -375,6 +376,141 @@ changed.
 `expert_timetable` computes exactly what it computed on 0.9.31, and every
 published route reads its new column back as 0, so
 `scripts/refresh_proposals.py` is optional here rather than required.
+
+---
+
+## 4c. WP14 pool + gthread, calc matrix, CALC 0.9.25 — one migration, one env review
+
+**Action:** review the new env knobs against Postgres `max_connections`
+(defaults are safe on the current VPS), let the migration apply, truncate
+the compute cache, run `refresh_proposals.py` once. **Stops applying** once
+this batch is on both environments.
+
+### What changed on the server side
+
+1. **Every adapter now borrows from one connection pool per API process**
+   (`backend/adapters/db_pool.py`) instead of holding its own psycopg2
+   connection. gunicorn moved from `sync` workers to **`gthread`** in
+   `backend/docker/entrypoint.sh` and both `deploy/*/docker-compose.yml`
+   `command:` lists: `--worker-class gthread --workers ${GUNICORN_WORKERS:-2}
+   --threads ${GUNICORN_THREADS:-8}`. A quick `/like` no longer waits behind
+   a slow `/calc` on the same worker, and the matrix endpoint below computes
+   its cells concurrently.
+2. **`POST /api/proposal/calc/matrix`** — one route under every scenario ×
+   every composition (6 × 12 = 72 cells today), streamed as NDJSON. Each
+   cell is an ordinary `/calc` compute through the compute cache, so the
+   first matrix on a route costs up to 72 computes (baseline first, then
+   `CALC_MATRIX_WORKERS` at a time); every later `/calc` on that route is a
+   cache hit. On a deployment running only the 2026 OpenRailRouting
+   instance, the 36 `infra_2032` cells are error cells by design (HTTP 200,
+   `routing_graph_not_configured` per cell) — nothing to fix.
+3. **`CALC_VERSION` 0.9.25** — `proposals.proposal_summaries` gains five
+   columns (`net_eur_per_year`, `operating_days_per_year`,
+   `train_km_per_year`, `available_place_km_per_year`,
+   `sold_place_km_per_year`).
+
+### Env knobs (all optional, documented in `backend/docker/.env.example`)
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `GUNICORN_WORKERS` | 2 | API processes |
+| `GUNICORN_THREADS` | 8 | request threads per process |
+| `DB_POOL_MIN` / `DB_POOL_MAX` | 2 / 16 | pool size per process |
+| `DB_POOL_ACQUIRE_TIMEOUT_S` | 10 | how long a request waits for a free connection before failing |
+| `CALC_MATRIX_MAX_CELLS` | 96 | largest grid one matrix request may ask for |
+| `CALC_MATRIX_WORKERS` | 4 | cells computed concurrently after the baseline |
+
+**Sizing rule.** Per process `DB_POOL_MAX ≥ GUNICORN_THREADS +
+CALC_MATRIX_WORKERS` (16 ≥ 8 + 4 ✓). Across the deployment
+`GUNICORN_WORKERS × DB_POOL_MAX` + migrate/bootstrap scripts + Mathesar
+must stay under Postgres `max_connections` (100 by default): the defaults
+use at most 32 from the API. If you raise workers or threads, raise
+`max_connections` or lower `DB_POOL_MAX` accordingly — pool exhaustion
+shows up as `PoolTimeoutError` 500s after 10 s, never as a hang.
+
+### Steps, both environments
+
+1. Deploy as usual — the migration
+   `db/dev/sql/migrations/2026-09-07_proposal_summaries_supply_kpis.sql`
+   applies before the API starts (`ADD COLUMN … NOT NULL DEFAULT 0`,
+   metadata-only, no rewrite).
+2. Truncate the compute cache (§4a step 2 statement): the summary block
+   changed shape, and a cached pre-0.9.25 result would be served without
+   the new keys.
+3. `docker exec <api> python -m scripts.refresh_proposals` — every stored
+   proposal is outdated by the CALC bump; this backfills the five columns
+   with real values (they read 0 until then). Safe to run any time, resumable.
+4. **Caddy check, once:** open a proposal in the frontend and watch the
+   network tab — `calc/matrix` must show cells arriving over several
+   seconds, not one body at the end. The response has no `Content-Length`
+   and `Content-Type: application/x-ndjson`; Caddy streams that without
+   configuration. If it buffers, the vhost has an `encode` or buffering
+   directive on `/api/*` that must exclude this path.
+
+### Rollback
+
+`--worker-class sync` still works with the pool (it is worker-model
+agnostic); the matrix endpoint then computes its cells sequentially in
+the request thread and still streams. The migration is additive; leaving
+the columns in place on a rollback to 0.9.24 is harmless.
+
+---
+
+## 4d. CALC 0.9.29 — catering on the summary: one migration, nothing else
+
+**Action:** let the migration apply with the deploy, then truncate the
+compute cache as after any model bump. **Stops applying** once this batch
+is on both environments.
+
+### What changed on the server side
+
+1. **One migration**, `backend/db/dev/sql/migrations/2026-09-12_summary_catering.sql`
+   — two additive columns on `proposals.proposal_summaries`
+   (`catering_contribution_eur`, `passengers_per_year`), both
+   `NOT NULL DEFAULT 0`, `ADD COLUMN IF NOT EXISTS`. Seconds on a table this
+   size, no lock worth planning around.
+
+   **Order matters, and `deploy.sh` already gets it right:** the publish
+   projection writes every summary key as a column, so an api image that
+   produces these two keys against a database without the columns fails
+   every publish. Migrations run before the api starts. Nothing for you to
+   sequence by hand — this is a note for the case where someone is tempted
+   to restart the api first.
+
+2. **`ROUTE_BUILDER_VERSION` 0.9.35 → 0.9.36 — no output change.** A lint
+   cleanup removed one unused import from a file the CI version gate
+   watches, so the constant had to move with it. Nothing a route computes
+   differs. It is listed here only because it appears in every response and
+   in `proposals.proposal_summaries.route_builder_version`, and you should
+   not read it as a second model change to plan around.
+
+3. **`CALC_VERSION` 0.9.28 → 0.9.29.** Every route's revenue moves: the
+   on-board catering now contributes a signed net figure per passenger
+   (default +1.20 €). Cost is unchanged. As with any model bump, truncate
+   the compute cache so nothing is served from before it — same statement
+   §3 already uses:
+
+   ```sql
+   TRUNCATE proposals.compute_cache;
+   ```
+
+   The family document cache needs no action: the calc version and the
+   document format are both folded into the family key, so pre-deploy
+   documents are simply never found again and the sweep drops them.
+
+4. **Stored proposals read 0 in both new columns until refreshed.** They
+   were priced without a catering assumption, so 0 is the honest value —
+   there is nothing to backfill without recomputing. `refresh_proposals.py`
+   fills them with real figures whenever it next runs for the version bump;
+   it is not urgent and not required for this deploy.
+
+**No new env knobs, no image or capacity change, no routing-graph work.**
+
+### Rollback
+
+The migration is additive; leaving the columns in place on a rollback to
+0.9.28 is harmless — the older api never writes them and the older gallery
+query never selects them.
 
 ---
 
@@ -870,6 +1006,221 @@ scenario pins and composition ids, **not** on the operator parameters, so
 cached calc results from before this reseed would be stale: clear
 `proposals` compute-cache entries (or bump the cache namespace) as part of
 this rollout, otherwise old and new evaluations coexist in the gallery.
+
+---
+
+## 13. WP18 phase A — one migration, no data change (CALC 0.9.26)
+
+Ships `2026-09-10_scenario_variants.sql`: two new tables in the existing
+`scenario` schema (`measure_sets`, `scenario_variants`), one seeded row,
+and the cross product of it with every existing scenario row. No existing
+table is touched, no column is added anywhere else, no stored number
+changes.
+
+**Deploy:** nothing special. `db/migrate.py` applies the file before the
+api starts, as always. It is small (two `CREATE TABLE`s, two inserts) and
+safe on a live database.
+
+**Do not truncate the compute cache for this one.** CALC moves 0.9.25 →
+0.9.26, which normally means stale cached results — but this bump is a
+signature change with every factor at 1.0, so the numbers behind cached
+payloads are unchanged. The version guard treats 0.9.25 entries as misses
+and recomputes them anyway, which is correct but wasteful; if the cache is
+large and the api feels slow in the first minutes after deploy, that is
+why, and truncating is then the faster path rather than a correctness fix.
+
+**`scripts/refresh_proposals.py` is not required.** Stored proposals carry
+`calc_version: "0.9.25"` and read as outdated in the gallery until the
+next refresh run. Since the numbers are identical, that refresh can ride
+along with phase B rather than being its own deploy — your call which is
+less disruptive.
+
+**No new environment variables.** `MODELS_CACHE_MAX_AGE_S` (the
+`Cache-Control` on the new `GET /api/models`) has a code default of 3600
+and appears name-only, commented out, in `.env.example` like every other
+code-defaulted setting.
+
+**One adjacent thing to check before the next fresh database:**
+`deploy/bot-server-app/docker-compose.yml`, `bot-server-demo` and
+`bot-server` still bind-mount
+`backend/db/dev/sql/create_input_params_schema.sql` and
+`create_scenario_schema.sql` into `docker-entrypoint-initdb.d`. Those files
+no longer exist — `db/schema.py::build_ddl()` replaced them — so Docker
+creates empty *directories* in their place. Existing volumes are
+unaffected (init scripts only run on an empty data directory), so this is
+dormant on staging and production, but a brand-new environment would come
+up without `input_params` or `scenario`. Not part of this deploy; worth
+fixing before the next fresh install.
+
+---
+
+## 14. WP18 phase B1 — an assertion migration and a fresh-install fix
+
+Ships `2026-09-10_auto_stop_add_removed.sql` (ROUTE_BUILDER 0.9.34).
+
+**What the migration does.** Nothing to the schema. It asserts that no
+stored proposal's `compute_request` asks for `auto_stop_addition: 'add'`,
+a mode the route builder no longer has, and that none omits the field
+(which would have taken the old `'add'` default). Either case **fails the
+deploy** before the api container starts, with a message naming the
+counts — a proposal like that would otherwise silently rebuild as a
+different route on its next recompute. It also prints a `NOTICE` with the
+number of published proposals carrying auto-added stops: those lose the
+stops on their next recompute, so their KPIs move. Informational, never
+fatal.
+
+**You can check before deploying**, though nothing requires it — the
+migration is the real gate:
+
+```bash
+docker exec tn-staging-db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
+SELECT count(*) FILTER (WHERE compute_request->>''auto_stop_addition'' = ''add'')  AS echo_add,
+       count(*) FILTER (WHERE compute_request->>''auto_stop_addition'' IS NULL) AS echo_missing,
+       count(*)                                                                  AS proposals
+FROM proposals.proposals;"'
+```
+
+Swap `tn-production-db` for production (`docker ps --filter name=tn-` if
+the names differ). Both counts zero means the migration passes silently.
+If not, and the environment still holds only test data, reseeding is the
+cheapest fix — see the pre-V1 section of
+`deploy/bot-server-app/README.md`.
+
+**Version bump handling.** ROUTE_BUILDER 0.9.33 → 0.9.34 marks every
+stored proposal outdated, so each recomputes on its next load. Unlike the
+CALC bump in §13, this one **can** change numbers: any proposal built
+under `'add'` loses the stops the builder chose. That is the intended
+correction, not a regression. `scripts/refresh_proposals.py` may be run to
+get it over with in one pass rather than lazily.
+
+**Fresh-install fix, changed blind.** All three deploy compose files
+(`bot-server-app`, `bot-server-demo`, `bot-server`) mounted
+`backend/db/dev/sql/create_input_params_schema.sql` and
+`create_scenario_schema.sql` into `docker-entrypoint-initdb.d`. Those
+files no longer exist — `db/schema.py::build_ddl()` replaced them — so
+Docker created *directories* in their place, `psql -f` on a directory
+fails, and the postgres entrypoint runs under `set -e`: **a database on an
+empty volume would never have finished initialising.** Existing volumes
+never run initdb, so staging and production are unaffected and always
+have been. The two mounts are now removed.
+
+Neither David nor I can test this: it only fires on a genuinely fresh
+volume, which is your first-time-setup path. Please verify on the next
+new environment. Expected: `docker compose up -d db` comes up healthy,
+`create_admin_schema.sql` and `create_proposal_schema.sql` run, and the
+documented `seed.py` step then creates all four schemas as before. If the
+db container dies during init, the mounts are the first place to look.
+
+---
+
+## 15. WP18 phase B2a — the `family` schema, and two more threads per process
+
+Ships `2026-09-10_family_schema.sql`: a new `family` schema with one
+UNLOGGED table, `family.documents`. Cache only — a fresh database starts
+with it empty, and it is safe to `TRUNCATE family.documents` at any time.
+
+**Deploy:** nothing special; the migration is two statements and applies
+in milliseconds. `proposals.compute_cache_*` keep working unchanged.
+
+**Cache truncation on future version bumps** now covers two schemas:
+
+```sql
+TRUNCATE proposals.compute_cache_pointer, proposals.compute_cache_result;
+TRUNCATE family.documents;
+```
+
+`scripts/refresh_proposals.py` will do both from B2b; until then the
+second line is yours when you truncate by hand. Forgetting it is
+harmless: the family key folds both model versions AND the document's own
+shape version into itself, so a stale document is never served, only left
+for the sweep. That is deliberate — a deploy that reshapes the document
+must not keep serving the old shape to a frontend whose types describe
+the new one.
+
+**Pool sizing.** The family build fans out its prewarm over
+`FAMILY_WORKERS` threads (default 4), each borrowing a pooled connection.
+Same rule as the matrix workers it replaces in B2b: `DB_POOL_MAX ≥
+GUNICORN_THREADS + FAMILY_WORKERS` per process. With today's defaults
+(8 + 4) you are inside the pool you already run; if you raised
+`GUNICORN_THREADS`, check.
+
+**No new environment variables required.** `FAMILY_MAX_MEMBERS` (1000)
+and `FAMILY_WORKERS` (4) have code defaults and appear name-only in
+`.env.example`.
+
+**One property of `route_cache` worth knowing, unrelated to this deploy.**
+A stop pair is stored once, `lo→hi`, and the other direction is served by
+reversing it — so whichever direction is routed FIRST decides the corridor
+for both. If two directions of the same pair are routed concurrently
+before either is stored, each gets its own live path, and the return trip
+of that one build differs from the return trip of every later build (which
+reverses the outbound). Measured here as a family whose geometry changed
+between a cold and a warm build. Nothing is wrong — the cache's
+"direction is symmetric" rule is deliberate — but it means a route's
+fingerprint can change on a recompute after a cold first build, which a
+refresh run would record as a changed route. The family builder now warms
+the two directions in order so it never triggers this; the precompute
+script already loads pairs one at a time.
+
+**Capacity, for §7:** a full 6 × 12 family costs one request ≈2 s warm
+on the dev box (`scripts/bench_member.py`, section D) and returns
+≈1.5 MB raw / ≈400 KB gzipped. Cold — legs not yet in `route_cache` —
+add the corridor's live routing on top, once. Worth a soak on the VPS
+before B2b makes it the only compute path; I'll ask for that with B2b.
+
+---
+
+## 16. WP18 phase B2b — backend 0.5.0: the family is the only compute path
+
+**Coupled deploy — now unblocked.** 0.5.0 removes `POST /api/proposal/calc`
+and `/calc/matrix`. A frontend built against 0.4.x cannot compute against
+it, so this backend goes to staging **together with** the frontend's phase
+C (`FRONTEND_HANDOVER.md` §16, done in §17): both halves are on
+`proposal-builder-redesign`, so one deploy of that branch carries both. Everything else — gallery,
+load, compare, publish, engagement — keeps working with either frontend.
+
+**Migration `2026-09-10_family_members.sql`.** Creates `family.members`
+(the member cache, one table) and **drops** `proposals.compute_cache_pointer`
+and `proposals.compute_cache_result`. Both are caches, so nothing is
+migrated across; the new table starts empty and fills on demand. Applies in
+milliseconds.
+
+**After the deploy, run the refresh** — this is the one that needs it:
+
+```bash
+docker compose run --rm migrate python scripts/refresh_proposals.py
+```
+
+Two reasons. Stored `evaluation_output` rows still carry a `models` key from
+before B2b (harmless — the reader ignores it — but the refresh rewrites
+them to `{views}` and keeps the column honest), and every proposal marked
+outdated by B1's ROUTE_BUILDER bump is still waiting for its recompute.
+The script flushes both family caches first; nothing else to truncate by
+hand any more.
+
+**Cache truncation on future bumps** is now exactly this:
+
+```sql
+TRUNCATE family.members, family.documents;
+```
+
+`proposals.compute_cache_*` no longer exist; `scripts/refresh_proposals.py`
+and `scripts/migrate_scenarios_2026.py` both know the new names.
+
+**No new environment variables.** `CALC_MATRIX_MAX_CELLS` and
+`CALC_MATRIX_WORKERS` are gone (ignored if still set); `FAMILY_MAX_MEMBERS`
+and `FAMILY_WORKERS` (§15) are the only knobs.
+
+**Capacity, for §7.** The family is now the cost of every compute: ≈1.5 s
+warm and ≈400 KB gzipped per new stop list, then document-cache hits
+(~110 ms) for every returning client; the views endpoint is ≈350 ms cold
+per member opened and a member-cache hit after. A soak on the VPS with a
+handful of concurrent family builds is worth doing before production —
+each borrows `FAMILY_WORKERS` pooled connections during its prewarm.
+
+**The `route_cache` note from §15 still stands** and matters more now:
+the family's prewarm routes both directions of a pair in order, so a cold
+family already produces what the warm one will.
 
 ---
 

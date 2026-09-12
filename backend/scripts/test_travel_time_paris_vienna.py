@@ -17,7 +17,7 @@ corridor.
 
 What this script does, in three parts:
 
-  1. ROUTE      One POST /api/proposal/calc for the NJ 468 corridor with
+  1. ROUTE      One member compute for the NJ 468 corridor with
                 the requested composition and scenario. Nothing is written
                 to the database.
   2. EXTRACT    Per-leg dump of distance_m, driving_time_min,
@@ -36,7 +36,7 @@ What this script does, in three parts:
 Everything is compared against the real NJ 468 timetable (REFERENCE below).
 
 The 90-minute technical stop at Mannheim (coupling) is NOT modelled by the
-API — /api/proposal/calc has no per-stop dwell field, and the calibrated
+API — a member request has no per-stop dwell field, and the calibrated
 dwell floor is 2 minutes per commercial stop. It is added as a flat
 constant (--tech-stop-min, default 90) OUTSIDE the model, and every
 printed total states whether it is included. Do not let it silently land
@@ -74,6 +74,7 @@ import requests
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from dev_env import api_base_url, routing_base_url  # noqa: E402
+from scripts.member import compute_member_payload  # noqa: E402
 
 API_BASE = api_base_url()
 ROUTING_URL = routing_base_url()
@@ -502,7 +503,7 @@ def fetch_scenario(scenario_key: str) -> dict:
 
 
 def compute(scenario_id: int, stops: list[str], composition_id: str) -> dict:
-    """One stateless POST /api/proposal/calc.
+    """One member (compute_member, in-process — scripts/member.py).
 
     auto_stop_addition="off" so the leg list is exactly the corridor asked
     for — an auto-added stop would change both the dwell total and the
@@ -518,11 +519,11 @@ def compute(scenario_id: int, stops: list[str], composition_id: str) -> dict:
         "timetable_mode": "simpleAutomatic",
         "auto_stop_addition": "off",
     }
-    resp = requests.post(f"{API_BASE}/api/proposal/calc", json=body, timeout=180)
-    if resp.status_code != 200:
-        print(f"[✗] proposal/calc failed: {resp.status_code} {resp.text[:400]}")
+    try:
+        return compute_member_payload(body)
+    except Exception as exc:  # noqa: BLE001 — an analysis script stops on the first failure
+        print(f"[✗] member compute failed: {exc}")
         sys.exit(1)
-    return resp.json()
 
 
 # =============================================================================

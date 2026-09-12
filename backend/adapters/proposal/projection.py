@@ -2,9 +2,9 @@
 projection.py
 =============
 Fingerprint + DB-shaped summary assembly (adapters/proposal/README.md §3.1/§5.4,
-WP4; slimmed with WP10 step 5). Pure functions over the same dicts
-POST /api/proposal/calc already returns (route_to_dict() shape + the
-evaluation "views" block) — no DB access, no domain-object construction.
+WP4; slimmed with WP10 step 5). Pure functions over the same dicts a
+member payload carries (route_to_dict() shape + the evaluation "views"
+block) — no DB access, no domain-object construction.
 
 The §5.4 KPI derivation itself (build_summary_row()) moved to
 models/evaluation/summary.py so the calc response, the compare sides,
@@ -35,7 +35,7 @@ Public interface:
                                                     repository's concern
                                                     at publish time.)
 
-Callers: api/helpers/proposal_compute.py (fingerprint only, for the
+Callers: api/helpers/member_compute.py (fingerprint only, for the
 merged compute response); repository.py (both functions, at
 publish/refresh time).
 """

@@ -5,7 +5,7 @@ Version anchor and factor set of the emissions model: flat per-mode GHG
 intensity factors (adapters/proposal/README.md decision 24) — the single
 source for the night-train, air, and car g CO2e/pax-km values used
 across the platform: `proposals.proposal_summaries.co2_g_per_pax_km`,
-the "summary" block of POST /api/proposal/calc, the
+the "summary" block of a member (and of every family member), the
 `evaluation.models.emissions` documentation entry
 (api/helpers/evaluation_serialize.py: models_to_dict()), and the
 placeholder CO2-savings derivation in models/evaluation/summary.py.

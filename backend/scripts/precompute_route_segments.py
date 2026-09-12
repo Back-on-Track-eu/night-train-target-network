@@ -449,19 +449,16 @@ def load(out: Path, graph_key: str, import_date: str | None) -> None:
     if not path.is_file():
         sys.exit(f"Neither {path.name} nor its .gz exists — run --finalize first.")
     repo = RouteSegmentRepository()
-    try:
-        # Same reconciliation the API does at startup: if the served graph
-        # moved on since the file was routed, the file is stale too.
-        if repo.sync_graph_import(graph_key, import_date):
-            print("  graph import changed — existing rows purged before load.")
-        before = repo.count(graph_key)
-        inserted = repo.load_csv(path, graph_key)
-        print(
-            f"Loaded {inserted} new segment(s) into route_cache for '{graph_key}' "
-            f"({before} → {repo.count(graph_key)} rows). Restart the API to warm up."
-        )
-    finally:
-        repo.close()
+    # Same reconciliation the API does at startup: if the served graph
+    # moved on since the file was routed, the file is stale too.
+    if repo.sync_graph_import(graph_key, import_date):
+        print("  graph import changed — existing rows purged before load.")
+    before = repo.count(graph_key)
+    inserted = repo.load_csv(path, graph_key)
+    print(
+        f"Loaded {inserted} new segment(s) into route_cache for '{graph_key}' "
+        f"({before} → {repo.count(graph_key)} rows). Restart the API to warm up."
+    )
 
 
 # ---------------------------------------------------------------------------

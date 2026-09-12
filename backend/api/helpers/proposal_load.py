@@ -21,7 +21,7 @@ Public interface:
 from __future__ import annotations
 
 from adapters.proposal.repository import outdated_trigger
-from api.helpers.proposal_compute import compute_proposal
+from api.helpers.member_compute import compute_member
 
 
 def load_current_container(repo, proposal_id: int) -> dict | None:
@@ -43,7 +43,7 @@ def load_current_container(repo, proposal_id: int) -> dict | None:
         # NOW, regardless of which of the three triggers actually fired.
         refresh_request = dict(container["compute_request"])
         refresh_request["scenario_id"] = None
-        computed, _ = compute_proposal(refresh_request)
+        computed, _ = compute_member(refresh_request)
         repo.refresh_proposal(proposal_id, computed, detail=trigger)
         # refresh_proposal()'s own return dict is deliberately minimal
         # (identity + timestamps, mirroring publish()'s) — it doesn't

@@ -32,6 +32,16 @@ Revenue, cost, and margin (OD pair level)
 All costs in EUR. evaluate_route() walks a Route and returns a flat
 EvaluationResult — one cost object per segment, one per trip pair, one
 per route, one revenue object per OD pair. No grouping or filtering here.
+
+Measures
+--------
+evaluate_route(..., measures) prices the route under one MeasureSet
+(models/params.py) — the political levers a scenario variant carries.
+Three factors enter the calculation, on ticket revenue, traction energy
+and track access; all three are 1.0 until WP17 seeds real rates, so
+NO_MEASURES (the default, and the only seeded set) reproduces every
+number this model returned before measure sets existed. The set that was
+used is recorded on EvaluationResult.measures.
 """
 
 from __future__ import annotations
@@ -39,6 +49,10 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
+from models.demand.model import (
+    STOPGAP_CATERING_EUR_PER_PAX_BY_CLASS,
+    STOPGAP_SERVICES_EUR_PER_PAX_BY_CLASS,
+)
 from models.infrastructure.energy_pricing.calc_energy_price import (
     SegmentEnergy,
     calc_segment_energy,
@@ -51,6 +65,8 @@ from models.infrastructure.facility.calc_facility import (
 from models.infrastructure.tac.calc_tac import SegmentTac, calc_segment_tac
 from models.params import (
     Composition,
+    MeasureSet,
+    NO_MEASURES,
     PassageChargeCollection,
     StopInfraCollection,
     TrackInfraCollection,
@@ -196,27 +212,6 @@ class CompositionFleetCost:
 
 
 @dataclass
-class ShuntingCost:
-    """
-    Cost of shunting movements across the route. shunting_count comes
-    from Route.shunting_count (currently 2 per trip — a placeholder
-    rule). shunting_eur_event is an operator-level rate (one shunting
-    yard contract per operator) — Route's operator invariant guarantees
-    every TripPair's composition carries the same rate.
-
-    total_eur unit: €/trip-cycle (one outbound + return).
-    """
-
-    route_id: str
-    shunting_count: int
-    shunting_eur_event: float  # €/event
-
-    @property
-    def total_eur(self) -> float:  # €/trip-cycle
-        return self.shunting_count * self.shunting_eur_event
-
-
-@dataclass
 class ParkingCost:
     """Cost for one overnight parking location. Mirrors Parking — one
     ParkingCost per Parking in route.parkings.
@@ -283,6 +278,16 @@ class ODPairRevenue:
     class_main: str
     places_sold: int  # annual tickets sold
     revenue_eur: float  # €/year  (places_sold × avg_price)
+    # Revenue from bicycles, oversized luggage and the like, sold with the
+    # ticket (CALC 0.9.30). Ordinary ticket revenue: not signed, not net —
+    # its cost is zero or already carried by the lower place density of the
+    # coach — so it stays INSIDE every overhead and margin base.
+    services_revenue_eur: float = 0.0
+    # Signed net contribution of the on-board catering for the passengers
+    # of this OD pair (places_sold × the class's rate, CALC 0.9.29).
+    # Revenue, not a cost: the figure already nets the service's own
+    # costs, which is why it is outside every overhead and margin base.
+    catering_contribution_eur: float = 0.0
 
 
 @dataclass
@@ -372,13 +377,13 @@ class SegmentPassengerLoad:
     def total_places_sold(self) -> int:
         """Annual passengers riding this segment — divide by the schedule's
         operating days for the load of one train run."""
-        return sum(l.places_sold for l in self.od_loads)
+        return sum(load.places_sold for load in self.od_loads)
 
     @property
     def total_revenue_eur(self) -> float:
         """Annual ticket revenue attributable to this segment. Feeds the
         revenue-share track access term (CH Deckungsbeitrag)."""
-        return sum(l.revenue_eur for l in self.od_loads)
+        return sum(load.revenue_eur for load in self.od_loads)
 
     def total_passengers_per_run(self, operating_days: int) -> float:
         """Passengers aboard on one train run — the basis of a per-passenger
@@ -391,32 +396,34 @@ class SegmentPassengerLoad:
 
     @property
     def total_place_km(self) -> float:
-        return sum(l.place_km for l in self.od_loads)
+        return sum(load.place_km for load in self.od_loads)
 
     @property
     def total_place_hours(self) -> float:
-        return sum(l.place_hours for l in self.od_loads)
+        return sum(load.place_hours for load in self.od_loads)
 
     @property
     def total_weighted_place_km(self) -> float:
-        return sum(l.weighted_place_km for l in self.od_loads)
+        return sum(load.weighted_place_km for load in self.od_loads)
 
     @property
     def total_weighted_place_hours(self) -> float:
-        return sum(l.weighted_place_hours for l in self.od_loads)
+        return sum(load.weighted_place_hours for load in self.od_loads)
 
     def total_place_km_for_country(self, cc: str) -> float:
-        return sum(l.place_km_by_country.get(cc, 0.0) for l in self.od_loads)
+        return sum(load.place_km_by_country.get(cc, 0.0) for load in self.od_loads)
 
     def total_place_hours_for_country(self, cc: str) -> float:
-        return sum(l.place_hours_by_country.get(cc, 0.0) for l in self.od_loads)
+        return sum(load.place_hours_by_country.get(cc, 0.0) for load in self.od_loads)
 
     def total_weighted_place_km_for_country(self, cc: str) -> float:
-        return sum(l.weighted_place_km_by_country.get(cc, 0.0) for l in self.od_loads)
+        return sum(
+            load.weighted_place_km_by_country.get(cc, 0.0) for load in self.od_loads
+        )
 
     def total_weighted_place_hours_for_country(self, cc: str) -> float:
         return sum(
-            l.weighted_place_hours_by_country.get(cc, 0.0) for l in self.od_loads
+            load.weighted_place_hours_by_country.get(cc, 0.0) for load in self.od_loads
         )
 
 
@@ -439,6 +446,11 @@ class EvaluationResult:
     od_pair_costs: list[ODPairCost]
     od_pair_margins: list[ODPairMargin]
     segment_passenger_loads: dict[tuple[str, int], "SegmentPassengerLoad"]
+    measures: MeasureSet = NO_MEASURES
+    """The measure set this evaluation was priced under — recorded so a
+    result carries its own political assumptions, the same way
+    RouteProvenance carries the parameter versions a route was built
+    with."""
 
 
 # =============================================================================
@@ -485,15 +497,21 @@ def _calc_segment_cost(
     crew_rate_eur_h: float,
     segment_revenue_eur: float,
     segment_passengers: float,
+    measures: MeasureSet,
 ) -> SegmentCost:
     distance_km = segment.distance_m / 1000.0
-    # Time in motion = raw router driving + traction dynamics (accel/brake is
-    # time the driver drives and crew is on duty) — buffer/dwell excluded.
-    driving_h = (segment.driving_time_min + segment.dynamics_time_min) / 60.0
+    # Staff are on the train for the WHOLE segment — driving, traction
+    # dynamics, the timetable buffer and any padding — and are paid for all
+    # of it (CALC 0.9.31). Until 0.9.30 only driving + dynamics were counted,
+    # which left a 10 h trip paying its driver for 8 h. Dwell at the stops
+    # is charged separately in _calc_stop_cost. The DUTY-COUNT basis for the
+    # roster efficiency stays driving time (evaluate_route): that is what
+    # 2005/47/EC caps, and it is computed there, not here.
+    on_train_h = segment.total_time_min / 60.0
 
     coach_maintenance_eur = composition.coach_maint_eur_km * distance_km
-    driver_hours = driving_h * composition.driver_factor
-    crew_hours = driving_h * composition.total_crew
+    driver_hours = on_train_h * composition.driver_factor
+    crew_hours = on_train_h * composition.total_crew
     driver_eur = driver_rate_eur_h * driver_hours
     crew_eur = crew_rate_eur_h * crew_hours
 
@@ -530,8 +548,14 @@ def _calc_segment_cost(
         crew_hours=crew_hours,
         driver_eur=driver_eur,
         crew_eur=crew_eur,
-        tac_eur=tac.total_eur,
-        energy_eur=energy.total_eur,
+        # The measure factors apply here, on the totals this SegmentCost
+        # reports — both are 1.0 today (models/params.py MeasureSet). The
+        # SegmentTac/SegmentEnergy objects below stay as priced, so the
+        # per-country views keep reading untouched components; WP17 moves
+        # the pricing into calc_tac.py/calc_energy_price.py, where the
+        # components are, rather than widening these two factors.
+        tac_eur=tac.total_eur * measures.track_access_factor,
+        energy_eur=energy.total_eur * measures.energy_cost_factor,
         tac=tac,
         energy=energy,
     )
@@ -671,6 +695,9 @@ def _calc_shunting_costs(
 
 def _calc_od_pair_results(
     route: Route,
+    measures: MeasureSet,
+    catering_eur_per_pax: dict[str, float],
+    services_eur_per_pax: dict[str, float],
 ) -> tuple[list[ODPairRevenue], list[ODPairCost], list[ODPairMargin]]:
     """
     Computes revenue, cost, and margin per OD pair.
@@ -679,6 +706,25 @@ def _calc_od_pair_results(
 
     od.places_sold is annual, so all outputs are €/year directly —
     no frequency multiplier (operating_days_per_year) is needed here.
+
+    measures.ticket_revenue_factor is what the operator keeps of the fare
+    (1.0 today) — applied before the two shares derived from revenue, so
+    variable overhead and the EBIT margin allocation scale with the
+    revenue actually earned rather than with a gross figure nobody
+    receives. The track access revenue base is deliberately not factored:
+    compute_segment_passenger_loads() prices the CH contribution margin
+    off turnover, which a fare tax exemption does not change.
+
+    catering_eur_per_pax rides on the same annual places_sold and is
+    deliberately NOT multiplied by ticket_revenue_factor, nor fed into
+    var_overhead_eur / ebit_margin_eur: it is already a net figure, and a
+    fare measure changes what a ticket earns, not what a passenger eats.
+
+    services_eur_per_pax rides on places_sold too but is the opposite case
+    (CALC 0.9.30): it IS ticket revenue — the fare for carrying a bike —
+    so it joins the overhead and margin bases. It is left outside
+    ticket_revenue_factor all the same: a fare measure that discounts
+    accommodation does not discount the bike.
     """
     revenues: list[ODPairRevenue] = []
     costs: list[ODPairCost] = []
@@ -687,13 +733,19 @@ def _calc_od_pair_results(
     for pair in route.trip_pairs:
         composition = pair.composition
         for od in pair.od_pairs:
-            revenue_eur = od.places_sold * od.avg_price
+            revenue_eur = od.places_sold * od.avg_price * measures.ticket_revenue_factor
+            services_eur = od.places_sold * services_eur_per_pax.get(od.class_main, 0.0)
             svc_stockings_eur = (
                 composition.svc_stockings_eur_place.get(od.class_main, 0.0)
                 * od.places_sold
             )
-            var_overhead_eur = revenue_eur * composition.var_overhead_per
-            ebit_margin_eur = revenue_eur * composition.ebit_margin_per
+            # The base of both shares is TICKET revenue — the accommodation
+            # fare plus the services sold with it (CALC 0.9.30). Catering is
+            # the one revenue leaf outside it, because its figure is already
+            # net of its own overhead.
+            ticket_base_eur = revenue_eur + services_eur
+            var_overhead_eur = ticket_base_eur * composition.var_overhead_per
+            ebit_margin_eur = ticket_base_eur * composition.ebit_margin_per
 
             revenues.append(
                 ODPairRevenue(
@@ -703,6 +755,10 @@ def _calc_od_pair_results(
                     class_main=od.class_main,
                     places_sold=od.places_sold,
                     revenue_eur=revenue_eur,
+                    services_revenue_eur=services_eur,
+                    catering_contribution_eur=(
+                        od.places_sold * catering_eur_per_pax.get(od.class_main, 0.0)
+                    ),
                 )
             )
             costs.append(
@@ -846,9 +902,17 @@ def evaluate_route(
     tracks: TrackInfraCollection,
     stop_infra: StopInfraCollection,
     passages: PassageChargeCollection,
+    measures: MeasureSet = NO_MEASURES,
+    catering_eur_per_pax: dict[str, float] | None = None,
+    services_eur_per_pax: dict[str, float] | None = None,
 ) -> EvaluationResult:
     """Compute flat cost and revenue for a Route. No aggregation or
     normalisation — see views.py.
+
+    measures: the political levers this evaluation runs under (see the
+    module docstring). Defaults to NO_MEASURES — every factor 1.0, the
+    regime every caller before WP18 implicitly asked for — so a caller
+    that does not know about measure sets gets the numbers it always got.
 
     The traffic pre-pass runs FIRST, before any cost: two track access
     terms price traffic rather than distance — the Swiss contribution
@@ -856,6 +920,13 @@ def evaluate_route(
     Channel Tunnel charges per carried passenger — so segment costs cannot
     be computed until the passengers and revenue riding each segment are
     known.
+
+    catering_eur_per_pax / services_eur_per_pax: the two per-class tariff
+    parts that ride on passengers rather than on distance
+    (models/demand/model.py). None takes the demand model's own standard
+    values, for the same reason measures defaults to NO_MEASURES — a caller
+    that does not know about the field gets the model's assumption rather
+    than zero.
     """
     composition_fleet_costs = _calc_composition_fleet_costs(route)
     segment_passenger_loads = compute_segment_passenger_loads(route)
@@ -891,6 +962,7 @@ def evaluate_route(
                 )
                 segment_costs.append(
                     _calc_segment_cost(
+                        measures=measures,
                         trip_id=trip.trip_id,
                         segment_index=i,
                         segment=segment,
@@ -927,7 +999,16 @@ def evaluate_route(
                     )
                 )
 
-    od_pair_revenues, od_pair_costs, od_pair_margins = _calc_od_pair_results(route)
+    od_pair_revenues, od_pair_costs, od_pair_margins = _calc_od_pair_results(
+        route,
+        measures,
+        catering_eur_per_pax
+        if catering_eur_per_pax is not None
+        else STOPGAP_CATERING_EUR_PER_PAX_BY_CLASS,
+        services_eur_per_pax
+        if services_eur_per_pax is not None
+        else STOPGAP_SERVICES_EUR_PER_PAX_BY_CLASS,
+    )
 
     result = EvaluationResult(
         route_cost=_calc_route_cost(route, tracks),
@@ -940,5 +1021,6 @@ def evaluate_route(
         od_pair_costs=od_pair_costs,
         od_pair_margins=od_pair_margins,
         segment_passenger_loads=segment_passenger_loads,
+        measures=measures,
     )
     return result

@@ -139,7 +139,7 @@ PROPOSALS_DEFAULT_LIMIT = _env_int("PROPOSALS_DEFAULT_LIMIT", 50)
 
 
 # =============================================================================
-# Expert timetable overrides — api/helpers/proposal_compute.py
+# Expert timetable overrides — api/helpers/member_compute.py
 # =============================================================================
 
 # Bounds on what a caller may do to a timetable by hand. Operational caps,
@@ -252,6 +252,37 @@ REQUEST_LOG_RETENTION_DAYS = _env_int("REQUEST_LOG_RETENTION_DAYS", 90)
 
 
 # =============================================================================
+# Model registry (api/models.py)
+# =============================================================================
+
+# Cache-Control max-age on GET /api/models. The body changes only with a
+# deployed model version bump, so this is not about load — it bounds how
+# long a client can show formulas that no longer match the numbers next to
+# them. One hour: long enough that a session fetches it once, short enough
+# that a deploy corrects every open tab the same working day.
+MODELS_CACHE_MAX_AGE_S = _env_int("MODELS_CACHE_MAX_AGE_S", 3600)
+
+
+# =============================================================================
+# Proposal family (api/helpers/family_compute.py)
+# =============================================================================
+
+# Largest scenario-variant × composition family one POST may ask for. The
+# default axes are 6 current scenarios × 1 measure set × 12 compositions =
+# 72 members; the cap leaves room for the measure sets WP17 adds (up to
+# 54 variants × 12 = 648) without bounding a request by whatever the seed
+# happens to hold.
+FAMILY_MAX_MEMBERS = _env_int("FAMILY_MAX_MEMBERS", 1000)
+
+# Threads for the family's PREWARM phase only — catalog loads per scenario
+# and the distinct leg variants, the two I/O-bound steps. The member loop
+# that follows is ~4 ms of pure Python per member and runs serially
+# (scripts/bench_member.py: threads there only contend). Bounded by the
+# DB pool: DB_POOL_MAX must cover GUNICORN_THREADS + this per process.
+FAMILY_WORKERS = _env_int("FAMILY_WORKERS", 4)
+
+
+# =============================================================================
 # Effective-config boot log
 # =============================================================================
 
@@ -306,6 +337,9 @@ def log_effective_config() -> None:
         "EXPERT_MAX_DEPARTURE_SHIFT_MIN": EXPERT_MAX_DEPARTURE_SHIFT_MIN,
         "EXPERT_DEPARTURE_MIN_TIME": EXPERT_DEPARTURE_MIN_TIME,
         "EXPERT_DEPARTURE_MAX_TIME": EXPERT_DEPARTURE_MAX_TIME,
+        "MODELS_CACHE_MAX_AGE_S": MODELS_CACHE_MAX_AGE_S,
+        "FAMILY_MAX_MEMBERS": FAMILY_MAX_MEMBERS,
+        "FAMILY_WORKERS": FAMILY_WORKERS,
     }
     logger.info(
         "Effective config — wiring: %s",

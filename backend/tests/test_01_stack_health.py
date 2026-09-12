@@ -85,9 +85,9 @@ def test_unknown_endpoint_returns_json_404(api_base):
 @pytest.mark.timeout(10)
 def test_wrong_method_returns_json_405(api_base):
     """GET on a POST-only endpoint returns the global JSON 405 handler's
-    body. /api/route/plan was removed in WP5 — /api/proposal/calc is its
-    POST-only successor."""
-    resp = requests.get(f"{api_base}/api/proposal/calc")
+    body. /api/proposal/family is the POST-only compute endpoint since
+    WP18 B2b (/calc before it, /api/route/plan before that)."""
+    resp = requests.get(f"{api_base}/api/proposal/family")
     assert resp.status_code == 405
     assert resp.json()["error"] == "method_not_allowed"
 

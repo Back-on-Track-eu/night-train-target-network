@@ -2,9 +2,10 @@
 evaluation_serialize.py
 ========================
 Serialization (domain → dict) for the cost/revenue evaluation pipeline —
-Breakdown trees, matrix views, and the "models" / "input" documentation
-sections of the merged POST /api/proposal/calc response's "evaluation"
-block (api/helpers/proposal_compute.py).
+Breakdown trees, matrix views (a member's "evaluation.views", api/helpers/
+member_compute.py), and the "models" / "input" documentation sections —
+served by GET /api/models and GET /api/params/* since WP18 B2b, no longer
+inlined in every member.
 
 Split out of the former serialize.py (2026-07-06) into two domain files —
 this one for evaluation output, route_serialize.py for Route (de)serialization
@@ -23,6 +24,7 @@ Public interface:
                                                     → dict  (all normalisations of one Breakdown, each class-keyed with 'all' —
                                                              CALC 0.9.9; scope = a cell's own annual denominators for
                                                              route-section cells, None otherwise)
+  route_view_to_dict(bd_all, route)               → dict  (the whole-route view alone — what build_summary_row() reads)
   views_to_dict(views, route)                     → dict  (the full "views" section from a ViewsBundle: description +
                                                              normalisations + data per view, views_meta merged in)
   models_to_dict()                                 → dict  (version + description + formulas for route_builder / energy / evaluation,
@@ -51,6 +53,16 @@ from models.energy.model import (
     ENERGY_CALC_VERSION,
     ENERGY_MODEL_DESCRIPTION,
     ENERGY_FORMULAS,
+)
+from models.demand.model import (
+    DEMAND_MODEL_DESCRIPTION,
+    DEMAND_MODEL_VERSION,
+    FARE_CLASS_MAINS,
+    STOPGAP_CATERING_EUR_PER_PAX_BY_CLASS,
+    STOPGAP_FARE_PER_KM_BY_CLASS,
+    STOPGAP_FARE_PER_PAX_BY_CLASS,
+    STOPGAP_SERVICES_EUR_PER_PAX_BY_CLASS,
+    STOPGAP_UTILIZATION_PER,
 )
 from models.emissions.model import (
     EMISSION_FACTORS,
@@ -114,6 +126,8 @@ def breakdown_to_dict(b: Breakdown) -> dict:
         },
         "revenue": {
             "ticket_revenue_eur": b.revenue.ticket_revenue_eur,
+            "services_revenue_eur": b.revenue.services_revenue_eur,
+            "catering_contribution_eur": b.revenue.catering_contribution_eur,
             "total_eur": b.revenue.total_eur,
         },
         "margin": {
@@ -275,9 +289,15 @@ def _section_value(stop_names: dict[str, str], section_key: str) -> str | dict:
 # =============================================================================
 
 
-def _route_view_to_dict(bd_all: Breakdown, route: Route) -> dict:
+def route_view_to_dict(bd_all: Breakdown, route: Route) -> dict:
     """The whole-route view has nothing to filter by — a single Breakdown,
-    no "filter" label needed."""
+    no "filter" label needed.
+
+    Public on its own (not only through views_to_dict) because it is the
+    one view models/evaluation/summary.py's build_summary_row() reads: a
+    family builds 72 summaries and must not pay for the other five views
+    to get them (scripts/bench_member.py — the full views_to_dict is
+    ~50 ms, this is ~3)."""
     meta = VIEW_META["route"]
     return {
         "description": meta["description"],
@@ -493,7 +513,7 @@ def views_to_dict(views: ViewsBundle, route: Route) -> dict:
     (\u2192 for the OD pair itself — a ticket is genuinely one-way)."""
     trip_pair_by_key = {p.outbound.trip_id: p for p in route.trip_pairs}
     return {
-        "route": _route_view_to_dict(views.bd_all, route),
+        "route": route_view_to_dict(views.bd_all, route),
         "per_trip_pair": _per_trip_pair_view_to_dict(
             views.bd_per_pair, route, trip_pair_by_key
         ),
@@ -545,6 +565,8 @@ EVALUATION_OUTPUT_FIELDS: frozenset[str] = frozenset(
         "station_charge_eur",
         "parking_eur",
         "ticket_revenue_eur",
+        "services_revenue_eur",
+        "catering_contribution_eur",
         "ebit_margin_eur",
         "operator_variable_total_eur",
         "operator_fixed_total_eur",
@@ -602,7 +624,13 @@ def models_to_dict() -> dict:
     model is a set of sourced per-mode constants (decision 24), not
     calculation steps — these are the per-mode reference values the
     frontend renders next to a proposal's night-train
-    co2_g_per_pax_km."""
+    co2_g_per_pax_km.
+
+    The demand entry carries "defaults" for the same kind of reason: the
+    stopgap model is neither steps nor sourced constants but overridable
+    standard values, and CALC 0.9.27 made the fares among them a request
+    field. Three shapes, one rule — every entry has version, description,
+    and exactly one of formulas / factors / defaults."""
     return {
         "route_builder": {
             "version": ROUTE_BUILDER_VERSION,
@@ -618,6 +646,36 @@ def models_to_dict() -> dict:
             "version": CALC_VERSION,
             "description": CALC_MODEL_DESCRIPTION,
             "formulas": _formulas_to_dict(CALC_FORMULAS),
+        },
+        "demand": {
+            "version": DEMAND_MODEL_VERSION,
+            "description": DEMAND_MODEL_DESCRIPTION,
+            # "defaults" rather than "formulas" or "factors": the stopgap
+            # demand model has no calculation steps to expose and no sourced
+            # factor table — it has standard values a request may override.
+            # The pricing panel reads fares_eur_per_km from here so it never
+            # hard-codes them. Fare classes only; Catering cannot be priced.
+            "defaults": {
+                "fares_eur_per_km": {
+                    k: STOPGAP_FARE_PER_KM_BY_CLASS[k] for k in FARE_CLASS_MAINS
+                },
+                # The three per-passenger tariff parts, each per class
+                # (CALC 0.9.30). The fixed fare joins the per-km rates above
+                # as the base fare; services are ordinary ticket revenue;
+                # catering is signed and already net of its own costs.
+                "fares_eur_per_pax": {
+                    k: STOPGAP_FARE_PER_PAX_BY_CLASS[k] for k in FARE_CLASS_MAINS
+                },
+                "services_eur_per_pax": {
+                    k: STOPGAP_SERVICES_EUR_PER_PAX_BY_CLASS[k]
+                    for k in FARE_CLASS_MAINS
+                },
+                "catering_eur_per_pax": {
+                    k: STOPGAP_CATERING_EUR_PER_PAX_BY_CLASS[k]
+                    for k in FARE_CLASS_MAINS
+                },
+                "utilization_per": STOPGAP_UTILIZATION_PER,
+            },
         },
         "emissions": {
             "version": EMISSIONS_MODEL_VERSION,
@@ -645,9 +703,9 @@ def input_to_dict(
     """Everything that went into this evaluation.
 
     route: the route dict this evaluation costed — included verbatim.
-    include_route=False for POST /api/proposal/calc (api/helpers/
-    proposal_compute.py, adapters/proposal/README.md §2.1): the merged response
-    already carries the route once, as a sibling key of "evaluation" — a
+    include_route=False wherever the caller already carries the route
+    once as a sibling key of "evaluation" (the seed's example proposal,
+    tests/helpers.py's compute_evaluation_domain) — a
     second copy under evaluation.input would violate the "route appears
     exactly once" rule. include_route=True is the model-layer default
     (tests/helpers.py's controlled-demand evaluations keep the old

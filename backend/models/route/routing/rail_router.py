@@ -88,7 +88,7 @@ Public surface
   StopInput  (input type — public; wraps StopInfrastructure + StopType)
   VALID_ROUTING_MODES  (single source of truth for allowed routing_mode
     strings — the routing_mode switch lives in RailRouter.route() below;
-    the compute request validation in api/helpers/proposal_compute.py
+    the compute request validation in api/helpers/member_compute.py
     reads from it)
   build_router_stops(stop_ids, stop_infra) → list[StopInput]
 """
@@ -380,7 +380,7 @@ class PassageIndex:
 
 VALID_ROUTING_MODES = frozenset({"simpleRouting", "fullRouting"})
 """Single source of truth for allowed routing_mode strings — read by both
-the compute request validation (api/helpers/proposal_compute.py) and RailRouter.route()'s switch below.
+the compute request validation (api/helpers/member_compute.py) and RailRouter.route()'s switch below.
 Adding a mode means: add it to this set and add a branch in route()."""
 
 
@@ -617,7 +617,7 @@ class RailRouter:
         from the call's own stops) → GraphHopper profile.
 
         routing_mode (no default here — defaulting is an API-boundary
-        concern, see api/helpers/proposal_compute.py):
+        concern, see api/helpers/member_compute.py):
           "fullRouting"   — speed cap + HSR avoidance; two-pass when
                              live-routed (pass 1: CH snap on the gauge
                              profile, pass 2: custom model on snapped
@@ -644,7 +644,7 @@ class RailRouter:
         profile = self.profile_for_gauge(gauge_mm)
 
         # routing_mode SWITCH — VALID_ROUTING_MODES is the same set the
-        # compute request validation (api/helpers/proposal_compute.py)
+        # compute request validation (api/helpers/member_compute.py)
         # checks against, so an unknown mode can only reach here if that
         # validation was bypassed.
         if routing_mode == "simpleRouting":

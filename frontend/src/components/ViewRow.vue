@@ -30,6 +30,11 @@ const props = defineProps<{
 const emit = defineEmits<{
   scopeChange: [scope: MapScope]
   'update:breakdown': [breakdown: Breakdown | null]
+  // The landed cell's per-class_main breakdowns for the current
+  // normalisation, "all" excluded. Already resolved here — the cube's class
+  // axis reads the same dict — so the revenue split costs no extra request.
+  'update:classBreakdowns': [split: { classMain: string; breakdown: Breakdown }[]]
+  'update:normalisation': [norm: NormKey]
 }>()
 
 const { t, te } = useI18n()
@@ -283,6 +288,19 @@ const currentBreakdown = computed<Breakdown | null>(() => {
   return dict[classSel.value] ?? null
 })
 watch(currentBreakdown, (b) => emit('update:breakdown', b), { immediate: true })
+// The bars scale every cell against the full route in the SAME
+// normalisation, so the parent needs to know which one that is.
+watch(normalisation, (n) => emit('update:normalisation', n), { immediate: true })
+
+const classBreakdowns = computed(() => {
+  const dict = currentNorms.value?.[normalisation.value] ?? null
+  if (!dict) return []
+  return Object.keys(dict)
+    .filter((k) => k !== 'all')
+    .sort()
+    .map((classMain) => ({ classMain, breakdown: dict[classMain] }))
+})
+watch(classBreakdowns, (v) => emit('update:classBreakdowns', v), { immediate: true })
 </script>
 
 <template>

@@ -77,13 +77,14 @@ backend/models/infrastructure/facility/calib/data/
 backend/models/infrastructure/route_context/calib/data/
 backend/models/infrastructure/stops/charges/data/
 backend/models/energy/calib/data/
-# Seed CSVs — regenerated from the calibration notebooks at seed time
+# Seed CSVs — regenerated from the calibrations at seed time
 backend/models/compositions/calib/seed/
 backend/models/infrastructure/tac/calib/seed/
 backend/models/infrastructure/energy_pricing/calib/seed/
 backend/models/infrastructure/facility/calib/seed/
 backend/models/infrastructure/route_context/calib/seed/
 backend/models/energy/calib/seed/
+backend/models/scenarios/calib/seed/
 # Demand model bulk inputs and derived artifacts. calib/raw/ holds third-party
 # downloads (ETISplus OD, census and GHS-POP grids) fetched from their sources;
 # calib/out/ holds everything the ETL notebooks derive from them. Tens of GB
@@ -120,6 +121,16 @@ project-snapshot*.zip
 notes/
 git_status.txt
 test_output.txt
+# pytest transcripts — the suite writes these on demand (`| Out-File
+# pytest-result.txt`), and they are a machine's opinion of one moment,
+# not repository content. gauge.txt is the same thing under an older name.
+pytest-result.txt
+backend/pytest-result.txt
+backend/gauge.txt
+# Per-delivery manifests. They belong with the working notes, not at the
+# repository root — what they decided is already in the handovers, the
+# changelogs and the code comments.
+MANIFEST_*.md
 # VitePress build artefacts. dist/ is already matched by the bare pattern
 # above; the cache is not.
 docs-site/.vitepress/cache/
