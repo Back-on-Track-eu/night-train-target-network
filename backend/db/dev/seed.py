@@ -713,13 +713,17 @@ SOURCES = [
     },
 ]
 
+# Named here, not read back off SOURCES[-1]: the infrastructure registers are
+# appended below, so a positional lookup resolves to the wrong document.
+SRC_CALIBRATION = (
+    "Back-on-Track (2026) and various other sources — composition "
+    "cost calibration; for further details see "
+    "backend/models/compositions/calib/CALIBRATION.md"
+)
+
 SOURCES.append(
     {
-        "source_description": (
-            "Back-on-Track (2026) and various other sources — composition "
-            "cost calibration; for further details see "
-            "backend/models/compositions/calib/CALIBRATION.md"
-        ),
+        "source_description": SRC_CALIBRATION,
         "source_url": "backend/models/compositions/calib/CALIBRATION.md",
         "source_date": "2026-07-21",
     }
@@ -760,7 +764,6 @@ INFRA_SOURCE_DESCRIPTIONS = {
 
 SRC_EXCEL = "B-o-T_targetnetwork_DB_v2.xlsx — illustrative placeholder values"
 SRC_ILLUSTRATIVE = "Illustrative / internal estimate"
-SRC_CALIBRATION = SOURCES[-1]["source_description"]
 
 
 def fetch_source_ids(cur) -> dict[str, int]:

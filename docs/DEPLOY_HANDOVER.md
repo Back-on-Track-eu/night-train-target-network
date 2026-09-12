@@ -29,6 +29,23 @@ that is genuinely yours to schedule.
 
 ---
 
+## A data migration re-points 109 rolling-stock rows — 2026-09-12
+
+`db/dev/sql/migrations/2026-09-12_rolling_stock_source.sql` runs with this
+deploy, before the api starts, like every other migration. Nothing for you to
+do; it is listed here only so a surprising row count in the deploy log is
+explainable.
+
+It stamps the 109 rows of `input_params.operators`,
+`operator_class_costs`, `coach_types`, `coach_type_classes` and
+`composition_types` with the composition cost calibration's source row.
+They previously pointed at the route-context topography assessment, because
+`seed.py` resolved the constant positionally. Data only — no schema change,
+no downtime, and re-running it is a no-op.
+
+**Delete this entry once both staging and production have deployed past
+2026-09-12.**
+
 ## The documentation site ships inside the frontend image
 
 `docs-site/` (VitePress) is built into the frontend container and served

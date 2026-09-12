@@ -21,6 +21,25 @@ are mostly "this field now exists, show it if you want".
 
 ---
 
+## `/api/params/compositions` now names the right source — 2026-09-12
+
+No shape change, no new field. The `sources` map that
+`params_serialize.py` attaches to the compositions payload previously
+credited every operator, coach and composition row to
+*"Corridor-by-corridor topographic assessment of the target network"* — a
+route-context document that says nothing about vehicles. `seed.py` resolved
+the constant positionally and picked up the wrong row.
+
+After the 2026-09-12 migration the same rows carry the composition cost
+calibration instead (`source_url` is a repo path,
+`backend/models/compositions/calib/CALIBRATION.md`, not an http URL — if the
+UI ever renders these as links, guard for that).
+
+Nothing to change unless you surface `source_description` somewhere. If you
+do, it now reads correctly.
+
+**Delete this entry once both environments have deployed past 2026-09-12.**
+
 ## `Formula.summary` on every documented formula — CALC 0.9.24 / route builder 0.9.31 / energy 1.1.1
 
 `models.evaluation.formulas[key]` gained a **`summary`** field: one
