@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-EMISSIONS_MODEL_VERSION: str = "0.1.1"
+EMISSIONS_MODEL_VERSION: str = "0.1.2"
 
 EMISSIONS_MODEL_DESCRIPTION: str = (
     "Climate impact factors: how many grams of CO2-equivalent one "
@@ -35,6 +35,19 @@ EMISSIONS_MODEL_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.1.2": {
+        "date": "2026-09-13",
+        "author": "david",
+        "changes": "DOCUMENTATION ONLY - no value changes. The module docstring "
+        "now names the family as the consumer of the factor set, following the "
+        "WP18 move to POST /api/proposal/family as the single compute path. "
+        "Factors, sources and mode-shift shares are untouched. Bumped only "
+        "because the version-check gate self-gates this file: any diff requires "
+        "the constant to move. Side effect: the bump marks every stored proposal "
+        "outdated, so each recomputes lazily on its next load and gets an "
+        "update_log entry naming this trigger - the recompute reproduces "
+        "identical numbers.",
+    },
     "0.1.1": {
         "date": "2026-08-10",
         "author": "david",

@@ -152,6 +152,10 @@ Night stop classification + timetable_mode 'simpleAutomaticWithFixedNight'. Stop
 
 ## Energy model
 
+### `1.1.2` — 2026-09-13
+
+DOCUMENTATION ONLY - no value changes anywhere. The comment above ENERGY_MODEL_DESCRIPTION now names the family compute response as the carrier of the models registry, following the WP18 move to POST /api/proposal/family as the single compute path. No coefficient, formula, latex, input legend or computed value is touched. Bumped only because the version-check gate self-gates this file: any diff requires the constant to move. Side effect as in 1.1.1: the bump marks every stored proposal outdated, so each recomputes lazily on its next load and gets an update_log entry naming this trigger - the recompute reproduces identical numbers.
+
 ### `1.1.1` — 2026-09-02
 
 DOCUMENTATION ONLY - no value changes anywhere. Every formula in this registry gained a Formula.summary: one self-contained sentence naming what the value is, for places with no room for the full description (the cost-breakdown info popover, a docs page description, a search snippet). The field is required, so a new formula cannot ship without one. No latex, no input legend, no computed value is touched. 5 summaries added. Bumped only because the version-check gate self-gates this file (any diff requires the constant to move). Note the side effect: a bump marks every stored proposal outdated, so each one recomputes lazily on its next load and gets an update_log entry naming this trigger - the recompute reproduces identical numbers, and this entry is the reason it fired.
@@ -187,6 +191,10 @@ version.py renamed to model.py (every model now anchors version, description, an
 Stopgap demand model moved out of models/route/ into its own models/demand/ package (route builder 0.9.13): distribute_demand() uniform-distribution proxy plus the STOPGAP_* standard values, ahead of the real demand model landing here.
 
 ## Cost & revenue evaluation
+
+### `0.9.32` — 2026-09-14
+
+MASS-BASED STATION CHARGES. Czechia prices a passenger stop per tonne of train mass (Sprava zeleznic Annex C II.5: 0.04-0.08 CZK per stop per tonne, mass without non-carrying traction). The stop table gains stop_charge_per_tonne_eur and _calc_stop_cost adds rate x Composition.total_weight_t to the fixed per-call figure; Czech stops carry an explicit 0.00 fixed part beside the rate. OUTPUT CHANGE for every route calling in Czechia (Praha hl.n. goes from the 11.28 EUR default to about 1.3 EUR for a 400 t train); no other stop moves. operations station calls gain per_tonne {eur_per_t, train_mass_t} so the figure can be checked. Seed contract 37 columns; migration 2026-09-14_stop_charge_per_tonne.
 
 ### `0.9.31` — 2026-09-12
 
@@ -309,6 +317,10 @@ Views pipeline overhaul — four numeric fixes and one new view. (1) Parking now
 Driver/crew billable hours now computed from time in motion — raw router driving time plus the route builder's new per-segment traction dynamics component (accel/brake time loss, route builder 0.9.8: Segment.dynamics_time_min) — instead of raw driving time alone; accelerating and braking is time the driver drives and the crew is on duty. SegmentCost.driving_time_min (and the SegmentPassengerLoad copy views.py aggregates loco/country hours from) carries this in-motion figure. Staff, and any per-hour-derived figure, grow by roughly 1-2min per segment vs 0.9.2. Loco lease was already billed on segment total_time_min, which now includes dynamics via the route model itself. No response shape change.
 
 ## Emissions model
+
+### `0.1.2` — 2026-09-13
+
+DOCUMENTATION ONLY - no value changes. The module docstring now names the family as the consumer of the factor set, following the WP18 move to POST /api/proposal/family as the single compute path. Factors, sources and mode-shift shares are untouched. Bumped only because the version-check gate self-gates this file: any diff requires the constant to move. Side effect: the bump marks every stored proposal outdated, so each recomputes lazily on its next load and gets an update_log entry naming this trigger - the recompute reproduces identical numbers.
 
 ### `0.1.1` — 2026-08-10
 

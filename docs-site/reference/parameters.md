@@ -120,7 +120,7 @@ Places per accommodation class within a coach type, with the class section's sha
 | <a id="p-input_params-coach_type_classes-service_class_id"></a>`service_class_id` | — | — | — |
 | <a id="p-input_params-coach_type_classes-coach_type_class_places"></a>`coach_type_class_places` | Number of places of this class in the coach type. | places | [class_main_allocation](/reference/formulas#f-calc-class_main_allocation) |
 | <a id="p-input_params-coach_type_classes-section_length_m"></a>`section_length_m` | Length of this class's section within the coach — basis of the class cost split and derived per-class densities. | m | [class_main_allocation](/reference/formulas#f-calc-class_main_allocation) |
-| <a id="p-input_params-coach_type_classes-section_weight_t"></a>`section_weight_t` | Weight of this class's section within the coach. | t | [class_main_allocation](/reference/formulas#f-calc-class_main_allocation) |
+| <a id="p-input_params-coach_type_classes-section_weight_t"></a>`section_weight_t` | Weight of this class's section within the coach. | t | [class_main_allocation](/reference/formulas#f-calc-class_main_allocation), [station_charge_eur](/cost/station-charge) |
 | <a id="p-input_params-coach_type_classes-section_crew_factor"></a>`section_crew_factor` | Cabin crew this class section needs, as a fraction of an attendant. | — | — |
 | <a id="p-input_params-coach_type_classes-source_id"></a>`source_id` | Source for all values in this row. | — | — |
 
@@ -360,6 +360,7 @@ Catalog of possible night train stops. An empty stop_charge_eur is resolved agai
 | <a id="p-input_params-stop_infrastructures-stop_lon"></a>`stop_lon` | Longitude in WGS-84 decimal degrees. | ° | — |
 | <a id="p-input_params-stop_infrastructures-stop_loc_src"></a>`stop_loc_src` | Source for the coordinates. | — | — |
 | <a id="p-input_params-stop_infrastructures-stop_charge_eur"></a>`stop_charge_eur` | Station fee per scheduled stop. Empty = the country or global default applies. | €/stop | [station_charge_eur](/cost/station-charge) |
+| <a id="p-input_params-stop_infrastructures-stop_charge_per_tonne_eur"></a>`stop_charge_per_tonne_eur` | Mass-based part of the station fee, per tonne of train mass excluding non-carrying traction (CompositionType.total_weight_t). Added to stop_charge_eur per call; empty = none. Czechia prices stops this way (Správa železnic, Annex C II.5). | €/stop/t | [station_charge_eur](/cost/station-charge) |
 | <a id="p-input_params-stop_infrastructures-stop_charge_src"></a>`stop_charge_src` | Source for the station fee. | — | — |
 | <a id="p-input_params-stop_infrastructures-stop_charge_vat_rate_per"></a>`stop_charge_vat_rate_per` | VAT rate applying to the station charge, as a percentage (19.00 = 19%). NULL where no charge is calibrated. | % | — |
 | <a id="p-input_params-stop_infrastructures-stop_charge_incl_vat_eur"></a>`stop_charge_incl_vat_eur` | The station charge including VAT. The model prices from the net stop_charge_eur; this is carried so both figures can be compared against whichever one the tariff document printed. | EUR | — |

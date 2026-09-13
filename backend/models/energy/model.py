@@ -29,7 +29,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-ENERGY_CALC_VERSION: str = "1.1.1"
+ENERGY_CALC_VERSION: str = "1.1.2"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -55,6 +55,20 @@ ENERGY_MODEL_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "1.1.2": {
+        "date": "2026-09-13",
+        "author": "david",
+        "changes": "DOCUMENTATION ONLY - no value changes anywhere. The comment "
+        "above ENERGY_MODEL_DESCRIPTION now names the family compute response as "
+        "the carrier of the models registry, following the WP18 move to "
+        "POST /api/proposal/family as the single compute path. No coefficient, "
+        "formula, latex, input legend or computed value is touched. Bumped only "
+        "because the version-check gate self-gates this file: any diff requires "
+        "the constant to move. Side effect as in 1.1.1: the bump marks every "
+        "stored proposal outdated, so each recomputes lazily on its next load "
+        "and gets an update_log entry naming this trigger - the recompute "
+        "reproduces identical numbers.",
+    },
     "1.1.1": {
         "date": "2026-09-02",
         "author": "bjarne + claude",
