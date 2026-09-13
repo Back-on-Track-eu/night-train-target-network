@@ -55,7 +55,7 @@ class TestVersionIsolation:
         assert opt_de.buffer_quota_per < base_de.buffer_quota_per
 
     def test_db_has_all_de_versions(self, db_cur):
-        """All seven DE snapshot rows exist — confirms the fixture the two
+        """All nine DE snapshot rows exist — confirms the fixture the two
         tests above depend on is actually in place, and that the version
         grid was extended in every table rather than only in the scenario
         rows (db/dev/seed.py: INFRA_VERSIONS)."""
@@ -64,7 +64,7 @@ class TestVersionIsolation:
             WHERE country_code = 'DE' ORDER BY track_infra_version
             """)
         versions = [r["track_infra_version"] for r in db_cur.fetchall()]
-        assert versions == [1, 2, 3, 4, 5, 6, 7]
+        assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9]
 
     def test_full_table_snapshot_invariant(self, db_cur):
         """Every track_infrastructures version is a COMPLETE snapshot — the
