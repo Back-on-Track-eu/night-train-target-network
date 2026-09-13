@@ -89,7 +89,8 @@ frontend/
     │   ├── costFactorRates.ts  # Cost factor → per-unit-rate resolution (popover)
     │   ├── ctaButtonClass.ts   # Shared "Suggest a new route" pill styling
     │   ├── feedbackApi.ts      # Thin client for POST /api/feedback
-    │   └── selectPillPt.ts     # Shared PrimeVue Select pass-through styling
+    │   ├── selectPillPt.ts     # Shared PrimeVue Select pass-through styling
+    │   └── uiLanguages.ts      # Language bar: order + which locales are live
     ├── utils/
     │   └── octilinear.ts    # Octilinear map-line layout helpers
     └── components/
