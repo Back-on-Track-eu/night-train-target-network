@@ -6,7 +6,7 @@ adapters/proposal/projection.py's route_fingerprint() and
 build_summary_db_row(), models/evaluation/summary.py's
 build_summary_row() (the shared §5.4 KPI derivation, WP10 step 5), plus
 their wiring into POST /api/proposal/calc's response (route_fingerprint,
-cache_hit, summary).
+summary).
 
 The schema-conformance case at the bottom inserts a
 build_summary_db_row() row directly into proposals.proposal_summaries,
@@ -89,13 +89,6 @@ class TestFingerprint:
         assert route_fingerprint(prefixed) == calc_response["route_fingerprint"]
 
 
-class TestCacheHitFlag:
-    def test_is_bool(self, calc_response):
-        """Shape only — hit/miss semantics live in
-        test_39_compute_cache.py, behind its own cache flush."""
-        assert isinstance(calc_response["cache_hit"], bool)
-
-
 # =============================================================================
 # build_summary_row() — §5.4
 # =============================================================================
@@ -118,7 +111,17 @@ class TestSummaryRow:
             "cost_eur_per_train_km",
             "revenue_eur_per_train_km",
             "margin_eur_per_train_km",
+            "net_eur_per_year",
             "subsidy_eur_per_year",
+            "services_revenue_eur",
+            "catering_contribution_eur",
+            "operating_days_per_year",
+            "departures_per_year",
+            "trainsets_physical",
+            "train_km_per_year",
+            "available_place_km_per_year",
+            "sold_place_km_per_year",
+            "passengers_per_year",
             "demand_trips_per_year",
             "demand_trip_km_per_year",
             "shift_air_trips_per_year",
@@ -162,7 +165,30 @@ class TestSummaryRow:
             per_train_km["total_revenue_eur"], 2
         )
         assert row["margin_eur_per_train_km"] == round(per_train_km["net_eur"], 2)
+        assert row["net_eur_per_year"] == round(per_year["net_eur"], 2)
         assert row["subsidy_eur_per_year"] == round(max(0.0, -per_year["net_eur"]), 2)
+
+    def test_supply_kpis_match_the_normalisation_divisors(self, calc_response, row):
+        """CALC 0.9.25: the annual denominators are the ones the route view
+        was normalised with, so per_year / per_train_km (and per
+        available-place-km) reproduce them — within the leaves' rounding."""
+        route_data = calc_response["evaluation"]["views"]["route"]["data"]
+        cost_year = route_data["per_year"]["all"]["total_cost_eur"]
+        cost_train_km = route_data["per_train_km"]["all"]["total_cost_eur"]
+        cost_place_km = route_data["per_available_place_km"]["all"]["total_cost_eur"]
+        # ROUTE_BUILDER 0.9.35: operating days are counted per calendar
+        # month (days_in_month x days_per_week / 7), not 52 x d, so a daily
+        # service is the evaluation year's day count — 366 in 2032 — and
+        # any schedule lands somewhere in [0, 366]. The exact value is the
+        # schedule's own arithmetic, pinned in test_21.
+        assert 0 < row["operating_days_per_year"] <= 366
+        assert row["train_km_per_year"] == pytest.approx(
+            cost_year / cost_train_km, rel=1e-3
+        )
+        assert row["available_place_km_per_year"] == pytest.approx(
+            cost_year / cost_place_km, rel=1e-3
+        )
+        assert 0 < row["sold_place_km_per_year"] <= row["available_place_km_per_year"]
 
     def test_demand_kpis_are_placeholder(self, row):
         assert row["demand_kpis_placeholder"] is True
@@ -235,7 +261,12 @@ class TestSummaryRowSchemaConformance:
                 calc_version, total_distance_km, total_time_h, avg_speed_kmh,
                 n_stops, countries, stop_ids, geom_simplified,
                 cost_eur_per_train_km, revenue_eur_per_train_km,
-                margin_eur_per_train_km, subsidy_eur_per_year,
+                margin_eur_per_train_km, net_eur_per_year, subsidy_eur_per_year,
+                services_revenue_eur, catering_contribution_eur,
+                operating_days_per_year, departures_per_year, trainsets_physical,
+                train_km_per_year,
+                available_place_km_per_year, sold_place_km_per_year,
+                passengers_per_year,
                 demand_trips_per_year, demand_trip_km_per_year,
                 shift_air_trips_per_year, shift_air_trip_km_per_year,
                 shift_car_trips_per_year, shift_car_trip_km_per_year,
@@ -248,7 +279,12 @@ class TestSummaryRowSchemaConformance:
                 %(n_stops)s, %(countries)s, %(stop_ids)s,
                 ST_SetSRID(ST_GeomFromGeoJSON(%(geom_simplified)s), 4326),
                 %(cost_eur_per_train_km)s, %(revenue_eur_per_train_km)s,
-                %(margin_eur_per_train_km)s, %(subsidy_eur_per_year)s,
+                %(margin_eur_per_train_km)s, %(net_eur_per_year)s, %(subsidy_eur_per_year)s,
+                %(services_revenue_eur)s, %(catering_contribution_eur)s,
+                %(operating_days_per_year)s, %(departures_per_year)s, %(trainsets_physical)s,
+                %(train_km_per_year)s,
+                %(available_place_km_per_year)s, %(sold_place_km_per_year)s,
+                %(passengers_per_year)s,
                 %(demand_trips_per_year)s, %(demand_trip_km_per_year)s,
                 %(shift_air_trips_per_year)s, %(shift_air_trip_km_per_year)s,
                 %(shift_car_trips_per_year)s, %(shift_car_trip_km_per_year)s,

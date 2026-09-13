@@ -45,13 +45,10 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from datetime import time, timedelta
-
-import psycopg2
-import psycopg2.extras
-
 from typing import Optional
+
+from adapters.db_pool import DBPool, default_pool
 
 from db.schema import STOP_NAME_LANGS
 from models.params import (
@@ -83,6 +80,9 @@ from models.params import (
     StopInfraCollection,
     StopInfraDescriptions,
     Scenario,
+    MeasureSet,
+    MeasureSetCollection,
+    ScenarioVariant,
 )
 
 logger = logging.getLogger(__name__)
@@ -183,44 +183,14 @@ class DBDataLoader:
     WARNING is logged for every substituted default.
     """
 
-    def __init__(self) -> None:
-        self._conn = self._connect()
-
-    def _connect(self):
-        """
-        Connect using environment variables only — no defaults.
-        Raises KeyError with a clear message if any required variable is missing.
-        Required: POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DB,
-                  POSTGRES_USER, POSTGRES_PASSWORD.
-        Set these in .env (loaded by python-dotenv in main.py).
-        """
-        required = [
-            "POSTGRES_HOST",
-            "POSTGRES_PORT",
-            "POSTGRES_DB",
-            "POSTGRES_USER",
-            "POSTGRES_PASSWORD",
-        ]
-        missing = [k for k in required if not os.environ.get(k)]
-        if missing:
-            raise KeyError(
-                f"Missing required environment variable(s) for DB connection: {', '.join(missing)}. "
-                f"Check your .env file."
-            )
-        return psycopg2.connect(
-            host=os.environ["POSTGRES_HOST"],
-            port=int(os.environ["POSTGRES_PORT"]),
-            dbname=os.environ["POSTGRES_DB"],
-            user=os.environ["POSTGRES_USER"],
-            password=os.environ["POSTGRES_PASSWORD"],
-        )
+    def __init__(self, pool: DBPool | None = None) -> None:
+        self._pool = pool or default_pool()
 
     def _cursor(self):
-        return self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-
-    def close(self) -> None:
-        if self._conn and not self._conn.closed:
-            self._conn.close()
+        """A cursor on a freshly borrowed connection — every loader query
+        is a single read, released when the block ends. No connection is
+        held between calls, so one loader serves any number of threads."""
+        return self._pool.cursor()
 
     # ------------------------------------------------------------------
     # SCENARIO RESOLUTION
@@ -282,7 +252,7 @@ class DBDataLoader:
         Resolve a scenario_id (or None → the live is_current_base scenario)
         to its routing_graph_key pin — which OpenRailRouting instance every
         distance and travel time comes from. The compute path
-        (api/helpers/proposal_compute.py) selects the RailRouter with this;
+        (api/helpers/member_compute.py) selects the RailRouter with this;
         the key → URL mapping lives in the deployment
         (api/helpers/dependencies.py), not in the database.
         """
@@ -326,30 +296,118 @@ class DBDataLoader:
             )
             rows = cur.fetchall()
 
+        return [self._scenario(row) for row in rows]
+
+    @staticmethod
+    def _scenario(row) -> Scenario:
+        """One scenario.scenarios row → Scenario. Shared by
+        list_all_scenarios() and resolve_scenario_variant()'s join, so a
+        column added to the table is picked up by both at once."""
+        return Scenario(
+            scenario_id=row["scenario_id"],
+            scenario_key=row["scenario_key"],
+            scenario_name=row["scenario_name"],
+            description=row["description"],
+            change_log=row["change_log"],
+            editor=row["editor"],
+            created_at=row["created_at"].isoformat(),
+            is_current_base=row["is_current_base"],
+            is_current_scenario=row["is_current_scenario"],
+            track_infrastructures_version=row["track_infrastructures_version"],
+            track_infrastructure_defaults_version=row[
+                "track_infrastructure_defaults_version"
+            ],
+            stop_infrastructures_version=row["stop_infrastructures_version"],
+            stop_infrastructure_defaults_version=row[
+                "stop_infrastructure_defaults_version"
+            ],
+            passage_charges_version=row["passage_charges_version"],
+            routing_graph_key=row["routing_graph_key"],
+        )
+
+    # ------------------------------------------------------------------
+    # MEASURE SETS AND SCENARIO VARIANTS
+    # ------------------------------------------------------------------
+
+    def build_all_measure_sets(self) -> MeasureSetCollection:
+        """
+        Every scenario.measure_sets row, keyed by measure_set_id. Not
+        scenario-versioned and not scenario-filtered: a measure set is a
+        definition of which levers are pulled, orthogonal to the pins a
+        scenario carries (models/params.py MeasureSet).
+        """
+        with self._cursor() as cur:
+            cur.execute("SELECT * FROM scenario.measure_sets ORDER BY measure_set_id")
+            rows = cur.fetchall()
+
+        return MeasureSetCollection(
+            {row["measure_set_id"]: self._measure_set(row) for row in rows}
+        )
+
+    @staticmethod
+    def _measure_set(row) -> MeasureSet:
+        return MeasureSet(
+            measure_set_id=row["measure_set_id"],
+            key=row["key"],
+            vat_exempt=row["vat_exempt"],
+            energy_tax_exempt=row["energy_tax_exempt"],
+            tac_direct_cost=row["tac_direct_cost"],
+            description=row["description"],
+        )
+
+    def list_scenario_variants(self) -> list[ScenarioVariant]:
+        """
+        Every scenario.scenario_variants row, ordered by scenario then
+        measure set — the order the family axis and GET /api/scenarios
+        present. Ids only; resolve_scenario_variant() below turns one into
+        the objects a compute needs.
+        """
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT * FROM scenario.scenario_variants "
+                "ORDER BY scenario_id, measure_set_id"
+            )
+            rows = cur.fetchall()
+
         return [
-            Scenario(
+            ScenarioVariant(
+                scenario_variant_id=row["scenario_variant_id"],
                 scenario_id=row["scenario_id"],
-                scenario_key=row["scenario_key"],
-                scenario_name=row["scenario_name"],
-                description=row["description"],
-                change_log=row["change_log"],
-                editor=row["editor"],
-                created_at=row["created_at"].isoformat(),
-                is_current_base=row["is_current_base"],
-                is_current_scenario=row["is_current_scenario"],
-                track_infrastructures_version=row["track_infrastructures_version"],
-                track_infrastructure_defaults_version=row[
-                    "track_infrastructure_defaults_version"
-                ],
-                stop_infrastructures_version=row["stop_infrastructures_version"],
-                stop_infrastructure_defaults_version=row[
-                    "stop_infrastructure_defaults_version"
-                ],
-                passage_charges_version=row["passage_charges_version"],
-                routing_graph_key=row["routing_graph_key"],
+                measure_set_id=row["measure_set_id"],
             )
             for row in rows
         ]
+
+    def resolve_scenario_variant(
+        self, scenario_variant_id: int
+    ) -> tuple[Scenario, MeasureSet]:
+        """
+        One variant id → the (Scenario, MeasureSet) pair an evaluation runs
+        under. Two round trips rather than one aliased join, so both halves
+        come out of the same builders every other caller uses (_scenario(),
+        _measure_set()) — the table is tiny and read once per family build.
+        Raises ValueError naming the unknown id, the same shape
+        resolve_scenario_id() raises for an unseeded database, so the API
+        boundary classifies both as domain errors.
+        """
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT s.*, v.measure_set_id "
+                "FROM scenario.scenario_variants v "
+                "JOIN scenario.scenarios s ON s.scenario_id = v.scenario_id "
+                "WHERE v.scenario_variant_id = %s",
+                (scenario_variant_id,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                raise ValueError(f"Scenario variant '{scenario_variant_id}' not found.")
+            cur.execute(
+                "SELECT * FROM scenario.measure_sets WHERE measure_set_id = %s",
+                (row["measure_set_id"],),
+            )
+            measure_row = cur.fetchone()
+
+        return self._scenario(row), self._measure_set(measure_row)
 
     # ------------------------------------------------------------------
     # SOURCES
@@ -1133,7 +1191,6 @@ class DBDataLoader:
                 result[comp_id] = comp
             except Exception as e:
                 logger.warning("Skipping composition '%s': %s", comp_id, e)
-                self._conn.rollback()
 
         logger.info(
             "Built %d compositions (%d with indicative figures).",
@@ -1759,6 +1816,7 @@ class DBDataLoader:
             "lat": "stop_lat",
             "lon": "stop_lon",
             "stop_charge_eur": "stop_charge_eur",
+            "stop_charge_per_tonne_eur": "stop_charge_per_tonne_eur",
         }
         stop_column_comments = self._load_column_comments(
             "input_params", "stop_infrastructures"
@@ -1798,6 +1856,15 @@ class DBDataLoader:
                         charge_is_default,
                     ),
                 }
+                # The per-tonne part has no default: registered only where a
+                # rate exists, under the same source as the per-call figure —
+                # one document prices the stop, whichever way it counts.
+                if stop.stop_charge_per_tonne_eur is not None:
+                    stop_fields["stop_charge_per_tonne_eur"] = (
+                        stop.stop_charge_per_tonne_eur,
+                        charge_src,
+                        False,
+                    )
                 for field_name, (
                     field_val,
                     field_src,
@@ -1894,6 +1961,7 @@ class DBDataLoader:
             lat=_f(row["stop_lat"]),
             lon=_f(row["stop_lon"]),
             stop_charge_eur=charge,
+            stop_charge_per_tonne_eur=_opt_f(row.get("stop_charge_per_tonne_eur")),
             stop_charge_vat_rate_per=_opt_f(row.get("stop_charge_vat_rate_per")),
             stop_charge_incl_vat_eur=_opt_f(row.get("stop_charge_incl_vat_eur")),
             stop_charge_basis=row.get("stop_charge_basis"),

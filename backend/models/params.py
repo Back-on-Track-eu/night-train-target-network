@@ -23,6 +23,9 @@ DB table → domain class mapping
   input_params.infrastructure_defaults → DefaultTrackInfra
   input_params.stops                → StopInfrastructure
   input_params.stop_defaults        → DefaultStopInfra
+  scenario.scenarios                → Scenario
+  scenario.measure_sets             → MeasureSet (NO_MEASURES: the empty set)
+  scenario.scenario_variants        → ScenarioVariant
 
 Provenance
 ----------
@@ -1204,7 +1207,7 @@ class TrackInfrastructure:
     field_is_default: {field_name: was_this_field_defaulted} — kept ON
     this object (unlike source/version) because api/helpers/route_serialize.py
     reads it directly to build the "defaulted_fields" list in the
-    route response (POST /api/proposal/calc, formerly POST /api/route/plan).
+    route response (a member's route — compute_member(); formerly POST /api/route/plan).
     Individual defaulted fields are expected and
     fine — that's what track_infrastructure_defaults is for.
 
@@ -1490,8 +1493,9 @@ class StopInfrastructure:
 
     stop_charge_eur IS exposed in the /api/params/StopInfrastructures
     response (see api/params.py get_stop_infrastructures()), alongside
-    its full provenance. It's also used internally by
-    models/evaluation/calc.py.
+    its full provenance and the optional per-tonne part. Both are used
+    internally by models/evaluation/calc.py, which adds
+    stop_charge_per_tonne_eur × the composition's coach mass per call.
 
     No _src fields here: source and version provenance for every field
     (lat, lon, stop_charge_eur — including which one, if any, was
@@ -1507,6 +1511,13 @@ class StopInfrastructure:
     lon: float
 
     stop_charge_eur: float
+
+    # Mass-based part of the charge, €/stop/t of coach mass
+    # (Composition.total_weight_t — the Czech "mpk"). None everywhere a stop
+    # is priced per call only; no default resolution, None means zero. The
+    # per-call figure above is the fixed part: a Czech stop carries an
+    # explicit 0.00 there beside its rate.
+    stop_charge_per_tonne_eur: float | None = None
 
     # The charge's provenance, carried beside the figure: which document it
     # came from, what it is per, and the VAT it excludes. A published number
@@ -1648,6 +1659,121 @@ class ODPair:
     trip_id: str  # references Trip.trip_id within the same Route
     places_sold: int  # annual tickets sold for this OD pair / class / trip
     avg_price: float  # EUR — average fare across all sold tickets
+
+
+# =============================================================================
+# MEASURES  (scenario.measure_sets, scenario.scenario_variants)
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class MeasureSet:
+    """
+    One row of scenario.measure_sets — a named bundle of political
+    measures an evaluation is run under. Orthogonal to Scenario: a
+    scenario pins what the infrastructure IS, a measure set what the
+    state DOES about it, and the two multiply into the scenario variants
+    the frontend addresses (ScenarioVariant below).
+
+    The three flags are the levers WP17 will price. Until then every set
+    but "none" is unseeded and the three factors below are 1.0, so an
+    evaluation under NO_MEASURES is byte-identical to one before measure
+    sets existed.
+
+    Where the rates will live (WP17, not here): a versioned
+    input_params table, resolved per country and pinned by the scenario
+    like every other calibrated parameter — measure_sets stays the
+    unversioned definition of WHICH levers are pulled.
+    """
+
+    measure_set_id: int
+    key: str
+    vat_exempt: bool
+    energy_tax_exempt: bool
+    tac_direct_cost: bool
+    description: Optional[str] = None
+
+    @property
+    def ticket_revenue_factor(self) -> float:
+        """Multiplier on ticket revenue. WP17: the VAT rate the fare no
+        longer carries, per country of sale."""
+        return 1.0
+
+    @property
+    def energy_cost_factor(self) -> float:
+        """Multiplier on traction energy cost. WP17: the electricity tax
+        share of the energy price, per country."""
+        return 1.0
+
+    @property
+    def track_access_factor(self) -> float:
+        """Multiplier on track access charges. WP17: the direct-cost floor
+        as a share of the full charge, per infrastructure manager.
+
+        A share is the crudest possible model of a direct-cost regime —
+        the real one selects different TAC COMPONENTS, which is a change
+        inside models/infrastructure/tac/calc_tac.py, not a factor here.
+        This hook exists so the plumbing (variant axis, cache keys, result
+        record) is in place and exercised at 1.0; WP17 implements the
+        pricing where the components live and the per-country views
+        (models/evaluation/views.py reads SegmentTac.by_country) stay
+        consistent with the totals.
+        """
+        return 1.0
+
+
+# The empty measure set — no lever pulled, every factor 1.0. The default
+# for every evaluation until WP17, and the one seeded row of
+# scenario.measure_sets. measure_set_id 1 matches the seed and the
+# migration; nothing reads the id off this object except the variant axis.
+NO_MEASURES = MeasureSet(
+    measure_set_id=1,
+    key="none",
+    vat_exempt=False,
+    energy_tax_exempt=False,
+    tac_direct_cost=False,
+    description="No political measures — today's tax and charging regime.",
+)
+
+
+class MeasureSetCollection:
+    """Every scenario.measure_sets row, keyed by measure_set_id. Read-only
+    and tiny (one row today), built by
+    DBDataLoader.build_all_measure_sets()."""
+
+    def __init__(self, measure_sets: dict[int, MeasureSet]):
+        self.measure_sets = measure_sets
+
+    def get(self, measure_set_id: int) -> Optional[MeasureSet]:
+        return self.measure_sets.get(measure_set_id)
+
+    def by_key(self, key: str) -> Optional[MeasureSet]:
+        return next((m for m in self.measure_sets.values() if m.key == key), None)
+
+    def all(self) -> dict[int, MeasureSet]:
+        return self.measure_sets
+
+    def __len__(self) -> int:
+        return len(self.measure_sets)
+
+
+@dataclass(frozen=True)
+class ScenarioVariant:
+    """
+    One row of scenario.scenario_variants — the flattened (scenario,
+    measure set) axis the API and the frontend address by a single id,
+    so a variant is one dropdown value rather than two.
+
+    Materialised as the full cross product (db/dev/seed.py
+    materialise_scenario_variants()), so with one measure set there is
+    exactly one variant per scenario. Carries the ids only; the Scenario
+    and MeasureSet themselves are resolved by
+    DBDataLoader.resolve_scenario_variant().
+    """
+
+    scenario_variant_id: int
+    scenario_id: int
+    measure_set_id: int
 
 
 # =============================================================================

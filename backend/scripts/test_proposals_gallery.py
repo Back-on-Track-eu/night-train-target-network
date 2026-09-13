@@ -291,16 +291,15 @@ def seed(force: bool = False):
         print(f"\n[{i}/{len(to_seed)}] {name}")
         print(f"    stops={spec['stops']}  composition={spec['composition_id']}")
         try:
-            calc = requests.post(
-                f"{API_BASE}/api/proposal/calc",
-                json={"stops": spec["stops"], "composition_id": spec["composition_id"]},
-                timeout=120,
-            )
-            calc.raise_for_status()
+            # Publish computes the member itself; defaults resolve at the
+            # boundary, so the minimal request is enough.
             resp = requests.post(
                 f"{API_BASE}/api/proposal/publish",
                 json={
-                    "compute_request": calc.json()["request"],
+                    "compute_request": {
+                        "stops": spec["stops"],
+                        "composition_id": spec["composition_id"],
+                    },
                     "name": name,
                     "mode": "new",
                 },

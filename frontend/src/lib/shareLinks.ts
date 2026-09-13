@@ -64,10 +64,12 @@ export interface ShareRouteInput {
   trip_pairs: {
     outbound: {
       general_parameters: { trip_km: number }
-      segments: unknown[]
+      // Countries come from the legs' own attribution: the route-level
+      // track_infrastructure block is provenance the family document does
+      // not carry, and the legs know where they run anyway.
+      segments: { country_distance_shares: Record<string, number> }[]
     }
   }[]
-  track_infrastructure: { country_code: string }[]
 }
 
 /**
@@ -87,7 +89,8 @@ export function routeFacts(route: ShareRouteInput | null): RouteFacts | null {
     km: Math.round(outbound.general_parameters.trip_km),
     // Segments are the legs between stops, so a 2-stop route has one.
     stops: outbound.segments.length + 1,
-    countries: new Set(route.track_infrastructure.map((c) => c.country_code)).size,
+    countries: new Set(outbound.segments.flatMap((seg) => Object.keys(seg.country_distance_shares)))
+      .size,
   }
 }
 

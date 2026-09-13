@@ -20,7 +20,7 @@ publish()'s transaction via the same cursor. This module owns the
 proposals.proposals / proposal_summaries / update_log rows and the
 transaction boundary around all of it. The prefixed-ID rewrite it applies
 at publish time lives in id_prefix.py (shared with api/helpers/
-proposal_compute.py, which strips the neutral prefix for /calc).
+member_compute.py, which strips the neutral prefix for /calc).
 
 Version refresh (README.md §4.2): publish()'s "write the state" middle
 section (prefix rewrite, GTFS write, summary upsert) is factored into
@@ -41,12 +41,11 @@ staleness detection now lives here, internally, for that purpose only.
 from __future__ import annotations
 
 import logging
-import os
-from contextlib import contextmanager
 from typing import Optional
 
-import psycopg2
-import psycopg2.extras
+from psycopg2.extras import RealDictCursor
+
+from adapters.db_pool import DBPool, default_pool
 from psycopg2.extras import Json
 
 from adapters.proposal.filter_builder import (
@@ -56,7 +55,6 @@ from adapters.proposal.filter_builder import (
     build_where,
 )
 from adapters.proposal.gtfs_store import (
-    input_parameters_from_scenario,
     insert_route_gtfs,
     route_dict_from_gtfs,
 )
@@ -68,7 +66,7 @@ from models.route.model import ROUTE_BUILDER_VERSION
 logger = logging.getLogger(__name__)
 
 # Every ID route_factory.py mints for a route starts with this — see
-# api/helpers/proposal_compute.py's _NEUTRAL_PREFIX docstring. Publish
+# api/helpers/member_compute.py's _NEUTRAL_PREFIX docstring. Publish
 # rewrites this bare structural form up to the real P{id}_V{version}_
 # prefix; single-route proposals only (today's only reachable case — see
 # gtfs_store.py and route_factory.py), so "R1" is precise, not a
@@ -140,60 +138,19 @@ class ProposalForbiddenError(Exception):
 
 
 class ProposalRepository:
-    """Persists proposals — thin connection wrapper mirroring DBDataLoader's
-    construction (same env vars, one connection per process/worker)."""
+    """Persists proposals. Every public method borrows one connection
+    from the shared DBPool (adapters/db_pool.py) for exactly its own
+    transaction — thread-safe without locks, nothing held between
+    calls."""
 
-    def __init__(self) -> None:
-        self._conn = self._connect()
+    def __init__(self, pool: DBPool | None = None) -> None:
+        self._pool = pool or default_pool()
 
-    def _connect(self):
-        required = {
-            "POSTGRES_HOST": os.environ.get("POSTGRES_HOST"),
-            "POSTGRES_PORT": os.environ.get("POSTGRES_PORT"),
-            "POSTGRES_DB": os.environ.get("POSTGRES_DB"),
-            "POSTGRES_USER": os.environ.get("POSTGRES_USER"),
-            "POSTGRES_PASSWORD": os.environ.get("POSTGRES_PASSWORD"),
-        }
-        missing = [key for key, value in required.items() if not value]
-        if missing:
-            raise RuntimeError(
-                f"Missing required environment variable(s) for DB connection: "
-                f"{', '.join(missing)}."
-            )
-        return psycopg2.connect(
-            host=required["POSTGRES_HOST"],
-            port=required["POSTGRES_PORT"],
-            dbname=required["POSTGRES_DB"],
-            user=required["POSTGRES_USER"],
-            password=required["POSTGRES_PASSWORD"],
-        )
-
-    @contextmanager
     def _cursor(self):
-        """One cursor on this repository's single connection, rolled back
-        if the block raises.
-
-        The rollback is the point. psycopg2's own cursor context manager
-        closes the cursor but leaves the transaction open, so one failed
-        statement puts the connection into "current transaction is
-        aborted" and EVERY later call on this worker fails until the
-        process restarts — a single bad query in a read path takes the
-        publish path down with it. Rolling back here confines a failure
-        to the call that caused it. Commits stay the caller's business:
-        the write paths commit explicitly after their block.
-        """
-        cursor = self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        try:
-            yield cursor
-        except Exception:
-            self._conn.rollback()
-            raise
-        finally:
-            cursor.close()
-
-    def close(self) -> None:
-        if self._conn and not self._conn.closed:
-            self._conn.close()
+        """A cursor on a freshly borrowed connection — single-query reads.
+        The transaction is released when the block ends. Writes borrow a
+        connection explicitly and commit inside the block."""
+        return self._pool.cursor()
 
     @staticmethod
     def _next_proposal_id(cur) -> int:
@@ -233,13 +190,13 @@ class ProposalRepository:
         )
         route_dict = prefixed["route"]
         evaluation_full = prefixed["evaluation"]
-        # §5.1 — only models + views are irreducible/stored; input.parameters
-        # is rebuilt on read via the scenario pin
-        # (gtfs_store.input_parameters_from_scenario()).
-        storage_evaluation = {
-            "models": evaluation_full["models"],
-            "views": evaluation_full["views"],
-        }
+        # §5.1 — the views are the irreducible output and the only thing
+        # stored. The models registry is GET /api/models and the parameters
+        # a proposal was priced from are GET /api/params/* for its scenario
+        # pin; neither is copied into every row (WP18 B2b — rows written
+        # before it still carry a "models" key, harmless until the next
+        # refresh rewrites them).
+        storage_evaluation = {"views": evaluation_full["views"]}
 
         if is_new:
             timestamps = self._insert_container(
@@ -296,11 +253,11 @@ class ProposalRepository:
         transaction: container row + GTFS/sidecars + summary row +
         update_log, prefixed IDs assigned here.
 
-        computed: api/helpers/proposal_compute.compute_proposal()'s
+        computed: api/helpers/member_compute.compute_member()'s
         output — bare structural ids ("R1", "R1_D0_T1", ...), NOT yet
         persistence-eligible. Publish is what mints the real
         P{proposal_id}_V{version}_ prefix (the reverse of what
-        compute_proposal() stripped off for /calc).
+        compute_member() stripped off for the member payload).
 
         mode: "new" | "overwrite". "new" ignores proposal_id (a fresh one
         is allocated from the sequence); "overwrite" requires it and
@@ -320,8 +277,8 @@ class ProposalRepository:
         if mode not in ("new", "overwrite"):
             raise ValueError(f"publish: unknown mode '{mode}'.")
 
-        try:
-            with self._cursor() as cur:
+        with self._pool.connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 if mode == "overwrite":
                     new_pid, new_version = self._lock_for_overwrite(
                         cur, proposal_id, user_id
@@ -353,10 +310,7 @@ class ProposalRepository:
                     based_on_proposal_id=based_on_proposal_id,
                 )
 
-            self._conn.commit()
-        except Exception:
-            self._conn.rollback()
-            raise
+            conn.commit()
 
         logger.info(
             "proposal publish: mode=%s proposal_id=%s version=%s user_id=%s",
@@ -377,7 +331,13 @@ class ProposalRepository:
             "calc_version": prefixed["calc_version"],
             "request": request_echo,
             "route": route_dict,
-            "evaluation": evaluation_full,
+            # The proposal as stored, not as computed: views only, the same
+            # shape GET /api/proposal/<id> serves. A compute response also
+            # carries `operations` (CALC 0.9.28); like the models registry
+            # before it, that is on-demand data — the member views endpoint
+            # — and copying it here would make the publish reply the one
+            # place it appeared alongside a stored proposal.
+            "evaluation": {"views": evaluation_full["views"]},
             "created_at": state["created_at"],
             "updated_at": state["updated_at"],
         }
@@ -404,8 +364,8 @@ class ProposalRepository:
         Raises ProposalNotFoundError if proposal_id doesn't exist (a
         proposal deleted manually between list_outdated() and this call).
         """
-        try:
-            with self._cursor() as cur:
+        with self._pool.connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
                     "SELECT proposal_version, user_id, name "
                     "FROM proposals.proposals WHERE proposal_id = %s FOR UPDATE",
@@ -438,10 +398,7 @@ class ProposalRepository:
                     detail=detail,
                 )
 
-            self._conn.commit()
-        except Exception:
-            self._conn.rollback()
-            raise
+            conn.commit()
 
         logger.info(
             "proposal refresh: proposal_id=%s version=%s trigger=%s",
@@ -727,7 +684,6 @@ class ProposalRepository:
                 (proposal_id,),
             )
             row = cur.fetchone()
-        self._conn.rollback()
         return dict(row) if row else None
 
     def reconstruct_route(
@@ -742,26 +698,15 @@ class ProposalRepository:
             route_dict = route_dict_from_gtfs(
                 proposal_id, proposal_version, loader, scenario_id, cur
             )
-        self._conn.rollback()
         return route_dict
 
-    def reconstruct_evaluation(self, container: dict, loader) -> dict:
-        """Full evaluation shape (models/input/views) for a loaded
-        proposal — models/views come back verbatim from the stored
-        evaluation_output column (§5.1: irreducible, stored as-is);
-        input.parameters is rebuilt fresh via the scenario pin
-        (gtfs_store.input_parameters_from_scenario()), never
-        stored (would duplicate the params tables into every row)."""
-        stored = container["evaluation_output"]
-        # input_parameters_from_scenario() returns the whole {"parameters":
-        # {...}} input dict already (see its own docstring), not just the
-        # inner parameters — so it slots straight under "input" below.
-        input_section = input_parameters_from_scenario(container["scenario_id"], loader)
-        return {
-            "models": stored["models"],
-            "input": input_section,
-            "views": stored["views"],
-        }
+    def reconstruct_evaluation(self, container: dict) -> dict:
+        """The evaluation of a loaded proposal — {views}, verbatim from the
+        stored evaluation_output column (§5.1: irreducible, stored as-is).
+        Nothing else: the models registry and the parameters have their
+        own endpoints (WP18 B2b). Reads only the views key, so rows written
+        before B2b, which also carry "models", load unchanged."""
+        return {"views": container["evaluation_output"]["views"]}
 
     def owner(self, proposal_id: int) -> Optional[int]:
         """user_id of a proposal's owner, or None if unknown — a cheap
@@ -773,7 +718,6 @@ class ProposalRepository:
                 (proposal_id,),
             )
             row = cur.fetchone()
-        self._conn.rollback()
         return row["user_id"] if row else None
 
     def share_name(self, proposal_id: int) -> Optional[str]:
@@ -788,7 +732,6 @@ class ProposalRepository:
                 (proposal_id,),
             )
             row = cur.fetchone()
-        self._conn.rollback()
         return row["name"] if row else None
 
     def list_outdated(self, limit: Optional[int] = None) -> list[dict]:
@@ -799,7 +742,7 @@ class ProposalRepository:
         (rather than fetching every proposal and checking in Python) since
         the steady-state case, most of the time, is that nothing is
         outdated. Returns just enough per row for outdated_trigger() and
-        compute_proposal(): proposal_id, the three stale-checkable
+        compute_member(): proposal_id, the three stale-checkable
         columns, current_base_scenario_id (see get_container()'s
         docstring for why it travels alongside rather than a second
         query), and compute_request (the recompute input)."""
@@ -818,7 +761,6 @@ class ProposalRepository:
                 + ((limit,) if limit is not None else ()),
             )
             rows = cur.fetchall()
-        self._conn.rollback()
         return [dict(row) for row in rows]
 
     # Every proposal_summaries column the `summaries` section returns.
@@ -829,7 +771,12 @@ class ProposalRepository:
         "total_time_h, avg_speed_kmh, n_stops, countries, country_relations, "
         "stop_ids, "
         "cost_eur_per_train_km, revenue_eur_per_train_km, "
-        "margin_eur_per_train_km, subsidy_eur_per_year, "
+        "margin_eur_per_train_km, net_eur_per_year, subsidy_eur_per_year, "
+        "services_revenue_eur, catering_contribution_eur, "
+        "operating_days_per_year, departures_per_year, trainsets_physical, "
+        "train_km_per_year, "
+        "available_place_km_per_year, sold_place_km_per_year, "
+        "passengers_per_year, "
         "demand_trips_per_year, demand_trip_km_per_year, "
         "shift_air_trips_per_year, shift_air_trip_km_per_year, "
         "shift_car_trips_per_year, shift_car_trip_km_per_year, "
@@ -886,7 +833,12 @@ class ProposalRepository:
         "       total_time_h, avg_speed_kmh, n_stops, countries, "
         "       country_relations, stop_ids, "
         "       cost_eur_per_train_km, revenue_eur_per_train_km, "
-        "       margin_eur_per_train_km, subsidy_eur_per_year, "
+        "       margin_eur_per_train_km, net_eur_per_year, subsidy_eur_per_year, "
+        "       services_revenue_eur, catering_contribution_eur, "
+        "       operating_days_per_year, departures_per_year, trainsets_physical, "
+        "       train_km_per_year, "
+        "       available_place_km_per_year, sold_place_km_per_year, "
+        "       passengers_per_year, "
         "       demand_trips_per_year, demand_trip_km_per_year, "
         "       shift_air_trips_per_year, shift_air_trip_km_per_year, "
         "       shift_car_trips_per_year, shift_car_trip_km_per_year, "
@@ -909,7 +861,17 @@ class ProposalRepository:
         "       NULL::numeric AS cost_eur_per_train_km, "
         "       NULL::numeric AS revenue_eur_per_train_km, "
         "       NULL::numeric AS margin_eur_per_train_km, "
+        "       NULL::numeric AS net_eur_per_year, "
         "       NULL::numeric AS subsidy_eur_per_year, "
+        "       NULL::numeric AS services_revenue_eur, "
+        "       NULL::numeric AS catering_contribution_eur, "
+        "       NULL::smallint AS operating_days_per_year, "
+        "       NULL::integer AS departures_per_year, "
+        "       NULL::smallint AS trainsets_physical, "
+        "       NULL::numeric AS train_km_per_year, "
+        "       NULL::numeric AS available_place_km_per_year, "
+        "       NULL::numeric AS sold_place_km_per_year, "
+        "       NULL::numeric AS passengers_per_year, "
         "       NULL::numeric AS demand_trips_per_year, "
         "       NULL::numeric AS demand_trip_km_per_year, "
         "       NULL::numeric AS shift_air_trips_per_year, "
@@ -980,7 +942,6 @@ class ProposalRepository:
                 page_params += [limit, offset]
             cur.execute(sql, page_params)
             rows = cur.fetchall()
-        self._conn.rollback()
         return [dict(row) for row in rows], total
 
     def map_lines(self, filters: Optional[dict] = None) -> list[dict]:
@@ -1099,7 +1060,6 @@ class ProposalRepository:
                 list(params) + [MAP_LINES_SIMPLIFY_TOLERANCE_DEG],
             )
             rows = cur.fetchall()
-        self._conn.rollback()
         return [dict(row) for row in rows]
 
     def map_routes(
@@ -1142,7 +1102,6 @@ class ProposalRepository:
         with self._cursor() as cur:
             cur.execute(sql, page_params)
             rows = cur.fetchall()
-        self._conn.rollback()
         return [dict(row) for row in rows]
 
     def map_stop_counts(self, filters: Optional[dict] = None) -> list[dict]:
@@ -1178,7 +1137,6 @@ class ProposalRepository:
                 params,
             )
             rows = cur.fetchall()
-        self._conn.rollback()
         return [dict(row) for row in rows]
 
     def map_country_counts(self, filters: Optional[dict] = None) -> list[dict]:
@@ -1212,7 +1170,6 @@ class ProposalRepository:
                 params,
             )
             rows = cur.fetchall()
-        self._conn.rollback()
         return [dict(row) for row in rows]
 
     # =========================================================================
@@ -1252,7 +1209,6 @@ class ProposalRepository:
                 params,
             )
             rows = cur.fetchall()
-        self._conn.rollback()
         return [dict(row) for row in rows]
 
     def stats_reach(self, filters: Optional[dict] = None) -> list[dict]:
@@ -1282,7 +1238,6 @@ class ProposalRepository:
                 params,
             )
             rows = cur.fetchall()
-        self._conn.rollback()
         return [dict(row) for row in rows]
 
     def stats_country_counts(self, filters: Optional[dict] = None) -> list[dict]:
@@ -1325,7 +1280,6 @@ class ProposalRepository:
                 params,
             )
             rows = cur.fetchall()
-        self._conn.rollback()
         return [dict(row) for row in rows]
 
     def stats_relation_counts(
@@ -1367,7 +1321,6 @@ class ProposalRepository:
                 params + [max_relation_km],
             )
             rows = cur.fetchall()
-        self._conn.rollback()
         return [dict(row) for row in rows]
 
     def stats_relation_universe(self, max_relation_km: float = 1600.0) -> dict:
@@ -1415,5 +1368,4 @@ class ProposalRepository:
                 "ORDER BY refs.country"
             )
             stations = [dict(row) for row in cur.fetchall()]
-        self._conn.rollback()
         return {**counts, "reference_stations": stations}

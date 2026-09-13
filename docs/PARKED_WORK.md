@@ -12,7 +12,8 @@ had been superseded for three weeks; this file is what survived it.
 | Item | Status | Blocked by |
 |---|---|---|
 | Bundle analyze endpoint | Designed 2026-08-04, postponed 2026-08-07 | Nothing — the compute cache prerequisite is done |
-| Connection pooling / intra-worker concurrency | Scoped, not started | Nothing |
+| Connection pooling / intra-worker concurrency | **Shipped** 2026-09-07 as WP14 (`adapters/db_pool.py`, gunicorn gthread) — §2 kept for the reasoning | — |
+| Price & regulatory measures axis (WP17) | Designed 2026-09-07, not started | Nothing — the matrix endpoint is the natural carrier |
 | `input_params` schema split | **Dropped** 2026-08-07 | — |
 
 ---
@@ -149,7 +150,7 @@ seconds. Analyze is therefore a **job**, not a synchronous call:
 - v1 executor: one in-process background worker, FIFO queue, one job at
   a time — matches the self-hosted process model; a real queue
   (RQ/Celery) is the documented escalation path, not v1. Each member
-  compute goes through `compute_proposal()`, so the compute cache does the
+  compute goes through `compute_member()`, so the compute cache does the
   heavy lifting for the dominant workflow (toggling scenarios over the
   same bundle). The compute cache is a hard prerequisite (**done**);
   connection pooling (§2 below) helps but doesn't gate.
@@ -179,9 +180,12 @@ stays the default.
 
 ## 2. Connection pooling / intra-worker concurrency
 
-Scoped but not started. Independent of everything above; touches the whole
-app rather than proposals specifically, which is why it was repeatedly
-deferred.
+**Shipped 2026-09-07 as WP14** — `backend/adapters/db_pool.py` (one
+`ThreadedConnectionPool` per process, every adapter borrows per unit of
+work), gunicorn `gthread`, `tests/test_05_db_pool.py`; deploy notes in
+`docs/DEPLOY_HANDOVER.md` §4c. The section is kept as the record of why
+it was done the way it was; the "what closing it needs" list below is
+what landed, with one deviation noted inline.
 
 **The gap.** Production runs `gunicorn --workers 4`, and
 `api/helpers/dependencies.py`'s `init()` builds one long-lived connection
@@ -191,7 +195,7 @@ run fully in parallel, and raising `--workers` scales it further, cheaply.
 
 What is missing is **intra**-worker concurrency. One worker process handles
 exactly one request at a time (sync worker model), so a slow live-routing
-`/calc` blocks a quick `/like` toggle that happens to land on the same
+compute blocks a quick `/like` toggle that happens to land on the same
 worker.
 
 **What closing it needs**
@@ -208,13 +212,13 @@ worker.
    throughout `adapters/*.py` stops holding once a connection isn't
    exclusively owned by one long-lived object.
 
-**Testable by**: a concurrent integration test issuing a slow `/calc` and a
-fast `/like` simultaneously against a single worker, asserting the fast one
+**Testable by**: a concurrent integration test issuing a slow family build
+and a fast `/like` simultaneously against a single worker, asserting the fast one
 doesn't wait on the slow one; plus connection-pool exhaustion behaviour
 under load.
 
 **Partial precedent already in the tree.** `scripts/refresh_proposals.py`
-parallelizes only its live-routing step: `compute_proposal()` takes optional
+parallelizes only its live-routing step: `compute_member()` takes optional
 `loader=`/`router=` arguments so each worker thread gets its own
 `DBDataLoader` (cheap — one connection, no heavy precompute) while sharing
 the one process-wide `RailRouter` (a pooled `requests.Session`, explicitly
@@ -236,3 +240,45 @@ time.
 Consequence of dropping it: the flat per-mode emission factors stay
 constants in `models/emissions` indefinitely — which locked decision 24
 already permits as the single source. Nothing else depended on the split.
+
+---
+
+## 3. Price & regulatory measures axis (WP17)
+
+Designed 2026-09-07 with the viewport rearrangement; the frontend ships
+the three toggles disabled with a "coming soon" hint
+(`frontend/src/components/ScenarioSwitches.vue`, `VITE_FEATURE_MEASURES`).
+
+**What it is.** Three policy measures a lay user reads as scenarios but
+that are not scenario rows: **VAT exemption on tickets** (revenue side:
+ticket revenue net of VAT rises, or fares fall and demand responds),
+**energy tax exemption** (energy price component), **track access at
+direct costs only** (the TAC tariff replaced by a marginal-cost rate).
+Every combination of the three on top of the six network × condition
+scenarios gives the sketch's 6 × 8 = 48 grid.
+
+**Why not scenario rows.** `scenario.scenarios` pins full-table snapshots
+of infrastructure parameters; VAT and energy tax are not infrastructure
+parameters, and 48 snapshots × 5 tables for three booleans would defeat
+the versioning contract. They are **evaluation-only inputs**: routing and
+timetabling are untouched, only `models/evaluation/calc.py` changes.
+
+**Shape — WP18 already landed the plumbing.** `scenario.measure_sets`
+holds the three flags per named set, `scenario.scenario_variants` is the
+materialised scenario × measure-set axis the family is built over, and
+`evaluate_route()` takes a `MeasureSet` whose three factors are 1.0 today
+(`models/params.py`, CALC 0.9.26). The member cache keys on the measure
+set; publish still refuses anything but the empty set until proposals may
+represent a measure. What remains is the pricing: the three rates (VAT
+rate on tickets,
+energy tax share of the energy price, direct-cost TAC rate) are calibrated
+domain parameters → DB tables with sources, per the parameter placement
+rule, not constants in `model.py`.
+
+**What it costs.** `CALC_VERSION` bump (calc.py — and the real pricing
+belongs inside `calc_tac.py`/`calc_energy_price.py`, where the per-country
+components are, not in the three factors: the per-country views read the
+components), three calibrated rates with sources (Juri/Josh), a flush of
+both family caches, the frontend measures row switched on and the family's
+variant axis multiplying from scenario × composition to
+scenario × measures for the selected composition (the sketch's heatmap).

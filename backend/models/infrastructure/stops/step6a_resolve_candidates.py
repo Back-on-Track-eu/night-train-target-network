@@ -39,7 +39,10 @@ Input columns (see step6_gap_closure_2026-09.csv for a complete example):
                     listed at the end so the record stays complete
 
 Output: data/step6_candidates_resolved.csv (one row per candidate with the
-outcome) and the paste-ready blocks on stdout.
+outcome) and two paste-ready blocks on stdout — the ADDITIONS_<REGION> lines,
+and the MANUAL_COUNTRY lines for the resolved stops neither ONTD nor step 3b
+knows a country for. Step 6 refuses to write those stops without one, so the
+second block saves a round trip through the notebook's error message.
 """
 
 from __future__ import annotations
@@ -149,12 +152,45 @@ def load_step5_ids() -> tuple[set[str], list[tuple[float, float, str]]]:
     return ids, located
 
 
+def load_ontd_countries() -> dict[str, str]:
+    """Country per OSM id as step 4 joined it — the same source step 6 prefers
+    over step 3b's own column, which OSM populates for barely 1% of stations."""
+    countries = {}
+    with open(
+        local_input("step4_MatchingONTDtoOSM.csv", "step4_MatchingONTDtoOSM.ipynb"),
+        encoding="utf-8-sig",
+        newline="",
+    ) as fh:
+        for row in csv.DictReader(fh):
+            stop_id = (row.get("osm_stop_id") or "").strip()
+            country = (row.get("ontd_country") or "").strip().upper()
+            if stop_id and country:
+                countries.setdefault(stop_id, country)
+    return countries
+
+
 def load_step6_ids() -> set[str]:
     path = DATA_DIR / "step6_manual_additions.csv"
     if not path.is_file():
         return set()
     with open(path, encoding="utf-8-sig", newline="") as fh:
         return {row["stop_id"] for row in csv.DictReader(fh)}
+
+
+def blank_outcome(candidate: dict, status: str = "") -> dict:
+    """The outcome shape every candidate gets, resolved or not — one place, so
+    the CSV header holds whichever row happens to come first."""
+    return {
+        **candidate,
+        "stop_id": "",
+        "osm_name": "",
+        "osm_country": "",
+        "station_mode": "",
+        "distance_km": "",
+        "name_score": "",
+        "status": status,
+        "alternatives": "",
+    }
 
 
 def resolve(
@@ -189,16 +225,7 @@ def resolve(
         )
         nearby.append((score, d, s))
 
-    outcome = {
-        **candidate,
-        "stop_id": "",
-        "osm_name": "",
-        "station_mode": "",
-        "distance_km": "",
-        "name_score": "",
-        "status": "",
-        "alternatives": "",
-    }
+    outcome = blank_outcome(candidate)
 
     # A prefilled id short-circuits the name search, but only after the same
     # checks a found object gets: it must exist, be a railway station, and sit
@@ -214,6 +241,7 @@ def resolve(
         outcome.update(
             stop_id=given,
             osm_name=match["stop_name"],
+            osm_country=match["country"].strip().upper(),
             station_mode=mode,
             distance_km=f"{d:.2f}",
             name_score=name_score(search, match["stop_name"]),
@@ -258,6 +286,7 @@ def resolve(
     outcome.update(
         stop_id=best["stop_id"],
         osm_name=best["stop_name"],
+        osm_country=best["country"].strip().upper(),
         station_mode=best["station_mode"],
         distance_km=f"{best_d:.2f}",
         name_score=best_score,
@@ -313,6 +342,7 @@ def main() -> None:
     stations = load_stations()
     step5_ids, step5_located = load_step5_ids()
     step6_ids = load_step6_ids()
+    ontd_country = load_ontd_countries()
     print(
         f"{len(stations)} step 3b stations, {len(step5_ids)} step 5 stops, "
         f"{len(step6_ids)} existing step 6 additions"
@@ -321,18 +351,7 @@ def main() -> None:
     outcomes = []
     for row in candidates:
         if row["decision"].strip() != "add":
-            outcomes.append(
-                {
-                    **row,
-                    "stop_id": "",
-                    "osm_name": "",
-                    "station_mode": "",
-                    "distance_km": "",
-                    "name_score": "",
-                    "status": row["decision"],
-                    "alternatives": "",
-                }
-            )
+            outcomes.append(blank_outcome(row, row["decision"]))
             continue
         outcome = resolve(row, stations, step5_ids, step5_located)
         if outcome["status"] == "resolved" and outcome["stop_id"] in step6_ids:
@@ -361,6 +380,29 @@ def main() -> None:
             print(f"    # --- {cc} --- (step 6a, {args.candidates.name})")
             for o in by_region[region][cc]:
                 print(python_line(o))
+
+    # --- countries step 6 cannot derive --------------------------------------
+    # Step 6 takes the country from step 4, falls back to step 3b and raises if
+    # both are empty. The candidate row already carries it, so hand it over
+    # rather than let the notebook fail on the first run.
+    needs_country = [
+        o
+        for o in outcomes
+        if o["status"] == "resolved"
+        and not ontd_country.get(o["stop_id"])
+        and not o["osm_country"]
+        and o["country"].strip()
+    ]
+    if needs_country:
+        print(
+            f"\n# ==== paste into MANUAL_COUNTRY in step6_manual_additions.ipynb "
+            f"({len(needs_country)} stops neither step 4 nor step 3b places) ===="
+        )
+        for o in needs_country:
+            print(
+                f'    "{o["stop_id"]}": "{o["country"].strip().upper()}",'
+                f"  # {o['osm_name']}"
+            )
 
     # --- everything that needs a human --------------------------------------
     problems = [

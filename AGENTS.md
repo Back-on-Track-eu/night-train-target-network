@@ -31,8 +31,12 @@ files describing the same three backend services, kept manually in sync:
 
 ### Python (backend)
 
-- Style: **`ruff format`** (`ruff==0.15.21`, enforced in CI and pre-commit);
-  config is the single `[tool.ruff]` section in `backend/pyproject.toml`
+- Style: **`ruff format`**, plus **`ruff check`** on ruff's default rule set
+  (`ruff==0.15.21`, both enforced in CI and pre-commit); config is the single
+  `[tool.ruff]` section in `backend/pyproject.toml`, whose
+  `per-file-ignores` records every deliberate exemption (research notebooks,
+  `db/dev/seed.py`'s load-bearing import order). The lint gate is at zero
+  findings — keep it there rather than adding an entry for new code
 - Dependencies: managed with `uv` (`pyproject.toml` + `uv.lock`); never run
   `pip install` directly in the project — use `uv add`/`uv sync`
 - Domain objects in `models/` carry **no serialization methods** — all
@@ -317,6 +321,7 @@ Full contract, `--baseline` semantics, and editorial rules:
 | `frontend/src/style.css` | Tailwind v4 import + CSS layer order declaration |
 | `frontend/src/stores/store.ts` | Pinia store — currently containing everything but might have more in the future |
 | `frontend/src/i18n/index.ts` | i18n setup; add new locales here |
+| `frontend/src/lib/uiLanguages.ts` | Language bar order and per-language availability — flip `available` here once a locale file exists |
 | `frontend/src/i18n/locales/en.json` | English translation strings — including the whole landing pitch (`gallery.heading`, `gallery.welcome.*`, `gallery.audience.*`, `gallery.story.*`) |
 | `frontend/src/components/LandingIntro.vue` | Landing pitch above the gallery: layout, hero sizing and scroll cue only, no copy |
 | `frontend/src/types/api.ts` | TypeScript types for backend responses |
@@ -327,7 +332,7 @@ Full contract, `--baseline` semantics, and editorial rules:
 | `.devcontainer/docker-compose.yml` | Self-contained VS Code devcontainer stack — duplicates the above, plus `frontend` |
 | `.github/workflows/ci.yml` | Frontend/backend formatting + frontend type-check (see CI/CD below) |
 | `.github/workflows/backend-tests.yml` | Version-bump enforcement + full backend integration test run |
-| `.pre-commit-config.yaml` | Pre-commit: ruff-format (`backend/`) + prettier (`frontend/`, `docs-site/` — excluding the emitted pages) |
+| `.pre-commit-config.yaml` | Pre-commit: ruff-format + ruff lint (`backend/`) + prettier (`frontend/`, `docs-site/` — excluding the emitted pages) |
 | `docs/DEPLOY_HANDOVER.md` | Living handover to Giovanni: deploy order, staging gotchas, server capacity. Update in the same PR as any change touching deploy, capacity or server data |
 | `docs/FRONTEND_HANDOVER.md` | Living handover to Bjarne: every backend change that reaches the API contract. Update in the same PR as the change |
 
@@ -405,6 +410,7 @@ Five workflows:
 | --- | -------------- |
 | `prettier-check` | Frontend formatting (`npm run format:check`) |
 | `ruff-check` | Backend Python formatting (`ruff format --check backend/`) |
+| `ruff-lint` | Backend Python lint (`ruff check backend/`) |
 | `type-check` | Frontend TypeScript (`npm run type-check` via `vue-tsc`) |
 | `unit-tests` | Frontend Vitest (`npm test`) |
 | `docs-prettier` | `docs-site/` formatting — hand-written pages only |

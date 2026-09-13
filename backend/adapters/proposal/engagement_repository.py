@@ -3,8 +3,8 @@ engagement_repository.py
 ========================
 Write-path database adapter for proposal likes and comments, plus the
 read path for the merged engagement timeline (WP11) — mirrors
-FeedbackRepository (adapters/feedback_repository.py): its own connection
-to the same database, kept separate from ProposalRepository
+FeedbackRepository (adapters/feedback_repository.py): one borrowed DBPool
+connection per call, kept separate from ProposalRepository
 (repository.py, which owns the heavier route/GTFS write path) and from
 DBDataLoader (read-only). See db/dev/sql/create_proposal_schema.sql for
 the proposals.likes / proposals.comments / proposals.update_log tables
@@ -17,15 +17,15 @@ write here first resolves the proposal's current version via
 _current_version(), which both confirms the proposal_id exists and
 supplies the proposal_version stamped onto the row. That lookup is
 duplicated from ProposalRepository.get_container()/.owner() rather than
-shared — the two repositories deliberately hold independent connections
+shared — the two repositories deliberately run independent transactions
 (same rationale as FeedbackRepository.get_user()) — but kept
 intentionally cheap: proposal_version only, no route/evaluation data.
 
 update_log is WRITTEN by ProposalRepository (inside the publish/refresh
 transaction, where it belongs) and only READ here, as the third source of
-the timeline. The split follows the same independent-connection rule as
-everything else in this module: reading a table another repository owns
-is ordinary, sharing its connection is not.
+the timeline. The split follows the same independent-transaction rule
+as everything else in this module: reading a table another repository
+owns is ordinary, joining its transaction is not.
 
 Timeline semantics (§7.5, locked decision 28): the timeline is a
 PROJECTION OF CURRENT STATE merged with the append-only update_log, not
@@ -37,51 +37,27 @@ Only update_log rows are genuinely immutable history.
 from __future__ import annotations
 
 import logging
-import os
 from typing import Optional
 
-import psycopg2
-import psycopg2.extras
+from psycopg2.extras import RealDictCursor
+
+from adapters.db_pool import DBPool, default_pool
 
 logger = logging.getLogger(__name__)
 
 
 class ProposalEngagementRepository:
-    """Persists proposal likes and comments — thin connection wrapper
-    mirroring FeedbackRepository's construction (same env vars, one
-    connection per process/worker)."""
+    """Persists proposal likes and comments — one borrowed DBPool
+    connection per call, mirroring FeedbackRepository."""
 
-    def __init__(self) -> None:
-        self._conn = self._connect()
-
-    def _connect(self):
-        required = {
-            "POSTGRES_HOST": os.environ.get("POSTGRES_HOST"),
-            "POSTGRES_PORT": os.environ.get("POSTGRES_PORT"),
-            "POSTGRES_DB": os.environ.get("POSTGRES_DB"),
-            "POSTGRES_USER": os.environ.get("POSTGRES_USER"),
-            "POSTGRES_PASSWORD": os.environ.get("POSTGRES_PASSWORD"),
-        }
-        missing = [key for key, value in required.items() if not value]
-        if missing:
-            raise RuntimeError(
-                f"Missing required environment variable(s) for DB connection: "
-                f"{', '.join(missing)}."
-            )
-        return psycopg2.connect(
-            host=required["POSTGRES_HOST"],
-            port=required["POSTGRES_PORT"],
-            dbname=required["POSTGRES_DB"],
-            user=required["POSTGRES_USER"],
-            password=required["POSTGRES_PASSWORD"],
-        )
+    def __init__(self, pool: DBPool | None = None) -> None:
+        self._pool = pool or default_pool()
 
     def _cursor(self):
-        return self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-
-    def close(self) -> None:
-        if self._conn and not self._conn.closed:
-            self._conn.close()
+        """A cursor on a freshly borrowed connection — single-query reads.
+        The transaction is released when the block ends. Writes borrow a
+        connection explicitly and commit inside the block."""
+        return self._pool.cursor()
 
     # ------------------------------------------------------------------
     # Shared: resolve + validate proposal_id
@@ -105,7 +81,6 @@ class ProposalEngagementRepository:
         doing anything else."""
         with self._cursor() as cur:
             version = self._current_version(cur, proposal_id)
-        self._conn.rollback()
         return version is not None
 
     # ------------------------------------------------------------------
@@ -121,14 +96,12 @@ class ProposalEngagementRepository:
         other. Returns None if proposal_id doesn't exist."""
         with self._cursor() as cur:
             if self._current_version(cur, proposal_id) is None:
-                self._conn.rollback()
                 return None
             engagement = {
                 "likes": self._likes_summary(cur, proposal_id, user_id),
                 "comments": self._live_comments(cur, proposal_id),
                 "timeline": self._timeline(cur, proposal_id),
             }
-        self._conn.rollback()
         return engagement
 
     # ------------------------------------------------------------------
@@ -156,11 +129,10 @@ class ProposalEngagementRepository:
         """Idempotent like: inserts if absent, no-ops if the user already
         liked this proposal. Returns the fresh {count, liked_by_me}
         summary, or None if proposal_id doesn't exist."""
-        try:
-            with self._cursor() as cur:
+        with self._pool.connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 version = self._current_version(cur, proposal_id)
                 if version is None:
-                    self._conn.rollback()
                     return None
                 cur.execute(
                     "INSERT INTO proposals.likes (proposal_id, proposal_version, user_id) "
@@ -169,10 +141,7 @@ class ProposalEngagementRepository:
                     (proposal_id, version, user_id),
                 )
                 summary = self._likes_summary(cur, proposal_id, user_id)
-            self._conn.commit()
-        except Exception:
-            self._conn.rollback()
-            raise
+            conn.commit()
         logger.info("like added: proposal_id=%s user_id=%s", proposal_id, user_id)
         return summary
 
@@ -180,18 +149,15 @@ class ProposalEngagementRepository:
         """Idempotent unlike — a hard DELETE, so the like leaves the
         timeline with it (locked decision 28). Returns the fresh summary
         regardless of whether a like existed to remove."""
-        try:
-            with self._cursor() as cur:
+        with self._pool.connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
                     "DELETE FROM proposals.likes "
                     "WHERE proposal_id = %s AND user_id = %s",
                     (proposal_id, user_id),
                 )
                 summary = self._likes_summary(cur, proposal_id, user_id)
-            self._conn.commit()
-        except Exception:
-            self._conn.rollback()
-            raise
+            conn.commit()
         logger.info("like removed: proposal_id=%s user_id=%s", proposal_id, user_id)
         return summary
 
@@ -225,11 +191,10 @@ class ProposalEngagementRepository:
     def add_comment(self, proposal_id: int, user_id: int, body: str) -> Optional[dict]:
         """Insert one comment. Returns the full row, or None if
         proposal_id doesn't exist."""
-        try:
-            with self._cursor() as cur:
+        with self._pool.connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 version = self._current_version(cur, proposal_id)
                 if version is None:
-                    self._conn.rollback()
                     return None
                 cur.execute(
                     "INSERT INTO proposals.comments "
@@ -239,10 +204,7 @@ class ProposalEngagementRepository:
                     (proposal_id, version, user_id, body),
                 )
                 row = dict(cur.fetchone())
-            self._conn.commit()
-        except Exception:
-            self._conn.rollback()
-            raise
+            conn.commit()
         row["user_name"] = self._display_name(user_id)
         logger.info(
             "comment added: proposal_id=%s comment_id=%s user_id=%s",
@@ -263,7 +225,6 @@ class ProposalEngagementRepository:
                 (comment_id,),
             )
             row = cur.fetchone()
-        self._conn.rollback()
         return dict(row) if row else None
 
     def edit_comment(self, comment_id: int, body: str) -> Optional[dict]:
@@ -271,8 +232,8 @@ class ProposalEngagementRepository:
         has already checked ownership and that the comment isn't deleted.
         The bumped updated_at is also where the comment's timeline event
         moves to (§7.5)."""
-        try:
-            with self._cursor() as cur:
+        with self._pool.connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
                     "UPDATE proposals.comments SET body = %s, updated_at = now() "
                     "WHERE comment_id = %s "
@@ -280,10 +241,7 @@ class ProposalEngagementRepository:
                     (body, comment_id),
                 )
                 row = cur.fetchone()
-            self._conn.commit()
-        except Exception:
-            self._conn.rollback()
-            raise
+            conn.commit()
         if row is None:
             return None
         row = dict(row)
@@ -296,8 +254,8 @@ class ProposalEngagementRepository:
         transaction) but is invisible from here on — neither the thread
         nor the timeline returns it. Returns False if comment_id doesn't
         exist."""
-        try:
-            with self._cursor() as cur:
+        with self._pool.connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
                     "UPDATE proposals.comments "
                     "SET is_deleted = TRUE, body = '', updated_at = now() "
@@ -306,10 +264,7 @@ class ProposalEngagementRepository:
                     (comment_id,),
                 )
                 deleted = cur.fetchone() is not None
-            self._conn.commit()
-        except Exception:
-            self._conn.rollback()
-            raise
+            conn.commit()
         if deleted:
             logger.info("comment soft-deleted: comment_id=%s", comment_id)
         return deleted
@@ -375,5 +330,4 @@ class ProposalEngagementRepository:
                 "SELECT display_name FROM admin.users WHERE user_id = %s", (user_id,)
             )
             row = cur.fetchone()
-        self._conn.rollback()
         return row["display_name"] if row else None

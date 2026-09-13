@@ -161,4 +161,3 @@ class TestCachedEqualsLive:
                 assert b.geometry == a.geometry
         finally:
             repo.purge(graph_key)
-            repo.close()

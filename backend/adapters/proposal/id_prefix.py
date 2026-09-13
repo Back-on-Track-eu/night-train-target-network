@@ -4,8 +4,9 @@ id_prefix.py
 The one shared utility of the P{proposal_id}_V{version}_ ID convention
 (models/route/version.py's "ID convention" section): rewriting an ID
 prefix across a whole serialized compute response. Used from both sides
-of the boundary — api/helpers/proposal_compute.py strips the neutral
-P0_V0_ prefix for POST /api/proposal/calc's response, and
+of the boundary — api/helpers/member_compute.py strips the neutral
+P0_V0_ prefix for a member's payload (and family_serialize.py for the
+family's compact routes), and
 adapters/proposal/repository.py mints the real prefix at publish time —
 so it lives in its own module rather than either caller.
 

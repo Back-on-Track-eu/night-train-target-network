@@ -6,6 +6,62 @@ body {
 
 @layer tailwind-base, primevue, tailwind-utilities;
 
+/* Slim, brand-tinted scrollbar for the app's own scroll containers. The
+   platform default is a light chrome artefact on a dark panel, and it claims
+   real width in the layout where these bars are incidental. Firefox takes the
+   two standard properties, WebKit needs the pseudo-elements; both are set, so
+   a container only ever has to carry the one class. */
+/* Every scroll container in the app, not only the ones that opt in: a page
+   scrollbar in the platform's default chrome is the one light element on a
+   dark page. Firefox takes the two standard properties on the root; WebKit
+   needs the pseudo-elements, applied broadly and then reused by .thin-scroll
+   for containers that want the same treatment explicitly. */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--p-primary-50) 45%, transparent) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--p-primary-50) 30%, transparent);
+  border-radius: 99px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--p-primary-50) 55%, transparent);
+}
+*::-webkit-scrollbar-corner,
+*::-webkit-scrollbar-button {
+  display: none;
+}
+
+.thin-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--p-primary-50) 45%, transparent) transparent;
+}
+.thin-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.thin-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.thin-scroll::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--p-primary-50) 35%, transparent);
+  border-radius: 99px;
+}
+.thin-scroll:hover::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--p-primary-50) 55%, transparent);
+}
+/* The end arrows are the most dated part of the default bar. */
+.thin-scroll::-webkit-scrollbar-button {
+  display: none;
+}
+
 @font-face {
   font-family: 'Mark Pro';
   src: url('@/assets/fonts/Mark Pro.ttf') format('truetype');

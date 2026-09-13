@@ -26,15 +26,12 @@ Write path is additive-only: ON CONFLICT DO NOTHING, so a concurrent
 identical live-route never mutates an existing row.
 
 Thread safety: RailRouter is a process singleton used concurrently
-(auto-stop mini-reroutes fan out on a thread pool), psycopg2 connections
-are not thread-safe — every operation takes one lock. Acceptable: each
-read is a single indexed query, orders of magnitude cheaper than the
-~300 ms router call it replaces.
-
-Mirrors ComputeCacheRepository's construction (same env vars, one
-connection per process). Read/store errors never propagate past
-store()/fetch_many() into a request: a cache hiccup degrades to live
-routing, it does not fail a compute.
+(auto-stop mini-reroutes fan out on a thread pool, the calc matrix
+computes cells in parallel). Every operation borrows its own connection
+from the shared DBPool (adapters/db_pool.py) for exactly one
+transaction, so no lock is needed. Read/store errors never propagate
+past store()/fetch_many() into a request: a cache hiccup degrades to
+live routing, it does not fail a compute.
 
 Public interface:
   RouteSegmentRepository().fetch_many(graph_key, variant_key, keys)
@@ -44,7 +41,6 @@ Public interface:
   RouteSegmentRepository().load_csv(path, graph_key, source) -> int
   RouteSegmentRepository().purge(graph_key) -> int
   RouteSegmentRepository().count(graph_key) -> int
-  RouteSegmentRepository().close()
 """
 
 from __future__ import annotations
@@ -52,13 +48,10 @@ from __future__ import annotations
 import gzip
 import json
 import logging
-import os
-import threading
 from pathlib import Path
 
-import psycopg2
-import psycopg2.extras
 
+from adapters.db_pool import DBPool, default_pool
 from models.route.routing.segment_cache import (
     CSV_COLUMNS,
     CachedSegment,
@@ -111,34 +104,8 @@ _LOAD_SQL = f"""
 
 
 class RouteSegmentRepository:
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._conn = self._connect()
-
-    def _connect(self):
-        required = {
-            "POSTGRES_HOST": os.environ.get("POSTGRES_HOST"),
-            "POSTGRES_PORT": os.environ.get("POSTGRES_PORT"),
-            "POSTGRES_DB": os.environ.get("POSTGRES_DB"),
-            "POSTGRES_USER": os.environ.get("POSTGRES_USER"),
-            "POSTGRES_PASSWORD": os.environ.get("POSTGRES_PASSWORD"),
-        }
-        missing = [key for key, value in required.items() if not value]
-        if missing:
-            raise RuntimeError(
-                f"Missing required environment variable(s) for DB connection: "
-                f"{', '.join(missing)}."
-            )
-        return psycopg2.connect(
-            host=required["POSTGRES_HOST"],
-            port=required["POSTGRES_PORT"],
-            dbname=required["POSTGRES_DB"],
-            user=required["POSTGRES_USER"],
-            password=required["POSTGRES_PASSWORD"],
-        )
-
-    def close(self) -> None:
-        self._conn.close()
+    def __init__(self, pool: DBPool | None = None) -> None:
+        self._pool = pool or default_pool()
 
     # -- request path ------------------------------------------------------
 
@@ -152,23 +119,18 @@ class RouteSegmentRepository:
         if not keys:
             return {}
         try:
-            with self._lock:
-                with self._conn.cursor(
-                    cursor_factory=psycopg2.extras.RealDictCursor
-                ) as cur:
-                    cur.execute(
-                        _FETCH_SQL,
-                        {
-                            "graph_key": graph_key,
-                            "variant_key": variant_key,
-                            "keys": tuple(keys),
-                        },
-                    )
-                    rows = cur.fetchall()
-                self._conn.commit()
+            with self._pool.cursor() as cur:
+                cur.execute(
+                    _FETCH_SQL,
+                    {
+                        "graph_key": graph_key,
+                        "variant_key": variant_key,
+                        "keys": tuple(keys),
+                    },
+                )
+                rows = cur.fetchall()
         except Exception:
             logger.warning("route_cache: lookup failed — live routing.", exc_info=True)
-            self._rollback()
             return {}
         return {
             (row["stop_lo"], row["stop_hi"]): segment_from_db_row(row) for row in rows
@@ -188,8 +150,8 @@ class RouteSegmentRepository:
         correct leg, and a write hiccup must not fail the request it was
         meant to speed up next time."""
         try:
-            with self._lock:
-                with self._conn.cursor() as cur:
+            with self._pool.connection() as conn:
+                with conn.cursor() as cur:
                     cur.execute(
                         _STORE_SQL,
                         {
@@ -210,7 +172,7 @@ class RouteSegmentRepository:
                             "source": source,
                         },
                     )
-                self._conn.commit()
+                conn.commit()
         except Exception:
             logger.warning(
                 "route_cache: store for (%s, %s) failed — continuing.",
@@ -218,7 +180,6 @@ class RouteSegmentRepository:
                 stop_hi,
                 exc_info=True,
             )
-            self._rollback()
 
     # -- maintenance -------------------------------------------------------
 
@@ -231,8 +192,8 @@ class RouteSegmentRepository:
         are still valid for whatever graph comes back."""
         if import_date is None:
             return False
-        with self._lock:
-            with self._conn.cursor() as cur:
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
                 cur.execute(
                     "SELECT import_date FROM route_cache.graph_state "
                     "WHERE routing_graph_key = %s",
@@ -256,7 +217,7 @@ class RouteSegmentRepository:
                     "import_date = EXCLUDED.import_date, synced_at = now()",
                     (graph_key, import_date),
                 )
-            self._conn.commit()
+            conn.commit()
         if stored is not None and stored != import_date:
             logger.warning(
                 "route_cache [%s]: graph import changed (%s -> %s) — purged %d "
@@ -282,8 +243,10 @@ class RouteSegmentRepository:
                     f"Unexpected CSV header {header!r} in {path.name} "
                     f"(expected {CSV_COLUMNS})."
                 )
-        with self._lock:
-            with self._conn.cursor() as cur:
+        # Staging table is ON COMMIT DROP — the COPY and the INSERT must
+        # share one borrowed connection.
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
                 cur.execute(_STAGING_DDL)
                 with opener(path, "rt", encoding="utf-8") as fh:
                     cur.copy_expert(
@@ -293,7 +256,7 @@ class RouteSegmentRepository:
                     )
                 cur.execute(_LOAD_SQL, {"graph_key": graph_key, "source": source})
                 inserted = cur.rowcount
-            self._conn.commit()
+            conn.commit()
         logger.info(
             "route_cache [%s]: loaded %d new segment(s) from %s.",
             graph_key,
@@ -303,31 +266,21 @@ class RouteSegmentRepository:
         return inserted
 
     def purge(self, graph_key: str) -> int:
-        with self._lock:
-            with self._conn.cursor() as cur:
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
                 cur.execute(
                     "DELETE FROM route_cache.route_segments WHERE routing_graph_key = %s",
                     (graph_key,),
                 )
                 deleted = cur.rowcount
-            self._conn.commit()
+            conn.commit()
         return deleted
 
     def count(self, graph_key: str) -> int:
-        with self._lock:
-            with self._conn.cursor() as cur:
-                cur.execute(
-                    "SELECT COUNT(*) FROM route_cache.route_segments "
-                    "WHERE routing_graph_key = %s",
-                    (graph_key,),
-                )
-                n = cur.fetchone()[0]
-            self._conn.commit()
-        return n
-
-    def _rollback(self) -> None:
-        try:
-            with self._lock:
-                self._conn.rollback()
-        except Exception:
-            pass
+        with self._pool.cursor(cursor_factory=None) as cur:
+            cur.execute(
+                "SELECT COUNT(*) FROM route_cache.route_segments "
+                "WHERE routing_graph_key = %s",
+                (graph_key,),
+            )
+            return cur.fetchone()[0]

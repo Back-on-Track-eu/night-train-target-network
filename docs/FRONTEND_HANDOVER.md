@@ -3,9 +3,10 @@
 **Living document.** Backend changes that reach the API contract or change
 what the UI should show, in one place. Updated after each change.
 
-Last update 2026-09-06. Covers 2026-08-17 → 2026-09-06:
-`ROUTE_BUILDER_VERSION` 0.9.23 → 0.9.32, `CALC_VERSION` 0.9.22, plus the
-scenario restructure.
+Last update 2026-09-12. Covers 2026-08-17 → 2026-09-12:
+`ROUTE_BUILDER_VERSION` 0.9.23 → 0.9.33, `CALC_VERSION` 0.9.22 → 0.9.25,
+the scenario restructure, and the calc matrix (§12 — **start there if you
+are looking at the viewport rearrangement**).
 
 > **FYI 2026-09-06 — existing night trains all dashed.** Backend-only
 > bootstrap bug (the routing step of the ONTD load never ran on persisted
@@ -31,6 +32,7 @@ are mostly "this field now exists, show it if you want".
 | §7 | `uic_ref` can hold more than one code | no type change |
 | §8 | Routes now prefer electrified track | no type change, results move |
 | §9 | Expert timetable mode | new request block + 2 new fields |
+| §12 | Calc matrix, scenario `dimensions`, five summary KPIs, the viewport rearrangement | **implemented in `frontend/` on this branch — review, not to-do** |
 
 ---
 
@@ -273,7 +275,7 @@ present and correct: `gauges_mm` on stops, `composition_id`,
 | `track_gauge_mm` | inside above | §4 |
 | `timetable_warnings` | inside above | Derived quality annotations, e.g. `fixed_night_stretch_slow`. Empty for most trips. |
 | `hours` | `parkings[]` | §2, the layover |
-| `routing_graph_key` | `Scenario` | §5. Additive; harmless at runtime, but it belongs in the type. |
+| `routing_graph_key` | `Scenario` | §5. **Done on this branch (§12).** |
 
 Also worth a look, though not a type change: the `422 gauge_mismatch`
 handler (§4), and whether `provenance` on stops is worth surfacing (§1).
@@ -438,6 +440,529 @@ Stored proposals evaluated before this reseed are not comparable to ones
 evaluated after; gallery KPIs and compare views will show the shift. Nothing
 to change on your side beyond expecting different numbers — `CALC_VERSION`
 is unchanged because no formula changed, only parameters.
+
+---
+
+## 12. Calc matrix + viewport rearrangement — CALC 0.9.25, backend 0.4.0
+
+This one is different from the entries above: the frontend side is already
+on the branch (`ProposalResults.vue` and the zone components, see
+`frontend/README.md`), so what you have is a review and the `api.ts`
+ownership question, not a to-do. Everything below is what the backend now
+serves and what the branch does with it.
+
+### 12.1 `Scenario.dimensions` (GET /api/scenarios)
+
+Every scenario carries `dimensions: {network: "2026"|"2032", hsr_allowed,
+optimised_timetable} | null`, derived server-side from `scenario_key` +
+`routing_graph_key`. `frontend/src/lib/scenarioAxes.ts` maps the three
+switches of the new scenario card onto `scenario_id` and back; which
+switch is enabled is data-driven (a switch state without a scenario is
+disabled — today "optimised timetables" only exists with HSR on). Also
+now typed: `passage_charges_version`, `routing_graph_key` (closes the §6
+row).
+
+### 12.2 Five new summary KPIs (calc `summary`, GET /api/proposal/<id>, gallery rows)
+
+| Field | What |
+|---|---|
+| `net_eur_per_year` | **signed** annual net after the target margin — negative is the shortfall `subsidy_eur_per_year` already reports, positive is a surplus |
+| `operating_days_per_year` | from the seasonal schedule |
+| `train_km_per_year` | both directions, all pairs — the `per_train_km` divisor |
+| `available_place_km_per_year` | capacity place-km — the `per_available_place_km` divisor |
+| `sold_place_km_per_year` | from the OD loads; sold / available is the utilisation |
+
+The surplus rule the branch applies everywhere (`lib/compareKpis.ts`
+`subsidyDisplay`): a profitable route reads "none · surplus X M €", never a
+negative subsidy. Stored proposals read the five columns as 0 until
+Giovanni's `refresh_proposals.py` run — the branch treats 0/absent as
+"unknown" (a dash), not as a surplus.
+
+### 12.3 `POST /api/proposal/calc/matrix`
+
+Full contract in `backend/api/README.md`. The short version: stops + the
+`/calc` HOW fields, optional `composition_ids` / `scenario_ids` (null =
+default axes: 6 current scenarios × the whole catalog), `detail`
+`"summary"` (default) | `"full"`. With `Accept: application/x-ndjson` the
+response streams one record per line — `header`, then cells in completion
+order (baseline first), `shared` blocks before the first cell referencing
+them (full only), `done` last. Types: `MatrixRecord`, `MatrixHeader`,
+`MatrixCell` (`ok | error` union), `MatrixDocument` in `api.ts`.
+
+What the branch does with it (`composables/useCalcMatrix.ts`): after every
+successful calc `ProposalViewport` requests **two** grids for the route on
+screen, both as JSON documents, both keyed on route fingerprint + HOW fields
++ axes, both reset when the itinerary is edited:
+
+| grid | axes | detail | feeds |
+|---|---|---|---|
+| `gridMatrix` | offered scenarios × every composition | summary | zone B bars + combination grid, zone D supply table |
+| `scenarioMatrix` | offered scenarios × the composition on screen | **full** | zone A deltas — and a **scenario switch with no API call at all** |
+
+The full cells carry route, views and parameters, so switching scenario is
+served entirely from memory: `cellAsCalcResponse()` (`lib/calcMatrix.ts`)
+rebuilds the cell into the `/calc` response it is equivalent to and hands it
+to the existing `applyPlan()`, which commits the new scenario — so the stale
+flag never appears and nothing is recomputed. Composition switches still go
+through `/calc` (36 full evaluations would be megabytes), but land on a cache
+entry `gridMatrix` has already created. Error cells (a scenario this
+deployment cannot route) simply leave that switch position on the ordinary
+Recalculate path.
+
+The endpoint also speaks NDJSON and streams cells as they complete; the
+client asks for the document instead, so the call goes through `apiRequest`
+with the same classification, budget, health tracking and cancel semantics as
+every other request. `lib/calcMatrix.ts` keeps the reader (`readNdjson`,
+`foldMatrixRecords`) for the day a grid is big enough that progressive
+rendering beats one response.
+
+### 12.4 What is deliberately disabled
+
+* **Price & regulatory measures** (VAT exemption, energy-tax exemption, TAC
+  at direct cost): rendered as greyed toggles with a "coming soon" hint in
+  `ScenarioSwitches.vue`; `VITE_FEATURE_MEASURES=off` hides the row. The
+  backend does not model them — `docs/PARKED_WORK.md` §3.
+* **Fit to demand** column in the supply table: header present, not
+  selectable, "coming soon" — the demand stopgap gives every composition
+  the same utilisation.
+* **Infra 2032**: shown in the network picker, not selectable, with a
+  "coming soon" chip beside (not inside) the segmented control and an ⓘ
+  hover hint (`InfoHint.vue`). The routing instance and its graph cache run and the backend
+  evaluates against 2032 scenarios fine — the infrastructure data behind
+  them is simply not at publishable quality yet. Frontend-only:
+  `PREVIEW_NETWORKS` in `lib/scenarioAxes.ts`, overridable with
+  `VITE_PREVIEW_NETWORKS` (empty string = release everything). While a
+  network is held back, its scenarios are also left out of the comparison
+  bars/grid **and** the matrix request's `scenario_ids`, so the grid is
+  3 × 12 instead of 6 × 12 — releasing 2032 doubles the matrix cost, which
+  is the moment to re-check `CALC_MATRIX_WORKERS` (DEPLOY_HANDOVER §4c).
+
+### 12.5 For you specifically
+
+* `api.ts` — the additions are yours to review: `Scenario` (3 fields),
+  `ProposalCalcSummary` (route/financial/supply fields typed), the
+  `Matrix*` block. Nothing was renamed or removed.
+* `en.json` — new namespaces `proposal.compare`, `proposal.supply`,
+  `proposal.settings`, `proposal.breakdown`, `proposal.ownership`.
+* Retired: `ComputeInputsPanel.vue`, `EvaluationPanel.vue`,
+  `EffectPanel.vue`, `CompositionPanel.vue` (their pieces live on in
+  `ProposalResults.vue`, `MainKpiGrid.vue`, `SupplyTable.vue`,
+  `CostRevenueBreakdown.vue`; `ViewRow`, `CostBreakdownPanel`,
+  `CompositionFormation`, `CompositionDetailOverlay` unchanged).
+* This joins the pending `backend-dev → staging` contract batch; the
+  summary columns need Giovanni's refresh (DEPLOY_HANDOVER §4c) before the
+  supply figures show on stored proposals.
+
+## 13. Measure sets, the variant axis, and `GET /api/models` — CALC 0.9.26
+
+WP18 phase A. Additive: nothing is removed, nothing changes shape, no
+number moves. This lands ahead of the proposal family (phase B), which is
+what the variant axis exists for — §13 gets rewritten when that ships, so
+treat what follows as the pieces you can already type against, not as the
+final family contract.
+
+### 13.1 `GET /api/scenarios` gains two keys
+
+Beside the three existing groups the body now carries `measure_sets` and
+`scenario_variants`:
+
+```ts
+interface MeasureSet {
+  measure_set_id: number
+  key: string                 // 'none' is the only seeded one today
+  description: string | null
+  vat_exempt: boolean
+  energy_tax_exempt: boolean
+  tac_direct_cost: boolean
+  factors: { ticket_revenue: number; energy_cost: number; track_access: number }
+}
+
+interface ScenarioVariant {
+  scenario_variant_id: number
+  scenario_id: number
+  measure_set_id: number
+  // inlined from the variant's scenario, so a switch renders from this
+  // list alone — the same fields as the matrix axis entry you have:
+  scenario_key: string
+  scenario_name: string
+  is_current_base: boolean
+  routing_graph_key: string
+  dimensions: ScenarioDimensions | null
+}
+```
+
+A **scenario** pins what the infrastructure is; a **measure set** says what
+the state does about it (VAT, energy tax, direct-cost track access); a
+**scenario variant** is the flattened cross product — one value instead of
+two. One measure set is seeded (`none`, every factor `1.0`), so today there
+is exactly one variant per scenario and `scenario_variant_id` is
+effectively an alias for `scenario_id`. Do not rely on that: it stops
+being true with WP17, which is the reason the id exists at all.
+
+What this means now: `lib/scenarioAxes.ts` can start mapping the three
+switches onto `scenario_variant_id` instead of `scenario_id`, and the
+family endpoint (phase B) addresses members by that id. Nothing forces the
+change yet.
+
+### 13.2 `GET /api/models` — new
+
+The `models` block every calc response inlines under `evaluation.models`
+is now also its own endpoint:
+
+```ts
+GET /api/models -> { models: Record<string, ModelEntry> }
+
+interface ModelEntry {
+  version: string
+  description: string
+  formulas?: Record<string, Formula>   // route_builder, energy, evaluation
+  factors?: Record<string, unknown>    // emissions
+}
+```
+
+Same content, same formula keys the breakdown rows already map to
+(`lib/factorFeedback.ts`). It is static — the response carries
+`Cache-Control: max-age=3600` — so fetch it once per session.
+
+Why it matters before phase B: a family of 72 members would otherwise
+carry ~26 KB of identical registry per member. Phase B drops `models` (and
+`evaluation.input.parameters`) from the per-member payload entirely, so a
+`useModels()` composable fetched once is the shape to move to. The calc
+response still inlines it today; nothing breaks if you wait.
+
+### 13.3 CALC 0.9.26 — no value changes
+
+`evaluate_route()` now takes a measure set and records it. Every factor is
+1.0 under `none`, so every KPI, breakdown and summary is byte-identical to
+0.9.25. The bump is for the signature. If a number moves after this
+deploy, it is not this change — tell me.
+
+### 13.4 `api.ts`
+
+Additive only: `MeasureSet`, `ScenarioVariant`, the two new arrays on the
+scenario list response, and `ModelsResponse`. No existing type changes.
+
+---
+
+## 14. `auto_stop_addition: "add"` is gone — ROUTE_BUILDER 0.9.34
+
+WP18 phase B1. The mode where the backend added stops of its own is
+removed. `auto_stop_addition` is now `"off" | "suggest"`, the API-boundary
+default moved from `"add"` to `"off"`, and posting `"add"` gets a 400 like
+any unknown mode.
+
+**You are almost certainly unaffected.** `requestCalc` /
+`recomputeWithSelection` only ever send `"suggest"` then `"off"`, so the
+running client never used the removed mode and never relied on the old
+default. What to do:
+
+- `types/api.ts`: narrow the union to `'off' | 'suggest'`.
+- Anywhere you rely on the default by omitting the field: it now means
+  "build exactly my stops" instead of "add what you think fits". That is
+  the behaviour the builder already wanted; nothing to change, but it is
+  the one silent difference.
+- `Stop.auto_added` stays in the response and is now always `false`. Keep
+  reading it: proposals published before 0.9.34 are stored with
+  auto-added stops and still come back with the flag set. If any UI
+  renders those stops differently, that rendering is still correct for
+  old proposals and simply never fires for new ones.
+
+Suggestions are unchanged: same candidate search, same `added_time_min`,
+same `suggested_stops` block. What changed is that accepting one is now
+the only way a catalog stop joins a route — which is what the builder's
+suggestion flow already does.
+
+Why: a route the user did not ask for is not the user's route, and a
+proposal family (phase B2) compares one stop list across every scenario
+and composition, which it cannot do if each member may pick its own stops
+within its own detour budget.
+
+---
+
+## 15. The proposal family — `POST /api/proposal/family` (WP18 phase B2a)
+
+Additive. `/calc` and `/calc/matrix` still work exactly as before; B2b
+removes them, so this is the endpoint to build zone C–E on now. Full
+contract in `backend/api/README.md` → Proposal Family; what follows is
+the client-side shape of it.
+
+### 15.1 One POST, then no requests for switching
+
+`POST /api/proposal/family` with the `/calc` body minus `composition_id`
+and `scenario_id` (those become axes; both optional, default = every
+current scenario variant × the whole catalog), plus an optional
+`presented`. Back comes one document — ≈400 KB gzipped for the full
+6 × 12 — with every member's summary, one compact route per
+(scenario, composition), and the geometry pool. Switching scenario
+variant or composition in the UI is a lookup:
+
+```ts
+const member = doc.members.find(m => m.scenario_variant_id === sv && m.composition_id === comp)
+const route  = doc.routes[member.route_ref]        // compact route
+const coords = doc.geometries[segment.geometry_id] // per segment
+```
+
+`useCalcMatrix` / `lib/calcMatrix.ts` map onto this almost 1:1 —
+`gridMatrix` is `members[].summary`, `scenarioMatrix` is
+`routes[route_ref]`. The plan's `lib/proposalFamily.ts` (`memberKey`,
+`routeFor(document, member)`, `byScenarioVariant`, `byComposition`,
+`baselineMember`) is the shape.
+
+### 15.2 The compact route — the one change with surface
+
+`routes[ref]` is `route_to_dict()`'s shape with three edits, and
+`adaptRoute()` in `ProposalViewport.vue` has to know about them:
+
+- **stops once per trip**: `trip.stops[]` in travel order; a segment has
+  `from` and `to` (indices into `stops`), not `from_stop`/`to_stop`.
+- **geometry by reference**: `segment.geometry_id` → `doc.geometries`.
+- **gone**: `trip_pairs[].composition` (use `GET /api/params/compositions`
+  by `composition_id`), `od_pairs`, `track_infrastructure`, route-level
+  `geometries`.
+
+Everything else — `schedule`, `general_parameters` incl.
+`timetable_warnings`, `parkings`, `shuntings`, ids — is verbatim.
+
+### 15.3 Views on demand
+
+`GET …/members/<sv>/<comp>/views` → `{ views }`, the same six views
+`/calc` returns under `evaluation.views` — and nothing else. Parameters
+are `GET /api/params/*` for that variant's scenario; formulas are
+`GET /api/models` (§13.2). Open zone E → fetch; cache per family key on
+the client. ≈350 ms first time, a member-cache hit after.
+
+### 15.4 Errors and the 2032 case
+
+A member the backend cannot compute is an **error member**, not a failed
+request: `{ status: 'error', error: 'routing_graph_not_configured' | 'routing_error' | 'gauge_mismatch' | 'domain_error', message }`.
+On a one-instance stack every `infra_2032` member is one. The document is
+still 200; `stats.n_ok / n_error` say how many.
+
+### 15.5 Keys and caching
+
+`family_key` identifies the document; `GET /api/proposal/family/<key>`
+returns it again until its TTL (3 h) passes, then 404 — POST again with
+the same body, the key is the same. `presented` is not in the key, so
+changing it never rebuilds. Expert-timetable edits, mode changes and a
+new stop list are new keys.
+
+### 15.6 `api.ts`
+
+Additive: `FamilyRequest`, `FamilyDocument`, `FamilyMember` (ok | error),
+`CompactRoute` / `CompactTrip` / `CompactSegment`, `FamilyViewsResponse`.
+`Matrix*` and `ProposalCalcResponse` stay until B2b.
+
+---
+
+## 16. The cutover — `/calc` and `/calc/matrix` are gone (backend 0.5.0, WP18 B2b)
+
+This is the breaking one. Everything §15 described is now the only way to
+compute, and this section is what changes for a client that still speaks
+`/calc`. It goes to staging together with your phase C; until then a
+client built against 0.4.x cannot compute against 0.5.0.
+
+### 16.1 Removed
+
+- `POST /api/proposal/calc` → 404. `useProposalCalc` / `requestCalc` /
+  `recomputeWithSelection` post `POST /api/proposal/family` (§15.1) and
+  read the presented member from the document.
+- `POST /api/proposal/calc/matrix` → 404. `useCalcMatrix`,
+  `lib/calcMatrix.ts` (the NDJSON reader and the fold) and the `Matrix*`
+  types are dead code; the document IS the matrix.
+- `ProposalCalcResponse`, `MatrixDocument`, `MatrixCell`, and
+  `evaluation.models` / `evaluation.input` anywhere.
+
+### 16.2 What `evaluation` carries now — views only
+
+Everywhere a member appears — `GET …/views`, `GET /api/proposal/<id>`,
+the publish response, both sides of `POST /api/proposals/compare` —
+`evaluation` is `{ views }`. One exception since CALC 0.9.28: the member
+views endpoint answers `{ views, operations }` — the physical side of the
+same evaluation, served on demand and never persisted (§18). The models registry is `GET /api/models`
+(§13.2), the parameters a member was priced from are `GET /api/params/*`
+for its scenario. `lib/factorFeedback.ts` and anything reading
+`evaluation.input.parameters` for provenance move to those two.
+
+`GET /api/proposal/<id>` keeps the **full** route shape (not the compact
+one) — loading a stored proposal is unchanged apart from `evaluation`;
+the family POST you make next carries the compact route for switching.
+
+### 16.3 Errors are members, not responses
+
+`/calc` answered a failed compute with 422 (`gauge_mismatch`,
+`routing_error`, `domain_error`) or 503 (`routing_graph_not_configured`).
+The family answers **200** and the member says so:
+
+```ts
+{ status: 'error', error: 'gauge_mismatch', message: '…', conflicting_stops?: {...} }
+```
+
+`handleCalcError` becomes a check on the presented member's `status`; the
+codes and `conflicting_stops` are the same, so the stop-marking logic
+keeps working. Validation errors (a bad HOW field, an unknown axis id,
+`family_too_large`) are still 400. The views endpoint still answers
+422/503 with the same codes when a member fails there.
+
+### 16.4 Publish: `mode: "copy"`
+
+`"copy"` is `"new"` with `based_on_proposal_id` **required** — the
+"copy to my proposals" action on someone else's proposal. `compute_request`
+is the family document's `request` plus the presented member's
+`composition_id` (and `scenario_id`, which must still be the base). The
+response shape is unchanged apart from §16.2.
+
+### 16.5 `api.ts`
+
+- Remove: `ProposalCalcRequest`/`Response`, every `Matrix*` type,
+  `EvaluationModels`, `EvaluationInput`.
+- `EvaluationSection` → `{ views: EvaluationViews }`.
+- `PublishRequest.mode` → `'new' | 'overwrite' | 'copy'`.
+- `FamilyMember` is a union: `{ status: 'ok', route_ref, summary } |
+  { status: 'error', error, message, conflicting_stops? }`.
+
+### 16.6 Checklist for phase C
+
+1. `requestCalc` → family POST; presented member → zone A/B/D; compact
+   route through `adaptRoute()` (§15.2).
+2. Scenario/composition switches read the document; no request.
+3. Zone E → `GET …/views`, cached per family key on the client.
+4. `handleCalcError` → member status.
+5. Models and parameters → `GET /api/models`, `GET /api/params/*`.
+6. Delete `useCalcMatrix`, `lib/calcMatrix.ts`, the `Matrix*` types.
+7. `vite build`, not only `vue-tsc`.
+
+---
+
+## 17. Phase C — done (frontend on the family)
+
+§15 and §16 were written as a handover; the work was then done in-house, so
+this section records what landed and where, for whoever reads the client
+next.
+
+- **One composable, `composables/useProposalFamily.ts`**, replaces the two
+  `useCalcMatrix` instances. Same query surface the results components used
+  (`okMember`/`byScenario`/`byComposition`/`cells`/`status`/`failure`),
+  keyed by scenario id as before, plus `views(sv, comp)` — fetched on demand
+  and cached per family.
+- **The full route stays the viewport's internal shape.**
+  `lib/proposalFamily.ts::inflateRoute()` rebuilds `from_stop`/`to_stop` and
+  `geometries[]` from the compact route and the pool (unit-tested), so
+  `adaptRoute`, the map, the itinerary and the expert reconciliation are
+  untouched. `routeFacts()` (share links) now reads countries from the legs'
+  `country_distance_shares`, since `track_infrastructure` is provenance the
+  document does not carry.
+- **`requestCalc` → `requestFamily` + `memberPlanFor`.** The family request
+  names the offered scenarios' variants (`store.variantFor`), omits the
+  composition axis (whole catalog) and presents the selected member. A
+  presented scenario the family does not cover (a preview network) falls
+  back to the backend's default rather than 400.
+- **Both switches are lookups.** Scenario and composition watchers apply
+  the member from the document when it is there; `paramsStale` and
+  Recalculate remain for expert edits and for members the document lacks.
+- **Zone E loads after the document.** `EvaluationResponse.views` is
+  `EvaluationViews | null`; `CostRevenueBreakdown` shows a skeleton while
+  null and takes its formulas from `store.models` (`GET /api/models`,
+  fetched at startup with the other reference data).
+- **Errors are members.** `lib/proposalFamily.ts::memberFailure()` maps an
+  error member to the `ApiFailure` a 422/503 used to be, so
+  `calcFailure`/`calcFailureMsg` and their copy paths are unchanged.
+- **Publish `copy`.** Evaluating someone else's proposal publishes with
+  `mode: 'copy'` and `based_on_proposal_id`.
+- **A loaded proposal** hydrates from `GET /api/proposal/<id>` as before
+  (full route, views inline) and builds its family in the background.
+- **Removed:** `composables/useCalcMatrix.ts`, `lib/calcMatrix.ts` (+ test),
+  `proposalsApi.calcMatrix`, `ProposalCalcResponse`, every `Matrix*` type,
+  `EvaluationInput`/`EvaluationParameters`.
+- **`api.ts` audit** covered this branch's backend: `ScenariosResponse`
+  gains `measure_sets`/`scenario_variants`, `ModelsResponse` and the family
+  types are new, `PublishRequest.mode` gains `'copy'`, `auto_stop_addition`
+  is `'off' | 'suggest'`. The `backend-dev` coordination batch
+  (`per_trip_km → per_train_km`, `comp_id → composition_id`,
+  `fix_overhead_eur`, …) is a separate pass when that branch merges.
+
+Gate: `vue-tsc`, `eslint`, `prettier --check`, `vitest` (224) and
+`vite build` — all green.
+
+---
+
+## 18. Catering, and `operations` per trip — CALC 0.9.29
+
+Two additive changes on the `backend-dev` branch, both for the Details
+card (zone D). The request gains one optional signed field,
+`catering_eur_per_pax`; `Breakdown.revenue` gains a second leaf,
+`catering_contribution_eur`; the summary row gains that leaf plus
+`passengers_per_year`; and `operations.trip_pairs[]` gains a per-direction
+`trips[]` and a `fleet` basis block. `FAMILY_DOCUMENT_FORMAT` is 4, so no
+cached family document survives the deploy. `ROUTE_BUILDER_VERSION` goes to
+0.9.36 with **no output change at all** — a lint cleanup touched one import
+in a gated file, and the gate demands a bump; the changelog entry records
+that every number is identical.
+
+Nothing is renamed or removed, so nothing breaks on your side before you
+choose to read the new keys. Two existing behaviours do move, and both are
+worth knowing:
+
+* **`total_revenue_eur` is no longer equal to `ticket_revenue_eur`.**
+  Anything that reconstructs revenue by hand, or labels the total "ticket
+  revenue", needs the second leaf. `net_eur` already includes it.
+* **`operations` was never views-only** — it has been on the member views
+  response since 0.9.28 and now carries more. If `api.ts` types that
+  endpoint as `{ views }`, it is wrong today, not just after this change.
+
+Full shapes, the exact JSON, and the three places the sketch and the wire
+deliberately differ: **`docs/FRONTEND_HANDOVER_SUPPLY_SETTINGS_ADDENDUM.md`**,
+which supplements `docs/FRONTEND_HANDOVER_SUPPLY_SETTINGS.md` (revision 2)
+and its design reference `docs/design/2026-09-12_details-sketch.html`.
+
+This grows the pending `backend-dev` coordination batch by the `api.ts`
+entries listed in §5 of that addendum.
+
+---
+
+## 19. 38 new stops, sourced station charges, and "no charge" ≠ "default" (2026-09-13)
+
+Data only on `backend-dev`, no shape change — but two things the picker
+and the charges panel should know:
+
+* **38 new stops** appear in `/api/params/StopInfrastructures` with the
+  usual `provenance` labels (Balaton and Alpine tourism, Greek and Balkan
+  corridors, ferry and border stations, Stratford and Ebbsfleet). Three
+  stops carry `infra_versions: "infra-2032"` only (Ülemiste, Shkodër,
+  Stuttgart Flughafen/Messe) and still seed into every snapshot, because
+  the seed does not consume that column yet — a visual cue is right, a
+  filter is not.
+* **`stop_charge_eur.value` can now be `0.0` with `is_default: false` and a
+  `source`.** That is a sourced "the infrastructure manager levies no
+  station charge" (Bulgaria, Denmark, Sweden, Ukraine), not a default. The
+  charges panel in the screenshot of 2026-09-13 renders `default` from the
+  flag, so it already distinguishes them; the label for this case should
+  read "no charge levied", not "0 €".
+
+Values move a lot: French termini price at 586.35 EUR per call, German
+Preisklasse 1 stations at 60–110 EUR. Nothing to change in `api.ts`.
+
+---
+
+## 20. Mass-based station charges — CALC 0.9.32, `FAMILY_DOCUMENT_FORMAT` 6
+
+Czechia prices a stop per tonne of train mass, so a Czech stop's charge
+depends on the composition. Two additive keys:
+
+* `/api/params/StopInfrastructures` → `stops[].stop_charge_eur` gains
+  **`per_tonne_eur: number | null`**. Non-null only where
+  `basis === "per_call_per_tonne"`; there `value` is the fixed part (an
+  explicit `0.00`) and the actual charge is `value + per_tonne_eur × coach
+  mass`. The picker cannot show a single €/stop for these without a
+  composition — "0.0033 €/t" or "per tonne" is the honest label.
+* member views → `operations.infrastructure.trips[].stations.calls[]`
+  gains **`per_tonne: { eur_per_t: number, train_mass_t: number } | null`**.
+  `eur` is already the multiplied figure; the object is there so the panel
+  can show "0.0033 €/t × 412 t" beside it. `category` carries the Czech
+  station category as before.
+
+`api.ts`: `StopCharge.per_tonne_eur` and `StationCall.per_tonne` — both go
+onto the pending `backend-dev` coordination batch. `FAMILY_DOCUMENT_FORMAT`
+6 means every cached document is rebuilt on the deploy.
 
 ---
 

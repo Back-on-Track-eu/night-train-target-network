@@ -656,7 +656,7 @@ columns (route metrics, financial KPIs, placeholder demand KPIs,
 `co2_g_per_pax_km`) as a pure function over the exact dicts
 `POST /api/proposal/calc` returns — no DB, no domain objects. One
 function, every consumer: the calc response's `summary` block
-(`api/helpers/proposal_compute.py`), the compare sides, and the
+(`api/helpers/member_compute.py`), the compare sides, and the
 publish-time `proposal_summaries` write
 (`adapters/proposal/projection.py: build_summary_db_row()`, which adds
 the DB-only `geom_simplified`). Moved here from

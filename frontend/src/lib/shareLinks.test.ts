@@ -13,11 +13,14 @@ function route(over: Partial<ShareRouteInput> = {}): ShareRouteInput {
       {
         outbound: {
           general_parameters: { trip_km: 1283.7 },
-          segments: [{}, {}, {}],
+          segments: [
+            { country_distance_shares: { DE: 1 } },
+            { country_distance_shares: { DE: 0.4, FR: 0.6 } },
+            { country_distance_shares: { FR: 1 } },
+          ],
         },
       },
     ],
-    track_infrastructure: [{ country_code: 'DE' }, { country_code: 'FR' }],
     ...over,
   }
 }
