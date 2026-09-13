@@ -1020,7 +1020,8 @@
   },
   "header": {
     "logoAlt": "Night Train Target Network",
-    "switchLanguageAria": "Switch language to {language}"
+    "switchLanguageAria": "Switch language to {language}",
+    "comingSoon": "Coming soon"
   },
   "auth": {
     "completed": "Evaluation completed",

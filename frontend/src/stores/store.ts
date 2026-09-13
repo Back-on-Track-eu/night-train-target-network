@@ -19,6 +19,7 @@ import type {
 } from '@/types/api'
 import { readAuthCookie, writeAuthCookie, clearAuthCookie } from '@/lib/authCookie'
 import { readLocale, writeLocale, type Locale } from '@/lib/localeStorage'
+import { availableLanguages } from '@/lib/uiLanguages'
 import { i18n } from '@/i18n'
 import type { GallerySearchSeed } from '@/lib/proposalPrefill'
 import { apiRequest } from '@/lib/apiClient'
@@ -364,11 +365,12 @@ export const useStore = defineStore('store', () => {
   // (App.vue), alongside restoreAuth().
   function restoreLocale(): void {
     const stored = readLocale()
-    // Multi-language is disabled for now — the app runs in English only, even
-    // if an earlier session persisted a different choice. The
-    // setLocale/writeLocale machinery stays for when the LanguageSwitch is
-    // re-enabled; drop this guard then.
-    if (stored === 'en') locale.value = stored
+    // The language bar advertises more languages than we ship strings for, so a
+    // persisted choice is only honoured while its locale file exists — see
+    // lib/uiLanguages.ts, the single source of truth for that.
+    if (stored && availableLanguages().some((lang) => lang.code === stored)) {
+      locale.value = stored
+    }
   }
 
   return {
