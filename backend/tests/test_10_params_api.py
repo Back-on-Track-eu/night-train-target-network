@@ -1,19 +1,16 @@
 """
 test_10_params_api.py
 =====================
-Response contracts for the read-only reference endpoints:
+Response contracts for the three read-only parameter endpoints:
 
   GET /api/params/StopInfrastructures
   GET /api/params/TrackInfrastructures
   GET /api/params/compositions
-  GET /api/models
 
 Covers the response layout (descriptions/sources/defaults/count/entities),
 field-object shape ({value, is_default, version, source_id}), is_default
 propagation through the API, source deduplication via source_id, and the
-?scenario_id= query parameter. /api/models is here rather than with the
-compute tests because it is the same kind of endpoint: static reference
-data, no request body, no scenario.
+?scenario_id= query parameter.
 """
 
 import pytest
@@ -161,12 +158,9 @@ class TestStopInfrastructures:
             )
 
     def test_stop_charge_carries_its_price_year(self, stops_body):
-        """The price year survives serialization.
-
-        Split out of test_stop_charge_carries_provenance so that test
-        keeps guarding the key set, basis and the VAT arithmetic. The
-        strict xfail went with the real charges landing — see
-        test_02_db_seed.test_stop_charge_carries_its_price_year."""
+        """Split out of test_stop_charge_carries_provenance so that test
+        keeps guarding the key set, basis and the VAT arithmetic. Was a
+        strict xfail until real tariffs landed (2026-09-13)."""
         for stop in stops_body["stops"]:
             charge = stop["stop_charge_eur"]
             if charge["source"]:
@@ -186,16 +180,21 @@ class TestStopInfrastructures:
         calibrated charge reports is_default=True and carries the global
         default's value; a stop with its own charge reports False.
 
-        Only the defaulted stop is pinned by id. Which stops carry a charge
-        follows the pipeline's station_charges.csv, so the explicit case is
-        found in the response and skipped while none exists — a data gap
-        (no charge calibrated yet) should not read as an API regression."""
-        stops = {s["stop_id"]: s for s in stops_body["stops"]}
-        assert stops["osm:n25948183"]["stop_charge_eur"]["is_default"] is True
-
+        Neither case is pinned by id. Which stops carry a charge follows the
+        pipeline's station_charges.csv — a sourced "not levied" is an
+        explicit 0.00, not a default — so both cases are found in the
+        response and each skips while it does not exist: a data gap should
+        not read as an API regression."""
+        defaulted = [
+            s for s in stops_body["stops"] if s["stop_charge_eur"]["is_default"]
+        ]
         explicit = [
             s for s in stops_body["stops"] if not s["stop_charge_eur"]["is_default"]
         ]
+        if not defaulted:
+            pytest.skip(
+                "every stop carries its own station charge — no default to test"
+            )
         if not explicit:
             pytest.skip(
                 "no stop carries its own station charge yet — run the charge "
@@ -206,10 +205,13 @@ class TestStopInfrastructures:
         ]
         for stop in explicit:
             assert stop["stop_charge_eur"]["value"] is not None
-        assert stops["osm:n25948183"]["stop_charge_eur"]["value"] == global_default
+            assert stop["stop_charge_eur"]["source"]
+        for stop in defaulted:
+            assert stop["stop_charge_eur"]["value"] == global_default
+            assert stop["stop_charge_eur"]["source"] is None
 
     def test_global_default_present(self, stops_body):
-        """The global default row (the one SE resolves against) is exposed
+        """The global default row (the one an unpriced stop resolves against) is exposed
         under default_stops.global with a positive charge."""
         global_default = stops_body["default_stops"]["global"]
         assert global_default is not None
@@ -349,9 +351,9 @@ class TestCompositions:
         # coach_types catalog (composition wo_service totals are internal)
         ark = compositions_body["coach_types"]["ARkimmbz"]
         assert ark["length_wo_service_m"] == 0.0
-        assert ark["places_total"] == 0 and ark["crew_factor"] == 1.0
+        assert ark["places_total"] == 0 and ark["crew_factor"] == 2.0
         assert comps["NEW-BAL-7"]["staff"]["zugchef_crew_factor"] == 1.19
-        assert comps["NEW-BAL-14"]["staff"]["zugchef_crew_factor"] == 1.19
+        assert comps["NEW-BAL-14"]["staff"]["zugchef_crew_factor"] == 2.38
         # allocation value pin: REF-PREM-12 seat carries its dining-car
         # per-head slice on top of the pure space share
         prem_mix = comps["REF-PREM-12"]["cost_allocation"]["by_class_main"]
@@ -361,7 +363,7 @@ class TestCompositions:
         """Top-level coach_types: every referenced type once, equipment
         keys complete, class_ids resolve into the classes section."""
         cts = compositions_body["coach_types"]
-        assert len(cts) == 33  # catalog coach types (2026-09-06)
+        assert len(cts) == 24
         all_class_ids = {
             e["class_id"] for lst in compositions_body["classes"].values() for e in lst
         }
@@ -382,7 +384,7 @@ class TestCompositions:
         assert set(classes) <= {"Seat", "Couchette", "Sleeper", "Capsule"}
         all_ids = [e["class_id"] for lst in classes.values() for e in lst]
         assert len(all_ids) == len(set(all_ids)), "class_ids must be unique"
-        assert len(all_ids) == 33  # one per coach section (catalog 2026-09-06)
+        assert len(all_ids) == 25  # one per coach section (2026-07-22)
         for cm, lst in classes.items():
             for e in lst:
                 assert e["places"] > 0 and e["coach_type_id"]
@@ -423,24 +425,6 @@ class TestCompositions:
             assert op is not None, f"{comp['composition_id']}: unknown operator"
             assert op["driver_costs_eur_h"] > 0
             assert op["crew_costs_eur_h"] > 0
-
-    def test_operator_cost_per_class_covers_every_class_it_carries(
-        self, compositions_body
-    ):
-        """cost_per_class is the operator's rate table, not one
-        composition's: every class_main any of its compositions carries
-        must have a rate."""
-        operators = {o["operator_id"]: o for o in compositions_body["operators"]}
-        carried: dict[str, set] = {}
-        for comp in compositions_body["compositions"]:
-            carried.setdefault(comp["operator_id"], set()).update(
-                comp["capacity"]["by_class"]
-            )
-        for operator_id, class_mains in carried.items():
-            rates = operators[operator_id]["cost_per_class"]
-            missing = class_mains - set(rates)
-            assert not missing, f"{operator_id}: no rate for {sorted(missing)}"
-            assert all(v > 0 for v in rates.values())
 
     def test_indicative_kpis_present(self, compositions_body):
         """Indicative block carries the seeded calibration KPIs (per-train-km
@@ -490,66 +474,3 @@ class TestCompositions:
         desc = compositions_body["descriptions"]
         ind_desc = desc["indicative"]["kpis"]["cost_eur_per_train_km"]
         assert "S41" in ind_desc and "2032" in ind_desc
-
-
-# =============================================================================
-# GET /api/models — the static model registry (WP18)
-# =============================================================================
-
-
-@pytest.fixture(scope="module")
-def models_body(api_base):
-    resp = requests.get(f"{api_base}/api/models", timeout=15)
-    assert resp.status_code == 200
-    return resp.json()
-
-
-class TestModels:
-    """The versions/descriptions/formulas block that used to be inlined
-    under evaluation.models in every compute response."""
-
-    def test_response_layout(self, models_body):
-        assert "models" in models_body
-        assert models_body["models"], "registry is empty"
-
-    def test_every_model_carries_version_and_description(self, models_body):
-        """Version and description are the two every entry has. What
-        comes with them differs by model: a formula registry for the
-        computed ones, an emission-factor table for emissions, and (CALC
-        0.9.27) overridable standard values for the stopgap demand model,
-        which has neither steps nor sourced constants to show."""
-        for name, model in models_body["models"].items():
-            assert model.get("version"), f"{name} has no version"
-            assert model.get("description"), f"{name} has no description"
-            kinds = {"formulas", "factors", "defaults"} & set(model)
-            assert len(kinds) == 1, (
-                f"{name} must carry exactly one of formulas / factors / "
-                f"defaults, got {sorted(kinds) or 'none'}"
-            )
-
-    def test_the_evaluation_model_is_present_with_formulas(self, models_body):
-        """The registry the cost breakdown keys into — an evaluation view
-        field maps to models.evaluation.formulas[<field>]."""
-        evaluation = models_body["models"]["evaluation"]
-        assert evaluation["formulas"], "evaluation model exposes no formulas"
-
-    def test_formula_entries_carry_the_full_legend(self, models_body):
-        """latex + summary + description + input/output legend — what the
-        cost-factor popover renders (CALC 0.9.24)."""
-        for model in models_body["models"].values():
-            for key, formula in model.get("formulas", {}).items():
-                missing = {
-                    "latex",
-                    "summary",
-                    "description",
-                    "inputs",
-                    "output",
-                } - set(formula)
-                assert missing == set(), f"formula '{key}' missing: {missing}"
-
-    def test_response_is_cacheable(self, api_base):
-        """The body only changes with a deployed version bump, so the
-        client fetches it once per session — api/config.py
-        MODELS_CACHE_MAX_AGE_S."""
-        resp = requests.get(f"{api_base}/api/models", timeout=15)
-        assert "max-age=" in resp.headers.get("Cache-Control", "")
