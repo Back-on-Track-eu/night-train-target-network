@@ -24,7 +24,7 @@ folder — that upload is the commit.
 | `charge_excl_vat_eur` | yes | The charge for **one call by one night train**, **net of VAT**, in EUR, `.` as decimal separator. This is what the cost model prices from. Empty means the country levies no station charge — see below |
 | `vat_rate_per` | yes | The VAT rate applying to the charge, as a percentage: `19.0`, not `0.19`. `0.0` where the service is exempt |
 | `charge_incl_vat_eur` | yes | The same charge **including VAT**, so both figures are visible side by side and can be compared against whichever the document printed |
-| `basis` | yes | What the figure is per. `per_call` unless the tariff genuinely differs; anything else must be explained in `note` |
+| `basis` | yes | What the figure is per. `per_call` for a fixed fee per stop; `per_call_per_tonne` where the tariff is mass-based (Czechia) — then the three money columns hold the **rate per tonne** of coach mass and the cost model multiplies it by the composition's mass. Nothing else is accepted; a tariff that fits neither is a modelling question, not a row |
 | `price_basis_year` | yes | The year the published figure applies to, e.g. `2026`. Escalation to 2032 happens later, in the notebook — never here |
 | `tariff_class` | no | The country's own category for the station (`Preisklasse 2`, `tipologia A`, …). Explains why two stations differ. A label, **60 characters at most** — the catalog column is that wide; the explanation belongs in `note` |
 | `source_ref` | yes | `source_id` of the document in `01_source_extraction.ipynb`. Every row must cite one. **40 characters at most** |
