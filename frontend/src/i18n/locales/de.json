@@ -1,0 +1,478 @@
+{
+  "errors": {
+    "offline": "Es besteht offenbar keine Internetverbindung. Bitte die Verbindung prüfen und erneut versuchen.",
+    "network": "Der Server war nicht erreichbar. Bitte in einem Moment erneut versuchen.",
+    "timeout": "Zeitüberschreitung bei der Serveranfrage. Bitte erneut versuchen.",
+    "stillWorking": "Das dauert länger als gewöhnlich. Unsere Server scheinen gerade etwas ausgelastet zu sein.",
+    "highDemand": "Der Andrang ist gerade hoch, deshalb dauert es länger als gewöhnlich.",
+    "server": "Auf unserer Seite ist etwas schiefgelaufen. Bitte in einem Moment erneut versuchen. Unser Team wurde über einen möglichen Fehler informiert.",
+    "unavailable": "Der Dienst ist vorübergehend nicht verfügbar. Bitte in einigen Minuten erneut versuchen.",
+    "malformed": "Die Sitzung ist möglicherweise abgelaufen. Zum Fortfahren die Seite neu laden.",
+    "unauthorized": "Zum Fortfahren bitte erneut anmelden.",
+    "forbidden": "Fehlende Berechtigung",
+    "notFound": "Das Gesuchte konnte offenbar nicht gefunden werden.",
+    "badInput": "Die Anfrage konnte nicht verarbeitet werden. Bitte die Eingabe prüfen.",
+    "retry": "Erneut versuchen",
+    "cancel": "Abbrechen",
+    "reload": "Seite neu laden",
+    "degraded": {
+      "title": "Verbindungsprobleme",
+      "body": "Mehrere Anfragen an den Server sind fehlgeschlagen. Möglicherweise ist der Andrang gerade hoch, einzelne Daten können fehlen oder veraltet sein."
+    },
+    "stopsUnavailable": "Die Bahnhofsliste konnte nicht geladen werden.",
+    "stopsEmpty": "Derzeit sind keine Bahnhöfe verfügbar.",
+    "compositionsUnavailable": "Die Zugbildungen konnten nicht geladen werden.",
+    "scenariosUnavailable": "Szenarien konnten nicht geladen werden, gerechnet wird gegen die Live-Basis.",
+    "calcFailed": "Diese Strecke konnte nicht ausgewertet werden.",
+    "proposalsLoadFailed": "Die Vorschläge konnten nicht geladen werden.",
+    "proposalLoadFailed": "Dieser Vorschlag konnte nicht geladen werden.",
+    "publishFailed": "Der Vorschlag konnte nicht gespeichert werden. Bitte erneut versuchen.",
+    "likeFailed": "Der Like konnte nicht gespeichert werden. Bitte erneut versuchen.",
+    "commentsLoadFailed": "Die Diskussion konnte nicht geladen werden.",
+    "commentFailed": "Der Kommentar konnte nicht gespeichert werden. Bitte erneut versuchen.",
+    "authGuestFailed": "Die Gast-Sitzung konnte nicht gestartet werden. Bitte erneut versuchen.",
+    "slug": {
+      "invalid_code": "Dieser Code ist ungültig oder abgelaufen. Bitte einen neuen anfordern.",
+      "rate_limited": "Zu viele Anfragen. Bitte einen Moment warten und erneut versuchen.",
+      "data_not_loaded": "Der Dienst startet noch. Bitte in einer Minute erneut versuchen.",
+      "email_failed": "Der Code konnte nicht gesendet werden. Bitte erneut versuchen.",
+      "scenario_not_base": "Dieses Szenario lässt sich nicht als Vorschlag speichern."
+    }
+  },
+  "proposal": {
+    "heading": "Na, wie sieht Deine Traum-Nachtzugverbindung aus?",
+    "evaluate": "Auswerten",
+    "recalculate": "Mit dieser Auswahl neu berechnen",
+    "evaluating": "Der Vorschlag wird ausgewertet…",
+    "edit": "Bearbeiten",
+    "cancelEdit": "Bearbeiten abbrechen",
+    "swapDirection": "Fahrtrichtung tauschen",
+    "mapPlaceholder": "Karte",
+    "searchPlaceholder": "Halte suchen…",
+    "addStop": "Halt hinzufügen",
+    "noStopsFound": "Keine Halte gefunden",
+    "trackGauge": "Spurweite",
+    "gaugeUnknown": "Spurweite unbekannt",
+    "minStopsTooltip": "Mindestens zwei Halte pro Strecke.",
+    "loading": "Daten werden geladen…",
+    "saved": "Der Vorschlag wurde automatisch gespeichert.",
+    "routeStats": "Streckendaten",
+    "comments": {
+      "title": "Diskussion",
+      "loading": "Die Diskussion wird geladen…",
+      "empty": "Noch keine Kommentare. Der erste Beitrag zu dieser Strecke fehlt noch.",
+      "placeholder": "Gedanken zu dieser Strecke teilen…",
+      "post": "Kommentar absenden",
+      "posting": "Wird gesendet…",
+      "save": "Speichern",
+      "saving": "Wird gespeichert…",
+      "cancel": "Abbrechen",
+      "edit": "Kommentar bearbeiten",
+      "edited": "bearbeitet",
+      "delete": "Kommentar löschen",
+      "deleteConfirm": "Diesen Kommentar löschen?",
+      "deleteYes": "Löschen",
+      "deleteNo": "Behalten",
+      "charsLeft": "{count} Zeichen übrig | {count} Zeichen übrig",
+      "charsOver": "{count} Zeichen über dem Limit | {count} Zeichen über dem Limit",
+      "loginToComment": "Zum Mitdiskutieren mit einem Konto anmelden.",
+      "login": "Anmelden",
+      "age": {
+        "now": "gerade eben",
+        "minutes": "vor {count} Minute | vor {count} Minuten",
+        "hours": "vor {count} Stunde | vor {count} Stunden",
+        "days": "vor {count} Tag | vor {count} Tagen"
+      }
+    },
+    "share": {
+      "like": "Diesen Vorschlag liken",
+      "title": "Diesen Vorschlag teilen",
+      "copyLink": "Link kopieren",
+      "copied": "Link kopiert",
+      "copyFailed": "Der Link ließ sich nicht kopieren. Bitte in der Adresszeile markieren und kopieren.",
+      "email": "E-Mail",
+      "whatsapp": "WhatsApp",
+      "more": "Teilen über…",
+      "stopsCount": "{count} Halt | {count} Halte",
+      "countriesCount": "{count} Land | {count} Länder",
+      "message": "Europa braucht einen Nachtzug von {origin} nach {destination}. {km} km, {stops}, {countries} – das wäre dafür nötig:",
+      "messagePlain": "Europa braucht einen Nachtzug von {origin} nach {destination}. Das wäre dafür nötig:",
+      "emailSubject": "Europa braucht einen Nachtzug {origin}–{destination}",
+      "emailBody": "So sähe ein Nachtzug {origin} – {destination} aus: Strecke, Fahrplan und Betriebskosten, modelliert nach dem Back-on-Track Target Network:"
+    },
+    "funFacts": {
+      "label": "Schon gewusst?",
+      "demandLabel": "Back-on-Track fordert",
+      "linkLabel": "back-on-track.eu",
+      "targetNetwork": {
+        "fact": "In Europa fuhren 2025 rund 100 Nachtzuglinien, ungefähr so viele, wie hier gerade geplant werden.",
+        "demand": "300 Linien bis 2035, genug, um die Zahl der Nachtzugreisenden zu verdreifachen."
+      },
+      "sevenInTen": {
+        "fact": "7 von 10 Europäerinnen und Europäern würden unter vernünftigen Bedingungen den Nachtzug statt des Flugzeugs nehmen.",
+        "demand": "dass marktbeherrschende Buchungsplattformen jeden Nachtzug anzeigen müssen, der in ihrem Land fährt."
+      },
+      "euEmissions": {
+        "fact": "Ein flächendeckendes europäisches Nachtzugnetz könnte 3 % der gesamten Treibhausgasemissionen der EU vermeiden.",
+        "demand": "dass die Connecting Europe Facility, knapp 40 Milliarden Euro über sechs Jahre, Nachtzugwagen und Trassenentgelte mitfinanziert."
+      },
+      "aviation": {
+        "fact": "Ein Umstieg vom Flugzeug auf den Nachtzug könnte rund ein Viertel der Luftverkehrsemissionen einsparen.",
+        "demand": "einen Mindestpreis für Flugtickets, damit Tarife nicht unter den Kosten verramscht werden."
+      },
+      "climate": {
+        "fact": "Eine Nachtzugfahrt ist für das Klima etwa 30-mal besser als ein Flug auf derselben Strecke.",
+        "demand": "die Abschaffung der Mehrwertsteuer auf internationale Bahntickets. Internationale Flüge werden bereits mit 0 % besteuert."
+      },
+      "europeanSleeper": {
+        "fact": "European Sleeper beförderte auf der Strecke Brüssel–Berlin–Prag im ersten Jahr über 230.000 Reisende in mehr als 750 Zügen.",
+        "demand": "dass die EU Schlaf- und Liegewagen kauft und verleast, damit Neueinsteiger wie dieser weniger Risiko tragen."
+      },
+      "flyLess": {
+        "fact": "Knapp die Hälfte der befragten Nachtzugreisenden will in den nächsten fünf Jahren weniger fliegen und mehr Bahn fahren.",
+        "demand": "Vorrang für Nachtzüge bei der Trassenvergabe, damit die gewünschten Verbindungen tatsächlich fahren können."
+      },
+      "carpatia": {
+        "fact": "Seit Dezember 2025 verbindet ein Nachtzug Carpatia Przemyśl und Krakau mit Wien, Salzburg und München.",
+        "demand": "EU-Kofinanzierung für Pilotstrecken an die Ränder Europas: Portugal, Griechenland, Nordeuropa, das Baltikum."
+      },
+      "parisBerlin": {
+        "fact": "Seit März 2026 fährt ein Nachtzug Paris–Brüssel–Berlin, Brüssel–Mailand soll folgen.",
+        "demand": "die Wiedereröffnung geschlossener Grenzbahnhöfe. Zwischen Irun und Hendaye ist seit 2020 kein Personenzug mehr gefahren."
+      },
+      "rollingStock": {
+        "fact": "In Europa gibt es rund 1.500 Nachtzugwagen. Für ein vollständiges Netz braucht es bis 2035 mehrere Tausend zusätzlich.",
+        "demand": "dass die Green Rail Investment Platform der Europäischen Investitionsbank tatsächlich Mittel erhält. Die Haushaltslinie ist bis heute leer."
+      },
+      "reuse": {
+        "fact": "In Frankreich werden rund 1.300 öffentlich finanzierte Wagen verschrottet, während in Europa Schlafwagen fehlen.",
+        "demand": "EU-Regeln, die die Weiterverwendung gebrauchter Fahrzeuge stattdessen ermöglichen."
+      },
+      "network": {
+        "fact": "Back-on-Track ist ein ehrenamtliches Netzwerk aus rund 60 aktiven Mitgliedern mit Gruppen in elf europäischen Ländern.",
+        "demand": "Nachtzüge als eigenes Verkehrssegment zu behandeln, befreit von Zuschlägen auf die Trassenentgelte."
+      }
+    },
+    "suggestions": {
+      "title": "Halte entlang der Strecke ergänzen?",
+      "subtitle": "Auf der Strecke liegen weitere Halte. Beliebige davon lassen sich aufnehmen.",
+      "addedTime": "+{minutes} Min.",
+      "backToEdit": "Zurück zur Bearbeitung",
+      "continue": "Weiter mit {count} zusätzlichem Halt | Weiter mit {count} zusätzlichen Halten",
+      "continueNone": "Ohne zusätzliche Halte weiter",
+      "adoptAll": "Alle vorgeschlagenen Halte übernehmen und weiter",
+      "addAria": "{name} zur Strecke hinzufügen",
+      "removeAria": "{name} aus der Strecke entfernen"
+    },
+    "frequency": {
+      "daily": "Täglich",
+      "three_per_week": "3× pro Woche"
+    },
+    "composition": {
+      "label": "Zugbildung",
+      "detailsAria": "Details zur Zugbildung anzeigen",
+      "previous": "Vorherige Zugbildung",
+      "next": "Nächste Zugbildung",
+      "formation": "Wagenreihung",
+      "loco": "Lokomotive",
+      "coaches": "Wagen",
+      "places": "Plätze",
+      "hsrAllowed": "Hochgeschwindigkeitsstrecken",
+      "serviceCoach": "Dienstwagen, keine Plätze",
+      "coachHint": "Auf einen Wagen zeigen, um seine Typdaten zu sehen",
+      "coachPosition": "Wagen {position} von {count}",
+      "moreDetails": "Personal, Kostenparameter und Quellen",
+      "sources": "Quellen",
+      "strategy": {
+        "new": "Neue Flotte",
+        "refurbished": "Modernisierte Flotte"
+      },
+      "equipment": {
+        "wifi": "WLAN",
+        "bikes": "Fahrradstellplätze",
+        "aircon": "Klimaanlage",
+        "plugs": "Steckdosen"
+      },
+      "byClass": {
+        "title": "Nach Klasse",
+        "places": "Plätze",
+        "capacity": "Kapazität",
+        "cost": "Kosten"
+      },
+      "kpi": {
+        "title": "Indikative Stückkosten",
+        "perTrainKm": "Je Zug-km",
+        "perPlaceKm": "Je Platz-km",
+        "caption": "Die Balken vergleichen mit der teuersten Zugbildung im Katalog."
+      },
+      "sections": {
+        "crew": "Personal",
+        "cost": "Kostenparameter"
+      },
+      "fields": {
+        "drivers": "Triebfahrzeugführer",
+        "attendants": "Zugbegleitung, Wagen",
+        "trainManager": "Zugchef",
+        "crewTotal": "Zugbegleitung, gesamt",
+        "staffRate": "Personal pro Stunde",
+        "crewFactor": "Personal",
+        "purchase": "Anschaffung, ganzer Zug",
+        "availability": "Verfügbarkeit",
+        "amortisation": "Abschreibungsdauer",
+        "cleaning": "Reinigung je Wagen",
+        "maintenance": "Wagenwartung",
+        "densityLength": "Länge je Platz",
+        "densityWeight": "Gewicht je Platz"
+      }
+    },
+    "map": {
+      "travelTime": "Fahrzeit",
+      "unknownDuration": "—",
+      "durationHm": "{h} Std. {m} Min.",
+      "durationH": "{h} Std.",
+      "durationM": "{m} Min."
+    },
+    "evaluation": {
+      "scenario": "Szenario",
+      "sections": {
+        "inputs": {
+          "title": "Szenario und Zugbildung wählen",
+          "body": "Beides verändert jede Zahl weiter unten: das Szenario, gegen das ausgewertet wird, und die Zugbildung, die auf der Strecke fahren würde."
+        },
+        "impact": {
+          "title": "Wesentliche Kennzahlen",
+          "body": "Jährliche Nachfrage, Verkehrsverlagerung und Emissionen dieser Strecke."
+        },
+        "finance": {
+          "title": "Kosten und Erlöse",
+          "body": "Was der Betrieb der Strecke jährlich kosten würde, was die Tickets einbringen würden und wie groß die Lücke dazwischen ist."
+        }
+      },
+      "views": {
+        "route": "Gesamte Strecke",
+        "per_trip_pair": "Nach Fahrtenpaar",
+        "per_trip_pair_per_country": "Nach Land",
+        "per_trip_pair_per_section": "Nach Streckenabschnitt",
+        "per_trip_per_stop": "Nach Halt"
+      },
+      "norms": {
+        "per_year": "Pro Jahr",
+        "per_operating_day": "Pro Betriebstag",
+        "per_train_km": "Je Zug-km",
+        "per_available_place_km": "Je angebotenem Platz-km",
+        "per_sold_place_km": "Je verkauftem Platz-km"
+      },
+      "kpi": {
+        "revenue": "Erlöse",
+        "cost": "Kosten",
+        "subsidies": "Erforderliche Zuschüsse"
+      },
+      "demand": {
+        "estimate": "Platzhalterdaten",
+        "estimateHint": "Platzhalterwerte, abgeleitet aus Streckenkennzahlen, noch nicht aus einem Nachfragemodell.",
+        "trips": "Personenfahrten",
+        "fromAir": "Vom Flugzeug verlagert",
+        "fromCar": "Vom Auto verlagert",
+        "co2Saved": "Eingespartes CO₂",
+        "co2Intensity": "CO₂-Intensität",
+        "subsidyPerCo2": "Zuschuss je t CO₂",
+        "units": {
+          "tripsPerYear": "Fahrten / Jahr",
+          "paxKm": "Pkm",
+          "tCo2PerYear": "t CO₂ / Jahr",
+          "gPerPaxKm": "g CO₂ / Pkm",
+          "eurPerTCo2": "€ / t CO₂"
+        }
+      },
+      "groups": {
+        "cost": "Kosten",
+        "operator": "Betreiber",
+        "variable": "Variabel",
+        "fixed": "Fix",
+        "infrastructure": "Infrastruktur",
+        "revenue": "Erlöse",
+        "margin": "Erwartete Marge des Betreibers"
+      },
+      "fields": {
+        "driver": "Triebfahrzeugführer",
+        "crew": "Zugbegleitpersonal",
+        "coach_maintenance": "Wagenwartung",
+        "loco": "Lokomotive",
+        "svc_stockings": "Bordbevorratung",
+        "var_overhead": "Variable Gemeinkosten",
+        "coach_amortisation": "Abschreibung der Wagen",
+        "financing": "Finanzierung",
+        "fix_overhead": "Fixe Gemeinkosten",
+        "cleaning": "Reinigung",
+        "shunting": "Rangieren",
+        "tac": "Trassenentgelte",
+        "energy": "Energie",
+        "station_charge": "Stationsentgelte",
+        "parking": "Abstellung",
+        "ticket_revenue": "Ticketerlöse",
+        "ebit_margin": "EBIT-Marge"
+      },
+      "filters": {
+        "default": "Alle",
+        "trip_pair": "Alle Fahrtenpaare",
+        "country": "Alle Länder",
+        "od_pair": "Alle Streckenabschnitte",
+        "trip": "Alle Fahrten",
+        "stop": "Alle Halte"
+      },
+      "noData": "Keine Daten für diese Auswahl.",
+      "showRaw": "Rohdaten (JSON)",
+      "calcVersion": "Berechnungsversion",
+      "info": {
+        "iconLabel": "Details zum Kostenfaktor anzeigen",
+        "readMore": "Die ausführliche Erläuterung lesen"
+      },
+      "classes": {
+        "all": "Alle Klassen",
+        "Seat": "Sitzplatz",
+        "Couchette": "Liegewagen",
+        "Sleeper": "Schlafwagen",
+        "Capsule": "Kapsel"
+      },
+      "direction": {
+        "outbound": "Hinfahrt",
+        "return": "Rückfahrt"
+      },
+      "section": {
+        "startAria": "Abschnittsbeginn",
+        "endAria": "Abschnittsende"
+      }
+    }
+  },
+  "gallery": {
+    "heading": "Es ist Zeit, Nachtzüge zurück auf die Schiene zu bringen!",
+    "tabs": {
+      "aToB": "Von A nach B",
+      "byStation": "Nach Bahnhof",
+      "byCountry": "Nach Land",
+      "byRelation": "Zwischen Ländern"
+    },
+    "search": {
+      "from": "Von",
+      "fromPlaceholder": "Zum Auswählen eines Bahnhofs klicken",
+      "to": "Nach",
+      "toPlaceholder": "Zum Auswählen eines Bahnhofs klicken",
+      "station": "Bahnhof",
+      "stationPlaceholder": "Zum Auswählen eines Bahnhofs klicken",
+      "country": "Land",
+      "countryPlaceholder": "Zum Auswählen eines Landes klicken",
+      "relationFrom": "Zwischen",
+      "relationTo": "und",
+      "clear": "{field} zurücksetzen",
+      "noCountries": "Keine Länder gefunden",
+      "button": "Suchen"
+    },
+    "welcome": {
+      "pitch": "Wir von Back on Track entwickeln derzeit unseren Vorschlag für ein Target Network 2032: ein Nachtzugnetz aus rund 300 Verbindungen quer über den Kontinent, doppelt so viele wie heute. Dieses Tool lädt alle ein, die sich für Nachtzüge begeistern, unser Anliegen zu unterstützen. Die Routenvorschläge die hier gesammelt werden, bilden die Grundlage für unser Target Network.",
+      "source": "Zahlen der IEA, aus unserem Positionspapier",
+      "browse": "Vorschläge anderer ansehen",
+      "about": "Über das Projekt"
+    },
+    "section": {
+      "title": "Galerie",
+      "subtitle": "Was bisher vorgeschlagen wurde."
+    },
+    "matching": "{count} Strecke gefunden | {count} Strecken gefunden",
+    "source": {
+      "all": "Alle Strecken",
+      "proposal": "Vorschläge",
+      "existing": "Bestehend"
+    },
+    "sort": {
+      "distance": "Entfernung",
+      "co2": "Eingespartes CO₂",
+      "stops": "Halte",
+      "likes": "Likes",
+      "comments": "Kommentare",
+      "created": "Erstellt",
+      "updated": "Aktualisiert",
+      "dir": {
+        "desc": "von hoch nach niedrig",
+        "asc": "von niedrig nach hoch"
+      }
+    },
+    "map": {
+      "legend": {
+        "proposed": "Vorgeschlagen",
+        "existing": "Bestehende Verbindung"
+      }
+    },
+    "card": {
+      "distance": "Entfernung",
+      "proposedBy": "Vorgeschlagen von {name}",
+      "guest": "Gast",
+      "existing": "Bestehende Verbindung",
+      "km": "{value} km",
+      "stops": "({count} Halt) | ({count} Halte)",
+      "co2PerYear": "{value} t CO₂/Jahr eingespart",
+      "like": "Like",
+      "loginToLike": "Zum Liken von Vorschlägen mit einem Konto anmelden.",
+      "stat": {
+        "distance": {
+          "title": "Entfernung",
+          "body": "Gesamte einfache Länge der Strecke."
+        },
+        "speed": {
+          "title": "Durchschnittsgeschwindigkeit",
+          "body": "Streckenlänge geteilt durch die gesamte Fahrzeit, einschließlich der Standzeiten in den Bahnhöfen."
+        },
+        "composition": {
+          "title": "Zugbildung",
+          "body": "Die Wagenkonfiguration, mit der diese Strecke geplant ist. Sie bestimmt die Kapazität an Sitz-, Liege- und Schlafplätzen."
+        },
+        "co2": {
+          "title": "Eingespartes CO₂",
+          "body": "Geschätzte CO₂-Emissionen, die jährlich vermieden werden, weil Reisende von Flugzeug und Auto auf diesen Zug umsteigen. Abgeleitet aus Platzhalterwerten der Nachfrage, noch nicht aus einem vollständigen Nachfragemodell."
+        }
+      }
+    },
+    "back": "Galerie",
+    "cta": {
+      "create": "Neue Strecke vorschlagen"
+    },
+    "empty": "Zu diesem Filter wurden keine Vorschläge gefunden. Hier entsteht der erste!",
+    "loadingMore": "Weitere werden geladen…",
+    "end": "Das waren alle {count} Vorschläge."
+  },
+  "user": {
+    "guest": "Gast",
+    "logout": "Abmelden",
+    "login": "Anmelden / Registrieren"
+  },
+  "header": {
+    "logoAlt": "Night Train Target Network",
+    "switchLanguageAria": "Sprache auf {language} umstellen"
+  },
+  "auth": {
+    "completed": "Auswertung abgeschlossen",
+    "loginTitle": "Anmelden oder registrieren",
+    "verifyTitle": "Bitte die Mail-Adresse bestätigen",
+    "nameTitle": "Einen Benutzernamen wählen",
+    "emailIncorrect": "Mail-Adresse ändern",
+    "co2Savings": "Diese Verbindung spart rund {value} t CO₂ pro Jahr.",
+    "register": " Mit einer Registrierung lässt sich verfolgen, was der eigene Vorschlag zu unserer Arbeit am EU Target Network 2032 beiträgt!",
+    "email": "E-Mail-Adresse",
+    "username": "Benutzername",
+    "usernameRequired": "Neu hier? Zum Registrieren einen Benutzernamen wählen.",
+    "continue": "Weiter",
+    "continueGuest": "Als Gast fortfahren",
+    "or": "ODER",
+    "codeSent": "Ein 6-stelliger Code ist per Mail an {email} unterwegs.",
+    "code": "Bestätigungscode",
+    "verify": "Bestätigen",
+    "back": "Zurück",
+    "close": "Schließen"
+  },
+  "toast": {
+    "dismiss": "Schließen",
+    "loginSuccess": "Anmeldung erfolgreich.",
+    "registerSuccess": "Willkommen! Das Konto wurde erstellt.",
+    "guestSuccess": "Weiter als Gast.",
+    "logoutSuccess": "Die Abmeldung war erfolgreich."
+  }
+}

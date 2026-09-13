@@ -270,11 +270,7 @@ export const useStore = defineStore('store', () => {
   // (App.vue), alongside restoreAuth().
   function restoreLocale(): void {
     const stored = readLocale()
-    // Multi-language is disabled for now — the app runs in English only, even
-    // if an earlier session persisted a different choice. The
-    // setLocale/writeLocale machinery stays for when the LanguageSwitch is
-    // re-enabled; drop this guard then.
-    if (stored === 'en') locale.value = stored
+    if (stored) locale.value = stored
   }
 
   return {
