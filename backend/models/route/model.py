@@ -30,7 +30,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.31"
+ROUTE_BUILDER_VERSION: str = "0.9.36"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -45,20 +45,157 @@ ROUTE_BUILDER_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
-    "0.9.31": {
-        "date": "2026-09-02",
+    "0.9.36": {
+        "date": "2026-09-12",
+        "author": "david + claude",
+        "changes": "NO OUTPUT CHANGE. One unused import removed from "
+        "route.py (enum.Enum, left behind when StopType moved to trip.py). "
+        "The version moves only because the CI version gate treats any "
+        "diff to a route-builder file as a model change, and riding along "
+        "with CALC 0.9.29 — which invalidates every family key and the "
+        "compute cache anyway — makes the bump free. Every number a route "
+        "produces is identical to 0.9.35.",
+    },
+    "0.9.35": {
+        "date": "2026-09-09",
+        "author": "david + claude",
+        "changes": "SCHEDULE per month and TRAINSETS from a cycle-time rule. "
+        "Schedule is now days-per-week for each of the twelve months "
+        "(0 = not running) plus min_turnaround_min, replacing the fixed "
+        "summer/winter x daily/three_per_week enums; operating days are "
+        "days_in_month x d/7, so the year no longer has exactly 364 days. "
+        "New schedule_mode 'custom' takes the month map from the request "
+        "({'1': 7, ..., '12': 0}); 'alwaysDaily' stays the default and means "
+        "7 everywhere. min_turnaround_min (default 180) is a request field "
+        "under either mode. TripPair.composition_count() no longer returns "
+        "'2 if daily else 1' / availability: it walks one rake through the "
+        "pair's own timetable, gives it at least min_turnaround_min at each "
+        "terminal and takes the next scheduled slot that fits (losing a day "
+        "when the slot is too close), which yields cycle_days; the physical "
+        "count is max over months of ceil(cycle_days x d/7) "
+        "(TripPair.trainsets(), new), and the cost basis divides that by "
+        "coach_avail_per as before. A normal night train has a two-day "
+        "cycle, so daily -> 2 and three-a-week -> 1 exactly as the old rule "
+        "said; four-a-week -> 2 and a too-short turnaround -> 3, which it "
+        "could not say. ASSUMPTION stated in OPEN_TODOS: departure days are "
+        "spread evenly through the week. Wire: route.schedule carries "
+        "days_per_week_by_month and min_turnaround_min and STILL writes the "
+        "legacy seasonal_schedules block derived from them; route_from_dict "
+        "reads either shape, widening a legacy block onto its months. "
+        "Schedule and min_turnaround_min join the family key. No schema "
+        "change.",
+    },
+    "0.9.34": {
+        "date": "2026-09-10",
+        "author": "david + claude",
+        "changes": "auto_stop_addition mode 'add' REMOVED (WP18 phase B1). The route "
+        "builder no longer adds stops of its own: VALID_AUTO_STOP_ADDITION_MODES is "
+        "{off, suggest}, timetable.apply_auto_stop_addition() is deleted, and "
+        "DEFAULT_AUTO_STOP_ADDITION moves from 'add' to 'off'. Two reasons. A route "
+        "the user did not ask for is not the user's route — 'suggest' already offers "
+        "the same candidates, costed, and lets them accept the ones they want, after "
+        "which those stops are ordinary posted stops. And a proposal family compares "
+        "one stop list across every scenario and composition, which it cannot do if "
+        "each member may pick its own stops within its own detour budget. "
+        "WHAT CHANGES: a request that posted 'add', or omitted the field and took the "
+        "old default, is now 400 or builds the caller's stops exactly — its route can "
+        "differ from what the same request returned on 0.9.33. Every request that "
+        "posted 'off' or 'suggest' is byte-identical. The frontend only ever posted "
+        "'suggest' then 'off', so no live client is affected. Migration "
+        "2026-09-10_auto_stop_add_removed.sql asserts no stored proposal carries "
+        "'add'. Stop.auto_added and proposals.stop_times.auto_added stay (a stored "
+        "route must round-trip) and are always false from here on. The candidate "
+        "search, its costing and AUTO_STOP_MAX_DETOUR_PER are unchanged — the budget "
+        "now only bounds how much router time costing may spend, never what is "
+        "suggested.",
+    },
+    "0.9.33": {
+        "date": "2026-09-06",
         "author": "bjarne + claude",
-        "changes": "DOCUMENTATION ONLY - no value changes anywhere. Every formula in "
-        "this registry gained a Formula.summary: one self-contained sentence naming "
-        "what the value is, for places with no room for the full description (the "
-        "cost-breakdown info popover, a docs page description, a search snippet). The "
-        "field is required, so a new formula cannot ship without one. No latex, no "
-        "input legend, no computed value is touched. 14 summaries added. Bumped only "
-        "because the version-check gate self-gates this file (any diff requires the "
-        "constant to move). Note the side effect: a bump marks every stored proposal "
-        "outdated, so each one recomputes lazily on its next load and gets an "
-        "update_log entry naming this trigger - the recompute reproduces identical "
-        "numbers, and this entry is the reason it fired.",
+        "changes": "DOCUMENTATION ONLY — no value changes anywhere. Every "
+        "formula in this registry gained a Formula.summary: one "
+        "self-contained sentence naming what the value is, for places with "
+        "no room for the full description (the cost-breakdown info popover, "
+        "a docs page description, a search snippet). The field is required, "
+        "so a new formula cannot ship without one. No latex, no input "
+        "legend, no computed value is touched. 14 summaries added. Bumped "
+        "only because the version-check gate self-gates this file (any diff "
+        "requires the constant to move). Authored on docs-site as 0.9.31 "
+        "and renumbered on the merge into backend-dev, where 0.9.31 and "
+        "0.9.32 had been taken independently while the branch was open. "
+        "Note the side effect: a bump marks every stored proposal outdated, "
+        "so each one recomputes lazily on its next load and gets an "
+        "update_log entry naming this trigger — the recompute reproduces "
+        "identical numbers, and this entry is the reason it fired.",
+    },
+    "0.9.32": {
+        "date": "2026-09-06",
+        "author": "david",
+        "changes": "Expert timetable mode. The compute request may carry an "
+        "optional expert_timetable block overriding two things the model "
+        "otherwise decides alone: the first departure of a direction "
+        "(mode 'absolute' pins a minute and survives a reroute; mode "
+        "'shift' displaces whatever the strategy computed and moves with "
+        "it), and manual extra minutes on individual legs "
+        "(segment_addons, stamped onto the new Segment.addon_time_min and "
+        "counted in total_time_min). Add-ons only ever ADD — the routed "
+        "physics stay the floor of every leg — and are keyed by ordered "
+        "stop pair, not leg index: an add-on whose pair no longer exists "
+        "after a reroute is dropped, never redistributed (OPEN_TODOS"
+        "['expert_addon_resplit']). The return direction mirrors "
+        "outbound's add-ons unless it sends its own block, exactly as "
+        "fixed_night_interval is already reversed; a departure is never "
+        "mirrored. Deliberately NOT a new timetable_mode: the overrides "
+        "compose with both existing modes as plain functions "
+        "(timetable.resolve_addons/resolve_departure/"
+        "classify_for_departure), applied in route_factory._build_trip() "
+        "after auto_stop_addition and after the timetable_mode switch (whose mirroring and "
+        "fixed-night stretch are given the add-ons, so a padded trip "
+        "stays centred on MIRROR_MIN and a padded interval needs less "
+        "slack). An overridden departure re-runs stop classification, so "
+        "a shifted trip gets the boarding/night/alighting split — and the "
+        "dwell — of where it now sits on the clock. NO OUTPUT CHANGE for "
+        "any request without the key: every existing route is "
+        "byte-identical, and stored payloads read addon_time_min back as "
+        "0. Costs DO move for a request that uses it, correctly: track "
+        "access and electricity night bands are placed on the clock from "
+        "stop times. Ships with a proposals.segments.addon_time_min "
+        "migration (metadata-only) and a compute-cache flush — the "
+        "resolved request gained a key, so every request hash changes; "
+        "the route SEGMENT cache is untouched.",
+    },
+    "0.9.31": {
+        "date": "2026-09-05",
+        "author": "david",
+        "changes": "Electrified track is now preferred. Every routing "
+        "request, in every mode, carries a priority rule penalizing track "
+        "OSM tags electrified=no by NON_ELECTRIFIED_PRIORITY_FACTOR — the "
+        "same mechanism HSR avoidance uses, but deliberately an order of "
+        "magnitude softer (10x, not 100x): HSR avoidance encodes a "
+        "permission, this encodes a preference, and at 100x whole "
+        "diesel-worked regions would attract detours no operator would "
+        "accept in exchange for catenary. A penalty rather than a block "
+        "for the further reason that an unelectrified station throat must "
+        "not fail a trip. Only electrified == NO is penalized; UNSET (tag "
+        "absent) stays untouched, because unknown is never treated as "
+        "forbidden. Motivation is not only realism: every seeded "
+        "locomotive is electric multi-system and the energy domain prices "
+        "catenary electricity on every kilometre, so unelectrified track "
+        "was being costed as something the train could not have run on. "
+        "OUTPUT CHANGE: routed geometry, distances, times and therefore "
+        "every downstream cost can move on any trip that previously used "
+        "unelectrified track — mostly regional and branch alignments; "
+        "fully electrified corridors are unaffected. NO GRAPH RE-IMPORT: "
+        "electrified is already in graph.encoded_values. The resolved "
+        "custom model changes, so route_variant_key changes and the whole "
+        "route-segment cache re-warms (old rows are unreachable, not "
+        "wrong — purge and re-precompute per docs/DEPLOY_HANDOVER.md). "
+        "Investigated alongside this and deliberately NOT implemented: a "
+        "tram/subway/light-rail block, which OpenRailRouting's built-in "
+        "rail.json already applies as priority 0 on railway_class != RAIL "
+        "— it is first in every profile's custom_model_files, so the "
+        "exclusion has been in force since the first import (see "
+        "routing/README.md).",
     },
     "0.9.30": {
         "date": "2026-08-31",
@@ -611,11 +748,11 @@ CHANGELOG: dict = {
 # change and warrants a version bump above.
 # =============================================================================
 
-# --- API request defaults (applied once, at the API boundary — api/helpers/proposal_compute.py)
+# --- API request defaults (applied once, at the API boundary — api/helpers/member_compute.py)
 DEFAULT_TIMETABLE_MODE: str = "simpleAutomatic"
 DEFAULT_SCHEDULE_MODE: str = "alwaysDaily"
 DEFAULT_ROUTING_MODE: str = "fullRouting"
-DEFAULT_AUTO_STOP_ADDITION: str = "add"
+DEFAULT_AUTO_STOP_ADDITION: str = "off"
 DEFAULT_COMPOSITION_ID: str = "NEW-BAL-7"
 """Composition a request without composition_id is computed with — the
 seven-coach new-fleet balanced train. It is the middle of the catalog on
@@ -667,6 +804,15 @@ this ratio the trip carries a 'fixed_night_stretch_slow' entry in
 general_parameters.timetable_warnings (a warning, never an error)."""
 
 # --- Schedule (seasonal model — models/route/route.py)
+DEFAULT_MIN_TURNAROUND_MIN: int = 180
+"""Shortest stand a rake is given at a terminal between arriving and
+departing again, minutes. Default for the request's min_turnaround_min;
+decides trainsets via TripPair.cycle_days()."""
+
+EVALUATION_YEAR: int = 2032
+"""Calendar year the schedule counts days in — the same year every price is
+expressed in. Only the month lengths matter (whether February has 29 days)."""
+
 WEEKS_PER_SEASON: int = 26
 """SUMMER (April–Sep) and WINTER (Oct–Mar) are each a fixed 26 weeks."""
 
@@ -773,6 +919,41 @@ not: the raw EEZ rings total ~165k vertices across the seeded countries
 and would be serialized into every mixed-avoidance routing request. At
 this tolerance the same set costs ~10k vertices."""
 
+
+# --- Electrification preference (models/route/routing/rail_router.py)
+NON_ELECTRIFIED_PRIORITY_FACTOR: float = 0.1
+"""GraphHopper custom-model priority multiplier applied to track OSM tags
+electrified=no — a 10x penalty, deliberately an order of magnitude softer
+than HSR_AVOIDANCE_PRIORITY_FACTOR's 100x.
+
+The difference is intentional and worth keeping. HSR avoidance encodes a
+PERMISSION: high-speed track is off-limits where it is off-limits, so the
+penalty is set high enough to make it a veto in all but the no-alternative
+case. This rule encodes a PREFERENCE: unelectrified track is what the
+catalog cannot exploit, not what it is forbidden to touch. At 100x whole
+diesel-worked regions — the Baltics, parts of the Balkans, Scandinavian
+inland lines — would attract detours far longer than an operator would
+ever accept in exchange for catenary. At 10x an unelectrified alignment
+loses to any reasonable electrified alternative and still wins where the
+alternative is absurd or absent.
+
+A penalty rather than a hard block for the further reason that a short
+unelectrified station throat must not fail a whole trip.
+
+Applied unconditionally, in every routing mode, because it is not merely a
+realism preference. Every seeded locomotive is 'electric multi-system'
+(input_params.loco_types) and the energy domain prices catenary
+electricity on every kilometre, so a route over unelectrified track was
+being costed as something the train could not physically have done. It
+becomes composition-dependent the day a diesel locomotive enters the
+catalog — see OPEN_TODOS['diesel_traction'].
+
+The condition matches the enum member NO of the routing engine's
+`electrified` encoded value (already in graph.encoded_values, so no
+re-import), never UNSET: a missing electrified tag means unknown, and
+unknown is never treated as forbidden — the same discipline
+HSR_TRACK_SPEED_SANITY_MAX_KMH enforces for untagged maxspeed."""
+
 # --- auto_stop_addition (candidate search — models/route/timetable.py)
 AUTO_STOP_BUFFER_M: int = 10_000
 """Max distance (metres) from a stop to the already-routed path for that
@@ -821,12 +1002,12 @@ deceleration); 0.5 m/s² is a comfortable service value appropriate for
 sleeping passengers — full emergency capability is far higher and
 irrelevant for timetabling."""
 
-# --- Neutral placeholder ids (api/helpers/proposal_compute.py, adapters/proposal/README.md §2.1)
+# --- Neutral placeholder ids (api/helpers/member_compute.py, adapters/proposal/README.md §2.1)
 NEUTRAL_PROPOSAL_ID: int = 0
 NEUTRAL_PROPOSAL_VERSION: int = 0
 """Fixed (not random) placeholder used only to satisfy plan_route()'s
-id-building signature for POST /api/proposal/calc. Never risks colliding
-with anything: /api/proposal/calc never persists, so its P{id}_V{version}_
+id-building signature for ephemeral compute (the family's members). Never
+risks colliding with anything: a member never persists, so its P{id}_V{version}_
 prefix exists only for the instant it takes rewrite_id_prefix() (adapters/
 proposal/id_prefix.py) to strip it back off into the neutral R1/T.../
 structural IDs §2.1 specifies. A fixed value keeps that round trip
@@ -841,6 +1022,40 @@ prefix — see adapters/proposal/repository.py's _STRUCTURAL_ROUTE_PREFIX."""
 # =============================================================================
 
 OPEN_TODOS: dict[str, str] = {
+    "schedule_weekday_pattern": (
+        "Schedule models days PER WEEK per month, not WHICH days. "
+        "TripPair.trainsets() therefore assumes departure days are spread "
+        "evenly through the week: three-a-week on Mon/Wed/Fri needs one rake "
+        "with a two-day cycle, Mon/Tue/Wed would need two. A weekday pattern "
+        "per month would settle it, at the cost of a heavier request and UI; "
+        "until then the even-spread figure is the one an operator planning "
+        "a new service would use too."
+    ),
+    "expert_addon_resplit": (
+        "(David, 2026-09-06, deliberate) An expert-mode segment add-on whose "
+        "ordered stop pair no longer exists after a reroute is DROPPED "
+        "(timetable.resolve_addons), never redistributed over the legs that "
+        "replaced it. Specified that way: splitting a person's 'this leg "
+        "needs 8 more minutes' across two legs they never saw would be an "
+        "invention, and the frontend reconciles its own add-on list from the "
+        "route it gets back, so the drop is visible rather than silent. "
+        "Revisit only if users ask for the split; the plausible rule would "
+        "be proportional-to-leg-time over the replacing legs, i.e. "
+        "_distribute_slack() applied to a sub-range."
+    ),
+    "expert_night_window_warning": (
+        "(David, 2026-09-06, future) An expert departure override can move a "
+        "timetable_mode='simpleAutomaticWithFixedNight' trip out of the "
+        "window that mode exists to guarantee (dep(A) < NIGHT_START_MIN, "
+        "arr(B) >= NIGHT_END_MIN) — the caller's prerogative, and the stops "
+        "are re-classified correctly for where they now sit, but nothing "
+        "says so explicitly. A TimetableWarning would be the natural home, "
+        "except its dataclass is fixed to the fixed_night_stretch_slow shape "
+        "(interval + two speeds + ratio); adding this means generalising "
+        "TimetableWarning first (a code plus an open detail dict, plus a "
+        "migration on proposals.timetable_warnings). Until then the frontend "
+        "can see it without help: every stop carries its stop_type."
+    ),
     "trip_pair_id": (
         "(David, 2026-07-06, future — not scheduled) Consider swapping the "
         "D/T order to trip_id = P{proposal_id}_V{version}_R1_T{pair_index}_"
@@ -868,14 +1083,6 @@ OPEN_TODOS: dict[str, str] = {
         "whether to include regions adjacent to the path, which would close "
         "this gap too."
     ),
-    "return_detour_budget": (
-        "auto_stop_addition's search-and-cost pass runs once per TripPair, "
-        "from outbound; return reuses the decision (reversed). Accepted "
-        "trade-off: return gets no independent detour-budget check against "
-        "its own baseline trip time. Revisit only if asymmetric routing "
-        "(e.g. one-directional HSR avoidance) is ever observed pushing "
-        "return trips materially past the budget."
-    ),
     "buffer_quota_time_of_day": (
         "buffer_quota_per is a flat per-country figure today. Congestion is "
         "daypart-dependent — after ~05:00 the morning rush builds while the "
@@ -889,6 +1096,42 @@ OPEN_TODOS: dict[str, str] = {
         "interacts with the timetable (buffer feeds departure times which "
         "feed each leg's clock time — likely needs one fixed-point "
         "iteration or an approximation from the provisional timetable)."
+    ),
+    "diesel_traction": (
+        "(David, 2026-09-05) The electrified=no penalty "
+        "(NON_ELECTRIFIED_PRIORITY_FACTOR) rides on every routing request "
+        "unconditionally, because every seeded locomotive is 'electric "
+        "multi-system' and the energy domain has no fuel price or "
+        "emissions factor for diesel haulage (see the energy_pricing "
+        "calibration). loco_types.loco_type_traction is recorded but read "
+        "by no model. When a diesel or bi-mode locomotive enters the "
+        "catalog the penalty must become composition-dependent: resolve it "
+        "in resolve_routing_params() alongside avoid_hsr and pass it into "
+        "RailRouter.route(), exactly as the HSR vector is threaded today. "
+        "Energy and emissions need the matching work — routing is the "
+        "smaller half."
+    ),
+    "branch_line_preference": (
+        "(David, 2026-09-05) Routes still occasionally prefer a branch "
+        "line where a real operator would stay on the main corridor. OSM "
+        "carries this as usage=main|branch, but this OpenRailRouting fork "
+        "registers no encoded value for it: RailAverageSpeedParser reads "
+        "the tag at import time and folds it into rail_average_speed (main "
+        "100, branch 50) ONLY where maxspeed is untagged — where maxspeed "
+        "is tagged, rail_average_speed is 0.9*maxspeed and usage is lost. "
+        "Three options, cheapest first: (a) a soft priority penalty on low "
+        "rail_average_speed — needs no re-import but also penalizes "
+        "station throats, so it must stay soft; (b) the same plus a "
+        "two-sided max_speed band rule, better where maxspeed coverage is "
+        "good (DE/AT/CH), weaker in the Balkans; (c) patch the fork for a "
+        "real railway_usage encoded value (one EV class, one parser, one "
+        "RailImportRegistry entry, applied as a patch in the Dockerfile "
+        "builder stage) — exact, but costs a graph re-import and Drive "
+        "re-upload of BOTH instances plus a standing patch against a "
+        "third-party repo. Diagnose a concrete case first: add "
+        "max_speed/rail_average_speed/railway_class/electrified to "
+        "RailRouter.DETAILS for one run and read the per-edge values off "
+        "the offending pair, rather than guessing a threshold."
     ),
     "composition_gauge_capability": (
         "(David, 2026-08-29) composition_gauges() in routing/gauge.py "
@@ -1151,9 +1394,9 @@ ROUTE_FORMULAS: dict[str, Formula] = {
         "dynamics and the wait itself.",
         description="Extra travel time a suggested additional stop would "
         "cost: the detour to reach it, the braking and accelerating it "
-        "causes, and the waiting time at the stop itself. Used to "
-        "automatically pick extra stops that fit the time budget, and to "
-        "report suggestions.",
+        "causes, and the waiting time at the stop itself. Reported with "
+        "every suggestion, so the figure a reader accepts a stop on is the "
+        "one the timetable then charges.",
         inputs=(
             FormulaParam(
                 symbol="Σ t_total (reroute)",

@@ -100,8 +100,16 @@
     "collapsed": false,
     "items": [
       {
-        "text": "Ticket revenue",
+        "text": "Base fare revenue",
         "link": "/cost/ticket-revenue"
+      },
+      {
+        "text": "Additional services",
+        "link": "/cost/services-revenue"
+      },
+      {
+        "text": "Catering contribution",
+        "link": "/cost/catering-contribution"
       }
     ]
   },

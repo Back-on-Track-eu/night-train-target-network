@@ -7,12 +7,12 @@ This is a **monorepo**. The backend and frontend deploy independently; the
 public documentation site ships inside the frontend image and is served at
 `/docs/` on the same origin:
 
-| Part         | Location    | Language                 | Entry point             |
-| ------------ | ----------- | ------------------------ | ------------------------ |
-| Backend API  | `backend/`  | Python 3.12 (Flask, uv)  | `backend/main.py`       |
-| Frontend SPA | `frontend/` | TypeScript (Vue 3, Vite) | `frontend/src/main.ts`  |
-| Public docs  | `docs-site/`| Markdown (VitePress)     | `docs-site/.vitepress/config.ts` |
-| Server deploy | `deploy/`  | Compose + bash           | `deploy/bot-server-app/README.md` |
+| Part          | Location     | Language                 | Entry point                       |
+| ------------- | ------------ | ------------------------ | --------------------------------- |
+| Backend API   | `backend/`   | Python 3.12 (Flask, uv)  | `backend/main.py`                 |
+| Frontend SPA  | `frontend/`  | TypeScript (Vue 3, Vite) | `frontend/src/main.ts`            |
+| Public docs   | `docs-site/` | Markdown (VitePress)     | `docs-site/.vitepress/config.ts`  |
+| Server deploy | `deploy/`    | Compose + bash           | `deploy/bot-server-app/README.md` |
 
 Data lives in PostgreSQL 16/PostGIS. Routing is served by a self-hosted
 OpenRailRouting (GraphHopper fork) container. There are two Docker Compose
@@ -31,8 +31,12 @@ files describing the same three backend services, kept manually in sync:
 
 ### Python (backend)
 
-- Style: **`ruff format`** (`ruff==0.15.21`, enforced in CI and pre-commit);
-  config is the single `[tool.ruff]` section in `backend/pyproject.toml`
+- Style: **`ruff format`**, plus **`ruff check`** on ruff's default rule set
+  (`ruff==0.15.21`, both enforced in CI and pre-commit); config is the single
+  `[tool.ruff]` section in `backend/pyproject.toml`, whose
+  `per-file-ignores` records every deliberate exemption (research notebooks,
+  `db/dev/seed.py`'s load-bearing import order). The lint gate is at zero
+  findings — keep it there rather than adding an entry for new code
 - Dependencies: managed with `uv` (`pyproject.toml` + `uv.lock`); never run
   `pip install` directly in the project — use `uv add`/`uv sync`
 - Domain objects in `models/` carry **no serialization methods** — all
@@ -45,7 +49,7 @@ files describing the same three backend services, kept manually in sync:
   no SQL) → `api/helpers/` (validation + serialization, Flask-free apart
   from `dependencies.py`) → `adapters/` (**all** DB access — repositories,
   loaders, and the GTFS store) → `models/` (pure domain; pipeline
-  *sequencing* lives in `models/pipeline.py`). Direction rules: `adapters/`
+  _sequencing_ lives in `models/pipeline.py`). Direction rules: `adapters/`
   may import the pure serializers from `api/helpers/` (they are Flask-free
   by design) but never blueprint files or `dependencies.py`; `models/`
   imports nothing from `api/` or `adapters/`. Proposal persistence is
@@ -96,7 +100,7 @@ files describing the same three backend services, kept manually in sync:
   (`useRoute`/`useRouter` inside `Gallery.vue`), reflecting its defaults into
   the URL right after mount too, via `seedToQuery`/`seedFromQuery`
   (`frontend/src/lib/proposalPrefill.ts`). `/proposal-builder`'s prefill seed
-  deliberately does *not* go through the URL: `Gallery.vue`'s
+  deliberately does _not_ go through the URL: `Gallery.vue`'s
   `createProposal()` stashes it in `store.pendingProposalSeed`
   (`frontend/src/stores/store.ts`) just before the push, and
   `ProposalWorkspace.vue` reads it once on mount — keeping arbitrary stop
@@ -115,7 +119,7 @@ files describing the same three backend services, kept manually in sync:
   `frontend/src/main.ts` must stay in sync:
   `tailwind-base → primevue → tailwind-utilities`
 - **The app is a single fixed dark look.** `body` is sapphire `#1d1e33` and
-  `primary-50` `#eef4fb` is the *ink*, used at many opacities
+  `primary-50` `#eef4fb` is the _ink_, used at many opacities
   (`text-primary-50/70`, `bg-primary-50/5`, `border-primary-50/10`). Surfaces
   are that ink composited over sapphire, not a token ramp — which is why
   `ProposalCard.vue` reconstructs one by hand with `color-mix`. `surface-*`
@@ -140,7 +144,6 @@ files describing the same three backend services, kept manually in sync:
 
 ---
 
-
 ## Parameter placement
 
 Two axes decide where a value lives: its **home** (five questions, first
@@ -154,13 +157,13 @@ use, and none of the below applies. Only tunables continue.
 
 1. **Differs between laptop / CI / staging / production?** → `.env`, read
    via `os.environ` at the point of use.
-   - *Secrets and wiring* (`JWT_SECRET`, `POSTGRES_*`, `SMTP_PASSWORD`,
+   - _Secrets and wiring_ (`JWT_SECRET`, `POSTGRES_*`, `SMTP_PASSWORD`,
      URLs, ports, container names): **no code default** — missing means a
      loud failure. A default here cannot rescue a misconfiguration, only
      turn a startup crash into a silent wrong answer. Dev-side exception:
      `backend/dev_env.py` is the ONE place host-run tooling defaults are
      defined.
-   - *Mode switches and data identity* (`AUTH_EMAIL_DEV_MODE`,
+   - _Mode switches and data identity_ (`AUTH_EMAIL_DEV_MODE`,
      `ONTD_BOOTSTRAP`, `TESTING`, Drive file ids): one code default, the
      safe/canonical value. Dev opts in to the unsafe one.
 2. **Calibrated from real-world data, needs provenance + versioning?** →
@@ -298,10 +301,10 @@ planning fails, everything else works). See `deploy/bot-server-app/README.md`.
 There is **no `main` branch**. Two protected branches map to two server
 environments; all work lands via pull request:
 
-| Branch | Role | Deploys to (on merge) |
-| ------ | ---- | --------------------- |
-| `staging` | Integration — every PR targets this | staging env, `targetnetwork.65.109.137.97.sslip.io` (basic-auth) |
-| `production` | Released — receives `staging` merges once tested | `targetnetwork.back-on-track.eu` |
+| Branch       | Role                                             | Deploys to (on merge)                                            |
+| ------------ | ------------------------------------------------ | ---------------------------------------------------------------- |
+| `staging`    | Integration — every PR targets this              | staging env, `targetnetwork.65.109.137.97.sslip.io` (basic-auth) |
+| `production` | Released — receives `staging` merges once tested | `targetnetwork.back-on-track.eu`                                 |
 
 A merged PR triggers `.github/workflows/deploy-staging.yml` /
 `deploy-production.yml`: SSH to bot-server → `deploy/bot-server-app/deploy.sh`
@@ -329,33 +332,35 @@ Full contract, `--baseline` semantics, and editorial rules:
 
 ## Important Files
 
-| File | Purpose |
-| ---- | ------- |
-| `backend/main.py` | Flask app factory, blueprint registration, global JSON error handlers — endpoint list is in its module docstring |
-| `backend/api/helpers/dependencies.py` | Singleton state: `DBDataLoader`, `CountryIndex`, `RailRouter`, `ProposalRepository`, `FeedbackRepository`, all built once at startup; `get_loader()` etc. for route handlers |
-| `backend/api/*.py` | One blueprint file per domain: `health.py`, `params.py`, `proposal_calc.py`, `proposal_publish.py`, `proposals.py`, `proposal_compare.py`, `proposal_engagement.py`, `auth.py`, `feedback.py`, `scenarios.py` |
-| `backend/api/helpers/*_serialize.py` | All `to_dict`/`from_dict` logic, split by domain — see Python conventions above |
-| `backend/api/config.py` | API-layer operational limits (rate limits, body caps), env-overridable. Not secrets (env at point of use), not domain parameters (DB or `models/*/version.py`) |
-| `backend/models/` | Domain layer (routing, demand, energy, evaluation, pipeline) — no serialization, no monetary values outside `models/evaluation/calc.py`. See `backend/models/README.md` |
-| `backend/db/dev/sql/` | Schema DDL, source of truth for all environments. See `backend/db/README.md` |
-| `backend/tests/` | Integration test suite, numbered by layer. See `backend/tests/README.md` |
-| `frontend/src/main.ts` | App bootstrap — plugin registration order matters |
-| `frontend/src/style.css` | Tailwind v4 import + CSS layer order declaration |
-| `frontend/src/stores/store.ts` | Pinia store — currently containing everything but might have more in the future |
-| `frontend/src/i18n/index.ts` | i18n setup; add new locales here |
-| `frontend/src/i18n/locales/en.json` | English translation strings — including the whole landing pitch (`gallery.heading`, `gallery.welcome.*`) |
-| `frontend/src/components/LandingIntro.vue` | Landing hero above the gallery: layout, hero sizing and the four onward buttons only, no copy. The long-form pitch it used to carry is the docs site landing page, `docs-site/index.md` |
-| `frontend/src/types/api.ts` | TypeScript types for backend responses |
-| `frontend/src/lib/factorFeedback.ts` | Breakdown row → formula key, docs page path, feedback `sub_category`. The docs deep-link contract, shared with `render_site.py::cost_slug` |
-| `docs-site/.vitepress/config.ts` | Public docs site: `base: '/docs/'`, local search, nav/sidebar (cost section generated) |
-| `backend/scripts/model_docs/` | One extraction layer over the model registries, one renderer per artefact (`docs/MODEL.md`, `docs-site/`) |
-| `backend/docker/docker-compose.yml` | Canonical backend Docker stack |
-| `.devcontainer/docker-compose.yml` | Self-contained VS Code devcontainer stack — duplicates the above, plus `frontend` and `docs` |
-| `.github/workflows/ci.yml` | Frontend/backend formatting + frontend type-check (see CI/CD below) |
-| `.github/workflows/backend-tests.yml` | Version-bump enforcement + full backend integration test run |
-| `.pre-commit-config.yaml` | Pre-commit: ruff-format (`backend/`) + prettier (`frontend/`, `docs-site/` — excluding the emitted pages) |
-| `docs/DEPLOY_HANDOVER.md` | Living handover to Giovanni: deploy order, staging gotchas, server capacity. Update in the same PR as any change touching deploy, capacity or server data |
-| `docs/FRONTEND_HANDOVER.md` | Living handover to Bjarne: every backend change that reaches the API contract. Update in the same PR as the change |
+| File                                       | Purpose                                                                                                                                                                                                       |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `backend/main.py`                          | Flask app factory, blueprint registration, global JSON error handlers — endpoint list is in its module docstring                                                                                              |
+| `backend/api/helpers/dependencies.py`      | Singleton state: `DBDataLoader`, `CountryIndex`, `RailRouter`, `ProposalRepository`, `FeedbackRepository`, all built once at startup; `get_loader()` etc. for route handlers                                  |
+| `backend/api/*.py`                         | One blueprint file per domain: `health.py`, `params.py`, `proposal_calc.py`, `proposal_publish.py`, `proposals.py`, `proposal_compare.py`, `proposal_engagement.py`, `auth.py`, `feedback.py`, `scenarios.py` |
+| `backend/api/helpers/*_serialize.py`       | All `to_dict`/`from_dict` logic, split by domain — see Python conventions above                                                                                                                               |
+| `backend/api/config.py`                    | API-layer operational limits (rate limits, body caps), env-overridable. Not secrets (env at point of use), not domain parameters (DB or `models/*/version.py`)                                                |
+| `backend/models/`                          | Domain layer (routing, demand, energy, evaluation, pipeline) — no serialization, no monetary values outside `models/evaluation/calc.py`. See `backend/models/README.md`                                       |
+| `backend/db/dev/sql/`                      | Schema DDL, source of truth for all environments. See `backend/db/README.md`                                                                                                                                  |
+| `backend/tests/`                           | Integration test suite, numbered by layer. See `backend/tests/README.md`                                                                                                                                      |
+| `frontend/src/main.ts`                     | App bootstrap — plugin registration order matters                                                                                                                                                             |
+| `frontend/src/style.css`                   | Tailwind v4 import + CSS layer order declaration                                                                                                                                                              |
+| `frontend/src/stores/store.ts`             | Pinia store — currently containing everything but might have more in the future                                                                                                                               |
+| `frontend/src/i18n/index.ts`               | i18n setup; add new locales here                                                                                                                                                                              |
+| `frontend/src/lib/uiLanguages.ts`          | Language bar order and per-language availability — a language belongs here only once its locale file exists                                                                                                   |
+| `frontend/src/i18n/locales/en.json`        | English translation strings — including the whole landing pitch (`gallery.heading`, `gallery.welcome.*`)                                                                                                      |
+| `frontend/src/i18n/locales/de.json`        | German translation strings — same key tree as `en.json`; both files change together                                                                                                                           |
+| `frontend/src/components/LandingIntro.vue` | Landing hero above the gallery: layout, hero sizing and the four onward buttons only, no copy. The long-form pitch it used to carry is the docs site landing page, `docs-site/index.md`                       |
+| `frontend/src/types/api.ts`                | TypeScript types for backend responses                                                                                                                                                                        |
+| `frontend/src/lib/factorFeedback.ts`       | Breakdown row → formula key, docs page path, feedback `sub_category`. The docs deep-link contract, shared with `render_site.py::cost_slug`                                                                    |
+| `docs-site/.vitepress/config.ts`           | Public docs site: `base: '/docs/'`, local search, nav/sidebar (cost section generated)                                                                                                                        |
+| `backend/scripts/model_docs/`              | One extraction layer over the model registries, one renderer per artefact (`docs/MODEL.md`, `docs-site/`)                                                                                                     |
+| `backend/docker/docker-compose.yml`        | Canonical backend Docker stack                                                                                                                                                                                |
+| `.devcontainer/docker-compose.yml`         | Self-contained VS Code devcontainer stack — duplicates the above, plus `frontend` and `docs`                                                                                                                  |
+| `.github/workflows/ci.yml`                 | Frontend/backend formatting + frontend type-check (see CI/CD below)                                                                                                                                           |
+| `.github/workflows/backend-tests.yml`      | Version-bump enforcement + full backend integration test run                                                                                                                                                  |
+| `.pre-commit-config.yaml`                  | Pre-commit: ruff-format + ruff lint (`backend/`) + prettier (`frontend/`, `docs-site/` — excluding the emitted pages)                                                                                         |
+| `docs/DEPLOY_HANDOVER.md`                  | Living handover to Giovanni: deploy order, staging gotchas, server capacity. Update in the same PR as any change touching deploy, capacity or server data                                                     |
+| `docs/FRONTEND_HANDOVER.md`                | Living handover to Bjarne: every backend change that reaches the API contract. Update in the same PR as the change                                                                                            |
 
 ---
 
@@ -427,14 +432,15 @@ Five workflows:
 
 **`.github/workflows/ci.yml`** — runs on every push/PR to `staging`/`production`:
 
-| Job | What it checks |
-| --- | -------------- |
-| `prettier-check` | Frontend formatting (`npm run format:check`) |
-| `ruff-check` | Backend Python formatting (`ruff format --check backend/`) |
-| `type-check` | Frontend TypeScript (`npm run type-check` via `vue-tsc`) |
-| `unit-tests` | Frontend Vitest (`npm test`) |
-| `docs-prettier` | `docs-site/` formatting — hand-written pages only |
-| `docs-build` | `vitepress build`; fails on a dead internal link |
+| Job              | What it checks                                             |
+| ---------------- | ---------------------------------------------------------- |
+| `prettier-check` | Frontend formatting (`npm run format:check`)               |
+| `ruff-check`     | Backend Python formatting (`ruff format --check backend/`) |
+| `ruff-lint`      | Backend Python lint (`ruff check backend/`)                |
+| `type-check`     | Frontend TypeScript (`npm run type-check` via `vue-tsc`)   |
+| `unit-tests`     | Frontend Vitest (`npm test`)                               |
+| `docs-prettier`  | `docs-site/` formatting — hand-written pages only          |
+| `docs-build`     | `vitepress build`; fails on a dead internal link           |
 
 **`.github/workflows/deploy-staging.yml` / `deploy-production.yml`** — on
 push to the matching branch, deploy to the matching server environment (see
@@ -444,11 +450,11 @@ push to the matching branch, deploy to the matching server environment (see
 `staging`/`production`/`backend-dev`, only when `backend/**`,
 `docs/MODEL.md`, `docs-site/**` or `.devcontainer/**` changed:
 
-| Job | What it checks |
-| --- | -------------- |
-| `model-docs-check` | Fails if `docs/MODEL.md` or `docs-site/` no longer matches the model registries (`generate_model_docs.py --check`) |
-| `version-check` | Fails if a model file (route builder, energy, or evaluation) changed without a matching version-constant bump in its `version.py` |
-| `test` | Builds and starts the full Docker stack (with `GIT_SHA` injected into `version.py` files), then runs `uv run --extra dev pytest tests/ -v --timeout=60` against it |
+| Job                | What it checks                                                                                                                                                     |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `model-docs-check` | Fails if `docs/MODEL.md` or `docs-site/` no longer matches the model registries (`generate_model_docs.py --check`)                                                 |
+| `version-check`    | Fails if a model file (route builder, energy, or evaluation) changed without a matching version-constant bump in its `version.py`                                  |
+| `test`             | Builds and starts the full Docker stack (with `GIT_SHA` injected into `version.py` files), then runs `uv run --extra dev pytest tests/ -v --timeout=60` against it |
 
 ### Pre-commit hooks
 
@@ -465,10 +471,10 @@ Run manually: `pre-commit run --all-files`
 
 Two living documents in `docs/`, one per person the backend hands work to:
 
-| File | Audience | Covers |
-| ---- | -------- | ------ |
-| `docs/DEPLOY_HANDOVER.md` | Giovanni | Deploy order, staging gotchas, server capacity and sizing |
-| `docs/FRONTEND_HANDOVER.md` | Bjarne | API contract changes, new fields, new error codes, UI implications |
+| File                        | Audience | Covers                                                             |
+| --------------------------- | -------- | ------------------------------------------------------------------ |
+| `docs/DEPLOY_HANDOVER.md`   | Giovanni | Deploy order, staging gotchas, server capacity and sizing          |
+| `docs/FRONTEND_HANDOVER.md` | Bjarne   | API contract changes, new fields, new error codes, UI implications |
 
 All handovers live in `docs/` — not next to the code they describe. Deploy
 procedure documented in two places drifts into two different procedures.

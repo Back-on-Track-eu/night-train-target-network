@@ -1,0 +1,34 @@
+coach_type_id,position,class_main,section_label,places,length_m,weight_t,crew,source_ids
+A10tuh,1,seat,1st class  - seat (large room),56,26.4,54.48,0,S47
+A9c9ux,1,couchette,couchette (4-berth),36,26.4,52.88,0.25,S47
+ABbmpvz,1,seat,2nd class - seat (large room),26,13.25,24.83,0,S47
+ABbmpvz,2,couchette,couchette (4-berth) PRM,4,13.25,23.07,0,S47
+Am,1,seat,2nd class - compartments,66,26.4,55.28,0,S47
+Apm,1,seat,1st class  - seat (large room),60,26.4,54.8,0,S47
+B (78),1,seat,2nd class - seat (large room),78,26.4,56.24,0,S47
+B10c10ux,1,couchette,couchette (6-berth),60,26.4,54.8,0.25,S47
+B8c8ux,1,couchette,couchette (6-berth),48,26.4,53.84,0.25,S47
+Bc (36),1,couchette,couchette (4-berth),36,26.4,52.88,0.25,S47
+Bcmz (54),1,couchette,couchette (6-berth),54,26.4,54.32,0.25,S47
+Bcmz_5291,1,couchette,couchette (4-berth),12,7.95,14.61,0.075,S47
+Bcmz_5291,2,capsule,Mini-Cabin (bed),28,18.55,34.09,0.175,S47
+Bfmpz,1,seat,2nd class - seat (large room),70,26.8,55.6,0,S47
+Bmpz (74),1,seat,2nd class - seat (large room),74,26.4,55.92,0,S47
+Bmz,1,seat,2nd class - compartments,66,26.4,55.28,0,S47
+Bpm (78),1,seat,2nd class - seat (large room),78,26.4,56.24,0,S47
+Bvcmbz,1,couchette,48 * couchette (6-berth) + 2 couchette PRM (2-berth),50,26.4,54,0.25,S47
+Bvcmz (50),1,couchette,couchette (5-berth),50,26.4,54,0.25,S47
+Bvcmz (60),1,couchette,couchette (6-berth),60,26.4,54.8,0.25,S47
+WLABee,1,sleeper,Sleeper (3-berth) with basin,30,26.4,52.4,0.5,S47
+WLABm (36),1,sleeper,sleeper (unspecified),36,26.4,52.88,0.5,S47
+WLABmz (DD),1,sleeper,18 * Sleeper (2-berth) with basin + 8 * Sleeper (2-berth) with shower & WC + 4 * Sleeper (4-berth) with basin,30,26.4,62.4,0.5,S47
+WLAmz_7091,1,sleeper,18 * Sleeper (2-berth) with shower option & WC + 2 * Sleeper (2-berth) with shower & WC,20,26.45,47.1,0.5,S47
+WLBmz (DD),1,sleeper,34 * Sleeper (2-berth) with basin + 8 * Sleeper (4-berth) with basin,42,26.4,63.36,0.5,S47
+B5-3,1,seat,2nd class - seat (large room),68,25.3,50.0,0,S48;S50
+B5-7,1,seat,Seat (reclining seat),30,25.3,46.0,0,S48
+BC5-3,1,seat,2nd class - seat (family coach with play area),40,25.3,47.0,0,S48;S50
+WLAB-2,1,sleeper,Sleeper (2-berth) with basin,30,27.0,53.0,0.5,S49
+NOX-36,1,capsule,Capsule (Nox private room),36,26.4,52.4,0.25,S51;S52;S53
+LR-SEATPOD-66,1,capsule,Capsule (Luna Rail Seat Pod),66,26.4,55.4,0.25,S54;S55
+LR-HOTELPOD-31,1,sleeper,"Sleeper (Luna Rail Hotel Pod, single)",31,26.4,51.9,0.5,S54;S55
+LR-HOTELPOD-42,1,sleeper,"Sleeper (Luna Rail Hotel Pod, 2-3 pax)",42,26.4,53.0,0.5,S54;S55

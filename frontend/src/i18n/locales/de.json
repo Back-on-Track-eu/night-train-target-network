@@ -180,7 +180,7 @@
       "hsrAllowed": "Hochgeschwindigkeitsstrecken",
       "serviceCoach": "Dienstwagen, keine Plätze",
       "coachHint": "Auf einen Wagen zeigen, um seine Typdaten zu sehen",
-      "coachPosition": "Wagen {position} von {count}",
+      "coachPosition": "Wagen {n}",
       "moreDetails": "Personal, Kostenparameter und Quellen",
       "sources": "Quellen",
       "strategy": {
@@ -309,7 +309,7 @@
         "energy": "Energie",
         "station_charge": "Stationsentgelte",
         "parking": "Abstellung",
-        "ticket_revenue": "Ticketerlöse",
+        "ticket_revenue": "Erlöse aus dem Grundfahrpreis",
         "ebit_margin": "EBIT-Marge"
       },
       "filters": {

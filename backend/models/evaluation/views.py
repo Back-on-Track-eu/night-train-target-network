@@ -171,14 +171,34 @@ class CostBreakdown:
 
 @dataclass
 class RevenueBreakdown:
+    """The three parts of the tariff (CALC 0.9.30):
+
+        ticket_revenue_eur         the base fare — fixed part + per-km part
+        services_revenue_eur       bikes, luggage, reservations
+        catering_contribution_eur  the restaurant, SIGNED and already net
+
+    All three are revenue and all three enter net_eur. The first two are the
+    base of the variable overhead and the EBIT margin; the third is not,
+    because its figure already nets its own overhead — see
+    models/demand/model.py."""
+
     ticket_revenue_eur: float = 0.0
+    services_revenue_eur: float = 0.0
+    catering_contribution_eur: float = 0.0
 
     @property
     def total_eur(self) -> float:
-        return round(self.ticket_revenue_eur, BREAKDOWN_TOTAL_NDIGITS)
+        return round(
+            self.ticket_revenue_eur
+            + self.services_revenue_eur
+            + self.catering_contribution_eur,
+            BREAKDOWN_TOTAL_NDIGITS,
+        )
 
     def __iadd__(self, other: RevenueBreakdown) -> RevenueBreakdown:
         self.ticket_revenue_eur += other.ticket_revenue_eur
+        self.services_revenue_eur += other.services_revenue_eur
+        self.catering_contribution_eur += other.catering_contribution_eur
         return self
 
 
@@ -290,6 +310,8 @@ _LEAF_PATHS: tuple[tuple[str, ...], ...] = (
     ("cost", "infrastructure", "station_charge_eur"),
     ("cost", "infrastructure", "parking_eur"),
     ("revenue", "ticket_revenue_eur"),
+    ("revenue", "services_revenue_eur"),
+    ("revenue", "catering_contribution_eur"),
     ("margin", "ebit_margin_eur"),
 )
 
@@ -448,6 +470,8 @@ def build_breakdown(
         if trip_ids is not None and r.trip_id not in trip_ids:
             continue
         b.revenue.ticket_revenue_eur += r.revenue_eur
+        b.revenue.services_revenue_eur += r.services_revenue_eur
+        b.revenue.catering_contribution_eur += r.catering_contribution_eur
 
     for c in result.od_pair_costs:
         if trip_ids is not None and c.trip_id not in trip_ids:
@@ -723,6 +747,10 @@ def build_breakdown_per_trip_pair_per_country(
                 if od_share == 0.0:
                     continue
                 b.revenue.ticket_revenue_eur += od_r.revenue_eur * od_share
+                b.revenue.services_revenue_eur += od_r.services_revenue_eur * od_share
+                b.revenue.catering_contribution_eur += (
+                    od_r.catering_contribution_eur * od_share
+                )
                 b.cost.operator.variable.svc_stockings_eur += (
                     od_c.svc_stockings_eur * od_share
                 )
@@ -1085,6 +1113,8 @@ def build_breakdown_per_trip_pair_per_od(
                 internal[k] = Breakdown()
             b = internal[k]
             b.revenue.ticket_revenue_eur += od_r.revenue_eur
+            b.revenue.services_revenue_eur += od_r.services_revenue_eur
+            b.revenue.catering_contribution_eur += od_r.catering_contribution_eur
             b.cost.operator.variable.svc_stockings_eur += od_c.svc_stockings_eur
             b.cost.operator.variable.var_overhead_eur += od_c.var_overhead_eur
             b.margin.ebit_margin_eur += od_m.ebit_margin_eur
@@ -1421,6 +1451,8 @@ def build_breakdown_per_trip_pair_per_section(
                 # --- Passenger side: everyone on board in the section,
                 # km-proportional. Per-class accumulators feed the class cells.
                 revenue_by_class: dict[str, float] = {}
+                services_by_class: dict[str, float] = {}
+                catering_by_class: dict[str, float] = {}
                 svc_by_class: dict[str, float] = {}
                 voh_by_class: dict[str, float] = {}
                 margin_by_class: dict[str, float] = {}
@@ -1449,6 +1481,14 @@ def build_breakdown_per_trip_pair_per_section(
                     if r := rev_by_key.get(k):
                         revenue_by_class[cls] = (
                             revenue_by_class.get(cls, 0.0) + r.revenue_eur * share
+                        )
+                        services_by_class[cls] = (
+                            services_by_class.get(cls, 0.0)
+                            + r.services_revenue_eur * share
+                        )
+                        catering_by_class[cls] = (
+                            catering_by_class.get(cls, 0.0)
+                            + r.catering_contribution_eur * share
                         )
                     if c := cost_by_key.get(k):
                         svc_by_class[cls] = (
@@ -1482,6 +1522,8 @@ def build_breakdown_per_trip_pair_per_section(
                 # the class cells slice it by weighted place-km share.
                 train_level = _scale_breakdown(b, 1.0)
                 b.revenue.ticket_revenue_eur += section_revenue
+                b.revenue.services_revenue_eur += sum(services_by_class.values())
+                b.revenue.catering_contribution_eur += sum(catering_by_class.values())
                 b.cost.operator.variable.svc_stockings_eur += sum(svc_by_class.values())
                 b.cost.operator.variable.var_overhead_eur += sum(voh_by_class.values())
                 b.margin.ebit_margin_eur += sum(margin_by_class.values())
@@ -1522,6 +1564,10 @@ def build_breakdown_per_trip_pair_per_section(
                     )
                     cb = _scale_breakdown(train_level, cls_share)
                     cb.revenue.ticket_revenue_eur += revenue_by_class.get(cls, 0.0)
+                    cb.revenue.services_revenue_eur += services_by_class.get(cls, 0.0)
+                    cb.revenue.catering_contribution_eur += catering_by_class.get(
+                        cls, 0.0
+                    )
                     cb.cost.operator.variable.svc_stockings_eur += svc_by_class.get(
                         cls, 0.0
                     )
@@ -1684,12 +1730,10 @@ def build_breakdown_per_trip_per_stop(
     matrix: dict[tuple[str, str], Breakdown] = {}
 
     for pair in route.trip_pairs:
-        trip_ids = {pair.outbound.trip_id, pair.return_trip.trip_id}
         composition = pair.composition
 
         for trip in pair.trips:
             trip_id = trip.trip_id
-            stop_idx = {s.stop_id: i for i, s in enumerate(trip.stops)}
 
             for stop in trip.stops:
                 stop_id = stop.stop_id
@@ -1709,7 +1753,6 @@ def build_breakdown_per_trip_per_stop(
                     )
 
                 # Boarding + alighting OD pairs at this stop
-                stop_i = stop_idx[stop_id]
                 boarding_alighting_ods = [
                     od
                     for od in pair.od_pairs
@@ -1799,6 +1842,10 @@ def build_breakdown_per_trip_per_stop(
                     )
                     if r := rev_by_key.get(k):
                         b.revenue.ticket_revenue_eur += r.revenue_eur
+                        b.revenue.services_revenue_eur += r.services_revenue_eur
+                        b.revenue.catering_contribution_eur += (
+                            r.catering_contribution_eur
+                        )
                     if c := cost_by_key.get(k):
                         b.cost.operator.variable.svc_stockings_eur += (
                             c.svc_stockings_eur

@@ -21,26 +21,43 @@ Public interface:
   route_from_dict(data, loader, scenario_id)     → (Route, CompositionCollection)  (rebuilds domain
                                                     objects from a route dict — model-layer test
                                                     evaluations, db/dev/seed.py's example proposal)
+  route_compact_to_dict(route_dict, geometries)  → dict       (the family document's route shape: stops once
+                                                                per trip, segments by index, geometry in a
+                                                                shared pool — see the function)
   suggested_stops_to_dicts(suggestions)          → list[dict] (the suggested_stops section,
                                                     auto_stop_addition="suggest")
+  expert_timetable_from_dict(block)              → ExpertTimetable | None  (the request's
+                                                    expert_timetable block as domain objects —
+                                                    request-side, but the same dict↔domain job
+                                                    and the same route domain, so it lives here
+                                                    rather than in a second module)
 """
 
 from __future__ import annotations
 
+from models.route.timetable import (
+    legacy_seasonal_schedules,
+    schedule_from_dict,
+)
 from models.route.route import (
     Route,
     TripPair,
-    Schedule,
-    SeasonalSchedule,
-    Season,
-    Frequency,
     Parking,
     Shunting,
     ODPair,
 )
 from models.route.trip import Stop, StopType, Segment, Trip, TimetableWarning
-from models.route.timetable import AutoStopSuggestion
+from models.route.timetable import (
+    AutoStopSuggestion,
+    DepartureOverride,
+    DirectionOverrides,
+    ExpertTimetable,
+    SegmentAddon,
+    NO_OVERRIDES,
+)
 from models.params import Composition, TrackInfraCollection, CompositionCollection
+from models.evaluation.summary import ordered_stops
+from models.utils import canonical_sha256
 
 # =============================================================================
 # ROUTE — serialize
@@ -73,6 +90,7 @@ def _segment_to_dict(seg: Segment, geometry_id: str) -> dict:
         "dynamics_time_min": seg.dynamics_time_min,
         "buffer_time_min": seg.buffer_time_min,
         "slack_time_min": seg.slack_time_min,
+        "addon_time_min": seg.addon_time_min,
         "energy_kwh": seg.energy_kwh,
         "country_distance_shares": seg.country_distance_shares,
         "country_time_shares": seg.country_time_shares,
@@ -115,6 +133,11 @@ def _trip_general_parameters(trip: Trip) -> dict:
         "trip_km": round(trip_km, 1),
         "route_duration_min": duration_min,
         "average_speed_kmh": round(average_speed_kmh, 1),
+        # Manual expert-mode minutes across the trip (0.9.32) — 0 for every
+        # automatic timetable. Here rather than left to the reader to sum
+        # over segments, for the same reason as the figures above: it is
+        # read at a glance ("this timetable was padded by 14 minutes").
+        "manual_addon_min": trip.addon_time_min,
         # Which per-gauge routing profile carried the trip (0.9.27) —
         # 1435 for the whole network west of the break-of-gauge lines,
         # informative exactly where routes were impossible before.
@@ -288,10 +311,13 @@ def route_to_dict(route: Route, scenario_id: int, tracks: TrackInfraCollection) 
         "route_id": route.route_id,
         "scenario_id": scenario_id,
         "schedule": {
-            "seasonal_schedules": [
-                {"season": ss.season.value, "frequency": ss.frequency.value}
-                for ss in route.schedule.seasonal_schedules
-            ]
+            "days_per_week_by_month": {
+                str(m): d for m, d in route.schedule.days_per_week_by_month.items()
+            },
+            "min_turnaround_min": route.schedule.min_turnaround_min,
+            # Pre-0.9.35 readers still find the two-season shape; derived
+            # from the month map so both describe the same plan.
+            "seasonal_schedules": legacy_seasonal_schedules(route.schedule),
         },
         "trip_pairs": trip_pairs,
         "parkings": [
@@ -325,6 +351,95 @@ def route_to_dict(route: Route, scenario_id: int, tracks: TrackInfraCollection) 
         ],
         "geometries": geometries,  # last — keeps the bulky coordinate data out of the way when scanning the rest of route
     }
+
+
+# =============================================================================
+# ROUTE — compact (family document)
+# =============================================================================
+
+# route_to_dict() keys the family document does not carry, and why:
+#   composition          catalog — GET /api/params/compositions
+#   od_pairs             demand, an evaluation input — the views endpoint
+#   track_infrastructure provenance — GET /api/params/TrackInfrastructures
+#   geometries           shared across members — the document's pool
+_COMPACT_DROPS_ROUTE = ("track_infrastructure", "geometries")
+_COMPACT_DROPS_PAIR = ("composition", "od_pairs")
+_COMPACT_DROPS_SEGMENT = ("from_stop", "to_stop")
+
+
+# Decimal places the geometry pool id is hashed at — the same 5 dp
+# (~1 m) adapters/proposal/projection.py::route_fingerprint() rounds to,
+# and for the same reason: a leg served from route_cache and the same leg
+# routed live agree to within float noise, not bit for bit, so an id taken
+# over raw coordinates would split one corridor into two pool entries.
+GEOMETRY_ID_NDIGITS = 5
+
+
+def route_compact_to_dict(
+    route_dict: dict,
+    geometries: dict[str, list],
+    id_cache: dict[int, str] | None = None,
+) -> dict:
+    """The family document's route: route_to_dict()'s shape with everything
+    a member can fetch elsewhere removed and every stop serialised ONCE.
+
+    id_cache: optional {id(coords) -> geometry_id} memo for one build.
+    The router memo hands every member of a family the same coordinate
+    LIST object for a given leg variant (models/family/context.py returns
+    shallow copies), so hashing it once per variant instead of once per
+    member is the difference between ~1 s and ~0.1 s on a 72-member family
+    (scripts/bench_member.py). Safe because `geometries` keeps a reference
+    to every list whose id is memoised, so no id can be reused.
+
+    Built from the full dict rather than from the Route so the summary and
+    the fingerprint, which read fields this drops (od_pairs, the
+    composition's places_by_class, the geometry), can be taken from the
+    same dict first. Per trip, `stops` holds each Stop once in travel
+    order and every segment refers to its ends by index (`from`, `to`)
+    instead of inlining both dicts — route_to_dict() carries every
+    intermediate stop twice per trip. Geometry goes into `geometries`,
+    content-addressed: a member's route on the same graph and variant
+    shares the pool entry, and the 72 members of a family reference about
+    eight of them. Everything else — ids, schedule, general_parameters
+    with its timetable_warnings, parkings, shuntings — is verbatim.
+    """
+
+    def compact_trip(trip: dict) -> dict:
+        stops = ordered_stops(trip)
+        segments = []
+        for i, seg in enumerate(trip["segments"]):
+            coords = geometry_by_id[seg["geometry_id"]]
+            geometry_id = id_cache.get(id(coords)) if id_cache is not None else None
+            if geometry_id is None:
+                rounded = [
+                    [round(c, GEOMETRY_ID_NDIGITS) for c in point] for point in coords
+                ]
+                geometry_id = "g:" + canonical_sha256(rounded)[len("sha256:") :][:16]
+                if id_cache is not None:
+                    id_cache[id(coords)] = geometry_id
+            geometries.setdefault(geometry_id, coords)
+            compact = {k: v for k, v in seg.items() if k not in _COMPACT_DROPS_SEGMENT}
+            compact.update({"from": i, "to": i + 1, "geometry_id": geometry_id})
+            segments.append(compact)
+        return {
+            "trip_id": trip["trip_id"],
+            "direction": trip["direction"],
+            "general_parameters": trip["general_parameters"],
+            "stops": stops,
+            "segments": segments,
+        }
+
+    geometry_by_id = {g["id"]: g["coords"] for g in route_dict["geometries"]}
+    out = {k: v for k, v in route_dict.items() if k not in _COMPACT_DROPS_ROUTE}
+    out["trip_pairs"] = [
+        {
+            **{k: v for k, v in pair.items() if k not in _COMPACT_DROPS_PAIR},
+            "outbound": compact_trip(pair["outbound"]),
+            "return_trip": compact_trip(pair["return_trip"]),
+        }
+        for pair in route_dict["trip_pairs"]
+    ]
+    return out
 
 
 # =============================================================================
@@ -369,6 +484,8 @@ def _segment_from_dict(d: dict, geometries_by_id: dict[str, list]) -> Segment:
         buffer_time_min=int(d["buffer_time_min"]),
         # pre-0.9.10 payloads predate fixed-night slack — default 0
         slack_time_min=int(d.get("slack_time_min", 0)),
+        # pre-0.9.32 payloads predate expert-mode add-ons — default 0
+        addon_time_min=int(d.get("addon_time_min", 0)),
         energy_kwh=float(d["energy_kwh"]),
         country_distance_shares=d["country_distance_shares"],
         country_time_shares=d["country_time_shares"],
@@ -427,7 +544,7 @@ def route_from_dict(
 
     Returns (Route, CompositionCollection) — the collection is returned
     alongside the Route (rather than just the Route, as before 2026-07-06)
-    so callers (api/helpers/proposal_compute.py, tests) can reuse it to document the actual
+    so callers (api/helpers/member_compute.py, tests) can reuse it to document the actual
     composition/operator parameters an evaluation was costed with, without
     a second DB round-trip.
     """
@@ -441,15 +558,7 @@ def route_from_dict(
             "track/stop infrastructure version to reconstruct the route with."
         )
 
-    schedule = Schedule(
-        seasonal_schedules=[
-            SeasonalSchedule(
-                season=Season(ss["season"]),
-                frequency=Frequency(ss["frequency"]),
-            )
-            for ss in data["schedule"]["seasonal_schedules"]
-        ]
-    )
+    schedule = schedule_from_dict(data["schedule"])
 
     geometries_by_id = {g["id"]: g["coords"] for g in data.get("geometries", [])}
 
@@ -516,3 +625,63 @@ def route_from_dict(
         shuntings=shuntings,
     )
     return route, compositions
+
+
+# =============================================================================
+# EXPERT TIMETABLE — request block → domain (0.9.32)
+# =============================================================================
+
+
+def _direction_overrides_from_dict(d: dict | None) -> DirectionOverrides:
+    """One direction of the request's expert_timetable block. An absent or
+    empty block is NO_OVERRIDES, i.e. a fully automatic timetable for that
+    direction."""
+    if not d:
+        return NO_OVERRIDES
+    departure = None
+    raw_departure = d.get("departure")
+    if raw_departure:
+        mode = raw_departure["mode"]
+        minutes = int(
+            raw_departure["time_min"]
+            if mode == "absolute"
+            else raw_departure["shift_min"]
+        )
+        departure = DepartureOverride(mode=mode, minutes=minutes)
+    addons = tuple(
+        SegmentAddon(
+            from_stop_id=a["from_stop_id"],
+            to_stop_id=a["to_stop_id"],
+            add_min=int(a["add_min"]),
+        )
+        for a in d.get("segment_addons", [])
+    )
+    return DirectionOverrides(departure=departure, addons=addons)
+
+
+def expert_timetable_from_dict(d: dict | None) -> ExpertTimetable | None:
+    """The compute request's expert_timetable block as domain objects —
+    the one place a dict becomes an ExpertTimetable, so models/ never sees
+    the wire shape (the same split route_from_dict() keeps for routes).
+
+    Assumes the block already passed validate_calc_body() and was
+    normalised by normalize_expert_timetable() (api/helpers/
+    member_compute.py): keys are known, values are the right types, and
+    a mirroring return block is exactly {"mirror_outbound": True}.
+
+    Returns None for an absent block — every request without the key gets
+    the automatic timetable it always got. A return block that mirrors is
+    represented as ExpertTimetable.return_trip=None; route_factory does the
+    reversing via timetable.mirror_overrides().
+    """
+    if not d:
+        return None
+    raw_return = d.get("return")
+    return ExpertTimetable(
+        outbound=_direction_overrides_from_dict(d.get("outbound")),
+        return_trip=(
+            None
+            if not raw_return or raw_return.get("mirror_outbound")
+            else _direction_overrides_from_dict(raw_return)
+        ),
+    )

@@ -99,8 +99,8 @@ export default defineConfig({
     // One flat sidebar for every page, including the landing one: the site
     // has no home layout, so the tree is visible wherever a reader lands.
     //
-    // The reference pages (formulas, parameters, versions, changelog,
-    // standard values, emission factors) are deliberately absent here. They
+    // The reference pages (formulas, parameters, standard values, emission
+    // factors) are deliberately absent here. They
     // are still built and still published: every input row of every cost
     // page's legend links into them, 122 links in all. They are reached from
     // a formula rather than browsed.

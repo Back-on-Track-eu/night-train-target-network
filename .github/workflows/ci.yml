@@ -34,6 +34,20 @@ jobs:
       - run: pip install ruff==0.15.21
       - run: ruff format --check backend/
 
+  # Separate job from the formatter on purpose: a lint failure names a defect
+  # to fix, a format failure names a command to run, and reading which one
+  # broke off the job name is worth the extra runner.
+  ruff-lint:
+    name: Ruff lint (backend)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff==0.15.21
+      - run: ruff check backend/
+
   type-check:
     name: vue-tsc (frontend)
     runs-on: ubuntu-latest

@@ -9,16 +9,20 @@ import '@/lib/maplibreWorker'
 import { octilinearPath } from '@/utils/octilinear'
 import { mdiPlus, mdiClose } from '@mdi/js'
 
-// Two sources/layers: the in-scope route (highlighted) and the out-of-scope
-// route (dimmed grey). The dim layer is added first so the highlight draws on
-// top of it at shared junctions.
+// Three sources/layers for the line, painted bottom to top: the family's other
+// variants (dashed, faded), the out-of-scope part of the shown route (dimmed),
+// and the in-scope part (highlighted). Order is the draw order — at a shared
+// junction the route the user is looking at is the one on top.
+const ALT_SOURCE = 'route-alt'
+const ALT_LAYER = 'route-alt-line'
+const ALT_LAYER_HIT = 'route-alt-hit'
 const ROUTE_SOURCE = 'route'
 const ROUTE_SOURCE_DIM = 'route-dim'
 const ROUTE_LAYER = 'route-line'
 const ROUTE_LAYER_DIM = 'route-line-dim'
-// Invisible, much wider copies of the two line layers, used only as hover
-// targets — a 3px line is near-impossible to hit with the cursor, and MapLibre
-// still hit-tests layers painted at zero opacity.
+// Invisible, much wider copies of the line layers, used only as hover targets —
+// a 3px line is near-impossible to hit with the cursor, and MapLibre still
+// hit-tests layers painted at zero opacity.
 const ROUTE_LAYER_HIT = 'route-line-hit'
 const ROUTE_LAYER_DIM_HIT = 'route-line-dim-hit'
 const HIT_LAYERS = [ROUTE_LAYER_HIT, ROUTE_LAYER_DIM_HIT]
@@ -36,6 +40,10 @@ const PRIMARY = '#2271b3'
 const PRIMARY_LIGHT = '#eef4fb'
 // A lighter tint of PRIMARY (not grey) for out-of-scope route parts and stops.
 const DIMMED = '#9cc0e5'
+// Other variants of the same proposal: a desaturated slate, deliberately NOT a
+// tint of PRIMARY, so "another scenario's corridor" never reads as "part of
+// this route, currently out of scope". Dashed for the same reason.
+const ALT = '#8b9bb4'
 // Label and tooltip text sits directly on the near-white basemap, which needs
 // more contrast than the marker fills do — so text uses a darker shade of each
 // tint than the corresponding line/marker.
@@ -88,6 +96,18 @@ interface MapSegment {
   travelMinutes: number | null
 }
 
+// A corridor one of the family's other members takes, drawn faded underneath
+// the route on screen. `lines` is already reduced to the geometry the shown
+// route does NOT draw (lib/proposalFamily.ts alternativeRoutes), so what is
+// visible is the divergence, not a second copy of the whole line.
+interface MapAlternative {
+  key: string
+  scenarioId: number
+  compositionId: string
+  label: string
+  lines: [number, number][][]
+}
+
 const props = defineProps<{
   stops: MarkerStop[]
   shape?: { type: string; coordinates: [number, number][] } | null
@@ -103,11 +123,16 @@ const props = defineProps<{
   // that is not already on the itinerary. Never affects the map's fit: these
   // cover most of Europe, so fitting to them would zoom out to the continent.
   available?: AvailableStop[] | null
+  // The other members' corridors. Hovering one names it, clicking one selects
+  // that member — the switch itself is the parent's, which already serves it
+  // from the family without recomputing.
+  alternatives?: MapAlternative[] | null
 }>()
 
 const emit = defineEmits<{
   'toggle-suggested': [stopId: string]
   'add-stop': [stopId: string]
+  'select-alternative': [scenarioId: number, compositionId: string]
 }>()
 
 const { t } = useI18n()
@@ -445,6 +470,38 @@ function syncPolyline() {
   srcDim.setData({ type: 'FeatureCollection', features: [] })
 }
 
+function syncAlternatives() {
+  if (!map || !mapLoaded) return
+  const src = map.getSource(ALT_SOURCE) as maplibregl.GeoJSONSource | undefined
+  if (!src) return
+  const features = (props.alternatives ?? []).flatMap((alt) =>
+    alt.lines.map((coordinates) => ({
+      type: 'Feature' as const,
+      geometry: { type: 'LineString' as const, coordinates },
+      properties: {
+        altKey: alt.key,
+        altLabel: alt.label,
+        altScenarioId: alt.scenarioId,
+        altCompositionId: alt.compositionId,
+      },
+    })),
+  )
+  src.setData({ type: 'FeatureCollection', features })
+  setAltHover(null)
+}
+
+// Lifting one corridor out of the set on hover. Done with a paint expression
+// over the feature's own altKey rather than feature-state, which would need
+// stable numeric feature ids this source has no reason to carry.
+function setAltHover(key: string | null) {
+  if (!map || !map.getLayer(ALT_LAYER)) return
+  map.setPaintProperty(
+    ALT_LAYER,
+    'line-opacity',
+    key === null ? 0.55 : ['case', ['==', ['get', 'altKey'], key], 0.95, 0.3],
+  )
+}
+
 // Minutes -> "6h 12m" / "3h" / "45m". Deliberately distinct from the "HH:MM"
 // clock format used for stop arrival/departure times.
 function formatDuration(minutes: number): string {
@@ -500,6 +557,35 @@ function hideLegTooltip() {
   hoverPopup?.remove()
 }
 
+function altTooltipContent(featureProps: Record<string, unknown>): HTMLElement {
+  const root = document.createElement('div')
+  root.append(
+    tooltipLine(String(featureProps.altLabel ?? ''), {
+      color: LABEL_PRIMARY,
+      fontWeight: '600',
+      whiteSpace: 'nowrap',
+    }),
+    tooltipLine(t('proposal.map.variantSwitch'), {
+      color: LABEL_DIMMED,
+      marginTop: '2px',
+    }),
+  )
+  return root
+}
+
+function onAltHover(e: maplibregl.MapLayerMouseEvent) {
+  const feature = e.features?.[0]
+  if (!map || !hoverPopup || !feature || feature.properties?.altKey === undefined) return
+  map.getCanvas().style.cursor = 'pointer'
+  setAltHover(String(feature.properties.altKey))
+  hoverPopup.setLngLat(e.lngLat).setDOMContent(altTooltipContent(feature.properties)).addTo(map)
+}
+
+function hideAltTooltip() {
+  setAltHover(null)
+  hideLegTooltip()
+}
+
 function fitToStops(animate: boolean) {
   if (!map || !mapLoaded || props.stops.length === 0) return
   const duration = animate ? 900 : 0
@@ -517,7 +603,7 @@ function fitToStops(animate: boolean) {
 
 function initLayers() {
   if (!map) return
-  for (const id of [AVAILABLE_SOURCE, ROUTE_SOURCE_DIM, ROUTE_SOURCE, STOPS_SOURCE]) {
+  for (const id of [AVAILABLE_SOURCE, ALT_SOURCE, ROUTE_SOURCE_DIM, ROUTE_SOURCE, STOPS_SOURCE]) {
     map.addSource(id, {
       type: 'geojson',
       data: { type: 'FeatureCollection', features: [] },
@@ -538,6 +624,27 @@ function initLayers() {
       'circle-stroke-width': 1.5,
       'circle-opacity': 0.9,
     },
+  })
+  // Under both route layers: another scenario's corridor is context for the
+  // route on screen, never competition for it.
+  map.addLayer({
+    id: ALT_LAYER,
+    type: 'line',
+    source: ALT_SOURCE,
+    layout: { 'line-join': 'round', 'line-cap': 'butt' },
+    paint: {
+      'line-color': ALT,
+      'line-width': 2,
+      'line-opacity': 0.55,
+      'line-dasharray': [3, 2],
+    },
+  })
+  map.addLayer({
+    id: ALT_LAYER_HIT,
+    type: 'line',
+    source: ALT_SOURCE,
+    layout: { 'line-join': 'round', 'line-cap': 'round' },
+    paint: { 'line-color': ALT, 'line-width': 14, 'line-opacity': 0 },
   })
   map.addLayer({
     id: ROUTE_LAYER_DIM,
@@ -591,6 +698,22 @@ function initLayers() {
     },
   })
 
+  // Registered BEFORE the shown route's handlers so that where an alternative
+  // and the route on screen overlap, the route's tooltip is the one that lands
+  // last and wins. They rarely overlap — an alternative only carries geometry
+  // the shown route does not draw — but a shared corridor under a different
+  // geometry id is possible.
+  map.on('mousemove', ALT_LAYER_HIT, onAltHover)
+  map.on('mouseleave', ALT_LAYER_HIT, hideAltTooltip)
+  map.on('click', ALT_LAYER_HIT, (e) => {
+    const feature = e.features?.[0]
+    const scenarioId = Number(feature?.properties?.altScenarioId)
+    const compositionId = feature?.properties?.altCompositionId as string | undefined
+    if (!Number.isFinite(scenarioId) || !compositionId) return
+    hideAltTooltip()
+    emit('select-alternative', scenarioId, compositionId)
+  })
+
   map.on('mousemove', HIT_LAYERS, onLegHover)
   map.on('mouseleave', HIT_LAYERS, hideLegTooltip)
 
@@ -639,6 +762,7 @@ onMounted(() => {
     syncSuggestedMarkers()
     syncAvailableStops()
     syncPolyline()
+    syncAlternatives()
     fitToStops(false)
   })
 })
@@ -670,6 +794,15 @@ watch(
   () => props.suggested,
   () => {
     syncSuggestedMarkers()
+  },
+  { deep: true },
+)
+// Alternatives never refit either: they are drawn along the same corridor as
+// the route, and a branch that leaves it should not pull the frame with it.
+watch(
+  () => props.alternatives,
+  () => {
+    syncAlternatives()
   },
   { deep: true },
 )

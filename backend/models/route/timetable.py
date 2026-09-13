@@ -48,24 +48,46 @@ living in route_factory.py:
                              sequential whole-trip reroute per candidate
                              doesn't scale to the ~50 stops a busy corridor
                              can add). Shared by both modes below.
-                           apply_auto_stop_addition() — mode "add": greedy
-                             cheapest-first acceptance within the
-                             AUTO_STOP_MAX_DETOUR_PER budget, then one real
-                             reroute of the final stop list; always returns
-                             routed_legs matching the returned stop_ids so
-                             route_factory never re-routes itself.
                            suggest_auto_stops() — mode "suggest": no
                              selection, no budget, no reroute — just every
                              costed candidate as an AutoStopSuggestion
                              (with added_time_min), in geographic order
                              along the route, for the caller to decide.
-                         Whether either is called at all (and mode "off"
-                         skipping both) is route_factory._build_trip()'s
-                         switch.
+                         Whether it is called at all (mode "off" skips it)
+                         is route_factory._build_trip()'s switch. The
+                         route builder never adds a stop by itself: mode
+                         "add" was removed in 0.9.34, so a suggestion only
+                         becomes a stop once the user accepts it and posts
+                         it in the stop list.
+
+EXPERT TIMETABLE OVERRIDES (0.9.32) are deliberately NOT a fourth named
+strategy: they compose with whichever timetable_mode runs, so they are
+plain functions like build_final_timetable() below, not a switch.
+ExpertTimetable/DirectionOverrides/DepartureOverride/SegmentAddon are the
+domain input objects (built at the API boundary by
+api/helpers/route_serialize.py::expert_timetable_from_dict), and three
+functions consume them:
+  resolve_addons()         — manual minutes per leg, aligned with
+                             routed_legs, plus the add-ons whose ordered
+                             stop pair no longer exists in the final stop
+                             list (dropped, never redistributed).
+  resolve_departure()      — the strategy's automatic departure, replaced
+                             ("absolute") or displaced ("shift").
+  classify_for_departure() — the classification tail both strategies run,
+                             re-runnable against an overridden departure
+                             so a shifted trip is re-classified (a stop
+                             that now departs after 00:00 becomes a night
+                             stop, and gets night dwell).
+mirror_overrides() reverses one direction's add-ons for the other, the
+same way route_factory reverses fixed_night_interval. Add-on minutes go
+into the strategies' own provisional offsets (addon_per_leg below), so a
+padded trip stays centred on MIRROR_MIN and a padded fixed-night interval
+needs correspondingly less stretch slack.
 
 VALID_TIMETABLE_MODES / VALID_SCHEDULE_MODES / VALID_AUTO_STOP_ADDITION_MODES
-stay here as the single source of truth for the allowed strings —
-the compute request validation (api/helpers/proposal_compute.py) and route_factory.py's dispatch both read
+/ VALID_DEPARTURE_MODES stay here as the single source of truth for the
+allowed strings —
+the compute request validation (api/helpers/member_compute.py) and route_factory.py's dispatch both read
 from them, so a new mode is added in exactly one place (plus the function
 implementing it and the route_factory branch that calls it).
 
@@ -90,7 +112,8 @@ from dataclasses import dataclass
 
 from models.params import Composition, TrackInfraCollection, StopInfraCollection
 from models.route.trip import Segment, StopType, TimetableWarning
-from models.route.route import Schedule, SeasonalSchedule, Season, Frequency
+from models.route.model import DEFAULT_MIN_TURNAROUND_MIN
+from models.route.route import Schedule
 from models.route.routing.dynamics import stop_time_loss_s
 from models.route.routing.gauge import resolve_trip_gauge, stop_supports_gauge
 from models.route.routing.rail_router import (
@@ -146,17 +169,19 @@ def classify_stop_type(arrival_min: int, departure_min: int) -> StopType:
 
 
 def _provisional_offsets(
-    pure_leg_times: list[int], slack_per_leg: list[int], min_dwell: int
+    pure_leg_times: list[int], extra_per_leg: list[int], min_dwell: int
 ) -> tuple[list[int], list[int]]:
     """Cumulative provisional (arrival, departure) offsets from trip
-    departure per stop — pure leg times plus slack per leg, min-dwell
-    approximation at intermediate stops, no dwell at termini. The common
-    positioning/classification arithmetic behind both timetable modes."""
+    departure per stop — pure leg times plus whatever non-physics minutes
+    that leg carries (fixed-night slack, expert-mode add-ons, or their
+    sum), min-dwell approximation at intermediate stops, no dwell at
+    termini. The common positioning/classification arithmetic behind both
+    timetable modes."""
     n = len(pure_leg_times) + 1
     arr_offset = [0] * n
     dep_offset = [0] * n
     for i in range(1, n):
-        arr_offset[i] = dep_offset[i - 1] + pure_leg_times[i - 1] + slack_per_leg[i - 1]
+        arr_offset[i] = dep_offset[i - 1] + pure_leg_times[i - 1] + extra_per_leg[i - 1]
         dep_offset[i] = arr_offset[i] + (min_dwell if i < n - 1 else 0)
     return arr_offset, dep_offset
 
@@ -185,6 +210,7 @@ def simple_automatic_timetable(
     stop_ids: list[str],
     composition: Composition,
     routed_legs: list[RoutedLeg],
+    addon_per_leg: list[int] | None = None,
 ) -> tuple[list[tuple[str, StopType]], int]:
     """
     Implements timetable_mode="simpleAutomatic". Derive departure time and
@@ -217,14 +243,21 @@ def simple_automatic_timetable(
     other side of the boundary once real dwell is added; not worth
     iterating to convergence here).
 
+    addon_per_leg: expert-mode manual minutes per leg (resolve_addons()) —
+    None means none anywhere. They are part of the trip's duration, so the
+    mirror is taken around the PADDED duration: padding a leg keeps the
+    trip centred on MIRROR_MIN instead of pushing its arrival late.
+
     Returns (stop_inputs with classified StopType, departure_time_min).
     """
     pure_leg_times = [leg.total_time_min for leg in routed_legs]
     min_dwell = min(
         composition.min_boarding_time_min, composition.min_alighting_time_min
     )
+    if addon_per_leg is None:
+        addon_per_leg = [0] * len(routed_legs)
     arr_offset, dep_offset = _provisional_offsets(
-        pure_leg_times, [0] * len(routed_legs), min_dwell
+        pure_leg_times, addon_per_leg, min_dwell
     )
 
     total_duration = arr_offset[-1]  # legs + min-dwell at every intermediate stop
@@ -240,6 +273,7 @@ def simple_automatic_fixed_night_timetable(
     composition: Composition,
     routed_legs: list[RoutedLeg],
     fixed_night_interval: list[str],
+    addon_per_leg: list[int] | None = None,
 ) -> tuple[list[tuple[str, StopType]], int, list[int]]:
     """
     Implements timetable_mode="simpleAutomaticWithFixedNight". Same
@@ -279,8 +313,15 @@ def simple_automatic_fixed_night_timetable(
     Provisional offsets use the same min-dwell approximation and the same
     accepted final-pass deviation as simple_automatic_timetable().
 
+    addon_per_leg: expert-mode manual minutes per leg (resolve_addons()) —
+    counted towards the interval's NATURAL span, so minutes a person added
+    inside the interval reduce the slack the night window has to stretch
+    it by (and can remove the stretch entirely). The two stay separate
+    quantities on the segment; only their sum drives the clock.
+
     Returns (stop_inputs with classified StopType, departure_time_min,
-    slack_per_leg aligned with routed_legs — zeros outside the interval).
+    slack_per_leg aligned with routed_legs — zeros outside the interval,
+    and never including addon_per_leg).
     """
     a_idx = _interval_index(stop_ids, fixed_night_interval[0], "start")
     b_idx = _interval_index(stop_ids, fixed_night_interval[1], "end")
@@ -294,9 +335,13 @@ def simple_automatic_fixed_night_timetable(
     min_dwell = min(
         composition.min_boarding_time_min, composition.min_alighting_time_min
     )
+    if addon_per_leg is None:
+        addon_per_leg = [0] * len(routed_legs)
 
     no_slack = [0] * len(routed_legs)
-    arr_natural, dep_natural = _provisional_offsets(pure_leg_times, no_slack, min_dwell)
+    arr_natural, dep_natural = _provisional_offsets(
+        pure_leg_times, addon_per_leg, min_dwell
+    )
     natural_span = arr_natural[b_idx] - dep_natural[a_idx]
 
     # dep(A) <= NIGHT_START_MIN - 1 and arr(B) >= NIGHT_END_MIN together
@@ -319,8 +364,9 @@ def simple_automatic_fixed_night_timetable(
             slack_total,
         )
 
+    extra_per_leg = [s + a for s, a in zip(slack_per_leg, addon_per_leg)]
     arr_offset, dep_offset = _provisional_offsets(
-        pure_leg_times, slack_per_leg, min_dwell
+        pure_leg_times, extra_per_leg, min_dwell
     )
     span = arr_offset[b_idx] - dep_offset[a_idx]  # natural_span + slack_total
 
@@ -340,7 +386,7 @@ def simple_automatic_fixed_night_timetable(
 
 def _interval_index(stop_ids: list[str], stop_id: str, role: str) -> int:
     """Index of a fixed_night_interval endpoint in stop_ids, with a domain
-    error naming the missing endpoint — api/helpers/proposal_compute.py validates against the
+    error naming the missing endpoint — api/helpers/member_compute.py validates against the
     caller's own stops, this re-checks against the possibly auto-extended
     final list (auto_stop_addition only ever inserts, so a miss here means
     the request validation was bypassed)."""
@@ -397,8 +443,12 @@ def fixed_night_speed_warning(
     TimetableWarning for the trip's general_parameters.timetable_warnings;
     None otherwise. A warning, never an error — the route still returns.
 
-    Runs on the final assembled segments (real dwell, real slack), not the
-    provisional physics the timetable strategy positioned with.
+    Runs on the final assembled segments (real dwell, real slack, real
+    expert-mode add-ons), not the provisional physics the timetable
+    strategy positioned with. Manual add-ons inside the interval therefore
+    lower its timetable speed like slack does, and can trip this warning on
+    their own — correctly so: the interval IS that slow now, whoever's
+    minutes made it so.
     """
     stop_ids = [segments[0].from_stop.stop_id] + [s.to_stop.stop_id for s in segments]
     a_idx = _interval_index(stop_ids, fixed_night_interval[0], "start")
@@ -444,11 +494,185 @@ def fixed_night_speed_warning(
 
 VALID_TIMETABLE_MODES = frozenset({"simpleAutomatic", "simpleAutomaticWithFixedNight"})
 """Single source of truth for allowed timetable_mode strings — read by both
-the compute request validation (api/helpers/proposal_compute.py) and route_factory._build_trip()'s switch.
+the compute request validation (api/helpers/member_compute.py) and route_factory._build_trip()'s switch.
 Adding a mode means: add its function above, add it to this set, add a
 branch in _build_trip(). "simpleAutomaticWithFixedNight" additionally
-requires the request's fixed_night_interval, validated in api/helpers/proposal_compute.py and
+requires the request's fixed_night_interval, validated in api/helpers/member_compute.py and
 threaded through TripPairInput."""
+
+
+# =============================================================================
+# EXPERT TIMETABLE OVERRIDES — manual departure + manual per-leg minutes,
+# applied on top of whichever timetable_mode ran. Not a mode of their own
+# (see the module docstring): plain functions route_factory._build_trip()
+# calls in a fixed order, so they compose with every strategy above.
+# =============================================================================
+
+VALID_DEPARTURE_MODES = frozenset({"absolute", "shift"})
+"""Single source of truth for expert_timetable.departure.mode — read by the
+compute request validation (api/helpers/member_compute.py) and by
+resolve_departure() below.
+
+"absolute": the trip departs at exactly this minute, whatever the strategy
+computed — it survives a reroute unchanged, which is what a timetabler
+pinning a departure means.
+"shift":    the strategy's own departure, displaced by this many minutes —
+it MOVES when a reroute changes the trip's duration and the mirror around
+MIRROR_MIN re-centres. Which of the two applies is the caller's choice per
+route, not a model decision."""
+
+
+@dataclass(frozen=True)
+class SegmentAddon:
+    """Manual minutes on ONE leg, keyed by the ordered stop pair rather than
+    a leg index: an index means nothing once a reroute inserts a stop, a
+    pair either still exists in the new stop list or it does not. add_min is
+    always positive — an add-on can only ever slow a leg down, the routed
+    physics stay the floor (enforced at the API boundary)."""
+
+    from_stop_id: str
+    to_stop_id: str
+    add_min: int
+
+
+@dataclass(frozen=True)
+class DepartureOverride:
+    """The caller's first-departure override for one direction. mode is one
+    of VALID_DEPARTURE_MODES; minutes is the absolute departure minute for
+    "absolute" and the signed displacement for "shift" — both on the
+    service-day scale everything else in the model uses (models/utils.py::
+    hhmm_to_min), so a mirrored return trip may legitimately carry a
+    negative absolute value."""
+
+    mode: str
+    minutes: int
+
+
+@dataclass(frozen=True)
+class DirectionOverrides:
+    """Everything one direction's timetable may be overridden with."""
+
+    departure: DepartureOverride | None
+    addons: tuple[SegmentAddon, ...]
+
+
+@dataclass(frozen=True)
+class ExpertTimetable:
+    """One trip pair's overrides. return_trip=None means "mirror outbound"
+    — the default, and the same convention route_factory already applies to
+    fixed_night_interval; mirror_overrides() below does the reversing."""
+
+    outbound: DirectionOverrides
+    return_trip: DirectionOverrides | None
+
+
+NO_OVERRIDES = DirectionOverrides(departure=None, addons=())
+"""What a direction with nothing overridden looks like — used by
+route_factory so it never has to branch on None twice."""
+
+
+def mirror_overrides(overrides: DirectionOverrides) -> DirectionOverrides:
+    """One direction's overrides as they apply to the OTHER direction: each
+    add-on's stop pair reversed, so a manual minute on A→B also pads B→A.
+
+    The departure is deliberately NOT carried over. A pinned outbound
+    departure says nothing about when the return should leave — the return
+    has its own timetable, mirrored around MIRROR_MIN by the strategy. A
+    caller who wants both pinned sends an explicit return block."""
+    return DirectionOverrides(
+        departure=None,
+        addons=tuple(
+            SegmentAddon(
+                from_stop_id=a.to_stop_id,
+                to_stop_id=a.from_stop_id,
+                add_min=a.add_min,
+            )
+            for a in overrides.addons
+        ),
+    )
+
+
+def resolve_addons(
+    stop_ids: list[str], addons: tuple[SegmentAddon, ...]
+) -> tuple[list[int], list[SegmentAddon]]:
+    """Manual minutes per leg, aligned with the FINAL stop list, plus the
+    add-ons that no longer belong to it.
+
+    An add-on survives only if its two stops are still adjacent, in that
+    order, in stop_ids. The request validation already requires that of the
+    stops the caller POSTED, so the only thing that can orphan one here is
+    auto_stop_addition="add" inserting a stop between the pair — the
+    reroute case the feature was specified around. An orphaned add-on is
+    DROPPED, never redistributed over the legs that replaced it: splitting
+    a person's "this leg needs 8 more minutes" across two legs they never
+    saw would be an invention (see OPEN_TODOS["expert_addon_resplit"]).
+
+    Returns (addon_per_leg with one entry per leg, dropped add-ons).
+    """
+    addon_per_leg = [0] * max(len(stop_ids) - 1, 0)
+    index_of_pair = {
+        (stop_ids[i], stop_ids[i + 1]): i for i in range(len(stop_ids) - 1)
+    }
+    dropped: list[SegmentAddon] = []
+    for addon in addons:
+        leg_index = index_of_pair.get((addon.from_stop_id, addon.to_stop_id))
+        if leg_index is None:
+            dropped.append(addon)
+            continue
+        addon_per_leg[leg_index] += addon.add_min
+    return addon_per_leg, dropped
+
+
+def resolve_departure(
+    auto_departure_min: int, override: DepartureOverride | None
+) -> int:
+    """The departure a trip actually gets: the strategy's own value, an
+    absolute replacement, or that value displaced by a shift. See
+    VALID_DEPARTURE_MODES for what the two modes mean across a reroute."""
+    if override is None:
+        return auto_departure_min
+    if override.mode == "absolute":
+        return override.minutes
+    if override.mode == "shift":
+        return auto_departure_min + override.minutes
+    raise ValueError(
+        f"Unknown departure override mode '{override.mode}'. "
+        f"Supported: {sorted(VALID_DEPARTURE_MODES)}."
+    )
+
+
+def classify_for_departure(
+    stop_ids: list[str],
+    routed_legs: list[RoutedLeg],
+    composition: Composition,
+    departure_time_min: int,
+    extra_per_leg: list[int],
+) -> list[tuple[str, StopType]]:
+    """The classification tail both timetable strategies run, re-runnable
+    against a departure they did not choose.
+
+    An overridden departure moves every stop on the clock, so the
+    boarding/night/alighting split has to be taken again: a stop that now
+    departs after 00:00 is a night stop and gets night dwell, and dwell is
+    what build_final_timetable() turns into real times afterwards. Uses the
+    same min-dwell provisional approximation as the strategies, so the
+    accepted provisional-vs-final deviation documented there is unchanged
+    rather than doubled.
+
+    No circularity: the automatic departure is derived from leg times plus
+    extra minutes plus MIN dwell, never from the classification it feeds —
+    so overriding the departure changes classification, but classification
+    never changes the automatic value it was derived from.
+    """
+    pure_leg_times = [leg.total_time_min for leg in routed_legs]
+    min_dwell = min(
+        composition.min_boarding_time_min, composition.min_alighting_time_min
+    )
+    arr_offset, dep_offset = _provisional_offsets(
+        pure_leg_times, extra_per_leg, min_dwell
+    )
+    stop_types = _classify_stops(departure_time_min, arr_offset, dep_offset)
+    return list(zip(stop_ids, stop_types))
 
 
 # =============================================================================
@@ -459,37 +683,98 @@ threaded through TripPairInput."""
 # =============================================================================
 
 
-def always_daily_schedule() -> Schedule:
-    """Implements schedule_mode='alwaysDaily': daily frequency in both
-    seasons, regardless of actual demand."""
+def always_daily_schedule(min_turnaround_min: int) -> Schedule:
+    """Implements schedule_mode='alwaysDaily': seven days a week in every
+    month, regardless of actual demand."""
     return Schedule(
-        seasonal_schedules=[
-            SeasonalSchedule(season=Season.SUMMER, frequency=Frequency.DAILY),
-            SeasonalSchedule(season=Season.WINTER, frequency=Frequency.DAILY),
-        ]
+        days_per_week_by_month={m: 7 for m in range(1, 13)},
+        min_turnaround_min=min_turnaround_min,
     )
 
 
-VALID_SCHEDULE_MODES = frozenset({"alwaysDaily"})
+def custom_schedule(days_per_week_by_month: dict, min_turnaround_min: int) -> Schedule:
+    """Implements schedule_mode='custom': the caller's days per week for
+    each month, already validated at the API boundary
+    (api/helpers/member_compute.py validate_schedule)."""
+    return Schedule(
+        days_per_week_by_month=days_per_week_by_month,
+        min_turnaround_min=min_turnaround_min,
+    )
+
+
+# Reading a schedule back from a stored payload — here rather than in
+# api/helpers/route_serialize.py because models/evaluation/summary.py needs
+# the same widening and models/ never imports from api/.
+#
+# Two-season legacy shape. ROUTE_BUILDER < 0.9.35 stored a schedule as
+# summer/winter × daily/three_per_week; the month map replaced it. Written
+# alongside the month map for readers that still expect it, and read when a
+# stored payload has nothing else — SUMMER is April–September.
+_LEGACY_SUMMER_MONTHS = frozenset(range(4, 10))
+
+
+def legacy_seasonal_schedules(schedule: Schedule) -> list[dict]:
+    def frequency(months: frozenset[int]) -> str:
+        peak = max(schedule.days_per_week(m) for m in months)
+        return "daily" if peak >= 7 else "three_per_week"
+
+    return [
+        {"season": "summer", "frequency": frequency(_LEGACY_SUMMER_MONTHS)},
+        {
+            "season": "winter",
+            "frequency": frequency(frozenset(range(1, 13)) - _LEGACY_SUMMER_MONTHS),
+        },
+    ]
+
+
+def schedule_from_dict(data: dict) -> Schedule:
+    """Either shape. The month map wins when present; a legacy two-season
+    block is widened onto its months (daily → 7, three_per_week → 3)."""
+    turnaround = int(data.get("min_turnaround_min", DEFAULT_MIN_TURNAROUND_MIN))
+    if "days_per_week_by_month" in data:
+        return Schedule(
+            days_per_week_by_month=data["days_per_week_by_month"],
+            min_turnaround_min=turnaround,
+        )
+    by_season = {ss["season"]: ss["frequency"] for ss in data["seasonal_schedules"]}
+    days = {"daily": 7, "three_per_week": 3}
+    return Schedule(
+        days_per_week_by_month={
+            m: days.get(
+                by_season.get("summer" if m in _LEGACY_SUMMER_MONTHS else "winter", ""),
+                0,
+            )
+            for m in range(1, 13)
+        },
+        min_turnaround_min=turnaround,
+    )
+
+
+VALID_SCHEDULE_MODES = frozenset({"alwaysDaily", "custom"})
 """Single source of truth for allowed schedule_mode strings — read by both
-the compute request validation (api/helpers/proposal_compute.py) and route_factory.plan_route()'s switch.
+the compute request validation (api/helpers/member_compute.py) and route_factory.plan_route()'s switch.
 Reserved: a future demand-aware mode can be added here (new function + this
 set + a plan_route() branch) without changing the request shape."""
 
 
 # =============================================================================
-# auto_stop_addition IMPLEMENTATION — search + costing shared by modes "add"
-# (apply_auto_stop_addition) and "suggest" (suggest_auto_stops); route_
-# factory._build_trip() decides which of them to call, if any ("off").
+# auto_stop_addition IMPLEMENTATION — the candidate search + costing behind
+# mode "suggest" (suggest_auto_stops); route_factory._build_trip() decides
+# whether to run it at all ("off" skips it).
 # =============================================================================
 
-VALID_AUTO_STOP_ADDITION_MODES = frozenset({"off", "add", "suggest"})
+VALID_AUTO_STOP_ADDITION_MODES = frozenset({"off", "suggest"})
 """Single source of truth for allowed auto_stop_addition strings — read by
-both the compute request validation (api/helpers/proposal_compute.py) and route_factory._build_trip()'s
-switch. "off": caller's stop list returned unmodified, no search. "add":
-search + cost + greedy addition within the detour budget. "suggest":
-search + cost like "add", but nothing is added — every costed candidate is
-returned as an AutoStopSuggestion instead, budget deliberately not applied."""
+both the compute request validation (api/helpers/member_compute.py) and
+route_factory._build_trip()'s switch. "off": caller's stop list returned
+unmodified, no search. "suggest": search + cost, but nothing is added —
+every costed candidate is returned as an AutoStopSuggestion instead, the
+detour budget deliberately not applied.
+
+"add" (the builder picking stops itself, within the budget) was removed in
+0.9.34: a route the user did not ask for is not the user's route, and a
+family of members must be comparable across compositions, which it cannot
+be if each member may choose its own stop list."""
 
 _DEG_PER_M = 1 / 111_000
 """Rough metres-per-degree constant (~111km/degree of latitude) — only
@@ -507,8 +792,8 @@ class _AutoStopCandidate:
     (it belongs between stop_ids[leg_index] and stop_ids[leg_index + 1]);
     along_leg_fraction (0..1) orders multiple candidates that land on the
     same leg. Both stay fixed to the ORIGINAL geometry even as candidates
-    get committed one by one — see apply_auto_stop_addition()'s sort-key
-    merge for why that's safe.
+    stay fixed to the ORIGINAL geometry, which is what lets suggestions be
+    reported in geographic order without re-routing anything.
     """
 
     stop_id: str
@@ -833,8 +1118,10 @@ def find_and_cost_auto_stop_candidates(
 
     # Exact-prune bound for the routed refinement: a candidate whose
     # analytic LOWER BOUND already exceeds the whole trip's detour budget
-    # can never be accepted by mode "add", so measuring it precisely buys
-    # nothing — its estimate is kept as the reported figure instead.
+    # is one no reader would accept, so spending a router call to measure
+    # it precisely buys nothing — its estimate is kept as the reported
+    # figure instead. The budget bounds the COSTING effort here; it never
+    # filters what is suggested (see suggest_auto_stops).
     budget_min = (
         _estimate_technical_trip_time_min(
             stop_ids, routed_legs, composition, tracks, stop_infra
@@ -887,112 +1174,6 @@ def find_and_cost_auto_stop_candidates(
         for candidate in candidates
         if candidate.stop_id in added_by_stop
     ]
-
-
-def apply_auto_stop_addition(
-    stop_ids: list[str],
-    routed_legs: list[RoutedLeg],
-    composition: Composition,
-    tracks: TrackInfraCollection,
-    stop_infra: StopInfraCollection,
-    router: RailRouter,
-    routing_mode: str,
-) -> tuple[list[str], list[RoutedLeg]]:
-    """
-    Implements auto_stop_addition="add": adds worthwhile stops along the
-    already-routed path, beyond what the caller supplied. Always runs the
-    full algorithm — route_factory._build_trip() only calls this for mode
-    "add"; this function itself has no mode gate.
-
-    Algorithm:
-      1./2. Shared search + concurrent costing —
-         find_and_cost_auto_stop_candidates() above.
-      3. Sort by added_time_min ascending (cheapest first) and greedily
-         accumulate — pure arithmetic now, no further I/O — stopping at
-         the first candidate that would push the running total over
-         AUTO_STOP_MAX_DETOUR_PER of the original trip's time. Later
-         (more expensive) candidates are not added even if they'd
-         individually fit, matching the original "stop at first rejection"
-         rule now applied to accumulated rather than per-step cost.
-      4. One single full-trip reroute of the final stop list, once, for
-         the authoritative routed_legs the rest of the pipeline uses — a
-         deliberate simplicity trade-off over re-stitching the individual
-         mini-routes from step 2 (which would save this one call but need
-         special-casing legs with 2+ accepted candidates).
-
-    Each accepted candidate is merged back into the stop sequence by
-    (leg_index, along_leg_fraction), so the final stop list always follows
-    the route's actual geography regardless of selection order.
-
-    Returns (final_stop_ids, final_routed_legs) — routed_legs always
-    matches final_stop_ids, whether or not anything was actually added, so
-    route_factory._build_trip() never needs to re-route itself afterwards.
-    """
-    costed_candidates = find_and_cost_auto_stop_candidates(
-        stop_ids, routed_legs, composition, tracks, stop_infra, router, routing_mode
-    )
-    if not costed_candidates:
-        return stop_ids, routed_legs
-    costed_candidates.sort(key=lambda pair: pair[1])
-
-    baseline_time_min = _estimate_technical_trip_time_min(
-        stop_ids, routed_legs, composition, tracks, stop_infra
-    )
-    max_extra_min = baseline_time_min * AUTO_STOP_MAX_DETOUR_PER
-
-    committed = [(sid, (i, -1.0)) for i, sid in enumerate(stop_ids)]
-    running_extra_min = 0.0
-    added_stop_ids: list[str] = []
-
-    for candidate, candidate_time_min in costed_candidates:
-        if running_extra_min + candidate_time_min > max_extra_min:
-            logger.info(
-                "apply_auto_stop_addition: stopping at '%s' (+%.1fmin) — would "
-                "push cumulative added time past budget %.1fmin.",
-                candidate.stop_id,
-                candidate_time_min,
-                max_extra_min,
-            )
-            break
-
-        # (stop_id, sort_key) merge — original stops carry sort_key=(index,
-        # -1.0), which always sorts before any candidate assigned to that
-        # same leg (candidates carry fraction in [0, 1]) and after the
-        # previous leg's candidates, keeping geographic order regardless
-        # of the cheapest-first order candidates were accepted in.
-        committed = sorted(
-            committed
-            + [
-                (candidate.stop_id, (candidate.leg_index, candidate.along_leg_fraction))
-            ],
-            key=lambda entry: entry[1],
-        )
-        running_extra_min += candidate_time_min
-        added_stop_ids.append(candidate.stop_id)
-
-    if not added_stop_ids:
-        return stop_ids, routed_legs
-
-    logger.info(
-        "apply_auto_stop_addition: added %d stop(s): %s",
-        len(added_stop_ids),
-        added_stop_ids,
-    )
-    final_reroute_start = time.monotonic()
-    final_stop_ids = [sid for sid, _ in committed]
-    final_routed_legs = route_trip(
-        router,
-        stops=build_router_stops(final_stop_ids, stop_infra),
-        composition=composition,
-        tracks=tracks,
-        routing_mode=routing_mode,
-    )
-    logger.info(
-        "apply_auto_stop_addition: final reroute of %d stop(s) took %.2fs.",
-        len(final_stop_ids),
-        time.monotonic() - final_reroute_start,
-    )
-    return final_stop_ids, final_routed_legs
 
 
 def suggest_auto_stops(
@@ -1076,17 +1257,24 @@ def build_final_timetable(
     tracks: TrackInfraCollection,
     departure_time_min: int,
     slack_per_leg: list[int] | None = None,
+    addon_per_leg: list[int] | None = None,
 ) -> list[tuple[int | None, int | None]]:
     """
     Exact, dwell-inclusive (arrival_min, departure_min) per stop, given a
     departure time and stop types that are already fixed (typically the
-    output of a timetable_mode strategy above). Not itself a strategy —
-    there's only one correct way to turn "departure time + stop types"
-    into real clock times, so this is a plain function, not dispatched.
+    output of a timetable_mode strategy above, possibly re-classified for
+    an overridden departure). Not itself a strategy — there's only one
+    correct way to turn "departure time + stop types" into real clock
+    times, so this is a plain function, not dispatched.
 
     slack_per_leg: fixed-night stretch minutes per leg, aligned with
     routed_legs (see simple_automatic_fixed_night_timetable) — None means
     no slack anywhere, the case for every other timetable_mode.
+
+    addon_per_leg: expert-mode manual minutes per leg (resolve_addons()) —
+    None means none anywhere. Kept a separate argument from slack_per_leg
+    because the two are separate fields on Segment; the clock only ever
+    sees their sum.
 
     First stop: arrival=None (it's the origin, nothing to arrive at).
     Last stop: departure=None (journey's over). Every stop in between
@@ -1095,6 +1283,8 @@ def build_final_timetable(
     n = len(stop_types)
     if slack_per_leg is None:
         slack_per_leg = [0] * len(routed_legs)
+    if addon_per_leg is None:
+        addon_per_leg = [0] * len(routed_legs)
     clock_min = departure_time_min  # time reached so far
     times: list[tuple[int | None, int | None]] = []
 
@@ -1112,7 +1302,12 @@ def build_final_timetable(
         )
 
         if not is_last:
-            clock_min = departure_min + routed_legs[i].total_time_min + slack_per_leg[i]
+            clock_min = (
+                departure_min
+                + routed_legs[i].total_time_min
+                + slack_per_leg[i]
+                + addon_per_leg[i]
+            )
 
         times.append((arrival_min, departure_min))
 

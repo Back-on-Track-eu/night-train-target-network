@@ -16,13 +16,23 @@ import pytest
 import requests
 
 from tests.conftest import API_BASE
-from tests.helpers import PROPOSAL_CALC_URL
-
-CALC_URL = f"{API_BASE}{PROPOSAL_CALC_URL}"
+from tests.helpers import member_of, post_member
 
 # Generous: a broad-gauge fullRouting call does the same two-pass work as
 # the suite's other routes, plus LM instead of CH for the custom-model pass.
 CALC_TIMEOUT = 180
+
+# What /calc used to answer for a failed member, now carried as the error
+# member's code inside a 200 family document (api/helpers/family_serialize
+# .py): the HTTP status is the one classify_compute_error() maps that code
+# to on the views endpoint — kept here so the assertions below read as
+# the wire contract they always were.
+_STATUS_BY_ERROR = {
+    "gauge_mismatch": 422,
+    "routing_error": 422,
+    "domain_error": 422,
+    "routing_graph_not_configured": 503,
+}
 
 
 def _query_stops_by_gauge(db_conn, country_code: str, gauge_mm: int):
@@ -59,9 +69,38 @@ def _stops_by_gauge(db_conn, country_code: str, gauge_mm: int, n: int = 2):
     return [rows[0], rows[-1]]
 
 
-def _calc(stop_ids: list[str], **extra) -> requests.Response:
+class _MemberResponse:
+    """A 1×1 family, read the way a /calc response was: status_code is 200
+    for an ok member or the code's HTTP status for an error member;
+    json() is the member's route (the family's compact shape — general_
+    parameters verbatim), its suggested_stops, or the error record."""
+
+    def __init__(self, resp: requests.Response) -> None:
+        self.text = resp.text
+        if resp.status_code != 200:
+            self.status_code = resp.status_code
+            self._body = resp.json()
+            return
+        document = resp.json()
+        member = member_of(document)
+        if member["status"] == "ok":
+            self.status_code = 200
+            self._body = {
+                "route": document["routes"][member["route_ref"]],
+                "suggested_stops": document.get("suggested_stops", []),
+            }
+        else:
+            self.status_code = _STATUS_BY_ERROR.get(member["error"], 500)
+            self._body = member
+            self.text = str(member)
+
+    def json(self) -> dict:
+        return self._body
+
+
+def _calc(stop_ids: list[str], **extra) -> _MemberResponse:
     body = {"stops": stop_ids, "composition_id": "NEW-BAL-7", **extra}
-    return requests.post(CALC_URL, json=body, timeout=CALC_TIMEOUT)
+    return _MemberResponse(post_member(API_BASE, body, timeout=CALC_TIMEOUT))
 
 
 def _route_any_pair(db_conn, country_code: str, gauge_mm: int, attempts: int = 6):
@@ -92,7 +131,17 @@ def _route_any_pair(db_conn, country_code: str, gauge_mm: int, attempts: int = 6
     tried = []
     for offset in range(min(attempts, len(central) // 2)):
         a, b = central[2 * offset], central[2 * offset + 1]
-        resp = _calc([a["stop_id"], b["stop_id"]])
+        try:
+            resp = _calc([a["stop_id"], b["stop_id"]])
+        except requests.exceptions.ConnectionError as exc:
+            # The worker went away mid-request — a dropped connection, not
+            # an answer about this pair. Under the full suite the routing
+            # container is busy and one long route can outlast a worker;
+            # the same pair routes in ~2 s when this file runs alone. Try
+            # the next pair rather than reporting a gauge failure that
+            # never happened, and name it if nothing works.
+            tried.append(f"{a['stop_name']} -> {b['stop_name']}: dropped ({exc})")
+            continue
         if resp.status_code == 200:
             return resp, a, b
         tried.append(
@@ -190,24 +239,24 @@ class TestRoutingErrorIsNotA500:
 
 
 class TestAutoStopGaugeFilter:
-    def test_no_gauge_foreign_stop_is_ever_auto_added(self, db_conn):
-        # Any broad-gauge trip with auto_stop_addition="add": every stop
-        # of the result must support the trip's gauge. Data-driven — the
-        # concrete corridor doesn't matter, the invariant does.
-        # Same connectivity-aware selection as the routing tests — this
-        # test is about the gauge filter, not about which pair connects.
-        # Reuse the connectivity-aware selection, then re-route the same
-        # pair with auto-stop addition on — this test is about the gauge
-        # filter, not about which pair connects.
+    def test_no_gauge_foreign_stop_is_ever_suggested(self, db_conn):
+        # Any broad-gauge trip: every stop the candidate search offers must
+        # support the trip's gauge (_find_nearby_candidates filters on
+        # stop_supports_gauge, strictly — a gauge-unknown stop is never
+        # offered). Data-driven: the concrete corridor doesn't matter, the
+        # invariant does, so this reuses the connectivity-aware pair
+        # selection the routing tests use.
+        #
+        # Asserted on "suggest" since ROUTE_BUILDER 0.9.34 removed "add".
+        # Same filter, and now the only way a catalog stop can reach a
+        # user's route at all — an offered stop is one they may accept.
         _, a, b = _route_any_pair(db_conn, "FI", 1524)
-        resp = _calc([a["stop_id"], b["stop_id"]], auto_stop_addition="add")
+        resp = _calc([a["stop_id"], b["stop_id"]], auto_stop_addition="suggest")
         assert resp.status_code == 200, resp.text[:400]
-        route = resp.json()["route"]
-        stop_ids = [
-            s["stop_id"]
-            for seg in route["trip_pairs"][0]["outbound"]["segments"]
-            for s in (seg["from_stop"], seg["to_stop"])
-        ]
+        payload = resp.json()
+        stop_ids = [s["stop_id"] for s in payload["suggested_stops"]]
+        if not stop_ids:
+            pytest.skip("corridor offers no candidate — nothing to filter")
         cur = db_conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute(
             """
@@ -224,6 +273,6 @@ class TestAutoStopGaugeFilter:
         family = {1520, 1524}  # GAUGE_FAMILY_MM — either tag supports the trip
         for stop_id in stop_ids:
             assert gauges.get(stop_id) and family & set(gauges[stop_id]), (
-                f"{stop_id} on a 1520-family trip without 1520/1524 support "
-                f"(gauges: {gauges.get(stop_id)})"
+                f"{stop_id} suggested for a 1520-family trip without "
+                f"1520/1524 support (gauges: {gauges.get(stop_id)})"
             )

@@ -14,7 +14,7 @@ All actual work lives in api/helpers/proposal_compare.py (validation,
 per-side resolution, diff building) — this view is thin delegation plus
 error mapping, like every other blueprint file. Stateless and
 unauthenticated: comparing writes nothing, same policy as
-POST /api/proposal/calc.
+POST /api/proposal/family.
 """
 
 import logging

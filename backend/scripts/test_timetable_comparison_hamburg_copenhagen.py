@@ -53,6 +53,7 @@ import requests
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from dev_env import api_base_url, routing_base_url  # noqa: E402
+from scripts.member import compute_member_payload  # noqa: E402
 
 API_BASE = api_base_url()
 ROUTING_URL = routing_base_url()
@@ -184,7 +185,8 @@ def fetch_scenario(scenario_key: str) -> dict:
 
 
 def build_route(scenario_id: int, fixed_night_interval: list[str] | None) -> dict:
-    """One POST /api/proposal/calc — mode A (interval=None, simpleAutomatic) or
+    """One member (compute_member, in-process — scripts/member.py) — mode A
+    (interval=None, simpleAutomatic) or
     mode B (interval set, simpleAutomaticWithFixedNight). Everything else is
     pinned identical so the timetable is the only thing that differs."""
     body = {
@@ -203,14 +205,13 @@ def build_route(scenario_id: int, fixed_night_interval: list[str] | None) -> dic
         body["timetable_mode"] = "simpleAutomaticWithFixedNight"
         body["fixed_night_interval"] = fixed_night_interval
 
-    resp = requests.post(f"{API_BASE}/api/proposal/calc", json=body, timeout=90)
-    if resp.status_code != 200:
+    try:
+        return compute_member_payload(body)["route"]
+    except Exception as exc:  # noqa: BLE001 — a comparison script stops on the first failure
         print(
-            f"[✗] proposal/calc failed for timetable_mode={body['timetable_mode']}: "
-            f"{resp.text[:300]}"
+            f"[✗] member compute failed for timetable_mode={body['timetable_mode']}: {exc}"
         )
         sys.exit(1)
-    return resp.json()["route"]
 
 
 # =============================================================================

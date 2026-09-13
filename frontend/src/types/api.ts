@@ -115,8 +115,8 @@ export interface StopsResponse {
   stops: Stop[]
 }
 
-// One candidate stop along the routed path, returned by POST
-// /api/proposal/calc only when auto_stop_addition="suggest". added_time_min is
+// One candidate stop along the routed path, carried by the family document
+// only when auto_stop_addition="suggest". added_time_min is
 // the full trip-time increase (detour + dwell) the stop would cost if added.
 export interface SuggestedStop {
   stop_id: string
@@ -125,6 +125,45 @@ export interface SuggestedStop {
   lat: number
   lon: number
   added_time_min: number
+}
+
+// Expert timetable mode (ROUTE_BUILDER 0.9.32) — the optional
+// `expert_timetable` block of a family request (POST /api/proposal/family) and
+// of the stored compute_request a published proposal replays. Omit it for the automatic
+// timetable; an absent block and an empty one are the same request.
+//
+// The state the builder edits is a different (camelCase, direction-aware)
+// shape — see lib/expertTimetable.ts, which owns the conversion. These types
+// describe only what goes on the wire.
+export interface SegmentAddonRequest {
+  from_stop_id: string
+  to_stop_id: string
+  // Whole minutes ≥ 1. An add-on can only ever slow a leg down — the routed
+  // physics are the floor of every leg, and 0 or negative is a 400.
+  add_min: number
+}
+
+// "absolute" pins a service-day minute that survives a reroute; "shift"
+// displaces whatever the automatic timetable computes and moves with it.
+export type DepartureOverrideRequest =
+  { mode: 'absolute'; time_min: number } | { mode: 'shift'; shift_min: number }
+
+export interface DirectionExpertRequest {
+  departure?: DepartureOverrideRequest | null
+  // Each pair must be adjacent, in that order, in the posted `stops` — the
+  // backend rejects anything else rather than dropping it silently. A pair
+  // that only stops existing because auto_stop_addition inserted a stop IS
+  // dropped server-side; read the surviving minutes back off
+  // route.trip_pairs[].*.segments[].addon_time_min.
+  segment_addons?: SegmentAddonRequest[]
+}
+
+export interface ExpertTimetableRequest {
+  outbound?: DirectionExpertRequest | null
+  // The default: outbound's add-ons applied to the return with each pair
+  // reversed (a departure is never mirrored). Send a full block instead for
+  // an asymmetric timetable — the two spellings are mutually exclusive.
+  return?: DirectionExpertRequest | { mirror_outbound: true } | null
 }
 
 // A scenario is a named snapshot of infrastructure parameters (track-access
@@ -145,6 +184,21 @@ export interface Scenario {
   track_infrastructure_defaults_version: number
   stop_infrastructures_version: number
   stop_infrastructure_defaults_version: number
+  passage_charges_version: number
+  // Which OpenRailRouting graph the scenario routes on ("infra_2026" /
+  // "infra_2032"). A deployment without that instance answers 503
+  // routing_graph_not_configured for the scenario.
+  routing_graph_key: string
+  // Grid coordinates the backend derives from scenario_key + routing_graph_key
+  // (scenario_serialize.py): the three switches of the scenario picker. null
+  // for a key outside the `infra-<network>[-hsr[-opt-tt]]` vocabulary.
+  dimensions: ScenarioDimensions | null
+}
+
+export interface ScenarioDimensions {
+  network: string
+  hsr_allowed: boolean
+  optimised_timetable: boolean
 }
 
 interface ScenarioGroup {
@@ -152,11 +206,42 @@ interface ScenarioGroup {
   scenarios: Scenario[]
 }
 
+// A named bundle of political measures an evaluation runs under (WP18 phase
+// A) — what the state DOES, where a scenario pins what the infrastructure
+// IS. One row until WP17 prices the levers, 'none', with every factor 1.0.
+export interface MeasureSet {
+  measure_set_id: number
+  key: string
+  description: string | null
+  vat_exempt: boolean
+  energy_tax_exempt: boolean
+  tac_direct_cost: boolean
+  factors: { ticket_revenue: number; energy_cost: number; track_access: number }
+}
+
+// The flattened (scenario × measure set) axis the family is computed over —
+// one dropdown value instead of two. With one measure set there is exactly
+// one variant per scenario; do not rely on that, it ends with WP17. The
+// scenario's display fields are inlined so a switch renders from this list
+// alone.
+export interface ScenarioVariant {
+  scenario_variant_id: number
+  scenario_id: number
+  measure_set_id: number
+  scenario_key: string
+  scenario_name: string
+  is_current_base: boolean
+  routing_graph_key: string
+  dimensions: ScenarioDimensions | null
+}
+
 export interface ScenariosResponse {
   current_base: ScenarioGroup
   current_scenarios: ScenarioGroup
   historical_scenarios: ScenarioGroup
   total_count: number
+  measure_sets: MeasureSet[]
+  scenario_variants: ScenarioVariant[]
 }
 
 /** One accommodation section of a coach type, listed under
@@ -235,10 +320,11 @@ export interface CompositionsResponse {
  *  themselves — the shared catalog the detail overlay resolves against. */
 export type CompositionCatalog = Omit<CompositionsResponse, 'count' | 'compositions'>
 
-// --- POST /api/proposal/calc : "evaluation" block ---------------------------
+// --- The evaluation views ---------------------------------------------------
 // Response shapes as produced by backend/api/helpers/evaluation_serialize.py,
-// carried under the merged calc response's "evaluation" key (see
-// ProposalCalcResponse below). The evaluation is a cube: view (grouping) ×
+// served by GET /api/proposal/family/<key>/members/<sv>/<comp>/views and
+// carried under evaluation.views by GET /api/proposal/<id> and publish (see
+// FamilyViewsResponse below). The evaluation is a cube: view (grouping) ×
 // filter selection (drill-down keys) × normalisation (unit) → one Breakdown
 // per cell.
 
@@ -309,7 +395,19 @@ export interface Breakdown {
     infrastructure: BreakdownInfrastructure
     total_eur: number
   }
-  revenue: { ticket_revenue_eur: number; total_eur: number }
+  // catering_contribution_eur is SIGNED (CALC 0.9.29): the on-board service's
+  // own sales less its own costs, one net figure per passenger carried. It is
+  // inside total_revenue_eur and net_eur, and deliberately outside the
+  // var_overhead_eur and ebit_margin_eur bases, which stay shares of tickets.
+  revenue: {
+    // The base fare — its fixed part plus its distance part.
+    ticket_revenue_eur: number
+    // Bikes, oversized luggage, reservations. Ordinary ticket revenue, so
+    // unlike catering it IS inside the overhead and margin bases.
+    services_revenue_eur: number
+    catering_contribution_eur: number
+    total_eur: number
+  }
   margin: { ebit_margin_eur: number; total_eur: number }
   total_cost_eur: number
   total_revenue_eur: number
@@ -403,18 +501,36 @@ export interface EvaluationModelSection {
   formulas: FormulaMap
 }
 
+/** The stopgap demand model carries overridable STANDARD VALUES rather than
+ *  formulas — the Supply tab's price fields read their defaults here so they
+ *  never hard-code a number the backend owns. */
+export interface DemandModelSection {
+  version: string
+  description: string
+  defaults: {
+    fares_eur_per_km: Record<string, number>
+    fares_eur_per_pax: Record<string, number>
+    services_eur_per_pax: Record<string, number>
+    // Signed net contribution per passenger of that class (CALC 0.9.30).
+    catering_eur_per_pax: Record<string, number>
+    utilization_per: number
+  }
+}
+
 export interface EvaluationModels {
   route_builder: EvaluationModelSection
   energy: EvaluationModelSection
   evaluation: EvaluationModelSection
+  demand?: DemandModelSection
 }
 
-// --- input.parameters : the per-unit rates actually loaded to cost this route
-// Backend: api/helpers/params_serialize.py (reused by input_to_dict()). Each
-// section lists EVERY loaded entity (all countries/stops/compositions).
-// Typed for completeness but no longer read by the app: the rates table that
-// consumed it moved to the documentation site, where a rate can be shown with
-// its source and its provenance instead of squeezed into a hover box.
+// --- GET /api/params/* : the per-unit rates a member was priced from --------
+// Backend: api/helpers/params_serialize.py. Each section lists EVERY loaded
+// entity (all countries/stops/compositions) for a scenario pin. Until backend
+// 0.5.0 this block also travelled inside every compute response as
+// evaluation.input.parameters; now it is the params endpoints' shape only.
+// Typed for completeness but not read by the app: the rates table that
+// consumed it moved to the documentation site.
 
 /** A referenced data source, keyed by source_id inside each section's
  *  `sources` map. */
@@ -518,47 +634,49 @@ export interface CompositionsSection {
   operators: OperatorParam[]
 }
 
-export interface EvaluationParameters {
-  track_infrastructures: TrackInfraSection
-  stop_infrastructures: StopInfraSection
-  compositions: CompositionsSection
-}
-
-/** The subset of the route we read to scope rates to the entities the route
- *  actually uses (countries it runs through, composition per trip pair). The
- *  merged calc response carries the route once, as a top-level sibling of
- *  "evaluation" — ProposalViewport re-attaches it here when assembling the
- *  EvaluationResponse the panel renders. */
-export interface EvaluationInputRoute {
-  track_infrastructure: { country_code: string }[]
-  trip_pairs: { composition_id: string }[]
-}
-
-export interface EvaluationInput {
-  route: EvaluationInputRoute
-  parameters: EvaluationParameters
-}
-
 // Panel-facing evaluation bundle. Not a wire shape: ProposalViewport assembles
-// it from one ProposalCalcResponse (calc_version and route_id lifted from the
-// top level / route, input.route re-attached from the response's route key).
+// it from the presented family member (calc_version and route_id) and the
+// member's views, which arrive on their own request
+// (GET /api/proposal/family/<key>/members/<sv>/<comp>/views) — null until
+// they do, and the cost/revenue zone shows its skeleton meanwhile. The
+// formulas the breakdown keys into are the store's ModelsResponse, not part
+// of any member since backend 0.5.0.
 export interface EvaluationResponse {
   calc_version: string
   route_id: string
-  models: EvaluationModels
-  input: EvaluationInput
-  views: EvaluationViews
+  views: EvaluationViews | null
+  // Fetched with the views for a family member; absent for a stored proposal
+  // until its member views call lands (GET /api/proposal/<id> serves views
+  // only). Zone D's train-operation receipts read it.
+  operations?: Operations | null
 }
 
-// --- POST /api/proposal/calc : full wire response ----------------------------
-// The merged compute endpoint (route + evaluation in one stateless call,
-// PROPOSALS_DESIGN.md §2.1). TRoute stays generic — the route shape is typed
-// where it is consumed (ProposalViewport's BackendRoute), only the fields the
-// frontend reads.
-// Gallery KPI summary block of the calc response. Only co2_savings_t_per_year
-// is read by the builder (the auth gate); the rest passes through untyped.
+// --- The gallery KPI summary block ------------------------------------------
+// Carried by every ok family member, by GET /api/proposal/<id> and by the
+// publish response (models/evaluation/summary.py). Only co2_savings_t_per_year
+// is read by the builder's auth gate; the rest feeds the results' KPI grid.
 export interface ProposalCalcSummary {
   co2_savings_t_per_year: number | null
+  // Route metrics and financial KPIs (models/evaluation/summary.py).
+  total_distance_km?: number
+  total_time_h?: number
+  avg_speed_kmh?: number
+  n_stops?: number
+  countries?: string[]
+  cost_eur_per_train_km?: number
+  revenue_eur_per_train_km?: number
+  margin_eur_per_train_km?: number
+  // Signed annual net after the target margin (CALC 0.9.25): negative is the
+  // shortfall subsidy_eur_per_year reports, positive is a surplus. The UI
+  // never shows a negative subsidy — a surplus is worded as one.
+  net_eur_per_year?: number
+  subsidy_eur_per_year?: number
+  // Annual supply denominators (CALC 0.9.25) — what the per-unit
+  // normalisations divide by; sold / available is the utilisation.
+  operating_days_per_year?: number
+  train_km_per_year?: number
+  available_place_km_per_year?: number
+  sold_place_km_per_year?: number
   // Demand & modal-shift KPIs — route-level, annual. PLACEHOLDER values
   // (deterministic fakes derived from route metrics) until models/demand/
   // lands; demand_kpis_placeholder stays true, so the UI must present these as
@@ -571,32 +689,329 @@ export interface ProposalCalcSummary {
   subsidy_eur_per_t_co2?: number | null
   co2_g_per_pax_km?: number
   demand_kpis_placeholder?: boolean
+  // CALC 0.9.29. The contribution is signed and already inside net_eur_per_year;
+  // passengers_per_year is the base it multiplies (places actually sold) — NOT
+  // demand_trips_per_year, which stays the revenue-derived placeholder above.
+  services_revenue_eur?: number
+  catering_contribution_eur?: number
+  passengers_per_year?: number
   [key: string]: unknown
 }
 
-export interface ProposalCalcResponse<TRoute = unknown> {
+// ---------------------------------------------------------------------------
+// POST /api/proposal/family — every scenario variant × composition of one stop
+// list + HOW, as one document (backend/api/README.md "Proposal Family";
+// adapters/family/README.md). The only compute endpoint since backend 0.5.0:
+// a member's route is in `routes` (compact — see CompactRoute), its summary on
+// the member, and its six evaluation views on GET …/members/<sv>/<comp>/views.
+// ---------------------------------------------------------------------------
+
+export interface FamilyRequest {
+  stops: string[]
+  timetable_mode?: string
+  fixed_night_interval?: string[] | null
+  schedule_mode?: string
+  routing_mode?: string
+  auto_stop_addition?: 'off' | 'suggest'
+  expert_timetable?: ExpertTimetableRequest | null
+  // Axes. Omitted = every variant of a current scenario (base first) /
+  // the whole composition catalog. An explicit list keeps its order.
+  scenario_variant_ids?: number[]
+  composition_ids?: string[]
+  // Which member the client shows first — the only one whose "suggest"
+  // search runs. Either half may be omitted (base variant, default
+  // composition). Not part of the family key: choosing another never rebuilds.
+  presented?: { scenario_variant_id?: number; composition_id?: string }
+}
+
+// Stops once per trip, in travel order; segments refer to their ends by
+// index into `stops`; geometry by id into the document's pool. Everything
+// else (general_parameters incl. timetable_warnings, parkings, shuntings,
+// schedule, ids) is the full route's, verbatim. lib/proposalFamily.ts
+// inflateRoute() turns this back into the shape ProposalViewport reads.
+export interface CompactStop {
+  stop_id: string
+  stop_name: string
+  country_code: string
+  lat: number
+  lon: number
+  arrival_time_min: number | null
+  departure_time_min: number | null
+  auto_added: boolean
+  [key: string]: unknown
+}
+
+export interface CompactSegment {
+  from: number
+  to: number
+  geometry_id: string
+  country_distance_shares: Record<string, number>
+  addon_time_min?: number
+  [key: string]: unknown
+}
+
+export interface CompactTrip {
+  trip_id: string
+  direction: number
+  general_parameters: Record<string, unknown>
+  stops: CompactStop[]
+  segments: CompactSegment[]
+}
+
+export interface CompactTripPair {
+  composition_id: string
+  outbound: CompactTrip
+  return_trip: CompactTrip
+}
+
+export interface CompactRoute {
+  route_id: string
+  scenario_id: number
+  schedule: { seasonal_schedules: { season: string; frequency: string }[] }
+  trip_pairs: CompactTripPair[]
+  parkings: unknown[]
+  shuntings: unknown[]
+}
+
+export interface FamilyMemberOk {
+  scenario_variant_id: number
+  composition_id: string
+  status: 'ok'
+  route_ref: string
+  summary: ProposalCalcSummary
+}
+
+export interface FamilyMemberError {
+  scenario_variant_id: number
+  composition_id: string
+  status: 'error'
+  // classify_compute_error()'s codes: gauge_mismatch | routing_error |
+  // domain_error | routing_graph_not_configured | calc_error
+  error: string
+  message: string
+  conflicting_stops?: Record<string, number[]>
+}
+
+export type FamilyMember = FamilyMemberOk | FamilyMemberError
+
+export interface FamilyStats {
+  n_members: number
+  n_ok: number
+  n_error: number
+  n_routes: number
+  n_geometries: number
+  elapsed_s: number
+  cache_hit: boolean
+  context?: Record<string, number>
+}
+
+export interface FamilyDocument {
+  family_key: string
   route_builder_version: string
   calc_version: string
-  route_fingerprint: string
-  // True when served from the server-side compute cache. Only present on a
-  // fresh calc — a proposal hydrated from GET /api/proposal/<id> (same shape,
-  // reused by ProposalViewport's applyPlan()) has no cache concept.
-  cache_hit?: boolean
-  // Resolved request echo — defaults applied, scenario_id concrete.
+  // The resolved echo: stops + HOW, defaults applied. What publish posts back
+  // as compute_request together with the presented composition_id.
   request: Record<string, unknown>
-  // Only present when the request used auto_stop_addition="suggest".
+  // "suggest" only — the presented member's candidates.
   suggested_stops?: SuggestedStop[]
-  // Gallery KPI summary — read by the auth gate (co2_savings_t_per_year) and
-  // the EvaluationPanel's demand/modal-shift box. Also returned by GET
-  // /api/proposal/<id> (see ProposalDetailResponse), so a loaded proposal
-  // populates the same box.
-  summary?: ProposalCalcSummary
-  route: TRoute
-  evaluation: {
-    models: EvaluationModels
-    input: { parameters: EvaluationParameters }
-    views: EvaluationViews
+  axes: { scenario_variants: ScenarioVariant[]; compositions: string[] }
+  presented: { scenario_variant_id: number; composition_id: string }
+  geometries: Record<string, number[][]>
+  routes: Record<string, CompactRoute>
+  members: FamilyMember[]
+  stats: FamilyStats
+}
+
+// --- operations: the physical side of the same evaluation -------------------
+// Trainsets, locomotive hours, people on board and their paid hours, read off
+// the very records the cost breakdown was priced from (CALC 0.9.29, backend
+// models/evaluation/operations.py). Served on demand with a member's views,
+// never persisted with a proposal and never part of the family document.
+
+/** One role on one trip (CALC 0.9.31): hours_on_train = on_board × trip
+ *  hours, paid_hours = hours_on_train / roster_efficiency — person-hours a
+ *  reader can check against the clock. The attendant-equivalent factor (the
+ *  train chief is one person paid at 1.19 attendants) is applied only in
+ *  the euros, never in the hours. */
+export interface TripStaffRole {
+  on_board: number
+  factor: number
+  hours_on_train: number
+  roster_efficiency: number
+  paid_hours: number
+  eur: number
+}
+
+export interface TripOperations {
+  trip_id: string
+  direction: 'outbound' | 'return'
+  // "at_stops" is the dwell at intermediate stops, where the loco stays
+  // coupled. Terminal standing time is NOT loco time in this model — it is
+  // priced as parking, an infrastructure leaf.
+  loco_hours: { running: number; at_stops: number; total: number }
+  staffing: Record<string, TripStaffRole> & {
+    total: {
+      on_board: number
+      factor_equivalents: number
+      hours_on_train: number
+      paid_hours: number
+      eur: number
+    }
   }
+}
+
+/** The basis behind the fleet receipt's lines — the euros themselves stay
+ *  breakdown leaves, so there is no second copy free to drift. */
+export interface FleetBasis {
+  coaches_per_set: number
+  // The cost model's own n: coaches per rake × the THEORETICAL trainsets.
+  coaches_needed: number
+  purchase_coach_eur: number
+  amort_years: number
+  financing_quota_per: number
+  coach_maint_eur_km: number
+  cleaning_eur_coach_day: number
+  shunting_events_per_trip_cycle: number
+}
+
+export interface PairStaffRole {
+  on_board: number
+  hours_per_trip_cycle: number
+  effective_rate_eur_h: number | null
+  eur_per_trip_cycle: number
+  eur_per_year: number
+}
+
+export interface PairOperations {
+  composition_id: string
+  trainsets: {
+    physical: number
+    theoretical: number
+    coach_avail_per: number
+    cycle_days: number | null
+    peak_month: number
+    min_turnaround_min: number
+  }
+  fleet: FleetBasis
+  loco_hours: { per_trip_cycle: number; per_year: number; n_locos: number }
+  staffing: Record<string, PairStaffRole> & {
+    total: {
+      on_board: number
+      factor_equivalents: number
+      hours_per_trip_cycle: number
+      paid_hours_per_trip_cycle: number
+      eur_per_trip_cycle: number
+      eur_per_year: number
+    }
+  }
+  trips: TripOperations[]
+}
+
+// --- infrastructure: what each country charged on (handover §6.5) ----------
+// Per trip, folded from the same component records the cost model priced,
+// so every total here agrees with the breakdown leaf it explains.
+
+export type TacTerm =
+  | 'distance'
+  | 'gross_weight'
+  | 'places'
+  | 'fixed_add_on'
+  | 'stop_fee'
+  | 'revenue_share'
+  | 'congestion'
+
+export interface TrackAccessCountry {
+  country_code: string
+  km: number
+  night_km: number
+  /** Only the terms this country actually levied, in tariff order — the
+   *  "charged on" list. */
+  terms: { term: TacTerm; eur: number }[]
+  eur: number
+  /** The whole country priced from the EU-average defaults — no row of its
+   *  own. */
+  defaulted: boolean
+}
+
+export interface EnergyCountry {
+  country_code: string
+  km: number
+  kwh: number
+  night_kwh: number
+  price_eur: number
+  catenary_eur: number
+  eur: number
+  /** The tariff it was priced at. Absent when the caller had no track
+   *  infrastructure to hand. No VAT: the model prices net and the
+   *  parameters carry no rate. */
+  tariff?: { day_eur_kwh: number; night_eur_kwh: number | null; defaulted: boolean }
+}
+
+export interface TripInfrastructure {
+  trip_id: string
+  direction: 'outbound' | 'return'
+  track_access: {
+    countries: TrackAccessCountry[]
+    passages: { passage_id: string; fixed_eur: number; per_passenger_eur: number; eur: number }[]
+    eur: number
+  }
+  energy: { countries: EnergyCountry[]; kwh: number; eur: number }
+  stations: {
+    calls: {
+      stop_id: string
+      stop_name: string
+      country_code: string
+      /** The station's charge class ("Cat. 1", "Gold") where the source
+       *  names one. */
+      category: string | null
+      eur: number
+      /** Priced at the global default because the stop has no charge of
+       *  its own. */
+      defaulted?: boolean
+    }[]
+    eur: number
+  }
+}
+
+export interface ParkingEntry {
+  stop_id: string
+  stop_name: string
+  country_code: string
+  trip_ids: string[]
+  basis: string
+  hours: number
+  billable_hours: number
+  facility_eur: number
+  hotel_power_eur: number
+  eur_per_operating_day: number
+  defaulted: boolean
+}
+
+export interface Operations {
+  trip_pairs: PairOperations[]
+  infrastructure: { trips: TripInfrastructure[]; parkings: ParkingEntry[] }
+  route: {
+    operating_days_per_year: number
+    departures_per_year: number
+    trainsets_physical: number
+    trainsets_theoretical: number
+    loco_hours_per_year: number
+    staff_hours_per_trip_cycle: number
+    staff_eur_per_year: number
+  }
+}
+
+export interface FamilyViewsResponse {
+  views: EvaluationViews
+  operations: Operations
+}
+
+// --- GET /api/models — the static model registry --------------------------
+// Versions, descriptions and the formula registry the breakdown keys into.
+// Fetched once per session (Cache-Control max-age); formerly inlined in every
+// compute response as evaluation.models.
+export interface ModelsResponse {
+  models: EvaluationModels
 }
 
 // The geographic scope currently selected in the evaluation panel — emitted so
@@ -791,11 +1206,7 @@ export type ProposalSourceKind = 'proposal' | 'existing'
  *  run their query (proposals.py::_list_response), so this is a real cost
  *  lever, not just a response filter. Backend default is ["summaries"]. */
 export type ProposalsSection =
-  | 'summaries'
-  | 'map_lines'
-  | 'map_routes'
-  | 'map_stop_counts'
-  | 'map_country_counts'
+  'summaries' | 'map_lines' | 'map_routes' | 'map_stop_counts' | 'map_country_counts'
 
 export interface ProposalsRequest {
   filter?: ProposalsFilter
@@ -935,7 +1346,9 @@ export interface ProposalsResponse {
 // dedup: mode "new" always creates a proposal; the returned proposal_id is then
 // adopted so later saves "overwrite" it.
 export interface PublishRequest {
-  mode: 'new' | 'overwrite'
+  // 'copy' is 'new' with based_on_proposal_id required — "copy to my
+  // proposals" on someone else's proposal (backend 0.5.0).
+  mode: 'new' | 'overwrite' | 'copy'
   // Non-empty (backend rejects blank). Auto-derived "Origin – Destination".
   name: string
   // The resolved `request` echo from a /calc response (with scenario_id nulled).
@@ -1024,9 +1437,7 @@ export interface ProposalDetailResponse<TRoute> {
   // same figures /calc did.
   summary?: ProposalCalcSummary
   route: TRoute
-  evaluation: {
-    models: EvaluationModels
-    input: { parameters: EvaluationParameters }
-    views: EvaluationViews
-  }
+  // Views only since backend 0.5.0: the models registry is GET /api/models,
+  // the parameters GET /api/params/* for the scenario pin.
+  evaluation: { views: EvaluationViews }
 }

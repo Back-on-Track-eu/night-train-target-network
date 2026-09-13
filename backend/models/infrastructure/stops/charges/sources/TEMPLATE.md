@@ -7,6 +7,12 @@ line in `CHARGE_FILES`, never new parsing code.
 
 `charges/sources/<cc>_station_charges.csv`, lowercase ISO 3166-1 alpha-2.
 
+The files are **not in git**. They live in the Drive folder
+`CHARGES_DRIVE_FOLDER_ID` (`backend/docker/.env`) and `02` syncs them into
+`sources/` on first use; a local file always wins, so one you are editing
+is never overwritten. A new or changed country file is uploaded to that
+folder — that upload is the commit.
+
 ## Columns
 
 | Column | Required | Description |
@@ -18,10 +24,10 @@ line in `CHARGE_FILES`, never new parsing code.
 | `charge_excl_vat_eur` | yes | The charge for **one call by one night train**, **net of VAT**, in EUR, `.` as decimal separator. This is what the cost model prices from. Empty means the country levies no station charge — see below |
 | `vat_rate_per` | yes | The VAT rate applying to the charge, as a percentage: `19.0`, not `0.19`. `0.0` where the service is exempt |
 | `charge_incl_vat_eur` | yes | The same charge **including VAT**, so both figures are visible side by side and can be compared against whichever the document printed |
-| `basis` | yes | What the figure is per. `per_call` unless the tariff genuinely differs; anything else must be explained in `note` |
+| `basis` | yes | What the figure is per. `per_call` for a fixed fee per stop; `per_call_per_tonne` where the tariff is mass-based (Czechia) — then the three money columns hold the **rate per tonne** of coach mass and the cost model multiplies it by the composition's mass. Nothing else is accepted; a tariff that fits neither is a modelling question, not a row |
 | `price_basis_year` | yes | The year the published figure applies to, e.g. `2026`. Escalation to 2032 happens later, in the notebook — never here |
-| `tariff_class` | no | The country's own category for the station (`Preisklasse 2`, `tipologia A`, …). Explains why two stations differ |
-| `source_ref` | yes | `source_id` of the document in `01_source_extraction.ipynb`. Every row must cite one |
+| `tariff_class` | no | The country's own category for the station (`Preisklasse 2`, `tipologia A`, …). Explains why two stations differ. A label, **60 characters at most** — the catalog column is that wide; the explanation belongs in `note` |
+| `source_ref` | yes | `source_id` of the document in `01_source_extraction.ipynb`. Every row must cite one. **40 characters at most** |
 | `note` | no | Anything a reader needs: which of several published columns was taken, remarks from the document, why a figure is unusual |
 
 CSV format: **comma-separated, UTF-8, `.` as decimal separator**, no thousands

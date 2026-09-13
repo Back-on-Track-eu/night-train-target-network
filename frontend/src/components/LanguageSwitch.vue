@@ -1,34 +1,44 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import { useStore } from '@/stores/store'
-import type { Locale } from '@/lib/localeStorage'
+import { UI_LANGUAGES, type UiLanguage } from '@/lib/uiLanguages'
 
-// Endonyms — a language's own name is never translated. Only the languages
-// with a locale file in i18n/locales/ belong here; listing one without
-// messages would switch the UI to untranslated fallback English.
-const LANGUAGES: { code: Locale; name: string }[] = [
-  { code: 'en', name: 'English' },
-  { code: 'de', name: 'Deutsch' },
-]
-
-const { t } = useI18n()
+// Order and availability live in lib/uiLanguages.ts — this component only
+// renders them: live locales switch on click, announced ones are greyed out and
+// explain themselves through the "coming soon" bubble.
 const store = useStore()
+const { t } = useI18n()
+
+function select(lang: UiLanguage): void {
+  if (lang.available) store.setLocale(lang.code)
+}
 </script>
 
 <template>
   <nav class="flex items-center gap-2.5 text-[13.5px] leading-none">
-    <button
-      v-for="lang in LANGUAGES"
-      :key="lang.code"
-      type="button"
-      class="lang cursor-pointer text-white transition-colors"
-      :class="{ underline: store.locale === lang.code }"
-      :aria-current="store.locale === lang.code ? 'true' : undefined"
-      :aria-label="t('header.switchLanguageAria', { language: lang.name })"
-      @click="store.setLocale(lang.code)"
-    >
-      {{ lang.name }}
-    </button>
+    <template v-for="lang in UI_LANGUAGES" :key="lang.code">
+      <button
+        v-if="lang.available"
+        type="button"
+        class="lang text-white transition-colors hover:text-[var(--color-pure-green)]"
+        :class="{ underline: store.locale === lang.code }"
+        :aria-label="t('header.switchLanguageAria', { language: lang.name })"
+        :aria-current="store.locale === lang.code ? 'true' : undefined"
+        @click="select(lang)"
+      >
+        {{ lang.name }}
+      </button>
+      <span
+        v-else
+        class="lang coming-soon relative cursor-default text-white/45"
+        :data-tip="t('header.comingSoon')"
+        aria-disabled="true"
+        tabindex="0"
+      >
+        {{ lang.name }}
+        <span class="sr-only">— {{ t('header.comingSoon') }}</span>
+      </span>
+    </template>
   </nav>
 </template>
 
@@ -41,8 +51,28 @@ const store = useStore()
   font-weight: 700;
 }
 
-/* Hover turns the label BoT's green (--nv-primary-accent on their site). */
-.lang:hover {
-  color: var(--color-pure-green);
+/* The bubble hangs below the 42px utility bar, over the brand image — the bar
+   never clips it. Pointer-events stay off so it cannot swallow a hover. */
+.coming-soon::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 3px 7px;
+  border-radius: 3px;
+  background: var(--color-sapphire);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 400;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  pointer-events: none;
+}
+
+.coming-soon:hover::after,
+.coming-soon:focus-visible::after {
+  opacity: 1;
 }
 </style>

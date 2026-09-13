@@ -127,6 +127,7 @@ LOADER_READ_COLUMNS = [
     ("input_params.stop_infrastructures", "stop_lat"),
     ("input_params.stop_infrastructures", "stop_lon"),
     ("input_params.stop_infrastructures", "stop_charge_eur"),
+    ("input_params.stop_infrastructures", "stop_charge_per_tonne_eur"),
 ]
 
 
@@ -154,8 +155,9 @@ STOP_ID = "osm:n3856100103"
 def test_all_compositions_load(loader):
     """All seeded compositions load without errors."""
     comps = loader.build_all_compositions()
-    assert len(comps) == 8, (
-        f"Expected the eight calibrated compositions, got {len(comps)}"
+    assert len(comps) == 12, (
+        f"Expected the twelve catalog compositions "
+        f"(models/compositions/calib/catalog), got {len(comps)}"
     )
 
 
@@ -491,20 +493,13 @@ def test_composition_indicative_figures_present(loader):
     assert by_id["REF-BUD-6"].material_strategy == "refurbished"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "The 13 station-charge rows are ILLUSTRATIVE-CURATED placeholders "
-        "and charges/data/station_charges.csv has no "
-        "price_basis_year column at all. See test_02_db_seed."
-        "test_stop_charge_carries_its_price_year for the full "
-        "reason. strict=True so this fails loudly once real "
-        "tariffs land."
-    ),
-)
 def test_stop_charge_price_year_surfaces(loader):
-    """Split out of test_stop_enrichment_surfaces so that test keeps
-    guarding the enrichment folding it is actually about."""
+    """The price year reaches the domain object, not just the table.
+
+    Split out of test_stop_enrichment_surfaces so that test keeps
+    guarding the enrichment folding it is actually about. The strict
+    xfail went with the real charges landing — see
+    test_02_db_seed.test_stop_charge_carries_its_price_year."""
     for stop in loader.build_all_stops().all().values():
         if stop.stop_charge_source:
             assert stop.stop_charge_price_basis_year, stop.stop_id

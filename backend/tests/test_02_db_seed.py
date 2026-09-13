@@ -35,7 +35,14 @@ STOP_SEED_CHANGE_LOG_PREFIX = "seeded from the stop classification pipeline"
 # Expectations after seeding — see db/dev/seed.py
 # =============================================================================
 
-EXPECTED_SCHEMAS = {"admin", "input_params", "scenario", "proposals"}
+EXPECTED_SCHEMAS = {
+    "admin",
+    "input_params",
+    "scenario",
+    "route_cache",
+    "family",
+    "proposals",
+}
 
 # Minimum row counts. Deliberately >= (not ==) so adding seed data doesn't
 # break the suite, while dropping seed data still fails loudly.
@@ -82,8 +89,6 @@ EXPECTED_PHASE1_TABLES = {
     "proposals.seasonal_schedules",
     "proposals.update_log",
     "proposals.proposal_summaries",
-    "proposals.compute_cache_pointer",
-    "proposals.compute_cache_result",
 }
 
 # Columns WP5's finalizing migration (2026-08-04_proposal_schema_phase2_
@@ -127,11 +132,14 @@ REQUIRED_COLUMNS = {
 
 
 def test_schemas_exist(db_cur):
-    """All four project schemas exist in the database."""
-    db_cur.execute("""
-        SELECT schema_name FROM information_schema.schemata
-        WHERE schema_name IN ('admin', 'input_params', 'scenario', 'proposals')
-        """)
+    """Every project schema exists in the database — the four the
+    seed's SQL files and db/schema.py define, plus the two caches
+    (route_cache, family) db/schema.py renders alongside them."""
+    db_cur.execute(
+        "SELECT schema_name FROM information_schema.schemata "
+        "WHERE schema_name = ANY(%s)",
+        (sorted(EXPECTED_SCHEMAS),),
+    )
     found = {row["schema_name"] for row in db_cur.fetchall()}
     assert found == EXPECTED_SCHEMAS, f"Missing schemas: {EXPECTED_SCHEMAS - found}"
 
@@ -306,22 +314,44 @@ def test_stop_enrichment_seeded(db_cur):
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "The 13 station-charge rows are ILLUSTRATIVE-CURATED placeholders "
-        "and charges/data/station_charges.csv has no price_basis_year "
-        "column at all (7 columns; step 10's CHARGE_PROVENANCE_COLUMNS "
-        "expects it plus vat_rate_per, incl_vat and tariff_class). A charge "
-        "with a basis but no price year cannot be inflated to the 2032 "
-        "target year like every other calibration in the project. Handed to "
-        "the station-charge calibration (2026-08-29); strict=True so this "
-        "fails loudly once real tariffs land and the marker must go."
-    ),
-)
+def test_stop_charge_per_tonne_is_a_rate_beside_an_explicit_zero(db_cur):
+    """A mass-based tariff (Czechia, CALC 0.9.32) seeds as a per-tonne rate
+    with an explicit 0.00 fixed part — never a NULL fixed part, which would
+    resolve to the default on top of the rate — and carries the same
+    provenance as a per-call charge."""
+    db_cur.execute("""
+        SELECT stop_id, stop_charge_eur, stop_charge_per_tonne_eur,
+               stop_charge_basis, stop_charge_source
+        FROM input_params.stop_infrastructures
+        WHERE stop_charge_per_tonne_eur IS NOT NULL AND stop_infra_version = 1
+        """)
+    rows = db_cur.fetchall()
+    if not rows:
+        pytest.skip("no stop is priced per tonne — CZ not joined into the catalog yet")
+    for row in rows:
+        assert row["stop_charge_per_tonne_eur"] > 0, row["stop_id"]
+        assert row["stop_charge_eur"] == 0, row["stop_id"]
+        assert row["stop_charge_basis"] == "per_call_per_tonne", row["stop_id"]
+        assert row["stop_charge_source"], row["stop_id"]
+
+    db_cur.execute("""
+        SELECT COUNT(*) AS n FROM input_params.stop_infrastructures
+        WHERE stop_charge_basis = 'per_call_per_tonne'
+          AND stop_charge_per_tonne_eur IS NULL AND stop_infra_version = 1
+        """)
+    assert db_cur.fetchone()["n"] == 0, "a per-tonne basis with no rate"
+
+
 def test_stop_charge_carries_its_price_year(db_cur):
-    """Split out of test_stop_charge_carries_its_provenance so the rest of
-    that test keeps guarding source, basis and the VAT arithmetic."""
+    """A charge without its price year cannot be inflated to the 2032
+    target year like every other calibration in the project.
+
+    Split out of test_stop_charge_carries_its_provenance so the rest of
+    that test keeps guarding source, basis and the VAT arithmetic. Was a
+    strict xfail while the catalogue carried 13 illustrative placeholder
+    charges; the 2026-09-01 calibration run replaced them with the 105
+    real German rows from the Stationspreisliste 2026, each with its
+    price year, so the marker went as its own reason instructed."""
     db_cur.execute("""
         SELECT stop_id, stop_charge_price_basis_year
         FROM input_params.stop_infrastructures
@@ -377,6 +407,31 @@ def test_stop_gauge_break_of_gauge(db_cur):
     assert row["gauges_mm"] == [1435, 1520]
 
 
+def test_stop_uic_refs_survive_the_seed(db_cur):
+    """uic_ref is OSM's tag verbatim, and that tag is multi-valued where a
+    station holds more than one code (Paris CDG 2 TGV carries both the SNCF
+    and the Transilien code). The column has to take the whole list: at
+    VARCHAR(12) the 15-character value aborted the seed outright
+    (2026-09-05). Each code is checked on its own, since a width that
+    clipped the list would leave a short or empty one behind."""
+    db_cur.execute("""
+        SELECT stop_id, uic_ref FROM input_params.stop_infrastructures
+        WHERE stop_infra_version = 1 AND uic_ref IS NOT NULL
+        """)
+    rows = db_cur.fetchall()
+    assert rows, "no stop carries a uic_ref — step 7's OSM tag read came back empty"
+
+    for row in rows:
+        codes = [c.strip() for c in row["uic_ref"].split(";")]
+        assert all(codes), f"{row['stop_id']}: empty code in {row['uic_ref']!r}"
+        # A single code is 7 characters (a few stops carry a shorter national
+        # number); anything longer means a list was stored where a code
+        # belongs, not that one code grew.
+        assert all(len(c) <= 12 for c in codes), (
+            f"{row['stop_id']}: {row['uic_ref']!r} is not a list of codes"
+        )
+
+
 def test_proposal_summaries_geom_is_postgis_geometry(db_cur):
     """proposal_summaries.geom_simplified is a PostGIS geometry column, not
     a plain type — information_schema doesn't expose the (MultiLineString,
@@ -393,19 +448,17 @@ def test_proposal_summaries_geom_is_postgis_geometry(db_cur):
     assert row["udt_name"] == "geometry"
 
 
-def test_compute_cache_tables_are_unlogged(db_cur):
-    """Both compute cache tables are UNLOGGED (adapters/proposal/README.md
-    §2.3) — a disposable performance layer, no WAL overhead, safe to lose
-    on crash."""
+def test_family_cache_tables_are_unlogged(db_cur):
+    """Both family caches are UNLOGGED (adapters/family/README.md) — a
+    disposable performance layer, no WAL overhead, safe to lose on
+    crash."""
     db_cur.execute(
-        "SELECT relname, relpersistence FROM pg_class "
-        "WHERE relname IN ('compute_cache_pointer', 'compute_cache_result')"
+        "SELECT c.relname, c.relpersistence FROM pg_class c "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = 'family' AND c.relkind = 'r'"
     )
     persistence = {row["relname"]: row["relpersistence"] for row in db_cur.fetchall()}
-    assert persistence == {
-        "compute_cache_pointer": "u",
-        "compute_cache_result": "u",
-    }
+    assert persistence == {"documents": "u", "members": "u"}
 
 
 # =============================================================================
@@ -596,13 +649,14 @@ def test_scenario_key_and_routing_graph_agree(db_cur):
 
 
 def test_infra_2032_scenarios_pin_versions_5_to_7(scenarios_2032):
-    """The 2032 trio pins versions 5, 6 and 7 across all five tables —
+    """The 2032 rows pin versions 5, 6, 7 and 9 across all five tables —
     one complete snapshot each, in the same operating-condition order as
-    the 2026 trio's 1, 2, 3 (db/dev/seed.py's version grid)."""
+    the 2026 rows' 1, 2, 3, 8 (db/dev/seed.py's version grid)."""
     for scenario_key, expected in (
         ("infra-2032", 5),
         ("infra-2032-hsr", 6),
         ("infra-2032-hsr-opt-tt", 7),
+        ("infra-2032-opt-tt", 9),
     ):
         scenario = scenarios_2032[scenario_key]
         for col in _SCENARIO_VERSION_COLUMNS:
@@ -612,7 +666,7 @@ def test_infra_2032_scenarios_pin_versions_5_to_7(scenarios_2032):
 
 
 def test_infra_2032_scenarios_are_current_but_not_base(scenarios_2032):
-    """All three are selectable lineage heads, and none of them displaces
+    """All four are selectable lineage heads, and none of them displaces
     Infra 2026 as the live default."""
     for scenario in scenarios_2032.values():
         assert scenario["is_current_scenario"] is True
@@ -650,9 +704,18 @@ def test_infra_2032_snapshots_copy_their_2026_counterparts(db_cur):
 
 def test_opt_tt_reduces_buffer_quota(db_cur, opt_tt_scenario, base_scenario):
     """The optimised-timetable snapshot carries a strictly lower schedule
-    supplement than the base wherever the base sits above the benchmark,
-    and never a higher one — the only numeric difference between the three
-    seeded scenarios (models/scenarios/README.md)."""
+    supplement than the base in EVERY country — the only numeric
+    difference between the three seeded scenarios
+    (models/scenarios/README.md).
+
+    Strictly lower everywhere, not merely somewhere: the reduction is a
+    percentage-point cut off each country's calibrated theoretical
+    timetable supplement, which is positive for every seeded country. The
+    previous benchmark rule left a country sitting at the floor untouched
+    and could only be asserted as "at least one" — that weaker assertion
+    would now pass on a calibration that had silently stopped reducing
+    most of Europe.
+    """
     db_cur.execute(
         """
         SELECT b.country_code,
@@ -672,12 +735,12 @@ def test_opt_tt_reduces_buffer_quota(db_cur, opt_tt_scenario, base_scenario):
     )
     rows = db_cur.fetchall()
     assert rows, "No country carries a buffer quota — seed data missing."
-    assert any(r["opt_quota"] < r["base_quota"] for r in rows), (
-        "No country's schedule supplement was reduced — the optimised "
-        "timetable scenario is indistinguishable from the base."
+    unreduced = [r["country_code"] for r in rows if r["opt_quota"] >= r["base_quota"]]
+    assert not unreduced, (
+        f"schedule supplement not reduced for {unreduced} — every country "
+        "carries a theoretical timetable supplement, so every country's "
+        "quota must fall (models/scenarios/calib/OPT_TT_CALIBRATION.md)."
     )
-    for row in rows:
-        assert row["opt_quota"] <= row["base_quota"], row["country_code"]
 
 
 def test_stop_infrastructure_values_unchanged_by_hsr_scenario(

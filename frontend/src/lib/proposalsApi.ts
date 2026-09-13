@@ -3,8 +3,10 @@
 // budget class, and type the response.
 
 import { apiRequest } from './apiClient'
-import { ApiError } from './apiError'
 import type {
+  FamilyDocument,
+  FamilyRequest,
+  FamilyViewsResponse,
   ProposalsRequest,
   ProposalsResponse,
   ProposalDetailResponse,
@@ -16,7 +18,7 @@ import type {
 } from '@/types/api'
 
 /** Every failure is an ApiError; re-exported so callers need one import. */
-export { ApiError }
+export { ApiError } from './apiError'
 
 /**
  * The gallery's one read: list page AND map in a single request. The response
@@ -164,4 +166,43 @@ export function deleteComment(
     headers: authHeaders,
     allowEmpty: true,
   })
+}
+
+/**
+ * The proposal family — every scenario variant × composition of one stop
+ * list + HOW as one document (backend/api/README.md "Proposal Family"). The
+ * only compute endpoint since backend 0.5.0. 'heavy' with no deadline, like
+ * publish: a cold family routes the corridor live, and a warm one is ~1.5 s.
+ */
+export function postFamily(
+  body: FamilyRequest,
+  headers: Record<string, string>,
+  signal?: AbortSignal,
+  onSlow?: (phase: 'slow' | 'verySlow') => void,
+): Promise<FamilyDocument> {
+  return apiRequest<FamilyDocument>('/api/proposal/family', {
+    method: 'POST',
+    headers,
+    body,
+    budget: 'heavy',
+    signal,
+    onSlow,
+  })
+}
+
+/**
+ * One member's six evaluation views, computed on demand and member-cached
+ * server-side (≈350 ms cold, a cache hit after). 404 once the family's key
+ * has expired — the caller posts the family again.
+ */
+export function fetchFamilyViews(
+  familyKey: string,
+  scenarioVariantId: number,
+  compositionId: string,
+  signal?: AbortSignal,
+): Promise<FamilyViewsResponse> {
+  return apiRequest<FamilyViewsResponse>(
+    `/api/proposal/family/${familyKey}/members/${scenarioVariantId}/${encodeURIComponent(compositionId)}/views`,
+    { budget: 'heavy', ...(signal ? { signal } : {}) },
+  )
 }

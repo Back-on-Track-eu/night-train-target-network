@@ -25,10 +25,28 @@ stop_timezone
     (marked +1); the schema and the rest of the catalog use IANA names.
 
 The catalog is a single file carrying everything downstream needs: the
-seven seed contract columns first (seed.py validates them as a header
-prefix and ignores the rest until the schema migration), then a
-human-readable provenance category, then the step 7 name/city/language
-columns and the step 8 gauges. Step 7's enrichment is therefore a required
+seven seed contract columns first, the charge provenance, a human-readable
+provenance category, the infrastructure versions the stop belongs to, then
+the step 7 name/city/language columns and the step 8 gauges. seed.py checks
+the header as an EXACT match against its _STOP_SEED_CSV_COLUMNS — adding a
+column here means adding it there in the same commit.
+
+infra_versions
+    Which routing-graph infrastructure version(s) the stop belongs to,
+    "infra-2026;infra-2032" for an existing station that stays (every step 5
+    stop, and every step 6 addition unless it says otherwise), "infra-2032"
+    for one not built yet, "infra-2026" for one the 2032 network bypasses.
+    Tagged in step 6, carried here; seed.py reads the column but does not
+    act on it yet — every stop still seeds into every snapshot version.
+
+Regression check
+    Before the catalog is overwritten, every stop the previous catalog had
+    and the new one lacks is written to data/step10_dropped_stops.csv and
+    printed. Step 5 reads a live schedule, so its membership can shrink
+    without anything in the repo changing — which is how Berlin-Spandau,
+    København H and Madrid Atocha silently left the catalog in August 2026
+    after step 6 had been pruned against an earlier step 5. A dropped stop
+    is not an error (ONTD may be right), but it must never be silent. Step 7's enrichment is therefore a required
 input; step 8's gauges are joined when present and warned about when not
 (Overpass-dependent, resumable — the catalog should not block on it).
 
@@ -98,7 +116,12 @@ CHARGES_PATH = (
     Path(__file__).resolve().parent / "charges" / "data" / "station_charges.csv"
 )
 
-# seed.py::_ONTD_SEED_CSV_COLUMNS — keep in lockstep.
+INFRA_BOTH = "infra-2026;infra-2032"
+INFRA_VALID = {"infra-2026", "infra-2032"}
+
+DROPPED_PATH = DATA_DIR / "step10_dropped_stops.csv"
+
+# seed.py::_STOP_SEED_CSV_COLUMNS — exact header match, keep in lockstep.
 SEED_COLUMNS = [
     "stop_id",
     "stop_name",
@@ -107,6 +130,7 @@ SEED_COLUMNS = [
     "stop_lat",
     "stop_lon",
     "stop_charge_eur",
+    "stop_charge_per_tonne_eur",
 ]
 
 # What the catalog keeps about a charge beyond the figure itself: the same
@@ -121,6 +145,35 @@ CHARGE_PROVENANCE_COLUMNS = {
     "stop_charge_class": "tariff_class",
     "stop_charge_source": "source_ref",
 }
+
+# Column widths of input_params.stop_infrastructures (db/schema.py). Postgres
+# rejects an over-long value at container start with a bare "value too long
+# for type character varying(60)" — no stop, no column named — so the export
+# checks first and says which. Language columns follow their base column.
+SEED_MAX_LEN = {
+    "stop_id": 120,
+    "stop_name": 120,
+    "stop_timezone": 50,
+    "stop_charge_basis": 30,
+    "stop_charge_class": 60,
+    "stop_charge_source": 40,
+    "provenance": 60,
+    "name_latin": 120,
+    "name_ascii": 120,
+    "uic_ref": 12,
+    "city": 120,
+}
+SEED_MAX_LEN_PREFIX = {"country_": 60, "city_": 120}
+
+
+def seed_width(column: str) -> int | None:
+    if column in SEED_MAX_LEN:
+        return SEED_MAX_LEN[column]
+    for prefix, width in SEED_MAX_LEN_PREFIX.items():
+        if column.startswith(prefix):
+            return width
+    return None
+
 
 # One IANA zone per country. Derived from the country rather than a UTC offset
 # so DST is handled by the zone database instead of being frozen into the data.
@@ -301,10 +354,21 @@ def load_enrichment() -> tuple[list[str], dict[str, dict]]:
     return enrich_fields + gauge_fields, rows
 
 
+def normalise_infra(value: str, stop_id: str) -> str:
+    parts = {p.strip() for p in (value or "").replace(",", ";").split(";") if p.strip()}
+    if not parts:
+        return INFRA_BOTH
+    bad = parts - INFRA_VALID
+    if bad:
+        raise ValueError(f"{stop_id}: unknown infra_versions {sorted(bad)}")
+    return ";".join(sorted(parts))
+
+
 def iter_candidates():
-    """(source, stop_id, ontd_id, stop_name, source_country, lat, lon, reason)
-    from step 5 then step 6. Step 5 first so its ONTD-backed row wins when a
-    stop qualifies both ways."""
+    """(source, stop_id, ontd_id, stop_name, source_country, lat, lon, reason,
+    infra_versions) from step 5 then step 6. Step 5 first so its ONTD-backed
+    row wins when a stop qualifies both ways. Step 5 stops exist today and
+    stay, so they are INFRA_BOTH; step 6 says per stop."""
     step5_path = local_input(
         "step5_JoinedNTStops.csv", "step5_JoinNTStopsWithOSM.ipynb"
     )
@@ -319,12 +383,19 @@ def iter_candidates():
                 parse_float(row.get("osm_lat")),
                 parse_float(row.get("osm_lon")),
                 f"night_train_stop:{(row.get('schedule_name') or '').strip()}",
+                INFRA_BOTH,
             )
     step6_path = local_input(
         "step6_manual_additions.csv", "step6_manual_additions.ipynb"
     )
     with open(step6_path, encoding="utf-8-sig", newline="") as fh:
-        for row in csv.DictReader(fh):
+        reader = csv.DictReader(fh)
+        if "infra_versions" not in (reader.fieldnames or []):
+            raise SystemExit(
+                "step6_manual_additions.csv has no infra_versions column — "
+                "re-run step6_manual_additions.ipynb (2026-09 version or later)."
+            )
+        for row in reader:
             yield (
                 "step6_manual",
                 (row.get("stop_id") or "").strip(),
@@ -334,7 +405,17 @@ def iter_candidates():
                 parse_float(row.get("stop_lat")),
                 parse_float(row.get("stop_lon")),
                 (row.get("reason") or "").strip(),
+                normalise_infra(row.get("infra_versions", ""), row.get("stop_id", "")),
             )
+
+
+def previous_catalog_ids() -> dict[str, str]:
+    """stop_id -> stop_name of the catalog currently on disk, for the
+    regression report. Empty on a clean checkout."""
+    if not OUTPUT_PATH.is_file():
+        return {}
+    with open(OUTPUT_PATH, encoding="utf-8-sig", newline="") as fh:
+        return {row["stop_id"]: row["stop_name"] for row in csv.DictReader(fh)}
 
 
 def main() -> None:
@@ -358,6 +439,7 @@ def main() -> None:
         lat,
         lon,
         reason,
+        infra_versions,
     ) in iter_candidates():
         if not stop_id or stop_id in seen_ids:
             continue
@@ -404,7 +486,14 @@ def main() -> None:
             "stop_charge_eur": (
                 "" if stop_id not in charges else f"{charges[stop_id]['value']:.2f}"
             ),
+            # Mass-based part (Czechia): the rate as 02 wrote it, empty for a
+            # per-call tariff. seed.py multiplies nothing — the cost model does.
+            "stop_charge_per_tonne_eur": (
+                charges.get(stop_id, {}).get("row", {}).get("stop_charge_per_tonne_eur")
+                or ""
+            ),
             "provenance": provenance_label(source, reason),
+            "infra_versions": infra_versions,
         }
         # Charge provenance travels as columns beside the figure; empty for the
         # stops that resolve through the country or global default.
@@ -474,8 +563,74 @@ def main() -> None:
     # Seed contract columns first (seed.py checks them as a header prefix),
     # provenance, then the enrichment block.
     fieldnames = (
-        SEED_COLUMNS + list(CHARGE_PROVENANCE_COLUMNS) + ["provenance"] + enrich_fields
+        SEED_COLUMNS
+        + list(CHARGE_PROVENANCE_COLUMNS)
+        + ["provenance", "infra_versions"]
+        + enrich_fields
     )
+
+    # --- regression report: what the previous catalog had that this one lacks
+    previous = previous_catalog_ids()
+    new_ids = {row["stop_id"] for row in rows}
+    dropped = sorted(
+        (
+            (stop_id, name)
+            for stop_id, name in previous.items()
+            if stop_id not in new_ids
+        ),
+        key=lambda pair: pair[1],
+    )
+    added = len(new_ids - set(previous)) if previous else 0
+    with open(DROPPED_PATH, "w", encoding="utf-8-sig", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["stop_id", "stop_name"])
+        writer.writerows(dropped)
+    if previous:
+        print(
+            f"  vs previous catalog ({len(previous)} stops): +{added} added, "
+            f"-{len(dropped)} dropped — see {DROPPED_PATH.name}"
+        )
+        for stop_id, name in dropped[:15]:
+            print(f"    dropped: {name} ({stop_id})")
+        if len(dropped) > 15:
+            print(f"    ... {len(dropped) - 15} more in {DROPPED_PATH.name}")
+        if dropped:
+            print(
+                "  A dropped stop is ONTD moving, not the pipeline breaking — but "
+                "if a step 6 addition was ever removed as a duplicate of it, "
+                "that addition needs to come back (see the 2026-09 addendum in "
+                "step6_manual_additions.ipynb)."
+            )
+
+    # uic_ref is one code in the seed table; OSM tags a few stations with two
+    # (a TGV station and its RER object). The catalog keeps the first, the
+    # full list stays in step7_enriched_stops.csv.
+    multi_uic = []
+    for row in rows:
+        refs = [r.strip() for r in (row.get("uic_ref") or "").split(";") if r.strip()]
+        if len(refs) > 1:
+            multi_uic.append((row["stop_name"], row["uic_ref"]))
+            row["uic_ref"] = refs[0]
+    if multi_uic:
+        print(f"  {len(multi_uic)} stop(s) with several uic_refs — first kept:")
+        for name, refs in multi_uic:
+            print(f"    {name}: {refs}")
+
+    too_long = [
+        (row["stop_name"], column, len(row[column]), width)
+        for row in rows
+        for column in fieldnames
+        if (width := seed_width(column)) and len(row.get(column) or "") > width
+    ]
+    if too_long:
+        for name, column, length, width in too_long[:15]:
+            print(f"    {name}: {column} is {length} chars, column holds {width}")
+        raise SystemExit(
+            f"{len(too_long)} value(s) exceed a stop_infrastructures column width "
+            "— seed.py would fail at container start. Shorten them at the source "
+            "(a tariff_class is a label, the explanation belongs in note)."
+        )
+
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(OUTPUT_PATH, "w", encoding="utf-8", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
@@ -500,6 +655,13 @@ def main() -> None:
         f"wrote {len(rows)} stops to {OUTPUT_PATH.name} "
         f"({per_source['step5']} from step 5, "
         f"{per_source['step6_manual']} manual step 6 additions)"
+    )
+    by_infra = {}
+    for row in rows:
+        by_infra[row["infra_versions"]] = by_infra.get(row["infra_versions"], 0) + 1
+    print(
+        "  by infra_versions:",
+        ", ".join(f"{k}: {v}" for k, v in sorted(by_infra.items())),
     )
     unexplained = sum(
         1 for p in provenance if p["source"] == "step6_manual" and not p["reason"]

@@ -25,7 +25,18 @@ Routing 200+ routes takes a few minutes and needs the router container
 up; --no-geometry skips it for a quick metadata-only rebuild. Any route
 whose stops the router can't snap falls back to straight lines between
 consecutive stops and is flagged geometry_routed = FALSE, so a partial
-router outage degrades the map instead of failing the load.
+router outage degrades the map instead of failing the load. Every
+failure is recorded in routing_status / routing_error and listed at the
+end of the run, grouped by status, so a dashed route on the gallery map
+can be traced to its cause without querying the table.
+
+Gauge: ONTD stops carry none, so each stop is routed on the gauge of the
+catalog stop it maps to (stop_mapping.catalog_gauges) — the ONTD→Target
+Network mapping is therefore built BEFORE routing, not just before the
+write. Unmapped stops stay gauge-unknown and do not constrain the trip
+(routing/gauge.py). Without this every existing train routed on the
+standard-gauge profile and the Finnish, Ukrainian and Baltic ones could
+not snap (2026-09-06).
 
 Directional averaging: a route's two trips differ slightly in timing, so
 total_time_h and total_distance_km are averaged over whichever
@@ -45,7 +56,7 @@ from typing import Any, Optional
 
 from connection import connect
 from psycopg2.extras import RealDictCursor
-from stop_mapping import build_stop_mappings
+from stop_mapping import build_stop_mappings, catalog_gauges
 
 # db/ontd/projection.py -> backend/ is two levels up. Needed because
 # this script imports models/ and api/ (the router and its dependencies)
@@ -414,6 +425,25 @@ def _write_corridors(
         )
 
 
+def _report_failures(
+    failures: dict[str, list[tuple[str, Optional[str], Optional[str]]]],
+) -> None:
+    """Routes left on straight lines, grouped by routing_status, with the
+    router's own message — the bootstrap log is where a dashed gallery
+    route gets explained. snap_failed with an ONTD stop far from any
+    track is usually an ONTD coordinate defect (see the unmatched-stop
+    report above); gauge_mismatch means the mapped catalog stops span two
+    networks; no_connection is a real answer about the graph."""
+    if not failures:
+        return
+    print("  ROUTES ON STRAIGHT-LINE FALLBACK, by routing_status:")
+    for status, entries in sorted(failures.items()):
+        print(f"    {status}: {len(entries)}")
+        for route_id, name, error in entries:
+            detail = f" — {error[:160]}" if error else ""
+            print(f"      {route_id}  {name!r}{detail}")
+
+
 def build_summaries(
     cur,
     with_geometry: bool = True,
@@ -423,6 +453,15 @@ def build_summaries(
     routes = fetch_active_routes(cur)
     stops_by_route = fetch_route_stops(cur)
 
+    # ONTD → Target Network stop translation (WP10 step 6a), built before
+    # anything else: routing reads each mapped stop's catalog gauge from
+    # it, and route_summaries.stop_ids / route_corridors are written in
+    # the proposal side's namespace. Matching only — the catalog is
+    # complete at seed time (stop_mapping.py's module docstring);
+    # unmatched stops are reported, keep raw ids and route gauge-unknown.
+    mapping = build_stop_mappings(cur)
+    gauges = catalog_gauges(cur) if with_geometry else {}
+
     context = build_reference_context(composition_id) if with_geometry else None
     routed = (
         route_all(
@@ -431,7 +470,12 @@ def build_summaries(
                 (
                     route["route_id"],
                     [
-                        (s["stop_id"], s["stop_lat"], s["stop_lon"])
+                        (
+                            s["stop_id"],
+                            s["stop_lat"],
+                            s["stop_lon"],
+                            gauges.get(mapping.get(s["stop_id"])),
+                        )
                         for s in stops_by_route[route["route_id"]]
                     ],
                 )
@@ -444,19 +488,13 @@ def build_summaries(
         else {}
     )
 
-    # ONTD → Target Network stop translation (WP10 step 6a): built
-    # before anything is written, so route_summaries.stop_ids and
-    # route_corridors come out in the proposal side's namespace. Matching
-    # only — the catalog is complete at seed time (stop_mapping.py's
-    # module docstring); unmatched stops are reported and keep raw ids.
-    mapping = build_stop_mappings(cur)
-
     cur.execute("TRUNCATE ontd.route_corridors")
     cur.execute("TRUNCATE ontd.route_legs")
     cur.execute("TRUNCATE ontd.route_summaries")
 
     written = routed_count = 0
-    for index, route in enumerate(routes, start=1):
+    failures: dict[str, list[tuple[str, Optional[str], Optional[str]]]] = {}
+    for route in routes:
         route_id = route["route_id"]
         stops = stops_by_route.get(route_id, [])
 
@@ -531,7 +569,13 @@ def build_summaries(
             ),
         )
         written += 1
+        if stops and status != "routed":
+            failures.setdefault(status, []).append((route_id, route["name"], error))
 
+    # Nothing to explain on a --no-geometry run: every route is a
+    # placeholder by construction.
+    if context is not None:
+        _report_failures(failures)
     return written, routed_count
 
 

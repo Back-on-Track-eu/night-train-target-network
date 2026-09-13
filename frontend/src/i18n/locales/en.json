@@ -37,7 +37,8 @@
       "data_not_loaded": "The service is still starting up. Please try again in a minute.",
       "email_failed": "We could not send the code. Please try again.",
       "scenario_not_base": "That scenario cannot be saved as a proposal."
-    }
+    },
+    "viewsFailed": "The cost and revenue detail could not be loaded. The route and its headline figures are unaffected."
   },
   "proposal": {
     "heading": "So, what's your dream night train route?",
@@ -153,6 +154,25 @@
         "demand": "night trains treated as their own transport segment, exempt from track access surcharges."
       }
     },
+    "expert": {
+      "toggle": "Expert timetable",
+      "firstDeparture": "First departure",
+      "pinned": "pinned",
+      "follows": "follows automatic",
+      "automatic": "Automatic — mirrored around 02:30",
+      "pinnedHint": "Stays at this time after a recalculation (automatic: {auto})",
+      "followsHint": "Automatic {auto}, {delta} min — moves with it",
+      "reset": "Back to automatic",
+      "nudgeAria": "Move the first departure by {minutes} minutes",
+      "legAria": "Extra minutes on the leg arriving at {stop}",
+      "moreAria": "One more minute on the leg arriving at {stop}",
+      "lessAria": "One minute less on the leg arriving at {stop}",
+      "mirrored": "The opposite direction copies these added minutes, reversed.",
+      "editSeparately": "Give it its own times",
+      "ownTimes": "The opposite direction keeps its own times.",
+      "relink": "Mirror this direction again",
+      "droppedAddons": "Added minutes were dropped on {legs}: a stop was added in between, so that leg no longer exists."
+    },
     "suggestions": {
       "title": "Add stops along the way?",
       "subtitle": "We found stops on your route. Pick any you'd like to include.",
@@ -180,7 +200,7 @@
       "hsrAllowed": "High-speed lines",
       "serviceCoach": "Service coach — no places",
       "coachHint": "Point at a coach to see its type data",
-      "coachPosition": "Coach {position} of {count}",
+      "coachPosition": "Coach {n}",
       "moreDetails": "Crew, cost inputs and sources",
       "sources": "Sources",
       "strategy": {
@@ -223,14 +243,20 @@
         "maintenance": "Coach maintenance",
         "densityLength": "Length per place",
         "densityWeight": "Weight per place"
-      }
+      },
+      "pickCoach": "Point at a coach for its type; click it for what is fitted in it."
     },
     "map": {
       "travelTime": "Travel time",
       "unknownDuration": "—",
       "durationHm": "{h}h {m}m",
       "durationH": "{h}h",
-      "durationM": "{m}m"
+      "durationM": "{m}m",
+      "variantSwitch": "Click to show this variant"
+    },
+    "tripPairs": {
+      "addAnother": "Add another trip pair",
+      "comingSoonHint": "Soon a proposal will be able to carry more than one trip pair — branching off a shared section, or crossing another at an interchange — so a route can be Y- or X-shaped instead of a single line."
     },
     "evaluation": {
       "scenario": "Scenario",
@@ -265,7 +291,12 @@
       "kpi": {
         "revenue": "Revenue",
         "cost": "Cost",
-        "subsidies": "Necessary Subsidies"
+        "subsidies": "Necessary Subsidies",
+        "surplus": "Surplus",
+        "margin": "Operator margin",
+        "marginShare": "{share} of ticket revenue",
+        "afterMargin": "after the margin",
+        "toReachMargin": "to cover cost and margin"
       },
       "demand": {
         "estimate": "Mock Data",
@@ -309,8 +340,10 @@
         "energy": "Energy",
         "station_charge": "Station charges",
         "parking": "Parking",
-        "ticket_revenue": "Ticket revenue",
-        "ebit_margin": "EBIT margin"
+        "ticket_revenue": "Base fare revenue",
+        "ebit_margin": "EBIT margin",
+        "catering_contribution": "Catering, net",
+        "services_revenue": "Additional services"
       },
       "filters": {
         "default": "All",
@@ -341,6 +374,509 @@
       "section": {
         "startAria": "Section start",
         "endAria": "Section end"
+      },
+      "impact": {
+        "placeholder": "Demand, modal-shift and CO₂ figures are interim estimates until the demand model lands."
+      },
+      "viewsLoading": "Loading the cost and revenue detail…",
+      "noClassSplit": "No class split in this view."
+    },
+    "stops": "Stops",
+    "ownership": {
+      "ownLabel": "Your proposal",
+      "ownNote": "changes are saved automatically",
+      "copyLabel": "{name}'s proposal",
+      "copyNote": "any change you make is saved as your own copy",
+      "someone": "Someone"
+    },
+    "compare": {
+      "scenarioTitle": "Scenario and main figures",
+      "scenarioBody": "Simulate the network, operating conditions and further potential political measures.",
+      "title": "Compare across scenarios",
+      "body": "How the selected train fares under every scenario, and every train under the selected one.",
+      "complete": "Every combination computed.",
+      "kpiPicker": "Figure to compare",
+      "viewBars": "Scenarios",
+      "viewGrid": "All combinations",
+      "pending": "Not computed yet",
+      "zeroLine": "0 — below the line no subsidy is needed",
+      "worse": "worse",
+      "better": "better",
+      "breakEven": "The tick marks break-even — amber needs a subsidy, green pays for itself",
+      "bestIs": "Best: {where}",
+      "none": "none",
+      "surplus": "surplus {value}",
+      "surplusShort": "surplus",
+      "noSubsidy": "no subsidy",
+      "isBaseline": "baseline",
+      "noBaselineYet": "baseline pending",
+      "vsBaseline": "vs. baseline",
+      "measuresNone": "Measures: none — today's prices and taxes",
+      "evaluatedWith": "Evaluated with {composition} · {frequency}",
+      "change": "change ↓",
+      "staleMarker": "results outdated",
+      "comingSoon": "coming soon",
+      "hsrInert": "This formation is not built for high-speed lines, so the permission changes nothing for it",
+      "axes": {
+        "network": "Rail network",
+        "infra": "Infra {network}",
+        "networkPreviewHint": "We're currently preparing to route on the 2032 network, including estimated infrastructure upgrades. Stay tuned!",
+        "conditions": "Operating conditions",
+        "hsr": "Night trains may use high-speed lines",
+        "optTt": "Optimised timetables",
+        "optTtNeedsHsr": "Optimised timetables are only modelled together with high-speed lines.",
+        "measures": "Price & regulatory measures",
+        "measuresHint": "We're currently preparing to add further political measures to our scenario analysis. Stay tuned!",
+        "measure": {
+          "vat": "VAT exemption on tickets",
+          "energyTax": "Energy tax exemption",
+          "tac": "Track access at direct costs only"
+        }
+      },
+      "conditionsShort": {
+        "base": "Base",
+        "hsr": "HSR",
+        "optTt": "TT OPT",
+        "hsrOptTt": "HSR + TT OPT"
+      },
+      "kpis": {
+        "subsidy": "Necessary subsidy",
+        "co2": "CO₂ saved",
+        "subsidyPerT": "Subsidy per t CO₂",
+        "pax": "Passenger trips",
+        "paxKm": "Passenger-km",
+        "shiftAir": "Shifted from air",
+        "shiftCar": "Shifted from car",
+        "journeyTime": "Journey time"
+      },
+      "units": {
+        "millionEurYear": "/ year",
+        "ktYear": "kt / year",
+        "eurPerT": "€ / t",
+        "perYear": "/ year",
+        "kmYear": "km / year"
+      },
+      "cellErrors": {
+        "routing_graph_not_configured": "This scenario needs a routing instance this deployment does not run.",
+        "gauge_mismatch": "The stops are on different track gauges.",
+        "routing_error": "No route could be found for this combination.",
+        "domain_error": "This combination could not be evaluated.",
+        "calc_error": "Something went wrong computing this combination."
+      },
+      "loading": "Computing every combination …",
+      "partial": "{received} of {total} combinations available — the rest could not be computed.",
+      "customSchedule": "Custom schedule · {days} operating days",
+      "pricePart": " · fares {span} €/km",
+      "cateringPart": " · catering {value} €/passenger",
+      "axisBreak": "axis starts at {value}, not zero"
+    },
+    "supply": {
+      "filters": {
+        "all": "All",
+        "new": "New fleet",
+        "refurbished": "Refurbished",
+        "hsr": "HSR-capable"
+      },
+      "columns": {
+        "composition": "Composition",
+        "places": "Places",
+        "eurTrainKm": "Cost",
+        "ctPlaceKm": "Cost per place",
+        "fit": "Fit to demand",
+        "subsidy": "Subsidy",
+        "trainsets": "Trainsets",
+        "densityLength": "Space per place",
+        "densityWeight": "Weight per place"
+      },
+      "fitHint": "Coming soon — needs the demand model. Today every train is evaluated at the same utilisation, so this column cannot tell them apart.",
+      "schedule": {
+        "alwaysDaily": "Daily",
+        "alwaysThreePerWeek": "3× per week"
+      },
+      "sidebar": {
+        "title": "Frequency & supply",
+        "frequency": "Frequency",
+        "perYear": "Per year, both directions",
+        "departures": "Departures",
+        "trainKm": "Train-km",
+        "places": "Places offered",
+        "placeKm": "Place-km offered",
+        "utilisation": "Places sold",
+        "utilisationNote": "Places sold follow the interim demand assumption until the demand model lands.",
+        "info": {
+          "departures": "Operating days per year times two directions. Follows the frequency and the months the train runs.",
+          "trainKm": "Departures times the route length, both directions, per year.",
+          "places": "Departures times the places in the selected formation, all classes.",
+          "placeKm": "Train-km times the places offered: the capacity the route puts on the rails per year.",
+          "utilisation": "Share of offered place-km actually sold, from the interim demand assumption."
+        }
+      },
+      "units": {
+        "metresPerPlace": "m / place",
+        "tonnesPerPlace": "t / place",
+        "eurPerTrainKm": "€ / train-km",
+        "centPerPlaceKm": "ct / place-km",
+        "perYear": "per year"
+      }
+    },
+    "settings": {
+      "divider": "The full cost breakdown, and the details behind it",
+      "title": "Detail settings",
+      "body": "Compare and choose the train composition; what the demand figures rest on.",
+      "tabs": {
+        "supply": "Supply",
+        "demand": "Demand"
+      },
+      "selectedFormation": "Selected: {composition}",
+      "mobileCard": "The cost breakdown and the details need a wider screen — evaluated with {composition}, {frequency}.",
+      "demand": {
+        "intro": "Passenger numbers are an interim assumption, not a demand model: every train is filled to the same share of its places on every leg, and ticket prices follow a per-km fare by class.",
+        "source": "Demand source: uniform utilisation of the offered places (interim), to be replaced by a mode-choice model.",
+        "prices": "Prices: per-km fares by accommodation class, calibrated on current operators.",
+        "modes": "Competing modes: air and car shares are fixed factors until the demand model lands.",
+        "placeholder": "Demand settings become editable once the demand model exists."
+      }
+    },
+    "breakdown": {
+      "cost": "Cost",
+      "revenue": "Revenue",
+      "gapSubsidy": "Necessary subsidy {value}",
+      "segments": {
+        "operatorVariable": "Operator variable",
+        "operatorFixed": "Operator fixed",
+        "trackAccess": "Track access",
+        "stationCharges": "Station charges",
+        "energy": "Energy",
+        "margin": "Operator expected margin",
+        "tickets": "Ticket revenue",
+        "parking": "Parking",
+        "services": "Additional services",
+        "catering": "Catering, net"
+      },
+      "byClass": "Revenue by class",
+      "abbr": {
+        "operatorVariable": "OP-VAR",
+        "operatorFixed": "OP-FIX",
+        "trackAccess": "TAC",
+        "stationCharges": "STN",
+        "energy": "NRG",
+        "margin": "MRG",
+        "tickets": "TKT",
+        "parking": "PRK"
+      },
+      "surplusBeyondMargin": "Surplus beyond the margin: {value}",
+      "cateringDeduction": "Catering costs {value} — taken off the total",
+      "verdictSurplus": "Revenue exceeds cost by {above}: margin {margin} + surplus {surplus}",
+      "verdictSubsidy": "Necessary subsidy {subsidy} — enough for the operator to earn its margin of {margin}",
+      "keyMarginSurplus": "Operator margin + surplus",
+      "keySubsidy": "Necessary subsidy",
+      "keyCateringDeduction": "Catering deduction",
+      "shareOfRoute": "{share} of the full route"
+    },
+    "details": {
+      "title": "Details",
+      "body": "What runs the route, what it costs to operate and to use, and who rides it.",
+      "staleChip": "inputs changed",
+      "staleOne": "The {what} changed. Panels that depend on it wait for the recalculation.",
+      "staleMany": "The {what} changed. Panels that depend on them wait for the recalculation.",
+      "and": " and ",
+      "awaiting": "awaiting recalculation",
+      "previewChip": "preview — estimated here, not calculated",
+      "scopes": {
+        "schedule": "schedule",
+        "prices": "prices"
+      },
+      "tabs": {
+        "supply": "Supply",
+        "operation": "Train operation",
+        "infrastructure": "Infrastructure",
+        "overhead": "Overhead",
+        "demand": "Demand"
+      },
+      "receipt": {
+        "item": "Item",
+        "basis": "Basis",
+        "perTrip": "€ / trip",
+        "share": "Share",
+        "perYearNote": "per-year lines ÷ {n} departures"
+      },
+      "strip": {
+        "perTrip": "Per trip",
+        "perCycle": "Per trip cycle",
+        "bothWays": "(outbound + inbound)",
+        "perYear": "Per year"
+      },
+      "schedule": {
+        "title": "Schedule",
+        "caption": "days per week, by month",
+        "info": "How often the train runs in each month of the year, and what follows from it. Operating days are the days in each month times its days per week, so the evaluation year has 366 days — 2032 is a leap year. Departures are operating days times two directions; train-km and place-km follow from the route length and the formation. Which weekday the train runs is not modelled. The fleet is sized to the busiest month: a rake needs the cycle length in days, so a train that runs seven days a week and takes two days to come back needs two rakes.",
+        "presets": {
+          "daily": "Every day",
+          "three": "3× per week",
+          "once": "Once per week",
+          "summer": "Summer only",
+          "custom": "Custom"
+        },
+        "months": {
+          "jan": "Jan",
+          "feb": "Feb",
+          "mar": "Mar",
+          "apr": "Apr",
+          "may": "May",
+          "jun": "Jun",
+          "jul": "Jul",
+          "aug": "Aug",
+          "sep": "Sep",
+          "oct": "Oct",
+          "nov": "Nov",
+          "dec": "Dec"
+        },
+        "dragHint": "Drag a column, or use the arrow keys.",
+        "operatingDays": "Operating days",
+        "departures": "Departures",
+        "trainKm": "Train-km",
+        "trainsets": "Trainsets",
+        "previewHint": "Departures, train-km, places and place-km follow from the grid; trainsets use the cycle of {cycle} days, which only a recalculation can redo. Recalculate to apply the schedule to every other panel.",
+        "previewHintNoCycle": "Departures, train-km, places and place-km follow from the grid. The trainset count needs the cycle length from a calculation — recalculate to fill it in."
+      },
+      "prices": {
+        "title": "Places and prices",
+        "caption": "{composition} · {places} places",
+        "info": "What the train offers and what it charges. The tariff is three parts, each per class. The BASE FARE has a fixed term and a distance term — a berth has a price of admission a short journey pays as surely as a long one, so pricing on distance alone made short connections implausibly cheap. ADDITIONAL SERVICES is the revenue from bicycles, oversized luggage and reservations sold with the ticket; it is ordinary ticket revenue, never negative, and it carries overhead and the profit requirement like any other fare. CATERING is the odd one: one signed NET figure per passenger, the restaurant’s own sales less its own costs, and therefore outside those two bases. It differs by class because the classes differ in what their base fare already includes. The two example columns price the BERTH only — fixed plus distance — over the longest and shortest journey the route sells. Demand does not respond to any of it yet: the demand model is a stopgap.",
+        "class": "Class",
+        "places": "Places",
+        "shareOfTrain": "Share of train",
+        "perKm": "€ / km",
+        "exampleLongest": "Example fare, longest",
+        "exampleShortest": "Example fare, shortest",
+        "default": "Default",
+        "reset": "Reset to the default",
+        "increase": "Increase",
+        "decrease": "Decrease",
+        "allClasses": "All classes",
+        "perYear": "Per year, both directions",
+        "placesOffered": "Places offered",
+        "placeKmOffered": "Place-km offered",
+        "parts": {
+          "faresPerPax": {
+            "label": "Base fare, fixed",
+            "unit": "€ / passenger"
+          },
+          "faresPerKm": {
+            "label": "Base fare, distance",
+            "unit": "€ / km"
+          },
+          "servicesPerPax": {
+            "label": "Additional services",
+            "unit": "€ / passenger"
+          },
+          "cateringPerPax": {
+            "label": "Catering, net",
+            "unit": "€ / passenger"
+          }
+        },
+        "resetTo": "Reset to the default ({value})",
+        "weightedAverage": "average per passenger, weighted by places"
+      },
+      "operation": {
+        "compareTitle": "Compare compositions",
+        "compareInfo": "Every composition in the catalogue, evaluated on THIS route under the selected scenario — so the figures are comparable with each other and with nothing else. Trainsets first: it is the first thing that changes when the schedule does. The two density columns are metres and tonnes per place, the physical price of comfort; they replace the catalogue's indicative unit costs, which said the same thing about every route.",
+        "selectedInfo": "The composition the figures on this page were computed with. Below it, what one trip costs to run, in three receipts: the rakes and their upkeep, the locomotive hours, and the people on board. Fleet euros are annual breakdown leaves divided by the year's departures; locomotive and staff euros are per single trip, because the two directions differ in running time and in where the duty boundaries fall.",
+        "onePairOfMany": "figures for one trip pair of several",
+        "coaches": "{n} coaches",
+        "places": "{n} places",
+        "fleet": {
+          "trainsets": "trainsets",
+          "withReserve": "with reserve",
+          "total": "Fleet",
+          "strip": "Fleet costs, from one trip",
+          "maintenance": "Coach maintenance",
+          "cleaning": "Cleaning",
+          "cleaningBasis": "{rate} per coach and day",
+          "shunting": "Shunting",
+          "shuntingBasis": "{n} events per cycle",
+          "amortisation": "Coach amortisation",
+          "financing": "Financing",
+          "cycle": "Cycle per rake",
+          "days": "{n} days",
+          "sizedBy": "Sized by",
+          "turnaround": "Minimum turnaround",
+          "availability": "Coach availability",
+          "purchase": "Purchase per coach"
+        },
+        "loco": {
+          "hoursPerYear": "locomotive hours per year",
+          "perTrain": "Locomotives per train",
+          "perCycle": "Hours per trip cycle",
+          "hours": "h / trip",
+          "running": "Running",
+          "atStops": "At stops",
+          "total": "Locomotive lease",
+          "strip": "Locomotive lease, from one trip"
+        },
+        "staff": {
+          "onBoard": "staff on board",
+          "weighted": "paid-equivalent",
+          "role": "Role",
+          "headcount": "On board",
+          "factor": "× factor",
+          "onTrain": "h on train",
+          "roster": "Roster",
+          "paid": "Paid h",
+          "paidUnit": "paid h",
+          "total": "Total",
+          "hoursOnTrain": "Hours on train, per trip",
+          "paidHours": "Paid hours, per trip",
+          "strip": "Staff, from one trip",
+          "roles": {
+            "drivers": "Drivers",
+            "train_chief": "Train chief",
+            "attendants": "Attendants"
+          }
+        }
+      },
+      "infrastructure": {
+        "outboundTrip": "outbound trip",
+        "country": "Country",
+        "countries": "Countries",
+        "chargedOn": "Charged on",
+        "terms": {
+          "distance": "distance",
+          "gross_weight": "gross weight",
+          "places": "places",
+          "fixed_add_on": "fixed add-on",
+          "stop_fee": "stop fees",
+          "revenue_share": "revenue share",
+          "congestion": "congestion surcharge",
+          "night_rate": "night rate",
+          "passage_fixed": "fixed passage charge",
+          "passage_per_passenger": "passage charge per passenger"
+        },
+        "crossing": "Crossing {id}",
+        "noCrossings": "none on this route",
+        "tac": {
+          "title": "Track access charges",
+          "info": "What each infrastructure manager charges for the run over its network, country by country. The \"charged on\" column lists the terms that country actually levies on this trip — distance (at the day rate, or partly at the night rate where the country has a night band and the trip falls in it), gross weight, places, a fixed per-kilometre add-on, stop fees, a share of revenue, a congestion surcharge — and leaves out the ones it does not. A crossing billed by its own operator is a separate line. The outbound trip is shown; the two directions can differ where a night band catches one and not the other.",
+          "strip": "Track access charges, from one trip",
+          "total": "Track access"
+        },
+        "stations": {
+          "title": "Station access charges",
+          "info": "One charge per stop call, levied by the station's own infrastructure manager at that country's rate. Every stop of the trip is a call, the terminals included.",
+          "calls": "stop calls, one trip",
+          "perCycle": "Calls per trip cycle",
+          "perYear": "Calls per year",
+          "total": "Station charges",
+          "strip": "Station access, from one trip ({cycle} stop events per cycle, {year} per year)",
+          "station": "Station",
+          "category": "Category",
+          "perStop": "€ / stop",
+          "stopsPerTrip": "{n} stops per trip"
+        },
+        "facilities": {
+          "title": "Service facilities — parking",
+          "info": "Stabling the formation between arrival and the next departure, at each arrival terminal, on the basis that country prices — per metre and started day, per started hour, or per event — after its free allowance, plus the power drawn while standing. Priced per operating day, one stay per location; the per-trip line is one stay averaged over both ends.",
+          "caption": "one stay per terminal per operating day",
+          "locations": "stabling locations",
+          "stay": "Stay",
+          "basisNote": "per-day figures ÷ 2 trips",
+          "total": "Parking",
+          "strip": "Parking, from one trip",
+          "terminal": "Parking at arrival terminal",
+          "basis": "Priced",
+          "hoursPerStay": "h per stay",
+          "eurPerHour": "€ / h",
+          "eurPerStay": "€ / stay",
+          "perTripRow": "Per trip — one stay, averaged over both ends",
+          "none": "No stabling priced on this route."
+        },
+        "parkingBasis": {
+          "per_metre_day": "per metre and started day",
+          "per_hour": "per started hour",
+          "per_event": "per event",
+          "none": "not charged"
+        },
+        "energy": {
+          "title": "Energy",
+          "info": "Traction energy for the run, country by country: the kWh the train draws over that country's kilometres, priced at the country's tariff — a flat rate, or a day and a night rate where the country has a night band, with the share drawn inside it — plus the catenary charge where one is levied. All figures are net of VAT; the model carries no VAT rate.",
+          "perTrip": "drawn on one trip",
+          "perTrainKm": "Per train-km",
+          "eurPerKwh": "Average €/kWh",
+          "basis": "kWh and tariff",
+          "total": "Energy",
+          "strip": "Energy, from one trip",
+          "kwhPerTrainKm": "kWh / train-km",
+          "kwhPerTrip": "kWh / trip",
+          "tariff": "Tariff, excl. VAT",
+          "nightTag": "{rate} €/kWh night · {share} at night",
+          "weighted": "{rate} €/kWh weighted"
+        },
+        "catenary": "catenary {value}",
+        "year": {
+          "title": "Infrastructure per year",
+          "info": "The four infrastructure leaves of the cost breakdown, per year, each with its cost per train-kilometre and its share of the infrastructure total. These are the same figures the Costs and revenue section reports under Infrastructure.",
+          "tac": "Track access",
+          "stations": "Station charges",
+          "parking": "Parking",
+          "energy": "Energy",
+          "perTrainKm": "{value} per train-km",
+          "total": "Infrastructure"
+        },
+        "eurPerTrainKm": "€ / train-km",
+        "route": "Route",
+        "defaultTag": "default",
+        "defaultLegend": "marks a figure priced from the EU-average default because the country or stop has no value of its own.",
+        "crossingsRow": "Separately billed crossings"
+      },
+      "overhead": {
+        "ofTicketRevenue": "of ticket revenue",
+        "ofOperatorCost": "of operator cost",
+        "cateringOutside": "Catering ({value} per trip) is outside: it is a net figure, its own overhead already inside it.",
+        "marginNote": "Deducted in the net result — not a cost paid to anyone.",
+        "variable": {
+          "title": "Variable overhead",
+          "covers": "Covers sales, distribution and customer service.",
+          "info": "The operator's selling costs, charged as a share of ticket revenue rather than of the full cost — that is how the model defines them. Catering is outside the base: the contribution is already net of the restaurant's own sales, costs and overhead, so charging distribution overhead on it would count the same overhead twice.",
+          "strip": "Variable overhead, from one trip",
+          "caption": "a share of ticket revenue",
+          "outcome": "Variable overhead, per trip"
+        },
+        "fixed": {
+          "title": "Fixed overhead",
+          "covers": "Covers administration, management and planning.",
+          "info": "The operator's running of itself, charged as a share of its OTHER operating costs. Two things are outside that base on purpose: variable overhead, which is already an overhead, and the infrastructure charges, which are paid to somebody else and are not the operator's to administer.",
+          "strip": "Fixed overhead, from one trip",
+          "caption": "a share of the operator's other costs",
+          "outcome": "Fixed overhead, per trip"
+        },
+        "margin": {
+          "title": "Expected margin",
+          "info": "The operating profit the operator is expected to keep, as a share of ticket revenue. It is not a cost anybody receives — it is subtracted in the net result, which is why a route can need a subsidy while every bill is paid. Catering is outside this base too, for the same reason it is outside the overhead base.",
+          "strip": "Expected margin, from one trip",
+          "caption": "a share of ticket revenue",
+          "outcome": "Expected margin, per trip",
+          "covers": "The operating profit the operator is expected to keep. Not a cost paid to anyone."
+        },
+        "base": "Base",
+        "factor": "Factor",
+        "ticketBaseItems": "Base fare + additional services.",
+        "fixedBaseItems": "Staff, locomotive lease, coach maintenance, on-board service, coach amortisation, financing, cleaning, shunting. Not in it: variable overhead, and everything paid to infrastructure managers."
+      },
+      "demand": {
+        "title": "Demand",
+        "caption": "interim assumption, per year",
+        "info": "What the interim demand assumption produces. Passengers are the places actually sold — the figure the catering contribution multiplies — not the placeholder trip count the KPI grid shows. Ticket revenue and the catering contribution are listed separately because they are earned in different ways and one of them can be negative.",
+        "passengers": "Passengers",
+        "placeKmSold": "Place-km sold",
+        "utilisation": "Utilisation",
+        "ticketRevenue": "Ticket revenue",
+        "cateringContribution": "Catering contribution",
+        "totalRevenue": "Revenue and contribution",
+        "byClass": "Ticket revenue by class",
+        "restsOn": "What this rests on",
+        "restsOnInfo": "The demand side of the model is a stopgap. Every figure on this tab is replaced once a real demand model lands; nothing here is a prediction.",
+        "whenItLands": "When the demand model lands, this tab shows demand by connection, by class and by the mode each passenger shifted from — and the prices under Supply get elasticities.",
+        "pricesElsewhere": "Prices are set under Supply."
       }
     }
   },
@@ -446,7 +982,8 @@
   },
   "header": {
     "logoAlt": "Night Train Target Network",
-    "switchLanguageAria": "Switch language to {language}"
+    "switchLanguageAria": "Switch language to {language}",
+    "comingSoon": "Coming soon"
   },
   "auth": {
     "completed": "Evaluation completed",

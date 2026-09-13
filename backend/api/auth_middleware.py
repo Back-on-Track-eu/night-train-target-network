@@ -13,6 +13,10 @@ two auth planes meet and normalize:
                            invalid* token is still a 401, not ignored
   @require_trust(level)  — valid token AND g.trust_level >= level
 
+resolve_identity_quietly() is the non-decorator entry, for callers that
+only OBSERVE the caller (api/request_log.py) and must never change the
+outcome of a request.
+
 It also owns rate_limit_key(), the per-user bucket key the rate-limited
 endpoints pass to @limiter.limit — identity resolution is this module's
 job, and putting it here keeps api/limiter.py import-free (see its
@@ -142,6 +146,35 @@ def _load_identity_from_request() -> dict | None:
         "is_guest": is_guest,
         "trust_level": TRUST_GUEST if is_guest else TRUST_CONTRIBUTOR,
     }
+
+
+def resolve_identity_quietly() -> dict | None:
+    """Identity of the current request, or None — never raises, never
+    touches g.
+
+    For observers rather than gatekeepers: the usage log
+    (api/request_log.py) needs to know who is calling, on endpoints that
+    carry no auth decorator, without being able to affect what the caller
+    gets back. Everything the decorators treat as a 401 — a malformed
+    header, an expired token, an account that no longer exists — is
+    anonymous here. That asymmetry is the point, and it does not weaken
+    anything: the decorators still run their own resolution and still
+    reject exactly what they rejected before.
+
+    Callers that already have identity on g should read it from there
+    instead; this decodes the token afresh.
+    """
+    try:
+        return _load_identity_from_request()
+    except AuthError:
+        return None
+    except Exception:
+        # A database hiccup resolving the user row, most likely. DEBUG,
+        # not WARNING: this runs once per request, the caller is an
+        # observer, and whatever is actually broken will surface loudly
+        # somewhere that matters.
+        logger.debug("Quiet identity resolution failed.", exc_info=True)
+        return None
 
 
 def _set_g(identity: dict) -> None:

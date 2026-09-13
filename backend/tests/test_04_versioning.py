@@ -14,7 +14,7 @@ Fixture values relied on (see db/dev/seed.py):
     tariff (models/scenarios/README.md).
   - SE tac_eur_train_km is NULL at every version → resolves from the
     EU-average default row (is_default=True).
-  - osm:n25948183 stop_charge_eur is NULL → resolves from the global
+  - a stop with stop_charge_eur NULL → resolves from the global
     stop default; osm:n3856100103 has an explicit charge.
 """
 
@@ -55,7 +55,7 @@ class TestVersionIsolation:
         assert opt_de.buffer_quota_per < base_de.buffer_quota_per
 
     def test_db_has_all_de_versions(self, db_cur):
-        """All seven DE snapshot rows exist — confirms the fixture the two
+        """All nine DE snapshot rows exist — confirms the fixture the two
         tests above depend on is actually in place, and that the version
         grid was extended in every table rather than only in the scenario
         rows (db/dev/seed.py: INFRA_VERSIONS)."""
@@ -64,7 +64,7 @@ class TestVersionIsolation:
             WHERE country_code = 'DE' ORDER BY track_infra_version
             """)
         versions = [r["track_infra_version"] for r in db_cur.fetchall()]
-        assert versions == [1, 2, 3, 4, 5, 6, 7]
+        assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9]
 
     def test_full_table_snapshot_invariant(self, db_cur):
         """Every track_infrastructures version is a COMPLETE snapshot — the
@@ -195,10 +195,28 @@ class TestParamProvenance:
     def test_stop_null_charge_resolves_from_global_default(
         self, loader, db_cur, base_scenario
     ):
-        """osm:n25948183 stop_charge is NULL — is_default=True and the value
-        equals the global default row's charge."""
+        """A stop whose stop_charge_eur is NULL reports is_default=True and
+        the value equals the global default row's charge.
+
+        Looked up rather than pinned: which stops carry a charge follows the
+        charge calibration, and a sourced "not levied" is an explicit 0.00,
+        not a NULL — Stockholm Central, once the pinned NULL here, became one
+        when Trafikverket's network statement was transcribed."""
+        db_cur.execute(
+            "SELECT stop_id FROM input_params.stop_infrastructures "
+            "WHERE stop_charge_eur IS NULL AND stop_infra_version = %s LIMIT 1",
+            (base_scenario["stop_infrastructures_version"],),
+        )
+        row = db_cur.fetchone()
+        if row is None:
+            pytest.skip(
+                "every stop carries its own station charge — no default to test"
+            )
+
         stops = loader.build_all_stops()
-        se_charge = stops.param_versions.get("stop_infra:osm:n25948183:stop_charge_eur")
+        se_charge = stops.param_versions.get(
+            f"stop_infra:{row['stop_id']}:stop_charge_eur"
+        )
         assert se_charge is not None
         assert se_charge.is_default is True
 

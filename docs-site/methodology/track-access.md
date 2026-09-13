@@ -72,7 +72,7 @@ pinned exchange-rate snapshot, then escalation to the 2032 evaluation year at
 
 New network statements, mostly. Tariffs are revised annually and this
 calibration is a snapshot, so a figure that is right today will drift. Every
-model version is dated, and the [changelog](/reference/changelog) records
-when values moved.
+model version is dated, and a change to any of these values bumps that
+version.
 
 <FeedbackForm />

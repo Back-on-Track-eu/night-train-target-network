@@ -1,6 +1,6 @@
 [project]
 name = "night-train-target-network"
-version = "0.3.0"
+version = "0.5.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -52,6 +52,22 @@ dev = [
 [tool.ruff]
 line-length = 88
 target-version = "py312"
+
+# Rule set is ruff's default (E4, E7, E9, F) — this section exists to record
+# the two exemptions below, not to widen the net. `ruff check backend/` is a
+# CI job, so it stays at zero findings; anything genuinely intended gets an
+# entry here rather than accumulating as noise a reader learns to scroll past.
+[tool.ruff.lint.per-file-ignores]
+# Calibration and exploration notebooks are research artefacts, not modules:
+# cells run out of order, imports sit where the narrative needs them, and a
+# name bound in an earlier session reads as undefined to a static checker.
+# They are still formatted — only these five rules are meaningless there.
+"**/*.ipynb" = ["E402", "F401", "F811", "F821", "F841"]
+# Import order is load-bearing here: load_dotenv() must run before the
+# modules that read the environment at import time, and sys.path.insert()
+# before the package import it enables. Five noqa comments saying the same
+# thing is worse than saying it once.
+"db/dev/seed.py" = ["E402"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

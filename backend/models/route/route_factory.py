@@ -8,19 +8,18 @@ Pipeline for plan_route() per TripPair (_build_trip_pair()), per direction (_bui
 1. Load composition + ParamVersions from DB.
 2. Load tracks + stops + ParamVersions from DB.
 3. RailRouter.route() — routes the stop list as given.
-4. auto_stop_addition switch (this module, _build_trip()) — three modes
+4. auto_stop_addition switch (this module, _build_trip()) — two modes
    (VALID_AUTO_STOP_ADDITION_MODES in models/route/timetable.py):
      "off"     — step skipped entirely, caller's stop list unmodified.
-     "add"     — apply_auto_stop_addition() looks for catalog stops close
-                 to the routed path and greedily adds any that fit within
-                 the detour time budget, re-routing internally as needed.
      "suggest" — routes like "off" (nothing added, nothing rerouted), but
-                 suggest_auto_stops() runs the same candidate search +
-                 costing and its AutoStopSuggestions are bubbled up
-                 through plan_route()'s return value for the API to
-                 attach to the response.
-   Either way the routed_legs used from here on match the (possibly
-   extended) stop list, so no separate re-route call is ever needed here.
+                 suggest_auto_stops() runs the candidate search + costing
+                 and its AutoStopSuggestions are bubbled up through
+                 plan_route()'s return value for the API to attach to the
+                 response.
+   Neither mode changes the stop list, so routed_legs always match the
+   caller's stops and no separate re-route call is ever needed here.
+   ("add", which let the builder add stops itself, was removed in 0.9.34 —
+   see VALID_AUTO_STOP_ADDITION_MODES.)
    The full search-and-cost pass only ever runs for the OUTBOUND direction —
    _build_trip_pair() reuses its result (reversed) for return via
    _build_trip()'s known_auto_added_stop_ids, rather than re-running the
@@ -33,10 +32,22 @@ Pipeline for plan_route() per TripPair (_build_trip_pair()), per direction (_bui
    actually pass through must have a row in input_params.track_infrastructures
    (any field may be None and fall back to the EU-average default), or this
    raises ValueError. See that function's docstring.
+5b. Expert add-ons (this module, _build_trip()) — timetable.resolve_addons()
+   turns the request's manual per-leg minutes into one value per leg of the
+   stop list. An add-on whose ordered stop pair does not exist is dropped,
+   never redistributed — a possibility since 0.9.34 only when the caller
+   posts one, nothing in the pipeline reorders stops any more.
 6. timetable_mode switch (this module, _build_trip()) — picks which named
    timetable_mode function (models/route/timetable.py) to call for this
    direction's departure time + boarding/alighting classification. Does no
-   routing of its own.
+   routing of its own. The add-ons from 5b go in, so the mirror (and the
+   fixed-night stretch) is taken around the padded duration.
+6b. Expert departure (this module, _build_trip()) — timetable.
+   resolve_departure() replaces ("absolute") or displaces ("shift") the
+   departure the strategy chose, and timetable.classify_for_departure()
+   re-runs the boarding/night/alighting split against it. Skipped when
+   nothing was overridden, which is every request without an
+   expert_timetable key.
 7. calc_energy_consumption() enriches RoutedLeg.energy_kwh in-place.
 8. _build_trip_stops_and_legs() (DB lookups + assembly) delegates exact
    timing to timetable.build_final_timetable(), pairs the result with
@@ -72,7 +83,7 @@ ID convention
   models/route/version.py. Not started here.
 
   proposal_id/version are always concrete ints by the time they reach here
-  — ephemeral compute (POST /api/proposal/calc) passes the fixed neutral
+  — ephemeral compute (a family member) passes the fixed neutral
   placeholders NEUTRAL_PROPOSAL_ID/VERSION (models/route/version.py, both
   0) and publish later rewrites the resulting bare structural ids up to
   the real P{proposal_id}_V{version}_ prefix (adapters/proposal/
@@ -108,16 +119,23 @@ from models.route.timetable import (
     simple_automatic_fixed_night_timetable,
     fixed_night_speed_warning,
     always_daily_schedule,
-    apply_auto_stop_addition,
+    custom_schedule,
     suggest_auto_stops,
     build_final_timetable,
+    classify_for_departure,
+    mirror_overrides,
+    resolve_addons,
+    resolve_departure,
     AutoStopSuggestion,
+    DirectionOverrides,
+    ExpertTimetable,
+    NO_OVERRIDES,
     VALID_TIMETABLE_MODES,
     VALID_SCHEDULE_MODES,
     VALID_AUTO_STOP_ADDITION_MODES,
 )
 from models.energy.calc_energy_consumption import calc_energy_consumption
-from models.route.model import ROUTE_BUILDER_VERSION
+from models.route.model import DEFAULT_MIN_TURNAROUND_MIN, ROUTE_BUILDER_VERSION
 from models.energy.model import ENERGY_CALC_VERSION
 
 logger = logging.getLogger(__name__)
@@ -168,7 +186,7 @@ class TripPairInput:
     pairs share one schedule, passed to plan_route() directly.
 
     No field here has a default — mode/flag defaulting is an API-boundary
-    concern (see api/helpers/proposal_compute.py), not something route_factory.py or its
+    concern (see api/helpers/member_compute.py), not something route_factory.py or its
     callers should need to know about. Every field must be explicitly
     supplied by the caller."""
 
@@ -182,6 +200,11 @@ class TripPairInput:
     # order — required for timetable_mode="simpleAutomaticWithFixedNight",
     # None for every other mode (enforced at the API boundary); reversed
     # automatically for the return trip by _build_trip_pair()
+    expert_timetable: ExpertTimetable | None  # manual departure + per-leg
+    # minutes, applied on top of whichever timetable_mode runs (see
+    # timetable.py's EXPERT TIMETABLE OVERRIDES section). None means the
+    # timetable is fully automatic — the case for every request that
+    # doesn't send the key, whose output is unchanged by its existence.
 
 
 # =============================================================================
@@ -214,6 +237,7 @@ def _build_trip_stops_and_legs(
     departure_time_min: int,
     auto_added_stop_ids: frozenset[str] = frozenset(),
     slack_per_leg: list[int] | None = None,
+    addon_per_leg: list[int] | None = None,
 ) -> list[Segment]:
     """
     DB lookups + object assembly only — no timing math here, that's
@@ -223,18 +247,27 @@ def _build_trip_stops_and_legs(
     stops into Segments — each Stop is shared by reference between the two
     segments touching it.
 
-    auto_added_stop_ids: stop_ids that auto_stop_addition inserted beyond
-    what the caller originally supplied — stamped onto the matching Stop's
-    auto_added field. Empty by default.
+    auto_added_stop_ids: stop_ids the builder inserted beyond what the
+    caller supplied — stamped onto the matching Stop's auto_added field.
+    Always empty since 0.9.34 removed mode "add"; the field and this
+    parameter stay because proposals.stop_times.auto_added persists it and
+    a stored route must still round-trip.
 
     slack_per_leg: fixed-night stretch minutes per leg (see
     simple_automatic_fixed_night_timetable) — stamped onto each Segment's
     slack_time_min and fed into build_final_timetable() so stop times and
     segment components stay consistent with each other. None (every other
     timetable_mode) means 0 everywhere.
+
+    addon_per_leg: expert-mode manual minutes per leg (resolve_addons()) —
+    same treatment, onto Segment.addon_time_min. Two arguments rather than
+    one sum because the segment reports the two separately: whose minutes
+    these are is exactly what a reader of the timetable wants to know.
     """
     if slack_per_leg is None:
         slack_per_leg = [0] * len(routed_legs)
+    if addon_per_leg is None:
+        addon_per_leg = [0] * len(routed_legs)
     stop_physicals = []
     for stop_id, _ in stop_inputs:
         sp = stop_infra.get(stop_id)
@@ -251,6 +284,7 @@ def _build_trip_stops_and_legs(
         tracks=tracks,
         departure_time_min=departure_time_min,
         slack_per_leg=slack_per_leg,
+        addon_per_leg=addon_per_leg,
     )
 
     stops = [
@@ -283,6 +317,7 @@ def _build_trip_stops_and_legs(
             country_distance_shares=routed_legs[i].country_distance_shares,
             country_time_shares=routed_legs[i].country_time_shares,
             slack_time_min=slack_per_leg[i],
+            addon_time_min=addon_per_leg[i],
             countries=routed_legs[i].countries,
             passages=routed_legs[i].passages,
         )
@@ -446,6 +481,7 @@ def _build_trip(
     routing_mode: str,
     auto_stop_addition: str,
     fixed_night_interval: list[str] | None,
+    expert: DirectionOverrides = NO_OVERRIDES,
     known_auto_added_stop_ids: frozenset[str] | None = None,
 ) -> tuple[Trip, list[AutoStopSuggestion]]:
     """
@@ -458,16 +494,19 @@ def _build_trip(
     trip) — consumed only by timetable_mode="simpleAutomaticWithFixedNight",
     None for every other mode.
 
+    expert: THIS direction's manual overrides (the caller mirrors the pair
+    input's outbound block for the return trip) — NO_OVERRIDES for a fully
+    automatic timetable, which is what every request without an
+    expert_timetable key gets.
+
     known_auto_added_stop_ids: when given, skips the candidate search
-    entirely regardless of auto_stop_addition — stop_ids is trusted as
-    already final (the search decision was already made elsewhere, e.g. by
-    the outbound direction of this same TripPair; see _build_trip_pair()),
-    and this set is used as-is to mark which of those stops get
-    Stop.auto_added=True. The routing call below still always happens for
-    whichever direction this is — reusing a decision about WHICH stops to
-    add never skips getting THIS direction's own real physics for its own
-    (possibly asymmetric) path, only the expensive candidate-search-and-
-    cost pass that decided the stop list in the first place.
+    entirely regardless of auto_stop_addition — the search already ran for
+    this TripPair, on the outbound direction (see _build_trip_pair()), and
+    re-running it for the return would spend the same router calls on the
+    same corridor reversed. The set itself is empty since 0.9.34; what the
+    parameter still carries is the DECISION not to search again. The
+    routing call below always happens either way, so this direction keeps
+    its own (possibly asymmetric) physics.
     """
     tid = _trip_id(proposal_id, proposal_version, direction, pair_index)
 
@@ -489,11 +528,9 @@ def _build_trip(
         routing_mode=routing_mode,
     )
 
-    # auto_stop_addition SWITCH — which (if any) auto-stop behaviour runs.
-    # The timetable.py functions themselves have no mode gate; "add" always
-    # returns routed_legs matching whatever stop_ids it hands back
-    # (unchanged for "off"/"suggest"), so no separate re-route is ever
-    # needed after this block regardless of which branch ran.
+    # auto_stop_addition SWITCH — whether the candidate search runs.
+    # Neither mode changes stop_ids since 0.9.34, so routed_legs above
+    # stay authoritative and no re-route is ever needed after this block.
     # VALID_AUTO_STOP_ADDITION_MODES is the same set the compute request
     # validation checks against, so an unknown mode can only reach here if
     # that validation was bypassed.
@@ -502,18 +539,6 @@ def _build_trip(
         auto_added_stop_ids = known_auto_added_stop_ids
     elif auto_stop_addition == "off":
         auto_added_stop_ids = frozenset()
-    elif auto_stop_addition == "add":
-        original_stop_ids = stop_ids
-        stop_ids, routed_legs = apply_auto_stop_addition(
-            stop_ids,
-            routed_legs,
-            composition=composition,
-            tracks=tracks,
-            stop_infra=stop_infra,
-            router=router,
-            routing_mode=routing_mode,
-        )
-        auto_added_stop_ids = frozenset(stop_ids) - frozenset(original_stop_ids)
     elif auto_stop_addition == "suggest":
         suggestions = suggest_auto_stops(
             stop_ids,
@@ -533,16 +558,34 @@ def _build_trip(
 
     _check_country_coverage(routed_legs, tracks)
 
+    # EXPERT ADD-ONS — manual minutes placed on the stop list. An add-on
+    # whose ordered stop pair is not adjacent is dropped here rather than
+    # silently landing on the wrong leg; since 0.9.34 nothing in the
+    # pipeline can orphan one, so that only happens when the caller posts
+    # a pair its own stop list does not contain. Zeros (and nothing
+    # dropped) for every request without an expert_timetable.
+    addon_per_leg, dropped_addons = resolve_addons(stop_ids, expert.addons)
+    if dropped_addons:
+        logger.info(
+            "_build_trip: %d expert add-on(s) dropped — stop pair no longer "
+            "adjacent after routing: %s",
+            len(dropped_addons),
+            [(a.from_stop_id, a.to_stop_id, a.add_min) for a in dropped_addons],
+        )
+
     # timetable_mode SWITCH — which named strategy computes departure time
     # + stop classification for this direction. VALID_TIMETABLE_MODES is the
-    # same set the compute request validation (api/helpers/proposal_compute.py) checks against, so an unknown
+    # same set the compute request validation (api/helpers/member_compute.py) checks against, so an unknown
     # mode can only reach here if that validation was bypassed. Only the
     # fixed-night strategy produces slack; every other mode gets zeros.
+    # Both are handed addon_per_leg: manual minutes are part of the trip's
+    # duration, so the mirror (and the fixed-night stretch) has to see them.
     if timetable_mode == "simpleAutomatic":
         stop_inputs, departure_time_min = simple_automatic_timetable(
             stop_ids=stop_ids,
             composition=composition,
             routed_legs=routed_legs,
+            addon_per_leg=addon_per_leg,
         )
         slack_per_leg = [0] * len(routed_legs)
     elif timetable_mode == "simpleAutomaticWithFixedNight":
@@ -552,11 +595,27 @@ def _build_trip(
                 composition=composition,
                 routed_legs=routed_legs,
                 fixed_night_interval=fixed_night_interval,
+                addon_per_leg=addon_per_leg,
             )
         )
     else:
         raise ValueError(
             f"Unknown timetable_mode '{timetable_mode}'. Supported: {sorted(VALID_TIMETABLE_MODES)}."
+        )
+
+    # EXPERT DEPARTURE — the strategy's value replaced or displaced, and
+    # the stops re-classified against the time they now actually depart:
+    # a trip shifted two hours later has different boarding/night stops,
+    # and therefore different dwell. Skipped entirely when nothing was
+    # overridden, so the automatic path stays byte-identical.
+    if expert.departure is not None:
+        departure_time_min = resolve_departure(departure_time_min, expert.departure)
+        stop_inputs = classify_for_departure(
+            stop_ids=stop_ids,
+            routed_legs=routed_legs,
+            composition=composition,
+            departure_time_min=departure_time_min,
+            extra_per_leg=[s + a for s, a in zip(slack_per_leg, addon_per_leg)],
         )
 
     calc_energy_consumption(routed_legs, composition)
@@ -570,6 +629,7 @@ def _build_trip(
         departure_time_min=departure_time_min,
         auto_added_stop_ids=auto_added_stop_ids,
         slack_per_leg=slack_per_leg,
+        addon_per_leg=addon_per_leg,
     )
 
     # Post-build timetable quality check — fixed-night only: did covering
@@ -653,22 +713,16 @@ def _build_trip_pair(
     # deviate rather than being forced to share one value.
     #
     # auto_stop_addition is the one exception: its candidate search + per-
-    # candidate costing (modes "add"/"suggest") is decided ONCE, from
-    # outbound, not re-run independently for return. The costing means one
-    # real RailRouter.route() call per nearby candidate — for a long
-    # corridor with many candidates nearby, that's the dominant cost of
-    # planning a route (measured: ~14s per direction on a Stockholm-Roma
-    # request with 9 candidates found, against <1s for routing itself),
-    # and outbound/return cover the same physical corridor reversed, so
-    # running that full search twice is mostly redundant work for the same
-    # answer. Accepted trade-off: return no longer gets its own independent
-    # detour-budget check against its own baseline trip time, only
-    # outbound's — see OPEN_TODOS["return_detour_budget"] in version.py and
-    # _build_trip()'s known_auto_added_stop_ids docstring. Return still
-    # gets a real routing call for its own (possibly asymmetric) physical
-    # path over the shared final stop list; only the search-and-cost pass
-    # that decided which stops to add (or which to suggest) is shared, not
-    # the routing itself.
+    # candidate costing (mode "suggest") runs ONCE, on outbound, and is
+    # not repeated for return. The costing means one real
+    # RailRouter.route() call per nearby candidate — for a long corridor
+    # with many candidates nearby, that's the dominant cost of planning a
+    # route (measured: ~14s per direction on a Stockholm-Roma request with
+    # 9 candidates found, against <1s for routing itself) — and both
+    # directions cover the same physical corridor reversed, so the second
+    # pass would buy a near-identical answer. Return still gets a real
+    # routing call for its own (possibly asymmetric) physical path over
+    # the shared stop list; only the search is shared, not the routing.
     outbound, suggestions = _build_trip(
         proposal_id,
         proposal_version,
@@ -683,6 +737,11 @@ def _build_trip_pair(
         routing_mode=pair_input.routing_mode,
         auto_stop_addition=pair_input.auto_stop_addition,
         fixed_night_interval=pair_input.fixed_night_interval,
+        expert=(
+            pair_input.expert_timetable.outbound
+            if pair_input.expert_timetable is not None
+            else NO_OVERRIDES
+        ),
     )
 
     final_outbound_stop_ids = [s.stop_id for s in outbound.stops]
@@ -697,6 +756,21 @@ def _build_trip_pair(
         if pair_input.fixed_night_interval is not None
         else None
     )
+
+    # Expert overrides follow the same rule as the interval above, with one
+    # extra step: an omitted return block means "mirror outbound", so its
+    # add-ons are reversed onto the return's own stop pairs
+    # (mirror_overrides()). An explicit return block wins as given —
+    # that is how an asymmetric timetable is expressed. The departure is
+    # never mirrored; see mirror_overrides()'s docstring.
+    expert = pair_input.expert_timetable
+    if expert is None:
+        return_expert = NO_OVERRIDES
+    elif expert.return_trip is not None:
+        return_expert = expert.return_trip
+    else:
+        return_expert = mirror_overrides(expert.outbound)
+
     return_trip, _ = _build_trip(
         proposal_id,
         proposal_version,
@@ -711,6 +785,7 @@ def _build_trip_pair(
         routing_mode=pair_input.routing_mode,
         auto_stop_addition=pair_input.auto_stop_addition,
         fixed_night_interval=return_fixed_night_interval,
+        expert=return_expert,
         known_auto_added_stop_ids=auto_added_stop_ids,
     )
 
@@ -736,6 +811,8 @@ def plan_route(
     proposal_id: int,
     proposal_version: int,
     scenario_id: int,
+    schedule: dict | None = None,
+    min_turnaround_min: int = DEFAULT_MIN_TURNAROUND_MIN,
 ) -> tuple[Route, RouteProvenance, list[AutoStopSuggestion]]:
     """
     Build a Route from scratch. One TripPair per entry in trip_pair_inputs
@@ -760,7 +837,8 @@ def plan_route(
     schedule_mode: this function's switch — which named schedule_mode
     function (models/route/timetable.py) to call. Decided once here, at
     route level, since Schedule is shared across every TripPair rather
-    than being a per-trip concern (currently only "alwaysDaily").
+    than being a per-trip concern. "custom" takes the days-per-week-by-
+    month block from the request; both modes take min_turnaround_min.
 
     scenario_id: stored as-is in RouteProvenance so the Route stays
     reproducible even if the live base scenario later moves on.
@@ -770,7 +848,11 @@ def plan_route(
     # validation checks against, so an unknown mode can only reach here if
     # that validation was bypassed.
     if schedule_mode == "alwaysDaily":
-        schedule = always_daily_schedule()
+        schedule = always_daily_schedule(min_turnaround_min)
+    elif schedule_mode == "custom":
+        if schedule is None:
+            raise ValueError("schedule_mode 'custom' needs a schedule block.")
+        schedule = custom_schedule(schedule, min_turnaround_min)
     else:
         raise ValueError(
             f"Unknown schedule_mode '{schedule_mode}'. Supported: {sorted(VALID_SCHEDULE_MODES)}."

@@ -409,7 +409,11 @@ CALC_TREE: list[tuple[str, str, list]] = [
     (
         "total_revenue_eur",
         "Total revenue",
-        [("ticket_revenue_eur", "Ticket revenue", [])],
+        [
+            ("ticket_revenue_eur", "Base fare revenue", []),
+            ("services_revenue_eur", "Additional services", []),
+            ("catering_contribution_eur", "Catering contribution", []),
+        ],
     ),
     ("ebit_margin_eur", "Profit requirement (margin)", []),
     ("net_eur", "Net result", []),

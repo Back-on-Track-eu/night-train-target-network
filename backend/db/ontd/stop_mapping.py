@@ -54,14 +54,20 @@ Public interface:
                                                 writes mappings through
                                                 `cur`, commit is the
                                                 caller's)
+  catalog_gauges(cur)       → dict[str, list[int] | None]
+                                               (tn_stop_id → gauges_mm of
+                                                the pinned snapshot, for
+                                                the projection's routing
+                                                pass)
   mint_tn_stop_id(country_code, stop_name) → str  (id convention — used
                                                 by the seed-CSV exporter,
                                                 scripts/
                                                 export_ontd_stop_seed.py)
   transliterate(name) → str
 
-Callers: db/ontd/projection.py's build_summaries() (before writing
-route_summaries/route_corridors, so their stop ids come out translated).
+Callers: db/ontd/projection.py's build_summaries() — before routing, so
+each ONTD stop routes on its catalog stop's gauge, and before writing
+route_summaries/route_corridors, so their stop ids come out translated.
 
 OPERATIONAL NOTE: the ontd schema is bootstrap-guarded, so a reseed with a
 changed stop catalog does NOT re-run this module by itself — mappings and
@@ -313,11 +319,23 @@ def _pinned_catalog(cur) -> list[dict[str, Any]]:
     )
     pinned_version = cur.fetchone()["stop_infrastructures_version"]
     cur.execute(
-        "SELECT stop_id, stop_name, stop_lat, stop_lon "
+        "SELECT stop_id, stop_name, stop_lat, stop_lon, gauges_mm "
         "FROM input_params.stop_infrastructures WHERE stop_infra_version = %s",
         (pinned_version,),
     )
     return [dict(row) for row in cur.fetchall()]
+
+
+def catalog_gauges(cur) -> dict[str, Optional[list[int]]]:
+    """tn_stop_id → gauges_mm of the pinned catalog snapshot (None where
+    the catalog itself does not know — hand-correction queue).
+
+    For the projection's routing pass: ONTD stops carry no gauge, so once
+    an ONTD stop is mapped to a catalog stop its gauge comes from here.
+    Without it every existing train resolves to the standard-gauge profile
+    (gauge.py's all-unknown rule) and broad-gauge lines — Finland,
+    Ukraine, the Baltics — fail to snap."""
+    return {row["stop_id"]: row["gauges_mm"] for row in _pinned_catalog(cur)}
 
 
 def _known_countries(cur) -> set[str]:

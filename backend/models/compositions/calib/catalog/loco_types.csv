@@ -1,0 +1,3 @@
+loco_type_id,description,traction,weight_t,max_speed_kmh
+VECTRON-MS-200,"Siemens Vectron MS, standard 200 km/h configuration. The baseline multi-system machine assumed for refurbished-fleet operation. TO_VERIFY: no specific national Baureihe is pinned by this calibration — the rate derivation is Vectron-class generic (ELL fleet, S29).",electric multi-system,90,200
+VECTRON-MS-230,"Siemens Vectron MS in the 230 km/h configuration, CD class 384 — an adjusted gear ratio over the 200 km/h machine (see the speed-class differentiation step of the loco lease derivation). Assumed for new-fleet operation.",electric multi-system,90,230
