@@ -466,6 +466,17 @@ def _trip_infrastructure(
             "country_code": c.country_code,
             "category": stop.stop_charge_class if stop else None,
             "eur": round(c.station_charge_eur, 2),
+            # Where the tariff is mass-based (Czechia) the figure is rate ×
+            # coach mass, and a reader can only check it with both beside
+            # it. null for a per-call tariff.
+            "per_tonne": (
+                {
+                    "eur_per_t": round(c.station_charge_per_tonne_eur, 6),
+                    "train_mass_t": round(c.train_mass_t, 1),
+                }
+                if c.station_charge_per_tonne_eur
+                else None
+            ),
         }
         if stop_infra is not None:
             pv = stop_infra.param_versions.get(
