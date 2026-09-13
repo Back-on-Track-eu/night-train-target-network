@@ -314,6 +314,34 @@ def test_stop_enrichment_seeded(db_cur):
     )
 
 
+def test_stop_charge_per_tonne_is_a_rate_beside_an_explicit_zero(db_cur):
+    """A mass-based tariff (Czechia, CALC 0.9.32) seeds as a per-tonne rate
+    with an explicit 0.00 fixed part — never a NULL fixed part, which would
+    resolve to the default on top of the rate — and carries the same
+    provenance as a per-call charge."""
+    db_cur.execute("""
+        SELECT stop_id, stop_charge_eur, stop_charge_per_tonne_eur,
+               stop_charge_basis, stop_charge_source
+        FROM input_params.stop_infrastructures
+        WHERE stop_charge_per_tonne_eur IS NOT NULL AND stop_infra_version = 1
+        """)
+    rows = db_cur.fetchall()
+    if not rows:
+        pytest.skip("no stop is priced per tonne — CZ not joined into the catalog yet")
+    for row in rows:
+        assert row["stop_charge_per_tonne_eur"] > 0, row["stop_id"]
+        assert row["stop_charge_eur"] == 0, row["stop_id"]
+        assert row["stop_charge_basis"] == "per_call_per_tonne", row["stop_id"]
+        assert row["stop_charge_source"], row["stop_id"]
+
+    db_cur.execute("""
+        SELECT COUNT(*) AS n FROM input_params.stop_infrastructures
+        WHERE stop_charge_basis = 'per_call_per_tonne'
+          AND stop_charge_per_tonne_eur IS NULL AND stop_infra_version = 1
+        """)
+    assert db_cur.fetchone()["n"] == 0, "a per-tonne basis with no rate"
+
+
 def test_stop_charge_carries_its_price_year(db_cur):
     """A charge without its price year cannot be inflated to the 2032
     target year like every other calibration in the project.

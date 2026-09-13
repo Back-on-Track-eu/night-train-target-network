@@ -1493,8 +1493,9 @@ class StopInfrastructure:
 
     stop_charge_eur IS exposed in the /api/params/StopInfrastructures
     response (see api/params.py get_stop_infrastructures()), alongside
-    its full provenance. It's also used internally by
-    models/evaluation/calc.py.
+    its full provenance and the optional per-tonne part. Both are used
+    internally by models/evaluation/calc.py, which adds
+    stop_charge_per_tonne_eur × the composition's coach mass per call.
 
     No _src fields here: source and version provenance for every field
     (lat, lon, stop_charge_eur — including which one, if any, was
@@ -1510,6 +1511,13 @@ class StopInfrastructure:
     lon: float
 
     stop_charge_eur: float
+
+    # Mass-based part of the charge, €/stop/t of coach mass
+    # (Composition.total_weight_t — the Czech "mpk"). None everywhere a stop
+    # is priced per call only; no default resolution, None means zero. The
+    # per-call figure above is the fixed part: a Czech stop carries an
+    # explicit 0.00 there beside its rate.
+    stop_charge_per_tonne_eur: float | None = None
 
     # The charge's provenance, carried beside the figure: which document it
     # came from, what it is per, and the VAT it excludes. A published number

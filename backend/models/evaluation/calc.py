@@ -97,7 +97,9 @@ class StopCost:
     trip_id: str  # which trip made this stop call
     stop_id: str
     country_code: str  # from Stop.country_code — ISO 3166-1 alpha-2
-    station_charge_eur: float  # €/trip
+    station_charge_eur: float  # €/trip — fixed part + per-tonne part × mass
+    station_charge_per_tonne_eur: float  # €/t — the rate; 0.0 where per-call only
+    train_mass_t: float  # t — composition coach mass the rate was applied to
     dwell_driver_hours: float  # person-hours/trip — dwell_h × composition.driver_factor
     dwell_crew_hours: float  # person-hours/trip — dwell_h × composition.total_crew
     dwell_driver_eur: float  # €/trip
@@ -467,7 +469,14 @@ def _calc_stop_cost(
     crew_rate_eur_h: float,
 ) -> StopCost:
     sp = stop_infra.get(stop.stop_id)
-    station_charge_eur = sp.stop_charge_eur if sp else 0.0
+    # Fixed part per call, plus a mass-based part where the tariff has one
+    # (Czechia: per tonne of coach mass — Composition.total_weight_t is the
+    # mass without non-carrying traction that the tariff means).
+    per_tonne_eur = (sp.stop_charge_per_tonne_eur or 0.0) if sp else 0.0
+    train_mass_t = composition.total_weight_t
+    station_charge_eur = (
+        sp.stop_charge_eur if sp else 0.0
+    ) + per_tonne_eur * train_mass_t
     country_code = stop.country_code
     dwell_h = stop.dwell_time_min / 60.0 if stop.dwell_time_min is not None else 0.0
     dwell_driver_hours = dwell_h * composition.driver_factor
@@ -479,6 +488,8 @@ def _calc_stop_cost(
         stop_id=stop.stop_id,
         country_code=country_code,
         station_charge_eur=station_charge_eur,
+        station_charge_per_tonne_eur=per_tonne_eur,
+        train_mass_t=train_mass_t,
         dwell_driver_hours=dwell_driver_hours,
         dwell_crew_hours=dwell_crew_hours,
         dwell_driver_eur=dwell_driver_eur,

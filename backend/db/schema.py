@@ -1421,6 +1421,16 @@ INPUT_PARAMS_TABLES: tuple[Table, ...] = (
                 "global default applies.",
                 "€/stop",
             ),
+            Column(
+                "stop_charge_per_tonne_eur",
+                "NUMERIC(10,6)",
+                "Mass-based part of the station fee, per tonne of train mass "
+                "excluding non-carrying traction (CompositionType."
+                "total_weight_t). Added to stop_charge_eur per call; empty = "
+                "none. Czechia prices stops this way (Správa železnic, "
+                "Annex C II.5).",
+                "€/stop/t",
+            ),
             _src("stop_charge_src", "the station fee"),
             Column(
                 "stop_charge_vat_rate_per",

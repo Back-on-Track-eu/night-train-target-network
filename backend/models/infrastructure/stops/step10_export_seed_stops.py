@@ -130,6 +130,7 @@ SEED_COLUMNS = [
     "stop_lat",
     "stop_lon",
     "stop_charge_eur",
+    "stop_charge_per_tonne_eur",
 ]
 
 # What the catalog keeps about a charge beyond the figure itself: the same
@@ -484,6 +485,12 @@ def main() -> None:
             "stop_lon": f"{lon:.7f}",
             "stop_charge_eur": (
                 "" if stop_id not in charges else f"{charges[stop_id]['value']:.2f}"
+            ),
+            # Mass-based part (Czechia): the rate as 02 wrote it, empty for a
+            # per-call tariff. seed.py multiplies nothing — the cost model does.
+            "stop_charge_per_tonne_eur": (
+                charges.get(stop_id, {}).get("row", {}).get("stop_charge_per_tonne_eur")
+                or ""
             ),
             "provenance": provenance_label(source, reason),
             "infra_versions": infra_versions,

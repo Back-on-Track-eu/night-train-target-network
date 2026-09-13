@@ -1309,6 +1309,50 @@ family already produces what the warm one will.
 
 ---
 
+## 17. Stop catalog 1,214 and sourced station charges (2026-09-13)
+
+**Data, not code — but it changes every cost result.** The stop catalog
+on Drive (`STOP_SEED_FILE_ID`, same id, new version) has 1,214 stops (38
+new from the expert review) and station charges sourced for 20 countries:
+961 stops carry a figure, 222 of them a sourced 0.00 (BG, DK, SE, UA —
+the network statement levies nothing), 233 stay on the 11.28 EUR default.
+No schema or version change in this batch; the next section has both.
+
+**A reseed is required on staging** — `seed.py` downloads the catalog at
+container start, so a restart with `down -v` is the whole deploy, and `-v`
+also clears `family.members` / `family.documents`, which it must: every
+cached document was priced on the old catalog.
+
+**Expect proposals to move, France most of all.** Paris termini went from
+the default to 586.35 EUR per departing train (Gares & Connexions DRG
+2024); a Berlin–Paris proposal's station line roughly triples. Anyone
+comparing a stored summary against a recompute will see that and should
+know why. `CHARGES_DRIVE_FOLDER_ID` appears in `.env.example`; the servers
+never need it — it feeds the charge notebooks only.
+
+Stops applying once staging has been reseeded on a catalog dated
+2026-09-13 or later.
+
+---
+
+## 18. Mass-based station charges — CALC 0.9.32, migration 2026-09-14
+
+**Migration `2026-09-14_stop_charge_per_tonne.sql`** adds one nullable
+column to `input_params.stop_infrastructures`. Additive, idempotent,
+milliseconds. Deploy order: migration, then api, then the catalog reseed
+(the new catalog has 37 columns; a 36-column contract would soft-fail the
+seed to the curated stub and every route would report unmatched stops).
+
+**Why:** Czechia prices a stop per tonne of train mass; the cost model now
+adds `rate × composition coach mass` per call. Only routes calling in
+Czechia change — Praha hl.n. from 11.28 EUR to about 1.3 EUR for a 400 t
+train. `FAMILY_DOCUMENT_FORMAT` is 6, so no cached document survives.
+
+Stops applying once staging carries the migration and a catalog dated
+2026-09-14 or later.
+
+---
+
 ## Maintaining this document
 
 One file, updated in the same PR as the change it describes. The rule that

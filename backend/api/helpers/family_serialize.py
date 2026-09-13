@@ -68,7 +68,10 @@ _NEUTRAL_PREFIX = f"P{NEUTRAL_PROPOSAL_ID}_V{NEUTRAL_PROPOSAL_VERSION}_"
 #      document, so its shape has to invalidate the cache
 #   5  the summary row gains services_revenue_eur and the tariff becomes
 #      three parts per class (CALC 0.9.30)
-FAMILY_DOCUMENT_FORMAT = 5
+#   6  operations station calls gain per_tonne (rate and train mass) and
+#      Czech stops are priced per tonne (CALC 0.9.32) — the figures change,
+#      not only the shape
+FAMILY_DOCUMENT_FORMAT = 6
 
 
 def route_ref(scenario_id: int, composition_id: str) -> str:

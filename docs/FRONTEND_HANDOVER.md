@@ -919,6 +919,53 @@ entries listed in §5 of that addendum.
 
 ---
 
+## 19. 38 new stops, sourced station charges, and "no charge" ≠ "default" (2026-09-13)
+
+Data only on `backend-dev`, no shape change — but two things the picker
+and the charges panel should know:
+
+* **38 new stops** appear in `/api/params/StopInfrastructures` with the
+  usual `provenance` labels (Balaton and Alpine tourism, Greek and Balkan
+  corridors, ferry and border stations, Stratford and Ebbsfleet). Three
+  stops carry `infra_versions: "infra-2032"` only (Ülemiste, Shkodër,
+  Stuttgart Flughafen/Messe) and still seed into every snapshot, because
+  the seed does not consume that column yet — a visual cue is right, a
+  filter is not.
+* **`stop_charge_eur.value` can now be `0.0` with `is_default: false` and a
+  `source`.** That is a sourced "the infrastructure manager levies no
+  station charge" (Bulgaria, Denmark, Sweden, Ukraine), not a default. The
+  charges panel in the screenshot of 2026-09-13 renders `default` from the
+  flag, so it already distinguishes them; the label for this case should
+  read "no charge levied", not "0 €".
+
+Values move a lot: French termini price at 586.35 EUR per call, German
+Preisklasse 1 stations at 60–110 EUR. Nothing to change in `api.ts`.
+
+---
+
+## 20. Mass-based station charges — CALC 0.9.32, `FAMILY_DOCUMENT_FORMAT` 6
+
+Czechia prices a stop per tonne of train mass, so a Czech stop's charge
+depends on the composition. Two additive keys:
+
+* `/api/params/StopInfrastructures` → `stops[].stop_charge_eur` gains
+  **`per_tonne_eur: number | null`**. Non-null only where
+  `basis === "per_call_per_tonne"`; there `value` is the fixed part (an
+  explicit `0.00`) and the actual charge is `value + per_tonne_eur × coach
+  mass`. The picker cannot show a single €/stop for these without a
+  composition — "0.0033 €/t" or "per tonne" is the honest label.
+* member views → `operations.infrastructure.trips[].stations.calls[]`
+  gains **`per_tonne: { eur_per_t: number, train_mass_t: number } | null`**.
+  `eur` is already the multiplied figure; the object is there so the panel
+  can show "0.0033 €/t × 412 t" beside it. `category` carries the Czech
+  station category as before.
+
+`api.ts`: `StopCharge.per_tonne_eur` and `StationCall.per_tonne` — both go
+onto the pending `backend-dev` coordination batch. `FAMILY_DOCUMENT_FORMAT`
+6 means every cached document is rebuilt on the deploy.
+
+---
+
 ## Maintaining this document
 
 One file, updated in the same PR as the backend change. Each entry says
