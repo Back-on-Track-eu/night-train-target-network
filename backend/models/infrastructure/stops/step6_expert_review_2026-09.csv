@@ -1,0 +1,41 @@
+﻿name,search_name,osm_stop_id,lat,lon,coord_source,region,country,reason,infra_versions,note,decision
+Valga,Valga,,57.77483,26.04966,corrected,BALTICS,EE,border,infra-2026;infra-2032,EE/LV border station (Valga/Valka),add
+Karaman,Karaman,,37.1862,33.2204,corrected,EASTERN_EUROPE,TR,network,infra-2026;infra-2032,Konya-Adana line,add
+Alexandroupoli Port,Αλεξανδρούπολη,,40.849,25.874,corrected,SOUTH_EASTERN_EUROPE,GR,fua:Alexandroupoli,infra-2026;infra-2032,port station; OSM names Greek stations in Greek,add
+Kiato,Κιάτο,,38.014026,22.73498,corrected,SOUTH_EASTERN_EUROPE,GR,network,infra-2026;infra-2032,Piraeus-Patras line,add
+Korinthos,Κόρινθος,,37.9214,22.932,corrected,SOUTH_EASTERN_EUROPE,GR,network,infra-2026;infra-2032,Piraeus-Patras line,add
+Diakopto,Διακοπτό,,38.191,22.197,corrected,SOUTH_EASTERN_EUROPE,GR,network,infra-2026;infra-2032,Piraeus-Patras line; interchange to the Kalavryta rack railway,add
+Kalambaka,Καλαμπάκα,,39.703,21.625,corrected,SOUTH_EASTERN_EUROPE,GR,tourism:Meteora,infra-2026;infra-2032,,add
+Dimitrovgrad,Димитровград,,43.011,22.764,corrected,SOUTH_EASTERN_EUROPE,RS,border,infra-2026;infra-2032,RS/BG border station; not the Bulgarian Dimitrovgrad,add
+Blagoevgrad,Благоевград,,42.013,23.085,corrected,SOUTH_EASTERN_EUROPE,BG,network,infra-2026;infra-2032,Sofia-Thessaloniki line,add
+Vidin,Видин,,43.972,22.848,corrected,SOUTH_EASTERN_EUROPE,BG,border,infra-2026;infra-2032,"BG/RO border station at the Danube bridge; sent as 'Vidin tovarna', so check which object step 6a picks",add
+Shkodër,Shkodër,,42.061,19.527,corrected,SOUTH_EASTERN_EUROPE,AL,fua:Shkodër,infra-2032,on the Tirane line being rebuilt; 2032 only,add
+Tirana Public Transport Terminal,Tirana,,41.347,19.777,corrected,SOUTH_EASTERN_EUROPE,AL,fua:Tirana,infra-2032,"the BUS terminal, not a railway station: Tirane's rail terminus was demolished in 2013 and the line ends at Kashar. This object was already removed from step 6 on 2026-08-29, where it seeded gauges_mm NULL, became Albania's centroid-nearest reference station and cost the country all 19 rows of the relations matrix. Re-add a real station when the Tirane-Durres rebuild reaches OSM",skip
+Baqël,Baqël,,41.899,19.65,corrected,SOUTH_EASTERN_EUROPE,AL,network,infra-2026;infra-2032,tiny station in the middle of nowhere,skip
+Ploče,Ploče,,43.043,17.43,corrected,SOUTH_EASTERN_EUROPE,HR,tourism:Adriatic coast,infra-2026;infra-2032,Adriatic end of the line from Bosnia,add
+Banja Luka,Banja Luka,,44.788,17.212,corrected,SOUTH_EASTERN_EUROPE,BA,fua:Banja Luka,infra-2026;infra-2032,seat of the Republika Srpska entity,add
+Prijedor,Prijedor,,44.979,16.716,corrected,SOUTH_EASTERN_EUROPE,BA,fua:Prijedor,infra-2026;infra-2032,,add
+Szczecinek,Szczecinek,,53.693,16.705,corrected,CENTRAL_EUROPE,PL,network,infra-2026;infra-2032,junction with lines in five directions; too small for an fua claim,add
+Balatonalmádi,Balatonalmádi,,47.028,18.015,corrected,CENTRAL_EUROPE,HU,tourism:Balaton,infra-2026;infra-2032,,add
+Balatonfüred,Balatonfüred,,46.955,17.882,corrected,CENTRAL_EUROPE,HU,tourism:Balaton,infra-2026;infra-2032,,add
+Révfülöp,Révfülöp,,46.829,17.632,corrected,CENTRAL_EUROPE,HU,tourism:Balaton,infra-2026;infra-2032,,add
+Tapolca,Tapolca,,46.876,17.428,corrected,CENTRAL_EUROPE,HU,tourism:Balaton,infra-2026;infra-2032,,add
+Charleville-Mézières,Charleville-Mézières,,49.767,4.725,corrected,FRANCE,FR,network,infra-2026;infra-2032,,add
+Sassnitz,Sassnitz,,54.516,13.637,corrected,GERMANY,DE,tourism:Rügen,infra-2026;infra-2032,former ferry port to Scandinavia,add
+Westerland (Sylt),Westerland,,54.905,8.313,corrected,GERMANY,DE,tourism:Sylt,infra-2026;infra-2032,"island terminus, reachable only by the Hindenburgdamm",add
+Bochum,Bochum Hauptbahnhof,,51.478,7.223,corrected,GERMANY,DE,fua:Bochum,infra-2026;infra-2032,Ruhr area; nearest qualified stops are Essen and Dortmund,add
+Oberstdorf,Oberstdorf,,47.411,10.278,corrected,GERMANY,DE,tourism:Alps,infra-2026;infra-2032,line terminus in the Allgaeu Alps,add
+Garmisch-Partenkirchen,Garmisch-Partenkirchen,,47.491,11.097,corrected,GERMANY,DE,tourism:Alps,infra-2026;infra-2032,,add
+Friedrichshafen,Friedrichshafen Stadt,,47.653,9.473,corrected,GERMANY,DE,tourism:Lake Constance,infra-2026;infra-2032,the town has a second station at the harbour; Stadt is the through station,add
+Konstanz,Konstanz,,47.658,9.177,corrected,GERMANY,DE,tourism:Lake Constance,infra-2026;infra-2032,,add
+Potsdam Hbf,Potsdam Hauptbahnhof,,52.391,13.067,corrected,GERMANY,DE,network,infra-2026;infra-2032,Berlin-Magdeburg corridor; the Berlin fua already has qualified stops,add
+Ludwigslust,Ludwigslust,,53.334,11.494,corrected,GERMANY,DE,network,infra-2026;infra-2032,Berlin-Hamburg line,add
+Stuttgart Flughafen,Stuttgart Flughafen,,48.692,9.195,corrected,GERMANY,DE,network,infra-2032,new through station opening with S21; the Stuttgart fua already has qualified stops,add
+Chur,Chur,,46.853,9.529,corrected,GERMANY,CH,tourism:Alps,infra-2026;infra-2032,interchange to the Rhaetian Railway and the Bernina line to Italy,add
+Pozzallo,Pozzallo,,36.733,14.847,corrected,ITALY,IT,ferry:Pozzallo,infra-2026;infra-2032,ferry port for Malta,add
+Napoli Afragola,Napoli Afragola,,40.931,14.331,corrected,ITALY,IT,network,infra-2026;infra-2032,high-speed station better suited to night trains than Napoli Centrale,add
+Lagos,Lagos,,37.108,-8.671,corrected,IBERIA,PT,tourism:Algarve,infra-2026;infra-2032,western terminus of the Algarve line,add
+Stratford International,Stratford International,,51.544,-0.008,corrected,UNITED_KINGDOM,GB,network,infra-2026;infra-2032,possible London terminus for an open-access Channel Tunnel operator,add
+Ebbsfleet International,Ebbsfleet,,51.443,0.321,corrected,UNITED_KINGDOM,GB,network,infra-2026;infra-2032,possible first stop for an open-access Channel Tunnel operator,add
+Haparanda,Haparanda,,65.828,24.13,corrected,NORDICS,SE,border,infra-2026;infra-2032,"SE/FI border station, break of gauge",add
+Tornio,Tornio,,65.845,24.163,corrected,NORDICS,FI,border,infra-2026;infra-2032,"FI/SE border station, break of gauge",add
