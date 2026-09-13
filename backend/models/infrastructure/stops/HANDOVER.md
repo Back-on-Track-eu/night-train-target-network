@@ -278,7 +278,7 @@ tariff fact rather than a gap); *open* falls to the 11.28 EUR default.
 | CH | 26 | 24 | 1 | 1 | Chur (expert review) open |
 | NO | 23 | 0 | 0 | 23 | Bane NOR |
 | FI | 23 | 0 | 0 | 23 | Väylävirasto |
-| CZ | 20 | 0 | 0 | 20 | **per tonne** — file present, not joined; cost-model work package, §3.5 |
+| CZ | 20 | 20 | 0 | 0 | **per tonne** — `basis per_call_per_tonne`, joined since CALC 0.9.32; the cost model multiplies the rate by coach mass |
 | DK | 16 | 0 | 16 | 0 | |
 | RS | 15 | 0 | 0 | 15 | |
 | BE | 15 | 15 | 0 | 0 | |
@@ -288,7 +288,7 @@ tariff fact rather than a gap); *open* falls to the 11.28 EUR default.
 | ME, LT, EE, IE, BA | 9, 6, 6, 6, 6 | 0 | 0 | all | |
 | MK, SI, MD, LV, AL, XK, LU | 5, 5, 4, 4, 3, 2, 1 | 0 | 0 | all | |
 
-Totals: 739 priced, 222 not levied, 253 open. Every open stop in a covered
+Totals: 759 priced (20 of them per tonne), 222 not levied, 233 open. Every open stop in a covered
 country is one of the 38 expert-review additions, which post-date the batch
 — they are the first rows of the next one.
 
@@ -440,12 +440,13 @@ now `charges/RESEARCH_NOTES.md`, tracked, and folded into the register's
   Montparnasse. The 2026 DRG should replace 2024 when someone has it.
 - **Czechia is per tonne.** `0.08 CZK per stop per tonne` of train mass
   excluding non-carrying traction, by station category. Read as a per-call
-  figure it prices every Czech stop at a third of a cent, so the file is in
-  `sources/` with `basis per_stop_per_tonne` and **not** in `CHARGE_FILES`.
-  The proper fix is in the cost model, which already has the mass the
-  tariff wants — `CompositionType.total_weight_t()` is exactly the Czech
-  mpk. That is a seed-contract and cost-model work package (a per-tonne
-  charge column beside the per-call one), scoped separately.
+  figure it would price every Czech stop at a third of a cent. Modelled
+  properly as of CALC 0.9.32: the file carries `basis per_call_per_tonne`,
+  `02` routes the rate to `stop_charge_per_tonne_eur` beside an explicit
+  `0.00` fixed part, and `_calc_stop_cost` adds rate × the composition's
+  coach mass (`Composition.total_weight_t`, exactly the Czech *mpk*). A
+  400 t train pays about 1.3 EUR at Praha hl.n. instead of the 11.28 EUR
+  default. Any other mass-based tariff uses the same basis word.
 - **Italy's 22% VAT** is an assumption — the RFI documents state no rate.
   Recorded in the register; the net figures are unaffected.
 - **Ukraine** is a research conclusion, not a document: no operator-facing
