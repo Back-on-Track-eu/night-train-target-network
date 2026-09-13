@@ -151,6 +151,50 @@ step 5, that is an ONTD gap: add it to step 6 as `night_train_stop`
 *and* report it upstream. Step 6 is a patch over ONTD coverage debt, not a
 fix for it.
 
+### 2.3 Batch 1 — received 2026-09-07
+
+40 stations arrived on `add-more-stopps` as
+`step6_more_gap_closure_2026-09.csv`: Balaton and Alpine tourism, the
+Greek and Balkan corridors, Adriatic and Baltic ferry and border
+stations, the Channel Tunnel termini, and a handful of German second
+cities. Good coverage of exactly what §2.1 asks for.
+
+It is now `step6_expert_review_2026-09.csv` — gap closure and expert
+review are different provenance and each keeps its own file. Five things
+were normalised on intake; the next batch is quicker if it lands with
+them already right:
+
+- **The header row was missing.** `step6a` reads by column name, so
+  without it the first station becomes the header and is silently lost.
+- **`region` must be one of the ten `ADDITIONS_*` dicts.**
+  `SOUTHERN_EUROPE`, `NORTHERN_EUROPE` and `SWITZERLAND` are not among
+  them — Italy and Portugal go to `ITALY` and `IBERIA`, the Nordics to
+  `NORDICS`, Switzerland to `GERMANY` (the dict is Germany, Austria,
+  Switzerland).
+- **`search_name` has to be in the script OSM uses.** Greek, Bulgarian,
+  Serbian and Macedonian stations are tagged in Greek and Cyrillic; a
+  Latin search name scores near zero against them and the row comes back
+  `no_name_match`. `name` stays Latin, `search_name` carries the local
+  spelling.
+- **`fua:<city>` means the city has no qualified stop.** Berlin, London,
+  Napoli and Stuttgart have several, so Potsdam, Stratford, Ebbsfleet,
+  Afragola and Stuttgart Flughafen are `network` — they are corridor and
+  second-station picks, which is a good reason, just a different one.
+- **`coord_source` was `schedule`** on coordinates read off a map;
+  `corrected` (2.5 km) is the label for those, and the wider radius is
+  what lets them resolve.
+
+**Tirana Public Transport Terminal is not added.** It is the bus
+terminal — the same object (`osm:n13895194676`) that was removed from
+step 6 on 2026-08-29, where it seeded `gauges_mm` NULL, became Albania's
+centroid-nearest reference station and cost the country all 19 of its
+rows in the relations matrix. Tirane's rail terminus was demolished in
+2013 and the line ends at Kashar. The row stays in the file as `skip`
+with that note, so nobody re-adds it. Shkodër is in, `infra-2032`.
+
+Vidin came in as "Vidin tovarna"; the row searches for Видин, so check
+which of the two Vidin objects step 6a picks before pasting it.
+
 ---
 
 ## 3. The other task: station charges
