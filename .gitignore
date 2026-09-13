@@ -92,18 +92,10 @@ backend/models/scenarios/calib/seed/
 # calib/etl/ that produce them stay tracked, as does docu/.
 backend/models/demand/calib/raw/
 backend/models/demand/calib/out/
-# NOT ignored, deliberately: route_context/calib/sources/. It holds an
-# extraction from a live database (ONTD timetables against router passage
-# times), not a derivation — the calibration cannot reproduce it on a machine
-# with no ONTD snapshot, so it travels with the repository like a source
-# document. See that package's README.
-# Ignored, unlike route_context's: stops/charges/sources/ holds published
-# tariff PDFs and spreadsheets — third-party documents that are not ours to
-# redistribute. 01_source_extraction.ipynb registers them by filename and
-# creates the directory, so a clone without them still runs.
-backend/models/infrastructure/stops/charges/sources/*
-!backend/models/infrastructure/stops/charges/sources/*.csv
-!backend/models/infrastructure/stops/charges/sources/TEMPLATE.md
+# Ignored, unlike route_context's: stops/charges/sources/ holds the tariff
+# documents and the country charge files, both Drive-hosted
+# (CHARGES_DRIVE_FOLDER_ID, synced by 02_station_charges.ipynb on first use).
+# Only TEMPLATE.md is tracked.
 # Downloaded from Drive when absent (ONTD stop catalog, country geometries)
 backend/db/dev/data/*.csv
 backend/db/dev/data/country_geoms.geojson.gz
