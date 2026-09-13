@@ -133,6 +133,7 @@ class TestStopInfrastructures:
         keys = {
             "value",
             "is_default",
+            "per_tonne_eur",
             "vat_rate_per",
             "incl_vat_eur",
             "basis",
@@ -180,6 +181,28 @@ class TestStopInfrastructures:
             assert isinstance(charge, dict), f"{stop['stop_id']}: not a field object"
             assert {"value", "is_default", "version", "source_id"} <= set(charge)
             assert isinstance(charge["is_default"], bool)
+
+    def test_per_tonne_rate_only_with_a_per_tonne_basis(self, stops_body):
+        """Czechia (CALC 0.9.32): a stop priced per tonne exposes the rate
+        in per_tonne_eur with value 0.00 as the fixed part; every other stop
+        has per_tonne_eur null. Skips while no country is priced that way."""
+        per_tonne = [
+            s
+            for s in stops_body["stops"]
+            if s["stop_charge_eur"]["basis"] == "per_call_per_tonne"
+        ]
+        for stop in stops_body["stops"]:
+            charge = stop["stop_charge_eur"]
+            if charge["basis"] == "per_call_per_tonne":
+                assert charge["per_tonne_eur"] > 0, stop["stop_id"]
+                assert charge["value"] == 0.0, stop["stop_id"]
+                assert charge["is_default"] is False, stop["stop_id"]
+            else:
+                assert charge["per_tonne_eur"] is None, stop["stop_id"]
+        if not per_tonne:
+            pytest.skip(
+                "no stop is priced per tonne — CZ not joined into the catalog yet"
+            )
 
     def test_is_default_flags_via_api(self, stops_body):
         """Provenance survives the API in both directions: a stop with no

@@ -89,7 +89,9 @@ def track_rates(api_base):
 
 @pytest.fixture(scope="module")
 def stop_charges(api_base):
-    """{stop_id: station charge €/call} from GET /api/params/StopInfrastructures."""
+    """{stop_id: station charge €/call} from GET /api/params/StopInfrastructures
+    — the fixed part only. A per-tonne stop (Czechia) reports 0.0 here and
+    its rate in per_tonne_eur; see TestPerTonneStationCharge."""
     body = requests.get(f"{api_base}/api/params/StopInfrastructures", timeout=15).json()
     return {s["stop_id"]: s["stop_charge_eur"]["value"] for s in body["stops"]}
 
@@ -1729,3 +1731,94 @@ class TestOperationsInfrastructure:
             for country in trip["energy"]["countries"]:
                 assert "tariff" not in country
                 assert country["kwh"] > 0
+
+
+# =============================================================================
+# Mass-based station charges — CALC 0.9.32
+# =============================================================================
+
+STOPS_BERLIN_PRAHA_WIEN = ["osm:n3856100103", "osm:n3134751791", "osm:w423692233"]
+PRAHA_HL_N = "osm:n3134751791"
+
+
+class TestPerTonneStationCharge:
+    """Czechia prices a passenger stop per tonne of coach mass (Správa
+    železnic Annex C II.5). The catalog carries the rate beside an explicit
+    0.00 fixed part; the evaluation multiplies it by the composition's
+    total_weight_t. These tests skip while Praha has no rate — the tariff
+    reaches the database through the catalog, and a catalog without CZ is
+    a data gap, not a model regression."""
+
+    @pytest.fixture(scope="class")
+    def built_via_praha(self, loader, api_base):
+        from tests.conftest import STANDARD_DEMAND
+        from tests.helpers import build_route
+        from api.helpers.route_serialize import route_from_dict
+        from models.evaluation.operations import build_operations
+        from models.pipeline import evaluate_and_build_views
+
+        route_dict = build_route(
+            api_base, STOPS_BERLIN_PRAHA_WIEN, auto_stop_addition="off"
+        )
+        scenario_id = route_dict["scenario_id"]
+        route, _ = route_from_dict(route_dict, loader, scenario_id=scenario_id)
+        for pair in route.trip_pairs:
+            pair.od_pairs = []
+        for class_main, places_sold, avg_price in STANDARD_DEMAND:
+            add_directional_domain_demand(route, class_main, places_sold, avg_price)
+        tracks = loader.build_all_tracks(scenario_id)
+        stop_infra = loader.build_all_stops(scenario_id)
+        praha = stop_infra.get(PRAHA_HL_N)
+        if praha is None or not praha.stop_charge_per_tonne_eur:
+            pytest.skip("Praha hl.n. carries no per-tonne rate — CZ not in the catalog")
+        result, _ = evaluate_and_build_views(
+            route, tracks, stop_infra, loader.build_all_passages(scenario_id)
+        )
+        return (
+            route,
+            result,
+            stop_infra,
+            build_operations(route, result, tracks, stop_infra),
+        )
+
+    def test_praha_pays_rate_times_coach_mass(self, built_via_praha):
+        route, result, stop_infra, _ = built_via_praha
+        praha = stop_infra.get(PRAHA_HL_N)
+        mass = route.trip_pairs[0].composition.total_weight_t
+        calls = [c for c in result.stop_costs if c.stop_id == PRAHA_HL_N]
+        assert len(calls) == 2  # outbound and return both call
+        for c in calls:
+            assert c.station_charge_eur == pytest.approx(
+                praha.stop_charge_eur + praha.stop_charge_per_tonne_eur * mass,
+                abs=0.005,
+            )
+            assert c.station_charge_per_tonne_eur == praha.stop_charge_per_tonne_eur
+            assert c.train_mass_t == pytest.approx(mass)
+
+    def test_per_call_stops_on_the_same_route_are_untouched(self, built_via_praha):
+        """The mass term is zero for a per-call tariff: Berlin and Wien pay
+        exactly their catalog figure, as before 0.9.32."""
+        _, result, stop_infra, _ = built_via_praha
+        for c in result.stop_costs:
+            if c.stop_id == PRAHA_HL_N:
+                continue
+            assert c.station_charge_per_tonne_eur == 0.0
+            assert c.station_charge_eur == pytest.approx(
+                stop_infra.get(c.stop_id).stop_charge_eur, abs=0.005
+            )
+
+    def test_operations_view_shows_the_rate_and_the_mass(self, built_via_praha):
+        """A reader can check the Praha figure from the view alone."""
+        _, _, _, ops = built_via_praha
+        for trip in ops["infrastructure"]["trips"]:
+            calls = {c["stop_id"]: c for c in trip["stations"]["calls"]}
+            praha = calls[PRAHA_HL_N]
+            assert praha["per_tonne"] is not None
+            assert praha["eur"] == pytest.approx(
+                praha["per_tonne"]["eur_per_t"] * praha["per_tonne"]["train_mass_t"],
+                abs=0.01,
+            )
+            assert praha["defaulted"] is False
+            for stop_id, call in calls.items():
+                if stop_id != PRAHA_HL_N:
+                    assert call["per_tonne"] is None
