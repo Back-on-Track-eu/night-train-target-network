@@ -145,6 +145,35 @@ CHARGE_PROVENANCE_COLUMNS = {
     "stop_charge_source": "source_ref",
 }
 
+# Column widths of input_params.stop_infrastructures (db/schema.py). Postgres
+# rejects an over-long value at container start with a bare "value too long
+# for type character varying(60)" — no stop, no column named — so the export
+# checks first and says which. Language columns follow their base column.
+SEED_MAX_LEN = {
+    "stop_id": 120,
+    "stop_name": 120,
+    "stop_timezone": 50,
+    "stop_charge_basis": 30,
+    "stop_charge_class": 60,
+    "stop_charge_source": 40,
+    "provenance": 60,
+    "name_latin": 120,
+    "name_ascii": 120,
+    "uic_ref": 12,
+    "city": 120,
+}
+SEED_MAX_LEN_PREFIX = {"country_": 60, "city_": 120}
+
+
+def seed_width(column: str) -> int | None:
+    if column in SEED_MAX_LEN:
+        return SEED_MAX_LEN[column]
+    for prefix, width in SEED_MAX_LEN_PREFIX.items():
+        if column.startswith(prefix):
+            return width
+    return None
+
+
 # One IANA zone per country. Derived from the country rather than a UTC offset
 # so DST is handled by the zone database instead of being frozen into the data.
 COUNTRY_TIMEZONES = {
@@ -565,6 +594,35 @@ def main() -> None:
                 "that addition needs to come back (see the 2026-09 addendum in "
                 "step6_manual_additions.ipynb)."
             )
+
+    # uic_ref is one code in the seed table; OSM tags a few stations with two
+    # (a TGV station and its RER object). The catalog keeps the first, the
+    # full list stays in step7_enriched_stops.csv.
+    multi_uic = []
+    for row in rows:
+        refs = [r.strip() for r in (row.get("uic_ref") or "").split(";") if r.strip()]
+        if len(refs) > 1:
+            multi_uic.append((row["stop_name"], row["uic_ref"]))
+            row["uic_ref"] = refs[0]
+    if multi_uic:
+        print(f"  {len(multi_uic)} stop(s) with several uic_refs — first kept:")
+        for name, refs in multi_uic:
+            print(f"    {name}: {refs}")
+
+    too_long = [
+        (row["stop_name"], column, len(row[column]), width)
+        for row in rows
+        for column in fieldnames
+        if (width := seed_width(column)) and len(row.get(column) or "") > width
+    ]
+    if too_long:
+        for name, column, length, width in too_long[:15]:
+            print(f"    {name}: {column} is {length} chars, column holds {width}")
+        raise SystemExit(
+            f"{len(too_long)} value(s) exceed a stop_infrastructures column width "
+            "— seed.py would fail at container start. Shorten them at the source "
+            "(a tariff_class is a label, the explanation belongs in note)."
+        )
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(OUTPUT_PATH, "w", encoding="utf-8", newline="") as fh:
