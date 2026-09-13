@@ -13,14 +13,8 @@ description: 'Revenue minus costs minus profit requirement; if negative, the sub
 
 Revenue minus every cost minus the operator's profit requirement.
 
-When it is negative, which for a night train it usually is, the magnitude is
+When it is negative, the magnitude is
 the annual subsidy the route would need at the fares and load factor you set.
-
-This is the most assumption-laden number in the breakdown, not the headline.
-It is a difference between a modelled quantity and an assumed one, so it
-carries the uncertainty of [ticket revenue](/cost/ticket-revenue) plus the
-cost side's own. Use it to compare routes against each other under the same
-assumptions, not as a forecast of what a particular service would need.
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-net_eur"></a>

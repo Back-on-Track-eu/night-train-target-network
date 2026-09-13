@@ -14,9 +14,7 @@ description: 'Maintaining the coaches, charged per kilometre driven.'
 Keeping the coaches serviceable, charged as a rate per kilometre driven.
 
 Locomotive maintenance is not here. It is bundled into the
-[locomotive rental](/cost/loco), which is quoted all-inclusive. The two lines
-look like they should be symmetrical and are not, so counting locomotive
-maintenance in both places is an easy mistake.
+[locomotive rental](/cost/loco), which is quoted all-inclusive.
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-coach_maintenance_eur"></a>

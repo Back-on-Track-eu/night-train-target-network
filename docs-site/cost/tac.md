@@ -15,27 +15,6 @@ What the operator pays each country's infrastructure manager for the right to
 run over its track. For a cross-border night train this is usually the
 largest infrastructure cost and the most variable.
 
-There is no European track access charge. Every country charges its own mix,
-and the mixes barely resemble each other: a rate per kilometre driven (often
-different at night), a rate per tonne of train weight and kilometre, in some
-countries a rate per seat, a flat administrative add-on, a fee for each stop,
-a share of the ticket revenue earned there, and a surcharge for running
-through a congested area at peak. A country that does not levy a term has no
-such term. It is absent, not zero.
-
-Because night trains run across the day/night boundary, the model splits each
-country run by the clock rather than pricing it entirely one way: the share
-of time actually spent inside a country's night window is charged at its
-night rate. Peak surcharges work the same way, with one compromise. The tool
-knows a departure's clock time but not its day of the week, so a
-Monday-to-Friday peak is charged at five-sevenths of its value rather than
-all or nothing.
-
-This is the best-sourced part of the model: 35 values read from a named
-locator in a national network statement, 10 derived by documented arithmetic
-and 1 assumed with a stated band, across 30 cited documents. See
-[track access calibration](/methodology/track-access).
-
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-tac_eur"></a>
 

@@ -12,8 +12,7 @@ lists the sources document by document. The
 into the parameters the model reads.
 
 The source register behind this page was last reviewed end to end on
-**11 August 2026**. Tariffs move faster than reviews do, so treat a figure as
-current to that date rather than to today.
+11 August 2026.
 
 Links are recorded exactly as the calibration found them, so a handful now
 land on a moved page: infrastructure managers reorganise their tariff
@@ -35,9 +34,8 @@ throughout the documentation:
 | **not levied** | The country genuinely does not charge this. Different from missing                                            |
 | **missing**    | Nobody has researched it yet. **Never** silently treated as zero                                              |
 
-The last distinction is enforced rather than intended. A country without a
-calibrated charge is priced without that component rather than given an
-invented median, and the database tests assert that such a column stays
+The last distinction is made since country without a
+calibrated charge is priced without that component, and the database tests assert that such a column stays
 distinguishable from an entered number.
 
 ## The railway itself
@@ -47,7 +45,7 @@ distinguishable from an entered number.
 rail-aware fork of GraphHopper. It supplies the track geometry, the
 distances, and which countries a route passes through. Gauge is respected:
 standard, Iberian, Russian and Irish gauge route on separate profiles, so a
-train cannot silently cross a break of gauge.
+route cannot cross a break of gauge.
 
 ## Existing night trains
 
@@ -55,8 +53,7 @@ The **Open Night Train Database (ONTD)**, a community-maintained record of
 services running in Europe today, compiled by Juri Maier and others at
 Back-on-Track. It supplies the existing-route context in the gallery, part of
 the stop catalogue, and the observed timetable slack used to calibrate
-schedule buffers. The model reads it as a database schema rather than as a
-document, and the database itself is
+schedule buffers. The database itself is
 [public](https://back-on-track.eu/night-train-database).
 
 ## Energy consumption
@@ -65,16 +62,12 @@ document, and the database itself is
 that returns the technical energy consumption of a specified train over a
 specified route. Querying it across many routes and train configurations
 produced the dataset the [energy model](/methodology/energy) is fitted to.
-Being a measurement rather than a tariff, it is why energy is one of the
-better-founded lines in the model.
 
 ## Track access
 
 Every European infrastructure manager is legally required to publish a network
 statement setting out what it charges and on what basis. These are the source
-for [track access](/methodology/track-access) and the best-sourced part of the
-model: thirty documents covering twenty-eight countries plus the Channel
-Tunnel.
+for [track access](/methodology/track-access).
 
 | Country        | Document                                                                                                                                                                    | Publisher                                              |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
@@ -109,7 +102,7 @@ Tunnel.
 | Slovakia       | [Network Statement 2027 Annex 5.2.B (Measure 2/2018)](https://www.zsr.sk/en/railway-undertaking/infrastructure/network-statement/network-statement-2027/)                   | ŽSR                                                    |
 | United Kingdom | [CP7 Track Usage Price List](https://www.networkrail.co.uk/industry-and-commercial/information-for-operators/network-statement/)                                            | Network Rail                                           |
 
-Cross-check, conversion and method sources. These price no country on their own. They underpin the exchange-rate table, the escalation to 2032 prices and the decisions about what a night train pays.
+Cross-check, conversion and method sources.
 
 | Document                                                                                                                                                                                                                              | Publisher                                          |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
@@ -167,11 +160,7 @@ Statistics, tax treatment and escalation. These do not price one country. They u
 
 ## Shunting, stabling and station charges
 
-Shunting movements, overnight stabling and the per-call station fee. This is
-the weakest-sourced of the charge domains: seventeen of twenty-eight countries
-fall back on a European default rather than a national figure, and the market
-top-up added to the published charge is larger than many of the charges it
-sits on. See [shunting and stabling](/methodology/facility).
+Shunting movements, overnight stabling and the per-call station fee. See [shunting and stabling](/methodology/facility).
 
 | Country  | Document                                                                                                                                                        | Publisher                                      |
 | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
@@ -197,23 +186,12 @@ Cross-check and method sources. These underpin the market top-up and the per-cou
 | Night train business case model, 2030 scenario (no public link)                       | Nox Mobility (publisher TO_VERIFY) |
 | [Nachtzugstudie — Wirtschaftlichkeit von Nachtzugverbindungen](https://bmdv.bund.de/) | Ramboll for BMDV                   |
 
-Station charges are thinner still. Germany's **Stationspreisliste 2026** (DB
-InfraGO AG) is transcribed in full, covering all 5,412 German stations.
-Seventeen countries have no transcribed price list at all. See
-[station charges](/cost/station-charge).
-
-Bulgaria's annex does double duty: it is both Bulgaria's own stabling rate and
-the European default the seventeen unsourced countries fall back on. Read a
-default country's figure as the European average adjusted for tier, not as a
-national tariff.
-
 ## Terrain and buffers
 
 How much slack a country's timetabling practice carries, and how much a
 route's terrain slows a train. No infrastructure manager publishes either, so
 this domain has no per-country tariff document behind it. The figures come
-from observed timetables and from pan-European statistics. See
-[terrain and buffers](/methodology/route-context).
+from observed timetables and from pan-European statistics.
 
 | Document                                                                                                                                                | Publisher                                     |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
@@ -228,11 +206,6 @@ Coach and locomotive prices, crew pay, maintenance and overhead. There is no
 equivalent of a network statement here. Vehicle prices are commercial, so the
 calibration triangulates from annual reports, procurement awards and trade
 press.
-
-Read this list differently from the ones above. It holds audited accounts and
-public procurement records alongside salary aggregators and press reporting of
-contract values, which is why the calibration records a reliability note per
-document. See [rolling stock](/methodology/compositions).
 
 **Studies and methodology**
 
@@ -297,16 +270,6 @@ document. See [rolling stock](/methodology/compositions).
 | [Eurosystem staff macroeconomic projections for the euro area, December 2025](https://www.ecb.europa.eu/press/projections/html/ecb.projections202512_eurosystemstaff~12ead61977.en.html) | European Central Bank | 2025 |
 | [BoT Open Night Train Database — route geometry sample](https://back-on-track.eu/night-train-database)                                                                                   | Back-on-Track Europe  | 2026 |
 
-## Country borders
-
-**Marine Regions EEZ land union v4** (Flanders Marine Institute, 2024,
-[DOI 10.14284/698](https://doi.org/10.14284/698), CC-BY 4.0). Land borders
-alone are not enough for a rail network that crosses belts, straits and
-tunnels: a train on the Fehmarn crossing or under the Channel is in some
-country's charging area. Using maritime zones as well as land means those
-segments are attributed to a country rather than falling into an unknown
-bucket.
-
 ## Emissions
 
 Per-mode emission factors, recorded in the model as **EEA TERM 2020** and read
@@ -325,30 +288,6 @@ exchange-rate snapshot and with a stated escalation to the 2032 evaluation
 year. From that point on every number in the database is plain euros at 2032
 prices, and no calculation module or seeding script sees a currency or a
 conversion.
-
-That is why there is no exchange rate anywhere in the model, and why a figure
-here cannot drift with the euro.
-
-## Values with no source
-
-Two entries in the register are placeholders rather than documents. Every
-number still pointing at them is an internal estimate, not a published
-figure.
-
-| Entry                                                             | What still uses it                                                                                                                                                                    |
-| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `B-o-T_targetnetwork_DB_v2.xlsx`, illustrative placeholder values | the original spreadsheet import, now largely superseded                                                                                                                               |
-| Illustrative / internal estimate                                  | the eleven countries outside the calibrated set (Albania, Bosnia, Cyprus, Liechtenstein, Malta, Moldova, Montenegro, North Macedonia, Serbia, Türkiye, Ukraine), and stop coordinates |
-
-Fourteen further entries are real sources cited without a public link, because
-they are unpublished, commercially confidential, or the link was never
-recorded: the Danish charging order BEK 2024/1351, the Back-on-Track base
-night train model, the BMDV Nachtzugstudie presentation, the French TET cost
-audits, the Nox Mobility business case model, the European Sleeper valuation,
-the ČD locomotive tender figures, Italo's figures via the financial press,
-SJ's pay scale, the four national salary aggregator sets behind crew pay, and
-the internal corridor topography assessment. Each is listed above in its own
-section marked "no public link" rather than omitted, so the gap stays visible.
 
 ## A caution about country figures
 

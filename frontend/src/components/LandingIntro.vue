@@ -111,9 +111,6 @@ onActivated(measureHero)
           <a :href="DOCS_ABOUT_URL" target="_blank" rel="noopener" :class="quietButtonClass">
             {{ t('gallery.welcome.about') }}
           </a>
-          <a :href="DOCS_HOW_URL" target="_blank" rel="noopener" :class="quietButtonClass">
-            {{ t('gallery.welcome.how') }}
-          </a>
         </div>
       </div>
     </div>

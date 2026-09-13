@@ -14,8 +14,8 @@ description: 'Everything paid to infrastructure companies: track, power, station
 Everything paid to the companies that own and run the railway itself: track
 access, traction electricity, station stops and overnight parking.
 
-This is the part of a night train's cost that policy moves most directly.
-Each country sets its own charging regime, and they differ widely in level
+This is the part of a night train's cost that is most directly affected by policy.
+Each country sets its own charging regime which differ widely in level
 and in structure. Some charge per kilometre, some per tonne, some take a
 share of ticket revenue. A cross-border night train pays each of them in
 turn, which is why this figure is so sensitive to the route.

@@ -5,8 +5,7 @@ description: What the power costs, and what the infrastructure manager charges t
 
 # Traction electricity calibration
 
-Two separate charges make up the [electricity line](/cost/energy), and they
-come from different places.
+Two separate charges make up the [electricity line](/cost/energy):
 
 ## The two components
 
@@ -16,8 +15,7 @@ tariff band, both the day and night rates were collected.
 
 **The delivery**, what the infrastructure manager charges for supplying power
 through the overhead line, typically a separate per-kilometre or
-per-kilowatt-hour term in the network statement. It is a real charge distinct
-from the energy, and omitting it would understate the cost.
+per-kilowatt-hour term in the network statement.
 
 ## Provenance
 
@@ -36,22 +34,12 @@ published.
 
 Only Austria, Switzerland and Croatia operate a traction electricity night
 tariff. Everywhere else there is one rate around the clock, and the night/day
-split the model computes has no effect.
-
-Where a band exists, the share of the country run falling inside it is
-applied to the kilowatt-hours drawn, rather than the whole leg being priced
-one way based on when it started. A train crossing into the band mid-country
-is billed as it actually runs.
-
-Croatia's band is assumed at 22:00 to 06:00. The tariff document does not
-state it explicitly, so the neighbouring convention was adopted, and the
-value is recorded as an assumption.
+split the model computes has no effect. Where a band exists, the share of the country run falling inside it is
+applied to the kilowatt-hours drawn.
 
 ## Price basis
 
 Escalated to the 2032 evaluation year at 2% a year, with currency converted
-once at the pinned snapshot. Electricity prices are volatile and this is a
-long extrapolation, so a 2032 traction electricity price is a projection
-rather than a known quantity.
+once at the pinned snapshot.
 
 <FeedbackForm />

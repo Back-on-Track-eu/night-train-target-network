@@ -13,16 +13,6 @@ description: 'The fee paid for every scheduled stop at a station.'
 
 The fee paid for each scheduled stop at a station.
 
-This is the weakest-sourced line in the cost model. Only Germany has real
-station charges in the database, and every other country falls back to a
-single flat rate per call. For a route whose stops are mostly outside
-Germany, this line is a placeholder carrying a number.
-
-Germany's figures come from DB InfraGO's **Stationspreisliste 2026**,
-transcribed in full for all 5,412 German stations. Station tariffs exist and
-are public in most countries; seventeen simply have not been transcribed yet.
-See [data sources](/sources/#shunting-stabling-and-station-charges).
-
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-station_charge_eur"></a>
 

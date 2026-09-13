@@ -15,17 +15,6 @@ Everything running the route costs in a year: what the operator spends on
 staff, rolling stock and service, plus what it pays the infrastructure
 companies for track, electricity, stations and parking.
 
-This is the figure the tool is built to estimate, and the half of the model
-with evidence behind it. Every line below is computed from a documented
-formula over parameters read from national network statements, published
-tariffs and measured technical runs, rather than from a single top-down rate
-per kilometre.
-
-It is not a price. Nothing here says what a ticket would cost or whether the
-route would pay for itself. That needs the
-[revenue side](/cost/total-revenue), which rests on an assumption you set
-rather than a forecast.
-
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-total_cost_eur"></a>
 

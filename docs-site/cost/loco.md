@@ -14,10 +14,6 @@ description: 'Renting the locomotive by the hour, maintenance and insurance incl
 Renting the locomotive, charged by the hour with maintenance and insurance
 included.
 
-Hours in use, not hours owned: a locomotive shared between several trips is
-counted once. That matters for a network of routes that can share traction
-rather than each holding its own.
-
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-loco_eur"></a>
 

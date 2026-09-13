@@ -14,7 +14,7 @@ description: 'What the cabin crew costs per year, including the relief crew a lo
 What the on-board staff cost over a year: the people who make up berths,
 serve breakfast and look after passengers overnight.
 
-Priced the same way as the driver. A wage per productive hour is divided by
+A wage per productive hour is divided by
 the share of paid hours that is productive, then multiplied by the hours the
 crew is on board. Long trips need relief crew, which lowers that share and
 raises the effective hourly cost.

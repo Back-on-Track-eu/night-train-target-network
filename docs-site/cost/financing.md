@@ -14,11 +14,8 @@ description: 'The annual cost of financing the coaches.'
 The annual cost of borrowing to buy the coaches: the purchase price times a
 financing rate.
 
-Kept separate from the [write-off](/cost/coach-amortisation) because the two
-answer different questions. Amortisation is what the asset costs to consume;
-financing is what the capital costs to raise. A public operator with cheap
-capital and a private one with expensive capital differ here and nowhere
-else.
+Kept separate from the [write-off](/cost/coach-amortisation) because amortisation is what the asset costs to consume;
+financing is what the capital costs to raise.
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-financing_eur"></a>

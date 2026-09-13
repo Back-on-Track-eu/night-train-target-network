@@ -14,7 +14,7 @@ description: 'Cleaning and preparing the train for each night of service.'
 Cleaning and preparing the train for the next night of service, at a daily
 rate per coach over the operating days in a year.
 
-Charged per coach rather than per train, so a longer train costs
+Charged per coach, so a longer train costs
 proportionally more to turn around.
 
 <!-- BEGIN GENERATED: formula -->

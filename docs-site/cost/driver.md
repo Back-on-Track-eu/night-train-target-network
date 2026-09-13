@@ -20,8 +20,7 @@ roster efficiency: the share of paid hours that is productive.
 
 That share is not constant. A shift may not exceed a legal maximum, so a long
 trip has to be split, and every additional shift boundary adds a fixed
-allowance. A route just over the limit costs noticeably more per hour than
-one just under, which is a real effect rather than an artefact.
+allowance.
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-driver_eur"></a>

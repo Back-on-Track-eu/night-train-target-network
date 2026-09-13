@@ -345,7 +345,7 @@
     }
   },
   "gallery": {
-    "heading": "Europe was once crossed by night trains. We believe it's time to bring them back on track!",
+    "heading": "It's time to bring night trains back on track!",
     "tabs": {
       "aToB": "From A to B",
       "byStation": "By Station",
@@ -368,11 +368,10 @@
       "button": "Search"
     },
     "welcome": {
-      "pitch": "Night trains have great potential in Europe, replacing flights for journeys between 500 and 3,000 kilometres. We at Back on Track are currently developing our proposal for a Target Network 2032 — a night train network of around 300 connections spanning the continent, doubling the current number of connections. This tool is a way for anyone with an interest in night trains to support our mission: suggest the night train of your dreams for us to incorporate in our Target Network design!",
+      "pitch": "We at Back on Track are currently developing our proposal for a Target Network 2032 — a night train network of around 300 connections spanning the continent, doubling the current number of connections. This tool is a way for anyone with an interest in night trains to support our mission: suggest the night train of your dreams for us to incorporate in our Target Network proposal!",
       "source": "IEA figures, via our position paper",
       "browse": "See other people's suggestions",
-      "about": "About",
-      "how": "How it works"
+      "about": "About"
     },
     "section": {
       "title": "Gallery",
