@@ -7,6 +7,12 @@ line in `CHARGE_FILES`, never new parsing code.
 
 `charges/sources/<cc>_station_charges.csv`, lowercase ISO 3166-1 alpha-2.
 
+The files are **not in git**. They live in the Drive folder
+`CHARGES_DRIVE_FOLDER_ID` (`backend/docker/.env`) and `02` syncs them into
+`sources/` on first use; a local file always wins, so one you are editing
+is never overwritten. A new or changed country file is uploaded to that
+folder — that upload is the commit.
+
 ## Columns
 
 | Column | Required | Description |
@@ -20,8 +26,8 @@ line in `CHARGE_FILES`, never new parsing code.
 | `charge_incl_vat_eur` | yes | The same charge **including VAT**, so both figures are visible side by side and can be compared against whichever the document printed |
 | `basis` | yes | What the figure is per. `per_call` unless the tariff genuinely differs; anything else must be explained in `note` |
 | `price_basis_year` | yes | The year the published figure applies to, e.g. `2026`. Escalation to 2032 happens later, in the notebook — never here |
-| `tariff_class` | no | The country's own category for the station (`Preisklasse 2`, `tipologia A`, …). Explains why two stations differ |
-| `source_ref` | yes | `source_id` of the document in `01_source_extraction.ipynb`. Every row must cite one |
+| `tariff_class` | no | The country's own category for the station (`Preisklasse 2`, `tipologia A`, …). Explains why two stations differ. A label, **60 characters at most** — the catalog column is that wide; the explanation belongs in `note` |
+| `source_ref` | yes | `source_id` of the document in `01_source_extraction.ipynb`. Every row must cite one. **40 characters at most** |
 | `note` | no | Anything a reader needs: which of several published columns was taken, remarks from the document, why a figure is unusual |
 
 CSV format: **comma-separated, UTF-8, `.` as decimal separator**, no thousands
