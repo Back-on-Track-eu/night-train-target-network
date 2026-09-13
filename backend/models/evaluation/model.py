@@ -32,7 +32,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-CALC_VERSION: str = "0.9.31"
+CALC_VERSION: str = "0.9.32"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -66,6 +66,21 @@ CALC_MODEL_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.32": {
+        "date": "2026-09-14",
+        "author": "david + claude",
+        "changes": "MASS-BASED STATION CHARGES. Czechia prices a passenger "
+        "stop per tonne of train mass (Sprava zeleznic Annex C II.5: "
+        "0.04-0.08 CZK per stop per tonne, mass without non-carrying "
+        "traction). The stop table gains stop_charge_per_tonne_eur and "
+        "_calc_stop_cost adds rate x Composition.total_weight_t to the fixed "
+        "per-call figure; Czech stops carry an explicit 0.00 fixed part "
+        "beside the rate. OUTPUT CHANGE for every route calling in Czechia "
+        "(Praha hl.n. goes from the 11.28 EUR default to about 1.3 EUR for "
+        "a 400 t train); no other stop moves. operations station calls gain "
+        "per_tonne {eur_per_t, train_mass_t} so the figure can be checked. "
+        "Seed contract 37 columns; migration 2026-09-14_stop_charge_per_tonne.",
+    },
     "0.9.31": {
         "date": "2026-09-12",
         "author": "david + claude",
@@ -1583,16 +1598,34 @@ CALC_FORMULAS: dict[str, Formula] = {
         ),
     ),
     "station_charge_eur": Formula(
-        latex=r"C_{station} = \sum_{stop} c_{stop,charge}",
+        latex=r"C_{station} = \sum_{stop} \left( c_{stop,charge} "
+        r"+ c_{stop,tonne} \cdot m_{coaches} \right)",
         summary="The fee paid for every scheduled stop at a station.",
         description="Station charge: the fee paid for every scheduled "
-        "stop at a station, added up over all stops.",
+        "stop at a station, added up over all stops. Where the tariff is "
+        "mass-based (Czechia), a per-tonne rate times the composition's "
+        "coach mass is added to the fixed fee.",
         inputs=(
             FormulaParam(
                 symbol="c_stop,charge",
                 ref="column:input_params.stop_infrastructures.stop_charge_eur",
-                description="Station fee per scheduled stop",
+                description="Station fee per scheduled stop (fixed part)",
                 unit="€/stop",
+            ),
+            FormulaParam(
+                symbol="c_stop,tonne",
+                ref="column:input_params.stop_infrastructures."
+                "stop_charge_per_tonne_eur",
+                description="Mass-based station fee per tonne of coach mass; "
+                "zero where the tariff is per call only",
+                unit="€/stop/t",
+            ),
+            FormulaParam(
+                symbol="m_coaches",
+                ref="column:input_params.coach_type_classes.section_weight_t",
+                description="Coach mass of the composition, without traction "
+                "that carries no passengers",
+                unit="t",
             ),
         ),
         output=FormulaParam(
