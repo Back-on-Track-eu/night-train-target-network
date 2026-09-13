@@ -1816,6 +1816,7 @@ class DBDataLoader:
             "lat": "stop_lat",
             "lon": "stop_lon",
             "stop_charge_eur": "stop_charge_eur",
+            "stop_charge_per_tonne_eur": "stop_charge_per_tonne_eur",
         }
         stop_column_comments = self._load_column_comments(
             "input_params", "stop_infrastructures"
@@ -1855,6 +1856,15 @@ class DBDataLoader:
                         charge_is_default,
                     ),
                 }
+                # The per-tonne part has no default: registered only where a
+                # rate exists, under the same source as the per-call figure —
+                # one document prices the stop, whichever way it counts.
+                if stop.stop_charge_per_tonne_eur is not None:
+                    stop_fields["stop_charge_per_tonne_eur"] = (
+                        stop.stop_charge_per_tonne_eur,
+                        charge_src,
+                        False,
+                    )
                 for field_name, (
                     field_val,
                     field_src,
@@ -1951,6 +1961,7 @@ class DBDataLoader:
             lat=_f(row["stop_lat"]),
             lon=_f(row["stop_lon"]),
             stop_charge_eur=charge,
+            stop_charge_per_tonne_eur=_opt_f(row.get("stop_charge_per_tonne_eur")),
             stop_charge_vat_rate_per=_opt_f(row.get("stop_charge_vat_rate_per")),
             stop_charge_incl_vat_eur=_opt_f(row.get("stop_charge_incl_vat_eur")),
             stop_charge_basis=row.get("stop_charge_basis"),

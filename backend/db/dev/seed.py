@@ -1754,6 +1754,7 @@ _STOP_SEED_CSV_COLUMNS = [
     "stop_lat",
     "stop_lon",
     "stop_charge_eur",
+    "stop_charge_per_tonne_eur",
     "stop_charge_vat_rate_per",
     "stop_charge_incl_vat_eur",
     "stop_charge_basis",
@@ -1985,6 +1986,11 @@ def _read_stop_seed() -> list[dict]:
             # country/global default. Only stops listed in the pipeline's
             # tracked station_charges.csv carry a figure.
             "stop_charge_eur": _parse_optional_float(row["stop_charge_eur"]),
+            # Per-tonne part, multiplied by the composition's coach mass at
+            # evaluation time. NULL for every stop priced per call only.
+            "stop_charge_per_tonne_eur": _parse_optional_float(
+                row["stop_charge_per_tonne_eur"]
+            ),
             # The charge's provenance travels with it: without these a
             # published figure cannot say which document it came from.
             "stop_charge_vat_rate_per": _parse_optional_float(
