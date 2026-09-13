@@ -199,10 +199,12 @@ which of the two Vidin objects step 6a picks before pasting it.
 
 ## 3. The other task: station charges
 
-Every stop in the catalog costs the same **11.28 EUR per call** in the cost
-model, because no sourced station charge outside Germany has landed — and
-Germany's have not landed either. Your task would be adding as many stop 
-charges you can, one CSV per country, all in one shape.
+Until September every stop in the catalog cost the same **11.28 EUR per
+call** in the cost model. As of 2026-09-13, 19 countries are in
+`charges/sources/` — see §3.5 for what landed and what changed on intake —
+and 253 stops remain on the default, most of them in GB, NO, FI and the
+Balkans. The task is the same shape as before: one CSV per country, twelve
+columns, only sourced values.
 
 ### 3.1 Where it actually stands
 
@@ -220,16 +222,25 @@ charges you can, one CSV per country, all in one shape.
   the Berlin stations, Dortmund — and the reader raises on an unknown id
   rather than skipping. That is deliberate and it did its job: those 21
   ids are how the stations came back with the same identity.
-- **Germany needs 11 more rows.** The closure adds 23 DE stops
-  (Frankfurt Hbf, Dortmund, Regensburg, Bamberg, Lübeck, Passau, …); 21
-  of them already have a row in the DE file — that is where their ids came
-  from. **Rastatt and Timmendorfer Strand** need looking up in the
-  Stationspreisliste. Nine DE stops that step 5 qualifies also have no row
-  — Hanau, Bitterfeld, Bruchsal, Oberhausen, Baden-Baden, München Süd and
-  Pasing, Frankfurt Flughafen Fernbahnhof, Lörrach Autoreisezug Terminal.
-  Look them up too; the two München yards may legitimately not be in the
-  price list, in which case leave them out and say so in the DE file's
-  notes.
+- **Germany is closed as of 2026-09-13.** The 19 stops that had no row —
+  Rastatt and Timmendorfer Strand, the step 5 stops (Hanau, Bitterfeld,
+  Bruchsal, Oberhausen, Baden-Baden, München-Pasing, Frankfurt Flughafen
+  Fernbahnhof) and the ten from the expert review — were looked up in
+  *Stationspreisliste 2026* and transcribed. The DE file holds **124 rows**
+  and covers 124 of the 126 German catalog stops.
+- **Two DE stops stay without a charge, on purpose.** *München Süd* and
+  *Lörrach Autoreisezug Terminal* do not appear in the price list under any
+  name: both are operational facilities used by an Autoreisezug, not
+  passenger stations with a Preisklasse. Per `TEMPLATE.md` a stop with no
+  defensible figure is left out rather than interpolated, so they resolve
+  through the default — which is the honest answer, and this paragraph is
+  where it is recorded.
+
+**Status after the expert-review run (2026-09-13):** the catalog is 1,214
+stops and the DE file 124 rows, all sourced from *Stationspreisliste 2026*
+(`DE-DB-SPL-2026`, already in the register). 02 and step 10 need re-running
+for the new rows to reach the catalog — the same step that was missed in
+August, so do not skip it.
 
 **Status after the closure run (2026-09-01):** 01, 02 and step 10 have
 been run against the closed catalog — `105 station charges (0 still
@@ -239,59 +250,47 @@ are gone for good. So the path works end to end; from here every run is
 the one in §3.3, and a country file that raises is telling you something
 real.
 
-### 3.2 The gap, by country
+### 3.2 Where each country stands (2026-09-13)
 
-Johanna investigated which countries levy a station charge at all. Her
-finding was a list of 13 that levy **nothing** — **BE, CZ, DK, EE, FR, GR,
-HR, IE, LU, LV, NO, PL, SE**. The notebook it came from has since been
-deleted and it cites no documents, so treat it as **a hypothesis to test,
-not a result to inherit**. If a country really levies nothing, that is a
-tariff fact and it gets a file too — same template, empty
-`charge_excl_vat_eur`, a `note` and `source_ref` naming the network
-statement that says so. A missing file cannot be told apart from a country
-nobody has looked at.
+Counted from the current catalog (1,214 stops) and the files in
+`charges/sources/`. *Priced* is a sourced non-zero charge; *not levied* is a
+sourced statement that the infrastructure manager charges nothing per stop
+(recorded as an empty `charge_excl_vat_eur`, which is what makes it a
+tariff fact rather than a gap); *open* falls to the 11.28 EUR default.
 
-Stop counts are the current catalog plus the September closure. Order is
-by coverage, which is why France and Poland come before Italy despite being
-on Johanna's list — 178 stops ride on whether she was right.
+| CC | Stops | Priced | Not levied | Open | Note |
+|---|---|---|---|---|---|
+| DE | 126 | 124 | 0 | 2 | München Süd, Lörrach Autoreisezug Terminal — not in the price list, §3.1 |
+| BG | 101 | 0 | 99 | 2 | NRIC does not charge passenger-station use |
+| FR | 96 | 96 | 0 | 0 | DRG 2024 Annexe A1, matched on UIC — replaces the 2026-09-10 zero assumption |
+| IT | 90 | 88 | 0 | 2 | RFI extra-PMdA component sum; 22% VAT is an assumption |
+| PL | 84 | 70 | 0 | 14 | 13 PKP-PLK-managed stops (Toruń Gł., Zakopane, …) came as 0.00 with "no tariff found" — dropped, they are open, not free |
+| RO | 83 | 83 | 0 | 0 | |
+| UA | 71 | 0 | 71 | 0 | research conclusion, no document — §3.5 |
+| GB | 60 | 0 | 0 | 60 | LTC is an annual station amount allocated by vehicle departures; needs a modelling decision, not a transcription |
+| ES | 53 | 53 | 0 | 0 | intermediate-stop component only; origin/destination and the passenger intensity component excluded |
+| AT | 49 | 49 | 0 | 0 | |
+| TR | 37 | 36 | 0 | 1 | |
+| SE | 36 | 0 | 35 | 1 | |
+| HU | 35 | 31 | 0 | 4 | the four Balaton stops from the expert review |
+| NL | 30 | 30 | 0 | 0 | train-stop code C assumed |
+| SK | 30 | 30 | 0 | 0 | |
+| CH | 26 | 24 | 1 | 1 | Chur (expert review) open |
+| NO | 23 | 0 | 0 | 23 | Bane NOR |
+| FI | 23 | 0 | 0 | 23 | Väylävirasto |
+| CZ | 20 | 0 | 0 | 20 | **per tonne** — file present, not joined; cost-model work package, §3.5 |
+| DK | 16 | 0 | 16 | 0 | |
+| RS | 15 | 0 | 0 | 15 | |
+| BE | 15 | 15 | 0 | 0 | |
+| HR | 14 | 0 | 0 | 14 | |
+| GR | 13 | 0 | 0 | 13 | |
+| PT | 11 | 10 | 0 | 1 | Lagos (expert review) open |
+| ME, LT, EE, IE, BA | 9, 6, 6, 6, 6 | 0 | 0 | all | |
+| MK, SI, MD, LV, AL, XK, LU | 5, 5, 4, 4, 3, 2, 1 | 0 | 0 | all | |
 
-| # | Country | Stops | Johanna: no charge? | Status / note |
-|---|---|---|---|---|
-| — | DE | 116 | | 105 rows sourced (`DE-DB-SPL-2026`), not landed; 11 stops to add — §3.1 |
-| 1 | BG | 99 | | |
-| 2 | FR | 95 | **yes** | verify from the SNCF Réseau / SNCF Gares & Connexions DRG; large |
-| 3 | IT | 88 | | RFI PIR, station categories |
-| 4 | RO | 83 | | CFR network statement |
-| 5 | PL | 83 | **yes** | verify from the PKP PLK network statement; PKP SA runs the stations |
-| 6 | UA | 71 | | **now seeded** — no longer skippable (was "not needed" in the old list) |
-| 7 | GB | 58 | | Network Rail station long-term charge / station access conditions |
-| 8 | ES | 53 | | Adif Declaración sobre la Red, station categories |
-| 9 | AT | 49 | | Johanna had figures, **no source** — redo from ÖBB Infra SNNB |
-| 10 | TR | 36 | | now seeded |
-| 11 | SE | 35 | **yes** | verify from Trafikverket JNB; Jernhusen owns the stations |
-| 12 | HU | 31 | | MÁV network statement |
-| 13 | SK | 30 | | Johanna had figures, **no source** — redo from ŽSR |
-| 14 | NL | 30 | | ProRail netverklaring |
-| 15 | CH | 25 | | SBB Infra Leistungskatalog |
-| 16 | NO | 23 | **yes** | verify from Bane NOR network statement |
-| 17 | FI | 22 | | Väylävirasto |
-| 18 | CZ | 20 | **yes** | verify from Správa železnic |
-| 19 | DK | 16 | **yes** | verify from Banedanmark |
-| 20 | BE | 15 | **yes** | verify from Infrabel |
-| 21 | RS | 14 | | |
-| 22 | HR | 13 | **yes** | verify from HŽ Infrastruktura |
-| 23 | PT | 10 | | Johanna had figures, **no source** — redo from IP |
-| 24 | ME | 9 | | |
-| 25 | GR | 8 | **yes** | verify from OSE |
-| 26 | EE | 7 | **yes** | verify from Eesti Raudtee |
-| 27 | IE | 6 | **yes** | verify from Iarnród Éireann network statement |
-| 28 | LT | 6 | | LTG Infra |
-| 29 | SI, LV, MK, MD | 5, 5, 5, 4 | LV yes | |
-| 30 | BA, AL, LU | 4, 2, 1 | LU yes | |
-| — | XK | 2 | | not seeded — skip |
-
-Publisher names in the last column are where I would start looking; they
-are pointers, not sources. The source is the document you register.
+Totals: 739 priced, 222 not levied, 253 open. Every open stop in a covered
+country is one of the 38 expert-review additions, which post-date the batch
+— they are the first rows of the next one.
 
 ### 3.3 The mechanism
 
@@ -408,3 +407,51 @@ nobody can.
   pass by.
 
 Questions to me, especially before you re-point or delete anything.
+
+### 3.5 Batch of 2026-09-10 — received
+
+18 country files in the twelve-column shape, every `stop_id` valid against
+the 1,214-stop catalog, no duplicates, no cross-country collisions, and a
+`Schmierzettel.txt` with the document URLs and the reasoning per country —
+now `charges/RESEARCH_NOTES.md`, tracked, and folded into the register's
+`reliability_note`s. Very good work. What changed on intake:
+
+- **NL `vat_rate_per` was `0.21`.** The template wants a percentage
+  (`21.0`); the gross figures were computed at 21%, so only the rate column
+  was off, and every NL row would have failed the reader's check.
+- **`basis` was `per_stop`; DE uses `per_call`.** One word for one thing —
+  normalised to `per_call`.
+- **Not-levied rows were `0.0`.** The template records a sourced "no charge"
+  as an empty `charge_excl_vat_eur`, and the reader counts those separately
+  from priced stops. BG, DK, SE, UA and Göschenen (CH, not in Anhang 2) are
+  now empty cells. Numerically identical; the difference is that the catalog
+  can tell "free" from "priced at zero".
+- **13 Polish rows were `0.00` with "no tariff found".** That is *unknown*,
+  not *not levied*, and `TEMPLATE.md` says a stop without a defensible figure
+  is left out. Dropped; they are open in §3.2. Toruń Główny among them is
+  certainly priced somewhere — PKP PLK's OIU list is the place to look.
+- **France was 95 stops at `0.00` on the assumption there is no station
+  charge.** There is: Gares & Connexions publishes the *Document de référence
+  des gares* with a per-departing-train tariff by station category and
+  region (Annexe A1) and the category of every station (Annexe A0.1). The
+  file was rebuilt from the DRG 2024 annexes, matched on UIC code (96 of 96,
+  no name/UIC disagreement). The spread is real: 19.77 EUR at a category C
+  PACA station, 586.35 EUR at Paris Austerlitz, Bercy, Gare de Lyon and
+  Montparnasse. The 2026 DRG should replace 2024 when someone has it.
+- **Czechia is per tonne.** `0.08 CZK per stop per tonne` of train mass
+  excluding non-carrying traction, by station category. Read as a per-call
+  figure it prices every Czech stop at a third of a cent, so the file is in
+  `sources/` with `basis per_stop_per_tonne` and **not** in `CHARGE_FILES`.
+  The proper fix is in the cost model, which already has the mass the
+  tariff wants — `CompositionType.total_weight_t()` is exactly the Czech
+  mpk. That is a seed-contract and cost-model work package (a per-tonne
+  charge column beside the per-call one), scoped separately.
+- **Italy's 22% VAT** is an assumption — the RFI documents state no rate.
+  Recorded in the register; the net figures are unaffected.
+- **Ukraine** is a research conclusion, not a document: no operator-facing
+  station tariff was found. Registered as `manual_transcription` so nobody
+  mistakes it for a network statement.
+
+Two integration tests that skipped until a sourced charge outside Germany
+existed — `test_04_versioning.py::test_stop_explicit_charge_is_not_default`
+and `test_10_params_api.py::test_is_default_flags_via_api` — now run.
