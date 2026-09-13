@@ -7,10 +7,12 @@ backend, in one place. Supersedes `deploy/HANDOVER.md` (2026-08-10),
 deleted.
 
 Updated after each change that touches deploy, capacity or server data.
-Last update 2026-09-12 (CALC 0.9.29 — catering on the summary, two new
-columns, §4d; before that 2026-09-07 WP14 connection pool + gunicorn
-gthread, the calc matrix endpoint and CALC 0.9.25 — §4c; 2026-09-06 ONTD
-bootstrap fix below; 2026-09-05 route builder 0.9.31 §4a; 0.9.32 §4b).
+Last update 2026-09-13 (new `infra_2026` OSM base with the Messina train
+ferry — graph cache wipe on your next restart, §4e; before that 2026-09-12
+CALC 0.9.29 — catering on the summary, two new columns, §4d; 2026-09-07
+WP14 connection pool + gunicorn gthread, the calc matrix endpoint and CALC
+0.9.25 — §4c; 2026-09-06 ONTD bootstrap fix below; 2026-09-05 route builder
+0.9.31 §4a; 0.9.32 §4b).
 
 > **Update 2026-09-06 — existing night trains drawn as dashed straight
 > lines: ONTD bootstrap fix, one-off action on every persisted database.**
@@ -64,6 +66,7 @@ capacity work that is genuinely yours to schedule.
 | §4 | Wipe the routing graph cache — required |
 | §4a | **Route builder 0.9.31 — truncate and re-precompute the segment cache** |
 | §4b | Route builder 0.9.32 — one migration, compute-cache truncate only |
+| §4e | **New `infra_2026` OSM base — wipe the graph cache on your next restart** |
 | §5 | Standing gotchas on every staging deploy |
 | §6 | How deploy relates to the backend `.env` |
 | §7 | **Capacity: routing under batch load** |
@@ -511,6 +514,88 @@ is on both environments.
 The migration is additive; leaving the columns in place on a rollback to
 0.9.28 is harmless — the older api never writes them and the older gallery
 query never selects them.
+
+---
+
+## 4e. New `infra_2026` OSM base (Messina train ferry) — wipe the graph cache on your next restart
+
+**Action: one volume wipe, whenever you next restart the stack anyway.**
+Nothing is broken until you do, so this needs no window of its own — but
+until it happens both environments keep routing on the old graph.
+**Stops applying** once both environments have restarted against the new
+cache.
+
+The `infra_2026` graph was re-imported from a new OSM extract that carries
+the **Messina train ferry**. Routes across the Strait of Messina now exist
+instead of failing `no_connection`, which was the last known routing gap:
+six existing ONTD night trains (1954, 1955, 1958, 1959, 1962, 1964) were
+drawn as straight lines because of it. No profile, `config.yml` or
+`custom_models/` change, so — unlike §4 — the routing container will
+**not** restart-loop if you postpone this. It will simply serve the old
+graph indefinitely.
+
+**Why a wipe is needed at all.** `entrypoint.sh` downloads the cache only
+when the graph-cache directory is empty. A container that already has a
+graph keeps it, forever, and the new cache was uploaded as a **new version
+of the same Drive file** — the id in `entrypoint.sh` is unchanged, so
+there is no `.env` edit that would pull it in either. Deleting the local
+copy is the only trigger.
+
+```bash
+cd /opt/targetnetwork-app/deploy/bot-server      # wherever the shared stack lives
+docker compose stop targetnetwork-routing
+docker volume rm tn_graphcache                   # entrypoint re-downloads from Drive
+docker compose up -d targetnetwork-routing
+```
+
+Same caveats as §4: renaming beats deleting if you want a fallback, the
+reload takes ~2 min, and **both environments share this container**, so
+staging and production both lose routing while it reloads.
+
+**Confirm you got the new one** before moving on — same command, either
+environment:
+
+```bash
+docker compose exec targetnetwork-routing \
+  curl -s localhost:8989/info | grep -o '"import_date":"[^"]*"'
+```
+
+The date must be the new import, not `2026-08-29`. If it is unchanged, the
+download fell back to a cached layer or the volume was recreated with the
+old content; repeat the wipe.
+
+**Then, in this order:**
+
+1. **Restart the api.** The segment cache purges itself on the changed
+   `import_date` (§7a.2) — watch for `graph import changed … purged N
+   cached segment(s)`. Nothing to do by hand, but the first hours route
+   live.
+2. **Truncate the compute caches.** A cached whole-result carries geometry
+   and times from the old graph, and no key of theirs mentions the graph:
+
+   ```sql
+   TRUNCATE family.members, family.documents;
+   ```
+
+3. **Re-run the ONTD projection**, so the six Sicilian routes pick up real
+   geometry instead of their straight-line placeholders (container name may
+   differ):
+
+   ```bash
+   docker exec night-train-api python /app/db/ontd/projection.py
+   ```
+
+   The run ends with every route still on straight lines, grouped by
+   `routing_status`. Sicily should be absent. Takes ~1 min, needs no Drive
+   access.
+4. **Re-run the §7a.3 precompute** for `infra_2026` when you have the
+   window. This is the recurring per-graph cost §7a.2 warns about, not new
+   work — the batch is simply the same runbook again. Not urgent: the cache
+   refills from traffic meanwhile.
+
+`scripts/refresh_proposals.py` is optional here. Published proposals near
+the strait will show different numbers once recomputed; everything else is
+unchanged, and the next refresh you run for any other reason picks them up.
 
 ---
 
