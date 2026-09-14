@@ -112,6 +112,7 @@ CREATE TABLE proposals.trips (
     trip_headsign             TEXT,
     direction_id              SMALLINT CHECK (direction_id IN (0, 1)),
     composition_type_id       TEXT NOT NULL,
+    departure_shift_min       SMALLINT NOT NULL DEFAULT 0,
     created_at                TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -129,6 +130,7 @@ COMMENT ON COLUMN proposals.trips.shape_id               IS 'References proposal
 COMMENT ON COLUMN proposals.trips.trip_headsign          IS 'Destination text shown to passengers (e.g. "Wien Hbf").';
 COMMENT ON COLUMN proposals.trips.direction_id           IS 'GTFS direction: 0 = outbound, 1 = inbound.';
 COMMENT ON COLUMN proposals.trips.composition_type_id    IS 'Natural key of the composition type used. Soft reference to input_params.composition_types.composition_type_id.';
+COMMENT ON COLUMN proposals.trips.departure_shift_min    IS 'How far an expert departure override moved the first departure from its automatic value, in minutes (ROUTE_BUILDER 0.9.37); 0 for every automatic timetable. Stored, not derived: the automatic departure is gone once an override replaced it.';
 
 -- ---------------------------------------------------------------
 -- stop_times

@@ -30,7 +30,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.37"
+ROUTE_BUILDER_VERSION: str = "0.9.38"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -45,6 +45,21 @@ ROUTE_BUILDER_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.38": {
+        "date": "2026-09-14",
+        "author": "david + claude",
+        "changes": "NO OUTPUT CHANGE for a fresh compute. Trip.departure_shift_min "
+        "is now PERSISTED: 0.9.37 serialized it but proposals.trips had no "
+        "column, so route_dict_from_gtfs() rebuilt every published trip with "
+        "the default 0 and a published expert timetable came back with its "
+        "shift forgotten (test_36's expert roundtrip caught it). One "
+        "migration adds proposals.trips.departure_shift_min SMALLINT NOT "
+        "NULL DEFAULT 0 (db/dev/sql/migrations/2026-09-14_trips_departure_"
+        "shift.sql); the GTFS store writes it on publish and reads it back. "
+        "Routes published under 0.9.37 with a departure override keep 0 — "
+        "the true shift was never stored and 0 is what the API has returned "
+        "for them since publication. No truncate, no recompute.",
+    },
     "0.9.37": {
         "date": "2026-09-13",
         "author": "david + claude",
