@@ -1,19 +1,22 @@
 import { describe, it, expect } from 'vitest'
 import {
   addonFor,
+  clockToServiceMinute,
   addonsForDirection,
   droppedAddons,
   emptyExpert,
   fromRequest,
   fromRouteSegments,
   isEmptyExpert,
+  materialiseSlack,
+  mirrorDeparture,
   mirrorDirection,
   pruneExpertToStops,
   pruneToStops,
   resolveDeparture,
+  resolveTimetable,
   setAddon,
   setDeparture,
-  shiftDeparture,
   swapDirections,
   toRequest,
   toggleDepartureMode,
@@ -30,6 +33,11 @@ const addon = (from: string, to: string, min: number): SegmentAddon => ({
   toStopId: to,
   addMin: min,
 })
+
+// Automatic departures of the two directions — outbound 21:00, return 21:10
+// (asymmetric on purpose, so a mirrored pin cannot pass by coincidence).
+const AUTOS = { own: 1260, other: 1270 }
+const AUTOS_FLIPPED = { own: AUTOS.other, other: AUTOS.own }
 
 describe('setAddon', () => {
   it('never stores a negative value — a leg can only be padded', () => {
@@ -87,13 +95,30 @@ describe('pruneToStops', () => {
 })
 
 describe('mirroring', () => {
-  it('reverses each pair and never carries the departure', () => {
-    const mirrored = mirrorDirection({
-      departure: { mode: 'absolute', minutes: 1290 },
-      addons: [addon(A, B, 8)],
-    })
-    expect(mirrored.departure).toBeNull()
+  it('reverses each pair and displaces the departure the other way', () => {
+    const mirrored = mirrorDirection(
+      { departure: { mode: 'shift', minutes: -60 }, addons: [addon(A, B, 8)] },
+      AUTOS,
+    )
+    expect(mirrored.departure).toEqual({ mode: 'shift', minutes: 60 })
     expect(mirrored.addons).toEqual([addon(B, A, 8)])
+  })
+
+  it('mirrors a pinned departure as a pin, by its distance from the automatic value', () => {
+    // 20:00 against an automatic 21:00 is an hour early; the other
+    // direction leaves an hour late against ITS automatic value.
+    const pinned = { mode: 'absolute' as const, minutes: 1200 }
+    expect(mirrorDeparture(pinned, AUTOS)).toEqual({ mode: 'absolute', minutes: 1330 })
+    expect(mirrorDeparture(null, AUTOS)).toBeNull()
+  })
+
+  it('is an involution once the autos change places', () => {
+    for (const departure of [
+      { mode: 'absolute' as const, minutes: 1200 },
+      { mode: 'shift' as const, minutes: 25 },
+    ]) {
+      expect(mirrorDeparture(mirrorDeparture(departure, AUTOS), AUTOS_FLIPPED)).toEqual(departure)
+    }
   })
 
   it('gives the return outbound’s mirrored add-ons until the link is broken', () => {
@@ -107,29 +132,33 @@ describe('mirroring', () => {
 
 describe('swapDirections', () => {
   it('leaves an untouched timetable untouched', () => {
-    expect(swapDirections(emptyExpert())).toEqual(emptyExpert())
+    expect(swapDirections(emptyExpert(), AUTOS)).toEqual(emptyExpert())
   })
 
   it('keeps a mirroring return mirroring, minutes staying on the same physical legs', () => {
     const state = { outbound: { departure: null, addons: [addon(A, B, 8)] }, returnTrip: null }
-    const swapped = swapDirections(state)
+    const swapped = swapDirections(state, AUTOS)
     expect(swapped.returnTrip).toBeNull()
     expect(swapped.outbound.addons).toEqual([addon(B, A, 8)])
     // Mirroring is symmetric, so flipping twice is where you started.
-    expect(swapDirections(swapped)).toEqual(state)
+    expect(swapDirections(swapped, AUTOS_FLIPPED)).toEqual(state)
   })
 
-  it('materialises the link rather than losing a pinned departure', () => {
+  it('shows the mirrored pin on the direction now on screen, and gets it back on the way home', () => {
     const state = {
       outbound: {
-        departure: { mode: 'absolute' as const, minutes: 1290 },
+        departure: { mode: 'absolute' as const, minutes: 1200 },
         addons: [addon(A, B, 8)],
       },
       returnTrip: null,
     }
-    const swapped = swapDirections(state)
-    expect(swapped.outbound).toEqual({ departure: null, addons: [addon(B, A, 8)] })
-    expect(swapped.returnTrip).toEqual(state.outbound)
+    const swapped = swapDirections(state, AUTOS)
+    expect(swapped.returnTrip).toBeNull()
+    expect(swapped.outbound).toEqual({
+      departure: { mode: 'absolute', minutes: 1330 },
+      addons: [addon(B, A, 8)],
+    })
+    expect(swapDirections(swapped, AUTOS_FLIPPED)).toEqual(state)
   })
 
   it('exchanges two unlinked directions as they are', () => {
@@ -140,10 +169,10 @@ describe('swapDirections', () => {
         addons: [addon(C, B, 4)],
       },
     }
-    const swapped = swapDirections(state)
+    const swapped = swapDirections(state, AUTOS)
     expect(swapped.outbound).toEqual(state.returnTrip)
     expect(swapped.returnTrip).toEqual(state.outbound)
-    expect(swapDirections(swapped)).toEqual(state)
+    expect(swapDirections(swapped, AUTOS_FLIPPED)).toEqual(state)
   })
 
   it('survives the prune that follows a direction flip — the wipe this prevents', () => {
@@ -155,7 +184,7 @@ describe('swapDirections', () => {
       outbound: { departure: null, addons: [addon(A, B, 8)] },
       returnTrip: { departure: null, addons: [addon(C, B, 4)] },
     }
-    const pruned = pruneExpertToStops(swapDirections(state), [...stops].reverse())
+    const pruned = pruneExpertToStops(swapDirections(state, AUTOS), [...stops].reverse())
     expect(pruned.outbound.addons).toEqual([addon(C, B, 4)])
     expect(pruned.returnTrip?.addons).toEqual([addon(A, B, 8)])
 
@@ -186,16 +215,6 @@ describe('departure override', () => {
     const newAuto = auto - 25 // a reroute re-centred the mirror
     expect(resolveDeparture(pinned, newAuto)).toBe(auto + 40)
     expect(resolveDeparture(following, newAuto)).toBe(newAuto + 40)
-  })
-
-  it('pins on the first nudge and then moves within the mode', () => {
-    const first = shiftDeparture(null, auto, -5)
-    expect(first).toEqual({ mode: 'absolute', minutes: auto - 5 })
-    expect(shiftDeparture(first, auto, -5)).toEqual({ mode: 'absolute', minutes: auto - 10 })
-    expect(shiftDeparture({ mode: 'shift', minutes: 10 }, auto, 5)).toEqual({
-      mode: 'shift',
-      minutes: 15,
-    })
   })
 
   it('keeps a following departure following when a time is typed in', () => {
@@ -326,5 +345,98 @@ describe('toRequest', () => {
       returnTrip: { departure: null, addons: [] },
     }
     expect(toRequest(state)?.return).toEqual({ mirror_outbound: true })
+  })
+})
+
+describe('clockToServiceMinute', () => {
+  it('lands on the day nearest the current departure', () => {
+    expect(clockToServiceMinute('23:55', 1260)).toBe(1435) // same evening
+    expect(clockToServiceMinute('00:10', 1435)).toBe(1450) // just past midnight
+    expect(clockToServiceMinute('23:55', -5)).toBe(-5) // a mirrored return, day −1
+  })
+
+  it('rejects anything that is not a clock time', () => {
+    expect(clockToServiceMinute('', 1260)).toBeNull()
+    expect(clockToServiceMinute('later', 1260)).toBeNull()
+  })
+})
+
+describe('resolveTimetable', () => {
+  const same = (
+    a: Parameters<typeof resolveTimetable>[0],
+    b: Parameters<typeof resolveTimetable>[0],
+  ) => JSON.stringify(resolveTimetable(a, AUTOS)) === JSON.stringify(resolveTimetable(b, AUTOS))
+
+  it('reads an untouched state as the automatic timetable', () => {
+    expect(resolveTimetable(emptyExpert(), AUTOS)).toEqual([
+      { departureMin: AUTOS.own, addons: [] },
+      { departureMin: AUTOS.other, addons: [] },
+    ])
+  })
+
+  it('does not call a pin at the automatic value, or a pin↔shift toggle, a change', () => {
+    const pinnedAtAuto = {
+      outbound: { departure: { mode: 'absolute' as const, minutes: AUTOS.own }, addons: [] },
+      returnTrip: null,
+    }
+    expect(same(emptyExpert(), pinnedAtAuto)).toBe(true)
+    const pinned = {
+      outbound: { departure: { mode: 'absolute' as const, minutes: 1200 }, addons: [] },
+      returnTrip: null,
+    }
+    const following = {
+      outbound: {
+        departure: toggleDepartureMode(pinned.outbound.departure, AUTOS.own),
+        addons: [],
+      },
+      returnTrip: null,
+    }
+    expect(same(pinned, following)).toBe(true)
+  })
+
+  it('does not call breaking the mirror link a change, but moving a mirrored time is one', () => {
+    const mirrored = {
+      outbound: { departure: { mode: 'shift' as const, minutes: -60 }, addons: [addon(A, B, 8)] },
+      returnTrip: null,
+    }
+    const copied = { ...mirrored, returnTrip: mirrorDirection(mirrored.outbound, AUTOS) }
+    expect(same(mirrored, copied)).toBe(true)
+    const moved = {
+      ...copied,
+      returnTrip: { ...copied.returnTrip, departure: { mode: 'shift' as const, minutes: 30 } },
+    }
+    expect(same(mirrored, moved)).toBe(false)
+  })
+
+  it('resolves the mirrored return as the opposite shift', () => {
+    const state = {
+      outbound: { departure: { mode: 'absolute' as const, minutes: 1200 }, addons: [] },
+      returnTrip: null,
+    }
+    expect(resolveTimetable(state, AUTOS)[1].departureMin).toBe(AUTOS.other + 60)
+  })
+})
+
+describe('materialiseSlack', () => {
+  it('turns the stretch into add-ons on the same legs and pins the departure where it is', () => {
+    const direction = { departure: null, addons: [addon(A, B, 5)] }
+    const legs = [
+      { fromStopId: A, toStopId: B, slackMin: 40 },
+      { fromStopId: B, toStopId: C, slackMin: 120 },
+      { fromStopId: C, toStopId: X, slackMin: 0 },
+    ]
+    const result = materialiseSlack(direction, legs, 1260)
+    expect(result.departure).toEqual({ mode: 'absolute', minutes: 1260 })
+    expect(addonFor(result.addons, A, B)).toBe(45)
+    expect(addonFor(result.addons, B, C)).toBe(120)
+    expect(addonFor(result.addons, C, X)).toBe(0)
+  })
+
+  it('replaces a following departure with a pin, so the automatic re-centring cannot move the trip', () => {
+    const direction = { departure: { mode: 'shift' as const, minutes: -30 }, addons: [] }
+    expect(materialiseSlack(direction, [], 1230).departure).toEqual({
+      mode: 'absolute',
+      minutes: 1230,
+    })
   })
 })
