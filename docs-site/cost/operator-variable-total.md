@@ -11,11 +11,11 @@ description: 'The operator costs that scale with how much the train runs.'
 
 ## What this is
 
-The operator costs that move with how much the train actually runs: hours
-on duty, kilometres driven, tickets sold.
+The operator costs that move with how much the train actually runs: hours on
+duty, kilometres driven, tickets sold.
 
-Add a stop and these grow. Run the service on fewer nights and they
-shrink. They are the costs that respond to the timetable.
+Add a stop and these grow. Run the service on fewer nights and they shrink.
+They are the costs that respond to the timetable.
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-operator_variable_total_eur"></a>

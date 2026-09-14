@@ -1,8 +1,8 @@
 ---
-title: 'All formulas'
+title: 'Formulas'
 ---
 
-# All formulas
+# Formulas
 
 <!-- Generated from the model registries. Edit the model, not this page —
      anything outside the GENERATED markers survives regeneration. -->

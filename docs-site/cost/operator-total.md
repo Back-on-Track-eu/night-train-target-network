@@ -14,13 +14,6 @@ description: 'Everything the operator spends: variable costs plus fixed costs.'
 What the train operator itself spends, as opposed to what it pays other
 companies for access to the railway.
 
-The split matters because the two halves behave differently under policy.
-Operator costs respond to how the service is run — the shift lengths, the
-size of the train, how often it is cleaned. Infrastructure costs are set
-by each country's charging regime and are largely outside an operator's
-control. A route that looks expensive because of track access charges is a
-different problem from one that looks expensive because of staffing.
-
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-operator_total_eur"></a>
 

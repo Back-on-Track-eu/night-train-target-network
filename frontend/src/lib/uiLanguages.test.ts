@@ -6,14 +6,16 @@ describe('uiLanguages', () => {
     expect(UI_LANGUAGES.map((lang) => lang.code).slice(0, 2)).toEqual(['en', 'de'])
   })
 
-  it('covers the seven back-on-track.eu languages without duplicates', () => {
+  it('lists the shipped locales without duplicates', () => {
     const codes = UI_LANGUAGES.map((lang) => lang.code)
-    expect(codes).toEqual(['en', 'de', 'fr', 'nl', 'it', 'es', 'pl'])
+    expect(codes).toEqual(['en', 'de'])
     expect(new Set(codes).size).toBe(codes.length)
   })
 
-  it('marks only the locales we ship translations for as available', () => {
-    expect(availableLanguages().map((lang) => lang.code)).toEqual(['en'])
+  // The bar advertises nothing it cannot deliver, so every entry is live. The
+  // `available: false` branch stays supported for a locale announced early.
+  it('marks every listed language as available', () => {
+    expect(availableLanguages().map((lang) => lang.code)).toEqual(['en', 'de'])
   })
 
   it('names every language by its endonym', () => {

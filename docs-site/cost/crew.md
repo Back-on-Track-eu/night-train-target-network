@@ -11,13 +11,13 @@ description: 'What the cabin crew costs per year, including the relief crew a lo
 
 ## What this is
 
-What the on-board staff cost over a year — the people who make up berths,
+What the on-board staff cost over a year: the people who make up berths,
 serve breakfast and look after passengers overnight.
 
-Priced the same way as the driver: a wage per productive hour divided by
-the share of paid hours that is productive, times the hours the crew is on
-board. Long trips need relief crew, which lowers that share and raises the
-effective hourly cost.
+A wage per productive hour is divided by
+the share of paid hours that is productive, then multiplied by the hours the
+crew is on board. Long trips need relief crew, which lowers that share and
+raises the effective hourly cost.
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-crew_eur"></a>
