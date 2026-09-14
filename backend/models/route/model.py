@@ -30,7 +30,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.38"
+ROUTE_BUILDER_VERSION: str = "0.9.39"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -45,6 +45,23 @@ ROUTE_BUILDER_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.39": {
+        "date": "2026-09-14",
+        "author": "david + claude",
+        "changes": "NO OUTPUT CHANGE for a fresh compute. Trip.gauge_mm is now "
+        "PERSISTED — the same gap as 0.9.38, one version older: 0.9.27 "
+        "serialized general_parameters.track_gauge_mm but proposals.trips "
+        "had no column, so route_dict_from_gtfs() rebuilt every published "
+        "trip at the default 1435 and a published Finnish or Iberian route "
+        "reported standard gauge on reload. One migration adds "
+        "proposals.trips.track_gauge_mm SMALLINT NOT NULL DEFAULT 1435 "
+        "(db/dev/sql/migrations/2026-09-14_trips_track_gauge.sql); the GTFS "
+        "store writes it on publish and reads it back, and test_36 now "
+        "round-trips a non-default gauge. Broad-gauge routes published "
+        "before this keep 1435 — what the API has returned for them since "
+        "publication; re-publishing restores the true family. No truncate, "
+        "no recompute.",
+    },
     "0.9.38": {
         "date": "2026-09-14",
         "author": "david + claude",

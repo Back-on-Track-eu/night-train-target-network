@@ -226,8 +226,8 @@ def _insert_trip(
     cur.execute(
         "INSERT INTO proposals.trips "
         "(trip_id, route_id, service_id, shape_id, trip_headsign, "
-        " direction_id, composition_type_id, departure_shift_min) "
-        "VALUES (%s, %s, %s, NULL, %s, %s, %s, %s)",
+        " direction_id, composition_type_id, departure_shift_min, track_gauge_mm) "
+        "VALUES (%s, %s, %s, NULL, %s, %s, %s, %s, %s)",
         (
             trip_id,
             route_id,
@@ -239,6 +239,9 @@ def _insert_trip(
             # how far an expert override moved the departure. Absent for
             # pre-0.9.37 payloads, which never had a shift to record.
             int(trip.get("general_parameters", {}).get("departure_shift_min", 0)),
+            # Likewise (0.9.39): the gauge family the trip routed on.
+            # Absent for pre-0.9.27 payloads, all of which were 1435.
+            int(trip.get("general_parameters", {}).get("track_gauge_mm", 1435)),
         ),
     )
     _insert_stop_times(cur, trip_id, stops)
@@ -389,7 +392,8 @@ def route_dict_from_gtfs(
     route_id = f"P{proposal_id}_V{proposal_version}_R1"
 
     cur.execute(
-        "SELECT trip_id, direction_id, composition_type_id, departure_shift_min "
+        "SELECT trip_id, direction_id, composition_type_id, departure_shift_min, "
+        " track_gauge_mm "
         "FROM proposals.trips WHERE route_id = %s ORDER BY trip_id",
         (route_id,),
     )
@@ -455,6 +459,7 @@ def route_dict_from_gtfs(
             direction=0,
             stop_infra=stop_infra,
             departure_shift_min=int(group[0]["departure_shift_min"]),
+            gauge_mm=int(group[0]["track_gauge_mm"]),
         )
         return_trip = _build_trip(
             cur,
@@ -462,6 +467,7 @@ def route_dict_from_gtfs(
             direction=1,
             stop_infra=stop_infra,
             departure_shift_min=int(group[1]["departure_shift_min"]),
+            gauge_mm=int(group[1]["track_gauge_mm"]),
         )
         od_pairs = _build_od_pairs(cur, group[0]["trip_id"], group[1]["trip_id"])
         trip_pairs.append(
@@ -489,7 +495,12 @@ def route_dict_from_gtfs(
 
 
 def _build_trip(
-    cur, trip_id: str, direction: int, stop_infra, departure_shift_min: int = 0
+    cur,
+    trip_id: str,
+    direction: int,
+    stop_infra,
+    departure_shift_min: int = 0,
+    gauge_mm: int = 1435,
 ) -> Trip:
     cur.execute(
         "SELECT stop_sequence, stop_id, arrival_time, departure_time, "
@@ -586,6 +597,7 @@ def _build_trip(
         direction=direction,
         segments=segments,
         timetable_warnings=warnings,
+        gauge_mm=gauge_mm,
         departure_shift_min=departure_shift_min,
     )
 

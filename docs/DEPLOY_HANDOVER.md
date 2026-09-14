@@ -77,15 +77,18 @@ capacity work that is genuinely yours to schedule.
 
 ---
 
-## One schema migration: `proposals.trips.departure_shift_min` — 2026-09-14
+## Two schema migrations on `proposals.trips` — 2026-09-14
 
-`db/dev/sql/migrations/2026-09-14_trips_departure_shift.sql` runs with this
-deploy, before the api starts, like every other migration. Nothing for you to
-do. It adds one `SMALLINT NOT NULL DEFAULT 0` column to `proposals.trips`
-(route builder 0.9.38): the expert timetable's departure shift, which 0.9.37
-serialized but never stored, so a published expert timetable came back with
-its shift at 0. Schema only — no truncate, no recompute, no reseed; existing
-rows take the default, which is what the API has been returning for them.
+`db/dev/sql/migrations/2026-09-14_trips_departure_shift.sql` and
+`2026-09-14_trips_track_gauge.sql` run with this deploy, before the api
+starts, like every other migration. Nothing for you to do. Each adds one
+`SMALLINT NOT NULL` column to `proposals.trips`: the expert timetable's
+departure shift (`DEFAULT 0`, route builder 0.9.38) and the gauge family the
+trip routed on (`DEFAULT 1435`, 0.9.39) — both were serialized by earlier
+versions but never stored, so a published expert timetable came back with its
+shift at 0 and a published broad-gauge route reported 1435. Schema only — no
+truncate, no recompute, no reseed; existing rows take the defaults, which is
+what the API has been returning for them.
 
 **Delete this entry once both staging and production have deployed past
 2026-09-14.**
