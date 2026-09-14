@@ -14,8 +14,12 @@ description: 'Ticket income from places sold and average fare — both set by yo
 Places sold times the average fare.
 
 **Both of those are inputs, not predictions.** The demand model in this
-tool is a placeholder: a flat load factor of 70% and flat fares per
-kilometre by accommodation class. It does not model who would travel,
+tool is a placeholder: a flat load factor of 70% and a two-part fare per
+accommodation class — a fixed price of admission plus a small distance
+term. The defaults are benchmarked against realised 2025–26 fares at ÖBB
+Nightjet, European Sleeper, Nox, Trenitalia and SNCF (see the standard
+values), but they are still one average applied everywhere. It does not
+model who would travel,
 between which cities, at what price, or how many would switch from flying
 or driving. It applies the same assumption to a Berlin–Paris service and a
 route nobody would ride.

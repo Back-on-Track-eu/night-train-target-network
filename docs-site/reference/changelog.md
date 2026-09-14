@@ -10,6 +10,10 @@ title: 'What changed'
 <!-- BEGIN GENERATED: changelog -->
 ## Route & timetable builder
 
+### `0.9.37` — 2026-09-13
+
+Expert timetable: a mirroring return now mirrors the DEPARTURE too. expert_timetable.return = {mirror_outbound: true} (the default) used to reverse outbound's add-ons and leave the return's departure at its automatic value, so pulling an outbound from 21:00 to 20:00 left the return where it was. The pair is now a mirror image around MIRROR_MIN: the return's departure is displaced the opposite way by however far outbound's actually moved (21:00->08:00 pulled to 20:00->07:00 sends the return to 22:00->09:00), and that holds for 'absolute' as well as 'shift' overrides because the displacement is resolved on the built outbound trip, not read off the request. An explicit return block is still taken as given, which is how the two directions are timed independently. New Trip.departure_shift_min, serialized as general_parameters.departure_shift_min (0 for every automatic timetable, read back on load, default 0 for older payloads), so a client can recover the automatic departure from a pinned trip. WHAT CHANGES: only requests with a mirroring return AND a departure override — their return trip moves, and with it its stop classification and every cost placed on the clock. Every automatic request, every add-on-only request and every explicit-return request is byte-identical apart from the new field. No schema change; the family key carries the version, so cached documents invalidate themselves.
+
 ### `0.9.36` — 2026-09-12
 
 NO OUTPUT CHANGE. One unused import removed from route.py (enum.Enum, left behind when StopType moved to trip.py). The version moves only because the CI version gate treats any diff to a route-builder file as a model change, and riding along with CALC 0.9.29 — which invalidates every family key and the compute cache anyway — makes the bump free. Every number a route produces is identical to 0.9.35.
@@ -173,6 +177,10 @@ version.py renamed to model.py (every model now anchors version, description, ch
 Dummy implementation: flat 28.0 kWh/km factor. Does not account for weight, speed, or terrain. Requires calibration by energy model team — see models/energy/README.md and ONBOARDING.md.
 
 ## Demand model
+
+### `0.0.5` — 2026-09-14
+
+THE STOPGAP TARIFF DEFAULTS ARE NOW BENCHMARKED, not round numbers. Every per-class default (fare_per_pax, fare_per_km, services, catering) is re-set from realised 2025-26 night-train fares — ÖBB Nightjet, European Sleeper, Nox, Trenitalia ICN, SNCF Intercités de nuit — net of VAT and carried to the 2032 price year. The SHAPE changes more than the level: real tariffs are nearly flat over distance (Nightjet prices one band per class for any German domestic journey), so the fixed part rises roughly fourfold and the per-km part falls to a quarter — a 1,000 km seat was 108 EUR and is now 55, a 300 km couchette was 51 and is now 66. Per-km rates are now expressed in tenths of a cent (0.025), which the request already carried at 4 decimals; the frontend follows in the same commit. Every evaluation that does not override the fares changes with this — hence the version bump.
 
 ### `0.0.4` — 2026-09-12
 
