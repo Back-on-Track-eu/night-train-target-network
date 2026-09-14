@@ -208,7 +208,7 @@ class TestFares:
         from api.helpers.member_compute import normalize_fares
 
         assert normalize_fares(None) == normalize_fares(
-            {"Seat": 0.10, "Couchette": 0.13, "Sleeper": 0.18, "Capsule": 0.12}
+            {"Seat": 0.025, "Couchette": 0.035, "Sleeper": 0.060, "Capsule": 0.040}
         )
 
     def test_validation(self):
