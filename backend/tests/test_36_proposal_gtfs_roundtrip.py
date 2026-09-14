@@ -213,6 +213,37 @@ class TestRouteRoundtrip:
             == 13
         )
 
+    def test_track_gauge_survives_roundtrip(self, db_cur, loader, api_base):
+        """ROUTE_BUILDER 0.9.39 — the gauge family a trip routed on is
+        stored, not re-derived: proposals.trips.track_gauge_mm. Every
+        fixture route in this file is 1435, which is also the column's
+        default, so a 1435 round-trip proves nothing; this test publishes
+        a route whose trips CLAIM 1520 and checks the claim comes back.
+        The claim is set on the published dict, exactly where the store
+        reads it — what a Finnish or Ukrainian route would carry
+        (test_78 covers that the router actually produces it)."""
+        response = compute(
+            api_base,
+            stops=STOPS_BERLIN_WIEN,
+            composition_id="NEW-BAL-7",
+            auto_stop_addition="off",
+        )
+        scenario_id = response["request"]["scenario_id"]
+        pid, version, published_route = _publish_fixture(db_cur, response)
+        for pair in published_route["trip_pairs"]:
+            for direction in ("outbound", "return_trip"):
+                pair[direction]["general_parameters"]["track_gauge_mm"] = 1520
+
+        insert_route_gtfs(db_cur, published_route)
+        reconstructed = _json_normalize(
+            route_dict_from_gtfs(pid, version, loader, scenario_id, db_cur)
+        )
+
+        for pair in reconstructed["trip_pairs"]:
+            for direction in ("outbound", "return_trip"):
+                assert pair[direction]["general_parameters"]["track_gauge_mm"] == 1520
+        assert reconstructed == _round_avg_price(published_route)
+
     def test_od_pairs_survive_roundtrip(self, db_cur, loader, api_base):
         """Stopgap demand (distribute_demand(), always run by
         POST /api/proposal/calc) populates od_pairs — confirms the

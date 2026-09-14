@@ -391,6 +391,47 @@ defaults, `GET /api/models`):
 `catering_eur_per_pax` was a single number until CALC 0.9.30; posting one
 now returns a 400 naming the new shape.
 
+**Expert timetable** — `expert_timetable` overrides two things the model
+otherwise decides alone, per direction: the first departure and extra
+minutes on individual legs. `null` (or an absent key) is the automatic
+timetable and computes exactly as before.
+
+```json
+"expert_timetable": {
+  "outbound": {
+    "departure": { "mode": "absolute", "time_min": 1200 },   // or { "mode": "shift", "shift_min": -60 }, or null
+    "segment_addons": [ { "from_stop_id": "osm:a", "to_stop_id": "osm:b", "add_min": 8 } ]
+  },
+  "return": { "mirror_outbound": true }                         // or a block shaped like outbound
+}
+```
+
+* `departure` — `absolute` pins a service-day minute that survives a
+  reroute; `shift` displaces whatever the strategy computes and moves with
+  it. Minutes are on the continuous service-day scale (`hhmm_to_min`), so a
+  return trip may legitimately carry a negative value.
+* `segment_addons` — `add_min` is an integer ≥ 1 on a stop pair that is
+  adjacent, in that order, in `stops` (400 otherwise). An add-on only ever
+  pads a leg; the routed physics stay the floor. It lands on
+  `segments[].addon_time_min` and is summed in
+  `general_parameters.manual_addon_min`.
+* `return` — either `{"mirror_outbound": true}` (the default, and what an
+  omitted block means) or its own block; never both. **Mirroring is the
+  mirror image around 02:30** (`ROUTE_BUILDER_VERSION` 0.9.37): outbound's
+  add-ons reversed onto the return's stop pairs, and the return's departure
+  displaced the opposite way by however far outbound's actually moved — an
+  outbound pulled from 21:00→08:00 to 20:00→07:00 sends the return to
+  22:00→09:00. A return block of its own is taken as given, which is how the
+  two directions are timed independently.
+* `general_parameters.departure_shift_min` on every trip reports how far
+  its first departure sits from the automatic value (0 on an automatic
+  timetable), so a client can always show the automatic departure next to an
+  overridden one: `departure_time_min − departure_shift_min`.
+
+The resolved block is echoed under `request.expert_timetable` in canonical
+form (add-ons sorted, a mirroring return spelled out) and is part of the
+family key.
+
 `auto_stop_addition: "suggest"` runs the candidate search on the
 presented member only; every other member builds with `"off"`, and the
 suggestions ride on the document. The mode is part of the family key —

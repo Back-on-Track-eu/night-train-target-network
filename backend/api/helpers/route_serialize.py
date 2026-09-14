@@ -138,6 +138,11 @@ def _trip_general_parameters(trip: Trip) -> dict:
         # over segments, for the same reason as the figures above: it is
         # read at a glance ("this timetable was padded by 14 minutes").
         "manual_addon_min": trip.addon_time_min,
+        # How far the expert departure moved the trip off its automatic
+        # value (0.9.37) — 0 for every automatic timetable. Read back on
+        # load, since the segments cannot reproduce it, and what the client
+        # needs to show "automatic 21:00" next to a pinned 20:00.
+        "departure_shift_min": trip.departure_shift_min,
         # Which per-gauge routing profile carried the trip (0.9.27) —
         # 1435 for the whole network west of the break-of-gauge lines,
         # informative exactly where routes were impossible before.
@@ -509,19 +514,23 @@ def _timetable_warning_from_dict(d: dict) -> TimetableWarning:
 
 
 def _trip_from_dict(d: dict, geometries_by_id: dict[str, list]) -> Trip:
-    # timetable_warnings live inside the (otherwise derived) general_parameters
-    # block — the one figure there that CAN'T be recomputed from segments
-    # alone (needs the fixed-night interval, which isn't stored), so it's
-    # read back for round-trip fidelity. Absent for pre-0.9.10 payloads.
+    # general_parameters is derived from the segments except for two entries
+    # read back for round-trip fidelity: timetable_warnings (need the
+    # fixed-night interval, which isn't stored; absent for pre-0.9.10
+    # payloads) and departure_shift_min (the automatic departure is gone
+    # once an override replaced it).
+    general = d.get("general_parameters", {})
     warnings = [
-        _timetable_warning_from_dict(w)
-        for w in d.get("general_parameters", {}).get("timetable_warnings", [])
+        _timetable_warning_from_dict(w) for w in general.get("timetable_warnings", [])
     ]
     return Trip(
         trip_id=d["trip_id"],
         direction=int(d["direction"]),
         segments=[_segment_from_dict(s, geometries_by_id) for s in d["segments"]],
         timetable_warnings=warnings,
+        # Absent for pre-0.9.37 payloads, which never had a mirrored
+        # departure to record.
+        departure_shift_min=int(general.get("departure_shift_min", 0)),
     )
 
 

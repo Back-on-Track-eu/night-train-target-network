@@ -10,8 +10,7 @@ import type { Locale } from '@/lib/localeStorage'
 // Available entries carry a `Locale`, so switching needs no cast; the announced
 // ones are labels only and stay inert until their locale file lands.
 export type UiLanguage =
-  | { code: Locale; name: string; available: true }
-  | { code: string; name: string; available: false }
+  { code: Locale; name: string; available: true } | { code: string; name: string; available: false }
 
 // English first, German next, matching back-on-track.eu's site order. The
 // `available: false` branch (and LanguageSwitch's greyed-out rendering of it)

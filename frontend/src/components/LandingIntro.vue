@@ -15,11 +15,8 @@ const POSITION_PAPER_URL = 'https://back-on-track.eu/back-on-track-europes-gener
 
 // The documentation site: a separate static site served at /docs/ on this
 // origin, so plain anchors and root-relative paths, not router links. Its
-// landing page is the About page, so that is the bare /docs/ link; "how it
-// works" goes to the top of the cost breakdown, which is what the model
-// actually computes and the root of every formula page.
+// landing page is the About page, so that is the bare /docs/ link.
 const DOCS_ABOUT_URL = '/docs/'
-const DOCS_HOW_URL = '/docs/cost/total-cost'
 
 // The three quieter buttons next to the one filled call to action. Same shape
 // so the row reads as one set, one weight down so "suggest a route" stays the
@@ -98,7 +95,7 @@ onActivated(measureHero)
         </i18n-t>
 
         <!-- Every way into the site: contribute one, read the others, or read
-             up. The two docs buttons leave the SPA for the static site at
+             up. The About button leaves the SPA for the static site at
              /docs/, hence anchors rather than router links. -->
         <div class="flex flex-wrap items-center gap-3">
           <button type="button" :class="ctaButtonClass" @click="emit('create')">

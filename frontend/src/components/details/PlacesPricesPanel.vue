@@ -106,13 +106,35 @@ const placeKmOffered = computed(() =>
   props.schedulePreviewing ? live.value.placeKmOffered : props.committed.placeKmOffered,
 )
 
-/** The step each part moves by: cents for a per-km rate, ten cents for the
- *  figures that are whole euros a passenger pays. */
+/** Decimals each part is kept and shown at. A per-km rate is tenths of a
+ *  cent — a realistic night-train tariff is nearly flat over distance, so
+ *  its defaults read 0.025, 0.035 (DEMAND 0.0.5) and rounding to the cent
+ *  would silently turn 0.025 into 0.03. The backend echoes the per-km map
+ *  at 4 decimals and the per-passenger maps at 2, so 3 and 2 here round
+ *  trip unchanged. */
+const DECIMALS: Record<TariffPart, number> = {
+  faresPerPax: 2,
+  faresPerKm: 3,
+  servicesPerPax: 2,
+  cateringPerPax: 2,
+}
+
+/** The step each part moves by: half a cent for a per-km rate, a euro for
+ *  the fixed fare, ten cents for the other per-passenger figures. */
 const STEP: Record<TariffPart, number> = {
   faresPerPax: 1,
-  faresPerKm: 0.01,
+  faresPerKm: 0.005,
   servicesPerPax: 0.1,
   cateringPerPax: 0.1,
+}
+
+function roundPart(part: TariffPart, value: number): number {
+  const factor = 10 ** DECIMALS[part]
+  return Math.round(value * factor) / factor
+}
+
+function formatPart(part: TariffPart, value: number): string {
+  return value.toFixed(DECIMALS[part])
 }
 
 function setPart(part: TariffPart, classMain: string, value: number) {
@@ -121,7 +143,7 @@ function setPart(part: TariffPart, classMain: string, value: number) {
   const clamped = partIsSigned(part) ? value : Math.max(0, value)
   emit('update:tariff', {
     ...props.tariff,
-    [part]: { ...props.tariff[part], [classMain]: Math.round(clamped * 100) / 100 },
+    [part]: { ...props.tariff[part], [classMain]: roundPart(part, clamped) },
   })
 }
 
@@ -247,7 +269,11 @@ const numCell =
                   type="button"
                   class="cursor-pointer text-primary-50/40 hover:text-primary-50"
                   :aria-label="t('proposal.details.prices.reset')"
-                  :title="t('proposal.details.prices.resetTo', { value: cell.default.toFixed(2) })"
+                  :title="
+                    t('proposal.details.prices.resetTo', {
+                      value: formatPart(cell.part, cell.default),
+                    })
+                  "
                   @click="setPart(cell.part, row.classMain, cell.default)"
                 >
                   <AppIcon :path="mdiRefresh" :size="12" />
@@ -255,7 +281,7 @@ const numCell =
                 <input
                   :class="[numCell, cell.changed ? 'border-amber-400/50' : '']"
                   inputmode="decimal"
-                  :value="cell.value.toFixed(2)"
+                  :value="formatPart(cell.part, cell.value)"
                   :aria-label="t(`proposal.details.prices.parts.${cell.part}.label`)"
                   @change="setPart(cell.part, row.classMain, parseField($event))"
                 />
@@ -312,7 +338,13 @@ const numCell =
               :key="cell.part"
               class="border-l border-primary-50/10 py-1.5 pr-2 pl-2 text-right tabular-nums text-primary-50"
             >
-              {{ cell.value === null ? '—' : fmt.eur2(cell.value) }}
+              {{
+                cell.value === null
+                  ? '—'
+                  : cell.part === 'faresPerKm'
+                    ? fmt.dec3(cell.value)
+                    : fmt.eur2(cell.value)
+              }}
             </td>
             <td
               class="border-l border-primary-50/10 py-1.5 pr-2 pl-2 text-right tabular-nums text-primary-50"

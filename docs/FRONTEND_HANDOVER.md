@@ -985,6 +985,149 @@ onto the pending `backend-dev` coordination batch. `FAMILY_DOCUMENT_FORMAT`
 
 ---
 
+## 21. Expert timetable: a mirroring return mirrors the departure too — route builder 0.9.37
+
+**Behaviour change, no request-shape change.** `expert_timetable.return =
+{"mirror_outbound": true}` (the default) used to reverse outbound's add-ons
+and leave the return's departure at its automatic value. It now makes the
+pair a mirror image around 02:30: the return's departure is displaced the
+opposite way by however far outbound's actually moved, for `absolute` pins
+as well as `shift`s. An outbound pulled from 21:00→08:00 to 20:00→07:00
+sends the return to 22:00→09:00. A `return` block of its own is unchanged —
+that is "own times".
+
+**One new field:** `general_parameters.departure_shift_min: number` on every
+trip — how far its first departure sits from the automatic value, 0 on an
+automatic timetable, and the mirrored return reports the negated outbound
+value. The automatic departure is therefore always
+`departure_time_min − departure_shift_min`, pinned or not; the builder no
+longer has to keep "the last automatic value it happened to see".
+
+**Implemented in `frontend/` on this branch — review, not to-do:**
+
+* `lib/expertTimetable.ts` — `mirrorDeparture()` / `mirrorAddons()` /
+  `mirrorDirection(direction, autos)`; `swapDirections(state, autos)` keeps
+  a mirroring return mirroring across a flip (the direction on screen shows
+  the mirrored departure; flipping back restores the original, mode
+  included) instead of materialising the link; `shiftDeparture()` deleted
+  with the nudge buttons.
+* `ExpertTimetableControls.vue` — **deleted.** There is no expert panel any
+  more: in expert mode the first departure is a time input in the timetable
+  strip's own times column (first row), and the two switches are icon-only
+  pills next to the direction switch — 🔒 pinned / 🔓 follows automatic, ⧉
+  mirrored / ⇄ own times (gold = on) — plus a ↺ reset that appears once a
+  departure is overridden. Each icon (the direction switch too) opens the
+  shared hover popover (`InfoPopover`, same timing as the ⓘ icons) with the
+  sentence its `aria-label` carries. Switching back to mirrored always
+  mirrors the direction on screen.
+* `ProposalViewport.vue` — automatic departures read off
+  `departure_shift_min`; `setMirrored()` replaces `unlinkReturn`/
+  `relinkReturn`; `onDepartureInput()` + `currentDepartureClock` drive the
+  strip input (the override in force, not the computed row, so a typed time
+  stays until the recalculation applies it).
+* `en.json` — `proposal.expert` now holds `toggle`, `firstDeparture`, the
+  four switch `…Aria` strings, `reset` and the per-leg strings; every hint
+  and label of the old panel is gone.
+* `lib/expertTimetable.ts` — `clockToServiceMinute()` (the typed-time
+  resolution the panel used to do inline, now pure and tested) and
+  `resolveTimetable()` — the state as minutes on the clock per direction.
+  Staleness is decided on that, not on the request: pinning at the automatic
+  value, toggling pinned↔follows, or breaking the mirror link changes the
+  request without moving a minute and no longer asks for a recalculation.
+  When a time did move, the Recalculate button sits over the route-stats
+  panel (which greys out); the timetable itself is never covered or dimmed,
+  so several edits can be made before one explicit recompute; the results
+  below only grey (their own button is suppressed — one Recalculate on the
+  page).
+  The chosen mode reaches the stored proposal with the next recalculation
+  that is needed anyway.
+
+`api.ts` needs nothing: `CompactTrip.general_parameters` is untyped there.
+Stops applying once the field is on staging; the behaviour note stays as
+long as §9 does.
+
+---
+
+## 22. Fixed night in the builder — frontend only, no backend change
+
+`timetable_mode: "simpleAutomaticWithFixedNight"` + `fixed_night_interval:
+[A, B]` have been in the API since 0.9.10; the builder now posts them.
+
+**The tool.** A 🌙 pill in the strip's tool row — one of expert mode's
+tools, so it shows only while Expert timetable is on (blue when on). On, each row's stop-type icon (the one
+between the times and the band) becomes the click target: two clicks place
+the night section — the earlier of the two stops is its start, whichever
+was clicked first; a chosen end gets a blue ring, the icon pulses while one
+end is pending. Clicking either end of a placed
+section takes it away; switching the pill off is back to the automatic
+night; leaving expert mode puts the night back to what the results were
+computed with (it is part of the saved proposal, not an expert override). A line under the table says which state applies (automatic / pick
+the other end / "Night between A and B: centres 00:00–05:00 on this section
+and stretches it to five hours if needed"). Moving the night is stale
+results like an expert edit: the Recalculate control appears over the
+route-stats panel (which greys out), not over the results — and never over
+the timetable, whose inputs stay live so several things can be adjusted
+before one explicit recompute (nothing recalculates on its own).
+
+**What the timetable shows, always.** Between the times and the band every
+row carries its `stop_type` icon — 🚶 boarding (`mdiWalk`), 💤 night
+(`mdiSleep`), 🏃 alighting (`mdiExitRun`), ⇄ both — with the shared hover
+popover; timeline legs that run through
+00:00–05:00 are blue (`legIsNight` on the segment's departure/arrival
+minutes, the backend's own `NIGHT_START_MIN`/`NIGHT_END_MIN`). A legend
+under the table names the three when the timetable has a night. Blue is the
+night's colour everywhere (pill, marker, band, icon); gold stays the expert
+tools'.
+
+**The stretch in the add-on fields — and taking it over.** In expert mode
+the per-leg stepper shows every extra minute on the leg beyond its physics:
+the manual add-on plus the fixed night's stretch (`segments[].slack_time_min`,
+blue when it is the only thing there). The backend shares that stretch over
+the section's legs in proportion to each leg's running time (driving +
+acceleration/deceleration + buffer); nothing is recomputed client-side.
+
+The night band is just another way of adding time, so the first manual
+touch of a stretched leg — a step either way or a typed value —
+*materialises* the night (`lib/expertTimetable.ts` `materialiseSlack`):
+every leg's stretch becomes its manual minutes, the departure is pinned
+where the trip currently leaves, the fixed night is dropped and the tool
+goes off. Not a minute moves; from there the field is an ordinary add-on
+field (160 steps to 159 or 161, exactly as it reads), and the band, night
+icons and legend fade until the recompute (`nightOnScreenStale`). A return
+with its own times takes over its own stretch the same way; a mirroring one
+is derived. Left to the backend instead, a manual minute inside a fixed-night
+section only shrinks the stretch and the field springs back on the recompute
+— which is why the takeover is done client-side. Switching the pill off is
+different: that is "no night" — the interval is dropped without takeover and
+the next recompute centres the trip on 02:30 again.
+
+**Scenario / composition switches.** A switch is served from the family
+(`applyMemberFromFamily`), and the family was computed with the same
+request for every member — so the mirroring rule, a pinned or shifted
+departure, the add-ons and the fixed night all apply to the new member as
+they did to the old one (the pair stays mirrored around 02:30; a pinned
+departure stays on the clock, a following one re-centres with the member's
+own physics; the stretch is re-shared over the member's own leg times).
+What the user has set but not yet recomputed survives the switch too: the
+pending expert state, the night selection/tool state and the direction on
+screen are captured before `applyPlan()` and restored after it (`look`
+mode, which also silences the "add-ons dropped" toast — those minutes are
+pending, not dropped). The Recalculate on the route stats stays up.
+
+**Plumbing.** `lib/nightInterval.ts` (pure, 8 tests): `pruneNightInterval`,
+`reverseNightInterval`, `sameNightInterval`, `toggleNightStop`,
+`inNightInterval`, `legIsNight`. In `ProposalViewport.vue`: `nightMode`,
+`nightSelection` / `committedNightInterval` (committed = the echo's
+`fixed_night_interval`, in the posted order; a stored proposal with a night
+opens with the tool on), `familyRequest()` posts mode + pruned interval,
+`swapDirection()` reverses it with the itinerary, `nightChanged` joins
+`expertChanged` in `paramsStale` as `timetableChanged`, `cancelEdit`
+restores it. The draft (`lib/proposalDraftStorage.ts`) gained
+`nightIntervalIds`. `BackendStop.stop_type` is read off the route (compact
+stops already carry it). New strings under `proposal.night.*`.
+
+---
+
 ## Maintaining this document
 
 One file, updated in the same PR as the backend change. Each entry says

@@ -103,8 +103,8 @@ const priceLabel = computed(() => {
   const rates = carried.map(([, rate]) => rate)
   const span =
     Math.min(...rates) === Math.max(...rates)
-      ? fmt.dec2(rates[0])
-      : `${fmt.dec2(Math.min(...rates))}–${fmt.dec2(Math.max(...rates))}`
+      ? fmt.dec3(rates[0])
+      : `${fmt.dec3(Math.min(...rates))}–${fmt.dec3(Math.max(...rates))}`
   // Catering is per class now; the line names the span rather than pretending
   // there is one figure.
   const catering = Object.values(

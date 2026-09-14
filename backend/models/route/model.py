@@ -30,7 +30,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.36"
+ROUTE_BUILDER_VERSION: str = "0.9.39"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -45,6 +45,65 @@ ROUTE_BUILDER_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.39": {
+        "date": "2026-09-14",
+        "author": "david + claude",
+        "changes": "NO OUTPUT CHANGE for a fresh compute. Trip.gauge_mm is now "
+        "PERSISTED — the same gap as 0.9.38, one version older: 0.9.27 "
+        "serialized general_parameters.track_gauge_mm but proposals.trips "
+        "had no column, so route_dict_from_gtfs() rebuilt every published "
+        "trip at the default 1435 and a published Finnish or Iberian route "
+        "reported standard gauge on reload. One migration adds "
+        "proposals.trips.track_gauge_mm SMALLINT NOT NULL DEFAULT 1435 "
+        "(db/dev/sql/migrations/2026-09-14_trips_track_gauge.sql); the GTFS "
+        "store writes it on publish and reads it back, and test_36 now "
+        "round-trips a non-default gauge. Broad-gauge routes published "
+        "before this keep 1435 — what the API has returned for them since "
+        "publication; re-publishing restores the true family. No truncate, "
+        "no recompute.",
+    },
+    "0.9.38": {
+        "date": "2026-09-14",
+        "author": "david + claude",
+        "changes": "NO OUTPUT CHANGE for a fresh compute. Trip.departure_shift_min "
+        "is now PERSISTED: 0.9.37 serialized it but proposals.trips had no "
+        "column, so route_dict_from_gtfs() rebuilt every published trip with "
+        "the default 0 and a published expert timetable came back with its "
+        "shift forgotten (test_36's expert roundtrip caught it). One "
+        "migration adds proposals.trips.departure_shift_min SMALLINT NOT "
+        "NULL DEFAULT 0 (db/dev/sql/migrations/2026-09-14_trips_departure_"
+        "shift.sql); the GTFS store writes it on publish and reads it back. "
+        "Routes published under 0.9.37 with a departure override keep 0 — "
+        "the true shift was never stored and 0 is what the API has returned "
+        "for them since publication. No truncate, no recompute.",
+    },
+    "0.9.37": {
+        "date": "2026-09-13",
+        "author": "david + claude",
+        "changes": "Expert timetable: a mirroring return now mirrors the "
+        "DEPARTURE too. expert_timetable.return = {mirror_outbound: true} "
+        "(the default) used to reverse outbound's add-ons and leave the "
+        "return's departure at its automatic value, so pulling an outbound "
+        "from 21:00 to 20:00 left the return where it was. The pair is now a "
+        "mirror image around MIRROR_MIN: the return's departure is displaced "
+        "the opposite way by however far outbound's actually moved "
+        "(21:00->08:00 pulled to 20:00->07:00 sends the return to "
+        "22:00->09:00), and that holds for 'absolute' as well as 'shift' "
+        "overrides because the displacement is resolved on the built "
+        "outbound trip, not read off the request. An explicit return block "
+        "is still taken as given, which is how the two directions are timed "
+        "independently. New Trip.departure_shift_min, serialized as "
+        "general_parameters.departure_shift_min (0 for every automatic "
+        "timetable, read back on load, default 0 for older payloads), so a "
+        "client can recover the automatic departure from a pinned trip. "
+        "WHAT CHANGES: only requests with a mirroring return AND a departure "
+        "override — their return trip moves, and with it its stop "
+        "classification and every cost placed on the clock. Every automatic "
+        "request, every add-on-only request and every explicit-return "
+        "request is byte-identical apart from the new field. No schema "
+        "change; the family key carries the version, so cached documents "
+        "invalidate themselves.",
+    },
     "0.9.36": {
         "date": "2026-09-12",
         "author": "david + claude",

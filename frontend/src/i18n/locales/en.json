@@ -42,6 +42,7 @@
   },
   "proposal": {
     "heading": "So, what's your dream night train route?",
+    "subheading": "Sketch it, run the numbers, improve and help us build the evidence for Europe's night train target network.",
     "evaluate": "Evaluate",
     "recalculate": "Recalculate with this selection",
     "evaluating": "Evaluating your proposal…",
@@ -157,21 +158,33 @@
     "expert": {
       "toggle": "Expert timetable",
       "firstDeparture": "First departure",
-      "pinned": "pinned",
-      "follows": "follows automatic",
-      "automatic": "Automatic — mirrored around 02:30",
-      "pinnedHint": "Stays at this time after a recalculation (automatic: {auto})",
-      "followsHint": "Automatic {auto}, {delta} min — moves with it",
-      "reset": "Back to automatic",
-      "nudgeAria": "Move the first departure by {minutes} minutes",
+      "pinnedAria": "Departure pinned: stays at this time after a recalculation. Click to let it follow the automatic timetable instead.",
+      "followsAria": "Departure follows the automatic timetable, keeping its distance from it. Click to pin it to this time.",
+      "mirroredAria": "Opposite direction mirrored around 02:30: departure moved the other way, added minutes reversed. Click to give it its own times.",
+      "ownTimesAria": "Opposite direction keeps its own times — use the direction switch to edit it. Click to mirror this direction instead.",
+      "reset": "Back to the automatic departure",
       "legAria": "Extra minutes on the leg arriving at {stop}",
       "moreAria": "One more minute on the leg arriving at {stop}",
       "lessAria": "One minute less on the leg arriving at {stop}",
-      "mirrored": "The opposite direction copies these added minutes, reversed.",
-      "editSeparately": "Give it its own times",
-      "ownTimes": "The opposite direction keeps its own times.",
-      "relink": "Mirror this direction again",
       "droppedAddons": "Added minutes were dropped on {legs}: a stop was added in between, so that leg no longer exists."
+    },
+    "night": {
+      "toggleAria": "Fixed night: choose the two stops the 00:00–05:00 window is centred between",
+      "markAria": "{stop} — click two stops to place the 00:00–05:00 window between them",
+      "autoHint": "Night: automatic — the whole trip is centred on 02:30. Click the icons of two stops to place it.",
+      "pendingHint": "Now click the other end of the night section.",
+      "fixedHint": "Night between {a} and {b}: the timetable centres 00:00–05:00 on this section and stretches it to five hours if needed.",
+      "legendNight": "night, 00:00–05:00",
+      "legendBoarding": "boarding",
+      "legendNightStop": "night stop",
+      "legendAlighting": "alighting",
+      "slackHint": "{minutes} of these minutes are the night stretch: the section is held to five hours, shared over its legs in proportion to each leg's running time. Minutes you add here count towards the five hours and reduce the stretch.",
+      "stopType": {
+        "boarding": "Boarding stop — the train departs before midnight",
+        "night": "Night stop — between 00:00 and 05:00",
+        "alighting": "Alighting stop — the train arrives from 05:00",
+        "both": "Boarding and alighting stop"
+      }
     },
     "suggestions": {
       "title": "Add stops along the way?",

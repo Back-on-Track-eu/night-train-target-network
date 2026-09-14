@@ -12,17 +12,36 @@ The demand model is currently the stopgap uniform-distribution proxy
 reported in API responses; that wiring lands with the real model.
 """
 
-DEMAND_MODEL_VERSION: str = "0.0.4"
+DEMAND_MODEL_VERSION: str = "0.0.5"
 
 DEMAND_MODEL_DESCRIPTION: str = (
     "Demand model (placeholder): assumes every accommodation class is "
-    "70% booked at a flat per-kilometre fare, spread evenly across all "
+    "70% booked at a flat two-part fare (fixed + per-km, by class), spread "
+    "evenly across all "
     "connections — a stand-in until a real demand model with directional "
     "demand, price sensitivity, and competition from other modes "
     "replaces it."
 )
 
 CHANGELOG: dict = {
+    "0.0.5": {
+        "date": "2026-09-14",
+        "author": "david + claude",
+        "changes": "THE STOPGAP TARIFF DEFAULTS ARE NOW BENCHMARKED, not round "
+        "numbers. Every per-class default (fare_per_pax, fare_per_km, "
+        "services, catering) is re-set from realised 2025-26 night-train "
+        "fares — ÖBB Nightjet, European Sleeper, Nox, Trenitalia ICN, SNCF "
+        "Intercités de nuit — net of VAT and carried to the 2032 price year. "
+        "The SHAPE changes more than the level: real tariffs are nearly flat "
+        "over distance (Nightjet prices one band per class for any German "
+        "domestic journey), so the fixed part rises roughly fourfold and the "
+        "per-km part falls to a quarter — a 1,000 km seat was 108 EUR and is "
+        "now 55, a 300 km couchette was 51 and is now 66. Per-km rates are "
+        "now expressed in tenths of a cent (0.025), which the request already "
+        "carried at 4 decimals; the frontend follows in the same commit. "
+        "Every evaluation that does not override the fares changes with "
+        "this — hence the version bump.",
+    },
     "0.0.4": {
         "date": "2026-09-12",
         "author": "david + claude",
@@ -83,13 +102,21 @@ STOPGAP_UTILIZATION_PER: float = 0.7
 real demand model lands."""
 
 STOPGAP_FARE_PER_KM_BY_CLASS: dict[str, float] = {
-    "Seat": 0.10,
-    "Couchette": 0.13,
-    "Sleeper": 0.18,
-    "Capsule": 0.12,
+    "Seat": 0.025,
+    "Couchette": 0.035,
+    "Sleeper": 0.060,
+    "Capsule": 0.040,
     "Catering": 0.0,
 }
-"""Placeholder flat per-km fares by class_main — same caveat as above.
+"""Distance part of the base fare by class_main, EUR per passenger-km, net
+of VAT, 2032 price year (DEMAND 0.0.5 — see STOPGAP_FARE_PER_PAX_BY_CLASS
+for the basis shared by both parts).
+
+Deliberately small: a night-train tariff is nearly flat over distance.
+ÖBB Nightjet prices one band per class for ANY German domestic journey,
+and the spread between a 300 km and a 1,300 km ticket at the other
+operators is a fraction of the fare, not a multiple. Expressed in tenths
+of a cent, which the request field carries at 4 decimals.
 
 Since CALC 0.9.27 these are the DEFAULTS: a request may carry its own
 `fares_eur_per_km` (api/helpers/member_compute.py), per proposal and part of
@@ -101,33 +128,56 @@ FARE_CLASS_MAINS: tuple[str, ...] = ("Seat", "Couchette", "Sleeper", "Capsule")
 STOPGAP_FARE_PER_KM_BY_CLASS is fixed."""
 
 STOPGAP_FARE_PER_PAX_BY_CLASS: dict[str, float] = {
-    "Seat": 8.0,
-    "Couchette": 12.0,
-    "Sleeper": 18.0,
-    "Capsule": 12.0,
+    "Seat": 30.0,
+    "Couchette": 55.0,
+    "Sleeper": 110.0,
+    "Capsule": 75.0,
 }
-"""Placeholder FIXED part of the base fare, EUR per passenger carried.
+"""FIXED part of the base fare, EUR per passenger carried, net of VAT,
+2032 price year.
 
 The tariff is two-part: a ticket costs `fare_per_pax + fare_per_km x km`.
 Real night-train tariffs are not proportional to distance — a berth has a
 price of admission that a 300 km journey pays as surely as a 1,300 km one
-— and pricing on distance alone made short OD pairs implausibly cheap and
-long ones implausibly dear. Overridable per proposal as
+— so most of the fare sits here. Overridable per proposal as
 `fares_eur_per_pax`. Ticket revenue: inside every overhead and margin base.
 
-Placeholder, like the per-km rates beside it: these are plausible round
-numbers, not a calibration (DEMAND 0.0.4)."""
+Basis (DEMAND 0.0.5, research 2026-09-14): revenue-weighted REALISED
+average fares — the mix of Sparschiene/Standard tickets and berth types
+an operator actually sells, not entry prices — read from 2025-26 tariffs
+of ÖBB Nightjet (German domestic price bands per class), European
+Sleeper (Brussels-Prague), Nox (announced 129 EUR single / 219 EUR
+double cabin), Trenitalia Intercity Notte and SNCF Intercités de nuit,
+weighted toward the open-access operators since the PSO fares are set
+under subsidy. Targets at 1,000 km, gross 2026: seat ~55, couchette ~90,
+capsule ~110, sleeper ~165 EUR (a berth, blended over single/double/
+triple). Cross-checks: Back-on-Track's Nox critique puts open-access cost
+coverage at ~95 EUR net per passenger at ~1,000 km; DLR's low-cost
+airline average on 500-1,500 km was 79 EUR gross (autumn 2024).
+
+Price year: observed 2026 gross, stripped of ~7-8% blended VAT (x0.925)
+and escalated to nominal 2032 at 2%/yr (x1.126) — the two nearly cancel
+(x1.04), so the parameters read like the 2026 gross figures. The
+`vat_exempt` measure multiplies THIS net base, so do not strip VAT twice.
+
+Implied fares, per_pax + per_km x km, at 300 / 700 / 1,200 km:
+seat 38 / 48 / 60 — couchette 66 / 80 / 97 — capsule 87 / 103 / 123 —
+sleeper 128 / 152 / 182."""
 
 STOPGAP_SERVICES_EUR_PER_PAX_BY_CLASS: dict[str, float] = {
     "Seat": 1.50,
-    "Couchette": 2.00,
-    "Sleeper": 3.00,
-    "Capsule": 2.00,
+    "Couchette": 2.50,
+    "Sleeper": 4.00,
+    "Capsule": 2.50,
 }
-"""Placeholder revenue from additional services, EUR per passenger carried.
+"""Revenue from additional services, EUR per passenger carried, net of VAT,
+2032 price year (DEMAND 0.0.5).
 
-Bicycle carriage, oversized luggage, pets, seat reservations bought
-alongside the ticket. NOT signed and NOT a net figure, which is what
+Bicycle carriage, oversized luggage, pets — set at ~2.5-3% of the class's
+base fare, the usual ancillary share in long-distance rail; no operator
+publishes the figure per passenger. Interrail/pass reservation fees are
+NOT here: a pass holder's reservation IS that passenger's fare and
+belongs in avg_price. NOT signed and NOT a net figure, which is what
 separates it from catering: its cost is either zero or already paid for in
 the lower place density of the coach that carries the bikes, so it is
 already in the cost model elsewhere and must not be netted here again.
@@ -136,18 +186,32 @@ Being ordinary ticket revenue, it stays INSIDE the variable-overhead and
 EBIT-margin bases. Overridable as `services_eur_per_pax`."""
 
 STOPGAP_CATERING_EUR_PER_PAX_BY_CLASS: dict[str, float] = {
-    "Seat": 1.20,
-    "Couchette": 1.20,
-    "Sleeper": 0.60,
-    "Capsule": 1.20,
+    "Seat": 1.50,
+    "Couchette": 2.00,
+    "Sleeper": 1.00,
+    "Capsule": 2.00,
 }
-"""Placeholder NET catering contribution per passenger carried, EUR, by class.
+"""NET catering contribution per passenger carried, EUR, by class, 2032
+price year (DEMAND 0.0.5).
 
 Signed, and a NET figure: the restaurant is not modelled as a business of
-its own, so one number per class carries its sales less its own service,
-stocking and overhead costs. Positive means the service pays for itself
-and contributes; negative means the tickets it helps sell carry it, which
-is the usual night-train case.
+its own, so one number per class carries its sales less its goods,
+provisioning and logistics costs. Positive means the service pays for
+itself and contributes; negative means the tickets it helps sell carry
+it. It EXCLUDES attendant time — the dining-coach attendant is already in
+the crew line (compositions/calib/CALIBRATION.md: one attendant per
+dining or bistro coach), so netting staff here again would count it
+twice; a train with no catering coach sells from the trolley with the
+same crew it has anyway.
+
+Basis: DB's day trains take under 1 EUR gross per passenger (2023
+on-board revenue ~110 M EUR on ~130 M passengers). A night train captures
+an evening and a morning, so ~4-6 EUR gross per seat/couchette passenger,
+netted at ~45% after goods and logistics, gives ~2 EUR. Sleeper is lower
+because breakfast and a welcome drink are already in its fare. Watch the
+cost side: svc_stockings at 0.25-1.50 EUR/place cannot carry linen plus
+an included breakfast; if that line is under-costed, these positives are
+partly offset there.
 
 Per class since DEMAND 0.0.4 because the classes differ in what their base
 fare already includes — a sleeper fare that covers breakfast leaves less

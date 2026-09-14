@@ -78,8 +78,11 @@ functions consume them:
                              so a shifted trip is re-classified (a stop
                              that now departs after 00:00 becomes a night
                              stop, and gets night dwell).
-mirror_overrides() reverses one direction's add-ons for the other, the
-same way route_factory reverses fixed_night_interval. Add-on minutes go
+mirror_overrides() turns one direction's overrides into the other's mirror
+image around MIRROR_MIN: each add-on's stop pair reversed (the same way
+route_factory reverses fixed_night_interval) and the departure displaced
+the opposite way (0.9.37 — a trip moved an hour earlier sends the other
+one an hour later, so the pair stays centred on 02:30). Add-on minutes go
 into the strategies' own provisional offsets (addon_per_leg below), so a
 padded trip stays centred on MIRROR_MIN and a padded fixed-night interval
 needs correspondingly less stretch slack.
@@ -560,7 +563,7 @@ class DirectionOverrides:
 class ExpertTimetable:
     """One trip pair's overrides. return_trip=None means "mirror outbound"
     — the default, and the same convention route_factory already applies to
-    fixed_night_interval; mirror_overrides() below does the reversing."""
+    fixed_night_interval; mirror_overrides() below does the mirroring."""
 
     outbound: DirectionOverrides
     return_trip: DirectionOverrides | None
@@ -571,16 +574,30 @@ NO_OVERRIDES = DirectionOverrides(departure=None, addons=())
 route_factory so it never has to branch on None twice."""
 
 
-def mirror_overrides(overrides: DirectionOverrides) -> DirectionOverrides:
-    """One direction's overrides as they apply to the OTHER direction: each
-    add-on's stop pair reversed, so a manual minute on A→B also pads B→A.
+def mirror_overrides(
+    overrides: DirectionOverrides, departure_shift_min: int = 0
+) -> DirectionOverrides:
+    """One direction's overrides as they apply to the OTHER direction — its
+    mirror image around MIRROR_MIN: each add-on's stop pair reversed, so a
+    manual minute on A→B also pads B→A, and the departure displaced the
+    opposite way.
 
-    The departure is deliberately NOT carried over. A pinned outbound
-    departure says nothing about when the return should leave — the return
-    has its own timetable, mirrored around MIRROR_MIN by the strategy. A
-    caller who wants both pinned sends an explicit return block."""
+    departure_shift_min is how far the mirrored direction's first departure
+    actually ended up from its automatic value — resolved by the caller
+    (route_factory._build_trip()), because an "absolute" override only
+    becomes a distance once the strategy has said where the automatic
+    departure is. The other direction gets a "shift" of the negated amount:
+    each direction's automatic timetable is already centred on MIRROR_MIN,
+    so moving one an hour earlier and the other an hour later keeps the
+    pair a mirror image (21:00→08:00 pulled to 20:00→07:00 sends the other
+    to 22:00→09:00). A caller who wants the two directions timed
+    independently sends an explicit return block instead."""
     return DirectionOverrides(
-        departure=None,
+        departure=(
+            DepartureOverride(mode="shift", minutes=-departure_shift_min)
+            if departure_shift_min
+            else None
+        ),
         addons=tuple(
             SegmentAddon(
                 from_stop_id=a.to_stop_id,

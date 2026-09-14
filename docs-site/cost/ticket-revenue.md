@@ -16,7 +16,7 @@ Places sold times the average fare.
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-ticket_revenue_eur"></a>
 
-Ticket income from places sold and average fare.
+Ticket income from places sold and average fare — both set by you, not predicted.
 
 ### The formula
 

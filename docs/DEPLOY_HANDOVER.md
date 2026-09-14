@@ -77,6 +77,22 @@ capacity work that is genuinely yours to schedule.
 
 ---
 
+## Two schema migrations on `proposals.trips` — 2026-09-14
+
+`db/dev/sql/migrations/2026-09-14_trips_departure_shift.sql` and
+`2026-09-14_trips_track_gauge.sql` run with this deploy, before the api
+starts, like every other migration. Nothing for you to do. Each adds one
+`SMALLINT NOT NULL` column to `proposals.trips`: the expert timetable's
+departure shift (`DEFAULT 0`, route builder 0.9.38) and the gauge family the
+trip routed on (`DEFAULT 1435`, 0.9.39) — both were serialized by earlier
+versions but never stored, so a published expert timetable came back with its
+shift at 0 and a published broad-gauge route reported 1435. Schema only — no
+truncate, no recompute, no reseed; existing rows take the defaults, which is
+what the API has been returning for them.
+
+**Delete this entry once both staging and production have deployed past
+2026-09-14.**
+
 ## A data migration re-points 109 rolling-stock rows — 2026-09-12
 
 `db/dev/sql/migrations/2026-09-12_rolling_stock_source.sql` runs with this
@@ -1367,6 +1383,29 @@ train. `FAMILY_DOCUMENT_FORMAT` is 6, so no cached document survives.
 
 Stops applying once staging carries the migration and a catalog dated
 2026-09-14 or later.
+
+---
+
+## 19. Route builder 0.9.37 — mirrored expert departures, no migration
+
+`ROUTE_BUILDER_VERSION` 0.9.36 → 0.9.37. **No schema change, no migration,
+no reseed.** Deploy the api image and nothing else.
+
+**What moves:** only stored proposals that carry an `expert_timetable` with
+a departure override *and* a mirroring return — their return trip now
+departs displaced the opposite way from outbound (the pair is a mirror
+image around 02:30), so its stop classification and every cost placed on
+the clock move with it. Automatic timetables, add-on-only overrides and
+explicit return blocks are byte-identical apart from one new
+`general_parameters.departure_shift_min` (0) on every trip.
+
+**Caches:** the family key carries the route builder version, so every
+cached family document is rebuilt on first request after the deploy — the
+usual cold-start cost, nothing to flush by hand. Stored proposal payloads
+are read back as they are (`departure_shift_min` defaults to 0 when
+absent) and refresh on their normal stale-version path.
+
+Stops applying once staging and production both run 0.9.37.
 
 ---
 
