@@ -141,13 +141,20 @@ async function submit() {
   gap: 1rem;
   flex-wrap: wrap;
 }
+/* The app's one solid-CTA recipe: primary-500 under white, darkening on
+   hover — frontend/src/components/CommentSection.vue:180. brand-1 is link
+   text here, not a fill, so it is deliberately not used. */
 .feedback-form button {
   padding: 0.5rem 1.25rem;
   border-radius: 8px;
-  background: var(--vp-c-brand-1);
-  color: var(--vp-c-bg);
+  background: var(--vp-button-brand-bg);
+  color: var(--vp-button-brand-text);
   font-weight: 600;
   cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+.feedback-form button:hover:not(:disabled) {
+  background: var(--vp-button-brand-hover-bg);
 }
 .feedback-form button:disabled {
   opacity: 0.5;

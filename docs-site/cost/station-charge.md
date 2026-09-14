@@ -13,15 +13,6 @@ description: 'The fee paid for every scheduled stop at a station.'
 
 The fee paid for each scheduled stop at a station.
 
-This is the weakest-sourced line in the cost model, and it is worth being
-plain about it: **only Germany has real station charges in the database.**
-Every other country falls back to a single flat rate per call. A route
-whose stops are mostly outside Germany has a station charge figure that is
-a placeholder wearing a number's clothes.
-
-Station tariffs exist and are public in most countries; they simply have
-not been transcribed yet. Seventeen countries are outstanding.
-
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-station_charge_eur"></a>
 

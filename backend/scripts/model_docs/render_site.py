@@ -330,10 +330,8 @@ def render_emission_factors() -> str:
 
 
 _REFERENCE_PAGES = {
-    "versions.md": ("Model versions", {"versions": render_versions}),
-    "changelog.md": ("What changed", {"changelog": render_changelog}),
-    "formulas.md": ("All formulas", {"formulas": render_reference_formulas}),
-    "parameters.md": ("Parameter reference", {"parameters": render_parameters}),
+    "formulas.md": ("Formulas", {"formulas": render_reference_formulas}),
+    "parameters.md": ("Parameters", {"parameters": render_parameters}),
     "standard-values.md": (
         "Standard values",
         {"standard_values": render_standard_values},

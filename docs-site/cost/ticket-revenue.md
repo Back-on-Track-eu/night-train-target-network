@@ -1,6 +1,6 @@
 ---
 title: 'Ticket revenue'
-description: 'Ticket income from places sold and average fare — both set by you, not predicted.'
+description: 'Ticket income from places sold and average fare, both set by you rather than predicted.'
 ---
 
 # Ticket revenue
@@ -12,29 +12,6 @@ description: 'Ticket income from places sold and average fare — both set by yo
 ## What this is
 
 Places sold times the average fare.
-
-**Both of those are inputs, not predictions.** The demand model in this
-tool is a placeholder: a flat load factor of 70% and a two-part fare per
-accommodation class — a fixed price of admission plus a small distance
-term. The defaults are benchmarked against realised 2025–26 fares at ÖBB
-Nightjet, European Sleeper, Nox, Trenitalia and SNCF (see the standard
-values), but they are still one average applied everywhere. It does not
-model who would travel,
-between which cities, at what price, or how many would switch from flying
-or driving. It applies the same assumption to a Berlin–Paris service and a
-route nobody would ride.
-
-So a revenue figure here answers: _if this train ran that full, at those
-fares, this is what it would earn._ It does not answer whether it would.
-
-This matters most for the numbers people quote. The net result and any
-"necessary subsidy" figure are revenue minus costs — so they inherit this
-assumption completely. The cost side stands on its own evidence; the gap
-between cost and revenue does not.
-
-A real demand model is the single most valuable thing that could be added
-to this tool. What it would need to look like is set out in
-[what we don't yet model](/not-modelled).
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-ticket_revenue_eur"></a>

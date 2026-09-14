@@ -14,9 +14,13 @@ minutes.
 Endpoints — all three are reachable *without* a cookie; everything else on
 the site sits behind ``forward_auth`` pointing at ``/api/gate/check``:
 
-    GET  /gate               inline HTML form. Inline rather than a Vue
-                             view so the gate does not depend on a
-                             frontend build or a template directory.
+    GET  /gate               the public countdown page, with the code form
+                             demoted into its footer. Inline rather than a Vue
+                             view so the gate does not depend on a frontend
+                             build or a template directory -- and, since
+                             forward_auth redirects every cookie-less visitor
+                             here before the SPA loads, a Vue implementation
+                             would never be seen by the audience it is for.
     POST /api/gate/redeem    code -> signed cookie + a redemption row.
     GET  /api/gate/check     forward_auth target. 204 when the cookie is
                              valid, 302 to /gate when it is not, so Caddy
@@ -45,6 +49,8 @@ from datetime import datetime, timedelta, timezone
 import jwt
 import psycopg2
 from flask import Blueprint, Response, jsonify, make_response, redirect, request
+
+from api.gate_page import page_html
 
 log = logging.getLogger(__name__)
 
@@ -108,51 +114,8 @@ def _cookie_code() -> str | None:
     return payload.get("code")
 
 
-_PAGE = """<!doctype html>
-<html lang="en"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Target Network — testing access</title>
-<style>
- :root{color-scheme:dark}
- body{margin:0;min-height:100vh;display:grid;place-items:center;
-      background:#0f1720;color:#e8eef4;
-      font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
- .card{width:min(92vw,26rem);padding:2rem;background:#16212c;
-       border:1px solid #24323f;border-radius:.75rem}
- h1{margin:0 0 .25rem;font-size:1.25rem}
- p{margin:.25rem 0 1.25rem;color:#9fb0c0;font-size:.9rem}
- label{display:block;margin-bottom:.4rem;font-size:.85rem;color:#9fb0c0}
- input{width:100%;box-sizing:border-box;padding:.7rem .8rem;font-size:1rem;
-       letter-spacing:.04em;background:#0f1720;color:#e8eef4;
-       border:1px solid #2c3d4d;border-radius:.4rem}
- input:focus{outline:2px solid #4c9be8;outline-offset:1px}
- button{width:100%;margin-top:1rem;padding:.7rem;font-size:1rem;font-weight:600;
-        background:#4c9be8;color:#08131c;border:0;border-radius:.4rem;cursor:pointer}
- button:hover{background:#69adee}
- .err{margin-top:1rem;padding:.6rem .8rem;border-radius:.4rem;
-      background:#3b1d22;border:1px solid #612b33;color:#f3c4c9;font-size:.9rem}
- .foot{margin-top:1.5rem;font-size:.78rem;color:#7d8fa0}
-</style></head><body>
-<div class="card">
-  <h1>Target Network — testing access</h1>
-  <p>This is a closed beta. Enter the testing code you were given.
-     After the gate you will sign in with your email, as a real user would.</p>
-  <form method="POST" action="/api/gate/redeem">
-    <label for="code">Testing code</label>
-    <input id="code" name="code" autocomplete="off" autocapitalize="off"
-           spellcheck="false" autofocus required placeholder="e.g. nt-4f7a2b">
-    <button type="submit">Enter</button>
-  </form>
-  __ERROR__
-  <div class="foot">Back-on-Track — night train Target Network.
-    No code? Ask whoever invited you to the testing party.</div>
-</div></body></html>
-"""
-
-
 def _render(error: str | None = None, status: int = 200) -> Response:
-    block = f'<div class="err">{error}</div>' if error else ""
-    resp = make_response(_PAGE.replace("__ERROR__", block), status)
+    resp = make_response(page_html(error), status)
     resp.headers["Content-Type"] = "text/html; charset=utf-8"
     resp.headers["Cache-Control"] = "no-store"
     return resp
