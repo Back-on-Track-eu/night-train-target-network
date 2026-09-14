@@ -133,7 +133,8 @@ plan_route(trip_pair_inputs, loader, router, schedule_mode, proposal_id, proposa
   ├── timetable.resolve_departure(auto, override) + classify_for_departure(...)
   │     (expert mode only — "absolute" pins a minute through reroutes, "shift"
   │     displaces the automatic value and moves with it; the stops are
-  │     re-classified against where the trip now sits on the clock)
+  │     re-classified against where the trip now sits on the clock; the
+  │     distance moved is kept as Trip.departure_shift_min)
   ├── calc_energy_consumption(legs, composition)                   → enriches RoutedLeg.energy_kwh
   ├── timetable.build_final_timetable()                            → exact per-stop arrival/departure
   ├── _build_trip_stops_and_legs(...)                              → list[Segment]
@@ -145,6 +146,10 @@ plan_route(trip_pair_inputs, loader, router, schedule_mode, proposal_id, proposa
   │
   │  return direction (_build_trip(), reusing outbound's decision):
   ├── stop_ids = reversed(outbound's stop list)
+  ├── expert = timetable.mirror_overrides(outbound's, outbound.departure_shift_min)
+  │     unless the request sent a return block of its own: add-ons reversed
+  │     onto the return's stop pairs, departure displaced the opposite way,
+  │     so the pair stays a mirror image around MIRROR_MIN (0.9.37)
   ├── rail_router.route(...) → list[RoutedLeg]  — still a real call, own physics
   ├── (auto_stop_addition NOT re-run — known_auto_added_stop_ids carries the
   │     decision not to search again; see _build_trip_pair()'s comment for why)

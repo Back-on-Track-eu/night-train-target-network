@@ -1353,6 +1353,29 @@ Stops applying once staging carries the migration and a catalog dated
 
 ---
 
+## 19. Route builder 0.9.37 — mirrored expert departures, no migration
+
+`ROUTE_BUILDER_VERSION` 0.9.36 → 0.9.37. **No schema change, no migration,
+no reseed.** Deploy the api image and nothing else.
+
+**What moves:** only stored proposals that carry an `expert_timetable` with
+a departure override *and* a mirroring return — their return trip now
+departs displaced the opposite way from outbound (the pair is a mirror
+image around 02:30), so its stop classification and every cost placed on
+the clock move with it. Automatic timetables, add-on-only overrides and
+explicit return blocks are byte-identical apart from one new
+`general_parameters.departure_shift_min` (0) on every trip.
+
+**Caches:** the family key carries the route builder version, so every
+cached family document is rebuilt on first request after the deploy — the
+usual cold-start cost, nothing to flush by hand. Stored proposal payloads
+are read back as they are (`departure_shift_min` defaults to 0 when
+absent) and refresh on their normal stale-version path.
+
+Stops applying once staging and production both run 0.9.37.
+
+---
+
 ## Maintaining this document
 
 One file, updated in the same PR as the change it describes. The rule that
