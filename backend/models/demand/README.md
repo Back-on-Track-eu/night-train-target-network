@@ -2,7 +2,8 @@
 
 All demand-related code lives here. Today that is exactly one thing: the
 **stopgap uniform-distribution proxy** (`stopgap.py`), which populates a
-`Route`'s OD pairs from a flat target utilization and per-km fares — see
+`Route`'s OD pairs from a flat target utilization and a two-part fare
+(fixed + per-km) per class — see
 `model.py` for the standard values and the open TODO describing the real
 model that will replace it.
 

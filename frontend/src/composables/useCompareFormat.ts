@@ -19,11 +19,17 @@ export function useCompareFormat(): KpiFormatters & {
    *  everything else, so 1,234.5 h and 1,234.50 € line up. */
   dec1(value: number): string
   dec2(value: number): string
+  /** Three decimals — the per-km fare, which is tenths of a cent. */
+  dec3(value: number): string
 } {
   const { locale } = useI18n()
   const two = computed(
     () =>
       new Intl.NumberFormat(locale.value, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+  )
+  const three = computed(
+    () =>
+      new Intl.NumberFormat(locale.value, { minimumFractionDigits: 3, maximumFractionDigits: 3 }),
   )
   const one = computed(
     () =>
@@ -45,5 +51,6 @@ export function useCompareFormat(): KpiFormatters & {
     eur: (v) => formatEur(v, locale.value),
     dec1: (v) => one.value.format(v),
     dec2: (v) => two.value.format(v),
+    dec3: (v) => three.value.format(v),
   }
 }
