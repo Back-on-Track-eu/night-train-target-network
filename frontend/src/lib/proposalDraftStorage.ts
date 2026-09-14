@@ -10,6 +10,9 @@ export interface ProposalDraft {
   // null = not mid suggest-flow; an array (possibly empty) = was in suggest
   // mode with these candidate stop ids opted in.
   suggestSelectedIds: string[] | null
+  // The fixed-night section [start, end] in stopIds order, null = automatic.
+  // Optional on read: a draft written before the field has none.
+  nightIntervalIds?: [string, string] | null
 }
 
 const STORAGE_KEY = 'nt_proposal_draft'
@@ -24,12 +27,19 @@ export function readDraft(): ProposalDraft | null {
   try {
     const parsed: unknown = JSON.parse(raw)
     if (typeof parsed !== 'object' || parsed === null) return null
-    const { stopIds, compositionId, suggestSelectedIds } = parsed as Record<string, unknown>
+    const { stopIds, compositionId, suggestSelectedIds, nightIntervalIds } = parsed as Record<
+      string,
+      unknown
+    >
     if (!isStringArray(stopIds)) return null
     return {
       stopIds,
       compositionId: typeof compositionId === 'string' ? compositionId : null,
       suggestSelectedIds: isStringArray(suggestSelectedIds) ? suggestSelectedIds : null,
+      nightIntervalIds:
+        isStringArray(nightIntervalIds) && nightIntervalIds.length === 2
+          ? [nightIntervalIds[0], nightIntervalIds[1]]
+          : null,
     }
   } catch {
     return null

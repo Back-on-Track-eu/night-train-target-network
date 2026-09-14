@@ -220,6 +220,13 @@ class Trip:
     # Defaulted only for dataclass field ordering; route_factory always
     # passes the resolved value.
     gauge_mm: int = 1435
+    # How far an expert departure override moved the first departure from
+    # the automatic value (0.9.37) — 0 for every automatic timetable, and
+    # what a mirroring return trip is displaced the other way by. Serialized
+    # as general_parameters.departure_shift_min so a client can recover the
+    # automatic departure (departure_time_min - departure_shift_min) even
+    # from a pinned trip.
+    departure_shift_min: int = 0
 
     @property
     def departure_time_min(self) -> int:
@@ -302,6 +309,7 @@ class Trip:
         segments: list[Segment],
         timetable_warnings: list[TimetableWarning] | None = None,
         gauge_mm: int = 1435,
+        departure_shift_min: int = 0,
     ) -> "Trip":
         """Sole constructor — called exclusively by route_factory."""
         return cls(
@@ -310,4 +318,5 @@ class Trip:
             segments=segments,
             timetable_warnings=timetable_warnings or [],
             gauge_mm=gauge_mm,
+            departure_shift_min=departure_shift_min,
         )

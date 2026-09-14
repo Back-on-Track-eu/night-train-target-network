@@ -28,6 +28,16 @@ import { ApiError, asApiFailure, isRetryable, type ApiFailure } from '@/lib/apiE
 import { useApiFailure } from '@/composables/useApiFailure'
 import { resolvePrefillStops, type GallerySearchSeed } from '@/lib/proposalPrefill'
 import { readDraft, writeDraft, clearDraft } from '@/lib/proposalDraftStorage'
+import {
+  inNightInterval,
+  legIsNight,
+  pruneNightInterval,
+  reverseNightInterval,
+  sameNightInterval,
+  toggleNightStop,
+  type NightInterval,
+  type NightSelection,
+} from '@/lib/nightInterval'
 import { useLocaleFormat } from '@/composables/useLocaleFormat'
 import { buildSuggestRows, settledRows, type SuggestRow } from '@/lib/suggestPlacement'
 import { formatClock, dayOffset } from '@/lib/tripClock'
@@ -37,15 +47,22 @@ import { alternativeRoutes, inflateRoute, memberFailure, routeFor } from '@/lib/
 import {
   addonFor,
   addonsForDirection,
+  clockToServiceMinute,
   droppedAddons,
   emptyExpert,
   fromRequest,
   fromRouteSegments,
   isEmptyExpert,
+  materialiseSlack,
   mirrorDirection,
   pruneExpertToStops,
+  resolveDeparture,
+  resolveTimetable,
+  setDeparture,
   setAddon,
   swapDirections,
+  toggleDepartureMode,
+  type ResolvedDirection,
   toRequest as expertToRequest,
   type DepartureOverride,
   type ExpertState,
@@ -58,13 +75,13 @@ import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Skeleton from 'primevue/skeleton'
 import AppIcon from '@/components/AppIcon.vue'
+import InfoPopover from '@/components/InfoPopover.vue'
 import AppSpinner from '@/components/AppSpinner.vue'
 import StopSelect from '@/components/StopSelect.vue'
 import ProposalResults from '@/components/ProposalResults.vue'
 import OwnershipLine from '@/components/OwnershipLine.vue'
 import CountryFlags from '@/components/CountryFlags.vue'
 import StopTime from '@/components/StopTime.vue'
-import ExpertTimetableControls from '@/components/ExpertTimetableControls.vue'
 import LoadingFunFact from '@/components/LoadingFunFact.vue'
 import MapView from '@/components/MapView.vue'
 import TripPairComingSoon from '@/components/TripPairComingSoon.vue'
@@ -75,6 +92,15 @@ import {
   mdiArrowLeft,
   mdiArrowLeftRight,
   mdiCheckCircle,
+  mdiLock,
+  mdiLockOpenVariant,
+  mdiMirror,
+  mdiRestore,
+  mdiSleep,
+  mdiSwapHorizontal,
+  mdiWalk,
+  mdiExitRun,
+  mdiWeatherNight,
   mdiMapMarkerMultipleOutline,
   mdiClose,
   mdiPencil,
@@ -115,6 +141,21 @@ const calcSlot = createAbortSlot()
 // Arguments of the last calc, so Retry replays it rather than guessing.
 const lastCalcArgs = ref<{ stopIds: string[]; autoStopAddition: 'off' | 'suggest' } | null>(null)
 
+// --- Fixed night -------------------------------------------------------------
+// Where the night goes: null = the automatic timetable (the whole trip
+// centred on 02:30), an interval = timetable_mode "simpleAutomaticWithFixed-
+// Night" with 00:00–05:00 centred on that section instead. A display-mode
+// tool like expert mode: switched on with the moon pill, picked stop by stop
+// on the timetable (lib/nightInterval.ts) in the itinerary's current travel
+// order — flipping direction reverses it (swapDirection). Moving it is stale
+// results like an expert edit, and takes the same Recalculate over the
+// timetable; switching the tool off is back to the automatic night.
+const nightMode = ref(false)
+const nightSelection = ref<NightSelection>({ interval: null, pending: null })
+// The interval the displayed results were computed with, in the orientation
+// they were computed in (the same convention as committedItinerary).
+const committedNightInterval = ref<NightInterval | null>(null)
+
 // --- Expert timetable state -------------------------------------------------
 // Manual overrides on top of the computed timetable: a pinned or shifted first
 // departure, and extra minutes on individual legs. The arithmetic (mirroring,
@@ -125,6 +166,11 @@ const lastCalcArgs = ref<{ stopIds: string[]; autoStopAddition: 'off' | 'suggest
 // controls are relative to a computed timetable — there is no automatic
 // departure to pin, and no leg to pad, before the first evaluation.
 const expertMode = ref(false)
+// The night tool is one of expert mode's tools: the pill and the markers
+// need expert mode on and a computed timetable to act on.
+const nightToolOn = computed(
+  () => expertMode.value && nightMode.value && currentMode.value === 'display',
+)
 const expert = ref<ExpertState>(emptyExpert())
 // What the displayed results were computed with — the comparison behind
 // paramsStale below, exactly like committedCompId/committedScenarioId.
@@ -235,6 +281,15 @@ interface StopTimeFmt {
   // a 20:00 → 08:00 night train doesn't read as travelling backwards in time.
   arrival_day: number
   departure_day: number
+  // How the backend classified the stop on the clock (boarding / night /
+  // alighting / both) — null on a stored proposal older than the field.
+  stop_type: string | null
+  // Whether the leg arriving here / leaving here runs through the night
+  // window (lib/nightInterval.ts legIsNight) — what colours the timeline.
+  night_in: boolean
+  night_out: boolean
+  // Night-stretch minutes on the leg arriving here (Segment.slack_time_min).
+  slack_in: number
 }
 
 interface TripResult {
@@ -263,6 +318,7 @@ interface BackendStop {
   lon: number
   arrival_time_min: number | null
   departure_time_min: number | null
+  stop_type?: string
 }
 
 interface BackendSegment {
@@ -274,6 +330,10 @@ interface BackendSegment {
   // authoritative record of which add-ons actually landed. Optional so a
   // proposal stored before 0.9.32 still type-checks.
   addon_time_min?: number
+  // Minutes the fixed-night stretch put on this leg (0 outside that mode) —
+  // shown in the same field as the manual minutes, since both are extra
+  // time on the leg beyond its physics.
+  slack_time_min?: number
 }
 
 // Headline physics figures the backend attaches per trip (route_serialize.py
@@ -287,6 +347,10 @@ interface BackendGeneralParameters {
   // nearly everything; 1520 on the ex-Soviet/Finnish family, 1600 Ireland,
   // 1668 Iberia. Optional so older stored proposals still type-check.
   track_gauge_mm?: number
+  // How far an expert departure moved the trip off its automatic value
+  // (ROUTE_BUILDER 0.9.37) — 0 on an automatic timetable. Optional for the
+  // same reason.
+  departure_shift_min?: number
 }
 
 interface BackendTripSide {
@@ -351,7 +415,11 @@ function legTravelMinutes(seg: BackendSegment): number | null {
 
 // baseMin is the trip's own first departure — the reference the "+1" markers are
 // counted from (see lib/tripClock.ts).
-function toStopTimeFmt(stop: BackendStop, baseMin: number | null): StopTimeFmt {
+function toStopTimeFmt(
+  stop: BackendStop,
+  baseMin: number | null,
+  night: { in: boolean; out: boolean; slackIn: number },
+): StopTimeFmt {
   return {
     stop_id: stop.stop_id,
     stop_name: stop.stop_name,
@@ -362,18 +430,32 @@ function toStopTimeFmt(stop: BackendStop, baseMin: number | null): StopTimeFmt {
     departure_time_fmt: formatClock(stop.departure_time_min),
     arrival_day: dayOffset(stop.arrival_time_min, baseMin),
     departure_day: dayOffset(stop.departure_time_min, baseMin),
+    stop_type: stop.stop_type ?? null,
+    night_in: night.in,
+    night_out: night.out,
+    slack_in: night.slackIn,
   }
 }
 
 // segments[] holds one from_stop/to_stop pair per leg — walk them into the
 // flat per-stop list the template expects (first leg's from_stop, then every
-// leg's to_stop).
+// leg's to_stop). Each leg's night flag lands on both of its stops: as
+// `night_out` on the one it leaves, `night_in` on the one it reaches.
 function buildStopTimes(segments: BackendSegment[]): StopTimeFmt[] {
   if (segments.length === 0) return []
   const baseMin = segments[0].from_stop.departure_time_min
+  const nightLeg = segments.map((seg) =>
+    legIsNight(seg.from_stop.departure_time_min, seg.to_stop.arrival_time_min),
+  )
   return [
-    toStopTimeFmt(segments[0].from_stop, baseMin),
-    ...segments.map((seg) => toStopTimeFmt(seg.to_stop, baseMin)),
+    toStopTimeFmt(segments[0].from_stop, baseMin, { in: false, out: nightLeg[0], slackIn: 0 }),
+    ...segments.map((seg, i) =>
+      toStopTimeFmt(seg.to_stop, baseMin, {
+        in: nightLeg[i],
+        out: nightLeg[i + 1] ?? false,
+        slackIn: seg.slack_time_min ?? 0,
+      }),
+    ),
   ]
 }
 
@@ -449,7 +531,13 @@ function swapDirection() {
   // committedExpert is deliberately NOT swapped: it stays paired with
   // committedItinerary, in the orientation the results were computed in, and
   // expertChanged below compares against either orientation.
-  expert.value = swapDirections(expert.value)
+  expert.value = swapDirections(expert.value, autosOnScreen())
+  if (nightSelection.value.interval) {
+    nightSelection.value = {
+      ...nightSelection.value,
+      interval: reverseNightInterval(nightSelection.value.interval),
+    }
+  }
   if (live) {
     const trips = routeResult.value?.trips ?? []
     const other = trips.find((t) => t.trip_id !== selectedTripId.value)
@@ -542,29 +630,26 @@ function reconcileExpert(
 // which drops all of them on the next recompute.
 const otherDirectionMirrors = computed(() => expert.value.returnTrip === null)
 
-// Stop mirroring: the opposite direction gets its own copy of what is on
-// screen, so breaking the link changes no times by itself.
-function unlinkReturn() {
-  expert.value = { ...expert.value, returnTrip: mirrorDirection(expert.value.outbound) }
-}
-
-// Back to mirroring — the opposite direction's own times are discarded, which
-// is what "mirror this direction again" means.
-function relinkReturn() {
-  expert.value = { ...expert.value, returnTrip: null }
+// Mirrored ↔ own times. Leaving mirroring gives the opposite direction its
+// own copy of what the mirror was showing it, so the switch changes no times
+// by itself; going back discards those own times and mirrors the direction
+// on screen — always the one on screen, which is what "mirror this
+// direction" means.
+function setMirrored(mirrored: boolean) {
+  expert.value = {
+    ...expert.value,
+    returnTrip: mirrored ? null : mirrorDirection(expert.value.outbound, autosOnScreen()),
+  }
 }
 
 // The automatic departure per direction — what a shift is measured from, what
-// "reset" returns to, and what the hint quotes. The response reports where the
-// trip actually departed, so the automatic value is recovered by backing the
-// override out of it: none means it IS the automatic value, a shift means
-// minus the shift. A PINNED departure hides it (the response only says where
-// the user put the train), so the last known value is kept instead — which is
-// exactly the case where the automatic value stopped mattering, and the next
-// calc without a pin refreshes it.
+// "reset" returns to, what the hint quotes, and what mirroring a pinned
+// departure is measured against. The response says how far each trip was
+// moved off it (general_parameters.departure_shift_min, 0 on an automatic
+// timetable), so it is recovered exactly, pinned or not.
 const lastAutoDeparture = ref<[number, number]>([0, 0])
 
-function rememberAutoDeparture(route: BackendRoute, sent: ExpertState | null) {
+function rememberAutoDeparture(route: BackendRoute) {
   const pair = route.trip_pairs[0]
   if (!pair) return
   const next: [number, number] = [...lastAutoDeparture.value]
@@ -574,9 +659,7 @@ function rememberAutoDeparture(route: BackendRoute, sent: ExpertState | null) {
   ] as const) {
     const departed = trip.segments[0]?.from_stop.departure_time_min
     if (departed == null) continue
-    const applied = sent ? slotFor(sent, direction).departure : null
-    if (applied === null) next[direction] = departed
-    else if (applied.mode === 'shift') next[direction] = departed - applied.minutes
+    next[direction] = departed - (trip.general_parameters.departure_shift_min ?? 0)
   }
   lastAutoDeparture.value = next
 }
@@ -584,19 +667,47 @@ function rememberAutoDeparture(route: BackendRoute, sent: ExpertState | null) {
 // Indexed by the ROUTE's direction id, not by which slot is on screen: the
 // route's directions do not move when the itinerary is flipped, so this
 // survives a flip without having to be swapped alongside the overrides.
-const autoDepartureMin = computed(
-  () => lastAutoDeparture.value[selectedTrip.value?.direction_id === 1 ? 1 : 0],
-)
+const onScreenDirection = computed<0 | 1>(() => (selectedTrip.value?.direction_id === 1 ? 1 : 0))
+const autoDepartureMin = computed(() => lastAutoDeparture.value[onScreenDirection.value])
 
-function slotFor(state: ExpertState, direction: 0 | 1) {
-  if (direction === 0) return state.outbound
-  return state.returnTrip ?? { departure: null, addons: addonsForDirection(state, 1) }
+// The pair of automatic values as lib/expertTimetable's mirroring wants
+// them: `own` for the direction on screen, `other` for the opposite one.
+function autosOnScreen() {
+  const [outbound, returnTrip] = lastAutoDeparture.value
+  return onScreenDirection.value === 0
+    ? { own: outbound, other: returnTrip }
+    : { own: returnTrip, other: outbound }
 }
 
 const currentDeparture = computed(() => expert.value.outbound.departure)
+const pinnedDeparture = computed(() => currentDeparture.value?.mode !== 'shift')
+const pinHintText = computed(() =>
+  t(pinnedDeparture.value ? 'proposal.expert.pinnedAria' : 'proposal.expert.followsAria'),
+)
+const mirrorHintText = computed(() =>
+  t(otherDirectionMirrors.value ? 'proposal.expert.mirroredAria' : 'proposal.expert.ownTimesAria'),
+)
 
 function setDepartureOverride(value: DepartureOverride | null) {
   expert.value = { ...expert.value, outbound: { ...expert.value.outbound, departure: value } }
+}
+
+// The first departure as the strip's input shows it: the override in force
+// (or the automatic value), NOT the computed row — a typed time has to stay
+// on screen until the recalculation that applies it. Wall clock in, service
+// minute out; the +1 markers on the later rows say what day it means.
+const currentDepartureMin = computed(() =>
+  resolveDeparture(currentDeparture.value, autoDepartureMin.value),
+)
+const currentDepartureClock = computed(() => formatClock(currentDepartureMin.value) ?? '')
+
+function onDepartureInput(event: Event) {
+  const minute = clockToServiceMinute(
+    (event.target as HTMLInputElement).value,
+    currentDepartureMin.value,
+  )
+  if (minute === null) return
+  setDepartureOverride(setDeparture(currentDeparture.value, autoDepartureMin.value, minute))
 }
 
 // Minutes currently on the leg arriving at `stopId` from `fromStopId`, for the
@@ -617,8 +728,88 @@ function setLegAddon(fromStopId: string | null, stopId: string, minutes: number)
   }
 }
 
-function onLegAddonInput(fromStopId: string | null, stopId: string, event: Event) {
-  setLegAddon(fromStopId, stopId, Number((event.target as HTMLInputElement).value))
+// The stepper shows every extra minute on the leg beyond its physics: the
+// manual add-on plus what the fixed-night stretch put there (the backend
+// shares that stretch over the section's legs in proportion to each leg's
+// running time — driving, acceleration/deceleration and buffer).
+//
+// The night band is just another way of adding time: the model chose the
+// minutes and where the trip sits, the user can take them over at any
+// point. So the first manual touch of a stretched leg — a step either way,
+// or a typed value — MATERIALISES the night (lib/expertTimetable.ts
+// materialiseSlack): every leg's stretch becomes its manual minutes, the
+// departure is pinned where the trip currently leaves, the fixed night is
+// dropped (tool off). Not a minute moves, and from there the field is an
+// ordinary add-on field: 160 steps to 159 or 161, exactly as it reads.
+// (Left to the backend instead, a manual minute inside a fixed-night
+// section only shrinks the stretch, and the field would spring back to 160
+// on the recompute.) Nothing here recalculates — that stays the button's.
+//
+// The stretch on screen is the last calc's and only describes the leg while
+// the night is where that calc put it; once moved, the field shows the
+// manual part alone until the next calc.
+function legSlack(row: ViewRow): number {
+  return nightSelection.value.interval !== null &&
+    sameNightInterval(nightSelection.value.interval, committedNightInterval.value)
+    ? row.slackIn
+    : 0
+}
+
+function legExtra(row: ViewRow): number {
+  return legAddon(row.prevStopId, row.stopId) + legSlack(row)
+}
+
+// The legs of a trip as materialiseSlack() wants them, from its rows.
+function slackLegs(stopTimes: StopTimeFmt[]) {
+  return stopTimes.slice(1).map((st, i) => ({
+    fromStopId: stopTimes[i].stop_id,
+    toStopId: st.stop_id,
+    slackMin: st.slack_in,
+  }))
+}
+
+function materialiseNight() {
+  const trips = routeResult.value?.trips ?? []
+  const onScreen = selectedTrip.value
+  if (!onScreen) return
+  const other = trips.find((t) => t.trip_id !== onScreen.trip_id)
+  const autos = autosOnScreen()
+  const outbound = materialiseSlack(
+    expert.value.outbound,
+    slackLegs(onScreen.stop_times),
+    currentDepartureMin.value,
+  )
+  // A return with its own times takes over its own stretch too; a
+  // mirroring one is derived from outbound and needs nothing.
+  const returnTrip =
+    expert.value.returnTrip && other
+      ? materialiseSlack(
+          expert.value.returnTrip,
+          slackLegs(other.stop_times),
+          resolveDeparture(expert.value.returnTrip.departure, autos.other),
+        )
+      : expert.value.returnTrip
+  expert.value = { outbound, returnTrip }
+  nightMode.value = false
+  nightSelection.value = { interval: null, pending: null }
+}
+
+function stepLegExtra(row: ViewRow, delta: number) {
+  if (legSlack(row) > 0) materialiseNight()
+  setLegAddon(row.prevStopId, row.stopId, legAddon(row.prevStopId, row.stopId) + delta)
+}
+
+function onLegExtraInput(row: ViewRow, event: Event) {
+  const minutes = Number((event.target as HTMLInputElement).value)
+  if (legSlack(row) > 0) materialiseNight()
+  setLegAddon(row.prevStopId, row.stopId, minutes)
+}
+
+function legExtraHint(row: ViewRow): string {
+  const slack = legSlack(row)
+  return slack > 0
+    ? t('proposal.night.slackHint', { minutes: slack })
+    : t('proposal.expert.legAria', { stop: row.name })
 }
 
 function cloneExpert(state: ExpertState): ExpertState {
@@ -635,11 +826,30 @@ function reportDroppedAddons(dropped: SegmentAddon[]) {
   toastStore.addToast('warn', t('proposal.expert.droppedAddons', { legs }))
 }
 
+// Hover text for the icon-only tools (direction switch, pinned, mirrored,
+// reset): one shared InfoPopover under the tool row, driven the way
+// FactorInfoPopover is driven from many icons — the key skips a redundant
+// re-open on the icon already showing. The sentence is the same one the
+// icon's aria-label carries, so sighted and screen-reader users read alike.
+const toolHint = ref<InstanceType<typeof InfoPopover> | null>(null)
+const toolHintText = ref('')
+
+function showToolHint(event: Event, text: string) {
+  toolHintText.value = text
+  toolHint.value?.open(event, text)
+}
+
 // Turning expert mode off drops the overrides rather than hiding them: a
 // hidden override that still reaches the next calc is the worst of both.
 function toggleExpertMode() {
   expertMode.value = !expertMode.value
-  if (!expertMode.value) expert.value = emptyExpert()
+  if (!expertMode.value) {
+    expert.value = emptyExpert()
+    // The night goes back to what the results were computed with — not to
+    // automatic: a placed night is part of the saved proposal, and leaving
+    // expert mode is not a request to move it.
+    nightSelection.value = { interval: committedNightInterval.value, pending: null }
+  }
 }
 
 // The offered scenarios' variants, in the picker's order — the family's
@@ -664,6 +874,9 @@ function familyRequest(
   autoStopAddition: 'off' | 'suggest',
   expertBlock: ExpertTimetableRequest | null,
 ): FamilyRequest {
+  // Pruned against the stops actually posted, for the same reason the expert
+  // add-ons are: a night placed on a stop that is gone is a 400.
+  const night = pruneNightInterval(nightSelection.value.interval, stopIds)
   const variantIds = familyVariantIds.value
   const selectedVariant = store.variantFor(store.selectedScenarioId)?.scenario_variant_id
   // A presented member has to be on the axes, or the backend answers 400:
@@ -686,6 +899,9 @@ function familyRequest(
     // backend rejects an add-on whose stop pair is not a leg of the stops
     // being posted.
     ...(expertBlock ? { expert_timetable: expertBlock } : {}),
+    ...(night
+      ? { timetable_mode: 'simpleAutomaticWithFixedNight', fixed_night_interval: night }
+      : {}),
     ...schedule,
     // The four tariff maps, posted only once the model registry has seeded
     // them: an empty object would price every class at nothing, which is not
@@ -934,7 +1150,11 @@ function restoreDetailInputs(request: Record<string, unknown>) {
   }
 }
 
-function applyPlan(json: MemberPlan, publish = false) {
+// `look`: the plan is another member of the SAME family (a scenario or
+// composition switch), not the result of what the builder currently asks
+// for — so add-ons the member does not carry were not "dropped", they are
+// the user's pending edits, and applyMemberFromFamily() puts them back.
+function applyPlan(json: MemberPlan, publish = false, look = false) {
   rawRoute.value = json.route
   // Expert overrides. Three steps, each answering a different question:
   //   1. what did we ASK for — the state as it stands, kept for the dropped
@@ -956,10 +1176,10 @@ function applyPlan(json: MemberPlan, publish = false) {
     expertMode.value = true
     expert.value = fromRequest(echoed)
   }
-  rememberAutoDeparture(json.route, echoed ? expert.value : null)
+  rememberAutoDeparture(json.route)
   if (expertMode.value) {
     const dropped = reconcileExpert(json.route, sentOutbound, sentReturn)
-    if (dropped.length > 0) reportDroppedAddons(dropped)
+    if (dropped.length > 0 && !look) reportDroppedAddons(dropped)
   }
   committedExpert.value = cloneExpert(expert.value)
   // The panel-facing EvaluationResponse: views are inline for a loaded
@@ -984,6 +1204,15 @@ function applyPlan(json: MemberPlan, publish = false) {
     route.trips.find((t) => t.direction_id === 0)?.trip_id ?? route.trips[0]?.trip_id ?? null
   itinerary.value = itineraryFromRoute(route)
   committedItinerary.value = itinerary.value.map((s) => ({ ...s }))
+  // The night as computed — the echo is in the posted order, which is the
+  // itinerary order just set. A stored proposal opens with its own night
+  // this way rather than reverting to automatic on its first recompute.
+  const echoedNight = json.request?.fixed_night_interval as string[] | null | undefined
+  const night: NightInterval | null =
+    echoedNight && echoedNight.length === 2 ? [echoedNight[0], echoedNight[1]] : null
+  nightSelection.value = { interval: night, pending: null }
+  committedNightInterval.value = night
+  if (night) nightMode.value = true
   // The first calc posts no composition, so the response is where we learn
   // which one was used. Committing it in the same tick also keeps the
   // recalc watcher below quiet — it only fires on a divergence from the
@@ -1295,7 +1524,7 @@ const draftHydrated = ref(false)
 // deep: true is required, not just defensive — removeStop()/onStopSelect()
 // mutate `itinerary` in place rather than reassigning it.
 watch(
-  [itinerary, selectedCompositionId, currentMode, suggestSelected],
+  [itinerary, selectedCompositionId, currentMode, suggestSelected, nightSelection],
   () => {
     if (!draftHydrated.value || props.mode !== 'edit' || currentMode.value === 'loading') return
     const stopIds = currentStopIds.value
@@ -1307,6 +1536,7 @@ watch(
       stopIds,
       compositionId: selectedCompositionId.value,
       suggestSelectedIds: currentMode.value === 'suggest' ? [...suggestSelected.value] : null,
+      nightIntervalIds: pruneNightInterval(nightSelection.value.interval, stopIds),
     })
   },
   { deep: true },
@@ -1328,6 +1558,28 @@ const isDirty = computed(() => {
   const sameReverse = cur.every((id, i) => id === committedIds[committedIds.length - 1 - i])
   return !sameForward && !sameReverse
 })
+
+// The night section moved: stale results, like an expert edit (see
+// expertChanged). Either orientation is the same night (sameNightInterval),
+// so a flip stays clean here too; an interval a stop edit made illegal
+// counts as removed, which is what the next request will post.
+const nightChanged = computed(
+  () =>
+    committedItinerary.value !== null &&
+    !sameNightInterval(
+      pruneNightInterval(nightSelection.value.interval, currentStopIds.value),
+      committedNightInterval.value,
+    ),
+)
+
+// While the night on screen is no longer the one requested, its band and
+// stop icons fade: what is drawn is the last calculation's, and a dropped
+// night has to be visibly gone before the recompute confirms it.
+const nightOnScreenStale = computed(() => nightChanged.value)
+
+// The two timetable tools together: what puts the Recalculate control over
+// the timetable rather than over the results.
+const timetableChanged = computed(() => expertChanged.value || nightChanged.value)
 
 // True when the rich computed view (times, exact map routing, evaluation) is in
 // force: display mode, and re-edit mode up until the first change. Making a
@@ -1355,6 +1607,7 @@ const paramsStale = computed(
     (selectedCompositionId.value !== committedCompId.value ||
       store.selectedScenarioId !== committedScenarioId.value ||
       expertChanged.value ||
+      nightChanged.value ||
       detailsChanged.value),
 )
 
@@ -1383,21 +1636,26 @@ const currentTariff = computed<Tariff>(() => ({
 
 // An expert edit is not "dirty" — the stops are untouched — it is stale
 // results, the same state a composition switch produces, and it takes the
-// same Recalculate control. Compared structurally: the state is small, and
-// two states that differ only in add-on order mean the same timetable, which
-// toRequest() already canonicalises.
+// same Recalculate control. Compared on the CLOCK, not on the request: a pin
+// at the automatic value, a pin↔follows toggle, or breaking the mirror link
+// changes the request without moving a minute, and must not ask for a
+// recalculation — only a departure or a leg that actually moved does. (The
+// mode itself reaches the stored proposal with the next recalculation that
+// is needed anyway; until then it only matters for what that recalculation
+// posts.)
+// Compared by the route's direction, so a flipped view counts as unchanged
+// for the same reason isDirty accepts a reversed stop list: the committed
+// state is in the computed orientation (slot 0 = direction 0), the current
+// one has the direction on screen in slot 0.
 const expertChanged = computed(() => {
   const committed = committedExpert.value
   if (committed === null) return false
-  const current = JSON.stringify(expertToRequest(expert.value))
-  // Either orientation counts as unchanged, for the same reason isDirty
-  // accepts a reversed stop list: flipping direction re-keys the overrides
-  // (swapDirection above) without moving a single minute of the timetable,
-  // and must not put the results behind a Recalculate button.
-  return (
-    current !== JSON.stringify(expertToRequest(committed)) &&
-    current !== JSON.stringify(expertToRequest(swapDirections(committed)))
-  )
+  const [outbound, returnTrip] = lastAutoDeparture.value
+  const committedByDirection = resolveTimetable(committed, { own: outbound, other: returnTrip })
+  const current = resolveTimetable(expert.value, autosOnScreen())
+  const currentByDirection: [ResolvedDirection, ResolvedDirection] =
+    onScreenDirection.value === 0 ? current : [current[1], current[0]]
+  return JSON.stringify(currentByDirection) !== JSON.stringify(committedByDirection)
 })
 
 // The stale results' recompute: same "stops are settled" call the scenario
@@ -1566,6 +1824,7 @@ function cancelEdit() {
     // committedItinerary's stop order, so putting one back without the other
     // leaves the overrides describing the opposite direction.
     if (committedExpert.value) expert.value = cloneExpert(committedExpert.value)
+    nightSelection.value = { interval: committedNightInterval.value, pending: null }
   }
   selectedTripId.value =
     routeResult.value?.trips.find((t) => t.direction_id === 0)?.trip_id ??
@@ -1586,6 +1845,48 @@ function onStopSelect(stop: ItineraryStop, selected: Stop) {
 
 function removeStop(index: number) {
   itinerary.value.splice(index, 1)
+}
+
+// The moon pill: on shows the markers, off is the automatic night again.
+function toggleNightMode() {
+  nightMode.value = !nightMode.value
+  if (!nightMode.value) nightSelection.value = { interval: null, pending: null }
+}
+
+// The night marker on a timetable row: two clicks place the night section,
+// a click on either end of it takes it away (lib/nightInterval.ts).
+function toggleNight(stopId: string) {
+  nightSelection.value = toggleNightStop(nightSelection.value, stopId, currentStopIds.value)
+}
+
+type NightMark = 'pending' | 'end' | 'inside' | 'none'
+
+function nightMark(stopId: string): NightMark {
+  const { interval, pending } = nightSelection.value
+  if (pending === stopId) return 'pending'
+  if (interval && (interval[0] === stopId || interval[1] === stopId)) return 'end'
+  return inNightInterval(interval, stopId, currentStopIds.value) ? 'inside' : 'none'
+}
+
+const nightEndNames = computed(() => {
+  const interval = nightSelection.value.interval
+  if (!interval) return null
+  const byId = new Map(store.stops.map((st) => [st.stop_id, st.name]))
+  return { a: byId.get(interval[0]) ?? interval[0], b: byId.get(interval[1]) ?? interval[1] }
+})
+
+// What each stop type means, for the icon beside the name and its hover
+// text. "both" is a boarding-and-alighting stop the backend marks on a
+// timetable that has no night on it at all.
+const STOP_TYPE_ICON: Record<string, string> = {
+  boarding: mdiWalk,
+  night: mdiSleep,
+  alighting: mdiExitRun,
+  both: mdiSwapHorizontal,
+}
+
+function stopTypeHint(stopType: string | null): string {
+  return stopType && stopType in STOP_TYPE_ICON ? t(`proposal.night.stopType.${stopType}`) : ''
 }
 
 function dist(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
@@ -1680,6 +1981,10 @@ interface ViewRow {
   // arrives at.
   stopId: string
   prevStopId: string | null
+  stopType: string | null
+  nightIn: boolean
+  nightOut: boolean
+  slackIn: number
 }
 
 const viewRows = computed((): ViewRow[] => {
@@ -1694,6 +1999,10 @@ const viewRows = computed((): ViewRow[] => {
       departureDay: st.departure_day,
       stopId: st.stop_id,
       prevStopId: i === 0 ? null : stops[i - 1].stop_id,
+      stopType: st.stop_type,
+      nightIn: st.night_in,
+      nightOut: st.night_out,
+      slackIn: st.slack_in,
     }))
   }
   return itinerary.value.map((s) => ({
@@ -1705,8 +2014,16 @@ const viewRows = computed((): ViewRow[] => {
     departureDay: 0,
     stopId: s.selectedStop?.stop_id ?? '',
     prevStopId: null,
+    stopType: null,
+    nightIn: false,
+    nightOut: false,
+    slackIn: 0,
   }))
 })
+
+// Whether the timetable on screen has a night on it at all — the legend
+// below the table is only worth its line then.
+const hasNightLeg = computed(() => viewRows.value.some((r) => r.nightOut))
 
 // --- Suggest mode -----------------------------------------------------------
 // The base "suggest" response, adapted, gives the confirmed stops (in order) and
@@ -2140,9 +2457,28 @@ function applyMemberFromFamily(scenarioId: number | null, compositionId: string 
   const member = family.okMember(scenarioId, compositionId)
   if (!member) return
   const plan = memberPlanFor(document, scenarioId, compositionId)
+  if (!plan) return
+  // The timetable tools' state survives the switch: what the user has set
+  // but not yet recomputed (a moved departure, add-ons, a night being
+  // placed, a materialised night) is theirs, not the member's. applyPlan()
+  // rebuilds the state from the family's request — the committed one — and
+  // puts the itinerary back in outbound order, so both are captured first
+  // and restored after, in the orientation the user was looking at. The
+  // mirroring itself needs nothing: it is a rule in the request, and the
+  // backend applies it to every member around the same 02:30.
+  const pending = {
+    expert: cloneExpert(expert.value),
+    night: { ...nightSelection.value },
+    nightMode: nightMode.value,
+    direction: onScreenDirection.value,
+  }
   // Not persisted: switching is a look, not an edit. The user's own
   // proposal is saved by the paths that do change it.
-  if (plan) applyPlan(plan)
+  applyPlan(plan, false, true)
+  if (pending.direction === 1) swapDirection()
+  expert.value = pending.expert
+  nightSelection.value = pending.night
+  nightMode.value = pending.nightMode
 }
 
 watch(
@@ -2181,6 +2517,10 @@ onMounted(async () => {
     if (restored.length >= 2) {
       itinerary.value = restored
       selectedCompositionId.value = draft!.compositionId
+      nightSelection.value = {
+        interval: pruneNightInterval(draft!.nightIntervalIds, draft!.stopIds),
+        pending: null,
+      }
       if (draft!.suggestSelectedIds !== null) await restoreSuggestState(draft!.suggestSelectedIds)
       draftHydrated.value = true
       return
@@ -2249,10 +2589,15 @@ onMounted(async () => {
          above about 900px — a max-w-sm itinerary column plus MapView's 480px
          minimum plus the gap — and below that the row used to overflow the
          page rather than wrap. -->
+    <!-- Dimmed while stale like the results. When the timetable itself is
+         what changed (expert edit, night moved), the Recalculate control sits over the itinerary column
+         instead of over the results (it is where the edit was made, and
+         must not need a scroll), so the column dims its own content under
+         that scrim below and only the map dims here. -->
     <div
       v-else
       class="flex flex-col gap-6 transition-opacity duration-200 lg:flex-row"
-      :class="paramsStale ? 'opacity-40' : ''"
+      :class="paramsStale && !timetableChanged ? 'opacity-40' : ''"
     >
       <!-- Left panel: shrink-wrapped to its content's natural width (the
            itinerary text) rather than a fixed share of the row, so MapView
@@ -2491,50 +2836,14 @@ onMounted(async () => {
             />
           </div>
 
-          <!-- Expert timetable: the departure control, plus the mirror notice
-               when the return is still following outbound. The per-leg
-               minutes live in the table below, on the row the leg arrives
-               at — a leg strip cannot be lifted out of the rows it sits
-               between without duplicating the whole table. -->
-          <div v-if="expertMode && currentMode === 'display'" class="mb-4 flex flex-col gap-2">
-            <ExpertTimetableControls
-              :departure="currentDeparture"
-              :auto-min="autoDepartureMin"
-              @update="setDepartureOverride"
-            />
-            <!-- You always edit the direction on screen; this says what that
-                 does to the other one, and offers the way out of it. Use the
-                 swap button to look at the other direction — the overrides
-                 follow it. -->
-            <p class="flex flex-wrap items-center gap-2 px-1 text-xs text-primary-50/50">
-              <template v-if="otherDirectionMirrors">
-                {{ t('proposal.expert.mirrored') }}
-                <button
-                  type="button"
-                  class="cursor-pointer font-semibold text-primary-50/80 underline underline-offset-2 transition hover:text-primary-50"
-                  @click="unlinkReturn"
-                >
-                  {{ t('proposal.expert.editSeparately') }}
-                </button>
-              </template>
-              <template v-else>
-                {{ t('proposal.expert.ownTimes') }}
-                <button
-                  type="button"
-                  class="cursor-pointer font-semibold text-primary-50/80 underline underline-offset-2 transition hover:text-primary-50"
-                  @click="relinkReturn"
-                >
-                  {{ t('proposal.expert.relink') }}
-                </button>
-              </template>
-            </p>
-          </div>
-
-          <!-- Display / Loading mode table. A standalone v-if, not the tail
-               of the suggest block's chain: the expert controls above sit
-               between the two, and a v-else-if would silently bind to them
-               instead. Same condition either way — suggest mode renders the
-               table above, edit mode the one at the top. -->
+          <!-- Display / Loading mode table. A standalone v-if rather than
+               the tail of the suggest block's chain, so it does not depend
+               on what sits between the two. Same condition either way —
+               suggest mode renders the table above, edit mode the one at
+               the top. In expert mode the first departure is an input in
+               the times column and the per-leg minutes a column of their
+               own; the switches for both live with the direction switch
+               below. -->
           <DataTable
             v-if="currentMode !== 'edit' && currentMode !== 'suggest'"
             :value="viewRows"
@@ -2557,22 +2866,91 @@ onMounted(async () => {
                   </template>
                   <template v-else>
                     <StopTime :time="row.arrival" :day="row.arrivalDay" />
-                    <StopTime :time="row.departure" :day="row.departureDay" />
+                    <!-- Expert mode: the first departure is typed here, in
+                         the strip, rather than in a control of its own. The
+                         toggles that say how it behaves (pinned/follows,
+                         mirrored/own times) sit with the direction switch
+                         below. -->
+                    <input
+                      v-if="expertMode && currentMode === 'display' && index === 0"
+                      type="time"
+                      step="60"
+                      class="expert-time-input h-6 rounded-md border border-amber-300/40 bg-sapphire px-1 text-xs tabular-nums text-primary-50"
+                      :value="currentDepartureClock"
+                      :aria-label="t('proposal.expert.firstDeparture')"
+                      @change="onDepartureInput"
+                    />
+                    <StopTime v-else :time="row.departure" :day="row.departureDay" />
                   </template>
                 </div>
               </template>
             </Column>
 
-            <!-- Timeline dot -->
+            <!-- What the stop is on the clock — boarding, sleeping, alighting
+                 — between its times and the band. With the fixed-night tool
+                 on, the same icon is the click target that places the night:
+                 blue ring = chosen end, faint blue = inside the section,
+                 pulsing = one end picked, the other still to come. Blue is
+                 the night's colour throughout: this icon, the band, the pill. -->
+            <Column style="width: 2rem" :pt="{ bodyCell: { class: '!p-0' } }">
+              <template #body="{ data: row }">
+                <button
+                  v-if="nightToolOn"
+                  type="button"
+                  class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full transition"
+                  :class="{
+                    'bg-sky-400/20 text-sky-300 ring-1 ring-sky-300/60':
+                      nightMark(row.stopId) === 'end',
+                    'text-sky-300/80': nightMark(row.stopId) === 'inside',
+                    'animate-pulse bg-sky-400/20 text-sky-300': nightMark(row.stopId) === 'pending',
+                    'text-primary-50/50 hover:text-primary-50': nightMark(row.stopId) === 'none',
+                  }"
+                  :aria-pressed="nightMark(row.stopId) !== 'none'"
+                  :aria-label="t('proposal.night.markAria', { stop: row.name })"
+                  @mouseenter="
+                    showToolHint($event, t('proposal.night.markAria', { stop: row.name }))
+                  "
+                  @mouseleave="toolHint?.scheduleClose()"
+                  @click="toggleNight(row.stopId)"
+                >
+                  <AppIcon :path="STOP_TYPE_ICON[row.stopType ?? 'both']" :size="16" />
+                </button>
+                <span
+                  v-else-if="row.stopType && currentMode !== 'loading'"
+                  class="flex items-center justify-center"
+                  :class="
+                    row.stopType === 'night' && !nightOnScreenStale
+                      ? 'text-sky-300'
+                      : 'text-primary-50/50'
+                  "
+                  :aria-label="stopTypeHint(row.stopType)"
+                  role="img"
+                  @mouseenter="showToolHint($event, stopTypeHint(row.stopType))"
+                  @mouseleave="toolHint?.scheduleClose()"
+                >
+                  <AppIcon :path="STOP_TYPE_ICON[row.stopType]" :size="16" />
+                </span>
+              </template>
+            </Column>
+
+            <!-- Timeline. Two halves per row (leg arriving, leg leaving) so
+                 the legs that run through 00:00–05:00 read as the night. -->
             <Column style="width: 2.5rem" :pt="{ bodyCell: { class: 'timeline-col !p-0' } }">
-              <template #body="{ index }">
+              <template #body="{ data: row, index }">
                 <div class="absolute inset-0 flex items-center justify-center">
                   <div
-                    class="absolute left-1/2 w-0.5 -translate-x-1/2 bg-primary-50/30"
-                    :class="[
-                      index === 0 ? 'top-1/2' : 'top-0',
-                      index === viewRows.length - 1 ? 'bottom-1/2' : 'bottom-0',
-                    ]"
+                    v-if="index > 0"
+                    class="absolute top-0 bottom-1/2 left-1/2 w-0.5 -translate-x-1/2"
+                    :class="
+                      row.nightIn && !nightOnScreenStale ? 'bg-sky-400/80' : 'bg-primary-50/30'
+                    "
+                  />
+                  <div
+                    v-if="index < viewRows.length - 1"
+                    class="absolute top-1/2 bottom-0 left-1/2 w-0.5 -translate-x-1/2"
+                    :class="
+                      row.nightOut && !nightOnScreenStale ? 'bg-sky-400/80' : 'bg-primary-50/30'
+                    "
                   />
                   <div
                     class="relative z-10 rounded-full bg-primary-50"
@@ -2587,7 +2965,7 @@ onMounted(async () => {
                  the table wider than its container. -->
             <Column>
               <template #body="{ data: row, index }">
-                <div class="flex min-w-0 items-center px-3 py-2">
+                <div class="flex min-w-0 items-center gap-2 px-3 py-2">
                   <span
                     :class="[
                       'text-primary-50 leading-tight break-words',
@@ -2604,7 +2982,9 @@ onMounted(async () => {
             <!-- Expert: minutes added to the leg ARRIVING at this stop. The
                  control is a number input with min="0" plus ±1 buttons, so
                  "never shorter than the physics" is visible in the control
-                 rather than only enforced on submit.
+                 rather than only enforced on submit. It shows the night
+                 stretch too (blue), so where the fixed night put its minutes
+                 is read in the same place as where the user put theirs.
                  It belongs to the leg BETWEEN two stops, not to either of
                  them, so it is lifted half a row up onto the boundary — level
                  with the timeline between the two names it spans. -->
@@ -2622,41 +3002,34 @@ onMounted(async () => {
                     type="button"
                     class="h-5 w-5 shrink-0 cursor-pointer rounded border border-primary-50/20 text-xs leading-none text-primary-50 transition hover:bg-primary-50/15 disabled:cursor-not-allowed disabled:opacity-40"
                     :aria-label="t('proposal.expert.lessAria', { stop: row.name })"
-                    @click="
-                      setLegAddon(
-                        row.prevStopId,
-                        row.stopId,
-                        legAddon(row.prevStopId, row.stopId) - 1,
-                      )
-                    "
+                    :disabled="legExtra(row) === 0"
+                    @click="stepLegExtra(row, -1)"
                   >
                     −
                   </button>
                   <input
                     type="number"
-                    min="0"
                     step="1"
                     class="expert-addon-input h-5 w-10 rounded border bg-sapphire px-1 text-right text-xs tabular-nums text-primary-50"
                     :class="
                       legAddon(row.prevStopId, row.stopId) > 0
                         ? 'border-amber-300/50 text-amber-200'
-                        : 'border-primary-50/20'
+                        : legSlack(row) > 0
+                          ? 'border-sky-400/50 text-sky-200'
+                          : 'border-primary-50/20'
                     "
-                    :value="legAddon(row.prevStopId, row.stopId)"
-                    :aria-label="t('proposal.expert.legAria', { stop: row.name })"
-                    @change="onLegAddonInput(row.prevStopId, row.stopId, $event)"
+                    min="0"
+                    :value="legExtra(row)"
+                    :aria-label="legExtraHint(row)"
+                    @mouseenter="showToolHint($event, legExtraHint(row))"
+                    @mouseleave="toolHint?.scheduleClose()"
+                    @change="onLegExtraInput(row, $event)"
                   />
                   <button
                     type="button"
                     class="h-5 w-5 shrink-0 cursor-pointer rounded border border-primary-50/20 text-xs leading-none text-primary-50 transition hover:bg-primary-50/15 disabled:cursor-not-allowed disabled:opacity-40"
                     :aria-label="t('proposal.expert.moreAria', { stop: row.name })"
-                    @click="
-                      setLegAddon(
-                        row.prevStopId,
-                        row.stopId,
-                        legAddon(row.prevStopId, row.stopId) + 1,
-                      )
-                    "
+                    @click="stepLegExtra(row, 1)"
                   >
                     +
                   </button>
@@ -2665,11 +3038,50 @@ onMounted(async () => {
             </Column>
           </DataTable>
 
-          <!-- Itinerary controls, always centered as a group under the itinerary:
-               Back to edit (suggest) / Edit (display) / Add Stop (edit) + Swap in
-               the middle; Cancel Edit (re-edit) on the right. The two flex-1
-               spacers keep the middle group centered regardless of which side
-               buttons are present. -->
+          <!-- The night on this timetable, spelled out once: the blue legs
+               are the 00:00–05:00 window and what the stop icons mean. With
+               the fixed-night tool on, also where the night is being put. -->
+          <div
+            v-if="
+              currentMode === 'display' && ((hasNightLeg && !nightOnScreenStale) || nightToolOn)
+            "
+            class="-mt-2 mb-4 flex flex-col gap-1 px-1 text-xs text-primary-50/50"
+          >
+            <p
+              v-if="hasNightLeg && !nightOnScreenStale"
+              class="flex flex-wrap items-center gap-x-3 gap-y-1"
+            >
+              <span class="flex items-center gap-1">
+                <span class="inline-block h-0.5 w-4 bg-sky-400/80" />
+                {{ t('proposal.night.legendNight') }}
+              </span>
+              <span class="flex items-center gap-1">
+                <AppIcon :path="mdiWalk" :size="14" />
+                {{ t('proposal.night.legendBoarding') }}
+              </span>
+              <span class="flex items-center gap-1 text-sky-300">
+                <AppIcon :path="mdiSleep" :size="14" />
+                {{ t('proposal.night.legendNightStop') }}
+              </span>
+              <span class="flex items-center gap-1">
+                <AppIcon :path="mdiExitRun" :size="14" />
+                {{ t('proposal.night.legendAlighting') }}
+              </span>
+            </p>
+            <p
+              v-if="nightToolOn"
+              class="flex flex-wrap items-center gap-x-2 gap-y-1 text-primary-50/60"
+            >
+              <template v-if="nightSelection.pending">
+                {{ t('proposal.night.pendingHint') }}
+              </template>
+              <template v-else-if="nightEndNames">
+                {{ t('proposal.night.fixedHint', nightEndNames) }}
+              </template>
+              <template v-else>{{ t('proposal.night.autoHint') }}</template>
+            </p>
+          </div>
+
           <div
             v-if="currentMode !== 'loading'"
             class="mt-5 flex items-center gap-2 border-t border-primary-50/10 pt-5"
@@ -2714,6 +3126,10 @@ onMounted(async () => {
                 v-if="showSwap"
                 :class="toolPillClass"
                 :aria-label="t('proposal.swapDirection')"
+                @mouseenter="showToolHint($event, t('proposal.swapDirection'))"
+                @mouseleave="toolHint?.scheduleClose()"
+                @focus="showToolHint($event, t('proposal.swapDirection'))"
+                @blur="toolHint?.scheduleClose()"
                 @click="swapDirection"
               >
                 <AppIcon :path="mdiSwapVertical" :size="16" />
@@ -2734,7 +3150,77 @@ onMounted(async () => {
                 <AppIcon :path="mdiTimerCogOutline" :size="16" />
                 {{ t('proposal.expert.toggle') }}
               </button>
+
+              <!-- Fixed night, one of expert mode's tools: on, each row's
+                   stop icon picks the section the 00:00–05:00 window is
+                   centred on; off is the automatic night. -->
+              <button
+                v-if="expertMode && currentMode === 'display'"
+                :class="[toolPillClass, nightMode ? 'night-pill-on' : '']"
+                :aria-pressed="nightMode"
+                :aria-label="t('proposal.night.toggleAria')"
+                @mouseenter="showToolHint($event, t('proposal.night.toggleAria'))"
+                @mouseleave="toolHint?.scheduleClose()"
+                @focus="showToolHint($event, t('proposal.night.toggleAria'))"
+                @blur="toolHint?.scheduleClose()"
+                @click="toggleNightMode"
+              >
+                <AppIcon :path="mdiWeatherNight" :size="16" />
+              </button>
+
+              <!-- Expert mode's two switches, icon-only, in the same pill as
+                   the direction switch: pinned/follows for the first
+                   departure typed into the strip above, mirrored/own times
+                   for the opposite direction. Gold = on. A reset appears
+                   once a departure is overridden. -->
+              <template v-if="expertMode && currentMode === 'display'">
+                <button
+                  :class="[toolPillClass, pinnedDeparture ? 'expert-pill-on' : '']"
+                  :aria-pressed="pinnedDeparture"
+                  :aria-label="pinHintText"
+                  @mouseenter="showToolHint($event, pinHintText)"
+                  @mouseleave="toolHint?.scheduleClose()"
+                  @focus="showToolHint($event, pinHintText)"
+                  @blur="toolHint?.scheduleClose()"
+                  @click="
+                    setDepartureOverride(toggleDepartureMode(currentDeparture, autoDepartureMin))
+                  "
+                >
+                  <AppIcon :path="pinnedDeparture ? mdiLock : mdiLockOpenVariant" :size="16" />
+                </button>
+                <button
+                  :class="[toolPillClass, otherDirectionMirrors ? 'expert-pill-on' : '']"
+                  :aria-pressed="otherDirectionMirrors"
+                  :aria-label="mirrorHintText"
+                  @mouseenter="showToolHint($event, mirrorHintText)"
+                  @mouseleave="toolHint?.scheduleClose()"
+                  @focus="showToolHint($event, mirrorHintText)"
+                  @blur="toolHint?.scheduleClose()"
+                  @click="setMirrored(!otherDirectionMirrors)"
+                >
+                  <AppIcon
+                    :path="otherDirectionMirrors ? mdiMirror : mdiArrowLeftRight"
+                    :size="16"
+                  />
+                </button>
+                <button
+                  v-if="currentDeparture !== null"
+                  :class="toolPillClass"
+                  :aria-label="t('proposal.expert.reset')"
+                  @mouseenter="showToolHint($event, t('proposal.expert.reset'))"
+                  @mouseleave="toolHint?.scheduleClose()"
+                  @focus="showToolHint($event, t('proposal.expert.reset'))"
+                  @blur="toolHint?.scheduleClose()"
+                  @click="setDepartureOverride(null)"
+                >
+                  <AppIcon :path="mdiRestore" :size="16" />
+                </button>
+              </template>
             </div>
+
+            <InfoPopover ref="toolHint">
+              <p class="w-72 text-sm text-primary-50/75">{{ toolHintText }}</p>
+            </InfoPopover>
 
             <div class="flex flex-1 items-center justify-end gap-2">
               <!-- Cancel Edit (re-edit) -->
@@ -2748,30 +3234,55 @@ onMounted(async () => {
           <!-- Headline route figures — distance, average speed, frequency.
                Its own panel under the itinerary controls, matching the boxes
                in the results section, and labelled the same way so the strip
-               reads as a titled panel rather than three loose pills. -->
-          <div
-            v-if="currentMode === 'display' && routeStatRows.length > 0"
-            class="mt-8 flex flex-col items-center gap-2 rounded-xl bg-primary-50/5 px-4 py-3 text-primary-50/70"
-          >
-            <span class="text-xs tracking-wide text-primary-50/50 uppercase">
-              {{ t('proposal.routeStats') }}
-            </span>
-            <div class="flex flex-wrap justify-center gap-x-8 gap-y-3">
-              <div
-                v-for="stat in routeStatRows"
-                :key="stat.icon"
-                class="flex items-center gap-2"
-                :title="stat.title"
-              >
-                <AppIcon :path="stat.icon" :size="20" />
-                <span class="text-base font-semibold">{{ stat.value }}</span>
+               reads as a titled panel rather than three loose pills.
+               While the timetable's own inputs (expert edits, the night)
+               have changed, this panel is what greys out and carries the
+               Recalculate control — the timetable above stays fully live so
+               several things can be adjusted before one recompute. -->
+          <div v-if="currentMode === 'display' && routeStatRows.length > 0" class="relative mt-8">
+            <div
+              class="flex flex-col items-center gap-2 rounded-xl bg-primary-50/5 px-4 py-3 text-primary-50/70 transition-opacity duration-200"
+              :class="paramsStale && timetableChanged ? 'opacity-30' : ''"
+            >
+              <span class="text-xs tracking-wide text-primary-50/50 uppercase">
+                {{ t('proposal.routeStats') }}
+              </span>
+              <div class="flex flex-wrap justify-center gap-x-8 gap-y-3">
+                <div
+                  v-for="stat in routeStatRows"
+                  :key="stat.icon"
+                  class="flex items-center gap-2"
+                  :title="stat.title"
+                >
+                  <AppIcon :path="stat.icon" :size="20" />
+                  <span class="text-base font-semibold">{{ stat.value }}</span>
+                </div>
+                <CountryFlags
+                  v-if="routeStats"
+                  :countries="routeStats.countries"
+                  :title="routeStats.countries.map((c) => countryName(c)).join(', ')"
+                />
               </div>
-              <CountryFlags
-                v-if="routeStats"
-                :countries="routeStats.countries"
-                :title="routeStats.countries.map((c) => countryName(c)).join(', ')"
-              />
             </div>
+
+            <!-- Stale timetable (expert edit or night moved): the recompute
+                 control, over the route stats — the one place it is needed,
+                 with nothing to scroll to and nothing blocked. The results
+                 below only grey out (their own control is suppressed, see
+                 ProposalResults props). -->
+            <button
+              v-if="paramsStale && timetableChanged"
+              type="button"
+              class="absolute inset-0 flex cursor-pointer items-center justify-center rounded-xl"
+              @click="recomputeWithSelection"
+            >
+              <span
+                class="flex items-center gap-2 rounded-full bg-primary-500 px-6 py-2 text-md font-semibold text-white shadow-lg transition hover:bg-primary-600"
+              >
+                {{ t('proposal.recalculate') }}
+                <span aria-hidden="true">→</span>
+              </span>
+            </button>
           </div>
         </div>
 
@@ -2876,7 +3387,8 @@ onMounted(async () => {
              the page scrolls past like any other, and pinning it would park it
              over the results below. -->
         <div
-          class="relative isolate h-full overflow-hidden rounded-xl border border-primary-50/10 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)]"
+          class="relative isolate h-full overflow-hidden rounded-xl border border-primary-50/10 transition-opacity duration-200 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)]"
+          :class="paramsStale && timetableChanged ? 'opacity-60' : ''"
           style="clip-path: inset(0 round 0.75rem)"
         >
           <MapView
@@ -2976,8 +3488,8 @@ onMounted(async () => {
         :compositions="store.compositions"
         :selected-composition-id="selectedCompositionId"
         :family="family"
-        :params-stale="paramsStale"
-        :dimmed="isDirty"
+        :params-stale="paramsStale && !timetableChanged"
+        :dimmed="isDirty || (paramsStale && timetableChanged)"
         :schedule-mode="(publishRequest?.schedule_mode as string | undefined) ?? null"
         :committed-request="publishRequest"
         :cycle-distance-km="cycleDistanceKm"
@@ -3027,11 +3539,22 @@ onMounted(async () => {
   margin: 0;
 }
 /* Expert mode on: the same gold this app already uses for "a value you
-   chose" (ProposalResults' scenario card, ExpertTimetableControls). */
+   chose" (ProposalResults' scenario card). */
 .expert-pill-on {
   border-color: color-mix(in srgb, #fbbf24 45%, transparent);
   background: color-mix(in srgb, #fbbf24 14%, transparent);
   color: #fde68a;
+}
+/* Fixed-night tool on: the night's blue, as on the band and the stop icons. */
+.night-pill-on {
+  border-color: color-mix(in srgb, #38bdf8 45%, transparent);
+  background: color-mix(in srgb, #38bdf8 14%, transparent);
+  color: #bae6fd;
+}
+/* The strip's departure input: no picker icon, it does not fit a 6-rem
+   column and the value is typed anyway. */
+.expert-time-input::-webkit-calendar-picker-indicator {
+  display: none;
 }
 /* Drag handle: hover-only */
 :deep(.reorder-col > *) {

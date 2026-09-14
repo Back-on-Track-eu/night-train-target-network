@@ -47,7 +47,9 @@ Pipeline for plan_route() per TripPair (_build_trip_pair()), per direction (_bui
    departure the strategy chose, and timetable.classify_for_departure()
    re-runs the boarding/night/alighting split against it. Skipped when
    nothing was overridden, which is every request without an
-   expert_timetable key.
+   expert_timetable key. The distance the departure moved is kept on the
+   Trip (departure_shift_min) — it is what a mirroring return trip is
+   displaced the other way by (timetable.mirror_overrides(), 0.9.37).
 7. calc_energy_consumption() enriches RoutedLeg.energy_kwh in-place.
 8. _build_trip_stops_and_legs() (DB lookups + assembly) delegates exact
    timing to timetable.build_final_timetable(), pairs the result with
@@ -488,6 +490,8 @@ def _build_trip(
     Returns (Trip, suggestions). suggestions is non-empty only for
     auto_stop_addition="suggest" on the direction that actually runs the
     candidate search (see known_auto_added_stop_ids below) — [] otherwise.
+    Trip.departure_shift_min records how far the expert departure moved the
+    trip from the strategy's value (0 without an override).
 
     fixed_night_interval: [start, end] stop IDs in THIS direction's travel
     order (the caller reverses the pair input's interval for the return
@@ -608,6 +612,7 @@ def _build_trip(
     # a trip shifted two hours later has different boarding/night stops,
     # and therefore different dwell. Skipped entirely when nothing was
     # overridden, so the automatic path stays byte-identical.
+    auto_departure_time_min = departure_time_min
     if expert.departure is not None:
         departure_time_min = resolve_departure(departure_time_min, expert.departure)
         stop_inputs = classify_for_departure(
@@ -647,6 +652,7 @@ def _build_trip(
         segments=segments,
         timetable_warnings=timetable_warnings,
         gauge_mm=gauge_mm,
+        departure_shift_min=departure_time_min - auto_departure_time_min,
     )
     logger.info(
         "_build_trip: id=%s %dm %.0fmin", tid, trip.distance_m, trip.total_time_min
@@ -759,17 +765,19 @@ def _build_trip_pair(
 
     # Expert overrides follow the same rule as the interval above, with one
     # extra step: an omitted return block means "mirror outbound", so its
-    # add-ons are reversed onto the return's own stop pairs
-    # (mirror_overrides()). An explicit return block wins as given —
-    # that is how an asymmetric timetable is expressed. The departure is
-    # never mirrored; see mirror_overrides()'s docstring.
+    # add-ons are reversed onto the return's own stop pairs and its
+    # departure is displaced the opposite way from outbound's — by however
+    # far outbound actually moved, which only the built trip knows once an
+    # "absolute" override is involved (mirror_overrides()). An explicit
+    # return block wins as given — that is how an asymmetric timetable is
+    # expressed.
     expert = pair_input.expert_timetable
     if expert is None:
         return_expert = NO_OVERRIDES
     elif expert.return_trip is not None:
         return_expert = expert.return_trip
     else:
-        return_expert = mirror_overrides(expert.outbound)
+        return_expert = mirror_overrides(expert.outbound, outbound.departure_shift_min)
 
     return_trip, _ = _build_trip(
         proposal_id,
