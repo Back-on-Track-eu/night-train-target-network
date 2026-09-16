@@ -1,0 +1,98 @@
+# =============================================================================
+# Target Network — shared OpenRailRouting engines, Coolify edition (tn-server)
+# =============================================================================
+# Deployed by Coolify as ONE compose application (project "Target Network",
+# environment "production", app "tn-routing") from this repo. Both app
+# environments (staging + production) reach the engines over the external
+# Docker network `tn-shared` by the stable aliases below — the same hostnames
+# the code already uses (OPENRAILROUTING_URL=http://targetnetwork-routing:8989).
+#
+# Coolify rules this file follows (learned on SB's Coolify, 2026-06..08):
+#   * build.context is relative to the REPO ROOT (Coolify runs compose with
+#     --project-directory=<checkout>), not to this file.
+#   * container_name is ignored/renamed by Coolify → cross-app addressing uses
+#     network aliases, never container names.
+#   * ${VAR:-default} for every env so an empty Coolify env cannot break boot.
+#
+# Memory (measured 2026-08-31): ~2.1 GiB resident per graph. tn-server has
+# 62 GiB, so both get headroom; the JVM caps are still explicit guardrails.
+# Start order: the 2032 engine waits for the 2026 one to be healthy — two
+# cold graph loads in parallel OOMed on the old box; on this box it is about
+# not doubling the disk/CPU spike, the rule stays.
+#
+# Graph caches: auto-downloaded from Drive on an empty volume (ids below,
+# new graph = new VERSION of the same file). Pre-seed the volumes from
+# bot-server (tar over ssh) to skip the download — see deploy/coolify/README.md.
+# =============================================================================
+
+services:
+
+  routing-2026:
+    build:
+      context: ./backend/models/route/routing/docker
+      dockerfile: Dockerfile
+    environment:
+      - JAVA_TOOL_OPTIONS=${ROUTING_2026_JAVA_OPTS:--Xmx4g}
+      - GRAPH_CACHE_FILE_ID=${GRAPH_CACHE_FILE_ID_2026:-1tWt1OX7mzPA7Ylo9KqmTK6YluRXEtt8z}
+    mem_limit: ${ROUTING_2026_MEM_LIMIT:-6g}
+    volumes:
+      - graphcache_2026:/app/graph-cache
+      - osmdata:/app/data
+    networks:
+      default:
+      tn-shared:
+        aliases:
+          - targetnetwork-routing
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8989/health"]
+      interval: 30s
+      timeout: 20s
+      retries: 5
+      start_period: 900s
+    restart: unless-stopped
+
+  routing-2032:
+    build:
+      context: ./backend/models/route/routing/docker
+      dockerfile: Dockerfile
+    environment:
+      - JAVA_TOOL_OPTIONS=${ROUTING_2032_JAVA_OPTS:--Xmx4g}
+      - GRAPH_CACHE_FILE_ID=${GRAPH_CACHE_FILE_ID_2032:-15lV2gKyHwljBtbmsOOHA2pWkYHNNjW_a}
+    mem_limit: ${ROUTING_2032_MEM_LIMIT:-6g}
+    volumes:
+      - graphcache_2032:/app/graph-cache
+    networks:
+      default:
+      tn-shared:
+        aliases:
+          - targetnetwork-routing-2032
+    depends_on:
+      routing-2026:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8989/health"]
+      interval: 30s
+      timeout: 20s
+      retries: 5
+      start_period: 900s
+    restart: unless-stopped
+
+# External, pre-created volumes: Coolify renames project-scoped volumes to
+# <app-uuid>_<name> (verified 2026-09-16: the `name:` key is ignored), which
+# would leave the pre-seeded graph caches unused and trigger a Drive download
+# per deploy. `external: true` is honoured. Create once on the box:
+#   docker volume create tn_graphcache_2026 tn_graphcache_2032 tn_osmdata
+volumes:
+  graphcache_2026:
+    external: true
+    name: tn_graphcache_2026
+  graphcache_2032:
+    external: true
+    name: tn_graphcache_2032
+  osmdata:
+    external: true
+    name: tn_osmdata
+
+networks:
+  tn-shared:
+    external: true

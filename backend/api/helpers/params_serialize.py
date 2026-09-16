@@ -124,6 +124,10 @@ def stop_infra_to_dict(stop_infra: StopInfraCollection) -> dict:
             # through a default — there is no document behind a default.
             "stop_charge_eur": {
                 **_field(s.stop_id, "stop_charge_eur", float(s.stop_charge_eur)),
+                # Mass-based part, €/stop/t of coach mass — Czechia. null
+                # everywhere else. The value above is the fixed part; the
+                # evaluation adds per_tonne_eur × the composition's mass.
+                "per_tonne_eur": s.stop_charge_per_tonne_eur,
                 "vat_rate_per": s.stop_charge_vat_rate_per,
                 "incl_vat_eur": s.stop_charge_incl_vat_eur,
                 "basis": s.stop_charge_basis,

@@ -573,12 +573,10 @@ class TestIncludeSections:
         assert set(body) == {"summaries"}
 
     def test_map_lines_geojson(self, api_base, published):
-        # published's request under default auto_stop_addition ("add")
-        # commonly inserts intermediate stops between the two named
-        # endpoints, so the corridor is N literal stop-pair segments, not
-        # necessarily one — map_lines groups by literal segment, not by
-        # "logical journey". Assert every segment the proposal appears on
-        # is well-formed, not that there's exactly one.
+        # A corridor is N literal stop-pair segments, not necessarily one
+        # — map_lines groups by literal segment, not by "logical journey".
+        # Assert every segment the proposal appears on is well-formed, not
+        # that there's exactly one.
         body = _gallery(
             api_base,
             filter={"proposal_ids": [published["proposal_id"]]},
@@ -617,18 +615,16 @@ class TestIncludeSections:
         list) should land on the SAME map_lines feature(s) as `published`
         rather than adding its own, with proposal_count bumped — the whole
         point of aggregating by corridor rather than by proposal.
-        Identical stop lists under the same default auto_stop_addition
-        behaviour insert the same intermediate stops, so every literal
-        segment is shared; with the filter restricted to exactly these two
-        proposals, EVERY returned corridor must therefore carry both.
+        Identical stop lists produce identical literal segments, so every
+        one of them is shared; with the filter restricted to exactly these
+        two proposals, EVERY returned corridor must therefore carry both.
 
-        Both sides use the SAME composition. An earlier version varied it,
-        which quietly made the test depend on two compositions producing an
-        identical auto-added stop list: the "add" budget is a share of
-        technical trip time, so a faster or slower consist can admit a
-        different number of marginal candidates and split the corridor into
-        different segments. That is correct behaviour and nothing to do with
-        corridor aggregation, which is what this test is about."""
+        Both sides use the SAME composition. That mattered more before
+        route builder 0.9.34, when the builder could add stops of its own
+        within a budget derived from technical trip time and a faster
+        consist could therefore split the corridor differently. Keeping one
+        composition still keeps the test about corridor aggregation and
+        nothing else."""
         second = publish(
             api_base,
             compute(api_base, _STOPS, _COMPOSITION)["request"],

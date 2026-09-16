@@ -151,29 +151,37 @@ EXPECTED_HEADERS: dict[str, list[str]] = {
     ],
 }
 
-_synced = False
+_synced: set[tuple[str, Path]] = set()
 
 
-def folder_id() -> str:
-    return os.environ.get(FOLDER_ID_VAR, "").strip()
+def folder_id(var: str = FOLDER_ID_VAR) -> str:
+    return os.environ.get(var, "").strip()
 
 
-def sync_folder(*, force: bool = False) -> int:
-    """Copy every folder file missing from data/ into it. Returns the count.
+def sync_folder(
+    *,
+    folder_id_var: str = FOLDER_ID_VAR,
+    target: Path = DATA_DIR,
+    force: bool = False,
+) -> int:
+    """Copy every file of a Drive folder missing from `target` into it.
 
-    Runs at most once per process unless forced. Downloads into a temporary
-    directory and copies only what is absent, so an existing local file — one a
-    step just wrote, or one placed by hand — is never overwritten.
+    Returns the count. Runs at most once per folder and process unless forced.
+    Downloads into a temporary directory and copies only what is absent, so an
+    existing local file — one a step just wrote, or one placed by hand — is
+    never overwritten. The defaults sync the stops pipeline's bulk inputs into
+    data/; the charge notebooks sync their country files into charges/sources/
+    with the same call.
     """
-    global _synced
-    if _synced and not force:
+    key = (folder_id_var, target)
+    if key in _synced and not force:
         return 0
 
-    ident = folder_id()
+    ident = folder_id(folder_id_var)
     if not ident:
         raise RuntimeError(
-            f"{FOLDER_ID_VAR} is not set — put the Drive folder id in "
-            "backend/docker/.env, or place the files in data/ by hand."
+            f"{folder_id_var} is not set — put the Drive folder id in "
+            f"backend/docker/.env, or place the files in {target.name}/ by hand."
         )
     try:
         import gdown
@@ -183,8 +191,8 @@ def sync_folder(*, force: bool = False) -> int:
             "`uv sync --extra dev`, or place the files in data/ by hand."
         ) from None
 
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"  syncing Drive folder {ident} — this takes a few minutes...")
+    target.mkdir(parents=True, exist_ok=True)
+    print(f"  syncing Drive folder {ident} into {target.name}/...")
 
     # gdown's signature has drifted between majors (5.x took remaining_ok, 6.x
     # dropped it), so only options present in the installed version are passed.
@@ -198,13 +206,13 @@ def sync_folder(*, force: bool = False) -> int:
     with tempfile.TemporaryDirectory() as tmp:
         gdown.download_folder(**{**options, "output": tmp})
         for source in sorted(Path(tmp).rglob("*")):
-            if not source.is_file() or (DATA_DIR / source.name).exists():
+            if not source.is_file() or (target / source.name).exists():
                 continue
-            shutil.copy2(source, DATA_DIR / source.name)
+            shutil.copy2(source, target / source.name)
             print(f"    + {source.name} ({source.stat().st_size / 1e6:.1f} MB)")
             copied += 1
 
-    _synced = True
+    _synced.add(key)
     print(f"  sync complete — {copied} file(s) added.")
     return copied
 

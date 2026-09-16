@@ -2,8 +2,8 @@
 auth_repository.py
 ==================
 Write-path database adapter for authentication — mirrors
-ProposalRepository / FeedbackRepository (own connection to the same
-database, so DBDataLoader stays strictly read-only). See
+ProposalRepository / FeedbackRepository (one borrowed DBPool connection
+per call, so DBDataLoader stays strictly read-only). See
 db/dev/sql/create_admin_schema.sql for admin.users / admin.auth_tokens.
 
 Transaction shape: each public method is one commit. The request-code
@@ -16,12 +16,11 @@ and stores the new one atomically.
 from __future__ import annotations
 
 import logging
-import os
-from contextlib import contextmanager
 from typing import Optional
 
-import psycopg2
-import psycopg2.extras
+from psycopg2.extras import RealDictCursor
+
+from adapters.db_pool import DBPool, default_pool
 
 logger = logging.getLogger(__name__)
 
@@ -30,57 +29,14 @@ class AuthRepository:
     """Persists users and OTP tokens for the local auth plane, and maps
     Keycloak identities to local rows for the OIDC plane."""
 
-    def __init__(self) -> None:
-        self._conn = self._connect()
+    def __init__(self, pool: DBPool | None = None) -> None:
+        self._pool = pool or default_pool()
 
-    def _connect(self):
-        required = {
-            "POSTGRES_HOST": os.environ.get("POSTGRES_HOST"),
-            "POSTGRES_PORT": os.environ.get("POSTGRES_PORT"),
-            "POSTGRES_DB": os.environ.get("POSTGRES_DB"),
-            "POSTGRES_USER": os.environ.get("POSTGRES_USER"),
-            "POSTGRES_PASSWORD": os.environ.get("POSTGRES_PASSWORD"),
-        }
-        missing = [key for key, value in required.items() if not value]
-        if missing:
-            raise RuntimeError(
-                f"Missing required environment variable(s) for DB connection: "
-                f"{', '.join(missing)}."
-            )
-        return psycopg2.connect(
-            host=required["POSTGRES_HOST"],
-            port=required["POSTGRES_PORT"],
-            dbname=required["POSTGRES_DB"],
-            user=required["POSTGRES_USER"],
-            password=required["POSTGRES_PASSWORD"],
-        )
-
-    @contextmanager
     def _cursor(self):
-        """One cursor on this repository's single connection, rolled back
-        if the block raises.
-
-        psycopg2's own cursor context manager closes the cursor but leaves
-        the transaction open, so a single failed statement puts the
-        connection into "current transaction is aborted" and every later
-        call on this worker fails until the process restarts. That was
-        survivable while auth queries were rare; get_user() now runs on
-        every authenticated request, so one transient failure would take
-        down publishing, liking and commenting alongside it. Commits stay
-        the caller's business — the write paths commit after their block.
-        """
-        cursor = self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        try:
-            yield cursor
-        except Exception:
-            self._conn.rollback()
-            raise
-        finally:
-            cursor.close()
-
-    def close(self) -> None:
-        if self._conn and not self._conn.closed:
-            self._conn.close()
+        """A cursor on a freshly borrowed connection — single-query reads.
+        The transaction is released when the block ends. Writes borrow a
+        connection explicitly and commit inside the block."""
+        return self._pool.cursor()
 
     # ------------------------------------------------------------------
     # Reads
@@ -94,7 +50,6 @@ class AuthRepository:
                 (email,),
             )
             row = cur.fetchone()
-        self._conn.rollback()  # release the read-only transaction
         return dict(row) if row else None
 
     def display_name_taken(self, display_name: str) -> bool:
@@ -104,7 +59,6 @@ class AuthRepository:
                 (display_name,),
             )
             row = cur.fetchone()
-        self._conn.rollback()
         return row is not None
 
     def get_user(self, user_id: int) -> Optional[dict]:
@@ -129,7 +83,6 @@ class AuthRepository:
                 (user_id,),
             )
             row = cur.fetchone()
-        self._conn.rollback()
         return dict(row) if row else None
 
     def merged_target(self, user_id: int) -> Optional[int]:
@@ -146,7 +99,6 @@ class AuthRepository:
                 (user_id,),
             )
             row = cur.fetchone()
-        self._conn.rollback()
         return row["merged_into_user_id"] if row else None
 
     # ------------------------------------------------------------------
@@ -158,8 +110,8 @@ class AuthRepository:
     ) -> dict:
         """Insert one admin.users row. Returns {user_id, email,
         display_name, is_verified}."""
-        try:
-            with self._cursor() as cur:
+        with self._pool.connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
                     "INSERT INTO admin.users (email, display_name, is_verified) "
                     "VALUES (%s, %s, %s) "
@@ -167,10 +119,7 @@ class AuthRepository:
                     (email, display_name, is_verified),
                 )
                 row = cur.fetchone()
-            self._conn.commit()
-        except Exception:
-            self._conn.rollback()
-            raise
+            conn.commit()
         logger.info(
             "user created: user_id=%s display_name=%s verified=%s",
             row["user_id"],
@@ -217,8 +166,8 @@ class AuthRepository:
     def issue_otp(self, user_id: int, code_hash: str, expires_at) -> None:
         """Invalidate any unused OTPs for this user and store the new one —
         atomically, so there is never more than one live code per user."""
-        try:
-            with self._cursor() as cur:
+        with self._pool.connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
                     "UPDATE admin.auth_tokens SET used = TRUE "
                     "WHERE user_id = %s AND NOT used",
@@ -229,10 +178,7 @@ class AuthRepository:
                     "VALUES (%s, %s, %s)",
                     (user_id, code_hash, expires_at),
                 )
-            self._conn.commit()
-        except Exception:
-            self._conn.rollback()
-            raise
+            conn.commit()
 
     def latest_valid_otp(self, user_id: int) -> Optional[dict]:
         """The most recent unused, unexpired token row for this user —
@@ -251,14 +197,13 @@ class AuthRepository:
                 (user_id,),
             )
             row = cur.fetchone()
-        self._conn.rollback()
         return dict(row) if row else None
 
     def consume_otp(self, token_id: int, user_id: int) -> None:
         """Mark the token used and the user verified — one transaction,
         so a verified user can never re-play the same code."""
-        try:
-            with self._cursor() as cur:
+        with self._pool.connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
                     "UPDATE admin.auth_tokens SET used = TRUE WHERE token_id = %s",
                     (token_id,),
@@ -267,10 +212,7 @@ class AuthRepository:
                     "UPDATE admin.users SET is_verified = TRUE WHERE user_id = %s",
                     (user_id,),
                 )
-            self._conn.commit()
-        except Exception:
-            self._conn.rollback()
-            raise
+            conn.commit()
 
     def complete_registration(
         self, token_id: int, user_id: int, display_name: str
@@ -281,8 +223,8 @@ class AuthRepository:
         (and vice versa). Distinct from consume_otp() because a brand-new
         account picks its name here, AFTER the code is confirmed, replacing
         the placeholder request-code created."""
-        try:
-            with self._cursor() as cur:
+        with self._pool.connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
                     "UPDATE admin.users SET display_name = %s, is_verified = TRUE "
                     "WHERE user_id = %s",
@@ -292,10 +234,7 @@ class AuthRepository:
                     "UPDATE admin.auth_tokens SET used = TRUE WHERE token_id = %s",
                     (token_id,),
                 )
-            self._conn.commit()
-        except Exception:
-            self._conn.rollback()
-            raise
+            conn.commit()
 
     # ------------------------------------------------------------------
     # Writes — guest merge
@@ -323,8 +262,8 @@ class AuthRepository:
         into this same account (idempotent no-op), or already merged into a
         different one (logged, refused).
         """
-        try:
-            with self._cursor() as cur:
+        with self._pool.connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
                     "SELECT email, merged_into_user_id FROM admin.users "
                     "WHERE user_id = %s FOR UPDATE",
@@ -332,7 +271,6 @@ class AuthRepository:
                 )
                 row = cur.fetchone()
                 if row is None or row["email"] is not None:
-                    self._conn.rollback()
                     return None
                 if row["merged_into_user_id"] is not None:
                     if row["merged_into_user_id"] != user_id:
@@ -342,7 +280,6 @@ class AuthRepository:
                             row["merged_into_user_id"],
                             user_id,
                         )
-                    self._conn.rollback()
                     return None
 
                 cur.execute(
@@ -383,10 +320,7 @@ class AuthRepository:
                     "WHERE user_id = %s",
                     (user_id, guest_user_id),
                 )
-            self._conn.commit()
-        except Exception:
-            self._conn.rollback()
-            raise
+            conn.commit()
 
         logger.info(
             "guest %d merged into user %d (%d proposals, %d feedback rows, "

@@ -25,7 +25,7 @@ stop catalog is classified. A changed value alone is a data change and
 follows the DB full-snapshot versioning rules instead.
 """
 
-INFRA_MODEL_VERSION: str = "0.9.6"
+INFRA_MODEL_VERSION: str = "0.9.7"
 
 INFRA_MODEL_DESCRIPTION: str = (
     "Infrastructure parameter model: per-country track access charges, "
@@ -51,6 +51,45 @@ OPEN_TODOS['tac_weekday_blend']."""
 
 
 CHANGELOG: dict = {
+    "0.9.7": {
+        "date": "2026-09-09",
+        "author": "david",
+        "changes": "VALUES CHANGE: the optimised-timetable scenarios "
+        "(versions 3 and 7) size their buffer reduction off each country's "
+        "calibrated THEORETICAL timetable supplement instead of converging "
+        "its measured quota toward a benchmark. The benchmark rule cut a "
+        "quarter of each quota's excess above 0.12, which gave the largest "
+        "absolute reduction to the countries whose quota is least likely to "
+        "be timetable supplement at all (Sweden 23%, the UK 24%) and none "
+        "whatever to Austria, whose quota is 73% supplement and therefore "
+        "has the most headroom in proportion. The rule is now "
+        "opt_quota = quota - 0.375 x timetable_buffer_theory_pct, a "
+        "percentage-point cut off the term the route-context calibration "
+        "already describes as what a priority-improvement scenario would "
+        "act on. 0.375 is Schittenhelm (2011, DTU / Rail Net Denmark): the "
+        "Copenhagen-Odense case costs a running-time supplement cut from "
+        "16% to 10% and calls it the outer edge of what a new timetabling "
+        "philosophy could deliver; UIC 451-1 and Hansen & Pachl put the "
+        "supplement it acts on at 8-9% and 3-7%, agreeing with this "
+        "calibration's own 8.1% median from a different derivation. Effect "
+        "on scheduled driving time: -1.86% to -3.11%, median -2.42%, "
+        "against 0.00% to -4.77% before — a narrower spread because it "
+        "tracks the timetable component rather than our own measurement "
+        "error. Every country is now reduced, Austria included. The two "
+        "seed constants are gone; the values are seeded from "
+        "models/scenarios/calib/opt_tt_calibration.py. Two scenarios ride "
+        "along: infra-2026-opt-tt and infra-2032-opt-tt (versions 8 and "
+        "9), optimised timetables WITHOUT the high-speed permission. The "
+        "two operating levers are independent — better pathing is a "
+        "planning decision and needs no policy change on high-speed lines "
+        "— so the grid is now 2x2 per network. The combination was "
+        "unreachable only because the scenario_key suffixes were nested "
+        "(infra-<network>[-hsr[-opt-tt]]); they are independent now and "
+        "the six older keys parse unchanged. No schema change, "
+        "no change to the baseline scenarios. Still provisional for the "
+        "reason route_context gives, not this one. Calibration: "
+        "models/scenarios/calib/OPT_TT_CALIBRATION.md.",
+    },
     "0.9.6": {
         "date": "2026-09-05",
         "author": "david",

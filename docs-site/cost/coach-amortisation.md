@@ -11,13 +11,13 @@ description: "The coaches' annual write-off: purchase price spread over their us
 
 ## What this is
 
-The annual write-off of the coaches — their purchase price spread over the
+The annual write-off of the coaches: their purchase price spread over the
 years they will be in service.
 
-The count includes a reserve: some coaches are always in the workshop, so
-a service needs more of them than it puts on the rails on any given night.
-Prices come from the composition cost calibration, which builds a
-per-metre purchase cost for new and refurbished vehicles at 2032 prices.
+The coach count includes a reserve, because some vehicles are always in the
+workshop and a service needs more of them than it puts on the rails on any
+given night. Prices come from the composition cost calibration, which builds
+a per-metre purchase cost for new and refurbished vehicles at 2032 prices.
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-coach_amortisation_eur"></a>

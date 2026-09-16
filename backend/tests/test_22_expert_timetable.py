@@ -18,8 +18,11 @@ Covers:
     move when the automatic value does
   - segment_addons: land on the named leg only, grow that leg's elapsed
     time and every later stop time by exactly N, leave earlier stops alone
-  - Mirroring: the return direction pads the reversed pair by default; an
-    explicit return block wins
+  - Mirroring: the return direction pads the reversed pair AND is displaced
+    the opposite way from outbound's departure by default (0.9.37 — the pair
+    stays a mirror image around 02:30); an explicit return block wins
+  - departure_shift_min: 0 on every automatic trip, the resolved
+    displacement on an overridden one, and read back from a stored payload
   - The resolved-request echo is canonical (add-on order irrelevant)
   - Validation: negative/zero add_min, non-adjacent pair, duplicate pair,
     unknown mode, unknown keys, over-cap values → 400
@@ -30,10 +33,8 @@ exactly what the drop rule is about, and would otherwise make the
 leg-by-leg assertions non-deterministic (see test_20's module docstring).
 """
 
-import requests
-
 from tests.conftest import STOPS_BERLIN_DRESDEN_WIEN
-from tests.helpers import PROPOSAL_CALC_URL, compute, stop_times, trip_by_direction
+from tests.helpers import compute, post_member, stop_times, trip_by_direction
 
 BASE = {"stops": STOPS_BERLIN_DRESDEN_WIEN, "auto_stop_addition": "off"}
 
@@ -65,7 +66,9 @@ def _elapsed(seg: dict) -> int:
 
 
 def _post(api_base: str, body: dict, timeout: int = 90):
-    return requests.post(f"{api_base}{PROPOSAL_CALC_URL}", json=body, timeout=timeout)
+    """The wire view of a member request — a 1×1 family — for the
+    validation cases; content cases use compute() in-process."""
+    return post_member(api_base, body, timeout=timeout)
 
 
 # =============================================================================
@@ -193,9 +196,11 @@ class TestDepartureOverride:
         assert _departure(trip_by_direction(pinned, 0)) == auto_dep
         assert _departure(trip_by_direction(shifted, 0)) == padded_dep
 
-    def test_return_departure_is_never_mirrored(self, api_base):
-        """An outbound pin says nothing about when the return leaves — the
-        return keeps its own automatic departure."""
+    def test_return_mirrors_a_pinned_outbound_departure(self, api_base):
+        """The pair is a mirror image around 02:30: outbound pulled 90
+        minutes earlier sends the mirroring return 90 minutes later — and
+        by the resolved distance, so an "absolute" pin mirrors as well as a
+        shift does."""
         automatic = compute(api_base, **BASE)["route"]
         auto_return_dep = _departure(trip_by_direction(automatic, 1))
         auto_out_dep = _departure(trip_by_direction(automatic, 0))
@@ -209,7 +214,72 @@ class TestDepartureOverride:
                 }
             ),
         )["route"]
-        assert _departure(trip_by_direction(route, 1)) == auto_return_dep
+        outbound, return_trip = trip_by_direction(route, 0), trip_by_direction(route, 1)
+        assert _departure(outbound) == auto_out_dep - 90
+        assert _departure(return_trip) == auto_return_dep + 90
+        assert outbound["general_parameters"]["departure_shift_min"] == -90
+        assert return_trip["general_parameters"]["departure_shift_min"] == 90
+
+    def test_return_mirrors_a_shifted_outbound_departure(self, api_base):
+        automatic = compute(api_base, **BASE)["route"]
+        auto_return_dep = _departure(trip_by_direction(automatic, 1))
+
+        route = compute(
+            api_base,
+            **BASE,
+            expert_timetable=_expert(
+                outbound={"departure": {"mode": "shift", "shift_min": 25}}
+            ),
+        )["route"]
+        assert _departure(trip_by_direction(route, 1)) == auto_return_dep - 25
+
+    def test_explicit_return_block_keeps_its_own_departure(self, api_base):
+        """Own times: a return block of its own, even one that overrides
+        nothing, is taken as given rather than mirrored."""
+        automatic = compute(api_base, **BASE)["route"]
+        auto_return_dep = _departure(trip_by_direction(automatic, 1))
+        auto_out_dep = _departure(trip_by_direction(automatic, 0))
+
+        route = compute(
+            api_base,
+            **BASE,
+            expert_timetable=_expert(
+                outbound={
+                    "departure": {"mode": "absolute", "time_min": auto_out_dep - 90}
+                },
+                return_block={"departure": {"mode": "shift", "shift_min": 10}},
+            ),
+        )["route"]
+        assert _departure(trip_by_direction(route, 1)) == auto_return_dep + 10
+        assert (
+            trip_by_direction(route, 1)["general_parameters"]["departure_shift_min"]
+            == 10
+        )
+
+    def test_departure_shift_min_round_trips_through_a_stored_payload(
+        self, api_base, loader
+    ):
+        """The one general_parameters figure beside timetable_warnings that
+        the segments cannot reproduce: a stored route reads it back."""
+        from api.helpers.route_serialize import route_from_dict
+
+        route_dict = compute(
+            api_base,
+            **BASE,
+            expert_timetable=_expert(
+                outbound={"departure": {"mode": "shift", "shift_min": -40}}
+            ),
+        )["route"]
+        route, _ = route_from_dict(route_dict, loader)
+        pair = route.trip_pairs[0]
+        assert pair.outbound.departure_shift_min == -40
+        assert pair.return_trip.departure_shift_min == 40
+
+    def test_departure_shift_min_is_zero_on_an_automatic_trip(self, api_base):
+        route = compute(api_base, **BASE)["route"]
+        for direction in (0, 1):
+            trip = trip_by_direction(route, direction)
+            assert trip["general_parameters"]["departure_shift_min"] == 0
 
 
 # =============================================================================

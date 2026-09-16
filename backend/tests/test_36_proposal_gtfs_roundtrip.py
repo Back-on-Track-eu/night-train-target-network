@@ -3,9 +3,11 @@ test_36_proposal_gtfs_roundtrip.py
 ====================================
 Round-trip tests (adapters/proposal/README.md §5.1/§5.2):
 adapters/proposal/gtfs_store.py's insert_route_gtfs() +
-route_dict_from_gtfs() must deep-equal the original POST /api/proposal/calc
-(WP2) route it was given, and input_parameters_from_scenario() must
-deep-equal the original evaluation.input.parameters.
+route_dict_from_gtfs() must deep-equal the original member route it was
+given (compute_member(), in-process via tests/helpers.py). The
+evaluation's parameters are not round-tripped since WP18 B2b: they are
+not stored per proposal and not served with one — GET /api/params/* for
+the scenario pin is where a reader finds them.
 
 No publish endpoint exists yet (WP5) — this file calls the write/read
 functions directly against the DB, exactly as the design doc's WP3
@@ -35,14 +37,13 @@ from adapters.proposal.repository import ProposalRepository
 from adapters.proposal.gtfs_store import (
     insert_route_gtfs,
     route_dict_from_gtfs,
-    input_parameters_from_scenario,
 )
 from tests.conftest import STOPS_BERLIN_DRESDEN_WIEN, STOPS_BERLIN_WIEN
 from tests.helpers import compute
 
 
 def _json_normalize(obj):
-    """route_dict_from_gtfs()/input_parameters_from_scenario() return
+    """route_dict_from_gtfs() returns
     native Python objects straight out of the DB/domain layer; the
     "original" side of every comparison in this file came back through
     an actual HTTP response, i.e. already round-tripped through JSON
@@ -132,27 +133,29 @@ class TestRouteRoundtrip:
         assert _json_normalize(reconstructed) == _round_avg_price(published_route)
 
     def test_auto_added_stop_survives_roundtrip(self, db_cur, loader, api_base):
-        """The gap this file's migration (phase1b) closed — a stop
-        auto_stop_addition inserted must come back with auto_added=true,
-        not silently downgraded to false."""
+        """The gap this file's migration (phase1b) closed — a stop marked
+        auto_added must come back true, not silently downgraded to false.
+
+        ROUTE_BUILDER 0.9.34 removed the mode that set the flag, so no
+        request can produce one any more and the flag is marked by hand
+        here. The round trip still has to carry it: routes published while
+        'add' existed are stored with auto_added stops and must keep
+        reading back as they were built, and proposals.stop_times.auto_added
+        exists for exactly that."""
         response = compute(
             api_base,
             stops=STOPS_BERLIN_DRESDEN_WIEN,
             composition_id="NEW-BAL-7",
-            auto_stop_addition="add",
+            auto_stop_addition="off",
         )
-        stops_in_route = [
-            s
-            for pair in response["route"]["trip_pairs"]
-            for s in (
-                [seg["from_stop"] for seg in pair["outbound"]["segments"]]
-                + [pair["outbound"]["segments"][-1]["to_stop"]]
-            )
-        ]
-        assert any(s["auto_added"] for s in stops_in_route), (
-            "fixture assumption: osm:n3325029085 should auto-add on this "
-            "corridor — see test_20_route_content.py's module docstring"
-        )
+        # Mark the middle stop of every trip, the way a pre-0.9.34 build
+        # would have: the flag lives on the Stop object, which each pair of
+        # adjacent segments shares by reference — so both the to_stop of
+        # one segment and the from_stop of the next carry it.
+        for pair in response["route"]["trip_pairs"]:
+            for trip in (pair["outbound"], pair["return_trip"]):
+                trip["segments"][0]["to_stop"]["auto_added"] = True
+                trip["segments"][1]["from_stop"]["auto_added"] = True
 
         scenario_id = response["request"]["scenario_id"]
         pid, version, published_route = _publish_fixture(db_cur, response)
@@ -209,6 +212,37 @@ class TestRouteRoundtrip:
             reconstructed["trip_pairs"][0]["outbound"]["segments"][0]["addon_time_min"]
             == 13
         )
+
+    def test_track_gauge_survives_roundtrip(self, db_cur, loader, api_base):
+        """ROUTE_BUILDER 0.9.39 — the gauge family a trip routed on is
+        stored, not re-derived: proposals.trips.track_gauge_mm. Every
+        fixture route in this file is 1435, which is also the column's
+        default, so a 1435 round-trip proves nothing; this test publishes
+        a route whose trips CLAIM 1520 and checks the claim comes back.
+        The claim is set on the published dict, exactly where the store
+        reads it — what a Finnish or Ukrainian route would carry
+        (test_78 covers that the router actually produces it)."""
+        response = compute(
+            api_base,
+            stops=STOPS_BERLIN_WIEN,
+            composition_id="NEW-BAL-7",
+            auto_stop_addition="off",
+        )
+        scenario_id = response["request"]["scenario_id"]
+        pid, version, published_route = _publish_fixture(db_cur, response)
+        for pair in published_route["trip_pairs"]:
+            for direction in ("outbound", "return_trip"):
+                pair[direction]["general_parameters"]["track_gauge_mm"] = 1520
+
+        insert_route_gtfs(db_cur, published_route)
+        reconstructed = _json_normalize(
+            route_dict_from_gtfs(pid, version, loader, scenario_id, db_cur)
+        )
+
+        for pair in reconstructed["trip_pairs"]:
+            for direction in ("outbound", "return_trip"):
+                assert pair[direction]["general_parameters"]["track_gauge_mm"] == 1520
+        assert reconstructed == _round_avg_price(published_route)
 
     def test_od_pairs_survive_roundtrip(self, db_cur, loader, api_base):
         """Stopgap demand (distribute_demand(), always run by
@@ -269,26 +303,3 @@ class TestFingerprintRoundtrip:
         assert ephemeral_fp == route_fingerprint(response["route"])
         assert ephemeral_fp == route_fingerprint(published_route)
         assert ephemeral_fp == route_fingerprint(reconstructed)
-
-
-class TestInputParametersRoundtrip:
-    def test_input_parameters_deep_equal_original(self, db_cur, loader, api_base):
-        """input_parameters_from_scenario() doesn't touch the GTFS tables
-        at all (§5.1: parameters are rebuilt from the scenario pin alone)
-        — no insert needed, just compare against the original compute
-        response's own evaluation.input.parameters."""
-        response = compute(
-            api_base,
-            stops=STOPS_BERLIN_WIEN,
-            composition_id="NEW-BAL-7",
-            auto_stop_addition="off",
-        )
-        scenario_id = response["request"]["scenario_id"]
-        original_parameters = response["evaluation"]["input"]["parameters"]
-
-        rebuilt = input_parameters_from_scenario(scenario_id, loader)
-
-        # See _json_normalize()'s docstring — same reasoning applies here.
-        rebuilt_normalized = _json_normalize(rebuilt)
-
-        assert rebuilt_normalized["parameters"] == original_parameters

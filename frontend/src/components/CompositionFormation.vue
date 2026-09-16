@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   classColor,
@@ -10,10 +10,14 @@ import {
 } from '@/lib/compositionFormation'
 
 // Platform-display drawing of one composition: every vehicle to scale, each
-// coach filled by the classes it carries, labelled with its type and
-// position. Amenities are deliberately NOT drawn here — at this scale the
-// glyphs were unreadable; they belong to the inspector line under the drawing,
-// which shows them for the coach being pointed at.
+// coach filled by the classes it carries and numbered by its position.
+//
+// Only the SELECTED coach is labelled with its type id. Printing all fourteen
+// at 1.9 px/m ran the labels into each other — a 26 m coach is 49 px wide and
+// "LR-SEATPOD" needs more than that — so the label moved to where there is
+// room for it: a single line above the drawing, for the coach being pointed
+// at. Amenities are not drawn on the vehicles either, for the same reason;
+// they belong to the inspector, which the parent renders under the drawing.
 const props = defineProps<{
   formation: Formation
   selected: number | null
@@ -28,13 +32,14 @@ const { t } = useI18n()
 // longest catalogue train still fits the overlay without scrolling.
 const PX_PER_M = 1.9
 const MARGIN_X = 4
-const BODY_Y = 13
+const BODY_Y = 5
 const BODY_H = 40
-const BAND_Y = 18
+const BAND_Y = 10
 const BAND_H = 30
-// Glyph width of the 8px label face — long type ids are clipped to fit.
-const LABEL_CHAR_PX = 4.6
-const HEIGHT = 70
+// Glyph width of the 9px label face — a long type id is still clipped, but
+// only the selected coach carries one, so it has its neighbours' room too.
+const LABEL_CHAR_PX = 5.0
+const HEIGHT = 62
 // Below this a band is too narrow for even a two-digit count.
 const BAND_MIN_COUNT_PX = 11
 
@@ -99,9 +104,8 @@ const vehicles = computed<DrawnVehicle[]>(() => {
       return drawn
     })
 
-    // "WLABmz (DD)" is 11 characters and would run into the neighbouring
-    // coach's label at this scale.
-    const maxChars = Math.floor(width / LABEL_CHAR_PX)
+    // The selected coach may borrow its neighbours' width for its label.
+    const maxChars = Math.floor((width * 3) / LABEL_CHAR_PX)
     const label =
       coach.coachTypeId.length > maxChars
         ? `${coach.coachTypeId.slice(0, maxChars - 1)}…`
@@ -124,104 +128,126 @@ const vehicles = computed<DrawnVehicle[]>(() => {
 })
 
 const width = computed(() => props.formation.totalLengthM * PX_PER_M + 2 * MARGIN_X)
+
+// Hover previews, click pins. Without the pin a reader cannot move the
+// pointer down to read the inspector without losing what they selected —
+// which is exactly what made the old hover-only behaviour feel broken.
+const hovered = ref<number | null>(null)
+const shown = computed(() => hovered.value ?? props.selected)
+
+const shownVehicle = computed(
+  () => vehicles.value.find((v) => v.position !== null && v.position === shown.value) ?? null,
+)
+
+function pick(position: number | null) {
+  if (position === null) return
+  emit('select', position)
+}
 </script>
 
 <template>
-  <div class="overflow-x-auto">
-    <svg
-      :width="width"
-      :height="HEIGHT"
-      :viewBox="`0 0 ${width} ${HEIGHT}`"
-      class="h-auto max-w-full"
-      role="img"
-      :aria-label="t('proposal.composition.formation')"
-    >
-      <g
-        v-for="vehicle in vehicles"
-        :key="vehicle.key"
-        :class="vehicle.position !== null ? 'cursor-pointer' : ''"
-        :tabindex="vehicle.position !== null ? 0 : undefined"
-        :role="vehicle.position !== null ? 'button' : undefined"
-        :aria-label="vehicle.title"
-        @mouseenter="vehicle.position !== null && emit('select', vehicle.position)"
-        @focus="vehicle.position !== null && emit('select', vehicle.position)"
-        @click="vehicle.position !== null && emit('select', vehicle.position)"
+  <div class="flex flex-col gap-1">
+    <!-- The label line: one coach at a time, where there is room to read it.
+         Reserved even when nothing is selected, so the drawing does not jump
+         as the pointer moves across it. -->
+    <p class="h-4 text-[11px] leading-4 text-primary-50/70">
+      <template v-if="shownVehicle">
+        <b class="font-semibold text-primary-50">{{ shownVehicle.label }}</b>
+        <span class="text-primary-50/50"> · {{ shownVehicle.title }}</span>
+      </template>
+    </p>
+    <div class="overflow-x-auto">
+      <svg
+        :width="width"
+        :height="HEIGHT"
+        :viewBox="`0 0 ${width} ${HEIGHT}`"
+        class="h-auto max-w-full"
+        role="img"
+        :aria-label="t('proposal.composition.formation')"
       >
-        <title>{{ vehicle.title }}</title>
-
-        <!-- Coach type above the body; the locomotive is drawn dark and unlabelled -->
-        <text
-          v-if="vehicle.label"
-          :x="vehicle.x + vehicle.width / 2"
-          :y="9"
-          text-anchor="middle"
-          class="fill-primary-50/60 text-[8px]"
+        <g
+          v-for="vehicle in vehicles"
+          :key="vehicle.key"
+          :class="vehicle.position !== null ? 'cursor-pointer' : ''"
+          :tabindex="vehicle.position !== null ? 0 : undefined"
+          :role="vehicle.position !== null ? 'button' : undefined"
+          :aria-label="vehicle.title"
+          @mouseenter="hovered = vehicle.position"
+          @mouseleave="hovered = null"
+          @blur="hovered = null"
+          @focus="hovered = vehicle.position"
+          @click="pick(vehicle.position)"
+          @keydown.enter.prevent="pick(vehicle.position)"
+          @keydown.space.prevent="pick(vehicle.position)"
         >
-          {{ vehicle.label }}
-        </text>
-        <rect
-          :x="vehicle.x + 1"
-          :y="BODY_Y"
-          :width="vehicle.width - 2"
-          :height="BODY_H"
-          rx="5"
-          :class="
-            vehicle.position === null
-              ? 'fill-primary-50/25 stroke-primary-50/30'
-              : selected === vehicle.position
-                ? 'fill-primary-50/15 stroke-primary-50'
-                : 'fill-primary-50/5 stroke-primary-50/25'
-          "
-        />
+          <title>{{ vehicle.title }}</title>
 
-        <!-- Class band: one segment per accommodation section, width by places -->
-        <template v-if="!vehicle.isService">
-          <g v-for="(section, i) in vehicle.sections" :key="i">
-            <rect
-              :x="section.x"
-              :y="BAND_Y"
-              :width="section.width"
-              :height="BAND_H"
-              rx="2"
-              :fill="section.color"
-            />
-            <text
-              v-if="section.showPlaces"
-              :x="section.x + section.width / 2"
-              :y="BAND_Y + BAND_H / 2 + 4"
-              text-anchor="middle"
-              :fill="section.ink"
-              class="text-[11px] font-bold"
-            >
-              {{ section.places }}
-            </text>
-          </g>
-        </template>
-        <rect
-          v-else-if="vehicle.position !== null"
-          :x="vehicle.x + 4"
-          :y="BAND_Y"
-          :width="vehicle.width - 8"
-          :height="BAND_H"
-          rx="2"
-          :fill="SERVICE_COLOR"
-        />
+          <rect
+            :x="vehicle.x + 1"
+            :y="BODY_Y"
+            :width="vehicle.width - 2"
+            :height="BODY_H"
+            rx="5"
+            :class="
+              vehicle.position === null
+                ? 'fill-primary-50/25 stroke-primary-50/30'
+                : shown === vehicle.position
+                  ? 'fill-primary-50/15 stroke-primary-50'
+                  : selected === vehicle.position
+                    ? 'fill-primary-50/10 stroke-primary-50/60'
+                    : 'fill-primary-50/5 stroke-primary-50/25'
+            "
+          />
 
-        <!-- Position number under the vehicle -->
-        <text
-          v-if="vehicle.position !== null"
-          :x="vehicle.x + vehicle.width / 2"
-          :y="HEIGHT - 5"
-          text-anchor="middle"
-          :class="
-            selected === vehicle.position
-              ? 'fill-primary-50 text-[10px] font-bold'
-              : 'fill-primary-50/50 text-[10px]'
-          "
-        >
-          {{ vehicle.position }}
-        </text>
-      </g>
-    </svg>
+          <!-- Class band: one segment per accommodation section, width by places -->
+          <template v-if="!vehicle.isService">
+            <g v-for="(section, i) in vehicle.sections" :key="i">
+              <rect
+                :x="section.x"
+                :y="BAND_Y"
+                :width="section.width"
+                :height="BAND_H"
+                rx="2"
+                :fill="section.color"
+              />
+              <text
+                v-if="section.showPlaces"
+                :x="section.x + section.width / 2"
+                :y="BAND_Y + BAND_H / 2 + 4"
+                text-anchor="middle"
+                :fill="section.ink"
+                class="text-[11px] font-bold"
+              >
+                {{ section.places }}
+              </text>
+            </g>
+          </template>
+          <rect
+            v-else-if="vehicle.position !== null"
+            :x="vehicle.x + 4"
+            :y="BAND_Y"
+            :width="vehicle.width - 8"
+            :height="BAND_H"
+            rx="2"
+            :fill="SERVICE_COLOR"
+          />
+
+          <!-- Position number under the vehicle -->
+          <text
+            v-if="vehicle.position !== null"
+            :x="vehicle.x + vehicle.width / 2"
+            :y="HEIGHT - 5"
+            text-anchor="middle"
+            :class="
+              shown === vehicle.position
+                ? 'fill-primary-50 text-[10px] font-bold'
+                : 'fill-primary-50/50 text-[10px]'
+            "
+          >
+            {{ vehicle.position }}
+          </text>
+        </g>
+      </svg>
+    </div>
   </div>
 </template>

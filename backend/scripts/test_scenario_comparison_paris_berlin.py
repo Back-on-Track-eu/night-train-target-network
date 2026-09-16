@@ -22,7 +22,8 @@ So the two scenarios can legitimately produce different routed paths
 (distance/time), not just different tac_eur figures. This script surfaces
 both: the routing-level diff (distance, driving time, per-country
 hsr_allowed) and the cost-level diff — both via one POST
-/api/proposal/calc per scenario (route + evaluation in one call).
+compute_member() per scenario (route + evaluation in one call, in-process
+via scripts/member.py — the wire no longer carries the full route).
 
 The 2026 Base Line ("2026-baseline") is deliberately excluded — it's a
 deprecated historical reference, not a live policy comparison.
@@ -56,6 +57,7 @@ import requests
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from dev_env import api_base_url, routing_base_url  # noqa: E402
+from scripts.member import compute_member_payload  # noqa: E402
 
 API_BASE = api_base_url()
 ROUTING_URL = routing_base_url()
@@ -181,9 +183,8 @@ def fetch_scenario(scenario_key: str) -> dict:
 
 
 def compute(scenario_id: int) -> dict:
-    """POST /api/proposal/calc — route + evaluation in one call. Same scenario
-    for build and cost (this script never needed the old evaluation/calc's
-    override-to-a-different-scenario capability), so the merge is exact."""
+    """One member (compute_member, in-process — scripts/member.py): route +
+    evaluation in one call. Same scenario for build and cost."""
     body = {
         "scenario_id": scenario_id,
         "stops": STOPS,
@@ -195,13 +196,11 @@ def compute(scenario_id: int) -> dict:
         # itself changes (routing/parameters), not auto-added stops.
         "auto_stop_addition": "off",
     }
-    resp = requests.post(f"{API_BASE}/api/proposal/calc", json=body, timeout=90)
-    if resp.status_code != 200:
-        print(
-            f"[✗] proposal/calc failed for scenario_id={scenario_id}: {resp.text[:300]}"
-        )
+    try:
+        return compute_member_payload(body)
+    except Exception as exc:  # noqa: BLE001 — a comparison script stops on the first failure
+        print(f"[✗] member compute failed for scenario_id={scenario_id}: {exc}")
         sys.exit(1)
-    return resp.json()
 
 
 def outbound_trip_summary(route: dict) -> dict:

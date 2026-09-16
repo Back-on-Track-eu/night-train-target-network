@@ -7,8 +7,8 @@ A TripPair is one outbound + return cycle, sharing a composition and a
 schedule. Most routes have one pair; Y-shaped routes have several, each
 independently scheduled and composed.
 
-Schedule: SUMMER (April–Sep) and WINTER (Oct–Mar), each 26 weeks, fixed.
-Frequency is DAILY or THREE_PER_WEEK — specific days of week aren't
+Schedule: days per week for each of the twelve months (0 = not running)
+plus a minimum terminal turnaround. Specific days of week aren't
 modelled, they don't affect cost or fleet sizing.
 
 Coach fleet sizing (TripPair.coaches_required): a night train composition
@@ -28,62 +28,120 @@ Operator invariant: all TripPairs in a Route must share the same operator_id.
 
 from __future__ import annotations
 
+import calendar
 from dataclasses import dataclass
-from enum import Enum
 
 from models.params import ODPair, Composition
 from models.route.trip import Trip
 
 # Standard schedule assumptions live in the route model's central registry —
 # see models/route/version.py (STANDARD VALUES).
-from models.route.model import WEEKS_PER_SEASON, DAYS_PER_OPERATING_WEEK
+from models.route.model import DEFAULT_MIN_TURNAROUND_MIN, EVALUATION_YEAR
+
+# =============================================================================
+# FLEET — the cycle-time rule, as pure functions
+# =============================================================================
+# Module-level so models/evaluation/summary.py can size a fleet from a route
+# DICT (it never sees a TripPair) with the exact arithmetic TripPair uses.
+
+
+def cycle_days_between(
+    out_dep: int, out_arr: int, ret_dep: int, ret_arr: int, min_turnaround_min: int
+) -> int:
+    """Calendar days one rake needs from a departure at the origin until it
+    is back there in time for a scheduled departure.
+
+    Walk the rake through the timetable: arrive at the far terminal, wait at
+    least min_turnaround_min, take the first return slot that fits —
+    tomorrow's if today's is too close — and the same again at the origin.
+    Every turnaround that misses the minimum costs a day, which is why a
+    service whose return leaves too soon after the outbound arrives needs an
+    extra rake.
+
+    Times are minutes from the origin departure's midnight, so a next-day
+    arrival is simply > 1440; clocks are taken mod a day.
+    """
+    day = 24 * 60
+
+    def next_slot(ready_min: int, slot_clock: int) -> int:
+        """First absolute minute >= ready_min at which the clock reads
+        slot_clock."""
+        k = max(0, -(-(ready_min - slot_clock) // day))
+        return k * day + slot_clock
+
+    ready_at_far = out_arr + min_turnaround_min
+    ret_leaves = next_slot(ready_at_far, ret_dep % day)
+    ret_arrives = ret_leaves + (ret_arr - ret_dep)
+    ready_at_origin = ret_arrives + min_turnaround_min
+    next_out = next_slot(ready_at_origin, out_dep % day)
+    return max(1, (next_out - out_dep) // day)
+
+
+def trainsets_for_cycle(cycle_days: int, schedule: "Schedule") -> int:
+    """Physical rakes for a service with this cycle: sized to the busiest
+    month, departure days assumed evenly spread through the week (stated in
+    models/route/model.py OPEN_TODOS)."""
+    return max(
+        -(-(cycle_days * d) // 7) for d in schedule.days_per_week_by_month.values()
+    )
+
 
 # =============================================================================
 # SCHEDULE
 # =============================================================================
 
 
-class Season(Enum):
-    SUMMER = "summer"
-    WINTER = "winter"
-
-
-class Frequency(Enum):
-    DAILY = "daily"
-    THREE_PER_WEEK = "three_per_week"
-
-    @property
-    def days_per_week(self) -> int:
-        return DAYS_PER_OPERATING_WEEK[self.name]
-
-
-@dataclass
-class SeasonalSchedule:
-    """Operating frequency for one season."""
-
-    season: Season
-    frequency: Frequency
-
-
 @dataclass
 class Schedule:
-    """Full-year schedule. A season with no entry is treated as not operating."""
+    """Full-year operating plan: how many days a week the train runs in
+    each month, and the shortest turnaround a rake is given at a terminal.
 
-    seasonal_schedules: list[SeasonalSchedule]
+    days_per_week_by_month: {1..12: 0..7}; 0 means the train does not run
+    that month. Which weekdays is not modelled — the operating days of a
+    month are days_in_month × d/7, and everything downstream that counts
+    departures assumes the days are spread evenly through the week.
 
-    def get(self, season: Season) -> SeasonalSchedule | None:
-        return next((s for s in self.seasonal_schedules if s.season == season), None)
+    min_turnaround_min: the minimum a rake stands between arriving at a
+    terminal and leaving it again, which is what decides whether one rake
+    can serve consecutive departures or a second one is needed — see
+    TripPair.cycle_days(). A HOW field on the request, default 180.
+    """
+
+    days_per_week_by_month: dict[int, int]
+    min_turnaround_min: int = DEFAULT_MIN_TURNAROUND_MIN
+
+    def __post_init__(self) -> None:
+        self.days_per_week_by_month = {
+            int(m): int(d) for m, d in self.days_per_week_by_month.items()
+        }
+        missing = set(range(1, 13)) - set(self.days_per_week_by_month)
+        if missing:
+            raise ValueError(f"Schedule is missing months {sorted(missing)}")
+
+    def days_per_week(self, month: int) -> int:
+        return self.days_per_week_by_month[month]
+
+    def operating_days(self, month: int) -> float:
+        days_in_month = calendar.monthrange(EVALUATION_YEAR, month)[1]
+        return days_in_month * self.days_per_week(month) / 7
+
+    @property
+    def operating_days_per_year(self) -> float:
+        return sum(self.operating_days(m) for m in range(1, 13))
+
+    @property
+    def peak_days_per_week(self) -> int:
+        return max(self.days_per_week_by_month.values())
+
+    @property
+    def is_operating(self) -> bool:
+        return self.peak_days_per_week > 0
 
     @property
     def is_daily_any_season(self) -> bool:
-        return any(s.frequency == Frequency.DAILY for s in self.seasonal_schedules)
-
-    @property
-    def operating_days_per_year(self) -> int:
-        return sum(
-            s.frequency.days_per_week * WEEKS_PER_SEASON
-            for s in self.seasonal_schedules
-        )
+        """Kept for readers that only ask "is this a daily service": true
+        when any month runs seven days a week."""
+        return self.peak_days_per_week >= 7
 
 
 # =============================================================================
@@ -154,9 +212,10 @@ class TripPair:
     coaches_required is a float, not an integer count of physical coach
     sets to buy for this route alone. Availability buffer (coach_avail_per)
     is pooled across an operator's whole network, not dedicated per route
-    — so this route's fair cost share is schedule_min / coach_avail_per,
+    — so this route's fair cost share is trainsets / coach_avail_per,
     e.g. 2 sets needed in rotation at 80% availability = 2.5. Rounding up
-    per route would overestimate cost by assuming a dedicated spare.
+    per route would overestimate cost by assuming a dedicated spare. The
+    physical count itself is trainsets(), from the cycle-time rule.
     """
 
     outbound: Trip
@@ -168,9 +227,32 @@ class TripPair:
     def trips(self) -> list[Trip]:
         return [self.outbound, self.return_trip]
 
+    def cycle_days(self, min_turnaround_min: int) -> int:
+        """Calendar days one rake needs from a departure at the origin until
+        it is back there in time for a scheduled departure — cycle_days_between()
+        on this pair's own terminal times."""
+        return cycle_days_between(
+            self.outbound.departure_time_min,
+            self.outbound.arrival_time_min,
+            self.return_trip.departure_time_min,
+            self.return_trip.arrival_time_min,
+            min_turnaround_min,
+        )
+
+    def trainsets(self, schedule: Schedule) -> int:
+        """Physical rakes this pair needs: trainsets_for_cycle() over the
+        busiest month."""
+        if not schedule.is_operating:
+            return 0
+        return trainsets_for_cycle(
+            self.cycle_days(schedule.min_turnaround_min), schedule
+        )
+
     def composition_count(self, schedule: Schedule) -> dict[str, float]:
-        schedule_min = 2 if schedule.is_daily_any_season else 1
-        n = schedule_min / self.composition.coach_avail_per
+        """The cost model's fleet basis: the physical trainsets divided by
+        availability, i.e. this route's fair share of a pooled spare fleet
+        (see the class docstring). Physical count: trainsets()."""
+        n = self.trainsets(schedule) / self.composition.coach_avail_per
         return {self.composition.comp_id: n}
 
     @property

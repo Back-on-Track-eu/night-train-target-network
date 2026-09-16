@@ -175,15 +175,7 @@ watch(filtered, () => {
         @keydown.up.prevent="move(-1)"
       />
     </div>
-    <div
-      ref="listRef"
-      class="overflow-y-auto p-1.5"
-      style="
-        max-height: 20rem;
-        scrollbar-width: thin;
-        scrollbar-color: color-mix(in srgb, var(--p-primary-50) 50%, transparent) transparent;
-      "
-    >
+    <div ref="listRef" class="thin-scroll overflow-y-auto p-1.5" style="max-height: 20rem">
       <!-- Loading: hold the popover's height with rows, so it doesn't claim
            there is nothing to find while the list is still on its way. -->
       <div
@@ -254,18 +246,5 @@ watch(filtered, () => {
 .stop-select-overlay {
   background: #23263d !important;
   border: 1px solid var(--p-primary-50) !important;
-}
-.stop-select-overlay *::-webkit-scrollbar {
-  width: 5px !important;
-}
-.stop-select-overlay *::-webkit-scrollbar-track {
-  background: transparent !important;
-}
-.stop-select-overlay *::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--p-primary-50) 50%, transparent) !important;
-  border-radius: 99px !important;
-}
-.stop-select-overlay *::-webkit-scrollbar-button {
-  display: none !important;
 }
 </style>

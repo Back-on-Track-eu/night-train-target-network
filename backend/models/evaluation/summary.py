@@ -2,7 +2,7 @@
 summary.py
 ==========
 Gallery-summary KPI derivation (adapters/proposal/README.md §5.4) — pure
-functions over the same dicts POST /api/proposal/calc returns
+functions over the same dicts a member payload carries
 (route_to_dict() shape + the evaluation "views" block). No DB access, no
 domain-object construction, and no geometry: the simplified gallery-map
 geometry is deliberately NOT part of this row — the calc response
@@ -12,7 +12,7 @@ adds a `geom_simplified` for `proposals.proposal_summaries`.
 
 Moved out of adapters/proposal/projection.py with WP10 step 5: the same
 derivation now feeds the calc response's "summary" block
-(api/helpers/proposal_compute.py), the compare sides
+(api/helpers/member_compute.py), the compare sides
 (api/helpers/proposal_compare.py, via that block), and the publish-time
 proposal_summaries write (adapters/proposal/repository.py via
 projection.py) — and api/helpers must never import calculation code from
@@ -22,7 +22,9 @@ cannot drift when a formula changes.
 
 Public interface:
   build_summary_row(route, evaluation) → dict  (every §5.4 KPI column:
-      route metrics, financial KPIs, placeholder demand KPIs, the served
+      route metrics, financial KPIs incl. the signed net_eur_per_year,
+      the annual supply denominators (train-km, available/sold place-km,
+      operating days), placeholder demand KPIs, the served
       country_relations, and the flat night-train co2_g_per_pax_km.
       Identity columns and geom_simplified are the callers' concern.)
   country_relations(route)             → list  (the served "AA__BB"
@@ -34,6 +36,8 @@ Public interface:
 
 from __future__ import annotations
 
+from models.route.route import cycle_days_between, trainsets_for_cycle
+from models.route.timetable import schedule_from_dict
 from models.emissions.model import EMISSION_FACTORS, MODE_SHIFT_SHARES
 
 # Placeholder demand-KPI assumption (§8.1: "deterministic fakes derived
@@ -53,25 +57,41 @@ def ordered_stops(trip: dict) -> list[dict]:
     return [segments[0]["from_stop"]] + [seg["to_stop"] for seg in segments]
 
 
+def _terminal_times(trip: dict) -> tuple[int, int]:
+    """(departure at the first stop, arrival at the last) of a full-route
+    trip dict — the shape every build_summary_row() caller hands in, and
+    the one ordered_stops() below already assumes."""
+    first = trip["segments"][0]["from_stop"]
+    last = trip["segments"][-1]["to_stop"]
+    dep = first.get("departure_time_min") or 0
+    arr = last.get("arrival_time_min") or dep
+    return int(dep), int(arr)
+
+
 def build_summary_row(route: dict, evaluation: dict) -> dict:
     """The §5.4 gallery-KPI columns for one (route, evaluation) pair —
-    exactly the shape POST /api/proposal/calc returns as "summary" and
+    exactly the shape a member (and each family member) carries as "summary" and
     the publish repository merges with its identity columns
     (proposal_id, user_id, composition_id, scenario_id, name, versions)
     and geom_simplified."""
     metrics = _route_metrics(route)
     financials = _financial_kpis(evaluation)
-    annual_revenue_eur = evaluation["views"]["route"]["data"]["per_year"]["all"][
-        "total_revenue_eur"
-    ]
+    supply = _supply_kpis(route)
+    # Ticket revenue, not the total: the placeholder trip count divides by
+    # an average FARE, so a catering contribution in the numerator would
+    # invent passengers who bought nothing.
+    annual_ticket_revenue_eur = evaluation["views"]["route"]["data"]["per_year"]["all"][
+        "revenue"
+    ]["ticket_revenue_eur"]
     demand = _placeholder_demand_kpis(
         metrics["total_distance_km"],
-        annual_revenue_eur,
+        annual_ticket_revenue_eur,
         financials["subsidy_eur_per_year"],
     )
     return {
         **metrics,
         **financials,
+        **supply,
         **demand,
         "country_relations": country_relations(route),
         # Flat factor (decision 24) until the energy-based,
@@ -148,20 +168,111 @@ def _route_metrics(route: dict) -> dict:
 
 def _financial_kpis(evaluation: dict) -> dict:
     """cost/revenue/margin per train-km from views.route.data.per_train_km,
-    and subsidy_eur_per_year (§9 locked decision 12: gap to target margin,
-    max(0, -net_eur)) from views.route.data.per_year — both already
-    rounded by the evaluation pipeline at a finer precision (4dp/2dp, see
-    evaluation_serialize.py) than the schema's NUMERIC(10,2)/(14,2)
-    columns, hence the explicit round() here rather than passing values
-    through as-is."""
+    and from views.route.data.per_year both the signed net_eur_per_year
+    (negative = the operator is short by that much, positive = surplus
+    beyond the target margin) and subsidy_eur_per_year (§9 locked
+    decision 12: gap to target margin, max(0, -net_eur)). The signed
+    value exists so a surplus route can be shown as one rather than as
+    "subsidy 0" — the UI never shows a negative subsidy to lay users.
+    All already rounded by the evaluation pipeline at a finer precision
+    (4dp/2dp, see evaluation_serialize.py) than the schema's
+    NUMERIC(10,2)/(14,2) columns, hence the explicit round() here rather
+    than passing values through as-is."""
     route_data = evaluation["views"]["route"]["data"]
     per_train_km = route_data["per_train_km"]["all"]
     per_year = route_data["per_year"]["all"]
+    net_eur_per_year = round(per_year["net_eur"], 2)
     return {
+        # The two non-accommodation revenue leaves, both already inside
+        # net_eur/total_revenue_eur, reported on their own so a panel can
+        # show what each contributed without re-deriving it. Services are
+        # ordinary ticket revenue; catering is signed and already net
+        # (CALC 0.9.30).
+        "services_revenue_eur": round(per_year["revenue"]["services_revenue_eur"], 2),
+        "catering_contribution_eur": round(
+            per_year["revenue"]["catering_contribution_eur"], 2
+        ),
         "cost_eur_per_train_km": round(per_train_km["total_cost_eur"], 2),
         "revenue_eur_per_train_km": round(per_train_km["total_revenue_eur"], 2),
         "margin_eur_per_train_km": round(per_train_km["net_eur"], 2),
-        "subsidy_eur_per_year": round(max(0.0, -per_year["net_eur"]), 2),
+        "net_eur_per_year": net_eur_per_year,
+        "subsidy_eur_per_year": round(max(0.0, -net_eur_per_year), 2),
+    }
+
+
+def _supply_kpis(route: dict) -> dict:
+    """The annual supply side the per-unit normalisations divide by
+    (models/evaluation/views.py's normalise_per_train_km /
+    normalise_per_available_place_km, re-derived here from the route
+    dict): operating days from the schedule, train-km and
+    capacity place-km over every trip of every pair × operating days,
+    and sold place-km from the OD loads (places_sold is already annual).
+    Exposed so a comparison table can show €/place-km and utilisation
+    per composition without the full views block."""
+    # Through the domain object so the legacy two-season shape a stored
+    # payload may still carry is widened the same way route_from_dict does.
+    schedule = schedule_from_dict(route["schedule"])
+    operating_days = schedule.operating_days_per_year
+    # ROUTE_BUILDER 0.9.35 fleet rule, from the dict: each pair's terminal
+    # times are on its first and last segment. The route's fleet is the
+    # busiest pair's.
+    trainsets = max(
+        (
+            trainsets_for_cycle(
+                cycle_days_between(
+                    *_terminal_times(pair["outbound"]),
+                    *_terminal_times(pair["return_trip"]),
+                    schedule.min_turnaround_min,
+                ),
+                schedule,
+            )
+            for pair in route["trip_pairs"]
+        ),
+        default=0,
+    )
+    if not schedule.is_operating:
+        trainsets = 0
+    cycle_km = 0.0
+    cycle_place_km = 0.0
+    sold_place_km = 0.0
+    # Counted over every OD pair unconditionally, unlike sold_place_km
+    # below, which needs both of a pair's stops on the trip to have a
+    # distance: a ticket is a passenger whether or not its ride range
+    # resolves.
+    passengers = sum(
+        od["places_sold"]
+        for pair in route["trip_pairs"]
+        for od in pair.get("od_pairs", [])
+    )
+    for pair in route["trip_pairs"]:
+        places = sum(pair["composition"]["places_by_class"].values())
+        for trip in (pair["outbound"], pair["return_trip"]):
+            segment_km = [seg["distance_m"] / 1000.0 for seg in trip["segments"]]
+            cycle_km += sum(segment_km)
+            cycle_place_km += places * sum(segment_km)
+            stop_ids = [stop["stop_id"] for stop in ordered_stops(trip)]
+            for od in pair.get("od_pairs", []):
+                if od["trip_id"] != trip["trip_id"]:
+                    continue
+                if (
+                    od["origin_stop_id"] not in stop_ids
+                    or od["destination_stop_id"] not in stop_ids
+                ):
+                    continue
+                start = stop_ids.index(od["origin_stop_id"])
+                end = stop_ids.index(od["destination_stop_id"])
+                sold_place_km += od["places_sold"] * sum(segment_km[start:end])
+    return {
+        "operating_days_per_year": operating_days,
+        # Every operating day sees one departure per trip of every pair.
+        "departures_per_year": round(
+            operating_days * sum(2 for _ in route["trip_pairs"])
+        ),
+        "trainsets_physical": trainsets,
+        "train_km_per_year": round(cycle_km * operating_days),
+        "available_place_km_per_year": round(cycle_place_km * operating_days),
+        "sold_place_km_per_year": round(sold_place_km),
+        "passengers_per_year": round(passengers),
     }
 
 

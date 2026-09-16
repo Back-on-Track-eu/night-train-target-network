@@ -1,0 +1,6 @@
+# Edge Caddy image for the Coolify stack. The Caddyfile is baked in instead of bind-mounted:
+# Coolify creates a DIRECTORY at any bind-mount source path that does not exist yet at deploy
+# time, so a file bind mount fails with "not a directory" (verified 2026-09-16, deploy #3).
+FROM caddy:2-alpine
+COPY Caddyfile /etc/caddy/Caddyfile
+RUN caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile

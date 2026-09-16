@@ -98,29 +98,31 @@ plan_route(trip_pair_inputs, loader, router, schedule_mode, proposal_id, proposa
   │     route() so auto-stop mini-reroutes get it too; buffer quota applies
   │     to driving and dynamics, strictly after the physics)
   ├── auto_stop_addition SWITCH (here) → "off": step skipped entirely;
-  │     "add": timetable.apply_auto_stop_addition(routed_legs, composition,
-  │     tracks, stop_infra, router, routing_mode) → stop_ids, routed_legs
-  │     (re-routes internally as needed); "suggest": timetable.
-  │     suggest_auto_stops(...) → list[AutoStopSuggestion] (nothing added,
-  │     nothing rerouted — suggestions bubble up through plan_route()'s
-  │     return value for the API layer to serialize). Search + costing is
-  │     shared (timetable.find_and_cost_auto_stop_candidates(), catalog
+  │     "suggest": timetable.suggest_auto_stops(...) →
+  │     list[AutoStopSuggestion] (nothing added, nothing rerouted —
+  │     suggestions bubble up through plan_route()'s return value for the
+  │     API layer to serialize). Mode "add", where the builder added stops
+  │     itself, was removed in 0.9.34: neither mode changes the stop list
+  │     any more. Search + costing:
+  │     timetable.find_and_cost_auto_stop_candidates(), catalog
   │     prefiltered to route-touched countries, then to AUTO_STOP_BUFFER_M
   │     of the routed geometry — 10km, model.py). Costing itself is
   │     analytic-first (timetable._analytic_added_time_min(): dwell +
   │     routing/dynamics.py's own accel/brake pair + out-and-back detour
   │     at cruise speed, ZERO router calls) for candidates within
   │     AUTO_STOP_ANALYTIC_DETOUR_M (100m) of the geometry or already over
-  │     budget on their analytic lower bound; only genuinely off-path
+  │     budget on their analytic lower bound (AUTO_STOP_MAX_DETOUR_PER
+  │     bounds costing EFFORT now, never what is suggested); only off-path
   │     candidates get a real 3-point mini-reroute (bounded concurrency).
   │     Only ever runs for outbound — see below.
   ├── _check_country_coverage(routed_legs, tracks)                 → raises ValueError if any
   │     transited country has no row at all in input_params.track_infrastructures
   │     (defaulted fields on an existing row are fine)
   ├── timetable.resolve_addons(stop_ids, expert.addons)            → addon_per_leg, dropped
-  │     (expert mode only — manual minutes placed on the FINAL stop list, so an
-  │     add-on whose ordered stop pair auto_stop_addition just split is dropped
-  │     rather than landing on the wrong leg; never redistributed)
+  │     (expert mode only — manual minutes placed on the stop list; an add-on
+  │     whose ordered stop pair is not adjacent is dropped rather than landing
+  │     on the wrong leg, never redistributed. Since 0.9.34 nothing on the
+  │     server can orphan one, so that is a safety net, not an expected case)
   ├── timetable_mode SWITCH (here)     → timetable.simple_automatic_timetable(...)
   │     ("simpleAutomatic") or timetable.simple_automatic_fixed_night_timetable(...)
   │     ("simpleAutomaticWithFixedNight", per-leg slack for a stretched night
@@ -131,7 +133,8 @@ plan_route(trip_pair_inputs, loader, router, schedule_mode, proposal_id, proposa
   ├── timetable.resolve_departure(auto, override) + classify_for_departure(...)
   │     (expert mode only — "absolute" pins a minute through reroutes, "shift"
   │     displaces the automatic value and moves with it; the stops are
-  │     re-classified against where the trip now sits on the clock)
+  │     re-classified against where the trip now sits on the clock; the
+  │     distance moved is kept as Trip.departure_shift_min)
   ├── calc_energy_consumption(legs, composition)                   → enriches RoutedLeg.energy_kwh
   ├── timetable.build_final_timetable()                            → exact per-stop arrival/departure
   ├── _build_trip_stops_and_legs(...)                              → list[Segment]
@@ -142,10 +145,14 @@ plan_route(trip_pair_inputs, loader, router, schedule_mode, proposal_id, proposa
   ├── Trip._create(...)                                            → Trip (outbound)
   │
   │  return direction (_build_trip(), reusing outbound's decision):
-  ├── stop_ids = reversed(outbound's final stop list, additions included)
+  ├── stop_ids = reversed(outbound's stop list)
+  ├── expert = timetable.mirror_overrides(outbound's, outbound.departure_shift_min)
+  │     unless the request sent a return block of its own: add-ons reversed
+  │     onto the return's stop pairs, departure displaced the opposite way,
+  │     so the pair stays a mirror image around MIRROR_MIN (0.9.37)
   ├── rail_router.route(...) → list[RoutedLeg]  — still a real call, own physics
-  ├── (auto_stop_addition NOT re-run — known_auto_added_stop_ids from outbound
-  │     marks Stop.auto_added directly; see _build_trip_pair()'s comment for why)
+  ├── (auto_stop_addition NOT re-run — known_auto_added_stop_ids carries the
+  │     decision not to search again; see _build_trip_pair()'s comment for why)
   ├── ...same remaining steps as outbound...
   ├── Trip._create(...)                                            → Trip (return)
   │
@@ -167,7 +174,7 @@ build_all_views(route, result)             → ViewsBundle         [evaluation/v
 `evaluate_and_build_views()` is the post-routing half, for callers that
 bring their own `Route`/demand (the DB seed's hand-crafted example,
 model-layer tests with controlled demand). Serialization stays out of
-`pipeline.py` — that's `api/helpers/proposal_compute.py`.
+`pipeline.py` — that's `api/helpers/member_compute.py`.
 
 `timetable_mode`, `schedule_mode`, and `auto_stop_addition` each have their
 switch (which named behaviour runs) in `route_factory.py`, at whichever
@@ -175,11 +182,11 @@ level owns the relevant context — `schedule_mode` in `plan_route()` (route-
 level, shared across every `TripPair`), `timetable_mode` in `_build_trip()`
 (per-trip, since departure time is direction-specific); `routing_mode`'s
 switch lives with its implementation in `rail_router.py`'s `route()`.
-`auto_stop_addition` is a three-value enum (`"off"` / `"add"` / `"suggest"`)
-and per-`TripPair`, not per-trip: `_build_trip_pair()` runs the candidate
-search + costing once, from outbound, and reuses the result (reversed) for
-return, rather than re-running the whole pass for what is physically the
-same corridor reversed. This pass was measured as the dominant cost of
+`auto_stop_addition` is a two-value enum (`"off"` / `"suggest"`, `"add"`
+removed in 0.9.34) and per-`TripPair`, not per-trip: `_build_trip_pair()`
+runs the candidate search + costing once, from outbound, rather than
+re-running the whole pass for what is physically the same corridor
+reversed. This pass was measured as the dominant cost of
 planning a route through the post-ONTD, 575-stop catalog — candidate
 mini-reroutes at ~1.5s of router time each, 13-19s of costing per calc on
 a 3-stop request (2026-08-06, `test_20_route_content.py::TestRouteGeometry`
@@ -199,7 +206,7 @@ itself — see that module's docstring. `VALID_TIMETABLE_MODES` /
 `VALID_SCHEDULE_MODES` / `VALID_AUTO_STOP_ADDITION_MODES` in `timetable.py`
 and `VALID_ROUTING_MODES` in `rail_router.py` are the single sources of
 truth both the compute request validation
-(`api/helpers/proposal_compute.py`) and the switches read from. Every
+(`api/helpers/member_compute.py`) and the switches read from. Every
 standard value the route model assumes (mode defaults, mirror time,
 auto-stop thresholds, schedule constants) and every open TODO on the route
 model are consolidated in `route/model.py` (`STANDARD VALUES` /

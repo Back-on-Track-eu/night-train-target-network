@@ -11,14 +11,12 @@ description: 'Parking the train at each end of the route between two nights of s
 
 ## What this is
 
-Stabling the train between two nights of service — a daily rate at each
-end of the route.
+Stabling the train between two nights of service, at a daily rate at each end
+of the route.
 
-A night train spends its day somewhere, and that somewhere charges for it.
 The rate comes from the facility calibration, which prices each country on
 its own basis against the scheduled layover and the train's length. Some
-countries' free allowances cover a twelve-hour turnaround entirely, so
-their parking cost is genuinely zero rather than missing.
+countries' free allowances cover a twelve-hour turnaround entirely, making their parking cost zero.
 
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-parking_eur"></a>

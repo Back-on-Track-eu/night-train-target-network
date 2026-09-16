@@ -183,9 +183,11 @@ const quietButtonClass =
 </script>
 
 <template>
-  <!-- Narrower than the panels above and centred: prose wants a short measure,
-       and a comment stretched across the full 6xl workspace is hard to read. -->
-  <section class="mx-auto flex w-full max-w-3xl flex-col gap-5 border-t border-primary-50/15 pt-8">
+  <!-- Full width, like every other zone: the discussion is a panel of the
+       results page, and a centred column narrower than the panels above it
+       read as a stray element. The rule at the top spans the same width, so
+       it separates the whole page rather than a column of it. -->
+  <section class="flex w-full flex-col gap-5 border-t border-primary-50/15 pt-8">
     <!-- Title + count only. The like button lives on the map now (MapShareBar),
          beside share: both are about the proposal as a whole, not about the
          discussion. -->

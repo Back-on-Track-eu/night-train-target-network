@@ -13,12 +13,6 @@ description: 'Ticket sales, distribution and customer service, as a share of tic
 
 Selling the tickets: distribution, payment handling, customer service.
 
-Charged as a share of ticket revenue rather than a fixed sum, because
-these costs genuinely scale with sales rather than with running the train.
-Note the consequence: because it is a share of revenue, and revenue rests
-on the [demand assumption](/cost/ticket-revenue), this line inherits that
-assumption too.
-
 <!-- BEGIN GENERATED: formula -->
 <a id="f-calc-var_overhead_eur"></a>
 

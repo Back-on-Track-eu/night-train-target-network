@@ -48,20 +48,17 @@ living in route_factory.py:
                              sequential whole-trip reroute per candidate
                              doesn't scale to the ~50 stops a busy corridor
                              can add). Shared by both modes below.
-                           apply_auto_stop_addition() — mode "add": greedy
-                             cheapest-first acceptance within the
-                             AUTO_STOP_MAX_DETOUR_PER budget, then one real
-                             reroute of the final stop list; always returns
-                             routed_legs matching the returned stop_ids so
-                             route_factory never re-routes itself.
                            suggest_auto_stops() — mode "suggest": no
                              selection, no budget, no reroute — just every
                              costed candidate as an AutoStopSuggestion
                              (with added_time_min), in geographic order
                              along the route, for the caller to decide.
-                         Whether either is called at all (and mode "off"
-                         skipping both) is route_factory._build_trip()'s
-                         switch.
+                         Whether it is called at all (mode "off" skips it)
+                         is route_factory._build_trip()'s switch. The
+                         route builder never adds a stop by itself: mode
+                         "add" was removed in 0.9.34, so a suggestion only
+                         becomes a stop once the user accepts it and posts
+                         it in the stop list.
 
 EXPERT TIMETABLE OVERRIDES (0.9.32) are deliberately NOT a fourth named
 strategy: they compose with whichever timetable_mode runs, so they are
@@ -81,8 +78,11 @@ functions consume them:
                              so a shifted trip is re-classified (a stop
                              that now departs after 00:00 becomes a night
                              stop, and gets night dwell).
-mirror_overrides() reverses one direction's add-ons for the other, the
-same way route_factory reverses fixed_night_interval. Add-on minutes go
+mirror_overrides() turns one direction's overrides into the other's mirror
+image around MIRROR_MIN: each add-on's stop pair reversed (the same way
+route_factory reverses fixed_night_interval) and the departure displaced
+the opposite way (0.9.37 — a trip moved an hour earlier sends the other
+one an hour later, so the pair stays centred on 02:30). Add-on minutes go
 into the strategies' own provisional offsets (addon_per_leg below), so a
 padded trip stays centred on MIRROR_MIN and a padded fixed-night interval
 needs correspondingly less stretch slack.
@@ -90,7 +90,7 @@ needs correspondingly less stretch slack.
 VALID_TIMETABLE_MODES / VALID_SCHEDULE_MODES / VALID_AUTO_STOP_ADDITION_MODES
 / VALID_DEPARTURE_MODES stay here as the single source of truth for the
 allowed strings —
-the compute request validation (api/helpers/proposal_compute.py) and route_factory.py's dispatch both read
+the compute request validation (api/helpers/member_compute.py) and route_factory.py's dispatch both read
 from them, so a new mode is added in exactly one place (plus the function
 implementing it and the route_factory branch that calls it).
 
@@ -115,7 +115,8 @@ from dataclasses import dataclass
 
 from models.params import Composition, TrackInfraCollection, StopInfraCollection
 from models.route.trip import Segment, StopType, TimetableWarning
-from models.route.route import Schedule, SeasonalSchedule, Season, Frequency
+from models.route.model import DEFAULT_MIN_TURNAROUND_MIN
+from models.route.route import Schedule
 from models.route.routing.dynamics import stop_time_loss_s
 from models.route.routing.gauge import resolve_trip_gauge, stop_supports_gauge
 from models.route.routing.rail_router import (
@@ -388,7 +389,7 @@ def simple_automatic_fixed_night_timetable(
 
 def _interval_index(stop_ids: list[str], stop_id: str, role: str) -> int:
     """Index of a fixed_night_interval endpoint in stop_ids, with a domain
-    error naming the missing endpoint — api/helpers/proposal_compute.py validates against the
+    error naming the missing endpoint — api/helpers/member_compute.py validates against the
     caller's own stops, this re-checks against the possibly auto-extended
     final list (auto_stop_addition only ever inserts, so a miss here means
     the request validation was bypassed)."""
@@ -496,10 +497,10 @@ def fixed_night_speed_warning(
 
 VALID_TIMETABLE_MODES = frozenset({"simpleAutomatic", "simpleAutomaticWithFixedNight"})
 """Single source of truth for allowed timetable_mode strings — read by both
-the compute request validation (api/helpers/proposal_compute.py) and route_factory._build_trip()'s switch.
+the compute request validation (api/helpers/member_compute.py) and route_factory._build_trip()'s switch.
 Adding a mode means: add its function above, add it to this set, add a
 branch in _build_trip(). "simpleAutomaticWithFixedNight" additionally
-requires the request's fixed_night_interval, validated in api/helpers/proposal_compute.py and
+requires the request's fixed_night_interval, validated in api/helpers/member_compute.py and
 threaded through TripPairInput."""
 
 
@@ -512,7 +513,7 @@ threaded through TripPairInput."""
 
 VALID_DEPARTURE_MODES = frozenset({"absolute", "shift"})
 """Single source of truth for expert_timetable.departure.mode — read by the
-compute request validation (api/helpers/proposal_compute.py) and by
+compute request validation (api/helpers/member_compute.py) and by
 resolve_departure() below.
 
 "absolute": the trip departs at exactly this minute, whatever the strategy
@@ -562,7 +563,7 @@ class DirectionOverrides:
 class ExpertTimetable:
     """One trip pair's overrides. return_trip=None means "mirror outbound"
     — the default, and the same convention route_factory already applies to
-    fixed_night_interval; mirror_overrides() below does the reversing."""
+    fixed_night_interval; mirror_overrides() below does the mirroring."""
 
     outbound: DirectionOverrides
     return_trip: DirectionOverrides | None
@@ -573,16 +574,30 @@ NO_OVERRIDES = DirectionOverrides(departure=None, addons=())
 route_factory so it never has to branch on None twice."""
 
 
-def mirror_overrides(overrides: DirectionOverrides) -> DirectionOverrides:
-    """One direction's overrides as they apply to the OTHER direction: each
-    add-on's stop pair reversed, so a manual minute on A→B also pads B→A.
+def mirror_overrides(
+    overrides: DirectionOverrides, departure_shift_min: int = 0
+) -> DirectionOverrides:
+    """One direction's overrides as they apply to the OTHER direction — its
+    mirror image around MIRROR_MIN: each add-on's stop pair reversed, so a
+    manual minute on A→B also pads B→A, and the departure displaced the
+    opposite way.
 
-    The departure is deliberately NOT carried over. A pinned outbound
-    departure says nothing about when the return should leave — the return
-    has its own timetable, mirrored around MIRROR_MIN by the strategy. A
-    caller who wants both pinned sends an explicit return block."""
+    departure_shift_min is how far the mirrored direction's first departure
+    actually ended up from its automatic value — resolved by the caller
+    (route_factory._build_trip()), because an "absolute" override only
+    becomes a distance once the strategy has said where the automatic
+    departure is. The other direction gets a "shift" of the negated amount:
+    each direction's automatic timetable is already centred on MIRROR_MIN,
+    so moving one an hour earlier and the other an hour later keeps the
+    pair a mirror image (21:00→08:00 pulled to 20:00→07:00 sends the other
+    to 22:00→09:00). A caller who wants the two directions timed
+    independently sends an explicit return block instead."""
     return DirectionOverrides(
-        departure=None,
+        departure=(
+            DepartureOverride(mode="shift", minutes=-departure_shift_min)
+            if departure_shift_min
+            else None
+        ),
         addons=tuple(
             SegmentAddon(
                 from_stop_id=a.to_stop_id,
@@ -685,37 +700,98 @@ def classify_for_departure(
 # =============================================================================
 
 
-def always_daily_schedule() -> Schedule:
-    """Implements schedule_mode='alwaysDaily': daily frequency in both
-    seasons, regardless of actual demand."""
+def always_daily_schedule(min_turnaround_min: int) -> Schedule:
+    """Implements schedule_mode='alwaysDaily': seven days a week in every
+    month, regardless of actual demand."""
     return Schedule(
-        seasonal_schedules=[
-            SeasonalSchedule(season=Season.SUMMER, frequency=Frequency.DAILY),
-            SeasonalSchedule(season=Season.WINTER, frequency=Frequency.DAILY),
-        ]
+        days_per_week_by_month={m: 7 for m in range(1, 13)},
+        min_turnaround_min=min_turnaround_min,
     )
 
 
-VALID_SCHEDULE_MODES = frozenset({"alwaysDaily"})
+def custom_schedule(days_per_week_by_month: dict, min_turnaround_min: int) -> Schedule:
+    """Implements schedule_mode='custom': the caller's days per week for
+    each month, already validated at the API boundary
+    (api/helpers/member_compute.py validate_schedule)."""
+    return Schedule(
+        days_per_week_by_month=days_per_week_by_month,
+        min_turnaround_min=min_turnaround_min,
+    )
+
+
+# Reading a schedule back from a stored payload — here rather than in
+# api/helpers/route_serialize.py because models/evaluation/summary.py needs
+# the same widening and models/ never imports from api/.
+#
+# Two-season legacy shape. ROUTE_BUILDER < 0.9.35 stored a schedule as
+# summer/winter × daily/three_per_week; the month map replaced it. Written
+# alongside the month map for readers that still expect it, and read when a
+# stored payload has nothing else — SUMMER is April–September.
+_LEGACY_SUMMER_MONTHS = frozenset(range(4, 10))
+
+
+def legacy_seasonal_schedules(schedule: Schedule) -> list[dict]:
+    def frequency(months: frozenset[int]) -> str:
+        peak = max(schedule.days_per_week(m) for m in months)
+        return "daily" if peak >= 7 else "three_per_week"
+
+    return [
+        {"season": "summer", "frequency": frequency(_LEGACY_SUMMER_MONTHS)},
+        {
+            "season": "winter",
+            "frequency": frequency(frozenset(range(1, 13)) - _LEGACY_SUMMER_MONTHS),
+        },
+    ]
+
+
+def schedule_from_dict(data: dict) -> Schedule:
+    """Either shape. The month map wins when present; a legacy two-season
+    block is widened onto its months (daily → 7, three_per_week → 3)."""
+    turnaround = int(data.get("min_turnaround_min", DEFAULT_MIN_TURNAROUND_MIN))
+    if "days_per_week_by_month" in data:
+        return Schedule(
+            days_per_week_by_month=data["days_per_week_by_month"],
+            min_turnaround_min=turnaround,
+        )
+    by_season = {ss["season"]: ss["frequency"] for ss in data["seasonal_schedules"]}
+    days = {"daily": 7, "three_per_week": 3}
+    return Schedule(
+        days_per_week_by_month={
+            m: days.get(
+                by_season.get("summer" if m in _LEGACY_SUMMER_MONTHS else "winter", ""),
+                0,
+            )
+            for m in range(1, 13)
+        },
+        min_turnaround_min=turnaround,
+    )
+
+
+VALID_SCHEDULE_MODES = frozenset({"alwaysDaily", "custom"})
 """Single source of truth for allowed schedule_mode strings — read by both
-the compute request validation (api/helpers/proposal_compute.py) and route_factory.plan_route()'s switch.
+the compute request validation (api/helpers/member_compute.py) and route_factory.plan_route()'s switch.
 Reserved: a future demand-aware mode can be added here (new function + this
 set + a plan_route() branch) without changing the request shape."""
 
 
 # =============================================================================
-# auto_stop_addition IMPLEMENTATION — search + costing shared by modes "add"
-# (apply_auto_stop_addition) and "suggest" (suggest_auto_stops); route_
-# factory._build_trip() decides which of them to call, if any ("off").
+# auto_stop_addition IMPLEMENTATION — the candidate search + costing behind
+# mode "suggest" (suggest_auto_stops); route_factory._build_trip() decides
+# whether to run it at all ("off" skips it).
 # =============================================================================
 
-VALID_AUTO_STOP_ADDITION_MODES = frozenset({"off", "add", "suggest"})
+VALID_AUTO_STOP_ADDITION_MODES = frozenset({"off", "suggest"})
 """Single source of truth for allowed auto_stop_addition strings — read by
-both the compute request validation (api/helpers/proposal_compute.py) and route_factory._build_trip()'s
-switch. "off": caller's stop list returned unmodified, no search. "add":
-search + cost + greedy addition within the detour budget. "suggest":
-search + cost like "add", but nothing is added — every costed candidate is
-returned as an AutoStopSuggestion instead, budget deliberately not applied."""
+both the compute request validation (api/helpers/member_compute.py) and
+route_factory._build_trip()'s switch. "off": caller's stop list returned
+unmodified, no search. "suggest": search + cost, but nothing is added —
+every costed candidate is returned as an AutoStopSuggestion instead, the
+detour budget deliberately not applied.
+
+"add" (the builder picking stops itself, within the budget) was removed in
+0.9.34: a route the user did not ask for is not the user's route, and a
+family of members must be comparable across compositions, which it cannot
+be if each member may choose its own stop list."""
 
 _DEG_PER_M = 1 / 111_000
 """Rough metres-per-degree constant (~111km/degree of latitude) — only
@@ -733,8 +809,8 @@ class _AutoStopCandidate:
     (it belongs between stop_ids[leg_index] and stop_ids[leg_index + 1]);
     along_leg_fraction (0..1) orders multiple candidates that land on the
     same leg. Both stay fixed to the ORIGINAL geometry even as candidates
-    get committed one by one — see apply_auto_stop_addition()'s sort-key
-    merge for why that's safe.
+    stay fixed to the ORIGINAL geometry, which is what lets suggestions be
+    reported in geographic order without re-routing anything.
     """
 
     stop_id: str
@@ -1059,8 +1135,10 @@ def find_and_cost_auto_stop_candidates(
 
     # Exact-prune bound for the routed refinement: a candidate whose
     # analytic LOWER BOUND already exceeds the whole trip's detour budget
-    # can never be accepted by mode "add", so measuring it precisely buys
-    # nothing — its estimate is kept as the reported figure instead.
+    # is one no reader would accept, so spending a router call to measure
+    # it precisely buys nothing — its estimate is kept as the reported
+    # figure instead. The budget bounds the COSTING effort here; it never
+    # filters what is suggested (see suggest_auto_stops).
     budget_min = (
         _estimate_technical_trip_time_min(
             stop_ids, routed_legs, composition, tracks, stop_infra
@@ -1113,112 +1191,6 @@ def find_and_cost_auto_stop_candidates(
         for candidate in candidates
         if candidate.stop_id in added_by_stop
     ]
-
-
-def apply_auto_stop_addition(
-    stop_ids: list[str],
-    routed_legs: list[RoutedLeg],
-    composition: Composition,
-    tracks: TrackInfraCollection,
-    stop_infra: StopInfraCollection,
-    router: RailRouter,
-    routing_mode: str,
-) -> tuple[list[str], list[RoutedLeg]]:
-    """
-    Implements auto_stop_addition="add": adds worthwhile stops along the
-    already-routed path, beyond what the caller supplied. Always runs the
-    full algorithm — route_factory._build_trip() only calls this for mode
-    "add"; this function itself has no mode gate.
-
-    Algorithm:
-      1./2. Shared search + concurrent costing —
-         find_and_cost_auto_stop_candidates() above.
-      3. Sort by added_time_min ascending (cheapest first) and greedily
-         accumulate — pure arithmetic now, no further I/O — stopping at
-         the first candidate that would push the running total over
-         AUTO_STOP_MAX_DETOUR_PER of the original trip's time. Later
-         (more expensive) candidates are not added even if they'd
-         individually fit, matching the original "stop at first rejection"
-         rule now applied to accumulated rather than per-step cost.
-      4. One single full-trip reroute of the final stop list, once, for
-         the authoritative routed_legs the rest of the pipeline uses — a
-         deliberate simplicity trade-off over re-stitching the individual
-         mini-routes from step 2 (which would save this one call but need
-         special-casing legs with 2+ accepted candidates).
-
-    Each accepted candidate is merged back into the stop sequence by
-    (leg_index, along_leg_fraction), so the final stop list always follows
-    the route's actual geography regardless of selection order.
-
-    Returns (final_stop_ids, final_routed_legs) — routed_legs always
-    matches final_stop_ids, whether or not anything was actually added, so
-    route_factory._build_trip() never needs to re-route itself afterwards.
-    """
-    costed_candidates = find_and_cost_auto_stop_candidates(
-        stop_ids, routed_legs, composition, tracks, stop_infra, router, routing_mode
-    )
-    if not costed_candidates:
-        return stop_ids, routed_legs
-    costed_candidates.sort(key=lambda pair: pair[1])
-
-    baseline_time_min = _estimate_technical_trip_time_min(
-        stop_ids, routed_legs, composition, tracks, stop_infra
-    )
-    max_extra_min = baseline_time_min * AUTO_STOP_MAX_DETOUR_PER
-
-    committed = [(sid, (i, -1.0)) for i, sid in enumerate(stop_ids)]
-    running_extra_min = 0.0
-    added_stop_ids: list[str] = []
-
-    for candidate, candidate_time_min in costed_candidates:
-        if running_extra_min + candidate_time_min > max_extra_min:
-            logger.info(
-                "apply_auto_stop_addition: stopping at '%s' (+%.1fmin) — would "
-                "push cumulative added time past budget %.1fmin.",
-                candidate.stop_id,
-                candidate_time_min,
-                max_extra_min,
-            )
-            break
-
-        # (stop_id, sort_key) merge — original stops carry sort_key=(index,
-        # -1.0), which always sorts before any candidate assigned to that
-        # same leg (candidates carry fraction in [0, 1]) and after the
-        # previous leg's candidates, keeping geographic order regardless
-        # of the cheapest-first order candidates were accepted in.
-        committed = sorted(
-            committed
-            + [
-                (candidate.stop_id, (candidate.leg_index, candidate.along_leg_fraction))
-            ],
-            key=lambda entry: entry[1],
-        )
-        running_extra_min += candidate_time_min
-        added_stop_ids.append(candidate.stop_id)
-
-    if not added_stop_ids:
-        return stop_ids, routed_legs
-
-    logger.info(
-        "apply_auto_stop_addition: added %d stop(s): %s",
-        len(added_stop_ids),
-        added_stop_ids,
-    )
-    final_reroute_start = time.monotonic()
-    final_stop_ids = [sid for sid, _ in committed]
-    final_routed_legs = route_trip(
-        router,
-        stops=build_router_stops(final_stop_ids, stop_infra),
-        composition=composition,
-        tracks=tracks,
-        routing_mode=routing_mode,
-    )
-    logger.info(
-        "apply_auto_stop_addition: final reroute of %d stop(s) took %.2fs.",
-        len(final_stop_ids),
-        time.monotonic() - final_reroute_start,
-    )
-    return final_stop_ids, final_routed_legs
 
 
 def suggest_auto_stops(

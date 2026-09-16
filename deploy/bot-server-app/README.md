@@ -66,8 +66,40 @@ docker compose run --rm migrate python db/migrate.py --baseline
 docker compose up -d
 ```
 
-After first-time setup, never run seed.py or `--baseline` on the environment
-again — `deploy.sh` and the `migrate` service handle everything from here.
+### Reseeding an environment (pre-V1 only)
+
+The rule this stack is built for is: **after first-time setup, never run
+`seed.py` or `--baseline` on an environment again** — `deploy.sh` and the
+`migrate` service handle everything, and schema changes arrive exclusively
+as migrations. `seed.py` begins with `DROP SCHEMA … CASCADE` for
+`input_params`, `scenario`, `route_cache` **and `proposals`**, so running
+it destroys every published proposal, comment and like along with the
+parameters.
+
+That rule takes effect at the **V1 deployment**, when the database first
+carries real users' work.
+
+Until then it does not apply. Staging and production both hold test data
+only — proposals we generated ourselves to exercise the tool — so a
+parameter recalibration is reseeded rather than migrated, which is what
+`docs/DEPLOY_HANDOVER.md` §11 and §12 ask for:
+
+```bash
+cd /opt/targetnetwork-<env>/deploy/bot-server-app
+docker compose run --rm --no-deps api python db/dev/seed.py
+docker compose run --rm migrate python db/migrate.py --baseline
+docker compose up -d
+```
+
+`--baseline` runs **after** the seed, never before: the seed drops the
+schemas and takes the migration tracking table with them, and a database
+born from `create_*.sql` + `db/schema.py` is already at the latest state,
+so every migration is recorded as applied without being executed.
+
+**Before V1, delete this section** and keep only the sentence above it.
+From that day a parameter change is a migration like any other, and losing
+the `proposals` schema is a data-loss incident rather than an
+inconvenience.
 
 ## Deploy key + forced command (one-time server setup)
 

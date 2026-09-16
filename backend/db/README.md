@@ -381,6 +381,8 @@ docker exec night-train-api python /app/scripts/build_country_relations.py --dry
 | Table | Description |
 |---|---|
 | `scenarios` | Container pinning one version of each of the five versioned `input_params` infrastructure tables (`track_infrastructures`, `track_infrastructure_defaults`, `stop_infrastructures`, `stop_infrastructure_defaults`, `passage_charges`). Every read of infrastructure data goes through a scenario — there's no other notion of "current" for those five tables. Exactly one row has `is_current_base = TRUE` (the live default used when an API call omits `scenario_id`); exactly one row per `scenario_key` has `is_current_scenario = TRUE` (the head of that what-if lineage). `scenario_id` is a surrogate key that changes on every edit; `scenario_key` (e.g. `"infra-2026"`, `"infra-2026-hsr"`) is the stable identifier for one lineage. Compositions, coach types, locomotive types, operators, and composition references are catalogs, not scenario-versioned — see `input_params` above. `routing_graph_key` pins the routing graph the same way — the one piece of infrastructure living outside the database (an OpenRailRouting instance per graph; key → URL mapping in `backend/docker/.env`, resolved by `api/helpers/dependencies.py`). |
+| `measure_sets` | A named bundle of political measures an evaluation runs under — what the state DOES, where a scenario pins what the infrastructure IS: `vat_exempt`, `energy_tax_exempt`, `tac_direct_cost`. Unversioned definitions; the flags say which levers are pulled, never by how much. The rates themselves (VAT per country of sale, electricity tax share, direct-cost floor per infrastructure manager) get their own versioned `input_params` table with WP17 and are pinned by the scenario like every other calibrated parameter. One row today, `none` — no lever pulled, which is what every evaluation before WP18 implicitly ran under, so seeding it changed no number. |
+| `scenario_variants` | The flattened (scenario × measure set) axis the API and the frontend address by a single id — one dropdown value instead of two, and what a proposal family is computed over. Materialised as the full cross product (`db/dev/seed.py` `materialise_scenario_variants()`, re-run after every scenario or measure-set insert), so it is derived data: truncating and rebuilding it loses nothing except the ids themselves, which nothing persists. |
 
 A version bump on any of the five pinned tables is a **full-table snapshot**,
 never a per-row diff: editing one stop's charge duplicates every other row of
@@ -447,6 +449,17 @@ Dev reseed drops the schema and bulk-loads any
 `ROUTE_SEGMENTS_FILE_ID_<KEY>`); servers load via
 `scripts/precompute_route_segments.py --load`. Not versioned: a cache row is
 either right for its graph import or purged with it.
+
+### `family`
+
+Layer L5 caches — everything derived from the pins. UNLOGGED, TTL on
+read, both flushed by `scripts/refresh_proposals.py` on every version
+bump; a fresh database starts with them empty. `adapters/family/README.md`.
+
+| Table | Description |
+|---|---|
+| `documents` | One serialised family document per family key (`models/family/key.py`): every member of one stop list + HOW under the current pins, as `POST /api/proposal/family` returns it. The key folds both model versions in, so a bump never finds an old row again. |
+| `members` | The member cache — one `compute_member()` payload per resolved request + measure set, keyed by `canonical_request_hash()`. Read by the family's views endpoint, publish, compare and refresh; fills lazily with the members whose views someone opened. Replaced the two-table compute cache under `proposals` in WP18 B2b. |
 
 ### `proposals`
 
@@ -555,8 +568,6 @@ cutover. The sidecars are written/read by
 | `seasonal_schedules` | One row per `SeasonalSchedule` (`models/route/route.py`) — operating frequency (daily/three_per_week) per season on a route |
 | `update_log` | Append-only timeline event log (published/overwritten/recalculated/branched_from/branched_to) — preserves state transitions that `proposals.proposals` itself prunes on overwrite. Written by `publish()`/`refresh_proposal()` (`adapters/proposal/repository.py`), read as the third timeline source by `adapters/proposal/engagement_repository.py`. A NULL `user_id` marks a system event, which is what distinguishes a refresh from a user overwrite |
 | `proposal_summaries` | Derived projection over `proposals.proposals` for the gallery/map — route metrics, financial KPIs, placeholder demand KPIs, simplified PostGIS geometry, and `country_relations` (the sorted `"AA__BB"` keys of every country-to-country relation the proposal actually serves — derived from `od_pairs`, so a merely transited country contributes nothing; ranked by `GET /api/proposals/stats` against `input_params.country_relations`). Not a source of truth; rebuildable at any time. Row-building logic: `adapters/proposal/projection.py`'s `build_summary_row()` (WP4, `tests/test_37_proposal_projection.py`); upserted by `publish()`, one row per proposal |
-| `compute_cache_pointer` | Compute cache, pointer side — `request_hash` → which result it resolves to, plus request-specific response parts. `UNLOGGED`. Still unpopulated — lands with WP13 |
-| `compute_cache_result` | Compute cache, result side — `(route_fingerprint, scenario_id, composition_id)` → the shared route + evaluation payload, stored once per distinct result. `UNLOGGED`. Still unpopulated — lands with WP13 |
 
 Segments/od_pairs/timetable_warnings key off `trip_id`; parkings/shuntings/
 seasonal_schedules key off `route_id` — matching where each field lives on

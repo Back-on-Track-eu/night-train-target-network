@@ -9,10 +9,13 @@ Sections
   Clock bands          — overlap of a run with a daily tariff band
   Geography            — haversine distance, bbox area
   Country code lookup  — ISO 3166-1 alpha-2 ↔ alpha-3 conversion
+  Canonical hashing    — one sha256 convention for keys and content ids
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from typing import Optional
 
@@ -181,3 +184,19 @@ def haversine_path_m(coords: list[list[float]]) -> float:
             coords[i + 1][1],
         )
     return total
+
+
+# =============================================================================
+# CANONICAL HASHING
+# =============================================================================
+
+
+def canonical_sha256(obj) -> str:
+    """ "sha256:<hex>" over the canonical JSON form of a JSON-serialisable
+    value (sorted keys, no whitespace) — the one hashing convention behind
+    the member cache's request hash, the family key (models/family/key.py)
+    and the content-addressed geometry pool of the family document. The
+    sha256: prefix matches the route fingerprint's format for at-a-glance
+    recognisability in the DB."""
+    canonical = json.dumps(obj, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()

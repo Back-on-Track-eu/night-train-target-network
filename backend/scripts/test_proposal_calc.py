@@ -1,18 +1,18 @@
 """
 test_proposal_calc.py
 ======================
-Manual test script for POST /api/proposal/calc — the FULL merged response
-(route + evaluation), not just the route-building half. Renamed and
-rewritten from the former test_route_plan.py, which only inspected
-route/geometry and left the evaluation block unexamined; this version
-prints and validates both halves and exercises the error paths too.
+Manual inspection script for ONE MEMBER — the full payload compute_member()
+returns (route + evaluation.views), which is what publish stores and what
+the family's views endpoint serves one view of. Runs in-process via
+scripts/member.py: since WP18 B2b the wire carries the family's compact
+route only, and this script exists to look at the full one.
 
 Usage:
     python scripts/test_proposal_calc.py <path/to/request.json>
 
-Reads the request body from the given JSON file, POSTs it to
-/api/proposal/calc, and writes, alongside the request file (same base
-name, e.g. tc_1_route_input.json):
+Reads the request body from the given JSON file, computes the member,
+and writes, alongside the request file (same base name, e.g.
+tc_1_route_input.json):
   <base>_output.json             — the full raw response, pretty-printed
   <base>_eval_summary.json       — a flattened per_year cost/revenue/
                                     margin summary, machine-diffable
@@ -65,6 +65,7 @@ import requests
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from dev_env import api_base_url, routing_base_url  # noqa: E402
+from scripts.member import compute_member_payload  # noqa: E402
 
 API_BASE = api_base_url()
 ROUTING_URL = routing_base_url()
@@ -88,8 +89,8 @@ EXPECTED_TOP_LEVEL_KEYS = (
     "route_builder_version",
     "calc_version",
     "route_fingerprint",
-    "cache_hit",
     "request",
+    "summary",
     "route",
     "evaluation",
 )
@@ -345,14 +346,10 @@ def validate_response(body: dict) -> list[str]:
         problems.append("route.trip_pairs is empty or missing")
 
     evaluation = body.get("evaluation", {})
-    for section in ("models", "input", "views"):
-        if section not in evaluation:
-            problems.append(f"evaluation.{section} is missing")
-    if "route" in evaluation.get("input", {}):
+    if set(evaluation) != {"views"}:
         problems.append(
-            "evaluation.input.route is present — should be omitted "
-            "(include_route=False), the route already appears once as a "
-            "sibling of 'evaluation'"
+            f"evaluation carries {sorted(evaluation)} — a member carries views "
+            "only (models: GET /api/models; parameters: GET /api/params/*)"
         )
 
     views = evaluation.get("views", {})
@@ -425,31 +422,25 @@ def test_proposal_calc(path: str) -> bool:
     stops_path = f"{base}_stops.geojson"
     suggested_stops_path = f"{base}_suggested_stops.geojson"
 
-    print("\nPOST /api/proposal/calc")
+    print("\ncompute_member (in-process)")
     print(f"Request: {path}")
     print("-" * 60)
 
-    response = requests.post(f"{API_BASE}/api/proposal/calc", json=request_body)
-    print(f"Status: {response.status_code}")
-
     try:
-        response_body = response.json()
-    except requests.exceptions.JSONDecodeError:
-        # Not a JSON body at all — most likely a raw Flask/Werkzeug error page,
-        # meaning the exception happened outside api/proposal_calc.py's own try/except.
-        # Check the Flask server's own terminal for the actual traceback.
-        print("\nNon-JSON response body (raw Flask error page?) — check the Flask")
-        print("server's terminal for the actual traceback. Raw response body:\n")
-        print(response.text)
-        with open(output_path, "w", encoding="utf-8") as f:
-            f.write(response.text)
-        return False
+        response_body = compute_member_payload(request_body)
+        status_code = 200
+    except ValueError as exc:
+        # Validation and domain errors alike — the API would answer 400/422
+        # with these words; here they are printed and written as-is.
+        response_body = {"error": "validation_or_domain_error", "message": str(exc)}
+        status_code = 400
+    print(f"Status: {status_code}")
 
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(response_body, f, indent=2, ensure_ascii=False)
 
-    if response.status_code != 200:
-        print_error_response(response.status_code, response_body)
+    if status_code != 200:
+        print_error_response(status_code, response_body)
         print(f"\nWrote raw error body to {output_path}")
         return False
 
@@ -468,7 +459,6 @@ def test_proposal_calc(path: str) -> bool:
     print(f"  route_builder_version: {response_body['route_builder_version']}")
     print(f"  calc_version:          {response_body['calc_version']}")
     print(f"  route_fingerprint:     {response_body['route_fingerprint']}")
-    print(f"  cache_hit:             {response_body['cache_hit']}")
 
     print("\n--- ROUTE ---")
     print(f"  route_id:     {route['route_id']}")
@@ -527,7 +517,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     print("=" * 60)
-    print("  Night Train — POST /api/proposal/calc (full response) test")
+    print("  Night Train — one member, full payload (compute_member) test")
     print("=" * 60)
 
     if not check_flask():

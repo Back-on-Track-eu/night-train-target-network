@@ -17,10 +17,6 @@ Two halves, mirroring route_serialize.py's own split:
   insert_route_gtfs(cur, route)                        — write side
   route_dict_from_gtfs(proposal_id, version, loader,
                         scenario_id, cur)                — read side
-  input_parameters_from_scenario(scenario_id, loader)   — the
-                                                            evaluation.
-                                                            input.parameters
-                                                            rebuild helper
 
 route_dict_from_gtfs() reconstructs Stop/Segment/Trip/TripPair/Route
 domain objects from the DB (composition reloaded via loader, same
@@ -50,17 +46,13 @@ import re
 from psycopg2.extras import Json
 
 from api.helpers.route_serialize import route_to_dict
-from api.helpers.evaluation_serialize import input_to_dict
 from models.route.route import (
     Route,
     TripPair,
-    Schedule,
-    SeasonalSchedule,
-    Season,
-    Frequency,
     Parking,
     Shunting,
 )
+from models.route.timetable import schedule_from_dict
 from models.route.trip import Stop, StopType, Segment, Trip, TimetableWarning
 from models.route.model import GTFS_SERVICE_END, GTFS_SERVICE_START
 from models.params import ODPair
@@ -128,9 +120,18 @@ def insert_route_gtfs(cur, route: dict) -> None:
 
     _insert_service(cur, service_id, route["schedule"])
     cur.execute(
-        "INSERT INTO proposals.routes (route_id, route_long_name) VALUES (%s, %s)",
-        (route_id, _route_long_name(route)),
+        "INSERT INTO proposals.routes "
+        "(route_id, route_long_name, schedule_months, min_turnaround_min) "
+        "VALUES (%s, %s, %s, %s)",
+        (
+            route_id,
+            _route_long_name(route),
+            Json(route["schedule"].get("days_per_week_by_month")),
+            route["schedule"].get("min_turnaround_min"),
+        ),
     )
+    # The two-season projection is still written for readers that expect
+    # it; the month map on the route row is what _load_schedule reads first.
     for ss in route["schedule"]["seasonal_schedules"]:
         cur.execute(
             "INSERT INTO proposals.seasonal_schedules (route_id, season, frequency) "
@@ -188,16 +189,18 @@ def insert_route_gtfs(cur, route: dict) -> None:
 
 
 def _insert_service(cur, service_id: str, schedule: dict) -> None:
-    """One shared GTFS service per route. Identical constraint to the old
-    write path's _insert_service(): only fully daily schedules are
-    persistable for now (the only reachable case — route planning
-    supports schedule_mode='alwaysDaily' exclusively)."""
-    frequencies = {ss["frequency"] for ss in schedule["seasonal_schedules"]}
-    if frequencies != {"daily"}:
-        raise ValueError(
-            f"Only fully daily schedules can be saved as proposals for now "
-            f"(got frequencies {sorted(frequencies)})."
-        )
+    """One shared GTFS service per route. Only a schedule that runs every
+    day of the week in its peak month can be persisted: the GTFS calendar
+    row is all-weekdays-TRUE, and a per-month map has no home in the
+    proposals schema yet (see _insert_route). Publish refuses anything else
+    rather than store a calendar that says something the plan does not."""
+    # The GTFS calendar row is all-weekdays-TRUE whatever the plan: which
+    # weekdays a non-daily month runs is not modelled (models/route/model.py
+    # OPEN_TODOS). The plan itself is on the route row, so nothing is lost;
+    # the calendar is the coarse GTFS view of it.
+    months = schedule.get("days_per_week_by_month")
+    if not months or max(int(d) for d in months.values()) < 1:
+        raise ValueError("A proposal must run in at least one month to be saved.")
     cur.execute(
         "INSERT INTO proposals.services (service_id) VALUES (%s)", (service_id,)
     )
@@ -223,8 +226,8 @@ def _insert_trip(
     cur.execute(
         "INSERT INTO proposals.trips "
         "(trip_id, route_id, service_id, shape_id, trip_headsign, "
-        " direction_id, composition_type_id) "
-        "VALUES (%s, %s, %s, NULL, %s, %s, %s)",
+        " direction_id, composition_type_id, departure_shift_min, track_gauge_mm) "
+        "VALUES (%s, %s, %s, NULL, %s, %s, %s, %s, %s)",
         (
             trip_id,
             route_id,
@@ -232,6 +235,13 @@ def _insert_trip(
             stops[-1]["stop_name"],
             trip["direction"],
             composition_id,
+            # Stored, not derived (0.9.38): the segments cannot reproduce
+            # how far an expert override moved the departure. Absent for
+            # pre-0.9.37 payloads, which never had a shift to record.
+            int(trip.get("general_parameters", {}).get("departure_shift_min", 0)),
+            # Likewise (0.9.39): the gauge family the trip routed on.
+            # Absent for pre-0.9.27 payloads, all of which were 1435.
+            int(trip.get("general_parameters", {}).get("track_gauge_mm", 1435)),
         ),
     )
     _insert_stop_times(cur, trip_id, stops)
@@ -382,8 +392,9 @@ def route_dict_from_gtfs(
     route_id = f"P{proposal_id}_V{proposal_version}_R1"
 
     cur.execute(
-        "SELECT trip_id, direction_id, composition_type_id FROM proposals.trips "
-        "WHERE route_id = %s ORDER BY trip_id",
+        "SELECT trip_id, direction_id, composition_type_id, departure_shift_min, "
+        " track_gauge_mm "
+        "FROM proposals.trips WHERE route_id = %s ORDER BY trip_id",
         (route_id,),
     )
     trip_rows = cur.fetchall()
@@ -397,14 +408,23 @@ def route_dict_from_gtfs(
         "SELECT season, frequency FROM proposals.seasonal_schedules WHERE route_id = %s",
         (route_id,),
     )
-    schedule = Schedule(
-        seasonal_schedules=[
-            SeasonalSchedule(
-                season=Season(r["season"]), frequency=Frequency(r["frequency"])
-            )
-            for r in cur.fetchall()
-        ]
+    legacy = [
+        {"season": r["season"], "frequency": r["frequency"]} for r in cur.fetchall()
+    ]
+    cur.execute(
+        "SELECT schedule_months, min_turnaround_min FROM proposals.routes "
+        "WHERE route_id = %s",
+        (route_id,),
     )
+    row = cur.fetchone() or {}
+    block = {"seasonal_schedules": legacy}
+    # Rows written since the month map has a home carry it; older rows fall
+    # back to the projection, widened as before.
+    if row.get("schedule_months"):
+        block["days_per_week_by_month"] = row["schedule_months"]
+    if row.get("min_turnaround_min") is not None:
+        block["min_turnaround_min"] = row["min_turnaround_min"]
+    schedule = schedule_from_dict(block)
 
     # Built once, not per trip pair — same rationale as route_from_dict()
     # and plan_route(): a fixed number of queries regardless of how many
@@ -434,10 +454,20 @@ def route_dict_from_gtfs(
                 f"route_dict_from_gtfs: composition '{composition_id}' not found."
             )
         outbound = _build_trip(
-            cur, group[0]["trip_id"], direction=0, stop_infra=stop_infra
+            cur,
+            group[0]["trip_id"],
+            direction=0,
+            stop_infra=stop_infra,
+            departure_shift_min=int(group[0]["departure_shift_min"]),
+            gauge_mm=int(group[0]["track_gauge_mm"]),
         )
         return_trip = _build_trip(
-            cur, group[1]["trip_id"], direction=1, stop_infra=stop_infra
+            cur,
+            group[1]["trip_id"],
+            direction=1,
+            stop_infra=stop_infra,
+            departure_shift_min=int(group[1]["departure_shift_min"]),
+            gauge_mm=int(group[1]["track_gauge_mm"]),
         )
         od_pairs = _build_od_pairs(cur, group[0]["trip_id"], group[1]["trip_id"])
         trip_pairs.append(
@@ -464,7 +494,14 @@ def route_dict_from_gtfs(
     return route_to_dict(route, scenario_id, tracks)
 
 
-def _build_trip(cur, trip_id: str, direction: int, stop_infra) -> Trip:
+def _build_trip(
+    cur,
+    trip_id: str,
+    direction: int,
+    stop_infra,
+    departure_shift_min: int = 0,
+    gauge_mm: int = 1435,
+) -> Trip:
     cur.execute(
         "SELECT stop_sequence, stop_id, arrival_time, departure_time, "
         " stop_type, auto_added "
@@ -560,6 +597,8 @@ def _build_trip(cur, trip_id: str, direction: int, stop_infra) -> Trip:
         direction=direction,
         segments=segments,
         timetable_warnings=warnings,
+        gauge_mm=gauge_mm,
+        departure_shift_min=departure_shift_min,
     )
 
 
@@ -618,28 +657,3 @@ def _build_shuntings(cur, route_id: str) -> list[Shunting]:
         )
         for r in cur.fetchall()
     ]
-
-
-# =============================================================================
-# input.parameters rebuild helper
-# =============================================================================
-
-
-def input_parameters_from_scenario(scenario_id: int, loader) -> dict:
-    """Rebuild the evaluation.input.parameters block
-    section from a scenario pin alone (§5.1 — parameters are never stored
-    per proposal, only the scenario_id that resolves them). Reuses
-    evaluation_serialize.input_to_dict() itself (include_route=False, same
-    as api/proposal_calc.py) rather than reimplementing its
-    tracks/stop_infra/compositions assembly a second time — returns
-    exactly {"parameters": {...}}."""
-    tracks = loader.build_all_tracks(scenario_id)
-    stop_infra = loader.build_all_stops(scenario_id)
-    compositions = loader.build_all_compositions(scenario_id, include_indicative=False)
-    return input_to_dict(
-        route_dict=None,
-        tracks=tracks,
-        stop_infra=stop_infra,
-        compositions=compositions,
-        include_route=False,
-    )

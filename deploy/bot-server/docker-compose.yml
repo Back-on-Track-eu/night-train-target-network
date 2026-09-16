@@ -35,10 +35,16 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
     volumes:
       - tn_pgdata:/var/lib/postgresql/data
-      # Schema-only init on first boot (empty volume). Order matters:
-      # admin → input_params → proposals (proposals.user_id FK → admin.users)
+      # Schema-only init on first boot (empty volume). Only the two
+      # schemas that still have a .sql file: input_params and scenario are
+      # rendered from backend/db/schema.py now (build_ddl()), and mounting
+      # their deleted files here made Docker create DIRECTORIES in their
+      # place — psql -f on a directory fails, and the postgres entrypoint
+      # runs under set -e, so a fresh volume never finished initialising.
+      # Nothing is missing as a result: first-time setup runs seed.py once
+      # (see README), which creates all four schemas itself and is the
+      # only thing that ever has.
       - ../../backend/db/dev/sql/create_admin_schema.sql:/docker-entrypoint-initdb.d/01_admin.sql:ro
-      - ../../backend/db/dev/sql/create_input_params_schema.sql:/docker-entrypoint-initdb.d/02_input_params.sql:ro
       - ../../backend/db/dev/sql/create_proposal_schema.sql:/docker-entrypoint-initdb.d/03_proposals.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]

@@ -5,7 +5,7 @@ Version anchor and factor set of the emissions model: flat per-mode GHG
 intensity factors (adapters/proposal/README.md decision 24) — the single
 source for the night-train, air, and car g CO2e/pax-km values used
 across the platform: `proposals.proposal_summaries.co2_g_per_pax_km`,
-the "summary" block of POST /api/proposal/calc, the
+the "summary" block of a member (and of every family member), the
 `evaluation.models.emissions` documentation entry
 (api/helpers/evaluation_serialize.py: models_to_dict()), and the
 placeholder CO2-savings derivation in models/evaluation/summary.py.
@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-EMISSIONS_MODEL_VERSION: str = "0.1.1"
+EMISSIONS_MODEL_VERSION: str = "0.1.2"
 
 EMISSIONS_MODEL_DESCRIPTION: str = (
     "Climate impact factors: how many grams of CO2-equivalent one "
@@ -35,6 +35,19 @@ EMISSIONS_MODEL_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.1.2": {
+        "date": "2026-09-13",
+        "author": "david",
+        "changes": "DOCUMENTATION ONLY - no value changes. The module docstring "
+        "now names the family as the consumer of the factor set, following the "
+        "WP18 move to POST /api/proposal/family as the single compute path. "
+        "Factors, sources and mode-shift shares are untouched. Bumped only "
+        "because the version-check gate self-gates this file: any diff requires "
+        "the constant to move. Side effect: the bump marks every stored proposal "
+        "outdated, so each recomputes lazily on its next load and gets an "
+        "update_log entry naming this trigger - the recompute reproduces "
+        "identical numbers.",
+    },
     "0.1.1": {
         "date": "2026-08-10",
         "author": "david",

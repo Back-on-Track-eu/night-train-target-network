@@ -4,7 +4,9 @@ scenarios.py
 Read-only scenario listing.
 
   GET /api/scenarios — all scenario.scenarios rows, grouped by current
-                        status (see scenario_serialize.scenario_collection_to_dict)
+                        status, plus the measure sets and the flattened
+                        (scenario x measure set) variant axis (see
+                        scenario_serialize.scenario_collection_to_dict)
 
 Not to be confused with the proposals API (formerly named "scenarios" —
 see api/proposals.py's module docstring) — this endpoint covers the
@@ -27,10 +29,16 @@ def get_scenarios():
     """
     Return every scenario, grouped into current_base / current_scenarios /
     historical_scenarios, each with its own count plus name, description,
-    and full attributes. See
+    and full attributes; then measure_sets and scenario_variants, the
+    axis a proposal family is computed over. See
     scenario_serialize.scenario_collection_to_dict() for the response
     layout.
     """
     loader = get_loader()
-    scenarios = loader.list_all_scenarios()
-    return jsonify(scenario_collection_to_dict(scenarios)), 200
+    return jsonify(
+        scenario_collection_to_dict(
+            loader.list_all_scenarios(),
+            list(loader.build_all_measure_sets().all().values()),
+            loader.list_scenario_variants(),
+        )
+    ), 200

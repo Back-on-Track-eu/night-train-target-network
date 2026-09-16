@@ -127,6 +127,7 @@ LOADER_READ_COLUMNS = [
     ("input_params.stop_infrastructures", "stop_lat"),
     ("input_params.stop_infrastructures", "stop_lon"),
     ("input_params.stop_infrastructures", "stop_charge_eur"),
+    ("input_params.stop_infrastructures", "stop_charge_per_tonne_eur"),
 ]
 
 

@@ -82,21 +82,31 @@ frontend/
     ├── lib/
     │   ├── apiClient.ts       # One classified HTTP boundary for every backend call
     │   ├── apiError.ts        # Failure classification shared by every consumer
+    │   ├── proposalFamily.ts  # the family document on the client: inflateRoute, member keys, error mapping
+    │   ├── compareKpis.ts     # The comparison KPIs, deltas and the surplus rule
+    │   ├── scenarioAxes.ts    # Scenario switches (network / HSR / opt. tt) ↔ scenario_id
     │   ├── compositionFormation.ts  # Composition → drawable formation; class colours/glyphs
     │   ├── costFactorRates.ts  # Cost factor → per-unit-rate resolution (popover)
     │   ├── ctaButtonClass.ts   # Shared "Suggest a new route" pill styling
     │   ├── feedbackApi.ts      # Thin client for POST /api/feedback
-    │   └── selectPillPt.ts     # Shared PrimeVue Select pass-through styling
+    │   ├── selectPillPt.ts     # Shared PrimeVue Select pass-through styling
+    │   └── uiLanguages.ts      # Language bar: order + which locales are live
     ├── utils/
     │   └── octilinear.ts    # Octilinear map-line layout helpers
     └── components/
         ├── AppIcon.vue                    # Tree-shakeable @mdi/js icon wrapper
         ├── CompositionDetailOverlay.vue   # Composition detail popover — facts + formation
         ├── CompositionFormation.vue       # Formation drawing (Wagenstandsanzeiger)
-        ├── CompositionPanel.vue           # Composition of the computed route
-        ├── ComputeInputsPanel.vue         # Scenario + composition — the two recompute inputs
-        ├── EvaluationPanel.vue            # Cost/revenue evaluation cube explorer
+        ├── CompareSection.vue             # Zone B: KPI picker, scenario bars, scenario × composition grid
+        ├── CostRevenueBreakdown.vue       # Zone E: cost/revenue bars + the cube explorer (collapsible)
         ├── Gallery.vue                    # Landing page: intro, search bar, result list + map
+        ├── InfoHint.vue                   # A single ⓘ with one sentence behind it
+        ├── InfoPopover.vue                # The hover-intent info overlay both ⓘ users share
+        ├── MainKpiGrid.vue                # Zone A: the eight headline KPIs with deltas vs. baseline
+        ├── ProposalResults.vue            # Everything below the map, zones A–E
+        ├── ScenarioSwitches.vue           # Zone A: the scenario as three switches (+ measures, disabled)
+        ├── SettingsSection.vue            # Zone D: supply table / demand notes (collapsible)
+        ├── SupplyTable.vue                # Compositions compared on the current route + scenario
         ├── LandingIntro.vue               # Landing pitch above the gallery (copy lives in en.json)
         ├── MapView.vue                    # MapLibre route/stop map
         ├── ProposalViewport.vue           # Proposal build/evaluate workspace
@@ -110,8 +120,44 @@ not a complete file listing.
 **Recompute inputs.** The first evaluation posts no `composition_id` at all —
 the backend computes it with its standard composition (`DEFAULT_COMPOSITION_ID`,
 `backend/models/route/model.py`) and reports back which one that was. Scenario
-and composition therefore only appear once a route exists, together in
-`ComputeInputsPanel` above the results.
+and composition therefore only appear once a route exists: the scenario as
+switches at the top of `ProposalResults` (zone A), the composition in the
+supply table of the collapsible settings (zone D).
+
+**The family.** Every evaluation is one `POST /api/proposal/family`
+(`composables/useProposalFamily.ts`): the stops and HOW fields under every
+offered scenario × every composition, returned as one document — a summary
+per member, a compact route per (scenario, composition), the geometry once.
+`ProposalViewport` puts the presented member on screen (its compact route
+inflated back into the full shape by `lib/proposalFamily.ts`, so the map,
+the itinerary and the expert timetable read what they always read), and a
+scenario or composition switch afterwards is a lookup in the document, not a
+request. The comparisons (zone A's deltas, B's bars and grid, D's table) read
+the other members. A member's six evaluation views are not in the document:
+zone E fetches the member on screen's from
+`GET /api/proposal/family/<key>/members/<sv>/<comp>/views` and shows a
+skeleton until they arrive. Editing the itinerary resets the family. A
+loaded proposal arrives with its full route and views inline
+(`GET /api/proposal/<id>`) and builds its family in the background so that
+switching on it is just as instant.
+
+A member the backend could not compute (a gauge clash, an unroutable pair, a
+graph this deployment does not run) is not a failed request but a member with
+`status: 'error'` and a code — `lib/proposalFamily.ts` turns the presented
+one into the same `ApiFailure` a 422 used to be, and the grid renders the
+others as `cellErrors.<code>`.
+
+**Coming-soon surfaces.** Three things are shown but disabled, each for a
+different reason: the "price & regulatory measures" toggles (the backend
+does not model them — `docs/PARKED_WORK.md` §3), the "fit to demand" column
+(the demand stopgap gives every composition the same utilisation), and the
+**Infra 2032** network (the routing instance runs and the backend evaluates
+it fine, but its infrastructure data is not at publishable quality yet).
+Only the last one is a release switch rather than missing code:
+`PREVIEW_NETWORKS` in `lib/scenarioAxes.ts`, overridable per deployment with
+`VITE_PREVIEW_NETWORKS` (comma-separated; empty string releases every
+network). A held-back network is also left out of the comparison views and
+of the family request's `scenario_variant_ids`, so nothing is computed for it.
 
 Changing either does **not** recompute on the spot: `ProposalViewport` marks
 the results stale (`paramsStale`) and covers them with a recompute control, so

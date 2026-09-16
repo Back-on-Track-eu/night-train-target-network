@@ -30,7 +30,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.33"
+ROUTE_BUILDER_VERSION: str = "0.9.39"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -45,6 +45,129 @@ ROUTE_BUILDER_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.39": {
+        "date": "2026-09-14",
+        "author": "david + claude",
+        "changes": "NO OUTPUT CHANGE for a fresh compute. Trip.gauge_mm is now "
+        "PERSISTED — the same gap as 0.9.38, one version older: 0.9.27 "
+        "serialized general_parameters.track_gauge_mm but proposals.trips "
+        "had no column, so route_dict_from_gtfs() rebuilt every published "
+        "trip at the default 1435 and a published Finnish or Iberian route "
+        "reported standard gauge on reload. One migration adds "
+        "proposals.trips.track_gauge_mm SMALLINT NOT NULL DEFAULT 1435 "
+        "(db/dev/sql/migrations/2026-09-14_trips_track_gauge.sql); the GTFS "
+        "store writes it on publish and reads it back, and test_36 now "
+        "round-trips a non-default gauge. Broad-gauge routes published "
+        "before this keep 1435 — what the API has returned for them since "
+        "publication; re-publishing restores the true family. No truncate, "
+        "no recompute.",
+    },
+    "0.9.38": {
+        "date": "2026-09-14",
+        "author": "david + claude",
+        "changes": "NO OUTPUT CHANGE for a fresh compute. Trip.departure_shift_min "
+        "is now PERSISTED: 0.9.37 serialized it but proposals.trips had no "
+        "column, so route_dict_from_gtfs() rebuilt every published trip with "
+        "the default 0 and a published expert timetable came back with its "
+        "shift forgotten (test_36's expert roundtrip caught it). One "
+        "migration adds proposals.trips.departure_shift_min SMALLINT NOT "
+        "NULL DEFAULT 0 (db/dev/sql/migrations/2026-09-14_trips_departure_"
+        "shift.sql); the GTFS store writes it on publish and reads it back. "
+        "Routes published under 0.9.37 with a departure override keep 0 — "
+        "the true shift was never stored and 0 is what the API has returned "
+        "for them since publication. No truncate, no recompute.",
+    },
+    "0.9.37": {
+        "date": "2026-09-13",
+        "author": "david + claude",
+        "changes": "Expert timetable: a mirroring return now mirrors the "
+        "DEPARTURE too. expert_timetable.return = {mirror_outbound: true} "
+        "(the default) used to reverse outbound's add-ons and leave the "
+        "return's departure at its automatic value, so pulling an outbound "
+        "from 21:00 to 20:00 left the return where it was. The pair is now a "
+        "mirror image around MIRROR_MIN: the return's departure is displaced "
+        "the opposite way by however far outbound's actually moved "
+        "(21:00->08:00 pulled to 20:00->07:00 sends the return to "
+        "22:00->09:00), and that holds for 'absolute' as well as 'shift' "
+        "overrides because the displacement is resolved on the built "
+        "outbound trip, not read off the request. An explicit return block "
+        "is still taken as given, which is how the two directions are timed "
+        "independently. New Trip.departure_shift_min, serialized as "
+        "general_parameters.departure_shift_min (0 for every automatic "
+        "timetable, read back on load, default 0 for older payloads), so a "
+        "client can recover the automatic departure from a pinned trip. "
+        "WHAT CHANGES: only requests with a mirroring return AND a departure "
+        "override — their return trip moves, and with it its stop "
+        "classification and every cost placed on the clock. Every automatic "
+        "request, every add-on-only request and every explicit-return "
+        "request is byte-identical apart from the new field. No schema "
+        "change; the family key carries the version, so cached documents "
+        "invalidate themselves.",
+    },
+    "0.9.36": {
+        "date": "2026-09-12",
+        "author": "david + claude",
+        "changes": "NO OUTPUT CHANGE. One unused import removed from "
+        "route.py (enum.Enum, left behind when StopType moved to trip.py). "
+        "The version moves only because the CI version gate treats any "
+        "diff to a route-builder file as a model change, and riding along "
+        "with CALC 0.9.29 — which invalidates every family key and the "
+        "compute cache anyway — makes the bump free. Every number a route "
+        "produces is identical to 0.9.35.",
+    },
+    "0.9.35": {
+        "date": "2026-09-09",
+        "author": "david + claude",
+        "changes": "SCHEDULE per month and TRAINSETS from a cycle-time rule. "
+        "Schedule is now days-per-week for each of the twelve months "
+        "(0 = not running) plus min_turnaround_min, replacing the fixed "
+        "summer/winter x daily/three_per_week enums; operating days are "
+        "days_in_month x d/7, so the year no longer has exactly 364 days. "
+        "New schedule_mode 'custom' takes the month map from the request "
+        "({'1': 7, ..., '12': 0}); 'alwaysDaily' stays the default and means "
+        "7 everywhere. min_turnaround_min (default 180) is a request field "
+        "under either mode. TripPair.composition_count() no longer returns "
+        "'2 if daily else 1' / availability: it walks one rake through the "
+        "pair's own timetable, gives it at least min_turnaround_min at each "
+        "terminal and takes the next scheduled slot that fits (losing a day "
+        "when the slot is too close), which yields cycle_days; the physical "
+        "count is max over months of ceil(cycle_days x d/7) "
+        "(TripPair.trainsets(), new), and the cost basis divides that by "
+        "coach_avail_per as before. A normal night train has a two-day "
+        "cycle, so daily -> 2 and three-a-week -> 1 exactly as the old rule "
+        "said; four-a-week -> 2 and a too-short turnaround -> 3, which it "
+        "could not say. ASSUMPTION stated in OPEN_TODOS: departure days are "
+        "spread evenly through the week. Wire: route.schedule carries "
+        "days_per_week_by_month and min_turnaround_min and STILL writes the "
+        "legacy seasonal_schedules block derived from them; route_from_dict "
+        "reads either shape, widening a legacy block onto its months. "
+        "Schedule and min_turnaround_min join the family key. No schema "
+        "change.",
+    },
+    "0.9.34": {
+        "date": "2026-09-10",
+        "author": "david + claude",
+        "changes": "auto_stop_addition mode 'add' REMOVED (WP18 phase B1). The route "
+        "builder no longer adds stops of its own: VALID_AUTO_STOP_ADDITION_MODES is "
+        "{off, suggest}, timetable.apply_auto_stop_addition() is deleted, and "
+        "DEFAULT_AUTO_STOP_ADDITION moves from 'add' to 'off'. Two reasons. A route "
+        "the user did not ask for is not the user's route — 'suggest' already offers "
+        "the same candidates, costed, and lets them accept the ones they want, after "
+        "which those stops are ordinary posted stops. And a proposal family compares "
+        "one stop list across every scenario and composition, which it cannot do if "
+        "each member may pick its own stops within its own detour budget. "
+        "WHAT CHANGES: a request that posted 'add', or omitted the field and took the "
+        "old default, is now 400 or builds the caller's stops exactly — its route can "
+        "differ from what the same request returned on 0.9.33. Every request that "
+        "posted 'off' or 'suggest' is byte-identical. The frontend only ever posted "
+        "'suggest' then 'off', so no live client is affected. Migration "
+        "2026-09-10_auto_stop_add_removed.sql asserts no stored proposal carries "
+        "'add'. Stop.auto_added and proposals.stop_times.auto_added stay (a stored "
+        "route must round-trip) and are always false from here on. The candidate "
+        "search, its costing and AUTO_STOP_MAX_DETOUR_PER are unchanged — the budget "
+        "now only bounds how much router time costing may spend, never what is "
+        "suggested.",
+    },
     "0.9.33": {
         "date": "2026-09-06",
         "author": "bjarne + claude",
@@ -85,8 +208,7 @@ CHANGELOG: dict = {
         "compose with both existing modes as plain functions "
         "(timetable.resolve_addons/resolve_departure/"
         "classify_for_departure), applied in route_factory._build_trip() "
-        "after auto_stop_addition (the last step that can change the stop "
-        "list) and after the timetable_mode switch (whose mirroring and "
+        "after auto_stop_addition and after the timetable_mode switch (whose mirroring and "
         "fixed-night stretch are given the add-ons, so a padded trip "
         "stays centred on MIRROR_MIN and a padded interval needs less "
         "slack). An overridden departure re-runs stop classification, so "
@@ -685,11 +807,11 @@ CHANGELOG: dict = {
 # change and warrants a version bump above.
 # =============================================================================
 
-# --- API request defaults (applied once, at the API boundary — api/helpers/proposal_compute.py)
+# --- API request defaults (applied once, at the API boundary — api/helpers/member_compute.py)
 DEFAULT_TIMETABLE_MODE: str = "simpleAutomatic"
 DEFAULT_SCHEDULE_MODE: str = "alwaysDaily"
 DEFAULT_ROUTING_MODE: str = "fullRouting"
-DEFAULT_AUTO_STOP_ADDITION: str = "add"
+DEFAULT_AUTO_STOP_ADDITION: str = "off"
 DEFAULT_COMPOSITION_ID: str = "NEW-BAL-7"
 """Composition a request without composition_id is computed with — the
 seven-coach new-fleet balanced train. It is the middle of the catalog on
@@ -741,6 +863,15 @@ this ratio the trip carries a 'fixed_night_stretch_slow' entry in
 general_parameters.timetable_warnings (a warning, never an error)."""
 
 # --- Schedule (seasonal model — models/route/route.py)
+DEFAULT_MIN_TURNAROUND_MIN: int = 180
+"""Shortest stand a rake is given at a terminal between arriving and
+departing again, minutes. Default for the request's min_turnaround_min;
+decides trainsets via TripPair.cycle_days()."""
+
+EVALUATION_YEAR: int = 2032
+"""Calendar year the schedule counts days in — the same year every price is
+expressed in. Only the month lengths matter (whether February has 29 days)."""
+
 WEEKS_PER_SEASON: int = 26
 """SUMMER (April–Sep) and WINTER (Oct–Mar) are each a fixed 26 weeks."""
 
@@ -930,12 +1061,12 @@ deceleration); 0.5 m/s² is a comfortable service value appropriate for
 sleeping passengers — full emergency capability is far higher and
 irrelevant for timetabling."""
 
-# --- Neutral placeholder ids (api/helpers/proposal_compute.py, adapters/proposal/README.md §2.1)
+# --- Neutral placeholder ids (api/helpers/member_compute.py, adapters/proposal/README.md §2.1)
 NEUTRAL_PROPOSAL_ID: int = 0
 NEUTRAL_PROPOSAL_VERSION: int = 0
 """Fixed (not random) placeholder used only to satisfy plan_route()'s
-id-building signature for POST /api/proposal/calc. Never risks colliding
-with anything: /api/proposal/calc never persists, so its P{id}_V{version}_
+id-building signature for ephemeral compute (the family's members). Never
+risks colliding with anything: a member never persists, so its P{id}_V{version}_
 prefix exists only for the instant it takes rewrite_id_prefix() (adapters/
 proposal/id_prefix.py) to strip it back off into the neutral R1/T.../
 structural IDs §2.1 specifies. A fixed value keeps that round trip
@@ -950,6 +1081,15 @@ prefix — see adapters/proposal/repository.py's _STRUCTURAL_ROUTE_PREFIX."""
 # =============================================================================
 
 OPEN_TODOS: dict[str, str] = {
+    "schedule_weekday_pattern": (
+        "Schedule models days PER WEEK per month, not WHICH days. "
+        "TripPair.trainsets() therefore assumes departure days are spread "
+        "evenly through the week: three-a-week on Mon/Wed/Fri needs one rake "
+        "with a two-day cycle, Mon/Tue/Wed would need two. A weekday pattern "
+        "per month would settle it, at the cost of a heavier request and UI; "
+        "until then the even-spread figure is the one an operator planning "
+        "a new service would use too."
+    ),
     "expert_addon_resplit": (
         "(David, 2026-09-06, deliberate) An expert-mode segment add-on whose "
         "ordered stop pair no longer exists after a reroute is DROPPED "
@@ -1001,14 +1141,6 @@ OPEN_TODOS: dict[str, str] = {
         "accepted at a 3km buffer; a NUTS-1 implementation should decide "
         "whether to include regions adjacent to the path, which would close "
         "this gap too."
-    ),
-    "return_detour_budget": (
-        "auto_stop_addition's search-and-cost pass runs once per TripPair, "
-        "from outbound; return reuses the decision (reversed). Accepted "
-        "trade-off: return gets no independent detour-budget check against "
-        "its own baseline trip time. Revisit only if asymmetric routing "
-        "(e.g. one-directional HSR avoidance) is ever observed pushing "
-        "return trips materially past the budget."
     ),
     "buffer_quota_time_of_day": (
         "buffer_quota_per is a flat per-country figure today. Congestion is "
@@ -1321,9 +1453,9 @@ ROUTE_FORMULAS: dict[str, Formula] = {
         "dynamics and the wait itself.",
         description="Extra travel time a suggested additional stop would "
         "cost: the detour to reach it, the braking and accelerating it "
-        "causes, and the waiting time at the stop itself. Used to "
-        "automatically pick extra stops that fit the time budget, and to "
-        "report suggestions.",
+        "causes, and the waiting time at the stop itself. Reported with "
+        "every suggestion, so the figure a reader accepts a stop on is the "
+        "one the timetable then charges.",
         inputs=(
             FormulaParam(
                 symbol="Σ t_total (reroute)",

@@ -1,17 +1,18 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import AppIcon from '@/components/AppIcon.vue'
 import FactorInfoPopover from '@/components/FactorInfoPopover.vue'
-import { mdiChevronDown, mdiChevronRight, mdiInformationOutline } from '@mdi/js'
+import LedgerTree from '@/components/LedgerTree.vue'
 import { formulaKeyForNode } from '@/lib/factorFeedback'
-import { fundedCostEur } from '@/lib/breakdownTotals'
-import { useEvaluationFormat } from '@/composables/useEvaluationFormat'
 import type { Breakdown, FormulaMap } from '@/types/api'
+import type { LedgerRow } from '@/lib/ledgerRows'
 
 // Cost tree (left column of the cost/revenue split) plus its cost-factor
 // detail popover — a one-line summary and a link to the factor's
 // documentation page.
+//
+// The table itself is LedgerTree, shared with the revenue side so the two
+// columns line up column for column.
 //
 // The formula, the input legend and the resolved rates used to live in this
 // popover. They are on the documentation site now: a rates table with its
@@ -22,7 +23,6 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
-const { formatEur, formatShare } = useEvaluationFormat()
 
 // --- Cost tree: hierarchical node spec, flattened for rendering ------------
 interface CostNode {
@@ -91,12 +91,6 @@ const costTree = computed<CostNode[]>(() => {
         { key: 'parking', label: f('parking'), value: i.parking_eur },
       ],
     },
-    // The operator's expected margin is a profit carve-out rather than a cost,
-    // so the backend keeps it out of cost.total_eur — but the subsidy figure
-    // beside this tree does include it. It therefore sits here as a peer of
-    // operator and infrastructure, not inside operator, whose own total would
-    // otherwise disagree with the children under it.
-    { key: 'ebit_margin', label: g('margin'), value: b.margin.ebit_margin_eur },
   ]
 })
 
@@ -109,19 +103,13 @@ function toggleExpand(key: string) {
   expanded.value = next
 }
 
-interface CostRow {
-  key: string
-  label: string
-  value: number
-  depth: number
-  hasChildren: boolean
-  isExpanded: boolean
-  share: number | null
-}
-
-const costRows = computed<CostRow[]>(() => {
-  const total = fundedCostEur(props.breakdown)
-  const rows: CostRow[] = []
+// Operating cost only. The operator's expected margin is a profit carve-out,
+// not a cost — the backend keeps it out of cost.total_eur — and it has its
+// own panel (MarginPanel) rather than a row here, so this total is the sum
+// of the rows under it and nothing else.
+const costRows = computed<LedgerRow[]>(() => {
+  const total = props.breakdown.cost.total_eur
+  const rows: LedgerRow[] = []
   const visit = (nodes: CostNode[], depth: number) => {
     for (const n of nodes) {
       const isExpanded = expanded.value.has(n.key)
@@ -155,59 +143,16 @@ const info = ref<InstanceType<typeof FactorInfoPopover> | null>(null)
 </script>
 
 <template>
-  <div class="w-1/2 rounded-xl bg-primary-50/5 p-4">
-    <div class="mb-2 flex items-center gap-1 border-b border-primary-50/10 pb-2">
-      <span class="w-5 shrink-0" />
-      <span class="flex-1 font-semibold text-primary-50">
-        {{ t('proposal.evaluation.groups.cost') }}
-      </span>
-      <span class="w-12 text-right text-xs text-primary-50/40 tabular-nums">
-        {{ formatShare(1) }}
-      </span>
-      <span class="w-24 text-right font-semibold text-primary-50 tabular-nums">
-        {{ formatEur(fundedCostEur(breakdown)) }}
-      </span>
-    </div>
-    <div
-      v-for="row in costRows"
-      :key="row.key"
-      class="flex items-center gap-1 py-1"
-      :style="{ paddingLeft: `${row.depth * 16}px` }"
-    >
-      <button
-        v-if="row.hasChildren"
-        class="flex w-5 shrink-0 cursor-pointer justify-center text-primary-50/40 transition hover:text-primary-50"
-        @click="toggleExpand(row.key)"
-      >
-        <AppIcon :path="row.isExpanded ? mdiChevronDown : mdiChevronRight" :size="16" />
-      </button>
-      <span v-else class="w-5 shrink-0" />
-      <span
-        class="flex flex-1 items-center gap-1 text-sm"
-        :class="row.depth === 0 || row.hasChildren ? 'text-primary-50' : 'text-primary-50/70'"
-      >
-        {{ row.label }}
-        <button
-          v-if="hasInfo(row.key)"
-          type="button"
-          class="flex cursor-pointer text-primary-50/40 transition hover:text-primary-50"
-          :aria-label="t('proposal.evaluation.info.iconLabel')"
-          @mouseenter="info?.open(row.key, row.label, $event)"
-          @mouseleave="info?.scheduleClose()"
-          @click="info?.open(row.key, row.label, $event)"
-        >
-          <AppIcon :path="mdiInformationOutline" :size="14" />
-        </button>
-      </span>
-      <span class="w-12 text-right text-xs text-primary-50/40 tabular-nums">
-        {{ formatShare(row.share) }}
-      </span>
-      <span class="w-24 text-right text-sm text-primary-50 tabular-nums">
-        {{ formatEur(row.value) }}
-      </span>
-    </div>
+  <LedgerTree
+    :title="t('proposal.evaluation.groups.cost')"
+    :total="breakdown.cost.total_eur"
+    :rows="costRows"
+    :has-info="hasInfo"
+    @toggle="toggleExpand"
+    @info="(key, label, event) => info?.open(key, label, event)"
+    @info-close="info?.scheduleClose()"
+  />
 
-    <!-- Shared detail popover, driven by the info icons above -->
-    <FactorInfoPopover ref="info" :formulas="formulas" />
-  </div>
+  <!-- Shared detail popover, driven by the info icons in the ledger -->
+  <FactorInfoPopover ref="info" :formulas="formulas" />
 </template>

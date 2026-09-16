@@ -149,7 +149,7 @@ def get_proposal(proposal_id: int):
     route = repo.reconstruct_route(
         proposal_id, container["proposal_version"], container["scenario_id"], loader
     )
-    evaluation = repo.reconstruct_evaluation(container, loader)
+    evaluation = repo.reconstruct_evaluation(container)
 
     payload = proposal_to_response_dict(container, route=route, evaluation=evaluation)
     return jsonify(payload), 200
