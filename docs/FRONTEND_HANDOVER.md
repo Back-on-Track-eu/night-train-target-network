@@ -1128,6 +1128,34 @@ stops already carry it). New strings under `proposal.night.*`.
 
 ---
 
+## 23. The gate page shows your UI — screenshots and a video, backend-owned (2026-09-16)
+
+FYI only, no API change, nothing for `api.ts`. The public `/gate` countdown
+page (served by Flask, `backend/api/gate_page.py`, not a Vue view — a
+cookie-less visitor never reaches the SPA) now carries the launch press
+text plus one slideshow: a 22-second screen recording, then eight
+screenshots of the builder, all taken on 2026-09-16 from staging. They
+are not in git: one zip on Drive, unpacked into `backend/api/gate_media/`
+(gitignored) when the API image is built — or by `uv run python
+scripts/fetch_gate_media.py` on a dev machine. One `<stem>.jpg` per
+screenshot, listed with their captions in `gate_page.GALLERY`.
+
+Two things that touch you:
+
+- **When the UI moves, the pictures go stale.** If you ship a visible
+  change to the builder or the details tabs before 22 September, say so and
+  I retake the affected screenshot and upload a new version of the Drive
+  zip — or send me the file (JPEG, roughly 1,000–1,400 px wide; the stage
+  is 3:2 and letterboxes anything else). A caption change is a one-line
+  edit to the `GalleryItem` in `gate_page.py`, and that one is in git.
+- **The screenshots quote no figures.** Captions describe what a screen
+  shows, not what a route costs, precisely so a recalibration does not make
+  the gate page wrong. Keep it that way if you edit one.
+
+Stops applying once the gate is removed after launch.
+
+---
+
 ## Maintaining this document
 
 One file, updated in the same PR as the backend change. Each entry says

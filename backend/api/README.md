@@ -55,6 +55,7 @@ its own example files.
 - [Feedback](#feedback)
   - [`POST /api/feedback`](#post-feedback) — submit feedback
   - [`GET /api/feedback/categories`](#feedback-categories) — suggested category/sub_category values
+- [Testing gate](#testing-gate) — the public countdown page, its media, and the `forward_auth` check
 - [Error responses](#error-responses)
 - [Usage logging](#usage-logging) — what every request records, and what it deliberately does not
 
@@ -1714,6 +1715,40 @@ wrong, e.g. to the wrong distance).
 | `500` | `feedback_error` | Feedback storage failed (mail failure alone never triggers this) |
 | `503` | `infrastructure_error` | DB unreachable or unknown composition ID |
 | `501` | `not_implemented` | Endpoint exists but is not yet implemented |
+
+<a id="testing-gate"></a>
+
+## Testing gate
+
+A gate, not authentication (2026-08-13 session, Decision 2): a tester
+redeems a code once per browser, then signs in through the real OTP flow
+like anyone else. On the servers Caddy's `forward_auth` sends every
+cookie-less request to the check below; locally nothing enforces it (see
+`deploy/bot-server-app/Caddyfile.local`). Nothing here is written to
+`admin.request_log` — the exclusion matches the blueprint prefix `gate.`.
+
+| Method | Path | Answer |
+|---|---|---|
+| `GET` | `/gate` | The public page: countdown until `gate_page.LAUNCH`, the launch press text and one auto-advancing slideshow (the walkthrough video, then the builder screenshots), with the code form in the footer. `Cache-Control: no-store` — it carries the countdown state. After launch the hero becomes a single "Open the Target Network" link, decided server-side |
+| `GET` | `/gate/media/<file>` | One file from `api/gate_media/` (`Cache-Control: public, max-age=86400`, Range requests honoured so the video seeks). 404 for anything not in that directory. Under `/gate/*` on purpose: that path is already open on Caddy, and the SPA's own static bundle sits behind `forward_auth` |
+| `POST` | `/api/gate/redeem` | Form field or JSON `code`. Valid → `tn_gate` cookie (HttpOnly, Secure, SameSite=Lax, 30 days) + a row in `admin.access_code_redemptions`; then `302 /` (form) or `{"ok": true}` (JSON). Unknown, revoked or exhausted → `403`; empty → `400` |
+| `GET` | `/api/gate/check` | `forward_auth` target: `204` with a valid cookie, `302 /gate` without |
+
+The page is pure string assembly in `api/gate_page.py` — `page_html(now=...)`
+renders it with nothing but the standard library (`tests/test_76_gate_page.py`).
+Every date the page states is derived from `LAUNCH`. The slideshow renders
+`VIDEO` first, then `GALLERY` in order — one `<stem>.jpg` in `api/gate_media/`
+per `GalleryItem`; images hold `SLIDE_SECONDS`, the video plays through once
+and the show moves on when it ends, and any tap on the controls stops the
+timer. Without JavaScript the slides are laid out one after the other. To
+swap a screenshot, replace the file; to add one, add the file and a
+`GalleryItem`. The media is **not in git**: `api/gate_media/` is gitignored and
+`scripts/fetch_gate_media.py` fills it from one Drive zip (`GATE_MEDIA_FILE_ID`,
+default in the script) at image build — the Dockerfile runs it, soft-failing —
+or by hand for a host-run API. A slide whose file is missing is left out, and
+with nothing on disk the whole section is, so a failed fetch degrades to the
+text. To refresh the media, upload a new version of the same Drive file and
+rebuild the image.
 
 <a id="usage-logging"></a>
 
