@@ -1,0 +1,61 @@
+# Coolify deployment (tn-server, since 2026-09-16)
+
+The dedicated Target Network box (`tn-server`, Hetzner auction #3065458, 95.216.39.96,
+HEL1) runs **Coolify** (`https://coolify.95.216.39.96.sslip.io`, later `coolify.tn.back-on-track.eu`).
+Host provisioning and lifecycle live in `Back-on-Track-eu/bot-server-infrastructure`
+under `hosts/tn-server/`; **this directory is what Coolify builds from this repo.**
+
+## Apps (Coolify project "Target Network")
+
+| App | Env | Branch | Compose file | Domain (on service `edge`) |
+|---|---|---|---|---|
+| `tn-routing` | production | `staging` (image is branch-independent) | `deploy/coolify/routing.docker-compose.yml` | none (internal) |
+| `tn-staging` | staging | `staging` | `deploy/coolify/app.docker-compose.yml` | `staging.targetnetwork.back-on-track.eu` |
+| `tn-production` | production | `production` | `deploy/coolify/app.docker-compose.yml` | `targetnetwork.back-on-track.eu` |
+
+Until DNS exists: `staging-targetnetwork.95.216.39.96.sslip.io` / `targetnetwork.95.216.39.96.sslip.io`.
+
+Auto-deploy: push to `staging` → `tn-staging` redeploys; push to `production` → `tn-production`.
+The GitHub App `coolify-bot-tn` (org Back-on-Track-eu) delivers the webhooks. This replaces the
+bot-server forced-command key (`/opt/tn-deploy/dispatch.sh`).
+
+## One-time on the box
+
+```bash
+docker network create tn-shared          # routing engines ⇄ app envs
+```
+
+Pre-seed the graph caches instead of waiting for the Drive download (≈1.3 GB each):
+```bash
+# on bot-server → tn-server (run from an operator machine with both aliases)
+ssh bot-server 'docker run --rm -v targetnetwork_tn_graphcache:/g alpine tar cz -C /g .' \
+  | ssh tn-server 'docker volume create tn_graphcache_2026 >/dev/null && docker run --rm -i -v tn_graphcache_2026:/g alpine tar xz -C /g'
+ssh bot-server 'docker run --rm -v targetnetwork_tn_graphcache_2032:/g alpine tar cz -C /g .' \
+  | ssh tn-server 'docker volume create tn_graphcache_2032 >/dev/null && docker run --rm -i -v tn_graphcache_2032:/g alpine tar xz -C /g'
+```
+
+## Environment variables (set in Coolify, never in git)
+
+`tn-staging` / `tn-production`: `ENV_NAME`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`,
+`JWT_SECRET` (fresh per box: invalidates old gate cookies, harmless), `SMTP_HOST`, `SMTP_PORT`,
+`SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` (All-Inkl: authenticate against `w020e032.kasserver.com`,
+not the vanity host), optional `GUNICORN_WORKERS` (default 4), `GUNICORN_THREADS` (8),
+`API_MEM_LIMIT` (4g), `ONTD_*` overrides.
+`tn-routing`: optional `ROUTING_2026_JAVA_OPTS`, `ROUTING_2032_JAVA_OPTS`, `*_MEM_LIMIT`, `GRAPH_CACHE_FILE_ID_*`.
+
+## Coolify gotchas that shaped these files
+
+- Build contexts and bind mounts are relative to the **repo root**, not to this directory.
+- `container_name` is ignored; cross-app names are **network aliases** on `tn-shared`.
+- Coolify injects empty strings for declared-but-unset variables → every optional variable
+  has a `${VAR:-default}`; required secrets use `${VAR:?…}` so a missing secret fails loudly.
+- Only `edge` gets a Coolify domain (port 80). Traefik does TLS + host; Caddy inside does the
+  gate. Do **not** put domains on `api` or `frontend`, that would bypass the gate.
+- One-shots (`migrate`, `ontd-bootstrap`, `country-relations`) exit 0 by design; Coolify shows
+  them as exited, that is expected.
+
+## Data migration from bot-server (production cut-over)
+
+`pg_dump` the bot-server production DB → restore into the new `tn-production` db → **setval every
+serial sequence** after a COPY-restore (lesson 2026-08-31, redemption ids) → point DNS (Juri, KAS)
+→ keep bot-server production read-only for a week, then retire. Staging is reseeded fresh here.

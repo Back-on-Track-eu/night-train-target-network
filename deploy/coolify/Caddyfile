@@ -1,0 +1,44 @@
+# Edge Caddy for one Target Network environment under Coolify. TLS and the
+# public hostname are Traefik's job (Coolify domain on the `edge` service);
+# this file only carries the access logic, copied from the live bot-server
+# vhost (2026-08-13 Decision 2: DB-backed testing gate, same codes on both
+# environments; each environment signs its own gate cookie with its JWT_SECRET).
+{
+    auto_https off
+    admin off
+}
+
+:80 {
+    # Open: the gate itself and liveness.
+    @open path /gate /gate/* /api/gate/* /api/health
+    handle @open {
+        reverse_proxy api:5000
+    }
+
+    # Static bundle carries no data; keeping it out of forward_auth avoids
+    # ~20 extra api calls per page load.
+    @assets path /assets/* /favicon.ico /robots.txt *.js *.css *.map *.svg *.png *.jpg *.webp *.woff *.woff2
+    handle @assets {
+        reverse_proxy frontend:80
+    }
+
+    handle /api/* {
+        forward_auth api:5000 {
+            uri /api/gate/check
+        }
+        reverse_proxy api:5000
+    }
+
+    handle {
+        forward_auth api:5000 {
+            uri /api/gate/check
+        }
+        reverse_proxy frontend:80
+    }
+
+    log {
+        output stdout
+        format console
+    }
+    header -Server
+}

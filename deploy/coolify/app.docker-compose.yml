@@ -1,0 +1,186 @@
+# =============================================================================
+# Target Network — app stack (staging AND production), Coolify edition
+# =============================================================================
+# One file, two Coolify applications in project "Target Network":
+#   tn-staging     branch `staging`     env ENV_NAME=staging
+#   tn-production  branch `production`  env ENV_NAME=production
+# Same definition, only the Coolify env differs — the bot-server principle kept.
+#
+# Differences from deploy/bot-server-app/docker-compose.yml, all forced by
+# Coolify (see routing.docker-compose.yml header for the rules):
+#   * paths relative to the repo root (./backend, ./frontend, ./docs-site)
+#   * no container_name; services talk by service name inside this project
+#     (the project network is private to the app) and reach the routing
+#     engines by alias over the external `tn-shared` network
+#   * no localhost debug ports — use Coolify's terminal or an ssh tunnel to
+#     the box and `docker exec` instead
+#   * `edge` = a small Caddy that carries the EXACT access logic of the live
+#     bot-server vhost (testing gate via forward_auth, open gate/health paths,
+#     static assets unguarded). Coolify's Traefik only does TLS + hostname and
+#     hands everything to `edge:80`. Set the Coolify domain on the `edge`
+#     service, nothing else gets a domain.
+# =============================================================================
+
+services:
+
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tn}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in Coolify}
+      POSTGRES_DB: ${POSTGRES_DB:-night_train_db}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backend/db/dev/sql/create_admin_schema.sql:/docker-entrypoint-initdb.d/01_admin.sql:ro
+      - ./backend/db/dev/sql/create_proposal_schema.sql:/docker-entrypoint-initdb.d/04_proposals.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tn} -d ${POSTGRES_DB:-night_train_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: ./backend
+      dockerfile: docker/Dockerfile
+    command: ["python", "db/migrate.py"]
+    environment:
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-tn}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB:-night_train_db}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  ontd-bootstrap:
+    build:
+      context: ./backend
+      dockerfile: docker/Dockerfile
+    command: ["python", "db/ontd/bootstrap.py"]
+    environment:
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-tn}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB:-night_train_db}
+      - OPENRAILROUTING_URL=http://targetnetwork-routing:8989
+      - ONTD_BOOTSTRAP=${ONTD_BOOTSTRAP:-auto}
+      - ONTD_WORKBOOK_ID=${ONTD_WORKBOOK_ID:-1ipyNcfZ6-a38xbAVPpAmTejYhKa6Dl97}
+      - ONTD_WORKBOOK_KIND=${ONTD_WORKBOOK_KIND:-drive_file}
+      - ONTD_COMPOSITIONS_ID=${ONTD_COMPOSITIONS_ID:-1vSJ-vHKb2uZRG4hMtW-5a--xUz43N6cd}
+      - ONTD_COMPOSITIONS_KIND=${ONTD_COMPOSITIONS_KIND:-drive_file}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - default
+      - tn-shared
+    restart: "no"
+
+  country-relations:
+    build:
+      context: ./backend
+      dockerfile: docker/Dockerfile
+    command: ["python", "scripts/build_country_relations.py"]
+    environment:
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-tn}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB:-night_train_db}
+      - OPENRAILROUTING_URL=http://targetnetwork-routing:8989
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - default
+      - tn-shared
+    restart: "no"
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: docker/Dockerfile
+    # Skip the image's seed-on-start entrypoint (DROP SCHEMA … CASCADE). Server
+    # databases are never reseeded from here; schema changes arrive via migrate.
+    command:
+      [
+        "gunicorn",
+        "--bind", "0.0.0.0:5000",
+        "--worker-class", "gthread",
+        "--workers", "${GUNICORN_WORKERS:-4}",
+        "--threads", "${GUNICORN_THREADS:-8}",
+        "--timeout", "120",
+        "main:create_app()",
+      ]
+    environment:
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-tn}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB:-night_train_db}
+      - OPENRAILROUTING_URL=http://targetnetwork-routing:8989
+      - OPENRAILROUTING_2032_URL=http://targetnetwork-routing-2032:8989
+      - JWT_SECRET=${JWT_SECRET:?set JWT_SECRET in Coolify}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+      - AUTH_EMAIL_DEV_MODE=${AUTH_EMAIL_DEV_MODE:-}
+      - KEYCLOAK_ISSUER_URL=${KEYCLOAK_ISSUER_URL:-}
+      - KEYCLOAK_CLIENT_ID=${KEYCLOAK_CLIENT_ID:-}
+    mem_limit: ${API_MEM_LIMIT:-4g}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - default
+      - tn-shared
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:5000/api/health"]
+      interval: 20s
+      timeout: 20s
+      retries: 6
+      start_period: 60s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      additional_contexts:
+        docssrc: ./docs-site
+      dockerfile: Dockerfile.demo
+      args:
+        VITE_API_BASE_URL: ""   # same-origin /api/* — edge routes it to api
+    restart: unless-stopped
+
+  # The one service with a Coolify domain. Exact copy of the live bot-server
+  # vhost logic (staging + production are identical apart from hostnames).
+  edge:
+    image: caddy:2-alpine
+    volumes:
+      - ./deploy/coolify/Caddyfile:/etc/caddy/Caddyfile:ro
+      - edge_data:/data
+    depends_on:
+      - frontend
+      - api
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  edge_data:
+
+networks:
+  tn-shared:
+    external: true
