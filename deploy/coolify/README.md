@@ -61,7 +61,7 @@ not the vanity host), optional `GUNICORN_WORKERS` (default 4), `GUNICORN_THREADS
 
 - Build contexts and bind mounts are relative to the **repo root**, not to this directory.
 - `container_name` is ignored; cross-app names are **network aliases** on `tn-shared`.
-- Project-scoped **volumes are renamed** to `<app-uuid>_<name>` (the `name:` key is ignored); pre-seeded data needs `external: true` volumes created on the box.
+- **Volumes are renamed** to `<app-uuid>_<name>`: the `name:` key AND `external: true` are both ignored (verified deploys #1 and #2, 2026-09-16). Pre-seeded data therefore goes INTO Coolify's own volumes: `docker run --rm -v tn_graphcache_2026:/src:ro -v <app-uuid>_graphcache-2026:/dst alpine sh -c 'rm -rf /dst/* && cp -a /src/. /dst/'`. The Drive zip unpacks into a `graph-cache-infra-2026/` subfolder, so a fresh download never satisfies the entrypoint's root `properties.txt` marker and the engine loops on "OSM file does not exist" (the 14-09 repackaging issue). Until the zip is flat, always pre-seed.
 - **File bind mounts become directories** if the path does not exist at deploy time → no `initdb.d` mounts, and the edge Caddyfile is baked into `Dockerfile.edge` instead of mounted.
 - Coolify injects empty strings for declared-but-unset variables → every optional variable
   has a `${VAR:-default}`; required secrets use `${VAR:?…}` so a missing secret fails loudly.
