@@ -21,10 +21,19 @@ the site sits behind ``forward_auth`` pointing at ``/api/gate/check``:
                              forward_auth redirects every cookie-less visitor
                              here before the SPA loads, a Vue implementation
                              would never be seen by the audience it is for.
+    GET  /gate/media/<file>  the page's own screenshots and walkthrough video,
+                             from ``api/gate_media/``. Under /gate/* for the
+                             same reason the page is inline: Caddy's open path
+                             already covers it, and the SPA's static bundle
+                             sits behind forward_auth.
     POST /api/gate/redeem    code -> signed cookie + a redemption row.
     GET  /api/gate/check     forward_auth target. 204 when the cookie is
                              valid, 302 to /gate when it is not, so Caddy
                              hands the redirect straight to the browser.
+
+None of these is written to ``admin.request_log``: ``REQUEST_LOG_EXCLUDED_ENDPOINTS``
+matches the blueprint prefix ``gate.``, so a new view here is excluded by
+default.
 
 Two deliberate choices worth stating:
 
@@ -48,9 +57,17 @@ from datetime import datetime, timedelta, timezone
 
 import jwt
 import psycopg2
-from flask import Blueprint, Response, jsonify, make_response, redirect, request
+from flask import (
+    Blueprint,
+    Response,
+    jsonify,
+    make_response,
+    redirect,
+    request,
+    send_from_directory,
+)
 
-from api.gate_page import page_html
+from api.gate_page import MEDIA_DIR, page_html
 
 log = logging.getLogger(__name__)
 
@@ -59,6 +76,9 @@ bp = Blueprint("gate", __name__)
 COOKIE_NAME = "tn_gate"
 _AUDIENCE = "tn-gate"
 _TTL_DAYS = 30
+# The page itself is no-store (it carries the countdown state); its media is
+# immutable per deploy and the video is the heaviest thing on the page.
+_MEDIA_MAX_AGE_S = 24 * 3600
 
 
 def _secret() -> str:
@@ -126,6 +146,13 @@ def gate_page() -> Response:
     if _cookie_code():
         return redirect("/", code=302)
     return _render()
+
+
+@bp.get("/gate/media/<path:filename>")
+def gate_media(filename: str) -> Response:
+    """Serve one file from gate_media/. Range requests work, so the video seeks."""
+    # send_from_directory answers 404 for anything that escapes the directory.
+    return send_from_directory(MEDIA_DIR, filename, max_age=_MEDIA_MAX_AGE_S)
 
 
 @bp.get("/api/gate/check")
