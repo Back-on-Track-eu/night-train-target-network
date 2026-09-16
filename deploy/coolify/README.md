@@ -62,7 +62,7 @@ not the vanity host), optional `GUNICORN_WORKERS` (default 4), `GUNICORN_THREADS
 - Build contexts and bind mounts are relative to the **repo root**, not to this directory.
 - `container_name` is ignored; cross-app names are **network aliases** on `tn-shared`.
 - Project-scoped **volumes are renamed** to `<app-uuid>_<name>` (the `name:` key is ignored); pre-seeded data needs `external: true` volumes created on the box.
-- **File bind mounts become directories** if the path does not exist at deploy time → no `initdb.d` mounts.
+- **File bind mounts become directories** if the path does not exist at deploy time → no `initdb.d` mounts, and the edge Caddyfile is baked into `Dockerfile.edge` instead of mounted.
 - Coolify injects empty strings for declared-but-unset variables → every optional variable
   has a `${VAR:-default}`; required secrets use `${VAR:?…}` so a missing secret fails loudly.
 - Only `edge` gets a Coolify domain (port 80). Traefik does TLS + host; Caddy inside does the

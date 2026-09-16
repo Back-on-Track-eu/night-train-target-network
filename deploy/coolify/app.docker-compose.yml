@@ -171,10 +171,9 @@ services:
   # The one service with a Coolify domain. Exact copy of the live bot-server
   # vhost logic (staging + production are identical apart from hostnames).
   edge:
-    image: caddy:2-alpine
-    volumes:
-      - ./deploy/coolify/Caddyfile:/etc/caddy/Caddyfile:ro
-      - edge_data:/data
+    build:
+      context: ./deploy/coolify
+      dockerfile: Dockerfile.edge   # Caddyfile baked in (Coolify turns file bind mounts into dirs)
     depends_on:
       - frontend
       - api
@@ -182,7 +181,6 @@ services:
 
 volumes:
   pgdata:
-  edge_data:
 
 networks:
   tn-shared:
