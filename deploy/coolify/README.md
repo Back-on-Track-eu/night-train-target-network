@@ -34,9 +34,23 @@ ssh bot-server 'docker run --rm -v targetnetwork_tn_graphcache_2032:/g alpine ta
   | ssh tn-server 'docker volume create tn_graphcache_2032 >/dev/null && docker run --rm -i -v tn_graphcache_2032:/g alpine tar xz -C /g'
 ```
 
+## First seed of a fresh environment (staging; production is restored from bot-server instead)
+
+The db starts empty (no initdb mounts, see compose comment). Once the app is deployed and `db` is
+healthy, from the box (Coolify → app → Terminal, or ssh):
+```bash
+P=<coolify app uuid>; cd /data/coolify/applications/$P   # Coolify's checkout
+docker compose -p $P -f deploy/coolify/app.docker-compose.yml run --rm --no-deps api \
+  sh -c "python scripts/export_country_geoms.py && python db/dev/seed.py"
+docker compose -p $P -f deploy/coolify/app.docker-compose.yml run --rm migrate python db/migrate.py --baseline
+docker compose -p $P -f deploy/coolify/app.docker-compose.yml run --rm migrate python db/migrate.py --check
+```
+then redeploy so `ontd-bootstrap` and `country-relations` run. Gate codes: copy `admin.access_codes` +
+`admin.access_code_redemptions` from bot-server staging (data-only dump) if the same codes must work.
+
 ## Environment variables (set in Coolify, never in git)
 
-`tn-staging` / `tn-production`: `ENV_NAME`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`,
+`tn-staging` / `tn-production`: `ENV_NAME`, `POSTGRES_USER` (`bot_admin`, as on bot-server: `reseed.sh` and David's pgAdmin assume it), `POSTGRES_PASSWORD`, `POSTGRES_DB` (`target_network`),
 `JWT_SECRET` (fresh per box: invalidates old gate cookies, harmless), `SMTP_HOST`, `SMTP_PORT`,
 `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` (All-Inkl: authenticate against `w020e032.kasserver.com`,
 not the vanity host), optional `GUNICORN_WORKERS` (default 4), `GUNICORN_THREADS` (8),
@@ -47,6 +61,8 @@ not the vanity host), optional `GUNICORN_WORKERS` (default 4), `GUNICORN_THREADS
 
 - Build contexts and bind mounts are relative to the **repo root**, not to this directory.
 - `container_name` is ignored; cross-app names are **network aliases** on `tn-shared`.
+- Project-scoped **volumes are renamed** to `<app-uuid>_<name>` (the `name:` key is ignored); pre-seeded data needs `external: true` volumes created on the box.
+- **File bind mounts become directories** if the path does not exist at deploy time → no `initdb.d` mounts.
 - Coolify injects empty strings for declared-but-unset variables → every optional variable
   has a `${VAR:-default}`; required secrets use `${VAR:?…}` so a missing secret fails loudly.
 - Only `edge` gets a Coolify domain (port 80). Traefik does TLS + host; Caddy inside does the

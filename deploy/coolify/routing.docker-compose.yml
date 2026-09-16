@@ -48,7 +48,7 @@ services:
       interval: 30s
       timeout: 20s
       retries: 5
-      start_period: 300s
+      start_period: 900s
     restart: unless-stopped
 
   routing-2032:
@@ -74,15 +74,23 @@ services:
       interval: 30s
       timeout: 20s
       retries: 5
-      start_period: 300s
+      start_period: 900s
     restart: unless-stopped
 
+# External, pre-created volumes: Coolify renames project-scoped volumes to
+# <app-uuid>_<name> (verified 2026-09-16: the `name:` key is ignored), which
+# would leave the pre-seeded graph caches unused and trigger a Drive download
+# per deploy. `external: true` is honoured. Create once on the box:
+#   docker volume create tn_graphcache_2026 tn_graphcache_2032 tn_osmdata
 volumes:
   graphcache_2026:
+    external: true
     name: tn_graphcache_2026
   graphcache_2032:
+    external: true
     name: tn_graphcache_2032
   osmdata:
+    external: true
     name: tn_osmdata
 
 networks:
