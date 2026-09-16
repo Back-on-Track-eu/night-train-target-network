@@ -71,6 +71,8 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=${POSTGRES_DB:-target_network}
       - OPENRAILROUTING_URL=http://targetnetwork-routing:8989
+      - OPENRAILROUTING_URL_INFRA_2026=http://targetnetwork-routing:8989
+      - OPENRAILROUTING_URL_INFRA_2032=http://targetnetwork-routing-2032:8989
       - ONTD_BOOTSTRAP=${ONTD_BOOTSTRAP:-auto}
       - ONTD_WORKBOOK_ID=${ONTD_WORKBOOK_ID:-1ipyNcfZ6-a38xbAVPpAmTejYhKa6Dl97}
       - ONTD_WORKBOOK_KIND=${ONTD_WORKBOOK_KIND:-drive_file}
@@ -98,6 +100,8 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=${POSTGRES_DB:-target_network}
       - OPENRAILROUTING_URL=http://targetnetwork-routing:8989
+      - OPENRAILROUTING_URL_INFRA_2026=http://targetnetwork-routing:8989
+      - OPENRAILROUTING_URL_INFRA_2032=http://targetnetwork-routing-2032:8989
     depends_on:
       db:
         condition: service_healthy
@@ -131,7 +135,8 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=${POSTGRES_DB:-target_network}
       - OPENRAILROUTING_URL=http://targetnetwork-routing:8989
-      - OPENRAILROUTING_2032_URL=http://targetnetwork-routing-2032:8989
+      - OPENRAILROUTING_URL_INFRA_2026=http://targetnetwork-routing:8989
+      - OPENRAILROUTING_URL_INFRA_2032=http://targetnetwork-routing-2032:8989
       - JWT_SECRET=${JWT_SECRET:?set JWT_SECRET in Coolify}
       - SMTP_HOST=${SMTP_HOST:-}
       - SMTP_PORT=${SMTP_PORT:-587}
