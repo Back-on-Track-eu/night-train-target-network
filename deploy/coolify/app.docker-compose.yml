@@ -34,6 +34,11 @@ services:
     # "could not read from input file: Is a directory"), which leaves a
     # half-initialised cluster. A fresh environment is seeded once by hand
     # (README "First seed"), exactly like bot-server's first-time setup.
+    ports:
+      # Localhost-only, never public: the target of David's / Gio's SSH tunnel
+      # for desktop pgAdmin (bot-server convention kept: staging 55433,
+      # production 55434). Set DB_DEBUG_PORT per Coolify environment.
+      - "127.0.0.1:${DB_DEBUG_PORT:-55433}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
