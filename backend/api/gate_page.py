@@ -26,7 +26,8 @@ a failed fetch degrades to the text, never to broken pictures.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+import os
+from datetime import UTC, datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
 from typing import NamedTuple
@@ -497,19 +498,39 @@ def _show_html(media_dir: Path) -> str:
     return _SHOW.format(seconds=SLIDE_SECONDS, slides=slides) if slides else ""
 
 
+def slideshow_enabled() -> bool:
+    """Whether the page embeds the slideshow at all.
+
+    Off unless ``GATE_SLIDESHOW=on`` (Coolify env). Decided 2026-09-17 with Juri:
+    the launch gate carries the press text only; the video and screenshots go
+    out in the media package instead. The files stay on disk and stay served
+    under ``MEDIA_URL`` either way, so the press package can link them.
+    """
+    return os.environ.get("GATE_SLIDESHOW", "off").strip().lower() in (
+        "on",
+        "1",
+        "true",
+        "yes",
+    )
+
+
 def page_html(
     error: str | None = None,
     now: datetime | None = None,
     media_dir: Path = MEDIA_DIR,
+    show: bool | None = None,
 ) -> str:
     """The gate page.
 
     ``now`` is injectable so the countdown/launched switch is testable without
     waiting for September; ``media_dir`` so both slideshow states are testable
-    whatever happens to be on disk. An error opens the code box, because that is
-    what the reader was doing when it happened.
+    whatever happens to be on disk; ``show`` overrides the ``GATE_SLIDESHOW``
+    switch (see ``slideshow_enabled``). An error opens the code box, because
+    that is what the reader was doing when it happened.
     """
-    moment = now or datetime.now(timezone.utc)
+    if show is None:
+        show = slideshow_enabled()
+    moment = now or datetime.now(UTC)
     hero = (
         _HERO_COUNTDOWN.format(
             target=LAUNCH.isoformat(), when=launch_when(), day=launch_day()
@@ -520,7 +541,7 @@ def page_html(
     block = f'<div class="err">{escape(error)}</div>' if error else ""
     return (
         _PAGE.replace("__HERO__", hero)
-        .replace("__SHOW__", _show_html(media_dir))
+        .replace("__SHOW__", _show_html(media_dir) if show else "")
         .replace("__DAY__", launch_day())
         .replace("__WHEN__", launch_when())
         .replace("__ERROR__", block)
