@@ -33,6 +33,7 @@ from api.gate_page import (
     launch_when,
     media_files,
     page_html,
+    slideshow_enabled,
 )
 from scripts.fetch_gate_media import unpack
 
@@ -207,7 +208,7 @@ def test_media_on_disk_is_exactly_what_the_page_lists():
 
 
 def test_one_slideshow_video_first_then_every_screenshot_once(full_media):
-    html = page_html(now=BEFORE, media_dir=full_media)
+    html = page_html(now=BEFORE, media_dir=full_media, show=True)
     stage = _stage(html)
     assert stage.count('<figure class="slide">') == len(GALLERY) + 1
     assert stage.index("<video") < stage.index("<img")
@@ -220,7 +221,7 @@ def test_one_slideshow_video_first_then_every_screenshot_once(full_media):
 
 def test_without_media_the_slideshow_is_left_out_entirely(tmp_path):
     """No files, no section — not an empty box with nine broken pictures."""
-    html = page_html(now=BEFORE, media_dir=tmp_path)
+    html = page_html(now=BEFORE, media_dir=tmp_path, show=True)
     assert 'class="show"' not in html
     assert MEDIA_URL not in html
     assert "Double the connections" in html  # the rest of the page is intact
@@ -229,7 +230,7 @@ def test_without_media_the_slideshow_is_left_out_entirely(tmp_path):
 def test_a_slide_without_its_file_is_skipped(full_media):
     (full_media / f"{GALLERY[0].stem}.jpg").unlink()
     (full_media / f"{VIDEO.stem}.mp4").unlink()  # poster alone is not a video slide
-    stage = _stage(page_html(now=BEFORE, media_dir=full_media))
+    stage = _stage(page_html(now=BEFORE, media_dir=full_media, show=True))
     assert stage.count('<figure class="slide">') == len(GALLERY) - 1
     assert "<video" not in stage
     assert GALLERY[0].stem not in stage
@@ -239,7 +240,7 @@ def test_the_walkthrough_is_muted_and_waits_for_its_slide(full_media):
     """Muted so a browser lets the script start it; no autoplay attribute so
     without the script it is a poster with a play button, not nine things
     playing at once. And nothing on the page counts its seconds."""
-    html = page_html(now=BEFORE, media_dir=full_media)
+    html = page_html(now=BEFORE, media_dir=full_media, show=True)
     video = html[html.index("<video") : html.index("</video>")]
     assert f'src="{MEDIA_URL}/{VIDEO.stem}.mp4"' in video
     assert f'poster="{MEDIA_URL}/{VIDEO.stem}-poster.jpg"' in video
@@ -260,7 +261,7 @@ def test_the_position_paper_link_sits_under_the_first_section():
 
 def test_media_stays_on_this_origin(full_media):
     """Same rule as the font: nothing the page loads leaves back-on-track.eu."""
-    html = page_html(now=BEFORE, media_dir=full_media)
+    html = page_html(now=BEFORE, media_dir=full_media, show=True)
     for src in re.findall(r'(?:src|href|poster)="([^"]+)"', html):
         if src.startswith(("http://", "https://", "//")):
             assert "back-on-track.eu" in src, src
@@ -305,3 +306,18 @@ def test_unpack_never_overwrites_a_local_file_unless_forced(tmp_path):
     assert (target / name).read_bytes() == b"mine"
     assert unpack(archive, target, force=True) == [name]
     assert (target / name).read_bytes() == b"drive"
+
+
+def test_the_slideshow_is_off_unless_switched_on(full_media, monkeypatch):
+    """Juri, 2026-09-17: press text only on the gate; the media goes out in the
+    media package. Default off, GATE_SLIDESHOW=on brings it back, the files stay
+    served either way."""
+    monkeypatch.delenv("GATE_SLIDESHOW", raising=False)
+    assert slideshow_enabled() is False
+    html = page_html(now=BEFORE, media_dir=full_media)
+    assert 'class="show"' not in html
+    assert MEDIA_URL not in html
+    assert "Double the connections" in html
+    monkeypatch.setenv("GATE_SLIDESHOW", "on")
+    assert slideshow_enabled() is True
+    assert 'class="show"' in page_html(now=BEFORE, media_dir=full_media)
