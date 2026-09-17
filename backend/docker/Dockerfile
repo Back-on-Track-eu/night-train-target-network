@@ -50,6 +50,16 @@ COPY . .
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
 
+# Gate page media (api/gate_media/, gitignored): fetched from Drive at BUILD
+# time so no request ever depends on Drive, and so every deploy path gets it —
+# the server compose files replace the entrypoint below with plain gunicorn,
+# so a start-time hook would never run there. A checkout that already holds
+# the files (a developer's local fetch) is copied in above and skips the
+# download. Soft-failing: the API is fully functional without the media and
+# the page hides the slideshow rather than showing broken pictures.
+RUN python scripts/fetch_gate_media.py \
+    || echo "WARNING: gate media not fetched — the gate page ships without its slideshow."
+
 EXPOSE 5000
 
 # entrypoint seeds the database then starts the API

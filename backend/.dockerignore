@@ -26,6 +26,8 @@ adapters/data_loader_from_spreadsheet.py
 scripts/
 !scripts/export_country_geoms.py
 !scripts/build_country_relations.py
+# ...and the build-time fetch of the gate page media (Dockerfile RUN step).
+!scripts/fetch_gate_media.py
 # Python
 .venv/
 __pycache__/

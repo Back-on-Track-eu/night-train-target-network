@@ -58,6 +58,9 @@ backend/models/route/routing/docker/graph-cache*/
 backend/models/route_evaluation_model/routing/docker/graph-cache/
 # Written by the Docker entrypoint at container start
 backend/models/route/routing/countries.geojson
+# Gate page screenshots and walkthrough video — no media in the repo. Fetched
+# from Drive by backend/scripts/fetch_gate_media.py (image build, or by hand).
+backend/api/gate_media/
 # Postgres data volume, when mounted locally
 pgdata/
 # Generated data

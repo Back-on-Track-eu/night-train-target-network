@@ -23,6 +23,7 @@
 *.7z binary
 *.png binary
 *.jpg binary
+*.mp4 binary
 *.pyd binary
 *.dll binary
 # Frontend sources — LF (Prettier writes LF; without these every

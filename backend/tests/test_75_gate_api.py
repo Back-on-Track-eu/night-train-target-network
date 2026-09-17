@@ -28,6 +28,8 @@ import jwt
 import pytest
 import requests
 
+from api.gate_page import media_files
+
 _TIMEOUT = 15
 COOKIE = "tn_gate"
 
@@ -243,6 +245,51 @@ def test_gate_page_is_reachable_without_a_cookie(api_base):
     resp = requests.get(f"{api_base}/gate", timeout=_TIMEOUT)
     assert resp.status_code == 200
     assert "Testing code" in resp.text
+
+
+@pytest.fixture
+def media_stack(api_base):
+    """Skip the media checks on a stack whose image was built without the
+    Drive fetch (scripts/fetch_gate_media.py soft-fails by design); the page
+    then hides the slideshow, which is the behaviour test_76 pins."""
+    page = requests.get(f"{api_base}/gate", timeout=_TIMEOUT)
+    if 'class="show"' not in page.text:
+        pytest.skip("gate media not on this stack — image built without the fetch")
+    return page
+
+
+def test_every_media_file_the_page_links_is_served(api_base, media_stack):
+    """Same list the page renders from; a 404 here is a broken picture there."""
+    for name in media_files():
+        assert name in media_stack.text, name
+        resp = requests.head(f"{api_base}/gate/media/{name}", timeout=_TIMEOUT)
+        assert resp.status_code == 200, name
+
+
+def test_media_carries_a_cache_lifetime_unlike_the_page(api_base, media_stack):
+    assert media_stack.headers["Cache-Control"] == "no-store"
+    image = requests.get(f"{api_base}/gate/media/landing.jpg", timeout=_TIMEOUT)
+    assert image.status_code == 200
+    assert image.headers["Content-Type"] == "image/jpeg"
+    assert "max-age=" in image.headers["Cache-Control"]
+
+
+def test_the_video_answers_range_requests(api_base, media_stack):
+    """Seeking in the walkthrough needs 206s; a 200 with the whole file breaks it."""
+    resp = requests.get(
+        f"{api_base}/gate/media/walkthrough.mp4",
+        headers={"Range": "bytes=0-1023"},
+        timeout=_TIMEOUT,
+    )
+    assert resp.status_code == 206
+    assert resp.headers["Content-Range"].startswith("bytes 0-1023/")
+    assert len(resp.content) == 1024
+
+
+def test_media_route_serves_nothing_outside_its_directory(api_base):
+    for path in ("gate.py", "%2e%2e/gate.py", "..%2fgate.py", "missing.jpg"):
+        resp = requests.get(f"{api_base}/gate/media/{path}", timeout=_TIMEOUT)
+        assert resp.status_code == 404, path
 
 
 def test_health_stays_open_without_a_cookie(api_base):

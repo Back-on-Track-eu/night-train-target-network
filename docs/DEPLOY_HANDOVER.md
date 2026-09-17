@@ -7,8 +7,11 @@ backend, in one place. Supersedes `deploy/HANDOVER.md` (2026-08-10),
 deleted.
 
 Updated after each change that touches deploy, capacity or server data.
-Last update 2026-09-13 (new `infra_2026` OSM base with the Messina train
-ferry — graph cache wipe on your next restart, §4e; before that 2026-09-12
+Last update 2026-09-16 (gate page carries the launch text and a slideshow;
+media fetched from Drive at image build — rebuild only, one curl to verify,
+§20; before that
+2026-09-13 new `infra_2026` OSM base with the Messina train
+ferry — graph cache wipe on your next restart, §4e; 2026-09-12
 CALC 0.9.29 — catering on the summary, two new columns, §4d; 2026-09-07
 WP14 connection pool + gunicorn gthread, the calc matrix endpoint and CALC
 0.9.25 — §4c; 2026-09-06 ONTD bootstrap fix below; 2026-09-05 route builder
@@ -1406,6 +1409,72 @@ are read back as they are (`departure_shift_min` defaults to 0 when
 absent) and refresh on their normal stale-version path.
 
 Stops applying once staging and production both run 0.9.37.
+
+---
+
+## 20. Gate page: launch text and slideshow (2026-09-16) — image rebuild, media fetched at build
+
+The `/gate` countdown page now carries the launch press text and one
+auto-advancing slideshow: a 22-second walkthrough video, then eight builder
+screenshots. **No schema change, no migration, no env change, no Caddyfile
+change.** Rebuild and deploy the api image.
+
+**Where the files come from.** Not git — media stays out of the repo
+(`backend/api/gate_media/` is gitignored). The Dockerfile runs
+`scripts/fetch_gate_media.py` after `COPY . .`: one 1.6 MB zip from Drive
+(`GATE_MEDIA_FILE_ID`, default `1h6emMrrtPAqTvZkHK96DRDtybMVdOKxl` in the
+script, link-shared, not a secret), unpacked flat into `api/gate_media/`.
+**Build time, not start time, on purpose:** your compose files replace the
+image's entrypoint with plain gunicorn, so a start-time hook would never
+run on the servers; and nothing at request time should depend on Drive.
+Soft-failing: if the build cannot reach Drive it prints a WARNING and
+ships anyway — the page then renders without the slideshow (text only,
+no broken pictures). So a build log line to watch for:
+
+```
+WARNING: gate media not fetched — the gate page ships without its slideshow.
+```
+
+Nothing to set in Coolify or `.env` unless the file id ever changes.
+
+**How they are served.** By Flask, at `/gate/media/<file>`
+(`Cache-Control: public, max-age=86400`, Range requests honoured). That
+path is under `/gate/*`, which your `@open` matcher already reverse-proxies
+to `api:5000` without `forward_auth` — the whole point of putting the media
+there rather than in the SPA bundle, whose `@assets` matcher does not list
+`*.mp4` and whose catch-all would redirect a cookie-less visitor. Caddy
+evaluates `handle @open` before `handle @assets` because both matchers name
+several paths and the adapter only reorders single-path matchers (it keeps
+written order otherwise) — the same reason `/api/gate/redeem` already wins
+over `handle /api/*` today.
+
+**Verify after the deploy, on each environment, without a gate cookie:**
+
+```bash
+curl -sI https://staging.targetnetwork.back-on-track.eu/gate/media/landing.jpg | head -5
+# expect: HTTP/2 200, content-type: image/jpeg, cache-control: public, max-age=86400
+curl -sI -H 'Range: bytes=0-1023' https://staging.targetnetwork.back-on-track.eu/gate/media/walkthrough.mp4 | head -3
+# expect: HTTP/2 206, content-range: bytes 0-1023/899324
+```
+
+A `404` on both with the page otherwise fine means the build fetch failed
+(see the WARNING above) — rebuild with `--no-cache`. A `302` to `/gate`
+means the request reached the catch-all — tell me, and we add
+`/gate/media/*` explicitly to `@open` (harmless, and already implied).
+
+**Refreshing the media later** (a retaken screenshot): David uploads a new
+version of the same Drive file, then the image needs a rebuild that
+re-runs the fetch layer — it sits behind `COPY . .`, so any backend change
+does it, and `docker compose build --no-cache api` does it when nothing
+else changed.
+
+**The date.** Every date on the page is derived from
+`backend/api/gate_page.py:LAUNCH` (22 September 2026, 10:00 CEST — the
+first day of InnoTrans). If the launch moves, that one constant moves; no
+text edit anywhere.
+
+Stops applying once staging and production both serve the page with the
+slideshow.
 
 ---
 
