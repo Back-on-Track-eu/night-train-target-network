@@ -75,3 +75,28 @@ not the vanity host), optional `GUNICORN_WORKERS` (default 4), `GUNICORN_THREADS
 `pg_dump` the bot-server production DB → restore into the new `tn-production` db → **setval every
 serial sequence** after a COPY-restore (lesson 2026-08-31, redemption ids) → point DNS (Juri, KAS)
 → keep bot-server production read-only for a week, then retire. Staging is reseeded fresh here.
+
+## Database access for developers (SSH tunnel, pgAdmin)
+
+The `db` service publishes Postgres on **localhost only**: `127.0.0.1:${DB_DEBUG_PORT}` on tn-server
+(`DB_DEBUG_PORT` is a Coolify environment variable per app: **staging 55433, production 55434**, the
+bot-server convention). Nothing is reachable from the internet; the only door is an SSH tunnel through a
+restricted user whose key may forward exactly those two ports and nothing else:
+
+```
+# ~/.ssh/authorized_keys of user `david` on tn-server
+restrict,port-forwarding,permitopen="127.0.0.1:55433",permitopen="127.0.0.1:55434" ssh-ed25519 AAAA… davidj.wedekind@gmail.com
+```
+
+Desktop side (pgAdmin, DBeaver, psql):
+
+```
+ssh -N -L 55433:127.0.0.1:55433 -L 55434:127.0.0.1:55434 david@95.216.39.96
+# then connect to localhost:55433 (staging) / localhost:55434 (production), db target_network
+```
+
+Roles: `david` exists in both databases. Staging: read + write on every application schema (it is the
+test bench). Production: **read-only** (`SELECT` on all schemas, `pg_read_all_data`); writes go through
+the app or a reviewed migration. Passwords live in Gio's bws (`TN_PG_DAVID_STAGING`, `TN_PG_DAVID_PRODUCTION`)
+and are shared once via Bitwarden Send. Roles are not part of `pg_dump` (`--no-owner --no-acl`): after any
+copy or reseed, re-run the grants (`deploy/coolify/grants-david.sql`).
