@@ -144,7 +144,8 @@ def test_public_figures_match_the_press_text():
     assert "from about 150 today to 300" in html
     assert "triple the number of night train passengers by 2032" in html
     assert "between 500 and 3,000&nbsp;km" in html
-    assert "0.3% of the total greenhouse gas emissions" in html
+    assert "around 3% of the total greenhouse gas emissions" in html
+    assert "0.3%" not in html
     assert "70% of Europeans" in html
     assert "twelve different train compositions" in html
     # The mockup's wrong number. 1,500 is carriages (proposal.funFacts
@@ -161,9 +162,12 @@ def test_the_two_quotes_are_attributed():
 
 
 def test_the_claims_carry_their_source():
-    """LandingIntro.vue pins the same figures to the position paper. So does this."""
+    """The 3% figure comes from the GHG reduction potential report. Link it."""
     html = page_html(now=BEFORE)
-    assert "back-on-track.eu/back-on-track-europes-general-position-paper/" in html
+    assert (
+        "back-on-track.eu/the-global-warming-reduction-potential-of-night-trains/"
+        in html
+    )
 
 
 def test_reduced_motion_is_respected():
@@ -254,7 +258,7 @@ def test_the_walkthrough_is_muted_and_waits_for_its_slide(full_media):
 
 def test_the_position_paper_link_sits_under_the_first_section():
     html = page_html(now=BEFORE)
-    link = html.index("back-on-track-europes-general-position-paper")
+    link = html.index("the-global-warming-reduction-potential-of-night-trains")
     assert html.index("Double the connections") < link
     assert link < html.index("Network planning as a game")
 
