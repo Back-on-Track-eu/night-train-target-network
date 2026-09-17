@@ -6,9 +6,10 @@ name: Deploy staging
 # command on the server (deploy/bot-server-app/dispatch.sh): it can trigger
 # this one deploy and nothing else.
 
+# 2026-09-16: staging now deploys to the dedicated tn-server through Coolify (GitHub App
+# coolify-bot-tn, see deploy/coolify/README.md). The bot-server lane below stays available
+# as a MANUAL fallback only; the push trigger is removed so a merge does not deploy twice.
 on:
-  push:
-    branches: [staging]
   # Manual re-run, same key and same forced command — no extra privilege.
   # Needed because `git pull --ff-only` cannot move a checkout backwards:
   # rolling staging to an earlier commit reports deploy success and

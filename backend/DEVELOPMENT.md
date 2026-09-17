@@ -133,6 +133,12 @@ rewrites container-side wiring (`POSTGRES_HOST=postgres`,
 Shell/PyCharm environment variables still win over the file if you need
 to point elsewhere.
 
+One thing the Docker image does at build that a host-run API does not:
+the gate page's screenshots and video (`api/gate_media/`, gitignored)
+come from Drive. Fetch them once with `uv run python
+scripts/fetch_gate_media.py`; until then `/gate` renders without its
+slideshow, which is by design.
+
 ---
 
 ## Database (standalone inspection)

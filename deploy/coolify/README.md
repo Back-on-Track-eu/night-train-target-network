@@ -75,3 +75,25 @@ not the vanity host), optional `GUNICORN_WORKERS` (default 4), `GUNICORN_THREADS
 `pg_dump` the bot-server production DB → restore into the new `tn-production` db → **setval every
 serial sequence** after a COPY-restore (lesson 2026-08-31, redemption ids) → point DNS (Juri, KAS)
 → keep bot-server production read-only for a week, then retire. Staging is reseeded fresh here.
+
+## Database access for developers (SSH tunnel, pgAdmin)
+
+The `db` service publishes Postgres on **localhost only**: `127.0.0.1:${DB_DEBUG_PORT}` on the box
+(`DB_DEBUG_PORT` is a Coolify environment variable per app; the values follow the bot-server convention).
+Nothing is reachable from the internet; the only door is an SSH tunnel through a restricted account whose
+key may forward exactly those ports and nothing else (`restrict,port-forwarding,permitopen=…` in its
+`authorized_keys`). Account name, host and port values are handed over personally by the maintainers,
+never written here.
+
+Desktop side (pgAdmin, DBeaver, psql):
+
+```
+ssh -N -L <local>:127.0.0.1:<DB_DEBUG_PORT> <account>@<host>
+# then connect to localhost:<local>, database target_network
+```
+
+Roles: each developer has a personal Postgres role. Staging: read + write on every application schema
+(it is the test bench). Production: **read-only** (`SELECT` on all schemas via `pg_read_all_data`); writes
+go through the app or a reviewed migration. Passwords are kept in the maintainers' secret store and shared
+once through an expiring link. Roles are not part of `pg_dump` (`--no-owner --no-acl`): after any copy or
+reseed, re-run the grants (`deploy/coolify/grants-developer.sql`, role name as a psql variable).
