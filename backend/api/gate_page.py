@@ -254,9 +254,9 @@ __SHOW__
       <p>Back-on-Track wants to double the number of night train connections in Europe,
          from about 150 today to 300, and to triple the number of night train passengers
          by 2032. Night trains are the best choice for many journeys between 500 and
-         3,000&nbsp;km. If Europe reaches these goals, night trains could avoid around
-         0.3% of the total greenhouse gas emissions of the EU.</p>
-      <p><a href="https://back-on-track.eu/back-on-track-europes-general-position-paper/">Read
+         3,000&nbsp;km. With an ambitious night train network, Europe could avoid around
+         3% of the total greenhouse gas emissions of the EU.</p>
+      <p><a href="https://back-on-track.eu/the-global-warming-reduction-potential-of-night-trains/">Read
          the position paper behind these numbers</a></p>
       <blockquote>
         <p>“The tracks exist and the demand exists. 70% of Europeans are ready to swap
