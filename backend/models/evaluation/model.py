@@ -32,7 +32,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-CALC_VERSION: str = "0.9.32"
+CALC_VERSION: str = "0.9.33"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -66,6 +66,22 @@ CALC_MODEL_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.33": {
+        "date": "2026-09-19",
+        "author": "david + claude",
+        "changes": "operations.route.departures_per_year is EXACT. "
+        "build_operations() rounded the route total's annualiser to a whole "
+        "number, which was invisible while every request ran daily (366 x 2 "
+        "= 732) and wrong the moment ROUTE_BUILDER 0.9.40 made three days a "
+        "week the default: 156.857 operating days give 313.71 departures, "
+        "and a receipt dividing a per-year leaf by 314 no longer reproduced "
+        "the per-trip figure the model priced. The operations block is "
+        "served, never persisted, so the exact float is simply what it "
+        "carries now; the summary row's departures_per_year stays rounded "
+        "because proposals.proposal_summaries.departures_per_year is an "
+        "INTEGER gallery column. No other number changes; the version moves "
+        "because the block is part of every member's evaluation output.",
+    },
     "0.9.32": {
         "date": "2026-09-14",
         "author": "david + claude",

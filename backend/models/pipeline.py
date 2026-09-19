@@ -125,8 +125,7 @@ def run_compute(
     scenario_id: int,
     timetable_mode: str,
     fixed_night_interval: list[str] | None,
-    schedule_mode: str,
-    schedule: dict | None = None,
+    schedule: dict,
     min_turnaround_min: int = DEFAULT_MIN_TURNAROUND_MIN,
     fares_eur_per_km: dict | None = None,
     fares_eur_per_pax: dict | None = None,
@@ -149,7 +148,8 @@ def run_compute(
     (NEUTRAL_PROPOSAL_ID/VERSION for ephemeral compute, real ids at
     publish time). Every other field must already be resolved (defaults
     applied) — that resolution is an API-boundary concern, not this
-    module's.
+    module's. schedule is the twelve-month map api/helpers/member_compute.py
+    resolves from one posted frequency (or a posted map, or nothing).
 
     expert_timetable: the request's manual timetable overrides, already
     turned into domain objects at the API boundary (api/helpers/
@@ -169,7 +169,6 @@ def run_compute(
     route, provenance, suggestions = plan_route(
         proposal_id=proposal_id,
         proposal_version=proposal_version,
-        schedule_mode=schedule_mode,
         schedule=schedule,
         min_turnaround_min=min_turnaround_min,
         trip_pair_inputs=[

@@ -265,6 +265,8 @@ def _supply_kpis(route: dict) -> dict:
     return {
         "operating_days_per_year": operating_days,
         # Every operating day sees one departure per trip of every pair.
+        # Rounded here only because the gallery column is an INTEGER; the
+        # exact divisor the receipts need is operations.route (CALC 0.9.33).
         "departures_per_year": round(
             operating_days * sum(2 for _ in route["trip_pairs"])
         ),

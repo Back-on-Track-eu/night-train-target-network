@@ -441,7 +441,7 @@ class ProposalRepository:
         the new state (§4: 'previous state hard-deleted in the same
         transaction'). routes/services cascade almost everything
         (trips -> stop_times/segments/od_pairs/timetable_warnings;
-        routes -> parkings/shuntings/seasonal_schedules; services ->
+        routes -> parkings/shuntings; services ->
         calendar/calendar_dates) — shapes don't cascade from either (both
         trips.shape_id and segments.shape_id are ON DELETE SET NULL, not
         the reverse), so they're deleted explicitly by the shared

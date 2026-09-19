@@ -66,8 +66,7 @@ class FamilyRequest:
     stops: list[str]
     timetable_mode: str
     fixed_night_interval: list[str] | None
-    schedule_mode: str
-    schedule: dict | None
+    schedule: dict
     min_turnaround_min: int
     fares_eur_per_km: dict
     fares_eur_per_pax: dict
@@ -163,7 +162,6 @@ def _build_route(
         scenario_id=scenario.scenario_id,
         timetable_mode=request.timetable_mode,
         fixed_night_interval=request.fixed_night_interval,
-        schedule_mode=request.schedule_mode,
         schedule=request.schedule,
         min_turnaround_min=request.min_turnaround_min,
         fares_eur_per_km=request.fares_eur_per_km,

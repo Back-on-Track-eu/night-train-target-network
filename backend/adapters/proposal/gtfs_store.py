@@ -5,7 +5,7 @@ GTFS + sidecar persistence — the DB write/read counterpart of
 api/helpers/route_serialize.py's route_to_dict()/route_from_dict(), against
 proposals.{routes,trips,stop_times,shapes,services,calendar} + the WP1
 sidecar tables (proposals.segments, od_pairs, parkings, shuntings,
-timetable_warnings, seasonal_schedules) instead of a JSON blob
+timetable_warnings) instead of a JSON blob
 (adapters/proposal/README.md §5.1/§5.2). Lives under adapters/ — it
 executes SQL, and the project's layering keeps all DB access in adapters/;
 the pure dict↔domain serializers it delegates to stay in api/helpers/
@@ -126,18 +126,10 @@ def insert_route_gtfs(cur, route: dict) -> None:
         (
             route_id,
             _route_long_name(route),
-            Json(route["schedule"].get("days_per_week_by_month")),
+            Json(route["schedule"]["days_per_week_by_month"]),
             route["schedule"].get("min_turnaround_min"),
         ),
     )
-    # The two-season projection is still written for readers that expect
-    # it; the month map on the route row is what _load_schedule reads first.
-    for ss in route["schedule"]["seasonal_schedules"]:
-        cur.execute(
-            "INSERT INTO proposals.seasonal_schedules (route_id, season, frequency) "
-            "VALUES (%s, %s, %s)",
-            (route_id, ss["season"], ss["frequency"]),
-        )
 
     for pair in route["trip_pairs"]:
         composition_id = pair["composition_id"]
@@ -189,15 +181,12 @@ def insert_route_gtfs(cur, route: dict) -> None:
 
 
 def _insert_service(cur, service_id: str, schedule: dict) -> None:
-    """One shared GTFS service per route. Only a schedule that runs every
-    day of the week in its peak month can be persisted: the GTFS calendar
-    row is all-weekdays-TRUE, and a per-month map has no home in the
-    proposals schema yet (see _insert_route). Publish refuses anything else
-    rather than store a calendar that says something the plan does not."""
-    # The GTFS calendar row is all-weekdays-TRUE whatever the plan: which
-    # weekdays a non-daily month runs is not modelled (models/route/model.py
-    # OPEN_TODOS). The plan itself is on the route row, so nothing is lost;
-    # the calendar is the coarse GTFS view of it.
+    """One shared GTFS service per route. The calendar row is
+    all-weekdays-TRUE whatever the plan: which weekdays a non-daily month
+    runs is not modelled (models/route/model.py OPEN_TODOS). The exact plan
+    is proposals.routes.schedule_months, so nothing is lost; the calendar is
+    the coarse GTFS view of it. A plan that never runs is refused here
+    rather than stored as a calendar that says something the plan does not."""
     months = schedule.get("days_per_week_by_month")
     if not months or max(int(d) for d in months.values()) < 1:
         raise ValueError("A proposal must run in at least one month to be saved.")
@@ -405,23 +394,18 @@ def route_dict_from_gtfs(
         )
 
     cur.execute(
-        "SELECT season, frequency FROM proposals.seasonal_schedules WHERE route_id = %s",
-        (route_id,),
-    )
-    legacy = [
-        {"season": r["season"], "frequency": r["frequency"]} for r in cur.fetchall()
-    ]
-    cur.execute(
         "SELECT schedule_months, min_turnaround_min FROM proposals.routes "
         "WHERE route_id = %s",
         (route_id,),
     )
     row = cur.fetchone() or {}
-    block = {"seasonal_schedules": legacy}
-    # Rows written since the month map has a home carry it; older rows fall
-    # back to the projection, widened as before.
-    if row.get("schedule_months"):
-        block["days_per_week_by_month"] = row["schedule_months"]
+    # NOT NULL since the 2026-09-19 migration folded the old two-season
+    # projection into it; a missing map is a row the migration never saw.
+    if not row.get("schedule_months"):
+        raise ValueError(
+            f"route_dict_from_gtfs: route_id '{route_id}' has no schedule_months."
+        )
+    block = {"days_per_week_by_month": row["schedule_months"]}
     if row.get("min_turnaround_min") is not None:
         block["min_turnaround_min"] = row["min_turnaround_min"]
     schedule = schedule_from_dict(block)

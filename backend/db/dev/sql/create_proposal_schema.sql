@@ -73,9 +73,12 @@ COMMENT ON COLUMN proposals.shapes.length_km IS 'Total route length derived from
 -- routes
 -- ---------------------------------------------------------------
 -- schedule_months / min_turnaround_min (ROUTE_BUILDER 0.9.35): the per-month
--- operating plan. proposals.seasonal_schedules keeps the two-season
--- projection for readers that still expect it; this is the authoritative
--- shape, and gtfs_store reads it first.
+-- operating plan — the ONE home of the schedule since 0.9.40, when the
+-- two-season projection (proposals.seasonal_schedules) was folded into it
+-- and dropped. The GTFS calendar row stays all-weekdays-TRUE: which
+-- weekdays a non-daily month runs is not modelled (models/route/model.py
+-- OPEN_TODOS), so the calendar is the coarse GTFS view and this column the
+-- exact plan.
 CREATE TABLE proposals.routes (
     route_id          TEXT PRIMARY KEY,
     agency_id         TEXT,
@@ -86,12 +89,12 @@ CREATE TABLE proposals.routes (
     route_color       TEXT,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 ,
-    schedule_months      JSONB,
+    schedule_months      JSONB NOT NULL,
     min_turnaround_min   INTEGER
 );
 
 COMMENT ON TABLE  proposals.routes                IS 'GTFS routes.txt — one row per proposal version route. route_id follows convention P{proposal_id}_V{version}_R{route_index} e.g. P1_V1_R1. route_type 105 = Sleeper Rail Service (GTFS extended HVT code).';
-COMMENT ON COLUMN proposals.routes.schedule_months  IS 'Days per week for each month, {"1": 7, ..., "12": 0} (models/route/route.py Schedule). NULL on rows written before ROUTE_BUILDER 0.9.35 — read seasonal_schedules instead.';
+COMMENT ON COLUMN proposals.routes.schedule_months  IS 'Days per week for each month, {"1": 7, ..., "12": 0} (models/route/route.py Schedule). The one home of the operating plan since ROUTE_BUILDER 0.9.40; a request posting one frequency stores the same number in every month.';
 COMMENT ON COLUMN proposals.routes.min_turnaround_min IS 'Minimum terminal turnaround the fleet was sized with, minutes. NULL before 0.9.35 (default 180).';
 COMMENT ON COLUMN proposals.routes.route_id         IS 'GTFS route identifier. Convention: P{proposal_id}_V{version}_R{route_index} e.g. P1_V1_R1.';
 COMMENT ON COLUMN proposals.routes.agency_id        IS 'GTFS agency_id — nullable; populate on GTFS export from input_params.operators.';
@@ -433,23 +436,6 @@ COMMENT ON COLUMN proposals.timetable_warnings.interval_end_stop_id   IS 'Soft r
 COMMENT ON COLUMN proposals.timetable_warnings.ratio                 IS 'timetable_speed_kmh / routing_speed_kmh over the interval — below FIXED_NIGHT_MIN_SPEED_RATIO triggers "fixed_night_stretch_slow".';
 
 -- ---------------------------------------------------------------
--- seasonal_schedules — one row per SeasonalSchedule (models/route/
--- route.py): route-level operating frequency per season. calendar/
--- calendar_dates alone only cover the daily case.
--- ---------------------------------------------------------------
-CREATE TABLE proposals.seasonal_schedules (
-    route_id   TEXT NOT NULL REFERENCES proposals.routes(route_id) ON DELETE CASCADE,
-    season     TEXT NOT NULL,
-    frequency  TEXT NOT NULL,
-    PRIMARY KEY (route_id, season)
-);
-
-COMMENT ON TABLE  proposals.seasonal_schedules            IS 'One row per SeasonalSchedule (models/route/route.py) — operating frequency for one season (summer/winter) on a route. calendar/calendar_dates alone only cover the always-daily case.';
-COMMENT ON COLUMN proposals.seasonal_schedules.route_id   IS 'References proposals.routes.';
-COMMENT ON COLUMN proposals.seasonal_schedules.season     IS 'summer or winter (mirrors models.route.route.Season).';
-COMMENT ON COLUMN proposals.seasonal_schedules.frequency  IS 'daily or three_per_week (mirrors models.route.route.Frequency).';
-
--- ---------------------------------------------------------------
 -- update_log (§4.1) — append-only timeline event log. States are
 -- pruned on overwrite and likes/comments only stamp a state number, so
 -- this is what preserves "comment on state 3, route overwritten
@@ -472,8 +458,8 @@ COMMENT ON TABLE  proposals.update_log                  IS 'Append-only timeline
 COMMENT ON COLUMN proposals.update_log.proposal_id      IS 'Soft reference to proposals.proposals.proposal_id — same convention as likes/comments.';
 COMMENT ON COLUMN proposals.update_log.proposal_version IS 'State counter AFTER the event.';
 COMMENT ON COLUMN proposals.update_log.user_id          IS 'Acting user; NULL for system events (version-bump/base-scenario refresh) — the timeline renders a NULL here as actor: null, which is what distinguishes a system recalculation from a user overwrite.';
-COMMENT ON COLUMN proposals.update_log.event            IS 'One of: published, overwritten, recalculated, branched_from, branched_to.';
-COMMENT ON COLUMN proposals.update_log.detail           IS 'Event-specific context. branched_*: {"source_proposal_id": …}. recalculated: {"trigger": "calc_version"|"route_builder_version"|"base_scenario_moved", "from": …, "to": …}.';
+COMMENT ON COLUMN proposals.update_log.event            IS 'One of: published, overwritten, recalculated, branched_from, branched_to, migrated.';
+COMMENT ON COLUMN proposals.update_log.detail           IS 'Event-specific context. branched_*: {"source_proposal_id": …}. recalculated: {"trigger": "calc_version"|"route_builder_version"|"base_scenario_moved", "from": …, "to": …}. migrated (a data migration rewrote the stored request without recomputing, user_id NULL): {"trigger": …, "from": …, "to": …}.';
 
 -- ---------------------------------------------------------------
 -- proposal_summaries (§5.4) — derived projection, NOT a source of
@@ -543,7 +529,7 @@ COMMENT ON TABLE  proposals.proposal_summaries                        IS 'Derive
 COMMENT ON COLUMN proposals.proposal_summaries.route_fingerprint      IS 'Route identity fingerprint (§3.1) — informational only, same as proposals.proposals.route_fingerprint.';
 COMMENT ON COLUMN proposals.proposal_summaries.subsidy_eur_per_year   IS 'max(0, -net_eur): gap to target margin. Unit: EUR/year';
 COMMENT ON COLUMN proposals.proposal_summaries.net_eur_per_year       IS 'Signed annual net after the target margin (CALC 0.9.25): negative is the shortfall subsidy_eur_per_year reports, positive is a surplus. Unit: EUR/year';
-COMMENT ON COLUMN proposals.proposal_summaries.operating_days_per_year IS 'Operating days from the seasonal schedule (CALC 0.9.25) — the annualisation factor behind every per-year figure.';
+COMMENT ON COLUMN proposals.proposal_summaries.operating_days_per_year IS 'Operating days from the month schedule (CALC 0.9.25) — the annualisation factor behind every per-year figure.';
 COMMENT ON COLUMN proposals.proposal_summaries.departures_per_year    IS 'Departures per year, every trip of every pair on every operating day (CALC 0.9.28).';
 COMMENT ON COLUMN proposals.proposal_summaries.trainsets_physical     IS 'Physical rakes the busiest pair needs in its busiest month — the cycle-time rule, ROUTE_BUILDER 0.9.35 (CALC 0.9.28). The cost model charges physical / coach_avail_per; see the operations block.';
 COMMENT ON COLUMN proposals.proposal_summaries.train_km_per_year      IS 'Annual train-km, both directions, all pairs (CALC 0.9.25) — the per_train_km divisor. Unit: km/year';

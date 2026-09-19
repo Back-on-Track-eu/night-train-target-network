@@ -74,7 +74,6 @@ from models.utils import canonical_sha256
 from models.route.timetable import (
     VALID_AUTO_STOP_ADDITION_MODES,
     VALID_DEPARTURE_MODES,
-    VALID_SCHEDULE_MODES,
     VALID_TIMETABLE_MODES,
 )
 from models.route.routing.rail_router import VALID_ROUTING_MODES
@@ -88,9 +87,9 @@ from models.demand.model import (
 from models.route.model import (
     DEFAULT_AUTO_STOP_ADDITION,
     DEFAULT_COMPOSITION_ID,
+    DEFAULT_DAYS_PER_WEEK,
     DEFAULT_ROUTING_MODE,
     DEFAULT_MIN_TURNAROUND_MIN,
-    DEFAULT_SCHEDULE_MODE,
     DEFAULT_TIMETABLE_MODE,
     NEUTRAL_PROPOSAL_ID,
     NEUTRAL_PROPOSAL_VERSION,
@@ -139,7 +138,7 @@ def validate_stops(body: dict) -> list[str]:
 
 def validate_how_fields(body: dict, stops) -> list[str]:
     """The HOW fields every compute request carries — timetable_mode,
-    fixed_night_interval, schedule_mode, routing_mode, auto_stop_addition,
+    fixed_night_interval, schedule, routing_mode, auto_stop_addition,
     expert_timetable — checked the same way for a member request (via
     validate_calc_body) and a family request (api/helpers/
     family_compute.py), whose WHAT fields are axes instead of one
@@ -186,12 +185,14 @@ def validate_how_fields(body: dict, stops) -> list[str]:
             "'simpleAutomaticWithFixedNight'."
         )
 
-    schedule_mode = body.get("schedule_mode", DEFAULT_SCHEDULE_MODE)
-    if schedule_mode not in VALID_SCHEDULE_MODES:
+    if "schedule_mode" in body:
+        # Gone with ROUTE_BUILDER 0.9.40; a stored request still carrying
+        # it is one the 2026-09-19 migration did not reach.
         errors.append(
-            f"'schedule_mode' = '{schedule_mode}' is invalid. Must be one of: {sorted(VALID_SCHEDULE_MODES)}."
+            "'schedule_mode' no longer exists: post 'schedule' as "
+            "{'days_per_week': 1..7} or a month map, or omit it for the default."
         )
-    errors.extend(validate_schedule(schedule_mode, body.get("schedule")))
+    errors.extend(validate_schedule(body.get("schedule")))
     turnaround = body.get("min_turnaround_min", DEFAULT_MIN_TURNAROUND_MIN)
     if (
         not isinstance(turnaround, int)
@@ -464,36 +465,57 @@ def canonical_request_hash(resolved_request: dict, measure_set_id: int) -> str:
 MONTHS = tuple(str(m) for m in range(1, 13))
 
 
-def validate_schedule(schedule_mode: str, schedule) -> list[str]:
-    """The `schedule` block: required with schedule_mode 'custom', rejected
-    with any other mode. Twelve month keys, each 0..7 days a week, and at
-    least one month running — a train that never runs has no evaluation."""
-    if schedule_mode != "custom":
-        return (
-            ["'schedule' is only allowed with schedule_mode 'custom'."]
-            if schedule
-            else []
-        )
+def _is_int(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def validate_schedule(schedule) -> list[str]:
+    """The optional `schedule` block, in either of its two shapes:
+
+      {"days_per_week": n}     one frequency, an integer 1..7 — what the
+                               Details card posts (ROUTE_BUILDER 0.9.40)
+      {"1": d, ..., "12": d}   days per week for each month, each 0..7,
+                               at least one month running — the seasonal
+                               shape a later UI will post
+
+    Absent means DEFAULT_DAYS_PER_WEEK in every month. A train that never
+    runs has no evaluation, hence the floor on both shapes."""
+    if schedule is None:
+        return []
     if not isinstance(schedule, dict):
-        return ["'schedule' must be an object of month → days per week."]
+        return [
+            "'schedule' must be an object: {'days_per_week': 1..7} or a month map "
+            "'1'..'12' → days per week."
+        ]
+    if set(schedule) == {"days_per_week"}:
+        d = schedule["days_per_week"]
+        if not _is_int(d) or not 1 <= d <= 7:
+            return ["'schedule.days_per_week' must be an integer 1..7."]
+        return []
     errors = []
-    keys = {str(k) for k in schedule}
-    if keys != set(MONTHS):
-        errors.append("'schedule' must carry exactly the months '1'..'12'.")
+    if {str(k) for k in schedule} != set(MONTHS):
+        errors.append(
+            "'schedule' must carry either 'days_per_week' or exactly the months "
+            "'1'..'12'."
+        )
     for k, v in schedule.items():
-        if isinstance(v, bool) or not isinstance(v, int) or not 0 <= v <= 7:
+        if not _is_int(v) or not 0 <= v <= 7:
             errors.append(f"'schedule[{k}]' must be an integer 0..7 (days per week).")
     if not errors and not any(int(v) > 0 for v in schedule.values()):
         errors.append("'schedule' must have at least one month with days > 0.")
     return errors
 
 
-def normalize_schedule(schedule_mode: str, schedule) -> dict | None:
-    """String month keys in calendar order, or None for a mode that does
-    not read the block — so the echo, and therefore the family key, is the
-    same however the client spelled it."""
-    if schedule_mode != "custom" or not isinstance(schedule, dict):
-        return None
+def normalize_schedule(schedule) -> dict[str, int]:
+    """The month map every resolved request carries, string month keys in
+    calendar order — one frequency expanded onto the twelve months, a
+    posted map canonicalised, an absent block the default — so the echo,
+    and therefore the family key, is the same however the plan was
+    spelled. Assumes the block passed validate_schedule()."""
+    if not isinstance(schedule, dict):
+        return {m: DEFAULT_DAYS_PER_WEEK for m in MONTHS}
+    if set(schedule) == {"days_per_week"}:
+        return {m: int(schedule["days_per_week"]) for m in MONTHS}
     return {m: int(schedule[m] if m in schedule else schedule[int(m)]) for m in MONTHS}
 
 
@@ -608,13 +630,10 @@ def resolve_how_fields(body: dict) -> dict:
     return {
         "timetable_mode": body.get("timetable_mode", DEFAULT_TIMETABLE_MODE),
         "fixed_night_interval": body.get("fixed_night_interval"),
-        "schedule_mode": body.get("schedule_mode", DEFAULT_SCHEDULE_MODE),
-        # Canonicalised to string month keys so a posted {1: 7} and {"1": 7}
-        # hash the same; None unless the mode reads it, for the same reason
-        # expert_timetable is always present.
-        "schedule": normalize_schedule(
-            body.get("schedule_mode", DEFAULT_SCHEDULE_MODE), body.get("schedule")
-        ),
+        # Always the twelve-month map with string keys: one posted
+        # frequency, a posted map and an omitted block all land on the same
+        # shape, so the same plan hashes the same however it was spelled.
+        "schedule": normalize_schedule(body.get("schedule")),
         "min_turnaround_min": int(
             body.get("min_turnaround_min", DEFAULT_MIN_TURNAROUND_MIN)
         ),
@@ -746,7 +765,6 @@ def compute_member(
         scenario_id=scenario_id,
         timetable_mode=resolved_request["timetable_mode"],
         fixed_night_interval=resolved_request["fixed_night_interval"],
-        schedule_mode=resolved_request["schedule_mode"],
         schedule=resolved_request["schedule"],
         min_turnaround_min=resolved_request["min_turnaround_min"],
         fares_eur_per_km=resolved_request["fares_eur_per_km"],

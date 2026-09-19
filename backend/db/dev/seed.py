@@ -2938,14 +2938,16 @@ def _build_example_route(scenario_id: int, composition, tracks) -> dict:
         geometries_out=geometries,
     )
 
+    from models.route.model import DEFAULT_MIN_TURNAROUND_MIN
+
     return {
         "route_id": draft_prefix,
         "scenario_id": scenario_id,
         "schedule": {
-            "seasonal_schedules": [
-                {"season": "summer", "frequency": "daily"},
-                {"season": "winter", "frequency": "daily"},
-            ]
+            # The example runs daily, spelled the way every route dict
+            # carries its plan since ROUTE_BUILDER 0.9.35: one figure per month.
+            "days_per_week_by_month": {str(m): 7 for m in range(1, 13)},
+            "min_turnaround_min": DEFAULT_MIN_TURNAROUND_MIN,
         },
         "trip_pairs": [
             {
@@ -3044,7 +3046,7 @@ def _compute_example_proposal(
     from models.evaluation.model import CALC_VERSION
     from models.evaluation.operations import build_operations
     from models.pipeline import evaluate_and_build_views
-    from models.route.model import ROUTE_BUILDER_VERSION
+    from models.route.model import DEFAULT_MIN_TURNAROUND_MIN, ROUTE_BUILDER_VERSION
 
     route, compositions = route_from_dict(route_dict, loader, scenario_id=scenario_id)
     distribute_demand(
@@ -3078,7 +3080,8 @@ def _compute_example_proposal(
             "scenario_id": scenario_id,
             "timetable_mode": "simpleAutomatic",
             "fixed_night_interval": None,
-            "schedule_mode": "alwaysDaily",
+            "schedule": {str(m): 7 for m in range(1, 13)},
+            "min_turnaround_min": DEFAULT_MIN_TURNAROUND_MIN,
             "routing_mode": "fullRouting",
             "auto_stop_addition": "off",
         },

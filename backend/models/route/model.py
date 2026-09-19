@@ -30,7 +30,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-ROUTE_BUILDER_VERSION: str = "0.9.39"
+ROUTE_BUILDER_VERSION: str = "0.9.40"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -45,6 +45,33 @@ ROUTE_BUILDER_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.40": {
+        "date": "2026-09-19",
+        "author": "david + claude",
+        "changes": "ONE FREQUENCY ON THE WIRE, the month grid stays underneath "
+        "(manual demand inputs, phase A — docs/2026-09-18_manual_demand_guide.md). "
+        "The request loses schedule_mode: 'alwaysDaily' and 'custom' only "
+        "ever chose between a flat seven and the posted month map, and the "
+        "new default of a new proposal is three days a week, not seven "
+        "(DEFAULT_DAYS_PER_WEEK). `schedule` is now optional and takes "
+        "either {'days_per_week': n} (1..7, expanded to a flat month map at "
+        "the API boundary) or the full month map ({'1': 7, ..., '12': 0}, "
+        "the seasonal shape a later UI will post); omitted means "
+        "DEFAULT_DAYS_PER_WEEK in every month. The resolved echo and the "
+        "family key always carry the month map, so the two spellings of one "
+        "plan hash alike. Schedule, operating days, fleet sizing "
+        "(busiest month) and every cost figure are UNCHANGED for a given "
+        "grid — what changes is the default plan of a request that posts no "
+        "schedule. The two-season projection is gone: route dicts no longer "
+        "carry seasonal_schedules, proposals.seasonal_schedules is folded "
+        "into proposals.routes.schedule_months and dropped "
+        "(db/dev/sql/migrations/2026-09-19_schedule_frequency.sql), and the "
+        "same migration strips schedule_mode from every stored "
+        "compute_request (alwaysDaily -> a flat seven) with a 'migrated' "
+        "row in proposals.update_log. The dead WEEKS_PER_SEASON and "
+        "DAYS_PER_OPERATING_WEEK constants (unused since 0.9.35) are "
+        "removed.",
+    },
     "0.9.39": {
         "date": "2026-09-14",
         "author": "david + claude",
@@ -809,7 +836,12 @@ CHANGELOG: dict = {
 
 # --- API request defaults (applied once, at the API boundary — api/helpers/member_compute.py)
 DEFAULT_TIMETABLE_MODE: str = "simpleAutomatic"
-DEFAULT_SCHEDULE_MODE: str = "alwaysDaily"
+DEFAULT_DAYS_PER_WEEK: int = 3
+"""Days a week a request without a `schedule` block runs, in every month —
+three, the middle of the 1..7 range a first result is read on. A daily
+service was the old default (schedule_mode 'alwaysDaily', gone with
+0.9.40); at a fixed potential demand it fills each train half as full as
+this one does, which is the wrong first impression of a corridor."""
 DEFAULT_ROUTING_MODE: str = "fullRouting"
 DEFAULT_AUTO_STOP_ADDITION: str = "off"
 DEFAULT_COMPOSITION_ID: str = "NEW-BAL-7"
@@ -862,7 +894,7 @@ interval to cover the night window can make it arbitrarily slow — below
 this ratio the trip carries a 'fixed_night_stretch_slow' entry in
 general_parameters.timetable_warnings (a warning, never an error)."""
 
-# --- Schedule (seasonal model — models/route/route.py)
+# --- Schedule (models/route/route.py)
 DEFAULT_MIN_TURNAROUND_MIN: int = 180
 """Shortest stand a rake is given at a terminal between arriving and
 departing again, minutes. Default for the request's min_turnaround_min;
@@ -871,13 +903,6 @@ decides trainsets via TripPair.cycle_days()."""
 EVALUATION_YEAR: int = 2032
 """Calendar year the schedule counts days in — the same year every price is
 expressed in. Only the month lengths matter (whether February has 29 days)."""
-
-WEEKS_PER_SEASON: int = 26
-"""SUMMER (April–Sep) and WINTER (Oct–Mar) are each a fixed 26 weeks."""
-
-DAYS_PER_OPERATING_WEEK: dict[str, int] = {"DAILY": 7, "THREE_PER_WEEK": 3}
-"""Operating days per week per Frequency name — specific days of week
-aren't modelled, they don't affect cost or fleet sizing."""
 
 # --- Routing graph ceiling (models/route/routing/docker/custom_models/night_train.json)
 MAX_COMPOSITION_SPEED_KMH: int = 230

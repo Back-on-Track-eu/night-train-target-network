@@ -36,7 +36,6 @@ Public interface:
 from __future__ import annotations
 
 from models.route.timetable import (
-    legacy_seasonal_schedules,
     schedule_from_dict,
 )
 from models.route.route import (
@@ -320,9 +319,6 @@ def route_to_dict(route: Route, scenario_id: int, tracks: TrackInfraCollection) 
                 str(m): d for m, d in route.schedule.days_per_week_by_month.items()
             },
             "min_turnaround_min": route.schedule.min_turnaround_min,
-            # Pre-0.9.35 readers still find the two-season shape; derived
-            # from the month map so both describe the same plan.
-            "seasonal_schedules": legacy_seasonal_schedules(route.schedule),
         },
         "trip_pairs": trip_pairs,
         "parkings": [

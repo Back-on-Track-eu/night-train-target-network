@@ -265,7 +265,6 @@ def build_or_load_family(body: dict) -> dict:
             stops=request["stops"],
             timetable_mode=request["timetable_mode"],
             fixed_night_interval=request["fixed_night_interval"],
-            schedule_mode=request["schedule_mode"],
             schedule=request["schedule"],
             min_turnaround_min=request["min_turnaround_min"],
             fares_eur_per_km=request["fares_eur_per_km"],
