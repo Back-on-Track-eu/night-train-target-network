@@ -77,8 +77,8 @@ from models.family.context import FamilyContext, MemoLoader, MemoRouter  # noqa:
 from models.pipeline import evaluate_and_build_views, run_compute  # noqa: E402
 from models.route.model import (  # noqa: E402
     DEFAULT_COMPOSITION_ID,
+    DEFAULT_DAYS_PER_WEEK,
     DEFAULT_ROUTING_MODE,
-    DEFAULT_SCHEDULE_MODE,
     DEFAULT_TIMETABLE_MODE,
     NEUTRAL_PROPOSAL_ID,
     NEUTRAL_PROPOSAL_VERSION,
@@ -138,7 +138,7 @@ def member(args, scenario_id: int, loader, router, composition_id: str):
         scenario_id=scenario_id,
         timetable_mode=DEFAULT_TIMETABLE_MODE,
         fixed_night_interval=None,
-        schedule_mode=DEFAULT_SCHEDULE_MODE,
+        schedule={str(m): DEFAULT_DAYS_PER_WEEK for m in range(1, 13)},
         routing_mode=DEFAULT_ROUTING_MODE,
         auto_stop_addition="off",
         loader=loader,
@@ -305,7 +305,6 @@ def section_family(args, loader) -> None:
         stops=request_echo["stops"],
         timetable_mode=request_echo["timetable_mode"],
         fixed_night_interval=request_echo["fixed_night_interval"],
-        schedule_mode=request_echo["schedule_mode"],
         schedule=request_echo["schedule"],
         min_turnaround_min=request_echo["min_turnaround_min"],
         fares_eur_per_km=request_echo["fares_eur_per_km"],

@@ -26,7 +26,7 @@ import pytest
 
 from adapters.family.member_cache import FamilyMemberCache
 from models.params import MeasureSet
-from models.route.model import DEFAULT_SCHEDULE_MODE
+from models.route.model import DEFAULT_DAYS_PER_WEEK
 from tests.conftest import DB_CONFIG, STOPS_BERLIN_WIEN
 from tests.helpers import _member_compute
 
@@ -110,10 +110,8 @@ class TestHitMiss:
         # contribution that lands in the net result.
         for patch in (
             {"composition_id": "REF-BUD-6"},
-            {
-                "schedule_mode": "custom",
-                "schedule": {str(m): (7 if m != 2 else 0) for m in range(1, 13)},
-            },
+            {"schedule": {str(m): (7 if m != 2 else 0) for m in range(1, 13)}},
+            {"schedule": {"days_per_week": 7}},
             {"min_turnaround_min": 600},
             {"fares_eur_per_km": {"Sleeper": 0.25}},
             {"catering_eur_per_pax": {"Sleeper": -0.80}},
@@ -137,7 +135,16 @@ class TestHitMiss:
     def test_omitted_field_and_explicit_default_share_one_entry(self, db_cur, db_conn):
         """Hashing the RESOLVED request is what makes these converge."""
         cached(BASE_REQUEST)
-        _, hit = cached({**BASE_REQUEST, "schedule_mode": DEFAULT_SCHEDULE_MODE})
+        _, hit = cached(
+            {**BASE_REQUEST, "schedule": {"days_per_week": DEFAULT_DAYS_PER_WEEK}}
+        )
+        assert hit is True
+        _, hit = cached(
+            {
+                **BASE_REQUEST,
+                "schedule": {str(m): DEFAULT_DAYS_PER_WEEK for m in range(1, 13)},
+            }
+        )
         assert hit is True
         assert _count(db_cur, db_conn, _MEMBERS) == 1
 

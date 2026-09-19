@@ -194,7 +194,8 @@ def build_route(scenario_id: int, fixed_night_interval: list[str] | None) -> dic
         "stops": STOPS,
         "composition_id": COMPOSITION_ID,
         "routing_mode": "fullRouting",
-        "schedule_mode": "alwaysDaily",
+        # Daily, spelled the 0.9.40 way (one frequency; the default is 3).
+        "schedule": {"days_per_week": 7},
         # Fixed stop list — isolates the comparison to the timetable mode,
         # not auto-added stops (which would also shift dwell/clock times).
         "auto_stop_addition": "off",

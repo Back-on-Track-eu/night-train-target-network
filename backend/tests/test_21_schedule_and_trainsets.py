@@ -4,7 +4,8 @@ test_21_schedule_and_trainsets.py
 ROUTE_BUILDER 0.9.35: the per-month schedule and the cycle-time trainset
 rule, exercised in-process on the domain objects — no database, no router.
 The request-boundary half (validate_schedule / normalize_schedule) is here
-too, since it is pure.
+too, since it is pure — including the one-frequency shape of 0.9.40
+({"days_per_week": n}) and its expansion onto the twelve months.
 """
 
 from types import MethodType, SimpleNamespace as NS
@@ -14,11 +15,8 @@ import pytest
 from api.helpers.member_compute import normalize_schedule, validate_schedule
 from models.route.route import Schedule, TripPair
 from models.route.trip import Segment, Stop, StopType, Trip
-from models.route.timetable import (
-    always_daily_schedule,
-    legacy_seasonal_schedules,
-    schedule_from_dict,
-)
+from models.route.model import DEFAULT_DAYS_PER_WEEK
+from models.route.timetable import flat_schedule, schedule_from_dict
 
 
 def _pair(out_dep, out_arr, ret_dep, ret_arr, avail=0.87):
@@ -50,10 +48,17 @@ DAY = 24 * H
 
 
 class TestSchedule:
-    def test_always_daily_is_every_day_of_the_year(self):
-        s = always_daily_schedule(180)
+    def test_flat_seven_is_every_day_of_the_year(self):
+        s = flat_schedule(7, 180)
         assert s.operating_days_per_year == 366  # the evaluation year is a leap year
         assert s.peak_days_per_week == 7 and s.is_daily_any_season
+
+    def test_one_frequency_is_a_share_of_the_year(self):
+        # The guide's reference: three days a week over a 366-day year.
+        s = flat_schedule(3, 180)
+        assert s.operating_days_per_year == pytest.approx(366 * 3 / 7)
+        assert s.operating_days_per_year == pytest.approx(156.857, abs=1e-3)
+        assert s.peak_days_per_week == 3 and not s.is_daily_any_season
 
     def test_summer_only_counts_its_months(self):
         s = Schedule({m: (7 if 4 <= m <= 9 else 0) for m in range(1, 13)})
@@ -64,25 +69,20 @@ class TestSchedule:
         with pytest.raises(ValueError):
             Schedule({m: 7 for m in range(1, 12)})
 
-    def test_legacy_shape_round_trips_through_the_months(self):
-        s = Schedule({m: (7 if 4 <= m <= 9 else 3) for m in range(1, 13)})
-        legacy = legacy_seasonal_schedules(s)
-        assert legacy == [
-            {"season": "summer", "frequency": "daily"},
-            {"season": "winter", "frequency": "three_per_week"},
-        ]
-        back = schedule_from_dict({"seasonal_schedules": legacy})
-        assert back.days_per_week(7) == 7 and back.days_per_week(1) == 3
-
-    def test_month_map_wins_over_legacy_block(self):
+    def test_stored_shape_reads_back(self):
         s = schedule_from_dict(
             {
                 "days_per_week_by_month": {str(m): 5 for m in range(1, 13)},
-                "seasonal_schedules": [{"season": "summer", "frequency": "daily"}],
                 "min_turnaround_min": 240,
             }
         )
         assert s.days_per_week(6) == 5 and s.min_turnaround_min == 240
+        assert (
+            schedule_from_dict(
+                {"days_per_week_by_month": {m: 3 for m in range(1, 13)}}
+            ).min_turnaround_min
+            == 180
+        )
 
 
 class TestTrainsets:
@@ -118,22 +118,33 @@ class TestTrainsets:
 
 
 class TestRequestBoundary:
-    def test_custom_needs_a_complete_month_map(self):
-        assert validate_schedule("custom", None)
-        assert validate_schedule("custom", {str(m): 7 for m in range(1, 12)})
-        assert validate_schedule("custom", {str(m): 8 for m in range(1, 13)})
-        assert validate_schedule("custom", {str(m): 0 for m in range(1, 13)})
-        assert validate_schedule("custom", {str(m): 7 for m in range(1, 13)}) == []
+    def test_one_frequency_is_an_integer_one_to_seven(self):
+        assert validate_schedule({"days_per_week": 3}) == []
+        assert validate_schedule({"days_per_week": 7}) == []
+        for bad in (0, 8, 3.5, "3", True, None):
+            assert validate_schedule({"days_per_week": bad}), bad
+        # Either shape, never a mixture.
+        assert validate_schedule({"days_per_week": 3, "1": 7})
 
-    def test_schedule_is_rejected_outside_custom(self):
-        assert validate_schedule("alwaysDaily", {str(m): 7 for m in range(1, 13)})
-        assert validate_schedule("alwaysDaily", None) == []
+    def test_month_map_must_be_complete_and_running(self):
+        assert validate_schedule({str(m): 7 for m in range(1, 12)})
+        assert validate_schedule({str(m): 8 for m in range(1, 13)})
+        assert validate_schedule({str(m): 0 for m in range(1, 13)})
+        assert validate_schedule({str(m): 7 for m in range(1, 13)}) == []
+
+    def test_absent_is_the_default_and_anything_else_is_not(self):
+        assert validate_schedule(None) == []
+        assert validate_schedule(3)
+        assert validate_schedule([3])
 
     def test_normalisation_makes_spellings_hash_equal(self):
-        a = normalize_schedule("custom", {m: 7 for m in range(1, 13)})
-        b = normalize_schedule("custom", {str(m): 7 for m in reversed(range(1, 13))})
-        assert a == b and list(a) == [str(m) for m in range(1, 13)]
-        assert normalize_schedule("alwaysDaily", {"1": 7}) is None
+        months = [str(m) for m in range(1, 13)]
+        a = normalize_schedule({m: 7 for m in range(1, 13)})
+        b = normalize_schedule({str(m): 7 for m in reversed(range(1, 13))})
+        c = normalize_schedule({"days_per_week": 7})
+        assert a == b == c and list(a) == months
+        assert normalize_schedule(None) == {m: DEFAULT_DAYS_PER_WEEK for m in months}
+        assert normalize_schedule({"days_per_week": 3})["12"] == 3
 
 
 class TestAgainstRealObjects:
