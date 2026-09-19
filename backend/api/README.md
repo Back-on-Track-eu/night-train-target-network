@@ -351,7 +351,8 @@ presented member:
   "stops": ["osm:n3856100103", "osm:w423692233"],
   "timetable_mode": "simpleAutomatic",
   "fixed_night_interval": null,
-  "schedule_mode": "alwaysDaily",
+  "schedule": { "days_per_week": 3 },        // optional — or a month map {"1": 7, …, "12": 0}; omitted = 3 every month
+  "min_turnaround_min": 180,                 // optional
   "fares_eur_per_km":     { "Sleeper": 0.25 },   // optional, per class_main — defaults: GET /api/models
   "fares_eur_per_pax":    { "Sleeper": 22.0 },   // optional, fixed part of the base fare
   "services_eur_per_pax": { "Sleeper": 3.50 },   // optional, bikes/luggage/reservations
@@ -366,7 +367,16 @@ presented member:
 ```
 
 Validation is a member request's for stops and the HOW fields (`member_compute.validate_stops`/`validate_how_fields`); axis lists must be
-non-empty, unique and known; `presented` must lie on the axes. A family
+non-empty, unique and known; `presented` must lie on the axes.
+
+`schedule` (ROUTE_BUILDER 0.9.40) takes two shapes: `{"days_per_week": n}`
+with `n` an integer 1..7 — what the Details card posts — or the full month
+map `{"1": d, …, "12": d}` with each `d` 0..7 and at least one month
+running, the seasonal shape a later UI will post. Omitted means
+`DEFAULT_DAYS_PER_WEEK` (`models/route/model.py`) in every month. The
+resolved echo always carries the month map (`request.schedule`), so one
+posted frequency, the same map spelled out and an omitted block hash to
+the same family. `schedule_mode` no longer exists and is a 400. A family
 larger than `FAMILY_MAX_MEMBERS` (`api/config.py`) is 400
 `family_too_large`.
 

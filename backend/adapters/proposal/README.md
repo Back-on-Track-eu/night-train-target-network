@@ -417,7 +417,7 @@ refresh batch). Rationale for the route side (verified against
 - **genuinely irreducible route data**: per-segment physics (distance,
   driving/dynamics/buffer/slack times, energy, country distance/time
   shares, per-segment geometry), OD pairs (places_sold, avg_price,
-  class_main), parkings, shuntings, timetable warnings, seasonal schedule,
+  class_main), parkings, shuntings, timetable warnings, the month schedule,
   per-stop classification (`stop_type` — not losslessly encoded in GTFS
   pickup/drop_off: "night" and "both" both map to (0,0)), and the compute
   request
@@ -460,8 +460,12 @@ additions:
 - `proposals.parkings`, `proposals.shuntings` — stop_id, stop_name,
   country_code, trip_id(s)
 - `proposals.timetable_warnings` — trip_id, code, interval, speeds, ratio
-- `proposals.seasonal_schedules` — route_id, season, frequency (calendar
-  alone only covers the daily case)
+- `proposals.routes.schedule_months` — days per week for each month, the
+  one home of the operating plan since ROUTE_BUILDER 0.9.40 (the GTFS
+  calendar row is all-weekdays-TRUE whatever the plan: which weekdays a
+  non-daily month runs is not modelled). The two-season projection table
+  that preceded it was folded in and dropped by
+  `db/dev/sql/migrations/2026-09-19_schedule_frequency.sql`
 
 ### 5.3 `proposals.proposals` (slimmed container)
 
@@ -1116,9 +1120,9 @@ architecture already draws:
   from `views.route.per_year`, exactly as it extracts the financial KPIs —
   and computes the `subsidy_eur_per_t_co2` ratio itself.
 
-Forward-looking note: if a demand-*aware* `schedule_mode` ever varies
-seasonal frequency, recheck fingerprinting — frequency is not part of the
-fingerprint (stops/geometry/times only).
+Forward-looking note: if a demand-aware schedule ever varies the
+frequency by month on its own, recheck fingerprinting — frequency is not
+part of the fingerprint (stops/geometry/times only).
 
 Placeholder policy (first implementation, to get API + frontend running):
 the projection fills demand-dependent columns with **deterministic fakes

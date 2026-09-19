@@ -31,7 +31,7 @@ models/
 │   ├── trip.py                      # Stop, Segment, Trip — physics domain objects
 │   ├── route.py                     # Route, TripPair, Parking, Shunting, ODPair, Schedule
 │   ├── route_factory.py             # plan_route() — sole Trip/TripPair/Route constructor
-│   ├── timetable.py                 # Pluggable timetable_mode / schedule_mode / auto_stop_addition strategies
+│   ├── timetable.py                 # Pluggable timetable_mode / auto_stop_addition strategies, the schedule builders
 │   ├── model.py                     # ROUTE_BUILDER_VERSION + all standard values & open TODOs of the route model
 │   └── routing/                     # rail_router.py (GraphHopper wrapper) + dynamics.py (per-stop accel/brake time loss)
 │       ├── rail_router.py           # OpenRailRouting (GraphHopper) wrapper
@@ -82,12 +82,12 @@ models/
 ## Pipeline
 
 ```
-plan_route(trip_pair_inputs, loader, router, schedule_mode, proposal_id, proposal_version, scenario_id)
+plan_route(trip_pair_inputs, loader, router, schedule, proposal_id, proposal_version, scenario_id)
   │
   ├── loader.build_all_compositions()  → CompositionCollection (per composition_id: .get())
   ├── loader.build_all_tracks()       → TrackInfraCollection
   ├── loader.build_all_stops()        → StopInfraCollection
-  ├── schedule_mode SWITCH (here)      → timetable.always_daily_schedule() (only mode today)
+  ├── timetable.schedule_from_dict()  → Schedule from the resolved month map (one per route)
   │
   │  per TripPair (_build_trip_pair()):
   │  outbound direction (_build_trip()):
@@ -176,11 +176,13 @@ bring their own `Route`/demand (the DB seed's hand-crafted example,
 model-layer tests with controlled demand). Serialization stays out of
 `pipeline.py` — that's `api/helpers/member_compute.py`.
 
-`timetable_mode`, `schedule_mode`, and `auto_stop_addition` each have their
-switch (which named behaviour runs) in `route_factory.py`, at whichever
-level owns the relevant context — `schedule_mode` in `plan_route()` (route-
-level, shared across every `TripPair`), `timetable_mode` in `_build_trip()`
-(per-trip, since departure time is direction-specific); `routing_mode`'s
+`timetable_mode` and `auto_stop_addition` each have their switch (which
+named behaviour runs) in `route_factory.py`, at whichever level owns the
+relevant context — `timetable_mode` in `_build_trip()` (per-trip, since
+departure time is direction-specific); the schedule has no switch since
+ROUTE_BUILDER 0.9.40: `plan_route()` takes the month map the API boundary
+resolved (one posted frequency expanded onto twelve months, or a posted
+map) and builds the one `Schedule` every `TripPair` shares; `routing_mode`'s
 switch lives with its implementation in `rail_router.py`'s `route()`.
 `auto_stop_addition` is a two-value enum (`"off"` / `"suggest"`, `"add"`
 removed in 0.9.34) and per-`TripPair`, not per-trip: `_build_trip_pair()`

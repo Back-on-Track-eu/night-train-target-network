@@ -1,5 +1,14 @@
 # Frontend handover — Details (supply, train operation, overhead, demand)
 
+> **Superseded in part (2026-09-19, ROUTE_BUILDER 0.9.40 — manual demand
+> inputs, phase A):** the schedule contract in this document is out of
+> date. `schedule_mode` no longer exists; the request posts `schedule` as
+> `{"days_per_week": 1..7}` (the Details card's one frequency) or a month
+> map, and the resolved echo always carries the month map, default 3 every
+> month. See `docs/2026-09-18_manual_demand_guide.md` and, once written,
+> `docs/FRONTEND_HANDOVER_DEMAND.md`. Everything about prices, the
+> comparison table and the cost tabs still holds.
+
 **Date:** 2026-09-12, revision 2 — supersedes the 2026-09-12 handover of the same name
 **Branch:** `backend-dev`
 **Backend status:** phases 2–4 merged and green (875 passed, 2 skipped).
