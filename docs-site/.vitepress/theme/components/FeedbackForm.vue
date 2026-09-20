@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useData, useRoute } from 'vitepress'
+import { apiUrl } from '../lib/apiBase'
 
-// "Found a mistake?" — posts to the same POST /api/feedback the app uses.
-// Same origin: the docs are served at /docs/ by the app's own nginx, so a
-// relative /api/feedback needs no CORS and no configuration.
+// "Found a mistake?" — the per-page form, appended to every documentation
+// page. Its general counterpart, where the reader picks what the feedback is
+// about, is the /docs/feedback page (GeneralFeedbackForm.vue). Both post to
+// the same POST /api/feedback the app uses; the origin comes from
+// lib/apiBase.ts (same origin in production).
 //
 // category/sub_category are protocol values sent verbatim, not display
 // text. sub_category is the page path, which is why the backend's
@@ -37,7 +40,7 @@ async function submit() {
   status.value = 'submitting'
   errorMsg.value = ''
   try {
-    const resp = await fetch('/api/feedback', {
+    const resp = await fetch(apiUrl('/api/feedback'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

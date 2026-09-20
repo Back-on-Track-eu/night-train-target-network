@@ -62,6 +62,13 @@ The rest of these pages are the model behind those figures: every formula,
 the parameters it reads, the source each parameter came from, and the
 assumptions still standing in for data.
 
+## Telling us something
+
+A missing station, a charge that is out of date, a formula that does not hold
+in your country, a feature the tool needs: the [feedback form](/feedback)
+takes all of it and reaches the working group. Every page here also ends with
+a short form for a correction to that page alone.
+
 [paper]: https://back-on-track.eu/back-on-track-europes-general-position-paper/
 
 <FeedbackForm />

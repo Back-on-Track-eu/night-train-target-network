@@ -87,6 +87,11 @@ _STATIC_CATEGORIES = (
 # section worth calling out separately.
 _ROUTE_TIMETABLE_SUB_CATEGORIES = (
     "Stops / stations",
+    # The one value the app deep-links to: the stop search's empty state links
+    # to /docs/feedback?topic=missing-stop, which preselects this pair. The
+    # alias, not this string, is what travels in the URL (docs-site), so the
+    # wording can change here without breaking a link already in the wild.
+    "Missing stop / suggest new stop",
     "Schedule / timetable / frequency",
     "Routing / track geometry",
     "Composition / rolling stock assignment",

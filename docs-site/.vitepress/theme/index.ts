@@ -2,6 +2,7 @@ import DefaultTheme from 'vitepress/theme'
 import type { Theme } from 'vitepress'
 import Layout from './Layout.vue'
 import FeedbackForm from './components/FeedbackForm.vue'
+import GeneralFeedbackForm from './components/GeneralFeedbackForm.vue'
 import 'katex/dist/katex.min.css'
 import './custom.css'
 
@@ -9,6 +10,11 @@ import './custom.css'
 // import — the emitted cost pages include it, and hand-written pages use
 // the same tag. Renaming it breaks all 30 generated pages, which carry the
 // tag verbatim (see backend/scripts/model_docs/render_site.py).
+//
+// GeneralFeedbackForm is used on one page (feedback.md) and is registered the
+// same way rather than imported there: a markdown file importing from
+// ./.vitepress/theme/components/ is a path that breaks the moment the page
+// moves into a folder.
 //
 // Layout extends the default one with the Back-on-Track masthead; custom.css
 // carries the brand tokens. Neither touches page content.
@@ -24,5 +30,6 @@ export default {
   Layout,
   enhanceApp({ app }) {
     app.component('FeedbackForm', FeedbackForm)
+    app.component('GeneralFeedbackForm', GeneralFeedbackForm)
   },
 } satisfies Theme
