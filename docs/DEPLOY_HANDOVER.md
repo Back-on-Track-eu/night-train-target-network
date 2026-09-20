@@ -944,7 +944,9 @@ simply deleted on the next API start.
 **What it does.** Routes every stop pair under a haversine cap, once per
 routing variant, pass-2-only (each stop is snapped once per gauge profile
 up front — half the calls of a runtime miss), writes a CSV, bulk-loads it.
-Four phases, each independently runnable and resumable.
+Five phases, each independently runnable and resumable — the fifth,
+`--export-upload`, exists for batches routed where the database is not
+reachable (§7a.5).
 
 **Where it runs.** Through the `migrate` service, like
 `refresh_proposals.py` — same network as `openrailrouting`, same database
@@ -982,7 +984,7 @@ rm $RC/route_segments_infra_2026.*        # start the real run clean
 # Phase 1 — the batch (hours). Detached; the container keeps running after logout.
 docker compose run -d --name precompute-infra-2026 -v $RC:/route-cache migrate \
   python scripts/precompute_route_segments.py --graph infra_2026 --out $OUT --cap-km 800 --workers 4
-docker logs -f precompute-infra-2026            # progress every 500 segments: rate, ETA, failures
+docker logs -f precompute-infra-2026            # one progress line every 5 min: share done, rate, ETA, finish time, failures
 
 # Phase 2 — finalize (minutes): completeness check, gzip, meta.json
 docker compose run --rm -v $RC:/route-cache migrate \
@@ -1038,15 +1040,30 @@ rows. Optional; the shared-instance path works, it is just slower for
 everyone during the run.
 
 **Interruptions.** Rerun the exact Phase 1 command (`docker rm` the old
-container first). Already-routed keys are read from the CSV and skipped;
-snapped coordinates come from `.snapped.csv`. Per-pair failures never stop
-the batch — they go to `route_segments_infra_2026.failures.csv` with the
-GraphHopper message. Expect a few hundred: unconnected islands, stops with
-defective coordinates (the ten gauge-NULL stops are the usual suspects),
-`PointNotFound` for stops far from any track. A failed pair is simply
-absent from the cache and, if a user ever requests it, fails live with the
-same 422 it fails with today. Anything systematic — thousands of failures,
-or all failures sharing one stop id — send me the file.
+container first). Already-routed keys are read from the CSV and skipped,
+a half-written final row is truncated automatically, and snapped
+coordinates come from `.snapped.csv`. `--stop-after-h N` ends a run
+cleanly after N hours if you want the container off the graph by morning;
+Ctrl-C does the same on demand. Segments routed elsewhere — an earlier
+run, a `.csv.gz` from a backup, a CSV exported from the server's table —
+are handed over with `--resume-from` and count as done without being
+re-exported.
+
+**Failures.** Per-pair failures never stop the batch. They are classified
+transient (timeout, HTTP 5xx, dropped connection) or permanent (no route,
+point off the network); `--retry-rounds` (default 2) reattempts the
+transient ones after the main pass, `--retry-all` includes the permanent
+ones and `--retry-failures-only` reruns just the file. What is still
+missing at the end is written fresh to
+`route_segments_infra_2026.failures.csv` — stop pair, profile, variant,
+attempt count, class and the last GraphHopper message, plus unsnappable
+pairs as `NotSnapped`. Because the file is rewritten every run it always
+answers "what is missing now". Expect a few hundred: unconnected islands,
+stops with defective coordinates (the ten gauge-NULL stops are the usual
+suspects), `PointNotFound` for stops far from any track. A failed pair is
+simply absent from the cache and, if a user ever requests it, fails live
+with the same 422 it fails with today. Anything systematic — thousands of
+failures, or all failures sharing one stop id — send me the file.
 
 **Verifying the load.** Before/after counts are printed by `--load`;
 independently:
@@ -1088,8 +1105,9 @@ refills from traffic on its own, so nothing is broken — just slower.
 | `No URL configured for graph 'infra_2032'` | Add `OPENRAILROUTING_URL_INFRA_2032` to the `migrate` service environment |
 | `Missing required environment variable(s) for DB connection` | The `migrate` service lacks a `POSTGRES_*` variable the api has |
 | Rate far below the probe, ETA growing | Container CPU-bound — lower `--workers`, or the isolation setup above |
-| `snap failed for <stop>` lines | Stop far from track / bad coordinates — its pairs are skipped, listed as unsnappable in the predict line |
-| `MISMATCH, investigate` at the end | Routed+failed ≠ predicted — the run was cut short; rerun Phase 1 |
+| `snapping: N … unsnappable` | Stop far from track / bad coordinates — its pairs are skipped and listed as `NotSnapped` in the failures file |
+| `stopped early` at the end | `--stop-after-h` elapsed or Ctrl-C — expected; rerun Phase 1 to continue |
+| `MISMATCH, investigate` at the end | Routed+failed ≠ predicted with nothing stopped — rerun Phase 1, which re-derives everything from the file |
 | `--load` prints `graph import changed` | The graph was re-imported after the batch — the file is stale; rerun |
 
 ### 7a.4 Capacity note
@@ -1098,6 +1116,31 @@ With the cache serving, a `/calc` is Postgres lookups + evaluation instead
 of GraphHopper waits — §7(a)'s worker/thread reasoning shifts accordingly;
 GraphHopper CPU (§7(d)) now matters mostly during a precompute batch, which
 is also when a second instance would earn its keep.
+
+### 7a.5 Batches routed off-site (laptop), uploaded by hand
+
+When the machine with spare CPU at night is not the machine with database
+access, the same script routes locally and ships a pgAdmin kit instead of
+calling `--load`:
+
+```powershell
+uv run python scripts/precompute_route_segments.py --graph infra_2026 --cap-km 800 --workers 4 --stop-after-h 9
+uv run python scripts/precompute_route_segments.py --graph infra_2026 --cap-km 800 --finalize
+uv run python scripts/precompute_route_segments.py --graph infra_2026 --export-upload --split-mb 250
+```
+
+`--export-upload` writes `upload_<graph>/`: the CSV in ≤250 MB parts plus
+`01_create_staging.sql`, `02_merge.sql`, `03_drop_staging.sql` and a
+README with the pgAdmin click-path. The merge goes through a staging table
+because the file carries neither the graph key nor the source, and it uses
+`ON CONFLICT DO NOTHING`, so it is idempotent and safe on top of rows
+traffic already stored. `02_merge.sql` refuses the load outright when
+`route_cache.graph_state.import_date` on the server differs from the
+import the file was routed against — the one failure mode of an off-site
+batch, caught before it seeds routes for the wrong network.
+
+Full runbook, including what to check before the first night:
+`docs/2026-09-21_route_cache_precompute_laptop_runbook.md`.
 
 ---
 

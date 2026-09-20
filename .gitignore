@@ -156,3 +156,9 @@ desktop.ini
 backend/models/infrastructure/stops/charges/sources/
 # Jupyter autosave state
 
+# Route-segment precompute artefacts (backend/scripts/precompute_route_segments.py):
+# the routed CSV runs to gigabytes, the snapped/failure sidecars and the
+# pgAdmin upload kit are derived from it, and every one of them is
+# regenerable. The .gz + .meta.json pair belongs on Drive, not in git.
+backend/scripts/data/route_segments_*
+backend/scripts/data/upload_*/

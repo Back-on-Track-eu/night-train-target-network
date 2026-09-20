@@ -515,7 +515,13 @@ scenario ids are in the key — nothing they change is stored.
 Front-loading: `scripts/precompute_route_segments.py --graph <key>` routes
 every pair under a distance cap once and bulk-loads the CSV (`--load`, or
 `db/dev/seed.py` picking up `db/dev/data/route_segments_<key>.csv.gz` on a
-dev reseed). Deploy and run notes: `docs/DEPLOY_HANDOVER.md` §7a.
+dev reseed). The batch is built to survive a long night: it resumes from
+its own output, retries transient failures, reports what is still missing
+in `<out>.failures.csv`, and can stop on a clock (`--stop-after-h`). Where
+the database is not reachable from the routing machine, `--export-upload`
+writes a pgAdmin kit (CSV parts + staging/merge SQL) instead of loading.
+Deploy and run notes: `docs/DEPLOY_HANDOVER.md` §7a; off-site batches:
+`docs/2026-09-21_route_cache_precompute_laptop_runbook.md`.
 
 ## Verifying the Gauge Profiles
 

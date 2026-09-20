@@ -455,8 +455,14 @@ UNLOGGED, disposable, never a source of truth. Declared in
 Dev reseed drops the schema and bulk-loads any
 `db/dev/data/route_segments_<graph_key>.csv.gz` (optionally Drive-hosted via
 `ROUTE_SEGMENTS_FILE_ID_<KEY>`); servers load via
-`scripts/precompute_route_segments.py --load`. Not versioned: a cache row is
-either right for its graph import or purged with it.
+`scripts/precompute_route_segments.py --load`, or — when the batch ran on a
+machine without database access — through the staging table and merge SQL
+that `--export-upload` generates for a pgAdmin import
+(`docs/2026-09-21_route_cache_precompute_laptop_runbook.md`). Both paths are
+`ON CONFLICT DO NOTHING` on `(routing_graph_key, stop_lo, stop_hi,
+variant_key)`, so a load never disturbs rows traffic already stored. Not
+versioned: a cache row is either right for its graph import or purged with
+it.
 
 ### `family`
 
