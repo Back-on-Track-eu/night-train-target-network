@@ -34,10 +34,21 @@ Public interface:
                                                     versions — are the
                                                     repository's concern
                                                     at publish time.)
+  corridor_segments(route)                → dict  (§5.4a — the route's
+                                                    per-segment shapes keyed
+                                                    by direction-collapsed
+                                                    stop pair, the
+                                                    `segments` column of a
+                                                    scenario row)
+  compact_route_geometry(route, pool)     → tuple (§5.4a — the same two
+                                                    geometry outputs from a
+                                                    family document's
+                                                    compact route)
 
 Callers: api/helpers/member_compute.py (fingerprint only, for the
-merged compute response); repository.py (both functions, at
-publish/refresh time).
+merged compute response); repository.py (build_summary_db_row, at
+publish/refresh time); api/helpers/scenario_summaries.py (the last two,
+once per scenario variant).
 """
 
 from __future__ import annotations
@@ -125,8 +136,44 @@ def _geom_simplified(route: dict) -> dict:
     (outbound and return, every pair), collected into a MultiLineString,
     Douglas-Peucker simplified — the geom_simplified GeoJSON handed to the
     repository for ST_GeomFromGeoJSON/ST_SetSRID at insert time (WP5)."""
+    return _simplified_multiline(trip_coordinate_lists(route))
+
+
+def _simplified_multiline(lines: list[list]) -> dict:
+    """One trip's coordinates per entry → the simplified MultiLineString
+    GeoJSON. Shared by the full-route and compact-route paths so both
+    produce byte-identical geometry for the same route."""
     from shapely.geometry import LineString, MultiLineString, mapping
 
+    simplified = MultiLineString([LineString(coords) for coords in lines]).simplify(
+        GEOM_SIMPLIFY_TOLERANCE_DEG, preserve_topology=False
+    )
+    # simplify() on a MultiLineString collapses to a plain LineString when
+    # only one line survives — normalize back so geom_simplified always
+    # matches the column's MultiLineString type.
+    if simplified.geom_type == "LineString":
+        simplified = MultiLineString([simplified])
+    return mapping(simplified)
+
+
+# =============================================================================
+# CORRIDOR SEGMENTS — §5.4a
+# =============================================================================
+
+
+def corridor_key(stop_a: str, stop_b: str) -> str:
+    """The direction-collapsed stop pair the gallery's corridor map groups
+    on — the two ids sorted and joined with a double underscore, the same
+    form the map_lines SQL builds with LEAST/GREATEST for the base route."""
+    lo, hi = sorted((stop_a, stop_b))
+    return f"{lo}__{hi}"
+
+
+def trip_coordinate_lists(route: dict) -> list[list]:
+    """Each trip's segment shapes concatenated into one coordinate list —
+    the input both geometry outputs below are built from. Accepts the FULL
+    route dict (route_to_dict()) only; the family document's compact route
+    is widened by compact_route_geometry() first."""
     geometries_by_id = {g["id"]: g["coords"] for g in route.get("geometries", [])}
     lines = []
     for pair in route["trip_pairs"]:
@@ -137,14 +184,67 @@ def _geom_simplified(route: dict) -> dict:
                 for pt in geometries_by_id.get(seg["geometry_id"], [])
             ]
             if len(coords) >= 2:
-                lines.append(LineString(coords))
+                lines.append(coords)
+    return lines
 
-    simplified = MultiLineString(lines).simplify(
-        GEOM_SIMPLIFY_TOLERANCE_DEG, preserve_topology=False
-    )
-    # simplify() on a MultiLineString collapses to a plain LineString when
-    # only one line survives — normalize back so geom_simplified always
-    # matches the column's MultiLineString type.
-    if simplified.geom_type == "LineString":
-        simplified = MultiLineString([simplified])
-    return mapping(simplified)
+
+def compact_route_geometry(
+    compact_route: dict, geometry_pool: dict[str, list]
+) -> tuple[dict, dict[str, dict]]:
+    """(geom_simplified, corridor segments) for a family document's COMPACT
+    route (api/helpers/route_serialize.py's route_compact_to_dict()) plus
+    the document's content-addressed geometry pool.
+
+    The compact shape drops each segment's from_stop/to_stop in favour of
+    `from`/`to` indices into the trip's own `stops` list, and moves the
+    coordinates into the shared pool — so both outputs are derived the
+    same way as from a full route, only with one lookup more. This is what
+    lets a publish project its §5.4a rows straight out of the family the
+    builder already computed, instead of rebuilding every member.
+    """
+    lines: list[list] = []
+    corridors: dict[str, dict] = {}
+    for pair in compact_route["trip_pairs"]:
+        for trip in (pair["outbound"], pair["return_trip"]):
+            stops = trip["stops"]
+            coords: list = []
+            for seg in trip["segments"]:
+                shape = geometry_pool.get(seg["geometry_id"]) or []
+                coords.extend(shape)
+                if len(shape) < 2:
+                    continue
+                key = corridor_key(
+                    stops[seg["from"]]["stop_id"], stops[seg["to"]]["stop_id"]
+                )
+                corridors.setdefault(
+                    key,
+                    {"type": "LineString", "coordinates": [list(c) for c in shape]},
+                )
+            if len(coords) >= 2:
+                lines.append(coords)
+    return _simplified_multiline(lines), corridors
+
+
+def corridor_segments(route: dict) -> dict[str, dict]:
+    """{corridor key: GeoJSON LineString} over every segment of every trip.
+    A non-base scenario's route is not in proposals.segments/shapes, so
+    this is where its corridors come from when the gallery draws that
+    variant. One representative shape per pair (the first seen — outbound
+    and return run the same line); segments without a shape are skipped,
+    which is what map_lines does for the base route too."""
+    geometries_by_id = {g["id"]: g["coords"] for g in route.get("geometries", [])}
+    corridors: dict[str, dict] = {}
+    for pair in route["trip_pairs"]:
+        for trip in (pair["outbound"], pair["return_trip"]):
+            for seg in trip["segments"]:
+                coords = geometries_by_id.get(seg["geometry_id"])
+                if not coords or len(coords) < 2:
+                    continue
+                key = corridor_key(
+                    seg["from_stop"]["stop_id"], seg["to_stop"]["stop_id"]
+                )
+                corridors.setdefault(
+                    key,
+                    {"type": "LineString", "coordinates": [list(c) for c in coords]},
+                )
+    return corridors

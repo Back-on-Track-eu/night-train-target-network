@@ -69,8 +69,20 @@ def filter_proposals():
         "sort":    [{"by": <column>, "dir": "asc"|"desc"}],
         "limit":   int (default 50), "offset": int,
         "include": ["summaries", "map_lines", "map_routes",
-                    "map_stop_counts", "map_country_counts"]
+                    "map_stop_counts", "map_country_counts"],
+        "scenario_variant_id": int                 // §5.4a, see below
       }
+
+    scenario_variant_id swaps the proposal side's FIGURES for that
+    variant's (proposals.proposal_scenario_summaries, §5.4a): KPIs, sort
+    order, corridors and per-card geometry follow the scenario, while the
+    set of proposals a filter returns is the base projection's and never
+    changes with the scenario. Existing (ONTD) rows are scenario-
+    independent. A proposal the family could not compute on that variant
+    is listed with status "error" and null figures; one whose rows have
+    not been backfilled yet with status "missing" (and its base geometry).
+    Omitted, every section reads the base projection exactly as before.
+    An unknown or non-current variant is a 400.
 
     filter.sources picks the gallery's source union (WP10 step 6b):
     ["proposal"], ["existing"] (the ONTD catalog of real night trains),
@@ -168,6 +180,21 @@ def _list_response(body: dict):
     filters = body.get("filter", {})
     include = body.get("include") or DEFAULT_INCLUDE
 
+    variant = body.get("scenario_variant_id")
+    if variant is not None and not _is_current_variant(variant):
+        return (
+            jsonify(
+                {
+                    "error": "unknown_scenario_variant",
+                    "message": (
+                        f"scenario_variant_id {variant} is not a variant of a "
+                        "current scenario — see GET /api/scenarios."
+                    ),
+                }
+            ),
+            400,
+        )
+
     response = {}
     # Shared by summaries and map_routes: the two sections must describe the
     # SAME window, or the map draws routes for cards that are not on screen.
@@ -181,23 +208,46 @@ def _list_response(body: dict):
             sort=sort,
             limit=limit,
             offset=offset,
+            scenario_variant_id=variant,
         )
         response["summaries"] = {
             "total": total,
+            "scenario_variant_id": variant,
             "proposals": [summary_row_to_dict(row) for row in rows],
         }
     if "map_routes" in include:
         response["map_routes"] = map_routes_to_geojson(
-            repo.map_routes(filters, sort=sort, limit=limit, offset=offset)
+            repo.map_routes(
+                filters,
+                sort=sort,
+                limit=limit,
+                offset=offset,
+                scenario_variant_id=variant,
+            )
         )
     if "map_lines" in include:
-        response["map_lines"] = map_lines_to_geojson(repo.map_lines(filters))
+        response["map_lines"] = map_lines_to_geojson(
+            repo.map_lines(filters, scenario_variant_id=variant)
+        )
     if "map_stop_counts" in include:
         response["map_stop_counts"] = map_stop_counts_to_dict(
-            repo.map_stop_counts(filters)
+            repo.map_stop_counts(filters, scenario_variant_id=variant)
         )
     if "map_country_counts" in include:
         response["map_country_counts"] = map_country_counts_to_geojson(
-            repo.map_country_counts(filters)
+            repo.map_country_counts(filters, scenario_variant_id=variant)
         )
     return jsonify(response), 200
+
+
+def _is_current_variant(scenario_variant_id: int) -> bool:
+    """Whether the id names a variant of a current scenario — the set
+    GET /api/scenarios offers and the §5.4a rows are written for."""
+    loader = get_loader()
+    current = {
+        s.scenario_id for s in loader.list_all_scenarios() if s.is_current_scenario
+    }
+    return any(
+        v.scenario_variant_id == scenario_variant_id and v.scenario_id in current
+        for v in loader.list_scenario_variants()
+    )

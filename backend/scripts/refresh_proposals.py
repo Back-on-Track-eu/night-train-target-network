@@ -52,8 +52,21 @@ calls themselves run with use_cache=False: the flush just emptied the
 member cache and each outdated proposal is computed exactly once, so
 hits are impossible here.
 
+Scenario rows (§5.4a): every refresh also rewrites the proposal's
+proposal_scenario_summaries rows, the same way a publish does. The
+--scenario-summaries mode is the BACKFILL for those rows alone —
+proposals whose rows are missing, behind the container's version or the
+running code, or not covering every current variant (list_scenario_
+backfill()) get their rows recomputed without touching the container,
+the route or the base summary. Run it once after deploying the migration
+that introduced the table, and after the scenario catalogue gains a
+variant. A variant whose routing graph this deployment does not serve is
+stored as an error row, so rerunning later — after the instance exists —
+is what fills it in.
+
 Usage:
     uv run --extra dev python -m scripts.refresh_proposals [--dry-run] [--limit N] [--concurrency N]
+    uv run --extra dev python -m scripts.refresh_proposals --scenario-summaries [--dry-run] [--limit N] [--concurrency N]
 """
 
 from __future__ import annotations
@@ -66,15 +79,30 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from adapters.proposal.repository import outdated_trigger
 from api.helpers import dependencies
 from api.helpers.member_compute import compute_member
+from api.helpers.scenario_summaries import compute_scenario_rows
 
 logger = logging.getLogger(__name__)
 
 
-def _compute_one(row: dict) -> tuple[dict, dict]:
+def _host_env_defaults() -> None:
+    """Host-side defaults matching tests/conftest.py's DB_CONFIG exactly —
+    setdefault() is a no-op wherever a container has already injected
+    the compose-network values (POSTGRES_HOST=postgres etc.), so this
+    is safe in both contexts. See module docstring for why this is
+    deliberately NOT a load_dotenv() against backend/docker/.env."""
+    os.environ.setdefault("POSTGRES_HOST", "localhost")
+    os.environ.setdefault("POSTGRES_PORT", "5432")
+    os.environ.setdefault("POSTGRES_DB", "target_network_test_db")
+    os.environ.setdefault("POSTGRES_USER", "bot_admin")
+    os.environ.setdefault("POSTGRES_PASSWORD", "devpassword")
+
+
+def _compute_one(row: dict) -> tuple[dict, list[dict], dict]:
     """Runs on a worker thread on the shared singletons; the RailRouter is
     resolved per proposal by compute_member() from the scenario's
     routing_graph_key pin (see api/helpers/dependencies.py). Returns
-    (computed, trigger); the DB write happens back on the main thread."""
+    (computed, scenario_rows, trigger); the DB write happens back on the
+    main thread."""
     trigger = outdated_trigger(row)
     # Can't happen in practice — list_outdated() already filtered to
     # exactly the rows outdated_trigger() agrees are outdated — but a
@@ -93,7 +121,64 @@ def _compute_one(row: dict) -> tuple[dict, dict]:
     # rule applied on the read path).
     refresh_request["scenario_id"] = None
     computed, _ = compute_member(refresh_request, use_cache=False)
-    return computed, trigger
+    return computed, compute_scenario_rows(computed["request"]), trigger
+
+
+def _compute_scenario_rows_one(row: dict) -> list[dict]:
+    """The backfill's worker: the §5.4a rows for one proposal from its
+    stored compute_request, on the current pins."""
+    return compute_scenario_rows(row["compute_request"])
+
+
+def run_scenario_backfill(
+    dry_run: bool = False,
+    limit: int | None = None,
+    concurrency: int = 1,
+) -> int:
+    """--scenario-summaries: fill or refresh the scenario rows of every
+    proposal list_scenario_backfill() reports, leaving everything else
+    stored untouched. Returns the number of failures."""
+    _host_env_defaults()
+    dependencies.init()
+    repo = dependencies.get_proposal_repository()
+
+    queue = repo.list_scenario_backfill(limit=limit)
+    logger.info("%d proposal(s) need scenario rows.", len(queue))
+    if not queue or dry_run:
+        for row in queue:
+            logger.info(
+                "[dry-run] would write scenario rows for proposal_id=%s",
+                row["proposal_id"],
+            )
+        return 0
+
+    failures = 0
+    with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
+        future_to_row = {
+            pool.submit(_compute_scenario_rows_one, row): row for row in queue
+        }
+        for future in as_completed(future_to_row):
+            row = future_to_row[future]
+            try:
+                rows = future.result()
+                repo.replace_scenario_summaries(row["proposal_id"], rows)
+                n_ok = sum(1 for r in rows if r["status"] == "ok")
+                logger.info(
+                    "scenario rows written for proposal_id=%s (%d ok, %d error)",
+                    row["proposal_id"],
+                    n_ok,
+                    len(rows) - n_ok,
+                )
+            except Exception:
+                failures += 1
+                logger.exception(
+                    "scenario rows failed for proposal_id=%s", row["proposal_id"]
+                )
+
+    logger.info(
+        "Scenario backfill complete: %d ok, %d failed.", len(queue) - failures, failures
+    )
+    return failures
 
 
 def run(
@@ -103,17 +188,7 @@ def run(
 ) -> int:
     """Returns the number of proposals that failed to refresh (0 = fully
     clean run, including the trivial case of nothing being outdated)."""
-    # Host-side defaults matching tests/conftest.py's DB_CONFIG exactly —
-    # setdefault() is a no-op wherever a container has already injected
-    # the compose-network values (POSTGRES_HOST=postgres etc.), so this
-    # is safe in both contexts. See module docstring for why this is
-    # deliberately NOT a load_dotenv() against backend/docker/.env.
-    os.environ.setdefault("POSTGRES_HOST", "localhost")
-    os.environ.setdefault("POSTGRES_PORT", "5432")
-    os.environ.setdefault("POSTGRES_DB", "target_network_test_db")
-    os.environ.setdefault("POSTGRES_USER", "bot_admin")
-    os.environ.setdefault("POSTGRES_PASSWORD", "devpassword")
-
+    _host_env_defaults()
     dependencies.init()
     repo = dependencies.get_proposal_repository()
 
@@ -143,8 +218,13 @@ def run(
         for future in as_completed(future_to_row):
             row = future_to_row[future]
             try:
-                computed, trigger = future.result()
-                repo.refresh_proposal(row["proposal_id"], computed, detail=trigger)
+                computed, scenario_rows, trigger = future.result()
+                repo.refresh_proposal(
+                    row["proposal_id"],
+                    computed,
+                    detail=trigger,
+                    scenario_rows=scenario_rows,
+                )
                 logger.info(
                     "refreshed proposal_id=%s (%s: %s -> %s)",
                     row["proposal_id"],
@@ -178,13 +258,21 @@ def main() -> None:
         default=1,
         help="Worker threads for the live-routing compute step (see module docstring).",
     )
+    parser.add_argument(
+        "--scenario-summaries",
+        action="store_true",
+        help="Backfill the §5.4a scenario rows only (see module docstring).",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(message)s"
     )
 
-    failures = run(dry_run=args.dry_run, limit=args.limit, concurrency=args.concurrency)
+    runner = run_scenario_backfill if args.scenario_summaries else run
+    failures = runner(
+        dry_run=args.dry_run, limit=args.limit, concurrency=args.concurrency
+    )
     raise SystemExit(1 if failures else 0)
 
 

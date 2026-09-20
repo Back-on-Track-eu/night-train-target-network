@@ -98,6 +98,13 @@ def validate_list_body(body: dict) -> list[str]:
         ):
             errors.append(f"'{key}' must be a non-negative integer if provided.")
 
+    # §5.4a: a top-level field, not a filter — it picks which projection
+    # the proposal side is read from, not which rows pass. Existence is
+    # checked against the scenario catalogue by the view (a DB lookup).
+    variant = body.get("scenario_variant_id")
+    if variant is not None and not (isinstance(variant, int) and variant > 0):
+        errors.append("'scenario_variant_id' must be a positive integer if provided.")
+
     return errors
 
 
@@ -322,6 +329,16 @@ def summary_row_to_dict(row: dict) -> dict:
     system (batch refresh + on-load fallback), so there's nothing for a
     reader of this row to act on.
 
+    Three §5.4a fields ride every proposal row: status — "ok" on the base
+    projection and on a computed scenario row, "error" when the family
+    could not compute the proposal on the requested variant, "missing"
+    when its rows for that variant have not been written yet — error_code
+    (the member's code, else null) and scenario_variant_id (the variant the
+    row describes; null on the base projection). Whatever the status, the
+    row is listed with its identity and the filterable columns from the
+    base projection: a scenario changes the figures, never the result set.
+    Only the figures are null on a non-ok row.
+
     "existing" rows (ONTD catalog, §5.5 decision 23): the reduced,
     descriptive shape — identity (route_id, name), the shared metric
     subset (country_relations included: both projections derive the
@@ -363,13 +380,16 @@ def summary_row_to_dict(row: dict) -> dict:
         "scenario_id": row["scenario_id"],
         "route_builder_version": row["route_builder_version"],
         "calc_version": row["calc_version"],
+        "status": row.get("status") or "ok",
+        "error_code": row.get("error_code"),
+        "scenario_variant_id": row.get("scenario_variant_id"),
         "total_distance_km": _to_float(row["total_distance_km"]),
         "total_time_h": _to_float(row["total_time_h"]),
         "avg_speed_kmh": _to_float(row["avg_speed_kmh"]),
         "n_stops": row["n_stops"],
-        "countries": list(row["countries"]),
-        "country_relations": list(row["country_relations"]),
-        "stop_ids": list(row["stop_ids"]),
+        "countries": list(row["countries"] or []),
+        "country_relations": list(row["country_relations"] or []),
+        "stop_ids": list(row["stop_ids"] or []),
         "cost_eur_per_train_km": _to_float(row["cost_eur_per_train_km"]),
         "revenue_eur_per_train_km": _to_float(row["revenue_eur_per_train_km"]),
         "margin_eur_per_train_km": _to_float(row["margin_eur_per_train_km"]),

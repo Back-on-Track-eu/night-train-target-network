@@ -3,8 +3,10 @@ publish_dispatch.py
 ====================
 POST /api/proposal/publish's case-dispatch (adapters/proposal/README.md §2.2). All persisting case distinctions in one small component: validate
 the publish envelope, enforce the base-scenario rule, compute (never
-trust a client-supplied result), and hand off to
-adapters/proposal/repository.py's publish() for the actual write.
+trust a client-supplied result), project the same proposal on every
+current scenario variant (api/helpers/scenario_summaries.py, §5.4a), and
+hand off to adapters/proposal/repository.py's publish() for the actual
+write.
 
 Deliberately Flask-agnostic beyond taking user_id as a plain argument —
 api/proposal_publish.py reads it off g.user_id (the auth layer) and
@@ -25,6 +27,7 @@ from __future__ import annotations
 
 from api.helpers.dependencies import get_loader, get_proposal_repository
 from api.helpers.member_compute import compute_member, validate_calc_body
+from api.helpers.scenario_summaries import compute_scenario_rows
 
 
 class ScenarioNotBaseError(Exception):
@@ -103,6 +106,10 @@ def dispatch_publish(body: dict, user_id: int) -> dict:
     # (cached payloads are exclusively server-written), so the cache_hit
     # flag is irrelevant here — publish never exposes it.
     computed, _ = compute_member(compute_request)
+    # §5.4a — the same proposal on every current variant, from the
+    # resolved echo (composition and HOW fields as the member settled
+    # them), so the scenario rows describe exactly the member stored.
+    scenario_rows = compute_scenario_rows(computed["request"])
 
     repo = get_proposal_repository()
     return repo.publish(
@@ -112,4 +119,5 @@ def dispatch_publish(body: dict, user_id: int) -> dict:
         computed=computed,
         proposal_id=proposal_id,
         based_on_proposal_id=based_on_proposal_id,
+        scenario_rows=scenario_rows,
     )
