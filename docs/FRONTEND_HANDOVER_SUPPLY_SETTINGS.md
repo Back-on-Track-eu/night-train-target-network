@@ -5,8 +5,8 @@
 > date. `schedule_mode` no longer exists; the request posts `schedule` as
 > `{"days_per_week": 1..7}` (the Details card's one frequency) or a month
 > map, and the resolved echo always carries the month map, default 3 every
-> month. See `docs/2026-09-18_manual_demand_guide.md` and, once written,
-> `docs/FRONTEND_HANDOVER_DEMAND.md`. Everything about prices, the
+> month. See `docs/2026-09-18_manual_demand_guide.md` and
+> `docs/FRONTEND_HANDOVER_DEMAND.md` (written 2026-09-20). Everything about prices, the
 > comparison table and the cost tabs still holds.
 
 **Date:** 2026-09-12, revision 2 — supersedes the 2026-09-12 handover of the same name

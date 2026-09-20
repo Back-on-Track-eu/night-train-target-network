@@ -7,9 +7,11 @@ backend, in one place. Supersedes `deploy/HANDOVER.md` (2026-08-10),
 deleted.
 
 Updated after each change that touches deploy, capacity or server data.
-Last update 2026-09-16 (gate page carries the launch text and a slideshow;
-media fetched from Drive at image build — rebuild only, one curl to verify,
-§20; before that
+Last update 2026-09-20 (manual demand inputs — two migrations, three model
+bumps, and `deploy.sh` now runs `refresh_proposals.py` after the health
+check on every deploy, §4f; before that 2026-09-16 gate page carries the
+launch text and a slideshow; media fetched from Drive at image build —
+rebuild only, one curl to verify, §20; before that
 2026-09-13 new `infra_2026` OSM base with the Messina train
 ferry — graph cache wipe on your next restart, §4e; 2026-09-12
 CALC 0.9.29 — catering on the summary, two new columns, §4d; 2026-09-07
@@ -57,6 +59,18 @@ WP14 connection pool + gunicorn gthread, the calc matrix endpoint and CALC
 > The compute cache must be truncated either way — a cached route carries
 > the old buffer minutes.
 
+> **Update 2026-09-20 — manual demand inputs (ROUTE_BUILDER 0.9.40, DEMAND
+> 0.1.0, CALC 0.9.34, EMISSIONS 0.2.0): two SQL migrations, every stored
+> proposal recomputes, and `deploy.sh` grows a step.** Two migration files
+> (`2026-09-19_schedule_frequency.sql`, `2026-09-19b_manual_demand.sql`)
+> apply themselves through `migrate.py` as always. Every published proposal
+> is outdated by the version bumps and now recomputes as part of the deploy:
+> `deploy.sh` runs `scripts/refresh_proposals.py` inside the api container
+> after the health check (§4f). One new optional env knob,
+> `REFRESH_CONCURRENCY` (default 2). Read §4f before the staging deploy —
+> in particular the note on how long the refresh takes and on the demand
+> KPIs of a proposal nobody has recomputed yet.
+
 **If you read one section:** §3 is the deploy currently queued for staging,
 §4 and §4a are mandatory cache wipes that come with it, and §7 is the
 capacity work that is genuinely yours to schedule.
@@ -70,6 +84,7 @@ capacity work that is genuinely yours to schedule.
 | §4a | **Route builder 0.9.31 — truncate and re-precompute the segment cache** |
 | §4b | Route builder 0.9.32 — one migration, compute-cache truncate only |
 | §4e | **New `infra_2026` OSM base — wipe the graph cache on your next restart** |
+| §4f | **Manual demand inputs — two migrations, then `refresh_proposals` on every deploy** |
 | §5 | Standing gotchas on every staging deploy |
 | §6 | How deploy relates to the backend `.env` |
 | §7 | **Capacity: routing under batch load** |
@@ -632,6 +647,89 @@ old content; repeat the wipe.
 `scripts/refresh_proposals.py` is optional here. Published proposals near
 the strait will show different numbers once recomputed; everything else is
 unchanged, and the next refresh you run for any other reason picks them up.
+
+---
+
+## 4f. Manual demand inputs — two migrations, then `refresh_proposals` on every deploy
+
+**Action:** none by hand on a normal deploy — `migrate.py` applies both
+files, `deploy.sh` runs the refresh. Read the notes on duration and on
+un-refreshed rows. **Stops applying** once this batch is on both
+environments, except that the refresh step in `deploy.sh` stays for good.
+
+### What changed on the server side
+
+1. **Two migrations, in filename order, one transaction each**
+   (`backend/db/dev/sql/migrations/`):
+
+   - `2026-09-19_schedule_frequency.sql` — the compute request loses
+     `schedule_mode`; every stored `compute_request` is rewritten in place
+     (`alwaysDaily` → a flat seven, `custom` keeps its month map);
+     `proposals.routes.schedule_months` becomes `NOT NULL` after the old
+     two-season projection (`proposals.seasonal_schedules`) is folded into
+     it, then that table is **dropped**; one `proposals.update_log` row
+     per rewritten proposal, event `migrated` (a new event value — the
+     timeline renders it generically). Refuses, loudly, if any `routes`
+     row has neither a month map nor a projection; there is none on any
+     seeded or deployed database.
+   - `2026-09-19b_manual_demand.sql` — `proposals.od_pairs.places_sold`
+     `INTEGER` → `DOUBLE PRECISION` (a table rewrite; seconds at today's
+     size, plan a minute at 10× — it takes an exclusive lock);
+     `proposal_summaries.shift_car_*` **renamed** `shift_other_*`;
+     `demand_kpis_placeholder` defaults `FALSE`; comments.
+
+   Both are idempotent and were run twice against a mini schema. Nothing
+   in them changes a number: the numbers change when the refresh recomputes.
+
+2. **Three model bumps mark every stored proposal outdated:**
+   `ROUTE_BUILDER_VERSION` 0.9.39 → 0.9.40 (request shape, default 3 days a
+   week instead of 7), `CALC_VERSION` 0.9.32 → 0.9.34 (the demand behind
+   every revenue figure; the demand KPIs on the summary are real now),
+   `EMISSIONS_MODEL_VERSION` 0.1.2 → 0.2.0 (389 / 132 / 14 g CO₂e/pkm — the
+   CO₂ savings move a lot, upward for long routes). The family caches need
+   no action (versions are in the key). The compute cache: the same
+   `TRUNCATE proposals.compute_cache;` as always, before the refresh.
+
+3. **`deploy.sh` step 5 — the refresh.** After the health check:
+
+   ```bash
+   docker compose exec -T api python -m scripts.refresh_proposals --concurrency "${REFRESH_CONCURRENCY:-2}"
+   ```
+
+   Idempotent and resumable; a no-op when nothing is outdated, so it costs
+   seconds on every later deploy. On THIS deploy it recomputes every
+   proposal on the environment. Budget roughly **one to two seconds per
+   proposal at concurrency 2** on the shared routing engine (§7 numbers;
+   the segment cache absorbs most of the routing). A failure is logged as a
+   `WARNING` and does not fail the deploy: the on-load fallback recomputes
+   a proposal the moment someone opens it, and the script can be rerun by
+   hand to retry the failures.
+
+4. **Until a proposal is refreshed** it reads with the OLD demand figures
+   and `demand_kpis_placeholder = TRUE` in the gallery — the flag now means
+   exactly "not yet recomputed under the manual demand model". The gallery
+   keeps badging those rows; once the refresh has run there are none.
+
+5. **New schedule semantics.** Stored proposals that ran daily keep
+   running daily after the rewrite (the flat seven); a NEW proposal starts
+   at three days a week. Existing summaries therefore do not move on the
+   schedule; new ones will look emptier at first sight than before — this
+   is the model's new default, not a regression.
+
+**Env knobs:** `REFRESH_CONCURRENCY` (optional, default 2) in
+`deploy/bot-server-app/.env`. No image or capacity change, no routing-graph
+work.
+
+### Rollback
+
+The schedule migration is not reversible by rollback of the api image
+alone: an older api expects `schedule_mode` in `compute_request` and the
+`seasonal_schedules` table. Roll back only together with a database
+restore from before the migration. The demand migration is benign on
+rollback (`DOUBLE PRECISION` reads as a number, the renamed columns are
+never selected by an older gallery query — but an older api that WRITES a
+summary would fail on the missing `shift_car_*` columns, which is the same
+reason to restore rather than roll the schema forward-and-back).
 
 ---
 
