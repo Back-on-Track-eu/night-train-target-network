@@ -2,11 +2,12 @@ import { describe, expect, test } from 'vitest'
 import {
   buildRelationToken,
   parseRelationToken,
-  corridorState,
   corridorBounds,
+  corridorPresenceFilter,
   corridorWidthExpression,
   featureBounds,
   routeForRow,
+  CORRIDOR_KINDS,
   CORRIDOR_WIDTH_STOPS,
 } from './galleryMap'
 import type {
@@ -59,23 +60,37 @@ describe('parseRelationToken', () => {
   })
 })
 
-describe('corridorState', () => {
-  test('is proposed only when no real train runs the corridor', () => {
-    expect(corridorState({ proposal_count: 3, existing_count: 0 })).toBe('proposed')
-    expect(corridorState({ proposal_count: 0, existing_count: 2 })).toBe('existing')
+describe('CORRIDOR_KINDS', () => {
+  // Draw order, and the reason the array is ordered at all: proposals are the
+  // thing the gallery collects, so they go on top of the trains already there.
+  test('draws existing corridors before proposed ones', () => {
+    expect(CORRIDOR_KINDS.indexOf('existing')).toBeLessThan(CORRIDOR_KINDS.indexOf('proposed'))
   })
+})
 
-  // Deliberately two states, not three: a proposal on top of a served corridor
-  // does not stop a train running there, so "existing" wins.
-  test('reads a corridor that is both as existing', () => {
-    expect(corridorState({ proposal_count: 1, existing_count: 1 })).toBe('existing')
+describe('corridorPresenceFilter', () => {
+  // One feature collection, two layers: each draws only the corridors its own
+  // kind actually runs on, so a corridor carrying both is drawn twice.
+  test('keeps only corridors carrying that kind of traffic', () => {
+    expect(corridorPresenceFilter('proposed')).toEqual(['>', ['get', 'proposal_count'], 0])
+    expect(corridorPresenceFilter('existing')).toEqual(['>', ['get', 'existing_count'], 0])
   })
 })
 
 describe('corridorWidthExpression', () => {
-  test('is a MapLibre interpolate over total_count', () => {
-    const expr = corridorWidthExpression()
-    expect(expr.slice(0, 3)).toEqual(['interpolate', ['linear'], ['get', 'total_count']])
+  // Per-kind counts, not total_count: with both layers on screen, thickness
+  // must mean "proposed n times" / "served by n trains", not their sum.
+  test("is a MapLibre interpolate over the kind's own count", () => {
+    expect(corridorWidthExpression('proposed').slice(0, 3)).toEqual([
+      'interpolate',
+      ['linear'],
+      ['get', 'proposal_count'],
+    ])
+    expect(corridorWidthExpression('existing').slice(0, 3)).toEqual([
+      'interpolate',
+      ['linear'],
+      ['get', 'existing_count'],
+    ])
   })
 
   // Thickness is the "proposed n times" signal, so the ramp must never dip.
