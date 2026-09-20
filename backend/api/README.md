@@ -1701,7 +1701,7 @@ derived live from the model's own definitions rather than hand-copied:
 | `Compositions` | Live — composition/operator/coach fields (`CompositionCollection`) |
 | `Evaluation — calculation method` | Live — every leaf of the evaluation model's cost/revenue/margin breakdown (`models/evaluation/views.py:Breakdown`) |
 | `Evaluation — results / view` | Live — the output views a member's evaluation section produces (`models/evaluation/views.py:VIEW_META`) |
-| `Route or timetable` | Static — no single schema object maps cleanly onto "route concepts" |
+| `Route or timetable` | Static — no single schema object maps cleanly onto "route concepts". Carries `Missing stop / suggest new stop`, the pair the app's stop search deep-links to (`/docs/feedback?topic=missing-stop`) |
 | `Documentation` | None — free text; the `sub_category` is a documentation page path, and those live in `docs-site/`, which the backend does not read |
 | `General functionality` | Static |
 | `Bug report` / `Feature request` / `Other` | None — free text |
