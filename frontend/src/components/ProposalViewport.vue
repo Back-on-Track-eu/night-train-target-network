@@ -2211,6 +2211,10 @@ const mapStops = computed(() => {
               : true,
     }))
   }
+  // Edit mode: the markers carry their stop id and may be removed from the map,
+  // under the same floor as the table's delete control — two stops are a route,
+  // one is not.
+  const removable = currentMode.value === 'edit' && itinerary.value.length > 2
   return itinerary.value
     .filter((s) => s.selectedStop !== null)
     .map((s) => ({
@@ -2218,6 +2222,8 @@ const mapStops = computed(() => {
       lon: s.selectedStop!.lon,
       name: s.name,
       highlighted: true,
+      stopId: s.selectedStop!.stop_id,
+      removable,
     }))
 })
 
@@ -2239,6 +2245,16 @@ const mapAvailable = computed(() => {
 function onMapAddStop(stopId: string): void {
   const stop = store.stops.find((s) => s.stop_id === stopId)
   if (stop) addStop(stop)
+}
+
+// ...and removing from the map reuses removeStop(), so both routes into the
+// itinerary go through one edit. The row is found by stop id rather than by
+// marker order: mapStops drops rows that have no stop chosen yet, so an index
+// into the markers is not an index into the itinerary.
+function onMapRemoveStop(stopId: string): void {
+  if (itinerary.value.length <= 2) return
+  const index = itinerary.value.findIndex((s) => s.selectedStop?.stop_id === stopId)
+  if (index >= 0) removeStop(index)
 }
 
 const mapShape = computed(() => {
@@ -3526,6 +3542,7 @@ onMounted(async () => {
             class="w-full h-full"
             @toggle-suggested="toggleSuggested"
             @add-stop="onMapAddStop"
+            @remove-stop="onMapRemoveStop"
             @select-alternative="onSelectAlternative"
           />
           <!-- Like + share, bottom-left: MapLibre's zoom control is top-right
