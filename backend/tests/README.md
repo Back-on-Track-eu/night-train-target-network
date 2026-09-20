@@ -47,13 +47,14 @@ built on top of it:
 | `test_60` | Feedback API — submit/categories |
 | `test_70`–`test_71` | Auth — integration (API + DB) and standalone units |
 | `test_72`–`test_76` | Standalone model units — no stack, no DB. Roster efficiency, the component track access charge, the locomotive catalog, the traction energy price model, and the service-facility charges. Runnable on their own with `pytest tests/test_7X_....py` |
+| `test_83` | DEMAND 0.1.0 units — no stack, no DB. The allocation rule, the OD spread and pins, the source split, `distribute_demand()` on a hand-built Berlin – Verona route, and the request boundary, all against the reference table of `docs/2026-09-18_manual_demand_guide.md` §3. Writes `tests/fixtures/demand_reference.json`, which the frontend parity tests read |
 | `test_75_gate_api` | The testing gate against the live API — redeem/check, cookie rules, forged tokens, the open paths, and `/gate/media/*` (every linked file served, cache lifetime, Range requests, nothing outside the directory — the first three skip on a stack whose image was built without the media) |
 | `test_76_gate_page` | The gate page as a string — stdlib only, no stack. Countdown/open switch, every date derived from `LAUNCH`, the press-text figures, the slideshow markup (video first, every screenshot once, no autoplay attribute), a slide left out when its file is missing and the whole section when none are, the fetch script's flat unpack. The on-disk check skips on a checkout without the media |
 
 Content tests that need *controlled* demand (`test_30`, `test_40`) call
 the model layer directly (`tests/helpers.py:compute_evaluation_domain()`),
 since a member request deliberately offers no way to inject
-custom demand into an already-built route — it always runs the stopgap
+custom demand into an already-built route — it always runs the manual
 demand model (`models/demand/`) internally.
 
 Shared code:
@@ -273,8 +274,8 @@ content, same models/route pipeline, just a different HTTP entry point).
 ## test_30_evaluation_content.py — Evaluation content logic
 
 Controlled demand scenarios need an override a member request
-deliberately doesn't offer (it always builds fresh and runs the stopgap
-demand model internally), so these tests call the model layer directly
+deliberately doesn't offer (it always builds fresh and runs the demand
+model internally), so these tests call the model layer directly
 (`tests/helpers.py:compute_evaluation_domain()` — `route_from_dict()` ->
 `add_directional_domain_demand()` ->
 `models.pipeline.evaluate_and_build_views()`), skipping HTTP for the

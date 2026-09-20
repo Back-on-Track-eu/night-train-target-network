@@ -1,0 +1,538 @@
+{
+  "air_share": {
+    "0": 0.0,
+    "1200": 1.0,
+    "2000": 1.0,
+    "299": 0.0,
+    "300": 0.25,
+    "750": 0.625
+  },
+  "alighting_stop_ids": [
+    "Kufstein",
+    "Innsbruck",
+    "Bolzano",
+    "Verona"
+  ],
+  "allocations": {
+    "NEW-BAL-14": {
+      "by_class": {
+        "Capsule": 167.99999999999997,
+        "Couchette": 80.0,
+        "Seat": 159.38069216757742,
+        "Sleeper": 80.0
+      },
+      "by_group_by_class": {
+        "budget": {
+          "Capsule": 0.0,
+          "Couchette": 0.0,
+          "Seat": 63.75227686703097,
+          "Sleeper": 0.0
+        },
+        "business": {
+          "Capsule": 22.31329690346084,
+          "Couchette": 0.0,
+          "Seat": 0.0,
+          "Sleeper": 0.0
+        },
+        "comfort": {
+          "Capsule": 145.68670309653913,
+          "Couchette": 15.93806921675774,
+          "Seat": 0.0,
+          "Sleeper": 80.0
+        },
+        "group": {
+          "Capsule": 0.0,
+          "Couchette": 63.75227686703097,
+          "Seat": 95.62841530054645,
+          "Sleeper": 0.0
+        },
+        "senior": {
+          "Capsule": 0.0,
+          "Couchette": 0.309653916211289,
+          "Seat": 0.0,
+          "Sleeper": 0.0
+        }
+      },
+      "not_served": 150.14207650273227,
+      "not_served_by_group": {
+        "budget": 1.7763568394002505e-15,
+        "business": 9.562841530054644,
+        "comfort": 77.13661202185794,
+        "group": 0.0,
+        "senior": 63.44262295081968
+      },
+      "served": 487.3806921675774
+    },
+    "NEW-BAL-7": {
+      "by_class": {
+        "Capsule": 84.0,
+        "Couchette": 40.0,
+        "Seat": 96.0,
+        "Sleeper": 40.0
+      },
+      "by_group_by_class": {
+        "budget": {
+          "Capsule": 0.0,
+          "Couchette": 0.0,
+          "Seat": 20.928961748633867,
+          "Sleeper": 0.0
+        },
+        "business": {
+          "Capsule": 0.0,
+          "Couchette": 0.0,
+          "Seat": 0.0,
+          "Sleeper": 0.0
+        },
+        "comfort": {
+          "Capsule": 84.0,
+          "Couchette": 35.38069216757742,
+          "Seat": 0.0,
+          "Sleeper": 40.0
+        },
+        "group": {
+          "Capsule": 0.0,
+          "Couchette": 4.619307832422578,
+          "Seat": 75.07103825136613,
+          "Sleeper": 0.0
+        },
+        "senior": {
+          "Capsule": 0.0,
+          "Couchette": 0.0,
+          "Seat": 0.0,
+          "Sleeper": 0.0
+        }
+      },
+      "not_served": 377.5227686703097,
+      "not_served_by_group": {
+        "budget": 42.823315118397105,
+        "business": 31.876138433515486,
+        "comfort": 159.38069216757742,
+        "group": 79.6903460837887,
+        "senior": 63.75227686703097
+      },
+      "served": 260.0
+    },
+    "REF-POD-14": {
+      "by_class": {
+        "Capsule": 152.5136612021858,
+        "Couchette": 0.0,
+        "Seat": 0.0,
+        "Sleeper": 230.0
+      },
+      "by_group_by_class": {
+        "budget": {
+          "Capsule": 0.0,
+          "Couchette": 0.0,
+          "Seat": 0.0,
+          "Sleeper": 0.0
+        },
+        "business": {
+          "Capsule": 19.12568306010929,
+          "Couchette": 0.0,
+          "Seat": 0.0,
+          "Sleeper": 12.750455373406195
+        },
+        "comfort": {
+          "Capsule": 133.38797814207652,
+          "Couchette": 0.0,
+          "Seat": 0.0,
+          "Sleeper": 185.37340619307832
+        },
+        "group": {
+          "Capsule": 0.0,
+          "Couchette": 0.0,
+          "Seat": 0.0,
+          "Sleeper": 0.0
+        },
+        "senior": {
+          "Capsule": 0.0,
+          "Couchette": 0.0,
+          "Seat": 0.0,
+          "Sleeper": 31.876138433515486
+        }
+      },
+      "not_served": 255.0091074681239,
+      "not_served_by_group": {
+        "budget": 63.75227686703097,
+        "business": 0.0,
+        "comfort": 0.0,
+        "group": 159.38069216757742,
+        "senior": 31.876138433515482
+      },
+      "served": 382.5136612021858
+    }
+  },
+  "average_distance_km": 535.2941176470588,
+  "boarding_stop_ids": [
+    "Berlin",
+    "Leipzig",
+    "Nürnberg",
+    "Kufstein",
+    "Innsbruck"
+  ],
+  "compositions": {
+    "NEW-BAL-14": {
+      "Capsule": 168,
+      "Couchette": 80,
+      "Seat": 192,
+      "Sleeper": 80
+    },
+    "NEW-BAL-7": {
+      "Capsule": 84,
+      "Couchette": 40,
+      "Seat": 96,
+      "Sleeper": 40
+    },
+    "REF-POD-14": {
+      "Capsule": 528,
+      "Couchette": 0,
+      "Seat": 0,
+      "Sleeper": 230
+    }
+  },
+  "days_in_year": 366,
+  "days_per_week": 3,
+  "departures_per_year": 313.7142857142857,
+  "description": "DEMAND 0.1.0 reference values — written by tests/test_83_demand_units.py, read by the frontend parity tests",
+  "even_shares": [
+    0.0588235294117647,
+    0.0588235294117647,
+    0.0588235294117647,
+    0.0588235294117647,
+    0.0588235294117647,
+    0.0588235294117647,
+    0.0588235294117647,
+    0.0588235294117647,
+    0.0588235294117647,
+    0.0588235294117647,
+    0.0588235294117647,
+    0.0588235294117647,
+    0.0588235294117647,
+    0.0588235294117647,
+    0.0588235294117647,
+    0.0588235294117647,
+    0.0588235294117647
+  ],
+  "group_shares_pct": {
+    "budget": 10.0,
+    "business": 5.0,
+    "comfort": 50.0,
+    "group": 25.0,
+    "senior": 10.0
+  },
+  "new_bal_7_per_year": {
+    "catering_eur": 135524.57142857142,
+    "passengers": 81565.71428571428,
+    "place_km_sold": 43661647.058823526,
+    "ticket_revenue_eur": 6840558.453781512
+  },
+  "passengers_per_year": 200000,
+  "per_trip_by_group": {
+    "budget": 63.75227686703097,
+    "business": 31.876138433515486,
+    "comfort": 318.76138433515484,
+    "group": 159.38069216757742,
+    "senior": 63.75227686703097
+  },
+  "pin_steps": [
+    {
+      "pin": [
+        "Berlin",
+        "Verona"
+      ],
+      "pins_after": [
+        [
+          [
+            "Berlin",
+            "Verona"
+          ],
+          20.0
+        ]
+      ],
+      "shares_after": [
+        0.05,
+        0.05,
+        0.05,
+        0.2,
+        0.05,
+        0.05,
+        0.05,
+        0.05,
+        0.05,
+        0.05,
+        0.05,
+        0.05,
+        0.05,
+        0.05,
+        0.05,
+        0.05,
+        0.05
+      ],
+      "value_pct": 20
+    },
+    {
+      "pin": [
+        "Leipzig",
+        "Verona"
+      ],
+      "pins_after": [
+        [
+          [
+            "Berlin",
+            "Verona"
+          ],
+          14.74
+        ],
+        [
+          [
+            "Leipzig",
+            "Verona"
+          ],
+          30.0
+        ]
+      ],
+      "shares_after": [
+        0.03684,
+        0.03684,
+        0.03684,
+        0.1474,
+        0.03684,
+        0.03684,
+        0.03684,
+        0.3,
+        0.03684,
+        0.03684,
+        0.03684,
+        0.03684,
+        0.03684,
+        0.03684,
+        0.03684,
+        0.03684,
+        0.03684
+      ],
+      "value_pct": 30
+    }
+  ],
+  "presets": {
+    "even": [
+      {
+        "Berlin": 1.0,
+        "Innsbruck": 1.0,
+        "Kufstein": 1.0,
+        "Leipzig": 1.0,
+        "Nürnberg": 1.0
+      },
+      {
+        "Bolzano": 1.0,
+        "Innsbruck": 1.0,
+        "Kufstein": 1.0,
+        "Verona": 1.0
+      }
+    ],
+    "long": [
+      {
+        "Berlin": 3.0,
+        "Innsbruck": 0.3,
+        "Kufstein": 1.0,
+        "Leipzig": 2.3,
+        "Nürnberg": 1.7
+      },
+      {
+        "Bolzano": 2.1,
+        "Innsbruck": 1.2,
+        "Kufstein": 0.3,
+        "Verona": 3.0
+      }
+    ],
+    "mid": [
+      {
+        "Berlin": 0.3,
+        "Innsbruck": 0.3,
+        "Kufstein": 1.7,
+        "Leipzig": 1.7,
+        "Nürnberg": 3.0
+      },
+      {
+        "Bolzano": 2.1,
+        "Innsbruck": 2.1,
+        "Kufstein": 0.3,
+        "Verona": 0.3
+      }
+    ],
+    "short": [
+      {
+        "Berlin": 0.3,
+        "Innsbruck": 3.0,
+        "Kufstein": 2.3,
+        "Leipzig": 1.0,
+        "Nürnberg": 1.7
+      },
+      {
+        "Bolzano": 1.2,
+        "Innsbruck": 2.1,
+        "Kufstein": 3.0,
+        "Verona": 0.3
+      }
+    ]
+  },
+  "sellable_pairs": [
+    {
+      "destination_stop_id": "Kufstein",
+      "distance_km": 745.0,
+      "origin_stop_id": "Berlin"
+    },
+    {
+      "destination_stop_id": "Innsbruck",
+      "distance_km": 820.0,
+      "origin_stop_id": "Berlin"
+    },
+    {
+      "destination_stop_id": "Bolzano",
+      "distance_km": 940.0,
+      "origin_stop_id": "Berlin"
+    },
+    {
+      "destination_stop_id": "Verona",
+      "distance_km": 1080.0,
+      "origin_stop_id": "Berlin"
+    },
+    {
+      "destination_stop_id": "Kufstein",
+      "distance_km": 555.0,
+      "origin_stop_id": "Leipzig"
+    },
+    {
+      "destination_stop_id": "Innsbruck",
+      "distance_km": 630.0,
+      "origin_stop_id": "Leipzig"
+    },
+    {
+      "destination_stop_id": "Bolzano",
+      "distance_km": 750.0,
+      "origin_stop_id": "Leipzig"
+    },
+    {
+      "destination_stop_id": "Verona",
+      "distance_km": 890.0,
+      "origin_stop_id": "Leipzig"
+    },
+    {
+      "destination_stop_id": "Kufstein",
+      "distance_km": 275.0,
+      "origin_stop_id": "Nürnberg"
+    },
+    {
+      "destination_stop_id": "Innsbruck",
+      "distance_km": 350.0,
+      "origin_stop_id": "Nürnberg"
+    },
+    {
+      "destination_stop_id": "Bolzano",
+      "distance_km": 470.0,
+      "origin_stop_id": "Nürnberg"
+    },
+    {
+      "destination_stop_id": "Verona",
+      "distance_km": 610.0,
+      "origin_stop_id": "Nürnberg"
+    },
+    {
+      "destination_stop_id": "Innsbruck",
+      "distance_km": 75.0,
+      "origin_stop_id": "Kufstein"
+    },
+    {
+      "destination_stop_id": "Bolzano",
+      "distance_km": 195.0,
+      "origin_stop_id": "Kufstein"
+    },
+    {
+      "destination_stop_id": "Verona",
+      "distance_km": 335.0,
+      "origin_stop_id": "Kufstein"
+    },
+    {
+      "destination_stop_id": "Bolzano",
+      "distance_km": 120.0,
+      "origin_stop_id": "Innsbruck"
+    },
+    {
+      "destination_stop_id": "Verona",
+      "distance_km": 260.0,
+      "origin_stop_id": "Innsbruck"
+    }
+  ],
+  "stops": [
+    {
+      "kind": "B",
+      "km": 0,
+      "stop_id": "Berlin"
+    },
+    {
+      "kind": "B",
+      "km": 190,
+      "stop_id": "Leipzig"
+    },
+    {
+      "kind": "B",
+      "km": 470,
+      "stop_id": "Nürnberg"
+    },
+    {
+      "kind": "N",
+      "km": 640,
+      "stop_id": "München"
+    },
+    {
+      "kind": "N",
+      "km": 705,
+      "stop_id": "Rosenheim"
+    },
+    {
+      "kind": "X",
+      "km": 745,
+      "stop_id": "Kufstein"
+    },
+    {
+      "kind": "X",
+      "km": 820,
+      "stop_id": "Innsbruck"
+    },
+    {
+      "kind": "A",
+      "km": 940,
+      "stop_id": "Bolzano"
+    },
+    {
+      "kind": "A",
+      "km": 1080,
+      "stop_id": "Verona"
+    }
+  ],
+  "tariff": {
+    "catering_eur_per_pax": {
+      "Capsule": 2.0,
+      "Couchette": 2.0,
+      "Seat": 1.5,
+      "Sleeper": 1.0
+    },
+    "fares_eur_per_km": {
+      "Capsule": 0.03,
+      "Couchette": 0.03,
+      "Seat": 0.06,
+      "Sleeper": 0.04
+    },
+    "fares_eur_per_pax": {
+      "Capsule": 75.0,
+      "Couchette": 75.0,
+      "Seat": 10.0,
+      "Sleeper": 125.0
+    },
+    "services_eur_per_pax": {
+      "Capsule": 2.5,
+      "Couchette": 2.5,
+      "Seat": 1.5,
+      "Sleeper": 4.0
+    }
+  }
+}

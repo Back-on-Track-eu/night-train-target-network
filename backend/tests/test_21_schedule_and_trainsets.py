@@ -208,18 +208,19 @@ class TestFares:
 
     def test_partial_override_resolves_against_the_defaults(self):
         from api.helpers.member_compute import normalize_fares
-        from models.demand.model import STOPGAP_FARE_PER_KM_BY_CLASS
+        from models.demand.model import FARE_PER_KM_BY_CLASS
 
         out = normalize_fares({"Sleeper": 0.25})
         assert out["Sleeper"] == 0.25
-        assert out["Seat"] == STOPGAP_FARE_PER_KM_BY_CLASS["Seat"]
+        assert out["Seat"] == FARE_PER_KM_BY_CLASS["Seat"]
         assert list(out) == ["Seat", "Couchette", "Sleeper", "Capsule"]
 
     def test_spellings_that_mean_the_same_hash_the_same(self):
         from api.helpers.member_compute import normalize_fares
 
+        # The D31 defaults (DEMAND 0.1.0), spelled out.
         assert normalize_fares(None) == normalize_fares(
-            {"Seat": 0.025, "Couchette": 0.035, "Sleeper": 0.060, "Capsule": 0.040}
+            {"Seat": 0.06, "Couchette": 0.03, "Sleeper": 0.04, "Capsule": 0.03}
         )
 
     def test_validation(self):
@@ -333,29 +334,27 @@ class TestCatering:
 
     def test_defaults_are_the_demand_model_standard_values(self):
         from api.helpers.member_compute import normalize_catering
-        from models.demand.model import STOPGAP_CATERING_EUR_PER_PAX_BY_CLASS
+        from models.demand.model import CATERING_EUR_PER_PAX_BY_CLASS
 
         assert normalize_catering(None) == {
-            k: round(v, 2) for k, v in STOPGAP_CATERING_EUR_PER_PAX_BY_CLASS.items()
+            k: round(v, 2) for k, v in CATERING_EUR_PER_PAX_BY_CLASS.items()
         }
 
     def test_an_omitted_field_and_its_default_hash_alike(self):
         from api.helpers.member_compute import normalize_catering
-        from models.demand.model import STOPGAP_CATERING_EUR_PER_PAX_BY_CLASS
+        from models.demand.model import CATERING_EUR_PER_PAX_BY_CLASS
 
         assert normalize_catering(
-            dict(STOPGAP_CATERING_EUR_PER_PAX_BY_CLASS)
+            dict(CATERING_EUR_PER_PAX_BY_CLASS)
         ) == normalize_catering(None)
 
     def test_a_partial_override_leaves_the_other_classes_alone(self):
         from api.helpers.member_compute import normalize_catering
-        from models.demand.model import STOPGAP_CATERING_EUR_PER_PAX_BY_CLASS
+        from models.demand.model import CATERING_EUR_PER_PAX_BY_CLASS
 
         resolved = normalize_catering({"Sleeper": -0.80})
         assert resolved["Sleeper"] == -0.80
-        assert resolved["Seat"] == round(
-            STOPGAP_CATERING_EUR_PER_PAX_BY_CLASS["Seat"], 2
-        )
+        assert resolved["Seat"] == round(CATERING_EUR_PER_PAX_BY_CLASS["Seat"], 2)
 
     def test_negative_catering_is_accepted_and_kept(self):
         """A restaurant carried by the tickets it helps sell is the usual
