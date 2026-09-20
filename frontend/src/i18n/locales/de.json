@@ -42,7 +42,7 @@
   },
   "proposal": {
     "heading": "Na, wie sieht Deine Traum-Nachtzugverbindung aus?",
-    "subheading": "Skizziere sie, rechne sie durch, verbessere sie – und hilf uns, die Grundlage für Europas Nachtzug-Target-Network zu legen.",
+    "subheading": "Mache einen Vorschlag, berechne die Zahlen, optimiere ihn und hilf uns dabei, die Grundlagen für das Zielnetz für Nachtzüge in Europa zu schaffen.",
     "evaluate": "Auswerten",
     "recalculate": "Mit dieser Auswahl neu berechnen",
     "evaluating": "Der Vorschlag wird ausgewertet…",
@@ -52,7 +52,8 @@
     "mapPlaceholder": "Karte",
     "searchPlaceholder": "Halte suchen…",
     "addStop": "Halt hinzufügen",
-    "noStopsFound": "Keine Halte gefunden",
+    "noStopsFound": "Nicht das in unseren Daten gefunden, was Du suchst?",
+    "missingStopLink": "Schlage einen weiteren Halt vor.",
     "trackGauge": "Spurweite",
     "gaugeUnknown": "Spurweite unbekannt",
     "minStopsTooltip": "Mindestens zwei Halte pro Strecke.",
@@ -158,21 +159,33 @@
     "expert": {
       "toggle": "Fahrplan im Expertenmodus",
       "firstDeparture": "Erste Abfahrt",
-      "pinned": "fixiert",
-      "follows": "folgt der Automatik",
-      "automatic": "Automatisch, gespiegelt um 02:30 Uhr",
-      "pinnedHint": "Bleibt nach einer Neuberechnung zu dieser Zeit (automatisch: {auto})",
-      "followsHint": "Automatisch {auto}, {delta} Min., verschiebt sich mit",
+      "pinnedAria": "Abfahrt fixiert: bleibt nach einer Neuberechnung zu dieser Zeit. Klicken, damit sie stattdessen der Automatik folgt.",
+      "followsAria": "Abfahrt folgt der Automatik und hält ihren Abstand zu ihr. Klicken, um sie auf diese Zeit zu fixieren.",
+      "mirroredAria": "Gegenrichtung um 02:30 Uhr gespiegelt: Abfahrt in die andere Richtung verschoben, zusätzliche Minuten umgekehrt. Klicken, um ihr eigene Zeiten zu geben.",
+      "ownTimesAria": "Die Gegenrichtung behält ihre eigenen Zeiten — zum Bearbeiten den Richtungswechsel nutzen. Klicken, um stattdessen diese Richtung zu spiegeln.",
       "reset": "Zurück zur Automatik",
-      "nudgeAria": "Erste Abfahrt um {minutes} Minuten verschieben",
       "legAria": "Zusätzliche Minuten auf dem Abschnitt bis {stop}",
       "moreAria": "Eine Minute mehr auf dem Abschnitt bis {stop}",
       "lessAria": "Eine Minute weniger auf dem Abschnitt bis {stop}",
-      "mirrored": "Die Gegenrichtung übernimmt diese zusätzlichen Minuten spiegelverkehrt.",
-      "editSeparately": "Eigene Zeiten geben",
-      "ownTimes": "Die Gegenrichtung behält ihre eigenen Zeiten.",
-      "relink": "Diese Richtung wieder spiegeln",
       "droppedAddons": "Auf {legs} sind zusätzliche Minuten entfallen: Dazwischen kam ein Halt hinzu, den Abschnitt gibt es nicht mehr."
+    },
+    "night": {
+      "toggleAria": "Feste Nacht: die beiden Halte wählen, zwischen denen das Fenster 00:00–05:00 Uhr zentriert wird",
+      "markAria": "{stop} — zwei Halte anklicken, um das Fenster 00:00–05:00 Uhr dazwischen zu legen",
+      "autoHint": "Nacht: automatisch — die ganze Fahrt ist auf 02:30 Uhr zentriert. Zum Festlegen die Symbole zweier Halte anklicken.",
+      "pendingHint": "Jetzt das andere Ende des Nachtabschnitts anklicken.",
+      "fixedHint": "Nacht zwischen {a} und {b}: Der Fahrplan zentriert 00:00–05:00 Uhr auf diesen Abschnitt und dehnt ihn bei Bedarf auf fünf Stunden.",
+      "legendNight": "Nacht, 00:00–05:00 Uhr",
+      "legendBoarding": "Einstieg",
+      "legendNightStop": "Nachthalt",
+      "legendAlighting": "Ausstieg",
+      "slackHint": "{minutes} dieser Minuten sind die Nachtdehnung: Der Abschnitt wird auf fünf Stunden gehalten, verteilt auf seine Teilabschnitte im Verhältnis ihrer Fahrzeit. Hier ergänzte Minuten zählen auf die fünf Stunden und verringern die Dehnung.",
+      "stopType": {
+        "boarding": "Einstiegshalt — der Zug fährt vor Mitternacht ab",
+        "night": "Nachthalt — zwischen 00:00 und 05:00 Uhr",
+        "alighting": "Ausstiegshalt — der Zug kommt ab 05:00 Uhr an",
+        "both": "Einstiegs- und Ausstiegshalt"
+      }
     },
     "suggestions": {
       "title": "Halte entlang der Strecke ergänzen?",
@@ -253,11 +266,12 @@
       "durationHm": "{h} Std. {m} Min.",
       "durationH": "{h} Std.",
       "durationM": "{m} Min.",
-      "variantSwitch": "Zum Anzeigen dieser Variante klicken"
+      "variantSwitch": "Zum Anzeigen dieser Variante klicken",
+      "removeStop": "Zum Entfernen von {name} aus der Route klicken"
     },
     "tripPairs": {
       "addAnother": "Weiteres Fahrtenpaar hinzufügen",
-      "comingSoonHint": "Bald kann ein Vorschlag mehr als ein Fahrtenpaar umfassen, abzweigend von einem gemeinsamen Abschnitt oder kreuzend an einem Umsteigebahnhof. Eine Strecke kann dann Y- oder X-förmig sein statt einer einzelnen Linie."
+      "comingSoonHint": "Bald kann ein Vorschlag mehr als ein Fahrtenpaar umfassen, abzweigend von einem gemeinsamen Abschnitt oder kreuzend an einem Umsteigebahnhof. Eine Strecke kann dann Y- oder X-förmig sein."
     },
     "evaluation": {
       "scenario": "Szenario",

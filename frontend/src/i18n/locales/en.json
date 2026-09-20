@@ -52,7 +52,8 @@
     "mapPlaceholder": "Map",
     "searchPlaceholder": "Search stops…",
     "addStop": "Add Stop",
-    "noStopsFound": "No stops found",
+    "noStopsFound": "Not found in our data what you were looking for.",
+    "missingStopLink": "Suggest another stop.",
     "trackGauge": "Track gauge",
     "gaugeUnknown": "gauge unknown",
     "minStopsTooltip": "Two stops per route minimum.",
@@ -265,7 +266,8 @@
       "durationHm": "{h}h {m}m",
       "durationH": "{h}h",
       "durationM": "{m}m",
-      "variantSwitch": "Click to show this variant"
+      "variantSwitch": "Click to show this variant",
+      "removeStop": "Click to remove {name} from the route"
     },
     "tripPairs": {
       "addAnother": "Add another trip pair",
