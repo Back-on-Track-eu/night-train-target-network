@@ -16,6 +16,7 @@ import {
   mdiSortDescending,
 } from '@mdi/js'
 import AppIcon from '@/components/AppIcon.vue'
+import AppSpinner from '@/components/AppSpinner.vue'
 import LandingIntro from '@/components/LandingIntro.vue'
 import StopSelect from '@/components/StopSelect.vue'
 import CountrySelect from '@/components/CountrySelect.vue'
@@ -178,35 +179,66 @@ const tabs = computed(() => [
   },
 ])
 
+// Existing trains alone on screen: neither the scenario (they run as they run
+// today) nor ownership (nobody owns them) applies, so both controls grey out
+// rather than pretend.
+const existingOnly = computed(() => sourceFilter.value === 'existing')
+
 // "Only mine": the same list narrowed to the signed-in account's own rows,
 // via the backend's `user_ids` filter. Existing (ONTD) rows carry no user_id,
 // so this is a proposals-only view by construction — hence the source switch
 // below drops the toggle whenever it is showing existing trains alone.
 const mineOnly = ref(false)
-// Guests get a user_id too, and their proposals are theirs until the session is
-// merged into an account — so the switch works for any identity, not for
-// registered users only. Signed out there is nothing to filter by, so the
-// "mine" half asks for an identity instead of filtering.
-const canFilterMine = computed(() => store.userId !== null)
+// Registered accounts only. A guest session carries a user_id too, so on
+// identity alone the switch would silently filter to an anonymous user's
+// proposals and never ask for anything — which reads as "Mine does nothing"
+// to someone who has not logged in. Registering merges the guest's proposals
+// into the account, so nothing is lost by asking.
+const canFilterMine = computed(() => store.authChoice === 'user')
 
 // The two halves of the ownership switch, as one pair of class strings rather
 // than a literal in each button.
 const activeOwnerClass = 'bg-primary-50/15 text-primary-50 font-semibold'
 const inactiveOwnerClass = 'text-primary-50/60 hover:text-primary-50'
 
+// Set when "Mine" was clicked without an identity: the auth modal opens, and
+// the filter is applied the moment an identity exists — the click meant "show
+// mine", not "show me a login form". Cleared if the modal is dismissed.
+const mineAfterAuth = ref(false)
+
 function selectMine(): void {
   if (!canFilterMine.value) {
-    // No identity yet: the filter is meaningless until there is one, so the
-    // click opens the same modal the rest of the app gates on.
+    // Signed out or a guest: the click opens the login / registration modal
+    // (standalone context — no "continue as guest" fork, that one belongs to
+    // the evaluation gate) and the filter applies once the account exists.
+    mineAfterAuth.value = true
     store.openAuthModal({ context: 'standalone' })
     return
   }
-  // Existing (ONTD) rows have no owner, so "mine" and "existing only" cannot
-  // both hold — move the source switch rather than filtering to an empty list
-  // behind a dropdown that still says "Existing".
-  if (sourceFilter.value === 'existing') sourceFilter.value = 'proposal'
+  applyMine()
+}
+
+function applyMine(): void {
+  // Unreachable while the list shows existing trains alone — the switch is
+  // disabled then — but an intent remembered across a login could land here
+  // after the source moved, and "mine" on ONTD rows is an empty list.
+  if (existingOnly.value) return
   mineOnly.value = true
 }
+
+watch(canFilterMine, (can) => {
+  if (can && mineAfterAuth.value) {
+    mineAfterAuth.value = false
+    applyMine()
+  }
+})
+watch(
+  () => store.authModal.open,
+  (open) => {
+    // Closed without signing in: the intent dies with the modal.
+    if (!open && !canFilterMine.value) mineAfterAuth.value = false
+  },
+)
 
 // --- The scenario the gallery is read on -----------------------------------
 // Every proposal is stored once per scenario variant (backend §5.4a), and
@@ -330,9 +362,14 @@ watch(canFilterMine, (can) => {
 // page would otherwise keep showing the old proposer until something else
 // forced a reload.
 watch(
-  () => [store.userId, store.username],
-  () => {
-    if (hydrating) return
+  () => store.userId,
+  (next, previous) => {
+    // Only a change from one identity to ANOTHER can relabel a listed row
+    // (the guest merge). Restoring a session on boot (null → id) and
+    // signing out (id → null) leave every proposer line as it was — and the
+    // boot case ran after this page's own first load, so it used to fire a
+    // second full request on every cold start.
+    if (hydrating || previous === null || next === null) return
     // Signing in usually happens somewhere else in the app while this page sits
     // in its keep-alive cache — firing a request at a page nobody is looking at
     // is the same waste the deactivate teardown exists to avoid, so hand it to
@@ -600,7 +637,11 @@ watch(
     sortDir,
     sourceFilter,
     mineOnly,
-    galleryScenarioId,
+    // The variant, not the scenario id: the id resolves from null to the
+    // base once the scenarios load, and that is not a change of what the
+    // request asks for (both send nothing) — watching it reloaded the
+    // whole gallery a second time on every cold start.
+    scenarioVariantId,
   ],
   () => {
     if (hydrating) return
@@ -668,6 +709,12 @@ onMounted(async () => {
   // shared or reloaded /gallery?... link reproduces the exact same results.
   const hasStopParams = ['from', 'to', 'station'].some((k) => queryString(route.query[k]))
   if (hasStopParams && store.stopsStatus !== 'success') await store.fetchStops()
+  // Same for a scenario in the link: it can only be resolved against the
+  // loaded scenarios, and resolving it after the first load would mean a
+  // second one.
+  if (queryString(route.query.scenario) && store.scenariosStatus !== 'success') {
+    await store.fetchScenarios()
+  }
   const seed = seedFromQuery(route.query, store.stops)
   mode.value = seed.mode
   fromStop.value = seed.fromStop
@@ -895,6 +942,7 @@ onActivated(() => {
       v-model="galleryScenarioId"
       :scenarios="store.scenarios"
       :without-figures="withoutFigures"
+      :disabled="existingOnly"
     />
 
     <!-- Results: controls + a scrolling card list (left) beside the map
@@ -957,32 +1005,57 @@ onActivated(() => {
              come back and then stays put across later searches — see
              shownTotal. -->
         <div class="flex min-h-8 items-center justify-between gap-2">
+          <!-- Greyed, not hidden, while existing trains alone are listed:
+               nobody owns an ONTD row, and a switch that vanished with the
+               source would be a switch nobody could find again. -->
           <div
-            class="flex items-center gap-0.5 rounded-full border border-primary-50/20 p-0.5 text-sm"
+            class="flex items-center gap-0.5 rounded-full border border-primary-50/20 p-0.5 text-sm transition-opacity"
+            :class="existingOnly ? 'opacity-40' : ''"
             role="group"
             :aria-label="t('gallery.filter.label')"
+            :aria-disabled="existingOnly"
+            :title="existingOnly ? t('gallery.filter.disabledHint') : undefined"
           >
             <button
               type="button"
-              class="cursor-pointer rounded-full px-3 py-1 transition"
-              :class="mineOnly ? inactiveOwnerClass : activeOwnerClass"
+              class="rounded-full px-3 py-1 transition"
+              :class="[
+                mineOnly ? inactiveOwnerClass : activeOwnerClass,
+                existingOnly ? 'cursor-not-allowed' : 'cursor-pointer',
+              ]"
               :aria-pressed="!mineOnly"
+              :disabled="existingOnly"
               @click="mineOnly = false"
             >
               {{ t('gallery.filter.all') }}
             </button>
             <button
               type="button"
-              class="flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1 transition"
-              :class="mineOnly ? activeOwnerClass : inactiveOwnerClass"
+              class="flex items-center gap-1.5 rounded-full px-3 py-1 transition"
+              :class="[
+                mineOnly ? activeOwnerClass : inactiveOwnerClass,
+                existingOnly ? 'cursor-not-allowed' : 'cursor-pointer',
+              ]"
               :aria-pressed="mineOnly"
+              :disabled="existingOnly"
               @click="selectMine"
             >
               <AppIcon :path="mdiAccountOutline" :size="16" />
               {{ t('gallery.filter.mine') }}
             </button>
           </div>
-          <p v-if="shownTotal !== null && !failure" class="text-sm text-primary-50/50">
+          <!-- Loading state lives up here, where the eye is, not at the foot of
+               a list that may be scrolled out of view: a spinner and a word
+               while any page is in flight, the count otherwise. -->
+          <span
+            v-if="loading"
+            class="flex items-center gap-1.5 text-sm text-primary-50/60"
+            role="status"
+          >
+            <AppSpinner :size="14" />
+            {{ t('gallery.loading') }}
+          </span>
+          <p v-else-if="shownTotal !== null && !failure" class="text-sm text-primary-50/50">
             {{ t('gallery.matching', shownTotal) }}
           </p>
         </div>
@@ -1037,13 +1110,9 @@ onActivated(() => {
             {{ t('gallery.empty') }}
           </p>
 
-          <!-- Infinite-scroll sentinel + status -->
-          <div
-            ref="sentinel"
-            class="flex h-8 items-center justify-center text-sm text-primary-50/40"
-          >
-            <span v-if="loading && initialized">{{ t('gallery.loadingMore') }}</span>
-          </div>
+          <!-- Infinite-scroll sentinel. Deliberately silent: the loading state
+               is announced at the head of the column, next to the count. -->
+          <div ref="sentinel" class="h-8" aria-hidden="true"></div>
 
           <!-- Trailing CTA, at the end of the list it belongs to -->
           <div class="flex justify-center pb-2">

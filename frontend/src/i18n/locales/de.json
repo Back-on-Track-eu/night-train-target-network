@@ -421,7 +421,7 @@
       "axes": {
         "network": "Schienennetz",
         "infra": "Infrastruktur {network}",
-        "networkPreviewHint": "Wir bereiten gerade die Routensuche auf dem Netz von 2032 vor, samt geschätzter Ausbauten. Bleibt dran!",
+        "networkPreviewHint": "Wir bereiten gerade die Routensuche auf dem Netz von 2032 vor. Dies umfasst auch die Routenführung über voraussichtlich künftig realisierte Infrastruktureinrichtungen. Bleibt dran!",
         "conditions": "Betriebsbedingungen",
         "hsr": "Nachtzüge dürfen Schnellfahrstrecken nutzen",
         "optTt": "Optimierte Fahrpläne",
@@ -983,7 +983,7 @@
     }
   },
   "gallery": {
-    "heading": "Es ist Zeit, Nachtzüge zurück auf die Schiene zu bringen!",
+    "heading": "Bringen wir die Nachtzüge zurück aufs Gleis!",
     "tabs": {
       "aToB": "Von A nach B",
       "byStation": "Nach Bahnhof",
@@ -1006,14 +1006,14 @@
       "button": "Suchen"
     },
     "welcome": {
-      "pitch": "Wir von Back on Track entwickeln derzeit unseren Vorschlag für ein Target Network 2032: ein Nachtzugnetz aus rund 300 Verbindungen quer über den Kontinent, doppelt so viele wie heute. Dieses Tool lädt alle ein, die sich für Nachtzüge begeistern, unser Anliegen zu unterstützen. Die Routenvorschläge die hier gesammelt werden, bilden die Grundlage für unser Target Network.",
-      "source": "Zahlen der IEA, aus unserem Positionspapier",
+      "pitch": "Wir von Back-on-Track arbeiten an einem Target Network 2032: rund 300 Nachtzugverbindungen quer über den Kontinent, doppelt so viele wie heute, mit dreimal so vielen Fahrgästen. Und hier kommst Du ins Spiel. Wähle zwei Städte, zeichne den Nachtzug Deiner Träume auf eine echte Karte des europäischen Schienennetzes und sieh sofort, was er kosten, wie viel öffentliches Geld er brauchen und wie viel CO₂ er einsparen würde — mit realistischen Fahrplänen, zwölf Zugbildungen, kostenlos und Open Source. Die besten Vorschläge werden zum Rückgrat unserer Studie für ein europäisches Nachtzugnetz 2032, die wir der Europäischen Kommission und den nationalen Verkehrsbehörden vorlegen — und alle, die mitmachen, werden genannt. Neugierig auf die Zahlen dahinter? Schau in {source}.",
+      "source": "unsere Berichte und Studien",
       "browse": "Vorschläge anderer ansehen",
       "about": "Über das Projekt"
     },
     "section": {
       "title": "Galerie",
-      "subtitle": "Was bisher vorgeschlagen wurde."
+      "subtitle": "Schau Dir an, was andere vorgeschlagen haben."
     },
     "matching": "{count} Strecke gefunden | {count} Strecken gefunden",
     "source": {
@@ -1024,13 +1024,16 @@
     "filter": {
       "label": "Wessen Strecken",
       "all": "Alle",
-      "mine": "Meine"
+      "mine": "Meine",
+      "disabledHint": "Bestehende Verbindungen haben keinen Urheber — auf Vorschläge wechseln, um deine zu sehen."
     },
     "scenario": {
       "label": "Szenario",
       "applied": "Werte in diesem Szenario",
-      "hint": "Jeder Vorschlag wird in jedem Szenario bewertet. Werte, Sortierung und Karte unten folgen deiner Auswahl. Bestehende Verbindungen werden immer so gezeigt, wie sie heute fahren.",
-      "withoutFigures": "{count} Strecke hier ohne Werte | {count} Strecken hier ohne Werte"
+      "hint": "Jeder Vorschlag wird in jedem Szenario bewertet. Werte, Sortierung und Karte unten folgen Deiner Auswahl. Bestehende Verbindungen werden immer so gezeigt, wie sie heute fahren.",
+      "withoutFigures": "{count} Strecke hier ohne Werte | {count} Strecken hier ohne Werte",
+      "proposalsOnly": "nur Vorschläge",
+      "disabledHint": "Das Szenario gilt nur für Vorschläge — bestehende Verbindungen werden so gezeigt, wie sie heute fahren."
     },
     "sort": {
       "distance": "Entfernung",
@@ -1077,11 +1080,11 @@
         },
         "co2": {
           "title": "Eingespartes CO₂",
-          "body": "Geschätzte CO₂-Emissionen, die jährlich vermieden werden, weil Reisende von Flugzeug und Auto auf diesen Zug umsteigen. Abgeleitet aus Platzhalterwerten der Nachfrage, noch nicht aus einem vollständigen Nachfragemodell."
+          "body": "Geschätzte CO₂-Emissionen, die jährlich vermieden werden, weil Reisende von Flugzeug und Auto auf diesen Zug umsteigen."
         },
         "demand": {
           "title": "Fahrten pro Jahr",
-          "body": "Geschätzte Fahrten mit diesem Zug pro Jahr, über alle Verkehrstage. Abgeleitet aus Platzhalterwerten der Nachfrage, noch nicht aus einem vollständigen Nachfragemodell."
+          "body": "Geschätzte Fahrten mit diesem Zug pro Jahr, über alle Verkehrstage."
         },
         "comments": {
           "title": "Kommentare",
@@ -1089,7 +1092,7 @@
         },
         "subsidyPerTCo2": {
           "title": "Subvention je Tonne CO₂",
-          "body": "Öffentliche Mittel je Tonne CO₂, die diese Strecke vermeidet — die jährliche Subvention geteilt durch die jährliche Einsparung. Je niedriger, desto mehr Klimawirkung pro Euro."
+          "body": "Öffentliche Mittel je Tonne CO₂, die diese Strecke vermeidet — die jährliche Subvention geteilt durch die jährliche Einsparung. Je niedriger, desto mehr Klimawirkung pro Euro. Alle Preise sind auf das Preisniveau 2032 hochgerechnet (inflationsbereinigt)."
         }
       },
       "comments": "Kommentare lesen",
@@ -1103,8 +1106,8 @@
     "cta": {
       "create": "Neue Strecke vorschlagen"
     },
-    "empty": "Zu diesem Filter wurden keine Vorschläge gefunden. Hier entsteht der erste!",
-    "loadingMore": "Weitere werden geladen…",
+    "empty": "Für diesen Filter wurden keine Vorschläge gefunden. Sei der Erste, der einen Vorschlag macht!",
+    "loading": "Strecken werden geladen…",
     "end": "Das waren alle {count} Vorschläge."
   },
   "user": {

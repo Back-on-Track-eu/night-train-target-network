@@ -84,11 +84,13 @@ const itinerary = computed(() => {
 })
 
 // --- The figures --------------------------------------------------------
-// One two-column grid, filled in a fixed order (distance, speed, demand, CO₂
-// saved, subsidy per tonne, composition), so the same fact sits in the same
-// corner on every card and the list can be read down a column instead of
-// re-parsed card by card. Every value is kept to ONE line: a figure that wraps
-// breaks the alignment the grid exists for.
+// One two-column grid, filled in a fixed order — distance | speed,
+// composition | trips per year, CO₂ saved | subsidy per tonne — so the same
+// fact sits in the same corner on every card and the list can be read down
+// a column instead of re-parsed card by card: the route's physics on the
+// first row, what runs and who rides on the second, climate and its price on
+// the third. Every value is kept to ONE line: a figure that wraps breaks the
+// alignment the grid exists for.
 //
 // Composition is proposals-only. An existing (ONTD) row carries whatever the
 // catalogue names, but nothing in the app can pick, change or show it — so the
@@ -126,8 +128,11 @@ const stats = computed(() => {
     },
     { key: 'speed', icon: mdiSpeedometerMedium, value: `${formatInt(p.avg_speed_kmh)} km/h` },
   ]
-  // Demand and co2 savings are proposal-only KPIs, both null until the
-  // proposal has an evaluation snapshot; composition is known from publish.
+  // Everything past the first row is proposal-only: composition is known from
+  // publish, the rest is null until the proposal has an evaluation snapshot.
+  if (compositionLabel.value) {
+    list.push({ key: 'composition', icon: mdiTrainCarPassenger, value: compositionLabel.value })
+  }
   if (p.source === 'proposal' && p.demand_trips_per_year != null) {
     list.push({
       key: 'demand',
@@ -142,9 +147,7 @@ const stats = computed(() => {
       value: t('gallery.card.co2PerYear', { value: formatInt(p.co2_savings_t_per_year) }),
     })
   }
-  // What that CO₂ costs the public purse, straight after the saving itself —
-  // the two are one argument, and the saving should not be read without its
-  // price.
+  // Straight after the saving it prices — the two are one argument.
   if (p.source === 'proposal' && p.subsidy_eur_per_t_co2 != null) {
     list.push({
       key: 'subsidyPerTCo2',
@@ -153,11 +156,6 @@ const stats = computed(() => {
         value: formatEur(p.subsidy_eur_per_t_co2, locale.value),
       }),
     })
-  }
-  // Last: an identifier among quantities, so it reads as the footnote it is
-  // rather than as another number.
-  if (compositionLabel.value) {
-    list.push({ key: 'composition', icon: mdiTrainCarPassenger, value: compositionLabel.value })
   }
   return list
 })

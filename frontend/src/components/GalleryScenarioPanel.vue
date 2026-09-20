@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { mdiChevronDown, mdiTuneVariant } from '@mdi/js'
 import AppIcon from '@/components/AppIcon.vue'
@@ -32,11 +32,23 @@ const props = defineProps<{
    *  that network, or not yet backfilled). They stay listed — the count is
    *  the header's way of saying why some cards carry a note instead. */
   withoutFigures?: number
+  /** The list shows existing trains only: nothing here applies to them, so
+   *  the panel is shown greyed and closed rather than hidden — a control
+   *  that vanishes with the source switch is a control nobody can find. */
+  disabled?: boolean
 }>()
 const emit = defineEmits<{ 'update:modelValue': [scenarioId: number] }>()
 
 const { t } = useI18n()
 const open = ref(false)
+// Closing when the source switch moves to existing-only keeps a greyed panel
+// from sitting open on controls that would do nothing.
+watch(
+  () => props.disabled,
+  (disabled) => {
+    if (disabled) open.value = false
+  },
+)
 
 const axes = computed(() => buildScenarioAxes(props.scenarios))
 const state = computed(() =>
@@ -59,16 +71,31 @@ const isBase = computed(() => {
 </script>
 
 <template>
-  <div class="w-full rounded-xl border border-primary-50/10 bg-primary-50/[0.03]">
+  <div
+    class="w-full rounded-xl border border-primary-50/10 bg-primary-50/[0.03] transition-opacity"
+    :class="disabled ? 'opacity-40' : ''"
+    :aria-disabled="disabled"
+  >
     <button
       type="button"
-      class="flex w-full cursor-pointer items-center gap-2 px-4 py-2 text-sm text-primary-50/70 transition hover:text-primary-50"
+      class="flex w-full items-center gap-2 px-4 py-2 text-sm text-primary-50/70 transition"
+      :class="disabled ? 'cursor-not-allowed' : 'cursor-pointer hover:text-primary-50'"
       :aria-expanded="open"
+      :disabled="disabled"
+      :title="disabled ? t('gallery.scenario.disabledHint') : undefined"
       @click="open = !open"
     >
       <AppIcon :path="mdiTuneVariant" :size="16" class="shrink-0 text-primary-50/40" />
       <span class="text-primary-50/50">{{ t('gallery.scenario.label') }}</span>
       <span v-if="summary" class="font-semibold text-primary-50">{{ summary }}</span>
+      <!-- Always on: which rows a scenario reaches is the one thing a reader
+           can get wrong here, and the existing-only case greys the whole
+           panel to say the same thing louder. -->
+      <span
+        class="rounded-full border border-primary-50/15 px-2 py-0.5 text-[0.65rem] uppercase tracking-wider text-primary-50/45"
+      >
+        {{ t('gallery.scenario.proposalsOnly') }}
+      </span>
       <!-- Only when it is NOT the base: on the base the figures are the ones
            every other surface shows, and saying so would be noise. -->
       <span v-if="!isBase" class="text-xs text-primary-50/50">

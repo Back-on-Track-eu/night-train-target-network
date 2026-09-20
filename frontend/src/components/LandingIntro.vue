@@ -9,9 +9,11 @@ const { t } = useI18n()
 
 const emit = defineEmits<{ create: []; browse: [] }>()
 
-// Back-on-Track's general position paper — the source behind both the emission
-// figure and the 300-route goal the pitch quotes.
-const POSITION_PAPER_URL = 'https://back-on-track.eu/back-on-track-europes-general-position-paper/'
+// Where the pitch sends the curious: Back-on-Track's reports and studies as
+// a whole (the 300-connection target, the passenger and emission figures
+// all live there), rather than one paper — the pitch is an invitation, not
+// a citation.
+const STUDIES_URL = 'https://back-on-track.eu/reports-and-studies/'
 
 // The documentation site: a separate static site served at /docs/ on this
 // origin, so plain anchors and root-relative paths, not router links. Its
@@ -66,49 +68,54 @@ onActivated(measureHero)
   <!-- Opening band: the statement on the left, the argument and every way
        onward on the right. Sized to fill the viewport — see measureHero. -->
   <section ref="hero" class="flex w-full flex-col" :style="{ minHeight: heroMinHeight }">
-    <!-- my-auto centres the row in the band while items-start keeps the two
-         columns aligned to each other, so the statement and the paragraph
-         share a top line. Centring the columns individually would break that
-         line the moment one side outgrew the other. -->
-    <div class="my-auto flex items-start gap-12 px-24">
-      <h1 class="w-2/5 shrink-0 text-4xl font-light text-white">{{ t('gallery.heading') }}</h1>
+    <!-- my-auto centres the block in the band. A grid rather than a flex row:
+         the headline must sit level with the middle of the PARAGRAPH, and in a
+         two-column flex layout it centred on the whole right column — paragraph
+         plus the button row beneath it — which put it a line or two too low.
+         With the buttons as a second grid row (starting in the second column
+         so they stay under the paragraph), items-center on the first row
+         centres the statement on the text alone. 2:3 keeps the previous
+         column split. -->
+    <div class="my-auto grid grid-cols-[2fr_3fr] gap-x-12 gap-y-8 px-24">
+      <h1 class="self-center text-4xl font-light text-white">{{ t('gallery.heading') }}</h1>
 
-      <div class="flex flex-1 flex-col gap-8">
-        <!-- i18n-t rather than a plain <p>: the emission figure has to carry
-             its source, and splitting the sentence to get an <a> in would
-             leave the copy untranslatable as one unit. -->
-        <i18n-t
-          keypath="gallery.welcome.pitch"
-          tag="p"
-          class="text-sm leading-relaxed text-primary-50/70"
-        >
-          <template #source>
-            <a
-              :href="POSITION_PAPER_URL"
-              target="_blank"
-              rel="noopener"
-              class="underline underline-offset-2 transition hover:text-primary-50"
-            >
-              {{ t('gallery.welcome.source') }}
-            </a>
-          </template>
-        </i18n-t>
-
-        <!-- Every way into the site: contribute one, read the others, or read
-             up. The About button leaves the SPA for the static site at
-             /docs/, hence anchors rather than router links. -->
-        <div class="flex flex-wrap items-center gap-3">
-          <button type="button" :class="ctaButtonClass" @click="emit('create')">
-            <AppIcon :path="mdiPlus" :size="18" />
-            {{ t('gallery.cta.create') }}
-          </button>
-          <button type="button" :class="quietButtonClass" @click="emit('browse')">
-            {{ t('gallery.welcome.browse') }}
-          </button>
-          <a :href="DOCS_ABOUT_URL" target="_blank" rel="noopener" :class="quietButtonClass">
-            {{ t('gallery.welcome.about') }}
+      <!-- i18n-t rather than a plain <p>: the pitch's last sentence carries
+           its source as a link ({source} in the copy), and splitting the
+           sentence to get an <a> in would leave it untranslatable as one
+           unit. The copy carries the launch gate's press facts
+           (backend/api/gate_page.py) in a lighter voice — keep the facts in
+           step with the gate when either changes. -->
+      <i18n-t
+        keypath="gallery.welcome.pitch"
+        tag="p"
+        class="self-center text-sm leading-relaxed text-primary-50/70"
+      >
+        <template #source>
+          <a
+            :href="STUDIES_URL"
+            target="_blank"
+            rel="noopener"
+            class="underline underline-offset-2 transition hover:text-primary-50"
+          >
+            {{ t('gallery.welcome.source') }}
           </a>
-        </div>
+        </template>
+      </i18n-t>
+
+      <!-- Every way into the site: contribute one, read the others, or read
+           up. The About button leaves the SPA for the static site at
+           /docs/, hence anchors rather than router links. -->
+      <div class="col-start-2 flex flex-wrap items-center gap-3">
+        <button type="button" :class="ctaButtonClass" @click="emit('create')">
+          <AppIcon :path="mdiPlus" :size="18" />
+          {{ t('gallery.cta.create') }}
+        </button>
+        <button type="button" :class="quietButtonClass" @click="emit('browse')">
+          {{ t('gallery.welcome.browse') }}
+        </button>
+        <a :href="DOCS_ABOUT_URL" target="_blank" rel="noopener" :class="quietButtonClass">
+          {{ t('gallery.welcome.about') }}
+        </a>
       </div>
     </div>
   </section>

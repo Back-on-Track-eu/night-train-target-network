@@ -432,8 +432,8 @@
       "hsrInert": "This formation is not built for high-speed lines, so the permission changes nothing for it",
       "axes": {
         "network": "Rail network",
-        "infra": "Infra {network}",
-        "networkPreviewHint": "We're currently preparing to route on the 2032 network, including estimated infrastructure upgrades. Stay tuned!",
+        "infra": "Infrastructure {network}",
+        "networkPreviewHint": "We're currently preparing to route on the 2032 network. This will also include routing via expected future infrastructure implementations. Stay tuned!",
         "conditions": "Operating conditions",
         "hsr": "Night trains may use high-speed lines",
         "optTt": "Optimised timetables",
@@ -995,7 +995,7 @@
     }
   },
   "gallery": {
-    "heading": "It's time to bring night trains back on track!",
+    "heading": "Bring the night trains back on track!",
     "tabs": {
       "aToB": "From A to B",
       "byStation": "By Station",
@@ -1018,8 +1018,8 @@
       "button": "Search"
     },
     "welcome": {
-      "pitch": "We at Back on Track are currently developing our proposal for a Target Network 2032 — a night train network of around 300 connections spanning the continent, doubling the current number of connections. This tool is a way for anyone with an interest in night trains to support our mission: suggest the night train of your dreams for us to incorporate in our Target Network proposal!",
-      "source": "IEA figures, via our position paper",
+      "pitch": "We at Back-on-Track are drawing up a Target Network 2032: around 300 night train connections across the continent, twice as many as today, carrying three times the passengers. This is where you come in. Pick two cities, draw the night train of your dreams on a real map of the European rail network, and see right away what it would cost, how much public money it would need and how much CO₂ it would save — realistic timetables, twelve train compositions, all of it free and open source. The best suggestions become the backbone of our study for a European night train network in 2032, which we will present to the European Commission and to national transport authorities, and everyone who contributes gets credited. Curious about the numbers behind all this? Have a look at {source}.",
+      "source": "our reports and studies",
       "browse": "See other people's suggestions",
       "about": "About"
     },
@@ -1036,13 +1036,16 @@
     "filter": {
       "label": "Whose routes",
       "all": "All",
-      "mine": "Mine"
+      "mine": "Mine",
+      "disabledHint": "Existing connections have no owner — switch to proposals to see yours."
     },
     "scenario": {
       "label": "Scenario",
       "applied": "figures on this scenario",
       "hint": "Every suggestion is evaluated on each scenario, so the figures, the sorting and the map below follow the one you pick here. Existing connections are shown as they run today, whatever you choose.",
-      "withoutFigures": "{count} route without figures here | {count} routes without figures here"
+      "withoutFigures": "{count} route without figures here | {count} routes without figures here",
+      "proposalsOnly": "proposals only",
+      "disabledHint": "The scenario applies to proposals only — existing connections are shown as they run today."
     },
     "sort": {
       "distance": "Distance",
@@ -1089,11 +1092,11 @@
         },
         "co2": {
           "title": "CO₂ saved",
-          "body": "Estimated CO₂ emissions avoided each year by passengers shifting from air and car to this train. Derived from placeholder demand figures, not yet from a full demand model."
+          "body": "Estimated CO₂ emissions avoided each year by passengers shifting from air and car to this train."
         },
         "demand": {
           "title": "Passenger trips per year",
-          "body": "Estimated passenger trips on this train per year, over every day it runs. Derived from placeholder demand figures, not yet from a full demand model."
+          "body": "Estimated passenger trips on this train per year, over every day it runs."
         },
         "comments": {
           "title": "Comments",
@@ -1101,7 +1104,7 @@
         },
         "subsidyPerTCo2": {
           "title": "Subsidy per tonne of CO₂",
-          "body": "Public money needed per tonne of CO₂ this route avoids — the annual subsidy divided by the annual saving. The lower it is, the more climate effect each euro buys."
+          "body": "Public money needed per tonne of CO₂ this route avoids — the annual subsidy divided by the annual saving. The lower it is, the more climate effect each euro buys. All prices are scaled to 2032 price levels (inflation-adjusted)."
         }
       },
       "comments": "Read the comments",
@@ -1116,7 +1119,7 @@
       "create": "Suggest a new route"
     },
     "empty": "No proposals have been found for this filter. Be the first to make one!",
-    "loadingMore": "Loading more…",
+    "loading": "Loading routes…",
     "end": "That's all {count} proposals."
   },
   "user": {
