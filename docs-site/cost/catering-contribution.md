@@ -25,7 +25,7 @@ $$ R_{cat} = \sum_{od} n_{places\_sold,od} \times c_{cat} $$
 | | Symbol | Meaning | Unit | Where it comes from |
 |---|---|---|---|---|
 | Input | `n_places_sold,od` | Places sold per connection and year | places/year | set by you |
-| Input | `c_cat` | Net catering contribution per passenger of that class, overridable per proposal | €/passenger | [STOPGAP_CATERING_EUR_PER_PAX_BY_CLASS](/reference/standard-values#s-demand-stopgap_catering_eur_per_pax_by_class) |
+| Input | `c_cat` | Net catering contribution per passenger of that class, overridable per proposal | €/passenger | [CATERING_EUR_PER_PAX_BY_CLASS](/reference/standard-values#s-demand-catering_eur_per_pax_by_class) |
 | **Result** | `R_cat` | Annual net catering contribution | €/year | — |
 
 **Feeds into:** [total_revenue_eur](/cost/total-revenue)
