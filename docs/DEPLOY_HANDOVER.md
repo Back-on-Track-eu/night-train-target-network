@@ -1576,6 +1576,60 @@ slideshow.
 
 ---
 
+## 21. Per-scenario gallery projections — backend 0.5.3, migration 2026-09-20
+
+New table `proposals.proposal_scenario_summaries` (adapters/proposal/README.md
+§5.4a): the gallery projection once per current scenario variant, so
+`POST /api/proposals` can serve summaries and map geometry for the
+scenario a viewer picks. **No route builder / calc / family format bump** —
+nothing existing changes value or shape.
+
+**Deploy order, in this order:**
+
+1. `db/dev/sql/migrations/2026-09-20_proposal_scenario_summaries.sql` —
+   additive, `IF NOT EXISTS`, safe to rerun.
+2. The api image (backend 0.5.3). From this point every publish and every
+   refresh writes the rows.
+3. The backfill, once, host-side against the deployment's database and
+   routing instances (the `--scenario-summaries` mode is new):
+
+   ```bash
+   uv run --extra dev python -m scripts.refresh_proposals --scenario-summaries --concurrency 4
+   ```
+
+   Idempotent — reruns pick up only proposals whose rows are missing or
+   behind. Until it has run, a gallery request naming a variant still lists
+   the proposals published before step 2 — as `status: "missing"` rows
+   without figures (0.5.3; 0.5.2 omitted them) — and the default (base)
+   gallery is unaffected throughout.
+
+**What a deployment without the Infra 2032 routing instance stores:** the
+2032 variants as `status = 'error'` rows (`routing_graph_not_configured`),
+listed by the gallery as "not computable on this scenario". Rerunning the
+backfill after that instance exists turns them into computed rows —
+nothing else needs redoing.
+
+**Publish cost (revised in 0.5.2).** Measured on 0.5.1 with the dev stack:
+warm publish 2.5–2.8 s, of which ~1.8 s was the variant rows — not
+routing (cached) but a catalog load per scenario, including the four
+Infra 2032 variants that cannot compute there at all. 0.5.2 fixes both:
+unservable variants are answered from the router registry before anything
+is loaded, and a publish that follows an Evaluate or Recalculate reads the
+rows out of the family document the builder already wrote
+(`family.documents`) instead of rebuilding. A publish with no document —
+the refresh script, or one after the 3 h document TTL — still pays the
+build. Watch `proposal_publish.publish` in `admin.request_log` after the
+deploy; the log line `scenario rows from family document` vs
+`scenario rows built` says which path ran.
+
+**Dev stacks:** the table is in `create_proposal_schema.sql`, so a fresh
+`docker compose down -v && up -d --build` has it; an existing dev database
+needs the migration. The seed's example proposal publishes without a
+router and therefore without rows — it is on the backfill queue until the
+script runs.
+
+---
+
 ## Maintaining this document
 
 One file, updated in the same PR as the change it describes. The rule that
