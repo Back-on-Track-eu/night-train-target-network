@@ -15,7 +15,9 @@ server environments from two branch-pinned checkouts:
 Merged PR → branch push → GitHub Actions (`deploy-staging.yml` /
 `deploy-production.yml`) → SSH forced-command → `deploy.sh`:
 fast-forward pull → build → **migrations applied before the api may start**
-→ `migrate.py --check` assertion → health check. A failed deploy is a red X
+→ `migrate.py --check` assertion → health check → `refresh_proposals.py`
+(recomputes whatever a model version bump left outdated; a warning, never a
+failed deploy). A failed deploy is a red X
 on the commit.
 
 Both environments share the existing `targetnetwork-routing` engine
