@@ -18,6 +18,7 @@ import {
   demandFromRequest,
   dirtyScopes,
   isAwaiting,
+  supplyFigures,
   tariffFromRequest,
   type DetailsInputs,
   type ExampleOd,
@@ -71,8 +72,9 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const store = useStore()
 
-type TabKey = 'supply' | 'operation' | 'infrastructure' | 'overhead' | 'demand'
-const TABS: TabKey[] = ['supply', 'operation', 'infrastructure', 'overhead', 'demand']
+type TabKey = 'demand' | 'supply' | 'operation' | 'infrastructure' | 'overhead'
+// D1: Demand opens first.
+const TABS: TabKey[] = ['demand', 'supply', 'operation', 'infrastructure', 'overhead']
 
 // Both live in the store — see the note there. A Recalculate pressed inside
 // this card must leave the card open, on the tab it was pressed on.
@@ -81,7 +83,7 @@ const open = computed({
   set: (value: boolean) => (store.detailsOpen = value),
 })
 const tab = computed({
-  get: () => (TABS.includes(store.detailsTab as TabKey) ? (store.detailsTab as TabKey) : 'supply'),
+  get: () => (TABS.includes(store.detailsTab as TabKey) ? (store.detailsTab as TabKey) : 'demand'),
   set: (value: TabKey) => (store.detailsTab = value),
 })
 
@@ -167,17 +169,6 @@ const routeBreakdown = computed<Breakdown | null>(
   () => props.result?.views?.route.data.per_year?.all ?? null,
 )
 
-/** Ticket revenue per class_main, for the demand panel's bar. */
-const classRevenue = computed(() => {
-  const cells = props.result?.views?.route.data.per_year
-  if (!cells) return null
-  const out: Record<string, number> = {}
-  for (const [classMain, bd] of Object.entries(cells)) {
-    if (classMain !== 'all') out[classMain] = bd.revenue.ticket_revenue_eur
-  }
-  return out
-})
-
 const operator = computed(() => {
   const id = selected.value?.operator_id
   if (!id) return null
@@ -207,6 +198,19 @@ const committedSupply = computed(() => ({
   placeKmOffered: props.summary?.available_place_km_per_year ?? null,
   trainsets: props.summary?.trainsets_physical ?? null,
 }))
+
+/** Departures a year at the frequency as the bar has it — what the Demand
+ *  tab's per-trip figures and ladder are drawn against (D9, finding 3). */
+const currentDepartures = computed(
+  () =>
+    supplyFigures(
+      store.scheduleDaysPerWeek,
+      props.cycleDistanceKm,
+      0,
+      null,
+      operations.value?.trip_pairs.length ?? 1,
+    ).departures,
+)
 
 /** The backend's demand block for the composition on screen — the family
  *  carries one per member, so switching compositions needs no request. */
@@ -394,10 +398,14 @@ const demandDefaults = computed(() => {
       <!-- Demand -->
       <DemandTab
         v-else
-        :summary="summary"
-        :breakdown="routeBreakdown"
-        :class-revenue="classRevenue"
-        :awaiting="awaits('schedule', 'prices')"
+        :compositions="compositions"
+        :selected-composition-id="selectedCompositionId"
+        :committed-block="committedBlock"
+        :days-per-week="store.scheduleDaysPerWeek"
+        :departures="currentDepartures"
+        :previewing="dirty.has('demand')"
+        @select-composition="(id) => emit('selectComposition', id)"
+        @go-to-supply="tab = 'supply'"
       />
     </div>
   </details>

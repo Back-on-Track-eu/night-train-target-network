@@ -488,7 +488,7 @@
         "densityLength": "Platzbedarf je Platz",
         "densityWeight": "Gewicht je Platz"
       },
-      "fitHint": "In Vorbereitung, braucht das Nachfragemodell. Heute wird jeder Zug mit derselben Auslastung bewertet, diese Spalte kann sie deshalb nicht unterscheiden.",
+      "fitHint": "Wie gut jede Wagenreihung zur Nachfrage passt, zeigt der Reiter Nachfrage (Auslastung nach Wagenreihung).",
       "schedule": {
         "alwaysDaily": "Täglich",
         "alwaysThreePerWeek": "3× pro Woche"
@@ -845,22 +845,6 @@
         "ticketBaseItems": "Grundfahrpreis + Zusatzleistungen.",
         "fixedBaseItems": "Personal, Lokmiete, Wagenwartung, Bordservice, Abschreibung der Wagen, Finanzierung, Reinigung, Rangieren. Nicht enthalten: variable Gemeinkosten und alles, was an Infrastrukturbetreiber geht."
       },
-      "demand": {
-        "title": "Nachfrage",
-        "caption": "vorläufige Annahme, pro Jahr",
-        "info": "Was die vorläufige Nachfrageannahme ergibt. Die Reisenden sind die tatsächlich verkauften Plätze, die Größe, mit der der Gastronomiebeitrag multipliziert wird, nicht die Platzhalterzahl an Fahrten aus dem Kennzahlenraster. Ticketerlöse und Gastronomiebeitrag stehen getrennt, weil sie unterschiedlich verdient werden und einer von beiden negativ sein kann.",
-        "passengers": "Reisende",
-        "placeKmSold": "Verkaufte Platz-km",
-        "utilisation": "Auslastung",
-        "ticketRevenue": "Ticketerlöse",
-        "cateringContribution": "Gastronomiebeitrag",
-        "totalRevenue": "Erlöse und Beitrag",
-        "byClass": "Ticketerlöse nach Klasse",
-        "restsOn": "Worauf das beruht",
-        "restsOnInfo": "Die Nachfrage ist eine manuelle Eingabe: ein Nachfragepotenzial, das unter Nachfrage gesetzt und nach einer festen Regel auf die Plätze verteilt wird. Jeder Wert auf diesem Reiter folgt aus dieser Eingabe; nichts davon ist eine Prognose.",
-        "whenItLands": "Sobald das Nachfragemodell vorliegt, zeigt dieser Reiter die Nachfrage nach Verbindung, nach Klasse und nach dem Verkehrsmittel, von dem die Reisenden umgestiegen sind, und die Preise unter Angebot bekommen Elastizitäten.",
-        "pricesElsewhere": "Die Preise werden unter Angebot festgelegt."
-      },
       "groups": {
         "comfort": "Freizeit – Komfort",
         "group": "Freizeit – Gruppe",
@@ -891,6 +875,110 @@
         "utilisation": "Auslastung",
         "revenueByClass": "Ticketerlös nach Klasse",
         "previewHint": "Vorschau aus Fahrplan und Preisen gegen die berechnete Nachfrage. Neu berechnen, um sie auf Zugbetrieb, Gemeinkosten und die Kennzahlen anzuwenden."
+      },
+      "potential": {
+        "title": "Nachfragepotenzial",
+        "info": "Reisende pro Jahr, beide Richtungen, die diese Strecke nutzen würden. Vier Stufen geben einen Startwert; jede Zahl kann eingetippt werden, die Stufe wird dann „Eigene“. Die gewählte Stufe wird mit dem Vorschlag gespeichert. Die Häufigkeit unter Angebot › Fahrplan macht aus dem Jahr eine Last je Abfahrt: Weniger Abfahrten füllen jeden Zug voller, und was ein Zug nicht aufnehmen kann, wird nicht bedient.",
+        "levels": {
+          "small": {
+            "short": "S",
+            "name": "Klein"
+          },
+          "medium": {
+            "short": "M",
+            "name": "Mittel"
+          },
+          "large": {
+            "short": "L",
+            "name": "Groß"
+          },
+          "xl": {
+            "short": "XL",
+            "name": "Sehr groß"
+          },
+          "custom": {
+            "short": "Eigene",
+            "name": "Eigene"
+          }
+        },
+        "levelTitle": "{name}: {n} Reisende pro Jahr",
+        "unit": "Reisende pro Jahr",
+        "perDeparture": "{n} je Abfahrt bei {days} Tagen pro Woche",
+        "ofPlaces": "{pct} der Plätze von {composition}"
+      },
+      "groupsPanel": {
+        "title": "Nachfrage nach Reisendengruppe",
+        "caption": "Anteile am Gesamtwert · Klassen in Reihenfolge der Präferenz",
+        "info": "Wie sich der Gesamtwert auf Reisendengruppen verteilt und welche Klassen jede Gruppe in welcher Reihenfolge bucht. Die Zuteilung läuft in vier Runden — jede Gruppe der Reihe nach (Freizeit – Komfort, Freizeit – Gruppe, Senioren, Freizeit – Sparsam, Geschäftlich) gibt 50, dann 20, 20 und 10 % ihrer Nachfrage frei; 80 % davon setzen sich nach der Präferenzliste, erste Klasse bis sie voll ist, dann die nächste, 20 % verteilen sich gleichmäßig auf die übrigen gelisteten Klassen der Gruppe. Eine Gruppe sitzt nur in den Klassen, die sie listet; was keine davon aufnehmen kann, wird nicht bedient. Erwartungswerte, keine Zufallsziehungen, damit eine Neuberechnung dieselben Zahlen liefert.",
+        "group": "Gruppe",
+        "share": "Anteil",
+        "perYear": "Pro Jahr",
+        "perTrip": "Je Fahrt",
+        "classes": "Klassen, in Reihenfolge",
+        "all": "Alle Reisenden",
+        "sumOff": "Die Anteile summieren sich auf {sum} % — die Gruppen fragen dann {n} nach, nicht den Gesamtwert.",
+        "rule": "{rule} % jeder Gruppe wählen nach der Regel — erste gelistete Klasse bis sie voll ist, dann die nächste; {rest} % nehmen gleichmäßig eine andere Klasse ihrer Liste."
+      },
+      "ladder": {
+        "title": "Auslastung nach Wagenreihung",
+        "info": "Dieselbe Nachfrage auf jede Wagenreihung der Familie verteilt, damit eine Nachfrage auf jedem Zug als Auslastung lesbar ist. Füllung = bediente Plätze, der Prozentwert die Auslastung, die Zahl hinter dem Balken die Plätze der Wagenreihung; die blasse gestrichelte Linie unter einem Balken ist Nachfrage, die keine gelistete Klasse aufnehmen konnte. Je Fahrt ist eine Abfahrt, eine Richtung; ein Monat ein Zwölftel des Jahres. Klick auf eine Wagenreihung wählt sie aus.",
+        "sameDemand": "dieselbe Nachfrage auf jeder Wagenreihung ·",
+        "atFrequency": "bei {days} Tagen pro Woche, {departures} Abfahrten im Jahr",
+        "units": {
+          "trip": "je Fahrt",
+          "month": "pro Monat",
+          "year": "pro Jahr"
+        },
+        "per": {
+          "trip": "je Abfahrt",
+          "month": "pro Monat",
+          "year": "pro Jahr"
+        },
+        "allClasses": "Alle Klassen",
+        "sort": "sortieren",
+        "sorts": {
+          "capacity": "Kapazität",
+          "utilisation": "Auslastung",
+          "unserved": "nicht bedient"
+        },
+        "noClass": "kein {c}",
+        "notServed": "{n} nicht bedient",
+        "axisAll": "Plätze im Zug {unit}",
+        "axisClass": "{c}-Plätze {unit}",
+        "legendPlaces": "Plätze der Wagenreihung",
+        "legendFill": "Füllung: bediente Plätze, % = Auslastung",
+        "legendCount": "Zahl hinter dem Balken: Plätze der Wagenreihung",
+        "legendMiss": "gestrichelt darunter: nicht bediente Nachfrage (Zahl bei der gewählten Wagenreihung)"
+      },
+      "od": {
+        "title": "Nachfrage nach Verbindung",
+        "caption": "Anteile der Nachfrage · aus den Haltegewichten gefüllt, bekannte Paare festpinnen",
+        "info": "Der Anteil der Nachfrage, den jedes verkäufliche Quell-Ziel-Paar bekommt — ein Einstiegshalt vor einem Ausstiegshalt. Die Matrix wird aus einer Sache gefüllt: einem Gewicht je Halt in den Rändern — der Anteil eines Paars ist Einstiegsgewicht mal Ausstiegsgewicht. Die Voreinstellungen schreiben diese Gewichte nach Lage entlang der Strecke (lange Fahrten: früh einsteigen, spät aussteigen; kurze Sprünge umgekehrt; mittlere Distanz: die mittleren Halte); jedes Gewicht kann überschrieben werden, eine große Stadt zieht mehr. Jede Zelle kann dann überschrieben werden: Sie wird gepinnt und der Rest skaliert so, dass die Summe 100 % bleibt. Ein Platz wird einmal pro Nacht verkauft, die Verteilung bewegt also Platz-km und Erlös, nicht Reisende. Eine Matrix für alle Klassen.",
+        "noRoute": "Die Verbindungen erscheinen, sobald die Strecke berechnet ist.",
+        "stopWeights": "Haltegewichte",
+        "presets": {
+          "even": "Gleichmäßig",
+          "long": "Lange Fahrten",
+          "mid": "Mittlere Distanz",
+          "short": "Kurze Sprünge"
+        },
+        "unpinAll": "alle lösen",
+        "unpinAllHint": "jede getippte Zelle verwerfen",
+        "corner": "einsteigen ↓ · aussteigen →",
+        "weight": "Gewicht",
+        "boards": "steigen ein",
+        "alights": "steigen aus",
+        "pinned": "gepinnt",
+        "hint": "Zeilen steigen ein, Spalten steigen aus; eine Zelle ist der Anteil des Paars an der Nachfrage, darunter seine Fahrtlänge. Einen Anteil tippen pinnt ihn (●); die Ränder halten die Haltegewichte, die den Rest füllen — eine Voreinstellung schreibt sie, sie lassen sich überschreiben. Nachthalte verkaufen nichts und werden nicht gezeigt.",
+        "droppedPins": "Pins auf Paaren, die die Strecke nicht mehr verkauft, wurden bei der letzten Berechnung verworfen: {pairs}.",
+        "sellablePairs": "Verkäufliche Paare",
+        "pinnedPairs": "Gepinnte Paare",
+        "averageJourney": "Mittlere Fahrtlänge",
+        "longestPair": "Längstes Paar, {name}",
+        "shortestPair": "Kürzestes Paar, {name}",
+        "busiestBoarding": "Stärkster Einstiegshalt",
+        "busiestAlighting": "Stärkster Ausstiegshalt",
+        "figuresNote": "Die Haltegewichte sind die wenigen Zahlen der Anfrage; gepinnte Zellen reisen mit ihnen."
       }
     }
   },

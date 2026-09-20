@@ -500,7 +500,7 @@
         "densityLength": "Space per place",
         "densityWeight": "Weight per place"
       },
-      "fitHint": "Coming soon — needs the demand model. Today every train is evaluated at the same utilisation, so this column cannot tell them apart.",
+      "fitHint": "How well each composition fits the demand is drawn on the Demand tab (Utilisation by composition).",
       "schedule": {
         "alwaysDaily": "Daily",
         "alwaysThreePerWeek": "3× per week"
@@ -857,22 +857,6 @@
         "ticketBaseItems": "Base fare + additional services.",
         "fixedBaseItems": "Staff, locomotive lease, coach maintenance, on-board service, coach amortisation, financing, cleaning, shunting. Not in it: variable overhead, and everything paid to infrastructure managers."
       },
-      "demand": {
-        "title": "Demand",
-        "caption": "interim assumption, per year",
-        "info": "What the interim demand assumption produces. Passengers are the places actually sold — the figure the catering contribution multiplies — not the placeholder trip count the KPI grid shows. Ticket revenue and the catering contribution are listed separately because they are earned in different ways and one of them can be negative.",
-        "passengers": "Passengers",
-        "placeKmSold": "Place-km sold",
-        "utilisation": "Utilisation",
-        "ticketRevenue": "Ticket revenue",
-        "cateringContribution": "Catering contribution",
-        "totalRevenue": "Revenue and contribution",
-        "byClass": "Ticket revenue by class",
-        "restsOn": "What this rests on",
-        "restsOnInfo": "Demand is a manual input: a potential demand you set under Demand, seated by a fixed rule. Every figure on this tab follows from that input; nothing here is a prediction.",
-        "whenItLands": "When the demand model lands, this tab shows demand by connection, by class and by the mode each passenger shifted from — and the prices under Supply get elasticities.",
-        "pricesElsewhere": "Prices are set under Supply."
-      },
       "groups": {
         "comfort": "Leisure – comfort",
         "group": "Leisure – group",
@@ -903,6 +887,110 @@
         "utilisation": "Utilisation",
         "revenueByClass": "Ticket revenue by class",
         "previewHint": "Preview from the schedule and prices against the committed demand. Recalculate to apply them to Train operation, Overhead and the KPI grid."
+      },
+      "potential": {
+        "title": "Potential demand",
+        "info": "Passengers per year, both directions, who would take this route. Four levels give a starting figure; any figure can be typed, which makes the level custom. The chosen level is saved with the proposal. The frequency under Supply › Schedule turns the year into a load per departure: fewer departures fill each train fuller, and what a train cannot seat is not served.",
+        "levels": {
+          "small": {
+            "short": "S",
+            "name": "Small"
+          },
+          "medium": {
+            "short": "M",
+            "name": "Medium"
+          },
+          "large": {
+            "short": "L",
+            "name": "Large"
+          },
+          "xl": {
+            "short": "XL",
+            "name": "Extra large"
+          },
+          "custom": {
+            "short": "Custom",
+            "name": "Custom"
+          }
+        },
+        "levelTitle": "{name}: {n} passengers per year",
+        "unit": "passengers per year",
+        "perDeparture": "{n} per departure at {days} days a week",
+        "ofPlaces": "{pct} of {composition}'s places"
+      },
+      "groupsPanel": {
+        "title": "Demand by traveller group",
+        "caption": "shares of the total · classes in order of preference",
+        "info": "How the total splits into traveller groups, and which classes each group books, in order. The allocation runs four rounds — every group in order (Leisure – comfort, Leisure – group, Senior leisure, Leisure – budget, Business) releases 50, then 20, 20 and 10 % of its demand; 80 % of that seats along the preference list, first class until full, then the next, and 20 % spread evenly over the group’s other listed classes. A group sits only in the classes it lists; what none of them can seat is not served. Expected values, never random draws, so a recalculation reproduces the same figures.",
+        "group": "Group",
+        "share": "Share",
+        "perYear": "Per year",
+        "perTrip": "Per trip",
+        "classes": "Classes, in order",
+        "all": "All travellers",
+        "sumOff": "Shares sum to {sum} % — the groups then ask for {n}, not the total.",
+        "rule": "{rule} % of each group choose by the rule — first listed class until full, then the next; {rest} % pick any other class on their list, evenly."
+      },
+      "ladder": {
+        "title": "Utilisation by composition",
+        "info": "The same demand allocated to every composition of the family, so one demand reads as a utilisation on each train. Fill = places served, the percentage its utilisation, the number after the bar the composition’s places; the faint dashed line below a bar is demand no listed class could seat. Per trip is one departure, one direction; a month is a twelfth of the year. Click a composition to select it.",
+        "sameDemand": "the same demand on every composition ·",
+        "atFrequency": "at {days} days per week, {departures} departures a year",
+        "units": {
+          "trip": "per trip",
+          "month": "per month",
+          "year": "per year"
+        },
+        "per": {
+          "trip": "per departure",
+          "month": "per month",
+          "year": "per year"
+        },
+        "allClasses": "All classes",
+        "sort": "sort",
+        "sorts": {
+          "capacity": "capacity",
+          "utilisation": "utilisation",
+          "unserved": "unserved"
+        },
+        "noClass": "no {c}",
+        "notServed": "{n} not served",
+        "axisAll": "places on the train {unit}",
+        "axisClass": "{c} places {unit}",
+        "legendPlaces": "places the composition has",
+        "legendFill": "fill: places served, % = utilisation",
+        "legendCount": "number after the bar: the composition’s places",
+        "legendMiss": "dashed below: demand not served (figure on the selected composition)"
+      },
+      "od": {
+        "title": "Demand by OD pair",
+        "caption": "shares of the demand · filled from the stop weights, pin the pairs you know",
+        "info": "The share of the demand each sellable OD pair gets — a boarding stop before an alighting stop. The matrix is filled from one thing: a weight per stop in the margins — a pair’s share is its boarding weight times its alighting weight. The presets write those weights by position along the route (long journeys: early boarding, late alighting; short hops the reverse; mid: the middle stops); any weight can be typed over, a big city pulling more. Any cell can then be typed over: it is pinned and the rest rescales so the total stays 100 %. A place is sold once per night, so the distribution moves place-km and revenue, not passengers. One matrix for all classes.",
+        "noRoute": "The OD pairs appear once the route has been calculated.",
+        "stopWeights": "Stop weights",
+        "presets": {
+          "even": "Even",
+          "long": "Long journeys",
+          "mid": "Mid distance",
+          "short": "Short hops"
+        },
+        "unpinAll": "unpin all",
+        "unpinAllHint": "drop every typed cell",
+        "corner": "board ↓ · alight →",
+        "weight": "weight",
+        "boards": "boards",
+        "alights": "alights",
+        "pinned": "pinned",
+        "hint": "Rows board, columns alight; a cell is the pair’s share of the demand, its journey below. Type a share to pin it (●); the margins hold the stop weights that fill the rest — a preset writes them, you can overwrite them. Night stops sell nothing and are not shown.",
+        "droppedPins": "Pins on pairs the route no longer sells were dropped at the last calculation: {pairs}.",
+        "sellablePairs": "Sellable OD pairs",
+        "pinnedPairs": "Pinned pairs",
+        "averageJourney": "Average journey",
+        "longestPair": "Longest pair, {name}",
+        "shortestPair": "Shortest pair, {name}",
+        "busiestBoarding": "Busiest boarding stop",
+        "busiestAlighting": "Busiest alighting stop",
+        "figuresNote": "The stop weights are the request’s few numbers; pinned cells travel with them."
       }
     }
   },

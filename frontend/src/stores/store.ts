@@ -224,7 +224,7 @@ export const useStore = defineStore('store', () => {
   // while it loads: keeping this in the card meant every Recalculate closed
   // the card it was pressed in and threw the reader back to the top.
   const detailsOpen = ref(false)
-  const detailsTab = ref<string>('supply')
+  const detailsTab = ref<string>('demand')
 
   /** Put the model's own standard values into the fields. Called once the
    *  registry is here and again whenever the user asks for a reset. */
