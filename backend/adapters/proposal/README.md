@@ -31,7 +31,7 @@ work now finished, and preserved in git history), plus the parked
 | File | Role |
 |---|---|
 | `repository.py` | `ProposalRepository` — publish, refresh, load, gallery/map queries, `outdated_trigger()` |
-| `projection.py` | Pure `(route, evaluation) → summary row`; `route_fingerprint()`; `GEOM_SIMPLIFY_TOLERANCE_DEG` |
+| `projection.py` | Pure `(route, evaluation) → summary row`; `route_fingerprint()`; `corridor_segments()` (§5.4a); `GEOM_SIMPLIFY_TOLERANCE_DEG` |
 | `gtfs_store.py` | Route ⇄ GTFS + sidecar tables (write and read-back) |
 | *(moved)* | The member cache is `adapters/family/member_cache.py` (`family.members`) since WP18 B2b — §2.3. Underneath it, routing itself is cached per stop pair in `adapters/route_segment_repository.py` (`route_cache` schema) — a miss there no longer means re-routing every unchanged leg |
 | `engagement_repository.py` | Likes, comments, and the `UNION ALL` timeline merge |
@@ -378,6 +378,12 @@ Mechanisms, in order of preference:
    correctness for anything the batch hasn't reached, at the cost of one
    slow load.
 
+Every refresh also rewrites the proposal's §5.4a scenario rows, exactly
+as a publish does; the rows alone are backfilled by
+`scripts/refresh_proposals.py --scenario-summaries` (missing rows, rows
+behind the container's version or the running code, a variant catalogue
+that gained a variant).
+
 Both mechanisms share one staleness check
 (`adapters/proposal/repository.py`'s `outdated_trigger()`, checked in
 priority order `route_builder_version` → `calc_version` →
@@ -593,6 +599,100 @@ the dependency direction). Route metrics computed as today's
 `views.*.per_train_km` normalisation; annual totals from `per_year`; the
 fingerprint (§3.1) computed here.
 
+### 5.4a `proposals.proposal_scenario_summaries` (per-scenario projection, 2026-09-20)
+
+The §5.4 projection **once per current scenario variant**, so the gallery
+can be read on the scenario a viewer picks instead of the base only.
+Same discipline as §5.4 — derived, not a source of truth, replaced
+wholesale in the same transaction as every publish and refresh
+(`repository.py`'s `_write_state()` → `_replace_scenario_summaries()`),
+rebuildable by `scripts/refresh_proposals.py --scenario-summaries`.
+
+```sql
+CREATE TABLE proposals.proposal_scenario_summaries (
+    proposal_id           INTEGER NOT NULL REFERENCES proposals.proposals(proposal_id) ON DELETE CASCADE,
+    proposal_version      INTEGER NOT NULL,
+    scenario_variant_id   INTEGER NOT NULL,   -- scenario × measure set (the family's axis)
+    scenario_id           INTEGER NOT NULL,
+    measure_set_id        INTEGER NOT NULL,
+    composition_id        TEXT NOT NULL,      -- the author's, same as the container
+    route_builder_version TEXT NOT NULL,
+    calc_version          TEXT NOT NULL,
+    status                TEXT NOT NULL,      -- 'ok' | 'error'
+    error_code            TEXT,               -- the member's code when status = 'error'
+    -- every §5.4 metric/KPI column, nullable (NULL on an error row)
+    ...
+    geom_simplified       geometry(MultiLineString, 4326),
+    segments              JSONB,              -- {"A__B": LineString} corridor shapes
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (proposal_id, scenario_variant_id)
+);
+```
+
+**How a row is made.** `api/helpers/scenario_summaries.py`'s
+`compute_scenario_rows(compute_request)`, in three steps:
+
+1. **Unservable variants first.** A variant whose scenario pins a routing
+   graph this deployment serves no instance for can only ever be an error
+   member, so the router registry is asked per distinct graph key and
+   those variants become error rows immediately. Without this they reach
+   `FamilyContext.prewarm()`, which loads a scenario's tracks, stops,
+   passages and compositions *before* asking for the router — ~200 ms per
+   scenario thrown away (measured 2026-09-20: four Infra 2032 variants on
+   a stack serving only infra-2026).
+2. **The family document, if it is there.** The builder has just run the
+   default family for these stops and HOW fields (every current variant ×
+   the whole catalog) and `family.documents` holds it; each member already
+   carries the §5.4 summary this projection would rebuild, plus one
+   compact route per (scenario, composition) and a shared geometry pool.
+   The rows are then a lookup plus `projection.py`'s
+   `compact_route_geometry()` — no routing, no catalog loads, no
+   evaluation. Reading a server-written cache satisfies §2.2's "never
+   persist a client-supplied result" exactly as a member-cache hit does.
+   A document that is missing a member this projection needs is treated
+   as a miss rather than stitched to a partial build.
+3. **Otherwise build.** `run_family()` for the proposal's composition
+   across the servable variants on one shared `FamilyContext` — the same
+   call POST /api/proposal/family makes — projected through
+   `build_summary_db_row()` + `corridor_segments()`. This is the refresh
+   script's path, and a publish whose document has been swept.
+
+Both row paths agree by construction: the document's member summary *is*
+`build_summary_row()`'s output, and the two geometry helpers share their
+simplification (`projection.py`'s `_simplified_multiline()`), so a refresh
+cannot move a figure the gallery is showing. Suggestions are off on the
+build path (the stops are the proposal's).
+
+**Error rows.** A member the family cannot compute on a variant — the
+variant's routing graph not served by this deployment
+(`routing_graph_not_configured`), an unroutable pair on that network, a
+gauge clash — is stored with `status = 'error'`, the member's code and
+NULL figures, never dropped: the gallery lists it and can say why the
+proposal is missing on that scenario. Rerunning the backfill once the
+instance exists turns it into an ok row.
+
+**`segments`.** A non-base variant's route is not in `proposals.segments`/
+`shapes`, so the corridor shapes `map_lines` groups on (§7.1) are kept
+here: a JSON object keyed by the direction-collapsed stop pair
+(`projection.py`'s `corridor_key()`, the same `LEAST/GREATEST` form the
+SQL builds for the base route), one GeoJSON LineString each.
+
+**The base row is a duplicate** of `proposal_summaries` by construction.
+`proposal_summaries` stays the projection every existing consumer reads
+(stats, compare, the default gallery) — and, since the revision of
+2026-09-20 (0.5.3), the row set and the filterable columns of the
+scenario gallery too: a variant request LEFT JOINs this table onto the
+base projection for its figures, so a scenario can change what a card
+says but never which cards a filter returns.
+
+**Backfill.** Proposals published before the table existed, or whose rows
+fell behind the container's version, the running code versions or the
+variant catalogue, are `list_scenario_backfill()`'s work queue;
+`replace_scenario_summaries()` writes them at the proposal's current
+version without touching anything else. `db/dev/seed.py`'s example
+proposal has no router and publishes with `scenario_rows=None`, so it is
+always on that queue until the backfill runs.
+
 ### 5.5 ONTD integration (revised 2026-08-04)
 
 Existing night train routes stay in the `ontd` schema — deliberately **not**
@@ -737,13 +837,28 @@ the caller picks sections via `include`.
 **Every stored proposal is a gallery item**, always representing the
 current base scenario — the system (batch refresh + the load endpoint's
 on-load fallback, §4.2) keeps it that way on its own, so there's no
-transient-state flag to expose here. There is no variant-level mode —
-scenario browsing happens in compare (§7.3), where other scenarios are a
-first-class dimension. Because every row is always on the current base by
-construction, `scenario_id` is **not** a filter — there is essentially
-only one value to filter on at any moment. `route_builder_version`/
-`calc_version` are likewise not filters: internal/analytical version
-tracking, not a gallery-facing dimension.
+transient-state flag to expose here. Because every row is always on the
+current base by construction, `scenario_id` is **not** a filter — there
+is essentially only one value to filter on at any moment.
+`route_builder_version`/`calc_version` are likewise not filters:
+internal/analytical version tracking, not a gallery-facing dimension.
+
+**Reading the gallery on another scenario (2026-09-20, §5.4a).** A
+top-level `scenario_variant_id` (not a filter: it picks where the
+proposal side's FIGURES come from, never which rows pass) joins that
+variant's `proposal_scenario_summaries` row onto the base projection —
+figures, sort order, `map_routes` geometry and `map_lines` corridors
+follow the scenario, while identity, name, countries, stop ids, relations,
+composition and timestamps stay the base projection's, so a filter returns
+the same proposals on every scenario. Existing (ONTD) rows are
+scenario-independent. Every proposal row carries `status` (`"ok"`;
+`"error"` — the family could not compute it on that variant; `"missing"` —
+its rows have not been backfilled yet), `error_code` and
+`scenario_variant_id` (null on the base projection); a non-ok row has
+null figures and, for `"missing"`, the base geometry so the map still
+draws it. Omitted, the request is exactly the pre-§5.4a contract; an
+unknown or non-current variant is a 400 `unknown_scenario_variant`. The
+stats endpoint (§7.7) and compare (§7.3) stay on the base.
 
 **Filter rule**: every **numeric** summary column (§5.4) accepts a
 `{"min": …, "max": …}` range (either bound optional) — `created_at`/

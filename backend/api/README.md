@@ -878,6 +878,28 @@ gallery row is always on the current base scenario by construction — the
 system keeps it that way on its own, §4.2, with no client-visible flag
 for the transient exception).
 
+**`scenario_variant_id`** (top-level, optional, §5.4a) swaps the proposal
+side's **figures** for that variant's in every requested section:
+`summaries` figures and sort order, `map_routes` geometry, `map_lines`
+corridors. It is not a filter, and it never changes the result set: the
+rows a filter returns — and their identity, name, countries, stop ids,
+relations, composition, timestamps — are the base projection's whichever
+scenario is read (`map_stop_counts`/`map_country_counts` are therefore
+identical on every scenario). Existing (ONTD) rows are unchanged. The response echoes it as
+`summaries.scenario_variant_id` (null when omitted), and every proposal
+row carries three extra fields:
+
+| Field | Meaning |
+|---|---|
+| `status` | `"ok"`; `"error"` — the family could not compute this proposal on the requested variant; `"missing"` — its rows for that variant have not been written yet (publish predates the backfill). On both non-ok values every figure is null; identity, `countries`/`stop_ids`/`country_relations` and timestamps are the base projection's as always |
+| `error_code` | the member's code when `status` is `"error"` (`routing_graph_not_configured`, `routing_error`, `gauge_mismatch`, `domain_error`), else null |
+| `scenario_variant_id` | the variant the row describes; null on the base projection |
+
+A `"missing"` row keeps its base geometry in `map_routes` so the map still
+draws it; an `"error"` row has none. Ids come from `GET /api/scenarios` (`scenario_variants`); an
+unknown or non-current id is a 400 `unknown_scenario_variant`, a
+non-integer a 400 `validation_error`.
+
 **What can be sorted by** — every column in the table above except the
 three "special" rows (`sources`, `trip_windows`, `bbox`, none of which
 are single-valued), plus `route_fingerprint`. `sort` is

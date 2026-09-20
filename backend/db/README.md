@@ -313,6 +313,14 @@ package instead of only at the end:
   `proposal_summaries`" rules out joining `proposals.proposals.created_at`
   at query time instead). Backfilled from `proposals.proposals.created_at`
   via a soft-reference `UPDATE...FROM`, not defaulted to `now()`.
+- **`proposal_scenario_summaries`**
+  (`migrations/2026-09-20_proposal_scenario_summaries.sql`, §5.4a) — a
+  new table, nothing existing touched. Rows arrive with every publish and
+  refresh from the api that ships it; proposals published earlier have
+  none until `uv run scripts/refresh_proposals.py --scenario-summaries`
+  has run (idempotent, needs the routing instances the deployment serves —
+  a variant without one is stored as an error row). Deploy order:
+  migration, api, backfill.
 
 ---
 
@@ -566,6 +574,7 @@ cutover. The sidecars are written/read by
 | `shuntings` | One row per `Shunting` (`models/route/route.py`) — one shunting event at a trip terminal; not deduplicated, up to 4 rows per round trip |
 | `timetable_warnings` | One row per `TimetableWarning` (`models/route/trip.py`) — a derived timetable quality annotation, informational only |
 | `update_log` | Append-only timeline event log (published/overwritten/recalculated/branched_from/branched_to/migrated — the last one a data migration that rewrote a stored request without recomputing, `2026-09-19_schedule_frequency.sql` being the first) — preserves state transitions that `proposals.proposals` itself prunes on overwrite. Written by `publish()`/`refresh_proposal()` (`adapters/proposal/repository.py`), read as the third timeline source by `adapters/proposal/engagement_repository.py`. A NULL `user_id` marks a system event, which is what distinguishes a refresh from a user overwrite |
+| `proposal_scenario_summaries` | The §5.4a projection once per current scenario variant — `proposal_summaries`' columns (nullable) plus `scenario_variant_id`, `status`/`error_code` and a `segments` JSONB of corridor shapes; replaced with every publish/refresh, backfilled by `scripts/refresh_proposals.py --scenario-summaries`; read by `POST /api/proposals` when a `scenario_variant_id` is requested. FK cascade from `proposals.proposals` |
 | `proposal_summaries` | Derived projection over `proposals.proposals` for the gallery/map — route metrics, financial KPIs, placeholder demand KPIs, simplified PostGIS geometry, and `country_relations` (the sorted `"AA__BB"` keys of every country-to-country relation the proposal actually serves — derived from `od_pairs`, so a merely transited country contributes nothing; ranked by `GET /api/proposals/stats` against `input_params.country_relations`). Not a source of truth; rebuildable at any time. Row-building logic: `adapters/proposal/projection.py`'s `build_summary_row()` (WP4, `tests/test_37_proposal_projection.py`); upserted by `publish()`, one row per proposal |
 
 Segments/od_pairs/timetable_warnings key off `trip_id`; parkings/shuntings
