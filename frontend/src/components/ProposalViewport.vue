@@ -3,7 +3,10 @@ import { onMounted, onBeforeUnmount, ref, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useStore } from '@/stores/store'
 import {
-  scheduleFromRequest,
+  daysPerWeekFromRequest,
+  demandFromRequest,
+  demandRequest,
+  sameDemand,
   scheduleRequest,
   sameTariff,
   tariffFromRequest,
@@ -887,11 +890,12 @@ function familyRequest(
     (variantIds.length === 0 || variantIds.includes(selectedVariant))
       ? selectedVariant
       : undefined
-  // The Details card's three inputs (zone D). They are HOW fields: part of
-  // the family key, echoed in the resolved request, and saved with the
-  // proposal. A flat seven posts no month map at all, so a proposal nobody
-  // has touched still hashes to the family it always did.
-  const schedule = scheduleRequest(store.scheduleMonths)
+  // The Details card's inputs (zone D): the schedule, the prices and the
+  // demand. They are HOW fields: part of the family key, echoed in the
+  // resolved request, and saved with the proposal. The frequency is always
+  // posted — the backend expands it onto its month grid and hashes the map,
+  // so one figure and the spelled-out map are the same family.
+  const schedule = scheduleRequest(store.scheduleDaysPerWeek)
   return {
     stops: stopIds,
     // Omitted entirely while nothing is overridden: an absent block and an
@@ -907,6 +911,9 @@ function familyRequest(
     // them: an empty object would price every class at nothing, which is not
     // what an unanswered request means.
     ...(Object.keys(store.faresEurPerKm).length > 0 ? tariffRequest(currentTariff.value) : {}),
+    // The demand block, once the registry has seeded it; omitted before that
+    // means the backend's own defaults, which is what it would post anyway.
+    ...(store.demand ? demandRequest(store.demand) : {}),
     auto_stop_addition: autoStopAddition,
     ...(variantIds.length > 0 ? { scenario_variant_ids: variantIds } : {}),
     presented: {
@@ -1131,11 +1138,16 @@ async function loadViews(scenarioId: number | null, compositionId: string | null
 // `publish` is true only for user-initiated evaluations (Evaluate button, stop
 // selection) — a passive scenario-switch recompute passes false so it never
 // creates or overwrites a proposal.
-/** The three Details inputs as the resolved request echo has them. */
+/** The Details inputs as the resolved request echo has them. */
 function restoreDetailInputs(request: Record<string, unknown>) {
-  store.scheduleMonths = scheduleFromRequest(
+  store.scheduleDaysPerWeek = daysPerWeekFromRequest(
     request.schedule as Record<string, number> | null | undefined,
   )
+  // An echo written before DEMAND 0.1.0 has no block: keep the registry's
+  // defaults, and the Details card will report the demand as changed until
+  // the first recalculation commits it.
+  const demand = demandFromRequest(request)
+  if (demand) store.demand = demand
   const tariff = tariffFromRequest(request)
   // Only what the echo actually carries: a request written before CALC
   // 0.9.30 has no fixed-fare or services map, and overwriting the seeded
@@ -1619,10 +1631,11 @@ const paramsStale = computed(
 const detailsChanged = computed(() => {
   const request = publishRequest.value
   if (!request) return false
-  const committedMonths = scheduleFromRequest(
+  const committedDays = daysPerWeekFromRequest(
     request.schedule as Record<string, number> | null | undefined,
   )
-  if (committedMonths.some((d, i) => d !== store.scheduleMonths[i])) return true
+  if (committedDays !== store.scheduleDaysPerWeek) return true
+  if (!sameDemand(store.demand, demandFromRequest(request))) return true
   return !sameTariff(currentTariff.value, tariffFromRequest(request))
 })
 

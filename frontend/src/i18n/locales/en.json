@@ -459,8 +459,8 @@
         "pax": "Passenger trips",
         "paxKm": "Passenger-km",
         "shiftAir": "Shifted from air",
-        "shiftCar": "Shifted from car",
-        "journeyTime": "Journey time"
+        "journeyTime": "Journey time",
+        "shiftOther": "Shifted from car or induced"
       },
       "units": {
         "millionEurYear": "/ year",
@@ -478,7 +478,6 @@
       },
       "loading": "Computing every combination …",
       "partial": "{received} of {total} combinations available — the rest could not be computed.",
-      "customSchedule": "Custom schedule · {days} operating days",
       "pricePart": " · fares {span} €/km",
       "cateringPart": " · catering {value} €/passenger",
       "axisBreak": "axis starts at {value}, not zero"
@@ -597,7 +596,8 @@
       "previewChip": "preview — estimated here, not calculated",
       "scopes": {
         "schedule": "schedule",
-        "prices": "prices"
+        "prices": "prices",
+        "demand": "demand"
       },
       "tabs": {
         "supply": "Supply",
@@ -621,41 +621,23 @@
       },
       "schedule": {
         "title": "Schedule",
-        "caption": "days per week, by month",
-        "info": "How often the train runs in each month of the year, and what follows from it. Operating days are the days in each month times its days per week, so the evaluation year has 366 days — 2032 is a leap year. Departures are operating days times two directions; train-km and place-km follow from the route length and the formation. Which weekday the train runs is not modelled. The fleet is sized to the busiest month: a rake needs the cycle length in days, so a train that runs seven days a week and takes two days to come back needs two rakes.",
-        "presets": {
-          "daily": "Every day",
-          "three": "3× per week",
-          "once": "Once per week",
-          "summer": "Summer only",
-          "custom": "Custom"
-        },
-        "months": {
-          "jan": "Jan",
-          "feb": "Feb",
-          "mar": "Mar",
-          "apr": "Apr",
-          "may": "May",
-          "jun": "Jun",
-          "jul": "Jul",
-          "aug": "Aug",
-          "sep": "Sep",
-          "oct": "Oct",
-          "nov": "Nov",
-          "dec": "Dec"
-        },
-        "dragHint": "Drag a column, or use the arrow keys.",
+        "caption": "days per week, average over the year",
+        "info": "How often the train runs, as an average over the year — one figure, no seasons. Operating days are 366 (2032 is a leap year) times days per week over seven; departures are operating days times two directions; train-km and place-km follow from the route length and the formation. Trainsets are the rakes the cycle needs at this frequency: a train that runs seven days a week and takes two days to come back needs two. Which weekday the train runs is not modelled.",
         "operatingDays": "Operating days",
         "departures": "Departures",
         "trainKm": "Train-km",
         "trainsets": "Trainsets",
-        "previewHint": "Departures, train-km, places and place-km follow from the grid; trainsets use the cycle of {cycle} days, which only a recalculation can redo. Recalculate to apply the schedule to every other panel.",
-        "previewHintNoCycle": "Departures, train-km, places and place-km follow from the grid. The trainset count needs the cycle length from a calculation — recalculate to fill it in."
+        "daysPerWeek": "{n} days per week",
+        "qualifier": {
+          "everyDay": "every day",
+          "onceAWeek": "once a week"
+        },
+        "operatingDaysNote": "{days} operating days a year · which weekdays is not modelled"
       },
       "prices": {
         "title": "Places and prices",
         "caption": "{composition} · {places} places",
-        "info": "What the train offers and what it charges. The tariff is three parts, each per class. The BASE FARE has a fixed term and a distance term — a berth has a price of admission a short journey pays as surely as a long one, so pricing on distance alone made short connections implausibly cheap. ADDITIONAL SERVICES is the revenue from bicycles, oversized luggage and reservations sold with the ticket; it is ordinary ticket revenue, never negative, and it carries overhead and the profit requirement like any other fare. CATERING is the odd one: one signed NET figure per passenger, the restaurant’s own sales less its own costs, and therefore outside those two bases. It differs by class because the classes differ in what their base fare already includes. The two example columns price the BERTH only — fixed plus distance — over the longest and shortest journey the route sells. Demand does not respond to any of it yet: the demand model is a stopgap.",
+        "info": "What the train offers and what it charges. The tariff is three parts, each per class. The BASE FARE has a fixed term and a distance term — a berth has a price of admission a short journey pays as surely as a long one, so pricing on distance alone made short connections implausibly cheap. ADDITIONAL SERVICES is the revenue from bicycles, oversized luggage and reservations sold with the ticket; it is ordinary ticket revenue, never negative, and it carries overhead and the profit requirement like any other fare. CATERING is the odd one: one signed NET figure per passenger, the restaurant’s own sales less its own costs, and therefore outside those two bases. It differs by class because the classes differ in what their base fare already includes. The two example columns price the BERTH only — fixed plus distance — over the longest and shortest journey the route sells. How many of these places actually sell is set under Demand.",
         "class": "Class",
         "places": "Places",
         "shareOfTrain": "Share of train",
@@ -887,9 +869,40 @@
         "totalRevenue": "Revenue and contribution",
         "byClass": "Ticket revenue by class",
         "restsOn": "What this rests on",
-        "restsOnInfo": "The demand side of the model is a stopgap. Every figure on this tab is replaced once a real demand model lands; nothing here is a prediction.",
+        "restsOnInfo": "Demand is a manual input: a potential demand you set under Demand, seated by a fixed rule. Every figure on this tab follows from that input; nothing here is a prediction.",
         "whenItLands": "When the demand model lands, this tab shows demand by connection, by class and by the mode each passenger shifted from — and the prices under Supply get elasticities.",
         "pricesElsewhere": "Prices are set under Supply."
+      },
+      "groups": {
+        "comfort": "Leisure – comfort",
+        "group": "Leisure – group",
+        "senior": "Senior leisure",
+        "budget": "Leisure – budget",
+        "business": "Business"
+      },
+      "follows": {
+        "title": "What follows",
+        "caption": "{composition} · per year, both directions",
+        "info": "What the schedule and the prices earn with the committed demand: passengers, place-km sold, utilisation and revenue per year, both directions. Ticket revenue and the catering contribution are earned in different ways and one of them can be negative, so they stay apart. Schedule and price edits preview here; a demand edit does not — this panel waits for the recalculation, so it never mixes a previewed demand with a calculated one.",
+        "noDemand": "No calculated demand yet — recalculate to see what the schedule and the prices earn.",
+        "passengersPerYear": "passengers per year",
+        "soldPerDeparture": "Places sold per departure",
+        "ofAsked": "of {n} asked",
+        "utilisationPlaces": "Utilisation, places",
+        "placeKmSold": "Place-km sold",
+        "utilisationPlaceKm": "Utilisation, place-km",
+        "ticketRevenue": "Ticket revenue",
+        "catering": "Catering contribution",
+        "total": "Revenue and contribution",
+        "perYear": "Per year",
+        "asks": "Asks",
+        "served": "Served",
+        "notServed": "Not served",
+        "passengers": "Passengers",
+        "placesOffered": "Places offered",
+        "utilisation": "Utilisation",
+        "revenueByClass": "Ticket revenue by class",
+        "previewHint": "Preview from the schedule and prices against the committed demand. Recalculate to apply them to Train operation, Overhead and the KPI grid."
       }
     }
   },

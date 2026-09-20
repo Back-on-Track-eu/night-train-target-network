@@ -24,7 +24,7 @@ import { i18n } from '@/i18n'
 import type { GallerySearchSeed } from '@/lib/proposalPrefill'
 import { apiRequest } from '@/lib/apiClient'
 import { asApiFailure, type ApiFailure } from '@/lib/apiError'
-import { DAILY_SCHEDULE } from '@/lib/detailsScope'
+import { DEFAULT_DAYS_PER_WEEK, type DemandInputs } from '@/lib/detailsScope'
 
 export type LoadStatus = 'idle' | 'loading' | 'success' | 'error'
 
@@ -191,15 +191,19 @@ export const useStore = defineStore('store', () => {
   }
 
   // --- Details inputs (zone D) ----------------------------------------------
-  // The three HOW fields the Details card edits. They are part of the family
-  // key and are saved with the proposal (they ride in compute_request), so
-  // they live here rather than in the card: ProposalViewport posts them with
-  // every family request and restores them when a stored proposal loads.
+  // The HOW fields the Details card edits: the schedule and the prices on
+  // Supply, the demand on Demand. They are part of the family key and are
+  // saved with the proposal (they ride in compute_request), so they live here
+  // rather than in the card: ProposalViewport posts them with every family
+  // request and restores them when a stored proposal loads.
   //
-  // Days per week for each month, January first. A flat seven is the
-  // backend's own default and posts no month map at all — see
-  // lib/detailsScope.ts::scheduleRequest.
-  const scheduleMonths = ref<number[]>([...DAILY_SCHEDULE])
+  // One frequency, days per week, 1..7 (ROUTE_BUILDER 0.9.40). The backend
+  // keeps a month grid underneath and expands this onto it.
+  const scheduleDaysPerWeek = ref<number>(DEFAULT_DAYS_PER_WEEK)
+  // The manual demand (DEMAND 0.1.0). Null until the model registry seeds
+  // it from demand.defaults (Medium, the default group mix, an even OD
+  // spread); a stored proposal's echo replaces it on load.
+  const demand = ref<DemandInputs | null>(null)
   // The tariff, four maps of class_main → EUR (CALC 0.9.30). Empty until the
   // model registry lands, then seeded from demand.defaults so the fields
   // never hard-code a rate the backend owns.
@@ -231,6 +235,19 @@ export const useStore = defineStore('store', () => {
     faresEurPerPax.value = { ...defaults.fares_eur_per_pax }
     servicesEurPerPax.value = { ...defaults.services_eur_per_pax }
     cateringEurPerPax.value = { ...defaults.catering_eur_per_pax }
+    demand.value = defaultDemand()
+  }
+
+  /** The demand a new proposal starts at, from the registry (§2.8). */
+  function defaultDemand(): DemandInputs | null {
+    const defaults = demandDefaults.value
+    if (!defaults) return null
+    return {
+      level: defaults.level,
+      passengersPerYear: defaults.levels[defaults.level] ?? 0,
+      groupSharesPct: { ...defaults.group_shares_pct },
+      od: { preset: 'even', stopWeights: { board: {}, alight: {} }, pinnedSharesPct: {} },
+    }
   }
 
   async function fetchModels(): Promise<void> {
@@ -391,7 +408,9 @@ export const useStore = defineStore('store', () => {
     modelsStatus,
     fetchModels,
     // details inputs
-    scheduleMonths,
+    scheduleDaysPerWeek,
+    demand,
+    defaultDemand,
     faresEurPerKm,
     faresEurPerPax,
     servicesEurPerPax,

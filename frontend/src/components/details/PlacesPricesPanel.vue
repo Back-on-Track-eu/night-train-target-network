@@ -36,8 +36,8 @@ const props = defineProps<{
   defaults: Tariff | null
   longest: ExampleOd | null
   shortest: ExampleOd | null
-  // Schedule-owned, so they preview with the grid rather than with the prices.
-  months: number[]
+  // Schedule-owned, so they preview with the frequency rather than with the prices.
+  daysPerWeek: number
   schedulePreviewing: boolean
   pricesPreviewing: boolean
   cycleDistanceKm: number
@@ -92,7 +92,7 @@ const classRows = computed(() =>
 
 const live = computed(() =>
   supplyFigures(
-    props.months,
+    props.daysPerWeek,
     props.cycleDistanceKm,
     totalPlaces.value,
     props.cycleDays,
@@ -107,11 +107,11 @@ const placeKmOffered = computed(() =>
 )
 
 /** Decimals each part is kept and shown at. A per-km rate is tenths of a
- *  cent — a realistic night-train tariff is nearly flat over distance, so
- *  its defaults read 0.025, 0.035 (DEMAND 0.0.5) and rounding to the cent
- *  would silently turn 0.025 into 0.03. The backend echoes the per-km map
- *  at 4 decimals and the per-passenger maps at 2, so 3 and 2 here round
- *  trip unchanged. */
+ *  cent — a realistic night-train tariff is nearly flat over distance (the
+ *  D31 defaults read 0.03, 0.04, 0.06) and a typed 0.025 rounded to the
+ *  cent would silently become 0.03. The backend echoes the per-km map at 4
+ *  decimals and the per-passenger maps at 2, so 3 and 2 here round trip
+ *  unchanged. */
 const DECIMALS: Record<TariffPart, number> = {
   faresPerPax: 2,
   faresPerKm: 3,
@@ -153,7 +153,8 @@ function stepPart(part: TariffPart, classMain: string, direction: number) {
 
 /** The "All classes" row: every tariff column and both example fares as the
  *  average for a passenger of this train — each class weighted by the places
- *  it offers, which is the mix the stopgap demand model fills. */
+ *  it offers. (Who actually sits where is the Demand tab's business; this
+ *  row describes the offer.) */
 const averageRow = computed(() => {
   const rows = classRows.value
   const places = rows.reduce((sum, r) => sum + r.places, 0)

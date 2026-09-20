@@ -6,7 +6,7 @@ import type { Composition, EvaluationResponse, MapScope, ProposalCalcSummary } f
 import type { ProposalFamily } from '@/composables/useProposalFamily'
 import { messageKey } from '@/lib/apiError'
 import type { ExampleOd } from '@/lib/detailsScope'
-import { operatingDaysPerYear, presetOf, scheduleFromRequest } from '@/lib/detailsScope'
+import { daysPerWeekFromRequest } from '@/lib/detailsScope'
 import { useCompareFormat } from '@/composables/useCompareFormat'
 import ScenarioSwitches from '@/components/ScenarioSwitches.vue'
 import MainKpiGrid from '@/components/MainKpiGrid.vue'
@@ -77,18 +77,16 @@ const selectedComposition = computed(
   () => props.compositions.find((c) => c.composition_id === props.selectedCompositionId) ?? null,
 )
 // What the figures were computed with, in the reader's words rather than the
-// request's. The schedule is named by its preset where the grid matches one
-// ("Every day", "Summer only") and by its operating days where it does not —
-// "custom" tells nobody anything.
+// request's: the one frequency, with the qualifier the two ends of the
+// range deserve.
 const frequencyLabel = computed(() => {
-  const months = scheduleFromRequest(
+  const days = daysPerWeekFromRequest(
     props.committedRequest?.schedule as Record<string, number> | null | undefined,
   )
-  const preset = presetOf(months)
-  if (preset !== 'custom') return t(`proposal.details.schedule.presets.${preset}`)
-  return t('proposal.compare.customSchedule', {
-    days: Math.round(operatingDaysPerYear(months)),
-  })
+  const base = t('proposal.details.schedule.daysPerWeek', { n: days })
+  if (days >= 7) return `${base} — ${t('proposal.details.schedule.qualifier.everyDay')}`
+  if (days <= 1) return `${base} — ${t('proposal.details.schedule.qualifier.onceAWeek')}`
+  return base
 })
 
 // The prices behind the revenue: the fare span across the classes the train

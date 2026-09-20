@@ -447,8 +447,8 @@
         "pax": "Personenfahrten",
         "paxKm": "Personenkilometer",
         "shiftAir": "Vom Flugzeug verlagert",
-        "shiftCar": "Vom Auto verlagert",
-        "journeyTime": "Reisezeit"
+        "journeyTime": "Reisezeit",
+        "shiftOther": "Vom Auto verlagert oder neu erzeugt"
       },
       "units": {
         "millionEurYear": "/ Jahr",
@@ -466,7 +466,6 @@
       },
       "loading": "Alle Kombinationen werden berechnet …",
       "partial": "{received} von {total} Kombinationen verfügbar, der Rest ließ sich nicht berechnen.",
-      "customSchedule": "Eigener Fahrplan · {days} Betriebstage",
       "pricePart": " · Fahrpreise {span} €/km",
       "cateringPart": " · Gastronomie {value} €/Reisenden",
       "axisBreak": "Achse beginnt bei {value}, nicht bei null"
@@ -585,7 +584,8 @@
       "previewChip": "Vorschau, hier geschätzt statt berechnet",
       "scopes": {
         "schedule": "Der Fahrplan",
-        "prices": "Die Preise"
+        "prices": "Die Preise",
+        "demand": "Nachfrage"
       },
       "tabs": {
         "supply": "Angebot",
@@ -609,41 +609,23 @@
       },
       "schedule": {
         "title": "Fahrplan",
-        "caption": "Tage pro Woche, nach Monat",
-        "info": "Wie oft der Zug in jedem Monat des Jahres fährt und was daraus folgt. Die Betriebstage sind die Tage jedes Monats mal seinen Tagen pro Woche, das Auswertungsjahr hat also 366 Tage, denn 2032 ist ein Schaltjahr. Die Abfahrten sind Betriebstage mal zwei Richtungen; Zug-km und Platz-km folgen aus Streckenlänge und Wagenreihung. An welchem Wochentag der Zug fährt, ist nicht modelliert. Die Flotte wird nach dem stärksten Monat bemessen: Eine Garnitur braucht die Umlaufdauer in Tagen, ein Zug, der sieben Tage pro Woche fährt und zwei Tage für den Rückweg braucht, also zwei Garnituren.",
-        "presets": {
-          "daily": "Jeden Tag",
-          "three": "3× pro Woche",
-          "once": "Einmal pro Woche",
-          "summer": "Nur im Sommer",
-          "custom": "Eigene Auswahl"
-        },
-        "months": {
-          "jan": "Jan",
-          "feb": "Feb",
-          "mar": "Mär",
-          "apr": "Apr",
-          "may": "Mai",
-          "jun": "Jun",
-          "jul": "Jul",
-          "aug": "Aug",
-          "sep": "Sep",
-          "oct": "Okt",
-          "nov": "Nov",
-          "dec": "Dez"
-        },
-        "dragHint": "Eine Spalte ziehen oder die Pfeiltasten benutzen.",
+        "caption": "Tage pro Woche, im Jahresmittel",
+        "info": "Wie oft der Zug fährt, im Mittel über das Jahr — eine Zahl, keine Saisons. Die Betriebstage sind 366 (2032 ist ein Schaltjahr) mal Tage pro Woche durch sieben; die Abfahrten sind Betriebstage mal zwei Richtungen; Zug-km und Platz-km folgen aus Streckenlänge und Wagenreihung. Garnituren sind die Züge, die der Umlauf bei dieser Häufigkeit braucht: Ein Zug, der sieben Tage pro Woche fährt und zwei Tage für den Rückweg braucht, braucht zwei. An welchem Wochentag der Zug fährt, ist nicht modelliert.",
         "operatingDays": "Betriebstage",
         "departures": "Abfahrten",
         "trainKm": "Zug-km",
         "trainsets": "Garnituren",
-        "previewHint": "Abfahrten, Zug-km, Plätze und Platz-km folgen aus dem Raster; die Garnituren nutzen den Umlauf von {cycle} Tagen, den nur eine Neuberechnung neu bestimmen kann. Neu berechnen, um den Fahrplan auf alle anderen Panels anzuwenden.",
-        "previewHintNoCycle": "Abfahrten, Zug-km, Plätze und Platz-km folgen aus dem Raster. Die Zahl der Garnituren braucht die Umlaufdauer aus einer Berechnung, bitte neu berechnen."
+        "daysPerWeek": "{n} Tage pro Woche",
+        "qualifier": {
+          "everyDay": "täglich",
+          "onceAWeek": "einmal pro Woche"
+        },
+        "operatingDaysNote": "{days} Betriebstage im Jahr · welche Wochentage, ist nicht modelliert"
       },
       "prices": {
         "title": "Plätze und Preise",
         "caption": "{composition} · {places} Plätze",
-        "info": "Was der Zug anbietet und was er dafür verlangt. Der Tarif besteht aus drei Teilen, jeder je Klasse. Der GRUNDFAHRPREIS hat einen festen und einen entfernungsabhängigen Term: Ein Bett hat einen Eintrittspreis, den eine kurze Fahrt genauso trägt wie eine lange, ein reiner Entfernungstarif machte kurze Verbindungen unplausibel billig. ZUSATZLEISTUNGEN sind die Erlöse aus Fahrrädern, Sperrgepäck und Reservierungen, die mit dem Ticket verkauft werden; sie sind gewöhnliche Ticketerlöse, nie negativ, und tragen Gemeinkosten und Gewinnanspruch wie jeder andere Fahrpreis. Die GASTRONOMIE fällt aus dem Rahmen: eine vorzeichenbehaftete NETTO-Größe je Reisendem, die eigenen Verkäufe des Restaurants abzüglich seiner eigenen Kosten, und damit außerhalb der beiden anderen Bemessungsgrundlagen. Sie fällt je Klasse verschieden aus, weil die Klassen sich darin unterscheiden, was ihr Grundfahrpreis bereits enthält. Die beiden Beispielspalten bepreisen nur den PLATZ, fest plus Entfernung, über die längste und die kürzeste Fahrt, die die Strecke verkauft. Die Nachfrage reagiert auf all das noch nicht: Das Nachfragemodell ist ein Provisorium.",
+        "info": "Was der Zug anbietet und was er dafür verlangt. Der Tarif besteht aus drei Teilen, jeder je Klasse. Der GRUNDFAHRPREIS hat einen festen und einen entfernungsabhängigen Term: Ein Bett hat einen Eintrittspreis, den eine kurze Fahrt genauso trägt wie eine lange, ein reiner Entfernungstarif machte kurze Verbindungen unplausibel billig. ZUSATZLEISTUNGEN sind die Erlöse aus Fahrrädern, Sperrgepäck und Reservierungen, die mit dem Ticket verkauft werden; sie sind gewöhnliche Ticketerlöse, nie negativ, und tragen Gemeinkosten und Gewinnanspruch wie jeder andere Fahrpreis. Die GASTRONOMIE fällt aus dem Rahmen: eine vorzeichenbehaftete NETTO-Größe je Reisendem, die eigenen Verkäufe des Restaurants abzüglich seiner eigenen Kosten, und damit außerhalb der beiden anderen Bemessungsgrundlagen. Sie fällt je Klasse verschieden aus, weil die Klassen sich darin unterscheiden, was ihr Grundfahrpreis bereits enthält. Die beiden Beispielspalten bepreisen nur den PLATZ, fest plus Entfernung, über die längste und die kürzeste Fahrt, die die Strecke verkauft. Wie viele dieser Plätze tatsächlich verkauft werden, wird unter Nachfrage festgelegt.",
         "class": "Klasse",
         "places": "Plätze",
         "shareOfTrain": "Anteil am Zug",
@@ -875,9 +857,40 @@
         "totalRevenue": "Erlöse und Beitrag",
         "byClass": "Ticketerlöse nach Klasse",
         "restsOn": "Worauf das beruht",
-        "restsOnInfo": "Die Nachfrageseite des Modells ist ein Provisorium. Jeder Wert auf diesem Reiter wird ersetzt, sobald ein echtes Nachfragemodell vorliegt; nichts davon ist eine Prognose.",
+        "restsOnInfo": "Die Nachfrage ist eine manuelle Eingabe: ein Nachfragepotenzial, das unter Nachfrage gesetzt und nach einer festen Regel auf die Plätze verteilt wird. Jeder Wert auf diesem Reiter folgt aus dieser Eingabe; nichts davon ist eine Prognose.",
         "whenItLands": "Sobald das Nachfragemodell vorliegt, zeigt dieser Reiter die Nachfrage nach Verbindung, nach Klasse und nach dem Verkehrsmittel, von dem die Reisenden umgestiegen sind, und die Preise unter Angebot bekommen Elastizitäten.",
         "pricesElsewhere": "Die Preise werden unter Angebot festgelegt."
+      },
+      "groups": {
+        "comfort": "Freizeit – Komfort",
+        "group": "Freizeit – Gruppe",
+        "senior": "Senioren",
+        "budget": "Freizeit – Sparsam",
+        "business": "Geschäftlich"
+      },
+      "follows": {
+        "title": "Was daraus folgt",
+        "caption": "{composition} · pro Jahr, beide Richtungen",
+        "info": "Was Fahrplan und Preise mit der berechneten Nachfrage einbringen: Reisende, verkaufte Platz-km, Auslastung und Erlös pro Jahr, beide Richtungen. Ticketerlös und Gastronomiebeitrag entstehen auf verschiedene Weise und einer davon kann negativ sein, deshalb bleiben sie getrennt. Änderungen an Fahrplan und Preisen werden hier als Vorschau gezeigt; Änderungen an der Nachfrage nicht — dieses Panel wartet auf die Neuberechnung, damit es nie eine Vorschau-Nachfrage mit berechneten Zahlen mischt.",
+        "noDemand": "Noch keine berechnete Nachfrage — neu berechnen, um zu sehen, was Fahrplan und Preise einbringen.",
+        "passengersPerYear": "Reisende pro Jahr",
+        "soldPerDeparture": "Verkaufte Plätze je Abfahrt",
+        "ofAsked": "von {n} nachgefragt",
+        "utilisationPlaces": "Auslastung, Plätze",
+        "placeKmSold": "Verkaufte Platz-km",
+        "utilisationPlaceKm": "Auslastung, Platz-km",
+        "ticketRevenue": "Ticketerlös",
+        "catering": "Gastronomiebeitrag",
+        "total": "Erlös und Beitrag",
+        "perYear": "Pro Jahr",
+        "asks": "Nachfrage",
+        "served": "Bedient",
+        "notServed": "Nicht bedient",
+        "passengers": "Reisende",
+        "placesOffered": "Angebotene Plätze",
+        "utilisation": "Auslastung",
+        "revenueByClass": "Ticketerlös nach Klasse",
+        "previewHint": "Vorschau aus Fahrplan und Preisen gegen die berechnete Nachfrage. Neu berechnen, um sie auf Zugbetrieb, Gemeinkosten und die Kennzahlen anzuwenden."
       }
     }
   },

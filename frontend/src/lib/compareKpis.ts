@@ -13,7 +13,7 @@
 import type { ProposalCalcSummary } from '@/types/api'
 
 export type CompareKpiKey =
-  'journeyTime' | 'pax' | 'paxKm' | 'subsidy' | 'shiftAir' | 'shiftCar' | 'co2' | 'subsidyPerT'
+  'journeyTime' | 'pax' | 'paxKm' | 'subsidy' | 'shiftAir' | 'shiftOther' | 'co2' | 'subsidyPerT'
 
 export interface CompareKpi {
   key: CompareKpiKey
@@ -81,10 +81,10 @@ export const COMPARE_KPIS: readonly CompareKpi[] = [
     unitKey: 'perYear',
   },
   {
-    key: 'shiftCar',
-    labelKey: 'shiftCar',
+    key: 'shiftOther',
+    labelKey: 'shiftOther',
     lowerIsBetter: false,
-    value: (s) => s.shift_car_trips_per_year ?? null,
+    value: (s) => s.shift_other_trips_per_year ?? null,
     format: (v, f) => f.count(v),
     unitKey: 'perYear',
   },
