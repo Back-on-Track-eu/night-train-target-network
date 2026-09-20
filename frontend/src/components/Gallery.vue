@@ -5,6 +5,7 @@ import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import Select from 'primevue/select'
 import Skeleton from 'primevue/skeleton'
 import {
+  mdiAccountOutline,
   mdiArrowLeftRight,
   mdiMapMarkerOutline,
   mdiEarth,
@@ -20,6 +21,7 @@ import StopSelect from '@/components/StopSelect.vue'
 import CountrySelect from '@/components/CountrySelect.vue'
 import SearchField from '@/components/SearchField.vue'
 import ProposalCard from '@/components/ProposalCard.vue'
+import GalleryScenarioPanel from '@/components/GalleryScenarioPanel.vue'
 import GalleryMap from '@/components/GalleryMap.vue'
 import { useStore } from '@/stores/store'
 import { useLocaleFormat } from '@/composables/useLocaleFormat'
@@ -176,6 +178,72 @@ const tabs = computed(() => [
   },
 ])
 
+// "Only mine": the same list narrowed to the signed-in account's own rows,
+// via the backend's `user_ids` filter. Existing (ONTD) rows carry no user_id,
+// so this is a proposals-only view by construction — hence the source switch
+// below drops the toggle whenever it is showing existing trains alone.
+const mineOnly = ref(false)
+// Guests get a user_id too, and their proposals are theirs until the session is
+// merged into an account — so the switch works for any identity, not for
+// registered users only. Signed out there is nothing to filter by, so the
+// "mine" half asks for an identity instead of filtering.
+const canFilterMine = computed(() => store.userId !== null)
+
+// The two halves of the ownership switch, as one pair of class strings rather
+// than a literal in each button.
+const activeOwnerClass = 'bg-primary-50/15 text-primary-50 font-semibold'
+const inactiveOwnerClass = 'text-primary-50/60 hover:text-primary-50'
+
+function selectMine(): void {
+  if (!canFilterMine.value) {
+    // No identity yet: the filter is meaningless until there is one, so the
+    // click opens the same modal the rest of the app gates on.
+    store.openAuthModal({ context: 'standalone' })
+    return
+  }
+  // Existing (ONTD) rows have no owner, so "mine" and "existing only" cannot
+  // both hold — move the source switch rather than filtering to an empty list
+  // behind a dropdown that still says "Existing".
+  if (sourceFilter.value === 'existing') sourceFilter.value = 'proposal'
+  mineOnly.value = true
+}
+
+// --- The scenario the gallery is read on -----------------------------------
+// Every proposal is stored once per scenario variant (backend §5.4a), and
+// the request reads one of those projections: figures, sort order, the
+// per-card geometry and the corridor map all follow the chosen scenario.
+// Existing (ONTD) trains are scenario-independent and unaffected.
+//
+// Null until the scenarios load; the store then holds the base. Kept here
+// rather than in store.selectedScenarioId, which is the BUILDER's selection
+// — a reader browsing the gallery on Infra 2032 must not move the scenario
+// the builder would open with (openProposal below hands it over on purpose,
+// which is a different thing from sharing one ref).
+const galleryScenarioId = ref<number | null>(null)
+watch(
+  () => store.scenarios,
+  (scenarios) => {
+    if (galleryScenarioId.value !== null || scenarios.length === 0) return
+    galleryScenarioId.value =
+      scenarios.find((s) => s.is_current_base)?.scenario_id ?? scenarios[0].scenario_id
+  },
+  { immediate: true },
+)
+
+const galleryScenario = computed(
+  () => store.scenarios.find((s) => s.scenario_id === galleryScenarioId.value) ?? null,
+)
+
+// The id the request carries — only when the reader has moved OFF the base,
+// so the base view stays exactly the pre-§5.4a request. Either way the
+// result set is the same: the backend joins the scenario's figures onto the
+// base projection rather than reading a different table, so a filter
+// returns the same proposals on every scenario.
+const scenarioVariantId = computed<number | null>(() => {
+  if (galleryScenario.value === null || galleryScenario.value.is_current_base) return null
+  return store.variantFor(galleryScenario.value.scenario_id)?.scenario_variant_id ?? null
+})
+
 // Which source(s) the list shows. 'all' sends no `sources` key at all, which
 // the backend reads as both.
 type SourceChoice = 'all' | ProposalSourceKind
@@ -243,11 +311,39 @@ const selectedSortOption = computed(
 
 // Switching to ONTD-only while sorted by a proposal-only column would leave the
 // Select showing an option that is no longer offered — fall back to distance.
+// The same switch drops "only mine", which is meaningless on rows nobody owns.
 watch(sourceFilter, (choice) => {
-  if (choice === 'existing' && !SHARED_SORT_KEYS.includes(sortField.value)) {
-    sortField.value = 'total_distance_km'
-  }
+  if (choice !== 'existing') return
+  if (!SHARED_SORT_KEYS.includes(sortField.value)) sortField.value = 'total_distance_km'
+  mineOnly.value = false
 })
+
+// Signing out mid-session leaves nothing to filter by, so the switch releases
+// itself — otherwise the list stays narrowed to an account with no way back.
+watch(canFilterMine, (can) => {
+  if (!can) mineOnly.value = false
+})
+
+// Who is signed in is part of what the list SAYS, not just of what it filters:
+// signing in merges the guest session into the account, so proposals published
+// as a guest change hands and their "proposed by" line with them. The loaded
+// page would otherwise keep showing the old proposer until something else
+// forced a reload.
+watch(
+  () => [store.userId, store.username],
+  () => {
+    if (hydrating) return
+    // Signing in usually happens somewhere else in the app while this page sits
+    // in its keep-alive cache — firing a request at a page nobody is looking at
+    // is the same waste the deactivate teardown exists to avoid, so hand it to
+    // the staleness flag onActivated already honours.
+    if (!isActive.value) {
+      store.galleryStale = true
+      return
+    }
+    resetAndLoad()
+  },
+)
 
 // Country codes present in the loaded stops, resolved to full names in the
 // active locale (unknown codes fall back to the raw code).
@@ -289,6 +385,15 @@ function buildFilter(): ProposalsFilter | undefined {
   // touches the ontd schema at all.
   if (sourceFilter.value !== 'all') base.sources = [sourceFilter.value]
 
+  // Own proposals only. `sources` is pinned alongside it because an existing
+  // row's NULL user_id would drop out of the result anyway — saying so up
+  // front keeps the query off the ontd schema instead of joining it to filter
+  // it away again.
+  if (mineOnly.value && store.userId !== null) {
+    base.user_ids = [store.userId]
+    base.sources = ['proposal']
+  }
+
   if (mode.value === 'aToB') {
     const ids = [fromStop.value?.stop_id, toStop.value?.stop_id].filter((id): id is string =>
       Boolean(id),
@@ -325,6 +430,7 @@ async function loadPage(): Promise<void> {
     }
     const filter = buildFilter()
     if (filter) body.filter = filter
+    if (scenarioVariantId.value !== null) body.scenario_variant_id = scenarioVariantId.value
 
     const res = await fetchProposals(body, signal)
     if (seq !== requestSeq) return
@@ -381,6 +487,15 @@ function onSentinel(): void {
   loadPage()
 }
 
+// How many of the loaded rows the chosen scenario has no figures for — not
+// evaluable on that network, or not yet backfilled. They stay in the list
+// (a scenario changes what a card says, never which cards a filter returns —
+// the backend guarantees the same result set on every scenario); the card
+// itself says why it has no figures, and the panel header carries the count.
+const withoutFigures = computed(
+  () => proposals.value.filter((p) => p.source === 'proposal' && p.status !== 'ok').length,
+)
+
 // Row identity for :key. Existing (ONTD) rows have no proposal id; proposals are
 // versioned, so the version is part of the key.
 const proposalKey = (p: ProposalSummary): string =>
@@ -392,6 +507,10 @@ const rowRefOf = (p: ProposalSummary): GalleryRowRef =>
   p.source === 'existing'
     ? { kind: 'existing', id: p.route_id }
     : { kind: 'proposal', id: p.proposal_id }
+
+// Whether this (kept-alive) page is the one on screen — see the identity
+// watcher below and the deactivate teardown.
+const isActive = ref(true)
 
 // Set while a card is hovered; the map isolates and frames that row's route.
 // One direction only — the map itself has no hover, because a corridor is
@@ -412,6 +531,37 @@ function scrollToGallery(): void {
   window.scrollTo({ top: top - GALLERY_SCROLL_MARGIN_PX, behavior: 'smooth' })
 }
 
+// --- Fitting the whole gallery into one screen ------------------------------
+// The results row — card column AND map — is exactly one viewport tall minus
+// the gallery's own chrome (heading, tabs, search pill, gutters). Two things
+// follow from that, and both are the point:
+//
+//   * the search bar stays on screen beside the map at 100% zoom, so changing a
+//     filter and seeing the result costs no scrolling;
+//   * the two columns are the same height, so the card column ends at the map's
+//     bottom edge instead of running past it. The cards scroll INSIDE their
+//     column (cardScroller below) rather than scrolling the page.
+//
+// Measured, not hardcoded: the heading wraps at narrow widths and the search
+// pill changes height with the active mode, so the chrome is not a constant.
+const resultsRow = ref<HTMLElement | null>(null)
+const cardScroller = ref<HTMLElement | null>(null)
+// Floor for short windows. Sized so the column still holds about three cards;
+// below this the row stops shrinking and the page scrolls a little instead.
+const ROW_MIN_HEIGHT_PX = 560
+const rowHeight = ref(`calc(100vh - ${2 * GALLERY_SCROLL_MARGIN_PX}px)`)
+
+function measureRow(): void {
+  const section = gallerySection.value
+  const row = resultsRow.value
+  if (!section || !row) return
+  // Everything between the top of the gallery block and the top of the results
+  // row, plus one gutter above the heading and one below the row.
+  const chrome = row.getBoundingClientRect().top - section.getBoundingClientRect().top
+  const reserved = Math.round(chrome) + 2 * GALLERY_SCROLL_MARGIN_PX
+  rowHeight.value = `max(${ROW_MIN_HEIGHT_PX}px, calc(100vh - ${reserved}px))`
+}
+
 // --- URL <-> search-bar sync -------------------------------------------
 // Reflects the whole search bar (filters + sort) in /gallery's query string
 // so results are shareable, reload-safe, and back/forward-navigable.
@@ -421,11 +571,20 @@ function scrollToGallery(): void {
 let hydrating = true
 
 function currentSearchQuery(): LocationQueryRaw {
-  return {
+  const query: LocationQueryRaw = {
     ...seedToQuery(searchSeed.value),
     sort: sortField.value,
     dir: sortDir.value,
   }
+  // Only when on: an absent key is the default, and a shared link should not
+  // carry a filter that resolves against whoever opens it.
+  if (mineOnly.value) query.mine = '1'
+  // The SCENARIO, not the variant: the variant ids are materialised and can
+  // be rebuilt, the scenario is what a shared link should still mean.
+  if (galleryScenario.value && !galleryScenario.value.is_current_base) {
+    query.scenario = String(galleryScenario.value.scenario_id)
+  }
+  return query
 }
 
 watch(
@@ -440,6 +599,8 @@ watch(
     sortField,
     sortDir,
     sourceFilter,
+    mineOnly,
+    galleryScenarioId,
   ],
   () => {
     if (hydrating) return
@@ -451,7 +612,29 @@ watch(
 // Navigate to a saved proposal's detail route (ProposalCard's @select, only
 // fired for source==='proposal' rows — see ProposalCard.vue).
 function openProposal(proposalId: number): void {
+  handOverScenario()
   router.push({ name: 'proposal', params: { id: proposalId } })
+}
+
+// A reader who browsed the gallery on another scenario opened THAT train's
+// figures, so the proposal view should present the same member once its
+// family is there. Off-URL via the store, like the builder's prefill seed:
+// a stored proposal always loads on the base first (it is stored on the
+// base), and the viewport switches when the family arrives.
+function handOverScenario(): void {
+  store.pendingScenarioId =
+    galleryScenario.value && !galleryScenario.value.is_current_base
+      ? galleryScenario.value.scenario_id
+      : null
+}
+
+// The card's comment count opens the same proposal AT its discussion. The hash
+// is the whole instruction: ProposalWorkspace reads it and ProposalViewport
+// scrolls there once the thread is on the page (the discussion only mounts
+// after the results do, so a plain browser anchor would fire too early).
+function openDiscussion(proposalId: number): void {
+  handOverScenario()
+  router.push({ name: 'proposal', params: { id: proposalId }, hash: '#comments' })
 }
 
 // "Suggest a new route" — hand the current search bar to the builder route as
@@ -463,12 +646,21 @@ function createProposal(): void {
 }
 
 let observer: IntersectionObserver | null = null
+// Watches the whole document, like LandingIntro's own band: what changes the
+// chrome above the results row is mostly elements ABOVE the gallery (the
+// header image loading, the API status banner appearing), which an observer on
+// the row itself would never see.
+let chromeObserver: ResizeObserver | null = null
+
 onMounted(async () => {
+  // The list scrolls inside its own column now, so the sentinel is watched
+  // against that box rather than the viewport — against the viewport it would
+  // either never intersect or (worse) intersect permanently.
   observer = new IntersectionObserver(
     (entries) => {
       if (entries[0]?.isIntersecting) onSentinel()
     },
-    { rootMargin: '300px' },
+    { root: cardScroller.value, rootMargin: '300px' },
   )
   if (sentinel.value) observer.observe(sentinel.value)
 
@@ -490,16 +682,35 @@ onMounted(async () => {
   }
   const dirParam = queryString(route.query.dir)
   if (dirParam === 'asc' || dirParam === 'desc') sortDir.value = dirParam
+  // Resolves against whoever is signed in now — the account is deliberately
+  // not part of the link.
+  mineOnly.value = queryString(route.query.mine) === '1' && canFilterMine.value
+  const scenarioParam = Number(queryString(route.query.scenario))
+  if (
+    Number.isInteger(scenarioParam) &&
+    store.scenarios.some((s) => s.scenario_id === scenarioParam)
+  ) {
+    galleryScenarioId.value = scenarioParam
+  }
 
   hydrating = false
   resetAndLoad()
   router.replace({ query: currentSearchQuery() })
+
+  measureRow()
+  chromeObserver = new ResizeObserver(measureRow)
+  chromeObserver.observe(document.body)
+  window.addEventListener('resize', measureRow)
 })
 // This component is kept alive (App.vue), so leaving the gallery deactivates it
 // instead of unmounting it. Cancelling in flight requests is right in BOTH
 // cases — nobody is looking at the result any more — so the teardown is shared.
 function teardown(): void {
+  isActive.value = false
   observer?.disconnect()
+  chromeObserver?.disconnect()
+  chromeObserver = null
+  window.removeEventListener('resize', measureRow)
   // Drop everything in flight; their rejections are 'canceled' and stay silent.
   listSlot.cancel()
 }
@@ -510,7 +721,14 @@ onDeactivated(teardown)
 // hydrate-and-load: the whole point is that a there-and-back trip costs zero
 // requests. Only a proposal published in the meantime forces a refresh.
 onActivated(() => {
+  isActive.value = true
   if (sentinel.value && observer) observer.observe(sentinel.value)
+  // The layout above can have changed while the gallery was cached, and the
+  // teardown dropped both listeners — re-measure and re-attach them.
+  measureRow()
+  chromeObserver = new ResizeObserver(measureRow)
+  chromeObserver.observe(document.body)
+  window.addEventListener('resize', measureRow)
   if (store.galleryStale) {
     store.galleryStale = false
     resetAndLoad()
@@ -519,25 +737,27 @@ onActivated(() => {
 </script>
 
 <template>
-  <!-- -mb-6 trims App.vue's py-12 page padding to 24px below this page's last
-       row, which is what stops the sticky map from being pushed up at the end of
-       the scroll — see the results row's comment below. Keep the two in sync: if
-       App.vue's bottom padding changes, this offset has to change with it. -->
-  <div class="-mb-6 flex w-full max-w-6xl flex-col gap-6">
+  <!-- -mb-6 trims App.vue's py-12 page padding to the 24px gutter the row's
+       height budget assumes below it (measureRow), so the gallery ends exactly
+       one screen after its heading. Keep the two in sync: if App.vue's bottom
+       padding changes, this offset has to change with it. -->
+  <div class="-mb-6 flex w-full max-w-6xl flex-col gap-4">
     <!-- Landing pitch: one viewport-filling opening band, the statement beside
          the argument and the four ways onward. Self-contained — it owns its own
          sizing and h1 (App.vue's centred heading steps aside for this route);
          the longer story lives at /docs/. -->
     <LandingIntro @create="createProposal" @browse="scrollToGallery" />
 
-    <!-- The gallery proper: search bar, result count, then the list + map. The
-         rule and the generous padding are what separate it from the landing
-         pitch above — without them the two read as one continuous column. -->
+    <!-- The gallery proper: search bar, then the list + map. The rule and the
+         padding are what separate it from the landing pitch above — without
+         them the two read as one continuous column. Kept deliberately tight:
+         every pixel here comes off the map's height budget (see measureRow),
+         and the pitch above has already introduced the page. -->
     <div
       ref="gallerySection"
-      class="mt-6 flex w-full flex-col items-center gap-1 border-t border-primary-50/10 pt-12"
+      class="mt-2 flex w-full flex-wrap items-baseline justify-center gap-x-3 border-t border-primary-50/10 pt-6"
     >
-      <h2 class="text-4xl font-light text-primary-50">
+      <h2 class="text-2xl font-light text-primary-50">
         {{ t('gallery.section.title') }}
       </h2>
       <p class="text-sm text-primary-50/60">
@@ -548,7 +768,7 @@ onActivated(() => {
     <!-- Search bar. `relative z-10` gives the mode tabs and the pill dropdowns a
          stacking context of their own, so neither the intro above nor the
          sticky map column beside them can paint over the controls. -->
-    <div class="relative z-10 flex flex-col items-center gap-4">
+    <div class="relative z-10 flex flex-col items-center gap-3">
       <!-- Category tabs -->
       <div class="flex divide-x divide-primary-50/20 overflow-hidden rounded-full">
         <button
@@ -665,28 +885,25 @@ onActivated(() => {
           <AppIcon :path="mdiMagnify" :size="20" />
         </button>
       </div>
-
-      <!-- How many rows the active search matched. Appears once the first query
-           has come back and then stays put across later searches — see
-           shownTotal. -->
-      <p v-if="shownTotal !== null && !failure" class="text-sm text-primary-50/50">
-        {{ t('gallery.matching', shownTotal) }}
-      </p>
     </div>
 
-    <!-- Results: one column of controls + cards (left) + a browser-height sticky
-         map (right).
-         The card column ends at the trailing CTA — no filler padding below it —
-         so the page's last scroll position is the one where the row's bottom
-         edge meets the stuck map's bottom edge, i.e. the CTA sits in the map's
-         bottom corner (the CTA block's own pb-4 is the gap). Past that point a
-         sticky element starts being pushed up out of view by the end of its
-         containing block, which is exactly what the -mb-6 on the root above
-         prevents: it leaves the document ending 24px below this row, matching
-         the map's own top-6 inset, so the scroll runs out at the same moment
-         the push would begin. -->
-    <div class="flex gap-6">
-      <div class="flex w-96 shrink-0 flex-col gap-4">
+    <!-- The scenario the figures are read on. Collapsed to one line by
+         default — see the component: an open panel costs the map its height
+         (measureRow), and the summary line already answers "which figures am
+         I looking at?". -->
+    <GalleryScenarioPanel
+      v-model="galleryScenarioId"
+      :scenarios="store.scenarios"
+      :without-figures="withoutFigures"
+    />
+
+    <!-- Results: controls + a scrolling card list (left) beside the map
+         (right), the row exactly one screen tall (measureRow). Both columns are
+         that height, which is what puts the bottom of the card list on the
+         bottom edge of the map: the list scrolls inside its own box rather than
+         running down the page past the map's corner. -->
+    <div ref="resultsRow" class="flex gap-6" :style="{ height: rowHeight }">
+      <div class="flex h-full w-96 shrink-0 flex-col gap-3">
         <!-- Source + sort, at the head of the column whose order they set —
              which also puts the map's top edge level with them. -->
         <div class="flex items-center justify-between gap-2">
@@ -731,6 +948,45 @@ onActivated(() => {
           </Select>
         </div>
 
+        <!-- Whose routes (left) and how many the search matched (right). The
+             ownership switch is always on screen, whatever the source switch or
+             the sign-in state says: hiding it for signed-out readers made it a
+             control nobody could find. Picking "mine" while the list is showing
+             existing trains alone moves the source switch with it, since an
+             ONTD row has no owner. The count appears once the first query has
+             come back and then stays put across later searches — see
+             shownTotal. -->
+        <div class="flex min-h-8 items-center justify-between gap-2">
+          <div
+            class="flex items-center gap-0.5 rounded-full border border-primary-50/20 p-0.5 text-sm"
+            role="group"
+            :aria-label="t('gallery.filter.label')"
+          >
+            <button
+              type="button"
+              class="cursor-pointer rounded-full px-3 py-1 transition"
+              :class="mineOnly ? inactiveOwnerClass : activeOwnerClass"
+              :aria-pressed="!mineOnly"
+              @click="mineOnly = false"
+            >
+              {{ t('gallery.filter.all') }}
+            </button>
+            <button
+              type="button"
+              class="flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1 transition"
+              :class="mineOnly ? activeOwnerClass : inactiveOwnerClass"
+              :aria-pressed="mineOnly"
+              @click="selectMine"
+            >
+              <AppIcon :path="mdiAccountOutline" :size="16" />
+              {{ t('gallery.filter.mine') }}
+            </button>
+          </div>
+          <p v-if="shownTotal !== null && !failure" class="text-sm text-primary-50/50">
+            {{ t('gallery.matching', shownTotal) }}
+          </p>
+        </div>
+
         <!-- Failures land here, in the column the user is reading, rather than
              as a one-line note above the fold. -->
         <div
@@ -749,57 +1005,58 @@ onActivated(() => {
           </button>
         </div>
 
-        <!-- First load: cards the size of real cards, so the column doesn't
-             collapse to a single line of text and then jump. -->
-        <div v-if="loading && !initialized" class="flex flex-col gap-4" aria-hidden="true">
-          <Skeleton v-for="n in 3" :key="n" height="9rem" border-radius="0.75rem" />
-        </div>
+        <!-- The scrolling part of the column. min-h-0 is what lets a flex child
+             shrink below its content and scroll; pr-1 keeps the thin scrollbar
+             off the cards. -->
+        <div ref="cardScroller" class="thin-scroll min-h-0 flex-1 overflow-y-auto pr-1">
+          <!-- First load: cards the size of real cards, so the column doesn't
+               collapse to a single line of text and then jump. -->
+          <div v-if="loading && !initialized" class="flex flex-col gap-3" aria-hidden="true">
+            <Skeleton v-for="n in 3" :key="n" height="11rem" border-radius="0.75rem" />
+          </div>
 
-        <div v-if="proposals.length" class="flex flex-col gap-4">
-          <ProposalCard
-            v-for="p in proposals"
-            :key="proposalKey(p)"
-            :proposal="p"
-            :highlight-stop-ids="highlightStopIds"
-            @select="openProposal"
-            @mouseenter="hoveredRow = rowRefOf(p)"
-            @mouseleave="hoveredRow = null"
-          />
-        </div>
-        <!-- "No proposals found" is only true if the query actually succeeded —
-             without the !failure guard it renders on top of a failed load and
-             reads as an answer. -->
-        <p
-          v-else-if="initialized && !loading && !failure"
-          class="py-8 text-center text-sm text-primary-50/50"
-        >
-          {{ t('gallery.empty') }}
-        </p>
+          <div v-if="proposals.length" class="flex flex-col gap-3">
+            <ProposalCard
+              v-for="p in proposals"
+              :key="proposalKey(p)"
+              :proposal="p"
+              :highlight-stop-ids="highlightStopIds"
+              @select="openProposal"
+              @discuss="openDiscussion"
+              @mouseenter="hoveredRow = rowRefOf(p)"
+              @mouseleave="hoveredRow = null"
+            />
+          </div>
+          <!-- "No proposals found" is only true if the query actually succeeded —
+               without the !failure guard it renders on top of a failed load and
+               reads as an answer. -->
+          <p
+            v-else-if="initialized && !loading && !failure"
+            class="py-8 text-center text-sm text-primary-50/50"
+          >
+            {{ t('gallery.empty') }}
+          </p>
 
-        <!-- Infinite-scroll sentinel + status -->
-        <div ref="sentinel" class="flex h-8 items-center justify-center text-sm text-primary-50/40">
-          <span v-if="loading && initialized">{{ t('gallery.loadingMore') }}</span>
-        </div>
+          <!-- Infinite-scroll sentinel + status -->
+          <div
+            ref="sentinel"
+            class="flex h-8 items-center justify-center text-sm text-primary-50/40"
+          >
+            <span v-if="loading && initialized">{{ t('gallery.loadingMore') }}</span>
+          </div>
 
-        <!-- Trailing CTA -->
-        <div class="flex justify-center pb-4">
-          <button type="button" :class="ctaButtonClass" @click="createProposal">
-            <AppIcon :path="mdiPlus" :size="18" />
-            {{ t('gallery.cta.create') }}
-          </button>
+          <!-- Trailing CTA, at the end of the list it belongs to -->
+          <div class="flex justify-center pb-2">
+            <button type="button" :class="ctaButtonClass" @click="createProposal">
+              <AppIcon :path="mdiPlus" :size="18" />
+              {{ t('gallery.cta.create') }}
+            </button>
+          </div>
         </div>
       </div>
 
-      <div class="flex-1">
-        <div
-          class="sticky top-6 h-[calc(100vh-3rem)] overflow-hidden rounded-xl border border-primary-50/10"
-        >
-          <GalleryMap
-            :corridors="corridors"
-            :routes="routeFeatures"
-            :highlighted-row="hoveredRow"
-          />
-        </div>
+      <div class="h-full flex-1 overflow-hidden rounded-xl border border-primary-50/10">
+        <GalleryMap :corridors="corridors" :routes="routeFeatures" :highlighted-row="hoveredRow" />
       </div>
     </div>
   </div>

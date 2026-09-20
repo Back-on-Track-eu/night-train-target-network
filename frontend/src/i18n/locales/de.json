@@ -1021,6 +1021,17 @@
       "proposal": "Vorschläge",
       "existing": "Bestehend"
     },
+    "filter": {
+      "label": "Wessen Strecken",
+      "all": "Alle",
+      "mine": "Meine"
+    },
+    "scenario": {
+      "label": "Szenario",
+      "applied": "Werte in diesem Szenario",
+      "hint": "Jeder Vorschlag wird in jedem Szenario bewertet. Werte, Sortierung und Karte unten folgen deiner Auswahl. Bestehende Verbindungen werden immer so gezeigt, wie sie heute fahren.",
+      "withoutFigures": "{count} Strecke hier ohne Werte | {count} Strecken hier ohne Werte"
+    },
     "sort": {
       "distance": "Entfernung",
       "co2": "Eingespartes CO₂",
@@ -1036,18 +1047,19 @@
     },
     "map": {
       "legend": {
-        "proposed": "Vorgeschlagen",
-        "existing": "Bestehende Verbindung"
+        "proposed": "Vorschläge",
+        "existing": "Bestehend"
       }
     },
     "card": {
       "distance": "Entfernung",
       "proposedBy": "Vorgeschlagen von {name}",
       "guest": "Gast",
-      "existing": "Bestehende Verbindung",
+      "existing": "Bestehend",
       "km": "{value} km",
       "stops": "({count} Halt) | ({count} Halte)",
-      "co2PerYear": "{value} t CO₂/Jahr eingespart",
+      "co2PerYear": "{value} t CO₂/Jahr",
+      "demandPerYear": "{value} Reisen/Jahr",
       "like": "Like",
       "loginToLike": "Zum Liken von Vorschlägen mit einem Konto anmelden.",
       "stat": {
@@ -1066,8 +1078,26 @@
         "co2": {
           "title": "Eingespartes CO₂",
           "body": "Geschätzte CO₂-Emissionen, die jährlich vermieden werden, weil Reisende von Flugzeug und Auto auf diesen Zug umsteigen. Abgeleitet aus Platzhalterwerten der Nachfrage, noch nicht aus einem vollständigen Nachfragemodell."
+        },
+        "demand": {
+          "title": "Fahrten pro Jahr",
+          "body": "Geschätzte Fahrten mit diesem Zug pro Jahr, über alle Verkehrstage. Abgeleitet aus Platzhalterwerten der Nachfrage, noch nicht aus einem vollständigen Nachfragemodell."
+        },
+        "comments": {
+          "title": "Kommentare",
+          "body": "Wie viele Kommentare dieser Vorschlag gesammelt hat. Zum Lesen oder Mitreden den Vorschlag öffnen."
+        },
+        "subsidyPerTCo2": {
+          "title": "Subvention je Tonne CO₂",
+          "body": "Öffentliche Mittel je Tonne CO₂, die diese Strecke vermeidet — die jährliche Subvention geteilt durch die jährliche Einsparung. Je niedriger, desto mehr Klimawirkung pro Euro."
         }
-      }
+      },
+      "comments": "Kommentare lesen",
+      "created": "Erstellt {date}",
+      "updated": "aktualisiert {date}",
+      "subsidyPerTCo2": "{value}/t CO₂",
+      "notEvaluable": "In diesem Szenario nicht bewertbar.",
+      "notYetEvaluated": "In diesem Szenario noch nicht bewertet."
     },
     "back": "Galerie",
     "cta": {

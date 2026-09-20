@@ -37,17 +37,43 @@ export function parseRelationToken(token: string | null | undefined): [string, s
 
 // --- Corridor styling --------------------------------------------------------
 
-/** The two states a corridor can be in. Deliberately only two: a corridor that
- *  is both proposed AND already served reads as EXISTING, because "a train
- *  already runs here" is a fact about the corridor that a proposal on top of it
- *  does not change — and it is the signal the map exists to show. */
-export const CORRIDOR_COLORS = {
-  /** Only proposals run here — brand blue. */
-  proposed: '#2271b3',
+/** The two kinds of traffic a corridor can carry, in DRAW ORDER: existing
+ *  first, proposals last and therefore on top. A corridor carrying both is no
+ *  longer resolved to one state — it is drawn twice, once per kind, so the
+ *  suggestion the gallery exists to collect always sits in front of the train
+ *  that already runs there. */
+export const CORRIDOR_KINDS = ['existing', 'proposed'] as const
+export type CorridorKind = (typeof CORRIDOR_KINDS)[number]
+
+export const CORRIDOR_COLORS: Record<CorridorKind, string> = {
   /** At least one real ONTD train runs here — orange (blue/orange is the
    *  colour-vision-safe pair). */
   existing: '#e07b39',
-} as const
+  /** Proposals run here — brand blue. */
+  proposed: '#2271b3',
+}
+
+/** The count each kind's thickness and stacking read from. Per-kind rather
+ *  than `total_count`: the two layers now share the map, so a corridor
+ *  proposed twice must be two proposals thick, not two-plus-its-trains. */
+export const CORRIDOR_COUNT_PROPERTIES: Record<CorridorKind, string> = {
+  existing: 'existing_count',
+  proposed: 'proposal_count',
+}
+
+/** Below 1 so crossing corridors still read as two lines. The proposal layer
+ *  is the more opaque of the two: where both run, it has to stay legible over
+ *  the orange underneath it rather than blending into it. */
+export const CORRIDOR_OPACITY: Record<CorridorKind, number> = {
+  existing: 0.65,
+  proposed: 0.95,
+}
+
+/** Whether a corridor carries this kind of traffic at all — the filter that
+ *  splits one feature collection across the two layers. */
+export function corridorPresenceFilter(kind: CorridorKind): unknown[] {
+  return ['>', ['get', CORRIDOR_COUNT_PROPERTIES[kind]], 0]
+}
 
 /** Width of the isolated route while a card is hovered. Flat, because with one
  *  route on screen the count ramp has nothing to compare against — varying
@@ -55,7 +81,7 @@ export const CORRIDOR_COLORS = {
 export const CORRIDOR_ISOLATED_WIDTH = 3
 
 /**
- * Width ramp keyed on `total_count`. Deliberately ABSOLUTE rather than scaled to
+ * Width ramp keyed on a corridor count. Deliberately ABSOLUTE rather than scaled to
  * the current result set: a corridor proposed five times must look the same
  * whether the gallery is filtered or not, otherwise thickness would silently
  * re-mean itself on every query. Saturates at 20 so one very popular corridor
@@ -69,23 +95,15 @@ export const CORRIDOR_WIDTH_STOPS: readonly (readonly [count: number, width: num
   [20, 8],
 ]
 
-/** `line-width` as a MapLibre interpolate expression over total_count. */
-export function corridorWidthExpression(): unknown[] {
+/** `line-width` as a MapLibre interpolate expression over the kind's own
+ *  count. Both layers share the ramp, so a corridor proposed five times and
+ *  one served by five trains are the same weight in their own colour. */
+export function corridorWidthExpression(kind: CorridorKind): unknown[] {
   return [
     'interpolate',
     ['linear'],
-    ['get', 'total_count'],
+    ['get', CORRIDOR_COUNT_PROPERTIES[kind]],
     ...CORRIDOR_WIDTH_STOPS.flatMap(([count, width]) => [count, width]),
-  ]
-}
-
-/** `line-color` as a MapLibre case expression: any existing service wins. */
-export function corridorColorExpression(): unknown[] {
-  return [
-    'case',
-    ['>', ['get', 'existing_count'], 0],
-    CORRIDOR_COLORS.existing,
-    CORRIDOR_COLORS.proposed,
   ]
 }
 
@@ -114,17 +132,6 @@ export const ROUTE_DASH_PATTERN = [2, 1.5]
  *  solid (proposals carry null, and a proposal is routed by construction). */
 export const ROUTED_FILTER = ['!=', ['get', 'geometry_routed'], false]
 export const UNROUTED_FILTER = ['==', ['get', 'geometry_routed'], false]
-
-/**
- * Which state a corridor is in. Shared by the legend and by the tests that pin
- * the expression above to the same rule.
- */
-export function corridorState(props: {
-  proposal_count: number
-  existing_count: number
-}): keyof typeof CORRIDOR_COLORS {
-  return props.existing_count > 0 ? 'existing' : 'proposed'
-}
 
 // --- Rows on a corridor ------------------------------------------------------
 

@@ -79,6 +79,13 @@ export const useStore = defineStore('store', () => {
   // ProposalViewport's searchSeed prop.
   const pendingProposalSeed = ref<GallerySearchSeed | null>(null)
 
+  // The scenario a reader was browsing the gallery on when they opened a
+  // proposal — handed over off-URL, exactly like the seed above, and read
+  // once by ProposalViewport when the proposal's family arrives (a stored
+  // proposal always loads on the base, because that is what it is stored
+  // on). Null means "the base", which is also what clearing it means.
+  const pendingScenarioId = ref<number | null>(null)
+
   // The gallery is kept alive across navigation (App.vue), so its loaded list
   // survives a trip into a proposal and back — which also means a proposal
   // published in between would be missing from it. Publishing sets this; the
@@ -421,6 +428,7 @@ export const useStore = defineStore('store', () => {
     detailsTab,
     selectedScenarioId,
     pendingProposalSeed,
+    pendingScenarioId,
     galleryStale,
     fetchStops,
     fetchCompositions,

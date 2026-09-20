@@ -1205,6 +1205,21 @@ export interface ProposalSummaryProposal extends ProposalSummaryShared {
   demand_kpis_placeholder: unknown
   likes_count: number
   comments_count: number
+  /** §5.4a. "error": the family could not compute THIS proposal on the
+   *  requested scenario variant. "missing": its rows for that variant have
+   *  not been written yet (published before the backfill). On both, every
+   *  FIGURE is null — identity, name, countries, stop ids and timestamps
+   *  are always the base projection's, so the row is listed and filterable
+   *  exactly as on the base. Always "ok" on the base projection, which is
+   *  why the figures stay non-nullable here: ProposalCard branches on this
+   *  before reading any of them. */
+  status: 'ok' | 'error' | 'missing'
+  /** The member's code when status is "error": routing_graph_not_configured
+   *  (this deployment serves no routing instance for that network),
+   *  routing_error, gauge_mismatch, domain_error. */
+  error_code: string | null
+  /** The variant this row describes; null on the base projection. */
+  scenario_variant_id: number | null
   // Proposer identity, live-joined from admin.users. is_guest is derived
   // server-side from the reserved "guest_" display-name prefix; the card
   // shows a generic "Guest" label instead of the raw guest_… name.
@@ -1299,6 +1314,15 @@ export interface ProposalsRequest {
   limit?: number
   offset?: number
   include?: ProposalsSection[]
+  /** Swap the proposal side's FIGURES for this scenario variant's (backend
+   *  §5.4a): KPIs, sort order, `map_routes` geometry and `map_lines`
+   *  corridors follow the scenario. NOT a filter, and never a different
+   *  result set: which proposals a filter returns — and their identity,
+   *  countries, stop ids, timestamps — is the base projection's whichever
+   *  variant is read. Existing (ONTD) rows are scenario-independent. Omitted
+   *  is the base projection. Ids come from `GET /api/scenarios`
+   *  (`scenario_variants`); an unknown or non-current one is a 400. */
+  scenario_variant_id?: number
 }
 
 // The `summaries` section of the sectioned list response (default `include`).
@@ -1306,6 +1330,8 @@ export interface ProposalsSummariesSection {
   // Count after filtering, before pagination — what infinite scroll compares
   // loaded length against.
   total: number
+  /** Echo of the request's variant; null when the base projection was read. */
+  scenario_variant_id: number | null
   proposals: ProposalSummary[]
 }
 

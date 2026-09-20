@@ -28,6 +28,7 @@ import type {
 import { publishProposal, fetchProposalRoute } from '@/lib/proposalsApi'
 import { createAbortSlot } from '@/lib/apiClient'
 import { ApiError, asApiFailure, isRetryable, type ApiFailure } from '@/lib/apiError'
+import { SELECTION_SAVE_DELAY_MS, selectionSaveNeeded } from '@/lib/selectionSave'
 import { useApiFailure } from '@/composables/useApiFailure'
 import { resolvePrefillStops, type GallerySearchSeed } from '@/lib/proposalPrefill'
 import { readDraft, writeDraft, clearDraft } from '@/lib/proposalDraftStorage'
@@ -121,6 +122,10 @@ const props = defineProps<{
   // The gallery search bar's state when "Suggest a new route" was clicked —
   // seeds the itinerary in fresh 'edit' mode (mode='edit', proposalId=null).
   searchSeed?: GallerySearchSeed | null
+  // Which part of the page the reader came for — 'comments' when they clicked a
+  // gallery card's comment count. Routing stays in ProposalWorkspace, which
+  // translates /proposal/<id>#comments into this prop.
+  focusSection?: 'comments' | null
 }>()
 const emit = defineEmits<{ back: []; published: [proposalId: number] }>()
 
@@ -243,6 +248,11 @@ const ownsProposal = computed(() => proposalOwnership.value === 'own')
 const pendingPublish = ref(false)
 const saved = ref(false)
 const publishError = ref<string | null>(null)
+// The composition the STORED proposal currently carries — what a
+// family-served switch is compared against to decide whether anything needs
+// saving (lib/selectionSave.ts). Set wherever the stored state is learned:
+// on load, and after every successful publish.
+const savedCompositionId = ref<string | null>(null)
 // Publish recomputes server-side, so it is as slow as a calc and escalates the
 // same way.
 const publishPhase = ref<'idle' | 'working' | 'slow' | 'verySlow'>('idle')
@@ -1268,7 +1278,7 @@ function derivedName(): string {
 // adopted; later saves in the same session "overwrite" it. scenario_id is nulled
 // so the server stores the current base (proposals represent the base; a
 // non-base scenario would 422).
-async function doPublish() {
+async function doPublish(silent = false) {
   const req = publishRequest.value
   if (!req) return
   publishError.value = null
@@ -1295,11 +1305,15 @@ async function doPublish() {
     publishedProposalId.value = resp.proposal_id
     proposalOwnership.value = 'own'
     saved.value = true
+    savedCompositionId.value = (req.composition_id as string | null) ?? null
     // The gallery is kept alive, so its cached list would otherwise not contain
     // the proposal the user just published. Flag it to refetch once on return.
     store.galleryStale = true
     clearDraft()
-    toastStore.addToast('success', t('proposal.saved'))
+    // A selection save is the user's own click, one debounce ago — the
+    // inline "saved" line under the results says so. A toast per arrow
+    // through the composition catalogue would be noise.
+    if (!silent) toastStore.addToast('success', t('proposal.saved'))
     if (isFirstPublish) emit('published', resp.proposal_id)
   } catch (err) {
     if (asApiFailure(err)?.kind === 'canceled') return
@@ -1603,6 +1617,54 @@ const showComputedView = computed(
     (currentMode.value === 'edit' && routeResult.value !== null && !isDirty.value),
 )
 
+// --- Saving the creator's last selection ------------------------------------
+// A composition switch served from the family is applied without a compute
+// (applyMemberFromFamily below), so nothing used to reach the store: the
+// proposal kept the composition of the last RECALCULATE, and every figure
+// the gallery showed described a train the creator had moved on from. The
+// switch now schedules a publish-overwrite, debounced so that arrowing
+// through the catalogue costs one publish rather than one per step.
+//
+// The publish is the ordinary one: the server recomputes, but by then the
+// member is in its member cache and the family document the builder wrote
+// carries the per-scenario rows, so the round trip is the cheap path (see
+// the backend's api/helpers/scenario_summaries.py). Only the composition is
+// treated this way — prices, demand, schedule and expert edits already
+// reach the store through the Recalculate that computes them, and the
+// scenario is deliberately not stored (a proposal always represents the
+// current base; the gallery's scenario panel shows the others).
+let selectionSaveTimer: ReturnType<typeof setTimeout> | null = null
+
+function cancelSelectionSave(): void {
+  if (selectionSaveTimer !== null) {
+    clearTimeout(selectionSaveTimer)
+    selectionSaveTimer = null
+  }
+}
+
+function selectionSaveState() {
+  return {
+    ownsProposal: ownsProposal.value,
+    proposalId: publishedProposalId.value,
+    selectedCompositionId: selectedCompositionId.value,
+    savedCompositionId: savedCompositionId.value,
+    dirty: isDirty.value,
+    busy: currentMode.value === 'loading' || publishPhase.value !== 'idle',
+  }
+}
+
+function scheduleSelectionSave(): void {
+  cancelSelectionSave()
+  if (!selectionSaveNeeded(selectionSaveState())) return
+  selectionSaveTimer = setTimeout(() => {
+    selectionSaveTimer = null
+    // Re-checked at fire time, not only when scheduled: the user may have
+    // switched back, started an edit, or hit Recalculate in the meantime —
+    // and that last one saves on its own path.
+    if (selectionSaveNeeded(selectionSaveState())) doPublish(true)
+  }, SELECTION_SAVE_DELAY_MS)
+}
+
 // Changing scenario or composition marks the displayed results stale instead
 // of recomputing on the spot: each arrow click through the composition
 // catalogue would otherwise be a full recompute, and the new selection should
@@ -1683,6 +1745,9 @@ const expertChanged = computed(() => {
 async function recomputeWithSelection() {
   const stopIds = currentStopIds.value
   if (stopIds.length < 2 || currentMode.value === 'loading') return
+  // This path publishes on its own for an owned proposal — a pending
+  // selection save would be a second write of the same state.
+  cancelSelectionSave()
   const scrollY = window.scrollY
   currentMode.value = 'loading'
   calcFailure.value = null
@@ -1741,6 +1806,23 @@ const showEvaluationSection = computed(
 // proposal and survives a re-evaluate. The storedProposalId !== null half of
 // the condition stays in the template, where it also narrows the prop.
 const showCommentSection = computed(() => routeResult.value !== null)
+
+// Scroll the reader to the discussion when that is what they clicked. The
+// section mounts only once the results are on the page, so a browser anchor
+// would resolve against nothing — this waits for the gate above to open and
+// fires once, leaving later navigation inside the page alone.
+const discussionAnchor = ref<HTMLElement | null>(null)
+let discussionFocused = false
+watch(
+  [() => props.focusSection, showCommentSection],
+  async ([focus, ready]) => {
+    if (focus !== 'comments' || !ready || discussionFocused) return
+    discussionFocused = true
+    await nextTick()
+    discussionAnchor.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  },
+  { immediate: true },
+)
 
 // Share-message inputs. The figures are the real computed ones — never the
 // summary block's co2/demand fields, which are placeholders (see routeFacts()).
@@ -2396,6 +2478,9 @@ async function loadStoredProposal(proposalId: number) {
       detail.user_id !== null && detail.user_id === store.userId ? 'own' : 'other'
     authorName.value = detail.user_name
     selectedCompositionId.value = detail.route.trip_pairs[0]?.composition_id ?? null
+    // What the stored proposal carries, as opposed to what is on screen —
+    // the two only diverge once the reader switches (lib/selectionSave.ts).
+    savedCompositionId.value = selectedCompositionId.value
     applyPlan(
       {
         route_builder_version: detail.route_builder_version,
@@ -2448,12 +2533,20 @@ onBeforeUnmount(() => {
   calcSlot.cancel()
   loadSlot.cancel()
   family.reset()
+  // Leaving before the debounce elapsed drops the save rather than firing
+  // it at an unmounted component: the selection is still in the draft, and
+  // the next deliberate action saves it.
+  cancelSelectionSave()
 })
 
 // An edited itinerary invalidates every member (they describe the previous
 // route); the next evaluation builds a fresh family.
 watch(isDirty, (dirty) => {
-  if (dirty) family.reset()
+  if (!dirty) return
+  family.reset()
+  // An edited itinerary invalidates the pending save too: it would store
+  // the previous route's member under stops the user has since changed.
+  cancelSelectionSave()
 })
 
 // A scenario or composition switch is served from the family when that
@@ -2485,13 +2578,16 @@ function applyMemberFromFamily(scenarioId: number | null, compositionId: string 
     nightMode: nightMode.value,
     direction: onScreenDirection.value,
   }
-  // Not persisted: switching is a look, not an edit. The user's own
-  // proposal is saved by the paths that do change it.
+  // applyPlan does not publish here: the switch is applied from the family,
+  // and what (if anything) needs storing is decided by the debounced save
+  // below — a scenario switch stores nothing, a composition switch stores
+  // the new selection once the user stops moving.
   applyPlan(plan, false, true)
   if (pending.direction === 1) swapDirection()
   expert.value = pending.expert
   nightSelection.value = pending.night
   nightMode.value = pending.nightMode
+  scheduleSelectionSave()
 }
 
 watch(
@@ -2499,6 +2595,22 @@ watch(
   (scenarioId) => {
     if (scenarioId === committedScenarioId.value) return
     applyMemberFromFamily(scenarioId, selectedCompositionId.value)
+  },
+)
+
+// A proposal opened from a gallery that was being browsed on another
+// scenario: the reader clicked THOSE figures, so present that member. It
+// cannot happen before the family is there — a stored proposal loads on the
+// base, which is what it is stored on — so this waits for the document and
+// then moves the selection, which the watcher above turns into the switch.
+// Read once: a later scenario switch is the reader's own.
+watch(
+  () => family.document.value,
+  (document) => {
+    const scenarioId = store.pendingScenarioId
+    if (!document || scenarioId === null) return
+    store.pendingScenarioId = null
+    if (scenarioId !== store.selectedScenarioId) store.selectedScenarioId = scenarioId
   },
 )
 
@@ -3514,7 +3626,12 @@ onMounted(async () => {
         @retry-family="retryFamily"
       >
         <template #discussion>
-          <div v-if="storedProposalId !== null && showCommentSection" class="w-full">
+          <div
+            v-if="storedProposalId !== null && showCommentSection"
+            id="comments"
+            ref="discussionAnchor"
+            class="w-full scroll-mt-6"
+          >
             <CommentSection :proposal-id="storedProposalId" />
           </div>
         </template>
