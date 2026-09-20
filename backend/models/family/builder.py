@@ -45,6 +45,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 
+from models.demand.distribute import DemandInputs, DemandResult
 from models.evaluation.calc import EvaluationResult
 from models.evaluation.views import ViewsBundle
 from models.params import Composition, MeasureSet, Scenario, ScenarioVariant
@@ -68,6 +69,7 @@ class FamilyRequest:
     fixed_night_interval: list[str] | None
     schedule: dict
     min_turnaround_min: int
+    demand: DemandInputs
     fares_eur_per_km: dict
     fares_eur_per_pax: dict
     services_eur_per_pax: dict
@@ -106,6 +108,10 @@ class FamilyMember:
     provenance: RouteProvenance | None = None
     evaluation_result: EvaluationResult | None = None
     views: ViewsBundle | None = None
+    # DEMAND 0.1.0: the allocation of the request's demand onto this
+    # member's composition — a property of the route, so variants of one
+    # scenario share it exactly as they share the route.
+    demand: DemandResult | None = None
     error: BaseException | None = None
 
     @property
@@ -164,6 +170,7 @@ def _build_route(
         fixed_night_interval=request.fixed_night_interval,
         schedule=request.schedule,
         min_turnaround_min=request.min_turnaround_min,
+        demand=request.demand,
         fares_eur_per_km=request.fares_eur_per_km,
         fares_eur_per_pax=request.fares_eur_per_pax,
         services_eur_per_pax=request.services_eur_per_pax,
@@ -261,6 +268,7 @@ def run_family(
                 )
             member.route = computed.route
             member.provenance = computed.provenance
+            member.demand = computed.demand
         except Exception as exc:  # noqa: BLE001 — every failure is a member
             member.status = "error"
             member.error = exc

@@ -599,7 +599,7 @@ def _build_od_pairs(cur, outbound_trip_id: str, return_trip_id: str) -> list[ODP
             destination_stop_id=r["destination_stop_id"],
             class_main=r["class_main"],
             trip_id=r["trip_id"],
-            places_sold=int(r["places_sold"]),
+            places_sold=float(r["places_sold"]),
             avg_price=float(r["avg_price"]),
         )
         for r in cur.fetchall()

@@ -28,7 +28,6 @@ from .extract import (
     CALC_TREE,
     EMISSION_FACTORS,
     INPUT_PARAMS_TABLES,
-    MODE_SHIFT_SHARES,
     MODEL_VERSION_ROWS,
     REGISTRIES,
     SCENARIO_TABLES,
@@ -229,10 +228,11 @@ def render_emission_factors() -> str:
             f"| {mode.replace('_', ' ')} | {factor.g_per_pax_km:g} | {factor.source} |"
         )
     parts.append("")
-    shares = ", ".join(f"{m} {s:.0%}" for m, s in MODE_SHIFT_SHARES.items())
     parts.append(
-        "Placeholder mode-shift assumption for the CO2-savings estimate "
-        f"(share of a route's passengers assumed shifted from each mode): {shares}."
+        "The CO2-savings estimate multiplies these by the demand model's "
+        "distance-dependent source split (`models/demand/sources.py`, "
+        "DEMAND 0.1.0): a share of every OD pair's passengers is taken from "
+        "the plane, the rest half from the car and half induced."
     )
     return "\n".join(parts)
 

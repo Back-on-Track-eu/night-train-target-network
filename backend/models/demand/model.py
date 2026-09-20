@@ -6,24 +6,67 @@ TODOs for the demand model — same single-anchor convention as every
 other model.py under models/: every standard assumption the model makes
 lives here, and modules using a value import it from here.
 
-The demand model is currently the stopgap uniform-distribution proxy
-(stopgap.py) — DEMAND_MODEL_VERSION stays 0.0.x until the real model
-(OPEN_TODOS["demand_model"] below) replaces it. The version is not yet
-reported in API responses; that wiring lands with the real model.
+DEMAND 0.1.0 is the MANUAL demand model (docs/2026-09-18_manual_demand_
+guide.md): a potential demand per year is a request input, split into
+five traveller groups with class preferences (groups.py), allocated onto
+a composition's places by a fixed rule, spread over the sellable OD pairs
+by a stop-weight matrix (od_matrix.py), and attributed to its sources —
+shifted from the plane, from the car, or induced — by distance
+(sources.py). distribute.py runs the three on a Route. The constants the
+rule needs are below; only the total, the level, the group shares and
+the OD weights/pins are request inputs.
 """
 
-DEMAND_MODEL_VERSION: str = "0.0.5"
+DEMAND_MODEL_VERSION: str = "0.1.0"
 
 DEMAND_MODEL_DESCRIPTION: str = (
-    "Demand model (placeholder): assumes every accommodation class is "
-    "70% booked at a flat two-part fare (fixed + per-km, by class), spread "
-    "evenly across all "
-    "connections — a stand-in until a real demand model with directional "
-    "demand, price sensitivity, and competition from other modes "
-    "replaces it."
+    "Manual demand model: a potential demand per year is an input, split "
+    "into five traveller groups that each book only the classes they "
+    "list — a fixed allocation rule seats them round by round, so one "
+    "demand reads as a utilisation on every composition, and demand no "
+    "listed class can seat is not served. Sales spread over the sellable "
+    "OD pairs by a boarding × alighting stop-weight matrix, and every "
+    "passenger is attributed by journey length to the plane, the car or "
+    "an induced trip for the climate figures. Fares are a flat two-part "
+    "tariff per class."
 )
 
 CHANGELOG: dict = {
+    "0.1.0": {
+        "date": "2026-09-19",
+        "author": "david + claude",
+        "changes": "THE STOPGAP IS REPLACED BY THE MANUAL DEMAND MODEL "
+        "(docs/2026-09-18_manual_demand_guide.md, sketch round 7). "
+        "STOPGAP_UTILIZATION_PER (a flat 70 % of every class) is gone; a "
+        "request now carries demand.passengers_per_year (default MEDIUM, "
+        "200 000 both directions, levels S/M/L/XL 100/200/300/500 k), "
+        "demand.group_shares_pct (defaults 50/25/10/10/5 for comfort, "
+        "group, senior, budget, business) and demand.od (stop weights per "
+        "boarding and alighting stop, default 1, four fill presets, pinned "
+        "cells). Per trip = per year / departures. Allocation (groups.py, "
+        "D14-D19): four ROUNDS releasing 50/20/20/10 % of every group's "
+        "demand, groups walked in order, RULE_SHARE 80 % seated along the "
+        "preference list first-until-full, the other 20 % spread evenly "
+        "over the group's other listed classes, expected values not "
+        "draws; a group sits only in the classes it lists, the rest is "
+        "not served. OD spread (od_matrix.py, D25-D30): share(o,d) ~ "
+        "w_board(o) x w_alight(d) over the sellable pairs (boarding stop "
+        "before alighting stop, night stops sell nothing), pins hold and "
+        "the rest rescales. places_sold per OD pair per class per year is "
+        "served x share x departures — a FLOAT now (ODPair.places_sold, "
+        "proposals.od_pairs.places_sold DOUBLE PRECISION). Tariff "
+        "defaults re-set (D31): Seat 10 + 0.06/km, Couchette 75 + 0.03, "
+        "Sleeper 125 + 0.04, Capsule 75 + 0.03; services and catering "
+        "keep 0.0.5. NEW sources.py: every OD pair's passengers split by "
+        "distance into shift from air (0 below 300 km, 25 % at 300 km, "
+        "linear to 100 % at 1 200 km) and other/induced, the latter half "
+        "car shift and half induced — this replaces the flat "
+        "MODE_SHIFT_SHARES of the emissions model in the summary's "
+        "demand KPIs, which stop being placeholders. Reference values at "
+        "the defaults (Berlin-Verona, 3 days/week): NEW-BAL-7 sells 260 "
+        "of 637.5 places a trip, 81 566 passengers and 6 840 558 EUR "
+        "ticket revenue a year (tests/test_83_demand_units.py).",
+    },
     "0.0.5": {
         "date": "2026-09-14",
         "author": "david + claude",
@@ -94,84 +137,164 @@ CHANGELOG: dict = {
 
 
 # =============================================================================
-# STANDARD VALUES — stopgap demand (stopgap.distribute_demand() inputs)
+# STANDARD VALUES — request defaults and the constants of the allocation
+# rule (groups.py), the OD spread (od_matrix.py) and the source split
+# (sources.py). Changing any of them changes model output — bump the
+# version above.
 # =============================================================================
 
-STOPGAP_UTILIZATION_PER: float = 0.7
-"""Placeholder scalar utilization applied uniformly to every class until a
-real demand model lands."""
+CLASS_ORDER: tuple[str, ...] = ("Seat", "Couchette", "Sleeper", "Capsule")
+"""The four accommodation classes a traveller can book, in the order the
+model reports them — the same order the frontend's CLASS_ICONS use. Every
+per-class map in a demand result is keyed and ordered by this."""
 
-STOPGAP_FARE_PER_KM_BY_CLASS: dict[str, float] = {
-    "Seat": 0.025,
-    "Couchette": 0.035,
-    "Sleeper": 0.060,
-    "Capsule": 0.040,
+DEMAND_LEVELS: dict[str, int] = {
+    "small": 100_000,
+    "medium": 200_000,
+    "large": 300_000,
+    "xl": 500_000,
+}
+"""Potential demand presets, passengers per year over both directions
+(D11). Defaults, not a scenario switch: the level writes the total and is
+saved with the proposal as `demand.level`; a total matching none of them
+is `custom`."""
+
+DEFAULT_DEMAND_LEVEL: str = "medium"
+"""The level a request without a demand block runs at (§2.8)."""
+
+DEMAND_LEVEL_CUSTOM: str = "custom"
+
+GROUP_ORDER: tuple[str, ...] = ("comfort", "group", "senior", "budget", "business")
+"""The five traveller groups in allocation order (D14): every round walks
+them in this order, which is what keeps the first group from taking a class
+outright before a later group with the same first preference gets a turn."""
+
+GROUP_CLASS_PREFERENCES: dict[str, tuple[str, ...]] = {
+    "comfort": ("Sleeper", "Capsule", "Couchette"),
+    "group": ("Couchette", "Seat"),
+    "senior": ("Couchette", "Sleeper"),
+    "budget": ("Seat",),
+    "business": ("Sleeper", "Capsule"),
+}
+"""Which classes each group books, first preference first — and ONLY
+those (D14, D17): demand no listed class can seat is not served, there is
+no overflow into other classes and no spill between groups."""
+
+GROUP_LABELS: dict[str, str] = {
+    "comfort": "Leisure – comfort",
+    "group": "Leisure – group",
+    "senior": "Senior leisure",
+    "budget": "Leisure – budget",
+    "business": "Business",
+}
+"""Display names of the groups, for the models registry."""
+
+DEFAULT_GROUP_SHARES_PCT: dict[str, float] = {
+    "comfort": 50.0,
+    "group": 25.0,
+    "senior": 10.0,
+    "budget": 10.0,
+    "business": 5.0,
+}
+"""Default share of the potential demand per group, percent (D14). A
+request may post its own; a sum other than 100 is allowed and means the
+groups ask for total x sum (D15), no rebalancing."""
+
+ROUNDS_PCT: tuple[float, ...] = (50.0, 20.0, 20.0, 10.0)
+"""Share of each group's demand released in each allocation round (D16).
+The rounds interleave the groups — see GROUP_ORDER."""
+
+RULE_SHARE: float = 0.8
+"""Within a round, the share of a group's released demand that follows the
+rule — first listed class until full, then the next. The rest spreads
+evenly over the group's OTHER listed classes; a single-class group has
+none, so it is 100 % rule. Expected values, not random draws (D18)."""
+
+OD_PRESETS: tuple[str, ...] = ("even", "long", "mid", "short")
+"""Fill presets of the OD matrix (D27): each writes one weight per
+boarding and alighting stop from its position along the route (0 = first,
+1 = last of that list): even (all 1), long journeys (board 1−x, alight x),
+mid distance (1−|2x−1| on both), short hops (board x, alight 1−x)."""
+
+OD_PRESET_CUSTOM: str = "custom"
+
+OD_WEIGHT_MIN: float = 0.3
+OD_WEIGHT_SPAN: float = 2.7
+"""A preset maps its position factor f in 0..1 to the weight
+OD_WEIGHT_MIN + OD_WEIGHT_SPAN x f, one decimal (0.3 … 3.0). Even is
+special-cased to 1 so the margins read naturally (finding 5)."""
+
+DEFAULT_OD_WEIGHT: float = 1.0
+"""Weight of a stop no request weight names — the even spread (D30)."""
+
+# --- Sources (sources.py): who the passengers are, by journey length ------
+
+AIR_SHIFT_FLOOR_KM: float = 300.0
+"""Below this journey length nobody would have flown: the air share is 0."""
+
+AIR_SHIFT_AT_FLOOR: float = 0.25
+"""The air share at exactly AIR_SHIFT_FLOOR_KM, from where it rises
+linearly to 1 at AIR_SHIFT_FULL_KM."""
+
+AIR_SHIFT_FULL_KM: float = 1200.0
+"""From this journey length on every passenger is a shift from the plane;
+the other sources are negligible on a night train that long."""
+
+OTHER_CAR_SHARE: float = 0.5
+"""Of the passengers who would NOT have flown, the share that would have
+driven; the rest is induced — a trip that would not have been made. Car
+shift saves the car's emissions less the train's, an induced trip adds the
+train's (models/emissions/model.py)."""
+
+# --- Tariff (D31): a flat two-part base fare per class, plus services and
+# catering per passenger. Defaults a request may override per class.
+
+FARE_PER_KM_BY_CLASS: dict[str, float] = {
+    "Seat": 0.06,
+    "Couchette": 0.03,
+    "Sleeper": 0.04,
+    "Capsule": 0.03,
     "Catering": 0.0,
 }
 """Distance part of the base fare by class_main, EUR per passenger-km, net
-of VAT, 2032 price year (DEMAND 0.0.5 — see STOPGAP_FARE_PER_PAX_BY_CLASS
-for the basis shared by both parts).
-
-Deliberately small: a night-train tariff is nearly flat over distance.
-ÖBB Nightjet prices one band per class for ANY German domestic journey,
-and the spread between a 300 km and a 1,300 km ticket at the other
-operators is a fraction of the fare, not a multiple. Expressed in tenths
-of a cent, which the request field carries at 4 decimals.
-
-Since CALC 0.9.27 these are the DEFAULTS: a request may carry its own
-`fares_eur_per_km` (api/helpers/member_compute.py), per proposal and part of
-the family key. Catering is not a fare class and is pinned to 0 whatever
-the request says."""
+of VAT, 2032 price year (DEMAND 0.1.0, D31 — decided 2026-09-18 on the
+sketch: seat 10 + 0.06/km, couchette 75 + 0.03, sleeper 125 + 0.04,
+capsule 75 + 0.03). Deliberately small: a night-train tariff is nearly
+flat over distance. Since CALC 0.9.27 these are the DEFAULTS: a request
+may carry its own `fares_eur_per_km` (api/helpers/member_compute.py), per
+proposal and part of the family key. Catering is not a fare class and is
+pinned to 0 whatever the request says."""
 
 FARE_CLASS_MAINS: tuple[str, ...] = ("Seat", "Couchette", "Sleeper", "Capsule")
 """The class_mains a request may price. Everything else in
-STOPGAP_FARE_PER_KM_BY_CLASS is fixed."""
+FARE_PER_KM_BY_CLASS is fixed."""
 
-STOPGAP_FARE_PER_PAX_BY_CLASS: dict[str, float] = {
-    "Seat": 30.0,
-    "Couchette": 55.0,
-    "Sleeper": 110.0,
+FARE_PER_PAX_BY_CLASS: dict[str, float] = {
+    "Seat": 10.0,
+    "Couchette": 75.0,
+    "Sleeper": 125.0,
     "Capsule": 75.0,
 }
 """FIXED part of the base fare, EUR per passenger carried, net of VAT,
-2032 price year.
+2032 price year (DEMAND 0.1.0, D31). A ticket costs `fare_per_pax +
+fare_per_km x km`: a berth has a price of admission a 300 km journey pays
+as surely as a 1,300 km one, so most of the fare sits here. Implied fares
+at 300 / 700 / 1,200 km: seat 28 / 52 / 82 — couchette 84 / 96 / 111 —
+capsule 84 / 96 / 111 — sleeper 137 / 153 / 173. Overridable per proposal
+as `fares_eur_per_pax`. Ticket revenue: inside every overhead and margin
+base. The 0.0.5 basis (realised 2025-26 fares of Nightjet, European
+Sleeper, Nox, ICN, Intercités de nuit, net of VAT, 2032 price year) still
+frames these; the 2026-09-18 decision moved the seat down and the berths
+up to where the sketch's revenues read right."""
 
-The tariff is two-part: a ticket costs `fare_per_pax + fare_per_km x km`.
-Real night-train tariffs are not proportional to distance — a berth has a
-price of admission that a 300 km journey pays as surely as a 1,300 km one
-— so most of the fare sits here. Overridable per proposal as
-`fares_eur_per_pax`. Ticket revenue: inside every overhead and margin base.
-
-Basis (DEMAND 0.0.5, research 2026-09-14): revenue-weighted REALISED
-average fares — the mix of Sparschiene/Standard tickets and berth types
-an operator actually sells, not entry prices — read from 2025-26 tariffs
-of ÖBB Nightjet (German domestic price bands per class), European
-Sleeper (Brussels-Prague), Nox (announced 129 EUR single / 219 EUR
-double cabin), Trenitalia Intercity Notte and SNCF Intercités de nuit,
-weighted toward the open-access operators since the PSO fares are set
-under subsidy. Targets at 1,000 km, gross 2026: seat ~55, couchette ~90,
-capsule ~110, sleeper ~165 EUR (a berth, blended over single/double/
-triple). Cross-checks: Back-on-Track's Nox critique puts open-access cost
-coverage at ~95 EUR net per passenger at ~1,000 km; DLR's low-cost
-airline average on 500-1,500 km was 79 EUR gross (autumn 2024).
-
-Price year: observed 2026 gross, stripped of ~7-8% blended VAT (x0.925)
-and escalated to nominal 2032 at 2%/yr (x1.126) — the two nearly cancel
-(x1.04), so the parameters read like the 2026 gross figures. The
-`vat_exempt` measure multiplies THIS net base, so do not strip VAT twice.
-
-Implied fares, per_pax + per_km x km, at 300 / 700 / 1,200 km:
-seat 38 / 48 / 60 — couchette 66 / 80 / 97 — capsule 87 / 103 / 123 —
-sleeper 128 / 152 / 182."""
-
-STOPGAP_SERVICES_EUR_PER_PAX_BY_CLASS: dict[str, float] = {
+SERVICES_EUR_PER_PAX_BY_CLASS: dict[str, float] = {
     "Seat": 1.50,
     "Couchette": 2.50,
     "Sleeper": 4.00,
     "Capsule": 2.50,
 }
 """Revenue from additional services, EUR per passenger carried, net of VAT,
-2032 price year (DEMAND 0.0.5).
+2032 price year (DEMAND 0.0.5, kept by 0.1.0).
 
 Bicycle carriage, oversized luggage, pets — set at ~2.5-3% of the class's
 base fare, the usual ancillary share in long-distance rail; no operator
@@ -185,14 +308,14 @@ already in the cost model elsewhere and must not be netted here again.
 Being ordinary ticket revenue, it stays INSIDE the variable-overhead and
 EBIT-margin bases. Overridable as `services_eur_per_pax`."""
 
-STOPGAP_CATERING_EUR_PER_PAX_BY_CLASS: dict[str, float] = {
+CATERING_EUR_PER_PAX_BY_CLASS: dict[str, float] = {
     "Seat": 1.50,
     "Couchette": 2.00,
     "Sleeper": 1.00,
     "Capsule": 2.00,
 }
 """NET catering contribution per passenger carried, EUR, by class, 2032
-price year (DEMAND 0.0.5).
+price year (DEMAND 0.0.5, kept by 0.1.0).
 
 Signed, and a NET figure: the restaurant is not modelled as a business of
 its own, so one number per class carries its sales less its goods,
@@ -208,16 +331,11 @@ Basis: DB's day trains take under 1 EUR gross per passenger (2023
 on-board revenue ~110 M EUR on ~130 M passengers). A night train captures
 an evening and a morning, so ~4-6 EUR gross per seat/couchette passenger,
 netted at ~45% after goods and logistics, gives ~2 EUR. Sleeper is lower
-because breakfast and a welcome drink are already in its fare. Watch the
-cost side: svc_stockings at 0.25-1.50 EUR/place cannot carry linen plus
-an included breakfast; if that line is under-costed, these positives are
-partly offset there.
+because breakfast and a welcome drink are already in its fare.
 
 Per class since DEMAND 0.0.4 because the classes differ in what their base
-fare already includes — a sleeper fare that covers breakfast leaves less
-to buy on board than a seat fare that covers nothing, so the same
-restaurant nets differently from the two. A class at 0.00 is a claim that
-its passengers buy nothing, not an absence of data.
+fare already includes. A class at 0.00 is a claim that its passengers buy
+nothing, not an absence of data.
 
 Deliberately outside the variable-overhead and EBIT-margin bases, which
 stay on ticket revenue (models/evaluation/model.py): charging distribution
@@ -242,25 +360,25 @@ def _resolve_per_class(
 def resolve_catering(override: dict | None) -> dict[str, float]:
     """The net catering contribution per passenger, per class. Signed — a
     negative override is a service the tickets carry, not an error."""
-    return _resolve_per_class(override, STOPGAP_CATERING_EUR_PER_PAX_BY_CLASS)
+    return _resolve_per_class(override, CATERING_EUR_PER_PAX_BY_CLASS)
 
 
 def resolve_services(override: dict | None) -> dict[str, float]:
     """Additional-services revenue per passenger, per class. Never
     negative: nobody is paid to bring a bicycle."""
-    return _resolve_per_class(override, STOPGAP_SERVICES_EUR_PER_PAX_BY_CLASS)
+    return _resolve_per_class(override, SERVICES_EUR_PER_PAX_BY_CLASS)
 
 
 def resolve_fares_per_pax(override: dict | None) -> dict[str, float]:
     """The fixed part of the base fare, per class."""
-    return _resolve_per_class(override, STOPGAP_FARE_PER_PAX_BY_CLASS)
+    return _resolve_per_class(override, FARE_PER_PAX_BY_CLASS)
 
 
 def resolve_fares(override: dict | None) -> dict[str, float]:
     """The per-km fares one evaluation runs with: the defaults, with the
     request's values on top for the classes it names. Always returns a
     complete dict so the distribution never hits a missing class."""
-    fares = dict(STOPGAP_FARE_PER_KM_BY_CLASS)
+    fares = dict(FARE_PER_KM_BY_CLASS)
     for class_main, value in (override or {}).items():
         if class_main in FARE_CLASS_MAINS:
             fares[class_main] = float(value)
@@ -273,15 +391,16 @@ def resolve_fares(override: dict | None) -> dict[str, float]:
 
 OPEN_TODOS: dict[str, str] = {
     "demand_model": (
-        "Replace stopgap.distribute_demand()'s inputs (STOPGAP_UTILIZATION_"
-        "PER, STOPGAP_FARE_PER_KM_BY_CLASS above) and its uniform-"
-        "distribution proxy with a real demand model accounting for "
-        "asymmetric directional demand, price elasticity, and competition "
-        "from other modes — likely with per-scenario parameters. Candidate "
-        "structure identified: the French open-source night train shift "
-        "model's log-additive factor form (compatible with the existing "
-        "test suite). The placeholder demand KPIs in adapters/proposal/"
-        "projection.py (_PLACEHOLDER_* constants, adapters/proposal/README.md §8.1) "
-        "are the second replacement site once this lands."
+        "The manual model takes the potential demand as an input. A demand "
+        "MODEL that derives it — asymmetric directional demand, price "
+        "elasticity, competition from other modes, likely per scenario — "
+        "would write demand.passengers_per_year and the group shares "
+        "instead of the user; the allocation, OD spread and source split "
+        "stay. Candidate structure: the French open-source night train shift "
+        "model's log-additive factor form."
+    ),
+    "od_by_class": (
+        "One OD matrix for all classes (D29). Sleeper demand plausibly skews "
+        "long; the request shape allows a later demand.od.by_class."
     ),
 }

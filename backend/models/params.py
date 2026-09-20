@@ -1647,7 +1647,10 @@ class ODPair:
     places_sold: annual total tickets sold for this OD pair / class / trip.
     Operators think and plan in annual figures — per-trip demand is derived
     by dividing by operating_days_per_year from the relevant TripPair's
-    Schedule.
+    Schedule. A FLOAT since DEMAND 0.1.0: served places per departure × a
+    pair's share × operating days is fractional, and rounding it per pair
+    would break the identity between the places the allocation seats and
+    the passengers the evaluation counts.
 
     avg_price: average ticket price across all tickets sold for this
     OD pair, class, and trip. EUR.
@@ -1657,7 +1660,7 @@ class ODPair:
     destination_stop_id: str
     class_main: str  # "Seat" | "Couchette" | "Sleeper" | "Capsule" | "Catering"
     trip_id: str  # references Trip.trip_id within the same Route
-    places_sold: int  # annual tickets sold for this OD pair / class / trip
+    places_sold: float  # annual tickets sold for this OD pair / class / trip
     avg_price: float  # EUR — average fare across all sold tickets
 
 

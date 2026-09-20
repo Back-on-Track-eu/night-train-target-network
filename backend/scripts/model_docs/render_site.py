@@ -28,7 +28,6 @@ from .extract import (
     CALC_GENERIC_FORMULAS,
     EMISSION_FACTORS,
     INPUT_PARAMS_TABLES,
-    MODE_SHIFT_SHARES,
     MODEL_CHANGELOGS,
     MODEL_VERSION_ROWS,
     REGISTRIES,
@@ -319,12 +318,14 @@ def render_emission_factors() -> str:
         parts.append(
             f"| {mode.replace('_', ' ')} | {factor.g_per_pax_km:g} | {_esc(factor.source)} |"
         )
-    shares = ", ".join(f"{m} {s:.0%}" for m, s in MODE_SHIFT_SHARES.items())
     parts += [
         "",
         "The CO2 saving compares a night train against the trip someone "
         "would otherwise have made. Which trip that is, is an assumption, "
-        f"not a measurement: {shares}.",
+        "not a measurement: the demand model splits every OD pair's "
+        "passengers by distance into a share that would have flown and a "
+        "share that would have driven or not travelled at all "
+        "(see the demand model's standard values).",
     ]
     return "\n".join(parts)
 

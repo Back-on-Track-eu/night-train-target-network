@@ -69,6 +69,8 @@ from api.helpers.family_serialize import family_document  # noqa: E402
 from api.helpers.member_compute import (  # noqa: E402
     classify_compute_error,
     compute_member,
+    demand_inputs,
+    normalize_demand,
 )
 from api.helpers.route_serialize import route_to_dict  # noqa: E402
 from models.evaluation.summary import build_summary_row  # noqa: E402
@@ -139,6 +141,7 @@ def member(args, scenario_id: int, loader, router, composition_id: str):
         timetable_mode=DEFAULT_TIMETABLE_MODE,
         fixed_night_interval=None,
         schedule={str(m): DEFAULT_DAYS_PER_WEEK for m in range(1, 13)},
+        demand=demand_inputs(normalize_demand(None)),
         routing_mode=DEFAULT_ROUTING_MODE,
         auto_stop_addition="off",
         loader=loader,

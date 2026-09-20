@@ -14,9 +14,8 @@ This module only ever hands back domain objects.
 
 Public interface:
   run_compute(...) -> ComputeResult                     (full pipeline:
-                                                          plan → stopgap
-                                                          demand → evaluate
-                                                          → views)
+                                                          plan → demand →
+                                                          evaluate → views)
   evaluate_and_build_views(route, tracks, stop_infra, passages)
       -> (EvaluationResult, ViewsBundle)                (the post-routing
                                                           half, for callers
@@ -35,13 +34,12 @@ from __future__ import annotations
 from models.route.model import DEFAULT_MIN_TURNAROUND_MIN
 from dataclasses import dataclass
 
-from models.demand.stopgap import distribute_demand
+from models.demand.distribute import DemandInputs, DemandResult, distribute_demand
 from models.demand.model import (
     resolve_catering,
     resolve_fares,
     resolve_fares_per_pax,
     resolve_services,
-    STOPGAP_UTILIZATION_PER,
 )
 from models.evaluation.calc import EvaluationResult, evaluate_route
 from models.evaluation.views import ViewsBundle, build_all_views
@@ -76,6 +74,10 @@ class ComputeResult:
     suggestions: list[AutoStopSuggestion]
     evaluation_result: EvaluationResult
     views: ViewsBundle
+    # DEMAND 0.1.0: the allocation and OD spread behind the route's
+    # od_pairs — the figures the Details card shows, serialised by
+    # api/helpers/evaluation_serialize.py::demand_to_dict.
+    demand: DemandResult
 
 
 def evaluate_and_build_views(
@@ -127,6 +129,7 @@ def run_compute(
     fixed_night_interval: list[str] | None,
     schedule: dict,
     min_turnaround_min: int = DEFAULT_MIN_TURNAROUND_MIN,
+    demand: DemandInputs,
     fares_eur_per_km: dict | None = None,
     fares_eur_per_pax: dict | None = None,
     catering_eur_per_pax: dict | None = None,
@@ -140,7 +143,7 @@ def run_compute(
 ) -> ComputeResult:
     """Build a route and evaluate it in one call — the steps every compute
     path (the family's members, publish, member-cache misses) needs:
-    plan → stopgap demand → evaluate → views.
+    plan → demand → evaluate → views.
 
     proposal_id/proposal_version: purely ID-building placeholders for
     plan_route()'s P{id}_V{version}_-prefixed ID convention (see
@@ -149,7 +152,9 @@ def run_compute(
     publish time). Every other field must already be resolved (defaults
     applied) — that resolution is an API-boundary concern, not this
     module's. schedule is the twelve-month map api/helpers/member_compute.py
-    resolves from one posted frequency (or a posted map, or nothing).
+    resolves from one posted frequency (or a posted map, or nothing);
+    demand is the request's demand block as values, defaults filled in
+    there too (models/demand/distribute.py::DemandInputs).
 
     expert_timetable: the request's manual timetable overrides, already
     turned into domain objects at the API boundary (api/helpers/
@@ -187,11 +192,11 @@ def run_compute(
         scenario_id=scenario_id,
     )
 
-    # Stopgap demand distribution — see OPEN_TODOS["demand_model"] in
-    # models/demand/version.py. Mutates route in place.
-    distribute_demand(
+    # The manual demand model (DEMAND 0.1.0) — mutates route in place and
+    # hands back the allocation the API reports.
+    demand_result = distribute_demand(
         route,
-        utilization_per=STOPGAP_UTILIZATION_PER,
+        demand,
         fare_per_km_by_class=resolve_fares(fares_eur_per_km),
         fare_per_pax_by_class=resolve_fares_per_pax(fares_eur_per_pax),
     )
@@ -212,4 +217,5 @@ def run_compute(
         suggestions=suggestions,
         evaluation_result=evaluation_result,
         views=views,
+        demand=demand_result,
     )

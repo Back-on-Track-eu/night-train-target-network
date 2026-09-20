@@ -3031,6 +3031,7 @@ def _compute_example_proposal(
     container being up yet; only the post-routing half of the pipeline is
     reused."""
     from api.helpers.evaluation_serialize import (
+        demand_to_dict,
         input_to_dict,
         models_to_dict,
         views_to_dict,
@@ -3038,21 +3039,22 @@ def _compute_example_proposal(
     from api.helpers.route_serialize import route_from_dict, route_to_dict
     from adapters.proposal.projection import route_fingerprint
     from models.evaluation.summary import build_summary_row
-    from models.demand.stopgap import distribute_demand
-    from models.demand.model import (
-        STOPGAP_FARE_PER_KM_BY_CLASS,
-        STOPGAP_UTILIZATION_PER,
-    )
+    from api.helpers.member_compute import demand_inputs, normalize_demand
+    from models.demand.distribute import distribute_demand
+    from models.demand.model import FARE_PER_KM_BY_CLASS, FARE_PER_PAX_BY_CLASS
     from models.evaluation.model import CALC_VERSION
     from models.evaluation.operations import build_operations
     from models.pipeline import evaluate_and_build_views
     from models.route.model import DEFAULT_MIN_TURNAROUND_MIN, ROUTE_BUILDER_VERSION
 
     route, compositions = route_from_dict(route_dict, loader, scenario_id=scenario_id)
-    distribute_demand(
+    # The manual demand model at its defaults (DEMAND 0.1.0) — the same
+    # call models/pipeline.py makes, on the hand-crafted route.
+    demand_result = distribute_demand(
         route,
-        utilization_per=STOPGAP_UTILIZATION_PER,
-        fare_per_km_by_class=STOPGAP_FARE_PER_KM_BY_CLASS,
+        demand_inputs(normalize_demand(None)),
+        fare_per_km_by_class=FARE_PER_KM_BY_CLASS,
+        fare_per_pax_by_class=FARE_PER_PAX_BY_CLASS,
     )
     stop_infra = loader.build_all_stops(scenario_id)
     passages = loader.build_all_passages(scenario_id)
@@ -3068,6 +3070,7 @@ def _compute_example_proposal(
         ),
         "views": views_to_dict(views, route),
         "operations": build_operations(route, evaluation_result),
+        "demand": demand_to_dict(demand_result, route),
     }
 
     return {
@@ -3082,6 +3085,7 @@ def _compute_example_proposal(
             "fixed_night_interval": None,
             "schedule": {str(m): 7 for m in range(1, 13)},
             "min_turnaround_min": DEFAULT_MIN_TURNAROUND_MIN,
+            "demand": normalize_demand(None),
             "routing_mode": "fullRouting",
             "auto_stop_addition": "off",
         },

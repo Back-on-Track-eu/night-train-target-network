@@ -583,7 +583,7 @@ def route_from_dict(
                 destination_stop_id=od["destination_stop_id"],
                 class_main=od["class_main"],
                 trip_id=od["trip_id"],
-                places_sold=int(od["places_sold"]),
+                places_sold=float(od["places_sold"]),
                 avg_price=float(od["avg_price"]),
             )
             for od in tp.get("od_pairs", [])

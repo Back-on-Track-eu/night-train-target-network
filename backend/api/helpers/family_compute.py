@@ -53,6 +53,7 @@ from api.helpers.family_serialize import (
 from api.helpers.member_compute import (
     classify_compute_error,
     compute_member,
+    demand_inputs,
     resolve_how_fields,
     validate_how_fields,
     validate_stops,
@@ -267,6 +268,7 @@ def build_or_load_family(body: dict) -> dict:
             fixed_night_interval=request["fixed_night_interval"],
             schedule=request["schedule"],
             min_turnaround_min=request["min_turnaround_min"],
+            demand=demand_inputs(request["demand"]),
             fares_eur_per_km=request["fares_eur_per_km"],
             fares_eur_per_pax=request["fares_eur_per_pax"],
             services_eur_per_pax=request["services_eur_per_pax"],
@@ -327,4 +329,5 @@ def member_views(
     return {
         "views": payload["evaluation"]["views"],
         "operations": payload["evaluation"]["operations"],
+        "demand": payload["evaluation"]["demand"],
     }

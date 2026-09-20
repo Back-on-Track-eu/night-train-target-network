@@ -123,17 +123,24 @@ jobs:
           for f in \
             backend/models/evaluation/calc.py \
             backend/models/evaluation/views.py \
-            backend/models/evaluation/summary.py; do
+            backend/models/evaluation/summary.py \
+            backend/models/evaluation/operations.py; do
             check_version "$f" \
               "backend/models/evaluation/model.py" \
               "CALC_VERSION"
           done
 
-          # Demand model (stopgap)
-          check_version \
-            "backend/models/demand/stopgap.py" \
-            "backend/models/demand/model.py" \
-            "DEMAND_MODEL_VERSION"
+          # Demand model (DEMAND 0.1.0: allocation, OD spread, sources,
+          # the distribution on a route)
+          for f in \
+            backend/models/demand/groups.py \
+            backend/models/demand/od_matrix.py \
+            backend/models/demand/sources.py \
+            backend/models/demand/distribute.py; do
+            check_version "$f" \
+              "backend/models/demand/model.py" \
+              "DEMAND_MODEL_VERSION"
+          done
 
           # Models whose entire content is model.py (emissions factor set,
           # composition cost calibration anchor, infrastructure parameter

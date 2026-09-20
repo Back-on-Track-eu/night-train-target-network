@@ -380,6 +380,36 @@ the same family. `schedule_mode` no longer exists and is a 400. A family
 larger than `FAMILY_MAX_MEMBERS` (`api/config.py`) is 400
 `family_too_large`.
 
+`demand` (DEMAND 0.1.0, `docs/2026-09-18_manual_demand_guide.md` §4) is
+the manual demand, every part optional:
+
+```jsonc
+"demand": {
+  "level": "medium",                 // small | medium | large | xl | custom (a label)
+  "passengers_per_year": 200000,     // both directions; default: the level's total (Medium)
+  "group_shares_pct": { "comfort": 50, "group": 25, "senior": 10, "budget": 10, "business": 5 },
+  "od": {
+    "preset": "even",                // even | long | mid | short | custom (a label)
+    "stop_weights": { "board": { "<stop_id>": 1.0 }, "alight": { "<stop_id>": 1.0 } },
+    "pinned_shares_pct": { "<origin_stop_id>": { "<destination_stop_id>": 12.5 } }
+  }
+}
+```
+
+Validation: shares ≥ 0 (a sum ≠ 100 is allowed — the groups then ask for
+total × sum), weights ≥ 0, pins 0..100 summing to at most 100, level and
+preset from their vocabularies, stop ids as keys (a pin whose stop is no
+longer sellable on the route is dropped and reported in the response's
+`demand.od.dropped_pins`). The echo carries the complete block with
+weights at 4 and pins at 2 decimals; `passengers_per_year`,
+`group_shares_pct`, `stop_weights` and `pinned_shares_pct` are in the
+family key, `level` and `preset` are not. Every ok member of the document
+carries a `demand` block beside `summary`, and the views endpoint answers
+`{views, operations, demand}` — the allocation by group and class (per
+trip and per year), what was not served, the OD matrix and the demand
+sources (`api/helpers/evaluation_serialize.py::demand_to_dict`,
+`models/demand/README.md`).
+
 The tariff is three parts, each an object of `class_main` → EUR and each
 partial (a request that prices one class leaves the others at the model's
 defaults, `GET /api/models`):
@@ -836,7 +866,7 @@ doesn't run its query at all.
 | `name` | `name` | substring | case-insensitive `str` |
 | `total_distance_km`, `total_time_h`, `avg_speed_kmh`, `n_stops` | same | range | `{"min": num, "max": num}` |
 | `cost_eur_per_train_km`, `revenue_eur_per_train_km`, `margin_eur_per_train_km`, `subsidy_eur_per_year` | same | range | `{"min": num, "max": num}` |
-| `demand_trips_per_year`, `demand_trip_km_per_year`, `shift_air_trips_per_year`, `shift_air_trip_km_per_year`, `shift_car_trips_per_year`, `shift_car_trip_km_per_year`, `co2_savings_t_per_year`, `subsidy_eur_per_t_co2` | same | range | `{"min": num, "max": num}` |
+| `demand_trips_per_year`, `demand_trip_km_per_year`, `shift_air_trips_per_year`, `shift_air_trip_km_per_year`, `shift_other_trips_per_year`, `shift_other_trip_km_per_year`, `co2_savings_t_per_year`, `subsidy_eur_per_t_co2` | same | range | `{"min": num, "max": num}` |
 | `likes_count`, `comments_count` | live-joined from `proposals.likes` / `proposals.comments` | range | `{"min": num, "max": num}` |
 | `created_at`, `updated_at` | same | range | `{"min": iso8601, "max": iso8601}` |
 | `trip_windows` | reaches into `stop_times` | special | see below |
@@ -883,7 +913,7 @@ paginated).
     "countries":       {"values": ["DE", "AT"], "mode": "all"},
     "stop_ids":        ["osm:n3856100103"],
     "composition_ids": ["NEW-BAL-7"],
-    "demand_kpis_placeholder": [true],
+    "demand_kpis_placeholder": [false],
     "name": "wien",
 
     "total_distance_km":        { "min": 800, "max": 1500 },
@@ -898,8 +928,8 @@ paginated).
     "demand_trip_km_per_year":    { "min": 0 },
     "shift_air_trips_per_year":   { "min": 0 },
     "shift_air_trip_km_per_year": { "min": 0 },
-    "shift_car_trips_per_year":   { "min": 0 },
-    "shift_car_trip_km_per_year": { "min": 0 },
+    "shift_other_trips_per_year":   { "min": 0 },
+    "shift_other_trip_km_per_year": { "min": 0 },
     "co2_savings_t_per_year":     { "min": 0 },
     "subsidy_eur_per_t_co2":      { "min": 0 },
     "likes_count":                 { "min": 1 },
@@ -941,9 +971,9 @@ paginated).
         "margin_eur_per_train_km": 1.7, "subsidy_eur_per_year": 0.0,
         "demand_trips_per_year": 4200, "demand_trip_km_per_year": 2870000,
         "shift_air_trips_per_year": 1470, "shift_air_trip_km_per_year": 1004000,
-        "shift_car_trips_per_year": 840, "shift_car_trip_km_per_year": 574000,
+        "shift_other_trips_per_year": 840, "shift_other_trip_km_per_year": 574000,
         "co2_savings_t_per_year": 210.4, "subsidy_eur_per_t_co2": null,
-        "demand_kpis_placeholder": true, "co2_g_per_pax_km": 33.0,
+        "demand_kpis_placeholder": false, "co2_g_per_pax_km": 14.0,
         "likes_count": 3,
         "display_name": "David", "is_guest": false,
         "created_at": "2026-08-01T09:00:00+00:00",
@@ -1042,9 +1072,12 @@ engagement counts, and timestamps — every range filter on those columns exclud
 them via plain SQL NULL semantics (no `sources` filter needed), and the
 default `updated_at DESC` sort places them after every proposal
 (`NULLS LAST`).
-`demand_*`/`shift_*`/`co2_savings_*` are deterministic placeholder
-figures (`demand_kpis_placeholder: true`) until the demand model lands —
-see §8. `co2_g_per_pax_km` is the flat night-train factor from
+`demand_*`/`shift_*`/`co2_savings_*` are the manual demand model's own
+figures since DEMAND 0.1.0 (`demand_kpis_placeholder: false`; `true` only
+on rows written before the 2026-09-19 migration and not yet refreshed):
+the trips are the passengers, `shift_air_*` / `shift_other_*` split them
+by journey length (the other half car shift, half induced), and the CO2
+saving follows with the re-based factors of EMISSIONS 0.2.0. `co2_g_per_pax_km` is the flat night-train factor from
 `models/emissions` (decision 24) until the energy-based,
 country-resolved model enriches it per route; the per-mode air/car
 reference values for the gallery's mode comparison come from the calc

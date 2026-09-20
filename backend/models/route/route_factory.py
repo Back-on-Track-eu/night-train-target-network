@@ -799,7 +799,7 @@ def _build_trip_pair(
         outbound=outbound,
         return_trip=return_trip,
         composition=composition,
-        od_pairs=[],  # populated later by models/demand (stopgap.distribute_demand())
+        od_pairs=[],  # populated later by models/demand (distribute.distribute_demand())
     )
     return pair, suggestions, param_versions, tracks
 
@@ -824,8 +824,8 @@ def plan_route(
     (Y-shaped routes pass several, each with its own composition).
     All pairs share the route-level schedule.
     Demand is not set here — call models/demand's
-    stopgap.distribute_demand() after plan_route() to populate od_pairs on
-    each TripPair.
+    distribute.distribute_demand() after plan_route() to populate od_pairs
+    on each TripPair.
 
     Returns (Route, RouteProvenance, suggestions). suggestions is only
     non-empty for auto_stop_addition="suggest" — the costed candidate

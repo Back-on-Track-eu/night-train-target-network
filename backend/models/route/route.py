@@ -204,8 +204,9 @@ class TripPair:
     valid origin→destination×class combination. Lives here (not on Route)
     because demand is bounded by this pair's composition capacity: you
     cannot sell more places than the composition provides for that class.
-    Populated either by user input or by the stopgap demand model
-    (models/demand/stopgap.py's distribute_demand()).
+    Populated by the manual demand model (models/demand/distribute.py's
+    distribute_demand(), DEMAND 0.1.0) — or directly by tests that need
+    controlled demand.
 
     composition_count: {comp_id: coaches_required} — a single entry,
     since a TripPair uses exactly one composition. Keyed by comp_id

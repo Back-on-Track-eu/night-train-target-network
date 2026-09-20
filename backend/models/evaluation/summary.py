@@ -24,9 +24,10 @@ Public interface:
   build_summary_row(route, evaluation) → dict  (every §5.4 KPI column:
       route metrics, financial KPIs incl. the signed net_eur_per_year,
       the annual supply denominators (train-km, available/sold place-km,
-      operating days), placeholder demand KPIs, the served
-      country_relations, and the flat night-train co2_g_per_pax_km.
-      Identity columns and geom_simplified are the callers' concern.)
+      operating days), the demand KPIs — passengers, their sources and
+      the CO2 saving (DEMAND 0.1.0) — the served country_relations, and
+      the flat night-train co2_g_per_pax_km. Identity columns and
+      geom_simplified are the callers' concern.)
   country_relations(route)             → list  (the served "AA__BB"
       relation keys, derived from od_pairs — §7.7's stats dimension)
   ordered_stops(trip)                  → list  (a trip's stops in travel
@@ -36,16 +37,10 @@ Public interface:
 
 from __future__ import annotations
 
+from models.demand.sources import split_sources
 from models.route.route import cycle_days_between, trainsets_for_cycle
 from models.route.timetable import schedule_from_dict
-from models.emissions.model import EMISSION_FACTORS, MODE_SHIFT_SHARES
-
-# Placeholder demand-KPI assumption (§8.1: "deterministic fakes derived
-# from route metrics ... plausible orders of magnitude for UI
-# development") — replaced wholesale once models/demand/ exists. Never
-# treat this as a real modelling assumption. The mode-shift shares and
-# CO2 factors it combines with live in models/emissions/model.py.
-_PLACEHOLDER_AVG_FARE_EUR = 120.0
+from models.emissions.model import EMISSION_FACTORS
 
 
 def ordered_stops(trip: dict) -> list[dict]:
@@ -77,17 +72,7 @@ def build_summary_row(route: dict, evaluation: dict) -> dict:
     metrics = _route_metrics(route)
     financials = _financial_kpis(evaluation)
     supply = _supply_kpis(route)
-    # Ticket revenue, not the total: the placeholder trip count divides by
-    # an average FARE, so a catering contribution in the numerator would
-    # invent passengers who bought nothing.
-    annual_ticket_revenue_eur = evaluation["views"]["route"]["data"]["per_year"]["all"][
-        "revenue"
-    ]["ticket_revenue_eur"]
-    demand = _placeholder_demand_kpis(
-        metrics["total_distance_km"],
-        annual_ticket_revenue_eur,
-        financials["subsidy_eur_per_year"],
-    )
+    demand = _demand_kpis(route, financials["subsidy_eur_per_year"])
     return {
         **metrics,
         **financials,
@@ -107,7 +92,7 @@ def country_relations(route: dict) -> list[str]:
 
     Read off the route's own od_pairs rather than its countries list: an
     OD pair exists only where a boarding-capable stop precedes an
-    alighting-capable one (models/demand/stopgap.py), so a country merely
+    alighting-capable one (models/demand/od_matrix.py), so a country merely
     transited, or reachable only boarding-to-boarding, contributes no
     relation. Same-country pairs are dropped — a relation is between two
     countries; domestic demand is a different question.
@@ -278,45 +263,64 @@ def _supply_kpis(route: dict) -> dict:
     }
 
 
-def _placeholder_demand_kpis(
-    total_distance_km: float, annual_revenue_eur: float, subsidy_eur_per_year: float
-) -> dict:
-    """Deterministic, route-metric-derived stand-ins for the demand-model
-    KPIs (§8.1 placeholder policy) — stable across recomputes of the same
-    route, plausible orders of magnitude, nothing more. Every value here
-    is replaced once models/demand/ lands; demand_kpis_placeholder stays
-    True until then. CO2 savings are each shifted mode's factor MINUS the
-    night train's own emissions over the shifted km (a shifted passenger
-    still emits on the train), in tonnes (/1e6 from g)."""
-    night_train_g = EMISSION_FACTORS["night_train"].g_per_pax_km
-    trips_per_year = (
-        round(annual_revenue_eur / _PLACEHOLDER_AVG_FARE_EUR)
-        if annual_revenue_eur
-        else 0
-    )
-    trip_km_per_year = round(trips_per_year * total_distance_km)
-    air_trips = round(trips_per_year * MODE_SHIFT_SHARES["air"])
-    air_trip_km = round(air_trips * total_distance_km)
-    car_trips = round(trips_per_year * MODE_SHIFT_SHARES["car"])
-    car_trip_km = round(car_trips * total_distance_km)
+def _od_loads(route: dict) -> list[tuple[float, float]]:
+    """(journey km, annual passengers) of every OD pair on every trip — the
+    loads the source split sums over. A pair whose stops do not both
+    resolve on its trip has no length and is skipped, exactly as
+    _supply_kpis skips it for sold place-km."""
+    loads: list[tuple[float, float]] = []
+    for pair in route["trip_pairs"]:
+        for trip in (pair["outbound"], pair["return_trip"]):
+            segment_km = [seg["distance_m"] / 1000.0 for seg in trip["segments"]]
+            stop_ids = [stop["stop_id"] for stop in ordered_stops(trip)]
+            for od in pair.get("od_pairs", []):
+                if od["trip_id"] != trip["trip_id"]:
+                    continue
+                if (
+                    od["origin_stop_id"] not in stop_ids
+                    or od["destination_stop_id"] not in stop_ids
+                ):
+                    continue
+                start = stop_ids.index(od["origin_stop_id"])
+                end = stop_ids.index(od["destination_stop_id"])
+                loads.append((sum(segment_km[start:end]), od["places_sold"]))
+    return loads
+
+
+def _demand_kpis(route: dict, subsidy_eur_per_year: float) -> dict:
+    """The demand KPIs from the places actually sold (DEMAND 0.1.0): the
+    trips are the passengers, the trip-km their journeys, and every
+    passenger is a shift from the plane, a shift from the car or an
+    induced trip by journey length (models/demand/sources.py). CO2 saving:
+    a shifted passenger-km saves that mode's factor less the train's own,
+    an induced one costs the train's (models/emissions/model.py), in
+    tonnes (/1e6 from g). demand_kpis_placeholder is FALSE — the column
+    stays for readers that filter on it."""
+    factors = EMISSION_FACTORS
+    train_g = factors["night_train"].g_per_pax_km
+    split = split_sources(_od_loads(route))
     co2_savings_t = round(
         (
-            air_trip_km * (EMISSION_FACTORS["air"].g_per_pax_km - night_train_g)
-            + car_trip_km * (EMISSION_FACTORS["car"].g_per_pax_km - night_train_g)
+            split.air_trip_km * (factors["air"].g_per_pax_km - train_g)
+            + split.car_trip_km * (factors["car"].g_per_pax_km - train_g)
+            - split.induced_trip_km * train_g
         )
         / 1e6,
         1,
     )
+    trips = split.air_trips + split.other_trips
     return {
-        "demand_trips_per_year": trips_per_year,
-        "demand_trip_km_per_year": trip_km_per_year,
-        "shift_air_trips_per_year": air_trips,
-        "shift_air_trip_km_per_year": air_trip_km,
-        "shift_car_trips_per_year": car_trips,
-        "shift_car_trip_km_per_year": car_trip_km,
+        "demand_trips_per_year": round(trips),
+        "demand_trip_km_per_year": round(split.air_trip_km + split.other_trip_km),
+        "shift_air_trips_per_year": round(split.air_trips),
+        "shift_air_trip_km_per_year": round(split.air_trip_km),
+        "shift_other_trips_per_year": round(split.other_trips),
+        "shift_other_trip_km_per_year": round(split.other_trip_km),
         "co2_savings_t_per_year": co2_savings_t,
         "subsidy_eur_per_t_co2": (
-            round(subsidy_eur_per_year / co2_savings_t, 2) if co2_savings_t else None
+            round(subsidy_eur_per_year / co2_savings_t, 2)
+            if co2_savings_t > 0
+            else None
         ),
-        "demand_kpis_placeholder": True,
+        "demand_kpis_placeholder": False,
     }

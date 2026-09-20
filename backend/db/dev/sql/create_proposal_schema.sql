@@ -354,7 +354,7 @@ CREATE TABLE proposals.od_pairs (
     origin_stop_id       TEXT NOT NULL,
     destination_stop_id  TEXT NOT NULL,
     class_main            TEXT NOT NULL,
-    places_sold           INTEGER NOT NULL,
+    places_sold           DOUBLE PRECISION NOT NULL,
     avg_price             NUMERIC(10, 2) NOT NULL
 );
 
@@ -365,7 +365,7 @@ COMMENT ON COLUMN proposals.od_pairs.trip_id               IS 'References propos
 COMMENT ON COLUMN proposals.od_pairs.origin_stop_id        IS 'Soft reference to input_params.stop_infrastructures.stop_id.';
 COMMENT ON COLUMN proposals.od_pairs.destination_stop_id   IS 'Soft reference to input_params.stop_infrastructures.stop_id.';
 COMMENT ON COLUMN proposals.od_pairs.class_main             IS 'Top-level accommodation category: Seat, Couchette, Sleeper, Capsule, or Catering.';
-COMMENT ON COLUMN proposals.od_pairs.places_sold             IS 'Annual total tickets sold for this OD pair / class / trip.';
+COMMENT ON COLUMN proposals.od_pairs.places_sold             IS 'Annual total tickets sold for this OD pair / class / trip. Fractional since DEMAND 0.1.0: served places per departure x the pair''s share x operating days.';
 COMMENT ON COLUMN proposals.od_pairs.avg_price               IS 'Average ticket price across all tickets sold for this OD pair, class, and trip. Unit: EUR';
 
 -- ---------------------------------------------------------------
@@ -507,11 +507,11 @@ CREATE TABLE proposals.proposal_summaries (
     demand_trip_km_per_year     NUMERIC(16, 0),
     shift_air_trips_per_year    NUMERIC(12, 0),
     shift_air_trip_km_per_year  NUMERIC(16, 0),
-    shift_car_trips_per_year    NUMERIC(12, 0),
-    shift_car_trip_km_per_year  NUMERIC(16, 0),
+    shift_other_trips_per_year  NUMERIC(12, 0),
+    shift_other_trip_km_per_year NUMERIC(16, 0),
     co2_savings_t_per_year      NUMERIC(12, 1),
     subsidy_eur_per_t_co2       NUMERIC(10, 2),
-    demand_kpis_placeholder     BOOLEAN NOT NULL DEFAULT TRUE,
+    demand_kpis_placeholder     BOOLEAN NOT NULL DEFAULT FALSE,
 
     co2_g_per_pax_km            NUMERIC(6, 1),
 
@@ -536,11 +536,18 @@ COMMENT ON COLUMN proposals.proposal_summaries.train_km_per_year      IS 'Annual
 COMMENT ON COLUMN proposals.proposal_summaries.available_place_km_per_year IS 'Annual capacity place-km (CALC 0.9.25) — the per_available_place_km divisor. Unit: place-km/year';
 COMMENT ON COLUMN proposals.proposal_summaries.services_revenue_eur IS 'Revenue from additional services sold with the ticket — bicycles, oversized luggage, reservations (CALC 0.9.30). Ordinary ticket revenue: not signed, and inside the variable-overhead and EBIT-margin bases. Unit: EUR/year';
 COMMENT ON COLUMN proposals.proposal_summaries.catering_contribution_eur IS 'Signed net contribution of the on-board catering, already inside net_eur_per_year (CALC 0.9.29): positive means the service pays for itself, negative that the tickets carry it. Unit: EUR/year';
-COMMENT ON COLUMN proposals.proposal_summaries.passengers_per_year   IS 'Places actually sold, summed over every OD pair (CALC 0.9.29) — the base catering_contribution_eur multiplies. Not demand_trips_per_year, which is a placeholder derived from revenue.';
+COMMENT ON COLUMN proposals.proposal_summaries.passengers_per_year   IS 'Places actually sold, summed over every OD pair (CALC 0.9.29) — the base catering_contribution_eur multiplies. Equal to demand_trips_per_year since DEMAND 0.1.0; kept as its own column because the supply KPIs and the demand KPIs are read by different consumers.';
+COMMENT ON COLUMN proposals.proposal_summaries.demand_trips_per_year IS 'Passengers per year (DEMAND 0.1.0: the places actually sold, no longer a revenue-derived placeholder).';
+COMMENT ON COLUMN proposals.proposal_summaries.demand_trip_km_per_year IS 'Passenger-km per year over every OD pair sold (DEMAND 0.1.0).';
+COMMENT ON COLUMN proposals.proposal_summaries.shift_air_trips_per_year IS 'Passengers who would otherwise have flown (DEMAND 0.1.0, models/demand/sources.py: 0 below 300 km, 25 % at 300 km, linear to 100 % at 1 200 km, per OD pair).';
+COMMENT ON COLUMN proposals.proposal_summaries.shift_air_trip_km_per_year IS 'Passenger-km of shift_air_trips_per_year.';
+COMMENT ON COLUMN proposals.proposal_summaries.shift_other_trips_per_year IS 'Passengers who would not have flown: half shifted from the car, half induced (DEMAND 0.1.0, OTHER_CAR_SHARE). Replaces shift_car_trips_per_year.';
+COMMENT ON COLUMN proposals.proposal_summaries.shift_other_trip_km_per_year IS 'Passenger-km of shift_other_trips_per_year.';
+COMMENT ON COLUMN proposals.proposal_summaries.co2_savings_t_per_year IS 'Air and car shift x (that mode''s factor - the train''s) less induced x the train''s, t CO2e/year (EMISSIONS 0.2.0, DEMAND 0.1.0). Can be negative on a very short route.';
 COMMENT ON COLUMN proposals.proposal_summaries.sold_place_km_per_year IS 'Annual sold place-km from the OD loads (CALC 0.9.25) — sold / available is the utilisation. Unit: place-km/year';
 COMMENT ON COLUMN proposals.proposal_summaries.geom_simplified        IS 'Per-segment shapes concatenated and simplified (Douglas-Peucker, tolerance tuned for gallery-map zoom levels) — small enough to ship all proposals in one map response for a long time.';
 COMMENT ON COLUMN proposals.proposal_summaries.country_relations      IS 'Country-to-country relations this proposal actually serves, as sorted "AA__BB" keys — derived from od_pairs (boarding-capable origin before alighting-capable destination), so a merely transited country contributes nothing. Ranking dimension of GET /api/proposals/stats (§7.7); written by models/evaluation/summary.py''s build_summary_row().';
-COMMENT ON COLUMN proposals.proposal_summaries.demand_kpis_placeholder IS 'TRUE while demand_*/shift_*/co2_* columns are placeholder-faked (§8) — no demand model exists yet.';
+COMMENT ON COLUMN proposals.proposal_summaries.demand_kpis_placeholder IS 'FALSE since DEMAND 0.1.0 — demand_*/shift_*/co2_* are the manual demand model''s figures. Kept for readers that filter on it; TRUE only on rows written before the 2026-09-19 migration and not yet refreshed.';
 COMMENT ON COLUMN proposals.proposal_summaries.co2_g_per_pax_km      IS 'Night-train GHG intensity (§8, decision 24): the flat models/emissions factor until the energy-based, country-resolved model enriches it per route. Unit: g CO2e / pax-km';
 COMMENT ON COLUMN proposals.proposal_summaries.created_at             IS 'Set once at the proposal''s first publish, never touched by an overwrite-publish or refresh — repository.py''s _upsert_summary() excludes it from the ON CONFLICT UPDATE. Gallery filter/sort target (WP6.1).';
 

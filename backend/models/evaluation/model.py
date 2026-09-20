@@ -32,7 +32,7 @@ from models.formula import Formula, FormulaParam
 # VERSION
 # =============================================================================
 
-CALC_VERSION: str = "0.9.33"
+CALC_VERSION: str = "0.9.34"
 
 GIT_SHA: str = "unknown"  # injected by CI
 
@@ -66,6 +66,31 @@ CALC_MODEL_DESCRIPTION: str = (
 )
 
 CHANGELOG: dict = {
+    "0.9.34": {
+        "date": "2026-09-19",
+        "author": "david + claude",
+        "changes": "EVERY RESULT CHANGES: the demand behind the OD loads is the "
+        "manual demand model (DEMAND 0.1.0, docs/2026-09-18_manual_demand_"
+        "guide.md) instead of a flat 70 % of every class, and the tariff "
+        "defaults moved (D31). od_pairs[].places_sold is a float. The "
+        "summary row's demand KPIs stop being placeholders: "
+        "demand_trips_per_year = passengers_per_year, demand_trip_km_per_year "
+        "is the passenger-km sold, shift_air_* / shift_other_* (RENAMED from "
+        "shift_car_*: half car shift, half induced) come from the source "
+        "split by journey length (models/demand/sources.py), "
+        "co2_savings_t_per_year uses the re-based emission factors "
+        "(EMISSIONS 0.2.0: 389 / 132 / 14 g CO2e/pkm) and may be negative "
+        "on a very short route (induced trips only add emissions), "
+        "subsidy_eur_per_t_co2 is NULL when the saving is not positive, and "
+        "demand_kpis_placeholder is FALSE. The member payload gains "
+        "evaluation.demand and every family member a demand block "
+        "(FAMILY_DOCUMENT_FORMAT 7) — the allocation by group and class, "
+        "not served, the OD matrix and the sources. Migration "
+        "db/dev/sql/migrations/2026-09-19b_manual_demand.sql (places_sold "
+        "DOUBLE PRECISION, summary columns renamed). GET /api/models: "
+        "demand.defaults gains the levels and group shares, "
+        "demand.constants the allocation rule; utilization_per is gone.",
+    },
     "0.9.33": {
         "date": "2026-09-19",
         "author": "david + claude",
@@ -1721,7 +1746,7 @@ CALC_FORMULAS: dict[str, Formula] = {
             ),
             FormulaParam(
                 symbol="s_class",
-                ref="standard:DEMAND.STOPGAP_SERVICES_EUR_PER_PAX_BY_CLASS",
+                ref="standard:DEMAND.SERVICES_EUR_PER_PAX_BY_CLASS",
                 description="Additional-services revenue per passenger of that "
                 "class, overridable per proposal",
                 unit="€/passenger",
@@ -1756,7 +1781,7 @@ CALC_FORMULAS: dict[str, Formula] = {
             ),
             FormulaParam(
                 symbol="c_cat",
-                ref="standard:DEMAND.STOPGAP_CATERING_EUR_PER_PAX_BY_CLASS",
+                ref="standard:DEMAND.CATERING_EUR_PER_PAX_BY_CLASS",
                 description="Net catering contribution per passenger of that "
                 "class, overridable per proposal",
                 unit="€/passenger",

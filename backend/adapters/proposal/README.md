@@ -564,8 +564,8 @@ CREATE TABLE proposals.proposal_summaries (
     demand_trip_km_per_year     NUMERIC(16,0),
     shift_air_trips_per_year    NUMERIC(12,0),
     shift_air_trip_km_per_year  NUMERIC(16,0),
-    shift_car_trips_per_year    NUMERIC(12,0),
-    shift_car_trip_km_per_year  NUMERIC(16,0),
+    shift_other_trips_per_year    NUMERIC(12,0),
+    shift_other_trip_km_per_year  NUMERIC(16,0),
     co2_savings_t_per_year      NUMERIC(12,1),
     subsidy_eur_per_t_co2       NUMERIC(10,2),
     demand_kpis_placeholder     BOOLEAN NOT NULL DEFAULT TRUE,
@@ -1097,9 +1097,10 @@ architecture already draws:
 - **Operative demand** — what revenue calculation consumes: per-OD,
   per-class, per-trip passengers and prices. This is exactly what `ODPair`
   holds today (`places_sold`, `avg_price`, `class_main`, `trip_id`),
-  currently filled by the stopgap `distribute_demand()`. The demand model
-  slots into the merged pipeline at that same point — route build →
-  **demand model** → evaluation — replacing the stopgap as the source and
+  filled by `models/demand/distribute.py` (DEMAND 0.1.0 — the manual
+  demand model; the uniform stopgap it replaced sat at the same point).
+  A future demand model that DERIVES the potential demand slots in at
+  that same point — route build → **demand model** → evaluation —
   writing the route's od_pairs in place. Stored in the `proposals.od_pairs`
   sidecar, shape unchanged. E.g. "X passengers in couchette per trip" =
   od_pairs rows with `class_main = couchette` for that trip. The
@@ -1107,7 +1108,7 @@ architecture already draws:
 - **Analytical demand** — reporting that nothing downstream computes with:
   modal shift and CO2. These become new **value keys in the existing
   views** (`pax`, `pax_km`, `shift_air_pax`, `shift_air_pax_km`,
-  `shift_car_*`, `co2_savings_t`) across the existing matrices —
+  `shift_other_*`, `co2_savings_t`) across the existing matrices —
   `views.route` for totals, `per_trip_pair`, and `per_trip_pair_per_od`
   (where "shifted from airplane on Berlin→Roma" naturally sits, next to
   that OD's revenue) — flowing through the existing normalisations, so
@@ -1124,15 +1125,16 @@ Forward-looking note: if a demand-aware schedule ever varies the
 frequency by month on its own, recheck fingerprinting — frequency is not
 part of the fingerprint (stops/geometry/times only).
 
-Placeholder policy (first implementation, to get API + frontend running):
-the projection fills demand-dependent columns with **deterministic fakes
-derived from route metrics** (stable across recomputes, plausible orders of
-magnitude for UI development) and sets `demand_kpis_placeholder = TRUE`. The
-flag is carried through every API response so the frontend can badge the
-values. When the demand model lands (next step after calibration), it
-adds its values per §8.1, the projection extracts real numbers, the flag
-flips, and the version-refresh batch (§4.2) re-runs everything — no special
-backfill path needed.
+Placeholder policy — closed with DEMAND 0.1.0 (2026-09-19): the
+demand-dependent columns (`demand_trips_per_year`, `demand_trip_km_per_year`,
+`shift_air_*`, `shift_other_*`, `co2_savings_t_per_year`,
+`subsidy_eur_per_t_co2`) are the model's own figures, computed by
+`models/evaluation/summary.py::_demand_kpis()` from the OD loads and the
+source split of `models/demand/sources.py`, and `demand_kpis_placeholder`
+is `FALSE`. The column stays: a row written before the 2026-09-19
+migration and not yet refreshed still carries `TRUE`, and the
+version-refresh batch (§4.2) is what flips it. Until then the frontend may
+keep badging such rows.
 
 ---
 
