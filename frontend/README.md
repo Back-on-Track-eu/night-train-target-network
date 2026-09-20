@@ -272,6 +272,13 @@ scenario-independent and unaffected. Two details that are load-bearing:
   the list with its identity and stops, and `ProposalCard` shows one line
   saying why in place of the figure grid. The panel header counts them.
 
+When the source switch shows existing trains alone, the panel and the
+ownership switch grey out and close rather than hide: nothing in either
+applies to an ONTD row, and a control that vanished with the source would be
+a control nobody could find again. The panel header carries a permanent
+"proposals only" chip for the same reason — which rows a scenario reaches is
+the one thing a reader can get wrong here.
+
 The panel is collapsed by default because the results row is sized to the
 viewport minus everything above it — an always-open panel would cost the map
 its height for a control most readers never touch. The URL carries the
@@ -286,10 +293,14 @@ the query string, as does the ownership switch (`?mine=1`). "Mine" adds the
 signed-in account's `user_ids` and pins `sources` to proposals, since an
 existing row has no owner — picking it while the list shows existing trains
 alone moves the source switch with it. The switch is always on screen whatever
-the sign-in state: signed out, "mine" opens the auth modal instead of
-filtering, because a control nobody can see is a control nobody can find.
-Guests can use it too — a guest session owns its proposals until it is merged
-into an account — and it releases itself on sign-out. The account is
+the sign-in state: signed out or a guest, "mine" opens the login /
+registration modal and applies itself the moment the account exists (the
+click meant "show mine", not "show me a form"); dismissing the modal drops
+that intent. Registered accounts only, on purpose: a guest session carries a
+user id too, so on identity alone the switch would silently filter to an
+anonymous user and never ask — and registering merges the guest's proposals
+into the account, so nothing is lost by asking. It releases itself on
+sign-out. The account is
 deliberately not part of the shared link: `?mine=1` resolves against whoever
 opens it. Signing in also reloads the list (or marks it stale if the gallery is
 in its keep-alive cache), because the guest merge changes who published what
@@ -304,9 +315,11 @@ likes. Only the route is bold; below it, hierarchy is carried by colour and
 size, because a card that sets the itinerary, every figure and both counts in
 semibold ranks nothing.
 
-The grid is filled in a fixed order — distance, average speed, passenger trips
-per year, CO₂ saved, subsidy per tonne of CO₂, composition — so the same fact
-sits in the same corner on every card and a list can be read down a column.
+The grid is filled in a fixed order — distance | average speed, composition |
+passenger trips per year, CO₂ saved | subsidy per tonne of CO₂ — so the same
+fact sits in the same corner on every card and a list can be read down a
+column: the route's physics, then what runs and who rides, then climate and
+its price.
 Every value stays on one line (`whitespace-nowrap`, and the labels are kept
 short for it): a figure that wraps breaks the alignment the grid exists for.
 Everything past average speed is proposal-only and appears once the proposal has
