@@ -284,3 +284,13 @@ def test_feedback_categories_static_lists_present(api_base):
     assert _sub_categories_for(payload, "General functionality")
     for category in ("Bug report", "Feature request", "Other"):
         assert _sub_categories_for(payload, category) == []
+
+
+def test_feedback_categories_carry_the_deep_linked_missing_stop(api_base):
+    """The stop search's empty state links to the feedback page with this
+    exact pair preselected. If either side is renamed without the other,
+    the form lands on a sub_category its own dropdown does not offer."""
+    resp = requests.get(f"{api_base}{FEEDBACK_CATEGORIES_URL}", timeout=15)
+    assert resp.status_code == 200
+    entries = _sub_categories_for(resp.json(), "Route or timetable")
+    assert "Missing stop / suggest new stop" in {e["parameter"] for e in entries}
