@@ -89,6 +89,11 @@ uv run python scripts/precompute_route_segments.py `
   line every five minutes instead, so the log stays readable.
 - Ctrl-C stops cleanly: in-flight calls finish, the file is flushed, and
   the summary tells you to rerun.
+- Pairs are routed **shortest first**. A run that stops early ends with
+  `Every pair under N km straight-line is routed or listed as failed`, so
+  what you upload is a complete distance band, not a scatter. Because
+  later pairs are longer and slower, the ETA drifts upwards as the run
+  goes on — treat the early figure as optimistic.
 
 Output files, all next to `--out` (default `backend/scripts/data/`):
 
@@ -120,8 +125,10 @@ uv run python scripts/precompute_route_segments.py --graph infra_2026 --cap-km 8
   --resume-from D:\backups\route_segments_infra_2026.csv.gz
 ```
 
-`--resume-from` also takes a directory (every `route_segments*.csv[.gz]`
-in it) and several paths at once. Those rows are **not** copied into
+`--resume-from` also takes a directory (its segment files; `.snapped` and
+`.failures` sidecars are ignored, and where both `X.csv` and `X.csv.gz`
+exist only the CSV is read) and several paths at once. A file whose header
+is not the segment header is skipped with a note. Those rows are **not** copied into
 `--out`: what the server already has stays off the upload.
 
 Exporting the server's rows for exactly that purpose, in pgAdmin's Query

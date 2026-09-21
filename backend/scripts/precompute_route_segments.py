@@ -55,6 +55,10 @@ Failures    A per-pair routing error never stops the batch. Failures are
             is written fresh to <out>.failures.csv with the attempt count
             and the last message; --retry-failures-only reroutes exactly
             that file in a later run.
+Order       Pairs are routed shortest straight-line distance first, so a
+            run that stops early leaves a complete band from 0 km up to a
+            reported edge, and a rerun with a wider --cap-km continues
+            outward from there.
 Progress    Percentage, throughput, elapsed, ETA and the wall-clock
             finish time, refreshed in place on a terminal and as one
             timestamped line every five minutes when redirected to a log.
@@ -106,7 +110,7 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from itertools import combinations
+from itertools import combinations, islice
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -235,16 +239,19 @@ def load_stops(loader) -> dict:
     return dict(sorted(loader.build_all_stops().all().items()))
 
 
-def generate_pairs(stops: dict, cap_km: float | None) -> list[tuple[str, str]]:
-    """All unordered (stop_lo, stop_hi) pairs within the haversine cap.
-    Sorted-id order IS the canonical storage orientation."""
+def generate_pairs(stops: dict, cap_km: float | None) -> dict[tuple[str, str], float]:
+    """(stop_lo, stop_hi) → straight-line km for every unordered pair within
+    the haversine cap, shortest first. Sorted-id order within the key IS the
+    canonical storage orientation; the distance order is the work order, so
+    a run that stops early leaves a complete band from 0 km up to where it
+    stopped rather than a scatter across the whole cap."""
     cap_m = cap_km * 1000 if cap_km else None
-    items = list(stops.items())
-    return [
-        (id_a, id_b)
-        for (id_a, a), (id_b, b) in combinations(items, 2)
-        if cap_m is None or haversine_m(a.lon, a.lat, b.lon, b.lat) <= cap_m
-    ]
+    pairs = {}
+    for (id_a, a), (id_b, b) in combinations(stops.items(), 2):
+        dist_m = haversine_m(a.lon, a.lat, b.lon, b.lat)
+        if cap_m is None or dist_m <= cap_m:
+            pairs[(id_a, id_b)] = dist_m / 1000
+    return dict(sorted(pairs.items(), key=lambda item: item[1]))
 
 
 def enumerate_models(loader, router, graph_key: str, stops: dict) -> dict[str, dict]:
@@ -293,13 +300,17 @@ def enumerate_models(loader, router, graph_key: str, stops: dict) -> dict[str, d
 
 
 def build_tasks(
-    router, stops: dict, pairs: list[tuple[str, str]], models: dict, compositions: dict
+    router,
+    stops: dict,
+    pairs: dict[tuple[str, str], float],
+    models: dict,
+    compositions: dict,
 ) -> tuple[list[Task], dict[str, dict | None]]:
-    """(stop_lo, stop_hi, profile, variant_key) for every pair × model,
-    plus variant_key → custom_model. The profile comes from the pair's
-    own two stops through resolve_trip_gauge() — the same rule
-    resolve_routing_params() applies at runtime, so keys match. Pairs
-    with no common gauge are skipped; the runtime rejects them before
+    """(stop_lo, stop_hi, profile, variant_key) for every pair × model, in
+    the pairs' distance order, plus variant_key → custom_model. The profile
+    comes from the pair's own two stops through resolve_trip_gauge() — the
+    same rule resolve_routing_params() applies at runtime, so keys match.
+    Pairs with no common gauge are skipped; the runtime rejects them before
     any HTTP too."""
     tasks: list[Task] = []
     models_by_vkey: dict[str, dict | None] = {}
@@ -464,7 +475,11 @@ def repair_partial_tail(path: Path) -> bool:
 def read_segment_keys(path: Path) -> set[SegmentKey]:
     """Every (stop_lo, stop_hi, variant_key) in a segment CSV (.csv or
     .csv.gz). Malformed rows are skipped with a count rather than raising
-    — a resume must never need the file repaired by hand."""
+    — a resume must never need the file repaired by hand.
+
+    The header must be exactly CSV_COLUMNS, otherwise the file is skipped:
+    a failures report has nine columns and the same leading three, and
+    reading it as segments would mark every failed pair as done."""
     if not path.is_file():
         return set()
     opener = gzip.open if path.name.endswith(".gz") else open
@@ -472,12 +487,16 @@ def read_segment_keys(path: Path) -> set[SegmentKey]:
     n_bad = 0
     with opener(path, "rt", newline="", encoding="utf-8") as fh:
         reader = csv.reader(fh)
+        header = next(reader, None)
+        if header is None:
+            return keys
+        if header != CSV_COLUMNS:
+            print(f"  {path.name}: not a segment CSV (header differs) — skipped.")
+            return keys
         try:
             for row in reader:
                 if len(row) != len(CSV_COLUMNS):
                     n_bad += 1
-                    continue
-                if row[0] == CSV_COLUMNS[0]:  # header
                     continue
                 keys.add((row[0], row[1], row[2]))
         except csv.Error as exc:
@@ -514,12 +533,23 @@ def collect_done_keys(out: Path, resume_from: list[Path]) -> set[SegmentKey]:
 
 
 def expand_resume_paths(raw: list[Path]) -> list[Path]:
-    """--resume-from accepts files and directories; a directory
-    contributes every route_segments*.csv/.csv.gz it holds."""
+    """--resume-from accepts files and directories. A directory contributes
+    its segment files only — sidecars (.snapped, .failures) are left out,
+    and where both X.csv and X.csv.gz exist only the CSV is read, which is
+    the same rows without the decompression."""
     paths: list[Path] = []
     for path in raw:
         if path.is_dir():
-            paths.extend(sorted(p for p in path.glob("route_segments*.csv*")))
+            found = [
+                p
+                for p in sorted(path.glob("route_segments*.csv*"))
+                if not any(tag in p.name for tag in (".snapped.", ".failures."))
+                and p.name.endswith((".csv", ".csv.gz"))
+            ]
+            plain = {p.name for p in found if p.suffix == ".csv"}
+            paths.extend(
+                p for p in found if not (p.suffix == ".gz" and p.stem in plain)
+            )
         elif path.is_file():
             paths.append(path)
         else:
@@ -699,9 +729,11 @@ def route_pass(
                 pool.submit(route_one, t): t
                 for t in tasks[start : start + SUBMIT_CHUNK]
             }
+            consumed: set[Task] = set()
             try:
                 for future in as_completed(futures):
                     task = futures[future]
+                    consumed.add(task)
                     try:
                         writer.writerow(future.result())
                         failures.pop(task, None)
@@ -720,7 +752,7 @@ def route_pass(
                         for pending in futures:
                             pending.cancel()
                         not_attempted.extend(
-                            t for f, t in futures.items() if f.cancelled()
+                            t for t in futures.values() if t not in consumed
                         )
                         break
             except KeyboardInterrupt:
@@ -728,7 +760,9 @@ def route_pass(
                 print("\n  Ctrl-C — letting in-flight calls finish, then stopping.")
                 for future in futures:
                     future.cancel()
-                not_attempted.extend(t for f, t in futures.items() if f.cancelled())
+                # Everything not yet written counts as not attempted — the
+                # in-flight calls finish, but their results are discarded.
+                not_attempted.extend(t for t in futures.values() if t not in consumed)
     finally:
         pool.shutdown(wait=True, cancel_futures=True)
         fh.flush()
@@ -774,7 +808,7 @@ def write_failures(
 
 
 def run_batch(
-    router, tasks, models_by_vkey, snapped, snap_errors, out: Path, args
+    router, tasks, models_by_vkey, snapped, snap_errors, pair_km, out: Path, args
 ) -> None:
     done = collect_done_keys(out, expand_resume_paths(args.resume_from or []))
     only = (
@@ -859,8 +893,6 @@ def run_batch(
     n_transient = sum(1 for f in failures.values() if f.transient)
     settled = n_routed + len(failures) + len(not_attempted)
     if not_attempted:
-        # A deliberate stop leaves the in-flight calls of the last chunk
-        # unwritten, so predicted vs. actual cannot balance — and need not.
         verdict = "stopped early"
     elif settled == n_before:
         verdict = "MATCH"
@@ -873,7 +905,13 @@ def run_batch(
     )
     print(f"Failures + unsnappable pairs: {failures_path.name}.")
     if not_attempted:
-        print("Rerun the same command to continue where this run stopped.")
+        # Work runs shortest pair first, so the smallest distance left
+        # undone is the edge of a complete band.
+        edge_km = min(pair_km[(lo, hi)] for lo, hi, _, _ in not_attempted)
+        print(
+            f"Every pair under {edge_km:.0f} km straight-line is routed or listed "
+            "as failed. Rerun the same command to continue from there."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1239,14 +1277,14 @@ def main() -> None:
     repair_partial_tail(out)
     pairs = generate_pairs(stops, args.cap_km)
     if args.limit:
-        pairs = pairs[: args.limit]
+        pairs = dict(islice(pairs.items(), args.limit))
     compositions = loader.build_all_compositions().all()
     tasks, models_by_vkey = build_tasks(router, stops, pairs, models, compositions)
     needed = {(lo, p) for lo, _, p, _ in tasks} | {(hi, p) for _, hi, p, _ in tasks}
     snapped, snap_errors = snap_needed(
         router, stops, needed, out.with_suffix(".snapped.csv")
     )
-    run_batch(router, tasks, models_by_vkey, snapped, snap_errors, out, args)
+    run_batch(router, tasks, models_by_vkey, snapped, snap_errors, pairs, out, args)
 
 
 if __name__ == "__main__":

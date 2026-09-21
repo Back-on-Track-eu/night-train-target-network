@@ -24,7 +24,9 @@ from models.route.routing.rail_router import RailRoutingError
 from models.route.routing.segment_cache import CSV_COLUMNS
 from scripts.precompute_route_segments import (
     collect_done_keys,
+    expand_resume_paths,
     finalize,
+    generate_pairs,
     is_transient,
     read_failure_keys,
     read_segment_keys,
@@ -258,3 +260,47 @@ class TestFinalize:
         gz = out.with_suffix(".csv.gz")
         with gzip.open(gz, "rb") as fh:
             assert fh.read() == out.read_bytes()
+
+
+class TestResumeSources:
+    def test_a_failures_report_is_not_read_as_segments(self, tmp_path):
+        # Same column count, same leading three columns — without the header
+        # check every failed pair would count as done and never be retried.
+        report = tmp_path / "route_segments_test.failures.csv"
+        write_failures(
+            report,
+            {},
+            [("a", "b", "night_train", "v1")],
+            {("a", "night_train"): "Cannot find point 0"},
+        )
+        assert read_segment_keys(report) == set()
+
+    def test_a_directory_yields_segment_files_once(self, tmp_path):
+        _write(tmp_path / "route_segments_x.csv", [_row("a", "b", "v1")])
+        (tmp_path / "route_segments_x.csv.gz").write_bytes(b"")
+        (tmp_path / "route_segments_x.snapped.csv").write_text("", encoding="utf-8")
+        (tmp_path / "route_segments_x.failures.csv").write_text("", encoding="utf-8")
+        _write(tmp_path / "route_segments_y.csv", [])
+        (tmp_path / "route_segments_z.csv.gz").write_bytes(b"")
+
+        names = [p.name for p in expand_resume_paths([tmp_path])]
+        assert names == [
+            "route_segments_x.csv",
+            "route_segments_y.csv",
+            "route_segments_z.csv.gz",
+        ]
+
+
+class TestWorkOrder:
+    def test_pairs_come_shortest_first_within_the_cap(self):
+        # Along the equator 1° of longitude is ~111 km.
+        stops = {
+            sid: _stop(sid, lon, [1435])
+            for sid, lon in [("a", 0.0), ("b", 1.0), ("c", 3.0), ("d", 3.5)]
+        }
+        pairs = generate_pairs(stops, cap_km=300)
+
+        assert list(pairs) == [("c", "d"), ("a", "b"), ("b", "c"), ("b", "d")]
+        assert list(pairs.values()) == sorted(pairs.values())
+        # a–c (~334 km) and a–d (~389 km) are outside the cap.
+        assert ("a", "c") not in pairs
