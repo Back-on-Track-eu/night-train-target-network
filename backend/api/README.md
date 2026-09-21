@@ -164,8 +164,9 @@ Config (see `docker/.env.example`): `JWT_SECRET` (required),
 | `GET` | `/api/params/StopInfrastructures` | All stops: location, per-stop charges, and the catalog enrichment (names, city, country, gauges) |
 | `GET` | `/api/params/compositions` | All composition types with full parameters, plus their operators |
 | `GET` | `/api/params/TrackInfrastructures` | All country track infrastructure parameters |
+| `GET` | `/api/params/TicketVat` | VAT on rail passenger tickets, per country — domestic rate and the rate on the country's share of a cross-border ticket |
 
-All three accept an optional `scenario_id` **query parameter** pinning which
+The first three accept an optional `scenario_id` **query parameter** pinning which
 version of every parameter table to read; omit it for the live
 `is_current_base` scenario (same semantics as everywhere else — see
 [Scenarios](#scenarios)).
@@ -226,6 +227,18 @@ one entry per country: `country_code` plus a field object for each of
 `tac_eur_train_km`, `parking_eur_day`, `shunting_eur_event`,
 `energy_price_eur_kwh`, `terrain_score`, `terrain_category`, `hsr_allowed`,
 `min_boarding_time_min`, `min_alighting_time_min`, `buffer_quota_per`.
+
+**`TicketVat`** (backend 0.5.8) is not scenario-pinned — the table is a
+catalogue, one row per country — and carries `rule` (the one-sentence
+contract the frontend applies), `sources`, `count` and `rates`: per country
+`vat_domestic_per` and `vat_international_per` as fractions, the
+calibration's `status` (`sourced` / `assumed` / `no_railway` / `blocked`),
+its `note` and a `source_id`. The effective rate of a route is
+Σ distance share × rate, with the international rate on a route that
+crosses a border and the domestic rate otherwise. **Display only**: every
+cost, revenue and subsidy figure the API returns is net of VAT; the frontend
+shows the gross fare and the gross ticket revenue beside them. Derivation:
+`models/demand/calib/vat/VAT_CALIBRATION.md`.
 
 These ten are the headline per-country figures, and four of them are no longer
 what the cost model prices from. Track access is a calibrated component sum

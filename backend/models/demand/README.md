@@ -22,8 +22,25 @@ demand/
 ├── groups.py        # allocate(places_by_class, demand_by_group) -> Allocation — D14–D19
 ├── od_matrix.py     # sellable pairs, preset_weights(), od_shares(), pin_pair(), drop_stale_pins()
 ├── sources.py       # air_share(km), split_sources(loads) — who the passengers are
-└── distribute.py    # distribute_demand(route, DemandInputs, fares) -> DemandResult; writes od_pairs
+├── distribute.py    # distribute_demand(route, DemandInputs, fares) -> DemandResult; writes od_pairs
+└── calib/vat/       # VAT on rail tickets per country: vat_calibration.py -> seed/*.csv,
+                     #   VAT_CALIBRATION.md — seeded into input_params.ticket_vat_rates,
+                     #   served by GET /api/params/TicketVat, applied by the frontend only
 ```
+
+## VAT on tickets (display only)
+
+The model prices **net of VAT** and nothing in `distribute.py` or the
+evaluation reads a VAT rate. What the passenger pays on top is shown beside
+the fares and the ticket revenue in the builder, from
+`input_params.ticket_vat_rates`: per country the rate on a domestic ticket
+and the rate on the country's distance share of a cross-border ticket (0
+where the international leg is exempt — most of Europe). The frontend forms
+a route's effective rate as Σ distance share × rate over the route's
+countries (`lib/ticketVat.ts`), with the international rate whenever the
+route crosses a border. Rates and provenance:
+`calib/vat/VAT_CALIBRATION.md`; regenerate with
+`uv run python models/demand/calib/vat/vat_calibration.py`.
 
 ## The rule, in one paragraph each
 
