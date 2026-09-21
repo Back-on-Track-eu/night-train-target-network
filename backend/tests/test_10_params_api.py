@@ -546,17 +546,36 @@ class TestModels:
     def test_every_model_carries_version_and_description(self, models_body):
         """Version and description are the two every entry has. What
         comes with them differs by model: a formula registry for the
-        computed ones, an emission-factor table for emissions, and (CALC
+        computed ones, an emission-factor table for emissions, (CALC
         0.9.27) overridable standard values for the demand model — plus,
-        since DEMAND 0.1.0, the constants of its allocation rule."""
+        since DEMAND 0.1.0, the constants of its allocation rule — and
+        nothing at all for the two parameter models (compositions,
+        infrastructure), whose versions the frontend shows beside the
+        panels that read their figures."""
         for name, model in models_body["models"].items():
             assert model.get("version"), f"{name} has no version"
             assert model.get("description"), f"{name} has no description"
             kinds = {"formulas", "factors", "defaults"} & set(model)
-            assert len(kinds) == 1, (
-                f"{name} must carry exactly one of formulas / factors / "
-                f"defaults, got {sorted(kinds) or 'none'}"
+            assert len(kinds) <= 1, (
+                f"{name} must carry at most one of formulas / factors / "
+                f"defaults, got {sorted(kinds)}"
             )
+
+    def test_every_pipeline_model_is_listed(self, models_body):
+        """One entry per model version the frontend puts on screen: the
+        route builder at the route stats, demand and emissions under the
+        main figures, evaluation under the breakdown, compositions,
+        infrastructure and energy on the Details tabs."""
+        expected = {
+            "route_builder",
+            "energy",
+            "evaluation",
+            "demand",
+            "emissions",
+            "compositions",
+            "infrastructure",
+        }
+        assert expected <= set(models_body["models"])
 
     def test_the_evaluation_model_is_present_with_formulas(self, models_body):
         """The registry the cost breakdown keys into — an evaluation view

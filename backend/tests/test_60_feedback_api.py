@@ -239,8 +239,19 @@ def test_feedback_categories_compositions_is_dynamic(api_base):
     resp = requests.get(f"{api_base}{FEEDBACK_CATEGORIES_URL}", timeout=15)
     assert resp.status_code == 200
     entries = _sub_categories_for(resp.json(), "Compositions")
-    assert entries  # non-empty
-    assert all(e["group"] == "Compositions" for e in entries)
+    fields = [e for e in entries if e["group"] == "Compositions"]
+    assert fields  # non-empty
+    assert {e["group"] for e in entries} == {"Compositions", "Suggestion"}
+
+
+def test_feedback_categories_carry_the_deep_linked_composition_suggestion(api_base):
+    """The gallery's "Suggest a new composition" button links to the feedback
+    page with this pair preselected; the form's dropdown must offer it."""
+    resp = requests.get(f"{api_base}{FEEDBACK_CATEGORIES_URL}", timeout=15)
+    assert resp.status_code == 200
+    entries = _sub_categories_for(resp.json(), "Compositions")
+    assert entries[0]["parameter"] == "Suggest a new composition"
+    assert entries[0]["group"] == "Suggestion"
 
 
 def test_feedback_categories_calc_method_is_dynamic(api_base):
