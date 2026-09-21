@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useCompareFormat } from '@/composables/useCompareFormat'
 import { supplyFigures } from '@/lib/detailsScope'
 import DetailPanel from '@/components/details/DetailPanel.vue'
+import { DOCS_DETAIL_PANEL } from '@/lib/docsLinks'
 import FrequencyBar from '@/components/details/FrequencyBar.vue'
 import PreviewChip from '@/components/details/PreviewChip.vue'
 
@@ -65,6 +66,7 @@ const rows = computed(() => {
   <DetailPanel
     :title="t('proposal.details.schedule.title')"
     :info="t('proposal.details.schedule.info')"
+    :doc-path="DOCS_DETAIL_PANEL.schedule"
     :caption="t('proposal.details.schedule.caption')"
   >
     <div class="grid gap-4 xl:grid-cols-[1fr_13rem]">

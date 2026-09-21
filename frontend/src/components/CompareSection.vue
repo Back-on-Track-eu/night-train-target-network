@@ -3,15 +3,14 @@ import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Composition, FamilyMember, Scenario } from '@/types/api'
 import type { FamilyStatus } from '@/composables/useProposalFamily'
-import { COMPARE_KPIS, type CompareKpiKey } from '@/lib/compareKpis'
+import { COMPARE_KPIS, compareKpi, type CompareKpiKey } from '@/lib/compareKpis'
 import { DOCS_SCENARIO } from '@/lib/docsLinks'
 import InfoHint from '@/components/InfoHint.vue'
-import ReportProblemLink from '@/components/ReportProblemLink.vue'
+import PriceBasisBadge from '@/components/PriceBasisBadge.vue'
 import Select from 'primevue/select'
 import { selectPillPt } from '@/lib/selectPillPt'
 import ScenarioCompareBars from '@/components/ScenarioCompareBars.vue'
 import ScenarioCompositionGrid from '@/components/ScenarioCompositionGrid.vue'
-import InlineAlert from '@/components/InlineAlert.vue'
 
 // Zone B: compare across scenarios. KPI picker + two views over the grid
 // matrix — bars (the selected composition across scenarios) and the full
@@ -28,13 +27,11 @@ const props = defineProps<{
   nCells: number | null
   selectedScenarioId: number | null
   selectedCompositionId: string | null
-  errorMessage: string | null
   gridAvailable: boolean
 }>()
 const emit = defineEmits<{
   selectScenario: [scenarioId: number]
   selectCell: [scenarioId: number, compositionId: string]
-  retry: []
 }>()
 
 const { t } = useI18n()
@@ -59,8 +56,14 @@ const kpiOptions = computed(() =>
       <div class="flex flex-col">
         <h2 class="flex items-center gap-1.5 text-base font-semibold text-primary-50">
           {{ t('proposal.compare.title') }}
-          <InfoHint :text="t('proposal.compare.titleHint')" :docs-href="DOCS_SCENARIO" />
-          <ReportProblemLink topic="compare" />
+          <InfoHint
+            :text="t('proposal.compare.titleHint')"
+            :docs-href="DOCS_SCENARIO"
+            feedback-topic="compare"
+          />
+          <!-- Only while a euro figure is on the grid: the sticker states the
+               price year of what is shown, and passenger counts have none. -->
+          <PriceBasisBadge v-if="compareKpi(kpi).isMoney" feedback-topic="compare" />
         </h2>
         <p class="text-xs text-primary-50/60">
           <template v-if="status === 'loading'">{{ t('proposal.compare.loading') }}</template>
@@ -106,16 +109,6 @@ const kpiOptions = computed(() =>
         </div>
       </div>
     </div>
-
-    <InlineAlert v-if="errorMessage" :message="errorMessage">
-      <button
-        type="button"
-        class="w-fit cursor-pointer text-xs font-semibold underline underline-offset-2"
-        @click="emit('retry')"
-      >
-        {{ t('errors.retry') }}
-      </button>
-    </InlineAlert>
 
     <ScenarioCompareBars
       v-if="view === 'bars' || !gridAvailable"

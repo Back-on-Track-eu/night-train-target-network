@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import type { DemandInputs } from '@/lib/detailsScope'
 import { useCompareFormat } from '@/composables/useCompareFormat'
 import DetailPanel from '@/components/details/DetailPanel.vue'
+import { DOCS_DETAIL_PANEL } from '@/lib/docsLinks'
 import PreviewChip from '@/components/details/PreviewChip.vue'
 
 // Demand · Potential demand (D10–D13): passengers per year over both
@@ -71,6 +72,7 @@ const note = computed(() => {
   <DetailPanel
     :title="t('proposal.details.potential.title')"
     :info="t('proposal.details.potential.info')"
+    :doc-path="DOCS_DETAIL_PANEL.potential"
   >
     <PreviewChip v-if="previewing" />
     <div class="flex flex-wrap items-center gap-1" role="group">

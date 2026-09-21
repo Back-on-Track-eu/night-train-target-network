@@ -89,6 +89,14 @@ from models.emissions.model import (
     EMISSIONS_MODEL_DESCRIPTION,
     EMISSIONS_MODEL_VERSION,
 )
+from models.compositions.model import (
+    COMPOSITIONS_MODEL_DESCRIPTION,
+    COMPOSITIONS_MODEL_VERSION,
+)
+from models.infrastructure.model import (
+    INFRA_MODEL_DESCRIPTION,
+    INFRA_MODEL_VERSION,
+)
 from models.route.model import (
     ROUTE_BUILDER_VERSION,
     ROUTE_BUILDER_DESCRIPTION,
@@ -751,8 +759,14 @@ def models_to_dict() -> dict:
     The demand entry carries "defaults" for the same kind of reason: the
     manual demand model is neither steps nor sourced constants but
     overridable standard values — and, since DEMAND 0.1.0, "constants" as
-    well: the allocation rule the frontend previews live. Every entry has
-    version, description, and formulas / factors / defaults."""
+    well: the allocation rule the frontend previews live.
+
+    The compositions and infrastructure entries carry version and
+    description only: they are calibrated PARAMETER models (seeded rows,
+    documented in their calibration notebooks and on the docs site), not
+    calculation steps — the frontend shows their versions beside the
+    panels that read their figures. Every entry has version and
+    description; the computed ones add formulas / factors / defaults."""
     return {
         "route_builder": {
             "version": ROUTE_BUILDER_VERSION,
@@ -832,6 +846,14 @@ def models_to_dict() -> dict:
                 mode: {"g_per_pax_km": factor.g_per_pax_km, "source": factor.source}
                 for mode, factor in EMISSION_FACTORS.items()
             },
+        },
+        "compositions": {
+            "version": COMPOSITIONS_MODEL_VERSION,
+            "description": COMPOSITIONS_MODEL_DESCRIPTION,
+        },
+        "infrastructure": {
+            "version": INFRA_MODEL_VERSION,
+            "description": INFRA_MODEL_DESCRIPTION,
         },
     }
 

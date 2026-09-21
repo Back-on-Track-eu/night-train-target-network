@@ -219,16 +219,31 @@ def _infrastructure_sub_categories(loader, scenario_id: int | None) -> list[dict
     return entries
 
 
+# One static value beside the field-derived ones: a composition that is not
+# in the catalogue has no field to be filed under. The gallery's "Suggest a
+# new composition" button deep-links to it by alias (docs-site feedback form),
+# not by this string, so the wording may change.
+COMPOSITION_SUGGEST_SUB_CATEGORY = "Suggest a new composition"
+
+
 def _composition_sub_categories(loader, scenario_id: int | None) -> list[dict]:
     """Every composition/operator/coach field — the same
-    CompositionCollection GET /api/params/compositions serves."""
+    CompositionCollection GET /api/params/compositions serves — plus the
+    one suggestion entry, listed first so the form's dropdown opens on it."""
     compositions = loader.build_all_compositions(scenario_id)
 
     leaves: list[dict] = []
     _flatten_descriptions(compositions.descriptions, [], leaves)
     entries = [{**leaf, "group": "Compositions"} for leaf in leaves]
     entries.sort(key=lambda e: e["parameter"])
-    return entries
+    return [
+        {
+            "parameter": COMPOSITION_SUGGEST_SUB_CATEGORY,
+            "description": "A train formation the catalogue should offer",
+            "group": "Suggestion",
+        },
+        *entries,
+    ]
 
 
 # =============================================================================

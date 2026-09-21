@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import type { Breakdown, Operator } from '@/types/api'
 import { useCompareFormat } from '@/composables/useCompareFormat'
 import DetailPanel from '@/components/details/DetailPanel.vue'
+import { DOCS_DETAIL_PANEL } from '@/lib/docsLinks'
 import TripCycleYearStrip from '@/components/details/TripCycleYearStrip.vue'
 
 // Overhead — the company-related costs, on the MODEL'S OWN bases rather than
@@ -72,6 +73,13 @@ interface Receipt {
   awaiting: boolean
 }
 
+// Each receipt's own cost page — the ⓘ hands over to the formula behind it.
+const OVERHEAD_DOCS: Record<Receipt['key'], string> = {
+  variable: DOCS_DETAIL_PANEL.overheadVariable,
+  fixed: DOCS_DETAIL_PANEL.overheadFixed,
+  margin: DOCS_DETAIL_PANEL.overheadMargin,
+}
+
 const receipts = computed<Receipt[]>(() => {
   const b = props.breakdown
   const cateringNote = t('proposal.details.overhead.cateringOutside', {
@@ -121,6 +129,7 @@ function pct(share: number | null): string {
       class="min-w-0"
       :title="t(`proposal.details.overhead.${r.key}.title`)"
       :info="t(`proposal.details.overhead.${r.key}.info`)"
+      :doc-path="OVERHEAD_DOCS[r.key]"
       :caption="t(`proposal.details.overhead.${r.key}.caption`)"
       :awaiting="r.awaiting"
     >

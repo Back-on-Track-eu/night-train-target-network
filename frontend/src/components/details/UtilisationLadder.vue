@@ -13,6 +13,7 @@ import {
 import { classColor } from '@/lib/compositionFormation'
 import { useCompareFormat } from '@/composables/useCompareFormat'
 import DetailPanel from '@/components/details/DetailPanel.vue'
+import { DOCS_DETAIL_PANEL } from '@/lib/docsLinks'
 import PreviewChip from '@/components/details/PreviewChip.vue'
 
 // Demand · Utilisation by composition (D20–D24): the same demand allocated
@@ -123,6 +124,7 @@ function labelInside(r: (typeof rows.value)[number]): boolean {
   <DetailPanel
     :title="t('proposal.details.ladder.title')"
     :info="t('proposal.details.ladder.info')"
+    :doc-path="DOCS_DETAIL_PANEL.ladder"
   >
     <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
       <PreviewChip v-if="previewing" />

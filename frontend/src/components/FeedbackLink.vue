@@ -2,19 +2,22 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppIcon from '@/components/AppIcon.vue'
-import { mdiMessageAlertOutline } from '@mdi/js'
+import { mdiMessageTextOutline } from '@mdi/js'
 import { docsFeedbackUrl, type ReportPanel } from '@/lib/feedbackLink'
 import { useReportContext } from '@/composables/useReportContext'
 
-// The small "report a problem" icon a result panel carries in its header. It
-// opens the documentation site's feedback page in a new tab with the panel's
-// topic preselected, the route's ends in the subject and its input
-// parameters in the message — the same mechanics as the map pill's report
-// menu, one icon per panel so a reader reports what they were looking at.
+// The "Provide feedback" line at the foot of a result panel's info overlay
+// (InfoHint), beside the docs hand-over. It opens the documentation site's
+// feedback page in a new tab with the panel's topic preselected, the
+// route's ends in the subject and its input parameters in the message — the
+// same mechanics as the map pill's feedback menu, so a reader gives
+// feedback on exactly what they were looking at. In the overlay rather than
+// as a second icon beside the ⓘ: two small icons in a row read as one
+// control that does two things.
 //
 // `panel` names the box inside a tab (a Details tab holds several); it goes
 // into the subject after the topic so the working group sees which one.
-// Renders nothing until the builder has a calculated route to report on.
+// Renders nothing until the builder has a calculated route to give feedback on.
 const props = defineProps<{ topic: ReportPanel; panel?: string }>()
 
 const { t } = useI18n()
@@ -34,11 +37,10 @@ const href = computed(() => {
     :href="href"
     target="_blank"
     rel="noopener noreferrer"
-    class="flex cursor-pointer text-primary-50/40 transition hover:text-primary-50"
-    :aria-label="t('proposal.report.panel')"
-    :title="t('proposal.report.panel')"
+    class="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-primary-300 transition hover:text-primary-50"
     @click.stop
   >
-    <AppIcon :path="mdiMessageAlertOutline" :size="14" />
+    {{ t('proposal.feedback.panel') }}
+    <AppIcon :path="mdiMessageTextOutline" :size="14" />
   </a>
 </template>

@@ -3,6 +3,10 @@ import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Select from 'primevue/select'
 import RouteSectionSlider from '@/components/RouteSectionSlider.vue'
+import InfoPopover from '@/components/InfoPopover.vue'
+import DocsReadMore from '@/components/DocsReadMore.vue'
+import FeedbackLink from '@/components/FeedbackLink.vue'
+import { DOCS_VIEW } from '@/lib/docsLinks'
 import { selectPillPt } from '@/lib/selectPillPt'
 import { useLocaleFormat } from '@/composables/useLocaleFormat'
 import type {
@@ -75,6 +79,17 @@ watch(
   },
   { immediate: true },
 )
+// Hover text for the view tabs — how that slice is accounted, its section
+// of the views page, and the feedback link: one shared InfoPopover under the
+// tab row, driven the way the Details card's tab pills are.
+const viewHint = ref<InstanceType<typeof InfoPopover> | null>(null)
+const viewHintKey = ref<ViewKey>('route')
+
+function showViewHint(event: Event, key: ViewKey) {
+  viewHintKey.value = key
+  viewHint.value?.open(event, key)
+}
+
 const normOptions = computed(() =>
   NORM_KEYS.map((n) => ({ value: n, label: t(`proposal.evaluation.norms.${n}`) })),
 )
@@ -317,11 +332,25 @@ watch(classBreakdowns, (v) => emit('update:classBreakdowns', v), { immediate: tr
               ? 'bg-primary-50/20 text-primary-50'
               : 'text-primary-50/60 hover:bg-primary-50/10'
           "
+          @mouseenter="showViewHint($event, opt.value)"
+          @mouseleave="viewHint?.scheduleClose()"
+          @focus="showViewHint($event, opt.value)"
+          @blur="viewHint?.scheduleClose()"
           @click="view = opt.value"
         >
           {{ opt.label }}
         </button>
       </div>
+
+      <InfoPopover ref="viewHint">
+        <div class="flex w-72 flex-col">
+          <p class="text-sm text-primary-50/75">
+            {{ t(`proposal.evaluation.viewHints.${viewHintKey}`) }}
+          </p>
+          <DocsReadMore :href="DOCS_VIEW[viewHintKey]" />
+          <FeedbackLink topic="breakdown" :panel="t(`proposal.evaluation.views.${viewHintKey}`)" />
+        </div>
+      </InfoPopover>
 
       <Select
         v-if="showLevel1 && level1"

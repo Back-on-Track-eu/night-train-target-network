@@ -27,6 +27,7 @@ const AUTH_COOKIE = 'nt_auth'
  * wording can change on the backend without breaking a link someone has
  * already sent on — only this map moves with it. The app links here as
  *   ?topic=missing-stop&q=<what was typed>                (empty stop search)
+ *   ?topic=composition                                    (gallery button)
  *   ?topic=routing|timetable&q=<A → B>&context=<inputs>   (map action pill)
  *   ?topic=<panel>&q=<panel · A → B>&context=<inputs>     (result panels)
  * `lead` opens the message: what the reader is asked to describe, or what
@@ -44,6 +45,28 @@ const TOPICS: Record<string, Topic> = {
     subCategory: 'Missing stop / suggest new stop',
     subject: 'Missing stop',
     lead: (query) => (query ? `I searched the stop list for “${query}” and found nothing.` : ''),
+  },
+  composition: {
+    category: 'Compositions',
+    subCategory: 'Suggest a new composition',
+    subject: 'New composition',
+    // A form to fill rather than a question: what the catalogue needs to
+    // seat, weigh and price a formation, in the order the calibration
+    // records it (backend/models/compositions/calib/catalog).
+    lead: () =>
+      'I would like to suggest a train composition that is missing from the ' +
+      'catalogue. What I know about it:\n\n' +
+      'Name / example operator (a real train it resembles): \n' +
+      'Locomotive (type, max speed, electric/multi-system): \n' +
+      'Coaches, in order, with type and count (seat / couchette / sleeper / capsule / catering): \n' +
+      'Places per class: \n' +
+      'Total length (m) and mass (t): \n' +
+      'Max speed (km/h) and whether it may use high-speed lines: \n' +
+      'New build or refurbished, and the year: \n' +
+      'Catering on board (dining car, trolley, none): \n' +
+      'Purchase or lease price, if known, and its source: \n' +
+      'Why this formation belongs in the target network: \n' +
+      'Sources (links, documents): ',
   },
   routing: {
     category: 'Route or timetable',

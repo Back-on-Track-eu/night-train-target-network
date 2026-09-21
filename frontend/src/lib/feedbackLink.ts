@@ -21,6 +21,8 @@ export const FEEDBACK_TOPIC_MISSING_STOP = 'missing-stop'
 export const FEEDBACK_TOPIC_ROUTING = 'routing'
 /** A computed route whose timetable looks wrong — times, speeds, the night. */
 export const FEEDBACK_TOPIC_TIMETABLE = 'timetable'
+/** The gallery's "Suggest a new composition" — the form opens with the fields the catalogue needs. */
+export const FEEDBACK_TOPIC_COMPOSITION = 'composition'
 
 /** The result panels a reader can report from. Each alias maps, on the
  *  feedback page, to "Evaluation — results / view" and the panel's own

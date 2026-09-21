@@ -27,13 +27,21 @@ const { t } = useI18n()
 const fmt = useCompareFormat()
 const kpiDef = computed(() => compareKpi(props.kpi))
 
+// Row labels are the operating condition alone; the network is named once,
+// above the first row of its group, since it is the same for every row in
+// that group. A label carrying both on every row ("Infrastructure 2026 ·
+// HSR + TT OPT") was wider than two cells and pushed twelve compositions
+// into a horizontal scroll on a full-width screen.
 const rows = computed(() => {
   const axes = buildScenarioAxes(props.scenarios)
-  return axes.ordered.map((scenario) => {
+  return axes.ordered.map((scenario, i, ordered) => {
     const state = axes.stateOf(scenario.scenario_id)
+    const network = state?.network ?? ''
+    const previous = i > 0 ? axes.stateOf(ordered[i - 1].scenario_id)?.network : undefined
     return {
       scenario,
-      network: state?.network ?? '',
+      network,
+      startsGroup: network !== previous,
       condition: state ? t(`proposal.compare.conditionsShort.${conditionLabelKey(state)}`) : '',
       cells: props.compositions.map((composition) => {
         const cell = props.cells.get(`${scenario.scenario_id}:${composition.composition_id}`)
@@ -116,7 +124,10 @@ const legend = computed(() => {
       <tbody>
         <tr v-for="row in rows" :key="row.scenario.scenario_id">
           <th class="pr-2 text-left font-normal whitespace-nowrap text-primary-50/70">
-            {{ t('proposal.compare.axes.infra', { network: row.network }) }} · {{ row.condition }}
+            <span v-if="row.startsGroup" class="block text-[9px] text-primary-50/40">
+              {{ t('proposal.compare.axes.infra', { network: row.network }) }}
+            </span>
+            {{ row.condition }}
           </th>
           <td v-for="entry in row.cells" :key="entry.composition.composition_id" class="p-0">
             <button

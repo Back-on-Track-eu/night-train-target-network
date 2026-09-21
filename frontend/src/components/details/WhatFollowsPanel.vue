@@ -8,6 +8,7 @@ import { cateringSign, supplyFigures, type DemandInputs, type Tariff } from '@/l
 import { follows } from '@/lib/whatFollows'
 import { useCompareFormat } from '@/composables/useCompareFormat'
 import DetailPanel from '@/components/details/DetailPanel.vue'
+import { DOCS_DETAIL_PANEL } from '@/lib/docsLinks'
 import PreviewChip from '@/components/details/PreviewChip.vue'
 
 // Supply · What follows (D2, D4) — what the schedule and the prices earn
@@ -131,6 +132,7 @@ const revenueShares = computed(() => {
   <DetailPanel
     :title="t('proposal.details.follows.title')"
     :info="t('proposal.details.follows.info')"
+    :doc-path="DOCS_DETAIL_PANEL.follows"
     :caption="
       composition
         ? t('proposal.details.follows.caption', { composition: composition.composition_id })

@@ -6,6 +6,7 @@ import { COMPARE_KPIS, isImprovement, relativeDelta, subsidyDisplay } from '@/li
 import { useCompareFormat } from '@/composables/useCompareFormat'
 import { DOCS_KPI } from '@/lib/docsLinks'
 import InfoHint from '@/components/InfoHint.vue'
+import PriceBasisBadge from '@/components/PriceBasisBadge.vue'
 
 // Zone A's headline: the eight main KPIs of the member on screen, each with
 // its change against the baseline member (base network, nothing switched on,
@@ -56,7 +57,10 @@ const tiles = computed(() =>
         <InfoHint
           :text="t(`proposal.compare.kpiHints.${tile.kpi.key}`)"
           :docs-href="DOCS_KPI[tile.kpi.key]"
+          feedback-topic="kpis"
+          :feedback-panel="t(`proposal.compare.kpis.${tile.kpi.labelKey}`)"
         />
+        <PriceBasisBadge v-if="tile.kpi.isMoney" feedback-topic="kpis" />
       </span>
 
       <!-- Necessary subsidy: the one tile with its own wording for a surplus. -->

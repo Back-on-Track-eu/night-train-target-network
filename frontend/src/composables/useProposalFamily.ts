@@ -74,7 +74,6 @@ export interface ProposalFamily {
     scenarioId: number,
     compositionId: string,
   ): Promise<{ views: EvaluationViews; operations: Operations } | null>
-  retry(): void
   abort(): void
   reset(): void
 }
@@ -92,11 +91,6 @@ export function useProposalFamily(): ProposalFamily {
   // leaves an axis to the backend (the builder always does for compositions)
   // is sized from what the backend last answered.
   let lastAxes: { variants: number; compositions: number } | null = null
-  let lastRequest: {
-    body: FamilyRequest
-    headers: Record<string, string>
-    onSlow?: (phase: 'slow' | 'verySlow') => void
-  } | null = null
 
   const variantOf = computed(() => {
     const out = new Map<number, ScenarioVariant>()
@@ -126,7 +120,6 @@ export function useProposalFamily(): ProposalFamily {
   function reset() {
     abort()
     currentKey = null
-    lastRequest = null
     status.value = 'idle'
     document.value = null
     failure.value = null
@@ -200,12 +193,7 @@ export function useProposalFamily(): ProposalFamily {
     }
     reset()
     currentKey = key
-    lastRequest = { body, headers, onSlow }
     return run(body, headers, onSlow)
-  }
-
-  function retry() {
-    if (lastRequest) run(lastRequest.body, lastRequest.headers, lastRequest.onSlow)
   }
 
   function member(scenarioId: number, compositionId: string): FamilyMember | undefined {
@@ -289,7 +277,6 @@ export function useProposalFamily(): ProposalFamily {
     byComposition,
     start,
     views,
-    retry,
     abort,
     reset,
   }

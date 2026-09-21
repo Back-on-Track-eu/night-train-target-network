@@ -6,6 +6,7 @@ import { GROUP_CLASS_PREFERENCES, GROUP_ORDER, RULE_SHARE } from '@/lib/demandAl
 import { classColor } from '@/lib/compositionFormation'
 import { useCompareFormat } from '@/composables/useCompareFormat'
 import DetailPanel from '@/components/details/DetailPanel.vue'
+import { DOCS_DETAIL_PANEL } from '@/lib/docsLinks'
 import PreviewChip from '@/components/details/PreviewChip.vue'
 
 // Demand · Demand by traveller group (D14, D15): the five groups in
@@ -56,6 +57,7 @@ function setShare(group: string, event: Event) {
   <DetailPanel
     :title="t('proposal.details.groupsPanel.title')"
     :info="t('proposal.details.groupsPanel.info')"
+    :doc-path="DOCS_DETAIL_PANEL.groups"
     :caption="t('proposal.details.groupsPanel.caption')"
   >
     <PreviewChip v-if="previewing" />

@@ -16,6 +16,7 @@ import {
 import { useCompareFormat } from '@/composables/useCompareFormat'
 import AppIcon from '@/components/AppIcon.vue'
 import DetailPanel from '@/components/details/DetailPanel.vue'
+import { DOCS_DETAIL_PANEL } from '@/lib/docsLinks'
 import PreviewChip from '@/components/details/PreviewChip.vue'
 
 // Supply · Places and prices — one table, one row per accommodation class:
@@ -185,6 +186,7 @@ const numCell =
   <DetailPanel
     :title="t('proposal.details.prices.title')"
     :info="t('proposal.details.prices.info')"
+    :doc-path="DOCS_DETAIL_PANEL.prices"
     :caption="
       composition
         ? t('proposal.details.prices.caption', {

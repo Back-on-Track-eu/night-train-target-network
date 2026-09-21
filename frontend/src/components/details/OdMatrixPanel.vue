@@ -15,6 +15,7 @@ import {
 } from '@/lib/odMatrix'
 import { useCompareFormat } from '@/composables/useCompareFormat'
 import DetailPanel from '@/components/details/DetailPanel.vue'
+import { DOCS_DETAIL_PANEL } from '@/lib/docsLinks'
 import PreviewChip from '@/components/details/PreviewChip.vue'
 
 // Demand · Demand by OD pair (D25–D30): an origin × destination matrix of
@@ -180,6 +181,7 @@ const droppedPins = computed(() => props.block?.od.dropped_pins ?? [])
   <DetailPanel
     :title="t('proposal.details.od.title')"
     :info="t('proposal.details.od.info')"
+    :doc-path="DOCS_DETAIL_PANEL.od"
     :caption="t('proposal.details.od.caption')"
   >
     <p v-if="!block" class="text-xs text-primary-50/50">{{ t('proposal.details.od.noRoute') }}</p>

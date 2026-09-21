@@ -44,6 +44,7 @@ import {
 } from '@/lib/nightInterval'
 import { useLocaleFormat } from '@/composables/useLocaleFormat'
 import { buildSuggestRows, settledRows, type SuggestRow } from '@/lib/suggestPlacement'
+import { bridgeRemovedStops } from '@/lib/suggestShape'
 import { formatClock, dayOffset } from '@/lib/tripClock'
 import { useProposalFamily } from '@/composables/useProposalFamily'
 import { useDeferredFlag } from '@/composables/useDeferredFlag'
@@ -94,6 +95,7 @@ import AppSpinner from '@/components/AppSpinner.vue'
 import StopSelect from '@/components/StopSelect.vue'
 import ProposalResults from '@/components/ProposalResults.vue'
 import OwnershipLine from '@/components/OwnershipLine.vue'
+import ModelVersions from '@/components/ModelVersions.vue'
 import CountryFlags from '@/components/CountryFlags.vue'
 import StopTime from '@/components/StopTime.vue'
 import LoadingFunFact from '@/components/LoadingFunFact.vue'
@@ -103,7 +105,6 @@ import MapShareBar from '@/components/MapShareBar.vue'
 import InfoHint from '@/components/InfoHint.vue'
 import DocsReadMore from '@/components/DocsReadMore.vue'
 import CommentSection from '@/components/CommentSection.vue'
-import InlineAlert from '@/components/InlineAlert.vue'
 import {
   mdiArrowLeft,
   mdiArrowLeftRight,
@@ -157,8 +158,6 @@ const selectedCompositionId = ref<string | null>(null)
 // needs live routing (lib/calcExpectation.ts), so "longer than usual" is
 // only said when it is.
 const calcPhase = ref<'idle' | 'working' | 'slow' | 'verySlow'>('idle')
-const calcFailure = ref<ApiFailure | null>(null)
-const calcFailureMsg = ref<string | null>(null)
 const calcSlot = createAbortSlot()
 // Arguments of the last calc, so Retry replays it rather than guessing.
 const lastCalcArgs = ref<{ stopIds: string[]; autoStopAddition: 'off' | 'suggest' } | null>(null)
@@ -231,6 +230,10 @@ const basePlan = ref<MemberPlan | null>(null)
 // Suggested stop ids the user has opted in (default none). Single source of
 // truth driving both the timeline bubbles and the map markers.
 const suggestSelected = ref<Set<string>>(new Set())
+// The user's OWN stops taken off the route while choosing (default none).
+// Like the picks, a choice, not an edit: the itinerary is untouched and the
+// route is recomputed once, on Continue — the map bridges the gap meanwhile.
+const suggestRemoved = ref<Set<string>>(new Set())
 // Pure display reversal for the suggest-mode timeline/markers — no reroute.
 const suggestReversed = ref(false)
 
@@ -260,7 +263,6 @@ const ownsProposal = computed(() => proposalOwnership.value === 'own')
 // Set when a calc finished but the user still has to pick an identity in the
 // gate — the authChoice watcher publishes once they do.
 const pendingPublish = ref(false)
-const publishError = ref<string | null>(null)
 // The composition the STORED proposal currently carries — what a
 // family-served switch is compared against to decide whether anything needs
 // saving (lib/selectionSave.ts). Set wherever the stored state is learned:
@@ -323,7 +325,7 @@ interface TripResult {
   direction_id: number
   departure_time: string
   stop_times: StopTimeFmt[]
-  shape: { type: string; coordinates: [number, number][] }
+  shape: { type: 'LineString'; coordinates: [number, number][] }
 }
 
 interface RouteResult {
@@ -491,7 +493,7 @@ function buildStopTimes(segments: BackendSegment[]): StopTimeFmt[] {
 function buildShape(
   segments: BackendSegment[],
   geometryById: Map<string, BackendGeometry>,
-): { type: string; coordinates: [number, number][] } {
+): { type: 'LineString'; coordinates: [number, number][] } {
   const coordinates: [number, number][] = []
   for (const seg of segments) {
     const geom = geometryById.get(seg.geometry_id)
@@ -959,7 +961,7 @@ function familyKey(body: FamilyRequest): string {
 }
 
 // POST /api/proposal/family for the given stop ids and auto_stop_addition
-// mode. Returns the document, or null on error (having set calcFailure and
+// mode. Returns the document, or null on error (having shown the failure and
 // dropped back to edit mode). proposal_id/proposal_version don't exist on
 // this request — persistence is publish's concern, not compute's.
 async function requestFamily(
@@ -985,21 +987,13 @@ async function requestFamily(
   // The user cancelled, or a newer build superseded this one: no error, and
   // the caller of cancelCalc() owns the mode.
   if (!failure || failure.kind === 'canceled') return null
-  calcFailure.value = failure
-  // Two surfaces, never the same sentence twice. Actionable detail (the
-  // backend's own validation text) belongs inline, next to the control. A
-  // systemic failure gets a SHORT inline note plus the full explanation in a
-  // sticky toast — printing the long "something went wrong on our side…"
-  // copy inline as well is what put it on screen twice.
-  const verbatim = new ApiError(failure).verbatim
-  calcFailureMsg.value = verbatim ?? t('errors.calcFailed')
-  if (!verbatim) report(new ApiError(failure))
+  showCalcFailure(failure, describe(new ApiError(failure), 'errors.calcFailed'))
   currentMode.value = 'edit'
   return null
 }
 
 // The member of `document` for a scenario and composition, as the plan
-// applyPlan() consumes — or null, with calcFailure set, when that member is
+// applyPlan() consumes — or null, with the failure shown, when that member is
 // an error member (a gauge clash, an unroutable pair, a graph this
 // deployment does not run). A failed member is a 200 on the wire; this is
 // where it becomes the failure the builder's copy paths already know.
@@ -1020,8 +1014,7 @@ function memberPlanFor(
   const member = family.member(variant.scenario_id, comp)
   if (!member) return null
   if (member.status === 'error') {
-    calcFailure.value = memberFailure(member)
-    calcFailureMsg.value = member.message
+    showCalcFailure(memberFailure(member), member.message)
     currentMode.value = 'edit'
     return null
   }
@@ -1083,11 +1076,28 @@ function cancelCalc(): void {
 
 /** Replay the last calc. Manual only — an automatic retry would re-queue work
  *  on an already-saturated worker pool, which is what made the overload worse. */
+// Every builder failure shows in the toast stack at the top of the page, none
+// inline beside the controls. Calc and publish failures each own one merge
+// key, so a new attempt replaces or clears the previous one instead of
+// stacking beside it.
+const CALC_TOAST_KEY = 'proposal:calc'
+const PUBLISH_TOAST_KEY = 'proposal:publish'
+
+function showCalcFailure(failure: ApiFailure, message: string): void {
+  toastStore.addToast('error', message, {
+    key: CALC_TOAST_KEY,
+    ...(isRetryable(failure) ? { action: { labelKey: 'errors.retry', run: retryCalc } } : {}),
+  })
+}
+
+function clearCalcFailure(): void {
+  toastStore.dismissByKey(CALC_TOAST_KEY)
+}
+
 function retryCalc(): void {
   const args = lastCalcArgs.value
   if (!args) return
-  calcFailure.value = null
-  calcFailureMsg.value = null
+  clearCalcFailure()
   currentMode.value = 'loading'
   requestPlan(args.stopIds, args.autoStopAddition).then((plan) => {
     if (plan) applyPlan(plan, true)
@@ -1142,12 +1152,6 @@ const routeStatRows = computed(() => {
   ]
 })
 
-// Retry after a family-level failure (network, 503): re-runs the last
-// request — the route on screen — from the start.
-function retryFamily() {
-  family.retry()
-}
-
 // The views of the member on screen, fetched after the document (they are
 // not in it) and cached per family. Guarded by a token: a switch that
 // arrives while a fetch is out must not have the older member's figures
@@ -1164,7 +1168,7 @@ async function loadViews(scenarioId: number | null, compositionId: string | null
     if (token !== viewsToken) return
     // Zone E stays on its skeleton; the rest of the page — route, KPIs,
     // comparisons — is unaffected, so this is a toast, not a mode change.
-    report(err, { fallbackKey: 'errors.viewsFailed' })
+    report(err, { fallbackKey: 'errors.viewsFailed', force: 'toast' })
   }
 }
 
@@ -1237,6 +1241,7 @@ function applyPlan(json: MemberPlan, publish = false, look = false) {
   // cost/revenue zone shows its skeleton, everything else is already here).
   calcResult.value = {
     calc_version: json.calc_version,
+    route_builder_version: json.route_builder_version,
     route_id: json.route.route_id,
     views: json.views,
   }
@@ -1309,7 +1314,7 @@ function derivedName(): string {
 async function doPublish(silent = false) {
   const req = publishRequest.value
   if (!req) return
-  publishError.value = null
+  toastStore.dismissByKey(PUBLISH_TOAST_KEY)
   // Someone else's proposal, evaluated by this user: a COPY into their own
   // proposals, with the provenance recorded — never an overwrite of the
   // original, which ownsProposal already guarantees. Their own work, and
@@ -1345,8 +1350,11 @@ async function doPublish(silent = false) {
     if (isFirstPublish) emit('published', resp.proposal_id)
   } catch (err) {
     if (asApiFailure(err)?.kind === 'canceled') return
-    publishError.value = describe(err, 'errors.publishFailed')
-    report(err, { fallbackKey: 'errors.publishFailed' })
+    // Sticky, and cleared by the next save attempt rather than a success
+    // toast: a failed save is the one outcome the user must not miss.
+    toastStore.addToast('error', describe(err, 'errors.publishFailed'), {
+      key: PUBLISH_TOAST_KEY,
+    })
   } finally {
     publishPhase.value = 'idle'
   }
@@ -1356,9 +1364,8 @@ async function evaluate() {
   const validStops = itinerary.value.filter((s) => s.selectedStop !== null)
   if (validStops.length < 2) return
   currentMode.value = 'loading'
-  calcFailure.value = null
-  calcFailureMsg.value = null
-  publishError.value = null
+  clearCalcFailure()
+  toastStore.dismissByKey(PUBLISH_TOAST_KEY)
   // First pass: "suggest" routes exactly the caller's stops and reports the
   // candidate stops along the way, without adding any automatically. The calc
   // itself runs tokenless (compute-only); the register/guest prompt only
@@ -1371,10 +1378,9 @@ async function evaluate() {
   const suggestions = json.suggested_stops ?? []
   if (suggestions.length > 0) {
     // Hand the choice to the user inline (suggest mode) rather than a modal.
+    resetSuggestState()
     basePlan.value = json
     suggestedStops.value = suggestions
-    suggestSelected.value = new Set()
-    suggestReversed.value = false
     currentMode.value = 'suggest'
   } else {
     applyPlan(json, true)
@@ -1387,21 +1393,22 @@ async function evaluate() {
 // which auto-publishes (or opens the auth gate) — reusing it here would risk
 // a silent auto-publish if the backend happens to return no suggestions this
 // time. On zero suggestions this just degrades to plain 'edit' instead.
-async function restoreSuggestState(selectedIds: string[]) {
+async function restoreSuggestState(selectedIds: string[], removedIds: string[]) {
   const stopIds = currentStopIds.value
   if (stopIds.length < 2) return
   currentMode.value = 'loading'
-  calcFailure.value = null
-  calcFailureMsg.value = null
+  clearCalcFailure()
   const json = await requestPlan(stopIds, 'suggest')
-  if (!json) return // requestPlan already reset currentMode to 'edit' and set calcFailure
+  if (!json) return // requestPlan already reset currentMode to 'edit' and showed the failure
   const suggestions = json.suggested_stops ?? []
   if (suggestions.length > 0) {
+    resetSuggestState()
     basePlan.value = json
     suggestedStops.value = suggestions
     suggestSelected.value = new Set(
       selectedIds.filter((id) => suggestions.some((s) => s.stop_id === id)),
     )
+    suggestRemoved.value = new Set(removedIds.filter((id) => stopIds.includes(id)))
     currentMode.value = 'suggest'
   } else {
     currentMode.value = 'edit'
@@ -1426,32 +1433,68 @@ function toggleSuggested(stopId: string) {
   suggestSelected.value = next
 }
 
-// User clicked "Continue with X additional stops". With no stops chosen, the
+// Leave suggest mode's state behind — the candidates, the base response and
+// the picks — without touching the itinerary or the mode.
+function resetSuggestState(): void {
+  suggestedStops.value = []
+  basePlan.value = null
+  suggestSelected.value = new Set()
+  suggestRemoved.value = new Set()
+  suggestReversed.value = false
+}
+
+// One floor for every way of taking a stop off the route — the table's trash
+// icon, the map marker in any mode, the suggest timeline: two stops are a
+// route, one is not. Termini included; the neighbour becomes the new end. In
+// suggest mode it counts the user's own stops still on the route.
+const stopRemovable = computed(() =>
+  currentMode.value === 'suggest' ? suggestActive.value.length > 2 : itinerary.value.length > 2,
+)
+
+// User ticked one of their OWN stops off the route, or back on, while
+// choosing. Nothing is computed here — a route through the remaining stops
+// is what Continue asks for — but the choice shows at once: the timeline
+// dims the stop like an unpicked candidate, the map drops its legs and
+// bridges the gap with a beeline (lib/suggestShape.ts).
+function toggleConfirmed(stopId: string) {
+  const next = new Set(suggestRemoved.value)
+  if (next.has(stopId)) next.delete(stopId)
+  else if (stopRemovable.value) next.add(stopId)
+  else return
+  suggestRemoved.value = next
+}
+
+// The timeline bubble and the map marker toggle whatever row they stand for:
+// a candidate in or out, or one of the user's own stops off or back on.
+function toggleSuggestRow(stopId: string) {
+  if (suggestConfirmedIds.value.has(stopId)) toggleConfirmed(stopId)
+  else toggleSuggested(stopId)
+}
+
+// User clicked "Continue …". With nothing chosen and nothing removed, the
 // first "suggest" response already routed exactly the caller's stops, so reuse
 // it directly. Otherwise the itinerary becomes exactly what the timeline showed
-// — the caller's stops with the opted-in candidates on the leg they were listed
-// on — and we recompute with auto_stop_addition="off": the caller has made the
-// selection, so no further suggestions are wanted.
+// — the caller's remaining stops with the opted-in candidates on the leg they
+// were listed on — and we recompute with auto_stop_addition="off": the caller
+// has made the selection, so no further suggestions are wanted.
 async function confirmStopSelection(selectedIds: string[]) {
   const base = basePlan.value
   const suggestions = suggestedStops.value
   const chosen = suggestions.filter((s) => selectedIds.includes(s.stop_id))
-  // Read the placement off the same rows the timeline rendered, before the
-  // suggest state (which baseOutbound derives from) is torn down below. Not
+  const routeChanged = suggestRemoved.value.size > 0
+  // Read the placement off the stops still on the route, before the suggest
+  // state (which baseOutbound derives from) is torn down below. Not
   // suggestRows: that one is reversed when the user flipped the view, and the
   // flip is a pure view change that leaves the itinerary's direction alone.
-  const confirmedStops = baseOutbound.value?.stop_times ?? []
+  const confirmedStops = suggestActive.value
   const settled = settledRows(confirmedStops, suggestions, new Set(selectedIds))
-  suggestedStops.value = []
-  basePlan.value = null
-  suggestSelected.value = new Set()
-  suggestReversed.value = false
+  resetSuggestState()
   if (!base) {
     currentMode.value = 'edit'
     dismissEvaluationGate()
     return
   }
-  if (chosen.length === 0) {
+  if (chosen.length === 0 && !routeChanged) {
     applyPlan(base, true) // opens the choose-phase gate for a no-choice visitor
     return
   }
@@ -1472,10 +1515,7 @@ function adoptAllSuggested() {
 // User backed out of suggest mode without continuing — abandon this evaluation
 // and return to editing, leaving the itinerary untouched.
 function cancelSuggestMode() {
-  suggestedStops.value = []
-  basePlan.value = null
-  suggestSelected.value = new Set()
-  suggestReversed.value = false
+  resetSuggestState()
   currentMode.value = 'edit'
   dismissEvaluationGate()
 }
@@ -1577,7 +1617,7 @@ const draftHydrated = ref(false)
 // deep: true is required, not just defensive — removeStop()/onStopSelect()
 // mutate `itinerary` in place rather than reassigning it.
 watch(
-  [itinerary, selectedCompositionId, currentMode, suggestSelected, nightSelection],
+  [itinerary, selectedCompositionId, currentMode, suggestSelected, suggestRemoved, nightSelection],
   () => {
     if (!draftHydrated.value || props.mode !== 'edit' || currentMode.value === 'loading') return
     const stopIds = currentStopIds.value
@@ -1589,6 +1629,7 @@ watch(
       stopIds,
       compositionId: selectedCompositionId.value,
       suggestSelectedIds: currentMode.value === 'suggest' ? [...suggestSelected.value] : null,
+      suggestRemovedIds: currentMode.value === 'suggest' ? [...suggestRemoved.value] : null,
       nightIntervalIds: pruneNightInterval(nightSelection.value.interval, stopIds),
     })
   },
@@ -1777,8 +1818,7 @@ async function recomputeWithSelection() {
   cancelSelectionSave()
   const scrollY = window.scrollY
   currentMode.value = 'loading'
-  calcFailure.value = null
-  calcFailureMsg.value = null
+  clearCalcFailure()
   const json = await requestPlan(stopIds, 'off')
   // Persist when the proposal is the user's own (see ownsProposal): this
   // recompute is the only way an expert timetable — or a composition or
@@ -1881,11 +1921,11 @@ const reportTimes = computed(() => {
   return outbound && back ? { outbound, return: back } : null
 })
 
-// What every "report a problem" link needs — the map pill's menu and the
-// icon on each result panel: the route's ends for the subject and every
-// input the route on screen was computed from. The committed state, not
-// edits waiting for a recalculation, since a report is about the route that
-// was drawn. Provided to the whole results tree (useReportContext).
+// What every "provide feedback" link needs — the map pill's menu and the
+// link in each result panel's info overlay: the route's ends for the subject
+// and every input the route on screen was computed from. The committed
+// state, not edits waiting for a recalculation, since feedback is about the
+// route that was drawn. Provided to the whole results tree (useReportContext).
 const reportContext = computed(() => {
   const stops = (committedItinerary.value ?? [])
     .filter((s) => s.selectedStop !== null)
@@ -2220,27 +2260,43 @@ const baseOutbound = computed<TripResult | null>(() => {
 })
 
 const suggestSelectedCount = computed(() => suggestSelected.value.size)
+const suggestRemovedCount = computed(() => suggestRemoved.value.size)
+
+// The user's own stops as the base response routed them, and the ones still
+// on the route after this session's removals.
+const suggestConfirmed = computed<StopTimeFmt[]>(() => baseOutbound.value?.stop_times ?? [])
+const suggestConfirmedIds = computed(() => new Set(suggestConfirmed.value.map((s) => s.stop_id)))
+const suggestActive = computed(() =>
+  suggestConfirmed.value.filter((s) => !suggestRemoved.value.has(s.stop_id)),
+)
 
 // Confirmed stops interleaved with the proposed stops along the way — see
-// lib/suggestPlacement.ts for the ordering rule. Reversed for display when the
-// user flips direction, after placement, so the flip stays a pure view change.
+// lib/suggestPlacement.ts for the ordering rule. A removed confirmed stop keeps
+// its row (dimmed, so it can be ticked back on); placement stays on the base
+// route so rows never jump. Reversed for display when the user flips
+// direction, after placement, so the flip stays a pure view change.
 const suggestRows = computed<SuggestRow[]>(() => {
   const rows = buildSuggestRows(
-    baseOutbound.value?.stop_times ?? [],
+    suggestConfirmed.value,
     suggestedStops.value,
     suggestSelected.value,
+  ).map((row) =>
+    row.kind === 'confirmed' && suggestRemoved.value.has(row.stopId)
+      ? { ...row, selected: false }
+      : row,
   )
   return suggestReversed.value ? [...rows].reverse() : rows
 })
 
-// Indices of the first and last confirmed stop in suggestRows — only these get
-// the pronounced endpoint styling (proposed stops are never endpoints).
+// Indices of the first and last confirmed stop still on the route in
+// suggestRows — only these get the pronounced endpoint styling (proposed and
+// removed stops are never endpoints).
 const suggestEndpointIdx = computed(() => {
   const rows = suggestRows.value
   let first = -1
   let last = -1
   rows.forEach((r, i) => {
-    if (r.kind === 'confirmed') {
+    if (r.kind === 'confirmed' && r.selected) {
       if (first < 0) first = i
       last = i
     }
@@ -2248,29 +2304,57 @@ const suggestEndpointIdx = computed(() => {
   return { first, last }
 })
 
-// Proposed-stop markers for MapView (suggest mode only). Independent of
-// mapStops/mapShape so toggling selection re-syncs only these markers.
+// Proposed-stop markers for MapView (suggest mode only) — the candidates, and
+// the user's own stops taken off the route, which offer the same plus to come
+// back. Independent of mapStops/mapShape so toggling a candidate re-syncs only
+// these markers.
 const mapSuggested = computed(() => {
   if (currentMode.value !== 'suggest') return null
-  return suggestedStops.value.map((s) => ({
+  const candidates = suggestedStops.value.map((s) => ({
     stopId: s.stop_id,
     lat: s.lat,
     lon: s.lon,
     name: s.stop_name,
     selected: suggestSelected.value.has(s.stop_id),
   }))
+  const removed = suggestConfirmed.value
+    .filter((s) => suggestRemoved.value.has(s.stop_id))
+    .map((s) => ({ stopId: s.stop_id, lat: s.lat, lon: s.lon, name: s.stop_name, selected: false }))
+  return [...candidates, ...removed]
+})
+
+// The temporary route with the removed stops' legs cut out: the routed runs
+// as the shape, the beelines across the gaps as bridges.
+const suggestShape = computed(() => {
+  const plan = basePlan.value
+  if (!plan) return null
+  const geometryById = new Map(plan.route.geometries.map((g) => [g.id, g]))
+  const outbound = plan.route.trip_pairs[0]?.outbound
+  if (!outbound) return null
+  const legs = outbound.segments.map((seg) => ({
+    from: { stopId: seg.from_stop.stop_id, lon: seg.from_stop.lon, lat: seg.from_stop.lat },
+    to: { stopId: seg.to_stop.stop_id, lon: seg.to_stop.lon, lat: seg.to_stop.lat },
+    coords: (geometryById.get(seg.geometry_id)?.coords ?? []).map(
+      (p) => [p[0], p[1]] as [number, number],
+    ),
+  }))
+  return bridgeRemovedStops(legs, suggestRemoved.value)
 })
 
 const mapStops = computed(() => {
   // Suggest mode: only the confirmed stops are pronounced route markers; the
   // proposed stops ride on the separate `suggested` prop. Order follows the
-  // reverse toggle so first/last markers match the timeline endpoints.
+  // reverse toggle so first/last markers match the timeline endpoints. A
+  // confirmed stop can be taken off the route here as in the timeline; a
+  // removed one rides on `suggested` until it is ticked back on.
   if (currentMode.value === 'suggest') {
-    const confirmed = (baseOutbound.value?.stop_times ?? []).map((st) => ({
+    const confirmed = suggestActive.value.map((st) => ({
       lat: st.lat,
       lon: st.lon,
       name: st.stop_name,
       highlighted: true,
+      stopId: st.stop_id,
+      removable: stopRemovable.value,
     }))
     return suggestReversed.value ? [...confirmed].reverse() : confirmed
   }
@@ -2287,10 +2371,15 @@ const mapStops = computed(() => {
         odHi = Math.max(oi, di)
       }
     }
+    // A computed route's markers can be removed straight from the map: that
+    // opens re-edit (as the Edit pill would) with the stop already gone.
+    const removable = currentMode.value === 'display' && stopRemovable.value
     return sts.map((st, i) => ({
       lat: st.lat,
       lon: st.lon,
       name: st.stop_name,
+      stopId: st.stop_id,
+      removable,
       highlighted:
         scope.kind === 'country'
           ? st.country_code === scope.country
@@ -2302,9 +2391,8 @@ const mapStops = computed(() => {
     }))
   }
   // Edit mode: the markers carry their stop id and may be removed from the map,
-  // under the same floor as the table's delete control — two stops are a route,
-  // one is not.
-  const removable = currentMode.value === 'edit' && itinerary.value.length > 2
+  // under the same floor as the table's delete control.
+  const removable = currentMode.value === 'edit' && stopRemovable.value
   return itinerary.value
     .filter((s) => s.selectedStop !== null)
     .map((s) => ({
@@ -2340,17 +2428,33 @@ function onMapAddStop(stopId: string): void {
 // ...and removing from the map reuses removeStop(), so both routes into the
 // itinerary go through one edit. The row is found by stop id rather than by
 // marker order: mapStops drops rows that have no stop chosen yet, so an index
-// into the markers is not an index into the itinerary.
+// into the markers is not an index into the itinerary. In suggest mode the
+// removal is a choice for Continue, not an edit; on a computed route it is the
+// first edit, so it opens re-edit first.
 function onMapRemoveStop(stopId: string): void {
-  if (itinerary.value.length <= 2) return
+  if (currentMode.value === 'suggest') {
+    toggleConfirmed(stopId)
+    return
+  }
+  if (!stopRemovable.value) return
   const index = itinerary.value.findIndex((s) => s.selectedStop?.stop_id === stopId)
-  if (index >= 0) removeStop(index)
+  if (index < 0) return
+  if (currentMode.value === 'display') startEdit()
+  removeStop(index)
 }
 
+const mapBridges = computed(() =>
+  currentMode.value === 'suggest' ? (suggestShape.value?.bridges ?? null) : null,
+)
+
 const mapShape = computed(() => {
-  // Suggest mode draws the temporary route from the base "suggest" response, as
-  // a single stitched polyline; it never changes when selection toggles.
-  if (currentMode.value === 'suggest') return baseOutbound.value?.shape ?? null
+  // Suggest mode draws the temporary route from the base "suggest" response;
+  // picking candidates never changes it, removing an own stop cuts its legs.
+  if (currentMode.value === 'suggest') {
+    const bridged = suggestShape.value
+    if (!bridged) return null
+    return { type: 'MultiLineString' as const, coordinates: bridged.routed }
+  }
   if (showComputedView.value && selectedTrip.value) {
     return selectedTrip.value.shape
   }
@@ -2752,7 +2856,9 @@ onMounted(async () => {
         interval: pruneNightInterval(draft!.nightIntervalIds, draft!.stopIds),
         pending: null,
       }
-      if (draft!.suggestSelectedIds !== null) await restoreSuggestState(draft!.suggestSelectedIds)
+      if (draft!.suggestSelectedIds !== null) {
+        await restoreSuggestState(draft!.suggestSelectedIds, draft!.suggestRemovedIds ?? [])
+      }
       draftHydrated.value = true
       return
     }
@@ -2779,11 +2885,15 @@ onMounted(async () => {
       </button>
       <!-- Whose proposal this is, and what a change does to it (copy-on-edit
            in words). Only once there IS a stored proposal and we know whose it
-           is — saying nothing during the load beats saying the wrong thing. -->
+           is — saying nothing during the load beats saying the wrong thing —
+           or while a save is out, when it shows the wait instead. -->
       <OwnershipLine
-        v-if="storedProposalId !== null && proposalOwnership !== 'unknown'"
+        v-if="
+          publishPhase !== 'idle' || (storedProposalId !== null && proposalOwnership !== 'unknown')
+        "
         :owned="ownsProposal"
         :author-name="authorName"
+        :saving="publishPhase !== 'idle'"
       />
     </div>
 
@@ -2964,7 +3074,10 @@ onMounted(async () => {
 
           <!-- Suggest mode: confirmed stops (pronounced) interleaved with the
                proposed stops (dimmed until picked). The bubble toggles a proposal
-               in/out; nothing else about the itinerary is editable here. -->
+               in/out; a confirmed stop shows a close icon on hover and comes
+               off the route on click (while more than two remain), then
+               reads as an unpicked candidate until ticked back on. Nothing
+               is routed until Continue. -->
           <div v-if="currentMode === 'suggest'" class="mb-4 flex flex-col gap-1">
             <h3 class="text-lg font-bold leading-tight text-primary-50">
               {{ t('proposal.suggestions.title') }}
@@ -2986,8 +3099,9 @@ onMounted(async () => {
               }"
               class="max-h-[16rem] overflow-y-auto"
             >
-              <!-- Timeline bubble: plain dot for confirmed stops, a clickable
-                   plus/close bubble for proposed ones. -->
+              <!-- Timeline bubble: a dot for confirmed stops (a removable one
+                   grows a close icon on hover), a clickable plus/close bubble
+                   for proposed ones. -->
               <Column style="width: 2.5rem" :pt="{ bodyCell: { class: 'timeline-col !p-0' } }">
                 <template #body="{ data: row, index }">
                   <div class="absolute inset-0 flex items-center justify-center">
@@ -2999,7 +3113,7 @@ onMounted(async () => {
                       ]"
                     />
                     <div
-                      v-if="row.kind === 'confirmed'"
+                      v-if="row.kind === 'confirmed' && row.selected && !stopRemovable"
                       class="relative z-10 rounded-full bg-primary-50"
                       :class="
                         index === suggestEndpointIdx.first || index === suggestEndpointIdx.last
@@ -3007,6 +3121,29 @@ onMounted(async () => {
                           : 'h-3 w-3'
                       "
                     />
+                    <button
+                      v-else-if="row.kind === 'confirmed' && row.selected"
+                      type="button"
+                      class="group relative z-10 flex h-5 w-5 cursor-pointer items-center justify-center rounded-full transition-colors hover:bg-primary-50 focus-visible:bg-primary-50"
+                      :aria-label="t('proposal.suggestions.removeAria', { name: row.name })"
+                      :title="t('proposal.map.removeStop', { name: row.name })"
+                      @click="toggleConfirmed(row.stopId)"
+                    >
+                      <span
+                        class="rounded-full bg-primary-50 group-hover:hidden group-focus-visible:hidden"
+                        :class="
+                          index === suggestEndpointIdx.first || index === suggestEndpointIdx.last
+                            ? 'h-4 w-4'
+                            : 'h-3 w-3'
+                        "
+                      />
+                      <AppIcon
+                        :path="mdiClose"
+                        :size="14"
+                        color="#23263d"
+                        class="hidden group-hover:block group-focus-visible:block"
+                      />
+                    </button>
                     <button
                       v-else
                       type="button"
@@ -3019,7 +3156,7 @@ onMounted(async () => {
                           ? t('proposal.suggestions.removeAria', { name: row.name })
                           : t('proposal.suggestions.addAria', { name: row.name })
                       "
-                      @click="toggleSuggested(row.stopId)"
+                      @click="toggleSuggestRow(row.stopId)"
                     >
                       <AppIcon
                         :path="row.selected ? mdiClose : mdiPlus"
@@ -3038,7 +3175,7 @@ onMounted(async () => {
                     <span
                       class="leading-tight"
                       :class="
-                        row.kind === 'confirmed'
+                        row.kind === 'confirmed' && row.selected
                           ? index === suggestEndpointIdx.first || index === suggestEndpointIdx.last
                             ? 'text-2xl font-bold text-primary-50'
                             : 'text-lg font-semibold text-primary-50'
@@ -3509,6 +3646,14 @@ onMounted(async () => {
                   :title="routeStats.countries.map((c) => countryName(c)).join(', ')"
                 />
               </div>
+              <ModelVersions
+                :items="[
+                  {
+                    label: t('proposal.models.routeBuilder'),
+                    version: calcResult?.route_builder_version,
+                  },
+                ]"
+              />
             </div>
 
             <!-- Stale timetable (expert edit or night moved): the recompute
@@ -3562,21 +3707,6 @@ onMounted(async () => {
             <span v-if="currentMode !== 'loading'">→</span>
             <AppSpinner v-else :size="16" />
           </button>
-
-          <!-- max-w-sm (inside InlineAlert) matches the itinerary table's own
-               cap. The parent panel is `w-fit`, so an uncapped sentence sets
-               the panel's width and collapses the flex-1 map beside it into a
-               sliver. -->
-          <InlineAlert v-if="calcFailureMsg" :message="calcFailureMsg">
-            <button
-              v-if="calcFailure && isRetryable(calcFailure)"
-              type="button"
-              class="w-fit cursor-pointer text-xs font-semibold text-primary-50 underline underline-offset-2"
-              @click="retryCalc"
-            >
-              {{ t('errors.retry') }}
-            </button>
-          </InlineAlert>
         </div>
 
         <!-- Continue button (suggest mode) — replaces Evaluate; carries the count
@@ -3588,9 +3718,11 @@ onMounted(async () => {
             @click="confirmStopSelection([...suggestSelected])"
           >
             {{
-              suggestSelectedCount === 0
-                ? t('proposal.suggestions.continueNone')
-                : t('proposal.suggestions.continue', suggestSelectedCount)
+              suggestSelectedCount > 0
+                ? t('proposal.suggestions.continue', suggestSelectedCount)
+                : suggestRemovedCount > 0
+                  ? t('proposal.suggestions.continueChanged')
+                  : t('proposal.suggestions.continueNone')
             }}
             <span>→</span>
           </button>
@@ -3601,14 +3733,6 @@ onMounted(async () => {
           >
             {{ t('proposal.suggestions.adoptAll') }}
           </button>
-        </div>
-
-        <!-- A failed save stays on screen until the next one. A successful
-             save needs no line of its own: the toast confirms an explicit
-             save, and the ownership line above the builder says every change
-             is saved automatically. -->
-        <div v-if="publishError" class="flex flex-col items-center gap-1">
-          <InlineAlert :message="publishError" />
         </div>
       </div>
 
@@ -3639,12 +3763,13 @@ onMounted(async () => {
           <MapView
             :stops="mapStops"
             :shape="mapShape"
+            :bridges="mapBridges"
             :segments="mapSegments"
             :suggested="mapSuggested"
             :available="mapAvailable"
             :alternatives="mapAlternatives"
             class="w-full h-full"
-            @toggle-suggested="toggleSuggested"
+            @toggle-suggested="toggleSuggestRow"
             @add-stop="onMapAddStop"
             @remove-stop="onMapRemoveStop"
             @select-alternative="onSelectAlternative"
@@ -3749,7 +3874,6 @@ onMounted(async () => {
         @select-composition="(id) => (selectedCompositionId = id)"
         @recalculate="recomputeWithSelection"
         @scope-change="onScopeChange"
-        @retry-family="retryFamily"
       >
         <template #discussion>
           <div

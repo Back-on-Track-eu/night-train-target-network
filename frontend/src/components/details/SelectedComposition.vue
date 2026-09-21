@@ -14,6 +14,7 @@ import { useCompareFormat } from '@/composables/useCompareFormat'
 import AppIcon from '@/components/AppIcon.vue'
 import CompositionFormation from '@/components/CompositionFormation.vue'
 import DetailPanel from '@/components/details/DetailPanel.vue'
+import { DOCS_DETAIL_PANEL } from '@/lib/docsLinks'
 import KassenzettelTable, { type ReceiptLine } from '@/components/details/KassenzettelTable.vue'
 import TripCycleYearStrip from '@/components/details/TripCycleYearStrip.vue'
 
@@ -247,6 +248,7 @@ const staffTotal = computed(() => trip.value?.staffing.total ?? null)
   <DetailPanel
     :title="composition.composition_id"
     :info="t('proposal.details.operation.selectedInfo')"
+    :doc-path="DOCS_DETAIL_PANEL.selectedComposition"
     :caption="pairCaption"
     :awaiting="awaiting"
     class="selected-composition"

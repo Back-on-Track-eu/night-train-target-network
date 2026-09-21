@@ -589,11 +589,22 @@ export interface DemandBlock {
   }
 }
 
+/** A calibrated parameter model (compositions, infrastructure) — version and
+ *  description only, no formulas; and the emissions model, whose factors the
+ *  app does not read. Optional: an older backend does not list them. */
+export interface ModelVersionSection {
+  version: string
+  description: string
+}
+
 export interface EvaluationModels {
   route_builder: EvaluationModelSection
   energy: EvaluationModelSection
   evaluation: EvaluationModelSection
   demand?: DemandModelSection
+  emissions?: ModelVersionSection
+  compositions?: ModelVersionSection
+  infrastructure?: ModelVersionSection
 }
 
 // --- GET /api/params/* : the per-unit rates a member was priced from --------
@@ -715,6 +726,7 @@ export interface CompositionsSection {
 // of any member since backend 0.5.0.
 export interface EvaluationResponse {
   calc_version: string
+  route_builder_version: string
   route_id: string
   views: EvaluationViews | null
   // Fetched with the views for a family member; absent for a stored proposal

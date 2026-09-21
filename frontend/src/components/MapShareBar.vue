@@ -33,7 +33,7 @@ import {
   mdiEmailOutline,
   mdiWhatsapp,
   mdiExportVariant,
-  mdiMessageAlertOutline,
+  mdiMessageTextOutline,
   mdiMapMarkerPath,
   mdiTimetable,
 } from '@mdi/js'
@@ -173,7 +173,7 @@ const menuItemClass =
         :class="pillButtonClass"
         @click="reportRef?.toggle($event)"
       >
-        <AppIcon :path="mdiMessageAlertOutline" :size="20" />
+        <AppIcon :path="mdiMessageTextOutline" :size="20" />
       </button>
 
       <Popover

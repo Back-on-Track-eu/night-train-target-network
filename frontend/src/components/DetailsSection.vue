@@ -37,6 +37,9 @@ import DemandTab from '@/components/details/DemandTab.vue'
 import DetailPanel from '@/components/details/DetailPanel.vue'
 import InfoPopover from '@/components/InfoPopover.vue'
 import DocsReadMore from '@/components/DocsReadMore.vue'
+import ModelVersions from '@/components/ModelVersions.vue'
+import { DOCS_DETAIL_PANEL } from '@/lib/docsLinks'
+import PriceBasisBadge from '@/components/PriceBasisBadge.vue'
 import { DOCS_DETAILS_TAB } from '@/lib/docsLinks'
 import type { ReportPanel } from '@/lib/feedbackLink'
 import { provideDetailsTabReport } from '@/composables/useDetailsTabReport'
@@ -249,6 +252,37 @@ const committedBlock = computed<DemandBlock | null>(() => {
   return member?.status === 'ok' ? member.demand : (props.result?.demand ?? null)
 })
 
+// The model versions named under each tab: what produced the figures on it.
+// The demand and cost versions are the result's own; the parameter models
+// come from the registry (store.models), which lists what the running
+// backend seeds and prices with.
+const tabModels = computed<Record<TabKey, { label: string; version: string | null | undefined }[]>>(
+  () => {
+    const m = store.models
+    const cost = { label: t('proposal.models.cost'), version: props.result?.calc_version }
+    // The demand block travels with the member views; the registry stands
+    // in until they land.
+    const demand = {
+      label: t('proposal.models.demand'),
+      version: committedBlock.value?.model_version ?? m?.demand?.version,
+    }
+    const compositions = {
+      label: t('proposal.models.compositions'),
+      version: m?.compositions?.version,
+    }
+    return {
+      demand: [demand],
+      supply: [compositions, demand],
+      operation: [cost, compositions],
+      infrastructure: [
+        { label: t('proposal.models.infrastructure'), version: m?.infrastructure?.version },
+        { label: t('proposal.models.energy'), version: m?.energy?.version },
+      ],
+      overhead: [cost],
+    }
+  },
+)
+
 const demandDefaults = computed(() => {
   const d = store.demandDefaults
   return d
@@ -273,6 +307,7 @@ const demandDefaults = computed(() => {
       <span class="flex flex-col">
         <span class="flex items-center gap-2 text-base font-semibold text-primary-50">
           {{ t('proposal.details.title') }}
+          <PriceBasisBadge feedback-topic="breakdown" />
           <span
             v-if="stale && !open"
             class="rounded-full bg-amber-400/20 px-2 py-px text-[10px] font-normal text-amber-200"
@@ -394,6 +429,7 @@ const demandDefaults = computed(() => {
         <DetailPanel
           :title="t('proposal.details.operation.compareTitle')"
           :info="t('proposal.details.operation.compareInfo')"
+          :doc-path="DOCS_DETAIL_PANEL.compositionComparison"
           :awaiting="awaits('schedule', 'prices', 'demand')"
         >
           <SupplyTable
@@ -448,6 +484,8 @@ const demandDefaults = computed(() => {
         @select-composition="(id) => emit('selectComposition', id)"
         @go-to-supply="tab = 'supply'"
       />
+
+      <ModelVersions :items="tabModels[tab]" />
     </div>
   </details>
 </template>

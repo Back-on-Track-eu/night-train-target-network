@@ -120,6 +120,8 @@ export default defineConfig({
           { text: 'Route planning', link: '/routing' },
           { text: 'Stop catalogue', link: '/stops' },
           { text: 'Demand and revenue', link: '/demand' },
+          { text: 'Views of costs and revenue', link: '/views' },
+          { text: 'Price basis: 2032 prices', link: '/price-basis' },
           { text: 'Emissions', link: '/emissions' },
           { text: 'Known gaps', link: '/not-modelled' },
         ],

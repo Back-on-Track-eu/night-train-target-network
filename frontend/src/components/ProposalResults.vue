@@ -1,13 +1,11 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useStore } from '@/stores/store'
 import type { Composition, EvaluationResponse, MapScope, ProposalCalcSummary } from '@/types/api'
 import type { ProposalFamily } from '@/composables/useProposalFamily'
-import { messageKey } from '@/lib/apiError'
 import type { ExampleOd } from '@/lib/detailsScope'
-import { daysPerWeekFromRequest } from '@/lib/detailsScope'
-import { useCompareFormat } from '@/composables/useCompareFormat'
+import { daysPerWeekFromRequest, demandFromRequest } from '@/lib/detailsScope'
 import ScenarioSwitches from '@/components/ScenarioSwitches.vue'
 import MainKpiGrid from '@/components/MainKpiGrid.vue'
 import CompareSection from '@/components/CompareSection.vue'
@@ -15,7 +13,7 @@ import DetailsSection from '@/components/DetailsSection.vue'
 import MobileSettingsCard from '@/components/MobileSettingsCard.vue'
 import CostRevenueBreakdown from '@/components/CostRevenueBreakdown.vue'
 import InfoHint from '@/components/InfoHint.vue'
-import ReportProblemLink from '@/components/ReportProblemLink.vue'
+import ModelVersions from '@/components/ModelVersions.vue'
 import { DOCS_SCENARIO } from '@/lib/docsLinks'
 import Skeleton from 'primevue/skeleton'
 
@@ -66,11 +64,9 @@ const emit = defineEmits<{
   selectComposition: [compositionId: string]
   recalculate: []
   scopeChange: [scope: MapScope]
-  retryFamily: []
 }>()
 
 const { t } = useI18n()
-const fmt = useCompareFormat()
 const store = useStore()
 
 const selectedScenario = computed(
@@ -92,34 +88,16 @@ const frequencyLabel = computed(() => {
   return base
 })
 
-// The prices behind the revenue: the fare span across the classes the train
-// carries, and the catering contribution when it is not zero.
-const priceLabel = computed(() => {
-  const fares = props.committedRequest?.fares_eur_per_km as Record<string, number> | undefined
-  if (!fares) return null
-  const carried = Object.entries(fares).filter(
-    ([classMain]) => (selectedComposition.value?.capacity.by_class[classMain]?.places ?? 0) > 0,
-  )
-  if (carried.length === 0) return null
-  const rates = carried.map(([, rate]) => rate)
-  const span =
-    Math.min(...rates) === Math.max(...rates)
-      ? fmt.dec3(rates[0])
-      : `${fmt.dec3(Math.min(...rates))}–${fmt.dec3(Math.max(...rates))}`
-  // Catering is per class now; the line names the span rather than pretending
-  // there is one figure.
-  const catering = Object.values(
-    (props.committedRequest?.catering_eur_per_pax as Record<string, number>) ?? {},
-  )
-  const cateringPart = catering.some((v) => v !== 0)
-    ? t('proposal.compare.cateringPart', {
-        value:
-          Math.min(...catering) === Math.max(...catering)
-            ? fmt.eur2(catering[0])
-            : `${fmt.eur2(Math.min(...catering))}–${fmt.eur2(Math.max(...catering))}`,
-      })
-    : ''
-  return t('proposal.compare.pricePart', { span }) + cateringPart
+// The demand level behind the passenger figures, by its name (S/M/L/XL or
+// custom) — the one demand input that shapes the result today. Fares are
+// deliberately not on this line: they change the revenue, not the demand,
+// and naming them here suggested a price elasticity the model does not have.
+const demandLabel = computed(() => {
+  const demand = demandFromRequest(props.committedRequest)
+  if (!demand) return null
+  return t('proposal.compare.demandPart', {
+    name: t(`proposal.details.potential.levels.${demand.level}.name`, demand.level),
+  })
 })
 
 // Baseline for the delta arrows: base network, nothing switched on, SAME
@@ -151,16 +129,16 @@ const axisCompositions = computed(() => {
     .map((id) => props.compositions.find((c) => c.composition_id === id))
     .filter((c): c is Composition => c !== undefined)
 })
-const familyError = computed(() => {
-  const f = props.family.failure.value
-  return f ? t(messageKey(f)) : null
-})
-
 const greyed = computed(() =>
   props.paramsStale || props.dimmed ? 'pointer-events-none opacity-40' : '',
 )
 
-function scrollToSettings() {
+// "change ↓" on the inputs line: open the Details card (its open state lives
+// in the store, see DetailsSection) and bring it into view. Opened first, so
+// the scroll lands on a card that already has its height.
+async function scrollToSettings() {
+  store.detailsOpen = true
+  await nextTick()
   document
     .getElementById('proposal-details')
     ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -177,8 +155,11 @@ function scrollToSettings() {
           <div class="flex flex-col gap-1">
             <h2 class="flex items-center gap-1.5 text-base font-semibold text-primary-50">
               {{ t('proposal.compare.scenarioTitle') }}
-              <InfoHint :text="t('proposal.compare.scenarioHint')" :docs-href="DOCS_SCENARIO" />
-              <ReportProblemLink topic="kpis" />
+              <InfoHint
+                :text="t('proposal.compare.scenarioHint')"
+                :docs-href="DOCS_SCENARIO"
+                feedback-topic="kpis"
+              />
             </h2>
             <p class="text-xs text-primary-50/60">{{ t('proposal.compare.scenarioBody') }}</p>
           </div>
@@ -228,8 +209,9 @@ function scrollToSettings() {
                 t('proposal.compare.evaluatedWith', {
                   composition: selectedCompositionId ?? '—',
                   frequency: frequencyLabel ?? '—',
+                  demand: demandLabel ?? '—',
                 })
-              }}<template v-if="priceLabel">{{ priceLabel }}</template>
+              }}
             </span>
             <button
               type="button"
@@ -250,6 +232,22 @@ function scrollToSettings() {
           <p v-if="summary.demand_kpis_placeholder" class="text-[11px] text-primary-50/40">
             {{ t('proposal.evaluation.impact.placeholder') }}
           </p>
+          <!-- Every model a tile reads: journey time from the route builder,
+               passengers from demand, subsidy from the cost model, CO₂e from
+               emissions. The demand block travels with the member views, so
+               until they land (or for a stored proposal without them) the
+               registry's version stands in. -->
+          <ModelVersions
+            :items="[
+              { label: t('proposal.models.routeBuilder'), version: result.route_builder_version },
+              { label: t('proposal.models.cost'), version: result.calc_version },
+              {
+                label: t('proposal.models.demand'),
+                version: result.demand?.model_version ?? store.models?.demand?.version,
+              },
+              { label: t('proposal.models.emissions'), version: store.models?.emissions?.version },
+            ]"
+          />
         </section>
 
         <!-- Zone B -->
@@ -264,7 +262,6 @@ function scrollToSettings() {
           :n-cells="family.document.value?.stats.n_members ?? null"
           :selected-scenario-id="store.selectedScenarioId"
           :selected-composition-id="selectedCompositionId"
-          :error-message="familyError"
           :grid-available="axisCompositions.length > 1"
           @select-scenario="(id) => (store.selectedScenarioId = id)"
           @select-cell="
@@ -273,7 +270,6 @@ function scrollToSettings() {
               emit('selectComposition', compositionId)
             }
           "
-          @retry="emit('retryFamily')"
         />
       </div>
 

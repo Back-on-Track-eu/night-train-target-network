@@ -115,13 +115,23 @@ interface MapAlternative {
   lines: [number, number][][]
 }
 
+type MapShape =
+  | { type: 'LineString'; coordinates: [number, number][] }
+  | { type: 'MultiLineString'; coordinates: [number, number][][] }
+
 const props = defineProps<{
   stops: MarkerStop[]
-  shape?: { type: string; coordinates: [number, number][] } | null
+  // The routed line: one polyline, or several runs (a MultiLineString) when
+  // legs are missing between them — see `bridges`.
+  shape?: MapShape | null
   // When provided, the route is drawn per-leg so out-of-scope parts can be
   // dimmed (highlighted=false) and each leg can be hovered for its travel time.
   // Falls back to `shape` (all highlighted) when absent.
   segments?: MapSegment[] | null
+  // Straight lines standing in for legs not routed yet (suggest mode, after
+  // a stop was taken off the route — lib/suggestShape.ts). Drawn on the dim
+  // layer beside `shape` so they read as provisional.
+  bridges?: [number, number][][] | null
   // Proposed stops along the temporary route (suggest mode). Rendered as their
   // own interactive markers, independent of `stops`/`shape` so toggling one
   // never redraws the route line or refits the map.
@@ -511,8 +521,13 @@ function syncPolyline() {
   // arrives as one stitched polyline with no per-leg boundaries, so it carries
   // no hover properties.
   if (props.shape) {
-    src.setData({ type: 'FeatureCollection', features: [lineFeature(props.shape.coordinates)] })
-    srcDim.setData({ type: 'FeatureCollection', features: [] })
+    const runs =
+      props.shape.type === 'MultiLineString' ? props.shape.coordinates : [props.shape.coordinates]
+    src.setData({ type: 'FeatureCollection', features: runs.map((run) => lineFeature(run)) })
+    srcDim.setData({
+      type: 'FeatureCollection',
+      features: (props.bridges ?? []).map((coords) => lineFeature(coords)),
+    })
     return
   }
 
@@ -841,7 +856,7 @@ onMounted(() => {
 // Stops/shape change → remarker, relabel, redraw, refit. Segments (scope)
 // change → redraw only, so toggling scope doesn't reset the user's manual zoom.
 watch(
-  () => [props.stops, props.shape],
+  () => [props.stops, props.shape, props.bridges],
   () => {
     syncMarkers()
     syncStopLabels()

@@ -28,6 +28,8 @@ export interface CompareKpi {
   format(value: number, fmt: KpiFormatters): string
   /** i18n unit key under proposal.compare.units, if any. */
   unitKey?: string
+  /** A euro figure — shown with the "2032 prices" sticker (PriceBasisBadge). */
+  isMoney?: boolean
 }
 
 export interface KpiFormatters {
@@ -72,6 +74,7 @@ export const COMPARE_KPIS: readonly CompareKpi[] = [
     value: (s) => (s.net_eur_per_year == null ? null : -s.net_eur_per_year / M),
     format: (v, f) => f.millionEur(v),
     unitKey: 'millionEurYear',
+    isMoney: true,
   },
   {
     key: 'shiftAir',
@@ -104,6 +107,7 @@ export const COMPARE_KPIS: readonly CompareKpi[] = [
     value: (s) => s.subsidy_eur_per_t_co2 ?? null,
     format: (v, f) => f.int(v),
     unitKey: 'eurPerT',
+    isMoney: true,
   },
 ]
 

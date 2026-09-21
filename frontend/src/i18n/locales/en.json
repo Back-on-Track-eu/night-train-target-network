@@ -95,7 +95,7 @@
       "copyFailed": "Couldn't copy the link — select and copy it from the address bar.",
       "email": "E-mail",
       "whatsapp": "WhatsApp",
-      "report": "Report a problem",
+      "report": "Provide feedback",
       "more": "Share via…",
       "stopsCount": "{count} stop | {count} stops",
       "countriesCount": "{count} country | {count} countries",
@@ -103,8 +103,8 @@
       "messagePlain": "Europe needs a night train from {origin} to {destination}. Here's what it would take:",
       "emailSubject": "Europe needs a {origin}–{destination} night train",
       "emailBody": "This is what a {origin} – {destination} night train would look like — route, timetable and running costs, modelled on the Back-on-Track Target Network:",
-      "reportRoute": "Problem with the route",
-      "reportTimetable": "Problem with the timetable"
+      "reportRoute": "Feedback on the route",
+      "reportTimetable": "Feedback on the timetable"
     },
     "funFacts": {
       "label": "Did you know?",
@@ -199,6 +199,7 @@
       "backToEdit": "Back to edit",
       "continue": "Continue with {count} additional stop | Continue with {count} additional stops",
       "continueNone": "Continue without additional stops",
+      "continueChanged": "Continue with the changed route",
       "adoptAll": "Adopt all suggested stops and continue",
       "addAria": "Add {name} to the route",
       "removeAria": "Remove {name} from the route"
@@ -302,6 +303,13 @@
         "per_trip_pair_per_section": "By route section",
         "per_trip_per_stop": "By stop"
       },
+      "viewHints": {
+        "route": "The whole proposal in one figure set: every segment, stop, coach and ticket relation, both directions, a full year. Nothing is allocated — each item is summed.",
+        "per_trip_pair": "One outbound-and-return pair on its own. Differs from the full route only on a Y- or X-shaped route with several pairs.",
+        "per_trip_pair_per_country": "Costs land where the train drives or the event happens, revenue where the passengers sit. Country cells add up to the full route.",
+        "per_trip_pair_per_section": "A physical piece of the trip between two stops, both directions: every cost occurring there and the km-share of everyone on board. Sections overlap, so they do not add up.",
+        "per_trip_per_stop": "One stop call of one direction. Only passengers boarding or alighting here count — the view for whether a call pays. Stop cells add up to the full route."
+      },
       "norms": {
         "per_year": "Per Year",
         "per_operating_day": "Per Operating Day",
@@ -376,10 +384,8 @@
       },
       "noData": "No data for this selection.",
       "showRaw": "Raw JSON",
-      "calcVersion": "calc version",
       "info": {
-        "iconLabel": "Show cost factor details",
-        "readMore": "Read the full explanation"
+        "iconLabel": "Show cost factor details"
       },
       "classes": {
         "all": "All Classes",
@@ -408,15 +414,29 @@
       "ownNote": "changes are saved automatically",
       "copyLabel": "{name}'s proposal",
       "copyNote": "any change you make is saved as your own copy",
-      "someone": "Someone"
+      "someone": "Someone",
+      "saving": "Saving proposal…"
+    },
+    "models": {
+      "routeBuilder": "Route builder",
+      "cost": "Cost model",
+      "demand": "Demand model",
+      "compositions": "Composition model",
+      "infrastructure": "Infrastructure model",
+      "energy": "Energy model",
+      "emissions": "Emissions model"
+    },
+    "priceBasis": {
+      "badge": "2032 prices",
+      "hint": "All costs and fares are 2032 money, escalated from each source's price year at a documented rate. One exception: rolling stock is bought now, its price stays at 2026."
     },
     "compare": {
       "scenarioTitle": "Scenario and main figures",
       "scenarioBody": "Simulate the network, operating conditions and further potential political measures.",
-      "scenarioHint": "A scenario combines a rail network with operating conditions and, soon, price measures. The figures are for the selected one; the baseline is today's network and rules.",
+      "scenarioHint": "Examine your route under different scenarios. Each combines a rail network with operating conditions and, soon, price measures; the baseline is today's network and rules.",
       "title": "Compare across scenarios",
       "body": "How the selected train fares under every scenario, and every train under the selected one.",
-      "titleHint": "The selected train under every scenario, and every train under the selected scenario, on one figure of your choice. Each cell is a full evaluation; the baseline is marked.",
+      "titleHint": "Compare the figures across scenarios and compositions: the selected train in every scenario, every train in the selected one, on a figure of your choice. The baseline is marked.",
       "complete": "Every combination computed.",
       "kpiPicker": "Figure to compare",
       "viewBars": "Scenarios",
@@ -435,7 +455,8 @@
       "noBaselineYet": "baseline pending",
       "vsBaseline": "vs. baseline",
       "measuresNone": "Measures: none — today's prices and taxes",
-      "evaluatedWith": "Evaluated with {composition} · {frequency}",
+      "evaluatedWith": "Evaluated with {composition} · {frequency} · {demand}",
+      "demandPart": "{name} demand",
       "change": "change ↓",
       "staleMarker": "results outdated",
       "comingSoon": "coming soon",
@@ -477,8 +498,8 @@
         "pax": "Passengers carried per year in both directions: the demand you set, as far as the train's classes can seat it.",
         "paxKm": "Each passenger trip times the distance travelled. The basis of the revenue per km and of the CO₂e saving.",
         "subsidy": "What the route needs per year to cover all costs and the operator's margin after ticket and other revenue. A surplus shows as none.",
-        "shiftAir": "Passengers who would otherwise have flown. The share grows with journey length: none under 300 km, everyone from 1,200 km.",
-        "shiftOther": "The remaining passengers: half would have driven, half would not have travelled at all (induced trips).",
+        "shiftAir": "Would otherwise have flown; the share grows with journey length (none under 300 km, all from 1,200 km). Interim manual demand model — an automatic one is coming.",
+        "shiftOther": "The remaining passengers: half would have driven, half would not have travelled at all (induced trips). Interim manual demand model — an automatic one is coming.",
         "co2": "Greenhouse gas avoided per year, incl. aviation's non-CO₂ warming: shifted passenger-km at the plane's or car's factor, less the train's. Induced trips count against it.",
         "subsidyPerT": "Necessary subsidy divided by the CO₂e saved: what one tonne avoided costs the public. 0 when the route needs no subsidy."
       },
@@ -497,8 +518,6 @@
       },
       "loading": "Computing every combination …",
       "partial": "{received} of {total} combinations available — the rest could not be computed.",
-      "pricePart": " · fares {span} €/km",
-      "cateringPart": " · catering {value} €/passenger",
       "axisBreak": "axis starts at {value}, not zero"
     },
     "supply": {
@@ -641,7 +660,7 @@
       "schedule": {
         "title": "Schedule",
         "caption": "days per week, average over the year",
-        "info": "How often the train runs, as an average over the year — one figure, no seasons. Operating days are 366 (2032 is a leap year) times days per week over seven; departures are operating days times two directions; train-km and place-km follow from the route length and the formation. Trainsets are the rakes the cycle needs at this frequency: a train that runs seven days a week and takes two days to come back needs two. Which weekday the train runs is not modelled.",
+        "info": "How often the train runs, as one average over the year. Departures, train-km and place-km follow from it; trainsets are the rakes the cycle needs at this frequency.",
         "operatingDays": "Operating days",
         "departures": "Departures",
         "trainKm": "Train-km",
@@ -656,7 +675,7 @@
       "prices": {
         "title": "Places and prices",
         "caption": "{composition} · {places} places",
-        "info": "What the train offers and what it charges. The tariff is three parts, each per class. The BASE FARE has a fixed term and a distance term — a berth has a price of admission a short journey pays as surely as a long one, so pricing on distance alone made short connections implausibly cheap. ADDITIONAL SERVICES is the revenue from bicycles, oversized luggage and reservations sold with the ticket; it is ordinary ticket revenue, never negative, and it carries overhead and the profit requirement like any other fare. CATERING is the odd one: one signed NET figure per passenger, the restaurant’s own sales less its own costs, and therefore outside those two bases. It differs by class because the classes differ in what their base fare already includes. The two example columns price the BERTH only — fixed plus distance — over the longest and shortest journey the route sells. How many of these places actually sell is set under Demand.",
+        "info": "What the train offers and charges, per class: a base fare with a fixed and a distance term, additional services, and a net catering contribution. Fares do not change demand.",
         "class": "Class",
         "places": "Places",
         "shareOfTrain": "Share of train",
@@ -694,8 +713,8 @@
       },
       "operation": {
         "compareTitle": "Compare compositions",
-        "compareInfo": "Every composition in the catalogue, evaluated on THIS route under the selected scenario — so the figures are comparable with each other and with nothing else. Trainsets first: it is the first thing that changes when the schedule does. The two density columns are metres and tonnes per place, the physical price of comfort; they replace the catalogue's indicative unit costs, which said the same thing about every route.",
-        "selectedInfo": "The composition the figures on this page were computed with. Below it, what one trip costs to run, in three receipts: the rakes and their upkeep, the locomotive hours, and the people on board. Fleet euros are annual breakdown leaves divided by the year's departures; locomotive and staff euros are per single trip, because the two directions differ in running time and in where the duty boundaries fall.",
+        "compareInfo": "Every composition of the catalogue evaluated on this route under the selected scenario, so the figures compare with each other and with nothing else.",
+        "selectedInfo": "The composition the figures were computed with, and what one trip costs to run: the rakes and their upkeep, the locomotive hours and the people on board.",
         "onePairOfMany": "figures for one trip pair of several",
         "coaches": "{n} coaches",
         "places": "{n} places",
@@ -770,7 +789,7 @@
         "noCrossings": "none on this route",
         "tac": {
           "title": "Track access charges",
-          "info": "What each infrastructure manager charges for the run over its network, country by country. The \"charged on\" column lists the terms that country actually levies on this trip — distance (at the day rate, or partly at the night rate where the country has a night band and the trip falls in it), gross weight, places, a fixed per-kilometre add-on, stop fees, a share of revenue, a congestion surcharge — and leaves out the ones it does not. A crossing billed by its own operator is a separate line. The outbound trip is shown; the two directions can differ where a night band catches one and not the other.",
+          "info": "What each infrastructure manager charges for the run over its network, country by country, on the terms that country levies: distance, weight, places, stops, revenue share.",
           "strip": "Track access charges, from one trip",
           "total": "Track access"
         },
@@ -789,7 +808,7 @@
         },
         "facilities": {
           "title": "Service facilities — parking",
-          "info": "Stabling the formation between arrival and the next departure, at each arrival terminal, on the basis that country prices — per metre and started day, per started hour, or per event — after its free allowance, plus the power drawn while standing. Priced per operating day, one stay per location; the per-trip line is one stay averaged over both ends.",
+          "info": "Stabling between arrival and the next departure at each terminal, on the basis that country prices, plus the power drawn while standing. One stay per location and day.",
           "caption": "one stay per terminal per operating day",
           "locations": "stabling locations",
           "stay": "Stay",
@@ -812,7 +831,7 @@
         },
         "energy": {
           "title": "Energy",
-          "info": "Traction energy for the run, country by country: the kWh the train draws over that country's kilometres, priced at the country's tariff — a flat rate, or a day and a night rate where the country has a night band, with the share drawn inside it — plus the catenary charge where one is levied. All figures are net of VAT; the model carries no VAT rate.",
+          "info": "Traction energy for the run, country by country: the kWh drawn over its kilometres at its tariff, day and night rate where it has a night band, plus any catenary charge.",
           "perTrip": "drawn on one trip",
           "perTrainKm": "Per train-km",
           "eurPerKwh": "Average €/kWh",
@@ -828,7 +847,7 @@
         "catenary": "catenary {value}",
         "year": {
           "title": "Infrastructure per year",
-          "info": "The four infrastructure leaves of the cost breakdown, per year, each with its cost per train-kilometre and its share of the infrastructure total. These are the same figures the Costs and revenue section reports under Infrastructure.",
+          "info": "The four infrastructure lines of the cost breakdown per year, each with its cost per train-kilometre and its share of the total — the same figures as under Costs and revenue.",
           "tac": "Track access",
           "stations": "Station charges",
           "parking": "Parking",
@@ -850,7 +869,7 @@
         "variable": {
           "title": "Variable overhead",
           "covers": "Covers sales, distribution and customer service.",
-          "info": "The operator's selling costs, charged as a share of ticket revenue rather than of the full cost — that is how the model defines them. Catering is outside the base: the contribution is already net of the restaurant's own sales, costs and overhead, so charging distribution overhead on it would count the same overhead twice.",
+          "info": "The operator's selling costs, charged as a share of ticket revenue rather than of the full cost. Catering is outside the base: its contribution is already net of overhead.",
           "strip": "Variable overhead, from one trip",
           "caption": "a share of ticket revenue",
           "outcome": "Variable overhead, per trip"
@@ -858,14 +877,14 @@
         "fixed": {
           "title": "Fixed overhead",
           "covers": "Covers administration, management and planning.",
-          "info": "The operator's running of itself, charged as a share of its OTHER operating costs. Two things are outside that base on purpose: variable overhead, which is already an overhead, and the infrastructure charges, which are paid to somebody else and are not the operator's to administer.",
+          "info": "The operator's running of itself, charged as a share of its other operating costs — not of variable overhead, and not of the infrastructure charges paid to somebody else.",
           "strip": "Fixed overhead, from one trip",
           "caption": "a share of the operator's other costs",
           "outcome": "Fixed overhead, per trip"
         },
         "margin": {
           "title": "Expected margin",
-          "info": "The operating profit the operator is expected to keep, as a share of ticket revenue. It is not a cost anybody receives — it is subtracted in the net result, which is why a route can need a subsidy while every bill is paid. Catering is outside this base too, for the same reason it is outside the overhead base.",
+          "info": "The operating profit the operator is expected to keep, as a share of ticket revenue. Nobody receives it: it is subtracted in the net result, so a route can need a subsidy with all bills paid.",
           "strip": "Expected margin, from one trip",
           "caption": "a share of ticket revenue",
           "outcome": "Expected margin, per trip",
@@ -886,7 +905,7 @@
       "follows": {
         "title": "What follows",
         "caption": "{composition} · per year, both directions",
-        "info": "What the schedule and the prices earn with the committed demand: passengers, place-km sold, utilisation and revenue per year, both directions. Ticket revenue and the catering contribution are earned in different ways and one of them can be negative, so they stay apart. Schedule and price edits preview here; a demand edit does not — this panel waits for the recalculation, so it never mixes a previewed demand with a calculated one.",
+        "info": "What the schedule and prices earn with the committed demand: passengers, place-km sold, utilisation and revenue per year. Demand edits show only after a recalculation.",
         "noDemand": "No calculated demand yet — recalculate to see what the schedule and the prices earn.",
         "passengersPerYear": "passengers per year",
         "soldPerDeparture": "Places sold per departure",
@@ -909,7 +928,7 @@
       },
       "potential": {
         "title": "Potential demand",
-        "info": "Passengers per year, both directions, who would take this route. Four levels give a starting figure; any figure can be typed, which makes the level custom. The chosen level is saved with the proposal. The frequency under Supply › Schedule turns the year into a load per departure: fewer departures fill each train fuller, and what a train cannot seat is not served.",
+        "info": "Passengers per year over both directions who would take this route. Four levels give a starting figure; any figure can be typed. What a train cannot seat is not served.",
         "levels": {
           "small": {
             "short": "S",
@@ -940,7 +959,7 @@
       "groupsPanel": {
         "title": "Demand by traveller group",
         "caption": "shares of the total · classes in order of preference",
-        "info": "How the total splits into traveller groups, and which classes each group books, in order. The allocation runs four rounds — every group in order (Leisure – comfort, Leisure – group, Senior leisure, Leisure – budget, Business) releases 50, then 20, 20 and 10 % of its demand; 80 % of that seats along the preference list, first class until full, then the next, and 20 % spread evenly over the group’s other listed classes. A group sits only in the classes it lists; what none of them can seat is not served. Expected values, never random draws, so a recalculation reproduces the same figures.",
+        "info": "How the demand splits into traveller groups and which classes each group books, in order. Allocated in rounds by a fixed rule, so a recalculation reproduces the same figures.",
         "group": "Group",
         "share": "Share",
         "perYear": "Per year",
@@ -952,7 +971,7 @@
       },
       "ladder": {
         "title": "Utilisation by composition",
-        "info": "The same demand allocated to every composition of the family, so one demand reads as a utilisation on each train. Fill = places served, the percentage its utilisation, the number after the bar the composition’s places; the faint dashed line below a bar is demand no listed class could seat. Per trip is one departure, one direction; a month is a twelfth of the year. Click a composition to select it.",
+        "info": "The same demand on every composition of the family, read as a utilisation per train. The dashed tail is demand no listed class could seat. Click a composition to select it.",
         "sameDemand": "the same demand on every composition ·",
         "atFrequency": "at {days} days per week, {departures} departures a year",
         "units": {
@@ -984,7 +1003,7 @@
       "od": {
         "title": "Demand by OD pair",
         "caption": "shares of the demand · filled from the stop weights, pin the pairs you know",
-        "info": "The share of the demand each sellable OD pair gets — a boarding stop before an alighting stop. The matrix is filled from one thing: a weight per stop in the margins — a pair’s share is its boarding weight times its alighting weight. The presets write those weights by position along the route (long journeys: early boarding, late alighting; short hops the reverse; mid: the middle stops); any weight can be typed over, a big city pulling more. Any cell can then be typed over: it is pinned and the rest rescales so the total stays 100 %. A place is sold once per night, so the distribution moves place-km and revenue, not passengers. One matrix for all classes.",
+        "info": "The share of the demand each boarding–alighting pair gets, from one weight per stop: a preset or your own, cells pinnable. It moves place-km and revenue, not heads.",
         "noRoute": "The OD pairs appear once the route has been calculated.",
         "stopWeights": "Stop weights",
         "presets": {
@@ -1021,8 +1040,8 @@
     },
     "docsReadMore": "Read more in the documentation",
     "routeStatsHint": "The path comes from a rail routing engine on OpenStreetMap track. Average speed covers the whole journey, stops included, and changes with the selected composition.",
-    "report": {
-      "panel": "Report a problem with this panel"
+    "feedback": {
+      "panel": "Provide feedback"
     }
   },
   "gallery": {
@@ -1049,9 +1068,14 @@
       "button": "Search"
     },
     "welcome": {
-      "pitch": "We at Back-on-Track are drawing up a Target Network 2032: around 300 night train connections across the continent, twice as many as today, carrying three times the passengers. This is where you come in. Pick two cities, draw the night train of your dreams on a real map of the European rail network, and see right away what it would cost, how much public money it would need and how much CO₂ it would save — realistic timetables, twelve train compositions, all of it free and open source. The best suggestions become the backbone of our study for a European night train network in 2032, which we will present to the European Commission and to national transport authorities, and everyone who contributes gets credited. Curious about the numbers behind all this? Have a look at {source}.",
+      "pitch": {
+        "network": "We at Back-on-Track are drawing up a Target Network 2032: around 300 night train connections across the continent, twice as many as today, carrying three times the passengers.",
+        "contribute": "This is where you come in. Pick two cities, draw the night train of your dreams on a real map of the European rail network, and see right away what it would cost, how much public money it would need and how much CO₂ it would save — realistic timetables, twelve train compositions, all of it free and open source.",
+        "study": "The best suggestions become the backbone of our study for a European night train network in 2032, which we will present to the European Commission and to national transport authorities, and everyone who contributes gets credited. Curious about the numbers behind all this? Have a look at {source}."
+      },
       "source": "our reports and studies",
       "browse": "See other people's suggestions",
+      "suggestComposition": "Suggest a new composition",
       "about": "About"
     },
     "section": {
