@@ -524,6 +524,56 @@ class TestCompositions:
 
 
 # =============================================================================
+# GET /api/params/TicketVat — VAT on rail tickets, per country
+# =============================================================================
+
+
+@pytest.fixture(scope="module")
+def vat_body(api_base):
+    resp = requests.get(f"{api_base}/api/params/TicketVat", timeout=15)
+    assert resp.status_code == 200
+    return resp.json()
+
+
+class TestTicketVat:
+    """models/demand/calib/vat/vat_calibration.py seeded through
+    input_params.ticket_vat_rates and served for the frontend's
+    distance-weighted display of gross fares."""
+
+    def test_response_layout(self, vat_body):
+        assert set(vat_body) >= {"rule", "sources", "count", "rates"}
+        assert vat_body["count"] == len(vat_body["rates"])
+        assert vat_body["sources"], "no source registered for any rate"
+
+    def test_one_row_per_seeded_country(self, vat_body, tracks_body):
+        """The VAT table covers exactly the countries the track table
+        covers — a country with track parameters but no VAT row would show
+        a fare with no tax where the passenger pays one."""
+        vat_codes = {r["country_code"] for r in vat_body["rates"]}
+        track_codes = {t["country_code"] for t in tracks_body["track_infrastructures"]}
+        assert vat_codes == track_codes
+
+    def test_rates_are_fractions_with_provenance(self, vat_body):
+        for r in vat_body["rates"]:
+            for field in ("vat_domestic_per", "vat_international_per"):
+                assert 0.0 <= r[field] <= 0.3, (
+                    f"{r['country_code']}.{field} = {r[field]}"
+                )
+            assert r["status"] in {"sourced", "assumed", "no_railway", "blocked"}
+            # JSON object keys are strings; the id on the row is a number.
+            assert str(r["source_id"]) in vat_body["sources"], r["country_code"]
+
+    def test_the_documented_international_treatment(self, vat_body):
+        """T&E 2025: Germany taxes the German section of an international
+        ticket at 7 %, France exempts it — the two ends of the rule the
+        frontend applies. Pinned so a reseed cannot silently swap them."""
+        by = {r["country_code"]: r for r in vat_body["rates"]}
+        assert by["DE"]["vat_international_per"] == pytest.approx(0.07)
+        assert by["FR"]["vat_international_per"] == 0.0
+        assert by["FR"]["vat_domestic_per"] == pytest.approx(0.10)
+
+
+# =============================================================================
 # GET /api/models — the static model registry (WP18)
 # =============================================================================
 
