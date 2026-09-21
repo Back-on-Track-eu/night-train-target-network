@@ -1011,7 +1011,7 @@
       }
     },
     "docsReadMore": "Mehr dazu in der Dokumentation",
-    "routeStatsHint": "Weg aus einer Schienen-Routing-Engine auf OpenStreetMap-Gleisen. Durchschnittstempo: Distanz durch die ganze Fahrzeit inkl. Halten – hängt also vom Zug ab."
+    "routeStatsHint": "Weg aus einer Schienen-Routing-Engine auf OpenStreetMap-Gleisen. Durchschnittstempo: Distanz durch die ganze Fahrzeit inkl. Halten – hängt von der gewählten Zugbildung ab."
   },
   "gallery": {
     "heading": "Bringen wir die Nachtzüge zurück aufs Gleis!",

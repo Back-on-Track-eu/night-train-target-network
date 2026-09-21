@@ -1011,7 +1011,7 @@
       }
     },
     "docsReadMore": "Read more in the documentation",
-    "routeStatsHint": "The path comes from a rail routing engine on OpenStreetMap track. Average speed is distance over the full scheduled journey, stops included — it changes with the train."
+    "routeStatsHint": "The path comes from a rail routing engine on OpenStreetMap track. Average speed covers the whole journey, stops included, and changes with the selected composition."
   },
   "gallery": {
     "heading": "Bring the night trains back on track!",
