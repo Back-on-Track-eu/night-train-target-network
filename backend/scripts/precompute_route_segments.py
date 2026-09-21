@@ -100,7 +100,6 @@ import gzip
 import json
 import os
 import random
-import shutil
 import sys
 import time
 from collections import deque
@@ -128,7 +127,12 @@ resolve_env()
 from adapters.data_loader_from_db import DBDataLoader  # noqa: E402
 from adapters.route_segment_repository import RouteSegmentRepository  # noqa: E402
 from db.schema import ROUTE_CACHE_TABLES  # noqa: E402
-from models.route.routing.gauge import GaugeMismatchError, resolve_trip_gauge  # noqa: E402
+from models.route.model import SUPPORTED_GAUGES_MM  # noqa: E402
+from models.route.routing.gauge import (  # noqa: E402
+    GaugeMismatchError,
+    resolve_trip_gauge,
+    stop_supports_gauge,
+)
 from models.route.routing.rail_router import (  # noqa: E402
     DEFAULT_ROUTING_GRAPH_KEY,
     CountryIndex,
@@ -154,6 +158,12 @@ PROGRESS_TTY_INTERVAL_S = 1.0
 PROGRESS_LOG_INTERVAL_S = 300.0  # redirected output: one line every 5 min
 RATE_WINDOW_S = 300.0  # ETA from the last five minutes, not the run average
 BAR_WIDTH = 24
+SNAP_HELPER_CANDIDATES = 8  # second points tried per stop before giving up
+MB = 1024 * 1024
+COPY_CHUNK = 16 * MB
+# zlib's own default. gzip.open() defaults to 9, which is 2-3x slower on
+# this data for a file barely smaller.
+GZIP_LEVEL = 6
 FAILURE_COLUMNS = [
     "stop_lo",
     "stop_hi",
@@ -365,6 +375,15 @@ class ProgressReporter:
             self.n_ok += 1
         else:
             self.n_fail += 1
+        self._tick()
+
+    def advance(self, n: int) -> None:
+        """Count n units of work at once — for byte-sized passes (gzip)
+        rather than one call per item."""
+        self.n_ok += n
+        self._tick()
+
+    def _tick(self) -> None:
         now = time.monotonic()
         self._samples.append((now, self.done))
         while len(self._samples) > 2 and now - self._samples[0][0] > RATE_WINDOW_S:
@@ -513,13 +532,38 @@ def expand_resume_paths(raw: list[Path]) -> list[Path]:
 # ---------------------------------------------------------------------------
 
 
+def snap_helpers(stop, stops: dict, gauge_mm: int) -> list:
+    """Candidate second points for snap_point(), nearest first — only stops
+    the catalog says carry this profile's gauge (family-aware, strict:
+    unknown gauge does not qualify). snap_point() routes stop → helper, so
+    a helper on the other side of a gauge break (Hendaye's nearest stop is
+    standard-gauge French, Barcelona-Sants' is Iberian) or on a cut-off
+    branch fails the snap of a perfectly good stop."""
+    return sorted(
+        (
+            o
+            for o in stops.values()
+            if o.stop_id != stop.stop_id and stop_supports_gauge(o, gauge_mm)
+        ),
+        key=lambda o: haversine_m(stop.lon, stop.lat, o.lon, o.lat),
+    )[:SNAP_HELPER_CANDIDATES]
+
+
 def snap_needed(
     router, stops: dict, needed: set[tuple[str, str]], sidecar: Path
-) -> dict[tuple[str, str], list[float]]:
-    """stop_id × profile → snapped [lon, lat], read from the sidecar where
-    possible and appended to it as it goes, so the snapping pass is paid
-    once across every rerun. Stops that fail twice are left unsnapped;
-    their pairs are reported as NotSnapped in the failures file."""
+) -> tuple[dict[tuple[str, str], list[float]], dict[tuple[str, str], str]]:
+    """(snapped, errors): stop_id × profile → snapped [lon, lat], plus the
+    reason for every combination that could not be snapped. Read from the
+    sidecar where possible and appended to it as it goes, so the snapping
+    pass is paid once across every rerun; failures are never stored and
+    are simply re-attempted by the next run.
+
+    Each stop tries up to SNAP_HELPER_CANDIDATES helpers. GraphHopper names
+    the point it could not place: 'point 0' is the stop itself — no helper
+    can fix that, so the search stops; anything else is the helper's or
+    the connection's fault, and the next helper is tried. The snapped
+    coordinate depends on the stop and profile only, so entries snapped
+    with a different helper in an earlier run stay valid."""
     repair_partial_tail(sidecar)
     snapped: dict[tuple[str, str], list[float]] = {}
     if sidecar.is_file():
@@ -529,53 +573,47 @@ def snap_needed(
                     snapped[(row[0], row[1])] = [float(row[2]), float(row[3])]
         print(f"  snapping: {len(snapped):,} entries loaded from {sidecar.name}.")
 
+    errors: dict[tuple[str, str], str] = {}
     todo = sorted(k for k in needed if k not in snapped)
     if not todo:
-        return snapped
+        return snapped, errors
 
+    gauge_by_profile = {router.profile_for_gauge(g): g for g in SUPPORTED_GAUGES_MM}
     sidecar.parent.mkdir(parents=True, exist_ok=True)
     progress = ProgressReporter(len(todo), "snapping")
     with open(sidecar, "a", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
-
-        def snap_round(batch: list[tuple[str, str]]) -> list[tuple[str, str]]:
-            failed: list[tuple[str, str]] = []
-            for i, (sid, profile) in enumerate(batch, 1):
-                stop = stops[sid]
-                # Helper = nearest other stop: a short, routable probe
-                # (snap_point needs any second reachable point).
-                helper = min(
-                    (o for o in stops.values() if o.stop_id != sid),
-                    key=lambda o: haversine_m(stop.lon, stop.lat, o.lon, o.lat),
-                )
+        for sid, profile in todo:
+            stop = stops[sid]
+            helpers = snap_helpers(stop, stops, gauge_by_profile[profile])
+            reason = "no catalog stop with this gauge to snap against"
+            for helper in helpers:
                 try:
                     coords = router.snap_point(
                         stop.lon, stop.lat, [helper.lon, helper.lat], profile
                     )
-                except Exception:
-                    failed.append((sid, profile))
+                except Exception as exc:
+                    reason = f"{type(exc).__name__}: {exc}"[:300]
+                    if "point 0" in str(exc).lower():
+                        break
                     continue
                 snapped[(sid, profile)] = coords
                 writer.writerow([sid, profile, coords[0], coords[1]])
-                if i % 100 == 0:
-                    fh.flush()
-            return failed
-
-        failed = snap_round(todo)
-        progress.n_ok = len(todo) - len(failed)
-        progress.n_fail = len(failed)
-        if failed:
-            # One retry: a snap failure is as often a busy container as a
-            # stop with no track near it.
-            progress.draw(force=True)
-            print(f"\n  snapping: retrying {len(failed)} failed stop(s)...")
-            failed = snap_round(failed)
-            progress.n_ok = len(todo) - len(failed)
-            progress.n_fail = len(failed)
+                break
+            else:
+                if helpers:
+                    reason = f"all {len(helpers)} helpers failed, last — {reason}"
+            if (sid, profile) not in snapped:
+                errors[(sid, profile)] = reason
+            progress.record(ok=(sid, profile) in snapped)
+            if progress.done % 100 == 0:
+                fh.flush()
     progress.finish()
-    if failed:
-        print(f"  snapping: {len(failed)} stop/profile combination(s) unsnappable.")
-    return snapped
+    if errors:
+        print(f"  snapping: {len(errors)} stop/profile combination(s) unsnappable:")
+        for (sid, profile), reason in sorted(errors.items()):
+            print(f"    {sid:<20} {profile:<18} {reason[:90]}")
+    return snapped, errors
 
 
 # ---------------------------------------------------------------------------
@@ -698,15 +736,26 @@ def route_pass(
     return not_attempted
 
 
-def write_failures(path: Path, failures: dict[Task, Failure], unsnappable: list[Task]):
+def write_failures(
+    path: Path,
+    failures: dict[Task, Failure],
+    unsnappable: list[Task],
+    snap_errors: dict[tuple[str, str], str],
+) -> None:
     """Rewrite the failures file from scratch — it reports what is missing
     NOW, so a rerun that fixes everything leaves an empty report rather
-    than yesterday's errors."""
+    than yesterday's errors. A NotSnapped row names the end that could not
+    be snapped and why."""
     with open(path, "w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
         writer.writerow(FAILURE_COLUMNS)
         for lo, hi, profile, vkey in unsnappable:
-            writer.writerow([lo, hi, profile, vkey, 0, False, "NotSnapped", "", ""])
+            reason = "; ".join(
+                f"{sid}: {snap_errors[(sid, profile)]}"
+                for sid in (lo, hi)
+                if (sid, profile) in snap_errors
+            )
+            writer.writerow([lo, hi, profile, vkey, 0, False, "NotSnapped", reason, ""])
         for f in sorted(failures.values(), key=lambda f: f.task):
             lo, hi, profile, vkey = f.task
             writer.writerow(
@@ -724,7 +773,9 @@ def write_failures(path: Path, failures: dict[Task, Failure], unsnappable: list[
             )
 
 
-def run_batch(router, tasks, models_by_vkey, snapped, out: Path, args) -> None:
+def run_batch(
+    router, tasks, models_by_vkey, snapped, snap_errors, out: Path, args
+) -> None:
     done = collect_done_keys(out, expand_resume_paths(args.resume_from or []))
     only = (
         read_failure_keys(out.with_suffix(".failures.csv"))
@@ -749,7 +800,7 @@ def run_batch(router, tasks, models_by_vkey, snapped, out: Path, args) -> None:
     )
     if not todo:
         print("Nothing to do.")
-        write_failures(out.with_suffix(".failures.csv"), {}, unsnappable)
+        write_failures(out.with_suffix(".failures.csv"), {}, unsnappable, snap_errors)
         return
 
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -804,7 +855,7 @@ def run_batch(router, tasks, models_by_vkey, snapped, out: Path, args) -> None:
             n_routed += progress.n_ok
 
     failures_path = out.with_suffix(".failures.csv")
-    write_failures(failures_path, failures, unsnappable)
+    write_failures(failures_path, failures, unsnappable, snap_errors)
     n_transient = sum(1 for f in failures.values() if f.transient)
     settled = n_routed + len(failures) + len(not_attempted)
     if not_attempted:
@@ -877,17 +928,30 @@ def finalize(out: Path, models, graph_key, import_date, cap_km, n_stops) -> None
     if not out.is_file():
         sys.exit(f"{out} does not exist — run the batch first.")
     repair_partial_tail(out)
-    with open(out, newline="", encoding="utf-8") as fh:
-        n_rows = sum(1 for _ in csv.DictReader(fh))
     failures_path = out.with_suffix(".failures.csv")
     n_failures = 0
     if failures_path.is_file():
         with open(failures_path, newline="", encoding="utf-8") as fh:
             n_failures = max(sum(1 for _ in fh) - 1, 0)
 
+    # One sequential pass: count and compress together. Rows never contain
+    # newlines (compact JSON), so counting '\n' is the row count without
+    # parsing gigabytes of geometry through the csv module.
     gz_path = out.with_suffix(out.suffix + ".gz")
-    with open(out, "rb") as src, gzip.open(gz_path, "wb") as dst:
-        shutil.copyfileobj(src, dst)
+    total_mb = max(1, -(-out.stat().st_size // MB))
+    progress = ProgressReporter(total_mb, "gzip MB ")
+    n_lines = read = 0
+    with (
+        open(out, "rb") as src,
+        gzip.open(gz_path, "wb", compresslevel=GZIP_LEVEL) as dst,
+    ):
+        while chunk := src.read(COPY_CHUNK):
+            n_lines += chunk.count(b"\n")
+            dst.write(chunk)
+            read += len(chunk)
+            progress.advance(-(-read // MB) - progress.done)
+    progress.finish()
+    n_rows = max(n_lines - 1, 0)  # minus the header
 
     meta = {
         "graph_key": graph_key,
@@ -927,7 +991,7 @@ def staging_ddl(table: str) -> str:
 def split_csv(out: Path, target: Path, split_mb: float) -> list[Path]:
     """Copy --out into <= split_mb parts, each with its own header, so a
     pgAdmin import that drops halfway costs one part and not the night."""
-    limit = int(split_mb * 1024 * 1024)
+    limit = int(split_mb * MB)
     parts: list[Path] = []
     with open(out, "rb") as src:
         header = src.readline()
@@ -1179,8 +1243,10 @@ def main() -> None:
     compositions = loader.build_all_compositions().all()
     tasks, models_by_vkey = build_tasks(router, stops, pairs, models, compositions)
     needed = {(lo, p) for lo, _, p, _ in tasks} | {(hi, p) for _, hi, p, _ in tasks}
-    snapped = snap_needed(router, stops, needed, out.with_suffix(".snapped.csv"))
-    run_batch(router, tasks, models_by_vkey, snapped, out, args)
+    snapped, snap_errors = snap_needed(
+        router, stops, needed, out.with_suffix(".snapped.csv")
+    )
+    run_batch(router, tasks, models_by_vkey, snapped, snap_errors, out, args)
 
 
 if __name__ == "__main__":
