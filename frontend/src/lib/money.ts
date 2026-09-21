@@ -50,6 +50,17 @@ export function formatCount(value: number, locale: string): string {
   return new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(value)
 }
 
+/** Tonnes on the same thresholds, with the unit folded into the prefix —
+ *  "43.66 kt", "1.20 Mt", "850 t" — because a bare "k" in front of a
+ *  separate "t" reads as a typo, and a million prefix in front of "kt"
+ *  (which is how the CO₂ tile once read) is off by a factor of a million. */
+export function formatTonnes(value: number, locale: string): string {
+  const abs = Math.abs(value)
+  if (abs >= MILLION) return `${two(locale).format(value / MILLION)} Mt`
+  if (abs >= THOUSAND) return `${two(locale).format(value / THOUSAND)} kt`
+  return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(value)} t`
+}
+
 export function formatInt(value: number, locale: string): string {
   return new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(value)
 }

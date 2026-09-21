@@ -1,7 +1,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { KpiFormatters } from '@/lib/compareKpis'
-import { formatCount, formatEur, formatInt, formatMillionEur } from '@/lib/money'
+import { formatCount, formatEur, formatInt, formatMillionEur, formatTonnes } from '@/lib/money'
 
 // Formatters for the comparison surfaces (KPI tiles, bars, grid, supply
 // table) and for zone D's panels. Locale-reactive; the arithmetic and the
@@ -40,6 +40,7 @@ export function useCompareFormat(): KpiFormatters & {
     millionEur: (v) => formatMillionEur(v, locale.value),
     count: (v) => formatCount(v, locale.value),
     int: (v) => formatInt(v, locale.value),
+    tonnes: (v) => formatTonnes(v, locale.value),
     hours: (v) => {
       const h = Math.floor(v)
       const m = Math.round((v - h) * 60)

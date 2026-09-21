@@ -35,6 +35,7 @@ export interface KpiFormatters {
   count(value: number): string
   int(value: number): string
   hours(value: number): string
+  tonnes(value: number): string
 }
 
 const M = 1_000_000
@@ -92,9 +93,9 @@ export const COMPARE_KPIS: readonly CompareKpi[] = [
     key: 'co2',
     labelKey: 'co2',
     lowerIsBetter: false,
-    value: (s) => (s.co2_savings_t_per_year == null ? null : s.co2_savings_t_per_year / 1000),
-    format: (v, f) => f.millionEur(v).replace(' €', ''),
-    unitKey: 'ktYear',
+    value: (s) => s.co2_savings_t_per_year ?? null,
+    format: (v, f) => f.tonnes(v),
+    unitKey: 'perYear',
   },
   {
     key: 'subsidyPerT',
