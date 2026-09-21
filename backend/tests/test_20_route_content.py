@@ -19,7 +19,7 @@ Covers:
   - Energy model: flat 28 kWh/km dummy factor, composition-independent
     (REPLACE the flat-factor tests once the real regression model is calibrated)
   - Parkings/shuntings derivation
-  - Mode switches (routing_mode/timetable_mode/schedule_mode/
+  - Mode switches (routing_mode/timetable_mode/
     auto_stop_addition), fixed-night interval stretching, scenario_id
     handling — content coverage ported from the pre-WP5 contract suite
     (Brno auto-insertion behavior, fixed-night slack/warning math); only
@@ -302,10 +302,28 @@ class TestModeSwitches:
             **BASE_REQUEST,
             "routing_mode": "fullRouting",
             "timetable_mode": "simpleAutomatic",
-            "schedule_mode": "alwaysDaily",
+            "schedule": {"days_per_week": 3},
             "auto_stop_addition": "off",
         }
         assert compute_body(body)["route"]["trip_pairs"]
+
+    def test_schedule_mode_is_gone(self, api_base):
+        """ROUTE_BUILDER 0.9.40: the switch no longer exists, so a stored
+        request the 2026-09-19 migration never reached says so at 400
+        rather than silently running daily."""
+        resp = post_member(
+            api_base, {**BASE_REQUEST, "schedule_mode": "alwaysDaily"}, timeout=10
+        )
+        assert resp.status_code == 400
+        assert "schedule_mode" in resp.text
+
+    def test_one_frequency_lands_on_every_month(self, api_base):
+        """The echo always carries the month map, whatever was posted."""
+        echo = compute_body({**BASE_REQUEST, "schedule": {"days_per_week": 2}})[
+            "request"
+        ]
+        assert echo["schedule"] == {str(m): 2 for m in range(1, 13)}
+        assert "schedule_mode" not in echo
 
     def test_simple_routing_mode_accepted(self, api_base):
         """routing_mode='simpleRouting' (cheap single-pass routing) is a
@@ -315,7 +333,7 @@ class TestModeSwitches:
 
     @pytest.mark.parametrize(
         "field",
-        ["routing_mode", "timetable_mode", "schedule_mode", "auto_stop_addition"],
+        ["routing_mode", "timetable_mode", "auto_stop_addition"],
     )
     def test_invalid_mode_returns_400(self, api_base, field):
         """An unknown value for any mode switch is rejected at validation."""

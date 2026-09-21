@@ -13,7 +13,7 @@
 import type { ProposalCalcSummary } from '@/types/api'
 
 export type CompareKpiKey =
-  'journeyTime' | 'pax' | 'paxKm' | 'subsidy' | 'shiftAir' | 'shiftCar' | 'co2' | 'subsidyPerT'
+  'journeyTime' | 'pax' | 'paxKm' | 'subsidy' | 'shiftAir' | 'shiftOther' | 'co2' | 'subsidyPerT'
 
 export interface CompareKpi {
   key: CompareKpiKey
@@ -28,6 +28,8 @@ export interface CompareKpi {
   format(value: number, fmt: KpiFormatters): string
   /** i18n unit key under proposal.compare.units, if any. */
   unitKey?: string
+  /** A euro figure — shown with the "2032 prices" sticker (PriceBasisBadge). */
+  isMoney?: boolean
 }
 
 export interface KpiFormatters {
@@ -35,6 +37,7 @@ export interface KpiFormatters {
   count(value: number): string
   int(value: number): string
   hours(value: number): string
+  tonnes(value: number): string
 }
 
 const M = 1_000_000
@@ -71,6 +74,7 @@ export const COMPARE_KPIS: readonly CompareKpi[] = [
     value: (s) => (s.net_eur_per_year == null ? null : -s.net_eur_per_year / M),
     format: (v, f) => f.millionEur(v),
     unitKey: 'millionEurYear',
+    isMoney: true,
   },
   {
     key: 'shiftAir',
@@ -81,10 +85,10 @@ export const COMPARE_KPIS: readonly CompareKpi[] = [
     unitKey: 'perYear',
   },
   {
-    key: 'shiftCar',
-    labelKey: 'shiftCar',
+    key: 'shiftOther',
+    labelKey: 'shiftOther',
     lowerIsBetter: false,
-    value: (s) => s.shift_car_trips_per_year ?? null,
+    value: (s) => s.shift_other_trips_per_year ?? null,
     format: (v, f) => f.count(v),
     unitKey: 'perYear',
   },
@@ -92,9 +96,9 @@ export const COMPARE_KPIS: readonly CompareKpi[] = [
     key: 'co2',
     labelKey: 'co2',
     lowerIsBetter: false,
-    value: (s) => (s.co2_savings_t_per_year == null ? null : s.co2_savings_t_per_year / 1000),
-    format: (v, f) => f.millionEur(v).replace(' €', ''),
-    unitKey: 'ktYear',
+    value: (s) => s.co2_savings_t_per_year ?? null,
+    format: (v, f) => f.tonnes(v),
+    unitKey: 'perYear',
   },
   {
     key: 'subsidyPerT',
@@ -103,6 +107,7 @@ export const COMPARE_KPIS: readonly CompareKpi[] = [
     value: (s) => s.subsidy_eur_per_t_co2 ?? null,
     format: (v, f) => f.int(v),
     unitKey: 'eurPerT',
+    isMoney: true,
   },
 ]
 

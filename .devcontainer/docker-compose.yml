@@ -77,6 +77,14 @@ services:
       - "${DOCS_HOST_PORT:-5174}:${DOCS_CONTAINER_PORT:-5174}"
     environment:
       DOCS_CONTAINER_PORT: ${DOCS_CONTAINER_PORT:-5174}
+      # The two feedback forms on this site post to the API. In production the
+      # docs are static files served at /docs/ by the same origin as the app,
+      # where Caddy routes /api/* to the api container, so their default empty
+      # base is right. In development there is no such origin: the docs are
+      # their own dev server behind the app's /docs proxy, and neither server
+      # has an /api route — a relative POST 404s. Same value and same reason as
+      # the frontend service above (docs-site/.vitepress/theme/lib/apiBase.ts).
+      VITE_API_BASE_URL: http://localhost:${API_HOST_PORT:-5050}
     volumes:
       - ../../docs-site:/app
       - /app/node_modules

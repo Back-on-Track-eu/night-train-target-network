@@ -2,101 +2,60 @@
 // out of the SFCs so it can be tested without mounting anything (vitest runs
 // in node, no jsdom — see AGENTS.md).
 //
-// Two inputs change the calculation, both on the Supply tab: the SCHEDULE and
-// the PRICES (fares and the catering contribution). Each is a scope. A panel
-// either OWNS a scope — it recomputes here, on the page, and says so — or
-// DEPENDS on one, in which case it keeps the figures it has, greys out, and
-// waits for the backend. Nothing ever shows a number that mixes a previewed
-// input with a calculated one.
+// Three inputs change the calculation: the SCHEDULE and the PRICES on the
+// Supply tab, the DEMAND on the Demand tab (docs/2026-09-18_manual_demand_
+// guide.md D2). Each is a scope. A panel either OWNS a scope — it recomputes
+// here, on the page, and says so — or DEPENDS on one, in which case it keeps
+// the figures it has, greys out, and waits for the backend. Nothing ever
+// shows a number that mixes a previewed input with a calculated one.
 
-/** Days in each month of the evaluation year. 2032 is a leap year, so the
- *  year has 366 days — the same calendar the backend counts operating days
- *  on (models/route/model.py EVALUATION_YEAR). */
-const DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31] as const
+/** Days of the evaluation year — 2032 is a leap year, the same calendar the
+ *  backend counts operating days on (models/route/model.py EVALUATION_YEAR).
+ *  A month is a twelfth of it everywhere. */
+export const DAYS_IN_YEAR = 366
 
-export const MONTH_KEYS = [
-  'jan',
-  'feb',
-  'mar',
-  'apr',
-  'may',
-  'jun',
-  'jul',
-  'aug',
-  'sep',
-  'oct',
-  'nov',
-  'dec',
-] as const
+/** The frequency a new proposal starts at — the backend's own
+ *  DEFAULT_DAYS_PER_WEEK (models/route/model.py, ROUTE_BUILDER 0.9.40). */
+export const DEFAULT_DAYS_PER_WEEK = 3
+export const MIN_DAYS_PER_WEEK = 1
+export const MAX_DAYS_PER_WEEK = 7
 
-export type SchedulePreset = 'daily' | 'three' | 'once' | 'summer' | 'custom'
-
-/** The preset grids, in the order the pills are shown. "custom" is not here:
- *  it is what a grid matching none of these is called. */
-export const SCHEDULE_PRESETS: Record<Exclude<SchedulePreset, 'custom'>, number[]> = {
-  daily: Array(12).fill(7),
-  three: Array(12).fill(3),
-  once: Array(12).fill(1),
-  // May to September inclusive.
-  summer: [0, 0, 0, 0, 7, 7, 7, 7, 7, 0, 0, 0],
+export function clampDaysPerWeek(value: number): number {
+  return Math.min(MAX_DAYS_PER_WEEK, Math.max(MIN_DAYS_PER_WEEK, Math.round(value)))
 }
 
-export const DAILY_SCHEDULE: number[] = SCHEDULE_PRESETS.daily
-
-export function sameSchedule(a: number[], b: number[]): boolean {
-  return a.length === b.length && a.every((d, i) => d === b[i])
+/** The request block for a frequency: one figure, which the backend expands
+ *  onto its twelve months, so a request that posts it and one that posts the
+ *  spelled-out month map hash to the same family. */
+export function scheduleRequest(daysPerWeek: number): { schedule: { days_per_week: number } } {
+  return { schedule: { days_per_week: clampDaysPerWeek(daysPerWeek) } }
 }
 
-/** Which preset a grid is, or "custom". The pill lights by itself. */
-export function presetOf(months: number[]): SchedulePreset {
-  for (const [name, grid] of Object.entries(SCHEDULE_PRESETS)) {
-    if (sameSchedule(months, grid)) return name as SchedulePreset
-  }
-  return 'custom'
+/** The frequency a resolved request echo describes — what the figures on
+ *  screen were computed with. The echo always carries the month map; a flat
+ *  map reads back exactly, a seasonal one (stored before the one-frequency
+ *  UI, or written by a later seasonal UI) as its rounded average over the
+ *  year, which is what one figure can say about it. */
+export function daysPerWeekFromRequest(
+  schedule: Record<string, number> | null | undefined,
+): number {
+  if (!schedule) return DEFAULT_DAYS_PER_WEEK
+  const months = Array.from({ length: 12 }, (_, i) => Number(schedule[String(i + 1)] ?? 0))
+  const average = months.reduce((sum, d) => sum + d, 0) / 12
+  return clampDaysPerWeek(average)
 }
 
-/** The request pair for a grid: a flat seven is the backend's own default
- *  mode and sends no month map at all, so an untouched proposal keeps
- *  hashing to the same family as one that never knew about the grid. */
-export function scheduleRequest(months: number[]): {
-  schedule_mode: string
-  schedule: Record<string, number> | null
-} {
-  if (sameSchedule(months, DAILY_SCHEDULE)) {
-    return { schedule_mode: 'alwaysDaily', schedule: null }
-  }
-  const schedule: Record<string, number> = {}
-  months.forEach((days, i) => (schedule[String(i + 1)] = days))
-  return { schedule_mode: 'custom', schedule }
+export function operatingDaysPerYear(daysPerWeek: number): number {
+  return (DAYS_IN_YEAR * daysPerWeek) / 7
 }
 
-/** The grid a resolved request echo describes — what the figures on screen
- *  were computed with. An echo without a month map is the daily default. */
-export function scheduleFromRequest(schedule: Record<string, number> | null | undefined): number[] {
-  if (!schedule) return [...DAILY_SCHEDULE]
-  return MONTH_KEYS.map((_, i) => Number(schedule[String(i + 1)] ?? 0))
-}
-
-export function operatingDaysPerYear(months: number[]): number {
-  return months.reduce((sum, days, i) => sum + (DAYS_IN_MONTH[i] * days) / 7, 0)
-}
-
-/** Index (0-based) of the month the fleet is sized to, or null when the grid
- *  is flat — in which case naming a "busiest" month would be arbitrary. */
-export function peakMonth(months: number[]): number | null {
-  const max = Math.max(...months)
-  if (max === Math.min(...months)) return null
-  return months.indexOf(max)
-}
-
-/** Physical rakes: the cycle length in days times the busiest month's
- *  days-per-week, rounded up (ROUTE_BUILDER 0.9.35). Exact on the page —
- *  the cycle itself is a constant of the timetable, which only the backend
- *  can redo, so it is taken from the last result. */
-export function trainsetsFor(months: number[], cycleDays: number | null): number | null {
+/** Physical rakes: the cycle length in days times the days per week, rounded
+ *  up (ROUTE_BUILDER 0.9.35). Exact on the page — the cycle itself is a
+ *  constant of the timetable, which only the backend can redo, so it is
+ *  taken from the last result. */
+export function trainsetsFor(daysPerWeek: number, cycleDays: number | null): number | null {
   if (cycleDays === null || cycleDays <= 0) return null
-  if (Math.max(...months) === 0) return 0
-  return Math.max(...months.map((days) => Math.ceil((cycleDays * days) / 7)))
+  return Math.ceil((cycleDays * daysPerWeek) / 7)
 }
 
 export interface SupplyFigures {
@@ -109,7 +68,8 @@ export interface SupplyFigures {
 }
 
 /**
- * The four schedule-owned figures plus the two place figures, from the grid.
+ * The four schedule-owned figures plus the two place figures, from the
+ * frequency.
  *
  * cycleDistanceKm is the route's own total over BOTH directions (the
  * summary's total_distance_km), so one operating day is one cycle: the
@@ -117,13 +77,13 @@ export interface SupplyFigures {
  * departures_per_year is operating days × 2 per pair.
  */
 export function supplyFigures(
-  months: number[],
+  daysPerWeek: number,
   cycleDistanceKm: number,
   places: number,
   cycleDays: number | null,
   tripPairs = 1,
 ): SupplyFigures {
-  const operatingDays = operatingDaysPerYear(months)
+  const operatingDays = operatingDaysPerYear(daysPerWeek)
   const departures = operatingDays * 2 * tripPairs
   const trainKm = operatingDays * cycleDistanceKm
   return {
@@ -132,7 +92,7 @@ export function supplyFigures(
     trainKm,
     placesOffered: departures * places,
     placeKmOffered: places * trainKm,
-    trainsets: trainsetsFor(months, cycleDays),
+    trainsets: trainsetsFor(daysPerWeek, cycleDays),
   }
 }
 
@@ -160,7 +120,23 @@ export interface ReceiptLine {
 
 // --- the change-scope rule ---------------------------------------------------
 
-export type Scope = 'schedule' | 'prices'
+export type Scope = 'schedule' | 'prices' | 'demand'
+
+/** Which scopes each tab has a panel waiting on — the dot beside the tab
+ *  label (D2). Supply's What-follows panel waits on the demand; Train
+ *  operation (the subsidy column) and Overhead (EBIT on revenue) on all
+ *  three; Infrastructure only on the schedule; Demand owns its scope and
+ *  previews, so it never waits. */
+export const TAB_AWAITS: Record<
+  'demand' | 'supply' | 'operation' | 'infrastructure' | 'overhead',
+  readonly Scope[]
+> = {
+  demand: [],
+  supply: ['demand'],
+  operation: ['schedule', 'prices', 'demand'],
+  infrastructure: ['schedule'],
+  overhead: ['schedule', 'prices', 'demand'],
+}
 
 /** The tariff, per class_main. Four maps since CALC 0.9.30: the base fare
  *  has a fixed and a distance term, the services sold with a ticket are
@@ -173,9 +149,23 @@ export interface Tariff {
   cateringPerPax: Record<string, number>
 }
 
+/** The manual demand as the Demand tab edits it and the request posts it
+ *  (DEMAND 0.1.0, guide §4). Weights and pins are keyed by stop id. */
+export interface DemandInputs {
+  level: string
+  passengersPerYear: number
+  groupSharesPct: Record<string, number>
+  od: {
+    preset: string
+    stopWeights: { board: Record<string, number>; alight: Record<string, number> }
+    pinnedSharesPct: Record<string, Record<string, number>>
+  }
+}
+
 export interface DetailsInputs {
-  months: number[]
+  daysPerWeek: number
   tariff: Tariff
+  demand: DemandInputs | null
 }
 
 export const TARIFF_PARTS = [
@@ -233,14 +223,77 @@ export function tariffRequest(tariff: Tariff): Record<string, Record<string, num
   return out
 }
 
+/** The demand block a resolved request echo describes; null on an echo
+ *  written before DEMAND 0.1.0 (its figures came from the stopgap and no
+ *  demand input can be said to match them). */
+export function demandFromRequest(request: Record<string, unknown> | null): DemandInputs | null {
+  const block = request?.demand as Record<string, unknown> | undefined
+  if (!block) return null
+  const od = (block.od ?? {}) as Record<string, unknown>
+  const weights = (od.stop_weights ?? {}) as Record<string, Record<string, number>>
+  return {
+    level: String(block.level ?? 'custom'),
+    passengersPerYear: Number(block.passengers_per_year ?? 0),
+    groupSharesPct: { ...((block.group_shares_pct as Record<string, number>) ?? {}) },
+    od: {
+      preset: String(od.preset ?? 'custom'),
+      stopWeights: { board: { ...(weights.board ?? {}) }, alight: { ...(weights.alight ?? {}) } },
+      pinnedSharesPct: Object.fromEntries(
+        Object.entries((od.pinned_shares_pct as Record<string, Record<string, number>>) ?? {}).map(
+          ([o, row]) => [o, { ...row }],
+        ),
+      ),
+    },
+  }
+}
+
+/** The request block, ready to spread into a family request. */
+export function demandRequest(demand: DemandInputs): { demand: Record<string, unknown> } {
+  return {
+    demand: {
+      level: demand.level,
+      passengers_per_year: demand.passengersPerYear,
+      group_shares_pct: demand.groupSharesPct,
+      od: {
+        preset: demand.od.preset,
+        stop_weights: demand.od.stopWeights,
+        pinned_shares_pct: demand.od.pinnedSharesPct,
+      },
+    },
+  }
+}
+
+function samePins(
+  a: Record<string, Record<string, number>>,
+  b: Record<string, Record<string, number>>,
+): boolean {
+  const origins = new Set([...Object.keys(a), ...Object.keys(b)])
+  return [...origins].every((o) => sameMap(a[o] ?? {}, b[o] ?? {}))
+}
+
+/** Same demand as far as the numbers go — the level and the preset are
+ *  labels the backend leaves out of the family key, so they are left out
+ *  here too: choosing "Medium" over a typed 200 000 changes nothing. */
+export function sameDemand(a: DemandInputs | null, b: DemandInputs | null): boolean {
+  if (a === null || b === null) return a === b
+  return (
+    a.passengersPerYear === b.passengersPerYear &&
+    sameMap(a.groupSharesPct, b.groupSharesPct) &&
+    sameMap(a.od.stopWeights.board, b.od.stopWeights.board) &&
+    sameMap(a.od.stopWeights.alight, b.od.stopWeights.alight) &&
+    samePins(a.od.pinnedSharesPct, b.od.pinnedSharesPct)
+  )
+}
+
 /** Which scopes differ from what the figures were computed with. Reverting an
  *  edit clears its scope by itself — this is a comparison, not a latch, the
  *  same rule the composition and scenario selections follow. */
 export function dirtyScopes(current: DetailsInputs, committed: DetailsInputs | null): Set<Scope> {
   const dirty = new Set<Scope>()
   if (committed === null) return dirty
-  if (!sameSchedule(current.months, committed.months)) dirty.add('schedule')
+  if (current.daysPerWeek !== committed.daysPerWeek) dirty.add('schedule')
   if (!sameTariff(current.tariff, committed.tariff)) dirty.add('prices')
+  if (!sameDemand(current.demand, committed.demand)) dirty.add('demand')
   return dirty
 }
 

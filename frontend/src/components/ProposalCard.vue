@@ -8,11 +8,15 @@ import CountryFlags from '@/components/CountryFlags.vue'
 import { useStore } from '@/stores/store'
 import { useToastStore } from '@/stores/toastStore'
 import { useLocaleFormat } from '@/composables/useLocaleFormat'
+import { formatEur } from '@/lib/money'
 import { likeProposal, unlikeProposal } from '@/lib/proposalsApi'
 import { useApiFailure } from '@/composables/useApiFailure'
 import type { ProposalSummary } from '@/types/api'
 import {
+  mdiAccountGroupOutline,
   mdiArrowLeftRight,
+  mdiCashMultiple,
+  mdiCommentOutline,
   mdiLeaf,
   mdiSpeedometerMedium,
   mdiThumbUp,
@@ -28,11 +32,11 @@ const props = defineProps<{
   highlightStopIds?: string[]
 }>()
 
-const emit = defineEmits<{ select: [proposalId: number] }>()
+const emit = defineEmits<{ select: [proposalId: number]; discuss: [proposalId: number] }>()
 
 const { t } = useI18n()
 const store = useStore()
-const { formatInt } = useLocaleFormat()
+const { locale, formatInt, formatDate } = useLocaleFormat()
 const { report } = useApiFailure()
 
 // Summaries carry stop_ids only (in travel order); resolve display names from
@@ -79,16 +83,43 @@ const itinerary = computed(() => {
   return { anchors, segments }
 })
 
-// --- Lower-half stats (icon/value pairs, RouteStatsCard style) --------------
-// null on ONTD rows the catalogue names no composition for; the wagon stat is
-// then dropped entirely rather than shown as an icon beside a blank.
-const compositionLabel = computed(() => props.proposal.composition_id)
+// --- The figures --------------------------------------------------------
+// One two-column grid, filled in a fixed order — distance | speed,
+// composition | trips per year, CO₂ saved | subsidy per tonne — so the same
+// fact sits in the same corner on every card and the list can be read down
+// a column instead of re-parsed card by card: the route's physics on the
+// first row, what runs and who rides on the second, climate and its price on
+// the third. Every value is kept to ONE line: a figure that wraps breaks the
+// alignment the grid exists for.
+//
+// Composition is proposals-only. An existing (ONTD) row carries whatever the
+// catalogue names, but nothing in the app can pick, change or show it — so the
+// label there is information without a use.
+const compositionLabel = computed(() =>
+  props.proposal.source === 'proposal' ? props.proposal.composition_id : null,
+)
 
-// Each stat carries a stable `key`: it identifies the row for v-for AND selects
+// A proposal row the gallery's chosen scenario has no figures for: not
+// evaluable on that network ("error", with the member's code) or not yet
+// backfilled ("missing"). The row itself is as real as any other — same
+// identity, same stops, same place in the list — only its numbers are
+// null, so the figure grid gives way to one line saying why. Never true on
+// the base projection.
+const withoutFigures = computed(
+  () => props.proposal.source === 'proposal' && props.proposal.status !== 'ok',
+)
+const noFiguresKey = computed(() =>
+  props.proposal.source === 'proposal' && props.proposal.status === 'error'
+    ? 'notEvaluable'
+    : 'notYetEvaluated',
+)
+
+// Each stat carries a stable `key`: it identifies the cell for v-for AND selects
 // the explanation shown in the shared popover below. (The v-for used to key on
 // `icon`, which is a path string, not an identity.)
 const stats = computed(() => {
   const p = props.proposal
+  if (withoutFigures.value) return []
   const list = [
     {
       key: 'distance',
@@ -97,14 +128,18 @@ const stats = computed(() => {
     },
     { key: 'speed', icon: mdiSpeedometerMedium, value: `${formatInt(p.avg_speed_kmh)} km/h` },
   ]
+  // Everything past the first row is proposal-only: composition is known from
+  // publish, the rest is null until the proposal has an evaluation snapshot.
   if (compositionLabel.value) {
+    list.push({ key: 'composition', icon: mdiTrainCarPassenger, value: compositionLabel.value })
+  }
+  if (p.source === 'proposal' && p.demand_trips_per_year != null) {
     list.push({
-      key: 'composition',
-      icon: mdiTrainCarPassenger,
-      value: compositionLabel.value,
+      key: 'demand',
+      icon: mdiAccountGroupOutline,
+      value: t('gallery.card.demandPerYear', { value: formatInt(p.demand_trips_per_year) }),
     })
   }
-  // co2 savings is a proposal-only KPI and null without an evaluation snapshot.
   if (p.source === 'proposal' && p.co2_savings_t_per_year != null) {
     list.push({
       key: 'co2',
@@ -112,11 +147,38 @@ const stats = computed(() => {
       value: t('gallery.card.co2PerYear', { value: formatInt(p.co2_savings_t_per_year) }),
     })
   }
+  // Straight after the saving it prices — the two are one argument.
+  if (p.source === 'proposal' && p.subsidy_eur_per_t_co2 != null) {
+    list.push({
+      key: 'subsidyPerTCo2',
+      icon: mdiCashMultiple,
+      value: t('gallery.card.subsidyPerTCo2', {
+        value: formatEur(p.subsidy_eur_per_t_co2, locale.value),
+      }),
+    })
+  }
   return list
 })
 
+// --- Authoring dates -------------------------------------------------------
+// Proposals only (an ONTD row has no author and no history). "Updated" is left
+// off when it would repeat the creation date, which is the common case — a
+// proposal published once and never revised should not carry the same date
+// twice.
+const dateLine = computed(() => {
+  const p = props.proposal
+  if (p.source !== 'proposal') return null
+  const created = formatDate(p.created_at)
+  const updated = formatDate(p.updated_at)
+  if (!created) return null
+  const parts = [t('gallery.card.created', { date: created })]
+  if (updated && updated !== created) parts.push(t('gallery.card.updated', { date: updated }))
+  return parts.join(' · ')
+})
+
 // --- Stat explanation popover ----------------------------------------------
-// One Popover for all four stats, driven by the hovered stat's key. Same
+// One Popover for every stat AND for the comment count, driven by the hovered
+// item's key — engagement is explained the same way a KPI is. Same
 // hover-intent shape as CostPanel.vue's cost-factor popover: open on enter,
 // stay open while the cursor is over the panel itself, close on a short delay
 // once it has left both — so moving from the row into the panel doesn't
@@ -209,8 +271,20 @@ function onCardClick() {
 // (idempotent) and syncs the icon, rather than actually toggling it off.
 const toastStore = useToastStore()
 const likeCount = ref(props.proposal.source === 'proposal' ? props.proposal.likes_count : 0)
+// Read-only, unlike the like count: the card has no comment box, so this is
+// the list's pointer to a discussion that lives in the proposal view.
+const commentCount = computed(() =>
+  props.proposal.source === 'proposal' ? props.proposal.comments_count : 0,
+)
 const likedByMe = ref(false)
 const likeBusy = ref(false)
+
+// The comment count is a link into the thread, not just a figure: the gallery
+// routes to the proposal's discussion rather than to the top of its page.
+function onCommentsClick() {
+  if (props.proposal.source !== 'proposal') return
+  emit('discuss', props.proposal.proposal_id)
+}
 
 async function onLikeClick() {
   if (props.proposal.source !== 'proposal') return
@@ -243,8 +317,12 @@ const flagCountries = computed(() => props.proposal.countries)
 </script>
 
 <template>
+  <!-- One bold thing per card: the route. Everything else is ranked by colour
+       and size rather than weight — the previous card set the itinerary, every
+       figure and both counts in semibold, which left nothing for the eye to
+       land on first. -->
   <article
-    class="group flex flex-col gap-3 overflow-hidden rounded-xl bg-primary-50/5 p-4 transition-colors duration-500"
+    class="group flex flex-col gap-2.5 overflow-hidden rounded-xl bg-primary-50/5 p-4 transition-colors duration-500 hover:bg-primary-50/[0.07]"
     :class="isClickable ? 'cursor-pointer' : ''"
     :role="cardRole"
     :tabindex="isClickable ? 0 : undefined"
@@ -252,95 +330,126 @@ const flagCountries = computed(() => props.proposal.countries)
     @keydown.enter="onCardClick"
     @keydown.space.prevent="onCardClick"
   >
-    <!-- Upper half: itinerary (centered). Between anchors we show "(N stops)"
-         while idle; on hover it fades out and the actual intermediate stops
-         slide in from above. -->
-    <div class="flex flex-col items-center px-2 text-center">
+    <!-- Itinerary. Between anchors we show "(N stops)" while idle; on hover it
+         fades out and the actual intermediate stops slide in from above. The
+         intermediate names are the quietest text on the card: they are context
+         for the route, not a second headline. -->
+    <div class="flex flex-col items-center px-1 text-center leading-tight">
+      <!-- The countries belong to the itinerary, not to the proposer: they say
+           what the route crosses, so they head the stop list rather than
+           sitting in the metadata foot. -->
+      <CountryFlags :countries="flagCountries" class="mb-1.5" />
       <template v-for="(anchor, i) in itinerary.anchors" :key="`a-${i}`">
         <span
           class="text-base text-primary-50"
-          :class="anchor.highlighted ? 'font-semibold' : 'font-bold'"
+          :class="anchor.highlighted ? 'font-medium' : 'font-bold'"
           >{{ anchor.name }}</span
         >
         <template v-if="i < itinerary.segments.length && itinerary.segments[i].length">
           <span
-            class="max-h-6 overflow-hidden text-sm text-primary-50/40 opacity-100 transition-all duration-300 group-hover:max-h-0 group-hover:opacity-0"
+            class="max-h-5 overflow-hidden py-0.5 text-xs font-normal text-primary-50/35 opacity-100 transition-all duration-300 group-hover:max-h-0 group-hover:py-0 group-hover:opacity-0"
             >{{ t('gallery.card.stops', itinerary.segments[i].length) }}</span
           >
           <span
             v-for="s in itinerary.segments[i]"
             :key="s.stop_id"
-            class="max-h-0 -translate-y-2 overflow-hidden whitespace-nowrap text-sm font-semibold text-primary-50/80 opacity-0 transition-all duration-300 group-hover:max-h-6 group-hover:translate-y-0 group-hover:opacity-100"
+            class="max-h-0 -translate-y-2 overflow-hidden whitespace-nowrap py-0 text-xs font-normal text-primary-50/55 opacity-0 transition-all duration-300 group-hover:max-h-5 group-hover:translate-y-0 group-hover:py-0.5 group-hover:opacity-100"
             >{{ s.stop_name }}</span
           >
         </template>
       </template>
     </div>
 
-    <!-- Lower half: stat pairs (left) · flags + like + proposer (right) -->
-    <!-- items-stretch (not items-start) so the right-hand column spans the
-         footer's full height — that is what lets the ONTD badge's mt-auto reach
-         the bottom corner. -->
-    <div class="mt-auto flex justify-between gap-3 border-t border-primary-50/10 pt-3">
-      <div class="flex flex-col gap-2 text-primary-50/70">
-        <!-- w-fit so the hover target is the stat itself, not the full column
-             width — otherwise the popover opens from empty space beside it. -->
-        <div
-          v-for="stat in stats"
-          :key="stat.key"
-          class="flex w-fit cursor-help items-center gap-2"
-          @mouseenter="openStat(stat.key, $event)"
-          @mouseleave="scheduleClose"
-        >
-          <AppIcon :path="stat.icon" :size="18" />
-          <span class="text-sm font-semibold text-primary-50/80">{{ stat.value }}</span>
-        </div>
-      </div>
-
-      <div class="flex flex-col items-end gap-2">
-        <CountryFlags :countries="flagCountries" />
-
-        <!-- Like button — proposal-only. Count sits left of the thumb; the
-             icon fills in once the current user has liked it. -->
-        <div v-if="proposal.source === 'proposal'" class="flex items-center gap-1.5">
-          <span v-if="likeCount > 0" class="text-sm font-semibold text-primary-50/70">{{
-            likeCount
-          }}</span>
-          <button
-            type="button"
-            :disabled="likeBusy"
-            :aria-label="t('gallery.card.like')"
-            class="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full transition hover:bg-primary-50/10 disabled:cursor-not-allowed"
-            :class="likedByMe ? 'text-primary-50' : 'text-primary-50/70 hover:text-primary-50'"
-            @click.stop="onLikeClick"
-          >
-            <!-- likeBusy guarded double-clicks but drove no visual state, so the
-                 button looked inert for the whole round trip. -->
-            <AppSpinner v-if="likeBusy" :size="18" />
-            <AppIcon v-else :path="likedByMe ? mdiThumbUp : mdiThumbUpOutline" :size="22" />
-          </button>
-        </div>
-
-        <!-- Where a proposal names its proposer, an existing train names itself
-             as one — the card's only marker of which kind it is. Plain text, not
-             a link: the whole card already leaves for the catalogue entry, so a
-             nested link would just be a second way to do the same thing. mt-auto
-             pins it to the card's bottom edge instead of letting it hang off the
-             flags. Kept in the badge style the "ONTD" pill used at the top. -->
-        <span
-          v-if="ontdUrl"
-          class="mt-auto rounded-full bg-primary-50/15 px-2 py-0.5 text-[0.65rem] font-bold uppercase tracking-wider text-primary-50/70"
-        >
-          {{ t('gallery.card.existing') }}
-        </span>
-        <span v-else class="text-xs text-primary-50/40">
-          {{ t('gallery.card.proposedBy', { name: proposerName }) }}
-        </span>
+    <!-- The figures, in a fixed two-column grid rather than a wrapping row.
+         Values in tabular figures at one weight, icons dimmed to a third — the
+         number is the content, the icon only says which number it is. This is
+         the card's one rule: below it everything is metadata. -->
+    <p
+      v-if="withoutFigures"
+      class="border-t border-primary-50/10 pt-2.5 text-xs text-primary-50/45"
+    >
+      {{ t(`gallery.card.${noFiguresKey}`) }}
+    </p>
+    <div v-else class="grid grid-cols-2 gap-x-3 gap-y-1.5 border-t border-primary-50/10 pt-2.5">
+      <!-- w-fit so the hover target is the stat itself, not the full grid cell
+           — otherwise the popover opens from empty space beside it. -->
+      <div
+        v-for="stat in stats"
+        :key="stat.key"
+        class="flex w-fit cursor-help items-center gap-2"
+        @mouseenter="openStat(stat.key, $event)"
+        @mouseleave="scheduleClose"
+      >
+        <AppIcon :path="stat.icon" :size="16" class="shrink-0 text-primary-50/35" />
+        <span class="whitespace-nowrap text-sm tabular-nums text-primary-50/85">{{
+          stat.value
+        }}</span>
       </div>
     </div>
 
-    <!-- What each stat denominates. PrimeVue teleports this to body, so it sits
-         above the card and its own hover keeps it open (see openStat). -->
+    <!-- Foot: who and when on the left, engagement on the right, behind a
+         second hairline so the figures above close off cleanly. All of it is
+         metadata, so all of it is small and dim; the two counts are the only
+         interactive part. -->
+    <div class="flex items-end justify-between gap-3 border-t border-primary-50/10 pt-2.5">
+      <div class="flex min-w-0 items-center gap-2.5">
+        <div class="flex min-w-0 flex-col gap-0.5">
+          <!-- Where a proposal names its proposer, an existing train names
+               itself as one — the card's only marker of which kind it is.
+               Plain text, not a link: the whole card already leaves for the
+               catalogue entry, so a nested link would just be a second way to
+               do the same thing. -->
+          <span
+            v-if="ontdUrl"
+            class="w-fit rounded-full bg-primary-50/10 px-2 py-0.5 text-[0.65rem] font-medium uppercase tracking-wider text-primary-50/60"
+          >
+            {{ t('gallery.card.existing') }}
+          </span>
+          <template v-else>
+            <span class="truncate text-xs text-primary-50/55">
+              {{ t('gallery.card.proposedBy', { name: proposerName }) }}
+            </span>
+            <span v-if="dateLine" class="truncate text-[0.7rem] text-primary-50/35">
+              {{ dateLine }}
+            </span>
+          </template>
+        </div>
+      </div>
+
+      <!-- Two identically built icon-then-count buttons: same box, same icon
+           size, the number always to the RIGHT of its icon, on one baseline.
+           Comments open the thread, likes toggle. -->
+      <div v-if="proposal.source === 'proposal'" class="flex shrink-0 items-center gap-1">
+        <button
+          type="button"
+          class="flex h-8 cursor-pointer items-center gap-1.5 rounded-full px-2 text-primary-50/55 transition hover:bg-primary-50/10 hover:text-primary-50"
+          :aria-label="t('gallery.card.comments')"
+          @click.stop="onCommentsClick"
+          @mouseenter="openStat('comments', $event)"
+          @mouseleave="scheduleClose"
+        >
+          <AppIcon :path="mdiCommentOutline" :size="18" />
+          <span class="text-sm tabular-nums">{{ commentCount }}</span>
+        </button>
+        <button
+          type="button"
+          :disabled="likeBusy"
+          :aria-label="t('gallery.card.like')"
+          class="flex h-8 cursor-pointer items-center gap-1.5 rounded-full px-2 transition hover:bg-primary-50/10 disabled:cursor-not-allowed"
+          :class="likedByMe ? 'text-primary-50' : 'text-primary-50/55 hover:text-primary-50'"
+          @click.stop="onLikeClick"
+        >
+          <!-- likeBusy guarded double-clicks but drove no visual state, so the
+               button looked inert for the whole round trip. -->
+          <AppSpinner v-if="likeBusy" :size="18" />
+          <AppIcon v-else :path="likedByMe ? mdiThumbUp : mdiThumbUpOutline" :size="18" />
+          <span class="text-sm tabular-nums">{{ likeCount }}</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- What each figure denominates. PrimeVue teleports this to body, so it
+         sits above the card and its own hover keeps it open (see openStat). -->
     <Popover
       ref="statPopover"
       :pt="statPopoverPt"

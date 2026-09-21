@@ -91,6 +91,7 @@ export default defineConfig({
       { text: 'About', link: '/' },
       { text: 'Data sources', link: '/sources/' },
       { text: 'Costs', link: '/cost/total-cost' },
+      { text: 'Feedback', link: '/feedback' },
       // "Open the tool" used to sit here. It is in the masthead now
       // (.vitepress/theme/components/SiteBrandBar.vue), which is where the
       // app puts its own outbound links.
@@ -106,15 +107,21 @@ export default defineConfig({
     // a formula rather than browsed.
     sidebar: [
       // About is the landing page, so it sits above the groups rather than
-      // heading a group of one.
+      // heading a group of one. Feedback keeps it company: it belongs to the
+      // same "what this is and how to take part" half of the site, not to the
+      // model chapters below.
       { text: 'About', link: '/' },
+      { text: 'Feedback', link: '/feedback' },
       {
         text: 'The model',
         items: [
           { text: 'Data sources', link: '/sources/' },
+          { text: 'Scenarios and main figures', link: '/scenarios' },
           { text: 'Route planning', link: '/routing' },
           { text: 'Stop catalogue', link: '/stops' },
           { text: 'Demand and revenue', link: '/demand' },
+          { text: 'Views of costs and revenue', link: '/views' },
+          { text: 'Price basis: 2032 prices', link: '/price-basis' },
           { text: 'Emissions', link: '/emissions' },
           { text: 'Known gaps', link: '/not-modelled' },
         ],

@@ -46,6 +46,19 @@ Registry of data sources. Every parameter row can point to the source its values
 | <a id="p-input_params-sources-source_url"></a>`source_url` | Optional link to the source document or dataset. | — | — |
 | <a id="p-input_params-sources-source_date"></a>`source_date` | Date the source data was published or retrieved. | — | — |
 
+## `input_params.ticket_vat_rates`
+
+VAT on rail passenger tickets, per country: the rate on a domestic ticket and the rate on the country's share of a cross-border ticket (0 where the international leg is exempt). Calibrated by models/demand/calib/vat/vat_calibration.py (VAT_CALIBRATION.md). Display-only: the cost/revenue model prices net; the frontend applies these rates distance-weighted over a route's country shares to show what a passenger pays. Not versioned — a rate change is a reseed, like the composition catalogue; a VAT-exemption measure (WP17) would override it per scenario, not rewrite it.
+
+| Parameter | Meaning | Unit | Used in |
+|---|---|---|---|
+| <a id="p-input_params-ticket_vat_rates-country_code"></a>`country_code` | Two-letter country code (ISO 3166-1 alpha-2). One row per country. | — | — |
+| <a id="p-input_params-ticket_vat_rates-vat_domestic_per"></a>`vat_domestic_per` | VAT rate on a ticket that starts and ends in the country, as a fraction (0.070 = 7 %). | — | — |
+| <a id="p-input_params-ticket_vat_rates-vat_international_per"></a>`vat_international_per` | VAT rate on the country's distance share of a ticket that crosses a border, as a fraction; 0 where the international leg is exempt (most member states). | — | — |
+| <a id="p-input_params-ticket_vat_rates-vat_status"></a>`vat_status` | Provenance: sourced / assumed / no_railway / blocked — see VAT_CALIBRATION.md. | — | — |
+| <a id="p-input_params-ticket_vat_rates-vat_note"></a>`vat_note` | What the rate is and where the international treatment comes from, in one line. | — | — |
+| <a id="p-input_params-ticket_vat_rates-vat_src"></a>`vat_src` | Source for both rates. | — | — |
+
 ## `input_params.service_classes`
 
 Accommodation class taxonomy. service_class_main groups the detailed classes into: Seat, Couchette, Sleeper, Capsule, Catering.

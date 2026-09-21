@@ -43,6 +43,7 @@ MEMBER_KEYS_OK = {
     "status",
     "route_ref",
     "summary",
+    "demand",
 }
 MEMBER_KEYS_ERROR = {
     "scenario_variant_id",
@@ -221,6 +222,24 @@ class TestDocument:
             assert summary["total_distance_km"] > 0
             assert "subsidy_eur_per_year" in summary
             assert "geom_simplified" not in summary
+            # DEMAND 0.1.0: the family's one demand on this composition —
+            # what the utilisation ladder draws for every member.
+            demand = member["demand"]
+            assert demand["composition_id"] == member["composition_id"]
+            assert (
+                demand["passengers_per_year"]
+                == narrow_document["request"]["demand"]["passengers_per_year"]
+            )
+            assert demand["served"]["per_year"] == pytest.approx(
+                summary["passengers_per_year"], abs=1
+            )
+            assert demand["served"]["per_trip"] + demand["not_served"][
+                "total_per_trip"
+            ] == pytest.approx(demand["per_trip_demand"], abs=1e-3)
+            assert sum(p["share"] for p in demand["od"]["pairs"]) == pytest.approx(
+                1, abs=1e-4
+            )
+            assert demand["od"]["dropped_pins"] == []
 
     def test_every_reference_resolves_and_no_geometry_repeats(self, narrow_document):
         """The document carries each geometry once — the content-addressed
@@ -466,7 +485,8 @@ class TestMemberViews:
         # block too — the physical side of the same evaluation. The
         # STORED evaluation stays views-only (test_50); operations are
         # served on demand like views, never persisted with the proposal.
-        assert set(body) == {"views", "operations"}
+        assert set(body) == {"views", "operations", "demand"}
+        assert body["demand"]["model_version"]
         ops = body["operations"]
         assert set(ops) == {"trip_pairs", "route", "infrastructure"}
         pair = ops["trip_pairs"][0]

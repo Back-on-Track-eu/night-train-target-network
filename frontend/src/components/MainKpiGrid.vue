@@ -4,12 +4,18 @@ import { useI18n } from 'vue-i18n'
 import type { ProposalCalcSummary } from '@/types/api'
 import { COMPARE_KPIS, isImprovement, relativeDelta, subsidyDisplay } from '@/lib/compareKpis'
 import { useCompareFormat } from '@/composables/useCompareFormat'
+import { DOCS_KPI } from '@/lib/docsLinks'
+import InfoHint from '@/components/InfoHint.vue'
+import PriceBasisBadge from '@/components/PriceBasisBadge.vue'
 
 // Zone A's headline: the eight main KPIs of the member on screen, each with
 // its change against the baseline member (base network, nothing switched on,
 // same composition) once the family has delivered it. Values come from the
-// summary of the member on screen; the baseline is a comparison only. Surplus rule (lib/compareKpis.ts subsidyDisplay): a
-// profitable route reads "none · surplus X", never a negative subsidy.
+// summary of the member on screen; the baseline is a comparison only.
+// Surplus rule (lib/compareKpis.ts subsidyDisplay): a profitable route reads
+// "none · surplus X", never a negative subsidy. Each label carries an ⓘ with
+// a few lines on what the figure is, handing over to its section of the
+// scenarios page for the rest.
 const props = defineProps<{
   summary: ProposalCalcSummary
   baseline: ProposalCalcSummary | null
@@ -46,9 +52,16 @@ const tiles = computed(() =>
       class="flex flex-col gap-0.5 rounded-lg border border-primary-50/10 bg-sapphire-100/60 p-3"
       :class="tile.kpi.key === 'subsidy' ? 'border-amber-400/40' : ''"
     >
-      <span class="text-xs text-primary-50/60">{{
-        t(`proposal.compare.kpis.${tile.kpi.labelKey}`)
-      }}</span>
+      <span class="flex items-center gap-1 text-xs text-primary-50/60">
+        {{ t(`proposal.compare.kpis.${tile.kpi.labelKey}`) }}
+        <InfoHint
+          :text="t(`proposal.compare.kpiHints.${tile.kpi.key}`)"
+          :docs-href="DOCS_KPI[tile.kpi.key]"
+          feedback-topic="kpis"
+          :feedback-panel="t(`proposal.compare.kpis.${tile.kpi.labelKey}`)"
+        />
+        <PriceBasisBadge v-if="tile.kpi.isMoney" feedback-topic="kpis" />
+      </span>
 
       <!-- Necessary subsidy: the one tile with its own wording for a surplus. -->
       <template v-if="tile.kpi.key === 'subsidy'">

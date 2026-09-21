@@ -191,7 +191,8 @@ def compute(scenario_id: int) -> dict:
         "composition_id": COMPOSITION_ID,
         "routing_mode": "fullRouting",
         "timetable_mode": "simpleAutomatic",
-        "schedule_mode": "alwaysDaily",
+        # Daily, spelled the 0.9.40 way (one frequency; the default is 3).
+        "schedule": {"days_per_week": 7},
         # Fixed stop list — isolates the comparison to what the scenario
         # itself changes (routing/parameters), not auto-added stops.
         "auto_stop_addition": "off",

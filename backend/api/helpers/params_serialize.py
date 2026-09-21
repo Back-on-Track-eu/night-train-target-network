@@ -25,6 +25,7 @@ from models.params import (
     CompositionCollection,
 )
 from models.evaluation.views import build_class_main_shares
+from models.params import TicketVatCollection
 
 # =============================================================================
 # SHARED
@@ -592,4 +593,52 @@ def composition_collection_to_dict(compositions: CompositionCollection) -> dict:
         # referenced from compositions' coaches.list; class_ids reference
         # the "classes" section
         "coach_types": coach_types_catalog,
+    }
+
+
+# =============================================================================
+# TICKET VAT — serialize
+# =============================================================================
+
+
+def ticket_vat_to_dict(vat: TicketVatCollection) -> dict:
+    """
+    Serialize a TicketVatCollection into the body for
+    GET /api/params/TicketVat.
+
+      rule     : how a route's effective rate is formed, in one sentence —
+                 the frontend applies it, so the contract is stated where
+                 the data is
+      sources  : every referenced source, keyed by source_id
+      count    : number of countries
+      rates    : one entry per country: the two rates as fractions, the
+                 calibration's status flag, its note and the source_id
+    """
+    sources_map: dict[int, dict] = {}
+    rates = []
+    for cc in sorted(vat.all()):
+        rate = vat.get(cc)
+        entry = vat.param_versions.get(f"ticket_vat:{cc}:domestic_per")
+        rates.append(
+            {
+                "country_code": cc,
+                "vat_domestic_per": rate.domestic_per,
+                "vat_international_per": rate.international_per,
+                "status": rate.status,
+                "note": rate.note,
+                "source_id": _register_source(
+                    sources_map, entry.source if entry else None
+                ),
+            }
+        )
+    return {
+        "rule": (
+            "effective_rate = sum over countries of distance_share x rate, "
+            "with rate = vat_international_per on a route that crosses a "
+            "border and vat_domestic_per otherwise; display only — every "
+            "cost, revenue and subsidy figure is net of VAT"
+        ),
+        "sources": sources_map,
+        "count": len(rates),
+        "rates": rates,
     }

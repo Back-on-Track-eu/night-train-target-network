@@ -313,6 +313,14 @@ package instead of only at the end:
   `proposal_summaries`" rules out joining `proposals.proposals.created_at`
   at query time instead). Backfilled from `proposals.proposals.created_at`
   via a soft-reference `UPDATE...FROM`, not defaulted to `now()`.
+- **`proposal_scenario_summaries`**
+  (`migrations/2026-09-20_proposal_scenario_summaries.sql`, §5.4a) — a
+  new table, nothing existing touched. Rows arrive with every publish and
+  refresh from the api that ships it; proposals published earlier have
+  none until `uv run scripts/refresh_proposals.py --scenario-summaries`
+  has run (idempotent, needs the routing instances the deployment serves —
+  a variant without one is stored as an error row). Deploy order:
+  migration, api, backfill.
 
 ---
 
@@ -447,8 +455,14 @@ UNLOGGED, disposable, never a source of truth. Declared in
 Dev reseed drops the schema and bulk-loads any
 `db/dev/data/route_segments_<graph_key>.csv.gz` (optionally Drive-hosted via
 `ROUTE_SEGMENTS_FILE_ID_<KEY>`); servers load via
-`scripts/precompute_route_segments.py --load`. Not versioned: a cache row is
-either right for its graph import or purged with it.
+`scripts/precompute_route_segments.py --load`, or — when the batch ran on a
+machine without database access — through the staging table and merge SQL
+that `--export-upload` generates for a pgAdmin import
+(`docs/2026-09-21_route_cache_precompute_laptop_runbook.md`). Both paths are
+`ON CONFLICT DO NOTHING` on `(routing_graph_key, stop_lo, stop_hi,
+variant_key)`, so a load never disturbs rows traffic already stored. Not
+versioned: a cache row is either right for its graph import or purged with
+it.
 
 ### `family`
 
@@ -565,12 +579,14 @@ cutover. The sidecars are written/read by
 | `parkings` | One row per `Parking` (`models/route/route.py`) — overnight parking location, deduplicated by `stop_id` within the route; `trip_ids` lists every trip that parks there |
 | `shuntings` | One row per `Shunting` (`models/route/route.py`) — one shunting event at a trip terminal; not deduplicated, up to 4 rows per round trip |
 | `timetable_warnings` | One row per `TimetableWarning` (`models/route/trip.py`) — a derived timetable quality annotation, informational only |
-| `seasonal_schedules` | One row per `SeasonalSchedule` (`models/route/route.py`) — operating frequency (daily/three_per_week) per season on a route |
-| `update_log` | Append-only timeline event log (published/overwritten/recalculated/branched_from/branched_to) — preserves state transitions that `proposals.proposals` itself prunes on overwrite. Written by `publish()`/`refresh_proposal()` (`adapters/proposal/repository.py`), read as the third timeline source by `adapters/proposal/engagement_repository.py`. A NULL `user_id` marks a system event, which is what distinguishes a refresh from a user overwrite |
+| `update_log` | Append-only timeline event log (published/overwritten/recalculated/branched_from/branched_to/migrated — the last one a data migration that rewrote a stored request without recomputing, `2026-09-19_schedule_frequency.sql` being the first) — preserves state transitions that `proposals.proposals` itself prunes on overwrite. Written by `publish()`/`refresh_proposal()` (`adapters/proposal/repository.py`), read as the third timeline source by `adapters/proposal/engagement_repository.py`. A NULL `user_id` marks a system event, which is what distinguishes a refresh from a user overwrite |
+| `proposal_scenario_summaries` | The §5.4a projection once per current scenario variant — `proposal_summaries`' columns (nullable) plus `scenario_variant_id`, `status`/`error_code` and a `segments` JSONB of corridor shapes; replaced with every publish/refresh, backfilled by `scripts/refresh_proposals.py --scenario-summaries`; read by `POST /api/proposals` when a `scenario_variant_id` is requested. FK cascade from `proposals.proposals` |
 | `proposal_summaries` | Derived projection over `proposals.proposals` for the gallery/map — route metrics, financial KPIs, placeholder demand KPIs, simplified PostGIS geometry, and `country_relations` (the sorted `"AA__BB"` keys of every country-to-country relation the proposal actually serves — derived from `od_pairs`, so a merely transited country contributes nothing; ranked by `GET /api/proposals/stats` against `input_params.country_relations`). Not a source of truth; rebuildable at any time. Row-building logic: `adapters/proposal/projection.py`'s `build_summary_row()` (WP4, `tests/test_37_proposal_projection.py`); upserted by `publish()`, one row per proposal |
 
-Segments/od_pairs/timetable_warnings key off `trip_id`; parkings/shuntings/
-seasonal_schedules key off `route_id` — matching where each field lives on
+Segments/od_pairs/timetable_warnings key off `trip_id`; parkings/shuntings
+key off `route_id`, and the operating plan is `routes.schedule_months`
+(days per week for each month, ROUTE_BUILDER 0.9.35; the one home since
+0.9.40) — matching where each field lives on
 the `Route`/`Trip` domain objects (route-level vs. trip-level), same
 soft-reference convention as `stop_times.stop_id`. See
 `adapters/proposal/README.md` §5.2/§4.1/§5.4/§2.3 for the full rationale and

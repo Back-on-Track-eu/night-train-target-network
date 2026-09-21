@@ -20,7 +20,8 @@ evaluation.models (GET /api/models) and evaluation.input.parameters
 (GET /api/params/*). What is left is what a member IS:
 
   {route_builder_version, calc_version, route_fingerprint, request,
-   suggested_stops?, summary, route, evaluation: {views}}
+   suggested_stops?, summary, route, evaluation: {views, operations,
+   demand}}
 
 validate_calc_body() keeps its name: it validates a member request (stops,
 composition, scenario, HOW), which is what publish's compute_request and
@@ -35,6 +36,9 @@ Public interface:
   canonical_sha256(obj) -> str            # re-exported from models/utils.py
   canonical_request_hash(resolved_request, measure_set_id) -> str
   resolve_how_fields(body: dict) -> dict  # the HOW subset of the echo
+  validate_demand(block) -> list[str]
+  normalize_demand(block) -> dict         # the echo's demand block
+  demand_inputs(echo_block) -> DemandInputs
   compute_member(body, loader=None, router=None, use_cache=True,
                  measures=NO_MEASURES)
       -> tuple[dict, bool]   # (member payload, cache_hit)
@@ -54,7 +58,7 @@ from api.helpers.dependencies import (
     get_member_cache,
     get_rail_router,
 )
-from api.helpers.evaluation_serialize import views_to_dict
+from api.helpers.evaluation_serialize import demand_to_dict, views_to_dict
 from api.config import (
     EXPERT_DEPARTURE_MAX_TIME,
     EXPERT_DEPARTURE_MIN_TIME,
@@ -74,12 +78,19 @@ from models.utils import canonical_sha256
 from models.route.timetable import (
     VALID_AUTO_STOP_ADDITION_MODES,
     VALID_DEPARTURE_MODES,
-    VALID_SCHEDULE_MODES,
     VALID_TIMETABLE_MODES,
 )
 from models.route.routing.rail_router import VALID_ROUTING_MODES
+from models.demand.distribute import DemandInputs
 from models.demand.model import (
+    DEFAULT_DEMAND_LEVEL,
+    DEFAULT_GROUP_SHARES_PCT,
+    DEMAND_LEVEL_CUSTOM,
+    DEMAND_LEVELS,
     FARE_CLASS_MAINS,
+    GROUP_ORDER,
+    OD_PRESET_CUSTOM,
+    OD_PRESETS,
     resolve_catering,
     resolve_fares,
     resolve_fares_per_pax,
@@ -88,9 +99,9 @@ from models.demand.model import (
 from models.route.model import (
     DEFAULT_AUTO_STOP_ADDITION,
     DEFAULT_COMPOSITION_ID,
+    DEFAULT_DAYS_PER_WEEK,
     DEFAULT_ROUTING_MODE,
     DEFAULT_MIN_TURNAROUND_MIN,
-    DEFAULT_SCHEDULE_MODE,
     DEFAULT_TIMETABLE_MODE,
     NEUTRAL_PROPOSAL_ID,
     NEUTRAL_PROPOSAL_VERSION,
@@ -139,7 +150,7 @@ def validate_stops(body: dict) -> list[str]:
 
 def validate_how_fields(body: dict, stops) -> list[str]:
     """The HOW fields every compute request carries — timetable_mode,
-    fixed_night_interval, schedule_mode, routing_mode, auto_stop_addition,
+    fixed_night_interval, schedule, routing_mode, auto_stop_addition,
     expert_timetable — checked the same way for a member request (via
     validate_calc_body) and a family request (api/helpers/
     family_compute.py), whose WHAT fields are axes instead of one
@@ -186,12 +197,14 @@ def validate_how_fields(body: dict, stops) -> list[str]:
             "'simpleAutomaticWithFixedNight'."
         )
 
-    schedule_mode = body.get("schedule_mode", DEFAULT_SCHEDULE_MODE)
-    if schedule_mode not in VALID_SCHEDULE_MODES:
+    if "schedule_mode" in body:
+        # Gone with ROUTE_BUILDER 0.9.40; a stored request still carrying
+        # it is one the 2026-09-19 migration did not reach.
         errors.append(
-            f"'schedule_mode' = '{schedule_mode}' is invalid. Must be one of: {sorted(VALID_SCHEDULE_MODES)}."
+            "'schedule_mode' no longer exists: post 'schedule' as "
+            "{'days_per_week': 1..7} or a month map, or omit it for the default."
         )
-    errors.extend(validate_schedule(schedule_mode, body.get("schedule")))
+    errors.extend(validate_schedule(body.get("schedule")))
     turnaround = body.get("min_turnaround_min", DEFAULT_MIN_TURNAROUND_MIN)
     if (
         not isinstance(turnaround, int)
@@ -199,6 +212,7 @@ def validate_how_fields(body: dict, stops) -> list[str]:
         or turnaround < 0
     ):
         errors.append("'min_turnaround_min' must be a non-negative integer (minutes).")
+    errors.extend(validate_demand(body.get("demand")))
     errors.extend(validate_fares(body.get("fares_eur_per_km")))
     errors.extend(validate_fares_per_pax(body.get("fares_eur_per_pax")))
     errors.extend(validate_services(body.get("services_eur_per_pax")))
@@ -464,37 +478,260 @@ def canonical_request_hash(resolved_request: dict, measure_set_id: int) -> str:
 MONTHS = tuple(str(m) for m in range(1, 13))
 
 
-def validate_schedule(schedule_mode: str, schedule) -> list[str]:
-    """The `schedule` block: required with schedule_mode 'custom', rejected
-    with any other mode. Twelve month keys, each 0..7 days a week, and at
-    least one month running — a train that never runs has no evaluation."""
-    if schedule_mode != "custom":
-        return (
-            ["'schedule' is only allowed with schedule_mode 'custom'."]
-            if schedule
-            else []
-        )
+def _is_int(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def validate_schedule(schedule) -> list[str]:
+    """The optional `schedule` block, in either of its two shapes:
+
+      {"days_per_week": n}     one frequency, an integer 1..7 — what the
+                               Details card posts (ROUTE_BUILDER 0.9.40)
+      {"1": d, ..., "12": d}   days per week for each month, each 0..7,
+                               at least one month running — the seasonal
+                               shape a later UI will post
+
+    Absent means DEFAULT_DAYS_PER_WEEK in every month. A train that never
+    runs has no evaluation, hence the floor on both shapes."""
+    if schedule is None:
+        return []
     if not isinstance(schedule, dict):
-        return ["'schedule' must be an object of month → days per week."]
+        return [
+            "'schedule' must be an object: {'days_per_week': 1..7} or a month map "
+            "'1'..'12' → days per week."
+        ]
+    if set(schedule) == {"days_per_week"}:
+        d = schedule["days_per_week"]
+        if not _is_int(d) or not 1 <= d <= 7:
+            return ["'schedule.days_per_week' must be an integer 1..7."]
+        return []
     errors = []
-    keys = {str(k) for k in schedule}
-    if keys != set(MONTHS):
-        errors.append("'schedule' must carry exactly the months '1'..'12'.")
+    if {str(k) for k in schedule} != set(MONTHS):
+        errors.append(
+            "'schedule' must carry either 'days_per_week' or exactly the months "
+            "'1'..'12'."
+        )
     for k, v in schedule.items():
-        if isinstance(v, bool) or not isinstance(v, int) or not 0 <= v <= 7:
+        if not _is_int(v) or not 0 <= v <= 7:
             errors.append(f"'schedule[{k}]' must be an integer 0..7 (days per week).")
     if not errors and not any(int(v) > 0 for v in schedule.values()):
         errors.append("'schedule' must have at least one month with days > 0.")
     return errors
 
 
-def normalize_schedule(schedule_mode: str, schedule) -> dict | None:
-    """String month keys in calendar order, or None for a mode that does
-    not read the block — so the echo, and therefore the family key, is the
-    same however the client spelled it."""
-    if schedule_mode != "custom" or not isinstance(schedule, dict):
-        return None
+def normalize_schedule(schedule) -> dict[str, int]:
+    """The month map every resolved request carries, string month keys in
+    calendar order — one frequency expanded onto the twelve months, a
+    posted map canonicalised, an absent block the default — so the echo,
+    and therefore the family key, is the same however the plan was
+    spelled. Assumes the block passed validate_schedule()."""
+    if not isinstance(schedule, dict):
+        return {m: DEFAULT_DAYS_PER_WEEK for m in MONTHS}
+    if set(schedule) == {"days_per_week"}:
+        return {m: int(schedule["days_per_week"]) for m in MONTHS}
     return {m: int(schedule[m] if m in schedule else schedule[int(m)]) for m in MONTHS}
+
+
+# =============================================================================
+# demand — the manual demand block (DEMAND 0.1.0, guide §4)
+# =============================================================================
+
+_DEMAND_KEYS = frozenset({"level", "passengers_per_year", "group_shares_pct", "od"})
+_OD_KEYS = frozenset({"preset", "stop_weights", "pinned_shares_pct"})
+_WEIGHT_SIDES = ("board", "alight")
+
+
+def _is_number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _validate_weights(weights, where: str) -> list[str]:
+    if weights is None:
+        return []
+    if not isinstance(weights, dict):
+        return [f"'{where}' must be an object of stop_id → weight."]
+    errors = []
+    for stop_id, w in weights.items():
+        if not isinstance(stop_id, str):
+            errors.append(f"'{where}' keys must be stop_id strings.")
+        elif not _is_number(w) or w < 0:
+            errors.append(f"'{where}[{stop_id}]' must be a non-negative number.")
+    return errors
+
+
+def _validate_pins(pins) -> list[str]:
+    """`od.pinned_shares_pct`: origin stop_id → {destination stop_id → share
+    in percent}, each 0..100, the sum at most 100."""
+    if pins is None:
+        return []
+    if not isinstance(pins, dict):
+        return [
+            "'demand.od.pinned_shares_pct' must be an object of origin → {destination → %}."
+        ]
+    errors = []
+    total = 0.0
+    for origin, row in pins.items():
+        if not isinstance(origin, str) or not isinstance(row, dict):
+            errors.append(
+                "'demand.od.pinned_shares_pct' must map stop_id → {stop_id → %}."
+            )
+            continue
+        for dest, v in row.items():
+            if not isinstance(dest, str) or not _is_number(v) or not 0 <= v <= 100:
+                errors.append(
+                    f"'demand.od.pinned_shares_pct[{origin}][{dest}]' must be a number 0..100."
+                )
+            else:
+                total += v
+    if not errors and total > 100 + 1e-9:
+        errors.append("'demand.od.pinned_shares_pct' may not sum to more than 100.")
+    return errors
+
+
+def validate_demand(block) -> list[str]:
+    """The optional `demand` block: every part optional (defaults: Medium,
+    the D14 shares, an even OD spread), shares ≥ 0 with any sum, weights
+    ≥ 0, pins in 0..100 summing to at most 100, level and preset from
+    their vocabularies."""
+    if block is None:
+        return []
+    if not isinstance(block, dict):
+        return ["'demand' must be an object."]
+    errors = []
+    unknown = set(block) - _DEMAND_KEYS
+    if unknown:
+        errors.append(f"'demand' has unknown keys: {sorted(unknown)}.")
+    level = block.get("level")
+    if level is not None and level not in (*DEMAND_LEVELS, DEMAND_LEVEL_CUSTOM):
+        errors.append(
+            f"'demand.level' = '{level}' is invalid. Must be one of: "
+            f"{[*DEMAND_LEVELS, DEMAND_LEVEL_CUSTOM]}."
+        )
+    total = block.get("passengers_per_year")
+    if total is not None and (not _is_number(total) or total < 0):
+        errors.append("'demand.passengers_per_year' must be a non-negative number.")
+    shares = block.get("group_shares_pct")
+    if shares is not None:
+        if not isinstance(shares, dict):
+            errors.append("'demand.group_shares_pct' must be an object of group → %.")
+        else:
+            bad = sorted(set(shares) - set(GROUP_ORDER))
+            if bad:
+                errors.append(
+                    f"'demand.group_shares_pct' has unknown groups {bad}; "
+                    f"allowed: {list(GROUP_ORDER)}."
+                )
+            for g, v in shares.items():
+                if not _is_number(v) or v < 0:
+                    errors.append(
+                        f"'demand.group_shares_pct[{g}]' must be a non-negative number."
+                    )
+    od = block.get("od")
+    if od is not None:
+        if not isinstance(od, dict):
+            errors.append("'demand.od' must be an object.")
+        else:
+            unknown = set(od) - _OD_KEYS
+            if unknown:
+                errors.append(f"'demand.od' has unknown keys: {sorted(unknown)}.")
+            preset = od.get("preset")
+            if preset is not None and preset not in (*OD_PRESETS, OD_PRESET_CUSTOM):
+                errors.append(
+                    f"'demand.od.preset' = '{preset}' is invalid. Must be one of: "
+                    f"{[*OD_PRESETS, OD_PRESET_CUSTOM]}."
+                )
+            weights = od.get("stop_weights")
+            if weights is not None:
+                if not isinstance(weights, dict) or set(weights) - set(_WEIGHT_SIDES):
+                    errors.append(
+                        "'demand.od.stop_weights' must be an object with 'board' and/or 'alight'."
+                    )
+                else:
+                    for side in _WEIGHT_SIDES:
+                        errors.extend(
+                            _validate_weights(
+                                weights.get(side), f"demand.od.stop_weights.{side}"
+                            )
+                        )
+            errors.extend(_validate_pins(od.get("pinned_shares_pct")))
+    return errors
+
+
+def _level_of(total: float, posted_level) -> str:
+    """The level label the echo carries: what was posted when it still
+    matches its total, else whichever level the total is, else custom —
+    editing the figure after choosing a level makes it custom (D12)."""
+    for level, level_total in DEMAND_LEVELS.items():
+        if float(level_total) == float(total):
+            return level
+    return (
+        DEMAND_LEVEL_CUSTOM
+        if posted_level is None or posted_level in DEMAND_LEVELS
+        else str(posted_level)
+    )
+
+
+def normalize_demand(block) -> dict:
+    """The complete, canonical demand block of the resolved request:
+    defaults filled in, keys in a fixed order, weights rounded to 4
+    decimals and pins to 2, sorted by stop id — so an omitted block, a
+    partial one and a spelled-out default hash alike (the family key reads
+    it minus `level` and `od.preset`, which are labels). Assumes the block
+    passed validate_demand()."""
+    block = block if isinstance(block, dict) else {}
+    od = block.get("od") if isinstance(block.get("od"), dict) else {}
+    total = block.get("passengers_per_year")
+    if total is None:
+        level = (
+            block.get("level")
+            if block.get("level") in DEMAND_LEVELS
+            else DEFAULT_DEMAND_LEVEL
+        )
+        total = DEMAND_LEVELS[level]
+    total = float(total)
+    shares = block.get("group_shares_pct") or {}
+    weights = od.get("stop_weights") or {}
+    pins = od.get("pinned_shares_pct") or {}
+    return {
+        "level": _level_of(total, block.get("level")),
+        "passengers_per_year": total,
+        "group_shares_pct": {
+            g: float(shares.get(g, DEFAULT_GROUP_SHARES_PCT[g])) for g in GROUP_ORDER
+        },
+        "od": {
+            "preset": od.get("preset")
+            if od.get("preset") in OD_PRESETS
+            else OD_PRESET_CUSTOM,
+            "stop_weights": {
+                side: {
+                    s: round(float(w), 4)
+                    for s, w in sorted((weights.get(side) or {}).items())
+                }
+                for side in _WEIGHT_SIDES
+            },
+            "pinned_shares_pct": {
+                o: {d: round(float(v), 2) for d, v in sorted(row.items())}
+                for o, row in sorted(pins.items())
+                if row
+            },
+        },
+    }
+
+
+def demand_inputs(echo: dict) -> DemandInputs:
+    """The echo's demand block as the domain values models/demand takes."""
+    od = echo["od"]
+    return DemandInputs(
+        passengers_per_year=float(echo["passengers_per_year"]),
+        group_shares_pct=dict(echo["group_shares_pct"]),
+        board_weights=dict(od["stop_weights"]["board"]),
+        alight_weights=dict(od["stop_weights"]["alight"]),
+        pins_pct={
+            (o, d): float(v)
+            for o, row in od["pinned_shares_pct"].items()
+            for d, v in row.items()
+        },
+    )
 
 
 def validate_fares(fares) -> list[str]:
@@ -608,19 +845,19 @@ def resolve_how_fields(body: dict) -> dict:
     return {
         "timetable_mode": body.get("timetable_mode", DEFAULT_TIMETABLE_MODE),
         "fixed_night_interval": body.get("fixed_night_interval"),
-        "schedule_mode": body.get("schedule_mode", DEFAULT_SCHEDULE_MODE),
-        # Canonicalised to string month keys so a posted {1: 7} and {"1": 7}
-        # hash the same; None unless the mode reads it, for the same reason
-        # expert_timetable is always present.
-        "schedule": normalize_schedule(
-            body.get("schedule_mode", DEFAULT_SCHEDULE_MODE), body.get("schedule")
-        ),
+        # Always the twelve-month map with string keys: one posted
+        # frequency, a posted map and an omitted block all land on the same
+        # shape, so the same plan hashes the same however it was spelled.
+        "schedule": normalize_schedule(body.get("schedule")),
         "min_turnaround_min": int(
             body.get("min_turnaround_min", DEFAULT_MIN_TURNAROUND_MIN)
         ),
         # Always the complete, resolved dict — defaults filled in and keys
         # in a fixed order — so a request naming one class and a request
         # spelling out all four with the same values hash the same.
+        # DEMAND 0.1.0: the manual demand, complete and canonical — total,
+        # level, group shares and the OD weights/pins (models/demand/).
+        "demand": normalize_demand(body.get("demand")),
         "fares_eur_per_km": normalize_fares(body.get("fares_eur_per_km")),
         # The three per-passenger tariff parts, each per class and each
         # resolved here like the per-km fares, so the key cannot tell an
@@ -746,9 +983,9 @@ def compute_member(
         scenario_id=scenario_id,
         timetable_mode=resolved_request["timetable_mode"],
         fixed_night_interval=resolved_request["fixed_night_interval"],
-        schedule_mode=resolved_request["schedule_mode"],
         schedule=resolved_request["schedule"],
         min_turnaround_min=resolved_request["min_turnaround_min"],
+        demand=demand_inputs(resolved_request["demand"]),
         fares_eur_per_km=resolved_request["fares_eur_per_km"],
         fares_eur_per_pax=resolved_request["fares_eur_per_pax"],
         services_eur_per_pax=resolved_request["services_eur_per_pax"],
@@ -801,6 +1038,10 @@ def compute_member(
             result.provenance.tracks,
             result.provenance.stop_infra,
         ),
+        # DEMAND 0.1.0: who sits where, what was not served, the OD matrix
+        # and the sources — the committed figures the Details card shows,
+        # so the client needs the allocation only for previews.
+        "demand": demand_to_dict(result.demand, result.route),
     }
     # §5.4 gallery KPIs, derived from the exact route/evaluation dicts
     # this response carries — the same build_summary_row() the publish

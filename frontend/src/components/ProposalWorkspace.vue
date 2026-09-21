@@ -19,6 +19,12 @@ const mode = computed(() => (proposalId.value !== null ? 'display' : 'edit'))
 // here — see store.pendingProposalSeed. Falls back to null (defaultPair's two
 // random major stops) for a directly-opened /proposal-builder.
 const searchSeed = computed(() => (mode.value === 'edit' ? store.pendingProposalSeed : null))
+// /proposal/<id>#comments — the gallery card's comment count links here, and
+// the hash is the only part of the target that is about WHERE on the page to
+// land. Kept in this wrapper because reading the route is its job.
+const focusSection = computed<'comments' | null>(() =>
+  route.hash === '#comments' ? 'comments' : null,
+)
 
 function onPublished(id: number) {
   if (route.name !== 'proposal') router.replace({ name: 'proposal', params: { id } })
@@ -30,6 +36,7 @@ function onPublished(id: number) {
     :mode="mode"
     :proposal-id="proposalId"
     :search-seed="searchSeed"
+    :focus-section="focusSection"
     class="w-full max-w-6xl"
     @back="router.push({ name: 'gallery' })"
     @published="onPublished"

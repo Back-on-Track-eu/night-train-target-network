@@ -28,6 +28,7 @@ onMounted(() => {
   store.fetchCompositions()
   store.fetchScenarios()
   store.fetchModels()
+  store.fetchTicketVat()
 })
 </script>
 

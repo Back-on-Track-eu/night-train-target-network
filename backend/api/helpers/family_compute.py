@@ -33,6 +33,7 @@ Public interface:
   validate_family_body(body) -> list[str]
   resolve_family_request(body) -> dict
   resolve_family_axes(body, loader) -> FamilyAxes
+  family_request_from_echo(request) -> FamilyRequest
   build_or_load_family(body) -> dict            # the document
   member_views(document_request, sv, comp) -> dict
 """
@@ -53,6 +54,7 @@ from api.helpers.family_serialize import (
 from api.helpers.member_compute import (
     classify_compute_error,
     compute_member,
+    demand_inputs,
     resolve_how_fields,
     validate_how_fields,
     validate_stops,
@@ -234,6 +236,28 @@ def resolve_presented(body: dict, axes: FamilyAxes, loader) -> tuple[int, str]:
 # =============================================================================
 
 
+def family_request_from_echo(request: dict) -> FamilyRequest:
+    """The resolved request echo (stops + HOW, as resolve_family_request()
+    or a stored compute_request carries it) as the domain FamilyRequest.
+    Any axis field the echo happens to carry — composition_id,
+    scenario_id — is ignored: the axes are the caller's."""
+    return FamilyRequest(
+        stops=list(request["stops"]),
+        timetable_mode=request["timetable_mode"],
+        fixed_night_interval=request["fixed_night_interval"],
+        schedule=request["schedule"],
+        min_turnaround_min=request["min_turnaround_min"],
+        demand=demand_inputs(request["demand"]),
+        fares_eur_per_km=request["fares_eur_per_km"],
+        fares_eur_per_pax=request["fares_eur_per_pax"],
+        services_eur_per_pax=request["services_eur_per_pax"],
+        catering_eur_per_pax=request["catering_eur_per_pax"],
+        routing_mode=request["routing_mode"],
+        auto_stop_addition=request["auto_stop_addition"],
+        expert_timetable=expert_timetable_from_dict(request["expert_timetable"]),
+    )
+
+
 def build_or_load_family(body: dict) -> dict:
     """The document for a validated body: cache hit or a full build.
     `presented` is not part of the key, so a cached document is served
@@ -261,21 +285,7 @@ def build_or_load_family(body: dict) -> dict:
         return document
 
     result = run_family(
-        FamilyRequest(
-            stops=request["stops"],
-            timetable_mode=request["timetable_mode"],
-            fixed_night_interval=request["fixed_night_interval"],
-            schedule_mode=request["schedule_mode"],
-            schedule=request["schedule"],
-            min_turnaround_min=request["min_turnaround_min"],
-            fares_eur_per_km=request["fares_eur_per_km"],
-            fares_eur_per_pax=request["fares_eur_per_pax"],
-            services_eur_per_pax=request["services_eur_per_pax"],
-            catering_eur_per_pax=request["catering_eur_per_pax"],
-            routing_mode=request["routing_mode"],
-            auto_stop_addition=request["auto_stop_addition"],
-            expert_timetable=expert_timetable_from_dict(request["expert_timetable"]),
-        ),
+        family_request_from_echo(request),
         axes,
         FamilyContext(loader, get_rail_router),
         presented,
@@ -328,4 +338,5 @@ def member_views(
     return {
         "views": payload["evaluation"]["views"],
         "operations": payload["evaluation"]["operations"],
+        "demand": payload["evaluation"]["demand"],
     }

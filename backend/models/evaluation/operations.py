@@ -559,8 +559,12 @@ def build_operations(
     operating_days = route.schedule.operating_days_per_year
     total = {
         "operating_days_per_year": operating_days,
-        # One departure per trip of every pair on every operating day.
-        "departures_per_year": round(operating_days * 2 * len(route.trip_pairs)),
+        # One departure per trip of every pair on every operating day —
+        # EXACT, not rounded (CALC 0.9.33): this is the divisor the receipts
+        # take a per-year leaf to a per-trip figure with, and 3 days a week
+        # over a 366-day year is 313.71 departures, not 314. The summary row
+        # rounds its copy because it is an INTEGER gallery column.
+        "departures_per_year": operating_days * 2 * len(route.trip_pairs),
         "trainsets_physical": sum(p["trainsets"]["physical"] for p in pairs),
         "trainsets_theoretical": round(
             sum(p["trainsets"]["theoretical"] for p in pairs), 2

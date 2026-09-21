@@ -3,8 +3,8 @@
     "offline": "Es besteht offenbar keine Internetverbindung. Bitte die Verbindung prüfen und erneut versuchen.",
     "network": "Der Server war nicht erreichbar. Bitte in einem Moment erneut versuchen.",
     "timeout": "Zeitüberschreitung bei der Serveranfrage. Bitte erneut versuchen.",
-    "stillWorking": "Das dauert länger als gewöhnlich. Unsere Server scheinen gerade etwas ausgelastet zu sein.",
-    "highDemand": "Der Andrang ist gerade hoch, deshalb dauert es länger als gewöhnlich.",
+    "stillWorking": "Das dauert länger als gewöhnlich.",
+    "highDemand": "Das dauert deutlich länger als gewöhnlich – unsere Server sind womöglich ausgelastet.",
     "server": "Auf unserer Seite ist etwas schiefgelaufen. Bitte in einem Moment erneut versuchen. Unser Team wurde über einen möglichen Fehler informiert.",
     "unavailable": "Der Dienst ist vorübergehend nicht verfügbar. Bitte in einigen Minuten erneut versuchen.",
     "malformed": "Die Sitzung ist möglicherweise abgelaufen. Zum Fortfahren die Seite neu laden.",
@@ -22,7 +22,7 @@
     "stopsUnavailable": "Die Bahnhofsliste konnte nicht geladen werden.",
     "stopsEmpty": "Derzeit sind keine Bahnhöfe verfügbar.",
     "compositionsUnavailable": "Die Zugbildungen konnten nicht geladen werden.",
-    "scenariosUnavailable": "Szenarien konnten nicht geladen werden, gerechnet wird gegen die Live-Basis.",
+    "scenariosUnavailable": "Szenarien konnten nicht geladen werden – gerechnet wird mit dem aktuellen Basisszenario.",
     "calcFailed": "Diese Strecke konnte nicht ausgewertet werden.",
     "proposalsLoadFailed": "Die Vorschläge konnten nicht geladen werden.",
     "proposalLoadFailed": "Dieser Vorschlag konnte nicht geladen werden.",
@@ -42,7 +42,7 @@
   },
   "proposal": {
     "heading": "Na, wie sieht Deine Traum-Nachtzugverbindung aus?",
-    "subheading": "Skizziere sie, rechne sie durch, verbessere sie – und hilf uns, die Grundlage für Europas Nachtzug-Target-Network zu legen.",
+    "subheading": "Mache einen Vorschlag, berechne die Zahlen, optimiere ihn und hilf uns dabei, die Grundlagen für das Zielnetz für Nachtzüge in Europa zu schaffen.",
     "evaluate": "Auswerten",
     "recalculate": "Mit dieser Auswahl neu berechnen",
     "evaluating": "Der Vorschlag wird ausgewertet…",
@@ -52,7 +52,8 @@
     "mapPlaceholder": "Karte",
     "searchPlaceholder": "Halte suchen…",
     "addStop": "Halt hinzufügen",
-    "noStopsFound": "Keine Halte gefunden",
+    "noStopsFound": "Nicht in unseren Daten gefunden, was Du suchst?",
+    "missingStopLink": "Schlage einen weiteren Halt vor.",
     "trackGauge": "Spurweite",
     "gaugeUnknown": "Spurweite unbekannt",
     "minStopsTooltip": "Mindestens zwei Halte pro Strecke.",
@@ -62,7 +63,7 @@
     "comments": {
       "title": "Diskussion",
       "loading": "Die Diskussion wird geladen…",
-      "empty": "Noch keine Kommentare. Der erste Beitrag zu dieser Strecke fehlt noch.",
+      "empty": "Noch keine Kommentare – mach den Anfang!",
       "placeholder": "Gedanken zu dieser Strecke teilen…",
       "post": "Kommentar absenden",
       "posting": "Wird gesendet…",
@@ -94,13 +95,16 @@
       "copyFailed": "Der Link ließ sich nicht kopieren. Bitte in der Adresszeile markieren und kopieren.",
       "email": "E-Mail",
       "whatsapp": "WhatsApp",
+      "report": "Feedback geben",
       "more": "Teilen über…",
       "stopsCount": "{count} Halt | {count} Halte",
       "countriesCount": "{count} Land | {count} Länder",
       "message": "Europa braucht einen Nachtzug von {origin} nach {destination}. {km} km, {stops}, {countries} – das wäre dafür nötig:",
       "messagePlain": "Europa braucht einen Nachtzug von {origin} nach {destination}. Das wäre dafür nötig:",
       "emailSubject": "Europa braucht einen Nachtzug {origin}–{destination}",
-      "emailBody": "So sähe ein Nachtzug {origin} – {destination} aus: Strecke, Fahrplan und Betriebskosten, modelliert nach dem Back-on-Track Target Network:"
+      "emailBody": "So sähe ein Nachtzug {origin} – {destination} aus: Strecke, Fahrplan und Betriebskosten, berechnet mit dem Back-on-Track Target Network:",
+      "reportRoute": "Feedback zur Strecke",
+      "reportTimetable": "Feedback zum Fahrplan"
     },
     "funFacts": {
       "label": "Schon gewusst?",
@@ -135,11 +139,11 @@
         "demand": "Vorrang für Nachtzüge bei der Trassenvergabe, damit die gewünschten Verbindungen tatsächlich fahren können."
       },
       "carpatia": {
-        "fact": "Seit Dezember 2025 verbindet ein Nachtzug Carpatia Przemyśl und Krakau mit Wien, Salzburg und München.",
+        "fact": "Seit Dezember 2025 verbindet der Nachtzug „Carpatia“ Przemyśl und Krakau mit Wien, Salzburg und München.",
         "demand": "EU-Kofinanzierung für Pilotstrecken an die Ränder Europas: Portugal, Griechenland, Nordeuropa, das Baltikum."
       },
       "parisBerlin": {
-        "fact": "Seit März 2026 fährt ein Nachtzug Paris–Brüssel–Berlin, Brüssel–Mailand soll folgen.",
+        "fact": "Seit März 2026 fährt ein Nachtzug Paris–Brüssel–Berlin; Brüssel–Mailand soll folgen.",
         "demand": "die Wiedereröffnung geschlossener Grenzbahnhöfe. Zwischen Irun und Hendaye ist seit 2020 kein Personenzug mehr gefahren."
       },
       "rollingStock": {
@@ -148,39 +152,54 @@
       },
       "reuse": {
         "fact": "In Frankreich werden rund 1.300 öffentlich finanzierte Wagen verschrottet, während in Europa Schlafwagen fehlen.",
-        "demand": "EU-Regeln, die die Weiterverwendung gebrauchter Fahrzeuge stattdessen ermöglichen."
+        "demand": "EU-Regeln, die stattdessen die Weiterverwendung gebrauchter Fahrzeuge ermöglichen."
       },
       "network": {
         "fact": "Back-on-Track ist ein ehrenamtliches Netzwerk aus rund 60 aktiven Mitgliedern mit Gruppen in elf europäischen Ländern.",
-        "demand": "Nachtzüge als eigenes Verkehrssegment zu behandeln, befreit von Zuschlägen auf die Trassenentgelte."
+        "demand": "die Behandlung von Nachtzügen als eigenes Marktsegment, befreit von Aufschlägen auf die Trassenentgelte."
       }
     },
     "expert": {
       "toggle": "Fahrplan im Expertenmodus",
       "firstDeparture": "Erste Abfahrt",
-      "pinned": "fixiert",
-      "follows": "folgt der Automatik",
-      "automatic": "Automatisch, gespiegelt um 02:30 Uhr",
-      "pinnedHint": "Bleibt nach einer Neuberechnung zu dieser Zeit (automatisch: {auto})",
-      "followsHint": "Automatisch {auto}, {delta} Min., verschiebt sich mit",
-      "reset": "Zurück zur Automatik",
-      "nudgeAria": "Erste Abfahrt um {minutes} Minuten verschieben",
+      "pinnedAria": "Abfahrt fixiert: bleibt auch nach einer Neuberechnung bei dieser Zeit. Klicken, damit sie stattdessen dem automatischen Fahrplan folgt.",
+      "followsAria": "Abfahrt folgt dem automatischen Fahrplan und behält ihren Abstand dazu. Klicken, um sie auf diese Zeit zu fixieren.",
+      "mirroredAria": "Gegenrichtung um 02:30 Uhr gespiegelt: Abfahrt in die andere Richtung verschoben, zusätzliche Minuten in umgekehrter Reihenfolge. Klicken, um ihr eigene Zeiten zu geben.",
+      "ownTimesAria": "Die Gegenrichtung behält ihre eigenen Zeiten – zum Bearbeiten die Fahrtrichtung tauschen. Klicken, um stattdessen diese Richtung zu spiegeln.",
+      "reset": "Zurück zur automatischen Abfahrt",
       "legAria": "Zusätzliche Minuten auf dem Abschnitt bis {stop}",
       "moreAria": "Eine Minute mehr auf dem Abschnitt bis {stop}",
       "lessAria": "Eine Minute weniger auf dem Abschnitt bis {stop}",
-      "mirrored": "Die Gegenrichtung übernimmt diese zusätzlichen Minuten spiegelverkehrt.",
-      "editSeparately": "Eigene Zeiten geben",
-      "ownTimes": "Die Gegenrichtung behält ihre eigenen Zeiten.",
-      "relink": "Diese Richtung wieder spiegeln",
-      "droppedAddons": "Auf {legs} sind zusätzliche Minuten entfallen: Dazwischen kam ein Halt hinzu, den Abschnitt gibt es nicht mehr."
+      "droppedAddons": "Auf {legs} sind die zusätzlichen Minuten entfallen: Dazwischen wurde ein Halt eingefügt, diesen Abschnitt gibt es nicht mehr.",
+      "toggleHint": "Gestalte den Fahrplan selbst: erste Abfahrt fixieren, Minuten auf Abschnitten ergänzen, Rückfahrt mit eigenen Zeiten, Nacht festlegen. Gilt nach dem Neuberechnen."
+    },
+    "night": {
+      "toggleAria": "Nacht festlegen: die beiden Halte wählen, zwischen die das Fenster 00:00–05:00 Uhr gelegt wird",
+      "markAria": "{stop} – zwei Halte anklicken, um das Fenster 00:00–05:00 Uhr dazwischenzulegen",
+      "autoHint": "Nacht: automatisch – die ganze Fahrt liegt symmetrisch um 02:30 Uhr. Zum Festlegen die Symbole zweier Halte anklicken.",
+      "pendingHint": "Jetzt das andere Ende des Nachtabschnitts anklicken.",
+      "fixedHint": "Nacht zwischen {a} und {b}: Der Fahrplan legt 00:00–05:00 Uhr mittig auf diesen Abschnitt und dehnt ihn bei Bedarf auf fünf Stunden.",
+      "legendNight": "Nacht, 00:00–05:00 Uhr",
+      "legendBoarding": "Einstieg",
+      "legendNightStop": "Nachthalt",
+      "legendAlighting": "Ausstieg",
+      "slackHint": "{minutes} dieser Minuten sind Nachtdehnung: Der Abschnitt wird auf fünf Stunden gehalten, verteilt auf seine Teilabschnitte im Verhältnis ihrer Fahrzeit. Hier ergänzte Minuten zählen zu den fünf Stunden und verringern die Dehnung.",
+      "stopType": {
+        "boarding": "Einstiegshalt – der Zug fährt vor Mitternacht ab",
+        "night": "Nachthalt – zwischen 00:00 und 05:00 Uhr",
+        "alighting": "Ausstiegshalt – der Zug kommt ab 05:00 Uhr an",
+        "both": "Einstiegs- und Ausstiegshalt"
+      },
+      "legendHint": "Nacht ist 00:00–05:00 Uhr. Einstiegshalte verlässt der Zug vor Mitternacht, Ausstiegshalte erreicht er ab 05:00 Uhr; an Nachthalten dazwischen wird nichts verkauft."
     },
     "suggestions": {
       "title": "Halte entlang der Strecke ergänzen?",
-      "subtitle": "Auf der Strecke liegen weitere Halte. Beliebige davon lassen sich aufnehmen.",
+      "subtitle": "Auf Deiner Strecke liegen weitere Halte. Wähle aus, welche Du aufnehmen möchtest.",
       "addedTime": "+{minutes} Min.",
       "backToEdit": "Zurück zur Bearbeitung",
       "continue": "Weiter mit {count} zusätzlichem Halt | Weiter mit {count} zusätzlichen Halten",
       "continueNone": "Ohne zusätzliche Halte weiter",
+      "continueChanged": "Weiter mit der geänderten Strecke",
       "adoptAll": "Alle vorgeschlagenen Halte übernehmen und weiter",
       "addAria": "{name} zur Strecke hinzufügen",
       "removeAria": "{name} aus der Strecke entfernen"
@@ -198,7 +217,7 @@
       "loco": "Lokomotive",
       "coaches": "Wagen",
       "places": "Plätze",
-      "hsrAllowed": "Hochgeschwindigkeitsstrecken",
+      "hsrAllowed": "Schnellfahrstrecken",
       "serviceCoach": "Dienstwagen, keine Plätze",
       "coachHint": "Auf einen Wagen zeigen, um seine Typdaten zu sehen",
       "coachPosition": "Wagen {n}",
@@ -224,7 +243,7 @@
         "title": "Indikative Stückkosten",
         "perTrainKm": "Je Zug-km",
         "perPlaceKm": "Je Platz-km",
-        "caption": "Die Balken vergleichen mit der teuersten Zugbildung im Katalog."
+        "caption": "Die Balken zeigen den Vergleich mit der teuersten Zugbildung im Katalog."
       },
       "sections": {
         "crew": "Personal",
@@ -245,7 +264,7 @@
         "densityLength": "Länge je Platz",
         "densityWeight": "Gewicht je Platz"
       },
-      "pickCoach": "Auf einen Wagen zeigen für seinen Typ, anklicken für seine Ausstattung."
+      "pickCoach": "Auf einen Wagen zeigen, um seinen Typ zu sehen; anklicken für seine Ausstattung."
     },
     "map": {
       "travelTime": "Fahrzeit",
@@ -253,18 +272,19 @@
       "durationHm": "{h} Std. {m} Min.",
       "durationH": "{h} Std.",
       "durationM": "{m} Min.",
-      "variantSwitch": "Zum Anzeigen dieser Variante klicken"
+      "variantSwitch": "Zum Anzeigen dieser Variante klicken",
+      "removeStop": "Klicken, um {name} aus der Strecke zu entfernen"
     },
     "tripPairs": {
       "addAnother": "Weiteres Fahrtenpaar hinzufügen",
-      "comingSoonHint": "Bald kann ein Vorschlag mehr als ein Fahrtenpaar umfassen, abzweigend von einem gemeinsamen Abschnitt oder kreuzend an einem Umsteigebahnhof. Eine Strecke kann dann Y- oder X-förmig sein statt einer einzelnen Linie."
+      "comingSoonHint": "Bald kann ein Vorschlag mehr als ein Fahrtenpaar umfassen, abzweigend von einem gemeinsamen Abschnitt oder kreuzend an einem Umsteigebahnhof. Eine Strecke kann dann Y- oder X-förmig sein."
     },
     "evaluation": {
       "scenario": "Szenario",
       "sections": {
         "inputs": {
           "title": "Szenario und Zugbildung wählen",
-          "body": "Beides verändert jede Zahl weiter unten: das Szenario, gegen das ausgewertet wird, und die Zugbildung, die auf der Strecke fahren würde."
+          "body": "Beides verändert jede Zahl weiter unten: das Szenario, für das ausgewertet wird, und die Zugbildung, die auf der Strecke fahren würde."
         },
         "impact": {
           "title": "Wesentliche Kennzahlen",
@@ -272,7 +292,8 @@
         },
         "finance": {
           "title": "Kosten und Erlöse",
-          "body": "Was der Betrieb der Strecke jährlich kosten würde, was die Tickets einbringen würden und wie groß die Lücke dazwischen ist."
+          "body": "Was der Betrieb der Strecke jährlich kosten würde, was die Tickets einbringen würden und wie groß die Lücke dazwischen ist.",
+          "hint": "Alle Kosten eines Jahres gegen alle Erlöse, und die Lücke: der nötige Zuschuss oder der Überschuss nach der Marge des Betreibers. Eine Zeile anklicken zeigt Anteil und Formel."
         }
       },
       "views": {
@@ -282,12 +303,19 @@
         "per_trip_pair_per_section": "Nach Streckenabschnitt",
         "per_trip_per_stop": "Nach Halt"
       },
+      "viewHints": {
+        "route": "Der ganze Vorschlag in einem Zahlenwerk: jeder Abschnitt, Halt, Wagen und jede Relation, beide Richtungen, ein volles Jahr. Nichts wird zugeordnet – alles wird summiert.",
+        "per_trip_pair": "Ein Hin-und-Rück-Paar für sich. Unterscheidet sich von der Gesamtstrecke nur bei Y- oder X-förmigen Strecken mit mehreren Paaren.",
+        "per_trip_pair_per_country": "Kosten fallen an, wo der Zug fährt oder das Ereignis stattfindet, Erlöse, wo die Reisenden sitzen. Länderzellen summieren sich zur Gesamtstrecke.",
+        "per_trip_pair_per_section": "Ein Streckenteil zwischen zwei Halten, beide Richtungen: alle Kosten dort und der km-Anteil aller Mitfahrenden. Abschnitte überlappen und summieren sich daher nicht.",
+        "per_trip_per_stop": "Ein Halt einer Richtung. Nur Ein- und Aussteigende zählen – die Sicht darauf, ob sich ein Halt lohnt. Haltzellen summieren sich zur Gesamtstrecke."
+      },
       "norms": {
         "per_year": "Pro Jahr",
         "per_operating_day": "Pro Betriebstag",
-        "per_train_km": "Je Zug-km",
-        "per_available_place_km": "Je angebotenem Platz-km",
-        "per_sold_place_km": "Je verkauftem Platz-km"
+        "per_train_km": "Pro Zug-km",
+        "per_available_place_km": "Pro angebotenem Platz-km",
+        "per_sold_place_km": "Pro verkauftem Platz-km"
       },
       "kpi": {
         "revenue": "Erlöse",
@@ -356,17 +384,15 @@
       },
       "noData": "Keine Daten für diese Auswahl.",
       "showRaw": "Rohdaten (JSON)",
-      "calcVersion": "Berechnungsversion",
       "info": {
-        "iconLabel": "Details zum Kostenfaktor anzeigen",
-        "readMore": "Die ausführliche Erläuterung lesen"
+        "iconLabel": "Details zum Kostenfaktor anzeigen"
       },
       "classes": {
         "all": "Alle Klassen",
         "Seat": "Sitzplatz",
         "Couchette": "Liegewagen",
         "Sleeper": "Schlafwagen",
-        "Capsule": "Kapsel"
+        "Capsule": "Schlafkapsel"
       },
       "direction": {
         "outbound": "Hinfahrt",
@@ -384,54 +410,71 @@
     },
     "stops": "Halte",
     "ownership": {
-      "ownLabel": "Eigener Vorschlag",
+      "ownLabel": "Dein Vorschlag",
       "ownNote": "Änderungen werden automatisch gespeichert",
       "copyLabel": "Vorschlag von {name}",
-      "copyNote": "jede Änderung wird als eigene Kopie gespeichert",
-      "someone": "Jemand"
+      "copyNote": "jede Änderung wird als Deine eigene Kopie gespeichert",
+      "someone": "Jemand",
+      "saving": "Vorschlag wird gespeichert …"
+    },
+    "models": {
+      "routeBuilder": "Routenmodell",
+      "cost": "Kostenmodell",
+      "demand": "Nachfragemodell",
+      "compositions": "Zugbildungsmodell",
+      "infrastructure": "Infrastrukturmodell",
+      "energy": "Energiemodell",
+      "emissions": "Emissionsmodell"
+    },
+    "priceBasis": {
+      "badge": "Preise 2032",
+      "hint": "Alle Kosten und Fahrpreise in Geld von 2032, mit belegter Rate vom Preisjahr der Quelle hochgerechnet. Ausnahme: Fahrzeuge werden jetzt gekauft, ihr Preis bleibt auf 2026."
     },
     "compare": {
       "scenarioTitle": "Szenario und Eckwerte",
       "scenarioBody": "Netz, Betriebsbedingungen und mögliche weitere politische Maßnahmen simulieren.",
+      "scenarioHint": "Prüfe Deine Strecke in verschiedenen Szenarien: Netz, Betriebsbedingungen und bald auch Preismaßnahmen. Basisszenario ist das heutige Netz mit heutigen Regeln.",
       "title": "Szenarien vergleichen",
       "body": "Wie sich der gewählte Zug in jedem Szenario schlägt und jeder Zug im gewählten Szenario.",
+      "titleHint": "Vergleiche die Zahlen über Szenarien und Zugbildungen: der gewählte Zug in jedem Szenario, jeder Zug im gewählten, für eine Kennzahl Deiner Wahl. Basis markiert.",
       "complete": "Alle Kombinationen berechnet.",
       "kpiPicker": "Kennzahl für den Vergleich",
       "viewBars": "Szenarien",
       "viewGrid": "Alle Kombinationen",
       "pending": "Noch nicht berechnet",
-      "zeroLine": "0, unterhalb der Linie ist kein Zuschuss nötig",
+      "zeroLine": "0 – unterhalb der Linie ist kein Zuschuss nötig",
       "worse": "schlechter",
       "better": "besser",
-      "breakEven": "Die Markierung zeigt die Kostendeckung: Bernstein braucht einen Zuschuss, Grün trägt sich selbst",
+      "breakEven": "Die Markierung zeigt die Kostendeckung: Orange braucht einen Zuschuss, Grün trägt sich selbst",
       "bestIs": "Am besten: {where}",
       "none": "keine",
       "surplus": "Überschuss {value}",
       "surplusShort": "Überschuss",
       "noSubsidy": "kein Zuschuss",
-      "isBaseline": "Ausgangswert",
-      "noBaselineYet": "Ausgangswert ausstehend",
-      "vsBaseline": "ggü. Ausgangswert",
-      "measuresNone": "Maßnahmen: keine, heutige Preise und Steuern",
-      "evaluatedWith": "Ausgewertet mit {composition} · {frequency}",
-      "change": "Veränderung ↓",
+      "isBaseline": "Basisszenario",
+      "noBaselineYet": "Basisszenario ausstehend",
+      "vsBaseline": "ggü. Basisszenario",
+      "measuresNone": "Maßnahmen: keine – heutige Preise und Steuern",
+      "evaluatedWith": "Ausgewertet mit {composition} · {frequency} · {demand}",
+      "demandPart": "Nachfrage {name}",
+      "change": "ändern ↓",
       "staleMarker": "Ergebnisse veraltet",
       "comingSoon": "in Vorbereitung",
-      "hsrInert": "Diese Wagenreihung ist nicht für Schnellfahrstrecken gebaut, die Freigabe ändert für sie also nichts",
+      "hsrInert": "Diese Zugbildung ist nicht für Schnellfahrstrecken ausgelegt, die Freigabe ändert für sie also nichts",
       "axes": {
         "network": "Schienennetz",
         "infra": "Infrastruktur {network}",
-        "networkPreviewHint": "Wir bereiten gerade die Routensuche auf dem Netz von 2032 vor, samt geschätzter Ausbauten. Bleibt dran!",
+        "networkPreviewHint": "Wir bereiten gerade die Routensuche auf dem Netz von 2032 vor. Dazu gehört auch die Routenführung über Infrastruktur, die bis dahin voraussichtlich in Betrieb geht. Bleib dran!",
         "conditions": "Betriebsbedingungen",
         "hsr": "Nachtzüge dürfen Schnellfahrstrecken nutzen",
         "optTt": "Optimierte Fahrpläne",
         "optTtNeedsHsr": "Optimierte Fahrpläne sind nur zusammen mit Schnellfahrstrecken modelliert.",
         "measures": "Preis- und Regulierungsmaßnahmen",
-        "measuresHint": "Wir bereiten gerade vor, weitere politische Maßnahmen in die Szenarioanalyse aufzunehmen. Bleibt dran!",
+        "measuresHint": "Wir bereiten gerade vor, weitere politische Maßnahmen in die Szenarioanalyse aufzunehmen. Bleib dran!",
         "measure": {
           "vat": "Mehrwertsteuerbefreiung für Tickets",
           "energyTax": "Energiesteuerbefreiung",
-          "tac": "Trassenpreise nur zu Grenzkosten"
+          "tac": "Trassenpreise nur zu unmittelbaren Kosten"
         }
       },
       "conditionsShort": {
@@ -442,17 +485,26 @@
       },
       "kpis": {
         "subsidy": "Erforderlicher Zuschuss",
-        "co2": "Eingespartes CO₂",
-        "subsidyPerT": "Zuschuss je t CO₂",
+        "co2": "Eingespartes CO₂e",
+        "subsidyPerT": "Zuschuss je t CO₂e",
         "pax": "Personenfahrten",
         "paxKm": "Personenkilometer",
         "shiftAir": "Vom Flugzeug verlagert",
-        "shiftCar": "Vom Auto verlagert",
-        "journeyTime": "Reisezeit"
+        "journeyTime": "Reisezeit",
+        "shiftOther": "Vom Auto verlagert oder Neuverkehr"
+      },
+      "kpiHints": {
+        "journeyTime": "Fahrplanzeit einer Richtung (Mittel beider), erste Abfahrt bis letzte Ankunft, inkl. Halten, Bremsen, Anfahren und Fahrplanpuffer.",
+        "pax": "Beförderte Reisende pro Jahr, beide Richtungen: die eingestellte Nachfrage, soweit die Klassen des Zuges sie aufnehmen.",
+        "paxKm": "Jede Reise mal die gefahrene Distanz. Grundlage der Erlöse je Kilometer und der CO₂e-Einsparung.",
+        "subsidy": "Was die Strecke pro Jahr braucht, um nach allen Erlösen die Kosten und die Marge des Betreibers zu decken. Bei Überschuss: keiner.",
+        "shiftAir": "Wären sonst geflogen; der Anteil wächst mit der Reiseweite (keiner unter 300 km, alle ab 1.200 km). Vorläufiges manuelles Nachfragemodell – bald automatisch.",
+        "shiftOther": "Die übrigen Reisenden: die Hälfte wäre Auto gefahren, die andere gar nicht gereist (Neuverkehr). Vorläufiges manuelles Nachfragemodell – bald automatisch.",
+        "co2": "Vermiedene Treibhausgase pro Jahr, inkl. Nicht-CO₂-Effekten des Fliegens: verlagerte Personen-km zum Faktor von Flugzeug oder Auto, abzüglich des Zuges.",
+        "subsidyPerT": "Erforderlicher Zuschuss je eingesparter Tonne CO₂e: was eine vermiedene Tonne die öffentliche Hand kostet. 0 ohne Zuschussbedarf."
       },
       "units": {
         "millionEurYear": "/ Jahr",
-        "ktYear": "kt / Jahr",
         "eurPerT": "€ / t",
         "perYear": "/ Jahr",
         "kmYear": "km / Jahr"
@@ -465,10 +517,7 @@
         "calc_error": "Bei der Berechnung dieser Kombination ist etwas schiefgelaufen."
       },
       "loading": "Alle Kombinationen werden berechnet …",
-      "partial": "{received} von {total} Kombinationen verfügbar, der Rest ließ sich nicht berechnen.",
-      "customSchedule": "Eigener Fahrplan · {days} Betriebstage",
-      "pricePart": " · Fahrpreise {span} €/km",
-      "cateringPart": " · Gastronomie {value} €/Reisenden",
+      "partial": "{received} von {total} Kombinationen verfügbar; der Rest ließ sich nicht berechnen.",
       "axisBreak": "Achse beginnt bei {value}, nicht bei null"
     },
     "supply": {
@@ -486,10 +535,10 @@
         "fit": "Passung zur Nachfrage",
         "subsidy": "Zuschuss",
         "trainsets": "Garnituren",
-        "densityLength": "Platzbedarf je Platz",
+        "densityLength": "Zuglänge je Platz",
         "densityWeight": "Gewicht je Platz"
       },
-      "fitHint": "In Vorbereitung, braucht das Nachfragemodell. Heute wird jeder Zug mit derselben Auslastung bewertet, diese Spalte kann sie deshalb nicht unterscheiden.",
+      "fitHint": "Wie gut jede Zugbildung zur Nachfrage passt, zeigt der Reiter Nachfrage (Auslastung nach Zugbildung).",
       "schedule": {
         "alwaysDaily": "Täglich",
         "alwaysThreePerWeek": "3× pro Woche"
@@ -568,7 +617,7 @@
       "surplusBeyondMargin": "Überschuss über die Marge hinaus: {value}",
       "cateringDeduction": "Die Gastronomie kostet {value} und wird vom Gesamtwert abgezogen",
       "verdictSurplus": "Die Erlöse übersteigen die Kosten um {above}: Marge {margin} + Überschuss {surplus}",
-      "verdictSubsidy": "Erforderlicher Zuschuss {subsidy}, genug, damit der Betreiber seine Marge von {margin} erwirtschaftet",
+      "verdictSubsidy": "Erforderlicher Zuschuss {subsidy} – genug, damit der Betreiber seine Marge von {margin} erwirtschaftet",
       "keyMarginSurplus": "Marge des Betreibers + Überschuss",
       "keySubsidy": "Erforderlicher Zuschuss",
       "keyCateringDeduction": "Abzug Gastronomie",
@@ -578,14 +627,15 @@
       "title": "Details",
       "body": "Was auf der Strecke fährt, was Betrieb und Nutzung kosten und wer mitfährt.",
       "staleChip": "Eingaben geändert",
-      "staleOne": "{what} wurde geändert. Panels, die davon abhängen, warten auf die Neuberechnung.",
-      "staleMany": "{what} wurden geändert. Panels, die davon abhängen, warten auf die Neuberechnung.",
+      "staleOne": "Geändert: {what}. Bereiche, die davon abhängen, warten auf die Neuberechnung.",
+      "staleMany": "Geändert: {what}. Bereiche, die davon abhängen, warten auf die Neuberechnung.",
       "and": " und ",
       "awaiting": "wartet auf Neuberechnung",
-      "previewChip": "Vorschau, hier geschätzt statt berechnet",
+      "previewChip": "Vorschau – hier geschätzt, nicht berechnet",
       "scopes": {
-        "schedule": "Der Fahrplan",
-        "prices": "Die Preise"
+        "schedule": "Fahrplan",
+        "prices": "Preise",
+        "demand": "Nachfrage"
       },
       "tabs": {
         "supply": "Angebot",
@@ -609,47 +659,31 @@
       },
       "schedule": {
         "title": "Fahrplan",
-        "caption": "Tage pro Woche, nach Monat",
-        "info": "Wie oft der Zug in jedem Monat des Jahres fährt und was daraus folgt. Die Betriebstage sind die Tage jedes Monats mal seinen Tagen pro Woche, das Auswertungsjahr hat also 366 Tage, denn 2032 ist ein Schaltjahr. Die Abfahrten sind Betriebstage mal zwei Richtungen; Zug-km und Platz-km folgen aus Streckenlänge und Wagenreihung. An welchem Wochentag der Zug fährt, ist nicht modelliert. Die Flotte wird nach dem stärksten Monat bemessen: Eine Garnitur braucht die Umlaufdauer in Tagen, ein Zug, der sieben Tage pro Woche fährt und zwei Tage für den Rückweg braucht, also zwei Garnituren.",
-        "presets": {
-          "daily": "Jeden Tag",
-          "three": "3× pro Woche",
-          "once": "Einmal pro Woche",
-          "summer": "Nur im Sommer",
-          "custom": "Eigene Auswahl"
-        },
-        "months": {
-          "jan": "Jan",
-          "feb": "Feb",
-          "mar": "Mär",
-          "apr": "Apr",
-          "may": "Mai",
-          "jun": "Jun",
-          "jul": "Jul",
-          "aug": "Aug",
-          "sep": "Sep",
-          "oct": "Okt",
-          "nov": "Nov",
-          "dec": "Dez"
-        },
-        "dragHint": "Eine Spalte ziehen oder die Pfeiltasten benutzen.",
+        "caption": "Tage pro Woche, im Jahresmittel",
+        "info": "Wie oft der Zug fährt, als ein Mittel über das Jahr. Abfahrten, Zug- und Platzkilometer folgen daraus; Garnituren sind die Wagenzüge, die der Umlauf dafür braucht.",
         "operatingDays": "Betriebstage",
         "departures": "Abfahrten",
         "trainKm": "Zug-km",
         "trainsets": "Garnituren",
-        "previewHint": "Abfahrten, Zug-km, Plätze und Platz-km folgen aus dem Raster; die Garnituren nutzen den Umlauf von {cycle} Tagen, den nur eine Neuberechnung neu bestimmen kann. Neu berechnen, um den Fahrplan auf alle anderen Panels anzuwenden.",
-        "previewHintNoCycle": "Abfahrten, Zug-km, Plätze und Platz-km folgen aus dem Raster. Die Zahl der Garnituren braucht die Umlaufdauer aus einer Berechnung, bitte neu berechnen."
+        "daysPerWeek": "{n} Tage pro Woche",
+        "qualifier": {
+          "everyDay": "täglich",
+          "onceAWeek": "einmal pro Woche"
+        },
+        "operatingDaysNote": "{days} Betriebstage im Jahr · welche Wochentage, ist nicht modelliert"
       },
       "prices": {
         "title": "Plätze und Preise",
         "caption": "{composition} · {places} Plätze",
-        "info": "Was der Zug anbietet und was er dafür verlangt. Der Tarif besteht aus drei Teilen, jeder je Klasse. Der GRUNDFAHRPREIS hat einen festen und einen entfernungsabhängigen Term: Ein Bett hat einen Eintrittspreis, den eine kurze Fahrt genauso trägt wie eine lange, ein reiner Entfernungstarif machte kurze Verbindungen unplausibel billig. ZUSATZLEISTUNGEN sind die Erlöse aus Fahrrädern, Sperrgepäck und Reservierungen, die mit dem Ticket verkauft werden; sie sind gewöhnliche Ticketerlöse, nie negativ, und tragen Gemeinkosten und Gewinnanspruch wie jeder andere Fahrpreis. Die GASTRONOMIE fällt aus dem Rahmen: eine vorzeichenbehaftete NETTO-Größe je Reisendem, die eigenen Verkäufe des Restaurants abzüglich seiner eigenen Kosten, und damit außerhalb der beiden anderen Bemessungsgrundlagen. Sie fällt je Klasse verschieden aus, weil die Klassen sich darin unterscheiden, was ihr Grundfahrpreis bereits enthält. Die beiden Beispielspalten bepreisen nur den PLATZ, fest plus Entfernung, über die längste und die kürzeste Fahrt, die die Strecke verkauft. Die Nachfrage reagiert auf all das noch nicht: Das Nachfragemodell ist ein Provisorium.",
+        "info": "Was der Zug anbietet und verlangt, je Klasse: Grundpreis mit festem und Entfernungsanteil, Zusatzleistungen, Netto-Gastronomiebeitrag. Preise ändern die Nachfrage nicht.",
         "class": "Klasse",
         "places": "Plätze",
         "shareOfTrain": "Anteil am Zug",
         "perKm": "€ / km",
         "exampleLongest": "Beispielpreis, längste Fahrt",
         "exampleShortest": "Beispielpreis, kürzeste Fahrt",
+        "inclVat": "inkl. {rate} MwSt. · {countries}",
+        "vatShare": "{cc} {rate} auf {share} der Strecke",
         "default": "Standardwert",
         "reset": "Auf den Standardwert zurücksetzen",
         "increase": "Erhöhen",
@@ -661,7 +695,7 @@
         "parts": {
           "faresPerPax": {
             "label": "Grundfahrpreis, fest",
-            "unit": "€ / Reisendem"
+            "unit": "€ / Person"
           },
           "faresPerKm": {
             "label": "Grundfahrpreis, Entfernung",
@@ -669,20 +703,20 @@
           },
           "servicesPerPax": {
             "label": "Zusatzleistungen",
-            "unit": "€ / Reisendem"
+            "unit": "€ / Person"
           },
           "cateringPerPax": {
             "label": "Gastronomie, netto",
-            "unit": "€ / Reisendem"
+            "unit": "€ / Person"
           }
         },
         "resetTo": "Auf den Standardwert zurücksetzen ({value})",
-        "weightedAverage": "Durchschnitt je Reisendem, gewichtet nach Plätzen"
+        "weightedAverage": "Durchschnitt je Person, gewichtet nach Plätzen"
       },
       "operation": {
         "compareTitle": "Zugbildungen vergleichen",
-        "compareInfo": "Jede Zugbildung des Katalogs, ausgewertet auf DIESER Strecke unter dem gewählten Szenario. Die Zahlen sind also untereinander vergleichbar und mit nichts anderem. Die Garnituren stehen vorn: Sie ändern sich als Erstes, wenn sich der Fahrplan ändert. Die beiden Dichtespalten sind Meter und Tonnen je Platz, der physische Preis des Komforts; sie ersetzen die indikativen Stückkosten des Katalogs, die über jede Strecke dasselbe sagten.",
-        "selectedInfo": "Die Zugbildung, mit der die Zahlen auf dieser Seite berechnet wurden. Darunter steht, was eine Fahrt im Betrieb kostet, in drei Aufstellungen: die Garnituren und ihre Unterhaltung, die Lokstunden und das Personal an Bord. Die Flottenbeträge sind Jahresblätter der Kostenaufstellung geteilt durch die Abfahrten des Jahres; Lok- und Personalbeträge gelten je einzelner Fahrt, weil sich die beiden Richtungen in Fahrzeit und Lage der Dienstgrenzen unterscheiden.",
+        "compareInfo": "Jede Zugbildung des Katalogs auf dieser Strecke im gewählten Szenario ausgewertet, sodass die Zahlen untereinander vergleichbar sind – und mit nichts anderem.",
+        "selectedInfo": "Die Zugbildung, mit der die Zahlen berechnet wurden, und was eine Fahrt im Betrieb kostet: Wagenzüge und ihre Instandhaltung, Lokstunden und das Personal an Bord.",
         "onePairOfMany": "Zahlen für ein Fahrtenpaar von mehreren",
         "coaches": "{n} Wagen",
         "places": "{n} Plätze",
@@ -717,7 +751,7 @@
         },
         "staff": {
           "onBoard": "Personal an Bord",
-          "weighted": "bezahlt-äquivalent",
+          "weighted": "bezahlte Äquivalente",
           "role": "Funktion",
           "headcount": "An Bord",
           "factor": "× Faktor",
@@ -751,24 +785,24 @@
           "congestion": "Engpasszuschlag",
           "night_rate": "Nachttarif",
           "passage_fixed": "festem Durchfahrtsentgelt",
-          "passage_per_passenger": "Durchfahrtsentgelt je Reisendem"
+          "passage_per_passenger": "Durchfahrtsentgelt je Person"
         },
         "crossing": "Übergang {id}",
         "noCrossings": "auf dieser Strecke keine",
         "tac": {
           "title": "Trassenentgelte",
-          "info": "Was jeder Infrastrukturbetreiber für die Fahrt über sein Netz verlangt, Land für Land. Die Spalte „Berechnet nach“ nennt die Terme, die dieses Land auf dieser Fahrt tatsächlich erhebt: Entfernung (zum Tagestarif, oder teilweise zum Nachttarif, wenn das Land ein Nachtzeitfenster hat und die Fahrt hineinfällt), Bruttogewicht, Plätze, ein fester Aufschlag je Kilometer, Haltegebühren, ein Erlösanteil, ein Engpasszuschlag. Was das Land nicht erhebt, bleibt weg. Ein Übergang, den sein eigener Betreiber abrechnet, ist eine eigene Zeile. Gezeigt wird die Hinfahrt; die beiden Richtungen können sich unterscheiden, wenn ein Nachtzeitfenster nur eine von beiden erfasst.",
+          "info": "Was jeder Infrastrukturbetreiber für die Fahrt über sein Netz verlangt, Land für Land, nach den Termen, die das Land erhebt: Entfernung, Gewicht, Plätze, Halte, Erlösanteil, Zuschläge.",
           "strip": "Trassenentgelte, aus einer Fahrt",
           "total": "Trassenentgelte"
         },
         "stations": {
           "title": "Stationsentgelte",
-          "info": "Ein Entgelt je Halt, erhoben vom Infrastrukturbetreiber der Station zum Tarif des jeweiligen Landes. Jeder Halt der Fahrt zählt, die Endbahnhöfe eingeschlossen.",
+          "info": "Ein Entgelt je Halt, erhoben vom Infrastrukturbetreiber der Station zum Tarif des Landes. Jeder Halt der Fahrt zählt, die Endbahnhöfe eingeschlossen.",
           "calls": "Halte, eine Fahrt",
           "perCycle": "Halte je Umlauf",
           "perYear": "Halte pro Jahr",
           "total": "Stationsentgelte",
-          "strip": "Stationszugang, aus einer Fahrt ({cycle} Haltevorgänge je Umlauf, {year} pro Jahr)",
+          "strip": "Stationsentgelte, aus einer Fahrt ({cycle} Haltevorgänge je Umlauf, {year} pro Jahr)",
           "station": "Bahnhof",
           "category": "Kategorie",
           "perStop": "€ / Halt",
@@ -776,7 +810,7 @@
         },
         "facilities": {
           "title": "Serviceeinrichtungen: Abstellung",
-          "info": "Das Abstellen der Wagenreihung zwischen Ankunft und nächster Abfahrt, an jedem Ankunftsendbahnhof, zu der Grundlage, nach der das Land bepreist (je Meter und angefangenem Tag, je angefangener Stunde oder je Vorgang), nach Abzug seines Freikontingents, zuzüglich des Stroms während des Stehens. Bepreist je Betriebstag, ein Aufenthalt je Standort; die Zeile je Fahrt ist ein Aufenthalt, gemittelt über beide Enden.",
+          "info": "Abstellen zwischen Ankunft und nächster Abfahrt an jedem Endbahnhof, auf der Grundlage, nach der das Land bepreist, plus Strom im Stand. Ein Aufenthalt je Ort und Tag.",
           "caption": "ein Aufenthalt je Endbahnhof und Betriebstag",
           "locations": "Abstellstandorte",
           "stay": "Aufenthalt",
@@ -799,7 +833,7 @@
         },
         "energy": {
           "title": "Energie",
-          "info": "Traktionsenergie für die Fahrt, Land für Land: die kWh, die der Zug über die Kilometer dieses Landes zieht, bepreist zum Tarif des Landes (ein einheitlicher Satz, oder ein Tag- und ein Nachttarif, wenn das Land ein Nachtzeitfenster hat, mit dem darin bezogenen Anteil), zuzüglich des Fahrleitungsentgelts, wo eines erhoben wird. Alle Werte verstehen sich ohne Mehrwertsteuer; das Modell führt keinen Mehrwertsteuersatz.",
+          "info": "Traktionsenergie für die Fahrt, Land für Land: die kWh über seine Kilometer zu seinem Tarif, Tag- und Nachtpreis bei Nachtband, plus etwaiges Oberleitungsentgelt.",
           "perTrip": "auf einer Fahrt bezogen",
           "perTrainKm": "Je Zug-km",
           "eurPerKwh": "Durchschnitt €/kWh",
@@ -815,7 +849,7 @@
         "catenary": "Fahrleitung {value}",
         "year": {
           "title": "Infrastruktur pro Jahr",
-          "info": "Die vier Infrastrukturposten der Kostenaufstellung, pro Jahr, jeweils mit ihren Kosten je Zugkilometer und ihrem Anteil an der Infrastruktursumme. Es sind dieselben Werte, die der Abschnitt Kosten und Erlöse unter Infrastruktur ausweist.",
+          "info": "Die vier Infrastrukturposten der Kostenaufstellung pro Jahr, mit Kosten je Zug-km und Anteil an der Summe – dieselben Zahlen wie unter Kosten und Erlöse.",
           "tac": "Trassenentgelte",
           "stations": "Stationsentgelte",
           "parking": "Abstellung",
@@ -833,11 +867,11 @@
         "ofTicketRevenue": "der Ticketerlöse",
         "ofOperatorCost": "der Betreiberkosten",
         "cateringOutside": "Die Gastronomie ({value} je Fahrt) bleibt außen vor: Sie ist eine Nettogröße, ihre eigenen Gemeinkosten stecken bereits darin.",
-        "marginNote": "Wird im Nettoergebnis abgezogen, keine Kosten, die jemand erhält.",
+        "marginNote": "Wird im Nettoergebnis abgezogen – keine Zahlung an Dritte.",
         "variable": {
           "title": "Variable Gemeinkosten",
-          "covers": "Deckt Vertrieb, Distribution und Kundenservice.",
-          "info": "Die Vertriebskosten des Betreibers, berechnet als Anteil der Ticketerlöse statt der Gesamtkosten, so definiert das Modell sie. Die Gastronomie bleibt außerhalb der Bemessungsgrundlage: Der Beitrag ist bereits netto, nach den eigenen Verkäufen, Kosten und Gemeinkosten des Restaurants; Vertriebsgemeinkosten darauf zu erheben, zählte dieselben Gemeinkosten ein zweites Mal.",
+          "covers": "Deckt Verkauf, Vertrieb und Kundenservice.",
+          "info": "Die Vertriebskosten des Betreibers, als Anteil der Ticketerlöse statt der Gesamtkosten. Die Gastronomie bleibt außerhalb der Basis: ihr Beitrag ist bereits netto nach Gemeinkosten.",
           "strip": "Variable Gemeinkosten, aus einer Fahrt",
           "caption": "ein Anteil der Ticketerlöse",
           "outcome": "Variable Gemeinkosten, je Fahrt"
@@ -845,44 +879,177 @@
         "fixed": {
           "title": "Fixe Gemeinkosten",
           "covers": "Deckt Verwaltung, Leitung und Planung.",
-          "info": "Der Betreiber im Betrieb seiner selbst, berechnet als Anteil seiner ÜBRIGEN Betriebskosten. Zwei Dinge bleiben bewusst außerhalb dieser Grundlage: die variablen Gemeinkosten, die selbst schon Gemeinkosten sind, und die Infrastrukturentgelte, die an jemand anderen gehen und nicht vom Betreiber zu verwalten sind.",
+          "info": "Die Kosten der eigenen Organisation, als Anteil der übrigen Betriebskosten – ohne die variablen Gemeinkosten und ohne die Infrastrukturentgelte, die an Dritte gehen.",
           "strip": "Fixe Gemeinkosten, aus einer Fahrt",
           "caption": "ein Anteil der übrigen Kosten des Betreibers",
           "outcome": "Fixe Gemeinkosten, je Fahrt"
         },
         "margin": {
           "title": "Erwartete Marge",
-          "info": "Der Betriebsgewinn, den der Betreiber behalten soll, als Anteil der Ticketerlöse. Es sind keine Kosten, die jemand erhält, sondern ein Abzug im Nettoergebnis, weshalb eine Strecke einen Zuschuss brauchen kann, obwohl jede Rechnung bezahlt ist. Die Gastronomie bleibt auch hier außerhalb der Bemessungsgrundlage, aus demselben Grund wie bei den Gemeinkosten.",
+          "info": "Der Betriebsgewinn, den der Betreiber behalten soll, als Anteil der Ticketerlöse. Im Nettoergebnis abgezogen, nicht gezahlt – daher Zuschuss trotz bezahlter Rechnungen.",
           "strip": "Erwartete Marge, aus einer Fahrt",
           "caption": "ein Anteil der Ticketerlöse",
           "outcome": "Erwartete Marge, je Fahrt",
-          "covers": "Der Betriebsgewinn, den der Betreiber behalten soll. Keine Kosten, die jemand erhält."
+          "covers": "Der Betriebsgewinn, den der Betreiber behalten soll. Keine Zahlung an Dritte."
         },
         "base": "Bemessungsgrundlage",
         "factor": "Faktor",
         "ticketBaseItems": "Grundfahrpreis + Zusatzleistungen.",
         "fixedBaseItems": "Personal, Lokmiete, Wagenwartung, Bordservice, Abschreibung der Wagen, Finanzierung, Reinigung, Rangieren. Nicht enthalten: variable Gemeinkosten und alles, was an Infrastrukturbetreiber geht."
       },
-      "demand": {
-        "title": "Nachfrage",
-        "caption": "vorläufige Annahme, pro Jahr",
-        "info": "Was die vorläufige Nachfrageannahme ergibt. Die Reisenden sind die tatsächlich verkauften Plätze, die Größe, mit der der Gastronomiebeitrag multipliziert wird, nicht die Platzhalterzahl an Fahrten aus dem Kennzahlenraster. Ticketerlöse und Gastronomiebeitrag stehen getrennt, weil sie unterschiedlich verdient werden und einer von beiden negativ sein kann.",
-        "passengers": "Reisende",
+      "groups": {
+        "comfort": "Freizeit – Komfort",
+        "group": "Freizeit – Gruppe",
+        "senior": "Freizeit – Senioren",
+        "budget": "Freizeit – preisbewusst",
+        "business": "Geschäftsreisende"
+      },
+      "follows": {
+        "title": "Was daraus folgt",
+        "caption": "{composition} · pro Jahr, beide Richtungen",
+        "info": "Was Fahrplan und Preise mit der berechneten Nachfrage einbringen: Reisende, verkaufte Platz-km, Auslastung und Erlös pro Jahr. Nachfrage erst nach Neurechnung.",
+        "noDemand": "Noch keine berechnete Nachfrage – neu berechnen, um zu sehen, was Fahrplan und Preise einbringen.",
+        "passengersPerYear": "Reisende pro Jahr",
+        "soldPerDeparture": "Verkaufte Plätze je Abfahrt",
+        "ofAsked": "von {n} nachgefragt",
+        "utilisationPlaces": "Auslastung, Plätze",
         "placeKmSold": "Verkaufte Platz-km",
+        "utilisationPlaceKm": "Auslastung, Platz-km",
+        "ticketRevenue": "Ticketerlös",
+        "ticketRevenueGross": "Ticketerlöse inkl. MwSt.",
+        "vatRate": "{rate} ({countries}) · nicht in der Kosten- und Erlösrechnung",
+        "catering": "Gastronomiebeitrag",
+        "total": "Erlös und Beitrag",
+        "perYear": "Pro Jahr",
+        "asks": "Nachfrage",
+        "served": "Bedient",
+        "notServed": "Nicht bedient",
+        "passengers": "Reisende",
+        "placesOffered": "Angebotene Plätze",
         "utilisation": "Auslastung",
-        "ticketRevenue": "Ticketerlöse",
-        "cateringContribution": "Gastronomiebeitrag",
-        "totalRevenue": "Erlöse und Beitrag",
-        "byClass": "Ticketerlöse nach Klasse",
-        "restsOn": "Worauf das beruht",
-        "restsOnInfo": "Die Nachfrageseite des Modells ist ein Provisorium. Jeder Wert auf diesem Reiter wird ersetzt, sobald ein echtes Nachfragemodell vorliegt; nichts davon ist eine Prognose.",
-        "whenItLands": "Sobald das Nachfragemodell vorliegt, zeigt dieser Reiter die Nachfrage nach Verbindung, nach Klasse und nach dem Verkehrsmittel, von dem die Reisenden umgestiegen sind, und die Preise unter Angebot bekommen Elastizitäten.",
-        "pricesElsewhere": "Die Preise werden unter Angebot festgelegt."
+        "revenueByClass": "Ticketerlös nach Klasse",
+        "previewHint": "Vorschau aus Fahrplan und Preisen gegen die berechnete Nachfrage. Neu berechnen, um sie auf Zugbetrieb, Gemeinkosten und die Kennzahlen anzuwenden."
+      },
+      "potential": {
+        "title": "Nachfragepotenzial",
+        "info": "Reisende pro Jahr über beide Richtungen, die diese Strecke nutzen würden. Vier Stufen geben einen Startwert; jede Zahl ist eintippbar. Was der Zug nicht fasst, fällt weg.",
+        "levels": {
+          "small": {
+            "short": "S",
+            "name": "Klein"
+          },
+          "medium": {
+            "short": "M",
+            "name": "Mittel"
+          },
+          "large": {
+            "short": "L",
+            "name": "Groß"
+          },
+          "xl": {
+            "short": "XL",
+            "name": "Sehr groß"
+          },
+          "custom": {
+            "short": "Eigene",
+            "name": "Eigene"
+          }
+        },
+        "levelTitle": "{name}: {n} Reisende pro Jahr",
+        "unit": "Reisende pro Jahr",
+        "perDeparture": "{n} je Abfahrt bei {days} Tagen pro Woche",
+        "ofPlaces": "{pct} der Plätze von {composition}"
+      },
+      "groupsPanel": {
+        "title": "Nachfrage nach Reisendengruppe",
+        "caption": "Anteile am Gesamtwert · Klassen in Reihenfolge der Präferenz",
+        "info": "Wie sich die Nachfrage auf Reisendengruppen verteilt und welche Klassen jede Gruppe der Reihe nach bucht. In Runden nach fester Regel, reproduzierbar.",
+        "group": "Gruppe",
+        "share": "Anteil",
+        "perYear": "Pro Jahr",
+        "perTrip": "Je Fahrt",
+        "classes": "Klassen, in Reihenfolge",
+        "all": "Alle Reisenden",
+        "sumOff": "Die Anteile summieren sich auf {sum} % – die Gruppen fragen dann {n} nach, nicht den Gesamtwert.",
+        "rule": "{rule} % jeder Gruppe buchen nach der Regel – zuerst die erstgelistete Klasse, bis sie voll ist, dann die nächste; {rest} % verteilen sich gleichmäßig auf die übrigen Klassen ihrer Liste."
+      },
+      "ladder": {
+        "title": "Auslastung nach Zugbildung",
+        "info": "Dieselbe Nachfrage auf jeder Zugbildung der Familie, als Auslastung je Zug gelesen. Der gestrichelte Rest ist Nachfrage, die keine gelistete Klasse fasst. Klick wählt sie aus.",
+        "sameDemand": "dieselbe Nachfrage auf jeder Zugbildung ·",
+        "atFrequency": "bei {days} Tagen pro Woche, {departures} Abfahrten im Jahr",
+        "units": {
+          "trip": "je Fahrt",
+          "month": "pro Monat",
+          "year": "pro Jahr"
+        },
+        "per": {
+          "trip": "je Abfahrt",
+          "month": "pro Monat",
+          "year": "pro Jahr"
+        },
+        "allClasses": "Alle Klassen",
+        "sort": "sortieren",
+        "sorts": {
+          "capacity": "Kapazität",
+          "utilisation": "Auslastung",
+          "unserved": "nicht bedient"
+        },
+        "noClass": "kein {c}",
+        "notServed": "{n} nicht bedient",
+        "axisAll": "Plätze im Zug {unit}",
+        "axisClass": "{c}-Plätze {unit}",
+        "legendPlaces": "Plätze der Zugbildung",
+        "legendFill": "Füllung: bediente Plätze, % = Auslastung",
+        "legendCount": "Zahl hinter dem Balken: Plätze der Zugbildung",
+        "legendMiss": "gestrichelt darunter: nicht bediente Nachfrage (Zahl bei der gewählten Zugbildung)"
+      },
+      "od": {
+        "title": "Nachfrage nach Relation",
+        "caption": "Anteile der Nachfrage · aus den Haltegewichten gefüllt, bekannte Relationen fixieren",
+        "info": "Der Anteil der Nachfrage je Ein-/Ausstiegspaar, aus einem Gewicht je Halt: Vorgabe oder eigene, Zellen fixierbar. Verschiebt Platz-km und Erlös, nicht Köpfe.",
+        "noRoute": "Die Relationen erscheinen, sobald die Strecke berechnet ist.",
+        "stopWeights": "Haltegewichte",
+        "presets": {
+          "even": "Gleichmäßig",
+          "long": "Lange Fahrten",
+          "mid": "Mittlere Distanz",
+          "short": "Kurzstrecken"
+        },
+        "unpinAll": "alle lösen",
+        "unpinAllHint": "alle eingetippten Zellen verwerfen",
+        "corner": "einsteigen ↓ · aussteigen →",
+        "weight": "Gewicht",
+        "boards": "Einstieg",
+        "alights": "Ausstieg",
+        "pinned": "fixiert",
+        "hint": "Zeilen: Einstieg, Spalten: Ausstieg; eine Zelle ist der Anteil der Relation an der Nachfrage, darunter ihre Fahrtlänge. Einen Anteil eintippen fixiert ihn (●); die Ränder enthalten die Haltegewichte, die den Rest füllen – eine Voreinstellung setzt sie, sie lassen sich überschreiben. An Nachthalten wird nichts verkauft, sie werden nicht gezeigt.",
+        "droppedPins": "Fixierte Anteile für Relationen, die die Strecke nicht mehr verkauft, wurden bei der letzten Berechnung verworfen: {pairs}.",
+        "sellablePairs": "Verkäufliche Relationen",
+        "pinnedPairs": "Fixierte Relationen",
+        "averageJourney": "Mittlere Fahrtlänge",
+        "longestPair": "Längste Relation, {name}",
+        "shortestPair": "Kürzeste Relation, {name}",
+        "busiestBoarding": "Stärkster Einstiegshalt",
+        "busiestAlighting": "Stärkster Ausstiegshalt",
+        "figuresNote": "Die Haltegewichte sind die wenigen Zahlen der Anfrage; fixierte Zellen werden mit ihnen gespeichert."
+      },
+      "tabHints": {
+        "demand": "Wie viele reisen, wer sie sind, wo sie ein- und aussteigen – die eingestellte Nachfrage, auf diesem Zug platziert.",
+        "supply": "Wie oft der Zug fährt und was jeder Platz kostet: Fahrplan und Tarif, aus denen die Erlöse entstehen.",
+        "operation": "Der Zug selbst: jede Zugbildung auf dieser Strecke sowie Garnituren, Lokstunden und Personal, die die gewählte je Fahrt braucht.",
+        "infrastructure": "Was die Infrastrukturbetreiber verlangen, Land für Land: Trassen, Stationshalte, Abstellung und Fahrstrom.",
+        "overhead": "Die eigenen Anteile des Betreibers über die direkten Kosten hinaus: variable und fixe Gemeinkosten sowie die erwartete Marge."
       }
+    },
+    "docsReadMore": "Mehr dazu in der Dokumentation",
+    "routeStatsHint": "Weg aus einer Schienen-Routing-Engine auf OpenStreetMap-Gleisen. Durchschnittstempo: Distanz durch die ganze Fahrzeit inkl. Halten – hängt von der gewählten Zugbildung ab.",
+    "feedback": {
+      "panel": "Feedback geben"
     }
   },
   "gallery": {
-    "heading": "Es ist Zeit, Nachtzüge zurück auf die Schiene zu bringen!",
+    "heading": "Bringen wir die Nachtzüge zurück aufs Gleis!",
     "tabs": {
       "aToB": "Von A nach B",
       "byStation": "Nach Bahnhof",
@@ -905,14 +1072,19 @@
       "button": "Suchen"
     },
     "welcome": {
-      "pitch": "Wir von Back on Track entwickeln derzeit unseren Vorschlag für ein Target Network 2032: ein Nachtzugnetz aus rund 300 Verbindungen quer über den Kontinent, doppelt so viele wie heute. Dieses Tool lädt alle ein, die sich für Nachtzüge begeistern, unser Anliegen zu unterstützen. Die Routenvorschläge die hier gesammelt werden, bilden die Grundlage für unser Target Network.",
-      "source": "Zahlen der IEA, aus unserem Positionspapier",
+      "pitch": {
+        "network": "Wir von Back-on-Track arbeiten an einem Target Network 2032: rund 300 Nachtzugverbindungen quer über den Kontinent, doppelt so viele wie heute, mit dreimal so vielen Fahrgästen.",
+        "contribute": "Und hier kommst Du ins Spiel. Wähle zwei Städte, zeichne den Nachtzug Deiner Träume auf eine echte Karte des europäischen Schienennetzes und sieh sofort, was er kosten, wie viel öffentliches Geld er brauchen und wie viel CO₂ er einsparen würde — mit realistischen Fahrplänen, zwölf Zugbildungen, kostenlos und Open Source.",
+        "study": "Die besten Vorschläge werden zum Rückgrat unserer Studie für ein europäisches Nachtzugnetz 2032, die wir der Europäischen Kommission und den nationalen Verkehrsbehörden vorlegen — und alle, die mitmachen, werden genannt. Neugierig auf die Zahlen dahinter? Schau in {source}."
+      },
+      "source": "unsere Berichte und Studien",
       "browse": "Vorschläge anderer ansehen",
+      "suggestComposition": "Neue Zugbildung vorschlagen",
       "about": "Über das Projekt"
     },
     "section": {
       "title": "Galerie",
-      "subtitle": "Was bisher vorgeschlagen wurde."
+      "subtitle": "Schau Dir an, was andere vorgeschlagen haben."
     },
     "matching": "{count} Strecke gefunden | {count} Strecken gefunden",
     "source": {
@@ -920,9 +1092,23 @@
       "proposal": "Vorschläge",
       "existing": "Bestehend"
     },
+    "filter": {
+      "label": "Wessen Strecken",
+      "all": "Alle",
+      "mine": "Meine",
+      "disabledHint": "Bestehende Verbindungen haben keinen Urheber — auf Vorschläge wechseln, um deine zu sehen."
+    },
+    "scenario": {
+      "label": "Szenario",
+      "applied": "Werte in diesem Szenario",
+      "hint": "Jeder Vorschlag wird in jedem Szenario bewertet. Werte, Sortierung und Karte unten folgen Deiner Auswahl. Bestehende Verbindungen werden immer so gezeigt, wie sie heute fahren.",
+      "withoutFigures": "{count} Strecke hier ohne Werte | {count} Strecken hier ohne Werte",
+      "proposalsOnly": "nur Vorschläge",
+      "disabledHint": "Das Szenario gilt nur für Vorschläge — bestehende Verbindungen werden so gezeigt, wie sie heute fahren."
+    },
     "sort": {
       "distance": "Entfernung",
-      "co2": "Eingespartes CO₂",
+      "co2": "Eingespartes CO₂e",
       "stops": "Halte",
       "likes": "Likes",
       "comments": "Kommentare",
@@ -935,18 +1121,19 @@
     },
     "map": {
       "legend": {
-        "proposed": "Vorgeschlagen",
-        "existing": "Bestehende Verbindung"
+        "proposed": "Vorschläge",
+        "existing": "Bestehend"
       }
     },
     "card": {
       "distance": "Entfernung",
       "proposedBy": "Vorgeschlagen von {name}",
       "guest": "Gast",
-      "existing": "Bestehende Verbindung",
+      "existing": "Bestehend",
       "km": "{value} km",
       "stops": "({count} Halt) | ({count} Halte)",
-      "co2PerYear": "{value} t CO₂/Jahr eingespart",
+      "co2PerYear": "{value} t CO₂e/Jahr",
+      "demandPerYear": "{value} Reisen/Jahr",
       "like": "Like",
       "loginToLike": "Zum Liken von Vorschlägen mit einem Konto anmelden.",
       "stat": {
@@ -963,17 +1150,35 @@
           "body": "Die Wagenkonfiguration, mit der diese Strecke geplant ist. Sie bestimmt die Kapazität an Sitz-, Liege- und Schlafplätzen."
         },
         "co2": {
-          "title": "Eingespartes CO₂",
-          "body": "Geschätzte CO₂-Emissionen, die jährlich vermieden werden, weil Reisende von Flugzeug und Auto auf diesen Zug umsteigen. Abgeleitet aus Platzhalterwerten der Nachfrage, noch nicht aus einem vollständigen Nachfragemodell."
+          "title": "Eingespartes CO₂e",
+          "body": "Geschätzte Treibhausgase (CO₂e), die jährlich vermieden werden, weil Reisende von Flugzeug und Auto auf diesen Zug umsteigen."
+        },
+        "demand": {
+          "title": "Fahrten pro Jahr",
+          "body": "Geschätzte Fahrten mit diesem Zug pro Jahr, über alle Verkehrstage."
+        },
+        "comments": {
+          "title": "Kommentare",
+          "body": "Wie viele Kommentare dieser Vorschlag gesammelt hat. Zum Lesen oder Mitreden den Vorschlag öffnen."
+        },
+        "subsidyPerTCo2": {
+          "title": "Subvention je Tonne CO₂e",
+          "body": "Öffentliche Mittel je Tonne CO₂e, die diese Strecke vermeidet — die jährliche Subvention geteilt durch die jährliche Einsparung. Je niedriger, desto mehr Klimawirkung pro Euro. Alle Preise sind auf das Preisniveau 2032 hochgerechnet (inflationsbereinigt)."
         }
-      }
+      },
+      "comments": "Kommentare lesen",
+      "created": "Erstellt {date}",
+      "updated": "aktualisiert {date}",
+      "subsidyPerTCo2": "{value}/t CO₂e",
+      "notEvaluable": "In diesem Szenario nicht bewertbar.",
+      "notYetEvaluated": "In diesem Szenario noch nicht bewertet."
     },
     "back": "Galerie",
     "cta": {
       "create": "Neue Strecke vorschlagen"
     },
-    "empty": "Zu diesem Filter wurden keine Vorschläge gefunden. Hier entsteht der erste!",
-    "loadingMore": "Weitere werden geladen…",
+    "empty": "Für diesen Filter wurden keine Vorschläge gefunden. Sei der Erste, der einen Vorschlag macht!",
+    "loading": "Strecken werden geladen…",
     "end": "Das waren alle {count} Vorschläge."
   },
   "user": {
@@ -992,7 +1197,7 @@
     "verifyTitle": "Bitte die Mail-Adresse bestätigen",
     "nameTitle": "Einen Benutzernamen wählen",
     "emailIncorrect": "Mail-Adresse ändern",
-    "co2Savings": "Diese Verbindung spart rund {value} t CO₂ pro Jahr.",
+    "co2Savings": "Diese Verbindung spart rund {value} t CO₂e pro Jahr.",
     "register": " Mit einer Registrierung lässt sich verfolgen, was der eigene Vorschlag zu unserer Arbeit am EU Target Network 2032 beiträgt!",
     "email": "E-Mail-Adresse",
     "username": "Benutzername",

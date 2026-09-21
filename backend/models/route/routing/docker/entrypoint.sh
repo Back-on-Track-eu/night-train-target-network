@@ -90,7 +90,10 @@ else
     # Sanity-check: unzip rejects HTML pages immediately, so this also catches auth failures
     echo "[entrypoint] Download complete. Extracting..."
     mkdir -p "$GRAPH_CACHE_DIR"
-    unzip -o "$ZIP_PATH" -d "$GRAPH_CACHE_DIR"
+    # -j flattens paths: the graph is a flat set of files, and an archive
+    # zipped with its folder in front would otherwise land one level too
+    # deep, where GraphHopper never looks (CI, 2026-09-22).
+    unzip -j -o "$ZIP_PATH" -d "$GRAPH_CACHE_DIR"
     rm "$ZIP_PATH"
     echo "[entrypoint] Graph cache ready."
 fi

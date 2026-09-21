@@ -66,10 +66,10 @@ OG_SITE_NAME = "Back-on-Track Target Network"
 # stops, countries) are deliberately NOT here: the sharer's own message
 # carries them, composed in the frontend where the locale is known — this
 # backend has no i18n, so anything written here is English for everyone.
-# Never put co2_savings_t_per_year or the demand KPIs in a shared card:
-# proposal_summaries.demand_kpis_placeholder is TRUE, those numbers are
-# deterministic fakes, and a forwarded message is precisely where a
-# placeholder gets read as fact.
+# co2_savings_t_per_year and the demand KPIs stay out of a shared card
+# even now that they are the manual demand model's own figures (DEMAND
+# 0.1.0): they follow from a potential demand the author typed, and a
+# forwarded message is precisely where an assumption gets read as fact.
 OG_DESCRIPTION = (
     "A night train route modelled on the Back-on-Track Target Network — "
     "see the itinerary, the timetable, and what it would take to run it."

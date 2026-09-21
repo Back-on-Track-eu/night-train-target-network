@@ -37,12 +37,20 @@ export const BUDGET_MS = {
 
 export type Budget = keyof typeof BUDGET_MS
 
-/** First escalation: "still working, the server is busy". */
+/** Default first escalation: "taking longer than usual". A call whose cost
+ *  depends on its size passes its own (see slowThresholds below) — the
+ *  family build does, from lib/calcExpectation.ts. */
 export const SLOW_AT_MS = 8_000
-/** Second escalation: "we're experiencing high demand". */
+/** Default second escalation: "much longer than usual, servers may be busy". */
 export const VERY_SLOW_AT_MS = 30_000
 
 export type SlowPhase = 'slow' | 'verySlow'
+
+/** When the two escalations fire, in ms after the request starts. */
+export interface SlowThresholds {
+  slowMs: number
+  verySlowMs: number
+}
 
 export interface RequestOptions {
   method?: 'GET' | 'POST' | 'DELETE' | 'PATCH'
@@ -53,6 +61,8 @@ export interface RequestOptions {
   budget?: Budget
   /** Fires at most once per phase while the request is still in flight. */
   onSlow?: (phase: SlowPhase) => void
+  /** Overrides SLOW_AT_MS / VERY_SLOW_AT_MS for this call. */
+  slowThresholds?: SlowThresholds
   /** Caller-owned abort: user cancel, supersession, unmount. Produces
    *  { kind: 'canceled' }, which is never surfaced and never counts as an
    *  outage. */
@@ -92,8 +102,11 @@ export async function apiRequest<T>(path: string, opts: RequestOptions = {}): Pr
   const method = opts.method ?? 'GET'
   const budgetName = opts.budget ?? 'interactive'
   const budgetMs = devOverride('api.budget') ?? BUDGET_MS[budgetName]
-  const slowAt = devOverride('api.slowAt') ?? SLOW_AT_MS
-  const verySlowAt = devOverride('api.verySlowAt') ?? VERY_SLOW_AT_MS
+  // The dev override wins over a per-call threshold too: it exists so the
+  // escalation copy can be seen without waiting for it.
+  const slowAt = devOverride('api.slowAt') ?? opts.slowThresholds?.slowMs ?? SLOW_AT_MS
+  const verySlowAt =
+    devOverride('api.verySlowAt') ?? opts.slowThresholds?.verySlowMs ?? VERY_SLOW_AT_MS
   const countsTowardOutage = opts.countsTowardOutage ?? true
   const dev = `${method} ${path}`
 

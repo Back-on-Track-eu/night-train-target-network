@@ -501,20 +501,100 @@ export interface EvaluationModelSection {
   formulas: FormulaMap
 }
 
-/** The stopgap demand model carries overridable STANDARD VALUES rather than
- *  formulas — the Supply tab's price fields read their defaults here so they
- *  never hard-code a number the backend owns. */
+/** The manual demand model (DEMAND 0.1.0) carries overridable STANDARD
+ *  VALUES rather than formulas — the Supply and Demand tabs read their
+ *  defaults here so they never hard-code a number the backend owns — and
+ *  the CONSTANTS of its allocation rule, which the client previews between
+ *  recalculations (lib/demandAllocation.ts, lib/odMatrix.ts). */
 export interface DemandModelSection {
   version: string
   description: string
   defaults: {
+    level: string
+    levels: Record<string, number>
+    group_shares_pct: Record<string, number>
+    od_weight: number
     fares_eur_per_km: Record<string, number>
     fares_eur_per_pax: Record<string, number>
     services_eur_per_pax: Record<string, number>
     // Signed net contribution per passenger of that class (CALC 0.9.30).
     catering_eur_per_pax: Record<string, number>
-    utilization_per: number
   }
+  constants: {
+    class_order: string[]
+    group_order: string[]
+    groups: Record<string, { label: string; classes: string[] }>
+    rounds_pct: number[]
+    rule_share: number
+    od_presets: string[]
+    od_weight_min: number
+    od_weight_span: number
+    air_shift_floor_km: number
+    air_shift_at_floor: number
+    air_shift_full_km: number
+    other_car_share: number
+  }
+}
+
+// --- The demand block (DEMAND 0.1.0) -----------------------------------------
+// Backend api/helpers/evaluation_serialize.py::demand_to_dict. On every ok
+// family member beside `summary`, and as `demand` on the member views
+// response: the allocation of the family's one demand onto that member's
+// composition, per trip and per year, what was not served, the OD matrix and
+// the sources. First trip pair only.
+
+export type PerTripPerYear<T> = { per_trip: T; per_year: T }
+
+export interface DemandOdPair {
+  origin_stop_id: string
+  destination_stop_id: string
+  origin_stop_name: string
+  destination_stop_name: string
+  distance_km: number
+  /** Fraction of the demand, summing to 1 over the sellable pairs. */
+  share: number
+  pinned: boolean
+}
+
+export interface DemandBlock {
+  model_version: string
+  passengers_per_year: number
+  departures_per_year: number
+  per_trip_demand: number
+  composition_id: string
+  demand_by_group: PerTripPerYear<Record<string, number>>
+  by_group_by_class: PerTripPerYear<Record<string, Record<string, number>>>
+  by_class: PerTripPerYear<Record<string, number>>
+  served: PerTripPerYear<number>
+  not_served: PerTripPerYear<Record<string, number>> & {
+    total_per_trip: number
+    total_per_year: number
+  }
+  od: {
+    boarding_stop_ids: string[]
+    alighting_stop_ids: string[]
+    stop_weights: { board: Record<string, number>; alight: Record<string, number> }
+    pinned_shares_pct: Record<string, Record<string, number>>
+    dropped_pins: { origin_stop_id: string; destination_stop_id: string }[]
+    pairs: DemandOdPair[]
+    average_distance_km: number
+  }
+  sources: {
+    air_trips_per_year: number
+    air_trip_km_per_year: number
+    other_trips_per_year: number
+    other_trip_km_per_year: number
+    car_trips_per_year: number
+    induced_trips_per_year: number
+  }
+}
+
+/** A calibrated parameter model (compositions, infrastructure) — version and
+ *  description only, no formulas; and the emissions model, whose factors the
+ *  app does not read. Optional: an older backend does not list them. */
+export interface ModelVersionSection {
+  version: string
+  description: string
 }
 
 export interface EvaluationModels {
@@ -522,6 +602,9 @@ export interface EvaluationModels {
   energy: EvaluationModelSection
   evaluation: EvaluationModelSection
   demand?: DemandModelSection
+  emissions?: ModelVersionSection
+  compositions?: ModelVersionSection
+  infrastructure?: ModelVersionSection
 }
 
 // --- GET /api/params/* : the per-unit rates a member was priced from --------
@@ -643,12 +726,16 @@ export interface CompositionsSection {
 // of any member since backend 0.5.0.
 export interface EvaluationResponse {
   calc_version: string
+  route_builder_version: string
   route_id: string
   views: EvaluationViews | null
   // Fetched with the views for a family member; absent for a stored proposal
   // until its member views call lands (GET /api/proposal/<id> serves views
   // only). Zone D's train-operation receipts read it.
   operations?: Operations | null
+  // DEMAND 0.1.0: who sits where on this member's train — served with the
+  // views, never stored with a proposal.
+  demand?: DemandBlock | null
 }
 
 // --- The gallery KPI summary block ------------------------------------------
@@ -677,21 +764,24 @@ export interface ProposalCalcSummary {
   train_km_per_year?: number
   available_place_km_per_year?: number
   sold_place_km_per_year?: number
-  // Demand & modal-shift KPIs — route-level, annual. PLACEHOLDER values
-  // (deterministic fakes derived from route metrics) until models/demand/
-  // lands; demand_kpis_placeholder stays true, so the UI must present these as
-  // estimates. Source: backend models/evaluation/summary.py.
+  // Demand & modal-shift KPIs — route-level, annual. The manual demand
+  // model's own figures since DEMAND 0.1.0 (backend models/evaluation/
+  // summary.py): the trips are the passengers, shift_air_* / shift_other_*
+  // split them by journey length (other = half car shift, half induced).
+  // demand_kpis_placeholder is false; true only on a row written before the
+  // 2026-09-19 migration and not yet refreshed.
   demand_trips_per_year?: number
+  demand_trip_km_per_year?: number
   shift_air_trips_per_year?: number
   shift_air_trip_km_per_year?: number
-  shift_car_trips_per_year?: number
-  shift_car_trip_km_per_year?: number
+  shift_other_trips_per_year?: number
+  shift_other_trip_km_per_year?: number
   subsidy_eur_per_t_co2?: number | null
   co2_g_per_pax_km?: number
   demand_kpis_placeholder?: boolean
   // CALC 0.9.29. The contribution is signed and already inside net_eur_per_year;
-  // passengers_per_year is the base it multiplies (places actually sold) — NOT
-  // demand_trips_per_year, which stays the revenue-derived placeholder above.
+  // passengers_per_year is the base it multiplies (places actually sold) —
+  // equal to demand_trips_per_year since DEMAND 0.1.0.
   services_revenue_eur?: number
   catering_contribution_eur?: number
   passengers_per_year?: number
@@ -710,7 +800,12 @@ export interface FamilyRequest {
   stops: string[]
   timetable_mode?: string
   fixed_night_interval?: string[] | null
-  schedule_mode?: string
+  // ROUTE_BUILDER 0.9.40: one frequency (or a month map); the echo always
+  // carries the month map. DEMAND 0.1.0: the manual demand block (see
+  // lib/detailsScope.ts::demandRequest for its shape).
+  schedule?: { days_per_week: number } | Record<string, number>
+  min_turnaround_min?: number
+  demand?: Record<string, unknown>
   routing_mode?: string
   auto_stop_addition?: 'off' | 'suggest'
   expert_timetable?: ExpertTimetableRequest | null
@@ -767,7 +862,7 @@ export interface CompactTripPair {
 export interface CompactRoute {
   route_id: string
   scenario_id: number
-  schedule: { seasonal_schedules: { season: string; frequency: string }[] }
+  schedule: { days_per_week_by_month: Record<string, number>; min_turnaround_min: number }
   trip_pairs: CompactTripPair[]
   parkings: unknown[]
   shuntings: unknown[]
@@ -779,6 +874,7 @@ export interface FamilyMemberOk {
   status: 'ok'
   route_ref: string
   summary: ProposalCalcSummary
+  demand: DemandBlock
 }
 
 export interface FamilyMemberError {
@@ -1004,12 +1100,36 @@ export interface Operations {
 export interface FamilyViewsResponse {
   views: EvaluationViews
   operations: Operations
+  demand: DemandBlock
 }
 
 // --- GET /api/models — the static model registry --------------------------
 // Versions, descriptions and the formula registry the breakdown keys into.
 // Fetched once per session (Cache-Control max-age); formerly inlined in every
 // compute response as evaluation.models.
+// --- GET /api/params/TicketVat : VAT on rail tickets, per country ------------
+// Backend api/helpers/params_serialize.py::ticket_vat_to_dict. Display only:
+// the frontend forms a route's effective rate (lib/ticketVat.ts) and shows
+// the gross fare beside the net one; no cost or revenue figure uses it.
+
+export interface TicketVatRate {
+  country_code: string
+  /** Rate on a ticket that starts and ends in the country, as a fraction. */
+  vat_domestic_per: number
+  /** Rate on the country's distance share of a cross-border ticket; 0 where exempt. */
+  vat_international_per: number
+  status: 'sourced' | 'assumed' | 'no_railway' | 'blocked'
+  note: string | null
+  source_id: number | null
+}
+
+export interface TicketVatResponse {
+  rule: string
+  sources: Record<string, ParamSource>
+  count: number
+  rates: TicketVatRate[]
+}
+
 export interface ModelsResponse {
   models: EvaluationModels
 }
@@ -1113,13 +1233,28 @@ export interface ProposalSummaryProposal extends ProposalSummaryShared {
   demand_trip_km_per_year: number | null
   shift_air_trips_per_year: number | null
   shift_air_trip_km_per_year: number | null
-  shift_car_trips_per_year: number | null
-  shift_car_trip_km_per_year: number | null
+  shift_other_trips_per_year: number | null
+  shift_other_trip_km_per_year: number | null
   co2_savings_t_per_year: number | null
   subsidy_eur_per_t_co2: number | null
   demand_kpis_placeholder: unknown
   likes_count: number
   comments_count: number
+  /** §5.4a. "error": the family could not compute THIS proposal on the
+   *  requested scenario variant. "missing": its rows for that variant have
+   *  not been written yet (published before the backfill). On both, every
+   *  FIGURE is null — identity, name, countries, stop ids and timestamps
+   *  are always the base projection's, so the row is listed and filterable
+   *  exactly as on the base. Always "ok" on the base projection, which is
+   *  why the figures stay non-nullable here: ProposalCard branches on this
+   *  before reading any of them. */
+  status: 'ok' | 'error' | 'missing'
+  /** The member's code when status is "error": routing_graph_not_configured
+   *  (this deployment serves no routing instance for that network),
+   *  routing_error, gauge_mismatch, domain_error. */
+  error_code: string | null
+  /** The variant this row describes; null on the base projection. */
+  scenario_variant_id: number | null
   // Proposer identity, live-joined from admin.users. is_guest is derived
   // server-side from the reserved "guest_" display-name prefix; the card
   // shows a generic "Guest" label instead of the raw guest_… name.
@@ -1214,6 +1349,15 @@ export interface ProposalsRequest {
   limit?: number
   offset?: number
   include?: ProposalsSection[]
+  /** Swap the proposal side's FIGURES for this scenario variant's (backend
+   *  §5.4a): KPIs, sort order, `map_routes` geometry and `map_lines`
+   *  corridors follow the scenario. NOT a filter, and never a different
+   *  result set: which proposals a filter returns — and their identity,
+   *  countries, stop ids, timestamps — is the base projection's whichever
+   *  variant is read. Existing (ONTD) rows are scenario-independent. Omitted
+   *  is the base projection. Ids come from `GET /api/scenarios`
+   *  (`scenario_variants`); an unknown or non-current one is a 400. */
+  scenario_variant_id?: number
 }
 
 // The `summaries` section of the sectioned list response (default `include`).
@@ -1221,6 +1365,8 @@ export interface ProposalsSummariesSection {
   // Count after filtering, before pagination — what infinite scroll compares
   // loaded length against.
   total: number
+  /** Echo of the request's variant; null when the base projection was read. */
+  scenario_variant_id: number | null
   proposals: ProposalSummary[]
 }
 

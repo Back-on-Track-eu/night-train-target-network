@@ -12,10 +12,23 @@ export function useLocaleFormat() {
     () => new Intl.NumberFormat(locale.value, { maximumFractionDigits: 0 }),
   )
   const regionNames = computed(() => new Intl.DisplayNames([locale.value], { type: 'region' }))
+  // Day precision: every timestamp the UI shows is an authoring date, where the
+  // hour is noise ("12 Sep 2026" / "12. Sep. 2026").
+  const dateFmt = computed(
+    () =>
+      new Intl.DateTimeFormat(locale.value, { year: 'numeric', month: 'short', day: 'numeric' }),
+  )
 
   // Whole-number formatting with the locale's grouping separator.
   function formatInt(value: number): string {
     return integerFmt.value.format(value)
+  }
+
+  // An ISO 8601 timestamp as a localized short date; empty for an unparseable
+  // value, so a bad row degrades to no date rather than "Invalid Date".
+  function formatDate(iso: string): string {
+    const date = new Date(iso)
+    return Number.isNaN(date.getTime()) ? '' : dateFmt.value.format(date)
   }
 
   // Localized country name for an ISO 3166-1 alpha-2 code; falls back to the
@@ -28,5 +41,5 @@ export function useLocaleFormat() {
     }
   }
 
-  return { locale, formatInt, countryName }
+  return { locale, formatInt, formatDate, countryName }
 }

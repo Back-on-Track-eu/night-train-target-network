@@ -635,6 +635,53 @@ INPUT_PARAMS_TABLES: tuple[Table, ...] = (
     ),
     Table(
         schema="input_params",
+        name="ticket_vat_rates",
+        description="VAT on rail passenger tickets, per country: the rate on "
+        "a domestic ticket and the rate on the country's share of a "
+        "cross-border ticket (0 where the international leg is exempt). "
+        "Calibrated by models/demand/calib/vat/vat_calibration.py "
+        "(VAT_CALIBRATION.md). Display-only: the cost/revenue model prices "
+        "net; the frontend applies these rates distance-weighted over a "
+        "route's country shares to show what a passenger pays. Not "
+        "versioned — a rate change is a reseed, like the composition "
+        "catalogue; a VAT-exemption measure (WP17) would override it per "
+        "scenario, not rewrite it.",
+        columns=(
+            Column(
+                "country_code",
+                "CHAR(2) PRIMARY KEY REFERENCES input_params.countries(country_code)",
+                "Two-letter country code (ISO 3166-1 alpha-2). One row per country.",
+            ),
+            Column(
+                "vat_domestic_per",
+                "NUMERIC(5,3) NOT NULL",
+                "VAT rate on a ticket that starts and ends in the country, as "
+                "a fraction (0.070 = 7 %).",
+            ),
+            Column(
+                "vat_international_per",
+                "NUMERIC(5,3) NOT NULL",
+                "VAT rate on the country's distance share of a ticket that "
+                "crosses a border, as a fraction; 0 where the international "
+                "leg is exempt (most member states).",
+            ),
+            Column(
+                "vat_status",
+                "VARCHAR(20) NOT NULL",
+                "Provenance: sourced / assumed / no_railway / blocked — see "
+                "VAT_CALIBRATION.md.",
+            ),
+            Column(
+                "vat_note",
+                "TEXT",
+                "What the rate is and where the international treatment "
+                "comes from, in one line.",
+            ),
+            _src("vat_src", "both rates"),
+        ),
+    ),
+    Table(
+        schema="input_params",
         name="service_classes",
         description="Accommodation class taxonomy. service_class_main "
         "groups the detailed classes into: Seat, Couchette, Sleeper, "

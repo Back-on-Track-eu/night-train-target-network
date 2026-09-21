@@ -762,6 +762,41 @@ OPT_TT_QUOTA_BY_COUNTRY = {
 }
 
 
+# ============================================================
+# VAT on rail tickets
+# ============================================================
+# Per-country rates on domestic and on cross-border tickets, exported by
+# models/demand/calib/vat/vat_calibration.py (VAT_CALIBRATION.md). Read
+# here, applied nowhere in the model: the frontend shows them on the fares,
+# distance-weighted over a route's country shares (GET /api/params/TicketVat).
+# Regenerated on every seed like opt_tt: a stdlib table that runs in
+# milliseconds, so a stale CSV never outlives an edit to the rates.
+
+VAT_SEED_DIR = (
+    Path(__file__).resolve().parents[2] / "models" / "demand" / "calib" / "vat" / "seed"
+)
+
+_VAT_SEED_CSVS = ("ticket_vat_rates.csv", "sources.csv")
+
+for _name in _VAT_SEED_CSVS:
+    (VAT_SEED_DIR / _name).unlink(missing_ok=True)
+_ensure_seed_csvs(
+    VAT_SEED_DIR,
+    _VAT_SEED_CSVS,
+    (VAT_SEED_DIR.parent / "vat_calibration.py",),
+)
+
+
+def _read_vat_csv(name: str) -> list[dict]:
+    return _read_seed_csv(
+        VAT_SEED_DIR, name, "models/demand/calib/vat/vat_calibration.py"
+    )
+
+
+TICKET_VAT_RATES_RAW = _read_vat_csv("ticket_vat_rates.csv")
+VAT_SOURCES = _read_vat_csv("sources.csv")
+
+
 def _num(row: dict, *keys: str) -> dict:
     """Return a copy of row with the given keys coerced to float."""
     out = dict(row)
@@ -817,7 +852,13 @@ SOURCES.append(
 # register wins on wording; the section a value was actually read at lives in
 # the per-value locator in each calibration's data/, not here.
 _INFRA_SOURCE_ROWS: dict[str, dict] = {}
-for _row in TAC_SOURCES + ENERGY_SOURCES + FACILITY_SOURCES + ROUTE_CONTEXT_SOURCES:
+for _row in (
+    TAC_SOURCES
+    + ENERGY_SOURCES
+    + FACILITY_SOURCES
+    + ROUTE_CONTEXT_SOURCES
+    + VAT_SOURCES
+):
     _INFRA_SOURCE_ROWS.setdefault(_row["source_id"], _row)
 
 SOURCES += [
@@ -2472,6 +2513,34 @@ _PASSAGE_SOURCE_KEYS = {
 }
 
 
+def seed_ticket_vat_rates(cur, source_ids: dict) -> None:
+    """One row per country from the VAT calibration's seed CSV, the source
+    FK resolved through the register the same way the infrastructure
+    domains do. Countries without a rate row would be a calibration gap,
+    so the CSV must cover input_params.countries exactly."""
+    seeded = {row["country_code"] for row in COUNTRIES}
+    rates = {row["country_code"] for row in TICKET_VAT_RATES_RAW}
+    assert rates == seeded, (
+        f"ticket_vat_rates.csv must cover every seeded country: "
+        f"missing {sorted(seeded - rates)}, extra {sorted(rates - seeded)}"
+    )
+    insert_rows(
+        cur,
+        "input_params.ticket_vat_rates",
+        [
+            {
+                "country_code": row["country_code"],
+                "vat_domestic_per": float(row["vat_domestic_per"]),
+                "vat_international_per": float(row["vat_international_per"]),
+                "vat_status": row["status"],
+                "vat_note": row["note"] or None,
+                "vat_src": source_ids[INFRA_SOURCE_DESCRIPTIONS[row["source_id"]]],
+            }
+            for row in TICKET_VAT_RATES_RAW
+        ],
+    )
+
+
 def seed_passage_charges(cur) -> None:
     """Insert the crossing rows, parsing the GeoJSON geometry server-side.
     Kept out of insert_rows() because the geometry column needs a
@@ -2938,14 +3007,16 @@ def _build_example_route(scenario_id: int, composition, tracks) -> dict:
         geometries_out=geometries,
     )
 
+    from models.route.model import DEFAULT_MIN_TURNAROUND_MIN
+
     return {
         "route_id": draft_prefix,
         "scenario_id": scenario_id,
         "schedule": {
-            "seasonal_schedules": [
-                {"season": "summer", "frequency": "daily"},
-                {"season": "winter", "frequency": "daily"},
-            ]
+            # The example runs daily, spelled the way every route dict
+            # carries its plan since ROUTE_BUILDER 0.9.35: one figure per month.
+            "days_per_week_by_month": {str(m): 7 for m in range(1, 13)},
+            "min_turnaround_min": DEFAULT_MIN_TURNAROUND_MIN,
         },
         "trip_pairs": [
             {
@@ -3029,6 +3100,7 @@ def _compute_example_proposal(
     container being up yet; only the post-routing half of the pipeline is
     reused."""
     from api.helpers.evaluation_serialize import (
+        demand_to_dict,
         input_to_dict,
         models_to_dict,
         views_to_dict,
@@ -3036,21 +3108,22 @@ def _compute_example_proposal(
     from api.helpers.route_serialize import route_from_dict, route_to_dict
     from adapters.proposal.projection import route_fingerprint
     from models.evaluation.summary import build_summary_row
-    from models.demand.stopgap import distribute_demand
-    from models.demand.model import (
-        STOPGAP_FARE_PER_KM_BY_CLASS,
-        STOPGAP_UTILIZATION_PER,
-    )
+    from api.helpers.member_compute import demand_inputs, normalize_demand
+    from models.demand.distribute import distribute_demand
+    from models.demand.model import FARE_PER_KM_BY_CLASS, FARE_PER_PAX_BY_CLASS
     from models.evaluation.model import CALC_VERSION
     from models.evaluation.operations import build_operations
     from models.pipeline import evaluate_and_build_views
-    from models.route.model import ROUTE_BUILDER_VERSION
+    from models.route.model import DEFAULT_MIN_TURNAROUND_MIN, ROUTE_BUILDER_VERSION
 
     route, compositions = route_from_dict(route_dict, loader, scenario_id=scenario_id)
-    distribute_demand(
+    # The manual demand model at its defaults (DEMAND 0.1.0) — the same
+    # call models/pipeline.py makes, on the hand-crafted route.
+    demand_result = distribute_demand(
         route,
-        utilization_per=STOPGAP_UTILIZATION_PER,
-        fare_per_km_by_class=STOPGAP_FARE_PER_KM_BY_CLASS,
+        demand_inputs(normalize_demand(None)),
+        fare_per_km_by_class=FARE_PER_KM_BY_CLASS,
+        fare_per_pax_by_class=FARE_PER_PAX_BY_CLASS,
     )
     stop_infra = loader.build_all_stops(scenario_id)
     passages = loader.build_all_passages(scenario_id)
@@ -3066,6 +3139,7 @@ def _compute_example_proposal(
         ),
         "views": views_to_dict(views, route),
         "operations": build_operations(route, evaluation_result),
+        "demand": demand_to_dict(demand_result, route),
     }
 
     return {
@@ -3078,7 +3152,9 @@ def _compute_example_proposal(
             "scenario_id": scenario_id,
             "timetable_mode": "simpleAutomatic",
             "fixed_night_interval": None,
-            "schedule_mode": "alwaysDaily",
+            "schedule": {str(m): 7 for m in range(1, 13)},
+            "min_turnaround_min": DEFAULT_MIN_TURNAROUND_MIN,
+            "demand": normalize_demand(None),
             "routing_mode": "fullRouting",
             "auto_stop_addition": "off",
         },
@@ -3239,6 +3315,9 @@ def main():
     print("Seeding input_params.countries...")
     insert_rows(cur, "input_params.countries", COUNTRIES)
     seed_country_geometries(cur)
+
+    print("Seeding input_params.ticket_vat_rates...")
+    seed_ticket_vat_rates(cur, source_ids)
 
     print("Seeding input_params.service_classes...")
     insert_rows(cur, "input_params.service_classes", SERVICE_CLASSES)

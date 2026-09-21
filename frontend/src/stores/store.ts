@@ -9,6 +9,8 @@ import type {
   MeasureSet,
   EvaluationModels,
   ModelsResponse,
+  TicketVatRate,
+  TicketVatResponse,
   StopsResponse,
   CompositionsResponse,
   ScenariosResponse,
@@ -24,7 +26,7 @@ import { i18n } from '@/i18n'
 import type { GallerySearchSeed } from '@/lib/proposalPrefill'
 import { apiRequest } from '@/lib/apiClient'
 import { asApiFailure, type ApiFailure } from '@/lib/apiError'
-import { DAILY_SCHEDULE } from '@/lib/detailsScope'
+import { DEFAULT_DAYS_PER_WEEK, type DemandInputs } from '@/lib/detailsScope'
 
 export type LoadStatus = 'idle' | 'loading' | 'success' | 'error'
 
@@ -72,12 +74,25 @@ export const useStore = defineStore('store', () => {
   const models = ref<EvaluationModels | null>(null)
   const modelsStatus = ref<LoadStatus>('idle')
 
+  // VAT on rail tickets per country (GET /api/params/TicketVat), fetched once
+  // per session like the registry. Keyed by country code for
+  // lib/ticketVat.ts; empty until it lands, which the panels show as no
+  // gross figure rather than a wrong one.
+  const ticketVatRates = ref<Record<string, TicketVatRate>>({})
+
   // Gallery's search-bar state at the moment "Suggest a new route" was
   // clicked, handed to ProposalWorkspace/ProposalViewport off-URL so a fresh
   // proposal's prefill doesn't leak into /proposal-builder's address bar.
   // Set right before the router.push to 'proposal-builder'; read once by
   // ProposalViewport's searchSeed prop.
   const pendingProposalSeed = ref<GallerySearchSeed | null>(null)
+
+  // The scenario a reader was browsing the gallery on when they opened a
+  // proposal — handed over off-URL, exactly like the seed above, and read
+  // once by ProposalViewport when the proposal's family arrives (a stored
+  // proposal always loads on the base, because that is what it is stored
+  // on). Null means "the base", which is also what clearing it means.
+  const pendingScenarioId = ref<number | null>(null)
 
   // The gallery is kept alive across navigation (App.vue), so its loaded list
   // survives a trip into a proposal and back — which also means a proposal
@@ -191,15 +206,19 @@ export const useStore = defineStore('store', () => {
   }
 
   // --- Details inputs (zone D) ----------------------------------------------
-  // The three HOW fields the Details card edits. They are part of the family
-  // key and are saved with the proposal (they ride in compute_request), so
-  // they live here rather than in the card: ProposalViewport posts them with
-  // every family request and restores them when a stored proposal loads.
+  // The HOW fields the Details card edits: the schedule and the prices on
+  // Supply, the demand on Demand. They are part of the family key and are
+  // saved with the proposal (they ride in compute_request), so they live here
+  // rather than in the card: ProposalViewport posts them with every family
+  // request and restores them when a stored proposal loads.
   //
-  // Days per week for each month, January first. A flat seven is the
-  // backend's own default and posts no month map at all — see
-  // lib/detailsScope.ts::scheduleRequest.
-  const scheduleMonths = ref<number[]>([...DAILY_SCHEDULE])
+  // One frequency, days per week, 1..7 (ROUTE_BUILDER 0.9.40). The backend
+  // keeps a month grid underneath and expands this onto it.
+  const scheduleDaysPerWeek = ref<number>(DEFAULT_DAYS_PER_WEEK)
+  // The manual demand (DEMAND 0.1.0). Null until the model registry seeds
+  // it from demand.defaults (Medium, the default group mix, an even OD
+  // spread); a stored proposal's echo replaces it on load.
+  const demand = ref<DemandInputs | null>(null)
   // The tariff, four maps of class_main → EUR (CALC 0.9.30). Empty until the
   // model registry lands, then seeded from demand.defaults so the fields
   // never hard-code a rate the backend owns.
@@ -220,7 +239,7 @@ export const useStore = defineStore('store', () => {
   // while it loads: keeping this in the card meant every Recalculate closed
   // the card it was pressed in and threw the reader back to the top.
   const detailsOpen = ref(false)
-  const detailsTab = ref<string>('supply')
+  const detailsTab = ref<string>('demand')
 
   /** Put the model's own standard values into the fields. Called once the
    *  registry is here and again whenever the user asks for a reset. */
@@ -231,6 +250,31 @@ export const useStore = defineStore('store', () => {
     faresEurPerPax.value = { ...defaults.fares_eur_per_pax }
     servicesEurPerPax.value = { ...defaults.services_eur_per_pax }
     cateringEurPerPax.value = { ...defaults.catering_eur_per_pax }
+    demand.value = defaultDemand()
+  }
+
+  /** The demand a new proposal starts at, from the registry (§2.8). */
+  function defaultDemand(): DemandInputs | null {
+    const defaults = demandDefaults.value
+    if (!defaults) return null
+    return {
+      level: defaults.level,
+      passengersPerYear: defaults.levels[defaults.level] ?? 0,
+      groupSharesPct: { ...defaults.group_shares_pct },
+      od: { preset: 'even', stopWeights: { board: {}, alight: {} }, pinnedSharesPct: {} },
+    }
+  }
+
+  async function fetchTicketVat(): Promise<void> {
+    try {
+      const json = await apiRequest<TicketVatResponse>('/api/params/TicketVat', {
+        budget: 'reference',
+      })
+      ticketVatRates.value = Object.fromEntries(json.rates.map((r) => [r.country_code, r]))
+    } catch {
+      // No rates means no gross fares — a display detail, not a failure worth
+      // a toast. Retried the next time a viewport mounts.
+    }
   }
 
   async function fetchModels(): Promise<void> {
@@ -390,8 +434,12 @@ export const useStore = defineStore('store', () => {
     models,
     modelsStatus,
     fetchModels,
+    ticketVatRates,
+    fetchTicketVat,
     // details inputs
-    scheduleMonths,
+    scheduleDaysPerWeek,
+    demand,
+    defaultDemand,
     faresEurPerKm,
     faresEurPerPax,
     servicesEurPerPax,
@@ -402,6 +450,7 @@ export const useStore = defineStore('store', () => {
     detailsTab,
     selectedScenarioId,
     pendingProposalSeed,
+    pendingScenarioId,
     galleryStale,
     fetchStops,
     fetchCompositions,

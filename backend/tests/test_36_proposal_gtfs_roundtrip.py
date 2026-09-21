@@ -57,8 +57,8 @@ def _json_normalize(obj):
 
 def _round_avg_price(obj):
     """avg_price is stored as NUMERIC(10,2) in proposals.od_pairs (WP1's
-    schema) — correct precision for a EUR-denominated field. The stopgap
-    demand model's raw output (distribute_demand(): a flat per-km fare
+    schema) — correct precision for a EUR-denominated field. The demand
+    model's raw output (distribute_demand(): fare_per_pax + fare_per_km
     times distance) isn't itself rounded, so the *published* (pre-storage)
     value can carry more decimals than the DB will ever keep — e.g.
     77.38690000000001. Once a route is actually published, avg_price is
@@ -246,7 +246,7 @@ class TestRouteRoundtrip:
 
     def test_od_pairs_survive_roundtrip(self, db_cur, loader, api_base):
         """Stopgap demand (distribute_demand(), always run by
-        POST /api/proposal/calc) populates od_pairs — confirms the
+        the family) populates od_pairs — confirms the
         proposals.od_pairs sidecar table round-trips real content, not
         just an empty list."""
         response = compute(
@@ -256,7 +256,7 @@ class TestRouteRoundtrip:
             auto_stop_addition="off",
         )
         assert len(response["route"]["trip_pairs"][0]["od_pairs"]) > 0, (
-            "fixture assumption: stopgap demand always populates od_pairs"
+            "fixture assumption: the demand model always populates od_pairs"
         )
 
         scenario_id = response["request"]["scenario_id"]

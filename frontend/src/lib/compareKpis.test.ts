@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { compareKpi, goodness, isImprovement, relativeDelta, subsidyDisplay } from './compareKpis'
+import {
+  compareKpi,
+  goodness,
+  isImprovement,
+  relativeDelta,
+  subsidyDisplay,
+  type KpiFormatters,
+} from './compareKpis'
 
 describe('subsidyDisplay', () => {
   it('reads the signed net: shortfall is a subsidy, positive is a surplus', () => {
@@ -48,5 +55,18 @@ describe('compare KPIs', () => {
     expect(goodness(kpi, 4, -2, 4)).toBe(0)
     expect(goodness(kpi, -2, -2, 4)).toBe(1)
     expect(goodness(compareKpi('co2'), 10, 0, 10)).toBe(1)
+  })
+})
+
+describe('the CO₂ tile', () => {
+  // It once divided by 1,000 and then formatted the result as millions of
+  // euros minus the euro sign: 43,660 t read "43.66 M kt".
+  it('reads tonnes, scaled once', () => {
+    const kpi = compareKpi('co2')
+    const value = kpi.value({ co2_savings_t_per_year: 43_660 })!
+    const fmt = { tonnes: (v: number) => `${v} t` } as unknown as KpiFormatters
+    expect(value).toBe(43_660)
+    expect(kpi.format(value, fmt)).toBe('43660 t')
+    expect(kpi.unitKey).toBe('perYear')
   })
 })

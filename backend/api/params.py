@@ -6,6 +6,7 @@ Read-only parameter endpoints.
   GET /api/params/StopInfrastructures  — all stops
   GET /api/params/compositions         — all composition types
   GET /api/params/TrackInfrastructures — all country track infrastructure
+  GET /api/params/TicketVat            — VAT on rail tickets, per country
 
 Response dict-building for all three endpoints lives in
 api/helpers/params_serialize.py — see its module docstring.
@@ -18,6 +19,7 @@ from flask import Blueprint, jsonify, request
 from api.helpers.dependencies import get_loader
 from api.helpers.params_serialize import (
     stop_infra_to_dict,
+    ticket_vat_to_dict,
     track_infra_to_dict,
     composition_collection_to_dict,
 )
@@ -83,3 +85,18 @@ def get_track_infrastructures():
     scenario_id = request.args.get("scenario_id", type=int)
     track_infra = loader.build_all_tracks(scenario_id)
     return jsonify(track_infra_to_dict(track_infra)), 200
+
+
+@bp.get("/TicketVat")
+def get_ticket_vat():
+    """
+    Return the VAT rates on rail passenger tickets for every country — the
+    rate on a domestic ticket and the rate on the country's share of a
+    cross-border ticket — with provenance. Not scenario-pinned: the table
+    is a catalogue, one row per country. The frontend applies the rates
+    distance-weighted over a route's country shares to show what a
+    passenger pays; no cost or revenue figure uses them. See
+    params_serialize.ticket_vat_to_dict() for the response layout.
+    """
+    loader = get_loader()
+    return jsonify(ticket_vat_to_dict(loader.build_all_ticket_vat())), 200

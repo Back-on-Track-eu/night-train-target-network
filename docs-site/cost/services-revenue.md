@@ -25,7 +25,7 @@ $$ R_{svc} = \sum_{od} n_{places\_sold,od} \times s_{class} $$
 | | Symbol | Meaning | Unit | Where it comes from |
 |---|---|---|---|---|
 | Input | `n_places_sold,od` | Places sold per connection and year | places/year | set by you |
-| Input | `s_class` | Additional-services revenue per passenger of that class, overridable per proposal | €/passenger | [STOPGAP_SERVICES_EUR_PER_PAX_BY_CLASS](/reference/standard-values#s-demand-stopgap_services_eur_per_pax_by_class) |
+| Input | `s_class` | Additional-services revenue per passenger of that class, overridable per proposal | €/passenger | [SERVICES_EUR_PER_PAX_BY_CLASS](/reference/standard-values#s-demand-services_eur_per_pax_by_class) |
 | **Result** | `R_svc` | Annual additional-services revenue | €/year | — |
 
 **Feeds into:** [total_revenue_eur](/cost/total-revenue)

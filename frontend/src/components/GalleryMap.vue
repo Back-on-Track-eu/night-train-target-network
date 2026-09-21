@@ -9,16 +9,20 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 import '@/lib/maplibreWorker'
 import {
   CORRIDOR_COLORS,
+  CORRIDOR_COUNT_PROPERTIES,
   CORRIDOR_ISOLATED_WIDTH,
+  CORRIDOR_KINDS,
+  CORRIDOR_OPACITY,
   ROUTE_DASH_PATTERN,
   ROUTED_FILTER,
   UNROUTED_FILTER,
   corridorBounds,
-  corridorColorExpression,
+  corridorPresenceFilter,
   corridorWidthExpression,
   featureBounds,
   routeColorExpression,
   routeForRow,
+  type CorridorKind,
   type GalleryRowRef,
 } from '@/lib/galleryMap'
 import type { MapLinesSection, MapRouteFeature } from '@/types/api'
@@ -26,8 +30,10 @@ import type { MapLinesSection, MapRouteFeature } from '@/types/api'
 // Two layers, two grains, one map:
 //
 //   OVERVIEW — `map_lines`: one line per stop-pair corridor across the whole
-//   filtered set, thickness by how often it was proposed, colour by whether a
-//   real night train already runs it. Read-only; the map has no hover of its
+//   filtered set, thickness by how often it was proposed or served. Drawn in
+//   two passes over the same features — existing trains first, proposals over
+//   the top — so a corridor carrying both shows its suggestion in front rather
+//   than resolving to a single colour. Read-only; the map has no hover of its
 //   own, because a corridor is shared by many rows and so names no single card.
 //
 //   ISOLATED — `map_routes`: while a card is hovered, the corridors are hidden
@@ -36,8 +42,14 @@ import type { MapLinesSection, MapRouteFeature } from '@/types/api'
 //   varying thickness along it would imply a difference that isn't there.
 const EUROPE_BOUNDS: [number, number, number, number] = [-30, 27, 50, 73]
 const CORRIDORS_SOURCE = 'gallery-corridors'
-const CORRIDORS_LAYER = 'gallery-corridors-line'
-const CORRIDORS_LAYER_DASHED = 'gallery-corridors-line-dashed'
+// Four corridor layers: solid and dashed per kind, added in CORRIDOR_KINDS
+// order so the proposal pair ends up above the existing pair.
+const corridorLayerId = (kind: CorridorKind, dashed: boolean): string =>
+  `gallery-corridors-${kind}${dashed ? '-dashed' : ''}`
+const CORRIDOR_LAYER_IDS = CORRIDOR_KINDS.flatMap((kind) => [
+  corridorLayerId(kind, false),
+  corridorLayerId(kind, true),
+])
 const ROUTE_SOURCE = 'gallery-route'
 // Two layers over one source, split on whether the geometry is real routing.
 // `line-dasharray` is not a data-driven property in MapLibre, so the dashed
@@ -64,9 +76,11 @@ let resizeObserver: ResizeObserver | null = null
 const EMPTY_CORRIDORS: MapLinesSection = { type: 'FeatureCollection', features: [] }
 const EMPTY_ROUTE = { type: 'FeatureCollection' as const, features: [] as MapRouteFeature[] }
 
+// Listed in stacking order, top layer first — the legend then reads the way
+// the map draws.
 const legendItems = computed(() => [
-  { color: CORRIDOR_COLORS.existing, label: t('gallery.map.legend.existing') },
   { color: CORRIDOR_COLORS.proposed, label: t('gallery.map.legend.proposed') },
+  { color: CORRIDOR_COLORS.existing, label: t('gallery.map.legend.existing') },
 ])
 
 function fitTo(bounds: [number, number, number, number] | null, maxZoom: number) {
@@ -95,8 +109,9 @@ function applyHighlight(row: GalleryRowRef | null) {
   // window in which the new geometry is drawn with the previous styling.
   routeSource?.setData(feature ? { type: 'FeatureCollection', features: [feature] } : EMPTY_ROUTE)
   const corridorsVisible = feature ? 'none' : 'visible'
-  map.setLayoutProperty(CORRIDORS_LAYER, 'visibility', corridorsVisible)
-  map.setLayoutProperty(CORRIDORS_LAYER_DASHED, 'visibility', corridorsVisible)
+  for (const id of CORRIDOR_LAYER_IDS) {
+    map.setLayoutProperty(id, 'visibility', corridorsVisible)
+  }
 
   if (feature) fitTo(featureBounds([feature]), 10)
   else fitAll()
@@ -118,38 +133,41 @@ function initLayers() {
     type: 'geojson',
     data: props.corridors ?? EMPTY_CORRIDORS,
   })
-  // Same split as the isolated route: a corridor whose only geometry is its two
-  // stops joined up is a placeholder, and must not read as a surveyed line at
-  // any point — not just while a card is hovered.
-  const corridorLayout = {
-    'line-join': 'round' as const,
-    // Busier corridors draw last, so a heavily-proposed line is never buried
-    // under a single-proposal one it crosses.
-    'line-sort-key': ['get', 'total_count'],
+  // Two passes over the one source, existing before proposed, each split again
+  // on whether the geometry is real routing: a corridor whose only geometry is
+  // its two stops joined up is a placeholder, and must not read as a surveyed
+  // line at any point — not just while a card is hovered.
+  for (const kind of CORRIDOR_KINDS) {
+    const layout = {
+      'line-join': 'round' as const,
+      // Busier corridors draw last within a layer, so a heavily-proposed line
+      // is never buried under a single-proposal one it crosses.
+      'line-sort-key': ['get', CORRIDOR_COUNT_PROPERTIES[kind]],
+    }
+    const paint = {
+      'line-color': CORRIDOR_COLORS[kind],
+      'line-width': corridorWidthExpression(kind),
+      'line-opacity': CORRIDOR_OPACITY[kind],
+    }
+    const presence = corridorPresenceFilter(kind)
+    map.addLayer({
+      id: corridorLayerId(kind, false),
+      type: 'line',
+      source: CORRIDORS_SOURCE,
+      filter: ['all', presence, ROUTED_FILTER],
+      layout: { ...layout, 'line-cap': 'round' },
+      paint,
+    } as maplibregl.LayerSpecification)
+    map.addLayer({
+      id: corridorLayerId(kind, true),
+      type: 'line',
+      source: CORRIDORS_SOURCE,
+      // Butt caps: round ones smear the gaps shut at these widths.
+      filter: ['all', presence, UNROUTED_FILTER],
+      layout: { ...layout, 'line-cap': 'butt' },
+      paint: { ...paint, 'line-dasharray': ROUTE_DASH_PATTERN },
+    } as maplibregl.LayerSpecification)
   }
-  const corridorPaint = {
-    'line-color': corridorColorExpression(),
-    'line-width': corridorWidthExpression(),
-    // Below 1 so crossing corridors still read as two lines.
-    'line-opacity': 0.75,
-  }
-  map.addLayer({
-    id: CORRIDORS_LAYER,
-    type: 'line',
-    source: CORRIDORS_SOURCE,
-    filter: ROUTED_FILTER,
-    layout: { ...corridorLayout, 'line-cap': 'round' },
-    paint: corridorPaint,
-  } as maplibregl.LayerSpecification)
-  map.addLayer({
-    id: CORRIDORS_LAYER_DASHED,
-    type: 'line',
-    source: CORRIDORS_SOURCE,
-    filter: UNROUTED_FILTER,
-    // Butt caps: round ones smear the gaps shut at these widths.
-    layout: { ...corridorLayout, 'line-cap': 'butt' },
-    paint: { ...corridorPaint, 'line-dasharray': ROUTE_DASH_PATTERN },
-  } as maplibregl.LayerSpecification)
 
   map.addSource(ROUTE_SOURCE, { type: 'geojson', data: EMPTY_ROUTE })
   map.addLayer({
@@ -217,7 +235,10 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="relative" style="width: 100%; height: 100%; min-height: 480px">
+  <!-- Fills whatever box the gallery gives it: the sticky column is sized to
+       leave the search bar on screen beside the map (Gallery.vue's measureMap),
+       so a min-height here would fight that budget on short viewports. -->
+  <div class="relative h-full w-full">
     <div ref="mapContainer" class="h-full w-full overflow-hidden rounded-xl" />
     <!-- Without this the "already served" signal reads as an arbitrary palette. -->
     <div

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { gross, vatBreakdown, vatRatesByCountry, type TicketVat } from '@/lib/ticketVat'
 import { useI18n } from 'vue-i18n'
 import { mdiRefresh } from '@mdi/js'
 import type { Composition } from '@/types/api'
@@ -16,6 +17,7 @@ import {
 import { useCompareFormat } from '@/composables/useCompareFormat'
 import AppIcon from '@/components/AppIcon.vue'
 import DetailPanel from '@/components/details/DetailPanel.vue'
+import { DOCS_DETAIL_PANEL } from '@/lib/docsLinks'
 import PreviewChip from '@/components/details/PreviewChip.vue'
 
 // Supply · Places and prices — one table, one row per accommodation class:
@@ -36,19 +38,44 @@ const props = defineProps<{
   defaults: Tariff | null
   longest: ExampleOd | null
   shortest: ExampleOd | null
-  // Schedule-owned, so they preview with the grid rather than with the prices.
-  months: number[]
+  // Schedule-owned, so they preview with the frequency rather than with the prices.
+  daysPerWeek: number
   schedulePreviewing: boolean
   pricesPreviewing: boolean
   cycleDistanceKm: number
   cycleDays: number | null
   tripPairs: number
   committed: { placesOffered: number | null; placeKmOffered: number | null }
+  ticketVat: TicketVat | null
 }>()
 const emit = defineEmits<{ 'update:tariff': [tariff: Tariff] }>()
 
 const { t } = useI18n()
 const fmt = useCompareFormat()
+
+// What the passenger pays: the example fare plus the route's VAT, under the
+// net figure the model works with. The header names the effective rate AND
+// each country's rate ("DE 7 %, CH 0 %"): a bare 5 % on a German–Swiss
+// route reads as an error until one sees that Switzerland exempts its leg
+// of an international ticket. The distance shares stay in the hover.
+const vatLabel = computed(() =>
+  props.ticketVat
+    ? t('proposal.details.prices.inclVat', {
+        rate: fmt.percent(props.ticketVat.ratePer * 100),
+        countries: vatRatesByCountry(props.ticketVat, fmt.percent),
+      })
+    : null,
+)
+const vatTitle = computed(() =>
+  props.ticketVat
+    ? vatBreakdown(props.ticketVat, fmt.percent, (cc, rate, share) =>
+        t('proposal.details.prices.vatShare', { cc, rate, share }),
+      )
+    : undefined,
+)
+function withVat(net: number | null): string {
+  return net === null || !props.ticketVat ? '' : fmt.eur2(gross(net, props.ticketVat))
+}
 
 const totalPlaces = computed(() => props.composition?.capacity.total_places ?? 0)
 
@@ -92,7 +119,7 @@ const classRows = computed(() =>
 
 const live = computed(() =>
   supplyFigures(
-    props.months,
+    props.daysPerWeek,
     props.cycleDistanceKm,
     totalPlaces.value,
     props.cycleDays,
@@ -107,11 +134,11 @@ const placeKmOffered = computed(() =>
 )
 
 /** Decimals each part is kept and shown at. A per-km rate is tenths of a
- *  cent — a realistic night-train tariff is nearly flat over distance, so
- *  its defaults read 0.025, 0.035 (DEMAND 0.0.5) and rounding to the cent
- *  would silently turn 0.025 into 0.03. The backend echoes the per-km map
- *  at 4 decimals and the per-passenger maps at 2, so 3 and 2 here round
- *  trip unchanged. */
+ *  cent — a realistic night-train tariff is nearly flat over distance (the
+ *  D31 defaults read 0.03, 0.04, 0.06) and a typed 0.025 rounded to the
+ *  cent would silently become 0.03. The backend echoes the per-km map at 4
+ *  decimals and the per-passenger maps at 2, so 3 and 2 here round trip
+ *  unchanged. */
 const DECIMALS: Record<TariffPart, number> = {
   faresPerPax: 2,
   faresPerKm: 3,
@@ -153,7 +180,8 @@ function stepPart(part: TariffPart, classMain: string, direction: number) {
 
 /** The "All classes" row: every tariff column and both example fares as the
  *  average for a passenger of this train — each class weighted by the places
- *  it offers, which is the mix the stopgap demand model fills. */
+ *  it offers. (Who actually sits where is the Demand tab's business; this
+ *  row describes the offer.) */
 const averageRow = computed(() => {
   const rows = classRows.value
   const places = rows.reduce((sum, r) => sum + r.places, 0)
@@ -184,6 +212,7 @@ const numCell =
   <DetailPanel
     :title="t('proposal.details.prices.title')"
     :info="t('proposal.details.prices.info')"
+    :doc-path="DOCS_DETAIL_PANEL.prices"
     :caption="
       composition
         ? t('proposal.details.prices.caption', {
@@ -226,11 +255,17 @@ const numCell =
               <span class="block text-[9px] text-primary-50/35">
                 {{ longest ? `${longest.name} · ${fmt.int(longest.km)} km` : '—' }}
               </span>
+              <span v-if="vatLabel" class="block text-[9px] text-primary-50/35" :title="vatTitle">
+                {{ vatLabel }}
+              </span>
             </th>
             <th class="py-1 pr-1 text-right font-normal whitespace-nowrap">
               {{ t('proposal.details.prices.exampleShortest') }}
               <span class="block text-[9px] text-primary-50/35">
                 {{ shortest ? `${shortest.name} · ${fmt.int(shortest.km)} km` : '—' }}
+              </span>
+              <span v-if="vatLabel" class="block text-[9px] text-primary-50/35" :title="vatTitle">
+                {{ vatLabel }}
               </span>
             </th>
           </tr>
@@ -311,12 +346,18 @@ const numCell =
               :class="pricesPreviewing && row.fareChanged ? 'preview-value' : 'text-primary-50/85'"
             >
               {{ row.longEur === null ? '—' : fmt.eur2(row.longEur) }}
+              <span v-if="vatLabel" class="block text-[10px] text-primary-50/45" :title="vatTitle">
+                {{ withVat(row.longEur) }}
+              </span>
             </td>
             <td
               class="py-1 pr-1 text-right tabular-nums"
               :class="pricesPreviewing && row.fareChanged ? 'preview-value' : 'text-primary-50/85'"
             >
               {{ row.shortEur === null ? '—' : fmt.eur2(row.shortEur) }}
+              <span v-if="vatLabel" class="block text-[10px] text-primary-50/45" :title="vatTitle">
+                {{ withVat(row.shortEur) }}
+              </span>
             </td>
           </tr>
 
@@ -350,9 +391,23 @@ const numCell =
               class="border-l border-primary-50/10 py-1.5 pr-2 pl-2 text-right tabular-nums text-primary-50"
             >
               {{ averageRow.longEur === null ? '—' : fmt.eur2(averageRow.longEur) }}
+              <span
+                v-if="vatLabel"
+                class="block text-[10px] font-normal text-primary-50/45"
+                :title="vatTitle"
+              >
+                {{ withVat(averageRow.longEur) }}
+              </span>
             </td>
             <td class="py-1.5 pr-1 text-right tabular-nums text-primary-50">
               {{ averageRow.shortEur === null ? '—' : fmt.eur2(averageRow.shortEur) }}
+              <span
+                v-if="vatLabel"
+                class="block text-[10px] font-normal text-primary-50/45"
+                :title="vatTitle"
+              >
+                {{ withVat(averageRow.shortEur) }}
+              </span>
             </td>
           </tr>
         </tbody>

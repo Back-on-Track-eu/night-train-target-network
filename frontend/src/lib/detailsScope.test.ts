@@ -1,18 +1,20 @@
 import { describe, it, expect } from 'vitest'
 import {
-  DAILY_SCHEDULE,
-  SCHEDULE_PRESETS,
+  DEFAULT_DAYS_PER_WEEK,
+  TAB_AWAITS,
   cateringSign,
+  daysPerWeekFromRequest,
+  demandFromRequest,
+  demandRequest,
   dirtyScopes,
   exampleFare,
   isAwaiting,
   operatingDaysPerYear,
-  peakMonth,
-  presetOf,
-  scheduleFromRequest,
+  sameDemand,
   scheduleRequest,
   supplyFigures,
   trainsetsFor,
+  type DemandInputs,
 } from './detailsScope'
 
 const tariff = (over: Partial<Parameters<typeof dirtyScopes>[0]['tariff']> = {}) => ({
@@ -23,82 +25,76 @@ const tariff = (over: Partial<Parameters<typeof dirtyScopes>[0]['tariff']> = {})
   ...over,
 })
 
-const inputs = (over: Partial<Parameters<typeof dirtyScopes>[0]> = {}) => ({
-  months: [...DAILY_SCHEDULE],
-  tariff: tariff(),
+const demand = (over: Partial<DemandInputs> = {}): DemandInputs => ({
+  level: 'medium',
+  passengersPerYear: 200000,
+  groupSharesPct: { comfort: 50, group: 25, senior: 10, budget: 10, business: 5 },
+  od: { preset: 'even', stopWeights: { board: {}, alight: {} }, pinnedSharesPct: {} },
   ...over,
 })
 
-describe('the schedule grid', () => {
+const inputs = (over: Partial<Parameters<typeof dirtyScopes>[0]> = {}) => ({
+  daysPerWeek: DEFAULT_DAYS_PER_WEEK,
+  tariff: tariff(),
+  demand: demand(),
+  ...over,
+})
+
+const flat = (d: number) =>
+  Object.fromEntries(Array.from({ length: 12 }, (_, i) => [String(i + 1), d]))
+
+describe('the frequency', () => {
   it('counts a daily year as the backend does — 2032 is a leap year', () => {
-    expect(operatingDaysPerYear(DAILY_SCHEDULE)).toBe(366)
+    expect(operatingDaysPerYear(7)).toBe(366)
   })
 
-  it('counts only the months a seasonal service runs', () => {
-    // May–September: 31 + 30 + 31 + 31 + 30.
-    expect(operatingDaysPerYear(SCHEDULE_PRESETS.summer)).toBeCloseTo(153, 6)
+  it("counts three days a week as the guide's 156.86 operating days", () => {
+    expect(operatingDaysPerYear(3)).toBeCloseTo(156.857, 3)
   })
 
-  it('names the preset a grid matches, and calls anything else custom', () => {
-    expect(presetOf(DAILY_SCHEDULE)).toBe('daily')
-    expect(presetOf(SCHEDULE_PRESETS.three)).toBe('three')
-    expect(presetOf(SCHEDULE_PRESETS.summer)).toBe('summer')
-    expect(presetOf([7, 7, 5, 5, 7, 7, 7, 7, 7, 5, 5, 7])).toBe('custom')
+  it('posts one figure, clamped to 1..7 whole days', () => {
+    expect(scheduleRequest(3)).toEqual({ schedule: { days_per_week: 3 } })
+    expect(scheduleRequest(9)).toEqual({ schedule: { days_per_week: 7 } })
+    expect(scheduleRequest(2.6)).toEqual({ schedule: { days_per_week: 3 } })
   })
 
-  it('sends no month map for a flat seven', () => {
-    // An untouched proposal has to hash to the family it always did.
-    expect(scheduleRequest(DAILY_SCHEDULE)).toEqual({
-      schedule_mode: 'alwaysDaily',
-      schedule: null,
-    })
+  it('reads a flat echo back exactly', () => {
+    expect(daysPerWeekFromRequest(flat(5))).toBe(5)
   })
 
-  it('sends all twelve months for anything else', () => {
-    const { schedule_mode, schedule } = scheduleRequest(SCHEDULE_PRESETS.once)
-    expect(schedule_mode).toBe('custom')
-    expect(Object.keys(schedule ?? {})).toHaveLength(12)
-    expect(schedule?.['1']).toBe(1)
-    expect(schedule?.['12']).toBe(1)
+  it('reads a seasonal echo as its rounded average over the year', () => {
+    const summerOnly = { ...flat(0), '5': 7, '6': 7, '7': 7, '8': 7, '9': 7 }
+    // 35 / 12 = 2.9 → 3
+    expect(daysPerWeekFromRequest(summerOnly)).toBe(3)
+    // never below one: a stored plan that ran at all is at least once a week
+    expect(daysPerWeekFromRequest({ ...flat(0), '7': 1 })).toBe(1)
   })
 
-  it('round-trips through the request echo', () => {
-    const months = [7, 7, 5, 5, 7, 7, 7, 7, 7, 5, 5, 7]
-    expect(scheduleFromRequest(scheduleRequest(months).schedule)).toEqual(months)
-  })
-
-  it('reads an absent echo as the daily default', () => {
-    expect(scheduleFromRequest(null)).toEqual(DAILY_SCHEDULE)
-    expect(scheduleFromRequest(undefined)).toEqual(DAILY_SCHEDULE)
-  })
-
-  it('names the busiest month only when there is one', () => {
-    expect(peakMonth(DAILY_SCHEDULE)).toBeNull()
-    expect(peakMonth([1, 1, 1, 1, 7, 1, 1, 1, 1, 1, 1, 1])).toBe(4)
+  it('reads an absent echo as the default', () => {
+    expect(daysPerWeekFromRequest(null)).toBe(DEFAULT_DAYS_PER_WEEK)
+    expect(daysPerWeekFromRequest(undefined)).toBe(DEFAULT_DAYS_PER_WEEK)
   })
 })
 
 describe('the fleet', () => {
-  it('sizes to the busiest month', () => {
-    expect(trainsetsFor(DAILY_SCHEDULE, 2)).toBe(2)
-    expect(trainsetsFor(SCHEDULE_PRESETS.three, 2)).toBe(1)
-    expect(trainsetsFor([3, 3, 3, 3, 7, 7, 7, 3, 3, 3, 3, 3], 2)).toBe(2)
-  })
-
-  it('needs no rake for a train that never runs', () => {
-    expect(trainsetsFor(Array(12).fill(0), 2)).toBe(0)
+  it('rounds the cycle times the frequency up', () => {
+    expect(trainsetsFor(7, 2)).toBe(2)
+    expect(trainsetsFor(4, 2)).toBe(2)
+    expect(trainsetsFor(3, 2)).toBe(1)
+    expect(trainsetsFor(1, 2)).toBe(1)
+    expect(trainsetsFor(7, 3)).toBe(3)
   })
 
   it('declines to guess without a cycle from the last result', () => {
-    // The cycle is a property of the timetable; only the backend can redo it.
-    expect(trainsetsFor(DAILY_SCHEDULE, null)).toBeNull()
+    expect(trainsetsFor(7, null)).toBeNull()
+    expect(trainsetsFor(7, 0)).toBeNull()
   })
 })
 
 describe('the supply figures a schedule change previews', () => {
-  const figures = supplyFigures(DAILY_SCHEDULE, 2160, 260, 2)
+  const figures = supplyFigures(7, 2160, 260, 2)
 
-  it('derives departures, train-km and place-km from the grid', () => {
+  it('derives departures, train-km and place-km from the frequency', () => {
     expect(figures.operatingDays).toBe(366)
     expect(figures.departures).toBe(732)
     expect(figures.trainKm).toBe(366 * 2160)
@@ -106,9 +102,47 @@ describe('the supply figures a schedule change previews', () => {
     expect(figures.placeKmOffered).toBe(260 * 366 * 2160)
   })
 
-  it('scales linearly with the operating days', () => {
-    const half = supplyFigures(Array(12).fill(3.5), 2160, 260, 2)
-    expect(half.trainKm).toBeCloseTo(figures.trainKm / 2, 6)
+  it("matches the guide's reference at three days a week", () => {
+    const three = supplyFigures(3, 2160, 260, 2)
+    expect(three.departures).toBeCloseTo(313.714, 3)
+    expect(Math.round(three.trainKm)).toBe(338811)
+    expect(three.trainsets).toBe(1)
+  })
+})
+
+describe('the demand block', () => {
+  it('round-trips through the request echo', () => {
+    const d = demand({
+      level: 'custom',
+      passengersPerYear: 123456,
+      od: {
+        preset: 'long',
+        stopWeights: { board: { a: 3 }, alight: { z: 0.3 } },
+        pinnedSharesPct: { a: { z: 12.5 } },
+      },
+    })
+    const echo = demandRequest(d).demand as Record<string, unknown>
+    expect(echo.passengers_per_year).toBe(123456)
+    expect(demandFromRequest({ demand: echo })).toEqual(d)
+  })
+
+  it('reads an echo without a demand block as none', () => {
+    expect(demandFromRequest({})).toBeNull()
+    expect(demandFromRequest(null)).toBeNull()
+  })
+
+  it('compares the numbers, not the labels', () => {
+    expect(sameDemand(demand({ level: 'medium' }), demand({ level: 'custom' }))).toBe(true)
+    expect(sameDemand(demand(), demand({ od: { ...demand().od, preset: 'long' } }))).toBe(true)
+    expect(sameDemand(demand(), demand({ passengersPerYear: 200001 }))).toBe(false)
+    expect(
+      sameDemand(demand(), demand({ groupSharesPct: { ...demand().groupSharesPct, budget: 11 } })),
+    ).toBe(false)
+    expect(
+      sameDemand(demand(), demand({ od: { ...demand().od, pinnedSharesPct: { a: { b: 5 } } } })),
+    ).toBe(false)
+    expect(sameDemand(null, null)).toBe(true)
+    expect(sameDemand(demand(), null)).toBe(false)
   })
 })
 
@@ -121,9 +155,32 @@ describe('the change-scope rule', () => {
     expect(dirtyScopes(inputs(), null)).toEqual(new Set())
   })
 
-  it('marks the schedule alone when the grid moves', () => {
-    const dirty = dirtyScopes(inputs({ months: SCHEDULE_PRESETS.three }), inputs())
+  it('marks the schedule alone when the frequency moves', () => {
+    const dirty = dirtyScopes(inputs({ daysPerWeek: 7 }), inputs())
     expect([...dirty]).toEqual(['schedule'])
+  })
+
+  it('marks the demand alone when a demand figure moves', () => {
+    const dirty = dirtyScopes(inputs({ demand: demand({ passengersPerYear: 300000 }) }), inputs())
+    expect([...dirty]).toEqual(['demand'])
+  })
+
+  it('treats a committed echo without a demand block as changed', () => {
+    // Figures computed by the stopgap cannot be said to match any demand
+    // input, so the first Recalculate after the upgrade is due.
+    expect([...dirtyScopes(inputs(), inputs({ demand: null }))]).toEqual(['demand'])
+  })
+
+  it('lights the tab dots as D2 says', () => {
+    const dirty = new Set(['demand'] as const)
+    expect(isAwaiting(TAB_AWAITS.demand, dirty)).toBe(false)
+    expect(isAwaiting(TAB_AWAITS.supply, dirty)).toBe(true)
+    expect(isAwaiting(TAB_AWAITS.operation, dirty)).toBe(true)
+    expect(isAwaiting(TAB_AWAITS.infrastructure, dirty)).toBe(false)
+    expect(isAwaiting(TAB_AWAITS.overhead, dirty)).toBe(true)
+    const prices = new Set(['prices'] as const)
+    expect(isAwaiting(TAB_AWAITS.supply, prices)).toBe(false)
+    expect(isAwaiting(TAB_AWAITS.infrastructure, prices)).toBe(false)
   })
 
   it('marks prices for any of the four tariff parts', () => {
@@ -140,13 +197,13 @@ describe('the change-scope rule', () => {
 
   it('clears itself when the edit is reverted', () => {
     const committed = inputs()
-    const edited = inputs({ months: SCHEDULE_PRESETS.once })
+    const edited = inputs({ daysPerWeek: 1 })
     expect(dirtyScopes(edited, committed).size).toBe(1)
     expect(dirtyScopes(inputs(), committed).size).toBe(0)
   })
 
   it('makes a panel wait only for the scopes it depends on', () => {
-    const priceOnly = new Set<'schedule' | 'prices'>(['prices'])
+    const priceOnly = new Set<'schedule' | 'prices' | 'demand'>(['prices'])
     // Cost does not depend on what a ticket sells for.
     expect(isAwaiting(['schedule'], priceOnly)).toBe(false)
     // The comparison table's subsidy column does.

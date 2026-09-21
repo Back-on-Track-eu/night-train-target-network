@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatCount, formatEur, formatMillionEur } from './money'
+import { formatCount, formatEur, formatMillionEur, formatTonnes } from './money'
 
 describe('money', () => {
   it('prints millions with M', () => {
@@ -32,5 +32,13 @@ describe('money', () => {
     expect(formatCount(1_200_000, 'en')).toBe('1.20 M')
     expect(formatCount(200_300, 'en')).toBe('200.3 k')
     expect(formatCount(732, 'en')).toBe('732')
+  })
+})
+
+describe('formatTonnes', () => {
+  it('folds the scale into the unit', () => {
+    expect(formatTonnes(850, 'en')).toBe('850 t')
+    expect(formatTonnes(43_660, 'en')).toBe('43.66 kt')
+    expect(formatTonnes(1_200_000, 'en')).toBe('1.20 Mt')
   })
 })

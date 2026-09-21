@@ -59,11 +59,18 @@ const NO_TRAVEL_TIME = -1
 // west, south, east, north — generous Europe + North Africa margin
 const EUROPE_BOUNDS: [number, number, number, number] = [-30, 27, 50, 73]
 
+// A stop on the route being shown. `removable` is the edit-mode affordance:
+// the marker reveals a close icon on hover and clicking it takes the stop off
+// the itinerary — the map's counterpart to the plus on an available stop, so
+// building a route by pointing at it works in both directions. `stopId` is
+// what the removal is emitted with, and is therefore only needed then.
 interface MarkerStop {
   lat: number
   lon: number
   name: string
   highlighted: boolean
+  stopId?: string
+  removable?: boolean
 }
 
 // A proposed (not-yet-committed) stop along the temporary route, shown as an
@@ -108,13 +115,23 @@ interface MapAlternative {
   lines: [number, number][][]
 }
 
+type MapShape =
+  | { type: 'LineString'; coordinates: [number, number][] }
+  | { type: 'MultiLineString'; coordinates: [number, number][][] }
+
 const props = defineProps<{
   stops: MarkerStop[]
-  shape?: { type: string; coordinates: [number, number][] } | null
+  // The routed line: one polyline, or several runs (a MultiLineString) when
+  // legs are missing between them — see `bridges`.
+  shape?: MapShape | null
   // When provided, the route is drawn per-leg so out-of-scope parts can be
   // dimmed (highlighted=false) and each leg can be hovered for its travel time.
   // Falls back to `shape` (all highlighted) when absent.
   segments?: MapSegment[] | null
+  // Straight lines standing in for legs not routed yet (suggest mode, after
+  // a stop was taken off the route — lib/suggestShape.ts). Drawn on the dim
+  // layer beside `shape` so they read as provisional.
+  bridges?: [number, number][][] | null
   // Proposed stops along the temporary route (suggest mode). Rendered as their
   // own interactive markers, independent of `stops`/`shape` so toggling one
   // never redraws the route line or refits the map.
@@ -132,6 +149,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   'toggle-suggested': [stopId: string]
   'add-stop': [stopId: string]
+  'remove-stop': [stopId: string]
   'select-alternative': [scenarioId: number, compositionId: string]
 }>()
 
@@ -149,17 +167,74 @@ let hoverPopup: maplibregl.Popup | null = null
 let mapLoaded = false
 let initialFitDone = false
 
-function makeMarkerEl(isEndpoint: boolean, highlighted: boolean): HTMLDivElement {
-  const el = document.createElement('div')
-  const size = isEndpoint ? 14 : 10
-  Object.assign(el.style, {
+function makeDotEl(size: number, highlighted: boolean): HTMLDivElement {
+  const dot = document.createElement('div')
+  Object.assign(dot.style, {
     width: `${size}px`,
     height: `${size}px`,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     background: highlighted ? PRIMARY : DIMMED,
     border: `2.5px solid ${PRIMARY_LIGHT}`,
     borderRadius: '50%',
     boxShadow: '0 1px 4px rgba(0,0,0,0.35)',
+    transition: 'width 120ms ease, height 120ms ease',
+  })
+  return dot
+}
+
+function makeMarkerEl(isEndpoint: boolean, highlighted: boolean): HTMLDivElement {
+  const el = makeDotEl(isEndpoint ? 14 : 10, highlighted)
+  el.style.cursor = 'pointer'
+  return el
+}
+
+// A route stop the user may take off the itinerary. The dot keeps its normal
+// size and colour until hovered, then grows to hold a close icon — the same
+// 18 px reveal an available stop uses for its plus, so adding and removing
+// read as one gesture in two directions. The name is already on the map as a
+// permanent label (STOPS_LABEL_LAYER), so this carries none, and no popup:
+// the click is the removal.
+const REMOVE_HOVER_SIZE = 18
+
+function makeRemovableMarkerEl(stop: MarkerStop, isEndpoint: boolean): HTMLDivElement {
+  const restSize = isEndpoint ? 14 : 10
+  // The wrapper stays at the hover size whatever the dot does, so growing the
+  // dot never moves the marker's centre and the hit area is comfortable even
+  // over a 10 px intermediate stop.
+  const el = document.createElement('div')
+  Object.assign(el.style, {
+    width: `${REMOVE_HOVER_SIZE}px`,
+    height: `${REMOVE_HOVER_SIZE}px`,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     cursor: 'pointer',
+  })
+  el.title = t('proposal.map.removeStop', { name: stop.name })
+
+  const dot = makeDotEl(restSize, stop.highlighted)
+  const icon = iconSvgEl(mdiClose, PRIMARY_LIGHT, 13)
+  icon.style.display = 'none'
+  dot.appendChild(icon)
+  el.appendChild(dot)
+
+  el.addEventListener('mouseenter', () => {
+    dot.style.width = `${REMOVE_HOVER_SIZE}px`
+    dot.style.height = `${REMOVE_HOVER_SIZE}px`
+    dot.style.background = PRIMARY
+    icon.style.display = ''
+  })
+  el.addEventListener('mouseleave', () => {
+    dot.style.width = `${restSize}px`
+    dot.style.height = `${restSize}px`
+    dot.style.background = stop.highlighted ? PRIMARY : DIMMED
+    icon.style.display = 'none'
+  })
+  el.addEventListener('click', (e) => {
+    e.stopPropagation()
+    emit('remove-stop', stop.stopId!)
   })
   return el
 }
@@ -171,11 +246,17 @@ function syncMarkers() {
   const n = props.stops.length
   props.stops.forEach((stop, i) => {
     const isEndpoint = i === 0 || i === n - 1
-    const marker = new maplibregl.Marker({ element: makeMarkerEl(isEndpoint, stop.highlighted) })
-      .setLngLat([stop.lon, stop.lat])
-      .setPopup(new maplibregl.Popup({ offset: 12 }).setText(stop.name))
-      .addTo(map!)
-    markers.push(marker)
+    // A removable marker answers the click itself; everywhere else the click
+    // still opens the stop's name popup.
+    const removable = stop.removable === true && stop.stopId !== undefined
+    const marker = new maplibregl.Marker({
+      element: removable
+        ? makeRemovableMarkerEl(stop, isEndpoint)
+        : makeMarkerEl(isEndpoint, stop.highlighted),
+      anchor: 'center',
+    }).setLngLat([stop.lon, stop.lat])
+    if (!removable) marker.setPopup(new maplibregl.Popup({ offset: 12 }).setText(stop.name))
+    markers.push(marker.addTo(map!))
   })
 }
 
@@ -272,8 +353,8 @@ function syncSuggestedMarkers() {
 //
 // There is deliberately no X here, unlike a proposed stop: a suggested stop is a
 // pending yes/no, whereas an available stop is simply not on the itinerary yet.
-// Removing a stop stays where it already lives — the itinerary table's own
-// delete control.
+// Its opposite is the route marker's own close icon (makeRemovableMarkerEl),
+// which is where taking a stop off the itinerary happens on the map.
 function makeAvailableMarkerEl(s: AvailableStop): HTMLDivElement {
   const el = document.createElement('div')
   const size = 18
@@ -440,8 +521,13 @@ function syncPolyline() {
   // arrives as one stitched polyline with no per-leg boundaries, so it carries
   // no hover properties.
   if (props.shape) {
-    src.setData({ type: 'FeatureCollection', features: [lineFeature(props.shape.coordinates)] })
-    srcDim.setData({ type: 'FeatureCollection', features: [] })
+    const runs =
+      props.shape.type === 'MultiLineString' ? props.shape.coordinates : [props.shape.coordinates]
+    src.setData({ type: 'FeatureCollection', features: runs.map((run) => lineFeature(run)) })
+    srcDim.setData({
+      type: 'FeatureCollection',
+      features: (props.bridges ?? []).map((coords) => lineFeature(coords)),
+    })
     return
   }
 
@@ -770,7 +856,7 @@ onMounted(() => {
 // Stops/shape change → remarker, relabel, redraw, refit. Segments (scope)
 // change → redraw only, so toggling scope doesn't reset the user's manual zoom.
 watch(
-  () => [props.stops, props.shape],
+  () => [props.stops, props.shape, props.bridges],
   () => {
     syncMarkers()
     syncStopLabels()

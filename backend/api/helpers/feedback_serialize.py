@@ -30,7 +30,8 @@ lists is a hand-maintained copy that can drift:
                                      evaluation model computes
                                      (models/evaluation/views.py:Breakdown)
   Evaluation — results / view     — the output views the evaluation endpoint
-                                     produces (models/evaluation/views.py:VIEW_META)
+                                     produces (models/evaluation/views.py:VIEW_META),
+                                     plus the builder's result panels (static)
   Route or timetable               — static list (no single schema object
                                      maps cleanly onto "route concepts")
   General functionality            — static list
@@ -87,6 +88,11 @@ _STATIC_CATEGORIES = (
 # section worth calling out separately.
 _ROUTE_TIMETABLE_SUB_CATEGORIES = (
     "Stops / stations",
+    # The one value the app deep-links to: the stop search's empty state links
+    # to /docs/feedback?topic=missing-stop, which preselects this pair. The
+    # alias, not this string, is what travels in the URL (docs-site), so the
+    # wording can change here without breaking a link already in the wild.
+    "Missing stop / suggest new stop",
     "Schedule / timetable / frequency",
     "Routing / track geometry",
     "Composition / rolling stock assignment",
@@ -213,16 +219,31 @@ def _infrastructure_sub_categories(loader, scenario_id: int | None) -> list[dict
     return entries
 
 
+# One static value beside the field-derived ones: a composition that is not
+# in the catalogue has no field to be filed under. The gallery's "Suggest a
+# new composition" button deep-links to it by alias (docs-site feedback form),
+# not by this string, so the wording may change.
+COMPOSITION_SUGGEST_SUB_CATEGORY = "Suggest a new composition"
+
+
 def _composition_sub_categories(loader, scenario_id: int | None) -> list[dict]:
     """Every composition/operator/coach field — the same
-    CompositionCollection GET /api/params/compositions serves."""
+    CompositionCollection GET /api/params/compositions serves — plus the
+    one suggestion entry, listed first so the form's dropdown opens on it."""
     compositions = loader.build_all_compositions(scenario_id)
 
     leaves: list[dict] = []
     _flatten_descriptions(compositions.descriptions, [], leaves)
     entries = [{**leaf, "group": "Compositions"} for leaf in leaves]
     entries.sort(key=lambda e: e["parameter"])
-    return entries
+    return [
+        {
+            "parameter": COMPOSITION_SUGGEST_SUB_CATEGORY,
+            "description": "A train formation the catalogue should offer",
+            "group": "Suggestion",
+        },
+        *entries,
+    ]
 
 
 # =============================================================================
@@ -279,11 +300,29 @@ def _breakdown_leaf_fields() -> list[dict]:
 # =============================================================================
 
 
+# The panels of the proposal builder's results, as the app names them. The
+# builder's "report a problem" icons deep-link to these by alias
+# (docs-site GeneralFeedbackForm.vue TOPICS ↔ frontend lib/feedbackLink.ts),
+# so a reader reports what they were looking at rather than which internal
+# view produced it. Static: panels are a frontend concept with no schema.
+_RESULT_PANEL_SUB_CATEGORIES = (
+    "Scenario and main figures",
+    "Scenario comparison",
+    "Cost and revenue breakdown",
+    "Details — Demand",
+    "Details — Supply",
+    "Details — Train operation",
+    "Details — Infrastructure",
+    "Details — Overhead",
+)
+
+
 def _evaluation_view_sub_categories() -> list[dict]:
     """The output views the merged compute response actually produces —
     the same VIEW_META api/helpers/evaluation_serialize.py builds each
-    view's response section from, not a separately hand-maintained list."""
-    return [
+    view's response section from, not a separately hand-maintained list —
+    followed by the builder's result panels."""
+    views = [
         {
             "parameter": view,
             "description": meta["description"],
@@ -291,6 +330,11 @@ def _evaluation_view_sub_categories() -> list[dict]:
         }
         for view, meta in sorted(VIEW_META.items())
     ]
+    panels = [
+        {"parameter": panel, "description": None, "group": "Builder panel"}
+        for panel in _RESULT_PANEL_SUB_CATEGORIES
+    ]
+    return views + panels
 
 
 # =============================================================================

@@ -48,7 +48,6 @@ from models.emissions.model import (  # noqa: E402
     EMISSION_FACTORS,
     EMISSIONS_MODEL_DESCRIPTION,
     EMISSIONS_MODEL_VERSION,
-    MODE_SHIFT_SHARES,
 )
 from models.energy.model import (  # noqa: E402
     CHANGELOG as ENERGY_CHANGELOG,
@@ -90,7 +89,6 @@ __all__ = [
     "CALC_TREE",
     "EMISSION_FACTORS",
     "INPUT_PARAMS_TABLES",
-    "MODE_SHIFT_SHARES",
     "MODEL_CHANGELOGS",
     "MODEL_VERSION_ROWS",
     "REGISTRIES",

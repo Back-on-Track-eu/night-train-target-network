@@ -15,19 +15,21 @@ reference — [`../../api/README.md`](../../api/README.md)
 
 | File | Content |
 |---|---|
-| `factors.py` | `EMISSION_FACTORS` (per-mode `EmissionFactor(g_per_pax_km, source)`), `MODE_SHIFT_SHARES`, `EMISSIONS_MODEL_VERSION` / `EMISSIONS_MODEL_DESCRIPTION` |
+| `model.py` | `EMISSION_FACTORS` (per-mode `EmissionFactor(g_per_pax_km, source)`), `EMISSIONS_MODEL_VERSION` / `EMISSIONS_MODEL_DESCRIPTION` |
 
 There is no calculation pipeline: the model is a set of sourced
-constants (EEA TERM 2020, EU-average 2018 figures). Correspondingly, the
+constants (Back-on-Track 2022, *The Global Warming Reduction Potential of
+Night-Trains*, Figure 3 — g CO2e/pkm incl. aviation's non-CO2 forcing,
+GWP*, well-to-wheel, EU mix 2019; EMISSIONS 0.2.0). Correspondingly, the
 `evaluation.models.emissions` entry of `POST /api/proposal/calc` carries
 `factors` where the other models carry `formulas`.
 
 ## Consumers
 
 - `models/evaluation/summary.py` — `co2_g_per_pax_km` on every §5.4
-  summary row (the flat night-train factor) and the placeholder
-  CO2-savings derivation (`shifted_km × (mode − night_train)`, combined
-  with `MODE_SHIFT_SHARES`).
+  summary row (the flat night-train factor) and the CO2-savings
+  derivation (`shifted_km × (mode − night_train)` per demand source, the
+  sources split by distance in `models/demand/sources.py`).
 - `api/helpers/evaluation_serialize.py` — the `evaluation.models.emissions`
   documentation entry, so every calc/publish/load response carries the
   per-mode reference values the frontend renders next to a proposal's
@@ -42,8 +44,5 @@ existing-route KPI comes from ONTD itself).
 - The night-train value is a flat European average until an energy-based,
   country-resolved model replaces it (`energy_kwh` per segment × country
   grid intensity ÷ sold places).
-- `MODE_SHIFT_SHARES` are §8.1 demand placeholders hosted here only
-  because their sole consumer is the emissions-savings placeholder — they
-  move to `models/demand/` when the real demand model lands.
 - The factors migrate into a scenario-versioned params table with the
   WP16 schema split; until then these constants are the single source.

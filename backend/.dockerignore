@@ -10,6 +10,9 @@ db/dev/data/
 # Nothing here is imported at runtime — the demand model is not wired into the
 # API — and raw/ alone runs to double-digit GB.
 models/demand/calib/
+# ...except the VAT calibration: a stdlib script the seeder runs at
+# container seed time to regenerate its seed CSVs (db/dev/seed.py).
+!models/demand/calib/vat/
 # Calibration observation tables, written by the 02_*.ipynb notebooks in each
 # domain. Notebook output, never read by the API. Seed CSVs (calib/seed/) are
 # deliberately NOT excluded: db/dev/seed.py reads them at container seed time.

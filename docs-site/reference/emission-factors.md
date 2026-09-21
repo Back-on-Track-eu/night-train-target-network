@@ -10,11 +10,11 @@ title: 'Emission factors'
 <!-- BEGIN GENERATED: emission_factors -->
 | Mode | g CO2e per passenger-km | Source |
 |---|---|---|
-| night train | 33 | EEA TERM 2020: EU-average passenger rail, 2018 (33 g CO2e/pkm) — flat proxy for night trains until the energy-based, country-resolved model lands |
-| air | 160 | EEA TERM 2020: intra-EU aviation, 2018 (160 g CO2/pkm, CO2 only — excludes non-CO2 radiative forcing such as contrails and NOx, which would push the effective value substantially higher) |
-| car | 143 | EEA TERM 2020: passenger car at average occupancy, 2018 (143 g CO2e/pkm) |
+| night train | 14 | Back-on-Track 2022, The Global Warming Reduction Potential of Night-Trains, Figure 3 (g CO2e/pkm, GWP*, well-to-wheel, EU mix 2019) — https://back-on-track.eu/the-global-warming-reduction-potential-of-night-trains/: an average EU night train at a high load factor — flat proxy until the energy-based, country-resolved model lands |
+| air | 389 | Back-on-Track 2022, The Global Warming Reduction Potential of Night-Trains, Figure 3 (g CO2e/pkm, GWP*, well-to-wheel, EU mix 2019) — https://back-on-track.eu/the-global-warming-reduction-potential-of-night-trains/: intra-EU flight incl. non-CO2 radiative forcing; 1:28 against the night train |
+| car | 132 | Back-on-Track 2022, The Global Warming Reduction Potential of Night-Trains, Figure 3 (g CO2e/pkm, GWP*, well-to-wheel, EU mix 2019) — https://back-on-track.eu/the-global-warming-reduction-potential-of-night-trains/: passenger car at average occupancy |
 
-The CO2 saving compares a night train against the trip someone would otherwise have made. Which trip that is, is an assumption, not a measurement: air 35%, car 20%.
+The CO2e saving compares a night train against the trip someone would otherwise have made. Which trip that is, is an assumption, not a measurement: the demand model splits every OD pair's passengers by distance into a share that would have flown and a share that would have driven or not travelled at all (see the demand model's standard values).
 <!-- END GENERATED: emission_factors -->
 
 <FeedbackForm />
