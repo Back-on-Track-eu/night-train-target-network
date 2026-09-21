@@ -101,7 +101,8 @@
       "message": "Europa braucht einen Nachtzug von {origin} nach {destination}. {km} km, {stops}, {countries} – das wäre dafür nötig:",
       "messagePlain": "Europa braucht einen Nachtzug von {origin} nach {destination}. Das wäre dafür nötig:",
       "emailSubject": "Europa braucht einen Nachtzug {origin}–{destination}",
-      "emailBody": "So sähe ein Nachtzug {origin} – {destination} aus: Strecke, Fahrplan und Betriebskosten, modelliert nach dem Back-on-Track Target Network:"
+      "emailBody": "So sähe ein Nachtzug {origin} – {destination} aus: Strecke, Fahrplan und Betriebskosten, modelliert nach dem Back-on-Track Target Network:",
+      "reportRoute": "Ein Problem mit dieser Route melden"
     },
     "funFacts": {
       "label": "Schon gewusst?",
@@ -167,7 +168,8 @@
       "legAria": "Zusätzliche Minuten auf dem Abschnitt bis {stop}",
       "moreAria": "Eine Minute mehr auf dem Abschnitt bis {stop}",
       "lessAria": "Eine Minute weniger auf dem Abschnitt bis {stop}",
-      "droppedAddons": "Auf {legs} sind zusätzliche Minuten entfallen: Dazwischen kam ein Halt hinzu, den Abschnitt gibt es nicht mehr."
+      "droppedAddons": "Auf {legs} sind zusätzliche Minuten entfallen: Dazwischen kam ein Halt hinzu, den Abschnitt gibt es nicht mehr.",
+      "toggleHint": "Gestalte den Fahrplan selbst: erste Abfahrt setzen und fixieren, Minuten auf Abschnitten ergänzen, eigene Zeiten für die Rückfahrt, Nacht festlegen. Gilt nach Neuberechnung."
     },
     "night": {
       "toggleAria": "Feste Nacht: die beiden Halte wählen, zwischen denen das Fenster 00:00–05:00 Uhr zentriert wird",
@@ -185,7 +187,8 @@
         "night": "Nachthalt — zwischen 00:00 und 05:00 Uhr",
         "alighting": "Ausstiegshalt — der Zug kommt ab 05:00 Uhr an",
         "both": "Einstiegs- und Ausstiegshalt"
-      }
+      },
+      "legendHint": "Nacht ist 00:00–05:00 Uhr. Einstiegshalte verlässt der Zug vor Mitternacht, Ausstiegshalte erreicht er ab 05:00; Nachthalte dazwischen verkaufen nichts."
     },
     "suggestions": {
       "title": "Halte entlang der Strecke ergänzen?",
@@ -407,6 +410,7 @@
     "compare": {
       "scenarioTitle": "Szenario und Eckwerte",
       "scenarioBody": "Netz, Betriebsbedingungen und mögliche weitere politische Maßnahmen simulieren.",
+      "scenarioHint": "Ein Szenario kombiniert ein Schienennetz mit Betriebsbedingungen und bald Preismaßnahmen. Die Zahlen gelten für das gewählte; Basis ist das heutige Netz.",
       "title": "Szenarien vergleichen",
       "body": "Wie sich der gewählte Zug in jedem Szenario schlägt und jeder Zug im gewählten Szenario.",
       "complete": "Alle Kombinationen berechnet.",
@@ -464,9 +468,18 @@
         "journeyTime": "Reisezeit",
         "shiftOther": "Vom Auto verlagert oder neu erzeugt"
       },
+      "kpiHints": {
+        "journeyTime": "Fahrplanzeit einer Richtung (Mittel beider), erste Abfahrt bis letzte Ankunft, inkl. Halten, Bremsen, Anfahren und Fahrplanpuffer.",
+        "pax": "Beförderte Reisende pro Jahr, beide Richtungen: die eingestellte Nachfrage, soweit die Klassen des Zuges sie aufnehmen.",
+        "paxKm": "Jede Reise mal die gefahrene Distanz. Grundlage der Erlöse je Kilometer und der CO₂-Einsparung.",
+        "subsidy": "Was die Linie pro Jahr braucht, um nach allen Erlösen die Kosten und die Marge des Betreibers zu decken. Bei Überschuss: keiner.",
+        "shiftAir": "Reisende, die sonst geflogen wären. Der Anteil wächst mit der Reiseweite: keiner unter 300 km, alle ab 1.200 km.",
+        "shiftOther": "Die übrigen Reisenden: Die Hälfte wäre Auto gefahren, die andere gar nicht gereist (induzierter Verkehr).",
+        "co2": "Vermiedene Emissionen pro Jahr: verlagerte Personen-km zum Faktor von Flugzeug oder Auto, abzüglich des Zuges. Induzierte Reisen zählen dagegen.",
+        "subsidyPerT": "Nötiger Zuschuss je eingesparter Tonne CO₂: was eine vermiedene Tonne die öffentliche Hand kostet. 0 ohne Zuschussbedarf."
+      },
       "units": {
         "millionEurYear": "/ Jahr",
-        "ktYear": "kt / Jahr",
         "eurPerT": "€ / t",
         "perYear": "/ Jahr",
         "kmYear": "km / Jahr"
@@ -994,7 +1007,9 @@
         "busiestAlighting": "Stärkster Ausstiegshalt",
         "figuresNote": "Die Haltegewichte sind die wenigen Zahlen der Anfrage; gepinnte Zellen reisen mit ihnen."
       }
-    }
+    },
+    "docsReadMore": "Mehr dazu in der Dokumentation",
+    "routeStatsHint": "Weg aus einer Schienen-Routing-Engine auf OpenStreetMap-Gleisen. Durchschnittstempo: Distanz durch die ganze Fahrzeit inkl. Halten – hängt also vom Zug ab."
   },
   "gallery": {
     "heading": "Bringen wir die Nachtzüge zurück aufs Gleis!",

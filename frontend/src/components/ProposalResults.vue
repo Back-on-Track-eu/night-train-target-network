@@ -14,6 +14,8 @@ import CompareSection from '@/components/CompareSection.vue'
 import DetailsSection from '@/components/DetailsSection.vue'
 import MobileSettingsCard from '@/components/MobileSettingsCard.vue'
 import CostRevenueBreakdown from '@/components/CostRevenueBreakdown.vue'
+import InfoHint from '@/components/InfoHint.vue'
+import { DOCS_SCENARIO } from '@/lib/docsLinks'
 import Skeleton from 'primevue/skeleton'
 
 // Everything below the route header and map, top to bottom:
@@ -172,8 +174,9 @@ function scrollToSettings() {
         <!-- Zone A -->
         <section class="scenario-gold-box flex flex-col gap-4 rounded-xl p-4">
           <div class="flex flex-col gap-1">
-            <h2 class="text-base font-semibold text-primary-50">
+            <h2 class="flex items-center gap-1.5 text-base font-semibold text-primary-50">
               {{ t('proposal.compare.scenarioTitle') }}
+              <InfoHint :text="t('proposal.compare.scenarioHint')" :docs-href="DOCS_SCENARIO" />
             </h2>
             <p class="text-xs text-primary-50/60">{{ t('proposal.compare.scenarioBody') }}</p>
           </div>

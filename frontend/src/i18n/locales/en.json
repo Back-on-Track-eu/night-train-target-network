@@ -101,7 +101,8 @@
       "message": "Europe needs a night train from {origin} to {destination}. {km} km, {stops}, {countries} — here's what it would take:",
       "messagePlain": "Europe needs a night train from {origin} to {destination}. Here's what it would take:",
       "emailSubject": "Europe needs a {origin}–{destination} night train",
-      "emailBody": "This is what a {origin} – {destination} night train would look like — route, timetable and running costs, modelled on the Back-on-Track Target Network:"
+      "emailBody": "This is what a {origin} – {destination} night train would look like — route, timetable and running costs, modelled on the Back-on-Track Target Network:",
+      "reportRoute": "Report a problem with this route"
     },
     "funFacts": {
       "label": "Did you know?",
@@ -167,7 +168,8 @@
       "legAria": "Extra minutes on the leg arriving at {stop}",
       "moreAria": "One more minute on the leg arriving at {stop}",
       "lessAria": "One minute less on the leg arriving at {stop}",
-      "droppedAddons": "Added minutes were dropped on {legs}: a stop was added in between, so that leg no longer exists."
+      "droppedAddons": "Added minutes were dropped on {legs}: a stop was added in between, so that leg no longer exists.",
+      "toggleHint": "Shape the timetable yourself: set and pin the first departure, add minutes on single legs, give the return its own times and fix the night. Applies on recalculate."
     },
     "night": {
       "toggleAria": "Fixed night: choose the two stops the 00:00–05:00 window is centred between",
@@ -185,7 +187,8 @@
         "night": "Night stop — between 00:00 and 05:00",
         "alighting": "Alighting stop — the train arrives from 05:00",
         "both": "Boarding and alighting stop"
-      }
+      },
+      "legendHint": "Night is 00:00–05:00. Boarding stops are left before midnight, alighting stops reached from 05:00; night stops in between sell no tickets."
     },
     "suggestions": {
       "title": "Add stops along the way?",
@@ -407,6 +410,7 @@
     "compare": {
       "scenarioTitle": "Scenario and main figures",
       "scenarioBody": "Simulate the network, operating conditions and further potential political measures.",
+      "scenarioHint": "A scenario combines a rail network with operating conditions and, soon, price measures. The figures are for the selected one; the baseline is today's network and rules.",
       "title": "Compare across scenarios",
       "body": "How the selected train fares under every scenario, and every train under the selected one.",
       "complete": "Every combination computed.",
@@ -464,9 +468,18 @@
         "journeyTime": "Journey time",
         "shiftOther": "Shifted from car or induced"
       },
+      "kpiHints": {
+        "journeyTime": "Scheduled time of one direction (the average of both), first departure to last arrival, incl. stops, braking, acceleration and timetable buffer.",
+        "pax": "Passengers carried per year in both directions: the demand you set, as far as the train's classes can seat it.",
+        "paxKm": "Each passenger trip times the distance travelled. The basis of the revenue per km and of the CO₂ saving.",
+        "subsidy": "What the route needs per year to cover all costs and the operator's margin after ticket and other revenue. A surplus shows as none.",
+        "shiftAir": "Passengers who would otherwise have flown. The share grows with journey length: none under 300 km, everyone from 1,200 km.",
+        "shiftOther": "The remaining passengers: half would have driven, half would not have travelled at all (induced trips).",
+        "co2": "Emissions avoided per year: shifted passenger-km at the plane's or car's factor, less the train's own. Induced trips count against it.",
+        "subsidyPerT": "Necessary subsidy divided by the CO₂ saved: what one tonne avoided costs the public. 0 when the route needs no subsidy."
+      },
       "units": {
         "millionEurYear": "/ year",
-        "ktYear": "kt / year",
         "eurPerT": "€ / t",
         "perYear": "/ year",
         "kmYear": "km / year"
@@ -994,7 +1007,9 @@
         "busiestAlighting": "Busiest alighting stop",
         "figuresNote": "The stop weights are the request’s few numbers; pinned cells travel with them."
       }
-    }
+    },
+    "docsReadMore": "Read more in the documentation",
+    "routeStatsHint": "The path comes from a rail routing engine on OpenStreetMap track. Average speed is distance over the full scheduled journey, stops included — it changes with the train."
   },
   "gallery": {
     "heading": "Bring the night trains back on track!",
