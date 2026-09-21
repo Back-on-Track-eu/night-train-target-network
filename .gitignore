@@ -88,6 +88,7 @@ backend/models/infrastructure/facility/calib/seed/
 backend/models/infrastructure/route_context/calib/seed/
 backend/models/energy/calib/seed/
 backend/models/scenarios/calib/seed/
+backend/models/demand/calib/vat/seed/
 # Demand model bulk inputs and derived artifacts. calib/raw/ holds third-party
 # downloads (ETISplus OD, census and GHS-POP grids) fetched from their sources;
 # calib/out/ holds everything the ETL notebooks derive from them. Tens of GB

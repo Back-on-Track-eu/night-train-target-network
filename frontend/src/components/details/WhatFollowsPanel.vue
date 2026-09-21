@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { gross, vatBreakdown, vatRatesByCountry, type TicketVat } from '@/lib/ticketVat'
 import { useI18n } from 'vue-i18n'
 import type { Composition, DemandBlock } from '@/types/api'
 import { CLASS_ORDER, GROUP_CLASS_PREFERENCES, GROUP_ORDER } from '@/lib/demandAllocation'
@@ -33,6 +34,7 @@ const props = defineProps<{
    *  request echo's block — and the backend's OD spread of it for this
    *  composition, which carries the share-weighted journey length. */
   committedDemand: DemandInputs | null
+  ticketVat: TicketVat | null
   committedBlock: DemandBlock | null
   previewing: boolean
   awaiting: boolean
@@ -88,6 +90,25 @@ const kpis = computed(() => {
     { key: 'placeKmSold', value: fmt.count(f.placeKmSold) },
     { key: 'utilisationPlaceKm', value: fmt.percent(utilKm) },
     { key: 'ticketRevenue', value: fmt.eur(f.ticketEur), total: true },
+    // What the passengers pay in all: the net revenue plus the route's VAT.
+    // Muted and outside the total, since VAT is neither the operator's
+    // revenue nor in the cost and revenue calculation.
+    ...(props.ticketVat
+      ? [
+          {
+            key: 'ticketRevenueGross',
+            value: fmt.eur(gross(f.ticketEur, props.ticketVat)),
+            note: t('proposal.details.follows.vatRate', {
+              rate: fmt.percent(props.ticketVat.ratePer * 100),
+              countries: vatRatesByCountry(props.ticketVat, fmt.percent),
+            }),
+            title: vatBreakdown(props.ticketVat, fmt.percent, (cc, rate, share) =>
+              t('proposal.details.prices.vatShare', { cc, rate, share }),
+            ),
+            muted: true,
+          },
+        ]
+      : []),
     {
       key: 'catering',
       value: `${f.cateringEur > 0 ? '+ ' : ''}${fmt.eur(f.cateringEur)}`,
@@ -161,16 +182,23 @@ const revenueShares = computed(() => {
           <template v-for="row in kpis" :key="row.key">
             <dt
               class="text-primary-50/65"
-              :class="
-                row.total ? 'border-t border-primary-50/10 pt-1 font-semibold text-primary-50' : ''
-              "
+              :class="[
+                row.total ? 'border-t border-primary-50/10 pt-1 font-semibold text-primary-50' : '',
+                row.muted ? 'text-[11px] text-primary-50/45' : '',
+              ]"
+              :title="row.title"
             >
               {{ t(`proposal.details.follows.${row.key}`) }}
             </dt>
             <dd
               class="text-right tabular-nums"
+              :title="row.title"
               :class="[
-                previewing ? 'preview-value' : 'text-primary-50',
+                row.muted
+                  ? 'text-[11px] text-primary-50/55'
+                  : previewing
+                    ? 'preview-value'
+                    : 'text-primary-50',
                 row.total ? 'border-t border-primary-50/10 pt-1 font-semibold' : '',
                 row.sign === 'positive'
                   ? 'text-emerald-300'

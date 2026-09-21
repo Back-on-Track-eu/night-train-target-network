@@ -5,6 +5,7 @@ import { useStore } from '@/stores/store'
 import type { Composition, EvaluationResponse, MapScope, ProposalCalcSummary } from '@/types/api'
 import type { ProposalFamily } from '@/composables/useProposalFamily'
 import type { ExampleOd } from '@/lib/detailsScope'
+import type { TicketVat } from '@/lib/ticketVat'
 import { daysPerWeekFromRequest, demandFromRequest } from '@/lib/detailsScope'
 import ScenarioSwitches from '@/components/ScenarioSwitches.vue'
 import MainKpiGrid from '@/components/MainKpiGrid.vue'
@@ -57,6 +58,8 @@ const props = defineProps<{
   // price table prices a fare on (ProposalViewport owns the route).
   committedRequest: Record<string, unknown> | null
   cycleDistanceKm: number
+  /** Relayed to the Details card; see DetailsSection. */
+  ticketVat: TicketVat | null
   longestOd: ExampleOd | null
   shortestOd: ExampleOd | null
 }>()
@@ -324,6 +327,7 @@ async function scrollToSettings() {
         :result="result"
         :committed-request="committedRequest"
         :cycle-distance-km="cycleDistanceKm"
+        :ticket-vat="ticketVat"
         :longest-od="longestOd"
         :shortest-od="shortestOd"
         @select-composition="(id) => emit('selectComposition', id)"

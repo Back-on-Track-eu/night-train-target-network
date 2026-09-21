@@ -1107,6 +1107,29 @@ export interface FamilyViewsResponse {
 // Versions, descriptions and the formula registry the breakdown keys into.
 // Fetched once per session (Cache-Control max-age); formerly inlined in every
 // compute response as evaluation.models.
+// --- GET /api/params/TicketVat : VAT on rail tickets, per country ------------
+// Backend api/helpers/params_serialize.py::ticket_vat_to_dict. Display only:
+// the frontend forms a route's effective rate (lib/ticketVat.ts) and shows
+// the gross fare beside the net one; no cost or revenue figure uses it.
+
+export interface TicketVatRate {
+  country_code: string
+  /** Rate on a ticket that starts and ends in the country, as a fraction. */
+  vat_domestic_per: number
+  /** Rate on the country's distance share of a cross-border ticket; 0 where exempt. */
+  vat_international_per: number
+  status: 'sourced' | 'assumed' | 'no_railway' | 'blocked'
+  note: string | null
+  source_id: number | null
+}
+
+export interface TicketVatResponse {
+  rule: string
+  sources: Record<string, ParamSource>
+  count: number
+  rates: TicketVatRate[]
+}
+
 export interface ModelsResponse {
   models: EvaluationModels
 }

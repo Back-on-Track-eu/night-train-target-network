@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { gross, vatBreakdown, vatRatesByCountry, type TicketVat } from '@/lib/ticketVat'
 import { useI18n } from 'vue-i18n'
 import { mdiRefresh } from '@mdi/js'
 import type { Composition } from '@/types/api'
@@ -45,11 +46,36 @@ const props = defineProps<{
   cycleDays: number | null
   tripPairs: number
   committed: { placesOffered: number | null; placeKmOffered: number | null }
+  ticketVat: TicketVat | null
 }>()
 const emit = defineEmits<{ 'update:tariff': [tariff: Tariff] }>()
 
 const { t } = useI18n()
 const fmt = useCompareFormat()
+
+// What the passenger pays: the example fare plus the route's VAT, under the
+// net figure the model works with. The header names the effective rate AND
+// each country's rate ("DE 7 %, CH 0 %"): a bare 5 % on a German–Swiss
+// route reads as an error until one sees that Switzerland exempts its leg
+// of an international ticket. The distance shares stay in the hover.
+const vatLabel = computed(() =>
+  props.ticketVat
+    ? t('proposal.details.prices.inclVat', {
+        rate: fmt.percent(props.ticketVat.ratePer * 100),
+        countries: vatRatesByCountry(props.ticketVat, fmt.percent),
+      })
+    : null,
+)
+const vatTitle = computed(() =>
+  props.ticketVat
+    ? vatBreakdown(props.ticketVat, fmt.percent, (cc, rate, share) =>
+        t('proposal.details.prices.vatShare', { cc, rate, share }),
+      )
+    : undefined,
+)
+function withVat(net: number | null): string {
+  return net === null || !props.ticketVat ? '' : fmt.eur2(gross(net, props.ticketVat))
+}
 
 const totalPlaces = computed(() => props.composition?.capacity.total_places ?? 0)
 
@@ -229,11 +255,17 @@ const numCell =
               <span class="block text-[9px] text-primary-50/35">
                 {{ longest ? `${longest.name} · ${fmt.int(longest.km)} km` : '—' }}
               </span>
+              <span v-if="vatLabel" class="block text-[9px] text-primary-50/35" :title="vatTitle">
+                {{ vatLabel }}
+              </span>
             </th>
             <th class="py-1 pr-1 text-right font-normal whitespace-nowrap">
               {{ t('proposal.details.prices.exampleShortest') }}
               <span class="block text-[9px] text-primary-50/35">
                 {{ shortest ? `${shortest.name} · ${fmt.int(shortest.km)} km` : '—' }}
+              </span>
+              <span v-if="vatLabel" class="block text-[9px] text-primary-50/35" :title="vatTitle">
+                {{ vatLabel }}
               </span>
             </th>
           </tr>
@@ -314,12 +346,18 @@ const numCell =
               :class="pricesPreviewing && row.fareChanged ? 'preview-value' : 'text-primary-50/85'"
             >
               {{ row.longEur === null ? '—' : fmt.eur2(row.longEur) }}
+              <span v-if="vatLabel" class="block text-[10px] text-primary-50/45" :title="vatTitle">
+                {{ withVat(row.longEur) }}
+              </span>
             </td>
             <td
               class="py-1 pr-1 text-right tabular-nums"
               :class="pricesPreviewing && row.fareChanged ? 'preview-value' : 'text-primary-50/85'"
             >
               {{ row.shortEur === null ? '—' : fmt.eur2(row.shortEur) }}
+              <span v-if="vatLabel" class="block text-[10px] text-primary-50/45" :title="vatTitle">
+                {{ withVat(row.shortEur) }}
+              </span>
             </td>
           </tr>
 
@@ -353,9 +391,23 @@ const numCell =
               class="border-l border-primary-50/10 py-1.5 pr-2 pl-2 text-right tabular-nums text-primary-50"
             >
               {{ averageRow.longEur === null ? '—' : fmt.eur2(averageRow.longEur) }}
+              <span
+                v-if="vatLabel"
+                class="block text-[10px] font-normal text-primary-50/45"
+                :title="vatTitle"
+              >
+                {{ withVat(averageRow.longEur) }}
+              </span>
             </td>
             <td class="py-1.5 pr-1 text-right tabular-nums text-primary-50">
               {{ averageRow.shortEur === null ? '—' : fmt.eur2(averageRow.shortEur) }}
+              <span
+                v-if="vatLabel"
+                class="block text-[10px] font-normal text-primary-50/45"
+                :title="vatTitle"
+              >
+                {{ withVat(averageRow.shortEur) }}
+              </span>
             </td>
           </tr>
         </tbody>

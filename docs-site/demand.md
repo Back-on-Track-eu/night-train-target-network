@@ -76,6 +76,19 @@ plus distance — over the longest and shortest journey the route sells. How
 many of these places actually sell is set under Demand. Fares have no
 influence on demand in this model.
 
+**VAT.** The fares are net; under each example fare the panel shows what the
+passenger pays with VAT. Passenger transport is taxed where it takes place,
+in proportion to the distance run in each country, and most countries exempt
+the domestic leg of an international rail ticket while taxing a domestic
+one — Germany (7 %), the Netherlands (9 %), Belgium (6 %), Spain (10 %),
+Croatia (25 %) and Austria (10 %) tax their section of an international
+ticket, the rest of Europe does not. A route's rate is therefore the sum
+over its countries of distance share × that country's rate, with the
+international rate whenever the route crosses a border. Hovering the rate
+shows the per-country make-up. VAT enters no cost, revenue or subsidy figure:
+the model prices net. Rates and sources:
+`backend/models/demand/calib/vat/VAT_CALIBRATION.md`.
+
 ### Potential demand {#potential-demand}
 
 Passengers per year, both directions, who would take this route. Four
@@ -123,7 +136,10 @@ year.
 What the schedule and the prices earn with the committed demand:
 passengers, place-km sold, utilisation and revenue per year, both
 directions. Ticket revenue and the catering contribution are earned in
-different ways and one of them can be negative, so they stay apart.
+different ways and one of them can be negative, so they stay apart. A muted
+line under the ticket revenue gives the same figure with VAT, what the
+passengers pay in all; it stays outside the total and the cost and revenue
+calculation.
 Schedule and price edits preview in the panel; a demand edit does not — the
 panel waits for the recalculation, so it never mixes a previewed demand with
 a calculated one.

@@ -1432,6 +1432,61 @@ class PassageChargeCollection:
 
 
 # =============================================================================
+# TICKET VAT  (input_params.ticket_vat_rates)
+# =============================================================================
+
+
+@dataclass
+class TicketVatRate:
+    """
+    VAT on rail passenger tickets in one country: the rate on a domestic
+    ticket and the rate on the country's distance share of a cross-border
+    ticket (0 where the international leg is exempt, which is most of
+    Europe). Calibrated by models/demand/calib/vat/vat_calibration.py.
+
+    Display-only. The evaluation prices net — no calc module reads this —
+    and the frontend applies the rates distance-weighted over a route's
+    country shares to show what a passenger pays on top.
+
+    status is the calibration's provenance flag (sourced / assumed /
+    no_railway / blocked); source and version live on
+    TicketVatCollection.param_versions like every other parameter.
+    """
+
+    country_code: str
+    domestic_per: float
+    international_per: float
+    status: str
+    note: Optional[str]
+
+
+@dataclass
+class TicketVatCollection:
+    """Dict-backed collection of TicketVatRate keyed by country_code,
+    built by DBDataLoader.build_all_ticket_vat(). One row per country in
+    input_params.countries — get() returns None only for a code that is
+    not a country at all."""
+
+    _data: dict[str, TicketVatRate]
+    param_versions: ParamVersions
+
+    def __init__(
+        self, data: dict[str, TicketVatRate], param_versions: ParamVersions
+    ) -> None:
+        self._data = data
+        self.param_versions = param_versions
+
+    def get(self, country_code: str) -> Optional[TicketVatRate]:
+        return self._data.get(country_code)
+
+    def all(self) -> dict[str, TicketVatRate]:
+        return self._data
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+
+# =============================================================================
 # STOP INFRASTRUCTURE DEFAULTS  (input_params.stop_defaults)
 # =============================================================================
 

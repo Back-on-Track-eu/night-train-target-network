@@ -9,6 +9,8 @@ import type {
   MeasureSet,
   EvaluationModels,
   ModelsResponse,
+  TicketVatRate,
+  TicketVatResponse,
   StopsResponse,
   CompositionsResponse,
   ScenariosResponse,
@@ -71,6 +73,12 @@ export const useStore = defineStore('store', () => {
   // models.evaluation.formulas.
   const models = ref<EvaluationModels | null>(null)
   const modelsStatus = ref<LoadStatus>('idle')
+
+  // VAT on rail tickets per country (GET /api/params/TicketVat), fetched once
+  // per session like the registry. Keyed by country code for
+  // lib/ticketVat.ts; empty until it lands, which the panels show as no
+  // gross figure rather than a wrong one.
+  const ticketVatRates = ref<Record<string, TicketVatRate>>({})
 
   // Gallery's search-bar state at the moment "Suggest a new route" was
   // clicked, handed to ProposalWorkspace/ProposalViewport off-URL so a fresh
@@ -257,6 +265,18 @@ export const useStore = defineStore('store', () => {
     }
   }
 
+  async function fetchTicketVat(): Promise<void> {
+    try {
+      const json = await apiRequest<TicketVatResponse>('/api/params/TicketVat', {
+        budget: 'reference',
+      })
+      ticketVatRates.value = Object.fromEntries(json.rates.map((r) => [r.country_code, r]))
+    } catch {
+      // No rates means no gross fares — a display detail, not a failure worth
+      // a toast. Retried the next time a viewport mounts.
+    }
+  }
+
   async function fetchModels(): Promise<void> {
     modelsStatus.value = 'loading'
     try {
@@ -414,6 +434,8 @@ export const useStore = defineStore('store', () => {
     models,
     modelsStatus,
     fetchModels,
+    ticketVatRates,
+    fetchTicketVat,
     // details inputs
     scheduleDaysPerWeek,
     demand,

@@ -39,6 +39,7 @@ import InfoPopover from '@/components/InfoPopover.vue'
 import DocsReadMore from '@/components/DocsReadMore.vue'
 import ModelVersions from '@/components/ModelVersions.vue'
 import { DOCS_DETAIL_PANEL } from '@/lib/docsLinks'
+import type { TicketVat } from '@/lib/ticketVat'
 import PriceBasisBadge from '@/components/PriceBasisBadge.vue'
 import { DOCS_DETAILS_TAB } from '@/lib/docsLinks'
 import type { ReportPanel } from '@/lib/feedbackLink'
@@ -69,6 +70,9 @@ const props = defineProps<{
   /** The route's own km over both directions, and the example OD pairs the
    *  price table prices — both from the route on screen. */
   cycleDistanceKm: number
+  /** VAT the passenger pays on top of the net fares (lib/ticketVat.ts); null
+   *  until the route and the rate table are both here. */
+  ticketVat: TicketVat | null
   longestOd: ExampleOd | null
   shortestOd: ExampleOd | null
 }>()
@@ -409,6 +413,7 @@ const demandDefaults = computed(() => {
           :cycle-days="pair?.trainsets.cycle_days ?? null"
           :trip-pairs="operations?.trip_pairs.length ?? 1"
           :committed="committedSupply"
+          :ticket-vat="ticketVat"
           @update:tariff="applyTariff"
         />
         <WhatFollowsPanel
@@ -421,6 +426,7 @@ const demandDefaults = computed(() => {
           :committed-block="committedBlock"
           :previewing="dirty.has('schedule') || dirty.has('prices')"
           :awaiting="awaits('demand')"
+          :ticket-vat="ticketVat"
         />
       </div>
 

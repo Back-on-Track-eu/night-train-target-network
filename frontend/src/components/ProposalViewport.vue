@@ -45,6 +45,7 @@ import {
 import { useLocaleFormat } from '@/composables/useLocaleFormat'
 import { buildSuggestRows, settledRows, type SuggestRow } from '@/lib/suggestPlacement'
 import { bridgeRemovedStops } from '@/lib/suggestShape'
+import { ticketVat as computeTicketVat } from '@/lib/ticketVat'
 import { formatClock, dayOffset } from '@/lib/tripClock'
 import { useProposalFamily } from '@/composables/useProposalFamily'
 import { useDeferredFlag } from '@/composables/useDeferredFlag'
@@ -353,6 +354,7 @@ interface BackendSegment {
   from_stop: BackendStop
   to_stop: BackendStop
   geometry_id: string
+  distance_m: number
   country_distance_shares: Record<string, number>
   // Manual expert-mode minutes on this leg (ROUTE_BUILDER 0.9.32) — the
   // authoritative record of which add-ons actually landed. Optional so a
@@ -594,6 +596,21 @@ const exampleOdPairs = computed(() => {
       km: shortest.distance_m / 1000,
     },
   }
+})
+
+// VAT the passenger pays on top of the net fares — distance-weighted over the
+// countries of the outbound trip (lib/ticketVat.ts), from the rates the store
+// fetched once. Null until both are here; the panels then show net only.
+const ticketVat = computed(() => {
+  const segments = rawRoute.value?.trip_pairs?.[0]?.outbound?.segments ?? []
+  if (segments.length === 0 || Object.keys(store.ticketVatRates).length === 0) return null
+  return computeTicketVat(
+    segments.map((seg) => ({
+      distanceM: seg.distance_m,
+      countryDistanceShares: seg.country_distance_shares,
+    })),
+    store.ticketVatRates,
+  )
 })
 
 // Both directions, which is what the summary's total_distance_km counts and
@@ -3869,6 +3886,7 @@ onMounted(async () => {
         :schedule-mode="(publishRequest?.schedule_mode as string | undefined) ?? null"
         :committed-request="publishRequest"
         :cycle-distance-km="cycleDistanceKm"
+        :ticket-vat="ticketVat"
         :longest-od="exampleOdPairs.longest"
         :shortest-od="exampleOdPairs.shortest"
         @select-composition="(id) => (selectedCompositionId = id)"

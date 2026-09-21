@@ -762,6 +762,41 @@ OPT_TT_QUOTA_BY_COUNTRY = {
 }
 
 
+# ============================================================
+# VAT on rail tickets
+# ============================================================
+# Per-country rates on domestic and on cross-border tickets, exported by
+# models/demand/calib/vat/vat_calibration.py (VAT_CALIBRATION.md). Read
+# here, applied nowhere in the model: the frontend shows them on the fares,
+# distance-weighted over a route's country shares (GET /api/params/TicketVat).
+# Regenerated on every seed like opt_tt: a stdlib table that runs in
+# milliseconds, so a stale CSV never outlives an edit to the rates.
+
+VAT_SEED_DIR = (
+    Path(__file__).resolve().parents[2] / "models" / "demand" / "calib" / "vat" / "seed"
+)
+
+_VAT_SEED_CSVS = ("ticket_vat_rates.csv", "sources.csv")
+
+for _name in _VAT_SEED_CSVS:
+    (VAT_SEED_DIR / _name).unlink(missing_ok=True)
+_ensure_seed_csvs(
+    VAT_SEED_DIR,
+    _VAT_SEED_CSVS,
+    (VAT_SEED_DIR.parent / "vat_calibration.py",),
+)
+
+
+def _read_vat_csv(name: str) -> list[dict]:
+    return _read_seed_csv(
+        VAT_SEED_DIR, name, "models/demand/calib/vat/vat_calibration.py"
+    )
+
+
+TICKET_VAT_RATES_RAW = _read_vat_csv("ticket_vat_rates.csv")
+VAT_SOURCES = _read_vat_csv("sources.csv")
+
+
 def _num(row: dict, *keys: str) -> dict:
     """Return a copy of row with the given keys coerced to float."""
     out = dict(row)
@@ -817,7 +852,13 @@ SOURCES.append(
 # register wins on wording; the section a value was actually read at lives in
 # the per-value locator in each calibration's data/, not here.
 _INFRA_SOURCE_ROWS: dict[str, dict] = {}
-for _row in TAC_SOURCES + ENERGY_SOURCES + FACILITY_SOURCES + ROUTE_CONTEXT_SOURCES:
+for _row in (
+    TAC_SOURCES
+    + ENERGY_SOURCES
+    + FACILITY_SOURCES
+    + ROUTE_CONTEXT_SOURCES
+    + VAT_SOURCES
+):
     _INFRA_SOURCE_ROWS.setdefault(_row["source_id"], _row)
 
 SOURCES += [
@@ -2472,6 +2513,34 @@ _PASSAGE_SOURCE_KEYS = {
 }
 
 
+def seed_ticket_vat_rates(cur, source_ids: dict) -> None:
+    """One row per country from the VAT calibration's seed CSV, the source
+    FK resolved through the register the same way the infrastructure
+    domains do. Countries without a rate row would be a calibration gap,
+    so the CSV must cover input_params.countries exactly."""
+    seeded = {row["country_code"] for row in COUNTRIES}
+    rates = {row["country_code"] for row in TICKET_VAT_RATES_RAW}
+    assert rates == seeded, (
+        f"ticket_vat_rates.csv must cover every seeded country: "
+        f"missing {sorted(seeded - rates)}, extra {sorted(rates - seeded)}"
+    )
+    insert_rows(
+        cur,
+        "input_params.ticket_vat_rates",
+        [
+            {
+                "country_code": row["country_code"],
+                "vat_domestic_per": float(row["vat_domestic_per"]),
+                "vat_international_per": float(row["vat_international_per"]),
+                "vat_status": row["status"],
+                "vat_note": row["note"] or None,
+                "vat_src": source_ids[INFRA_SOURCE_DESCRIPTIONS[row["source_id"]]],
+            }
+            for row in TICKET_VAT_RATES_RAW
+        ],
+    )
+
+
 def seed_passage_charges(cur) -> None:
     """Insert the crossing rows, parsing the GeoJSON geometry server-side.
     Kept out of insert_rows() because the geometry column needs a
@@ -3246,6 +3315,9 @@ def main():
     print("Seeding input_params.countries...")
     insert_rows(cur, "input_params.countries", COUNTRIES)
     seed_country_geometries(cur)
+
+    print("Seeding input_params.ticket_vat_rates...")
+    seed_ticket_vat_rates(cur, source_ids)
 
     print("Seeding input_params.service_classes...")
     insert_rows(cur, "input_params.service_classes", SERVICE_CLASSES)
