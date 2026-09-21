@@ -34,6 +34,7 @@ from api.gate_page import (
     media_files,
     page_html,
     slideshow_enabled,
+    gate_is_open,
 )
 from scripts.fetch_gate_media import unpack
 
@@ -87,6 +88,13 @@ def test_before_launch_counts_down():
     assert f'data-target="{LAUNCH.isoformat()}"' in html
     assert "Target Network opens in" in _hero(html)
     assert "Open the Target Network" not in _hero(html)
+
+
+def test_gate_is_open_flips_at_the_launch_moment():
+    """The one switch behind the hero and the forward_auth check."""
+    assert gate_is_open(BEFORE) is False
+    assert gate_is_open(LAUNCH) is True
+    assert gate_is_open(AFTER) is True
 
 
 def test_after_launch_offers_the_way_in_without_javascript():
