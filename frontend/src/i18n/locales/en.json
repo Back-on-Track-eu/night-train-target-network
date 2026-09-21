@@ -95,6 +95,7 @@
       "copyFailed": "Couldn't copy the link — select and copy it from the address bar.",
       "email": "E-mail",
       "whatsapp": "WhatsApp",
+      "report": "Report a problem",
       "more": "Share via…",
       "stopsCount": "{count} stop | {count} stops",
       "countriesCount": "{count} country | {count} countries",
@@ -102,7 +103,8 @@
       "messagePlain": "Europe needs a night train from {origin} to {destination}. Here's what it would take:",
       "emailSubject": "Europe needs a {origin}–{destination} night train",
       "emailBody": "This is what a {origin} – {destination} night train would look like — route, timetable and running costs, modelled on the Back-on-Track Target Network:",
-      "reportRoute": "Report a problem with this route"
+      "reportRoute": "Problem with the route",
+      "reportTimetable": "Problem with the timetable"
     },
     "funFacts": {
       "label": "Did you know?",
@@ -460,8 +462,8 @@
       },
       "kpis": {
         "subsidy": "Necessary subsidy",
-        "co2": "CO₂ saved",
-        "subsidyPerT": "Subsidy per t CO₂",
+        "co2": "CO₂e saved",
+        "subsidyPerT": "Subsidy per t CO₂e",
         "pax": "Passenger trips",
         "paxKm": "Passenger-km",
         "shiftAir": "Shifted from air",
@@ -471,12 +473,12 @@
       "kpiHints": {
         "journeyTime": "Scheduled time of one direction (the average of both), first departure to last arrival, incl. stops, braking, acceleration and timetable buffer.",
         "pax": "Passengers carried per year in both directions: the demand you set, as far as the train's classes can seat it.",
-        "paxKm": "Each passenger trip times the distance travelled. The basis of the revenue per km and of the CO₂ saving.",
+        "paxKm": "Each passenger trip times the distance travelled. The basis of the revenue per km and of the CO₂e saving.",
         "subsidy": "What the route needs per year to cover all costs and the operator's margin after ticket and other revenue. A surplus shows as none.",
         "shiftAir": "Passengers who would otherwise have flown. The share grows with journey length: none under 300 km, everyone from 1,200 km.",
         "shiftOther": "The remaining passengers: half would have driven, half would not have travelled at all (induced trips).",
-        "co2": "Emissions avoided per year: shifted passenger-km at the plane's or car's factor, less the train's own. Induced trips count against it.",
-        "subsidyPerT": "Necessary subsidy divided by the CO₂ saved: what one tonne avoided costs the public. 0 when the route needs no subsidy."
+        "co2": "Greenhouse gas avoided per year, incl. aviation's non-CO₂ warming: shifted passenger-km at the plane's or car's factor, less the train's. Induced trips count against it.",
+        "subsidyPerT": "Necessary subsidy divided by the CO₂e saved: what one tonne avoided costs the public. 0 when the route needs no subsidy."
       },
       "units": {
         "millionEurYear": "/ year",
@@ -1066,7 +1068,7 @@
     },
     "sort": {
       "distance": "Distance",
-      "co2": "CO₂ saved",
+      "co2": "CO₂e saved",
       "stops": "Stops",
       "likes": "Likes",
       "comments": "Comments",
@@ -1090,7 +1092,7 @@
       "existing": "Existing",
       "km": "{value} km",
       "stops": "({count} stop) | ({count} stops)",
-      "co2PerYear": "{value} t CO₂/yr",
+      "co2PerYear": "{value} t CO₂e/yr",
       "demandPerYear": "{value} trips/yr",
       "like": "Like",
       "loginToLike": "Log in with an account to like proposals.",
@@ -1108,8 +1110,8 @@
           "body": "The carriage configuration this route is planned with — it determines the seat, couchette and sleeper capacity."
         },
         "co2": {
-          "title": "CO₂ saved",
-          "body": "Estimated CO₂ emissions avoided each year by passengers shifting from air and car to this train."
+          "title": "CO₂e saved",
+          "body": "Estimated greenhouse gas (CO₂e) avoided each year by passengers shifting from air and car to this train."
         },
         "demand": {
           "title": "Passenger trips per year",
@@ -1120,14 +1122,14 @@
           "body": "How many comments this proposal has collected. Open the proposal to read them or add your own."
         },
         "subsidyPerTCo2": {
-          "title": "Subsidy per tonne of CO₂",
-          "body": "Public money needed per tonne of CO₂ this route avoids — the annual subsidy divided by the annual saving. The lower it is, the more climate effect each euro buys. All prices are scaled to 2032 price levels (inflation-adjusted)."
+          "title": "Subsidy per tonne of CO₂e",
+          "body": "Public money needed per tonne of CO₂e this route avoids — the annual subsidy divided by the annual saving. The lower it is, the more climate effect each euro buys. All prices are scaled to 2032 price levels (inflation-adjusted)."
         }
       },
       "comments": "Read the comments",
       "created": "Created {date}",
       "updated": "updated {date}",
-      "subsidyPerTCo2": "{value}/t CO₂",
+      "subsidyPerTCo2": "{value}/t CO₂e",
       "notEvaluable": "Cannot be evaluated on this scenario.",
       "notYetEvaluated": "Not yet evaluated on this scenario."
     },
@@ -1155,7 +1157,7 @@
     "verifyTitle": "Please verify your mail address",
     "nameTitle": "Choose a username",
     "emailIncorrect": "Change mail address",
-    "co2Savings": "This connection saves about {value} t CO₂ per year.",
+    "co2Savings": "This connection saves about {value} t CO₂e per year.",
     "register": " Register to keep track of your proposal's impact on our research towards the EU target network 2032!",
     "email": "E-Mail Address",
     "username": "Username",
