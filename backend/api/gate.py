@@ -30,6 +30,12 @@ the site sits behind ``forward_auth`` pointing at ``/api/gate/check``:
     GET  /api/gate/check     forward_auth target. 204 when the cookie is
                              valid, 302 to /gate when it is not, so Caddy
                              hands the redirect straight to the browser.
+                             From the launch moment (gate_page.LAUNCH) on,
+                             204 for everyone: the gate opens itself, and
+                             /gate sends a visitor straight to the app —
+                             nothing to touch on launch morning, and the
+                             code path stays for a later re-gating by
+                             moving LAUNCH.
 
 None of these is written to ``admin.request_log``: ``REQUEST_LOG_EXCLUDED_ENDPOINTS``
 matches the blueprint prefix ``gate.``, so a new view here is excluded by
@@ -67,7 +73,7 @@ from flask import (
     send_from_directory,
 )
 
-from api.gate_page import MEDIA_DIR, page_html
+from api.gate_page import MEDIA_DIR, gate_is_open, page_html
 
 log = logging.getLogger(__name__)
 
@@ -143,7 +149,7 @@ def _render(error: str | None = None, status: int = 200) -> Response:
 
 @bp.get("/gate")
 def gate_page() -> Response:
-    if _cookie_code():
+    if gate_is_open() or _cookie_code():
         return redirect("/", code=302)
     return _render()
 
@@ -157,8 +163,9 @@ def gate_media(filename: str) -> Response:
 
 @bp.get("/api/gate/check")
 def gate_check() -> Response:
-    """forward_auth target. 204 = let the request through."""
-    if _cookie_code():
+    """forward_auth target. 204 = let the request through — everyone once
+    the launch moment has passed, cookie holders before it."""
+    if gate_is_open() or _cookie_code():
         return Response(status=204)
     # Caddy forwards a non-2xx response to the client verbatim, so this
     # redirect is what an ungated visitor actually receives.

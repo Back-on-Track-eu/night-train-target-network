@@ -42,6 +42,16 @@ from api.gate_logo import BOT_LOGO_B64
 # from this constant too, so moving the launch is a one-line change.
 LAUNCH = datetime(2026, 9, 22, 10, 0, tzinfo=timezone(timedelta(hours=2), "CEST"))
 
+
+def gate_is_open(now: datetime | None = None) -> bool:
+    """Whether the launch moment has passed — the one switch behind the
+    page's hero AND the forward_auth check (api/gate.py). Before it, the
+    site is a testing gate a code opens; from it on, everyone is let
+    through and the page only offers the way in. ``now`` is injectable for
+    the tests; an aware datetime, compared as instants."""
+    return (now or datetime.now(UTC)) >= LAUNCH
+
+
 # Media the page embeds. Files sit in gate_media/ beside this module (gitignored,
 # fetched by scripts/fetch_gate_media.py); gate.py serves that directory at
 # MEDIA_URL. Both are here rather than in gate.py so the page, its tests and the
@@ -530,13 +540,12 @@ def page_html(
     """
     if show is None:
         show = slideshow_enabled()
-    moment = now or datetime.now(UTC)
     hero = (
-        _HERO_COUNTDOWN.format(
+        _HERO_OPEN
+        if gate_is_open(now)
+        else _HERO_COUNTDOWN.format(
             target=LAUNCH.isoformat(), when=launch_when(), day=launch_day()
         )
-        if moment < LAUNCH
-        else _HERO_OPEN
     )
     block = f'<div class="err">{escape(error)}</div>' if error else ""
     return (
