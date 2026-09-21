@@ -46,6 +46,7 @@ import { useLocaleFormat } from '@/composables/useLocaleFormat'
 import { buildSuggestRows, settledRows, type SuggestRow } from '@/lib/suggestPlacement'
 import { formatClock, dayOffset } from '@/lib/tripClock'
 import { useProposalFamily } from '@/composables/useProposalFamily'
+import { useDeferredFlag } from '@/composables/useDeferredFlag'
 import { buildScenarioAxes, conditionLabelKey } from '@/lib/scenarioAxes'
 import { alternativeRoutes, inflateRoute, memberFailure, routeFor } from '@/lib/proposalFamily'
 import {
@@ -139,9 +140,12 @@ const currentMode = ref<'edit' | 'loading' | 'display' | 'suggest'>(props.mode)
 const selectedCompositionId = ref<string | null>(null)
 
 // --- Compute state --------------------------------------------------------
-// The family build is the one genuinely long call in the app (routing engine,
-// one leg at a time, once per corridor), so it reports progress rather than
-// just spinning: 'slow' at 8s, 'verySlow' at 30s, cancellable throughout.
+// The family build is the one genuinely long call in the app, so it reports
+// progress rather than just spinning, cancellable throughout. When it
+// escalates to 'slow' and 'verySlow' depends on the route: the family
+// composable sizes the thresholds from members × legs and whether the route
+// needs live routing (lib/calcExpectation.ts), so "longer than usual" is
+// only said when it is.
 const calcPhase = ref<'idle' | 'working' | 'slow' | 'verySlow'>('idle')
 const calcFailure = ref<ApiFailure | null>(null)
 const calcFailureMsg = ref<string | null>(null)
@@ -1038,6 +1042,17 @@ async function requestPlan(
 
 // What the map overlay says while we wait. Both the calc and publish escalate
 // through the same phases; whichever is running drives the copy.
+//
+// The overlay itself appears only after LOADING_SCRIM_DELAY_MS and then stays
+// at least LOADING_SCRIM_MIN_MS: a document-cache hit answers in 0.2–0.4 s,
+// and a scrim flashing on and off for that reads as a glitch. The builder is
+// in loading mode (inputs disabled) from the first millisecond either way.
+const LOADING_SCRIM_DELAY_MS = 500
+const LOADING_SCRIM_MIN_MS = 700
+const loadingScrimVisible = useDeferredFlag(() => currentMode.value === 'loading', {
+  delayMs: LOADING_SCRIM_DELAY_MS,
+  minVisibleMs: LOADING_SCRIM_MIN_MS,
+})
 const progressCaption = computed(() => {
   const phase = calcPhase.value !== 'idle' ? calcPhase.value : publishPhase.value
   if (phase === 'verySlow') return t('errors.highDemand')
@@ -3568,7 +3583,7 @@ onMounted(async () => {
                and (once Cancel moved in here) holding a focusable phantom
                button. A 200ms fade on a loading scrim is not worth that. -->
           <div
-            v-if="currentMode === 'loading'"
+            v-if="loadingScrimVisible"
             class="absolute inset-0 flex items-center justify-center rounded-xl bg-black/20 px-8 backdrop-blur-sm"
           >
             <!-- The caption sits on its own dark panel rather than straight on
@@ -3597,8 +3612,12 @@ onMounted(async () => {
                    anchoring Cancel to it left the longest waits uncancellable.
                    The server keeps working either way — aborting the fetch
                    cannot free its worker — so this only ever means "I've stopped
-                   watching", and the copy avoids claiming otherwise. -->
+                   watching", and the copy avoids claiming otherwise. Shown
+                   only while there is something to cancel: the scrim may
+                   outlive the calc by up to LOADING_SCRIM_MIN_MS, and
+                   cancelCalc() would drop fresh results back to edit mode. -->
               <button
+                v-if="currentMode === 'loading'"
                 type="button"
                 class="cursor-pointer text-xs text-primary-50/60 underline underline-offset-2 transition hover:text-primary-50"
                 @click="cancelCalc"

@@ -2,7 +2,7 @@
 // live in apiClient — these are thin wrappers that name the endpoint, pick a
 // budget class, and type the response.
 
-import { apiRequest } from './apiClient'
+import { apiRequest, type SlowThresholds } from './apiClient'
 import type {
   FamilyDocument,
   FamilyRequest,
@@ -172,13 +172,16 @@ export function deleteComment(
  * The proposal family — every scenario variant × composition of one stop
  * list + HOW as one document (backend/api/README.md "Proposal Family"). The
  * only compute endpoint since backend 0.5.0. 'heavy' with no deadline, like
- * publish: a cold family routes the corridor live, and a warm one is ~1.5 s.
+ * publish: its cost grows with members × legs, plus live routing for legs
+ * the server has not routed before (lib/calcExpectation.ts), which is why
+ * the caller passes size-aware slowThresholds.
  */
 export function postFamily(
   body: FamilyRequest,
   headers: Record<string, string>,
   signal?: AbortSignal,
   onSlow?: (phase: 'slow' | 'verySlow') => void,
+  slowThresholds?: SlowThresholds,
 ): Promise<FamilyDocument> {
   return apiRequest<FamilyDocument>('/api/proposal/family', {
     method: 'POST',
@@ -187,6 +190,7 @@ export function postFamily(
     budget: 'heavy',
     signal,
     onSlow,
+    ...(slowThresholds ? { slowThresholds } : {}),
   })
 }
 

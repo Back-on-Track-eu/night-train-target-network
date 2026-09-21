@@ -11,6 +11,11 @@
 // already work in; the document's scenario_variant_id is mapped through its
 // own axes.
 //
+// How long a build should take is decided here, where the request is sent
+// and its answer measured: run() asks lib/calcExpectation.ts for size-aware
+// escalation thresholds, and feeds each finished build back so the model
+// learns this server and remembers which legs are already routed.
+//
 // Views are separate on purpose: the document carries every member's summary
 // and route but no evaluation views (they are ~700 KB each, and a visitor
 // opens one or two). views() fetches a member's on first use and caches it
@@ -20,6 +25,7 @@
 
 import { computed, ref, shallowRef, type ComputedRef, type Ref } from 'vue'
 import { fetchFamilyViews, postFamily } from '@/lib/proposalsApi'
+import { DEFAULT_FAMILY_MEMBERS, expectFamilyWait, recordFamilyWait } from '@/lib/calcExpectation'
 import { asApiFailure, type ApiFailure } from '@/lib/apiError'
 import { memberKey } from '@/lib/proposalFamily'
 import type {
@@ -82,6 +88,10 @@ export function useProposalFamily(): ProposalFamily {
 
   let controller: AbortController | null = null
   let currentKey: string | null = null
+  // The axis sizes of the last document, surviving reset(): a request that
+  // leaves an axis to the backend (the builder always does for compositions)
+  // is sized from what the backend last answered.
+  let lastAxes: { variants: number; compositions: number } | null = null
   let lastRequest: {
     body: FamilyRequest
     headers: Record<string, string>
@@ -124,6 +134,14 @@ export function useProposalFamily(): ProposalFamily {
     viewsCache.clear()
   }
 
+  /** Members the request will produce, as far as it can be known before
+   *  the answer says so. */
+  function expectedMembers(body: FamilyRequest): number {
+    const variants = body.scenario_variant_ids?.length ?? lastAxes?.variants
+    const compositions = body.composition_ids?.length ?? lastAxes?.compositions
+    return variants && compositions ? variants * compositions : DEFAULT_FAMILY_MEMBERS
+  }
+
   function run(
     body: FamilyRequest,
     headers: Record<string, string>,
@@ -134,9 +152,26 @@ export function useProposalFamily(): ProposalFamily {
     controller = own
     status.value = 'loading'
     failure.value = null
-    return postFamily(body, headers, own.signal, onSlow)
+    const expectation = expectFamilyWait({
+      stopIds: body.stops,
+      members: expectedMembers(body),
+      suggest: body.auto_stop_addition === 'suggest',
+    })
+    const startedAt = performance.now()
+    return postFamily(body, headers, own.signal, onSlow, expectation.thresholds)
       .then((doc) => {
         if (own.signal.aborted) return null
+        recordFamilyWait({
+          stopIds: body.stops,
+          members: doc.stats.n_members,
+          newRoute: expectation.newRoute,
+          wallMs: performance.now() - startedAt,
+          cacheHit: doc.stats.cache_hit,
+        })
+        lastAxes = {
+          variants: doc.axes.scenario_variants.length,
+          compositions: doc.axes.compositions.length,
+        }
         document.value = doc
         const next = new Map<string, FamilyMember>()
         for (const m of doc.members) next.set(memberKey(m.scenario_variant_id, m.composition_id), m)
