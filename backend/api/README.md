@@ -1815,7 +1815,7 @@ cookie-less request to the check below; locally nothing enforces it (see
 | `GET` | `/gate` | The public page: countdown until `gate_page.LAUNCH`, the launch press text and one auto-advancing slideshow (the walkthrough video, then the builder screenshots), with the code form in the footer. `Cache-Control: no-store` — it carries the countdown state. After launch the hero becomes a single "Open the Target Network" link, decided server-side |
 | `GET` | `/gate/media/<file>` | One file from `api/gate_media/` (`Cache-Control: public, max-age=86400`, Range requests honoured so the video seeks). 404 for anything not in that directory. Under `/gate/*` on purpose: that path is already open on Caddy, and the SPA's own static bundle sits behind `forward_auth` |
 | `POST` | `/api/gate/redeem` | Form field or JSON `code`. Valid → `tn_gate` cookie (HttpOnly, Secure, SameSite=Lax, 30 days) + a row in `admin.access_code_redemptions`; then `302 /` (form) or `{"ok": true}` (JSON). Unknown, revoked or exhausted → `403`; empty → `400` |
-| `GET` | `/api/gate/check` | `forward_auth` target: `204` with a valid cookie, `302 /gate` without |
+| `GET` | `/api/gate/check` | `forward_auth` target: `204` with a valid cookie, `302 /gate` without — and `204` for everyone from the launch moment on (`gate_page.LAUNCH`, backend 0.5.9): the gate opens itself at 22 September 10:00 CEST, and `/gate` then redirects to `/`. Re-gating later means moving `LAUNCH`, nothing else |
 
 The page is pure string assembly in `api/gate_page.py` — `page_html(now=...)`
 renders it with nothing but the standard library (`tests/test_76_gate_page.py`).
