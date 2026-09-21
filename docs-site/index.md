@@ -46,7 +46,7 @@ Three kinds of contribution are useful here:
   rolling stock, infrastructure and demand are all modelled from parameters
   you can challenge, with the sources named on every page.
 - **Policy stakeholders** need route-level figures rather than a wish list:
-  cost, subsidy requirement, passengers shifted off aircraft, CO₂ avoided.
+  cost, subsidy requirement, passengers shifted off aircraft, CO₂e avoided.
 
 ## What happens to a proposal
 

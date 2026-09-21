@@ -320,7 +320,7 @@ def render_emission_factors() -> str:
         )
     parts += [
         "",
-        "The CO2 saving compares a night train against the trip someone "
+        "The CO2e saving compares a night train against the trip someone "
         "would otherwise have made. Which trip that is, is an assumption, "
         "not a measurement: the demand model splits every OD pair's "
         "passengers by distance into a share that would have flown and a "

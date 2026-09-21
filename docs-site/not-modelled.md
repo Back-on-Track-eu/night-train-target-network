@@ -13,7 +13,7 @@ Every model is incomplete. This page collects the gaps we know about ordered by 
 seated by a fixed rule. Nothing derives it from the corridor, the price or the
 competition. This affects [ticket revenue](/cost/ticket-revenue), the [net result](/cost/net),
 subsidy figures, [variable overhead](/cost/var-overhead), the
-revenue-share component of [track access](/cost/tac), and the CO₂ saving.
+revenue-share component of [track access](/cost/tac), and the CO₂e saving.
 
 ## Station charges outside Germany
 

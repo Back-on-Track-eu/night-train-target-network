@@ -32,7 +32,7 @@ works:
   journeys, mid distance, short hops) or typed; single pairs can be pinned
 - every passenger is attributed by journey length to a **shift from the
   plane** (none under 300 km, a quarter at 300 km, everyone from 1 200 km)
-  or to the car and induced travel (half and half) — this is what the CO₂
+  or to the car and induced travel (half and half) — this is what the CO₂e
   saving rests on
 - fares are a flat **two-part tariff** per class — a fixed part plus a
   distance part (seat 10 € + 0.06 €/km, couchette 75 € + 0.03, sleeper

@@ -979,7 +979,7 @@ until a country-resolved, energy-based model replaces it — see the
 | air | 389 | Back-on-Track 2022, The Global Warming Reduction Potential of Night-Trains, Figure 3 (g CO2e/pkm, GWP*, well-to-wheel, EU mix 2019) — https://back-on-track.eu/the-global-warming-reduction-potential-of-night-trains/: intra-EU flight incl. non-CO2 radiative forcing; 1:28 against the night train |
 | car | 132 | Back-on-Track 2022, The Global Warming Reduction Potential of Night-Trains, Figure 3 (g CO2e/pkm, GWP*, well-to-wheel, EU mix 2019) — https://back-on-track.eu/the-global-warming-reduction-potential-of-night-trains/: passenger car at average occupancy |
 
-The CO2-savings estimate multiplies these by the demand model's distance-dependent source split (`models/demand/sources.py`, DEMAND 0.1.0): a share of every OD pair's passengers is taken from the plane, the rest half from the car and half induced.
+The CO2e-savings estimate multiplies these by the demand model's distance-dependent source split (`models/demand/sources.py`, DEMAND 0.1.0): a share of every OD pair's passengers is taken from the plane, the rest half from the car and half induced.
 <!-- END GENERATED: emission_factors -->
 
 ---

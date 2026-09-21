@@ -59,7 +59,7 @@ traveller group's list can take is not served and not counted.
 ### Passenger-km {#passenger-km}
 
 Each passenger trip multiplied by the distance that passenger travels,
-summed. It is what the revenue per kilometre and the CO₂ saving are built on.
+summed. It is what the revenue per kilometre and the CO₂e saving are built on.
 
 ### Necessary subsidy {#necessary-subsidy}
 
@@ -82,16 +82,17 @@ suggests.
 Everyone else: half would have driven, and half would not have made the
 journey at all — induced travel.
 
-### CO₂ saved {#co2-saved}
+### CO₂e saved {#co2-saved}
 
-The greenhouse gas the route avoids per year, in CO₂-equivalent. Each
-shifted passenger-km saves the plane's or the car's factor less the train's
-own; an induced passenger-km adds the train's. The factors and their source
-are on the [emissions](/emissions) page.
+The greenhouse gas the route avoids per year, in tonnes of CO₂-equivalent —
+including the non-CO₂ warming of aviation, which is most of what a flight
+causes. Each shifted passenger-km saves the plane's or the car's factor less
+the train's own; an induced passenger-km adds the train's. The factors and
+their source are on the [emissions](/emissions) page.
 
-### Subsidy per tonne of CO₂ {#subsidy-per-t-co2}
+### Subsidy per tonne of CO₂e {#subsidy-per-t-co2}
 
-The necessary subsidy divided by the CO₂ saved: what one tonne avoided costs
+The necessary subsidy divided by the CO₂e saved: what one tonne avoided costs
 the public purse. It reads 0 when the route needs no subsidy, and has no
 value when the route saves nothing.
 

@@ -229,7 +229,7 @@ def render_emission_factors() -> str:
         )
     parts.append("")
     parts.append(
-        "The CO2-savings estimate multiplies these by the demand model's "
+        "The CO2e-savings estimate multiplies these by the demand model's "
         "distance-dependent source split (`models/demand/sources.py`, "
         "DEMAND 0.1.0): a share of every OD pair's passengers is taken from "
         "the plane, the rest half from the car and half induced."

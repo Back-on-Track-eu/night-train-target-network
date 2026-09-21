@@ -5,8 +5,9 @@ description: How the CO₂ saving is estimated, and the assumption it rests on.
 
 # Emissions
 
-The tool reports a CO₂ saving for a proposed route. It is built from two
-inputs of very different quality.
+The tool reports a greenhouse gas saving for every proposed route, in tonnes
+of **CO₂-equivalent (CO₂e)** per year. It is built from two inputs of very
+different quality.
 
 ## The factors are sourced
 
@@ -20,14 +21,25 @@ Per-passenger-kilometre factors come from Back-on-Track's 2022 report
 | Plane (intra-EU)         | 389                     |
 | Car (average occupancy)  | 132                     |
 
-They are well-to-wheel, on the EU electricity mix of 2019, and the plane's
-figure **includes the non-CO₂ warming of aviation** — contrails, NOx and
-water vapour, on the GWP\* basis. That term is what separates it from the
-EEA's CO₂-only 160 g, and it makes the night train 28 times cleaner than the
-plane per passenger-km. The night-train figure is a European average at a
-high load factor; it does not yet reflect the electricity mix of the
-countries a route runs through, which an energy-based model will replace it
-with.
+All three are **well-to-wheel** — fuel and electricity production included —
+for the EU energy mix of the reference year 2019, built on the IEA's
+greenhouse gas intensities of passenger transport.
+
+The plane's figure is the one that differs from most published comparisons.
+The IEA puts a plane at 144 g without the **non-CO₂ effects of aviation** —
+contrails, NOx and water vapour, released high in the atmosphere. The report
+adds them by applying a radiative forcing factor of 3.0 to the CO₂ from the
+fuel burnt, the best current estimate (Lee et al. 2021) on the **GWP\***
+basis, which measures the warming a flight causes now rather than averaged
+over a hundred years. It also adds 8 % for flights not flying straight lines.
+The result makes a plane 28 times more harmful than a night train per
+passenger-km.
+
+The night train's 14 g is the IEA's average for non-urban rail, at a high
+load factor. The report keeps it on purpose although it expects night trains
+to do better. It does not yet reflect the electricity mix of the countries a
+route runs through, nor how full this particular train is — an energy-based
+model will replace it.
 
 ## The mode shift
 
@@ -45,6 +57,10 @@ The saving of a year is then
 
 since a shifted passenger still travels on the train, and an induced one adds
 the train's emissions without saving anything. The builder shows the result
-as [CO₂ saved](/scenarios#co2-saved).
+as [CO₂e saved](/scenarios#co2-saved).
+
+The report itself counts only the shift from the plane, and names the car as
+additional potential. Counting the car here makes the figure a little larger;
+counting induced travel against it makes it a little smaller.
 
 <FeedbackForm />
