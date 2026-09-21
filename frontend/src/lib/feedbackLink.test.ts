@@ -63,6 +63,10 @@ describe('routingFeedbackContext', () => {
     km: 1427.4,
     kmh: 101.6,
     countries: ['HU', 'AT', 'DE', 'BE'],
+    times: {
+      outbound: '19:30 Budapest-Déli → 09:31 (+1) Bruxelles-Midi',
+      return: '19:10 Bruxelles-Midi → 09:12 (+1) Budapest-Déli',
+    },
     proposalUrl: 'https://example.org/proposal/7',
     routeBuilderVersion: '0.9.40',
   }
@@ -74,6 +78,8 @@ describe('routingFeedbackContext', () => {
       'Train: NEW-BAL-7',
       'Timetable: automatic, centred on 02:30',
       'Result: 1427 km, 102 km/h average, through HU, AT, DE, BE',
+      'Outbound: 19:30 Budapest-Déli → 09:31 (+1) Bruxelles-Midi',
+      'Return: 19:10 Bruxelles-Midi → 09:12 (+1) Budapest-Déli',
       'Proposal: https://example.org/proposal/7',
       'Route builder: 0.9.40',
     ])
@@ -98,6 +104,7 @@ describe('routingFeedbackContext', () => {
       km: null,
       kmh: null,
       countries: [],
+      times: null,
       proposalUrl: null,
       routeBuilderVersion: null,
     })
