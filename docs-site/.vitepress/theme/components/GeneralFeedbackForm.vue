@@ -26,8 +26,8 @@ const AUTH_COOKIE = 'nt_auth'
  * Deep links carry a short alias, not the protocol strings, so the taxonomy
  * wording can change on the backend without breaking a link someone has
  * already sent on — only this map moves with it. The app links here as
- *   ?topic=missing-stop&q=<what was typed>             (empty stop search)
- *   ?topic=routing&q=<A → B>&context=<the route's inputs> (map action pill)
+ *   ?topic=missing-stop&q=<what was typed>                (empty stop search)
+ *   ?topic=routing|timetable&q=<A → B>&context=<inputs>   (map action pill)
  * `lead` opens the message: what the reader is asked to describe, or what
  * already happened.
  */
@@ -50,7 +50,16 @@ const TOPICS: Record<string, Topic> = {
     subject: 'Routing',
     lead: () =>
       'What looks wrong with this route? For example a detour, a line it avoids but ' +
-      'should take, a border it should not cross, or a travel time far from reality.',
+      'should take, a border it should not cross, or a distance far from reality.',
+  },
+  timetable: {
+    category: 'Route or timetable',
+    subCategory: 'Schedule / timetable / frequency',
+    subject: 'Timetable',
+    lead: () =>
+      'What looks wrong with this timetable? For example a departure or arrival at ' +
+      'an unrealistic hour, a leg much faster or slower than reality, or the night ' +
+      'falling on the wrong section.',
   },
 }
 

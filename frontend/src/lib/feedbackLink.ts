@@ -17,8 +17,10 @@
 
 /** Something the stop catalogue does not have. */
 export const FEEDBACK_TOPIC_MISSING_STOP = 'missing-stop'
-/** A computed route that looks wrong — path, distance, speed, timetable. */
+/** A computed route whose path looks wrong — detour, line, border, distance. */
 export const FEEDBACK_TOPIC_ROUTING = 'routing'
+/** A computed route whose timetable looks wrong — times, speeds, the night. */
+export const FEEDBACK_TOPIC_TIMETABLE = 'timetable'
 
 /** Both mirror the form's own caps: what is cut here is cut there anyway,
  *  and a search box can hold a paragraph if someone pastes one. */
@@ -40,7 +42,7 @@ export function docsFeedbackUrl(topic: string, query?: string, context?: string)
   return `/docs/feedback?${params.toString()}`
 }
 
-/** Everything a routing report needs to reproduce the route it is about. */
+/** Everything a route or timetable report needs to reproduce what it is about. */
 export interface RoutingReport {
   stops: { name: string; id: string }[]
   scenario: string | null
@@ -52,13 +54,18 @@ export interface RoutingReport {
   km: number | null
   kmh: number | null
   countries: string[]
+  /** First departure → last arrival per direction, as shown in the builder
+   *  ("19:30 Budapest-Déli → 09:31 (+1) Bruxelles-Midi"); null before a route. */
+  times: { outbound: string; return: string } | null
   proposalUrl: string | null
   routeBuilderVersion: string | null
 }
 
 /**
  * The input parameters of a computed route, one labelled line each — the
- * block the routing feedback form carries under the reader's description.
+ * block both report topics carry under the reader's description. One block
+ * for both: a timetable problem is often a routing one in disguise, and the
+ * working group should not have to ask for the other half.
  * English regardless of the UI language: it is data for the working group,
  * which reads the reports, and labels that change with the reader's locale
  * would make them harder to compare.
@@ -81,6 +88,8 @@ export function routingFeedbackContext(report: RoutingReport): string {
     report.composition ? `Train: ${report.composition}` : null,
     `Timetable: ${timetable}`,
     result.length ? `Result: ${result.join(', ')}` : null,
+    report.times ? `Outbound: ${report.times.outbound}` : null,
+    report.times ? `Return: ${report.times.return}` : null,
     report.proposalUrl ? `Proposal: ${report.proposalUrl}` : null,
     report.routeBuilderVersion ? `Route builder: ${report.routeBuilderVersion}` : null,
   ]

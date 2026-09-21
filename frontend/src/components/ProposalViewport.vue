@@ -75,7 +75,12 @@ import {
   type SegmentAddon,
 } from '@/lib/expertTimetable'
 import { buildShareUrls, routeFacts } from '@/lib/shareLinks'
-import { docsFeedbackUrl, FEEDBACK_TOPIC_ROUTING, routingFeedbackContext } from '@/lib/feedbackLink'
+import {
+  docsFeedbackUrl,
+  FEEDBACK_TOPIC_ROUTING,
+  FEEDBACK_TOPIC_TIMETABLE,
+  routingFeedbackContext,
+} from '@/lib/feedbackLink'
 import { DOCS_EXPERT_TIMETABLE, DOCS_NIGHT, DOCS_ROUTE_FIGURES } from '@/lib/docsLinks'
 import { API_BASE_URL } from '@/lib/apiBase'
 import { provideProposalEngagement } from '@/composables/useProposalEngagement'
@@ -1855,11 +1860,31 @@ const shareDestination = computed(
   () => sectionStops.value[sectionStops.value.length - 1]?.name ?? '',
 )
 
-// The map pill's "report a problem with this route": the feedback page with
-// the routing topic and every input the route on screen was computed from —
-// the committed state, not edits waiting for a recalculation, since the
-// report is about the route that was drawn.
-const routingFeedbackHref = computed(() => {
+// "19:30 Budapest-Déli → 09:31 (+1) Bruxelles-Midi" — one direction's first
+// departure and last arrival, day-marked as the timetable shows them.
+function tripSpanText(side: BackendTripSide): string | null {
+  const first = side.segments[0]?.from_stop
+  const last = side.segments[side.segments.length - 1]?.to_stop
+  const dep = formatClock(first?.departure_time_min)
+  const arr = formatClock(last?.arrival_time_min)
+  if (!first || !last || !dep || !arr) return null
+  const day = dayOffset(last.arrival_time_min, first.departure_time_min)
+  return `${dep} ${first.stop_name} → ${arr}${day ? ` (+${day})` : ''} ${last.stop_name}`
+}
+
+const reportTimes = computed(() => {
+  const pair = rawRoute.value?.trip_pairs[0]
+  if (!pair) return null
+  const outbound = tripSpanText(pair.outbound)
+  const back = tripSpanText(pair.return_trip)
+  return outbound && back ? { outbound, return: back } : null
+})
+
+// The map pill's report menu — a problem with the route, or with its
+// timetable: the feedback page with that topic and every input the route on
+// screen was computed from. The committed state, not edits waiting for a
+// recalculation, since the report is about the route that was drawn.
+const reportHrefs = computed(() => {
   const stops = (committedItinerary.value ?? [])
     .filter((s) => s.selectedStop !== null)
     .map((s) => ({ name: s.name, id: s.selectedStop!.stop_id }))
@@ -1877,17 +1902,18 @@ const routingFeedbackHref = computed(() => {
     km: routeStats.value.distanceKm,
     kmh: routeStats.value.avgSpeedKmh,
     countries: routeStats.value.countries,
+    times: reportTimes.value,
     proposalUrl:
       storedProposalId.value !== null
         ? buildShareUrls(storedProposalId.value, window.location.origin, API_BASE_URL).appUrl
         : null,
     routeBuilderVersion: family.document.value?.route_builder_version ?? null,
   })
-  return docsFeedbackUrl(
-    FEEDBACK_TOPIC_ROUTING,
-    `${stops[0]!.name} → ${stops[stops.length - 1]!.name}`,
-    context,
-  )
+  const ends = `${stops[0]!.name} → ${stops[stops.length - 1]!.name}`
+  return {
+    route: docsFeedbackUrl(FEEDBACK_TOPIC_ROUTING, ends, context),
+    timetable: docsFeedbackUrl(FEEDBACK_TOPIC_TIMETABLE, ends, context),
+  }
 })
 
 // Quiet pill — used by the "Gallery" back link above the workspace.
@@ -3628,7 +3654,7 @@ onMounted(async () => {
             :origin="shareOrigin"
             :destination="shareDestination"
             :facts="shareFacts"
-            :feedback-href="routingFeedbackHref"
+            :feedback-hrefs="reportHrefs"
           />
           <!-- Deliberately NOT wrapped in <Transition>. The fade wedged its own
                state machine here: the element kept `fade-enter-from` (opacity 0)

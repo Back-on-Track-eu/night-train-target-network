@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // The floating action pill over the proposal map: like, share, and report a
-// problem with the route.
+// problem — with the route or with its timetable.
 //
 // Both halves belong to the proposal as a whole rather than to any panel below,
 // which is why they sit on the map instead of inside the discussion — the like
@@ -10,10 +10,10 @@
 // GET /engagements response (see composables/useProposalEngagement.ts), so a
 // click here updates the count there too.
 //
-// The report link opens the documentation site's feedback page in a new tab,
-// prefilled with the route's input parameters (lib/feedbackLink.ts) — the
-// parent builds it, since only the builder knows what the route was computed
-// from.
+// Report opens a two-item menu, route or timetable; each opens the
+// documentation site's feedback page in a new tab with its own topic and the
+// route's input parameters prefilled (lib/feedbackLink.ts). The parent builds
+// both links, since only the builder knows what the route was computed from.
 //
 // What the share channels can and cannot do is documented in lib/shareLinks.ts.
 // The short version: Signal has no prefilled-text URL scheme and is reachable
@@ -34,6 +34,8 @@ import {
   mdiWhatsapp,
   mdiExportVariant,
   mdiMessageAlertOutline,
+  mdiMapMarkerPath,
+  mdiTimetable,
 } from '@mdi/js'
 import { useToastStore } from '@/stores/toastStore'
 import { useLocaleFormat } from '@/composables/useLocaleFormat'
@@ -54,8 +56,8 @@ const props = defineProps<{
   destination: string
   /** Real computed figures, or null before a route exists; see routeFacts(). */
   facts: RouteFacts | null
-  /** The prefilled routing feedback page, or null while there is no route. */
-  feedbackHref: string | null
+  /** The prefilled feedback pages, or null while there is no route. */
+  feedbackHrefs: { route: string; timetable: string } | null
 }>()
 
 const { t } = useI18n()
@@ -64,6 +66,7 @@ const toastStore = useToastStore()
 const { likes, likeBusy, toggleLike } = useProposalEngagement()
 
 const popoverRef = ref<InstanceType<typeof Popover> | null>(null)
+const reportRef = ref<InstanceType<typeof Popover> | null>(null)
 
 // Computed once, not reactive: a browser does not grow a share sheet mid-session.
 const hasShareSheet = canUseShareSheet()
@@ -161,18 +164,48 @@ const menuItemClass =
       <AppIcon :path="mdiShareVariant" :size="20" />
     </button>
 
-    <template v-if="feedbackHref">
+    <template v-if="feedbackHrefs">
       <span class="h-5 w-px bg-primary-50/15" aria-hidden="true" />
-      <a
-        :href="feedbackHref"
-        target="_blank"
-        rel="noopener noreferrer"
-        :aria-label="t('proposal.share.reportRoute')"
-        :title="t('proposal.share.reportRoute')"
+      <button
+        type="button"
+        :aria-label="t('proposal.share.report')"
+        :title="t('proposal.share.report')"
         :class="pillButtonClass"
+        @click="reportRef?.toggle($event)"
       >
         <AppIcon :path="mdiMessageAlertOutline" :size="20" />
-      </a>
+      </button>
+
+      <Popover
+        ref="reportRef"
+        :pt="{
+          root: { class: 'share-overlay !p-0 !rounded-xl !shadow-2xl !min-w-52' },
+          content: { class: '!p-1.5 !bg-transparent' },
+        }"
+      >
+        <div class="flex flex-col gap-0.5">
+          <a
+            :href="feedbackHrefs.route"
+            target="_blank"
+            rel="noopener noreferrer"
+            :class="menuItemClass"
+            @click="reportRef?.hide()"
+          >
+            <AppIcon :path="mdiMapMarkerPath" :size="18" class="shrink-0" />
+            {{ t('proposal.share.reportRoute') }}
+          </a>
+          <a
+            :href="feedbackHrefs.timetable"
+            target="_blank"
+            rel="noopener noreferrer"
+            :class="menuItemClass"
+            @click="reportRef?.hide()"
+          >
+            <AppIcon :path="mdiTimetable" :size="18" class="shrink-0" />
+            {{ t('proposal.share.reportTimetable') }}
+          </a>
+        </div>
+      </Popover>
     </template>
 
     <Popover
