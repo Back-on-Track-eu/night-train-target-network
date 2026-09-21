@@ -116,6 +116,7 @@ export default defineConfig({
         text: 'The model',
         items: [
           { text: 'Data sources', link: '/sources/' },
+          { text: 'Scenarios and main figures', link: '/scenarios' },
           { text: 'Route planning', link: '/routing' },
           { text: 'Stop catalogue', link: '/stops' },
           { text: 'Demand and revenue', link: '/demand' },
