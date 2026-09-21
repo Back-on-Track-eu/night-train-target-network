@@ -262,17 +262,37 @@ def test_feedback_categories_eval_view_is_dynamic(api_base):
     resp = requests.get(f"{api_base}{FEEDBACK_CATEGORIES_URL}", timeout=15)
     assert resp.status_code == 200
     entries = _sub_categories_for(resp.json(), "Evaluation — results / view")
-    parameters = {e["parameter"] for e in entries}
-    # Matches evaluation_serialize.py's five views exactly — this category
-    # is meant to enumerate them completely, unlike the open-ended lists
+    views = {e["parameter"] for e in entries if e["group"] is None}
+    # Matches evaluation_serialize.py's views exactly — this category is
+    # meant to enumerate them completely, unlike the open-ended lists
     # above, so pinning the full set here is appropriate.
-    assert parameters == {
+    assert views == {
         "route",
         "per_trip_pair",
         "per_trip_pair_per_country",
         "per_trip_pair_per_od",
         "per_trip_pair_per_section",
         "per_trip_per_stop",
+    }
+
+
+def test_feedback_categories_carry_the_builder_panels(api_base):
+    """The builder's "report a problem" icons deep-link to these eight
+    pairs; a renamed panel without its alias updated lands the form on a
+    sub_category its dropdown does not offer."""
+    resp = requests.get(f"{api_base}{FEEDBACK_CATEGORIES_URL}", timeout=15)
+    assert resp.status_code == 200
+    entries = _sub_categories_for(resp.json(), "Evaluation — results / view")
+    panels = {e["parameter"] for e in entries if e["group"] == "Builder panel"}
+    assert panels == {
+        "Scenario and main figures",
+        "Scenario comparison",
+        "Cost and revenue breakdown",
+        "Details — Demand",
+        "Details — Supply",
+        "Details — Train operation",
+        "Details — Infrastructure",
+        "Details — Overhead",
     }
 
 
