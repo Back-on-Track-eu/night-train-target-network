@@ -245,6 +245,29 @@ describe('apiRequest — slow-progress escalation', () => {
     await promise
   })
 
+  test('per-call thresholds replace the defaults', async () => {
+    vi.useFakeTimers()
+    const { fetchImpl, resolve } = pending()
+    vi.stubGlobal('fetch', vi.fn(fetchImpl))
+    const onSlow = vi.fn()
+
+    const promise = apiRequest('/api/proposal/family', {
+      budget: 'heavy',
+      onSlow,
+      slowThresholds: { slowMs: 20_000, verySlowMs: 45_000 },
+    })
+
+    await vi.advanceTimersByTimeAsync(SLOW_AT_MS)
+    expect(onSlow).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(20_000 - SLOW_AT_MS)
+    expect(onSlow).toHaveBeenCalledExactlyOnceWith('slow')
+    await vi.advanceTimersByTimeAsync(25_000)
+    expect(onSlow).toHaveBeenLastCalledWith('verySlow')
+
+    resolve(reply(200, '{}'))
+    await promise
+  })
+
   test('a fast response never escalates', async () => {
     vi.useFakeTimers()
     const { fetchImpl, resolve } = pending()
