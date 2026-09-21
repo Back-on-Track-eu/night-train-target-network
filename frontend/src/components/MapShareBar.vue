@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// The floating action pill over the proposal map: like, and share.
+// The floating action pill over the proposal map: like, share, and report a
+// problem with the route.
 //
 // Both halves belong to the proposal as a whole rather than to any panel below,
 // which is why they sit on the map instead of inside the discussion — the like
@@ -8,6 +9,11 @@
 // Like state is injected, not fetched: the discussion thread reads the same
 // GET /engagements response (see composables/useProposalEngagement.ts), so a
 // click here updates the count there too.
+//
+// The report link opens the documentation site's feedback page in a new tab,
+// prefilled with the route's input parameters (lib/feedbackLink.ts) — the
+// parent builds it, since only the builder knows what the route was computed
+// from.
 //
 // What the share channels can and cannot do is documented in lib/shareLinks.ts.
 // The short version: Signal has no prefilled-text URL scheme and is reachable
@@ -27,6 +33,7 @@ import {
   mdiEmailOutline,
   mdiWhatsapp,
   mdiExportVariant,
+  mdiMessageAlertOutline,
 } from '@mdi/js'
 import { useToastStore } from '@/stores/toastStore'
 import { useLocaleFormat } from '@/composables/useLocaleFormat'
@@ -47,6 +54,8 @@ const props = defineProps<{
   destination: string
   /** Real computed figures, or null before a route exists; see routeFacts(). */
   facts: RouteFacts | null
+  /** The prefilled routing feedback page, or null while there is no route. */
+  feedbackHref: string | null
 }>()
 
 const { t } = useI18n()
@@ -151,6 +160,20 @@ const menuItemClass =
     >
       <AppIcon :path="mdiShareVariant" :size="20" />
     </button>
+
+    <template v-if="feedbackHref">
+      <span class="h-5 w-px bg-primary-50/15" aria-hidden="true" />
+      <a
+        :href="feedbackHref"
+        target="_blank"
+        rel="noopener noreferrer"
+        :aria-label="t('proposal.share.reportRoute')"
+        :title="t('proposal.share.reportRoute')"
+        :class="pillButtonClass"
+      >
+        <AppIcon :path="mdiMessageAlertOutline" :size="20" />
+      </a>
+    </template>
 
     <Popover
       ref="popoverRef"

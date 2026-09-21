@@ -2,17 +2,21 @@
 import { ref } from 'vue'
 import InfoPopover from '@/components/InfoPopover.vue'
 import AppIcon from '@/components/AppIcon.vue'
+import DocsReadMore from '@/components/DocsReadMore.vue'
 import { mdiInformationOutline } from '@mdi/js'
 
-// A single "ⓘ" with one sentence behind it — for a chip or a label that needs
-// to explain itself without a paragraph competing with the controls it
-// belongs to. Self-contained (icon + overlay in one element), unlike
+// A single "ⓘ" with a short explanation behind it — for a chip or a label
+// that needs to explain itself without a paragraph competing with the
+// controls it belongs to. Self-contained (icon + overlay in one element), unlike
 // FactorInfoPopover, which one panel renders once and drives from many icons.
 //
 // Both sit on InfoPopover.vue, so hover-intent timing and overlay styling
 // stay in one place. Not the browser's `title`: that waits a second, cannot
 // be reached by keyboard, and renders in the OS style rather than ours.
-defineProps<{ text: string }>()
+//
+// `docsHref` adds the hand-over to the documentation below the sentence; the
+// overlay stays open while the cursor is inside it, so the link is reachable.
+defineProps<{ text: string; docsHref?: string }>()
 
 const popover = ref<InstanceType<typeof InfoPopover> | null>(null)
 </script>
@@ -37,7 +41,10 @@ const popover = ref<InstanceType<typeof InfoPopover> | null>(null)
            itself sized by this element, collapses to zero, and leaves the text
            wrapping at its longest word. The overlay's own max-width keeps this
            inside a narrow viewport. -->
-      <p class="w-72 text-sm text-primary-50/75">{{ text }}</p>
+      <div class="flex w-72 flex-col">
+        <p class="text-sm text-primary-50/75">{{ text }}</p>
+        <DocsReadMore v-if="docsHref" :href="docsHref" />
+      </div>
     </InfoPopover>
   </span>
 </template>

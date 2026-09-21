@@ -17,20 +17,72 @@
 
 /** Something the stop catalogue does not have. */
 export const FEEDBACK_TOPIC_MISSING_STOP = 'missing-stop'
+/** A computed route that looks wrong — path, distance, speed, timetable. */
+export const FEEDBACK_TOPIC_ROUTING = 'routing'
 
-/** Mirrors the form's own QUERY_MAX: what is cut here is cut there anyway,
+/** Both mirror the form's own caps: what is cut here is cut there anyway,
  *  and a search box can hold a paragraph if someone pastes one. */
 const QUERY_MAX = 120
+const CONTEXT_MAX = 1_500
 
 /**
- * The feedback page with a topic preselected, and optionally the text the
- * user was searching for — which the page turns into the subject line and
- * the first sentence of the message, so the report arrives with its context
- * already in it.
+ * The feedback page with a topic preselected. `query` becomes part of the
+ * subject line (the search text, the route's two ends); `context` is appended
+ * to the message below the reader's own words, so the report arrives with
+ * what it is about already in it.
  */
-export function docsFeedbackUrl(topic: string, query?: string): string {
+export function docsFeedbackUrl(topic: string, query?: string, context?: string): string {
   const params = new URLSearchParams({ topic })
   const trimmed = query?.trim()
   if (trimmed) params.set('q', trimmed.slice(0, QUERY_MAX))
+  const block = context?.trim()
+  if (block) params.set('context', block.slice(0, CONTEXT_MAX))
   return `/docs/feedback?${params.toString()}`
+}
+
+/** Everything a routing report needs to reproduce the route it is about. */
+export interface RoutingReport {
+  stops: { name: string; id: string }[]
+  scenario: string | null
+  composition: string | null
+  /** Expert overrides (departures, leg minutes, own return times) in effect. */
+  expert: boolean
+  /** The two stops the night is fixed between, by name; null = automatic. */
+  nightBetween: [string, string] | null
+  km: number | null
+  kmh: number | null
+  countries: string[]
+  proposalUrl: string | null
+  routeBuilderVersion: string | null
+}
+
+/**
+ * The input parameters of a computed route, one labelled line each — the
+ * block the routing feedback form carries under the reader's description.
+ * English regardless of the UI language: it is data for the working group,
+ * which reads the reports, and labels that change with the reader's locale
+ * would make them harder to compare.
+ */
+export function routingFeedbackContext(report: RoutingReport): string {
+  const timetable = [
+    report.expert ? 'expert (edited departures or leg minutes)' : 'automatic, centred on 02:30',
+    ...(report.nightBetween
+      ? [`night fixed between ${report.nightBetween[0]} and ${report.nightBetween[1]}`]
+      : []),
+  ].join('; ')
+  const result = [
+    report.km !== null ? `${Math.round(report.km)} km` : null,
+    report.kmh !== null ? `${Math.round(report.kmh)} km/h average` : null,
+    report.countries.length ? `through ${report.countries.join(', ')}` : null,
+  ].filter((part): part is string => part !== null)
+  const lines = [
+    `Stops: ${report.stops.map((s) => `${s.name} (${s.id})`).join(' → ')}`,
+    report.scenario ? `Scenario: ${report.scenario}` : null,
+    report.composition ? `Train: ${report.composition}` : null,
+    `Timetable: ${timetable}`,
+    result.length ? `Result: ${result.join(', ')}` : null,
+    report.proposalUrl ? `Proposal: ${report.proposalUrl}` : null,
+    report.routeBuilderVersion ? `Route builder: ${report.routeBuilderVersion}` : null,
+  ]
+  return lines.filter((line): line is string => line !== null).join('\n')
 }

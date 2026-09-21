@@ -74,7 +74,10 @@ import {
   type ExpertTimetableRequest,
   type SegmentAddon,
 } from '@/lib/expertTimetable'
-import { routeFacts } from '@/lib/shareLinks'
+import { buildShareUrls, routeFacts } from '@/lib/shareLinks'
+import { docsFeedbackUrl, FEEDBACK_TOPIC_ROUTING, routingFeedbackContext } from '@/lib/feedbackLink'
+import { DOCS_EXPERT_TIMETABLE, DOCS_NIGHT, DOCS_ROUTE_FIGURES } from '@/lib/docsLinks'
+import { API_BASE_URL } from '@/lib/apiBase'
 import { provideProposalEngagement } from '@/composables/useProposalEngagement'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
@@ -91,12 +94,13 @@ import LoadingFunFact from '@/components/LoadingFunFact.vue'
 import MapView from '@/components/MapView.vue'
 import TripPairComingSoon from '@/components/TripPairComingSoon.vue'
 import MapShareBar from '@/components/MapShareBar.vue'
+import InfoHint from '@/components/InfoHint.vue'
+import DocsReadMore from '@/components/DocsReadMore.vue'
 import CommentSection from '@/components/CommentSection.vue'
 import InlineAlert from '@/components/InlineAlert.vue'
 import {
   mdiArrowLeft,
   mdiArrowLeftRight,
-  mdiCheckCircle,
   mdiLock,
   mdiLockOpenVariant,
   mdiMirror,
@@ -250,7 +254,6 @@ const ownsProposal = computed(() => proposalOwnership.value === 'own')
 // Set when a calc finished but the user still has to pick an identity in the
 // gate — the authChoice watcher publishes once they do.
 const pendingPublish = ref(false)
-const saved = ref(false)
 const publishError = ref<string | null>(null)
 // The composition the STORED proposal currently carries — what a
 // family-served switch is compared against to decide whether anything needs
@@ -850,9 +853,13 @@ function reportDroppedAddons(dropped: SegmentAddon[]) {
 // icon's aria-label carries, so sighted and screen-reader users read alike.
 const toolHint = ref<InstanceType<typeof InfoPopover> | null>(null)
 const toolHintText = ref('')
+const toolHintDocs = ref<string | null>(null)
 
-function showToolHint(event: Event, text: string) {
+// `docs` hands over to the documentation below the sentence — for a tool
+// whose label names it but cannot say what it changes.
+function showToolHint(event: Event, text: string, docs: string | null = null) {
   toolHintText.value = text
+  toolHintDocs.value = docs
   toolHint.value?.open(event, text)
 }
 
@@ -1319,15 +1326,15 @@ async function doPublish(silent = false) {
     })
     publishedProposalId.value = resp.proposal_id
     proposalOwnership.value = 'own'
-    saved.value = true
     savedCompositionId.value = (req.composition_id as string | null) ?? null
     // The gallery is kept alive, so its cached list would otherwise not contain
     // the proposal the user just published. Flag it to refetch once on return.
     store.galleryStale = true
     clearDraft()
-    // A selection save is the user's own click, one debounce ago — the
-    // inline "saved" line under the results says so. A toast per arrow
-    // through the composition catalogue would be noise.
+    // A selection save is the user's own click, one debounce ago, and the
+    // ownership line above the builder already says changes save
+    // automatically. A toast per arrow through the composition catalogue
+    // would be noise.
     if (!silent) toastStore.addToast('success', t('proposal.saved'))
     if (isFirstPublish) emit('published', resp.proposal_id)
   } catch (err) {
@@ -1345,7 +1352,6 @@ async function evaluate() {
   currentMode.value = 'loading'
   calcFailure.value = null
   calcFailureMsg.value = null
-  saved.value = false
   publishError.value = null
   // First pass: "suggest" routes exactly the caller's stops and reports the
   // candidate stops along the way, without adding any automatically. The calc
@@ -1848,6 +1854,41 @@ const shareOrigin = computed(() => sectionStops.value[0]?.name ?? '')
 const shareDestination = computed(
   () => sectionStops.value[sectionStops.value.length - 1]?.name ?? '',
 )
+
+// The map pill's "report a problem with this route": the feedback page with
+// the routing topic and every input the route on screen was computed from —
+// the committed state, not edits waiting for a recalculation, since the
+// report is about the route that was drawn.
+const routingFeedbackHref = computed(() => {
+  const stops = (committedItinerary.value ?? [])
+    .filter((s) => s.selectedStop !== null)
+    .map((s) => ({ name: s.name, id: s.selectedStop!.stop_id }))
+  if (stops.length < 2 || !routeStats.value) return null
+  const nameOf = (id: string) => stops.find((s) => s.id === id)?.name ?? id
+  const night = committedNightInterval.value
+  const context = routingFeedbackContext({
+    stops,
+    scenario:
+      store.scenarios.find((sc) => sc.scenario_id === committedScenarioId.value)?.scenario_name ??
+      null,
+    composition: committedCompId.value,
+    expert: committedExpert.value !== null && !isEmptyExpert(committedExpert.value),
+    nightBetween: night ? [nameOf(night[0]), nameOf(night[1])] : null,
+    km: routeStats.value.distanceKm,
+    kmh: routeStats.value.avgSpeedKmh,
+    countries: routeStats.value.countries,
+    proposalUrl:
+      storedProposalId.value !== null
+        ? buildShareUrls(storedProposalId.value, window.location.origin, API_BASE_URL).appUrl
+        : null,
+    routeBuilderVersion: family.document.value?.route_builder_version ?? null,
+  })
+  return docsFeedbackUrl(
+    FEEDBACK_TOPIC_ROUTING,
+    `${stops[0]!.name} → ${stops[stops.length - 1]!.name}`,
+    context,
+  )
+})
 
 // Quiet pill — used by the "Gallery" back link above the workspace.
 const pillClass =
@@ -3223,6 +3264,7 @@ onMounted(async () => {
                 <AppIcon :path="mdiExitRun" :size="14" />
                 {{ t('proposal.night.legendAlighting') }}
               </span>
+              <InfoHint :text="t('proposal.night.legendHint')" :docs-href="DOCS_NIGHT" />
             </p>
             <p
               v-if="nightToolOn"
@@ -3301,6 +3343,14 @@ onMounted(async () => {
                 v-if="currentMode === 'display'"
                 :class="[toolPillClass, expertMode ? 'expert-pill-on' : '']"
                 :aria-pressed="expertMode"
+                @mouseenter="
+                  showToolHint($event, t('proposal.expert.toggleHint'), DOCS_EXPERT_TIMETABLE)
+                "
+                @mouseleave="toolHint?.scheduleClose()"
+                @focus="
+                  showToolHint($event, t('proposal.expert.toggleHint'), DOCS_EXPERT_TIMETABLE)
+                "
+                @blur="toolHint?.scheduleClose()"
                 @click="toggleExpertMode"
               >
                 <AppIcon :path="mdiTimerCogOutline" :size="16" />
@@ -3375,7 +3425,10 @@ onMounted(async () => {
             </div>
 
             <InfoPopover ref="toolHint">
-              <p class="w-72 text-sm text-primary-50/75">{{ toolHintText }}</p>
+              <div class="flex w-72 flex-col">
+                <p class="text-sm text-primary-50/75">{{ toolHintText }}</p>
+                <DocsReadMore v-if="toolHintDocs" :href="toolHintDocs" />
+              </div>
             </InfoPopover>
 
             <div class="flex flex-1 items-center justify-end gap-2">
@@ -3400,8 +3453,11 @@ onMounted(async () => {
               class="flex flex-col items-center gap-2 rounded-xl bg-primary-50/5 px-4 py-3 text-primary-50/70 transition-opacity duration-200"
               :class="paramsStale && timetableChanged ? 'opacity-30' : ''"
             >
-              <span class="text-xs tracking-wide text-primary-50/50 uppercase">
+              <span
+                class="flex items-center gap-1.5 text-xs tracking-wide text-primary-50/50 uppercase"
+              >
                 {{ t('proposal.routeStats') }}
+                <InfoHint :text="t('proposal.routeStatsHint')" :docs-href="DOCS_ROUTE_FIGURES" />
               </span>
               <div class="flex flex-wrap justify-center gap-x-8 gap-y-3">
                 <div
@@ -3513,13 +3569,12 @@ onMounted(async () => {
           </button>
         </div>
 
-        <!-- Publish status: saved confirmation (display) / publish error -->
-        <div v-if="(saved && !isDirty) || publishError" class="flex flex-col items-center gap-1">
-          <p v-if="saved && !isDirty" class="flex items-center gap-1.5 text-sm text-primary-50/70">
-            <AppIcon :path="mdiCheckCircle" :size="16" />
-            {{ t('proposal.saved') }}
-          </p>
-          <InlineAlert v-if="publishError" :message="publishError" />
+        <!-- A failed save stays on screen until the next one. A successful
+             save needs no line of its own: the toast confirms an explicit
+             save, and the ownership line above the builder says every change
+             is saved automatically. -->
+        <div v-if="publishError" class="flex flex-col items-center gap-1">
+          <InlineAlert :message="publishError" />
         </div>
       </div>
 
@@ -3573,6 +3628,7 @@ onMounted(async () => {
             :origin="shareOrigin"
             :destination="shareDestination"
             :facts="shareFacts"
+            :feedback-href="routingFeedbackHref"
           />
           <!-- Deliberately NOT wrapped in <Transition>. The fade wedged its own
                state machine here: the element kept `fade-enter-from` (opacity 0)

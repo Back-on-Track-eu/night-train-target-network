@@ -38,6 +38,72 @@ Dwell time at each stop is then the larger of what the train needs and what
 the station needs. A long train at a short platform is constrained by the
 train; a busy station by the station.
 
+<!-- The next three headings are linked from the builder's info overlays
+     (frontend/src/lib/docsLinks.ts) by their slugs. Renaming one breaks the
+     link silently — update docsLinks.ts with it. -->
+
+## The route figures
+
+Under the timetable the builder shows four figures for the route on screen.
+
+**Distance** is the length of the routed track path, stop to stop. **The
+countries** are the ones that path runs through, in order.
+
+**Average speed** is that distance divided by the scheduled journey time,
+from the first departure to the last arrival. It therefore includes
+everything above — braking and acceleration at every stop, the timetable
+buffer, and the dwell times — and it is not a top speed. The train matters
+twice: its weight and traction set the time lost at each stop, and its top
+speed caps every stretch of the path. High-speed lines are used only where
+both the train and the country's rules allow it. The same route with a
+different train can therefore show a different average, and occasionally a
+different path.
+
+**Stops** counts every call, including the first and the last.
+
+## The night and its stops
+
+A night train is timetabled around the night rather than from a departure
+time. The automatic timetable places the whole trip symmetrically around
+02:30 and runs the return as its mirror image, so both directions spend the
+same share of the journey at night.
+
+The night is 00:00–05:00, and every stop falls into one of three kinds:
+
+- **Boarding stop** — the train leaves it before midnight.
+- **Alighting stop** — the train reaches it at 05:00 or later.
+- **Night stop** — anything in between. Passengers are asleep, so a night
+  stop sells no tickets: demand is counted only from boarding stops to
+  alighting stops.
+
+On a long route the automatic placement can put the night somewhere
+inconvenient — over a strong evening catchment, say. The
+[expert timetable](#expert-timetable) lets you fix the night between two stops
+of your choice instead. The timetable then centres 00:00–05:00 on that
+section: its first stop must be left by 23:59 and its last reached at 05:00
+or later. If the section is naturally shorter than five hours, it is
+stretched to fit by adding minutes to its legs in proportion to their running
+time.
+
+## Expert timetable
+
+The automatic timetable is a sound default and needs no input. Expert mode,
+available once a route has been calculated, lets you shape it instead:
+
+- **First departure.** Type the departure into the timetable. Pinned, it
+  stays at that time when the route changes; following, it keeps its offset
+  from the automatic time, so it moves with it.
+- **Minutes on single legs.** Add running time where the model's is too
+  optimistic, or to hold a train for a connection.
+- **The return.** By default the return mirrors the outbound around 02:30,
+  departure and added minutes included. It can instead carry its own times.
+- **The night.** Fix the night between two stops, as described
+  [above](#the-night-and-its-stops).
+
+Nothing changes until you recalculate, so several adjustments can be made
+first. Leaving expert mode drops the overrides, and the next calculation uses
+the automatic timetable again.
+
 ## Suggested extra stops
 
 The tool can propose additional stops that fit within a time budget. Each

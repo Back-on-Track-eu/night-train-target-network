@@ -17,19 +17,40 @@ import { apiUrl } from '../lib/apiBase'
 
 const SUBJECT_MAX = 200
 const QUERY_MAX = 120
+// A route's input parameters, one per line (the app's routingFeedbackContext);
+// the app caps at 1,500, this is the page's own ceiling for hand-made links.
+const CONTEXT_MAX = 2_000
 const AUTH_COOKIE = 'nt_auth'
 
 /**
- * Deep links carry a short alias, not the protocol strings. The app's stop
- * search links here as /docs/feedback?topic=missing-stop&q=<what was typed>,
- * so the taxonomy wording can change on the backend without breaking a link
- * someone has already sent on — only this map moves with it.
+ * Deep links carry a short alias, not the protocol strings, so the taxonomy
+ * wording can change on the backend without breaking a link someone has
+ * already sent on — only this map moves with it. The app links here as
+ *   ?topic=missing-stop&q=<what was typed>             (empty stop search)
+ *   ?topic=routing&q=<A → B>&context=<the route's inputs> (map action pill)
+ * `lead` opens the message: what the reader is asked to describe, or what
+ * already happened.
  */
-const TOPICS: Record<string, { category: string; subCategory: string; subject: string }> = {
+interface Topic {
+  category: string
+  subCategory: string
+  subject: string
+  lead: (query: string) => string
+}
+const TOPICS: Record<string, Topic> = {
   'missing-stop': {
     category: 'Route or timetable',
     subCategory: 'Missing stop / suggest new stop',
     subject: 'Missing stop',
+    lead: (query) => (query ? `I searched the stop list for “${query}” and found nothing.` : ''),
+  },
+  routing: {
+    category: 'Route or timetable',
+    subCategory: 'Routing / track geometry',
+    subject: 'Routing',
+    lead: () =>
+      'What looks wrong with this route? For example a detour, a line it avoids but ' +
+      'should take, a border it should not cross, or a travel time far from reality.',
   },
 }
 
@@ -135,15 +156,17 @@ onMounted(() => {
   const params = new URLSearchParams(window.location.search)
   const topic = TOPICS[params.get('topic') ?? '']
   const query = (params.get('q') ?? '').trim().slice(0, QUERY_MAX)
+  const context = (params.get('context') ?? '').trim().slice(0, CONTEXT_MAX)
   if (topic) {
     category.value = topic.category
     subCategory.value = topic.subCategory
-    subject.value = query ? `${topic.subject}: ${query}` : topic.subject
+    subject.value = (query ? `${topic.subject}: ${query}` : topic.subject).slice(0, SUBJECT_MAX)
   }
-  if (query && topic?.subject === 'Missing stop') {
-    message.value = `I searched the stop list for “${query}” and found nothing.\n\n`
-  }
-  subject.value = subject.value.slice(0, SUBJECT_MAX)
+  // The reader's words go first — the lead asks for them — and the context
+  // the link carried sits below, labelled, so it reads as attached data.
+  const lead = topic?.lead(query) ?? ''
+  const parts = [lead ? `${lead}\n\n` : '', context ? `\n\n— What this is about —\n${context}` : '']
+  message.value = parts.join('')
 
   loadCategories(topic?.subCategory ?? '')
 })
