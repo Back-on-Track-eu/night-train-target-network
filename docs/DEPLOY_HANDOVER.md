@@ -1081,8 +1081,11 @@ is just where the count is logged.
 are the fast way back after any `route_cache` wipe (a reseed, a volume
 loss) — `--load` again, minutes instead of hours. They are valid only for
 the `import_date` in `meta.json`; `--load` checks that against the live
-graph and refuses stale data by purging first. Expect roughly 1–2 GB
-uncompressed for a full run, a few hundred MB gzipped. Upload the pair to
+graph and refuses stale data by purging first. Size is dominated by the
+geometry, ~160 bytes per routed km (measured 2026-09-21): several GB
+uncompressed at `--cap-km 300`, gzip roughly a third of that; 800 km and
+uncapped runs reach tens to hundreds of GB and are not practical with full
+geometry. Upload the pair to
 Drive as well: `ROUTE_SEGMENTS_FILE_ID_INFRA_2026` lets a dev reseed pull
 it, which is how the rest of us get a warm cache locally.
 

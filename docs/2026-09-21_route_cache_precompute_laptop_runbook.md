@@ -26,7 +26,7 @@ there for.
 | Stack up | `cd backend\docker; docker compose up -d postgres openrailrouting-infra-2026` |
 | Catalog seeded | `docker compose logs postgres \| Select-String "seed"` — the stop catalog the batch pairs comes from the local DB |
 | Dependencies | `cd backend; uv sync --extra dev` |
-| Disk | ~5 GB free next to the repo: the CSV runs 1–2 GB, the `.gz` a few hundred MB, the upload parts another copy |
+| Disk | Geometry costs ~160 bytes per routed km (measured 2026-09-21), so at `--cap-km 300` the CSV is several GB and the `.gz` roughly a third of that; the upload parts are another full copy. Leave 3× the expected CSV free |
 | Sleep off | `powercfg /change standby-timeout-ac 0` and `powercfg /change hibernate-timeout-ac 0` — a sleeping laptop pauses the batch, it does not corrupt it, but you lose the night. Restore your old values afterwards |
 
 **The one check that actually matters** is that your graph is the server's
@@ -157,7 +157,21 @@ stop_lo,stop_hi,profile,variant_key,attempts,transient,error_type,error_message,
 
 The file is rewritten from scratch on every run, so it always answers
 "what is missing now", never "what raised last week". Unsnappable pairs
-are in it too, as `NotSnapped`.
+are in it too, as `NotSnapped`, with the stop that could not be snapped
+and GraphHopper's reason in `error_message`.
+
+**Snapping.** Each stop is snapped once per gauge profile by routing it to
+a helper stop. Helpers are the nearest catalog stops that carry that
+gauge (up to eight are tried), so a stop whose nearest neighbour sits
+across a gauge break or on a cut-off branch still snaps. A stop is only
+reported unsnappable when GraphHopper cannot place the stop itself
+(`Cannot find point 0`) or every helper fails.
+
+**What the first 300 km run showed (2026-09-21)** — all 204 routing
+failures were legitimate: 45 Finland–Estonia pairs (no rail link across
+the Gulf, and the land route runs through Russia) and 23 pairs between
+occupied and Ukrainian-controlled Donbas / Azov stops (no through
+connection in the graph). Neither is worth retrying.
 
 To work only on that list later — e.g. after restarting the routing
 container:
@@ -182,7 +196,11 @@ uv run python scripts/precompute_route_segments.py --graph infra_2026 --cap-km 8
 ```
 
 Writes `route_segments_infra_2026.csv.gz` and `…​.meta.json` (graph,
-import date, cap, stop count, segment count, remaining failures). Keep
+import date, cap, stop count, segment count, remaining failures). One
+sequential read of the CSV, counting and compressing together, with a
+progress line in MB — a few minutes per 10 GB. **Not needed for the
+pgAdmin path**: `--export-upload` works from the CSV directly, so finalize
+can run afterwards, or later, while the upload is under way. Keep
 both: they are the fast way back after any `route_cache` wipe, and the
 `.gz` + `.meta.json` pair is also what `db/dev/seed.py` picks up from
 `backend/db/dev/data/` on a dev reseed — and what to upload to Drive as
