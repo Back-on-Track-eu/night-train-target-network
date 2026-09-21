@@ -30,7 +30,8 @@ lists is a hand-maintained copy that can drift:
                                      evaluation model computes
                                      (models/evaluation/views.py:Breakdown)
   Evaluation — results / view     — the output views the evaluation endpoint
-                                     produces (models/evaluation/views.py:VIEW_META)
+                                     produces (models/evaluation/views.py:VIEW_META),
+                                     plus the builder's result panels (static)
   Route or timetable               — static list (no single schema object
                                      maps cleanly onto "route concepts")
   General functionality            — static list
@@ -284,11 +285,29 @@ def _breakdown_leaf_fields() -> list[dict]:
 # =============================================================================
 
 
+# The panels of the proposal builder's results, as the app names them. The
+# builder's "report a problem" icons deep-link to these by alias
+# (docs-site GeneralFeedbackForm.vue TOPICS ↔ frontend lib/feedbackLink.ts),
+# so a reader reports what they were looking at rather than which internal
+# view produced it. Static: panels are a frontend concept with no schema.
+_RESULT_PANEL_SUB_CATEGORIES = (
+    "Scenario and main figures",
+    "Scenario comparison",
+    "Cost and revenue breakdown",
+    "Details — Demand",
+    "Details — Supply",
+    "Details — Train operation",
+    "Details — Infrastructure",
+    "Details — Overhead",
+)
+
+
 def _evaluation_view_sub_categories() -> list[dict]:
     """The output views the merged compute response actually produces —
     the same VIEW_META api/helpers/evaluation_serialize.py builds each
-    view's response section from, not a separately hand-maintained list."""
-    return [
+    view's response section from, not a separately hand-maintained list —
+    followed by the builder's result panels."""
+    views = [
         {
             "parameter": view,
             "description": meta["description"],
@@ -296,6 +315,11 @@ def _evaluation_view_sub_categories() -> list[dict]:
         }
         for view, meta in sorted(VIEW_META.items())
     ]
+    panels = [
+        {"parameter": panel, "description": None, "group": "Builder panel"}
+        for panel in _RESULT_PANEL_SUB_CATEGORIES
+    ]
+    return views + panels
 
 
 # =============================================================================

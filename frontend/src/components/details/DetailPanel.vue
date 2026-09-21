@@ -2,10 +2,17 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import InfoHint from '@/components/InfoHint.vue'
+import ReportProblemLink from '@/components/ReportProblemLink.vue'
+import { useDetailsTabReport } from '@/composables/useDetailsTabReport'
 
 // The one panel shape every box inside the Details card uses: a title row with
-// EXACTLY ONE ⓘ carrying that panel's whole explanation, an optional
-// right-aligned caption, the waiting badge, then content.
+// EXACTLY ONE ⓘ carrying that panel's whole explanation, the report icon,
+// an optional right-aligned caption, the waiting badge, then content.
+//
+// The report icon needs no prop: DetailsSection provides the active tab's
+// report topic (useDetailsTabReport), and since tabs render with v-if, every
+// panel on screen belongs to that tab. The panel's own title goes into the
+// report's subject.
 //
 // overflow-hidden is load-bearing, not decoration: the card is available from
 // the lg breakpoint up, and at the narrow end of that range a receipt table
@@ -16,14 +23,13 @@ const props = defineProps<{
   info: string
   caption?: string | null
   awaiting?: boolean
-  // Reserved for the documentation deep link the ⓘ will carry once the
-  // per-figure pages exist (docs/2026-09-09_supply_settings_plan.md). Passed
-  // through so the panels can already name their page.
+  /** The documentation page the ⓘ hands over to, when the panel has one. */
   docPath?: string | null
 }>()
 
 const { t } = useI18n()
 const hint = computed(() => props.info)
+const reportTopic = useDetailsTabReport()
 </script>
 
 <template>
@@ -35,7 +41,8 @@ const hint = computed(() => props.info)
     <header class="flex flex-wrap items-center gap-x-2 gap-y-1">
       <h4 class="flex items-center gap-1.5 text-sm font-semibold text-primary-50">
         {{ title }}
-        <InfoHint :text="hint" />
+        <InfoHint :text="hint" :docs-href="docPath ?? undefined" />
+        <ReportProblemLink v-if="reportTopic" :topic="reportTopic" :panel="title" />
       </h4>
       <span
         v-if="awaiting"

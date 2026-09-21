@@ -9,6 +9,9 @@ import { layoutSegmentLabels, type SegmentLabel } from '@/lib/segmentLabels'
 import ViewRow from '@/components/ViewRow.vue'
 import CostBreakdownPanel from '@/components/CostBreakdownPanel.vue'
 import AppIcon from '@/components/AppIcon.vue'
+import InfoHint from '@/components/InfoHint.vue'
+import ReportProblemLink from '@/components/ReportProblemLink.vue'
+import { DOCS_NET_RESULT } from '@/lib/docsLinks'
 import Skeleton from 'primevue/skeleton'
 import { mdiChevronDown } from '@mdi/js'
 
@@ -276,9 +279,19 @@ function segmentInk(color: string): string {
   >
     <summary class="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3">
       <span class="flex flex-col">
-        <span class="text-base font-semibold text-primary-50">{{
-          t('proposal.evaluation.sections.finance.title')
-        }}</span>
+        <!-- The ⓘ and the report icon sit inside a <summary>: a click on
+             either must not toggle the section. Both stop propagation, and
+             the ⓘ's hover overlay needs no click at all. -->
+        <span class="flex items-center gap-1.5 text-base font-semibold text-primary-50">
+          {{ t('proposal.evaluation.sections.finance.title') }}
+          <span @click.stop>
+            <InfoHint
+              :text="t('proposal.evaluation.sections.finance.hint')"
+              :docs-href="DOCS_NET_RESULT"
+            />
+          </span>
+          <ReportProblemLink topic="breakdown" />
+        </span>
         <span class="text-xs text-primary-50/60">{{
           t('proposal.evaluation.sections.finance.body')
         }}</span>

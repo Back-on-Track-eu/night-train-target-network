@@ -22,6 +22,19 @@ export const FEEDBACK_TOPIC_ROUTING = 'routing'
 /** A computed route whose timetable looks wrong — times, speeds, the night. */
 export const FEEDBACK_TOPIC_TIMETABLE = 'timetable'
 
+/** The result panels a reader can report from. Each alias maps, on the
+ *  feedback page, to "Evaluation — results / view" and the panel's own
+ *  sub-category (backend feedback_serialize.py _RESULT_PANEL_SUB_CATEGORIES). */
+export type ReportPanel =
+  | 'kpis'
+  | 'compare'
+  | 'breakdown'
+  | 'details-demand'
+  | 'details-supply'
+  | 'details-operation'
+  | 'details-infrastructure'
+  | 'details-overhead'
+
 /** Both mirror the form's own caps: what is cut here is cut there anyway,
  *  and a search box can hold a paragraph if someone pastes one. */
 const QUERY_MAX = 120

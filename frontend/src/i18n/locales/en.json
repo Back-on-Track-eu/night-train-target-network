@@ -291,7 +291,8 @@
         },
         "finance": {
           "title": "Costs and revenue",
-          "body": "What running the route would cost each year, what tickets would bring in, and the gap between them."
+          "body": "What running the route would cost each year, what tickets would bring in, and the gap between them.",
+          "hint": "Every cost of a year against every revenue, and the gap: the necessary subsidy, or the surplus once the operator's margin is paid. Click a row for its share and its formula."
         }
       },
       "views": {
@@ -415,6 +416,7 @@
       "scenarioHint": "A scenario combines a rail network with operating conditions and, soon, price measures. The figures are for the selected one; the baseline is today's network and rules.",
       "title": "Compare across scenarios",
       "body": "How the selected train fares under every scenario, and every train under the selected one.",
+      "titleHint": "The selected train under every scenario, and every train under the selected scenario, on one figure of your choice. Each cell is a full evaluation; the baseline is marked.",
       "complete": "Every combination computed.",
       "kpiPicker": "Figure to compare",
       "viewBars": "Scenarios",
@@ -1008,10 +1010,20 @@
         "busiestBoarding": "Busiest boarding stop",
         "busiestAlighting": "Busiest alighting stop",
         "figuresNote": "The stop weights are the request’s few numbers; pinned cells travel with them."
+      },
+      "tabHints": {
+        "demand": "How many travel, who they are, where they board and alight — the demand you set, seated on this train.",
+        "supply": "How often the train runs and what each place costs: the schedule and the tariff the revenue is built from.",
+        "operation": "The train itself: every composition on this route, and the rakes, locomotive hours and crew the selected one needs per trip.",
+        "infrastructure": "What infrastructure managers charge, country by country: track access, station calls, stabling and traction energy.",
+        "overhead": "The operator's own shares on top of the direct costs: variable and fixed overhead, and the margin it is expected to keep."
       }
     },
     "docsReadMore": "Read more in the documentation",
-    "routeStatsHint": "The path comes from a rail routing engine on OpenStreetMap track. Average speed covers the whole journey, stops included, and changes with the selected composition."
+    "routeStatsHint": "The path comes from a rail routing engine on OpenStreetMap track. Average speed covers the whole journey, stops included, and changes with the selected composition.",
+    "report": {
+      "panel": "Report a problem with this panel"
+    }
   },
   "gallery": {
     "heading": "Bring the night trains back on track!",

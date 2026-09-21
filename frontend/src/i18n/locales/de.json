@@ -291,7 +291,8 @@
         },
         "finance": {
           "title": "Kosten und Erlöse",
-          "body": "Was der Betrieb der Strecke jährlich kosten würde, was die Tickets einbringen würden und wie groß die Lücke dazwischen ist."
+          "body": "Was der Betrieb der Strecke jährlich kosten würde, was die Tickets einbringen würden und wie groß die Lücke dazwischen ist.",
+          "hint": "Alle Kosten eines Jahres gegen alle Erlöse, und die Lücke: der nötige Zuschuss oder der Überschuss nach der Marge des Betreibers. Eine Zeile anklicken zeigt Anteil und Formel."
         }
       },
       "views": {
@@ -415,6 +416,7 @@
       "scenarioHint": "Ein Szenario kombiniert ein Schienennetz mit Betriebsbedingungen und bald mit Preismaßnahmen. Die Zahlen gelten für das gewählte; Basisszenario ist das heutige Netz.",
       "title": "Szenarien vergleichen",
       "body": "Wie sich der gewählte Zug in jedem Szenario schlägt und jeder Zug im gewählten Szenario.",
+      "titleHint": "Der gewählte Zug in jedem Szenario und jeder Zug im gewählten Szenario, für eine Kennzahl Deiner Wahl. Jede Zelle ist voll berechnet; das Basisszenario ist markiert.",
       "complete": "Alle Kombinationen berechnet.",
       "kpiPicker": "Kennzahl für den Vergleich",
       "viewBars": "Szenarien",
@@ -1008,10 +1010,20 @@
         "busiestBoarding": "Stärkster Einstiegshalt",
         "busiestAlighting": "Stärkster Ausstiegshalt",
         "figuresNote": "Die Haltegewichte sind die wenigen Zahlen der Anfrage; fixierte Zellen werden mit ihnen gespeichert."
+      },
+      "tabHints": {
+        "demand": "Wie viele reisen, wer sie sind, wo sie ein- und aussteigen – die eingestellte Nachfrage, auf diesem Zug platziert.",
+        "supply": "Wie oft der Zug fährt und was jeder Platz kostet: Fahrplan und Tarif, aus denen die Erlöse entstehen.",
+        "operation": "Der Zug selbst: jede Zugbildung auf dieser Strecke sowie Garnituren, Lokstunden und Personal, die die gewählte je Fahrt braucht.",
+        "infrastructure": "Was die Infrastrukturbetreiber verlangen, Land für Land: Trassen, Stationshalte, Abstellung und Fahrstrom.",
+        "overhead": "Die eigenen Anteile des Betreibers über die direkten Kosten hinaus: variable und fixe Gemeinkosten sowie die erwartete Marge."
       }
     },
     "docsReadMore": "Mehr dazu in der Dokumentation",
-    "routeStatsHint": "Weg aus einer Schienen-Routing-Engine auf OpenStreetMap-Gleisen. Durchschnittstempo: Distanz durch die ganze Fahrzeit inkl. Halten – hängt von der gewählten Zugbildung ab."
+    "routeStatsHint": "Weg aus einer Schienen-Routing-Engine auf OpenStreetMap-Gleisen. Durchschnittstempo: Distanz durch die ganze Fahrzeit inkl. Halten – hängt von der gewählten Zugbildung ab.",
+    "report": {
+      "panel": "Ein Problem mit diesem Bereich melden"
+    }
   },
   "gallery": {
     "heading": "Bringen wir die Nachtzüge zurück aufs Gleis!",

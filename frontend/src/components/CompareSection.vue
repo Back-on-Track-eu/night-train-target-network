@@ -4,6 +4,9 @@ import { useI18n } from 'vue-i18n'
 import type { Composition, FamilyMember, Scenario } from '@/types/api'
 import type { FamilyStatus } from '@/composables/useProposalFamily'
 import { COMPARE_KPIS, type CompareKpiKey } from '@/lib/compareKpis'
+import { DOCS_SCENARIO } from '@/lib/docsLinks'
+import InfoHint from '@/components/InfoHint.vue'
+import ReportProblemLink from '@/components/ReportProblemLink.vue'
 import Select from 'primevue/select'
 import { selectPillPt } from '@/lib/selectPillPt'
 import ScenarioCompareBars from '@/components/ScenarioCompareBars.vue'
@@ -54,7 +57,11 @@ const kpiOptions = computed(() =>
   <section class="flex flex-col gap-3 rounded-xl border border-primary-50/10 p-4">
     <div class="flex flex-wrap items-center justify-between gap-2">
       <div class="flex flex-col">
-        <h2 class="text-base font-semibold text-primary-50">{{ t('proposal.compare.title') }}</h2>
+        <h2 class="flex items-center gap-1.5 text-base font-semibold text-primary-50">
+          {{ t('proposal.compare.title') }}
+          <InfoHint :text="t('proposal.compare.titleHint')" :docs-href="DOCS_SCENARIO" />
+          <ReportProblemLink topic="compare" />
+        </h2>
         <p class="text-xs text-primary-50/60">
           <template v-if="status === 'loading'">{{ t('proposal.compare.loading') }}</template>
           <template v-else-if="status === 'complete'">

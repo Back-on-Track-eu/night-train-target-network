@@ -15,6 +15,7 @@ import DetailsSection from '@/components/DetailsSection.vue'
 import MobileSettingsCard from '@/components/MobileSettingsCard.vue'
 import CostRevenueBreakdown from '@/components/CostRevenueBreakdown.vue'
 import InfoHint from '@/components/InfoHint.vue'
+import ReportProblemLink from '@/components/ReportProblemLink.vue'
 import { DOCS_SCENARIO } from '@/lib/docsLinks'
 import Skeleton from 'primevue/skeleton'
 
@@ -177,6 +178,7 @@ function scrollToSettings() {
             <h2 class="flex items-center gap-1.5 text-base font-semibold text-primary-50">
               {{ t('proposal.compare.scenarioTitle') }}
               <InfoHint :text="t('proposal.compare.scenarioHint')" :docs-href="DOCS_SCENARIO" />
+              <ReportProblemLink topic="kpis" />
             </h2>
             <p class="text-xs text-primary-50/60">{{ t('proposal.compare.scenarioBody') }}</p>
           </div>

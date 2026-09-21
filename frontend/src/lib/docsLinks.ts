@@ -1,7 +1,8 @@
 /**
  * Deep links from the builder's info overlays into the documentation site:
- * the route-planning page (docs-site/routing.md) and the scenarios page
- * (docs-site/scenarios.md). Absolute paths, not router links: /docs/ is a
+ * the route-planning page (docs-site/routing.md), the scenarios page
+ * (docs-site/scenarios.md), and the cost and demand pages the Details tabs
+ * and the breakdown hand over to. Absolute paths, not router links: /docs/ is a
  * separate static site served on this origin — the same reason
  * factorFeedback.ts builds its cost-page paths by hand.
  *
@@ -35,4 +36,23 @@ export const DOCS_KPI: Record<CompareKpiKey, string> = {
   shiftOther: `${SCENARIOS}#shifted-from-car-or-induced`,
   co2: `${SCENARIOS}#co2-saved`,
   subsidyPerT: `${SCENARIOS}#subsidy-per-t-co2`,
+}
+
+/** The cost/revenue breakdown headline: revenue minus cost minus margin. */
+export const DOCS_NET_RESULT = '/docs/cost/net'
+
+/** One page per Details tab — the tab's hover overlay hands over to it. */
+export const DOCS_DETAILS_TAB: Record<
+  'demand' | 'supply' | 'operation' | 'infrastructure' | 'overhead',
+  string
+> = {
+  demand: '/docs/demand',
+  // The tariff the Supply tab's prices panel edits is described with the
+  // demand it meets, on the same page.
+  supply: '/docs/demand',
+  operation: '/docs/cost/operator-total',
+  infrastructure: '/docs/cost/infrastructure-total',
+  // The three overhead panels are the operator's own shares and its margin —
+  // the net-result page is where all three come together.
+  overhead: '/docs/cost/net',
 }

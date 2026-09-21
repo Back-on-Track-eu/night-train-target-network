@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { mdiChevronDown } from '@mdi/js'
 import { useStore } from '@/stores/store'
@@ -35,6 +35,11 @@ import OverheadTab from '@/components/details/OverheadTab.vue'
 import InfrastructureTab from '@/components/details/InfrastructureTab.vue'
 import DemandTab from '@/components/details/DemandTab.vue'
 import DetailPanel from '@/components/details/DetailPanel.vue'
+import InfoPopover from '@/components/InfoPopover.vue'
+import DocsReadMore from '@/components/DocsReadMore.vue'
+import { DOCS_DETAILS_TAB } from '@/lib/docsLinks'
+import type { ReportPanel } from '@/lib/feedbackLink'
+import { provideDetailsTabReport } from '@/composables/useDetailsTabReport'
 
 // Zone D — "Details". What runs the route, what it costs to operate and to
 // use, and who rides it. Five tabs, one card, one Recalculate.
@@ -90,6 +95,29 @@ const tab = computed({
 const selected = computed(
   () => props.compositions.find((c) => c.composition_id === props.selectedCompositionId) ?? null,
 )
+
+// Every panel on the active tab reports under that tab's topic
+// (details/DetailPanel.vue reads it) — the tabs render with v-if, so the
+// panels on screen are exactly the active tab's.
+const TAB_REPORT: Record<TabKey, ReportPanel> = {
+  demand: 'details-demand',
+  supply: 'details-supply',
+  operation: 'details-operation',
+  infrastructure: 'details-infrastructure',
+  overhead: 'details-overhead',
+}
+provideDetailsTabReport(computed(() => TAB_REPORT[tab.value]))
+
+// Hover text for the tab pills — what the tab holds, and its documentation
+// page: one shared InfoPopover under the tablist, driven the way the
+// itinerary's tool hints are (ProposalViewport showToolHint).
+const tabHint = ref<InstanceType<typeof InfoPopover> | null>(null)
+const tabHintKey = ref<TabKey>('demand')
+
+function showTabHint(event: Event, key: TabKey) {
+  tabHintKey.value = key
+  tabHint.value?.open(event, key)
+}
 
 // --- what the figures were computed with ------------------------------------
 
@@ -297,6 +325,10 @@ const demandDefaults = computed(() => {
               : 'text-primary-50/60 hover:text-primary-50'
           "
           :aria-selected="tab === key"
+          @mouseenter="showTabHint($event, key)"
+          @mouseleave="tabHint?.scheduleClose()"
+          @focus="showTabHint($event, key)"
+          @blur="tabHint?.scheduleClose()"
           @click="tab = key"
         >
           {{ t(`proposal.details.tabs.${key}`) }}
@@ -307,6 +339,15 @@ const demandDefaults = computed(() => {
           />
         </button>
       </div>
+
+      <InfoPopover ref="tabHint">
+        <div class="flex w-72 flex-col">
+          <p class="text-sm text-primary-50/75">
+            {{ t(`proposal.details.tabHints.${tabHintKey}`) }}
+          </p>
+          <DocsReadMore :href="DOCS_DETAILS_TAB[tabHintKey]" />
+        </div>
+      </InfoPopover>
 
       <!-- Supply -->
       <div v-if="tab === 'supply'" class="flex flex-col gap-3">

@@ -84,6 +84,7 @@ import {
 import { DOCS_EXPERT_TIMETABLE, DOCS_NIGHT, DOCS_ROUTE_FIGURES } from '@/lib/docsLinks'
 import { API_BASE_URL } from '@/lib/apiBase'
 import { provideProposalEngagement } from '@/composables/useProposalEngagement'
+import { provideReportContext } from '@/composables/useReportContext'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Skeleton from 'primevue/skeleton'
@@ -1880,11 +1881,12 @@ const reportTimes = computed(() => {
   return outbound && back ? { outbound, return: back } : null
 })
 
-// The map pill's report menu — a problem with the route, or with its
-// timetable: the feedback page with that topic and every input the route on
-// screen was computed from. The committed state, not edits waiting for a
-// recalculation, since the report is about the route that was drawn.
-const reportHrefs = computed(() => {
+// What every "report a problem" link needs — the map pill's menu and the
+// icon on each result panel: the route's ends for the subject and every
+// input the route on screen was computed from. The committed state, not
+// edits waiting for a recalculation, since a report is about the route that
+// was drawn. Provided to the whole results tree (useReportContext).
+const reportContext = computed(() => {
   const stops = (committedItinerary.value ?? [])
     .filter((s) => s.selectedStop !== null)
     .map((s) => ({ name: s.name, id: s.selectedStop!.stop_id }))
@@ -1909,10 +1911,16 @@ const reportHrefs = computed(() => {
         : null,
     routeBuilderVersion: family.document.value?.route_builder_version ?? null,
   })
-  const ends = `${stops[0]!.name} → ${stops[stops.length - 1]!.name}`
+  return { ends: `${stops[0]!.name} → ${stops[stops.length - 1]!.name}`, context }
+})
+provideReportContext(reportContext)
+
+const reportHrefs = computed(() => {
+  const ctx = reportContext.value
+  if (!ctx) return null
   return {
-    route: docsFeedbackUrl(FEEDBACK_TOPIC_ROUTING, ends, context),
-    timetable: docsFeedbackUrl(FEEDBACK_TOPIC_TIMETABLE, ends, context),
+    route: docsFeedbackUrl(FEEDBACK_TOPIC_ROUTING, ctx.ends, ctx.context),
+    timetable: docsFeedbackUrl(FEEDBACK_TOPIC_TIMETABLE, ctx.ends, ctx.context),
   }
 })
 

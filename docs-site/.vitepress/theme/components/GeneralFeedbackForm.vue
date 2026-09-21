@@ -28,6 +28,7 @@ const AUTH_COOKIE = 'nt_auth'
  * already sent on — only this map moves with it. The app links here as
  *   ?topic=missing-stop&q=<what was typed>                (empty stop search)
  *   ?topic=routing|timetable&q=<A → B>&context=<inputs>   (map action pill)
+ *   ?topic=<panel>&q=<panel · A → B>&context=<inputs>     (result panels)
  * `lead` opens the message: what the reader is asked to describe, or what
  * already happened.
  */
@@ -61,6 +62,30 @@ const TOPICS: Record<string, Topic> = {
       'an unrealistic hour, a leg much faster or slower than reality, or the night ' +
       'falling on the wrong section.',
   },
+  // The builder's result panels — one "report a problem" icon each. The
+  // sub-categories are the backend's _RESULT_PANEL_SUB_CATEGORIES verbatim.
+  ...resultPanels({
+    kpis: ['Scenario and main figures', 'Main figures'],
+    compare: ['Scenario comparison', 'Scenario comparison'],
+    breakdown: ['Cost and revenue breakdown', 'Cost and revenue'],
+    'details-demand': ['Details — Demand', 'Details / Demand'],
+    'details-supply': ['Details — Supply', 'Details / Supply'],
+    'details-operation': ['Details — Train operation', 'Details / Train operation'],
+    'details-infrastructure': ['Details — Infrastructure', 'Details / Infrastructure'],
+    'details-overhead': ['Details — Overhead', 'Details / Overhead'],
+  }),
+}
+
+function resultPanels(panels: Record<string, [subCategory: string, subject: string]>) {
+  const lead =
+    'What looks wrong in this panel? Name the figure and, if you can, what you ' +
+    'expected instead and why. The route and its inputs are attached below.'
+  return Object.fromEntries(
+    Object.entries(panels).map(([alias, [subCategory, subject]]) => [
+      alias,
+      { category: 'Evaluation — results / view', subCategory, subject, lead: () => lead },
+    ]),
+  )
 }
 
 interface SubCategory {
