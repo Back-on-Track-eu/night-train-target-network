@@ -674,7 +674,9 @@ nothing but the running code.
                        "formulas": { "tac_eur": { "latex": "...", "summary": "...",
                                                   "description": "...",
                                                   "inputs": [ ... ], "output": { ... } } } },
-    "emissions":     { "version": "...", "description": "...", "factors": { ... } }
+    "emissions":     { "version": "...", "description": "...", "factors": { ... } },
+    "compositions":  { "version": "0.9.5",  "description": "..." },
+    "infrastructure":{ "version": "0.9.7",  "description": "..." }
   }
 }
 ```
@@ -682,7 +684,10 @@ nothing but the running code.
 Every entry carries `version` and `description`. What comes with them
 differs by model: a formula registry for the computed ones (keyed by the
 same field names the evaluation views use, so a breakdown row maps
-straight to its formula), and an emission-factor table for `emissions`.
+straight to its formula), an emission-factor table for `emissions`, and
+nothing further for the two calibrated parameter models `compositions`
+and `infrastructure` — their versions are listed so the frontend can show
+every model version beside the panel that reads its figures.
 
 This block used to be inlined under `evaluation.models` in every compute
 response — roughly 26 KB repeated per member of a proposal family. It is
@@ -1698,7 +1703,7 @@ derived live from the model's own definitions rather than hand-copied:
 | Category | sub_categories source |
 |---|---|
 | `Infrastructure` | Live — `TrackInfrastructures` + `StopInfrastructures` fields (same collections `GET /api/params/*` serves) |
-| `Compositions` | Live — composition/operator/coach fields (`CompositionCollection`) |
+| `Compositions` | Live — composition/operator/coach fields (`CompositionCollection`), preceded by the static `Suggest a new composition` (group `Suggestion`), which the gallery's button deep-links to by alias |
 | `Evaluation — calculation method` | Live — every leaf of the evaluation model's cost/revenue/margin breakdown (`models/evaluation/views.py:Breakdown`) |
 | `Evaluation — results / view` | Live — the output views a member's evaluation section produces (`models/evaluation/views.py:VIEW_META`), followed by the builder's eight result panels (static, `group: "Builder panel"`) — the pairs the builder's "report a problem" icons deep-link to |
 | `Route or timetable` | Static — no single schema object maps cleanly onto "route concepts". Carries `Missing stop / suggest new stop`, the pair the app's stop search deep-links to (`/docs/feedback?topic=missing-stop`) |

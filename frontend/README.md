@@ -166,32 +166,53 @@ to the selection the results were computed with clears the flag on its own. A
 diverged itinerary takes precedence — that is the Evaluate button's path,
 which also re-prompts for stop suggestions.
 
+## Stop suggestions
+
+Evaluate first runs the family with `auto_stop_addition: "suggest"`: the
+backend routes exactly the user's stops and returns the candidates along the
+way, which the builder shows interleaved with the user's own stops (suggest
+mode, `lib/suggestPlacement.ts` for the ordering). Candidates toggle in and
+out from the timeline bubble or the map marker. A user's own stop — a
+terminus included — can be ticked off the route from the same two places
+while more than two remain, and ticked back on: like a pick, that is a
+choice, not an edit. Nothing is routed per click; the timeline dims the stop
+like an unpicked candidate and the map cuts its legs, bridging the gap with a
+dimmed beeline (`lib/suggestShape.ts`). Continue then recomputes once with
+`"off"` on the remaining stops, the chosen candidates placed on the leg they
+were listed on; with nothing picked and nothing removed it reuses the base
+response as is.
+
+## Removing stops from the map
+
+Every mode that shows the user's stops as route markers lets a marker be
+removed by hovering it (close icon) and clicking — under one floor,
+`stopRemovable` in `ProposalViewport.vue`: more than two stops, termini
+included. In edit mode it is the table's trash icon by other means; on a
+computed route (display mode) it opens re-edit with the stop already gone,
+exactly as _Edit_ followed by the trash icon would; in suggest mode it is
+the choice described above, routed on Continue.
+
 ---
 
 ## Landing Page Copy
 
 The pitch a first-time visitor reads on `/gallery` lives entirely in
-`en.json` under `gallery.heading`, `gallery.welcome.*`, `gallery.audience.*`
-and `gallery.story.*` — `LandingIntro.vue` holds only layout, so editing the
-text never means touching a component.
+`en.json` / `de.json` under `gallery.heading` and `gallery.welcome.*` —
+`LandingIntro.vue` holds only layout, so editing the text never means touching
+a component.
 
-The intro is two bands, both above the fold. The first carries the headline,
-the two calls to action and the argument, split into three headed blocks; the
-two columns are top-aligned inside a vertically centred row, so the lead-in
-above the headline shares a line with the first block heading. Its
-height is measured at runtime rather than fixed: the site header carries a
-background image and the API status banner comes and goes, so the offset above
-it is not a constant, and the collapsed row below it is subtracted so that row
-stays visible without scrolling.
-
-That second band — who the tool is for, and what happens to a submission — is a
-panel collapsed by default, so the pitch stays the whole first impression. It
-opens by animating `grid-template-rows` from `0fr` to `1fr`, which needs no
-height measurement: copy can grow freely without re-tuning a `max-height`.
-Toggling it scrolls the panel's bottom edge onto the fold, so opening reveals
-the whole panel, closing returns the page to where it started, and neither
-exposes the gallery below. A rule above the gallery heading keeps the two halves
-of the page apart.
+The intro is one band that fills the viewport below the header. Its left
+column holds the headline and every way onward (the filled "suggest a route"
+call to action on its own line, the quieter "see other suggestions",
+"suggest a new composition" (the feedback form, opened on the catalogue's
+fields) and "About" beneath it); the right column holds the pitch as three
+paragraphs —
+`gallery.welcome.pitch.network`, `.contribute` and `.study`. Only the last
+carries the `{source}` link to Back-on-Track's reports; adding a paragraph
+means a new key there and an entry in `PITCH_PARAGRAPHS`. The band's height is
+measured at runtime rather than fixed: the site header carries a background
+image and the API status banner comes and goes, so the offset above it is not
+a constant.
 
 `LandingIntro` emits rather than navigates — `create` opens the builder,
 `browse` scrolls to the gallery — because what follows the intro on the page is
@@ -219,7 +240,17 @@ edits reach the store through the Recalculate that computes them, and the
 scenario is deliberately not stored at all — a published proposal always
 represents the current base, and which scenario a _reader_ sees is the
 gallery's scenario panel, not the author's last click. The save is silent:
-no toast per step, just the inline "saved" line the results already carry.
+no toast per step. A failed save is not — it raises a sticky error toast.
+
+## Errors in the builder
+
+Every failure in the proposal builder — a calculation (including the
+backend's own validation text, such as a gauge clash), a save, a views fetch
+— shows in the toast stack at the top of the page, never as an inline box
+under the controls. Calc and save failures each hold one merge key
+(`proposal:calc`, `proposal:publish` in `ProposalViewport.vue`), so the next
+attempt clears the old message instead of stacking a second one; a retryable
+calc failure carries a _Try again_ action on its toast.
 
 ---
 
