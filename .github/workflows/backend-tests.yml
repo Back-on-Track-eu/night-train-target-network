@@ -250,7 +250,8 @@ jobs:
             backend/models/route/routing/docker/entrypoint.sh)
           URL="https://drive.usercontent.google.com/download?id=${FILE_ID}&export=download&confirm=t"
           curl -L "$URL" -o /tmp/graph-cache.zip
-          unzip -o /tmp/graph-cache.zip -d backend/models/route/routing/docker/graph-cache-infra-2026
+          # -j: same flattening as the container's entrypoint.
+          unzip -j -o /tmp/graph-cache.zip -d backend/models/route/routing/docker/graph-cache-infra-2026
           rm /tmp/graph-cache.zip
 
       # ------------------------------------------------------------------
