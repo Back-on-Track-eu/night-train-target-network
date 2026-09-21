@@ -5,8 +5,8 @@ The parts of scripts/precompute_route_segments.py that decide whether an
 overnight batch can be resumed, retried and uploaded — all pure, no stack
 needed: the resume reader (including the two shapes a killed run leaves
 behind), the transient/permanent split that decides what a retry round
-reattempts, the failures report, and the pgAdmin upload kit's CSV split
-and staging DDL.
+reattempts, the gauge-aware snap helper search, the failures report, and
+the pgAdmin upload kit's CSV split and staging DDL.
 
 The routing itself is covered by test_79_route_segment_cache.py.
 """
@@ -24,11 +24,14 @@ from models.route.routing.rail_router import RailRoutingError
 from models.route.routing.segment_cache import CSV_COLUMNS
 from scripts.precompute_route_segments import (
     collect_done_keys,
+    finalize,
     is_transient,
     read_failure_keys,
     read_segment_keys,
     record_failure,
     repair_partial_tail,
+    snap_helpers,
+    snap_needed,
     split_csv,
     staging_ddl,
     write_failures,
@@ -124,11 +127,20 @@ class TestFailureReport:
         for _ in range(2):
             record_failure(failures, task, RailRoutingError("HTTP 502: gateway"))
 
-        write_failures(path, failures, [("x", "y", "night_train", "v1")])
+        write_failures(
+            path,
+            failures,
+            [("x", "y", "night_train", "v1")],
+            {("x", "night_train"): "Cannot find point 0"},
+        )
 
         rows = list(csv.DictReader(open(path, newline="", encoding="utf-8")))
         assert {r["error_type"] for r in rows} == {"RailRoutingError", "NotSnapped"}
         assert [r["attempts"] for r in rows if r["stop_lo"] == "a"] == ["2"]
+        # A NotSnapped row names the end that failed and why.
+        assert [r["error_message"] for r in rows if r["stop_lo"] == "x"] == [
+            "x: Cannot find point 0"
+        ]
         # Unsnappable pairs are reported too, so the file answers "what is
         # missing" rather than "what raised".
         assert read_failure_keys(path) == {("a", "b", "v1"), ("x", "y", "v1")}
@@ -163,3 +175,86 @@ class TestUploadKit:
         # neither the graph key nor the source.
         assert "NOT NULL" not in ddl
         assert "routing_graph_key" not in ddl
+
+
+class _SnapRouter:
+    """snap_point() the way GraphHopper fails it: 'point 0' when the stop
+    itself is off the network, anything else when the helper is."""
+
+    profile = "night_train"
+
+    def __init__(self, off_network=(), disconnected=()):
+        self.off_network = set(off_network)
+        self.disconnected = set(disconnected)
+        self.calls: list[tuple[float, float]] = []
+
+    def profile_for_gauge(self, gauge_mm):
+        return self.profile if gauge_mm == 1435 else f"{self.profile}_{gauge_mm}"
+
+    def snap_point(self, lon, lat, helper, profile):
+        self.calls.append((lon, helper[0]))
+        if lon in self.off_network:
+            raise RailRoutingError("Routing engine HTTP 400: Cannot find point 0")
+        if helper[0] in self.disconnected:
+            raise RailRoutingError(
+                "Routing engine HTTP 400: Connection between locations not found"
+            )
+        return [lon, lat]
+
+
+def _stop(stop_id, lon, gauges):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(stop_id=stop_id, lon=lon, lat=0.0, gauges_mm=gauges)
+
+
+class TestSnapping:
+    # Barcelona-Sants' nearest catalog stop is Iberian-gauge only; with a
+    # nearest-stop helper its standard-gauge snap failed on a good stop.
+    STOPS = {
+        s.stop_id: s
+        for s in [
+            _stop("sants", 0.0, [1435, 1668]),
+            _stop("iberian", 0.1, [1668]),
+            _stop("cut_off", 0.2, [1435]),
+            _stop("figueres", 0.5, [1435]),
+            _stop("unknown", 0.6, None),
+            _stop("off_network", 5.0, [1435]),
+        ]
+    }
+
+    def test_helpers_carry_the_profile_gauge_nearest_first(self):
+        helpers = snap_helpers(self.STOPS["sants"], self.STOPS, 1435)
+        # Wrong gauge and unknown gauge are no basis for a snap.
+        assert [h.stop_id for h in helpers] == ["cut_off", "figueres", "off_network"]
+
+    def test_next_helper_is_tried_when_the_connection_fails(self, tmp_path):
+        router = _SnapRouter(disconnected={0.2})
+        snapped, errors = snap_needed(
+            router, self.STOPS, {("sants", "night_train")}, tmp_path / "s.csv"
+        )
+        assert ("sants", "night_train") in snapped and not errors
+        assert router.calls == [(0.0, 0.2), (0.0, 0.5)]
+
+    def test_a_stop_off_the_network_gives_up_after_one_call(self, tmp_path):
+        router = _SnapRouter(off_network={5.0})
+        snapped, errors = snap_needed(
+            router, self.STOPS, {("off_network", "night_train")}, tmp_path / "s.csv"
+        )
+        assert not snapped
+        assert "point 0" in errors[("off_network", "night_train")]
+        assert len(router.calls) == 1
+
+
+class TestFinalize:
+    def test_counts_rows_and_writes_a_readable_gzip(self, tmp_path):
+        out = tmp_path / "route_segments_test.csv"
+        _write(out, [_row(f"s{i}", f"s{i + 1}", "v1", 500) for i in range(40)])
+
+        finalize(out, {}, "infra_test", "2026-09-13T00:01:42Z", 300, 41)
+
+        meta = json.loads(out.with_suffix(".meta.json").read_text(encoding="utf-8"))
+        assert meta["n_segments"] == 40
+        gz = out.with_suffix(".csv.gz")
+        with gzip.open(gz, "rb") as fh:
+            assert fh.read() == out.read_bytes()
