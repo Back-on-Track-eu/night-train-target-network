@@ -95,6 +95,7 @@ Public surface
 
 from __future__ import annotations
 
+import threading
 import hashlib
 import json
 import logging
@@ -265,6 +266,13 @@ class CountryIndex:
                 self._polygons.append(polygon)
         self._prepared = [prep(polygon) for polygon in self._polygons]
         self._tree = STRtree(self._polygons)
+        # GEOS prepared geometries are NOT thread-safe (shapely docs): two
+        # threads calling contains() on the same PreparedGeometry corrupt the
+        # heap and the process dies in libgeos. The API serves requests from
+        # gthread workers and the precompute script routes with a thread
+        # pool, so every lookup() takes this lock. It costs ~60us per call
+        # against a ~1s routing round-trip — concurrency is unaffected.
+        self._lock = threading.Lock()
         self._avoidance_rings: dict[str, list | None] = {}
         logger.info(
             "CountryIndex: loaded %d polygons across %d countries.",
@@ -278,9 +286,10 @@ class CountryIndex:
         point = Point(lon, lat)
         # Ascending index order is alphabetical country order, so the rare
         # point on a shared boundary always resolves the same way.
-        for i in sorted(self._tree.query(point)):
-            if self._prepared[i].contains(point):
-                return self._codes[i]
+        with self._lock:
+            for i in sorted(self._tree.query(point)):
+                if self._prepared[i].contains(point):
+                    return self._codes[i]
         return None
 
     def get_largest_polygon(self, country_code: str) -> list | None:
