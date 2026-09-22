@@ -123,17 +123,24 @@ jobs:
           for f in \
             backend/models/evaluation/calc.py \
             backend/models/evaluation/views.py \
-            backend/models/evaluation/summary.py; do
+            backend/models/evaluation/summary.py \
+            backend/models/evaluation/operations.py; do
             check_version "$f" \
               "backend/models/evaluation/model.py" \
               "CALC_VERSION"
           done
 
-          # Demand model (stopgap)
-          check_version \
-            "backend/models/demand/stopgap.py" \
-            "backend/models/demand/model.py" \
-            "DEMAND_MODEL_VERSION"
+          # Demand model (DEMAND 0.1.0: allocation, OD spread, sources,
+          # the distribution on a route)
+          for f in \
+            backend/models/demand/groups.py \
+            backend/models/demand/od_matrix.py \
+            backend/models/demand/sources.py \
+            backend/models/demand/distribute.py; do
+            check_version "$f" \
+              "backend/models/demand/model.py" \
+              "DEMAND_MODEL_VERSION"
+          done
 
           # Models whose entire content is model.py (emissions factor set,
           # composition cost calibration anchor, infrastructure parameter
@@ -222,7 +229,16 @@ jobs:
           # infra-2026 prefix: the path changed with the per-graph dir
           # rename, and a key bump guarantees a clean save at the new
           # path instead of restoring an archive recorded at the old one.
-          key: openrailrouting-graph-infra-2026-${{ hashFiles('backend/models/route/routing/docker/config.yml') }}
+          # The key names everything the graph depends on: the profiles and
+          # the custom models as well as config.yml, plus the entrypoint
+          # (whose default file id is where the Drive zip is named). A graph
+          # imported under other profiles makes the routing container
+          # unhealthy without a word in this log — and actions/cache only
+          # ever restores from the run's own branch, its base or the default
+          # branch, so a pull request into staging restored staging's stale
+          # graph while every push to backend-dev restored its own fresh
+          # one (2026-09-22). -v2 retires every cache saved under the old key.
+          key: openrailrouting-graph-infra-2026-v2-${{ hashFiles('backend/models/route/routing/docker/config.yml', 'backend/models/route/routing/docker/custom_models/**', 'backend/models/route/routing/docker/entrypoint.sh') }}
 
       - name: Download graph cache if not cached
         if: steps.cache-graph.outputs.cache-hit != 'true'
@@ -234,7 +250,8 @@ jobs:
             backend/models/route/routing/docker/entrypoint.sh)
           URL="https://drive.usercontent.google.com/download?id=${FILE_ID}&export=download&confirm=t"
           curl -L "$URL" -o /tmp/graph-cache.zip
-          unzip -o /tmp/graph-cache.zip -d backend/models/route/routing/docker/graph-cache-infra-2026
+          # -j: same flattening as the container's entrypoint.
+          unzip -j -o /tmp/graph-cache.zip -d backend/models/route/routing/docker/graph-cache-infra-2026
           rm /tmp/graph-cache.zip
 
       # ------------------------------------------------------------------
@@ -256,6 +273,7 @@ jobs:
       # Start the full backend stack
       # ------------------------------------------------------------------
       - name: Start Docker stack
+        id: stack
         run: |
           cd backend/docker
           cp .env.example .env
@@ -279,6 +297,16 @@ jobs:
           POSTGRES_PASSWORD: devpassword
           POSTGRES_DB:       target_network_test_db
           POSTGRES_PORT:     5432
+
+      # A routing container that comes up unhealthy fails `compose up` before
+      # the API wait below ever dumps the logs — so say why here.
+      - name: Routing container logs on failure
+        if: failure() && steps.stack.outcome == 'failure'
+        run: |
+          echo "::group::graph cache on the runner"
+          ls -la backend/models/route/routing/docker/graph-cache-infra-2026 || true
+          echo "::endgroup::"
+          docker compose -f backend/docker/docker-compose.yml logs --tail 200 openrailrouting-infra-2026
 
       - name: Wait for API to be healthy
         run: |

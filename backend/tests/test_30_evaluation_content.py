@@ -5,7 +5,7 @@ Content-logic tests for the evaluation model (models/evaluation/calc.py)
 — the numbers, not just the shape.
 
 Controlled demand scenarios need an override POST /api/proposal/calc
-deliberately doesn't offer (it always builds fresh and runs the stopgap
+deliberately doesn't offer (it always builds fresh and runs the demand
 demand model internally), so these tests call the model layer directly
 (tests/helpers.py:compute_evaluation_domain() — route_from_dict() ->
 add_directional_domain_demand() -> models.pipeline.
@@ -1172,13 +1172,13 @@ class TestCateringContribution:
     def test_contribution_is_passengers_times_the_rate(self, loader, route_berlin_wien):
         """Per class since CALC 0.9.30 — the route total is the sum over the
         classes it actually carries, not one rate times everybody."""
-        from models.demand.model import STOPGAP_CATERING_EUR_PER_PAX_BY_CLASS
+        from models.demand.model import CATERING_EUR_PER_PAX_BY_CLASS
 
         costed, result = compute_evaluation_domain(
             route_berlin_wien, loader, demand=[("Seat", 30, 49.0)]
         )
         expected = sum(
-            od["places_sold"] * STOPGAP_CATERING_EUR_PER_PAX_BY_CLASS[od["class_main"]]
+            od["places_sold"] * CATERING_EUR_PER_PAX_BY_CLASS[od["class_main"]]
             for tp in costed["trip_pairs"]
             for od in tp["od_pairs"]
         )
@@ -1568,7 +1568,7 @@ class TestThreePartTariff:
     def test_the_base_fare_has_a_fixed_part(self, loader, route_berlin_wien):
         """Two OD pairs of different length no longer differ by the full
         ratio of their distances — the fixed term is paid by both."""
-        from models.demand.model import STOPGAP_FARE_PER_PAX_BY_CLASS
+        from models.demand.model import FARE_PER_PAX_BY_CLASS
 
         costed, _ = compute_evaluation_domain(
             route_berlin_wien, loader, demand=[("Seat", 30, 49.0)]
@@ -1579,7 +1579,7 @@ class TestThreePartTariff:
             for od in tp["od_pairs"]
             if od["places_sold"] > 0
         )
-        assert prices[0] >= STOPGAP_FARE_PER_PAX_BY_CLASS["Seat"]
+        assert prices[0] >= FARE_PER_PAX_BY_CLASS["Seat"]
 
     def test_services_allocate_like_the_other_leaves(self, eval_standard):
         """Same allocator, so the OD cells still sum to the route total."""

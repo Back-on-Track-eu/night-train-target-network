@@ -88,6 +88,7 @@ backend/models/infrastructure/facility/calib/seed/
 backend/models/infrastructure/route_context/calib/seed/
 backend/models/energy/calib/seed/
 backend/models/scenarios/calib/seed/
+backend/models/demand/calib/vat/seed/
 # Demand model bulk inputs and derived artifacts. calib/raw/ holds third-party
 # downloads (ETISplus OD, census and GHS-POP grids) fetched from their sources;
 # calib/out/ holds everything the ETL notebooks derive from them. Tens of GB
@@ -156,3 +157,9 @@ desktop.ini
 backend/models/infrastructure/stops/charges/sources/
 # Jupyter autosave state
 
+# Route-segment precompute artefacts (backend/scripts/precompute_route_segments.py):
+# the routed CSV runs to gigabytes, the snapped/failure sidecars and the
+# pgAdmin upload kit are derived from it, and every one of them is
+# regenerable. The .gz + .meta.json pair belongs on Drive, not in git.
+backend/scripts/data/route_segments_*
+backend/scripts/data/upload_*/

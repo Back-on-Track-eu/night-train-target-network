@@ -515,7 +515,8 @@ def compute(scenario_id: int, stops: list[str], composition_id: str) -> dict:
         "stops": stops,
         "composition_id": composition_id,
         "routing_mode": "fullRouting",
-        "schedule_mode": "alwaysDaily",
+        # Daily, spelled the 0.9.40 way (one frequency; the default is 3).
+        "schedule": {"days_per_week": 7},
         "timetable_mode": "simpleAutomatic",
         "auto_stop_addition": "off",
     }

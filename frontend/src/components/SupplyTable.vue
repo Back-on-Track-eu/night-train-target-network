@@ -20,9 +20,9 @@ import { useCompareFormat } from '@/composables/useCompareFormat'
 // which said the same thing about every route.
 //
 // "Fit to demand" is in the header but not selectable (a "coming soon"
-// chip): the demand stopgap applies one uniform utilisation to every
-// composition, so the column would read the same for all of them — it fills
-// once models/demand/ lands.
+// chip) until the Demand tab's utilisation ladder lands (manual demand
+// inputs, phase D): DEMAND 0.1.0 does tell the compositions apart, and the
+// ladder is where that comparison is drawn.
 const props = defineProps<{
   compositions: Composition[]
   cells: Map<string, FamilyMember>
@@ -189,7 +189,7 @@ const headerClass =
                 {{ t('proposal.supply.units.centPerPlaceKm') }}
               </span>
             </th>
-            <!-- Not selectable: the demand stopgap cannot distinguish compositions. -->
+            <!-- Not selectable until the utilisation ladder (Demand tab) carries it. -->
             <th
               class="cursor-not-allowed px-2 py-1.5 text-left text-[11px] font-normal text-primary-50/35"
               :title="t('proposal.supply.fitHint')"

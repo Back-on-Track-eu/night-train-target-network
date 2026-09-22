@@ -11,12 +11,15 @@ Schedule: days per week for each of the twelve months (0 = not running)
 plus a minimum terminal turnaround. Specific days of week aren't
 modelled, they don't affect cost or fleet sizing.
 
-Coach fleet sizing (TripPair.coaches_required): a night train composition
-takes two operating days to complete one out-and-back cycle (depart
-evening, arrive next morning, layover, return the following evening).
-DAILY service needs 2 coach sets; THREE_PER_WEEK needs 1, since the gap
-between operating days is enough for one set to complete its cycle. Peak
-season governs.
+Coach fleet sizing (TripPair.trainsets): a night train composition takes
+two operating days to complete one out-and-back cycle (depart evening,
+arrive next morning, layover, return the following evening). A daily
+service needs 2 coach sets; three days a week needs 1, since the gap
+between operating days is enough for one set to complete its cycle. The
+busiest month governs. Since ROUTE_BUILDER 0.9.40 the request usually
+posts one frequency, which the API boundary expands to the same number in
+every month — the grid stays so a seasonal plan can return without a
+domain change.
 
 Locomotives are not fleet-sized here — they're utilization-based
 full-service leased and billed per segment in calc.py
@@ -35,7 +38,7 @@ from models.params import ODPair, Composition
 from models.route.trip import Trip
 
 # Standard schedule assumptions live in the route model's central registry —
-# see models/route/version.py (STANDARD VALUES).
+# see models/route/model.py (STANDARD VALUES).
 from models.route.model import DEFAULT_MIN_TURNAROUND_MIN, EVALUATION_YEAR
 
 # =============================================================================
@@ -201,8 +204,9 @@ class TripPair:
     valid origin→destination×class combination. Lives here (not on Route)
     because demand is bounded by this pair's composition capacity: you
     cannot sell more places than the composition provides for that class.
-    Populated either by user input or by the stopgap demand model
-    (models/demand/stopgap.py's distribute_demand()).
+    Populated by the manual demand model (models/demand/distribute.py's
+    distribute_demand(), DEMAND 0.1.0) — or directly by tests that need
+    controlled demand.
 
     composition_count: {comp_id: coaches_required} — a single entry,
     since a TripPair uses exactly one composition. Keyed by comp_id

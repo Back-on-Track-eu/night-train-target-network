@@ -28,7 +28,17 @@ import jwt
 import pytest
 import requests
 
-from api.gate_page import media_files
+from api.gate_page import gate_is_open, media_files
+
+# The check answers 204 to everyone once the launch moment has passed, so the
+# "ungated visitor is bounced" cases only hold before it and the "everyone is
+# let through" case only after — each skips on the wrong side of LAUNCH.
+before_launch = pytest.mark.skipif(
+    gate_is_open(), reason="launch moment passed — the gate is open to everyone"
+)
+after_launch = pytest.mark.skipif(
+    not gate_is_open(), reason="before the launch moment — the gate still bounces"
+)
 
 _TIMEOUT = 15
 COOKIE = "tn_gate"
@@ -162,16 +172,29 @@ def test_check_passes_with_a_freshly_issued_cookie(api_base, live_code):
     assert resp.status_code == 204
 
 
+@before_launch
 def test_check_without_cookie_redirects_to_gate(api_base):
     resp = _check(api_base)
     assert resp.status_code == 302
     assert resp.headers["Location"].endswith("/gate")
 
 
+@after_launch
+def test_check_lets_everyone_through_after_launch(api_base):
+    """No cookie, no code: 204, and the page itself sends the visitor to
+    the app instead of a countdown."""
+    assert _check(api_base).status_code == 204
+    page = requests.get(f"{api_base}/gate", timeout=_TIMEOUT, allow_redirects=False)
+    assert page.status_code == 302
+    assert page.headers["Location"].endswith("/")
+
+
+@before_launch
 def test_check_rejects_garbage_cookie(api_base):
     assert _check(api_base, cookies={COOKIE: "not-a-jwt"}).status_code == 302
 
 
+@before_launch
 def test_check_rejects_tampered_signature(api_base, live_code):
     token = _redeem(api_base, live_code).cookies[COOKIE]
     # Flip a character in the MIDDLE of the signature segment. The final
@@ -198,6 +221,7 @@ def _forge(payload, secret=None):
 
 
 @_needs_secret
+@before_launch
 def test_check_rejects_token_signed_with_another_secret(api_base):
     token = _forge(
         {
@@ -211,6 +235,7 @@ def test_check_rejects_token_signed_with_another_secret(api_base):
 
 
 @_needs_secret
+@before_launch
 def test_check_rejects_expired_token(api_base):
     token = _forge(
         {
@@ -223,6 +248,7 @@ def test_check_rejects_expired_token(api_base):
 
 
 @_needs_secret
+@before_launch
 def test_a_user_token_cannot_open_the_gate(api_base):
     """The gate and the auth plane are separate mechanisms. A correctly-signed
     token for any other audience must not satisfy the gate."""
@@ -241,6 +267,7 @@ def test_a_user_token_cannot_open_the_gate(api_base):
 # =============================================================================
 
 
+@before_launch
 def test_gate_page_is_reachable_without_a_cookie(api_base):
     resp = requests.get(f"{api_base}/gate", timeout=_TIMEOUT)
     assert resp.status_code == 200

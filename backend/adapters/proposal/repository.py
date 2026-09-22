@@ -17,8 +17,13 @@ sidecar rows pruned in the same transaction). See adapters/proposal/README.md
 The actual GTFS + sidecar writing is NOT here — gtfs_store.py's
 insert_route_gtfs() (WP3) is the sole writer, called from within
 publish()'s transaction via the same cursor. This module owns the
-proposals.proposals / proposal_summaries / update_log rows and the
-transaction boundary around all of it. The prefixed-ID rewrite it applies
+proposals.proposals / proposal_summaries / proposal_scenario_summaries /
+update_log rows and the transaction boundary around all of it. The
+scenario rows (README.md §5.4a) are computed by the caller
+(api/helpers/scenario_summaries.py — this layer never runs a family)
+and handed in as `scenario_rows`; None means "this caller could not
+compute them" (db/dev/seed.py has no router) and clears the proposal's
+rows so nothing stale outlives an overwrite. The prefixed-ID rewrite it applies
 at publish time lives in id_prefix.py (shared with api/helpers/
 member_compute.py, which strips the neutral prefix for /calc).
 
@@ -172,13 +177,14 @@ class ProposalRepository:
         name: str,
         computed: dict,
         is_new: bool,
+        scenario_rows: Optional[list[dict]],
     ) -> dict:
         """The write-side state transition shared by publish() and
         refresh_proposal(): prefix rewrite, container row, GTFS + sidecar
-        write, summary upsert. NOT the update_log row or the transaction
-        boundary — callers own those, since they differ (event name,
-        ownership check, based_on handling) between a user publish and a
-        system refresh.
+        write, summary upsert, scenario rows (§5.4a). NOT the update_log
+        row or the transaction boundary — callers own those, since they
+        differ (event name, ownership check, based_on handling) between a
+        user publish and a system refresh.
 
         Returns {prefixed, route_dict, evaluation_full, created_at,
         updated_at} — everything both callers' own return dicts need.
@@ -231,6 +237,12 @@ class ProposalRepository:
             prefixed=prefixed,
             summary=summary,
         )
+        self._replace_scenario_summaries(
+            cur,
+            proposal_id=proposal_id,
+            proposal_version=proposal_version,
+            rows=scenario_rows or [],
+        )
 
         return {
             "prefixed": prefixed,
@@ -248,10 +260,17 @@ class ProposalRepository:
         computed: dict,
         proposal_id: Optional[int] = None,
         based_on_proposal_id: Optional[int] = None,
+        scenario_rows: Optional[list[dict]] = None,
     ) -> dict:
         """Publish a computed proposal (new or overwrite) — one
         transaction: container row + GTFS/sidecars + summary row +
-        update_log, prefixed IDs assigned here.
+        scenario rows + update_log, prefixed IDs assigned here.
+
+        scenario_rows: api/helpers/scenario_summaries.py's
+        compute_scenario_rows() output — the §5.4a projection on every
+        current variant. None (the seed, which has no router) writes no
+        rows; scripts/refresh_proposals.py --scenario-summaries fills
+        them in later.
 
         computed: api/helpers/member_compute.compute_member()'s
         output — bare structural ids ("R1", "R1_D0_T1", ...), NOT yet
@@ -295,6 +314,7 @@ class ProposalRepository:
                     name=name,
                     computed=computed,
                     is_new=(mode == "new"),
+                    scenario_rows=scenario_rows,
                 )
                 prefixed = state["prefixed"]
                 route_dict = state["route_dict"]
@@ -347,6 +367,7 @@ class ProposalRepository:
         proposal_id: int,
         computed: dict,
         detail: dict,
+        scenario_rows: Optional[list[dict]] = None,
     ) -> dict:
         """System-triggered recompute-and-overwrite-in-place (§4.2) — the
         write-path counterpart to publish(mode="overwrite") used by
@@ -386,6 +407,7 @@ class ProposalRepository:
                     name=name,
                     computed=computed,
                     is_new=False,
+                    scenario_rows=scenario_rows,
                 )
 
                 self._write_update_log(
@@ -441,7 +463,7 @@ class ProposalRepository:
         the new state (§4: 'previous state hard-deleted in the same
         transaction'). routes/services cascade almost everything
         (trips -> stop_times/segments/od_pairs/timetable_warnings;
-        routes -> parkings/shuntings/seasonal_schedules; services ->
+        routes -> parkings/shuntings; services ->
         calendar/calendar_dates) — shapes don't cascade from either (both
         trips.shape_id and segments.shape_id are ON DELETE SET NULL, not
         the reverse), so they're deleted explicitly by the shared
@@ -598,6 +620,168 @@ class ProposalRepository:
             f"ON CONFLICT (proposal_id) DO UPDATE SET {assignments}, updated_at = now()",
             values,
         )
+
+    # The §5.4 KPI columns as proposal_scenario_summaries carries them —
+    # build_summary_db_row()'s keys minus geom_simplified, which needs the
+    # PostGIS expression. Listed once so the insert and the gallery's
+    # variant branch cannot disagree.
+    _SCENARIO_METRIC_COLUMNS = (
+        "total_distance_km",
+        "total_time_h",
+        "avg_speed_kmh",
+        "n_stops",
+        "countries",
+        "country_relations",
+        "stop_ids",
+        "cost_eur_per_train_km",
+        "revenue_eur_per_train_km",
+        "margin_eur_per_train_km",
+        "net_eur_per_year",
+        "subsidy_eur_per_year",
+        "services_revenue_eur",
+        "catering_contribution_eur",
+        "operating_days_per_year",
+        "departures_per_year",
+        "trainsets_physical",
+        "train_km_per_year",
+        "available_place_km_per_year",
+        "sold_place_km_per_year",
+        "passengers_per_year",
+        "demand_trips_per_year",
+        "demand_trip_km_per_year",
+        "shift_air_trips_per_year",
+        "shift_air_trip_km_per_year",
+        "shift_other_trips_per_year",
+        "shift_other_trip_km_per_year",
+        "co2_savings_t_per_year",
+        "subsidy_eur_per_t_co2",
+        "demand_kpis_placeholder",
+        "co2_g_per_pax_km",
+    )
+
+    def _replace_scenario_summaries(
+        self,
+        cur,
+        proposal_id: int,
+        proposal_version: int,
+        rows: list[dict],
+    ) -> None:
+        """The proposal's §5.4a rows, replaced wholesale: the variant set
+        can change with the scenario catalogue and an overwrite can change
+        the composition, so an upsert would leave rows behind that
+        describe neither. An error row carries NULL in every figure —
+        the columns are nullable for exactly that member."""
+        cur.execute(
+            "DELETE FROM proposals.proposal_scenario_summaries WHERE proposal_id = %s",
+            (proposal_id,),
+        )
+        if not rows:
+            return
+        identity_columns = (
+            "proposal_id",
+            "proposal_version",
+            "scenario_variant_id",
+            "scenario_id",
+            "measure_set_id",
+            "composition_id",
+            "route_builder_version",
+            "calc_version",
+            "status",
+            "error_code",
+        )
+        columns = list(identity_columns) + list(self._SCENARIO_METRIC_COLUMNS)
+        columns += ["geom_simplified", "segments"]
+        placeholders = ["%s"] * (
+            len(identity_columns) + len(self._SCENARIO_METRIC_COLUMNS)
+        )
+        placeholders += ["ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326)", "%s"]
+        sql = (
+            f"INSERT INTO proposals.proposal_scenario_summaries ({', '.join(columns)}) "
+            f"VALUES ({', '.join(placeholders)})"
+        )
+        for row in rows:
+            summary = row.get("summary") or {}
+            values = [
+                proposal_id,
+                proposal_version,
+                row["scenario_variant_id"],
+                row["scenario_id"],
+                row["measure_set_id"],
+                row["composition_id"],
+                ROUTE_BUILDER_VERSION,
+                CALC_VERSION,
+                row["status"],
+                row.get("error_code"),
+            ]
+            values += [summary.get(col) for col in self._SCENARIO_METRIC_COLUMNS]
+            geometry = summary.get("geom_simplified")
+            values += [
+                Json(geometry) if geometry is not None else None,
+                Json(row["segments"]) if row.get("segments") is not None else None,
+            ]
+            cur.execute(sql, values)
+
+    def replace_scenario_summaries(self, proposal_id: int, rows: list[dict]) -> None:
+        """The backfill's write (scripts/refresh_proposals.py
+        --scenario-summaries): the §5.4a rows for one proposal in their
+        own transaction, at the proposal's CURRENT version, without
+        touching the container, the route or the base summary. FOR UPDATE
+        so a publish racing this write serialises behind it.
+
+        Raises ProposalNotFoundError for a proposal deleted between the
+        work-queue query and this call."""
+        with self._pool.connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT proposal_version FROM proposals.proposals "
+                    "WHERE proposal_id = %s FOR UPDATE",
+                    (proposal_id,),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    raise ProposalNotFoundError(proposal_id)
+                self._replace_scenario_summaries(
+                    cur,
+                    proposal_id=proposal_id,
+                    proposal_version=row["proposal_version"],
+                    rows=rows,
+                )
+            conn.commit()
+
+    def list_scenario_backfill(self, limit: Optional[int] = None) -> list[dict]:
+        """The backfill's work queue: proposals whose §5.4a rows are
+        missing, behind the container's version, behind the running code
+        versions, or not covering every current variant. Filtered in SQL
+        like list_outdated() — in steady state nothing needs doing.
+        Returns proposal_id and compute_request per row."""
+        with self._cursor() as cur:
+            cur.execute(
+                "WITH current_variants AS ("
+                "  SELECT v.scenario_variant_id "
+                "  FROM scenario.scenario_variants v "
+                "  JOIN scenario.scenarios s ON s.scenario_id = v.scenario_id "
+                "  WHERE s.is_current_scenario"
+                "), covered AS ("
+                "  SELECT proposal_id, count(*) AS n_rows "
+                "  FROM proposals.proposal_scenario_summaries ps "
+                "  WHERE ps.route_builder_version = %s AND ps.calc_version = %s "
+                "    AND ps.proposal_version = ("
+                "      SELECT proposal_version FROM proposals.proposals p "
+                "      WHERE p.proposal_id = ps.proposal_id) "
+                "    AND ps.scenario_variant_id IN (SELECT scenario_variant_id "
+                "                                   FROM current_variants) "
+                "  GROUP BY proposal_id"
+                ") "
+                "SELECT p.proposal_id, p.compute_request "
+                "FROM proposals.proposals p "
+                "LEFT JOIN covered c ON c.proposal_id = p.proposal_id "
+                "WHERE COALESCE(c.n_rows, 0) < (SELECT count(*) FROM current_variants) "
+                "ORDER BY p.proposal_id" + (" LIMIT %s" if limit is not None else ""),
+                (ROUTE_BUILDER_VERSION, CALC_VERSION)
+                + ((limit,) if limit is not None else ()),
+            )
+            rows = cur.fetchall()
+        return [dict(row) for row in rows]
 
     def _write_update_log(
         self,
@@ -779,7 +963,7 @@ class ProposalRepository:
         "passengers_per_year, "
         "demand_trips_per_year, demand_trip_km_per_year, "
         "shift_air_trips_per_year, shift_air_trip_km_per_year, "
-        "shift_car_trips_per_year, shift_car_trip_km_per_year, "
+        "shift_other_trips_per_year, shift_other_trip_km_per_year, "
         "co2_savings_t_per_year, subsidy_eur_per_t_co2, "
         "demand_kpis_placeholder, co2_g_per_pax_km, created_at, updated_at"
     )
@@ -796,6 +980,11 @@ class ProposalRepository:
     _ENGAGEMENT_CTE = (
         "proposal_summaries_with_engagement AS ("
         "  SELECT ps.*, "
+        # The three §5.4a columns, so the union branch below is one SELECT
+        # list whichever table it reads: the base projection is always a
+        # computed row of no particular variant.
+        "         'ok'::text AS status, NULL::text AS error_code, "
+        "         NULL::int AS scenario_variant_id, "
         "         u.display_name, "
         "         starts_with(u.display_name, 'guest_') AS is_guest, "
         "         COALESCE(l.likes_count, 0)::int AS likes_count, "
@@ -811,6 +1000,87 @@ class ProposalRepository:
         "    FROM proposals.comments WHERE NOT is_deleted GROUP BY proposal_id"
         "  ) c ON c.proposal_id = ps.proposal_id"
         ")"
+    )
+
+    # The §5.4a counterpart of _ENGAGEMENT_CTE: the SAME rows as the base
+    # projection — identity, name, the filterable columns (countries,
+    # stop_ids, relations, composition, timestamps) all still come from
+    # proposal_summaries, so a scenario never changes which proposals a
+    # filter returns — with the figures swapped in from the scenario table
+    # for ONE variant. A proposal that variant could not evaluate is still
+    # a row (status 'error', figures NULL), and one whose rows have not
+    # been backfilled yet is still a row too (status 'missing', figures
+    # NULL, the base geometry so the map keeps drawing it). The variant id
+    # is inlined by _gallery_ctes(): every reader passes its own parameter
+    # list straight through, and the id is a validated int before it
+    # reaches this layer.
+    _SCENARIO_ENGAGEMENT_CTE = (
+        "proposal_summaries_with_engagement AS ("
+        "  SELECT ps.proposal_id, ps.proposal_version, ps.user_id, ps.name, "
+        "         ps.route_fingerprint, ps.composition_id, "
+        "         COALESCE(sv.scenario_id, ps.scenario_id) AS scenario_id, "
+        "         ps.route_builder_version, ps.calc_version, "
+        "         ps.countries, ps.country_relations, ps.stop_ids, "
+        "         {metrics}, "
+        "         CASE WHEN sv.status = 'ok' THEN sv.geom_simplified "
+        "              WHEN sv.proposal_id IS NULL THEN ps.geom_simplified END "
+        "           AS geom_simplified, "
+        "         ps.created_at, ps.updated_at, "
+        "         COALESCE(sv.status, 'missing') AS status, sv.error_code, "
+        "         {variant}::int AS scenario_variant_id, "
+        "         u.display_name, "
+        "         starts_with(u.display_name, 'guest_') AS is_guest, "
+        "         COALESCE(l.likes_count, 0)::int AS likes_count, "
+        "         COALESCE(c.comments_count, 0)::int AS comments_count "
+        "  FROM proposals.proposal_summaries ps "
+        "  LEFT JOIN proposals.proposal_scenario_summaries sv "
+        "         ON sv.proposal_id = ps.proposal_id "
+        "        AND sv.scenario_variant_id = {variant} "
+        "  LEFT JOIN admin.users u ON u.user_id = ps.user_id "
+        "  LEFT JOIN ("
+        "    SELECT proposal_id, count(*) AS likes_count "
+        "    FROM proposals.likes GROUP BY proposal_id"
+        "  ) l ON l.proposal_id = ps.proposal_id "
+        "  LEFT JOIN ("
+        "    SELECT proposal_id, count(*) AS comments_count "
+        "    FROM proposals.comments WHERE NOT is_deleted GROUP BY proposal_id"
+        "  ) c ON c.proposal_id = ps.proposal_id"
+        ")"
+    )
+
+    # The scenario row's figure columns — everything in
+    # _SCENARIO_METRIC_COLUMNS that is a quantity of the evaluation rather
+    # than a description of the route the filters read. NULL unless the
+    # variant's row is status 'ok'.
+    _SCENARIO_FIGURE_COLUMNS = (
+        "total_distance_km",
+        "total_time_h",
+        "avg_speed_kmh",
+        "n_stops",
+        "cost_eur_per_train_km",
+        "revenue_eur_per_train_km",
+        "margin_eur_per_train_km",
+        "net_eur_per_year",
+        "subsidy_eur_per_year",
+        "services_revenue_eur",
+        "catering_contribution_eur",
+        "operating_days_per_year",
+        "departures_per_year",
+        "trainsets_physical",
+        "train_km_per_year",
+        "available_place_km_per_year",
+        "sold_place_km_per_year",
+        "passengers_per_year",
+        "demand_trips_per_year",
+        "demand_trip_km_per_year",
+        "shift_air_trips_per_year",
+        "shift_air_trip_km_per_year",
+        "shift_other_trips_per_year",
+        "shift_other_trip_km_per_year",
+        "co2_savings_t_per_year",
+        "subsidy_eur_per_t_co2",
+        "demand_kpis_placeholder",
+        "co2_g_per_pax_km",
     )
 
     # The two UNION branches of the gallery (WP10 step 6b). One shared
@@ -841,12 +1111,13 @@ class ProposalRepository:
         "       passengers_per_year, "
         "       demand_trips_per_year, demand_trip_km_per_year, "
         "       shift_air_trips_per_year, shift_air_trip_km_per_year, "
-        "       shift_car_trips_per_year, shift_car_trip_km_per_year, "
+        "       shift_other_trips_per_year, shift_other_trip_km_per_year, "
         "       co2_savings_t_per_year, subsidy_eur_per_t_co2, "
         "       demand_kpis_placeholder, co2_g_per_pax_km, geom_simplified, "
         "       likes_count, comments_count, display_name, is_guest, "
         "       created_at, updated_at, "
-        "       NULL::boolean AS geometry_routed, NULL::text AS ontd_url "
+        "       NULL::boolean AS geometry_routed, NULL::text AS ontd_url, "
+        "       status, error_code, scenario_variant_id "
         "FROM proposal_summaries_with_engagement"
     )
     _GALLERY_EXISTING_BRANCH = (
@@ -876,8 +1147,8 @@ class ProposalRepository:
         "       NULL::numeric AS demand_trip_km_per_year, "
         "       NULL::numeric AS shift_air_trips_per_year, "
         "       NULL::numeric AS shift_air_trip_km_per_year, "
-        "       NULL::numeric AS shift_car_trips_per_year, "
-        "       NULL::numeric AS shift_car_trip_km_per_year, "
+        "       NULL::numeric AS shift_other_trips_per_year, "
+        "       NULL::numeric AS shift_other_trip_km_per_year, "
         "       NULL::numeric AS co2_savings_t_per_year, "
         "       NULL::numeric AS subsidy_eur_per_t_co2, "
         "       NULL::boolean AS demand_kpis_placeholder, co2_g_per_pax_km, "
@@ -885,24 +1156,44 @@ class ProposalRepository:
         "       NULL::int AS likes_count, NULL::int AS comments_count, "
         "       NULL::text AS display_name, NULL::boolean AS is_guest, "
         "       NULL::timestamptz AS created_at, NULL::timestamptz AS updated_at, "
-        "       geometry_routed, ontd_url "
+        "       geometry_routed, ontd_url, "
+        "       NULL::text AS status, NULL::text AS error_code, "
+        "       NULL::int AS scenario_variant_id "
         "FROM ontd.route_summaries"
     )
 
-    def _gallery_cte(self, filters: Optional[dict]) -> str:
-        """`gallery AS (...)` — built from only the requested source
+    def _gallery_ctes(
+        self, filters: Optional[dict], scenario_variant_id: Optional[int] = None
+    ) -> str:
+        """The WITH body every gallery reader starts from: the engagement
+        CTE, then `gallery AS (...)` built from only the requested source
         branch(es) (filter.sources, DEFAULT both), so a
-        sources=["proposal"] request compiles to exactly the pre-6b
-        query plan and never touches the ontd schema at all. Must be
-        preceded by _ENGAGEMENT_CTE in the same WITH (the proposal
-        branch reads proposal_summaries_with_engagement)."""
+        sources=["proposal"] request compiles to exactly the pre-6b query
+        plan and never touches the ontd schema at all.
+
+        scenario_variant_id (§5.4a) swaps the proposal side's FIGURES: the
+        base projection when None (today's rows, today's plan); otherwise
+        the same rows with that variant's figures joined in — never a
+        different set of proposals, so a filter answers the same whichever
+        scenario is read. The existing branch is scenario-independent
+        either way."""
+        if scenario_variant_id is None:
+            engagement = self._ENGAGEMENT_CTE
+        else:
+            engagement = self._SCENARIO_ENGAGEMENT_CTE.format(
+                metrics=", ".join(
+                    f"CASE WHEN sv.status = 'ok' THEN sv.{col} END AS {col}"
+                    for col in self._SCENARIO_FIGURE_COLUMNS
+                ),
+                variant=int(scenario_variant_id),
+            )
         sources = (filters or {}).get("sources") or list(DEFAULT_SOURCES)
         branches = []
         if "proposal" in sources:
             branches.append(self._GALLERY_PROPOSAL_BRANCH)
         if "existing" in sources:
             branches.append(self._GALLERY_EXISTING_BRANCH)
-        return "gallery AS (" + " UNION ALL ".join(branches) + ")"
+        return engagement + ", gallery AS (" + " UNION ALL ".join(branches) + ")"
 
     def list_summaries(
         self,
@@ -910,16 +1201,18 @@ class ProposalRepository:
         sort: Optional[list[dict]] = None,
         limit: Optional[int] = None,
         offset: int = 0,
+        scenario_variant_id: Optional[int] = None,
     ) -> tuple[list[dict], int]:
         """The full §7.1 `summaries` section (WP6; sources union WP10
         step 6b) — every generic filter
         (adapters/proposal/filter_builder.py), sorted (NULLS LAST, so
         existing rows trail proposals on the default newest-first),
         windowed-counted, paginated over the source union. Returns
-        (rows, total_before_pagination)."""
+        (rows, total_before_pagination). scenario_variant_id reads the
+        proposal side from the §5.4a rows of that variant."""
         where_sql, params = build_where(filters or {})
         where_clause = f" WHERE {where_sql}" if where_sql else ""
-        ctes = f"WITH {self._ENGAGEMENT_CTE}, {self._gallery_cte(filters)} "
+        ctes = f"WITH {self._gallery_ctes(filters, scenario_variant_id)} "
 
         with self._cursor() as cur:
             cur.execute(
@@ -932,7 +1225,7 @@ class ProposalRepository:
                 f"{ctes}"
                 f"SELECT source, route_id, geometry_routed, ontd_url, "
                 f"{self._SUMMARY_COLUMNS}, likes_count, comments_count, "
-                f"display_name, is_guest "
+                f"display_name, is_guest, status, error_code, scenario_variant_id "
                 f"FROM gallery{where_clause} "
                 f"ORDER BY {build_order_by(sort)}"
             )
@@ -944,7 +1237,9 @@ class ProposalRepository:
             rows = cur.fetchall()
         return [dict(row) for row in rows], total
 
-    def map_lines(self, filters: Optional[dict] = None) -> list[dict]:
+    def map_lines(
+        self, filters: Optional[dict] = None, scenario_variant_id: Optional[int] = None
+    ) -> list[dict]:
         """`map_lines` section (§7.1, WP6.1 revision; existing-route
         merge WP10 step 6b): one row per distinct stop-pair corridor
         within the filtered set — not one row per proposal or route. A
@@ -995,16 +1290,21 @@ class ProposalRepository:
         preserve_topology=False used on the projection side, so both
         render at the same fidelity; see
         MAP_LINES_SIMPLIFY_TOLERANCE_DEG for why the tolerance is its
-        own value."""
+        own value.
+
+        scenario_variant_id (§5.4a): a non-base variant's route is not in
+        proposals.segments/shapes, so its corridors come from the
+        scenario row's `segments` JSON — one LineString per collapsed
+        stop pair, keyed "A__B" — unnested here at the same grain. Only
+        rows the variant evaluated contribute (an error or not-yet-
+        backfilled proposal draws no corridor on that scenario; its card
+        is still listed). The representative geometry is still fetched by
+        reference (the proposal id, then that key), so the geometry stays
+        out of the grouping aggregate on this path as well."""
         where_sql, params = build_where(filters or {})
         where_clause = f" WHERE {where_sql}" if where_sql else ""
-        with self._cursor() as cur:
-            cur.execute(
-                f"WITH {self._ENGAGEMENT_CTE}, {self._gallery_cte(filters)}, filtered AS ("
-                "  SELECT source, route_id, proposal_id, proposal_version, "
-                "         margin_eur_per_train_km "
-                f"  FROM gallery{where_clause}"
-                "), segs AS ("
+        if scenario_variant_id is None:
+            proposal_segs = (
                 "  SELECT f.source, f.proposal_id, f.route_id, "
                 "         f.margin_eur_per_train_km, "
                 "         LEAST(s.from_stop_id, s.to_stop_id) AS stop_a, "
@@ -1016,6 +1316,52 @@ class ProposalRepository:
                 "   AND t.route_id = 'P' || f.proposal_id || '_V' || f.proposal_version || '_R1' "
                 "  JOIN proposals.segments s ON s.trip_id = t.trip_id "
                 "  WHERE s.shape_id IS NOT NULL "
+            )
+            rep_geometry = (
+                "  LEFT JOIN proposals.shapes sh ON sh.shape_id = g.rep_shape_id "
+                "  LEFT JOIN ontd.route_corridors rc "
+                "         ON rc.route_id = g.rep_route_id "
+                "        AND rc.stop_a = g.stop_a AND rc.stop_b = g.stop_b"
+            )
+            rep_geometry_expr = "COALESCE(sh.geometry, rc.geometry)::text"
+        else:
+            variant = int(scenario_variant_id)
+            # shape_id doubles as "which proposal to fetch the corridor's
+            # geometry from": the key itself is the corridor, so the
+            # proposal id is the whole reference.
+            proposal_segs = (
+                "  SELECT f.source, f.proposal_id, f.route_id, "
+                "         f.margin_eur_per_train_km, "
+                "         split_part(seg.key, '__', 1) AS stop_a, "
+                "         split_part(seg.key, '__', 2) AS stop_b, "
+                "         f.proposal_id::text AS shape_id "
+                "  FROM filtered f "
+                "  JOIN proposals.proposal_scenario_summaries ss "
+                "    ON f.source = 'proposal' AND ss.proposal_id = f.proposal_id "
+                f"   AND ss.scenario_variant_id = {variant} AND ss.status = 'ok' "
+                "  CROSS JOIN LATERAL jsonb_each(COALESCE(ss.segments, '{}'::jsonb)) "
+                "    AS seg(key, geometry) "
+            )
+            rep_geometry = (
+                "  LEFT JOIN proposals.proposal_scenario_summaries sr "
+                "         ON sr.proposal_id = g.rep_shape_id::int "
+                f"        AND sr.scenario_variant_id = {variant} "
+                "  LEFT JOIN ontd.route_corridors rc "
+                "         ON rc.route_id = g.rep_route_id "
+                "        AND rc.stop_a = g.stop_a AND rc.stop_b = g.stop_b"
+            )
+            rep_geometry_expr = (
+                "COALESCE(sr.segments -> (g.stop_a || '__' || g.stop_b), "
+                "         rc.geometry)::text"
+            )
+        with self._cursor() as cur:
+            cur.execute(
+                f"WITH {self._gallery_ctes(filters, scenario_variant_id)}, filtered AS ("
+                "  SELECT source, route_id, proposal_id, proposal_version, "
+                "         margin_eur_per_train_km "
+                f"  FROM gallery{where_clause}"
+                "), segs AS ("
+                f"{proposal_segs}"
                 "  UNION ALL "
                 # route_corridors already stores direction-collapsed pairs
                 # (stop_a < stop_b, db/ontd/projection.py) — no
@@ -1041,13 +1387,9 @@ class ProposalRepository:
                 "  FROM segs GROUP BY stop_a, stop_b"
                 "), rep AS ("
                 "  SELECT g.*, "
-                "         ST_GeomFromGeoJSON("
-                "           COALESCE(sh.geometry, rc.geometry)::text) AS geom "
+                f"         ST_GeomFromGeoJSON({rep_geometry_expr}) AS geom "
                 "  FROM grouped g "
-                "  LEFT JOIN proposals.shapes sh ON sh.shape_id = g.rep_shape_id "
-                "  LEFT JOIN ontd.route_corridors rc "
-                "         ON rc.route_id = g.rep_route_id "
-                "        AND rc.stop_a = g.stop_a AND rc.stop_b = g.stop_b"
+                f"{rep_geometry}"
                 ") "
                 "SELECT stop_a, stop_b, proposal_count, existing_count, "
                 "       total_count, avg_margin_eur_per_train_km, "
@@ -1068,6 +1410,7 @@ class ProposalRepository:
         sort: Optional[list[dict]] = None,
         limit: Optional[int] = None,
         offset: int = 0,
+        scenario_variant_id: Optional[int] = None,
     ) -> list[dict]:
         """`map_routes` section: one already-simplified polyline per
         LISTED row — the same filter, sort and window as
@@ -1084,11 +1427,12 @@ class ProposalRepository:
         already carries — until now only as a bbox filter target, never
         returned. NULL for an ONTD route whose routing failed; the row
         is still emitted, with a null geometry, rather than silently
-        dropped."""
+        dropped. scenario_variant_id: the §5.4a row's geometry — NULL
+        on an error row, emitted the same way."""
         where_sql, params = build_where(filters or {})
         where_clause = f" WHERE {where_sql}" if where_sql else ""
         sql = (
-            f"WITH {self._ENGAGEMENT_CTE}, {self._gallery_cte(filters)} "
+            f"WITH {self._gallery_ctes(filters, scenario_variant_id)} "
             "SELECT source, proposal_id, proposal_version, route_id, "
             "       geometry_routed, "
             "       ST_AsGeoJSON(geom_simplified) AS geometry "
@@ -1104,7 +1448,9 @@ class ProposalRepository:
             rows = cur.fetchall()
         return [dict(row) for row in rows]
 
-    def map_stop_counts(self, filters: Optional[dict] = None) -> list[dict]:
+    def map_stop_counts(
+        self, filters: Optional[dict] = None, scenario_variant_id: Optional[int] = None
+    ) -> list[dict]:
         """`map_stop_counts` section (§7.1; source union WP10 step 6b):
         rows/routes touching each stop within the filtered set, joined to
         the current base scenario's pinned stop_infrastructures snapshot
@@ -1119,7 +1465,7 @@ class ProposalRepository:
         where_clause = f" WHERE {where_sql}" if where_sql else ""
         with self._cursor() as cur:
             cur.execute(
-                f"WITH {self._ENGAGEMENT_CTE}, {self._gallery_cte(filters)} "
+                f"WITH {self._gallery_ctes(filters, scenario_variant_id)} "
                 "SELECT sub.stop_id, si.stop_lat, si.stop_lon, "
                 "       count(*) FILTER (WHERE sub.source = 'proposal') "
                 "         AS n_proposals, "
@@ -1139,7 +1485,9 @@ class ProposalRepository:
             rows = cur.fetchall()
         return [dict(row) for row in rows]
 
-    def map_country_counts(self, filters: Optional[dict] = None) -> list[dict]:
+    def map_country_counts(
+        self, filters: Optional[dict] = None, scenario_variant_id: Optional[int] = None
+    ) -> list[dict]:
         """`map_country_counts` section (§7.1, WP6.1 revision; source
         union WP10 step 6b): rows per country within the filtered set —
         per-source split AND total (n_proposals / n_existing / n —
@@ -1153,7 +1501,7 @@ class ProposalRepository:
         where_clause = f" WHERE {where_sql}" if where_sql else ""
         with self._cursor() as cur:
             cur.execute(
-                f"WITH {self._ENGAGEMENT_CTE}, {self._gallery_cte(filters)} "
+                f"WITH {self._gallery_ctes(filters, scenario_variant_id)} "
                 "SELECT sub.country, "
                 "       count(*) FILTER (WHERE sub.source = 'proposal') "
                 "         AS n_proposals, "
@@ -1202,7 +1550,7 @@ class ProposalRepository:
         where_clause = f" WHERE {where_sql}" if where_sql else ""
         with self._cursor() as cur:
             cur.execute(
-                f"WITH {self._ENGAGEMENT_CTE}, {self._gallery_cte(filters)} "
+                f"WITH {self._gallery_ctes(filters)} "
                 f"SELECT source, count(*) AS n_rows, {build_aggregate_select()} "
                 f"FROM gallery{where_clause} "
                 "GROUP BY GROUPING SETS ((source), ())",
@@ -1224,7 +1572,7 @@ class ProposalRepository:
         where_clause = f" WHERE {where_sql}" if where_sql else ""
         with self._cursor() as cur:
             cur.execute(
-                f"WITH {self._ENGAGEMENT_CTE}, {self._gallery_cte(filters)}, "
+                f"WITH {self._gallery_ctes(filters)}, "
                 "filtered AS ("
                 f"  SELECT source, stop_ids, countries FROM gallery{where_clause}"
                 ") "
@@ -1258,7 +1606,7 @@ class ProposalRepository:
         where_clause = f" WHERE {where_sql}" if where_sql else ""
         with self._cursor() as cur:
             cur.execute(
-                f"WITH {self._ENGAGEMENT_CTE}, {self._gallery_cte(filters)}, "
+                f"WITH {self._gallery_ctes(filters)}, "
                 "observed AS ("
                 "  SELECT source, unnest(countries) AS country "
                 f"  FROM gallery{where_clause}"
@@ -1299,7 +1647,7 @@ class ProposalRepository:
         where_clause = f" WHERE {where_sql}" if where_sql else ""
         with self._cursor() as cur:
             cur.execute(
-                f"WITH {self._ENGAGEMENT_CTE}, {self._gallery_cte(filters)}, "
+                f"WITH {self._gallery_ctes(filters)}, "
                 "observed AS ("
                 "  SELECT source, unnest(country_relations) AS relation "
                 f"  FROM gallery{where_clause}"

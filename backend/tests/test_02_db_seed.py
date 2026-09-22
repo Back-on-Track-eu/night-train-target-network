@@ -86,7 +86,6 @@ EXPECTED_PHASE1_TABLES = {
     "proposals.parkings",
     "proposals.shuntings",
     "proposals.timetable_warnings",
-    "proposals.seasonal_schedules",
     "proposals.update_log",
     "proposals.proposal_summaries",
 }

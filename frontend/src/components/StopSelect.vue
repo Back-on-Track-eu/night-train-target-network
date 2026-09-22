@@ -7,6 +7,7 @@ import { mdiMagnify } from '@mdi/js'
 import { useI18n } from 'vue-i18n'
 import type { Stop } from '@/types/api'
 import type { LoadStatus } from '@/stores/store'
+import { docsFeedbackUrl, FEEDBACK_TOPIC_MISSING_STOP } from '@/lib/feedbackLink'
 
 // `status` exists because an empty `stops` array means three different things —
 // still loading, failed to load, and genuinely empty — and the popover used to
@@ -47,6 +48,12 @@ const filtered = computed(() => {
   if (!query) return props.stops
   return props.stops.filter((s) => haystacks.value.get(s.stop_id)?.includes(query))
 })
+
+// The report link under an empty result, carrying what was searched for as
+// typed (not the lowercased haystack query) so the form quotes it back.
+const missingStopUrl = computed(() =>
+  docsFeedbackUrl(FEEDBACK_TOPIC_MISSING_STOP, filterQuery.value),
+)
 
 // Subtitle under each row: "city · country" in the current UI locale, falling
 // back through English to the on-the-ground names.
@@ -198,11 +205,22 @@ watch(filtered, () => {
       <p v-else-if="!stops.length" class="px-4 py-3 text-base text-primary-50/70">
         {{ t('errors.stopsEmpty') }}
       </p>
-      <!-- Only now does "no stops found" mean what it says: we have the list,
-           and the user's query matched nothing in it. -->
-      <p v-else-if="!filtered.length" class="px-4 py-3 text-base text-primary-50/70">
-        {{ t('proposal.noStopsFound') }}
-      </p>
+      <!-- We have the list, and the user's query matched nothing in it —
+           which is the one moment the catalogue's gaps are visible to the
+           person who can name them. So the way to report one is offered right
+           here, carrying what they searched for. A second tab, because the
+           itinerary being built in this one is not saved. -->
+      <div v-else-if="!filtered.length" class="px-4 py-3">
+        <p class="text-base text-primary-50/70">{{ t('proposal.noStopsFound') }}</p>
+        <a
+          :href="missingStopUrl"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="mt-1 block cursor-pointer text-sm font-semibold text-primary-50 underline underline-offset-2"
+        >
+          {{ t('proposal.missingStopLink') }}
+        </a>
+      </div>
       <button
         v-for="(stop, i) in filtered"
         :key="stop.stop_id"

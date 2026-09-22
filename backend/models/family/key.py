@@ -9,13 +9,16 @@ document_cache.py). What goes into the key is therefore exactly what can
 change a member's numbers:
 
   - the resolved request: stops and every HOW field (timetable_mode,
-    fixed_night_interval, schedule_mode, schedule, min_turnaround_min,
+    fixed_night_interval, schedule, min_turnaround_min, demand,
     fares_eur_per_km, fares_eur_per_pax, services_eur_per_pax,
     catering_eur_per_pax, routing_mode,
     auto_stop_addition,
     the canonicalised expert_timetable) — as api/helpers/member_compute.
     py resolves it, so an omitted field and its explicit default hash
-    alike;
+    alike. Of the demand block only what changes a number is keyed:
+    passengers_per_year, group_shares_pct, stop_weights and
+    pinned_shares_pct; `level` and `od.preset` are labels for the UI
+    (DEMAND 0.1.0, guide §4) and stay out;
   - the resolved axes: scenario_variant_ids and composition_ids, sorted —
     a variant id pins a scenario row and a measure set, and scenario rows
     are immutable, so the id already carries every parameter version;
@@ -49,9 +52,9 @@ REQUEST_KEY_FIELDS = (
     "stops",
     "timetable_mode",
     "fixed_night_interval",
-    "schedule_mode",
     "schedule",
     "min_turnaround_min",
+    "demand",
     "fares_eur_per_km",
     "fares_eur_per_pax",
     "services_eur_per_pax",
@@ -60,6 +63,16 @@ REQUEST_KEY_FIELDS = (
     "auto_stop_addition",
     "expert_timetable",
 )
+
+
+def _demand_key_fields(demand: dict) -> dict:
+    """The demand block minus its two labels."""
+    return {
+        "passengers_per_year": demand["passengers_per_year"],
+        "group_shares_pct": demand["group_shares_pct"],
+        "stop_weights": demand["od"]["stop_weights"],
+        "pinned_shares_pct": demand["od"]["pinned_shares_pct"],
+    }
 
 
 def family_key(
@@ -76,7 +89,14 @@ def family_key(
     imports from api/."""
     return canonical_sha256(
         {
-            "request": {field: resolved_request[field] for field in REQUEST_KEY_FIELDS},
+            "request": {
+                field: (
+                    _demand_key_fields(resolved_request[field])
+                    if field == "demand"
+                    else resolved_request[field]
+                )
+                for field in REQUEST_KEY_FIELDS
+            },
             "scenario_variant_ids": sorted(scenario_variant_ids),
             "composition_ids": sorted(composition_ids),
             "route_builder_version": ROUTE_BUILDER_VERSION,

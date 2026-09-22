@@ -50,8 +50,8 @@ import logging
 from dataclasses import dataclass, field
 
 from models.demand.model import (
-    STOPGAP_CATERING_EUR_PER_PAX_BY_CLASS,
-    STOPGAP_SERVICES_EUR_PER_PAX_BY_CLASS,
+    CATERING_EUR_PER_PAX_BY_CLASS,
+    SERVICES_EUR_PER_PAX_BY_CLASS,
 )
 from models.infrastructure.energy_pricing.calc_energy_price import (
     SegmentEnergy,
@@ -278,7 +278,7 @@ class ODPairRevenue:
     origin_stop_id: str
     destination_stop_id: str
     class_main: str
-    places_sold: int  # annual tickets sold
+    places_sold: float  # annual tickets sold
     revenue_eur: float  # €/year  (places_sold × avg_price)
     # Revenue from bicycles, oversized luggage and the like, sold with the
     # ticket (CALC 0.9.30). Ordinary ticket revenue: not signed, not net —
@@ -344,7 +344,7 @@ class ODSegmentLoad:
     origin_stop_id: str
     destination_stop_id: str
     class_main: str
-    places_sold: int  # annual
+    places_sold: float  # annual
     revenue_eur: float  # €/year — places_sold × avg_price, this OD pair's
     # ticket revenue, attributed whole to every segment it rides (an OD
     # pair's fare buys its entire journey; splitting it per segment would
@@ -376,7 +376,7 @@ class SegmentPassengerLoad:
     od_loads: list[ODSegmentLoad]
 
     @property
-    def total_places_sold(self) -> int:
+    def total_places_sold(self) -> float:
         """Annual passengers riding this segment — divide by the schedule's
         operating days for the load of one train run."""
         return sum(load.places_sold for load in self.od_loads)
@@ -1015,10 +1015,10 @@ def evaluate_route(
         measures,
         catering_eur_per_pax
         if catering_eur_per_pax is not None
-        else STOPGAP_CATERING_EUR_PER_PAX_BY_CLASS,
+        else CATERING_EUR_PER_PAX_BY_CLASS,
         services_eur_per_pax
         if services_eur_per_pax is not None
-        else STOPGAP_SERVICES_EUR_PER_PAX_BY_CLASS,
+        else SERVICES_EUR_PER_PAX_BY_CLASS,
     )
 
     result = EvaluationResult(

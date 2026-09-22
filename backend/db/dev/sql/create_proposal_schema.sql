@@ -73,9 +73,12 @@ COMMENT ON COLUMN proposals.shapes.length_km IS 'Total route length derived from
 -- routes
 -- ---------------------------------------------------------------
 -- schedule_months / min_turnaround_min (ROUTE_BUILDER 0.9.35): the per-month
--- operating plan. proposals.seasonal_schedules keeps the two-season
--- projection for readers that still expect it; this is the authoritative
--- shape, and gtfs_store reads it first.
+-- operating plan — the ONE home of the schedule since 0.9.40, when the
+-- two-season projection (proposals.seasonal_schedules) was folded into it
+-- and dropped. The GTFS calendar row stays all-weekdays-TRUE: which
+-- weekdays a non-daily month runs is not modelled (models/route/model.py
+-- OPEN_TODOS), so the calendar is the coarse GTFS view and this column the
+-- exact plan.
 CREATE TABLE proposals.routes (
     route_id          TEXT PRIMARY KEY,
     agency_id         TEXT,
@@ -86,12 +89,12 @@ CREATE TABLE proposals.routes (
     route_color       TEXT,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 ,
-    schedule_months      JSONB,
+    schedule_months      JSONB NOT NULL,
     min_turnaround_min   INTEGER
 );
 
 COMMENT ON TABLE  proposals.routes                IS 'GTFS routes.txt — one row per proposal version route. route_id follows convention P{proposal_id}_V{version}_R{route_index} e.g. P1_V1_R1. route_type 105 = Sleeper Rail Service (GTFS extended HVT code).';
-COMMENT ON COLUMN proposals.routes.schedule_months  IS 'Days per week for each month, {"1": 7, ..., "12": 0} (models/route/route.py Schedule). NULL on rows written before ROUTE_BUILDER 0.9.35 — read seasonal_schedules instead.';
+COMMENT ON COLUMN proposals.routes.schedule_months  IS 'Days per week for each month, {"1": 7, ..., "12": 0} (models/route/route.py Schedule). The one home of the operating plan since ROUTE_BUILDER 0.9.40; a request posting one frequency stores the same number in every month.';
 COMMENT ON COLUMN proposals.routes.min_turnaround_min IS 'Minimum terminal turnaround the fleet was sized with, minutes. NULL before 0.9.35 (default 180).';
 COMMENT ON COLUMN proposals.routes.route_id         IS 'GTFS route identifier. Convention: P{proposal_id}_V{version}_R{route_index} e.g. P1_V1_R1.';
 COMMENT ON COLUMN proposals.routes.agency_id        IS 'GTFS agency_id — nullable; populate on GTFS export from input_params.operators.';
@@ -351,7 +354,7 @@ CREATE TABLE proposals.od_pairs (
     origin_stop_id       TEXT NOT NULL,
     destination_stop_id  TEXT NOT NULL,
     class_main            TEXT NOT NULL,
-    places_sold           INTEGER NOT NULL,
+    places_sold           DOUBLE PRECISION NOT NULL,
     avg_price             NUMERIC(10, 2) NOT NULL
 );
 
@@ -362,7 +365,7 @@ COMMENT ON COLUMN proposals.od_pairs.trip_id               IS 'References propos
 COMMENT ON COLUMN proposals.od_pairs.origin_stop_id        IS 'Soft reference to input_params.stop_infrastructures.stop_id.';
 COMMENT ON COLUMN proposals.od_pairs.destination_stop_id   IS 'Soft reference to input_params.stop_infrastructures.stop_id.';
 COMMENT ON COLUMN proposals.od_pairs.class_main             IS 'Top-level accommodation category: Seat, Couchette, Sleeper, Capsule, or Catering.';
-COMMENT ON COLUMN proposals.od_pairs.places_sold             IS 'Annual total tickets sold for this OD pair / class / trip.';
+COMMENT ON COLUMN proposals.od_pairs.places_sold             IS 'Annual total tickets sold for this OD pair / class / trip. Fractional since DEMAND 0.1.0: served places per departure x the pair''s share x operating days.';
 COMMENT ON COLUMN proposals.od_pairs.avg_price               IS 'Average ticket price across all tickets sold for this OD pair, class, and trip. Unit: EUR';
 
 -- ---------------------------------------------------------------
@@ -433,23 +436,6 @@ COMMENT ON COLUMN proposals.timetable_warnings.interval_end_stop_id   IS 'Soft r
 COMMENT ON COLUMN proposals.timetable_warnings.ratio                 IS 'timetable_speed_kmh / routing_speed_kmh over the interval — below FIXED_NIGHT_MIN_SPEED_RATIO triggers "fixed_night_stretch_slow".';
 
 -- ---------------------------------------------------------------
--- seasonal_schedules — one row per SeasonalSchedule (models/route/
--- route.py): route-level operating frequency per season. calendar/
--- calendar_dates alone only cover the daily case.
--- ---------------------------------------------------------------
-CREATE TABLE proposals.seasonal_schedules (
-    route_id   TEXT NOT NULL REFERENCES proposals.routes(route_id) ON DELETE CASCADE,
-    season     TEXT NOT NULL,
-    frequency  TEXT NOT NULL,
-    PRIMARY KEY (route_id, season)
-);
-
-COMMENT ON TABLE  proposals.seasonal_schedules            IS 'One row per SeasonalSchedule (models/route/route.py) — operating frequency for one season (summer/winter) on a route. calendar/calendar_dates alone only cover the always-daily case.';
-COMMENT ON COLUMN proposals.seasonal_schedules.route_id   IS 'References proposals.routes.';
-COMMENT ON COLUMN proposals.seasonal_schedules.season     IS 'summer or winter (mirrors models.route.route.Season).';
-COMMENT ON COLUMN proposals.seasonal_schedules.frequency  IS 'daily or three_per_week (mirrors models.route.route.Frequency).';
-
--- ---------------------------------------------------------------
 -- update_log (§4.1) — append-only timeline event log. States are
 -- pruned on overwrite and likes/comments only stamp a state number, so
 -- this is what preserves "comment on state 3, route overwritten
@@ -472,8 +458,8 @@ COMMENT ON TABLE  proposals.update_log                  IS 'Append-only timeline
 COMMENT ON COLUMN proposals.update_log.proposal_id      IS 'Soft reference to proposals.proposals.proposal_id — same convention as likes/comments.';
 COMMENT ON COLUMN proposals.update_log.proposal_version IS 'State counter AFTER the event.';
 COMMENT ON COLUMN proposals.update_log.user_id          IS 'Acting user; NULL for system events (version-bump/base-scenario refresh) — the timeline renders a NULL here as actor: null, which is what distinguishes a system recalculation from a user overwrite.';
-COMMENT ON COLUMN proposals.update_log.event            IS 'One of: published, overwritten, recalculated, branched_from, branched_to.';
-COMMENT ON COLUMN proposals.update_log.detail           IS 'Event-specific context. branched_*: {"source_proposal_id": …}. recalculated: {"trigger": "calc_version"|"route_builder_version"|"base_scenario_moved", "from": …, "to": …}.';
+COMMENT ON COLUMN proposals.update_log.event            IS 'One of: published, overwritten, recalculated, branched_from, branched_to, migrated.';
+COMMENT ON COLUMN proposals.update_log.detail           IS 'Event-specific context. branched_*: {"source_proposal_id": …}. recalculated: {"trigger": "calc_version"|"route_builder_version"|"base_scenario_moved", "from": …, "to": …}. migrated (a data migration rewrote the stored request without recomputing, user_id NULL): {"trigger": …, "from": …, "to": …}.';
 
 -- ---------------------------------------------------------------
 -- proposal_summaries (§5.4) — derived projection, NOT a source of
@@ -521,11 +507,11 @@ CREATE TABLE proposals.proposal_summaries (
     demand_trip_km_per_year     NUMERIC(16, 0),
     shift_air_trips_per_year    NUMERIC(12, 0),
     shift_air_trip_km_per_year  NUMERIC(16, 0),
-    shift_car_trips_per_year    NUMERIC(12, 0),
-    shift_car_trip_km_per_year  NUMERIC(16, 0),
+    shift_other_trips_per_year  NUMERIC(12, 0),
+    shift_other_trip_km_per_year NUMERIC(16, 0),
     co2_savings_t_per_year      NUMERIC(12, 1),
     subsidy_eur_per_t_co2       NUMERIC(10, 2),
-    demand_kpis_placeholder     BOOLEAN NOT NULL DEFAULT TRUE,
+    demand_kpis_placeholder     BOOLEAN NOT NULL DEFAULT FALSE,
 
     co2_g_per_pax_km            NUMERIC(6, 1),
 
@@ -543,20 +529,105 @@ COMMENT ON TABLE  proposals.proposal_summaries                        IS 'Derive
 COMMENT ON COLUMN proposals.proposal_summaries.route_fingerprint      IS 'Route identity fingerprint (§3.1) — informational only, same as proposals.proposals.route_fingerprint.';
 COMMENT ON COLUMN proposals.proposal_summaries.subsidy_eur_per_year   IS 'max(0, -net_eur): gap to target margin. Unit: EUR/year';
 COMMENT ON COLUMN proposals.proposal_summaries.net_eur_per_year       IS 'Signed annual net after the target margin (CALC 0.9.25): negative is the shortfall subsidy_eur_per_year reports, positive is a surplus. Unit: EUR/year';
-COMMENT ON COLUMN proposals.proposal_summaries.operating_days_per_year IS 'Operating days from the seasonal schedule (CALC 0.9.25) — the annualisation factor behind every per-year figure.';
+COMMENT ON COLUMN proposals.proposal_summaries.operating_days_per_year IS 'Operating days from the month schedule (CALC 0.9.25) — the annualisation factor behind every per-year figure.';
 COMMENT ON COLUMN proposals.proposal_summaries.departures_per_year    IS 'Departures per year, every trip of every pair on every operating day (CALC 0.9.28).';
 COMMENT ON COLUMN proposals.proposal_summaries.trainsets_physical     IS 'Physical rakes the busiest pair needs in its busiest month — the cycle-time rule, ROUTE_BUILDER 0.9.35 (CALC 0.9.28). The cost model charges physical / coach_avail_per; see the operations block.';
 COMMENT ON COLUMN proposals.proposal_summaries.train_km_per_year      IS 'Annual train-km, both directions, all pairs (CALC 0.9.25) — the per_train_km divisor. Unit: km/year';
 COMMENT ON COLUMN proposals.proposal_summaries.available_place_km_per_year IS 'Annual capacity place-km (CALC 0.9.25) — the per_available_place_km divisor. Unit: place-km/year';
 COMMENT ON COLUMN proposals.proposal_summaries.services_revenue_eur IS 'Revenue from additional services sold with the ticket — bicycles, oversized luggage, reservations (CALC 0.9.30). Ordinary ticket revenue: not signed, and inside the variable-overhead and EBIT-margin bases. Unit: EUR/year';
 COMMENT ON COLUMN proposals.proposal_summaries.catering_contribution_eur IS 'Signed net contribution of the on-board catering, already inside net_eur_per_year (CALC 0.9.29): positive means the service pays for itself, negative that the tickets carry it. Unit: EUR/year';
-COMMENT ON COLUMN proposals.proposal_summaries.passengers_per_year   IS 'Places actually sold, summed over every OD pair (CALC 0.9.29) — the base catering_contribution_eur multiplies. Not demand_trips_per_year, which is a placeholder derived from revenue.';
+COMMENT ON COLUMN proposals.proposal_summaries.passengers_per_year   IS 'Places actually sold, summed over every OD pair (CALC 0.9.29) — the base catering_contribution_eur multiplies. Equal to demand_trips_per_year since DEMAND 0.1.0; kept as its own column because the supply KPIs and the demand KPIs are read by different consumers.';
+COMMENT ON COLUMN proposals.proposal_summaries.demand_trips_per_year IS 'Passengers per year (DEMAND 0.1.0: the places actually sold, no longer a revenue-derived placeholder).';
+COMMENT ON COLUMN proposals.proposal_summaries.demand_trip_km_per_year IS 'Passenger-km per year over every OD pair sold (DEMAND 0.1.0).';
+COMMENT ON COLUMN proposals.proposal_summaries.shift_air_trips_per_year IS 'Passengers who would otherwise have flown (DEMAND 0.1.0, models/demand/sources.py: 0 below 300 km, 25 % at 300 km, linear to 100 % at 1 200 km, per OD pair).';
+COMMENT ON COLUMN proposals.proposal_summaries.shift_air_trip_km_per_year IS 'Passenger-km of shift_air_trips_per_year.';
+COMMENT ON COLUMN proposals.proposal_summaries.shift_other_trips_per_year IS 'Passengers who would not have flown: half shifted from the car, half induced (DEMAND 0.1.0, OTHER_CAR_SHARE). Replaces shift_car_trips_per_year.';
+COMMENT ON COLUMN proposals.proposal_summaries.shift_other_trip_km_per_year IS 'Passenger-km of shift_other_trips_per_year.';
+COMMENT ON COLUMN proposals.proposal_summaries.co2_savings_t_per_year IS 'Air and car shift x (that mode''s factor - the train''s) less induced x the train''s, t CO2e/year (EMISSIONS 0.2.0, DEMAND 0.1.0). Can be negative on a very short route.';
 COMMENT ON COLUMN proposals.proposal_summaries.sold_place_km_per_year IS 'Annual sold place-km from the OD loads (CALC 0.9.25) — sold / available is the utilisation. Unit: place-km/year';
 COMMENT ON COLUMN proposals.proposal_summaries.geom_simplified        IS 'Per-segment shapes concatenated and simplified (Douglas-Peucker, tolerance tuned for gallery-map zoom levels) — small enough to ship all proposals in one map response for a long time.';
 COMMENT ON COLUMN proposals.proposal_summaries.country_relations      IS 'Country-to-country relations this proposal actually serves, as sorted "AA__BB" keys — derived from od_pairs (boarding-capable origin before alighting-capable destination), so a merely transited country contributes nothing. Ranking dimension of GET /api/proposals/stats (§7.7); written by models/evaluation/summary.py''s build_summary_row().';
-COMMENT ON COLUMN proposals.proposal_summaries.demand_kpis_placeholder IS 'TRUE while demand_*/shift_*/co2_* columns are placeholder-faked (§8) — no demand model exists yet.';
+COMMENT ON COLUMN proposals.proposal_summaries.demand_kpis_placeholder IS 'FALSE since DEMAND 0.1.0 — demand_*/shift_*/co2_* are the manual demand model''s figures. Kept for readers that filter on it; TRUE only on rows written before the 2026-09-19 migration and not yet refreshed.';
 COMMENT ON COLUMN proposals.proposal_summaries.co2_g_per_pax_km      IS 'Night-train GHG intensity (§8, decision 24): the flat models/emissions factor until the energy-based, country-resolved model enriches it per route. Unit: g CO2e / pax-km';
 COMMENT ON COLUMN proposals.proposal_summaries.created_at             IS 'Set once at the proposal''s first publish, never touched by an overwrite-publish or refresh — repository.py''s _upsert_summary() excludes it from the ON CONFLICT UPDATE. Gallery filter/sort target (WP6.1).';
+
+-- ---------------------------------------------------------------
+-- proposal_scenario_summaries (§5.4a) — the §5.4 projection once per
+-- current scenario variant, for the gallery's scenario panel. Same
+-- discipline as proposal_summaries: derived, rebuildable, written in
+-- the same transaction as every publish and refresh
+-- (adapters/proposal/repository.py: _write_state() ->
+-- _replace_scenario_summaries()) and backfilled by
+-- scripts/refresh_proposals.py --scenario-summaries. The base variant's
+-- row duplicates proposal_summaries so the gallery has ONE read path per
+-- variant. A member the family could not compute on a variant (its
+-- routing graph not served here, an unroutable pair on that network) is
+-- still a row — status 'error' with the member's code and NULL figures —
+-- so the gallery can say "not computable on this scenario" rather than
+-- lose the proposal.
+-- ---------------------------------------------------------------
+CREATE TABLE proposals.proposal_scenario_summaries (
+    proposal_id             INTEGER NOT NULL REFERENCES proposals.proposals(proposal_id) ON DELETE CASCADE,
+    proposal_version        INTEGER NOT NULL,
+    scenario_variant_id     INTEGER NOT NULL,
+    scenario_id             INTEGER NOT NULL,
+    measure_set_id          INTEGER NOT NULL,
+    composition_id          TEXT NOT NULL,
+    route_builder_version   TEXT NOT NULL,
+    calc_version            TEXT NOT NULL,
+    status                  TEXT NOT NULL CHECK (status IN ('ok', 'error')),
+    error_code              TEXT,
+
+    total_distance_km       NUMERIC(8, 1),
+    total_time_h            NUMERIC(6, 2),
+    avg_speed_kmh           NUMERIC(5, 1),
+    n_stops                 SMALLINT,
+    countries               TEXT[],
+    country_relations       TEXT[],
+    stop_ids                TEXT[],
+    geom_simplified         geometry(MultiLineString, 4326),
+    segments                JSONB,
+
+    cost_eur_per_train_km       NUMERIC(10, 2),
+    revenue_eur_per_train_km    NUMERIC(10, 2),
+    margin_eur_per_train_km     NUMERIC(10, 2),
+    net_eur_per_year            NUMERIC(14, 2),
+    subsidy_eur_per_year        NUMERIC(14, 2),
+    services_revenue_eur        NUMERIC(14, 2),
+    catering_contribution_eur   NUMERIC(14, 2),
+
+    operating_days_per_year     SMALLINT,
+    departures_per_year         INTEGER,
+    trainsets_physical          SMALLINT,
+    train_km_per_year           NUMERIC(12, 0),
+    available_place_km_per_year NUMERIC(16, 0),
+    sold_place_km_per_year      NUMERIC(16, 0),
+    passengers_per_year         NUMERIC(12, 0),
+
+    demand_trips_per_year       NUMERIC(12, 0),
+    demand_trip_km_per_year     NUMERIC(16, 0),
+    shift_air_trips_per_year    NUMERIC(12, 0),
+    shift_air_trip_km_per_year  NUMERIC(16, 0),
+    shift_other_trips_per_year  NUMERIC(12, 0),
+    shift_other_trip_km_per_year NUMERIC(16, 0),
+    co2_savings_t_per_year      NUMERIC(12, 1),
+    subsidy_eur_per_t_co2       NUMERIC(10, 2),
+    demand_kpis_placeholder     BOOLEAN,
+
+    co2_g_per_pax_km            NUMERIC(6, 1),
+
+    updated_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (proposal_id, scenario_variant_id)
+);
+
+CREATE INDEX idx_scenario_summaries_variant ON proposals.proposal_scenario_summaries (scenario_variant_id);
+CREATE INDEX idx_scenario_summaries_geom    ON proposals.proposal_scenario_summaries USING GIST (geom_simplified);
+
+COMMENT ON TABLE  proposals.proposal_scenario_summaries             IS 'The §5.4 projection once per current scenario variant (§5.4a) — what POST /api/proposals serves when a scenario_variant_id is requested. Derived, NOT a source of truth: replaced wholesale in the same transaction as every publish/refresh, backfilled by scripts/refresh_proposals.py --scenario-summaries. The base variant''s row duplicates proposal_summaries.';
+COMMENT ON COLUMN proposals.proposal_scenario_summaries.status      IS 'ok: the member computed and every figure is set. error: the family could not compute this proposal on this variant (error_code says why — routing_graph_not_configured, routing_error, gauge_mismatch, domain_error); the figures and geometry are NULL.';
+COMMENT ON COLUMN proposals.proposal_scenario_summaries.error_code  IS 'The member''s error code (api/helpers/member_compute.py classify_compute_error()) when status = error, else NULL.';
+COMMENT ON COLUMN proposals.proposal_scenario_summaries.segments    IS 'Corridor geometry for the gallery''s map_lines on this variant: a JSON object keyed "STOP_A__STOP_B" (stop ids sorted, direction collapsed) whose values are GeoJSON LineStrings — the per-segment shapes proposals.segments/shapes hold for the base route, which a non-base variant has nowhere else to keep.';
+COMMENT ON COLUMN proposals.proposal_scenario_summaries.geom_simplified IS 'Same simplification as proposal_summaries.geom_simplified, on this variant''s route.';
 
 -- The member cache (WP13's compute_cache_pointer/_result) lives in the
 -- family schema since WP18 B2b — db/schema.py FAMILY_TABLES.

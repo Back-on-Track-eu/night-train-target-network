@@ -126,8 +126,8 @@ class TestSummaryRow:
             "demand_trip_km_per_year",
             "shift_air_trips_per_year",
             "shift_air_trip_km_per_year",
-            "shift_car_trips_per_year",
-            "shift_car_trip_km_per_year",
+            "shift_other_trips_per_year",
+            "shift_other_trip_km_per_year",
             "co2_savings_t_per_year",
             "subsidy_eur_per_t_co2",
             "demand_kpis_placeholder",
@@ -190,11 +190,23 @@ class TestSummaryRow:
         )
         assert 0 < row["sold_place_km_per_year"] <= row["available_place_km_per_year"]
 
-    def test_demand_kpis_are_placeholder(self, row):
-        assert row["demand_kpis_placeholder"] is True
-        assert row["demand_trips_per_year"] >= 0
-        assert row["demand_trip_km_per_year"] >= 0
-        assert row["co2_savings_t_per_year"] >= 0
+    def test_demand_kpis_are_the_models_own(self, row):
+        """DEMAND 0.1.0: the trips are the passengers, every one of them
+        a shift from the plane or an 'other' (car / induced) by journey
+        length, and the CO2 saving follows from the two."""
+        assert row["demand_kpis_placeholder"] is False
+        assert row["demand_trips_per_year"] == row["passengers_per_year"]
+        assert row["demand_trip_km_per_year"] == row["sold_place_km_per_year"]
+        assert row["shift_air_trips_per_year"] + row[
+            "shift_other_trips_per_year"
+        ] == pytest.approx(row["demand_trips_per_year"], abs=1)
+        assert row["shift_air_trip_km_per_year"] + row[
+            "shift_other_trip_km_per_year"
+        ] == pytest.approx(row["demand_trip_km_per_year"], abs=1)
+        # Berlin – Wien is long enough that the plane shift outweighs the
+        # induced trips.
+        assert row["co2_savings_t_per_year"] > 0
+        assert row["subsidy_eur_per_t_co2"] is None or row["subsidy_eur_per_t_co2"] >= 0
 
     def test_co2_is_the_flat_night_train_factor(self, row):
         """Decision 24 — the flat models/emissions factor until the
@@ -269,7 +281,7 @@ class TestSummaryRowSchemaConformance:
                 passengers_per_year,
                 demand_trips_per_year, demand_trip_km_per_year,
                 shift_air_trips_per_year, shift_air_trip_km_per_year,
-                shift_car_trips_per_year, shift_car_trip_km_per_year,
+                shift_other_trips_per_year, shift_other_trip_km_per_year,
                 co2_savings_t_per_year, subsidy_eur_per_t_co2,
                 demand_kpis_placeholder, co2_g_per_pax_km
             ) VALUES (
@@ -287,7 +299,7 @@ class TestSummaryRowSchemaConformance:
                 %(passengers_per_year)s,
                 %(demand_trips_per_year)s, %(demand_trip_km_per_year)s,
                 %(shift_air_trips_per_year)s, %(shift_air_trip_km_per_year)s,
-                %(shift_car_trips_per_year)s, %(shift_car_trip_km_per_year)s,
+                %(shift_other_trips_per_year)s, %(shift_other_trip_km_per_year)s,
                 %(co2_savings_t_per_year)s, %(subsidy_eur_per_t_co2)s,
                 %(demand_kpis_placeholder)s, %(co2_g_per_pax_km)s
             )

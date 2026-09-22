@@ -164,8 +164,9 @@ Config (see `docker/.env.example`): `JWT_SECRET` (required),
 | `GET` | `/api/params/StopInfrastructures` | All stops: location, per-stop charges, and the catalog enrichment (names, city, country, gauges) |
 | `GET` | `/api/params/compositions` | All composition types with full parameters, plus their operators |
 | `GET` | `/api/params/TrackInfrastructures` | All country track infrastructure parameters |
+| `GET` | `/api/params/TicketVat` | VAT on rail passenger tickets, per country — domestic rate and the rate on the country's share of a cross-border ticket |
 
-All three accept an optional `scenario_id` **query parameter** pinning which
+The first three accept an optional `scenario_id` **query parameter** pinning which
 version of every parameter table to read; omit it for the live
 `is_current_base` scenario (same semantics as everywhere else — see
 [Scenarios](#scenarios)).
@@ -226,6 +227,18 @@ one entry per country: `country_code` plus a field object for each of
 `tac_eur_train_km`, `parking_eur_day`, `shunting_eur_event`,
 `energy_price_eur_kwh`, `terrain_score`, `terrain_category`, `hsr_allowed`,
 `min_boarding_time_min`, `min_alighting_time_min`, `buffer_quota_per`.
+
+**`TicketVat`** (backend 0.5.8) is not scenario-pinned — the table is a
+catalogue, one row per country — and carries `rule` (the one-sentence
+contract the frontend applies), `sources`, `count` and `rates`: per country
+`vat_domestic_per` and `vat_international_per` as fractions, the
+calibration's `status` (`sourced` / `assumed` / `no_railway` / `blocked`),
+its `note` and a `source_id`. The effective rate of a route is
+Σ distance share × rate, with the international rate on a route that
+crosses a border and the domestic rate otherwise. **Display only**: every
+cost, revenue and subsidy figure the API returns is net of VAT; the frontend
+shows the gross fare and the gross ticket revenue beside them. Derivation:
+`models/demand/calib/vat/VAT_CALIBRATION.md`.
 
 These ten are the headline per-country figures, and four of them are no longer
 what the cost model prices from. Track access is a calibrated component sum
@@ -351,7 +364,8 @@ presented member:
   "stops": ["osm:n3856100103", "osm:w423692233"],
   "timetable_mode": "simpleAutomatic",
   "fixed_night_interval": null,
-  "schedule_mode": "alwaysDaily",
+  "schedule": { "days_per_week": 3 },        // optional — or a month map {"1": 7, …, "12": 0}; omitted = 3 every month
+  "min_turnaround_min": 180,                 // optional
   "fares_eur_per_km":     { "Sleeper": 0.25 },   // optional, per class_main — defaults: GET /api/models
   "fares_eur_per_pax":    { "Sleeper": 22.0 },   // optional, fixed part of the base fare
   "services_eur_per_pax": { "Sleeper": 3.50 },   // optional, bikes/luggage/reservations
@@ -366,9 +380,48 @@ presented member:
 ```
 
 Validation is a member request's for stops and the HOW fields (`member_compute.validate_stops`/`validate_how_fields`); axis lists must be
-non-empty, unique and known; `presented` must lie on the axes. A family
+non-empty, unique and known; `presented` must lie on the axes.
+
+`schedule` (ROUTE_BUILDER 0.9.40) takes two shapes: `{"days_per_week": n}`
+with `n` an integer 1..7 — what the Details card posts — or the full month
+map `{"1": d, …, "12": d}` with each `d` 0..7 and at least one month
+running, the seasonal shape a later UI will post. Omitted means
+`DEFAULT_DAYS_PER_WEEK` (`models/route/model.py`) in every month. The
+resolved echo always carries the month map (`request.schedule`), so one
+posted frequency, the same map spelled out and an omitted block hash to
+the same family. `schedule_mode` no longer exists and is a 400. A family
 larger than `FAMILY_MAX_MEMBERS` (`api/config.py`) is 400
 `family_too_large`.
+
+`demand` (DEMAND 0.1.0, `docs/2026-09-18_manual_demand_guide.md` §4) is
+the manual demand, every part optional:
+
+```jsonc
+"demand": {
+  "level": "medium",                 // small | medium | large | xl | custom (a label)
+  "passengers_per_year": 200000,     // both directions; default: the level's total (Medium)
+  "group_shares_pct": { "comfort": 50, "group": 25, "senior": 10, "budget": 10, "business": 5 },
+  "od": {
+    "preset": "even",                // even | long | mid | short | custom (a label)
+    "stop_weights": { "board": { "<stop_id>": 1.0 }, "alight": { "<stop_id>": 1.0 } },
+    "pinned_shares_pct": { "<origin_stop_id>": { "<destination_stop_id>": 12.5 } }
+  }
+}
+```
+
+Validation: shares ≥ 0 (a sum ≠ 100 is allowed — the groups then ask for
+total × sum), weights ≥ 0, pins 0..100 summing to at most 100, level and
+preset from their vocabularies, stop ids as keys (a pin whose stop is no
+longer sellable on the route is dropped and reported in the response's
+`demand.od.dropped_pins`). The echo carries the complete block with
+weights at 4 and pins at 2 decimals; `passengers_per_year`,
+`group_shares_pct`, `stop_weights` and `pinned_shares_pct` are in the
+family key, `level` and `preset` are not. Every ok member of the document
+carries a `demand` block beside `summary`, and the views endpoint answers
+`{views, operations, demand}` — the allocation by group and class (per
+trip and per year), what was not served, the OD matrix and the demand
+sources (`api/helpers/evaluation_serialize.py::demand_to_dict`,
+`models/demand/README.md`).
 
 The tariff is three parts, each an object of `class_main` → EUR and each
 partial (a request that prices one class leaves the others at the model's
@@ -634,7 +687,9 @@ nothing but the running code.
                        "formulas": { "tac_eur": { "latex": "...", "summary": "...",
                                                   "description": "...",
                                                   "inputs": [ ... ], "output": { ... } } } },
-    "emissions":     { "version": "...", "description": "...", "factors": { ... } }
+    "emissions":     { "version": "...", "description": "...", "factors": { ... } },
+    "compositions":  { "version": "0.9.5",  "description": "..." },
+    "infrastructure":{ "version": "0.9.7",  "description": "..." }
   }
 }
 ```
@@ -642,7 +697,10 @@ nothing but the running code.
 Every entry carries `version` and `description`. What comes with them
 differs by model: a formula registry for the computed ones (keyed by the
 same field names the evaluation views use, so a breakdown row maps
-straight to its formula), and an emission-factor table for `emissions`.
+straight to its formula), an emission-factor table for `emissions`, and
+nothing further for the two calibrated parameter models `compositions`
+and `infrastructure` — their versions are listed so the frontend can show
+every model version beside the panel that reads its figures.
 
 This block used to be inlined under `evaluation.models` in every compute
 response — roughly 26 KB repeated per member of a proposal family. It is
@@ -826,7 +884,7 @@ doesn't run its query at all.
 | `name` | `name` | substring | case-insensitive `str` |
 | `total_distance_km`, `total_time_h`, `avg_speed_kmh`, `n_stops` | same | range | `{"min": num, "max": num}` |
 | `cost_eur_per_train_km`, `revenue_eur_per_train_km`, `margin_eur_per_train_km`, `subsidy_eur_per_year` | same | range | `{"min": num, "max": num}` |
-| `demand_trips_per_year`, `demand_trip_km_per_year`, `shift_air_trips_per_year`, `shift_air_trip_km_per_year`, `shift_car_trips_per_year`, `shift_car_trip_km_per_year`, `co2_savings_t_per_year`, `subsidy_eur_per_t_co2` | same | range | `{"min": num, "max": num}` |
+| `demand_trips_per_year`, `demand_trip_km_per_year`, `shift_air_trips_per_year`, `shift_air_trip_km_per_year`, `shift_other_trips_per_year`, `shift_other_trip_km_per_year`, `co2_savings_t_per_year`, `subsidy_eur_per_t_co2` | same | range | `{"min": num, "max": num}` |
 | `likes_count`, `comments_count` | live-joined from `proposals.likes` / `proposals.comments` | range | `{"min": num, "max": num}` |
 | `created_at`, `updated_at` | same | range | `{"min": iso8601, "max": iso8601}` |
 | `trip_windows` | reaches into `stop_times` | special | see below |
@@ -837,6 +895,28 @@ analytical, not a gallery-facing dimension) and `scenario_id` (every
 gallery row is always on the current base scenario by construction — the
 system keeps it that way on its own, §4.2, with no client-visible flag
 for the transient exception).
+
+**`scenario_variant_id`** (top-level, optional, §5.4a) swaps the proposal
+side's **figures** for that variant's in every requested section:
+`summaries` figures and sort order, `map_routes` geometry, `map_lines`
+corridors. It is not a filter, and it never changes the result set: the
+rows a filter returns — and their identity, name, countries, stop ids,
+relations, composition, timestamps — are the base projection's whichever
+scenario is read (`map_stop_counts`/`map_country_counts` are therefore
+identical on every scenario). Existing (ONTD) rows are unchanged. The response echoes it as
+`summaries.scenario_variant_id` (null when omitted), and every proposal
+row carries three extra fields:
+
+| Field | Meaning |
+|---|---|
+| `status` | `"ok"`; `"error"` — the family could not compute this proposal on the requested variant; `"missing"` — its rows for that variant have not been written yet (publish predates the backfill). On both non-ok values every figure is null; identity, `countries`/`stop_ids`/`country_relations` and timestamps are the base projection's as always |
+| `error_code` | the member's code when `status` is `"error"` (`routing_graph_not_configured`, `routing_error`, `gauge_mismatch`, `domain_error`), else null |
+| `scenario_variant_id` | the variant the row describes; null on the base projection |
+
+A `"missing"` row keeps its base geometry in `map_routes` so the map still
+draws it; an `"error"` row has none. Ids come from `GET /api/scenarios` (`scenario_variants`); an
+unknown or non-current id is a 400 `unknown_scenario_variant`, a
+non-integer a 400 `validation_error`.
 
 **What can be sorted by** — every column in the table above except the
 three "special" rows (`sources`, `trip_windows`, `bbox`, none of which
@@ -873,7 +953,7 @@ paginated).
     "countries":       {"values": ["DE", "AT"], "mode": "all"},
     "stop_ids":        ["osm:n3856100103"],
     "composition_ids": ["NEW-BAL-7"],
-    "demand_kpis_placeholder": [true],
+    "demand_kpis_placeholder": [false],
     "name": "wien",
 
     "total_distance_km":        { "min": 800, "max": 1500 },
@@ -888,8 +968,8 @@ paginated).
     "demand_trip_km_per_year":    { "min": 0 },
     "shift_air_trips_per_year":   { "min": 0 },
     "shift_air_trip_km_per_year": { "min": 0 },
-    "shift_car_trips_per_year":   { "min": 0 },
-    "shift_car_trip_km_per_year": { "min": 0 },
+    "shift_other_trips_per_year":   { "min": 0 },
+    "shift_other_trip_km_per_year": { "min": 0 },
     "co2_savings_t_per_year":     { "min": 0 },
     "subsidy_eur_per_t_co2":      { "min": 0 },
     "likes_count":                 { "min": 1 },
@@ -931,9 +1011,9 @@ paginated).
         "margin_eur_per_train_km": 1.7, "subsidy_eur_per_year": 0.0,
         "demand_trips_per_year": 4200, "demand_trip_km_per_year": 2870000,
         "shift_air_trips_per_year": 1470, "shift_air_trip_km_per_year": 1004000,
-        "shift_car_trips_per_year": 840, "shift_car_trip_km_per_year": 574000,
+        "shift_other_trips_per_year": 840, "shift_other_trip_km_per_year": 574000,
         "co2_savings_t_per_year": 210.4, "subsidy_eur_per_t_co2": null,
-        "demand_kpis_placeholder": true, "co2_g_per_pax_km": 33.0,
+        "demand_kpis_placeholder": false, "co2_g_per_pax_km": 14.0,
         "likes_count": 3,
         "display_name": "David", "is_guest": false,
         "created_at": "2026-08-01T09:00:00+00:00",
@@ -1032,9 +1112,12 @@ engagement counts, and timestamps — every range filter on those columns exclud
 them via plain SQL NULL semantics (no `sources` filter needed), and the
 default `updated_at DESC` sort places them after every proposal
 (`NULLS LAST`).
-`demand_*`/`shift_*`/`co2_savings_*` are deterministic placeholder
-figures (`demand_kpis_placeholder: true`) until the demand model lands —
-see §8. `co2_g_per_pax_km` is the flat night-train factor from
+`demand_*`/`shift_*`/`co2_savings_*` are the manual demand model's own
+figures since DEMAND 0.1.0 (`demand_kpis_placeholder: false`; `true` only
+on rows written before the 2026-09-19 migration and not yet refreshed):
+the trips are the passengers, `shift_air_*` / `shift_other_*` split them
+by journey length (the other half car shift, half induced), and the CO2
+saving follows with the re-based factors of EMISSIONS 0.2.0. `co2_g_per_pax_km` is the flat night-train factor from
 `models/emissions` (decision 24) until the energy-based,
 country-resolved model enriches it per route; the per-mode air/car
 reference values for the gallery's mode comparison come from the calc
@@ -1633,10 +1716,10 @@ derived live from the model's own definitions rather than hand-copied:
 | Category | sub_categories source |
 |---|---|
 | `Infrastructure` | Live — `TrackInfrastructures` + `StopInfrastructures` fields (same collections `GET /api/params/*` serves) |
-| `Compositions` | Live — composition/operator/coach fields (`CompositionCollection`) |
+| `Compositions` | Live — composition/operator/coach fields (`CompositionCollection`), preceded by the static `Suggest a new composition` (group `Suggestion`), which the gallery's button deep-links to by alias |
 | `Evaluation — calculation method` | Live — every leaf of the evaluation model's cost/revenue/margin breakdown (`models/evaluation/views.py:Breakdown`) |
-| `Evaluation — results / view` | Live — the output views a member's evaluation section produces (`models/evaluation/views.py:VIEW_META`) |
-| `Route or timetable` | Static — no single schema object maps cleanly onto "route concepts" |
+| `Evaluation — results / view` | Live — the output views a member's evaluation section produces (`models/evaluation/views.py:VIEW_META`), followed by the builder's eight result panels (static, `group: "Builder panel"`) — the pairs the builder's "report a problem" icons deep-link to |
+| `Route or timetable` | Static — no single schema object maps cleanly onto "route concepts". Carries `Missing stop / suggest new stop`, the pair the app's stop search deep-links to (`/docs/feedback?topic=missing-stop`) |
 | `Documentation` | None — free text; the `sub_category` is a documentation page path, and those live in `docs-site/`, which the backend does not read |
 | `General functionality` | Static |
 | `Bug report` / `Feature request` / `Other` | None — free text |
@@ -1732,7 +1815,7 @@ cookie-less request to the check below; locally nothing enforces it (see
 | `GET` | `/gate` | The public page: countdown until `gate_page.LAUNCH`, the launch press text and one auto-advancing slideshow (the walkthrough video, then the builder screenshots), with the code form in the footer. `Cache-Control: no-store` — it carries the countdown state. After launch the hero becomes a single "Open the Target Network" link, decided server-side |
 | `GET` | `/gate/media/<file>` | One file from `api/gate_media/` (`Cache-Control: public, max-age=86400`, Range requests honoured so the video seeks). 404 for anything not in that directory. Under `/gate/*` on purpose: that path is already open on Caddy, and the SPA's own static bundle sits behind `forward_auth` |
 | `POST` | `/api/gate/redeem` | Form field or JSON `code`. Valid → `tn_gate` cookie (HttpOnly, Secure, SameSite=Lax, 30 days) + a row in `admin.access_code_redemptions`; then `302 /` (form) or `{"ok": true}` (JSON). Unknown, revoked or exhausted → `403`; empty → `400` |
-| `GET` | `/api/gate/check` | `forward_auth` target: `204` with a valid cookie, `302 /gate` without |
+| `GET` | `/api/gate/check` | `forward_auth` target: `204` with a valid cookie, `302 /gate` without — and `204` for everyone from the launch moment on (`gate_page.LAUNCH`, backend 0.5.9): the gate opens itself at 22 September 10:00 CEST, and `/gate` then redirects to `/`. Re-gating later means moving `LAUNCH`, nothing else |
 
 The page is pure string assembly in `api/gate_page.py` — `page_html(now=...)`
 renders it with nothing but the standard library (`tests/test_76_gate_page.py`).

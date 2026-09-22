@@ -8,11 +8,13 @@ import {
   CATERING_ICON,
   classColor,
 } from '@/lib/compositionFormation'
+import { DAYS_IN_YEAR } from '@/lib/detailsScope'
 import { useStore } from '@/stores/store'
 import { useCompareFormat } from '@/composables/useCompareFormat'
 import AppIcon from '@/components/AppIcon.vue'
 import CompositionFormation from '@/components/CompositionFormation.vue'
 import DetailPanel from '@/components/details/DetailPanel.vue'
+import { DOCS_DETAIL_PANEL } from '@/lib/docsLinks'
 import KassenzettelTable, { type ReceiptLine } from '@/components/details/KassenzettelTable.vue'
 import TripCycleYearStrip from '@/components/details/TripCycleYearStrip.vue'
 
@@ -181,10 +183,16 @@ const fleetFacts = computed(() => {
           : t('proposal.details.operation.fleet.days', { n: p.trainsets.cycle_days }),
     },
     {
+      // The fleet is sized to the frequency (ROUTE_BUILDER 0.9.40: one
+      // figure over the year; the busiest month of the grid underneath is
+      // every month). Read back from the operating days the result carries.
       label: t('proposal.details.operation.fleet.sizedBy'),
-      value: t(
-        `proposal.details.schedule.months.${MONTH_SHORT[p.trainsets.peak_month - 1] ?? 'jan'}`,
-      ),
+      value:
+        props.operatingDaysPerYear === null
+          ? '—'
+          : t('proposal.details.schedule.daysPerWeek', {
+              n: Math.round((props.operatingDaysPerYear * 7) / DAYS_IN_YEAR),
+            }),
     },
     {
       label: t('proposal.details.operation.fleet.turnaround'),
@@ -200,21 +208,6 @@ const fleetFacts = computed(() => {
     },
   ]
 })
-
-const MONTH_SHORT = [
-  'jan',
-  'feb',
-  'mar',
-  'apr',
-  'may',
-  'jun',
-  'jul',
-  'aug',
-  'sep',
-  'oct',
-  'nov',
-  'dec',
-]
 
 const locoLines = computed<ReceiptLine[]>(() => {
   const lh = trip.value?.loco_hours
@@ -255,6 +248,7 @@ const staffTotal = computed(() => trip.value?.staffing.total ?? null)
   <DetailPanel
     :title="composition.composition_id"
     :info="t('proposal.details.operation.selectedInfo')"
+    :doc-path="DOCS_DETAIL_PANEL.selectedComposition"
     :caption="pairCaption"
     :awaiting="awaiting"
     class="selected-composition"

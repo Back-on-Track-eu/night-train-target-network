@@ -1,20 +1,24 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { mdiChevronDown } from '@mdi/js'
 import { useStore } from '@/stores/store'
 import type {
   Breakdown,
   Composition,
+  DemandBlock,
   EvaluationResponse,
   FamilyMember,
   Operations,
   ProposalCalcSummary,
 } from '@/types/api'
 import {
+  TAB_AWAITS,
+  daysPerWeekFromRequest,
+  demandFromRequest,
   dirtyScopes,
   isAwaiting,
-  scheduleFromRequest,
+  supplyFigures,
   tariffFromRequest,
   type DetailsInputs,
   type ExampleOd,
@@ -25,22 +29,32 @@ import AppIcon from '@/components/AppIcon.vue'
 import SupplyTable from '@/components/SupplyTable.vue'
 import SchedulePanel from '@/components/details/SchedulePanel.vue'
 import PlacesPricesPanel from '@/components/details/PlacesPricesPanel.vue'
+import WhatFollowsPanel from '@/components/details/WhatFollowsPanel.vue'
 import SelectedComposition from '@/components/details/SelectedComposition.vue'
 import OverheadTab from '@/components/details/OverheadTab.vue'
 import InfrastructureTab from '@/components/details/InfrastructureTab.vue'
 import DemandTab from '@/components/details/DemandTab.vue'
 import DetailPanel from '@/components/details/DetailPanel.vue'
+import InfoPopover from '@/components/InfoPopover.vue'
+import DocsReadMore from '@/components/DocsReadMore.vue'
+import ModelVersions from '@/components/ModelVersions.vue'
+import { DOCS_DETAIL_PANEL } from '@/lib/docsLinks'
+import type { TicketVat } from '@/lib/ticketVat'
+import PriceBasisBadge from '@/components/PriceBasisBadge.vue'
+import { DOCS_DETAILS_TAB } from '@/lib/docsLinks'
+import type { ReportPanel } from '@/lib/feedbackLink'
+import { provideDetailsTabReport } from '@/composables/useDetailsTabReport'
 
 // Zone D — "Details". What runs the route, what it costs to operate and to
 // use, and who rides it. Five tabs, one card, one Recalculate.
 //
-// The change-scope rule is the behaviour the whole card shares. Two inputs
-// change the calculation, both on Supply: the SCHEDULE and the PRICES. A panel
-// that OWNS a changed input previews its own figures on the page and marks
-// them; every panel that DEPENDS on one keeps the figures it has, greys to
-// 45 % and lights its waiting badge; a panel that depends on neither is
-// untouched. Change a price and Train operation stays lit — cost does not
-// depend on what a ticket sells for.
+// The change-scope rule is the behaviour the whole card shares. Three inputs
+// change the calculation: the SCHEDULE and the PRICES on Supply, the DEMAND
+// on Demand (D2). A panel that OWNS a changed input previews its own figures
+// on the page and marks them; every panel that DEPENDS on one keeps the
+// figures it has, greys to 45 % and lights its waiting badge; a panel that
+// depends on neither is untouched. Change a price and Infrastructure stays
+// lit — track access does not depend on what a ticket sells for.
 //
 // The card is NOT greyed out while stale, unlike the zones above it: it is
 // where the inputs live, so it has to stay usable. That is why the waiting
@@ -56,6 +70,9 @@ const props = defineProps<{
   /** The route's own km over both directions, and the example OD pairs the
    *  price table prices — both from the route on screen. */
   cycleDistanceKm: number
+  /** VAT the passenger pays on top of the net fares (lib/ticketVat.ts); null
+   *  until the route and the rate table are both here. */
+  ticketVat: TicketVat | null
   longestOd: ExampleOd | null
   shortestOd: ExampleOd | null
 }>()
@@ -67,8 +84,9 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const store = useStore()
 
-type TabKey = 'supply' | 'operation' | 'infrastructure' | 'overhead' | 'demand'
-const TABS: TabKey[] = ['supply', 'operation', 'infrastructure', 'overhead', 'demand']
+type TabKey = 'demand' | 'supply' | 'operation' | 'infrastructure' | 'overhead'
+// D1: Demand opens first.
+const TABS: TabKey[] = ['demand', 'supply', 'operation', 'infrastructure', 'overhead']
 
 // Both live in the store — see the note there. A Recalculate pressed inside
 // this card must leave the card open, on the tab it was pressed on.
@@ -77,7 +95,7 @@ const open = computed({
   set: (value: boolean) => (store.detailsOpen = value),
 })
 const tab = computed({
-  get: () => (TABS.includes(store.detailsTab as TabKey) ? (store.detailsTab as TabKey) : 'supply'),
+  get: () => (TABS.includes(store.detailsTab as TabKey) ? (store.detailsTab as TabKey) : 'demand'),
   set: (value: TabKey) => (store.detailsTab = value),
 })
 
@@ -85,25 +103,52 @@ const selected = computed(
   () => props.compositions.find((c) => c.composition_id === props.selectedCompositionId) ?? null,
 )
 
+// Every panel on the active tab reports under that tab's topic
+// (details/DetailPanel.vue reads it) — the tabs render with v-if, so the
+// panels on screen are exactly the active tab's.
+const TAB_REPORT: Record<TabKey, ReportPanel> = {
+  demand: 'details-demand',
+  supply: 'details-supply',
+  operation: 'details-operation',
+  infrastructure: 'details-infrastructure',
+  overhead: 'details-overhead',
+}
+provideDetailsTabReport(computed(() => TAB_REPORT[tab.value]))
+
+// Hover text for the tab pills — what the tab holds, and its documentation
+// page: one shared InfoPopover under the tablist, driven the way the
+// itinerary's tool hints are (ProposalViewport showToolHint).
+const tabHint = ref<InstanceType<typeof InfoPopover> | null>(null)
+const tabHintKey = ref<TabKey>('demand')
+
+function showTabHint(event: Event, key: TabKey) {
+  tabHintKey.value = key
+  tabHint.value?.open(event, key)
+}
+
 // --- what the figures were computed with ------------------------------------
 
 const committed = computed<DetailsInputs | null>(() => {
   const request = props.committedRequest
   if (!request) return null
   return {
-    months: scheduleFromRequest(request.schedule as Record<string, number> | null | undefined),
+    daysPerWeek: daysPerWeekFromRequest(
+      request.schedule as Record<string, number> | null | undefined,
+    ),
     tariff: tariffFromRequest(request),
+    demand: demandFromRequest(request),
   }
 })
 
 const current = computed<DetailsInputs>(() => ({
-  months: store.scheduleMonths,
+  daysPerWeek: store.scheduleDaysPerWeek,
   tariff: {
     faresPerKm: store.faresEurPerKm,
     faresPerPax: store.faresEurPerPax,
     servicesPerPax: store.servicesEurPerPax,
     cateringPerPax: store.cateringEurPerPax,
   },
+  demand: store.demand,
 }))
 
 const dirty = computed(() => dirtyScopes(current.value, committed.value))
@@ -124,13 +169,13 @@ function awaits(...scopes: Scope[]) {
 }
 
 /** Which tabs hold a waiting panel — the dot beside the tab label, so the
- *  reader does not have to open all five to find out. */
+ *  reader does not have to open all five to find out (D2's map). */
 const tabAwaiting = computed<Record<TabKey, boolean>>(() => ({
-  supply: false, // Supply owns both scopes; it previews rather than waits.
-  operation: awaits('schedule', 'prices'),
-  infrastructure: awaits('schedule'),
-  overhead: awaits('schedule', 'prices'),
-  demand: awaits('schedule', 'prices'),
+  supply: awaits(...TAB_AWAITS.supply),
+  operation: awaits(...TAB_AWAITS.operation),
+  infrastructure: awaits(...TAB_AWAITS.infrastructure),
+  overhead: awaits(...TAB_AWAITS.overhead),
+  demand: awaits(...TAB_AWAITS.demand),
 }))
 
 const staleText = computed(() => {
@@ -159,17 +204,6 @@ const routeBreakdown = computed<Breakdown | null>(
   () => props.result?.views?.route.data.per_year?.all ?? null,
 )
 
-/** Ticket revenue per class_main, for the demand panel's bar. */
-const classRevenue = computed(() => {
-  const cells = props.result?.views?.route.data.per_year
-  if (!cells) return null
-  const out: Record<string, number> = {}
-  for (const [classMain, bd] of Object.entries(cells)) {
-    if (classMain !== 'all') out[classMain] = bd.revenue.ticket_revenue_eur
-  }
-  return out
-})
-
 const operator = computed(() => {
   const id = selected.value?.operator_id
   if (!id) return null
@@ -187,16 +221,71 @@ const operatingDaysPerYear = computed(
 )
 
 const committedSupply = computed(() => ({
-  operatingDays: props.summary?.operating_days_per_year ?? null,
-  departures: props.summary?.departures_per_year ?? null,
+  // The exact annualisers from the operations block where it has arrived;
+  // the summary's rounded copies until then.
+  operatingDays: operatingDaysPerYear.value,
+  departures: departuresPerYear.value,
   trainKm: props.summary?.train_km_per_year ?? null,
   placesOffered:
-    props.summary?.departures_per_year !== undefined && selected.value
-      ? props.summary.departures_per_year * selected.value.capacity.total_places
+    departuresPerYear.value !== null && selected.value
+      ? departuresPerYear.value * selected.value.capacity.total_places
       : null,
   placeKmOffered: props.summary?.available_place_km_per_year ?? null,
   trainsets: props.summary?.trainsets_physical ?? null,
 }))
+
+/** Departures a year at the frequency as the bar has it — what the Demand
+ *  tab's per-trip figures and ladder are drawn against (D9, finding 3). */
+const currentDepartures = computed(
+  () =>
+    supplyFigures(
+      store.scheduleDaysPerWeek,
+      props.cycleDistanceKm,
+      0,
+      null,
+      operations.value?.trip_pairs.length ?? 1,
+    ).departures,
+)
+
+/** The backend's demand block for the composition on screen — the family
+ *  carries one per member, so switching compositions needs no request. */
+const committedBlock = computed<DemandBlock | null>(() => {
+  const member = props.selectedCompositionId
+    ? props.cellsByComposition.get(props.selectedCompositionId)
+    : undefined
+  return member?.status === 'ok' ? member.demand : (props.result?.demand ?? null)
+})
+
+// The model versions named under each tab: what produced the figures on it.
+// The demand and cost versions are the result's own; the parameter models
+// come from the registry (store.models), which lists what the running
+// backend seeds and prices with.
+const tabModels = computed<Record<TabKey, { label: string; version: string | null | undefined }[]>>(
+  () => {
+    const m = store.models
+    const cost = { label: t('proposal.models.cost'), version: props.result?.calc_version }
+    // The demand block travels with the member views; the registry stands
+    // in until they land.
+    const demand = {
+      label: t('proposal.models.demand'),
+      version: committedBlock.value?.model_version ?? m?.demand?.version,
+    }
+    const compositions = {
+      label: t('proposal.models.compositions'),
+      version: m?.compositions?.version,
+    }
+    return {
+      demand: [demand],
+      supply: [compositions, demand],
+      operation: [cost, compositions],
+      infrastructure: [
+        { label: t('proposal.models.infrastructure'), version: m?.infrastructure?.version },
+        { label: t('proposal.models.energy'), version: m?.energy?.version },
+      ],
+      overhead: [cost],
+    }
+  },
+)
 
 const demandDefaults = computed(() => {
   const d = store.demandDefaults
@@ -222,6 +311,7 @@ const demandDefaults = computed(() => {
       <span class="flex flex-col">
         <span class="flex items-center gap-2 text-base font-semibold text-primary-50">
           {{ t('proposal.details.title') }}
+          <PriceBasisBadge feedback-topic="breakdown" />
           <span
             v-if="stale && !open"
             class="rounded-full bg-amber-400/20 px-2 py-px text-[10px] font-normal text-amber-200"
@@ -274,6 +364,10 @@ const demandDefaults = computed(() => {
               : 'text-primary-50/60 hover:text-primary-50'
           "
           :aria-selected="tab === key"
+          @mouseenter="showTabHint($event, key)"
+          @mouseleave="tabHint?.scheduleClose()"
+          @focus="showTabHint($event, key)"
+          @blur="tabHint?.scheduleClose()"
           @click="tab = key"
         >
           {{ t(`proposal.details.tabs.${key}`) }}
@@ -285,17 +379,26 @@ const demandDefaults = computed(() => {
         </button>
       </div>
 
+      <InfoPopover ref="tabHint">
+        <div class="flex w-72 flex-col">
+          <p class="text-sm text-primary-50/75">
+            {{ t(`proposal.details.tabHints.${tabHintKey}`) }}
+          </p>
+          <DocsReadMore :href="DOCS_DETAILS_TAB[tabHintKey]" />
+        </div>
+      </InfoPopover>
+
       <!-- Supply -->
       <div v-if="tab === 'supply'" class="flex flex-col gap-3">
         <SchedulePanel
-          :months="store.scheduleMonths"
+          :days-per-week="store.scheduleDaysPerWeek"
           :previewing="dirty.has('schedule')"
           :cycle-distance-km="cycleDistanceKm"
           :places="selected?.capacity.total_places ?? 0"
           :cycle-days="pair?.trainsets.cycle_days ?? null"
           :trip-pairs="operations?.trip_pairs.length ?? 1"
           :committed="committedSupply"
-          @update:months="store.scheduleMonths = $event"
+          @update:days-per-week="store.scheduleDaysPerWeek = $event"
         />
         <PlacesPricesPanel
           :composition="selected"
@@ -303,14 +406,27 @@ const demandDefaults = computed(() => {
           :defaults="demandDefaults"
           :longest="longestOd"
           :shortest="shortestOd"
-          :months="store.scheduleMonths"
+          :days-per-week="store.scheduleDaysPerWeek"
           :schedule-previewing="dirty.has('schedule')"
           :prices-previewing="dirty.has('prices')"
           :cycle-distance-km="cycleDistanceKm"
           :cycle-days="pair?.trainsets.cycle_days ?? null"
           :trip-pairs="operations?.trip_pairs.length ?? 1"
           :committed="committedSupply"
+          :ticket-vat="ticketVat"
           @update:tariff="applyTariff"
+        />
+        <WhatFollowsPanel
+          :composition="selected"
+          :days-per-week="store.scheduleDaysPerWeek"
+          :tariff="current.tariff"
+          :trip-pairs="operations?.trip_pairs.length ?? 1"
+          :cycle-distance-km="cycleDistanceKm"
+          :committed-demand="committed?.demand ?? null"
+          :committed-block="committedBlock"
+          :previewing="dirty.has('schedule') || dirty.has('prices')"
+          :awaiting="awaits('demand')"
+          :ticket-vat="ticketVat"
         />
       </div>
 
@@ -319,7 +435,8 @@ const demandDefaults = computed(() => {
         <DetailPanel
           :title="t('proposal.details.operation.compareTitle')"
           :info="t('proposal.details.operation.compareInfo')"
-          :awaiting="awaits('schedule', 'prices')"
+          :doc-path="DOCS_DETAIL_PANEL.compositionComparison"
+          :awaiting="awaits('schedule', 'prices', 'demand')"
         >
           <SupplyTable
             :compositions="compositions"
@@ -358,17 +475,23 @@ const demandDefaults = computed(() => {
         :departures-per-year="departuresPerYear"
         :operating-days-per-year="operatingDaysPerYear"
         :awaiting-schedule="awaits('schedule')"
-        :awaiting-prices="awaits('prices')"
+        :awaiting-prices="awaits('prices') || awaits('demand')"
       />
 
       <!-- Demand -->
       <DemandTab
         v-else
-        :summary="summary"
-        :breakdown="routeBreakdown"
-        :class-revenue="classRevenue"
-        :awaiting="awaits('schedule', 'prices')"
+        :compositions="compositions"
+        :selected-composition-id="selectedCompositionId"
+        :committed-block="committedBlock"
+        :days-per-week="store.scheduleDaysPerWeek"
+        :departures="currentDepartures"
+        :previewing="dirty.has('demand')"
+        @select-composition="(id) => emit('selectComposition', id)"
+        @go-to-supply="tab = 'supply'"
       />
+
+      <ModelVersions :items="tabModels[tab]" />
     </div>
   </details>
 </template>

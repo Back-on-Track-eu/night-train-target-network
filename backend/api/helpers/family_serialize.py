@@ -15,8 +15,10 @@ What the document carries, and only once:
   routes        one compact route per (scenario, composition) — variants
                 of one scenario evaluate the same route
   members       variants outer, compositions inner; ok members carry a
-                route_ref and the §5.4 summary, error members the code
-                /calc would answer
+                route_ref, the §5.4 summary and the DEMAND 0.1.0 demand
+                block (the allocation of the family's one demand onto
+                that composition — what the utilisation ladder draws),
+                error members the code /calc would answer
   stats         counts, elapsed, cache_hit, and the context's memo stats
 
 Not here by design (D11): provenance, parameter blocks, the models
@@ -32,7 +34,7 @@ Public interface:
 from __future__ import annotations
 
 from adapters.proposal.id_prefix import rewrite_id_prefix
-from api.helpers.evaluation_serialize import route_view_to_dict
+from api.helpers.evaluation_serialize import demand_to_dict, route_view_to_dict
 from api.helpers.route_serialize import (
     route_compact_to_dict,
     route_to_dict,
@@ -71,7 +73,10 @@ _NEUTRAL_PREFIX = f"P{NEUTRAL_PROPOSAL_ID}_V{NEUTRAL_PROPOSAL_VERSION}_"
 #   6  operations station calls gain per_tonne (rate and train mass) and
 #      Czech stops are priced per tonne (CALC 0.9.32) — the figures change,
 #      not only the shape
-FAMILY_DOCUMENT_FORMAT = 6
+#   7  every ok member gains a `demand` block and the summary row's demand
+#      KPIs stop being placeholders (DEMAND 0.1.0, CALC 0.9.34); the
+#      request echo gains `demand`
+FAMILY_DOCUMENT_FORMAT = 7
 
 
 def route_ref(scenario_id: int, composition_id: str) -> str:
@@ -142,6 +147,7 @@ def family_document(
                 "status": "ok",
                 "route_ref": ref,
                 "summary": summary,
+                "demand": demand_to_dict(member.demand, member.route),
             }
         )
 

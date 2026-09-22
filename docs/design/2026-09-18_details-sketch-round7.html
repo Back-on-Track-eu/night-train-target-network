@@ -1,0 +1,810 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Details — Supply and Demand, sketch round 7</title>
+<style>
+  :root{
+    --sapphire:#1d1e33; --sapphire-100:#23263d; --sapphire-200:#2b2e4a;
+    --ink:#eef4fb; --ink-85:rgba(238,244,251,.85); --ink-70:rgba(238,244,251,.7); --ink-60:rgba(238,244,251,.6);
+    --ink-50:rgba(238,244,251,.5); --ink-40:rgba(238,244,251,.4); --ink-25:rgba(238,244,251,.25);
+    --ink-15:rgba(238,244,251,.15); --ink-10:rgba(238,244,251,.10); --ink-5:rgba(238,244,251,.05);
+    --primary:#2271b3; --primary-600:#1c5d96; --sky-300:#7db5d9;
+    --amber:#fbbf24; --amber-300:#fcd34d; --amber-200:#fde68a; --amber-dim:rgba(251,191,36,.10); --amber-bd:rgba(251,191,36,.4);
+    --yellow-green:#92d051; --sulphur:#eaf044; --pure:#008f39;
+    /* CLASS_COLORS, lib/compositionFormation.ts — the only source of class colour */
+    --c-seat:#7db5d9; --c-couchette:#92d051; --c-capsule:#eaf044; --c-sleeper:#008f39; --c-service:#2b2e4a;
+    --radius:12px; --radius-s:8px;
+  }
+  *{box-sizing:border-box;min-width:0}
+  body{margin:0;background:var(--sapphire);color:var(--ink);font:14px/1.45 "Mark Pro","Segoe UI",system-ui,-apple-system,sans-serif}
+  button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0}
+  input{font:inherit;color:inherit}
+  code{font-size:.92em}
+  .num{font-variant-numeric:tabular-nums}
+  .page{max-width:1120px;margin:0 auto;padding:28px 20px 80px}
+
+  .hero{margin-bottom:16px}
+  .hero h1{font-size:24px;margin:0 0 4px;font-weight:700}
+  .hero p{margin:0;color:var(--ink-60);font-size:13px;max-width:780px}
+  .sketch-note{margin:0 0 18px;padding:10px 14px;border-left:3px solid var(--amber);background:var(--amber-dim);border-radius:0 var(--radius-s) var(--radius-s) 0;font-size:13px;color:var(--ink-60)}
+  .sketch-note b{color:var(--ink)}
+  .sketch-h{margin:8px 0 6px;font-size:16px;font-weight:700;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .sketch-h .n{font-size:11px;font-weight:400;color:var(--ink-40)}
+  .sketch-h .ghost{margin-left:auto;font-size:11px;color:var(--ink-50);border:1px solid var(--ink-15);border-radius:99px;padding:2px 10px}
+  .sketch-h .ghost:hover{color:var(--ink)}
+  .callout{position:absolute;font-size:10px;color:var(--amber-200);background:rgba(29,30,51,.92);border:1px dashed var(--amber-bd);border-radius:6px;padding:3px 7px;pointer-events:none;z-index:3;white-space:nowrap}
+  .questions{margin:28px 0 0;padding:14px 16px;border:1px dashed var(--amber-bd);border-radius:var(--radius-s);font-size:13px;color:var(--ink-60)}
+  .questions h3{margin:0 0 8px;font-size:14px;color:var(--ink)}
+  .questions ol{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px}
+  .questions b{color:var(--ink-85);font-weight:600}
+  .questions code{color:var(--amber-200)}
+
+  /* ---- the app's surfaces ---- */
+  .card{background:var(--sapphire);border:1px solid var(--ink-10);border-radius:var(--radius)}
+  .card > summary{list-style:none;display:flex;justify-content:space-between;align-items:center;gap:8px;padding:12px 16px;cursor:pointer}
+  .card > summary::-webkit-details-marker{display:none}
+  .card > summary .st{font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px}
+  .card > summary .sub{font-size:12px;color:var(--ink-60)}
+  .card > summary .chev{color:var(--ink-60)}
+  .body{border-top:1px solid var(--ink-10);padding:12px 16px 16px;display:flex;flex-direction:column;gap:14px}
+  .tabs{display:inline-flex;width:fit-content;border:1px solid var(--ink-15);border-radius:99px;padding:2px}
+  .tabs button{padding:4px 12px;border-radius:99px;font-size:12px;color:var(--ink-60);white-space:nowrap}
+  .tabs button[aria-selected="true"]{background:var(--ink-15);color:var(--ink)}
+  .tabs button .dot{width:6px;height:6px;border-radius:50%;background:var(--amber);margin-left:5px;display:none;vertical-align:1px}
+  .tabs button.has-await .dot{display:inline-block}
+  .pane{display:none;flex-direction:column;gap:14px}
+  .pane.on{display:flex}
+  .all .pane{display:flex}
+  .all .pane::before{content:attr(data-title);font-size:11px;color:var(--amber-200);border-top:1px dashed var(--amber-bd);padding-top:8px;margin-top:4px}
+  .box{border:1px solid var(--ink-10);border-radius:var(--radius-s);padding:12px;display:flex;flex-direction:column;gap:8px;min-width:0;overflow:hidden;position:relative}
+  .box h4{margin:0;font-size:13px;font-weight:700;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .box h4 .r{margin-left:auto;font-weight:400;font-size:11px;color:var(--ink-50);text-align:right}
+  .box h5{margin:6px 0 0;font-size:11px;font-weight:400;color:var(--ink-40);border-top:1px solid var(--ink-10);padding-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .tw{overflow-x:auto}
+  .pill{display:inline-flex;align-items:center;gap:5px;padding:2px 10px;border-radius:99px;font-size:12px;color:var(--ink-60);border:1px solid transparent;white-space:nowrap;cursor:pointer}
+  .pill:hover{color:var(--ink)}
+  .pill.on{background:var(--ink-15);color:var(--ink)}
+  .pill.custom{border-color:var(--ink-15);color:var(--ink-40);cursor:default}
+  .pill.custom.on{border-color:var(--amber-bd);color:var(--amber-200);background:var(--amber-dim)}
+  .kv{display:grid;grid-template-columns:1fr auto;gap:2px 12px;font-size:12px;align-items:center;margin:0}
+  .kv dt{color:var(--ink-70)}
+  .kv dd{margin:0;text-align:right;font-weight:700;color:var(--ink);white-space:nowrap}
+  .kv dd.pos{color:var(--yellow-green)}
+  .kv dd.neg{color:var(--amber-300)}
+  .kv dd small{font-weight:400;color:var(--ink-60);font-size:11px;margin-left:4px}
+  .kv dt.tot,.kv dd.tot{border-top:1px solid var(--ink-25);padding-top:3px;margin-top:2px}
+  .chip{display:inline-flex;align-items:center;gap:4px;border-radius:99px;padding:1px 8px;font-size:10px;line-height:1.5}
+  .chip.stale{background:rgba(251,191,36,.2);color:var(--amber-200)}
+  .chip.preview{background:rgba(251,191,36,.2);color:var(--amber-200);display:none;align-self:flex-start;width:fit-content}
+  .previewing .chip.preview{display:inline-flex}
+  .previewing .pv{color:var(--amber-200)!important;font-style:italic;font-weight:400!important}
+  .recalc{display:inline-flex;align-items:center;gap:8px;border-radius:99px;background:var(--primary);color:#fff;padding:6px 18px;font-size:13px;font-weight:700;white-space:nowrap}
+  .recalc:hover{background:var(--primary-600)}
+  .stale-banner{display:none;align-items:center;gap:12px;flex-wrap:wrap;border:1px solid var(--amber-bd);background:var(--amber-dim);border-radius:var(--radius-s);padding:8px 12px;font-size:12px;color:var(--amber-200)}
+  body.stale .stale-banner{display:flex}
+  .stale-banner .what{color:var(--ink-60);flex:1 1 30rem}
+  .awaiting{opacity:.45;transition:opacity .15s}
+  .awaiting .await{display:inline-flex}
+  .await{display:none;align-items:center;gap:4px;border-radius:99px;padding:1px 8px;font-size:10px;background:var(--ink-15);color:var(--ink-70);white-space:nowrap}
+  .preview-hint{display:none;font-size:11px;color:var(--amber-200);line-height:1.4;border-top:1px solid var(--amber-bd);padding-top:8px;margin:0}
+  .previewing .preview-hint{display:block}
+
+  /* ⓘ — InfoHint.vue */
+  .i{display:inline-flex;width:14px;height:14px;border-radius:50%;border:1.3px solid var(--ink-50);color:var(--ink-50);font-size:9px;font-weight:700;line-height:1;align-items:center;justify-content:center;font-style:normal;cursor:help;flex:none;vertical-align:-2px;position:relative}
+  .i:hover,.i.open{border-color:var(--ink);color:var(--ink)}
+  .pop{position:absolute;left:-6px;top:22px;width:300px;padding:10px 12px;background:var(--sapphire-100);border:1px solid var(--ink-25);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.45);font-size:13px;font-weight:400;color:var(--ink-70);line-height:1.4;z-index:5;text-align:left;cursor:default;font-style:normal;white-space:normal}
+
+  /* ---- schedule ---- */
+  .sched{display:grid;grid-template-columns:minmax(0,1fr) 13.5rem;gap:16px}
+  .presets{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+  /* frequency: a stepped bar, 1 to 7 days per week */
+  .fs{position:relative;height:34px;cursor:pointer;touch-action:none;outline:0;margin:6px 4px 0}
+  .fs .track{position:absolute;left:0;right:0;top:8px;height:4px;border-radius:99px;background:var(--ink-15)}
+  .fs .fill{position:absolute;left:0;top:8px;height:4px;border-radius:99px;background:var(--primary)}
+  .fs .tick{position:absolute;top:6px;width:2px;height:8px;background:var(--ink-25);transform:translateX(-1px)}
+  .fs .tl{position:absolute;top:20px;font-size:9px;color:var(--ink-40);transform:translateX(-50%)}
+  .fs .tl.on{color:var(--ink)}
+  .fs .th{position:absolute;top:2px;width:16px;height:16px;border-radius:50%;background:var(--sapphire-100);border:2px solid var(--primary);transform:translateX(-50%)}
+  .fs:hover .th,.fs:focus-visible .th{box-shadow:0 0 0 4px rgba(34,113,179,.3)}
+  .sfig{border-left:1px solid var(--ink-10);padding-left:16px;display:flex;flex-direction:column;gap:8px}
+
+  /* ---- numeric field + stepper, as PlacesPricesPanel draws it ---- */
+  .inum{display:inline-flex;align-items:center;gap:3px}
+  .inum input{width:54px;background:none;border:1px solid var(--ink-15);border-radius:4px;padding:2px 6px;text-align:right;color:var(--ink);outline:0}
+  .inum input:focus{border-color:var(--sky-300)}
+  .inum input.changed{border-color:var(--amber-bd)}
+  .inum .bt{display:flex;flex-direction:column;line-height:1}
+  .inum .bt button{font-size:8px;color:var(--ink-50);padding:0 2px}
+  .inum .bt button:hover{color:var(--ink)}
+  .inum .reset{font-size:11px;color:var(--ink-40);width:12px;text-align:center}
+  .inum .reset:hover{color:var(--ink)}
+  .inum .reset.hide{visibility:hidden}
+  .inum .u{font-size:11px;color:var(--ink-50);white-space:nowrap}
+
+  /* ---- supply: places and prices ---- */
+  table.pr{width:100%;min-width:50rem;border-collapse:collapse;font-size:12px}
+  .pr th{font-weight:400;font-size:11px;color:var(--ink-50);padding:2px 6px;text-align:right;white-space:nowrap;vertical-align:bottom;line-height:1.3}
+  .pr th:first-child{text-align:left}
+  .pr th b{display:block;color:var(--ink-40);font-weight:400;font-size:9px}
+  .pr th.part,.pr td.part{border-left:1px solid var(--ink-10)}
+  .pr td{padding:4px 6px;border-top:1px solid var(--ink-5);text-align:right;color:var(--ink-85);white-space:nowrap;vertical-align:middle}
+  .pr td:first-child{text-align:left}
+  .pr tr.tot td{border-top:1px solid var(--ink-25);font-weight:700;color:var(--ink);padding:6px}
+  .pr tr.tot td small{display:block;font-size:9px;font-weight:400;color:var(--ink-40)}
+  .cl{display:inline-flex;align-items:center;gap:6px;color:var(--ink-85)}
+  .cl i{width:10px;height:10px;border-radius:3px;display:inline-block;flex:none}
+  .share{display:inline-flex;align-items:center;gap:6px;justify-content:flex-end}
+  .share .bar{width:40px}
+  .share span{width:36px;text-align:right;color:var(--ink-50);font-size:11px}
+  .bar{height:4px;border-radius:99px;background:var(--ink-10);overflow:hidden;display:block}
+  .bar i{display:block;height:100%;border-radius:99px;background:var(--primary)}
+  .peryear{display:flex;flex-wrap:wrap;align-items:center;gap:4px 24px;border-top:1px solid var(--ink-10);padding-top:8px;font-size:12px}
+  .peryear .l{font-size:11px;color:var(--ink-50)}
+  .peryear .f{display:inline-flex;align-items:baseline;gap:6px}
+  .peryear .f b{color:var(--ink)}
+  .peryear .f span{color:var(--ink-60);font-size:11px}
+
+  /* ---- demand: by class ---- */
+  .dgrid3{display:grid;grid-template-columns:16rem minmax(0,1fr);gap:14px;align-items:stretch}
+  .dgrid3 .box{display:flex;flex-direction:column;gap:8px}
+  .tt input{width:48px;background:none;border:1px solid var(--ink-15);border-radius:4px;padding:1px 5px;text-align:right;color:var(--ink);font-weight:700;outline:0}
+  .tt input:focus{border-color:var(--sky-300)}
+  .presets .sep{width:1px;height:16px;background:var(--ink-15);margin:0 6px}
+  .presets .lbl{font-size:11px;color:var(--ink-50);margin-right:2px}
+  .groups{display:grid;grid-template-columns:1.4fr repeat(5,minmax(0,1fr));gap:8px}
+  .gt{display:flex;flex-direction:column;gap:3px;padding:8px 10px;border-radius:6px;background:var(--ink-5);font-size:12px}
+  .gt.tot{border:1px solid var(--ink-25);background:none}
+  .gt .gl{color:var(--ink-70);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .gt.tot .gl{color:var(--ink);font-weight:700}
+  .gt .inum input{width:80px;font-weight:700}
+  .gt.tot .inum{flex-wrap:wrap}
+  .gt .gs{font-size:11px;color:var(--ink-50)}
+  .gt .gp{display:flex;align-items:center;gap:3px;font-size:10px;color:var(--ink-40);margin-top:2px}
+  .gt .gp i{width:8px;height:8px;border-radius:2px;display:inline-block}
+  .gt .gp small{margin-left:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .din{display:flex;align-items:center;gap:8px 12px;font-size:12px;flex-wrap:wrap;min-height:28px}
+  .din .eq{color:var(--ink-40);font-size:11px}
+  .din .split{display:inline-flex;align-items:center;gap:5px;color:var(--ink-60);cursor:pointer}
+  .din .split:hover{color:var(--ink)}
+  .din .split b{color:var(--ink);font-weight:700}
+  .pill i{width:9px;height:9px;border-radius:2px;display:inline-block}
+  .dclass .dh .eq{color:var(--ink-40);font-size:11px}
+  .ladder{display:grid;grid-template-columns:9.5rem minmax(0,1fr);align-items:center;position:relative;font-size:12px;padding-top:18px;--cc:var(--amber)}
+  .ladder .nm{color:var(--ink-60);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 12px 0 6px;height:28px;line-height:28px;border-radius:6px 0 0 6px}
+  .ladder .nm.sel{color:var(--ink);font-weight:700;background:rgba(251,191,36,.10)}
+  .ladder .nm .tag{font-size:9px;padding:0 5px;border-radius:99px;background:rgba(251,191,36,.18);color:var(--amber-200);margin-left:5px;vertical-align:1px}
+  .ladder .tr{position:relative;height:28px;border-radius:0 6px 6px 0}
+  .ladder .tr.sel{background:rgba(251,191,36,.10)}
+  .ladder .tr .cap{position:absolute;left:0;top:5px;height:12px;border-radius:3px;background:var(--ink-15)}
+  .ladder .tr .fill{position:absolute;left:0;top:5px;height:12px;border-radius:3px 0 0 3px;background:var(--cc)}
+  .ladder .tr .fill.full{border-radius:3px}
+  /* demand not served: a faint dashed line under the bar, from served to asked */
+  .ladder .tr .miss{position:absolute;top:20px;height:3px;background:repeating-linear-gradient(90deg,var(--cc) 0 4px,transparent 4px 8px);opacity:.4}
+  .ladder .tr .lb{position:absolute;top:5px;height:12px;line-height:12px;font-size:10px;white-space:nowrap;transform:translateX(-100%);padding:0 5px;color:var(--sapphire);font-weight:700}
+  .ladder .tr .lb.cap{transform:none;background:none;color:var(--ink-60);font-weight:400}
+  .ladder .tr .lb.out{transform:none;color:var(--cc);font-weight:700}
+  .ladder .tr .lb.after{transform:none;top:16px;height:10px;line-height:10px;color:var(--cc);opacity:.8;font-weight:400;font-size:9px}
+  .ladder .axis{grid-column:2;display:flex;justify-content:space-between;font-size:9px;color:var(--ink-40);padding-top:2px;margin-top:2px;border-top:1px solid var(--ink-10)}
+  /* the demand line overlays the track column of every row; dragging it sets the demand */
+  .ladder .line{position:absolute;left:9.5rem;right:0;top:18px;bottom:16px;cursor:ew-resize;touch-action:none;z-index:2;outline:0}
+  .ladder .line i{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--cc);transform:translateX(-1px);box-shadow:0 0 0 1px rgba(29,30,51,.8)}
+  .ladder .line i::before{content:"";position:absolute;top:-4px;left:-4px;width:10px;height:10px;border-radius:50%;background:var(--cc)}
+  .ladder .line i::after{content:attr(data-l);position:absolute;top:-16px;left:8px;font-size:10px;color:var(--cc);white-space:nowrap}
+  .ladder .line:focus-visible i{box-shadow:0 0 0 3px rgba(251,191,36,.35)}
+  .legend{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:11px;color:var(--ink-50);align-items:center}
+  .legend i{display:inline-block;width:14px;height:5px;border-radius:99px;margin-right:5px;vertical-align:1px}
+  .legend i.miss{background:repeating-linear-gradient(90deg,var(--amber) 0 3px,transparent 3px 6px)}
+  .legend i.line{width:2px;height:10px;background:var(--ink-60);vertical-align:-1px}
+
+  /* ---- demand: distribution ---- */
+  .dist{display:grid;grid-template-columns:minmax(0,1fr) 19rem;gap:16px}
+  .dist svg{display:block;width:100%;height:auto}
+  .dist .ctl{display:grid;grid-template-columns:8rem minmax(0,1fr) 4.5rem;gap:6px 10px;align-items:center;font-size:12px;color:var(--ink-70)}
+  .dist .ctl span:last-child{text-align:right;color:var(--ink-50);font-size:11px}
+  .dist .ctl .ends{display:flex;justify-content:space-between;font-size:9px;color:var(--ink-40);margin-top:-2px}
+  input[type=range]{width:100%;accent-color:var(--primary);margin:0}
+  .dfig{border-left:1px solid var(--ink-10);padding-left:16px;display:flex;flex-direction:column;gap:8px}
+  /* OD matrix: rows board, columns alight; cells shaded by share */
+  table.odm{border-collapse:separate;border-spacing:3px;font-size:11px;margin-top:8px}
+  .odm th{font-weight:400;color:var(--ink-60);padding:2px 4px;white-space:nowrap;vertical-align:bottom;text-align:center}
+  .odm th.o{text-align:right}
+  .odm th .wt{display:block;font-size:9px;color:var(--ink-40)}
+  .odm th input{width:34px;background:none;border:1px solid var(--ink-15);border-radius:3px;padding:0 3px;text-align:right;color:var(--ink);font-size:10px;outline:0}
+  .odm th input:focus{border-color:var(--sky-300)}
+  .odm td{width:58px;height:34px;border-radius:5px;text-align:center;vertical-align:middle;padding:0;position:relative;color:var(--ink-85)}
+  .odm td.c{background:rgba(34,113,179,calc(.08 + .8 * var(--a)));cursor:text}
+  .odm td.c b{display:block;font-size:12px;color:var(--ink)}
+  .odm td.c small{display:block;font-size:9px;color:var(--ink-60)}
+  .odm td.c.pin::after{content:"●";position:absolute;top:2px;right:4px;font-size:7px;color:var(--amber)}
+  .odm td.c input{width:44px;background:var(--sapphire);border:1px solid var(--sky-300);border-radius:3px;text-align:right;color:var(--ink);font-size:12px;outline:0;padding:1px 3px}
+  .odm td.x{background:var(--ink-5);color:var(--ink-25)}
+  .odm td.t,.odm th.t{color:var(--ink-60);font-size:10px;width:44px}
+  details.od{border-top:1px solid var(--ink-10);padding-top:6px}
+  details.od summary{list-style:none;cursor:pointer;font-size:11px;color:var(--ink-50);display:flex;align-items:center;gap:6px}
+  details.od summary::-webkit-details-marker{display:none}
+  details.od summary::before{content:"▸";font-size:10px}
+  details.od[open] summary::before{content:"▾"}
+  table.tt{width:100%;border-collapse:collapse;font-size:12px;margin-top:6px}
+  .tt th{text-align:right;font-weight:400;font-size:10px;color:var(--ink-40);padding:2px 5px;white-space:nowrap;vertical-align:bottom}
+  .tt th:first-child{text-align:left}
+  .tt td{text-align:right;padding:3px 5px;border-top:1px solid var(--ink-10);color:var(--ink-85);white-space:nowrap}
+  .tt td:first-child{text-align:left;color:var(--ink-70)}
+  .tt td.p{color:var(--ink-40);font-size:11px}
+  .tt tr.tot td{border-top:1px solid var(--ink-25);font-weight:700;color:var(--ink)}
+
+  /* ---- demand: what follows ---- */
+  .follow{display:grid;grid-template-columns:15rem minmax(0,1fr);gap:16px;align-items:start}
+  #followTable{font-size:11px}
+  #followTable td,#followTable th{padding:3px 4px}
+  .follow > div{min-width:0}
+  .kpi{display:flex;flex-direction:column;gap:2px;padding-bottom:8px;border-bottom:1px solid var(--ink-10);margin-bottom:8px}
+  .kpi .n{display:block;font-size:34px;line-height:1;font-weight:700}
+  .kpi .n small{font-size:13px;font-weight:400;color:var(--ink-60);margin-left:6px}
+  .kpi .u{display:block;font-size:12px;color:var(--ink-60)}
+
+  .stub{color:var(--ink-50);font-size:12px}
+  .rev{display:flex;height:8px;border-radius:99px;overflow:hidden;background:var(--ink-10)}
+  .rev i{display:block;height:100%}
+  @media (max-width:900px){.dgrid,.dist,.follow,.sched{grid-template-columns:1fr}.dfig,.sfig{border-left:0;padding-left:0}}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="hero">
+    <h1>Details — Supply and Demand, sketch round 7</h1>
+    <p>The demand model will not land for V1. Demand becomes the third <b>input</b> of the Details card, next to the schedule and the prices: how many places each traveller group asks for, and how those sales spread over the route's OD pairs. Supply is drawn with the schedule reduced to one average frequency — the month grid is gone.</p>
+  </div>
+  <p class="sketch-note"><b>Sketch, not code.</b> Route Berlin – Verona, 1,080 km, 9 stops, DE · AT · IT; 17 sellable OD pairs. The schedule is one average frequency in days per week; nothing seasonal remains, so a month is a twelfth of the year. Compositions and their places by class are the real catalog (COMPOSITION_CATALOG_OVERVIEW); base-fare defaults are the ones decided 2026-09-18 (Seat 10 € + 0.06 €/km, Couchette 75 € + 0.03, Sleeper 125 € + 0.04, Capsule 75 € + 0.03); services and catering stay at DEMAND 0.0.5. Everything on the Demand tab is client-side arithmetic on the page, so it previews live and is marked as a preview; only Recalculate commits. The page opens on the defaults — Medium, 200,000 passengers a year, the default group mix, 3 days per week, an even spread over OD pairs — so the first thing to try is a demand level, a group figure, or a distribution slider. Hover any ⓘ.</p>
+  <p class="sketch-note"><b>What changes in the change-scope rule.</b> A third scope, <b>demand</b>, joins schedule and prices. Demand owns its panels and previews them; Train operation (subsidy), Overhead (EBIT on revenue) and the What-follows panel on Supply depend on it — that panel previews the schedule and prices live against the committed demand. The request would carry <code>schedule.days_per_week</code> (one figure), <code>demand.passengers_per_year</code> by traveller group and <code>demand.od {stop_weights, pinned_shares}</code>; the class preferences, the group order, the 50 / 20 / 20 / 10 round shares and the 80 % rule share are model constants in place of the model constant <code>STOPGAP_UTILIZATION_PER</code>; demand is stored as an absolute yearly figure, so a family evaluates every composition — and every frequency — against the same demand — which is exactly what the ladders show.</p>
+
+  <h2 class="sketch-h">Zone D · Details <span class="n">Demand · Supply · Train operation · Infrastructure · Overhead</span><button class="ghost" id="showAll">show all panes</button></h2>
+  <details class="card" open id="card">
+    <summary><span><span class="st">Details <span class="chip stale" style="display:none" id="staleChip">inputs changed</span></span><span class="sub">What runs the route, what it costs to operate and to use, and who rides it.</span></span><span class="chev">⌃</span></summary>
+    <div class="body">
+      <div class="stale-banner"><b>Inputs changed.</b><span class="what" id="staleWhat"></span><button class="recalc" id="recalc">Recalculate <span>→</span></button></div>
+
+      <div class="tabs" role="tablist">
+        <button role="tab" aria-selected="true" data-tab="demand">Demand<span class="dot"></span></button>
+        <button role="tab" aria-selected="false" data-tab="supply">Supply<span class="dot"></span></button>
+        <button role="tab" aria-selected="false" data-tab="ops">Train operation<span class="dot"></span></button>
+        <button role="tab" aria-selected="false" data-tab="infra">Infrastructure<span class="dot"></span></button>
+        <button role="tab" aria-selected="false" data-tab="overhead">Overhead<span class="dot"></span></button>
+      </div>
+
+      <!-- ================= DEMAND (new: inputs) ================= -->
+      <div class="pane" data-pane="demand" data-title="Demand">
+
+        <div class="dgrid3" id="demandBox">
+          <div class="box">
+            <h4>Potential demand <i class="i" data-pop="Passengers per year, both directions, who would take this route. Four levels give a starting figure; any figure can be typed. The frequency under Supply › Schedule turns it into a load per departure.">i</i></h4>
+            <span class="chip preview">preview</span>
+            <div class="presets" id="levelPills"></div>
+            <div class="din"><span class="inum"><input class="num" id="totalInput" inputmode="numeric" style="width:88px;font-weight:700"><span class="u">passengers per year</span></span></div>
+            <p class="stub" id="totalNote" style="font-size:11px;margin:0"></p>
+          </div>
+          <div class="box">
+            <h4>Demand by traveller group <i class="i" data-pop="How the total splits into traveller groups, and which classes each group books, in order. The allocation runs four rounds — every group in order (Leisure – comfort, Leisure – group, Senior leisure, Leisure – budget, Business) releases 50, then 20, 20 and 10 % of its demand; 80 % of that seats along the preference list, first class until full, then the next, and 20 % spread evenly over the group's other listed classes. A group sits only in the classes it lists; what none of them can seat is not served.">i</i><span class="r">shares of the total · classes in order of preference</span></h4>
+            <span class="chip preview">preview</span>
+            <div class="tw"><table class="tt num" id="shareTable"></table></div>
+            <p class="stub" id="shareNote" style="font-size:11px;margin:0"></p>
+          </div>
+        </div>
+
+        <div class="box" id="byClassBox">
+          <h4>Utilisation by composition <i class="i" data-pop="The same demand allocated to every composition of the family, so one demand reads as a utilisation on each train. Fill = places served, the percentage its utilisation, the number after the bar the composition's places; the faint dashed line below a bar is demand no listed class could seat. Per trip is one departure, one direction; a month is a twelfth of the year.">i</i><span class="r" id="freqLink"></span></h4>
+          <div class="presets" id="viewPills"></div>
+          <div class="ladder" id="ladder"></div>
+          <div class="legend"><span><i style="background:var(--ink-15)"></i>places the composition has</span><span><i style="background:var(--ink-60)"></i>fill: places served, % = utilisation</span><span>number after the bar: the composition's places</span><span><i class="miss" style="background:repeating-linear-gradient(90deg,var(--ink-40) 0 4px,transparent 4px 8px)"></i>dashed below: demand not served (figure on the selected composition)</span></div>
+        </div>
+
+        <div class="box" id="distBox">
+          <h4>Demand by OD pair <i class="i" data-pop="The share of the demand each sellable OD pair gets — a boarding stop before an alighting stop. The matrix is filled from one thing: a weight per stop in the margins — a pair's share is its boarding weight times its alighting weight. The presets write those weights by position along the route (long journeys: early boarding, late alighting; short hops the reverse; mid: the middle stops); any weight can be typed over, a big city pulling more. Any cell can then be typed over; it is pinned and the rest rescales so the total stays 100 %. That keeps a 10 × 10 route to twenty margin weights and a couple of curve settings, plus the handful of pairs you know better. A place is sold once per night, so the distribution moves place-km and revenue, not passengers. One matrix for all classes.">i</i><span class="r">shares of the demand · filled from the stop weights, pin the pairs you know</span></h4>
+          <div class="dist">
+            <div>
+              <div class="presets" id="distPresets">
+                <span class="lbl">Stop weights</span>
+                <span class="pill" data-dist="uniform">Even</span>
+                <span class="pill" data-dist="long">Long journeys</span>
+                <span class="pill" data-dist="mid">Mid distance</span>
+                <span class="pill" data-dist="short">Short hops</span>
+                <span class="sep"></span>
+                <span class="pill" id="clearPins" title="drop every typed cell">unpin all</span>
+              </div>
+              <div class="tw"><table class="odm num" id="odMatrix"></table></div>
+              <p class="stub" style="font-size:11px;margin:0">Rows board, columns alight; a cell is the pair's share of the demand, its journey below. Type a share to pin it (●); the margins hold the stop weights that fill the rest — a preset writes them, you can overwrite them. Night stops sell nothing and are not shown.</p>
+            </div>
+            <div class="dfig">
+              <span class="chip preview">preview</span>
+              <dl class="kv">
+                <dt>Sellable OD pairs</dt><dd>17</dd>
+                <dt>Pinned pairs</dt><dd class="pv" data-d="pinned"></dd>
+                <dt>Average journey</dt><dd class="pv" data-d="avgKm"></dd>
+                <dt>Longest pair, Berlin – Verona</dt><dd class="pv" data-d="longShare"></dd>
+                <dt>Shortest pair, Kufstein – Innsbruck</dt><dd class="pv" data-d="shortShare"></dd>
+                <dt>Busiest boarding stop</dt><dd class="pv" data-d="topO"></dd>
+                <dt>Busiest alighting stop</dt><dd class="pv" data-d="topD"></dd>
+              </dl>
+              <p class="stub" style="font-size:11px">The stop weights are the request's few numbers; pinned cells travel with them. A 20-stop route with 10 boarding and 10 alighting stops is 100 cells here, still one screen.</p>
+            </div>
+          </div>
+        </div>
+
+      </div>
+      <!-- ================= SUPPLY (as implemented) ================= -->
+      <div class="pane on" data-pane="supply" data-title="Supply">
+        <div class="box" id="schedBox">
+          <h4>Schedule <i class="i" data-pop="How often the train runs, as an average over the year — one figure, no seasons. Operating days are 366 (2032 is a leap year) times days per week over seven; departures are operating days times two directions; train-km and place-km follow from the route length and the formation. Trainsets are the rakes the cycle needs at this frequency.">i</i><span class="r">days per week, average over the year</span></h4>
+          <div class="sched">
+            <div>
+              <div class="fs" id="freqSlider"></div>
+              <div class="din"><b id="freqLabel"></b><span class="eq" id="freqNote"></span></div>
+            </div>
+            <div class="sfig">
+              <span class="chip preview">preview</span>
+              <dl class="kv">
+                <dt>Operating days</dt><dd class="pv" data-s="opDays"></dd>
+                <dt>Departures</dt><dd class="pv" data-s="dep"></dd>
+                <dt>Train-km</dt><dd class="pv" data-s="tkm"></dd>
+                <dt>Trainsets</dt><dd class="pv" data-s="sets"></dd>
+              </dl>
+            </div>
+          </div>
+        </div>
+
+        <div class="box" id="priceBox">
+          <h4>Places and prices <i class="i" data-pop="What the train offers and what it charges. The tariff is three parts, each per class: a base fare with a fixed and a distance term, additional services (bicycles, luggage, reservations — ordinary ticket revenue), and catering as one signed net figure per passenger. The two example columns price the berth only — fixed plus distance — over the longest and the shortest journey the route sells. How many of these places actually sell is set under Demand.">i</i><span class="r">NEW-BAL-7 · 260 places</span></h4>
+          <div class="tw"><table class="pr num">
+            <thead><tr>
+              <th>Class</th><th>Places</th><th>Share of train</th>
+              <th class="part">Base fare, fixed<b>€ / passenger</b></th>
+              <th class="part">Base fare, distance<b>€ / km</b></th>
+              <th class="part">Additional services<b>€ / passenger</b></th>
+              <th class="part">Catering, net<b>€ / passenger</b></th>
+              <th class="part">Example fare, longest<b>Berlin – Verona · 1,080 km</b></th>
+              <th>Example fare, shortest<b>Kufstein – Innsbruck · 75 km</b></th>
+            </tr></thead>
+            <tbody id="fareRows"></tbody>
+          </table></div>
+          <div class="peryear" id="supplyPerYear">
+            <span class="chip preview">preview</span>
+            <span class="l">Per year, both directions</span>
+            <span class="f"><b class="pv" data-s="pl"></b><span>places offered</span></span>
+            <span class="f"><b class="pv" data-s="plkm"></b><span>place-km offered</span></span>
+          </div>
+        </div>
+        <div class="box" id="followBox" data-await="demand">
+          <h4>What follows <span class="await">awaiting recalculation</span> <i class="i" data-pop="What the schedule and the prices earn with the committed demand: passengers, place-km sold, utilisation and revenue per year, both directions. Ticket revenue and the catering contribution are earned in different ways and one of them can be negative, so they stay apart. Preview until Recalculate; the family cache keys on the demand inputs like on the prices.">i</i><span class="r">NEW-BAL-7 · per year, both directions</span></h4>
+          <span class="chip preview">preview</span>
+          <div class="follow">
+            <div>
+              <div class="kpi"><span class="n pv" data-f="pax"></span><span class="u">passengers per year</span></div>
+              <dl class="kv">
+                <dt>Places sold per departure</dt><dd class="pv" data-f="soldDep"></dd>
+                <dt>Utilisation, places</dt><dd class="pv" data-f="utilPl"></dd>
+                <dt>Place-km sold</dt><dd class="pv" data-f="plkmSold"></dd>
+                <dt>Utilisation, place-km</dt><dd class="pv" data-f="utilKm"></dd>
+                <dt class="tot">Ticket revenue</dt><dd class="tot pv" data-f="revTicket"></dd>
+                <dt>Catering contribution</dt><dd class="pv" data-f="revCat"></dd>
+                <dt class="tot">Revenue and contribution</dt><dd class="tot pv" data-f="revTot"></dd>
+              </dl>
+            </div>
+            <div>
+              <div class="tw"><table class="tt num" id="followTable"></table></div>
+              <h5>Ticket revenue by class</h5>
+              <div class="rev" id="revBar"></div>
+              <p class="preview-hint">Preview from the schedule and prices against the committed demand. Recalculate to apply them to Train operation, Overhead and the KPI grid.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= the three cost tabs, as today ================= -->
+      <div class="pane" data-pane="ops" data-title="Train operation">
+        <div class="box" data-await="schedule prices demand"><h4>Compare compositions <span class="await">awaiting recalculation</span></h4><p class="stub">As implemented: the comparison table, the selected composition, then Composition fleet · Locomotive leasing · Staff as Kassenzettel. New here: the <b>Subsidy / year</b> column depends on demand, so the whole table waits when demand changes — and the ladders on the Demand tab are the "fit to demand" column that was once planned for this table.</p></div>
+      </div>
+      <div class="pane" data-pane="infra" data-title="Infrastructure">
+        <div class="box" data-await="schedule"><h4>Track access · Stations · Facilities · Energy <span class="await">awaiting recalculation</span></h4><p class="stub">As implemented. Depends on the schedule only — demand changes nothing here.</p></div>
+      </div>
+      <div class="pane" data-pane="overhead" data-title="Overhead">
+        <div class="box" data-await="schedule prices demand"><h4>Company costs <span class="await">awaiting recalculation</span></h4><p class="stub">As implemented. The EBIT margin is a share of revenue, so it now waits on demand as well as on prices.</p></div>
+      </div>
+
+    </div>
+  </details>
+
+  <div class="questions">
+    <h3>Decisions (all confirmed 2026-09-18)</h3>
+    <ol>
+      <li><b>Demand levels are defaults, not a scenario switch — and the chosen level is saved with the proposal.</b> A level writes the total and keeps the group mix; any edit afterwards makes it Custom, and Custom is what gets saved then. The four totals are model constants (DEMAND 0.1.0).</li>
+      <li><b>Unit of the input.</b> Places sold per departure (drawn here) keeps the ladder honest — utilisation is a per-departure idea. Per year would tie the input to the schedule and change under a schedule edit.</li>
+      <li><b>Stored as places, not as a share.</b> A family evaluates all compositions against one request, so an absolute demand is the only thing that makes the ladders true. The share is just how it is entered.</li>
+      <li><b>Rounds, not spill.</b> Each group only ever sits in the classes it lists. The 50 / 20 / 20 / 10 are the shares of a group's demand released per round, so the groups interleave: Leisure – comfort places half of its demand, then Leisure – group half of its, and so on, before anyone places the next fifth. Within a round 80 % of a group fills its first preference before touching its second; the other 20 % go evenly to the group's other listed classes (a variance term as expected values, not random draws, so results stay reproducible; a single-class group has no other class). Demand no listed class can seat is not served — on REF-POD-14 (no Seat, no Couchette) that is Leisure – group and Leisure – budget in full.</li>
+      <li><b>Default group mix</b> is Leisure – comfort 50 %, Leisure – group 25 %, Senior leisure 10 %, Leisure – budget 10 %, Business 5 %; a level applies it to the total, and editing a group changes the mix for that proposal only.</li>
+      <li><b>One distribution for all classes.</b> Sleeper demand plausibly skews long. A per-class curve is a small extension of <code>od_distribution</code>; the sketch keeps one to stay readable.</li>
+      <li><b>The year is fixed, the trip follows.</b> Demand is stored per year; per trip is that figure over the departures the frequency yields, per month a twelfth of the year — no seasons. So a frequency change moves the load per departure, not the input: every second day fills each train roughly twice as full and turns demand it can no longer seat into "not served". The frequency stays a Supply › Schedule input; the utilisation panel names it with a link, since it decides how many trips carry the year.</li>
+      <li><b>Backend contract.</b> <code>distribute_demand()</code> already takes a utilisation and a fare map; it grows a per-class places figure and a weight function over OD distance. <code>CALC_VERSION</code> patch bump, <code>FAMILY_DOCUMENT_FORMAT</code> +1, the family key gains the demand fields.</li>
+    </ol>
+  </div>
+</div>
+
+<script>
+/* ---------------- data ---------------- */
+const ORDER=['Seat','Couchette','Sleeper','Capsule']; // CLASS_ICONS order
+const COLOR={Seat:'#7db5d9',Couchette:'#92d051',Capsule:'#eaf044',Sleeper:'#008f39'};
+const CYCLE_KM=2160, ROUTE_KM=1080, CYCLE_DAYS=2;
+const SELECTED='NEW-BAL-7';
+// COMPOSITION_CATALOG_OVERVIEW_2026-09-06 — places by class
+const COMPS=[
+  ['REF-POD-14','refurbished',{Seat:0,Couchette:0,Capsule:528,Sleeper:230}],
+  ['REF-BUD-12','refurbished',{Seat:312,Couchette:180,Capsule:0,Sleeper:108}],
+  ['REF-COUCH-10','refurbished',{Seat:56,Couchette:480,Capsule:0,Sleeper:0}],
+  ['REF-PREM-12','refurbished',{Seat:66,Couchette:400,Capsule:0,Sleeper:60}],
+  ['REF-BAL-9','refurbished',{Seat:348,Couchette:104,Capsule:0,Sleeper:72}],
+  ['NEW-BAL-14','new',{Seat:192,Couchette:80,Capsule:168,Sleeper:80}],
+  ['REF-ROOM-14','refurbished',{Seat:0,Couchette:0,Capsule:504,Sleeper:0}],
+  ['REF-BUD-6','refurbished',{Seat:148,Couchette:240,Capsule:0,Sleeper:0}],
+  ['REF-POD-7','refurbished',{Seat:0,Couchette:0,Capsule:264,Sleeper:115}],
+  ['REF-NOR-7','refurbished',{Seat:206,Couchette:0,Capsule:0,Sleeper:60}],
+  ['NEW-BAL-7','new',{Seat:96,Couchette:40,Capsule:84,Sleeper:40}],
+  ['REF-COUCH-6','refurbished',{Seat:0,Couchette:180,Capsule:0,Sleeper:36}],
+].map(([id,strategy,places])=>({id,strategy,places,total:Object.values(places).reduce((a,b)=>a+b,0)}))
+ .sort((a,b)=>b.total-a.total); // Places ↓, as the comparison table sorts
+const SEL=COMPS.find(c=>c.id===SELECTED);
+
+// Stops with cumulative km; B boards, A alights, X both, N night (sells nothing)
+const STOPS=[['Berlin',0,'B'],['Leipzig',190,'B'],['Nürnberg',470,'B'],['München',640,'N'],['Rosenheim',705,'N'],['Kufstein',745,'X'],['Innsbruck',820,'X'],['Bolzano',940,'A'],['Verona',1080,'A']];
+const OD=[];
+STOPS.forEach((o,i)=>STOPS.forEach((d,j)=>{if(j>i&&'BX'.includes(o[2])&&'AX'.includes(d[2]))OD.push({name:`${o[0]} – ${d[0]}`,km:d[1]-o[1]})}));
+OD.sort((a,b)=>b.km-a.km);
+const KM_MIN=Math.min(...OD.map(o=>o.km)), KM_MAX=Math.max(...OD.map(o=>o.km));
+
+// Tariff defaults decided 2026-09-18 (base fare); services and catering as DEMAND 0.0.5
+const TARIFF_DEFAULT={
+  fixed:{Seat:10,Couchette:75,Sleeper:125,Capsule:75},
+  perKm:{Seat:0.06,Couchette:0.03,Sleeper:0.04,Capsule:0.03},
+  services:{Seat:1.5,Couchette:2.5,Sleeper:4.0,Capsule:2.5},
+  catering:{Seat:1.5,Couchette:2.0,Sleeper:1.0,Capsule:2.0},
+};
+const PART_DEC={fixed:2,perKm:3,services:2,catering:2};
+const PART_STEP={fixed:1,perKm:0.005,services:0.1,catering:0.1};
+// Fill presets are stop-weight profiles by position along the route: long
+// journeys = early boarding, late alighting; short hops the reverse; mid =
+// the middle stops on both sides. What the margins show is what fills the matrix.
+const DIST_PRESETS={uniform:{o:x=>1,d:x=>1},long:{o:x=>1-x,d:x=>x},mid:{o:x=>1-Math.abs(2*x-1),d:x=>1-Math.abs(2*x-1)},short:{o:x=>x,d:x=>1-x}};
+const presetWeights=k=>{const pos=(list,i)=>list.length>1?i/(list.length-1):0.5, w=f=>k==='uniform'?1:+(0.3+2.7*f).toFixed(1);
+  return {wO:Object.fromEntries(ORIGINS.map((o,i)=>[o,w(DIST_PRESETS[k].o(pos(ORIGINS,i)))])),wD:Object.fromEntries(DESTS.map((d,i)=>[d,w(DIST_PRESETS[k].d(pos(DESTS,i)))]))}};
+const ORIGINS=STOPS.filter(st=>'BX'.includes(st[2])).map(st=>st[0]), DESTS=STOPS.filter(st=>'AX'.includes(st[2])).map(st=>st[0]);
+OD.forEach(o=>{const [a,b]=o.name.split(' – ');o.o=a;o.d=b;o.key=`${a}>${b}`});
+
+// Demand levels: passengers per year over all groups, both directions. The
+// year is the fixed quantity — fewer departures fill each train fuller.
+const LEVELS={small:{label:'S',name:'Small',total:100000},medium:{label:'M',name:'Medium',total:200000},large:{label:'L',name:'Large',total:300000},xl:{label:'XL',name:'Extra large',total:500000}};
+const levelTotal=l=>LEVELS[l].total;
+
+// Traveller groups, each with its classes in order of preference — and only
+// those. The allocation runs ROUNDS: in each, every group in GROUP_ORDER
+// releases that round's share of its demand and seats it along its
+// preference list, first class until full, then the next. Interleaving the
+// groups this way keeps the first group from taking a class outright before
+// the others get their turn. Demand no listed class can seat is not served.
+const GROUPS={
+  comfort:{label:'Leisure – comfort',prefs:['Sleeper','Capsule','Couchette'],share:0.50},
+  group:{label:'Leisure – group',prefs:['Couchette','Seat'],share:0.25},
+  senior:{label:'Senior leisure',prefs:['Couchette','Sleeper'],share:0.10},
+  budget:{label:'Leisure – budget',prefs:['Seat'],share:0.10},
+  business:{label:'Business',prefs:['Sleeper','Capsule'],share:0.05},
+};
+const GROUP_ORDER=['comfort','group','senior','budget','business'];
+const ROUNDS=[50,20,20,10]; // share of each group's demand released per round, %
+// Not everyone follows the rule: this share of a group seats along its
+// preference list first-until-full; the rest spreads evenly over the other
+// listed classes. Expected values, not random draws — the result is stable.
+const RULE_SHARE=0.8;
+const DEFAULT_SHARES=Object.fromEntries(GROUP_ORDER.map(g=>[g,GROUPS[g].share*100]));
+const copy=o=>JSON.parse(JSON.stringify(o));
+const S={freq:3,tariff:copy(TARIFF_DEFAULT),total:levelTotal('medium'),shares:copy(DEFAULT_SHARES),dist:{...presetWeights('uniform'),pins:{}}};
+/** Passengers per year by group: the total split by the shares as entered. */
+const groupsOf=st=>Object.fromEntries(GROUP_ORDER.map(g=>[g,st.total*st.shares[g]/100]));
+let COMMITTED=copy(S);
+
+/* ---------------- formatting ---------------- */
+const fInt=n=>Math.round(n).toLocaleString('en-US');
+const fPct=n=>`${Math.round(n)} %`;
+const fEur=n=>`${n.toFixed(2)} €`;
+const fM=n=>`${(n/1e6).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})} M €`;
+const fKm=n=>`${fInt(n)} km`;
+
+/* ---------------- arithmetic ---------------- */
+function supply(freq){
+  const opDays=366*freq/7;
+  const dep=opDays*2, tkm=opDays*CYCLE_KM;
+  return {opDays,dep,tkm,sets:Math.ceil(CYCLE_DAYS*freq/7),pl:dep*SEL.total,plkm:tkm*SEL.total};
+}
+// OD shares, % per pair in OD order: boarding weight × alighting weight,
+// normalised; pinned cells keep their value, the rest share the remainder
+function odShares(dist){
+  const base=OD.map(o=>dist.wO[o.o]*dist.wD[o.d]);
+  const pinned=OD.reduce((t,o)=>t+(dist.pins[o.key]??0),0), free=OD.reduce((t,o,i)=>t+(o.key in dist.pins?0:base[i]),0);
+  const rest=Math.max(0,100-pinned);
+  return OD.map((o,i)=>(o.key in dist.pins?dist.pins[o.key]:free?base[i]/free*rest:0)/100);
+}
+/** Pin one pair at v %; every other pair rescales so the total stays 100. */
+function pinPair(key,v){
+  const cur=odShares(S.dist).map(x=>x*100), i=OD.findIndex(o=>o.key===key), old=cur[i];
+  v=Math.min(100,Math.max(0,v));
+  const k=old<100?(100-v)/(100-old):0;
+  OD.forEach((o,j)=>{if(j!==i&&(o.key in S.dist.pins))S.dist.pins[o.key]=+(S.dist.pins[o.key]*k).toFixed(2)});
+  // unpinned pairs rescale by themselves through the remainder
+  S.dist.pins[key]=+v.toFixed(2);
+}
+/** Allocates one departure's group demand onto a train: ROUNDS release a
+ *  share of each group's demand; RULE_SHARE of it seats along the group's
+ *  preference list first-until-full, the rest spreads evenly over the other
+ *  listed classes. A group sits only in the classes it lists. */
+function allocate(k,groups){
+  const room={...k.places}, left={...groups};
+  const alloc=Object.fromEntries(GROUP_ORDER.map(g=>[g,Object.fromEntries(ORDER.map(c=>[c,0]))]));
+  let pending=Object.fromEntries(GROUP_ORDER.map(g=>[g,0])); // released but not yet seated
+  const seat=(g,c,amount)=>{const take=Math.min(amount,room[c]);if(take>0){alloc[g][c]+=take;room[c]-=take;left[g]-=take}return take};
+  for(const share of ROUNDS){
+    for(const g of GROUP_ORDER){
+      const prefs=GROUPS[g].prefs, others=prefs.slice(1), released=groups[g]*share/100;
+      // the deviating share first: an even split over the other listed
+      // classes; what they cannot seat joins the rule-followers
+      const stray=others.length?released*(1-RULE_SHARE):0;
+      pending[g]+=released-stray;
+      others.forEach(c=>{pending[g]+=stray/others.length-seat(g,c,stray/others.length)});
+      for(const c of prefs)pending[g]-=seat(g,c,pending[g]);
+    }
+  }
+  const byClass=Object.fromEntries(ORDER.map(c=>[c,GROUP_ORDER.reduce((s,g)=>s+alloc[g][c],0)]));
+  const served=ORDER.reduce((s,c)=>s+byClass[c],0);
+  return {alloc,byClass,left,served,miss:GROUP_ORDER.reduce((s,g)=>s+left[g],0)};
+}
+const totalDemand=groups=>GROUP_ORDER.reduce((s,g)=>s+groups[g],0);
+/** Yearly group demand → what one departure has to seat at this frequency. */
+const perTrip=(groups,freq)=>{const dep=supply(freq).dep;return Object.fromEntries(GROUP_ORDER.map(g=>[g,dep?groups[g]/dep:0]))};
+
+function follows(groups,dist,freq,tariff){
+  const sup=supply(freq), share=odShares(dist), A=allocate(SEL,perTrip(groups,freq));
+  const avgKm=OD.reduce((s,o,i)=>s+o.km*share[i],0);
+  const rows=ORDER.map(c=>{
+    const served=A.byClass[c];
+    const pax=served*sup.dep;
+    const ticket=pax*(tariff.fixed[c]+tariff.perKm[c]*avgKm+tariff.services[c]);
+    return {c,served,pax,plkm:pax*avgKm,ticket,cat:pax*tariff.catering[c]};
+  });
+  const tot=k=>rows.reduce((s,r)=>s+r[k],0);
+  return {rows,A,avgKm,share,sup,soldDep:tot('served'),pax:tot('pax'),plkm:tot('plkm'),ticket:tot('ticket'),cat:tot('cat')};
+}
+
+/* ---------------- change scope ---------------- */
+const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+function dirty(){
+  const d=new Set();
+  if(S.freq!==COMMITTED.freq)d.add('schedule');
+  if(!same(S.tariff,COMMITTED.tariff))d.add('prices');
+  if(S.total!==COMMITTED.total||!same(S.shares,COMMITTED.shares)||!same(S.dist,COMMITTED.dist))d.add('demand');
+  return d;
+}
+const SCOPE_NAME={schedule:'the schedule',prices:'the prices',demand:'the demand'};
+
+/* ---------------- render: supply ---------------- */
+function setFreq(v){S.freq=Math.min(7,Math.max(1,Math.round(v)));refresh()}
+/** Builds a stepped 1–7 slider into el once; renderFreqSlider moves it. */
+function buildFreqSlider(el){
+  const x=v=>`${(v-1)/6*100}%`;
+  el.setAttribute('tabindex','0');el.setAttribute('role','slider');el.setAttribute('aria-valuemin','1');el.setAttribute('aria-valuemax','7');
+  el.innerHTML=`<span class="track"></span><span class="fill"></span>`+[1,2,3,4,5,6,7].map(v=>`<span class="tick" style="left:${x(v)}"></span><span class="tl" style="left:${x(v)}">${v}</span>`).join('')+`<span class="th"></span>`;
+  const set=ev=>{const r=el.getBoundingClientRect();setFreq(1+(ev.clientX-r.left)/r.width*6)};
+  el.addEventListener('pointerdown',ev=>{el.setPointerCapture(ev.pointerId);set(ev);el.onpointermove=set});
+  el.addEventListener('pointerup',()=>el.onpointermove=null);
+  el.addEventListener('keydown',ev=>{const d=ev.key==='ArrowRight'||ev.key==='ArrowUp'?1:ev.key==='ArrowLeft'||ev.key==='ArrowDown'?-1:0;if(d){ev.preventDefault();setFreq(S.freq+d)}});
+}
+function renderFreqSlider(el){
+  const x=`${(S.freq-1)/6*100}%`;
+  el.querySelector('.fill').style.width=x;el.querySelector('.th').style.left=x;el.setAttribute('aria-valuenow',S.freq);
+  el.querySelectorAll('.tl').forEach(t=>t.classList.toggle('on',+t.textContent===S.freq));
+}
+buildFreqSlider(document.getElementById('freqSlider'));
+const freqLabel=()=>`${S.freq} days per week`+({7:' — every day',1:' — once a week'}[S.freq]||'');
+function renderSchedule(dirtySchedule){
+  renderFreqSlider(document.getElementById('freqSlider'));
+  document.getElementById('freqLabel').textContent=freqLabel();
+  document.getElementById('freqNote').textContent=`${fInt(366*S.freq/7)} operating days a year · which weekdays is not modelled`;
+  document.getElementById('schedBox').classList.toggle('previewing',dirtySchedule);
+}
+
+
+
+function numField(part,c,value,dflt,changed){
+  return `<span class="inum" data-part="${part}" data-c="${c}"><button class="reset ${changed?'':'hide'}" title="Reset to the default (${dflt.toFixed(PART_DEC[part])})">↺</button><input class="num ${changed?'changed':''}" inputmode="decimal" value="${value.toFixed(PART_DEC[part])}"><span class="bt"><button data-d="1">▲</button><button data-d="-1">▼</button></span></span>`;
+}
+function renderPrices(){
+  const T=S.tariff, D=TARIFF_DEFAULT, rows=ORDER.filter(c=>SEL.places[c]>0);
+  const fare=(c,km)=>T.fixed[c]+T.perKm[c]*km;
+  const wavg=fn=>rows.reduce((s,c)=>s+fn(c)*SEL.places[c],0)/SEL.total;
+  document.getElementById('fareRows').innerHTML=rows.map(c=>`<tr>
+    <td><span class="cl"><i style="background:${COLOR[c]}"></i>${c}</span></td>
+    <td>${SEL.places[c]}</td>
+    <td><span class="share"><span class="bar"><i style="width:${SEL.places[c]/SEL.total*100}%;background:${COLOR[c]}"></i></span><span>${fPct(SEL.places[c]/SEL.total*100)}</span></span></td>
+    ${['fixed','perKm','services','catering'].map(p=>`<td class="part">${numField(p,c,T[p][c],D[p][c],T[p][c]!==D[p][c])}</td>`).join('')}
+    <td class="part pv">${fEur(fare(c,KM_MAX))}</td><td class="pv">${fEur(fare(c,KM_MIN))}</td></tr>`).join('')+
+    `<tr class="tot"><td>All classes<small>average per passenger, weighted by places</small></td><td>${SEL.total}</td><td style="font-weight:400;color:var(--ink-50);font-size:11px">100 %</td>
+    <td class="part">${fEur(wavg(c=>T.fixed[c]))}</td><td class="part">${wavg(c=>T.perKm[c]).toFixed(3)}</td><td class="part">${fEur(wavg(c=>T.services[c]))}</td><td class="part">${fEur(wavg(c=>T.catering[c]))}</td>
+    <td class="part">${fEur(wavg(c=>fare(c,KM_MAX)))}</td><td>${fEur(wavg(c=>fare(c,KM_MIN)))}</td></tr>`;
+  document.querySelectorAll('#fareRows .inum').forEach(f=>{
+    const {part,c}=f.dataset, round=v=>Math.round(v*10**PART_DEC[part])/10**PART_DEC[part];
+    const set=v=>{S.tariff[part][c]=round(part==='catering'?v:Math.max(0,v));refresh()};
+    f.querySelector('input').addEventListener('change',ev=>set(parseFloat(ev.target.value.replace(',','.'))||0));
+    f.querySelectorAll('.bt button').forEach(b=>b.addEventListener('click',()=>set(S.tariff[part][c]+ +b.dataset.d*PART_STEP[part])));
+    f.querySelector('.reset').addEventListener('click',()=>set(TARIFF_DEFAULT[part][c]));
+  });
+}
+
+/* ---------------- render: demand by class ---------------- */
+function ladderRows(c,max,sumRow,trackPx){
+  // one row per composition: grey = places, coloured fill = served. The sum
+  // row stacks the fill by class and hatches what no preferred class could
+  // seat; a class row shows only its own fill, since "not served" is a
+  // property of a group, not of a class.
+  const px=v=>v/max*trackPx, w=v=>`${v/max*100}%`, f=unitFactor(), G=perTrip(groupsOf(S),S.freq);
+  // one allocation per composition, then the rows in the order asked for
+  const rows=COMPS.map(k=>{const A=allocate(k,G), cap=sumRow?k.total:k.places[c], served=sumRow?A.served:A.byClass[c];return {k,A,cap,served,util:cap?served/cap:-1}});
+  const by={capacity:r=>r.cap,utilisation:r=>r.util,miss:r=>r.A.miss}[UI.sort];
+  rows.sort((a,b)=>by(b)-by(a)||b.cap-a.cap);
+  return rows.map(r=>{
+    const k=r.k, A=r.A, cap=r.cap*f, sel=k.id===SELECTED;
+    const served=r.served*f, miss=(sumRow?A.miss:0)*f, demand=served+miss;
+    const who=sumRow?'':GROUP_ORDER.filter(g=>A.alloc[g][c]>0.5).map(g=>`${GROUPS[g].label} ${Math.round(A.alloc[g][c])}`).join(' · ');
+    let fill='', labels='';
+    if(sumRow){let x=0;fill=ORDER.map(q=>{const seg=`<span class="fill" style="left:${w(x)};width:${w(A.byClass[q]*f)};background:${COLOR[q]};border-radius:0" title="${q} ${fInt(A.byClass[q]*f)}"></span>`;x+=A.byClass[q]*f;return seg}).join('')}
+    else if(served>0)fill=`<span class="fill ${served>=cap-0.5?'full':''}" style="width:${w(served)}" title="${who}"></span>`;
+    if(cap>0){
+      // utilisation inside the fill (or just after it when the fill is
+      // narrow), the composition's places always after the bar end
+      const pct=fPct(served/cap*100), room=px(cap)-px(served);
+      const inside=px(served)>=40&&(room>=34||served>=cap-0.5);
+      labels=inside?`<span class="lb" style="left:${w(served)}">${pct}</span>`:`<span class="lb out" style="left:${w(served)}">${pct}</span>`;
+      labels+=`<span class="lb cap" style="left:${w(cap)}">${fInt(cap)}</span>`;
+    }else if(!sumRow)labels=`<span class="lb cap" style="left:0;color:var(--ink-40)">no ${c}</span>`;
+    const hatch=miss>0.5?`<span class="miss" style="left:${w(served)};width:${w(miss)}"></span>${sel?`<span class="lb after" style="left:${w(demand)};margin-left:6px">${fInt(miss)} not served</span>`:''}`:'';
+    return `<span class="nm ${sel?'sel':''}" title="${k.id}">${k.id}${sel?'<span class="tag">selected</span>':''}</span>
+      <span class="tr ${sel?'sel':''}">${cap?`<span class="cap" style="width:${w(cap)}"></span>`:''}${fill}${labels}${hatch}</span>`;
+  }).join('');
+}
+const UI={cls:'all',unit:'trip',sort:'capacity'};
+const UNITS={trip:{label:'per trip',per:'per departure'},month:{label:'per month',per:'per month'},year:{label:'per year',per:'per year'}};
+const SORTS={capacity:'capacity',utilisation:'utilisation',miss:'unserved'};
+/** Departures in the unit on screen; month is a twelfth of the year, no seasons. */
+const unitFactor=()=>UI.unit==='trip'?1:supply(S.freq).dep/(UI.unit==='month'?12:1);
+function buildLadder(el,c,sumRow){
+  const f=unitFactor(), total=totalDemand(groupsOf(S))/supply(S.freq).dep;
+  const max=Math.max(...COMPS.map(k=>sumRow?k.total:k.places[c]),sumRow?total:0)*1.18*f;
+  const trackPx=Math.max(el.clientWidth-9.5*14,200);
+  el.style.setProperty('--cc',sumRow?'var(--amber)':COLOR[c]);
+  el.innerHTML=ladderRows(c,max,sumRow,trackPx)+`<span></span><span class="axis"><span>0</span><span>${sumRow?'places on the train':`${c} places`} ${UNITS[UI.unit].per}</span><span>${fInt(max)}</span></span>`;
+}
+function renderDemandBox(){
+  const total=S.total, sum=GROUP_ORDER.reduce((t,g)=>t+S.shares[g],0), dep=supply(S.freq).dep;
+  const active=Object.keys(LEVELS).find(l=>levelTotal(l)===total)||'custom';
+  document.getElementById('levelPills').innerHTML=Object.entries(LEVELS).map(([l,v])=>`<span class="pill ${active===l?'on':''}" data-level="${l}" title="${v.name}: ${fInt(v.total)} passengers per year">${v.label}</span>`).join('')+`<span class="pill custom ${active==='custom'?'on':''}">Custom</span>`;
+  document.querySelectorAll('[data-level]').forEach(p=>p.addEventListener('click',()=>{S.total=levelTotal(p.dataset.level);refresh()}));
+  document.getElementById('totalInput').value=total;
+  document.getElementById('totalNote').textContent=`${LEVELS[active]?LEVELS[active].name+' · ':''}${fInt(total/dep)} per departure at ${S.freq} days a week · ${fPct(total/dep/SEL.total*100)} of ${SELECTED}'s places`;
+  document.getElementById('freqLink').innerHTML=`the same demand on every composition · at <a href="#" data-tab-link="supply" style="color:var(--sky-300)">${freqLabel()}, ${fInt(dep)} departures a year</a>`;
+  document.querySelector('[data-tab-link]').addEventListener('click',ev=>{ev.preventDefault();document.querySelector('[data-tab="supply"]').click()});
+  document.getElementById('shareTable').innerHTML=`<thead><tr><th>Group</th><th>Share</th><th>Per year</th><th>Per trip</th><th style="text-align:left">Classes, in order</th></tr></thead><tbody>`+
+    GROUP_ORDER.map(g=>`<tr><td>${GROUPS[g].label}</td><td><input inputmode="numeric" value="${S.shares[g]}" data-share="${g}"> %</td><td>${fInt(total*S.shares[g]/100)}</td><td class="p">${fInt(total*S.shares[g]/100/dep)}</td><td style="text-align:left"><span class="cl">${GROUPS[g].prefs.map((c,i)=>`<i style="background:${COLOR[c]};opacity:${1-i*.3}" title="${c}"></i>`).join('')}<small style="color:var(--ink-50)">${GROUPS[g].prefs.join(' › ')}</small></span></td></tr>`).join('')+
+    `<tr class="tot"><td>All travellers</td><td style="color:${Math.abs(sum-100)>0.01?'var(--amber-300)':'inherit'}">${sum} %</td><td>${fInt(total*sum/100)}</td><td class="p">${fInt(total*sum/100/dep)}</td><td></td></tr></tbody>`;
+  document.querySelectorAll('[data-share]').forEach(inp=>inp.addEventListener('change',ev=>{S.shares[ev.target.dataset.share]=Math.max(0,Math.round(parseFloat(ev.target.value)||0));refresh()}));
+  document.getElementById('shareNote').innerHTML=(Math.abs(sum-100)>0.01?`<span style="color:var(--amber-300)">Shares sum to ${sum} % — the groups then ask for ${fInt(total*sum/100)}, not the total.</span> `:'')+
+    `${Math.round(RULE_SHARE*100)} % of each group choose by the rule — first listed class until full, then the next; ${Math.round((1-RULE_SHARE)*100)} % pick any other class on their list, evenly.`;
+
+}
+document.getElementById('totalInput').addEventListener('change',ev=>{S.total=Math.max(0,Math.round(parseFloat(ev.target.value)||0));refresh()});
+
+function renderByClass(){
+  renderDemandBox();
+  const c=UI.cls, all=c==='all';
+  document.getElementById('viewPills').innerHTML=Object.entries(UNITS).map(([u,v])=>`<span class="pill ${UI.unit===u?'on':''}" data-unit="${u}">${v.label}</span>`).join('')+
+    `<span class="sep"></span>`+ORDER.map(q=>`<span class="pill ${c===q?'on':''}" data-cls="${q}"><i style="background:${COLOR[q]}"></i>${q}</span>`).join('')+`<span class="pill ${all?'on':''}" data-cls="all">All classes</span>`+
+    `<span class="sep"></span><span class="lbl">sort</span>`+Object.entries(SORTS).map(([k,v])=>`<span class="pill ${UI.sort===k?'on':''}" data-sort="${k}">${v}</span>`).join('');
+  document.querySelectorAll('[data-unit]').forEach(p=>p.addEventListener('click',()=>{UI.unit=p.dataset.unit;renderByClass()}));
+  document.querySelectorAll('[data-cls]').forEach(p=>p.addEventListener('click',()=>{UI.cls=p.dataset.cls;renderByClass()}));
+  document.querySelectorAll('[data-sort]').forEach(p=>p.addEventListener('click',()=>{UI.sort=p.dataset.sort;renderByClass()}));
+  buildLadder(document.getElementById('ladder'),all?'all':c,all);
+}
+
+/* ---------------- render: distribution ---------------- */
+function renderDist(){
+  const share=odShares(S.dist);
+  const presetKey=Object.keys(DIST_PRESETS).find(k=>{const w=presetWeights(k);return same(w.wO,S.dist.wO)&&same(w.wD,S.dist.wD)});
+  document.querySelectorAll('[data-dist]').forEach(p=>p.classList.toggle('on',p.dataset.dist===presetKey));
+  // the matrix
+  const cell=(o,d)=>OD.findIndex(p=>p.o===o&&p.d===d), maxShare=Math.max(...share);
+  const rowSum=o=>OD.reduce((t,p,i)=>t+(p.o===o?share[i]:0),0), colSum=d=>OD.reduce((t,p,i)=>t+(p.d===d?share[i]:0),0);
+  document.getElementById('odMatrix').innerHTML=`<thead><tr><th class="o">board ↓ · alight →</th>${DESTS.map(d=>`<th>${d}<span class="wt">weight <input value="${S.dist.wD[d]}" data-wd="${d}"></span></th>`).join('')}<th class="t">boards</th></tr></thead><tbody>`+
+    ORIGINS.map(o=>`<tr><th class="o">${o}<span class="wt">weight <input value="${S.dist.wO[o]}" data-wo="${o}"></span></th>${DESTS.map(d=>{const i=cell(o,d);if(i<0)return `<td class="x">–</td>`;const p=OD[i];return `<td class="c ${p.key in S.dist.pins?'pin':''}" data-key="${p.key}" style="--a:${share[i]/maxShare}" title="${p.name} · ${p.km} km${p.key in S.dist.pins?' · pinned':''}"><b>${(share[i]*100).toFixed(1)} %</b><small>${p.km} km</small></td>`}).join('')}<td class="t">${fPct(rowSum(o)*100)}</td></tr>`).join('')+
+    `<tr><th class="o t">alights</th>${DESTS.map(d=>`<td class="t">${fPct(colSum(d)*100)}</td>`).join('')}<td class="t">100 %</td></tr></tbody>`;
+  document.querySelectorAll('[data-wo],[data-wd]').forEach(inp=>inp.addEventListener('change',ev=>{const v=Math.max(0,parseFloat(ev.target.value.replace(',','.'))||0);if(ev.target.dataset.wo)S.dist.wO[ev.target.dataset.wo]=v;else S.dist.wD[ev.target.dataset.wd]=v;refresh()}));
+  document.querySelectorAll('.odm td.c').forEach(td=>td.addEventListener('click',()=>{
+    if(td.querySelector('input'))return;
+    const key=td.dataset.key, v=(share[OD.findIndex(o=>o.key===key)]*100).toFixed(1);
+    td.innerHTML=`<input value="${v}" inputmode="decimal">`;const inp=td.querySelector('input');inp.focus();inp.select();
+    const done=()=>{const nv=parseFloat(inp.value.replace(',','.'));if(!isNaN(nv))pinPair(key,nv);refresh()};
+    inp.addEventListener('blur',done);inp.addEventListener('keydown',ev=>{if(ev.key==='Enter')inp.blur();if(ev.key==='Escape'){inp.removeEventListener('blur',done);refresh()}});
+  }));
+  const avgKm=OD.reduce((s,o,i)=>s+o.km*share[i],0);
+  const set=(k,v)=>document.querySelector(`[data-d="${k}"]`).textContent=v;
+  const top=(list,fn)=>list.map(x=>[x,fn(x)]).sort((a,b)=>b[1]-a[1])[0];
+  const tO=top(ORIGINS,rowSum), tD=top(DESTS,colSum);
+  set('pinned',Object.keys(S.dist.pins).length);set('avgKm',fKm(avgKm));set('longShare',`${(share[0]*100).toFixed(1)} %`);set('shortShare',`${(share[OD.length-1]*100).toFixed(1)} %`);
+  set('topO',`${tO[0]} · ${fPct(tO[1]*100)}`);set('topD',`${tD[0]} · ${fPct(tD[1]*100)}`);
+}
+document.getElementById('clearPins').addEventListener('click',()=>{S.dist.pins={};refresh()});
+document.querySelectorAll('[data-dist]').forEach(p=>p.addEventListener('click',()=>{Object.assign(S.dist,presetWeights(p.dataset.dist));refresh()}));
+
+/* ---------------- render: what follows ---------------- */
+function renderFollow(){
+  // demand is previewed; schedule and prices are whatever was committed
+  // the supply inputs preview live; demand is whatever was last committed
+  const G=groupsOf(COMMITTED), f=follows(G,COMMITTED.dist,S.freq,S.tariff), A=f.A, total=totalDemand(G), dep=f.sup.dep;
+  const set=(k,v)=>document.querySelector(`[data-f="${k}"]`).innerHTML=v;
+  set('pax',`${fInt(f.pax)}`);set('soldDep',`${Math.round(f.soldDep)}<small>of ${fInt(total/dep)} asked</small>`);set('utilPl',fPct(f.soldDep/SEL.total*100));
+  set('plkmSold',fInt(f.plkm));set('utilKm',fPct(f.plkm/f.sup.plkm*100));
+  set('revTicket',fM(f.ticket));set('revCat',`${f.cat>=0?'+ ':''}${fM(f.cat)}`);set('revTot',fM(f.ticket+f.cat));
+  document.querySelector('[data-f="revCat"]').className='pv '+(f.cat>0?'pos':f.cat<0?'neg':'');
+  // who sits where on the selected train, then what each class earns
+  const cell=v=>v*dep>0.5?fInt(v*dep):'<span style="color:var(--ink-25)">·</span>';
+  document.getElementById('followTable').innerHTML=`<thead><tr><th>Per year</th><th>Asks</th>${ORDER.map(c=>`<th><span class="cl"><i style="background:${COLOR[c]}"></i>${c}</span></th>`).join('')}<th>Served</th><th>Not served</th></tr></thead><tbody>`+
+    GROUP_ORDER.map(g=>`<tr><td title="${GROUPS[g].prefs.join(' › ')}">${GROUPS[g].label}</td><td class="pv">${fInt(G[g])}</td>${ORDER.map(c=>`<td class="pv">${cell(A.alloc[g][c])}</td>`).join('')}<td class="pv">${fInt(G[g]-A.left[g]*dep)}</td><td class="pv" style="color:${A.left[g]*dep>0.5?'var(--amber-300)':'var(--ink-40)'}">${A.left[g]*dep>0.5?fInt(A.left[g]*dep):'—'}</td></tr>`).join('')+
+    `<tr class="tot"><td>Passengers</td><td class="pv">${fInt(total)}</td>${f.rows.map(r=>`<td class="pv">${fInt(r.pax)}</td>`).join('')}<td class="pv">${fInt(f.pax)}</td><td class="pv" style="color:${A.miss>0.5?'var(--amber-300)':'var(--ink-40)'}">${A.miss>0.5?fInt(A.miss*dep):'—'}</td></tr>`+
+    `<tr><td class="p">Places offered</td><td></td>${f.rows.map(r=>`<td class="pv">${fInt(SEL.places[r.c]*dep)}</td>`).join('')}<td class="pv">${fInt(SEL.total*dep)}</td><td></td></tr>`+
+    `<tr><td class="p">Utilisation</td><td></td>${f.rows.map(r=>`<td class="pv">${SEL.places[r.c]?fPct(r.served/SEL.places[r.c]*100):'—'}</td>`).join('')}<td class="pv">${fPct(f.soldDep/SEL.total*100)}</td><td></td></tr>`+
+    `<tr><td class="p">Ticket revenue</td><td></td>${f.rows.map(r=>`<td class="pv">${fM(r.ticket)}</td>`).join('')}<td class="pv">${fM(f.ticket)}</td><td></td></tr></tbody>`;
+  document.getElementById('revBar').innerHTML=f.rows.map(r=>`<i style="width:${r.ticket/f.ticket*100}%;background:${COLOR[r.c]}" title="${r.c} ${fPct(r.ticket/f.ticket*100)}"></i>`).join('');
+}
+
+/* ---------------- refresh everything ---------------- */
+function refresh(){
+  const d=dirty();
+  document.body.classList.toggle('stale',d.size>0);
+  document.getElementById('staleChip').style.display=d.size?'inline-flex':'none';
+  document.getElementById('staleWhat').textContent=d.size?`${[...d].map(s=>SCOPE_NAME[s]).join(' and ')} changed — the figures still show the last calculation.`:'';
+  // schedule grid + figures
+  const sup=supply(S.freq), com=supply(COMMITTED.freq), show=d.has('schedule')?sup:com;
+  renderSchedule(d.has('schedule'));
+  document.getElementById('supplyPerYear').classList.toggle('previewing',d.has('schedule'));
+  [['opDays',fInt(show.opDays)],['dep',fInt(show.dep)],['tkm',fInt(show.tkm)],['sets',show.sets],['pl',fInt(show.pl)],['plkm',fInt(show.plkm)]].forEach(([k,v])=>document.querySelector(`[data-s="${k}"]`).textContent=v);
+  renderPrices();
+  document.getElementById('priceBox').classList.toggle('previewing',d.has('prices'));
+  // demand
+  renderByClass();renderDist();renderFollow();
+  ['byClassBox','distBox'].forEach(id=>document.getElementById(id).classList.toggle('previewing',d.has('demand')));
+  document.getElementById('followBox').classList.toggle('previewing',d.has('schedule')||d.has('prices'));
+  document.querySelectorAll('#demandBox .box').forEach(box=>box.classList.toggle('previewing',d.has('demand')));
+  document.querySelectorAll('[data-await]').forEach(el=>el.classList.toggle('awaiting',el.dataset.await.split(' ').some(s=>d.has(s))));
+  const tabWaits={supply:['demand'],ops:['schedule','prices','demand'],infra:['schedule'],overhead:['schedule','prices','demand'],demand:[]};
+  document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('has-await',(tabWaits[b.dataset.tab]||[]).some(s=>d.has(s))));
+}
+document.getElementById('recalc').addEventListener('click',()=>{COMMITTED=copy(S);refresh()});
+
+/* ---------------- chrome ---------------- */
+document.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('[data-tab]').forEach(x=>x.setAttribute('aria-selected',x===b));
+  document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('on',p.dataset.pane===b.dataset.tab));
+}));
+document.getElementById('showAll').addEventListener('click',ev=>{const c=document.getElementById('card');c.classList.toggle('all');ev.target.textContent=c.classList.contains('all')?'show one pane':'show all panes'});
+document.addEventListener('click',ev=>{
+  document.querySelectorAll('.i.open').forEach(i=>{if(!i.contains(ev.target)){i.classList.remove('open');i.querySelector('.pop')?.remove()}});
+  const i=ev.target.closest('.i');
+  if(i&&!i.classList.contains('open')){i.classList.add('open');i.insertAdjacentHTML('beforeend',`<span class="pop">${i.dataset.pop}</span>`)}
+});
+document.querySelectorAll('[data-tab="demand"]')[0].click();
+refresh();
+</script>
+</body>
+</html>

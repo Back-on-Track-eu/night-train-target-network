@@ -5,6 +5,7 @@ import type { Breakdown, Operations, ParkingEntry, TripInfrastructure } from '@/
 import { useCompareFormat } from '@/composables/useCompareFormat'
 import { useLocaleFormat } from '@/composables/useLocaleFormat'
 import DetailPanel from '@/components/details/DetailPanel.vue'
+import { DOCS_DETAIL_PANEL } from '@/lib/docsLinks'
 import TripCycleYearStrip from '@/components/details/TripCycleYearStrip.vue'
 
 // Infrastructure — what the route pays to use the network, laid out as the
@@ -208,6 +209,7 @@ const tdS = 'py-1 pr-2 text-right whitespace-nowrap tabular-nums text-primary-50
         class="min-w-0"
         :title="t('proposal.details.infrastructure.tac.title')"
         :info="t('proposal.details.infrastructure.tac.info')"
+        :doc-path="DOCS_DETAIL_PANEL.tac"
         :caption="trip ? t('proposal.details.infrastructure.outboundTrip') : null"
         :awaiting="awaiting"
       >
@@ -298,6 +300,7 @@ const tdS = 'py-1 pr-2 text-right whitespace-nowrap tabular-nums text-primary-50
         class="min-w-0"
         :title="t('proposal.details.infrastructure.stations.title')"
         :info="t('proposal.details.infrastructure.stations.info')"
+        :doc-path="DOCS_DETAIL_PANEL.stations"
         :caption="trip ? t('proposal.details.infrastructure.outboundTrip') : null"
         :awaiting="awaiting"
       >
@@ -360,6 +363,7 @@ const tdS = 'py-1 pr-2 text-right whitespace-nowrap tabular-nums text-primary-50
         class="min-w-0"
         :title="t('proposal.details.infrastructure.facilities.title')"
         :info="t('proposal.details.infrastructure.facilities.info')"
+        :doc-path="DOCS_DETAIL_PANEL.facilities"
         :caption="t('proposal.details.infrastructure.facilities.caption')"
         :awaiting="awaiting"
       >
@@ -435,6 +439,7 @@ const tdS = 'py-1 pr-2 text-right whitespace-nowrap tabular-nums text-primary-50
         class="min-w-0"
         :title="t('proposal.details.infrastructure.energy.title')"
         :info="t('proposal.details.infrastructure.energy.info')"
+        :doc-path="DOCS_DETAIL_PANEL.energy"
         :caption="trip ? t('proposal.details.infrastructure.outboundTrip') : null"
         :awaiting="awaiting"
       >
@@ -533,6 +538,7 @@ const tdS = 'py-1 pr-2 text-right whitespace-nowrap tabular-nums text-primary-50
       class="mt-3"
       :title="t('proposal.details.infrastructure.year.title')"
       :info="t('proposal.details.infrastructure.year.info')"
+      :doc-path="DOCS_DETAIL_PANEL.infrastructureYear"
       :awaiting="awaiting"
     >
       <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">

@@ -9,10 +9,11 @@ Every model is incomplete. This page collects the gaps we know about ordered by 
 
 ## Demand, and everything downstream
 
-[The demand model is currently a placeholder](/demand): a flat 70% load factor and flat
-fares per kilometre. This affects [ticket revenue](/cost/ticket-revenue), the [net result](/cost/net),
-subsidy figures, [variable overhead](/cost/var-overhead), and the
-revenue-share component of [track access](/cost/tac).
+[Demand is a manual input, not a forecast](/demand): a potential demand you set,
+seated by a fixed rule. Nothing derives it from the corridor, the price or the
+competition. This affects [ticket revenue](/cost/ticket-revenue), the [net result](/cost/net),
+subsidy figures, [variable overhead](/cost/var-overhead), the
+revenue-share component of [track access](/cost/tac), and the CO₂e saving.
 
 ## Station charges outside Germany
 

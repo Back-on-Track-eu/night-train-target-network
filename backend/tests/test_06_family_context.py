@@ -170,10 +170,11 @@ class TestFamilyContextLive:
         """After prewarm, a run_compute() on the context loads no catalog
         and routes nothing — the property the family's member loop relies
         on to cost ~4 ms per member."""
+        from api.helpers.member_compute import demand_inputs, normalize_demand
         from models.pipeline import run_compute
         from models.route.model import (
+            DEFAULT_DAYS_PER_WEEK,
             DEFAULT_ROUTING_MODE,
-            DEFAULT_SCHEDULE_MODE,
             DEFAULT_TIMETABLE_MODE,
             NEUTRAL_PROPOSAL_ID,
             NEUTRAL_PROPOSAL_VERSION,
@@ -199,7 +200,8 @@ class TestFamilyContextLive:
             scenario_id=base_id,
             timetable_mode=DEFAULT_TIMETABLE_MODE,
             fixed_night_interval=None,
-            schedule_mode=DEFAULT_SCHEDULE_MODE,
+            schedule={str(m): DEFAULT_DAYS_PER_WEEK for m in range(1, 13)},
+            demand=demand_inputs(normalize_demand(None)),
             routing_mode=DEFAULT_ROUTING_MODE,
             auto_stop_addition="off",
             loader=context.loader,

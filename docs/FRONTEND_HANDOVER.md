@@ -1156,6 +1156,54 @@ Stops applying once the gate is removed after launch.
 
 ---
 
+## 24. Gallery on a chosen scenario — `POST /api/proposals` gains `scenario_variant_id` (backend 0.5.3)
+
+For the gallery's scenario panel (phase C of
+`docs/2026-09-20_gallery_scenario_plan.md`). One optional **top-level**
+request field, no change to any existing field:
+
+```json
+{ "filter": {...}, "sort": [...], "limit": 20, "offset": 0,
+  "include": ["summaries", "map_lines", "map_routes"],
+  "scenario_variant_id": 3 }
+```
+
+Ids are `GET /api/scenarios` → `scenario_variants[].scenario_variant_id`
+(the same axis the family request uses; with one measure set there is
+exactly one variant per scenario, so `lib/scenarioAxes.ts` → `scenario_id`
+→ its variant is a lookup). Omitted, the response is byte-for-byte what it
+is today.
+
+With it, every proposal-side section is read from that variant's
+projection: figures and sort order in `summaries`, the card geometry in
+`map_routes`, the corridors in `map_lines`. Existing (ONTD) rows are
+unchanged. `summaries` echoes the id, and three fields are now on every
+proposal row (also on the default path, so `types/api.ts` can add them
+unconditionally):
+
+| Field | Type | Meaning |
+|---|---|---|
+| `status` | `"ok" \| "error" \| "missing"` | `"error"`: the family could not compute this proposal on the requested variant; `"missing"`: its rows for that variant are not written yet (published before the backfill). On both, every figure is `null` — identity, `countries`/`stop_ids`/`country_relations` and timestamps are always the base projection's, so the row is listed and filterable exactly as on the base. Always `"ok"` on the default path |
+| `error_code` | `string \| null` | `routing_graph_not_configured` (this deployment serves no routing instance for that network — the 2032 case), `routing_error`, `gauge_mismatch`, `domain_error` |
+| `scenario_variant_id` | `number \| null` | the variant the row describes; `null` on the default path |
+
+`ProposalSummaryProposal` therefore needs the three fields, with every
+figure that is `number` today becoming `number | null` **when
+`status === "error"`** — a discriminated narrowing on `status` keeps the
+ok branch's types as they are. `map_routes` emits an error row's feature
+with `geometry: null`, exactly like an unrouted ONTD route today, so the
+map already copes.
+
+The one rule (revised in 0.5.3): **a variant never changes the result
+set.** The same filter returns the same proposals on every scenario — the
+backend joins the scenario's figures onto the base projection instead of
+reading a different table — so a card can lose its figures but never its
+place in the list. A `"missing"` row keeps its base geometry in
+`map_routes`; an `"error"` row has none. An unknown or non-current id is a
+400 `unknown_scenario_variant`. Stats and compare stay on the base.
+
+---
+
 ## Maintaining this document
 
 One file, updated in the same PR as the backend change. Each entry says

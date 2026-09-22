@@ -20,6 +20,7 @@ import AppSpinner from '@/components/AppSpinner.vue'
 import { mdiPencilOutline, mdiTrashCanOutline } from '@mdi/js'
 import { useStore } from '@/stores/store'
 import { useApiFailure } from '@/composables/useApiFailure'
+import { useLocaleFormat } from '@/composables/useLocaleFormat'
 import { useProposalEngagement } from '@/composables/useProposalEngagement'
 import { postComment, editComment, deleteComment } from '@/lib/proposalsApi'
 import {
@@ -36,7 +37,8 @@ import type { Comment } from '@/types/api'
 
 const props = defineProps<{ proposalId: number }>()
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
+const { formatDate } = useLocaleFormat()
 const store = useStore()
 const { describe, report } = useApiFailure()
 
@@ -67,11 +69,8 @@ function ageLabel(comment: Comment): string {
     case 'days':
       return t('proposal.comments.age.days', age.value)
     case 'date':
-      return new Date(comment.created_at).toLocaleDateString(locale.value, {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-      })
+      // Same short date the gallery card prints — one formatter, one style.
+      return formatDate(comment.created_at)
   }
 }
 

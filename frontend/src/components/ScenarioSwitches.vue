@@ -27,6 +27,10 @@ import InfoHint from '@/components/InfoHint.vue'
 // PREVIEW_NETWORKS — Infra 2032 today): the routing instance runs and the
 // backend would evaluate against it, but we do not put figures on screen we
 // would not stand behind.
+//
+// Both "coming soon" overlays carry the feedback link under the "kpis" topic.
+// In the gallery's scenario panel there is no route context, so the link
+// simply does not render there (FeedbackLink).
 const props = defineProps<{
   scenarios: Scenario[]
   modelValue: number | null
@@ -125,7 +129,7 @@ const comingSoonChipClass =
              two labels. The ⓘ carries the "why" on hover. -->
         <span v-if="previewNetwork" :class="`${comingSoonChipClass} text-primary-50/50`">
           {{ t('proposal.compare.comingSoon') }}
-          <InfoHint :text="t('proposal.compare.axes.networkPreviewHint')" />
+          <InfoHint :text="t('proposal.compare.axes.networkPreviewHint')" feedback-topic="kpis" />
         </span>
       </div>
     </fieldset>
@@ -179,7 +183,7 @@ const comingSoonChipClass =
         {{ t('proposal.compare.axes.measures') }}
         <span :class="`${comingSoonChipClass} normal-case tracking-normal`">
           {{ t('proposal.compare.comingSoon') }}
-          <InfoHint :text="t('proposal.compare.axes.measuresHint')" />
+          <InfoHint :text="t('proposal.compare.axes.measuresHint')" feedback-topic="kpis" />
         </span>
       </legend>
       <span

@@ -344,7 +344,7 @@ def operating_days(route: dict) -> float:
 # =============================================================================
 #
 # POST /api/proposal/calc only takes stops/composition_id and always runs
-# the stopgap demand model internally, no override. Formula-correctness
+# the demand model internally, no override. Formula-correctness
 # tests that need custom demand therefore call the model layer directly
 # (route_from_dict -> add_directional_domain_demand ->
 # models.pipeline.evaluate_and_build_views -> views_to_dict), skipping
@@ -353,7 +353,7 @@ def operating_days(route: dict) -> float:
 
 
 def add_directional_domain_demand(
-    route, class_main: str, places_sold: int, avg_price: float
+    route, class_main: str, places_sold: float, avg_price: float
 ):
     """Append one full-route ODPair per trip (outbound + return of every
     pair), oriented in that trip's own travel direction (first stop ->
@@ -426,10 +426,10 @@ def compute_evaluation_domain(
         route_dict, loader, scenario_id=resolved_scenario_id
     )
     # route_dict came from POST /api/proposal/calc, which always runs the
-    # stopgap demand model internally — its od_pairs are already populated.
+    # demand model internally — its od_pairs are already populated.
     # Clear that baseline before applying `demand`, so an empty demand list
     # genuinely means zero demand and a non-empty one replaces rather than
-    # adds to the stopgap figures (wholesale-replace semantics).
+    # adds to the model's figures (wholesale-replace semantics).
     for pair in route.trip_pairs:
         pair.od_pairs = []
     for class_main, places_sold, avg_price in demand:

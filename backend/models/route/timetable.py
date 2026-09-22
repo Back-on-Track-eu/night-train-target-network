@@ -6,7 +6,7 @@ implementations, not the switch. Which implementation runs for a given
 request is decided by route_factory.py (at whichever level owns the
 relevant context — per-trip in _build_trip(), per-route in plan_route());
 this module holds one function per named strategy and never branches on
-timetable_mode/schedule_mode/auto_stop_addition itself.
+timetable_mode/auto_stop_addition itself.
 
 Three request-level concerns have their logic here, each with its switch
 living in route_factory.py:
@@ -31,12 +31,13 @@ living in route_factory.py:
                          fixed_night_speed_warning() is the fixed-night
                          mode's post-build quality check.
 
-  schedule_mode       — seasonal frequency for the route as a whole. One
-                         function per mode (currently always_daily_schedule()
-                         for "alwaysDaily"); route_factory.plan_route()
-                         picks which to call — a route-level decision made
-                         once, not per trip, since schedule is shared
-                         across every TripPair.
+  schedule            — the operating plan for the route as a whole:
+                         days per week for each month, resolved at the API
+                         boundary (api/helpers/member_compute.py) from
+                         either one frequency or a month map;
+                         flat_schedule() / schedule_from_dict() build the
+                         Schedule — a route-level object, shared across
+                         every TripPair.
 
   auto_stop_addition  — additional stops along a route beyond what the
                          caller supplied. Split into a shared search+cost
@@ -87,7 +88,7 @@ into the strategies' own provisional offsets (addon_per_leg below), so a
 padded trip stays centred on MIRROR_MIN and a padded fixed-night interval
 needs correspondingly less stretch slack.
 
-VALID_TIMETABLE_MODES / VALID_SCHEDULE_MODES / VALID_AUTO_STOP_ADDITION_MODES
+VALID_TIMETABLE_MODES / VALID_AUTO_STOP_ADDITION_MODES
 / VALID_DEPARTURE_MODES stay here as the single source of truth for the
 allowed strings —
 the compute request validation (api/helpers/member_compute.py) and route_factory.py's dispatch both read
@@ -693,85 +694,33 @@ def classify_for_departure(
 
 
 # =============================================================================
-# schedule_mode IMPLEMENTATIONS — route_factory.plan_route() picks which of
-# these to call based on the request's schedule_mode (once per route, not
-# per trip — schedule is shared across every TripPair); nothing here
-# branches on the mode string itself.
+# SCHEDULE — the route-level operating plan, once per route (shared across
+# every TripPair), from the month map the API boundary resolved.
 # =============================================================================
 
 
-def always_daily_schedule(min_turnaround_min: int) -> Schedule:
-    """Implements schedule_mode='alwaysDaily': seven days a week in every
-    month, regardless of actual demand."""
+def flat_schedule(days_per_week: int, min_turnaround_min: int) -> Schedule:
+    """The same days a week in every month — what a request posting one
+    frequency (`schedule.days_per_week`, ROUTE_BUILDER 0.9.40) means, and
+    what the tests and scripts build most of the time."""
     return Schedule(
-        days_per_week_by_month={m: 7 for m in range(1, 13)},
+        days_per_week_by_month={m: days_per_week for m in range(1, 13)},
         min_turnaround_min=min_turnaround_min,
     )
-
-
-def custom_schedule(days_per_week_by_month: dict, min_turnaround_min: int) -> Schedule:
-    """Implements schedule_mode='custom': the caller's days per week for
-    each month, already validated at the API boundary
-    (api/helpers/member_compute.py validate_schedule)."""
-    return Schedule(
-        days_per_week_by_month=days_per_week_by_month,
-        min_turnaround_min=min_turnaround_min,
-    )
-
-
-# Reading a schedule back from a stored payload — here rather than in
-# api/helpers/route_serialize.py because models/evaluation/summary.py needs
-# the same widening and models/ never imports from api/.
-#
-# Two-season legacy shape. ROUTE_BUILDER < 0.9.35 stored a schedule as
-# summer/winter × daily/three_per_week; the month map replaced it. Written
-# alongside the month map for readers that still expect it, and read when a
-# stored payload has nothing else — SUMMER is April–September.
-_LEGACY_SUMMER_MONTHS = frozenset(range(4, 10))
-
-
-def legacy_seasonal_schedules(schedule: Schedule) -> list[dict]:
-    def frequency(months: frozenset[int]) -> str:
-        peak = max(schedule.days_per_week(m) for m in months)
-        return "daily" if peak >= 7 else "three_per_week"
-
-    return [
-        {"season": "summer", "frequency": frequency(_LEGACY_SUMMER_MONTHS)},
-        {
-            "season": "winter",
-            "frequency": frequency(frozenset(range(1, 13)) - _LEGACY_SUMMER_MONTHS),
-        },
-    ]
 
 
 def schedule_from_dict(data: dict) -> Schedule:
-    """Either shape. The month map wins when present; a legacy two-season
-    block is widened onto its months (daily → 7, three_per_week → 3)."""
-    turnaround = int(data.get("min_turnaround_min", DEFAULT_MIN_TURNAROUND_MIN))
-    if "days_per_week_by_month" in data:
-        return Schedule(
-            days_per_week_by_month=data["days_per_week_by_month"],
-            min_turnaround_min=turnaround,
-        )
-    by_season = {ss["season"]: ss["frequency"] for ss in data["seasonal_schedules"]}
-    days = {"daily": 7, "three_per_week": 3}
+    """A schedule from the stored / echoed shape: the month map plus the
+    turnaround. Here rather than in api/helpers/route_serialize.py because
+    models/evaluation/summary.py needs it and models/ never imports from
+    api/. The two-season block ROUTE_BUILDER < 0.9.35 wrote is gone: the
+    2026-09-19 migration folded every stored one into its month map."""
     return Schedule(
-        days_per_week_by_month={
-            m: days.get(
-                by_season.get("summer" if m in _LEGACY_SUMMER_MONTHS else "winter", ""),
-                0,
-            )
-            for m in range(1, 13)
-        },
-        min_turnaround_min=turnaround,
+        days_per_week_by_month=data["days_per_week_by_month"],
+        min_turnaround_min=int(
+            data.get("min_turnaround_min", DEFAULT_MIN_TURNAROUND_MIN)
+        ),
     )
-
-
-VALID_SCHEDULE_MODES = frozenset({"alwaysDaily", "custom"})
-"""Single source of truth for allowed schedule_mode strings — read by both
-the compute request validation (api/helpers/member_compute.py) and route_factory.plan_route()'s switch.
-Reserved: a future demand-aware mode can be added here (new function + this
-set + a plan_route() branch) without changing the request shape."""
 
 
 # =============================================================================

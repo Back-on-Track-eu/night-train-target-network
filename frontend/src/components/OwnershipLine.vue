@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
+import AppSpinner from '@/components/AppSpinner.vue'
 
 // The ownership pill next to the Gallery link: whose proposal this is and what
 // a change does to it — the copy-on-edit mechanism in words. An own proposal
@@ -12,16 +13,27 @@ import { useI18n } from 'vue-i18n'
 // Green = saved to your own; gold = the same gold every "this is not the
 // default / your change lands elsewhere" surface uses (the scenario card, the
 // expert-timetable pill), so the copy state is recognisable before it is read.
+//
+// While a save is out — the auto-save after a calculation takes a few
+// seconds — the dot gives way to a spinner and the line says so, then
+// settles into whichever state applies. That is the only case the pill
+// shows before a stored proposal exists: the first save is the one wait a
+// visitor cannot otherwise see.
 defineProps<{
   owned: boolean
   authorName: string | null
+  saving?: boolean
 }>()
 
 const { t } = useI18n()
 </script>
 
 <template>
-  <p class="own-pill" :class="owned ? 'is-own' : 'is-copy'">
+  <p v-if="saving" class="own-pill is-saving" role="status">
+    <AppSpinner :size="10" />
+    <b>{{ t('proposal.ownership.saving') }}</b>
+  </p>
+  <p v-else class="own-pill" :class="owned ? 'is-own' : 'is-copy'">
     <i aria-hidden="true" />
     <b>{{
       owned
@@ -59,6 +71,11 @@ const { t } = useI18n()
 
 .is-own i {
   background: var(--color-yellow-green);
+}
+
+/* Saving: neutral, no dot — the spinner is the status. */
+.is-saving b {
+  color: color-mix(in srgb, var(--color-primary-50) 80%, transparent);
 }
 
 /* The copy state carries the gold wash, so it reads as "not your default

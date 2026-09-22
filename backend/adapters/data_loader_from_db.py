@@ -83,6 +83,8 @@ from models.params import (
     MeasureSet,
     MeasureSetCollection,
     ScenarioVariant,
+    TicketVatCollection,
+    TicketVatRate,
 )
 
 logger = logging.getLogger(__name__)
@@ -2038,6 +2040,47 @@ class DBDataLoader:
 
         logger.info("Built %d passage charges.", len(result))
         return PassageChargeCollection(result, param_versions)
+
+    # ------------------------------------------------------------------
+    # TICKET VAT
+    # ------------------------------------------------------------------
+
+    def build_all_ticket_vat(self) -> TicketVatCollection:
+        """
+        Return the VAT rates on rail tickets for every country. Not
+        scenario-pinned: the table is a catalogue like the compositions
+        (db/dev/seed.py, versioning note), so there is one row per country
+        and no version to resolve. Provenance is registered per country
+        under "ticket_vat:{cc}:{field}" for the params endpoint.
+        """
+        sources = self._load_sources()
+        with self._cursor() as cur:
+            cur.execute("SELECT * FROM input_params.ticket_vat_rates")
+            rows = cur.fetchall()
+
+        result: dict[str, TicketVatRate] = {}
+        param_versions = ParamVersions()
+        for row in rows:
+            cc = row["country_code"]
+            rate = TicketVatRate(
+                country_code=cc,
+                domestic_per=_f(row["vat_domestic_per"]),
+                international_per=_f(row["vat_international_per"]),
+                status=row["vat_status"],
+                note=row.get("vat_note"),
+            )
+            result[cc] = rate
+            source = _src(row, "vat_src", sources)
+            for field_name in ("domestic_per", "international_per"):
+                param_versions.add(
+                    key=f"ticket_vat:{cc}:{field_name}",
+                    value=getattr(rate, field_name),
+                    version=1,
+                    source=source,
+                )
+
+        logger.info("Built %d ticket VAT rates.", len(result))
+        return TicketVatCollection(result, param_versions)
 
     def get_passage_geometries(self) -> list[tuple[str, dict]]:
         """

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { readingDwellMs } from '@/lib/readingTime'
 
 // Rotating Back-on-Track tidbits shown while a route is being evaluated — the
 // calc is the one genuinely long wait in the app, so the time is spent saying
@@ -29,7 +30,6 @@ const FACT_KEYS = [
   'network',
 ] as const
 
-const ROTATE_MS = 9000
 const BOT_URL = 'https://back-on-track.eu/'
 
 const { t } = useI18n()
@@ -38,17 +38,6 @@ const { t } = useI18n()
 // opener each time; from there it advances in order, so one wait never repeats
 // a tidbit.
 const index = ref(Math.floor(Math.random() * FACT_KEYS.length))
-let timer: ReturnType<typeof setInterval> | undefined
-
-onMounted(() => {
-  timer = setInterval(() => {
-    index.value = (index.value + 1) % FACT_KEYS.length
-  }, ROTATE_MS)
-})
-onBeforeUnmount(() => {
-  if (timer) clearInterval(timer)
-})
-
 const current = computed(() => {
   const key = FACT_KEYS[index.value]
   return {
@@ -57,10 +46,40 @@ const current = computed(() => {
     demand: t(`proposal.funFacts.${key}.demand`),
   }
 })
+
+let timer: ReturnType<typeof setTimeout> | undefined
+
+// Each tidbit stays as long as it takes to read (lib/readingTime.ts): they run
+// 22–38 words, and one fixed interval flipped the long ones mid-sentence.
+// Hovering or focusing the box holds the current one — the reader is reading
+// it, or reaching for its link — and leaving gives it a fresh full dwell,
+// which is simpler than pausing a clock and never too short.
+function schedule() {
+  clearTimeout(timer)
+  timer = setTimeout(
+    () => {
+      index.value = (index.value + 1) % FACT_KEYS.length
+      schedule()
+    },
+    readingDwellMs(`${current.value.fact} ${current.value.demand}`),
+  )
+}
+function hold() {
+  clearTimeout(timer)
+}
+
+onMounted(schedule)
+onBeforeUnmount(hold)
 </script>
 
 <template>
-  <div class="flex max-w-xs flex-col gap-1.5 border-t border-primary-50/15 pt-3 text-left">
+  <div
+    class="flex max-w-xs flex-col gap-1.5 border-t border-primary-50/15 pt-3 text-left"
+    @mouseenter="hold"
+    @mouseleave="schedule"
+    @focusin="hold"
+    @focusout="schedule"
+  >
     <span class="text-[0.65rem] font-bold uppercase tracking-wider text-primary-50/50">
       {{ t('proposal.funFacts.label') }}
     </span>

@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import InfoPopover from '@/components/InfoPopover.vue'
-import AppIcon from '@/components/AppIcon.vue'
-import { mdiOpenInNew } from '@mdi/js'
-import { useI18n } from 'vue-i18n'
+import DocsReadMore from '@/components/DocsReadMore.vue'
+import FeedbackLink from '@/components/FeedbackLink.vue'
 import { formulaKeyForNode, docsPathForFormula } from '@/lib/factorFeedback'
 import type { FormulaMap } from '@/types/api'
 
 // The info popover shared by the cost tree and the revenue panel: the row's
-// label, a one-line summary of it, and a link to its documentation page.
+// one-line summary, the hand-over to its documentation page and the
+// feedback link — the same three parts, in the same look, as every InfoHint
+// overlay in the builder, so a reader meets one kind of overlay everywhere.
 //
 // The overlay itself — hover-intent timing, styling — is InfoPopover.vue,
 // which InfoHint.vue also uses; this component is only the factor content
@@ -23,8 +24,6 @@ import type { FormulaMap } from '@/types/api'
 const props = defineProps<{
   formulas: FormulaMap
 }>()
-
-const { t } = useI18n()
 
 const popover = ref<InstanceType<typeof InfoPopover> | null>(null)
 const activeKey = ref<string | null>(null)
@@ -69,27 +68,16 @@ const activeFactor = computed(() => {
 
 <template>
   <InfoPopover ref="popover">
-    <div v-if="activeFactor" class="flex w-96 flex-col gap-3">
-      <div class="flex items-center gap-2">
-        <h3 class="text-xl font-semibold text-primary-50">{{ activeFactor.title }}</h3>
-        <!-- Leaves the SPA: the docs are a separate static site served at
-             /docs/ on this origin, so a plain anchor, not a router link. -->
-        <a
-          :href="activeFactor.docsPath"
-          target="_blank"
-          rel="noopener"
-          class="flex text-primary-300 transition hover:text-primary-50"
-          :aria-label="t('proposal.evaluation.info.readMore')"
-          :title="t('proposal.evaluation.info.readMore')"
-        >
-          <AppIcon :path="mdiOpenInNew" :size="16" />
-        </a>
-      </div>
-      <!-- width:0 + min-width:100% so the sentence wraps to the column
-           width rather than widening the popover with its max-content. -->
-      <p class="w-0 min-w-full text-sm text-primary-50/70">
+    <!-- Same width and type as InfoHint's overlay (see the note there on why a
+         definite width). The row's label leads the sentence: the overlay is
+         shared, so it names what it is about. -->
+    <div v-if="activeFactor" class="flex w-72 flex-col">
+      <p class="text-sm text-primary-50/75">
+        <b class="font-semibold text-primary-50">{{ activeFactor.title }}</b> —
         {{ activeFactor.summary }}
       </p>
+      <DocsReadMore :href="activeFactor.docsPath" />
+      <FeedbackLink topic="breakdown" :panel="activeFactor.title" />
     </div>
   </InfoPopover>
 </template>

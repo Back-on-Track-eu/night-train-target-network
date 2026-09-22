@@ -24,7 +24,7 @@ builds one member exactly as it always has; this package only decides
 ~238 ms on the plain loader and router, of which ~208 ms is reloading the
 five catalogs `run_compute()` touches (stops twice) and ~35 ms is fetching
 legs from `route_cache`. Once both are shared, a member is **4 ms** —
-trip build, timetable, stopgap demand and evaluation together. So:
+trip build, timetable, demand and evaluation together. So:
 
 - **Prewarm is the only threaded phase.** It is the I/O: one catalog load
   per scenario and one `route()` per distinct leg variant (12 on

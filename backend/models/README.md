@@ -24,14 +24,17 @@ models/
 ├── pipeline.py                      # run_compute() / evaluate_and_build_views() — domain-level pipeline dispatch
 ├── utils.py                         # Shared unit conversion utilities
 ├── demand/
-│   ├── stopgap.py                   # distribute_demand() — stopgap uniform-distribution proxy
-│   ├── model.py                     # DEMAND_MODEL_VERSION + stopgap standard values & open TODOs
+│   ├── groups.py                    # allocate() — the traveller-group allocation rule (D14–D19)
+│   ├── od_matrix.py                 # sellable pairs, preset weights, od_shares(), pins (D25–D30)
+│   ├── sources.py                   # air / car / induced by journey length
+│   ├── distribute.py                # distribute_demand() — the three on a Route, writes od_pairs
+│   ├── model.py                     # DEMAND_MODEL_VERSION + standard values & open TODOs
 │   └── README.md                    # Demand model documentation (incl. incoming real-model design)
 ├── route/
 │   ├── trip.py                      # Stop, Segment, Trip — physics domain objects
 │   ├── route.py                     # Route, TripPair, Parking, Shunting, ODPair, Schedule
 │   ├── route_factory.py             # plan_route() — sole Trip/TripPair/Route constructor
-│   ├── timetable.py                 # Pluggable timetable_mode / schedule_mode / auto_stop_addition strategies
+│   ├── timetable.py                 # Pluggable timetable_mode / auto_stop_addition strategies, the schedule builders
 │   ├── model.py                     # ROUTE_BUILDER_VERSION + all standard values & open TODOs of the route model
 │   └── routing/                     # rail_router.py (GraphHopper wrapper) + dynamics.py (per-stop accel/brake time loss)
 │       ├── rail_router.py           # OpenRailRouting (GraphHopper) wrapper
@@ -82,12 +85,12 @@ models/
 ## Pipeline
 
 ```
-plan_route(trip_pair_inputs, loader, router, schedule_mode, proposal_id, proposal_version, scenario_id)
+plan_route(trip_pair_inputs, loader, router, schedule, proposal_id, proposal_version, scenario_id)
   │
   ├── loader.build_all_compositions()  → CompositionCollection (per composition_id: .get())
   ├── loader.build_all_tracks()       → TrackInfraCollection
   ├── loader.build_all_stops()        → StopInfraCollection
-  ├── schedule_mode SWITCH (here)      → timetable.always_daily_schedule() (only mode today)
+  ├── timetable.schedule_from_dict()  → Schedule from the resolved month map (one per route)
   │
   │  per TripPair (_build_trip_pair()):
   │  outbound direction (_build_trip()):
@@ -161,7 +164,7 @@ plan_route(trip_pair_inputs, loader, router, schedule_mode, proposal_id, proposa
 plan_route() returns (Route, RouteProvenance, list[AutoStopSuggestion]) —
 suggestions non-empty only for auto_stop_addition="suggest".
 
-distribute_demand(route, utilization_per, fare_per_km_by_class)  → Route (with od_pairs)  [demand/stopgap.py]
+distribute_demand(route, demand_inputs, fare_per_km_by_class, fare_per_pax_by_class)  → DemandResult (route.od_pairs written)  [demand/distribute.py]
 
 evaluate_route(route, tracks, stop_infra)  → EvaluationResult   [evaluation/calc.py]
 
@@ -169,18 +172,20 @@ build_all_views(route, result)             → ViewsBundle         [evaluation/v
 ```
 
 `models/pipeline.py` is the domain-level dispatch over these steps:
-`run_compute()` runs the whole sequence (plan → stopgap demand → evaluate
+`run_compute()` runs the whole sequence (plan → demand → evaluate
 → views) for every compute path (`POST /api/proposal/calc`, publish);
 `evaluate_and_build_views()` is the post-routing half, for callers that
 bring their own `Route`/demand (the DB seed's hand-crafted example,
 model-layer tests with controlled demand). Serialization stays out of
 `pipeline.py` — that's `api/helpers/member_compute.py`.
 
-`timetable_mode`, `schedule_mode`, and `auto_stop_addition` each have their
-switch (which named behaviour runs) in `route_factory.py`, at whichever
-level owns the relevant context — `schedule_mode` in `plan_route()` (route-
-level, shared across every `TripPair`), `timetable_mode` in `_build_trip()`
-(per-trip, since departure time is direction-specific); `routing_mode`'s
+`timetable_mode` and `auto_stop_addition` each have their switch (which
+named behaviour runs) in `route_factory.py`, at whichever level owns the
+relevant context — `timetable_mode` in `_build_trip()` (per-trip, since
+departure time is direction-specific); the schedule has no switch since
+ROUTE_BUILDER 0.9.40: `plan_route()` takes the month map the API boundary
+resolved (one posted frequency expanded onto twelve months, or a posted
+map) and builds the one `Schedule` every `TripPair` shares; `routing_mode`'s
 switch lives with its implementation in `rail_router.py`'s `route()`.
 `auto_stop_addition` is a two-value enum (`"off"` / `"suggest"`, `"add"`
 removed in 0.9.34) and per-`TripPair`, not per-trip: `_build_trip_pair()`
@@ -210,7 +215,8 @@ truth both the compute request validation
 standard value the route model assumes (mode defaults, mirror time,
 auto-stop thresholds, schedule constants) and every open TODO on the route
 model are consolidated in `route/model.py` (`STANDARD VALUES` /
-`OPEN_TODOS`); the stopgap demand parameters live in
+`OPEN_TODOS`); the demand model's standard values — levels, groups, the
+allocation rounds, the OD presets, the source split, the tariff — live in
 `demand/model.py`.
 
 ---
@@ -221,7 +227,7 @@ model are consolidated in `route/model.py` (`STANDARD VALUES` /
 |---|---|
 | `pipeline.py` | Domain-level dispatch: plan → demand → evaluate → views, one implementation for every compute path |
 | `route_factory.py` | Sole constructor for `Trip`, `TripPair`, `Route` — orchestrates the full planning pipeline |
-| `demand/stopgap.py` | Stopgap demand model — populates `TripPair.od_pairs` |
+| `demand/distribute.py` | Manual demand model (DEMAND 0.1.0) — allocates the request's demand onto the composition, spreads it over the OD pairs, populates `TripPair.od_pairs` |
 | `rail_router.py` | HTTP calls to routing engine, country attribution, buffer computation → `RoutedLeg` |
 | `calc_energy_consumption.py` | Energy model — enriches `RoutedLeg.energy_kwh` (how many kWh) |
 | `infrastructure/tac/calc_tac.py` | Component track access charge per segment |

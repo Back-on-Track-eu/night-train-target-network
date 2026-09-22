@@ -29,6 +29,9 @@ Public interface:
                                                              normalisations + data per view, views_meta merged in)
   models_to_dict()                                 → dict  (version + description + formulas for route_builder / energy / evaluation,
                                                              + the emissions factor set — constants, not formulas)
+  demand_to_dict(demand, route)                    → dict  (DEMAND 0.1.0: the allocation, OD spread and sources behind
+                                                             the route's od_pairs — a member's evaluation.demand and a
+                                                             family member's demand block)
   input_to_dict(route_dict, tracks, stop_infra, compositions) → dict  (the posted route + every parameter actually used to cost it)
 """
 
@@ -54,20 +57,45 @@ from models.energy.model import (
     ENERGY_MODEL_DESCRIPTION,
     ENERGY_FORMULAS,
 )
+from models.demand.distribute import DemandResult
 from models.demand.model import (
+    AIR_SHIFT_AT_FLOOR,
+    AIR_SHIFT_FLOOR_KM,
+    AIR_SHIFT_FULL_KM,
+    CATERING_EUR_PER_PAX_BY_CLASS,
+    CLASS_ORDER,
+    DEFAULT_DEMAND_LEVEL,
+    DEFAULT_GROUP_SHARES_PCT,
+    DEFAULT_OD_WEIGHT,
+    DEMAND_LEVELS,
     DEMAND_MODEL_DESCRIPTION,
     DEMAND_MODEL_VERSION,
     FARE_CLASS_MAINS,
-    STOPGAP_CATERING_EUR_PER_PAX_BY_CLASS,
-    STOPGAP_FARE_PER_KM_BY_CLASS,
-    STOPGAP_FARE_PER_PAX_BY_CLASS,
-    STOPGAP_SERVICES_EUR_PER_PAX_BY_CLASS,
-    STOPGAP_UTILIZATION_PER,
+    FARE_PER_KM_BY_CLASS,
+    FARE_PER_PAX_BY_CLASS,
+    GROUP_CLASS_PREFERENCES,
+    GROUP_LABELS,
+    GROUP_ORDER,
+    OD_PRESETS,
+    OD_WEIGHT_MIN,
+    OD_WEIGHT_SPAN,
+    OTHER_CAR_SHARE,
+    ROUNDS_PCT,
+    RULE_SHARE,
+    SERVICES_EUR_PER_PAX_BY_CLASS,
 )
 from models.emissions.model import (
     EMISSION_FACTORS,
     EMISSIONS_MODEL_DESCRIPTION,
     EMISSIONS_MODEL_VERSION,
+)
+from models.compositions.model import (
+    COMPOSITIONS_MODEL_DESCRIPTION,
+    COMPOSITIONS_MODEL_VERSION,
+)
+from models.infrastructure.model import (
+    INFRA_MODEL_DESCRIPTION,
+    INFRA_MODEL_VERSION,
 )
 from models.route.model import (
     ROUTE_BUILDER_VERSION,
@@ -533,6 +561,108 @@ def views_to_dict(views: ViewsBundle, route: Route) -> dict:
 
 
 # =============================================================================
+# DEMAND — the allocation and OD spread behind the route's od_pairs
+# =============================================================================
+
+
+def _scaled(values: dict, factor: float, ndigits: int = 2) -> dict:
+    return {k: round(v * factor, ndigits) for k, v in values.items()}
+
+
+def _nest_pins(pins: dict[tuple[str, str], float]) -> dict:
+    out: dict[str, dict[str, float]] = {}
+    for (o, d), v in pins.items():
+        out.setdefault(o, {})[d] = v
+    return out
+
+
+def demand_to_dict(demand: DemandResult, route: Route) -> dict:
+    """The demand block of a member payload (`evaluation.demand`) and of a
+    family member (beside `summary`), guide §4: per trip and per year, by
+    group and class, what was not served, the OD matrix and the sources.
+    First trip pair only — every route today has one; a Y-shaped route will
+    need this per pair.
+
+    Per year means every departure of the route (both directions), so it
+    agrees with the summary's passengers_per_year to the passenger."""
+    pair = demand.trip_pairs[0]
+    alloc = pair.allocation
+    departures = demand.departures_per_year
+    names, _, _ = _label_context(route)
+    return {
+        "model_version": DEMAND_MODEL_VERSION,
+        "passengers_per_year": demand.passengers_per_year,
+        "departures_per_year": departures,
+        "per_trip_demand": round(demand.per_trip_demand, 4),
+        "composition_id": pair.composition_id,
+        "demand_by_group": {
+            "per_trip": _scaled(alloc.demand_by_group, 1.0, 4),
+            "per_year": _scaled(alloc.demand_by_group, departures),
+        },
+        "by_group_by_class": {
+            "per_trip": {
+                g: _scaled(alloc.by_group_by_class[g], 1.0, 4)
+                for g in alloc.by_group_by_class
+            },
+            "per_year": {
+                g: _scaled(alloc.by_group_by_class[g], departures)
+                for g in alloc.by_group_by_class
+            },
+        },
+        "by_class": {
+            "per_trip": _scaled(alloc.by_class, 1.0, 4),
+            "per_year": _scaled(alloc.by_class, departures),
+        },
+        "served": {
+            "per_trip": round(alloc.served, 4),
+            "per_year": round(alloc.served * departures, 2),
+        },
+        "not_served": {
+            "per_trip": _scaled(alloc.not_served_by_group, 1.0, 4),
+            "per_year": _scaled(alloc.not_served_by_group, departures),
+            "total_per_trip": round(alloc.not_served, 4),
+            "total_per_year": round(alloc.not_served * departures, 2),
+        },
+        "od": {
+            "boarding_stop_ids": list(pair.boarding_stop_ids),
+            "alighting_stop_ids": list(pair.alighting_stop_ids),
+            "stop_weights": {
+                "board": dict(pair.board_weights),
+                "alight": dict(pair.alight_weights),
+            },
+            "pinned_shares_pct": _nest_pins(pair.pins_pct),
+            "dropped_pins": [
+                {"origin_stop_id": o, "destination_stop_id": d}
+                for o, d in pair.dropped_pins
+            ],
+            "pairs": [
+                {
+                    "origin_stop_id": p.origin_stop_id,
+                    "destination_stop_id": p.destination_stop_id,
+                    "origin_stop_name": names.get(p.origin_stop_id, p.origin_stop_id),
+                    "destination_stop_name": names.get(
+                        p.destination_stop_id, p.destination_stop_id
+                    ),
+                    "distance_km": round(p.distance_km, 3),
+                    "share": round(pair.shares.get(p.key, 0.0), 6),
+                    "pinned": p.key in pair.pins_pct,
+                }
+                for p in pair.pairs
+            ],
+            "average_distance_km": round(pair.average_distance_km, 3),
+        },
+        "sources": {
+            "air_trips_per_year": round(pair.sources.air_trips, 2),
+            "air_trip_km_per_year": round(pair.sources.air_trip_km, 2),
+            "other_trips_per_year": round(pair.sources.other_trips, 2),
+            "other_trip_km_per_year": round(pair.sources.other_trip_km, 2),
+            "car_trips_per_year": round(pair.sources.car_trips, 2),
+            "induced_trips_per_year": round(pair.sources.induced_trips, 2),
+        },
+    }
+
+
+# =============================================================================
 # MODELS — version + description + formulas for every model in the pipeline
 # =============================================================================
 
@@ -627,10 +757,16 @@ def models_to_dict() -> dict:
     co2_g_per_pax_km.
 
     The demand entry carries "defaults" for the same kind of reason: the
-    stopgap model is neither steps nor sourced constants but overridable
-    standard values, and CALC 0.9.27 made the fares among them a request
-    field. Three shapes, one rule — every entry has version, description,
-    and exactly one of formulas / factors / defaults."""
+    manual demand model is neither steps nor sourced constants but
+    overridable standard values — and, since DEMAND 0.1.0, "constants" as
+    well: the allocation rule the frontend previews live.
+
+    The compositions and infrastructure entries carry version and
+    description only: they are calibrated PARAMETER models (seeded rows,
+    documented in their calibration notebooks and on the docs site), not
+    calculation steps — the frontend shows their versions beside the
+    panels that read their figures. Every entry has version and
+    description; the computed ones add formulas / factors / defaults."""
     return {
         "route_builder": {
             "version": ROUTE_BUILDER_VERSION,
@@ -650,31 +786,57 @@ def models_to_dict() -> dict:
         "demand": {
             "version": DEMAND_MODEL_VERSION,
             "description": DEMAND_MODEL_DESCRIPTION,
-            # "defaults" rather than "formulas" or "factors": the stopgap
-            # demand model has no calculation steps to expose and no sourced
-            # factor table — it has standard values a request may override.
-            # The pricing panel reads fares_eur_per_km from here so it never
-            # hard-codes them. Fare classes only; Catering cannot be priced.
+            # "defaults" rather than "formulas" or "factors": the manual
+            # demand model has standard values a request may override, and
+            # constants the frontend's live previews need to reproduce the
+            # allocation (DEMAND 0.1.0). Every panel reads its defaults from
+            # here so nothing is hard-coded twice. Fare classes only; Catering
+            # cannot be priced.
             "defaults": {
+                "level": DEFAULT_DEMAND_LEVEL,
+                "levels": dict(DEMAND_LEVELS),
+                "group_shares_pct": dict(DEFAULT_GROUP_SHARES_PCT),
+                "od_weight": DEFAULT_OD_WEIGHT,
                 "fares_eur_per_km": {
-                    k: STOPGAP_FARE_PER_KM_BY_CLASS[k] for k in FARE_CLASS_MAINS
+                    k: FARE_PER_KM_BY_CLASS[k] for k in FARE_CLASS_MAINS
                 },
                 # The three per-passenger tariff parts, each per class
                 # (CALC 0.9.30). The fixed fare joins the per-km rates above
                 # as the base fare; services are ordinary ticket revenue;
                 # catering is signed and already net of its own costs.
                 "fares_eur_per_pax": {
-                    k: STOPGAP_FARE_PER_PAX_BY_CLASS[k] for k in FARE_CLASS_MAINS
+                    k: FARE_PER_PAX_BY_CLASS[k] for k in FARE_CLASS_MAINS
                 },
                 "services_eur_per_pax": {
-                    k: STOPGAP_SERVICES_EUR_PER_PAX_BY_CLASS[k]
-                    for k in FARE_CLASS_MAINS
+                    k: SERVICES_EUR_PER_PAX_BY_CLASS[k] for k in FARE_CLASS_MAINS
                 },
                 "catering_eur_per_pax": {
-                    k: STOPGAP_CATERING_EUR_PER_PAX_BY_CLASS[k]
-                    for k in FARE_CLASS_MAINS
+                    k: CATERING_EUR_PER_PAX_BY_CLASS[k] for k in FARE_CLASS_MAINS
                 },
-                "utilization_per": STOPGAP_UTILIZATION_PER,
+            },
+            # The rule itself, so a client can preview the allocation and
+            # the OD spread between recalculations without carrying its own
+            # copy of the constants (the frontend's ports are pinned to the
+            # same figures by the parity tests).
+            "constants": {
+                "class_order": list(CLASS_ORDER),
+                "group_order": list(GROUP_ORDER),
+                "groups": {
+                    g: {
+                        "label": GROUP_LABELS[g],
+                        "classes": list(GROUP_CLASS_PREFERENCES[g]),
+                    }
+                    for g in GROUP_ORDER
+                },
+                "rounds_pct": list(ROUNDS_PCT),
+                "rule_share": RULE_SHARE,
+                "od_presets": list(OD_PRESETS),
+                "od_weight_min": OD_WEIGHT_MIN,
+                "od_weight_span": OD_WEIGHT_SPAN,
+                "air_shift_floor_km": AIR_SHIFT_FLOOR_KM,
+                "air_shift_at_floor": AIR_SHIFT_AT_FLOOR,
+                "air_shift_full_km": AIR_SHIFT_FULL_KM,
+                "other_car_share": OTHER_CAR_SHARE,
             },
         },
         "emissions": {
@@ -684,6 +846,14 @@ def models_to_dict() -> dict:
                 mode: {"g_per_pax_km": factor.g_per_pax_km, "source": factor.source}
                 for mode, factor in EMISSION_FACTORS.items()
             },
+        },
+        "compositions": {
+            "version": COMPOSITIONS_MODEL_VERSION,
+            "description": COMPOSITIONS_MODEL_DESCRIPTION,
+        },
+        "infrastructure": {
+            "version": INFRA_MODEL_VERSION,
+            "description": INFRA_MODEL_DESCRIPTION,
         },
     }
 

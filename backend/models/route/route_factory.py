@@ -58,13 +58,13 @@ Pipeline for plan_route() per TripPair (_build_trip_pair()), per direction (_bui
 10. TripPair._create() bundles both trips with their shared composition and schedule.
 11. Route._create() assembles all TripPairs.
 
-timetable_mode / schedule_mode / auto_stop_addition each have their switch
-(which named behaviour runs, based on the request field) here in
-route_factory.py — at whichever level owns the relevant context: per-trip
-in _build_trip() for timetable_mode, per-TripPair in _build_trip_pair()
-for auto_stop_addition (decided once from outbound, reused for return —
-see above), per-route in plan_route() for schedule_mode (shared across
-every TripPair, decided once). routing_mode's switch lives with its
+timetable_mode / auto_stop_addition each have their switch (which named
+behaviour runs, based on the request field) here in route_factory.py — at
+whichever level owns the relevant context: per-trip in _build_trip() for
+timetable_mode, per-TripPair in _build_trip_pair() for auto_stop_addition
+(decided once from outbound, reused for return — see above). The schedule
+has no switch since 0.9.40: plan_route() takes the resolved month map and
+builds the one Schedule every TripPair shares. routing_mode's switch lives with its
 implementation, in rail_router.py's route(). models/route/timetable.py
 holds one function per named behaviour and never branches on the
 mode/flag itself — see that module's docstring.
@@ -120,8 +120,7 @@ from models.route.timetable import (
     simple_automatic_timetable,
     simple_automatic_fixed_night_timetable,
     fixed_night_speed_warning,
-    always_daily_schedule,
-    custom_schedule,
+    schedule_from_dict,
     suggest_auto_stops,
     build_final_timetable,
     classify_for_departure,
@@ -133,7 +132,6 @@ from models.route.timetable import (
     ExpertTimetable,
     NO_OVERRIDES,
     VALID_TIMETABLE_MODES,
-    VALID_SCHEDULE_MODES,
     VALID_AUTO_STOP_ADDITION_MODES,
 )
 from models.energy.calc_energy_consumption import calc_energy_consumption
@@ -801,7 +799,7 @@ def _build_trip_pair(
         outbound=outbound,
         return_trip=return_trip,
         composition=composition,
-        od_pairs=[],  # populated later by models/demand (stopgap.distribute_demand())
+        od_pairs=[],  # populated later by models/demand (distribute.distribute_demand())
     )
     return pair, suggestions, param_versions, tracks
 
@@ -815,11 +813,10 @@ def plan_route(
     trip_pair_inputs: list[TripPairInput],
     loader,
     router: RailRouter,
-    schedule_mode: str,
+    schedule: dict,
     proposal_id: int,
     proposal_version: int,
     scenario_id: int,
-    schedule: dict | None = None,
     min_turnaround_min: int = DEFAULT_MIN_TURNAROUND_MIN,
 ) -> tuple[Route, RouteProvenance, list[AutoStopSuggestion]]:
     """
@@ -827,8 +824,8 @@ def plan_route(
     (Y-shaped routes pass several, each with its own composition).
     All pairs share the route-level schedule.
     Demand is not set here — call models/demand's
-    stopgap.distribute_demand() after plan_route() to populate od_pairs on
-    each TripPair.
+    distribute.distribute_demand() after plan_route() to populate od_pairs
+    on each TripPair.
 
     Returns (Route, RouteProvenance, suggestions). suggestions is only
     non-empty for auto_stop_addition="suggest" — the costed candidate
@@ -842,29 +839,18 @@ def plan_route(
     once at the API boundary before this is called. See the ID convention
     note at the top of this module.
 
-    schedule_mode: this function's switch — which named schedule_mode
-    function (models/route/timetable.py) to call. Decided once here, at
-    route level, since Schedule is shared across every TripPair rather
-    than being a per-trip concern. "custom" takes the days-per-week-by-
-    month block from the request; both modes take min_turnaround_min.
+    schedule: the resolved days-per-week-by-month map ({1..12: 0..7}, at
+    least one month running) — one Schedule at route level, since it is
+    shared across every TripPair rather than being a per-trip concern.
+    Resolving one posted frequency into this map is the API boundary's
+    job (api/helpers/member_compute.py::normalize_schedule).
 
     scenario_id: stored as-is in RouteProvenance so the Route stays
     reproducible even if the live base scenario later moves on.
     """
-    # schedule_mode SWITCH — which named strategy builds this route's
-    # Schedule. VALID_SCHEDULE_MODES is the same set the compute request
-    # validation checks against, so an unknown mode can only reach here if
-    # that validation was bypassed.
-    if schedule_mode == "alwaysDaily":
-        schedule = always_daily_schedule(min_turnaround_min)
-    elif schedule_mode == "custom":
-        if schedule is None:
-            raise ValueError("schedule_mode 'custom' needs a schedule block.")
-        schedule = custom_schedule(schedule, min_turnaround_min)
-    else:
-        raise ValueError(
-            f"Unknown schedule_mode '{schedule_mode}'. Supported: {sorted(VALID_SCHEDULE_MODES)}."
-        )
+    route_schedule = schedule_from_dict(
+        {"days_per_week_by_month": schedule, "min_turnaround_min": min_turnaround_min}
+    )
     rid = _route_id(proposal_id, proposal_version)
     logger.info(
         "plan_route: id=%s pairs=%d scenario_id=%d",
@@ -918,7 +904,7 @@ def plan_route(
 
     route = Route._create(
         route_id=rid,
-        schedule=schedule,
+        schedule=route_schedule,
         trip_pairs=trip_pairs,
         parkings=parking,
         shuntings=_shuntings([t for pair in trip_pairs for t in pair.trips]),

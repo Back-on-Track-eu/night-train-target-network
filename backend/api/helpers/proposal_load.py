@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from adapters.proposal.repository import outdated_trigger
 from api.helpers.member_compute import compute_member
+from api.helpers.scenario_summaries import compute_scenario_rows
 
 
 def load_current_container(repo, proposal_id: int) -> dict | None:
@@ -44,7 +45,12 @@ def load_current_container(repo, proposal_id: int) -> dict | None:
         refresh_request = dict(container["compute_request"])
         refresh_request["scenario_id"] = None
         computed, _ = compute_member(refresh_request)
-        repo.refresh_proposal(proposal_id, computed, detail=trigger)
+        repo.refresh_proposal(
+            proposal_id,
+            computed,
+            detail=trigger,
+            scenario_rows=compute_scenario_rows(computed["request"]),
+        )
         # refresh_proposal()'s own return dict is deliberately minimal
         # (identity + timestamps, mirroring publish()'s) — it doesn't
         # carry user_name/compute_request/evaluation_output the way
