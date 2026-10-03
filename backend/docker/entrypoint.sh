@@ -13,6 +13,23 @@ python /app/scripts/export_country_geoms.py || echo "  WARNING: country geometry
 echo "Running database seed..."
 python /app/db/dev/seed.py
 
+# Data tasks (db/run_tasks.py — the batch half of the database pipeline,
+# next to the schema migrations server deploys run). A fresh seed has
+# nothing to backfill, so on a dev stack this is a few idempotent no-ops
+# recorded in admin.data_task_runs — but running them here keeps the dev
+# stack on the same path as the deploy's `data-tasks` one-shot, so a task
+# that would fail on a server fails here first. Backgrounded and
+# soft-failing like the loads below: the api is fully functional before
+# any task has run (every consumer falls back until its task is through).
+# A seed IS every migration (create_*.sql are the latest schema), so record
+# them as applied the way a server's first seed does by hand — the task
+# runner refuses to start on a database with pending migrations.
+echo "Recording migrations as applied (fresh seed)..."
+python /app/db/migrate.py --baseline
+
+echo "Running data tasks in the background..."
+python /app/db/run_tasks.py &
+
 # ONTD reference data (existing night trains) — loaded in the BACKGROUND
 # so the API is serving within seconds. The gallery shows proposals
 # immediately and existing routes appear once the load finishes (well
