@@ -52,6 +52,17 @@ npm install
 npm run dev
 ```
 
+### Production image
+
+`Dockerfile.demo` builds the bundle and the docs site and serves both from
+nginx with `nginx.conf`. Two cache rules live there: everything under
+`assets/` (content-hashed by Vite and VitePress) is `immutable` for a year,
+everything else — `index.html` first of all — is `no-cache`, i.e.
+revalidated on every navigation (a 304 on the ETag). Without the second
+rule a browser may reuse a heuristically "fresh" `index.html` after a
+deploy and keep running the previous bundle until the user forces a
+reload. A change to `nginx.conf` ships with the next frontend image build.
+
 ---
 
 ## Project Structure
