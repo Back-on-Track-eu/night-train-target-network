@@ -411,6 +411,46 @@ class TestSourceUnion:
         )
         assert all(r["source"] == "proposal" for r in body["summaries"]["proposals"])
 
+    def test_scoped_range_lets_existing_rows_through(
+        self, api_base, existing_routes, published
+    ):
+        """A range with scope "proposal" is asked of proposals only: the
+        fake existing rows (74 and 97 km/h) stay listed under a bound no
+        existing row meets, and so does one with NULL in the column —
+        while the proposal side is still sieved. The unscoped form of the
+        same range drops them (test_financial_filter_excludes_existing
+        pins the NULL case; this pins the non-NULL one)."""
+        unscoped = _gallery(api_base, filter={"avg_speed_kmh": {"min": 500}})
+        assert unscoped["summaries"]["proposals"] == []
+
+        scoped = _gallery(
+            api_base,
+            filter={"avg_speed_kmh": {"min": 500, "scope": "proposal"}},
+            limit=500,
+        )
+        rows = scoped["summaries"]["proposals"]
+        assert {r["source"] for r in rows} == {"existing"}
+        assert set(_EXISTING_ROUTE_IDS) <= {r["route_id"] for r in rows}
+
+        # NULL on the existing side passes too: margin is NULL on every
+        # existing row, and the scope makes that irrelevant.
+        body = _gallery(
+            api_base,
+            filter={
+                "margin_eur_per_train_km": {"min": -1_000_000, "scope": "proposal"}
+            },
+            limit=500,
+        )
+        assert {r["source"] for r in body["summaries"]["proposals"]} >= {"existing"}
+
+    def test_unknown_range_scope_rejected(self, api_base):
+        resp = requests.post(
+            f"{api_base}{PROPOSALS_URL}",
+            json={"filter": {"avg_speed_kmh": {"min": 60, "scope": "existing"}}},
+            timeout=15,
+        )
+        assert resp.status_code == 400
+
     def test_stop_ids_filter_spans_sources(self, api_base, existing_routes, published):
         """stop_ids is a shared Target Network namespace (step 6a) —
         one filter matches proposals AND existing routes over the same
