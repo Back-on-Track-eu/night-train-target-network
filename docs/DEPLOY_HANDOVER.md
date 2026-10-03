@@ -1676,6 +1676,27 @@ script runs.
 
 ---
 
+## 22. Gallery loading — backend 0.5.10, no migration (2026-10-03)
+
+Production timed out on the unfiltered gallery (1,334 proposals, 205
+existing): `map_lines` took 31 s / 8.8 MB and `map_routes` 6 s / 4.3 MB per
+20-card page, inside one request with a 15 s client deadline. Phase 1 —
+image rebuild of api and frontend, nothing else:
+
+- `map_routes` and `map_lines` geometry is thinned on read (≈200 m, 5
+  decimals). No stored value changes, no backfill.
+- The frontend asks for `map_lines` in its own request, apart from the
+  cards, with no client deadline. Expect two `POST /api/proposals` on a cold
+  gallery load: `["summaries", "map_routes"]` and `["map_lines"]`.
+
+`map_lines` itself is still the slow query until phase 2 (precomputed
+corridors). Watch `proposals.list_proposals` in `admin.request_log`; the
+`map_lines` request is the long one, and it may hold a gunicorn worker for
+~30 s per uncached gallery open until phase 2 lands. Stops applying when
+phase 2 replaces this section.
+
+---
+
 ## Maintaining this document
 
 One file, updated in the same PR as the change it describes. The rule that

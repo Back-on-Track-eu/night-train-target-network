@@ -940,9 +940,16 @@ Response sections:
   `proposal_ids` / `existing_route_ids` are deliberately not returned —
   unbounded in proposal count, and superseded by `map_routes`.
 - `map_routes`: GeoJSON FeatureCollection, one feature per **listed** row
-  (the projections' stored `geom_simplified`) — the only map section that
-  IS paginated, sharing `summaries`' exact filter/sort/limit/offset so the
-  two always describe the same rows. Fixed in size at the page size.
+  (the projections' stored `geom_simplified`, simplified once more on read
+  to `MAP_ROUTES_SIMPLIFY_TOLERANCE_DEG` ≈ 200 m) — the only map section
+  that IS paginated, sharing `summaries`' exact filter/sort/limit/offset so
+  the two always describe the same rows. Fixed in size at the page size.
+
+Both line sections write coordinates at 5 decimals (~1 m,
+`GALLERY_GEOJSON_DECIMALS`) instead of PostGIS's default 9 — invisible on
+a web map, roughly half the bytes. Measured on production (2026-10-03,
+1,334 proposals): one 20-card `map_routes` page had grown to 4.3 MB at the
+stored resolution.
 - `map_stop_counts`: `[{stop_id, lat, lon, n}]` — routes touching each stop
   (unnest over `stop_ids`, coordinates joined from the stop catalog).
 - `map_country_counts`: GeoJSON FeatureCollection, one feature per country

@@ -1138,7 +1138,11 @@ features carry `proposal_count` / `existing_count` / `total_count` plus
 `avg_margin_eur_per_train_km` is the mean across the corridor's
 proposals only (`null` on corridors served exclusively by existing
 trains). Corridor geometry prefers a proposal shape and falls back to
-the existing route's own. `map_country_counts` is one feature per
+the existing route's own. Both line sections (`map_lines`, `map_routes`)
+are thinned for the wire: simplified at ~200 m and written at 5 decimals
+(~1 m) — see adapters/proposal/README.md §7.1. `map_lines` aggregates the
+whole filtered set and is by far the most expensive section; the gallery
+requests it on its own, apart from the paginated list. `map_country_counts` is one feature per
 country touched by the filtered set, carrying the country's own border
 geometry (`input_params.countries.country_geom`) so the frontend
 doesn't need a second lookup for the choropleth — `geometry: null` for
