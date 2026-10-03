@@ -973,7 +973,10 @@ Response sections:
   trips — what the supply figures are built on), the ONTD projection is per
   direction, and the gallery halves the proposal side in the union
   (`_GALLERY_PROPOSAL_BRANCH`) so sorting, range filters and the stats
-  compare like with like. `avg_speed_kmh` is unaffected.
+  compare like with like. `avg_speed_kmh` is unaffected. A consumer that
+  needs the row as stored — `POST /api/proposals/compare`'s stored side,
+  which is diffed against a computed cycle summary — reads
+  `repository.stored_summary()` instead of the gallery list.
 - `map_lines`: GeoJSON FeatureCollection, one feature per distinct
   stop-pair **corridor** (direction-agnostic — outbound and return share a
   corridor) rather than one per proposal, so a client can drive line

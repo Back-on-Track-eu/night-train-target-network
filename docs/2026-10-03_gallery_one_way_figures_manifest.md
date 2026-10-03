@@ -41,10 +41,22 @@ were cycle figures until now. "2.1 M km of night train route, one way",
 before the report goes out — the shares will move noticeably (the qualifying
 share up, the too-long counts down).
 
+## Compare keeps the cycle
+
+`POST /api/proposals/compare` built its stored side from the gallery list
+and its computed side from the calc summary, so after the halving the two
+disagreed by a factor of two (test_54
+`test_override_equal_to_stored_is_computed_but_identical`). The stored side
+now reads the row as stored through a new `repository.stored_summary()` —
+same column shape as the list, engagement counts included, no halving — so
+the diff is zero again where nothing changed. The gallery list was the only
+other consumer.
+
 ## Files
 
 - `backend/adapters/proposal/repository.py` — the two halved columns in
-  `_GALLERY_PROPOSAL_BRANCH`, with the rationale.
+  `_GALLERY_PROPOSAL_BRANCH`, with the rationale; `stored_summary()`.
+- `backend/api/helpers/proposal_compare.py` — stored side via `stored_summary()`.
 - `backend/tests/test_52_proposals_gallery_api.py` —
   `test_gallery_distance_and_time_are_one_way`.
 - `backend/tests/test_56_proposal_scenario_summaries.py` — the variant row
