@@ -882,7 +882,16 @@ doesn't run its query at all.
 | `countries` | `countries` (`TEXT[]`) | array, any/all | `[str, ...]` or `{"values": [...], "mode": "any"\|"all"}` |
 | `stop_ids` | `stop_ids` (`TEXT[]`) | array, any/all | `[str, ...]` or `{"values": [...], "mode": "any"\|"all"}` |
 | `name` | `name` | substring | case-insensitive `str` |
-| `total_distance_km`, `total_time_h`, `avg_speed_kmh`, `n_stops` | same | range | `{"min": num, "max": num}` |
+| `total_distance_km`, `total_time_h`, `avg_speed_kmh`, `n_stops` | same, **one direction** (see below) | range | `{"min": num, "max": num}` |
+
+`total_distance_km` and `total_time_h` are **one way** in every gallery row
+and every gallery filter, sort and statistic — the proposal side is halved
+in the union (`repository.py` `_GALLERY_PROPOSAL_BRANCH`), because the
+stored summary sums both trips of the pair (a cycle: what `train_km_per_year`
+and the supply figures are built on; the builder's own KPIs halve it in
+`lib/compareKpis.ts`), while the ONTD side is per direction. `GET
+/api/proposal/<id>` and the family responses still carry the cycle in
+`evaluation.summary`. `avg_speed_kmh` is a ratio and is the same either way.
 
 Every range (numeric and datetime) also takes `"scope": "proposal"`: the
 bounds are then asked of proposal rows **only** and every existing (ONTD)

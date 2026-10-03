@@ -967,7 +967,13 @@ Response sections:
 
 - `summaries`: paginated summary rows + `total` (windowed count), each row
   carrying `source: "proposal" | "existing"` and `likes_count`. ONTD rows
-  have KPI fields null and no user/engagement metadata.
+  have KPI fields null and no user/engagement metadata. `total_distance_km`
+  and `total_time_h` are **one direction** on both sides (2026-10-03): the
+  stored proposal summary is the cycle (§5.4, `_route_metrics` sums both
+  trips — what the supply figures are built on), the ONTD projection is per
+  direction, and the gallery halves the proposal side in the union
+  (`_GALLERY_PROPOSAL_BRANCH`) so sorting, range filters and the stats
+  compare like with like. `avg_speed_kmh` is unaffected.
 - `map_lines`: GeoJSON FeatureCollection, one feature per distinct
   stop-pair **corridor** (direction-agnostic — outbound and return share a
   corridor) rather than one per proposal, so a client can drive line
