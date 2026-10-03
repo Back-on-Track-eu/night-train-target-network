@@ -107,7 +107,8 @@ import random
 import sys
 import time
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from itertools import combinations, islice
@@ -316,6 +317,13 @@ def build_tasks(
     models_by_vkey: dict[str, dict | None] = {}
     n_gauge_skipped = 0
     any_comp = next(iter(compositions.values()))
+    # route_variant_key() serialises and hashes the whole resolved custom
+    # model (border polygons included) — milliseconds per call. It depends
+    # on (profile, model) only, a handful of distinct values, so hash once
+    # per combination instead of once per pair: 300k pairs took 20+ minutes
+    # of single-core startup before routing began (measured 2026-09-22).
+    model_list = list(models.values())
+    vkey_by_profile_model: dict[tuple[str, int], str] = {}
     for lo, hi in pairs:
         try:
             gauge_mm = resolve_trip_gauge((stops[lo], stops[hi]), any_comp)
@@ -323,9 +331,12 @@ def build_tasks(
             n_gauge_skipped += 1
             continue
         profile = router.profile_for_gauge(gauge_mm)
-        for entry in models.values():
-            vkey = route_variant_key(profile, entry["custom_model"])
-            models_by_vkey[vkey] = entry["custom_model"]
+        for idx, entry in enumerate(model_list):
+            vkey = vkey_by_profile_model.get((profile, idx))
+            if vkey is None:
+                vkey = route_variant_key(profile, entry["custom_model"])
+                vkey_by_profile_model[(profile, idx)] = vkey
+                models_by_vkey[vkey] = entry["custom_model"]
             tasks.append((lo, hi, profile, vkey))
     if n_gauge_skipped:
         print(f"  {n_gauge_skipped} pair(s) skipped: no common gauge.")
@@ -676,14 +687,58 @@ def is_transient(exc: BaseException) -> bool:
     return False
 
 
+class RemoteFailure(Exception):
+    """A routing failure crossing the process boundary from a --processes
+    worker: the original exception is classified in the child (type name +
+    transient flag) because requests/RailRoutingError instances do not
+    always survive pickling intact."""
+
+    def __init__(self, error_type: str, message: str, transient: bool) -> None:
+        super().__init__(message)
+        self.error_type = error_type
+        self.transient = transient
+
+    def __reduce__(self):
+        return (RemoteFailure, (self.error_type, str(self), self.transient))
+
+
+_CHILD: dict = {}
+
+
+def _child_init(graph_key: str, snapped: dict, models_by_vkey: dict) -> None:
+    """Per-process setup for --processes: each worker owns its router (HTTP
+    session, CountryIndex, DB pool) — nothing routing-related is shared
+    across processes, so the GIL stops being the ceiling."""
+    import contextlib
+    import io
+
+    with contextlib.redirect_stdout(io.StringIO()):  # graph banner once is enough
+        _, router, _ = build_context(graph_key)
+    _CHILD.update(router=router, snapped=snapped, models=models_by_vkey)
+
+
+def _child_route(task: Task) -> list:
+    lo, hi, profile, vkey = task
+    try:
+        leg = _CHILD["router"].route_pair_from_snapped(
+            [_CHILD["snapped"][(lo, profile)], _CHILD["snapped"][(hi, profile)]],
+            _CHILD["models"][vkey],
+            profile,
+        )
+        return segment_to_csv_row(lo, hi, vkey, segment_from_leg(leg, reverse=False))
+    except Exception as exc:
+        raise RemoteFailure(type(exc).__name__, str(exc), is_transient(exc)) from None
+
+
 def record_failure(failures: dict[Task, Failure], task: Task, exc: Exception) -> None:
     previous = failures.get(task)
+    remote = isinstance(exc, RemoteFailure)
     failures[task] = Failure(
         task=task,
-        error_type=type(exc).__name__,
+        error_type=exc.error_type if remote else type(exc).__name__,
         message=str(exc).replace("\n", " ")[:500],
         attempts=(previous.attempts if previous else 0) + 1,
-        transient=is_transient(exc),
+        transient=exc.transient if remote else is_transient(exc),
         at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
     )
 
@@ -699,11 +754,20 @@ def route_pass(
     failures: dict[Task, Failure],
     workers: int,
     deadline: float | None,
+    processes: int = 1,
+    graph_key: str | None = None,
 ) -> list[Task]:
     """One pass over `tasks`: route, append successes to --out, book
     failures. Returns the tasks never attempted, because --stop-after-h
     elapsed or Ctrl-C was pressed — they stay missing from --out and are
-    picked up by the next run."""
+    picked up by the next run.
+
+    Concurrency: `workers` threads in this process by default. With
+    `processes` > 1 the routing moves to that many worker processes (one
+    task in flight per process, this process only writes the CSV) — the
+    per-segment Python work (response parsing, country attribution,
+    haversine over every vertex, CSV encoding) is what saturates a single
+    core at ~20 segments/s on the server, not GraphHopper."""
 
     def route_one(task: Task) -> list:
         lo, hi, profile, vkey = task
@@ -716,7 +780,19 @@ def route_pass(
 
     not_attempted: list[Task] = []
     stopped = False
-    pool = ThreadPoolExecutor(max_workers=workers)
+    if processes > 1:
+        # spawn, not fork: the parent holds an open DB pool and an HTTP
+        # session, and a forked child closing inherited sockets breaks them.
+        pool = ProcessPoolExecutor(
+            max_workers=processes,
+            mp_context=multiprocessing.get_context("spawn"),
+            initializer=_child_init,
+            initargs=(graph_key, snapped, models_by_vkey),
+        )
+        route_fn = _child_route
+    else:
+        pool = ThreadPoolExecutor(max_workers=workers)
+        route_fn = route_one
     try:
         for start in range(0, len(tasks), SUBMIT_CHUNK):
             if stopped:
@@ -726,7 +802,7 @@ def route_pass(
                 not_attempted.extend(tasks[start:])
                 break
             futures = {
-                pool.submit(route_one, t): t
+                pool.submit(route_fn, t): t
                 for t in tasks[start : start + SUBMIT_CHUNK]
             }
             consumed: set[Task] = set()
@@ -861,6 +937,8 @@ def run_batch(
             failures,
             args.workers,
             deadline,
+            processes=args.processes,
+            graph_key=args.graph,
         )
         n_routed = progress.n_ok
 
@@ -885,6 +963,8 @@ def run_batch(
                 failures,
                 args.workers,
                 deadline,
+                processes=args.processes,
+                graph_key=args.graph,
             )
             n_routed += progress.n_ok
 
@@ -1201,6 +1281,13 @@ def main() -> None:
     parser.add_argument("--graph", default=DEFAULT_ROUTING_GRAPH_KEY)
     parser.add_argument("--cap-km", type=float, default=800)
     parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument(
+        "--processes",
+        type=int,
+        default=1,
+        help="route in N worker processes instead of --workers threads; use "
+        "when the script (not GraphHopper) is at 100%% of one core",
+    )
     parser.add_argument("--out", type=Path)
     parser.add_argument("--limit", type=int, help="debug: route only N pairs")
     parser.add_argument("--probe", type=int, default=20)
