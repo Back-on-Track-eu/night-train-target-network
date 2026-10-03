@@ -245,6 +245,22 @@ represents the current base, and which scenario a _reader_ sees is the
 gallery's scenario panel, not the author's last click. The save is silent:
 no toast per step. A failed save is not — it raises a sticky error toast.
 
+## The builder on a phone
+
+The proposal page stacks below `lg` like the gallery does, and two things
+follow from the width. **Expert timetable is a two-column tool**: its stepper
+column widens the itinerary past a phone, the departure strip and the night
+picker need the map beside the table, and it is precision work for a
+pointer. Below `lg` the button is not offered (`expertAvailable`, from
+`useMediaQuery(LG_MEDIA_QUERY)`), and a session that was in expert mode when
+the window narrowed leaves it the way the button does — overrides dropped,
+not hidden, so no invisible override reaches the next calc. The itinerary
+tool row wraps instead of running past the edge. **Every label row that
+carries a sticker wraps** (the "2032 prices" badge on the KPI tiles, the
+finance and details headings, the compare title), so a chip drops to the
+next line rather than leaving its box; KPI units never break inside
+("km / year" wraps as one).
+
 ## Errors in the builder
 
 Every failure in the proposal builder — a calculation (including the
