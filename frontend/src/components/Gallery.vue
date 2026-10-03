@@ -209,7 +209,7 @@ const activeOwnerClass = 'bg-primary-50/15 text-primary-50 font-semibold'
 const inactiveOwnerClass = 'text-primary-50/60 hover:text-primary-50'
 
 // The position paper's "typical night train" sieve (lib/typicalNightTrain.ts):
-// 500–2 000 km, 7–16 h, ≥ 50 km/h, asked of PROPOSALS only — existing trains
+// 500–2 000 km, 7–21 h, ≥ 50 km/h, asked of PROPOSALS only — existing trains
 // always stay listed, they are the comparison. ON by default: the gallery
 // opens on the set the launch report counted; the 9 000 km four-nighters and
 // the 2 km city hops are one click away, not in the way. In the URL only when

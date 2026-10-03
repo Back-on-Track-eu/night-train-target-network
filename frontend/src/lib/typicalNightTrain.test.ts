@@ -5,7 +5,7 @@ describe('typicalNightTrainFilter', () => {
   it('carries the position paper bounds on the three range columns, scoped to proposals', () => {
     expect(typicalNightTrainFilter()).toEqual({
       total_distance_km: { min: 500, max: 2000, scope: 'proposal' },
-      total_time_h: { min: 7, max: 16, scope: 'proposal' },
+      total_time_h: { min: 7, max: 21, scope: 'proposal' },
       avg_speed_kmh: { min: 50, scope: 'proposal' },
     })
   })

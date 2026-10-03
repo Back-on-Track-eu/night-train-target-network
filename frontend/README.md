@@ -343,7 +343,7 @@ of showing an empty column.
 
 **The "typical night train" toggle.** Next to the ownership pill, on by
 default, with the app's ⓘ overlay (`InfoHint`) naming the bounds: the
-position paper's yardstick — one way 500–2 000 km, 7–16 h, at least 50 km/h
+position paper's yardstick — one way 500–2 000 km, 7–21 h, at least 50 km/h
 on average (`lib/typicalNightTrain.ts`, one place for the numbers; the
 overlay text is rendered from them). Three `POST /api/proposals` range
 filters with `scope: 'proposal'`, so they are asked of proposals only and

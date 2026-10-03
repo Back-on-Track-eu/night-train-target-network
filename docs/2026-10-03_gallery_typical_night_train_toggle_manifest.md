@@ -3,6 +3,10 @@
 Backend 0.5.12 (one small, generic filter extension; no migration) +
 frontend. Supersedes the first cut of this zip from earlier today.
 
+> **Update 2026-10-04:** time bound loosened to **7–21 h** (was 7–16 h);
+> distance and speed unchanged. One constant in `lib/typicalNightTrain.ts`,
+> its test, and the prose that spells the number out. No backend change.
+
 ## What
 
 One toggle next to the ownership pill, **on by default**, applying the
