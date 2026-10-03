@@ -57,6 +57,7 @@ from adapters.proposal.filter_builder import (
     DATETIME_RANGE_COLUMNS,
     LIST_COLUMNS,
     RANGE_COLUMNS,
+    RANGE_SCOPES,
     SORTABLE_COLUMNS,
     SUBSTRING_COLUMNS,
     SUPPORTED_SOURCES,
@@ -139,16 +140,30 @@ def _validate_filters(filters) -> list[str]:
         bounds = filters.get(key)
         if bounds is None:
             continue
-        if not isinstance(bounds, dict) or not set(bounds) <= {"min", "max"}:
-            errors.append(f"'filter.{key}' must be an object with 'min'/'max'.")
+        if not isinstance(bounds, dict) or not set(bounds) <= {"min", "max", "scope"}:
+            errors.append(
+                f"'filter.{key}' must be an object with 'min'/'max' "
+                "(and optionally 'scope')."
+            )
+        elif "scope" in bounds and bounds["scope"] not in RANGE_SCOPES:
+            errors.append(
+                f"'filter.{key}.scope' must be one of {sorted(RANGE_SCOPES)}."
+            )
 
     for key in DATETIME_RANGE_COLUMNS:
         bounds = filters.get(key)
         if bounds is None:
             continue
-        if not isinstance(bounds, dict) or not set(bounds) <= {"min", "max"}:
-            errors.append(f"'filter.{key}' must be an object with 'min'/'max'.")
+        if not isinstance(bounds, dict) or not set(bounds) <= {"min", "max", "scope"}:
+            errors.append(
+                f"'filter.{key}' must be an object with 'min'/'max' "
+                "(and optionally 'scope')."
+            )
             continue
+        if "scope" in bounds and bounds["scope"] not in RANGE_SCOPES:
+            errors.append(
+                f"'filter.{key}.scope' must be one of {sorted(RANGE_SCOPES)}."
+            )
         for bound_key in ("min", "max"):
             value = bounds.get(bound_key)
             if value is not None and not isinstance(value, str):

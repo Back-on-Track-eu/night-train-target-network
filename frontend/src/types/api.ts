@@ -1317,8 +1317,27 @@ export interface ProposalSort {
  *  ("all" — the row must carry every value). */
 export type ProposalsArrayFilter = string[] | { values: string[]; mode: 'any' | 'all' }
 
+/** A closed or half-open numeric range — the backend's `{"min", "max"}`
+ *  shape for every RANGE_COLUMNS entry (filter_builder.py). Either bound may
+ *  be omitted. */
+export interface ProposalsRange {
+  min?: number
+  max?: number
+  /** 'proposal': the bounds are asked of proposal rows only and every
+   *  existing (ONTD) row passes unexamined. Omitted, the range applies to
+   *  both sources and a row with no figure (NULL) never matches. */
+  scope?: 'proposal'
+}
+
 export interface ProposalsFilter {
   user_ids?: number[]
+  /** Numeric ranges on summary columns BOTH sources carry, so they narrow
+   *  existing trains too; a row with no figure (NULL) never matches. The
+   *  gallery's "typical night train" sieve is three of these
+   *  (lib/typicalNightTrain.ts). */
+  total_distance_km?: ProposalsRange
+  total_time_h?: ProposalsRange
+  avg_speed_kmh?: ProposalsRange
   countries?: ProposalsArrayFilter
   stop_ids?: ProposalsArrayFilter
   /** Country pairs a row serves, as "AT__DE" — the two ISO codes joined by a

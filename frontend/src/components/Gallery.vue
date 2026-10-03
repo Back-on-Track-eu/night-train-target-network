@@ -14,9 +14,11 @@ import {
   mdiPlus,
   mdiSortAscending,
   mdiSortDescending,
+  mdiWeatherNight,
 } from '@mdi/js'
 import AppIcon from '@/components/AppIcon.vue'
 import AppSpinner from '@/components/AppSpinner.vue'
+import InfoHint from '@/components/InfoHint.vue'
 import LandingIntro from '@/components/LandingIntro.vue'
 import StopSelect from '@/components/StopSelect.vue'
 import CountrySelect from '@/components/CountrySelect.vue'
@@ -27,12 +29,13 @@ import GalleryMap from '@/components/GalleryMap.vue'
 import { useStore } from '@/stores/store'
 import { useLocaleFormat } from '@/composables/useLocaleFormat'
 import { LG_MEDIA_QUERY, useMediaQuery } from '@/composables/useMediaQuery'
-import { fetchProposals } from '@/lib/proposalsApi'
+import { fetchMapCorridors, fetchProposals } from '@/lib/proposalsApi'
 import { createAbortSlot } from '@/lib/apiClient'
 import { ctaButtonClass } from '@/lib/ctaButtonClass'
 import { selectPillPt } from '@/lib/selectPillPt'
 import { asApiFailure, isRetryable, type ApiFailure } from '@/lib/apiError'
 import { buildRelationToken, type GalleryRowRef } from '@/lib/galleryMap'
+import { TYPICAL_NIGHT_TRAIN, typicalNightTrainFilter } from '@/lib/typicalNightTrain'
 import { useApiFailure } from '@/composables/useApiFailure'
 import {
   seedToQuery,
@@ -65,16 +68,13 @@ const { describe, report } = useApiFailure()
 
 const LIMIT = 20
 
-// The list page and the whole map come from ONE request: the map sections are
-// computed from the same filters but ignore limit/offset, so they cover the
-// entire result set and only need to ride the first page of a query. Appends
-// therefore ask for summaries alone.
-// map_lines aggregates the WHOLE filtered set, so it rides the first page only.
-// map_routes is the one section that follows limit/offset — it carries the route
-// behind each listed card, so every append brings its own page's worth and the
-// client accumulates them.
-const FIRST_PAGE_SECTIONS: ProposalsSection[] = ['summaries', 'map_lines', 'map_routes']
-const APPEND_SECTIONS: ProposalsSection[] = ['summaries', 'map_routes']
+// Every page asks for its cards and the route behind each one (map_routes
+// follows limit/offset, so the client accumulates it page by page). The
+// corridor overview (map_lines) is NOT part of it: it aggregates the WHOLE
+// filtered set, so its cost grows with the catalogue, and riding along with
+// the first page let an unfiltered gallery time out before a single card
+// showed. It is its own request per query instead — see loadCorridors().
+const PAGE_SECTIONS: ProposalsSection[] = ['summaries', 'map_routes']
 
 const mode = ref<GallerySearchMode>('aToB')
 
@@ -134,6 +134,9 @@ const sortDir = ref<'asc' | 'desc'>('desc')
 // keeps it a fixed cost per page however many proposals exist.
 const corridors = ref<MapLinesSection | null>(null)
 const routeFeatures = ref<MapRouteFeature[]>([])
+// The overview's own request state, shown on the map rather than in the card
+// column: the list is usable whether or not the corridors have arrived.
+const corridorsStatus = ref<'idle' | 'loading' | 'failed'>('idle')
 
 // Result list (accumulated across pages) + pagination bookkeeping.
 const proposals = ref<ProposalSummary[]>([])
@@ -156,6 +159,9 @@ const listSlot = createAbortSlot()
 // Belt and braces on top of the abort: only the newest request may write to
 // proposals/offset/total, so a late loser can never reorder the list.
 let requestSeq = 0
+// The corridor overview runs beside the list under the same rules.
+const corridorSlot = createAbortSlot()
+let corridorSeq = 0
 
 const tabs = computed(() => [
   {
@@ -201,6 +207,23 @@ const canFilterMine = computed(() => store.authChoice === 'user')
 // than a literal in each button.
 const activeOwnerClass = 'bg-primary-50/15 text-primary-50 font-semibold'
 const inactiveOwnerClass = 'text-primary-50/60 hover:text-primary-50'
+
+// The position paper's "typical night train" sieve (lib/typicalNightTrain.ts):
+// 500–2 000 km, 7–16 h, ≥ 50 km/h, asked of PROPOSALS only — existing trains
+// always stay listed, they are the comparison. ON by default: the gallery
+// opens on the set the launch report counted; the 9 000 km four-nighters and
+// the 2 km city hops are one click away, not in the way. In the URL only when
+// OFF, since on is the default a shared link should not need to spell out.
+const typicalOnly = ref(true)
+const typicalHint = computed(() =>
+  t('gallery.filter.typicalHint', {
+    minKm: TYPICAL_NIGHT_TRAIN.distanceKm.min,
+    maxKm: TYPICAL_NIGHT_TRAIN.distanceKm.max,
+    minH: TYPICAL_NIGHT_TRAIN.timeH.min,
+    maxH: TYPICAL_NIGHT_TRAIN.timeH.max,
+    minKmh: TYPICAL_NIGHT_TRAIN.avgSpeedKmh.min,
+  }),
+)
 
 // Set when "Mine" was clicked without an identity: the auth modal opens, and
 // the filter is applied the moment an identity exists — the click meant "show
@@ -432,6 +455,8 @@ function buildFilter(): ProposalsFilter | undefined {
     base.sources = ['proposal']
   }
 
+  if (typicalOnly.value) Object.assign(base, typicalNightTrainFilter())
+
   if (mode.value === 'aToB') {
     const ids = [fromStop.value?.stop_id, toStop.value?.stop_id].filter((id): id is string =>
       Boolean(id),
@@ -464,11 +489,9 @@ async function loadPage(): Promise<void> {
       sort: [currentSort.value],
       limit: LIMIT,
       offset: requestOffset,
-      include: isFirstPage ? FIRST_PAGE_SECTIONS : APPEND_SECTIONS,
+      include: PAGE_SECTIONS,
+      ...queryScope(),
     }
-    const filter = buildFilter()
-    if (filter) body.filter = filter
-    if (scenarioVariantId.value !== null) body.scenario_variant_id = scenarioVariantId.value
 
     const res = await fetchProposals(body, signal)
     if (seq !== requestSeq) return
@@ -479,9 +502,6 @@ async function loadPage(): Promise<void> {
     total.value = summaries.total
     shownTotal.value = summaries.total
     offset.value = requestOffset + summaries.proposals.length
-    // The corridor overview already covers the whole filtered set, so only the
-    // first page carries it; the per-card routes arrive one page at a time.
-    if (isFirstPage) corridors.value = res.map_lines ?? null
     const newRoutes = res.map_routes?.features ?? []
     routeFeatures.value = isFirstPage ? newRoutes : [...routeFeatures.value, ...newRoutes]
     initialized.value = true
@@ -498,6 +518,34 @@ async function loadPage(): Promise<void> {
   }
 }
 
+// What a query asks for, independent of the page: the filter and the scenario
+// variant. Shared by the list and the corridor overview, so the two always
+// describe the same result set.
+function queryScope(): Pick<ProposalsRequest, 'filter' | 'scenario_variant_id'> {
+  const scope: Pick<ProposalsRequest, 'filter' | 'scenario_variant_id'> = {}
+  const filter = buildFilter()
+  if (filter) scope.filter = filter
+  if (scenarioVariantId.value !== null) scope.scenario_variant_id = scenarioVariantId.value
+  return scope
+}
+
+// The corridor overview for the current query. The previous query's corridors
+// stay drawn until the new ones land (same reasoning as resetAndLoad below);
+// a failure is reported on the map only — the cards are unaffected.
+async function loadCorridors(): Promise<void> {
+  corridorsStatus.value = 'loading'
+  const seq = ++corridorSeq
+  try {
+    const res = await fetchMapCorridors(queryScope(), corridorSlot.begin())
+    if (seq !== corridorSeq) return
+    corridors.value = res.map_lines ?? null
+    corridorsStatus.value = 'idle'
+  } catch (err) {
+    if (asApiFailure(err)?.kind === 'canceled' || seq !== corridorSeq) return
+    corridorsStatus.value = 'failed'
+  }
+}
+
 // A filter/sort change starts a fresh query from offset 0. Deliberately NOT
 // guarded on `loading`: the point is to replace whatever is in flight.
 //
@@ -507,9 +555,13 @@ async function loadPage(): Promise<void> {
 // changing the sort order or the search mode threw the reader back to the top
 // of the page. loadPage() swaps all of it at once when the response lands,
 // which is the same reasoning `shownTotal` already applies to the result count.
-function resetAndLoad(): void {
+//
+// The corridor overview reloads with it, except on a sort change: sorting
+// reorders the cards but cannot change which corridors the result set covers.
+function resetAndLoad({ corridors: withCorridors = true } = {}): void {
   offset.value = 0
   loadPage()
+  if (withCorridors) loadCorridors()
 }
 
 function retryLoad(): void {
@@ -626,6 +678,7 @@ function currentSearchQuery(): LocationQueryRaw {
   // Only when on: an absent key is the default, and a shared link should not
   // carry a filter that resolves against whoever opens it.
   if (mineOnly.value) query.mine = '1'
+  if (!typicalOnly.value) query.typical = '0'
   // The SCENARIO, not the variant: the variant ids are materialised and can
   // be rebuilt, the scenario is what a shared link should still mean.
   if (galleryScenario.value && !galleryScenario.value.is_current_base) {
@@ -643,19 +696,23 @@ watch(
     countryCode,
     relationFrom,
     relationTo,
-    sortField,
-    sortDir,
     sourceFilter,
     mineOnly,
+    typicalOnly,
     // The variant, not the scenario id: the id resolves from null to the
     // base once the scenarios load, and that is not a change of what the
     // request asks for (both send nothing) — watching it reloaded the
     // whole gallery a second time on every cold start.
     scenarioVariantId,
+    // Sort LAST: the callback tells a sort-only change (same result set, so
+    // the corridors already drawn still apply) from one that moved the query.
+    sortField,
+    sortDir,
   ],
-  () => {
+  (next, previous) => {
     if (hydrating) return
-    resetAndLoad()
+    const scopeChanged = next.slice(0, -2).some((value, i) => value !== previous[i])
+    resetAndLoad({ corridors: scopeChanged })
     router.replace({ query: currentSearchQuery() })
   },
 )
@@ -697,6 +754,8 @@ function createProposal(): void {
 }
 
 let observer: IntersectionObserver | null = null
+// What the last teardown cancelled before it landed; onActivated resumes it.
+const interrupted = { page: false, corridors: false }
 // Watches the whole document, like LandingIntro's own band: what changes the
 // chrome above the results row is mostly elements ABOVE the gallery (the
 // header image loading, the API status banner appearing), which an observer on
@@ -756,6 +815,7 @@ onMounted(async () => {
   // Resolves against whoever is signed in now — the account is deliberately
   // not part of the link.
   mineOnly.value = queryString(route.query.mine) === '1' && canFilterMine.value
+  typicalOnly.value = queryString(route.query.typical) !== '0'
   const scenarioParam = Number(queryString(route.query.scenario))
   if (
     Number.isInteger(scenarioParam) &&
@@ -782,15 +842,24 @@ function teardown(): void {
   chromeObserver?.disconnect()
   chromeObserver = null
   window.removeEventListener('resize', measureRow)
+  // A load cut short here never lands, and a cancellation is silent by design
+  // — so without remembering it, leaving before a query's first page arrived
+  // came back to an empty (or stale) column with no skeleton, no count and no
+  // retry. An interrupted APPEND needs nothing: the sentinel asks again.
+  interrupted.page = loading.value && offset.value === 0
+  interrupted.corridors = corridorsStatus.value === 'loading'
   // Drop everything in flight; their rejections are 'canceled' and stay silent.
   listSlot.cancel()
+  corridorSlot.cancel()
+  if (interrupted.corridors) corridorsStatus.value = 'idle'
 }
 onBeforeUnmount(teardown)
 onDeactivated(teardown)
 
 // Coming back to a cached gallery. Deliberately does NOT re-run onMounted's
 // hydrate-and-load: the whole point is that a there-and-back trip costs zero
-// requests. Only a proposal published in the meantime forces a refresh.
+// requests. Only a proposal published in the meantime, or a load the teardown
+// interrupted, forces a refresh.
 onActivated(() => {
   isActive.value = true
   // Rebuilt rather than re-observed: the viewport may have crossed the
@@ -805,7 +874,12 @@ onActivated(() => {
   if (store.galleryStale) {
     store.galleryStale = false
     resetAndLoad()
+  } else if (interrupted.page) {
+    resetAndLoad({ corridors: interrupted.corridors })
+  } else if (interrupted.corridors) {
+    loadCorridors()
   }
+  interrupted.page = interrupted.corridors = false
 })
 </script>
 
@@ -1054,44 +1128,65 @@ onActivated(() => {
              come back and then stays put across later searches — see
              shownTotal. -->
         <div class="flex min-h-8 items-center justify-between gap-2">
-          <!-- Greyed, not hidden, while existing trains alone are listed:
+          <!-- The two filters that are not part of the search bar, as one
+               group so the count keeps the right edge to itself. -->
+          <div class="flex flex-wrap items-center gap-2">
+            <!-- Greyed, not hidden, while existing trains alone are listed:
                nobody owns an ONTD row, and a switch that vanished with the
                source would be a switch nobody could find again. -->
-          <div
-            class="flex items-center gap-0.5 rounded-full border border-primary-50/20 p-0.5 text-sm transition-opacity"
-            :class="existingOnly ? 'opacity-40' : ''"
-            role="group"
-            :aria-label="t('gallery.filter.label')"
-            :aria-disabled="existingOnly"
-            :title="existingOnly ? t('gallery.filter.disabledHint') : undefined"
-          >
-            <button
-              type="button"
-              class="rounded-full px-3 py-1 transition"
-              :class="[
-                mineOnly ? inactiveOwnerClass : activeOwnerClass,
-                existingOnly ? 'cursor-not-allowed' : 'cursor-pointer',
-              ]"
-              :aria-pressed="!mineOnly"
-              :disabled="existingOnly"
-              @click="mineOnly = false"
+            <div
+              class="flex items-center gap-0.5 rounded-full border border-primary-50/20 p-0.5 text-sm transition-opacity"
+              :class="existingOnly ? 'opacity-40' : ''"
+              role="group"
+              :aria-label="t('gallery.filter.label')"
+              :aria-disabled="existingOnly"
+              :title="existingOnly ? t('gallery.filter.disabledHint') : undefined"
             >
-              {{ t('gallery.filter.all') }}
-            </button>
-            <button
-              type="button"
-              class="flex items-center gap-1.5 rounded-full px-3 py-1 transition"
-              :class="[
-                mineOnly ? activeOwnerClass : inactiveOwnerClass,
-                existingOnly ? 'cursor-not-allowed' : 'cursor-pointer',
-              ]"
-              :aria-pressed="mineOnly"
-              :disabled="existingOnly"
-              @click="selectMine"
-            >
-              <AppIcon :path="mdiAccountOutline" :size="16" />
-              {{ t('gallery.filter.mine') }}
-            </button>
+              <button
+                type="button"
+                class="rounded-full px-3 py-1 transition"
+                :class="[
+                  mineOnly ? inactiveOwnerClass : activeOwnerClass,
+                  existingOnly ? 'cursor-not-allowed' : 'cursor-pointer',
+                ]"
+                :aria-pressed="!mineOnly"
+                :disabled="existingOnly"
+                @click="mineOnly = false"
+              >
+                {{ t('gallery.filter.all') }}
+              </button>
+              <button
+                type="button"
+                class="flex items-center gap-1.5 rounded-full px-3 py-1 transition"
+                :class="[
+                  mineOnly ? activeOwnerClass : inactiveOwnerClass,
+                  existingOnly ? 'cursor-not-allowed' : 'cursor-pointer',
+                ]"
+                :aria-pressed="mineOnly"
+                :disabled="existingOnly"
+                @click="selectMine"
+              >
+                <AppIcon :path="mdiAccountOutline" :size="16" />
+                {{ t('gallery.filter.mine') }}
+              </button>
+            </div>
+            <!-- The position paper's sieve, as one toggle in the same idiom as
+                 the ownership pill, on by default. The bounds and what the
+                 toggle leaves alone sit behind the app's ⓘ overlay (InfoHint),
+                 not a browser tooltip. -->
+            <span class="flex items-center gap-1">
+              <button
+                type="button"
+                class="flex cursor-pointer items-center gap-1.5 rounded-full border border-primary-50/20 px-3 py-1 text-sm transition"
+                :class="typicalOnly ? activeOwnerClass : inactiveOwnerClass"
+                :aria-pressed="typicalOnly"
+                @click="typicalOnly = !typicalOnly"
+              >
+                <AppIcon :path="mdiWeatherNight" :size="16" />
+                {{ t('gallery.filter.typical') }}
+              </button>
+              <InfoHint :text="typicalHint" />
+            </span>
           </div>
           <!-- Loading state lives up here, where the eye is, not at the foot of
                a list that may be scrolled out of view: a spinner and a word
@@ -1179,7 +1274,13 @@ onActivated(() => {
       <div
         class="order-first h-64 w-full overflow-hidden rounded-xl border border-primary-50/10 sm:h-96 lg:order-none lg:h-full lg:w-auto lg:flex-1"
       >
-        <GalleryMap :corridors="corridors" :routes="routeFeatures" :highlighted-row="hoveredRow" />
+        <GalleryMap
+          :corridors="corridors"
+          :corridors-status="corridorsStatus"
+          :routes="routeFeatures"
+          :highlighted-row="hoveredRow"
+          @retry-corridors="loadCorridors"
+        />
       </div>
     </div>
   </div>
