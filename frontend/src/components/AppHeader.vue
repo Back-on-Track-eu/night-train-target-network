@@ -18,15 +18,18 @@ const { t } = useI18n()
       >
         <!-- Languages sit flush to the container's right edge — the exact
              back-on-track.eu position (right edge of "Polski" at the gutter).
-             The account badge is pushed just past that edge, into the outer
-             gutter to its right, so it never shifts the languages inward. -->
+             From xl up the account badge is pushed just past that edge, into
+             the outer gutter to its right, so it never shifts the languages
+             inward. Below xl there IS no outer gutter (the container spans
+             the viewport), so the badge sits in the row instead — absolute
+             there put it off the right edge of every phone screen. -->
         <LanguageSwitch />
         <!-- Always visible: reads "Guest" until the user logs in. `z-50` lifts
              this wrapper's stacking context above UserMenu's click-away catcher
              (teleported to body at z-30) — without it the transform here
              (-translate-y-1/2) traps the z-50 dropdown below the catcher, so
              clicks on the menu hit the catcher and it just closes. -->
-        <div class="absolute left-full top-1/2 z-50 ml-4 -translate-y-1/2">
+        <div class="z-50 ml-4 xl:absolute xl:left-full xl:top-1/2 xl:-translate-y-1/2">
           <UserMenu />
         </div>
       </div>
