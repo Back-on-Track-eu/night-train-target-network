@@ -76,9 +76,12 @@ const isBase = computed(() => {
     :class="disabled ? 'opacity-40' : ''"
     :aria-disabled="disabled"
   >
+    <!-- flex-wrap: on a phone the summary, badge and notes run onto a second
+         line rather than squeezing each other into word-per-line columns;
+         the chevron keeps the right edge of whichever line it lands on. -->
     <button
       type="button"
-      class="flex w-full items-center gap-2 px-4 py-2 text-sm text-primary-50/70 transition"
+      class="flex w-full flex-wrap items-center gap-x-2 gap-y-1 px-4 py-2 text-left text-sm text-primary-50/70 transition"
       :class="disabled ? 'cursor-not-allowed' : 'cursor-pointer hover:text-primary-50'"
       :aria-expanded="open"
       :disabled="disabled"
@@ -92,7 +95,7 @@ const isBase = computed(() => {
            can get wrong here, and the existing-only case greys the whole
            panel to say the same thing louder. -->
       <span
-        class="rounded-full border border-primary-50/15 px-2 py-0.5 text-[0.65rem] uppercase tracking-wider text-primary-50/45"
+        class="whitespace-nowrap rounded-full border border-primary-50/15 px-2 py-0.5 text-[0.65rem] uppercase tracking-wider text-primary-50/45"
       >
         {{ t('gallery.scenario.proposalsOnly') }}
       </span>

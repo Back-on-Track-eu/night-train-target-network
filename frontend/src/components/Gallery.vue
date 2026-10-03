@@ -26,7 +26,8 @@ import GalleryScenarioPanel from '@/components/GalleryScenarioPanel.vue'
 import GalleryMap from '@/components/GalleryMap.vue'
 import { useStore } from '@/stores/store'
 import { useLocaleFormat } from '@/composables/useLocaleFormat'
-import { fetchMapCorridors, fetchProposals } from '@/lib/proposalsApi'
+import { LG_MEDIA_QUERY, useMediaQuery } from '@/composables/useMediaQuery'
+import { fetchProposals } from '@/lib/proposalsApi'
 import { createAbortSlot } from '@/lib/apiClient'
 import { ctaButtonClass } from '@/lib/ctaButtonClass'
 import { selectPillPt } from '@/lib/selectPillPt'
@@ -64,13 +65,16 @@ const { describe, report } = useApiFailure()
 
 const LIMIT = 20
 
-// Every page asks for its cards and the route behind each one (map_routes
-// follows limit/offset, so the client accumulates it page by page). The
-// corridor overview (map_lines) is NOT part of it: it aggregates the WHOLE
-// filtered set, so its cost grows with the catalogue, and riding along with
-// the first page let an unfiltered gallery time out before a single card
-// showed. It is its own request per query instead — see loadCorridors().
-const PAGE_SECTIONS: ProposalsSection[] = ['summaries', 'map_routes']
+// The list page and the whole map come from ONE request: the map sections are
+// computed from the same filters but ignore limit/offset, so they cover the
+// entire result set and only need to ride the first page of a query. Appends
+// therefore ask for summaries alone.
+// map_lines aggregates the WHOLE filtered set, so it rides the first page only.
+// map_routes is the one section that follows limit/offset — it carries the route
+// behind each listed card, so every append brings its own page's worth and the
+// client accumulates them.
+const FIRST_PAGE_SECTIONS: ProposalsSection[] = ['summaries', 'map_lines', 'map_routes']
+const APPEND_SECTIONS: ProposalsSection[] = ['summaries', 'map_routes']
 
 const mode = ref<GallerySearchMode>('aToB')
 
@@ -130,9 +134,6 @@ const sortDir = ref<'asc' | 'desc'>('desc')
 // keeps it a fixed cost per page however many proposals exist.
 const corridors = ref<MapLinesSection | null>(null)
 const routeFeatures = ref<MapRouteFeature[]>([])
-// The overview's own request state, shown on the map rather than in the card
-// column: the list is usable whether or not the corridors have arrived.
-const corridorsStatus = ref<'idle' | 'loading' | 'failed'>('idle')
 
 // Result list (accumulated across pages) + pagination bookkeeping.
 const proposals = ref<ProposalSummary[]>([])
@@ -155,9 +156,6 @@ const listSlot = createAbortSlot()
 // Belt and braces on top of the abort: only the newest request may write to
 // proposals/offset/total, so a late loser can never reorder the list.
 let requestSeq = 0
-// The corridor overview runs beside the list under the same rules.
-const corridorSlot = createAbortSlot()
-let corridorSeq = 0
 
 const tabs = computed(() => [
   {
@@ -466,9 +464,11 @@ async function loadPage(): Promise<void> {
       sort: [currentSort.value],
       limit: LIMIT,
       offset: requestOffset,
-      include: PAGE_SECTIONS,
-      ...queryScope(),
+      include: isFirstPage ? FIRST_PAGE_SECTIONS : APPEND_SECTIONS,
     }
+    const filter = buildFilter()
+    if (filter) body.filter = filter
+    if (scenarioVariantId.value !== null) body.scenario_variant_id = scenarioVariantId.value
 
     const res = await fetchProposals(body, signal)
     if (seq !== requestSeq) return
@@ -479,6 +479,9 @@ async function loadPage(): Promise<void> {
     total.value = summaries.total
     shownTotal.value = summaries.total
     offset.value = requestOffset + summaries.proposals.length
+    // The corridor overview already covers the whole filtered set, so only the
+    // first page carries it; the per-card routes arrive one page at a time.
+    if (isFirstPage) corridors.value = res.map_lines ?? null
     const newRoutes = res.map_routes?.features ?? []
     routeFeatures.value = isFirstPage ? newRoutes : [...routeFeatures.value, ...newRoutes]
     initialized.value = true
@@ -495,34 +498,6 @@ async function loadPage(): Promise<void> {
   }
 }
 
-// What a query asks for, independent of the page: the filter and the scenario
-// variant. Shared by the list and the corridor overview, so the two always
-// describe the same result set.
-function queryScope(): Pick<ProposalsRequest, 'filter' | 'scenario_variant_id'> {
-  const scope: Pick<ProposalsRequest, 'filter' | 'scenario_variant_id'> = {}
-  const filter = buildFilter()
-  if (filter) scope.filter = filter
-  if (scenarioVariantId.value !== null) scope.scenario_variant_id = scenarioVariantId.value
-  return scope
-}
-
-// The corridor overview for the current query. The previous query's corridors
-// stay drawn until the new ones land (same reasoning as resetAndLoad below);
-// a failure is reported on the map only — the cards are unaffected.
-async function loadCorridors(): Promise<void> {
-  corridorsStatus.value = 'loading'
-  const seq = ++corridorSeq
-  try {
-    const res = await fetchMapCorridors(queryScope(), corridorSlot.begin())
-    if (seq !== corridorSeq) return
-    corridors.value = res.map_lines ?? null
-    corridorsStatus.value = 'idle'
-  } catch (err) {
-    if (asApiFailure(err)?.kind === 'canceled' || seq !== corridorSeq) return
-    corridorsStatus.value = 'failed'
-  }
-}
-
 // A filter/sort change starts a fresh query from offset 0. Deliberately NOT
 // guarded on `loading`: the point is to replace whatever is in flight.
 //
@@ -532,13 +507,9 @@ async function loadCorridors(): Promise<void> {
 // changing the sort order or the search mode threw the reader back to the top
 // of the page. loadPage() swaps all of it at once when the response lands,
 // which is the same reasoning `shownTotal` already applies to the result count.
-//
-// The corridor overview reloads with it, except on a sort change: sorting
-// reorders the cards but cannot change which corridors the result set covers.
-function resetAndLoad({ corridors: withCorridors = true } = {}): void {
+function resetAndLoad(): void {
   offset.value = 0
   loadPage()
-  if (withCorridors) loadCorridors()
 }
 
 function retryLoad(): void {
@@ -599,9 +570,9 @@ function scrollToGallery(): void {
 }
 
 // --- Fitting the whole gallery into one screen ------------------------------
-// The results row — card column AND map — is exactly one viewport tall minus
-// the gallery's own chrome (heading, tabs, search pill, gutters). Two things
-// follow from that, and both are the point:
+// From lg up, the results row — card column AND map — is exactly one viewport
+// tall minus the gallery's own chrome (heading, tabs, search pill, gutters).
+// Two things follow from that, and both are the point:
 //
 //   * the search bar stays on screen beside the map at 100% zoom, so changing a
 //     filter and seeing the result costs no scrolling;
@@ -609,10 +580,19 @@ function scrollToGallery(): void {
 //     bottom edge instead of running past it. The cards scroll INSIDE their
 //     column (cardScroller below) rather than scrolling the page.
 //
+// Below lg there is no "beside": the map sits above the list at a fixed
+// height and the cards run down the page, so the row takes no height budget
+// and the list scrolls with the document — which is why the infinite-scroll
+// observer below watches the viewport there, not the column.
+//
 // Measured, not hardcoded: the heading wraps at narrow widths and the search
 // pill changes height with the active mode, so the chrome is not a constant.
 const resultsRow = ref<HTMLElement | null>(null)
 const cardScroller = ref<HTMLElement | null>(null)
+// The one layout fact the template cannot settle on its own: the same
+// breakpoint as the row's lg: classes, so the observer's root and the
+// column's overflow never disagree about who scrolls.
+const twoColumn = useMediaQuery(LG_MEDIA_QUERY)
 // Floor for short windows. Sized so the column still holds about three cards;
 // below this the row stops shrinking and the page scrolls a little instead.
 const ROW_MIN_HEIGHT_PX = 560
@@ -663,6 +643,8 @@ watch(
     countryCode,
     relationFrom,
     relationTo,
+    sortField,
+    sortDir,
     sourceFilter,
     mineOnly,
     // The variant, not the scenario id: the id resolves from null to the
@@ -670,15 +652,10 @@ watch(
     // request asks for (both send nothing) — watching it reloaded the
     // whole gallery a second time on every cold start.
     scenarioVariantId,
-    // Sort LAST: the callback tells a sort-only change (same result set, so
-    // the corridors already drawn still apply) from one that moved the query.
-    sortField,
-    sortDir,
   ],
-  (next, previous) => {
+  () => {
     if (hydrating) return
-    const scopeChanged = next.slice(0, -2).some((value, i) => value !== previous[i])
-    resetAndLoad({ corridors: scopeChanged })
+    resetAndLoad()
     router.replace({ query: currentSearchQuery() })
   },
 )
@@ -720,25 +697,37 @@ function createProposal(): void {
 }
 
 let observer: IntersectionObserver | null = null
-// What the last teardown cancelled before it landed; onActivated resumes it.
-const interrupted = { page: false, corridors: false }
 // Watches the whole document, like LandingIntro's own band: what changes the
 // chrome above the results row is mostly elements ABOVE the gallery (the
 // header image loading, the API status banner appearing), which an observer on
 // the row itself would never see.
 let chromeObserver: ResizeObserver | null = null
 
-onMounted(async () => {
-  // The list scrolls inside its own column now, so the sentinel is watched
-  // against that box rather than the viewport — against the viewport it would
-  // either never intersect or (worse) intersect permanently.
+// The infinite-scroll sentinel is watched against whatever scrolls the list:
+// the card column from lg up, where it scrolls inside its own box (against the
+// viewport the sentinel would either never intersect or intersect
+// permanently), and the viewport below lg, where the column is just part of
+// the page. A root is fixed at construction, so a layout change means a new
+// observer — see the twoColumn watcher.
+function observeSentinel(): void {
+  observer?.disconnect()
   observer = new IntersectionObserver(
     (entries) => {
       if (entries[0]?.isIntersecting) onSentinel()
     },
-    { root: cardScroller.value, rootMargin: '300px' },
+    { root: twoColumn.value ? cardScroller.value : null, rootMargin: '300px' },
   )
   if (sentinel.value) observer.observe(sentinel.value)
+}
+
+// Only while on screen: a cached gallery re-attaches in onActivated anyway,
+// and an observer built while the page is hidden would fire into nothing.
+watch(twoColumn, () => {
+  if (isActive.value) observeSentinel()
+})
+
+onMounted(async () => {
+  observeSentinel()
 
   // Hydrate the search bar from the URL before the first query fires, so a
   // shared or reloaded /gallery?... link reproduces the exact same results.
@@ -793,27 +782,20 @@ function teardown(): void {
   chromeObserver?.disconnect()
   chromeObserver = null
   window.removeEventListener('resize', measureRow)
-  // A load cut short here never lands, and a cancellation is silent by design
-  // — so without remembering it, leaving before a query's first page arrived
-  // came back to an empty (or stale) column with no skeleton, no count and no
-  // retry. An interrupted APPEND needs nothing: the sentinel asks again.
-  interrupted.page = loading.value && offset.value === 0
-  interrupted.corridors = corridorsStatus.value === 'loading'
   // Drop everything in flight; their rejections are 'canceled' and stay silent.
   listSlot.cancel()
-  corridorSlot.cancel()
-  if (interrupted.corridors) corridorsStatus.value = 'idle'
 }
 onBeforeUnmount(teardown)
 onDeactivated(teardown)
 
 // Coming back to a cached gallery. Deliberately does NOT re-run onMounted's
 // hydrate-and-load: the whole point is that a there-and-back trip costs zero
-// requests. Only a proposal published in the meantime, or a load the teardown
-// interrupted, forces a refresh.
+// requests. Only a proposal published in the meantime forces a refresh.
 onActivated(() => {
   isActive.value = true
-  if (sentinel.value && observer) observer.observe(sentinel.value)
+  // Rebuilt rather than re-observed: the viewport may have crossed the
+  // breakpoint while the gallery was cached, and the old root with it.
+  observeSentinel()
   // The layout above can have changed while the gallery was cached, and the
   // teardown dropped both listeners — re-measure and re-attach them.
   measureRow()
@@ -823,12 +805,7 @@ onActivated(() => {
   if (store.galleryStale) {
     store.galleryStale = false
     resetAndLoad()
-  } else if (interrupted.page) {
-    resetAndLoad({ corridors: interrupted.corridors })
-  } else if (interrupted.corridors) {
-    loadCorridors()
   }
-  interrupted.page = interrupted.corridors = false
 })
 </script>
 
@@ -865,13 +842,18 @@ onActivated(() => {
          stacking context of their own, so neither the intro above nor the
          sticky map column beside them can paint over the controls. -->
     <div class="relative z-10 flex flex-col items-center gap-3">
-      <!-- Category tabs -->
-      <div class="flex divide-x divide-primary-50/20 overflow-hidden rounded-full">
+      <!-- Category tabs: one hairline-divided pill from sm up. Four labels
+           side by side are wider than a phone, so below sm they sit in a
+           2×2 grid without the dividers (a divider between wrapped rows
+           would join the wrong neighbours). -->
+      <div
+        class="grid w-full grid-cols-2 sm:flex sm:w-auto sm:divide-x sm:divide-primary-50/20 sm:overflow-hidden sm:rounded-full"
+      >
         <button
           v-for="tab in tabs"
           :key="tab.value"
           type="button"
-          class="flex cursor-pointer items-center gap-1.5 px-4 py-2 text-sm leading-none transition"
+          class="flex cursor-pointer items-center justify-center gap-1.5 px-3 py-2 text-sm leading-none transition sm:px-4"
           :class="
             mode === tab.value
               ? 'text-primary-50 font-bold'
@@ -884,9 +866,13 @@ onActivated(() => {
         </button>
       </div>
 
-      <!-- Input pill — adapts to the active mode -->
+      <!-- Input pill — adapts to the active mode. A row from sm up; on a phone
+           the fields stack full-width (SearchField drops its fixed width
+           there, and items-stretch is what hands it the pill's width), the
+           divider turns into a rule between them and the search button
+           becomes a labelled full-width row rather than an icon on its own. -->
       <div
-        class="flex items-center gap-1 rounded-full border border-primary-50/20 bg-primary-50/5 py-1.5 pl-2 pr-1.5 shadow-lg"
+        class="flex w-full flex-col items-stretch gap-1 rounded-3xl border border-primary-50/20 bg-primary-50/5 p-1.5 shadow-lg sm:w-auto sm:flex-row sm:items-center sm:rounded-full sm:py-1.5 sm:pl-2 sm:pr-1.5"
       >
         <!-- From A to B: two stop inputs -->
         <template v-if="mode === 'aToB'">
@@ -903,7 +889,7 @@ onActivated(() => {
               @clear="fromStop = null"
             />
           </StopSelect>
-          <div class="h-8 w-px bg-primary-50/15"></div>
+          <div class="h-px w-full bg-primary-50/15 sm:h-8 sm:w-px"></div>
           <StopSelect
             :stops="store.stops"
             :status="store.stopsStatus"
@@ -960,7 +946,7 @@ onActivated(() => {
               @clear="relationFrom = null"
             />
           </CountrySelect>
-          <div class="h-8 w-px bg-primary-50/15"></div>
+          <div class="h-px w-full bg-primary-50/15 sm:h-8 sm:w-px"></div>
           <CountrySelect :countries="countryOptions" @select="relationTo = $event">
             <SearchField
               :label="t('gallery.search.relationTo')"
@@ -971,14 +957,17 @@ onActivated(() => {
           </CountrySelect>
         </template>
 
-        <!-- Search button -->
+        <!-- Search button. The label is spoken on every screen and shown only
+             on a phone, where a lone glyph at the foot of a stacked pill
+             reads as decoration. -->
         <button
           type="button"
-          class="flex cursor-pointer items-center justify-center rounded-full bg-primary-50/10 p-3 text-primary-50 transition hover:bg-primary-50/20"
+          class="flex cursor-pointer items-center justify-center gap-2 rounded-full bg-primary-50/10 px-4 py-2.5 text-sm text-primary-50 transition hover:bg-primary-50/20 sm:p-3"
           :aria-label="t('gallery.search.button')"
           @click="resetAndLoad"
         >
           <AppIcon :path="mdiMagnify" :size="20" />
+          <span class="sm:sr-only">{{ t('gallery.search.button') }}</span>
         </button>
       </div>
     </div>
@@ -995,12 +984,23 @@ onActivated(() => {
     />
 
     <!-- Results: controls + a scrolling card list (left) beside the map
-         (right), the row exactly one screen tall (measureRow). Both columns are
-         that height, which is what puts the bottom of the card list on the
-         bottom edge of the map: the list scrolls inside its own box rather than
-         running down the page past the map's corner. -->
-    <div ref="resultsRow" class="flex gap-6" :style="{ height: rowHeight }">
-      <div class="flex h-full w-96 shrink-0 flex-col gap-3">
+         (right), the row exactly one screen tall (measureRow) from lg up. Both
+         columns are that height, which is what puts the bottom of the card
+         list on the bottom edge of the map: the list scrolls inside its own
+         box rather than running down the page past the map's corner.
+
+         Below lg the row is a column with no height of its own: the map first
+         (order-first — it is the overview, and the DOM keeps it after the list
+         for the two-column case), then the controls, then the cards running
+         down the page. The measured height rides a custom property so only
+         the lg: class applies it; an inline `height` would bind on a phone
+         too. -->
+    <div
+      ref="resultsRow"
+      class="flex flex-col gap-4 lg:h-(--row-height) lg:flex-row lg:gap-6"
+      :style="{ '--row-height': rowHeight }"
+    >
+      <div class="flex w-full flex-col gap-3 lg:h-full lg:w-96 lg:shrink-0">
         <!-- Source + sort, at the head of the column whose order they set —
              which also puts the map's top edge level with them. -->
         <div class="flex items-center justify-between gap-2">
@@ -1127,10 +1127,11 @@ onActivated(() => {
           </button>
         </div>
 
-        <!-- The scrolling part of the column. min-h-0 is what lets a flex child
-             shrink below its content and scroll; pr-1 keeps the thin scrollbar
-             off the cards. -->
-        <div ref="cardScroller" class="thin-scroll min-h-0 flex-1 overflow-y-auto pr-1">
+        <!-- The scrolling part of the column, from lg up. min-h-0 is what lets
+             a flex child shrink below its content and scroll; pr-1 keeps the
+             thin scrollbar off the cards. Below lg it is plain flow — the page
+             scrolls, so an overflow box here would only clip. -->
+        <div ref="cardScroller" class="thin-scroll lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
           <!-- First load: cards the size of real cards, so the column doesn't
                collapse to a single line of text and then jump. -->
           <div v-if="loading && !initialized" class="flex flex-col gap-3" aria-hidden="true">
@@ -1173,14 +1174,12 @@ onActivated(() => {
         </div>
       </div>
 
-      <div class="h-full flex-1 overflow-hidden rounded-xl border border-primary-50/10">
-        <GalleryMap
-          :corridors="corridors"
-          :corridors-status="corridorsStatus"
-          :routes="routeFeatures"
-          :highlighted-row="hoveredRow"
-          @retry-corridors="loadCorridors"
-        />
+      <!-- A fixed height below lg: the map fills the row's height from lg up,
+           and below it the row has none, so the box has to bring its own. -->
+      <div
+        class="order-first h-64 w-full overflow-hidden rounded-xl border border-primary-50/10 sm:h-96 lg:order-none lg:h-full lg:w-auto lg:flex-1"
+      >
+        <GalleryMap :corridors="corridors" :routes="routeFeatures" :highlighted-row="hoveredRow" />
       </div>
     </div>
   </div>
