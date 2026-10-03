@@ -693,6 +693,44 @@ version without touching anything else. `db/dev/seed.py`'s example
 proposal has no router and publishes with `scenario_rows=None`, so it is
 always on that queue until the backfill runs.
 
+### 5.4b `proposals.proposal_corridors` (corridor overview, precomputed — 2026-10-03)
+
+The gallery's `map_lines` section (§7.1) is one feature per distinct stop
+pair across the WHOLE filtered set. Until backend 0.5.11 it was derived per
+request: walk `trips → segments → shapes` for the base (or unnest the §5.4a
+rows' `segments` JSON for a variant), group, then parse and simplify one
+full-resolution representative shape per corridor. At 1,334 proposals that
+took 31 s and 8.8 MB on production — the unfiltered gallery timed out on it.
+
+This table holds the pieces that query derived, computed once at write
+time: one row per (`proposal_id`, `scenario_variant_id`, `stop_a`, `stop_b`),
+`scenario_variant_id` NULL for the base projection, geometry already
+Douglas-Peucker simplified at `MAP_LINES_SIMPLIFY_TOLERANCE_DEG` (~200 m),
+and `geometry_routed` measured on the unsimplified shape so a routed line
+that happens to run straight is not mislabelled a two-stop placeholder. A
+non-base variant has rows only where its §5.4a row is `status = 'ok'` — an
+error row draws nothing on its scenario, as before.
+
+Same discipline as §5.4 / §5.4a — derived, rebuildable, never a source of
+truth — with one twist: the derivation is **pure SQL over what the database
+already holds** (`repository.py` `_replace_corridors()`), so publish,
+refresh, the §5.4a backfill (`replace_scenario_summaries()`) and the
+corridor backfill (`rebuild_corridors()`) are literally one code path, and
+no geometry ever crosses into Python. `_write_state()` calls it last, after
+the summary and the scenario rows it reads from.
+
+**The gap and the fallback.** `list_corridor_gaps()` names every proposal
+whose rows do not match the rest of the database (no base rows for the
+stored version although the route has shapes; a computed scenario row with
+segments and no rows for its variant). Empty in steady state. `map_lines()`
+asks it first (one anti-join, tens of ms) and, while it is non-empty, answers
+from `_map_lines_derived()` — the pre-0.5.11 query, kept verbatim — so the
+gallery is correct throughout the window between deploying the table and
+running the backfill, only slow. The backfill is the data task
+`db/tasks/2026-10-03_backfill_proposal_corridors.py` (`db/run_tasks.py`,
+see `db/README.md` "Data tasks"); the fallback and the gap check are to be
+deleted once every environment has run it.
+
 ### 5.5 ONTD integration (revised 2026-08-04)
 
 Existing night train routes stay in the `ontd` schema — deliberately **not**
@@ -935,8 +973,10 @@ Response sections:
   corridor) rather than one per proposal, so a client can drive line
   *thickness* off `proposal_count`; `avg_margin_eur_per_train_km` is the
   mean across exactly those proposals, for optional colouring — filtered
-  but **not** paginated (the map shows the whole filtered set). Geometry
-  is simplified for overview zoom at query time. The contributing
+  but **not** paginated (the map shows the whole filtered set). The
+  proposal side reads the precomputed `proposal_corridors` (§5.4b),
+  geometry simplified for overview zoom at write time; existing routes'
+  pieces (`ontd.route_corridors`) are still shaped on the way out. The contributing
   `proposal_ids` / `existing_route_ids` are deliberately not returned —
   unbounded in proposal count, and superseded by `map_routes`.
 - `map_routes`: GeoJSON FeatureCollection, one feature per **listed** row

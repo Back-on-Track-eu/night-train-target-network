@@ -1141,8 +1141,11 @@ trains). Corridor geometry prefers a proposal shape and falls back to
 the existing route's own. Both line sections (`map_lines`, `map_routes`)
 are thinned for the wire: simplified at ~200 m and written at 5 decimals
 (~1 m) — see adapters/proposal/README.md §7.1. `map_lines` aggregates the
-whole filtered set and is by far the most expensive section; the gallery
-requests it on its own, apart from the paginated list. `map_country_counts` is one feature per
+whole filtered set; since backend 0.5.11 its proposal side reads the
+precomputed `proposals.proposal_corridors` (§5.4b) and falls back to
+deriving corridors at request time while any proposal still lacks its
+rows (the window before the deploy's data task has run). The gallery
+requests the section on its own, apart from the paginated list. `map_country_counts` is one feature per
 country touched by the filtered set, carrying the country's own border
 geometry (`input_params.countries.country_geom`) so the frontend
 doesn't need a second lookup for the choropleth — `geometry: null` for
