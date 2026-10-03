@@ -1405,6 +1405,28 @@ class ProposalRepository:
             rows = cur.fetchall()
         return [dict(row) for row in rows], total
 
+    def stored_summary(self, proposal_id: int) -> Optional[dict]:
+        """One proposal's §5.4 row AS STORED — the cycle figures, with the
+        live engagement counts — in the same column shape list_summaries()
+        returns, so summary_row_to_dict() reads it unchanged. For consumers
+        that hold the stored row against a computed summary
+        (api/helpers/proposal_compare.py): the gallery union halves
+        distance and time for display beside the per-direction ONTD rows,
+        and a diff against the calc's own cycle figures would read that
+        as a change. None if the proposal has no summary row."""
+        with self._cursor() as cur:
+            cur.execute(
+                f"WITH {self._ENGAGEMENT_CTE} "
+                "SELECT 'proposal'::text AS source, NULL::text AS route_id, "
+                "       NULL::boolean AS geometry_routed, NULL::text AS ontd_url, "
+                f"       {self._SUMMARY_COLUMNS}, likes_count, comments_count, "
+                "       display_name, is_guest, status, error_code, scenario_variant_id "
+                "FROM proposal_summaries_with_engagement WHERE proposal_id = %s",
+                (proposal_id,),
+            )
+            row = cur.fetchone()
+        return dict(row) if row else None
+
     def map_lines(
         self, filters: Optional[dict] = None, scenario_variant_id: Optional[int] = None
     ) -> list[dict]:
