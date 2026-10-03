@@ -1123,7 +1123,9 @@
       "legend": {
         "proposed": "Vorschläge",
         "existing": "Bestehend"
-      }
+      },
+      "loading": "Karte wird geladen…",
+      "failed": "Die Karte konnte nicht geladen werden."
     },
     "card": {
       "distance": "Entfernung",

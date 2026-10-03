@@ -1123,7 +1123,9 @@
       "legend": {
         "proposed": "Proposals",
         "existing": "Existing"
-      }
+      },
+      "loading": "Loading map…",
+      "failed": "The map couldn't be loaded."
     },
     "card": {
       "distance": "Distance",

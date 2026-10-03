@@ -93,6 +93,18 @@ _STRUCTURAL_ROUTE_PREFIX = "R1"
 # corridor COUNT by then — and starts visibly cutting corners.
 MAP_LINES_SIMPLIFY_TOLERANCE_DEG = 0.002
 
+# The same read-time thinning for map_routes, the route behind each listed
+# card. The stored geom_simplified (~50 m, projection.py) is kept for the bbox
+# filter and the scenario rows; at the zoom a hovered card is framed at (≤ 10)
+# 200 m is still sub-pixel, and the full-resolution page cost ~210 KB per card
+# (4.3 MB per 20-card page, measured on production 2026-10-03).
+MAP_ROUTES_SIMPLIFY_TOLERANCE_DEG = 0.002
+
+# Decimal places ST_AsGeoJSON writes for the gallery's map sections. PostGIS
+# defaults to 9 (sub-millimetre); 5 is ~1 m, invisible on any web map, and
+# roughly halves the bytes per coordinate.
+GALLERY_GEOJSON_DECIMALS = 5
+
 
 def outdated_trigger(container: dict) -> Optional[dict]:
     """Whether a stored proposal's version/scenario pin has fallen behind
@@ -1397,9 +1409,10 @@ class ProposalRepository:
                 # line that happens to run straight would collapse to two
                 # points under ST_Simplify and be mislabelled a placeholder.
                 "       ST_NPoints(geom) > 2 AS geometry_routed, "
-                "       ST_AsGeoJSON(ST_Simplify(geom, %s)) AS geometry "
+                "       ST_AsGeoJSON(ST_Simplify(geom, %s), %s) AS geometry "
                 "FROM rep",
-                list(params) + [MAP_LINES_SIMPLIFY_TOLERANCE_DEG],
+                list(params)
+                + [MAP_LINES_SIMPLIFY_TOLERANCE_DEG, GALLERY_GEOJSON_DECIMALS],
             )
             rows = cur.fetchall()
         return [dict(row) for row in rows]
@@ -1424,22 +1437,30 @@ class ProposalRepository:
         Reads proposal_summaries.geom_simplified / route_summaries.
         geom_simplified, which both projections already maintain (see
         projection.py's _geom_simplified) and which the gallery union
-        already carries — until now only as a bbox filter target, never
-        returned. NULL for an ONTD route whose routing failed; the row
+        already carries, thinned once more on the way out
+        (MAP_ROUTES_SIMPLIFY_TOLERANCE_DEG, GALLERY_GEOJSON_DECIMALS). NULL for an ONTD route whose routing failed; the row
         is still emitted, with a null geometry, rather than silently
         dropped. scenario_variant_id: the §5.4a row's geometry — NULL
         on an error row, emitted the same way."""
         where_sql, params = build_where(filters or {})
         where_clause = f" WHERE {where_sql}" if where_sql else ""
+        # The simplify parameters come FIRST: they sit in the SELECT list,
+        # ahead of the WHERE placeholders. preserveCollapsed keeps a very
+        # short route drawable instead of simplifying it away to NULL.
         sql = (
             f"WITH {self._gallery_ctes(filters, scenario_variant_id)} "
             "SELECT source, proposal_id, proposal_version, route_id, "
             "       geometry_routed, "
-            "       ST_AsGeoJSON(geom_simplified) AS geometry "
+            "       ST_AsGeoJSON(ST_Simplify(geom_simplified, %s, true), %s) "
+            "         AS geometry "
             f"FROM gallery{where_clause} "
             f"ORDER BY {build_order_by(sort)}"
         )
-        page_params = list(params)
+        page_params = [
+            MAP_ROUTES_SIMPLIFY_TOLERANCE_DEG,
+            GALLERY_GEOJSON_DECIMALS,
+            *params,
+        ]
         if limit is not None:
             sql += " LIMIT %s OFFSET %s"
             page_params += [limit, offset]
