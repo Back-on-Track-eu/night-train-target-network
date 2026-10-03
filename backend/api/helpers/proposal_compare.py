@@ -181,16 +181,19 @@ def _stored_side(container: dict, repo, loader) -> dict:
         loader,
     )
     evaluation = repo.reconstruct_evaluation(container)
-    # Summary fetched through the ordinary gallery machinery so the row
-    # carries exactly the §5.4 shape incl. engagement counts. publish() writes
+    # The §5.4 row as stored, engagement counts included — NOT the gallery
+    # list: that halves distance and time to one direction for display
+    # beside the per-direction ONTD rows (§7.1), and the computed side's
+    # summary is the calc's own cycle figure, so a diff through the
+    # gallery would report a change where there is none. publish() writes
     # container + summary in one transaction, so the row always exists.
-    rows, _ = repo.list_summaries(filters={"proposal_ids": [container["proposal_id"]]})
+    row = repo.stored_summary(container["proposal_id"])
 
     side = {"published": True}
     side.update(
         proposal_to_response_dict(container, route=route, evaluation=evaluation)
     )
-    side["summary"] = summary_row_to_dict(rows[0])
+    side["summary"] = summary_row_to_dict(row)
     return side
 
 

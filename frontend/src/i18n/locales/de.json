@@ -1096,7 +1096,9 @@
       "label": "Wessen Strecken",
       "all": "Alle",
       "mine": "Meine",
-      "disabledHint": "Bestehende Verbindungen haben keinen Urheber — auf Vorschläge wechseln, um deine zu sehen."
+      "disabledHint": "Bestehende Verbindungen haben keinen Urheber — auf Vorschläge wechseln, um deine zu sehen.",
+      "typical": "Typische Nachtzüge",
+      "typicalHint": "Vorschläge mit {minKm}–{maxKm} km einfacher Fahrt, {minH}–{maxH} h und im Schnitt mindestens {minKmh} km/h – der Rahmen unseres Positionspapiers. Bestehende Züge werden immer gezeigt. Ausschalten zeigt alle Vorschläge."
     },
     "scenario": {
       "label": "Szenario",
@@ -1123,7 +1125,9 @@
       "legend": {
         "proposed": "Vorschläge",
         "existing": "Bestehend"
-      }
+      },
+      "loading": "Karte wird geladen…",
+      "failed": "Die Karte konnte nicht geladen werden."
     },
     "card": {
       "distance": "Entfernung",

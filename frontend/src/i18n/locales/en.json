@@ -1096,7 +1096,9 @@
       "label": "Whose routes",
       "all": "All",
       "mine": "Mine",
-      "disabledHint": "Existing connections have no owner — switch to proposals to see yours."
+      "disabledHint": "Existing connections have no owner — switch to proposals to see yours.",
+      "typical": "Typical night trains",
+      "typicalHint": "Proposals of one way {minKm}–{maxKm} km, {minH}–{maxH} h and at least {minKmh} km/h on average — the range of our position paper. Existing trains are always shown. Switch off to see every proposal."
     },
     "scenario": {
       "label": "Scenario",
@@ -1123,7 +1125,9 @@
       "legend": {
         "proposed": "Proposals",
         "existing": "Existing"
-      }
+      },
+      "loading": "Loading map…",
+      "failed": "The map couldn't be loaded."
     },
     "card": {
       "distance": "Distance",

@@ -283,7 +283,7 @@ function segmentInk(color: string): string {
         <!-- The ⓘ and the price-basis sticker sit inside a <summary>: a
              click on either must not toggle the section. Both stop
              propagation, and their hover overlays need no click at all. -->
-        <span class="flex items-center gap-1.5 text-base font-semibold text-primary-50">
+        <span class="flex flex-wrap items-center gap-1.5 text-base font-semibold text-primary-50">
           {{ t('proposal.evaluation.sections.finance.title') }}
           <span @click.stop>
             <InfoHint

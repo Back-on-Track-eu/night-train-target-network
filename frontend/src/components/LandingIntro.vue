@@ -81,10 +81,13 @@ onActivated(measureHero)
   <section ref="hero" class="flex w-full flex-col" :style="{ minHeight: heroMinHeight }">
     <!-- my-auto centres the block in the band; items-center levels the left
          column (headline + buttons) with the pitch. Equal columns so the
-         quiet buttons fit on one or two lines in both languages. -->
-    <div class="my-auto grid grid-cols-2 items-center gap-x-16 px-24">
+         quiet buttons fit on one or two lines in both languages. Below lg
+         the two columns stack — statement and buttons first, the argument
+         under them — and the band's own gutter steps back to the page's,
+         since a phone has no room for a second one. -->
+    <div class="my-auto grid grid-cols-1 items-center gap-x-16 gap-y-10 lg:grid-cols-2 lg:px-24">
       <div class="flex flex-col gap-8">
-        <h1 class="text-4xl font-light text-white">{{ t('gallery.heading') }}</h1>
+        <h1 class="text-3xl font-light text-white sm:text-4xl">{{ t('gallery.heading') }}</h1>
 
         <!-- Every way into the site: contribute a route, read the others,
              suggest a train, or read up. The call to action gets its own line

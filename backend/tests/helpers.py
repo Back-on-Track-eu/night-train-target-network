@@ -479,6 +479,18 @@ def route_bd(
     return cells if class_main is None else cells[class_main]
 
 
+def half_like_postgres(value, places: int) -> float:
+    """value / 2 rounded the way `round(numeric, n)` does in Postgres —
+    half AWAY from zero on the decimal value (15.93 / 2 = 7.965 → 7.97).
+    Python's round() on a float decides on the binary representation and
+    says 7.96, so a test comparing a gallery figure (one direction, halved
+    in SQL) with its stored cycle has to round like the database."""
+    from decimal import ROUND_HALF_UP, Decimal
+
+    quantum = Decimal(1).scaleb(-places)
+    return float((Decimal(str(value)) / 2).quantize(quantum, rounding=ROUND_HALF_UP))
+
+
 def purge_saved_proposals(conn, keep_route_id: str = "P1_V1_R1") -> None:
     """Delete everything the persist-on-calc pipelines wrote, except the one
     real example proposal seeded at DB init time (keep_route_id — see

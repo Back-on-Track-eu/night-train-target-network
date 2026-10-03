@@ -680,6 +680,17 @@ key). The only file in the suite runnable standalone.
    longer a gap: `AUTO_STOP_MAX_DETOUR_PER` only bounds how much router
    time costing may spend, and never filters what is suggested.
 
+## test_57_proposal_corridors.py — Precomputed gallery corridors + the data-task runner
+
+| Test | What it checks | Fixture | Assertion |
+|---|---|---|---|
+| `test_publish_writes_base_rows_for_every_stop_pair` | A publish writes one base row (`scenario_variant_id` NULL) per direction-collapsed stop pair of the stored route, LineStrings of ≥ 2 points at the current version | `published` | pair set == distinct pairs of `trips → segments` |
+| `test_publish_writes_variant_rows_keyed_like_the_segments_json` | Every `ok` scenario row with `segments` has corridor rows for its variant keyed exactly like the JSON; error rows have none | `published` | per-variant pair sets |
+| `test_map_lines_from_the_table_matches_the_derivation` | `map_lines()` (table) and `_map_lines_derived()` (request-time) agree on corridors, counts and routed flags on the base | `repo`, `published` | shape-set equality |
+| `test_map_lines_on_a_variant_matches_the_derivation` | Same on the HSR variant (both empty where this stack cannot compute it) | `hsr_scenario` | shape-set equality |
+| `test_api_map_lines_uses_the_same_corridors` | `POST /api/proposals` `map_lines` equals the repository's table path | live api | shape-set equality |
+| `test_missing_rows_fall_back_then_the_task_backfills` | Rows deleted → proposal on `list_corridor_gaps()`, api still answers (derived); the runner runs the backfill task, records `done`, rows are back, the fast path answers the same. Last in the module | `db_conn` | queue membership, `admin.data_task_runs`, feature equality before/after |
+
 ## test_79_route_segment_cache.py — Route segment cache
 
 | Test | What it checks | Fixture | Assertion |

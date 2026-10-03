@@ -49,10 +49,12 @@ const tiles = computed(() =>
     <div
       v-for="tile in tiles"
       :key="tile.kpi.key"
-      class="flex flex-col gap-0.5 rounded-lg border border-primary-50/10 bg-sapphire-100/60 p-3"
+      class="flex min-w-0 flex-col gap-0.5 rounded-lg border border-primary-50/10 bg-sapphire-100/60 p-3"
       :class="tile.kpi.key === 'subsidy' ? 'border-amber-400/40' : ''"
     >
-      <span class="flex items-center gap-1 text-xs text-primary-50/60">
+      <!-- Wraps: on a phone the tile is half the screen, and the "2032 prices"
+           sticker has to drop to the next line rather than leave the tile. -->
+      <span class="flex flex-wrap items-center gap-x-1 gap-y-0.5 text-xs text-primary-50/60">
         {{ t(`proposal.compare.kpis.${tile.kpi.labelKey}`) }}
         <InfoHint
           :text="t(`proposal.compare.kpiHints.${tile.kpi.key}`)"
@@ -67,7 +69,9 @@ const tiles = computed(() =>
       <template v-if="tile.kpi.key === 'subsidy'">
         <span v-if="net.kind === 'subsidy'" class="text-xl font-semibold text-amber-300">
           {{ fmt.millionEur(net.millionEur) }}
-          <small class="text-xs font-normal text-primary-50/60">{{ tile.unit }}</small>
+          <small class="text-xs font-normal whitespace-nowrap text-primary-50/60">{{
+            tile.unit
+          }}</small>
         </span>
         <span v-else-if="net.kind === 'surplus'" class="text-xl font-semibold text-yellow-green">
           {{ t('proposal.compare.none') }}
@@ -91,7 +95,7 @@ const tiles = computed(() =>
 
       <span v-else class="text-xl font-semibold text-primary-50">
         {{ tile.label }}
-        <small v-if="tile.unit" class="text-xs font-normal text-primary-50/60">{{
+        <small v-if="tile.unit" class="text-xs font-normal whitespace-nowrap text-primary-50/60">{{
           tile.unit
         }}</small>
       </span>

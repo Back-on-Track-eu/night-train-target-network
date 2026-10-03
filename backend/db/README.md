@@ -278,6 +278,70 @@ scenario lineage**, and a partial reseed of `input_params`/`scenario` that
 preserves `proposals` would dangle pinned `scenario_id`s. Reseed = everything
 or nothing.
 
+### Data tasks (`db/run_tasks.py`) — batch operations after the migrations
+
+A schema change is a migration; a change to the DATA in bulk is a **data
+task**: backfilling a new derived table, re-projecting every proposal after a
+route-builder bump, rewriting stored requests after a model change. Tasks are
+Python files in `db/tasks/`, named `YYYY-MM-DD_name.py` like the migrations,
+each exposing
+
+```python
+DESCRIPTION = "one line, what this does"
+
+def run(ctx, dry_run: bool) -> str:      # returns the one-line summary that is recorded
+    ...
+```
+
+`ctx.conn` is a psycopg2 connection the runner commits after a successful
+run (rolls back on an exception), `ctx.repo` the `ProposalRepository` built
+on first use, `ctx.log` a logger. A task that needs the loader or the routing
+engines calls `api.helpers.dependencies.init()` itself, the way
+`scripts/refresh_proposals.py` does. **Tasks must be idempotent and
+resumable**: derive the work queue from the current database state, skip what
+is done, so an interrupted run is simply run again; `dry_run=True` reports
+and changes nothing.
+
+`run_tasks.py` records every attempt in `admin.data_task_runs` (created on
+first contact, like the migrations table). A task is pending until one run
+ended `done`; a failed run leaves it pending for the next deploy, and the
+runner stops at the first failure (a later task may build on it). It refuses
+to start while a schema migration is pending — a task assumes the schema it
+was written against — and runs pending tasks in filename order.
+
+```
+python db/run_tasks.py                # run pending tasks
+python db/run_tasks.py --list         # every task with its last run
+python db/run_tasks.py --dry-run      # pending tasks in dry-run mode, nothing recorded
+python db/run_tasks.py --check        # exit 2 if pending
+python db/run_tasks.py --run FILE     # one task, even if done (re-run a backfill)
+python db/run_tasks.py --baseline     # record pending tasks as done WITHOUT running them
+```
+
+**Where it runs.** Deploys run tasks in a one-shot container **after**
+`migrate` and **beside** the starting api, not before it
+(`deploy/coolify/app.docker-compose.yml` → `data-tasks`): a task may take an
+hour and hold the routing engines, so the api never waits for it. The
+corollary is a design rule for every consumer of a task's result: **cope with
+the window before the task has run** — `POST /api/proposals`' `map_lines`
+derives corridors at request time while `proposal_corridors` is incomplete.
+The dev stack runs the same script in the background from
+`docker/entrypoint.sh`, after `migrate.py --baseline` has recorded the seed's
+schema (a fresh seed is every migration), so a task that would fail on a
+server fails on a laptop first. `--baseline` is for a database the tasks have
+nothing to do on — a fresh seed — exactly once, like the migrations'.
+
+**Recipe — re-project every proposal after a version bump** (the recurring
+case): a new file `db/tasks/<date>_refresh_for_<version>.py` whose `run()`
+calls `scripts.refresh_proposals.run(dry_run=dry_run)` and returns its
+counts. The task's filename is the audit trail of which bump was rolled out
+when; the refresh itself stays idempotent (`list_outdated()` is empty once
+every proposal is current). Tasks so far:
+
+| Task | What it does |
+|---|---|
+| `2026-10-03_backfill_proposal_corridors.py` | Fills `proposals.proposal_corridors` (§5.4b) for every proposal published before the table existed — pure SQL over stored data, no routing, about a minute |
+
 ### The proposals redesign — two-phase migration (in progress)
 
 The `proposals` schema is mid-redesign per
@@ -321,6 +385,14 @@ package instead of only at the end:
   has run (idempotent, needs the routing instances the deployment serves —
   a variant without one is stored as an error row). Deploy order:
   migration, api, backfill.
+- **`proposal_corridors`**
+  (`migrations/2026-10-03_proposal_corridors.sql`, §5.4b) — a new table,
+  nothing existing touched. Rows arrive with every publish and refresh from
+  backend 0.5.11; proposals published earlier have none until the data task
+  `db/tasks/2026-10-03_backfill_proposal_corridors.py` has run (the deploy's
+  `data-tasks` one-shot does; pure SQL, no routing). Until then `map_lines`
+  derives corridors at request time. Deploy order: migration, api, tasks —
+  the compose file enforces it.
 
 ---
 
@@ -580,6 +652,7 @@ cutover. The sidecars are written/read by
 | `shuntings` | One row per `Shunting` (`models/route/route.py`) — one shunting event at a trip terminal; not deduplicated, up to 4 rows per round trip |
 | `timetable_warnings` | One row per `TimetableWarning` (`models/route/trip.py`) — a derived timetable quality annotation, informational only |
 | `update_log` | Append-only timeline event log (published/overwritten/recalculated/branched_from/branched_to/migrated — the last one a data migration that rewrote a stored request without recomputing, `2026-09-19_schedule_frequency.sql` being the first) — preserves state transitions that `proposals.proposals` itself prunes on overwrite. Written by `publish()`/`refresh_proposal()` (`adapters/proposal/repository.py`), read as the third timeline source by `adapters/proposal/engagement_repository.py`. A NULL `user_id` marks a system event, which is what distinguishes a refresh from a user overwrite |
+| `proposal_corridors` | The gallery's corridor overview precomputed (§5.4b): one row per (proposal, scenario variant or NULL for the base, direction-collapsed stop pair), geometry simplified for overview zoom at write time plus a `geometry_routed` flag measured before simplification; rewritten with every publish/refresh and whenever the scenario rows are replaced, backfilled by the data task `2026-10-03_backfill_proposal_corridors.py`; read by `POST /api/proposals`' `map_lines`, which derives corridors at request time while any proposal lacks rows. FK cascade from `proposals.proposals` |
 | `proposal_scenario_summaries` | The §5.4a projection once per current scenario variant — `proposal_summaries`' columns (nullable) plus `scenario_variant_id`, `status`/`error_code` and a `segments` JSONB of corridor shapes; replaced with every publish/refresh, backfilled by `scripts/refresh_proposals.py --scenario-summaries`; read by `POST /api/proposals` when a `scenario_variant_id` is requested. FK cascade from `proposals.proposals` |
 | `proposal_summaries` | Derived projection over `proposals.proposals` for the gallery/map — route metrics, financial KPIs, placeholder demand KPIs, simplified PostGIS geometry, and `country_relations` (the sorted `"AA__BB"` keys of every country-to-country relation the proposal actually serves — derived from `od_pairs`, so a merely transited country contributes nothing; ranked by `GET /api/proposals/stats` against `input_params.country_relations`). Not a source of truth; rebuildable at any time. Row-building logic: `adapters/proposal/projection.py`'s `build_summary_row()` (WP4, `tests/test_37_proposal_projection.py`); upserted by `publish()`, one row per proposal |
 

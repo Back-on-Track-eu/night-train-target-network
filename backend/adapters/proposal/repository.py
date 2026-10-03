@@ -93,6 +93,18 @@ _STRUCTURAL_ROUTE_PREFIX = "R1"
 # corridor COUNT by then — and starts visibly cutting corners.
 MAP_LINES_SIMPLIFY_TOLERANCE_DEG = 0.002
 
+# The same read-time thinning for map_routes, the route behind each listed
+# card. The stored geom_simplified (~50 m, projection.py) is kept for the bbox
+# filter and the scenario rows; at the zoom a hovered card is framed at (≤ 10)
+# 200 m is still sub-pixel, and the full-resolution page cost ~210 KB per card
+# (4.3 MB per 20-card page, measured on production 2026-10-03).
+MAP_ROUTES_SIMPLIFY_TOLERANCE_DEG = 0.002
+
+# Decimal places ST_AsGeoJSON writes for the gallery's map sections. PostGIS
+# defaults to 9 (sub-millimetre); 5 is ~1 m, invisible on any web map, and
+# roughly halves the bytes per coordinate.
+GALLERY_GEOJSON_DECIMALS = 5
+
 
 def outdated_trigger(container: dict) -> Optional[dict]:
     """Whether a stored proposal's version/scenario pin has fallen behind
@@ -243,6 +255,8 @@ class ProposalRepository:
             proposal_version=proposal_version,
             rows=scenario_rows or [],
         )
+        # Last, because it reads what the two writes above just stored.
+        self._replace_corridors(cur, proposal_id, proposal_version)
 
         return {
             "prefixed": prefixed,
@@ -746,7 +760,146 @@ class ProposalRepository:
                     proposal_version=row["proposal_version"],
                     rows=rows,
                 )
+                self._replace_corridors(cur, proposal_id, row["proposal_version"])
             conn.commit()
+
+    # ------------------------------------------------------------------
+    # Corridors — §5.4b (the gallery's map_lines, precomputed)
+    # ------------------------------------------------------------------
+
+    # Shared by both derivations below: the stop pair direction-collapsed,
+    # the raw shape kept long enough to measure it, then simplified to
+    # the overview tolerance. A shape that is not a LineString of at
+    # least two points draws nothing and is skipped.
+    _CORRIDOR_INSERT = (
+        "INSERT INTO proposals.proposal_corridors "
+        "  (proposal_id, proposal_version, scenario_variant_id, stop_a, stop_b, "
+        "   geometry_routed, geom) "
+        "SELECT DISTINCT ON (scenario_variant_id, stop_a, stop_b) "
+        "       proposal_id, proposal_version, scenario_variant_id, stop_a, stop_b, "
+        "       ST_NPoints(raw) > 2, ST_Simplify(raw, %(tol)s) "
+        "FROM ({source}) src "
+        "WHERE ST_GeometryType(raw) = 'ST_LineString' AND ST_NPoints(raw) >= 2 "
+        "ORDER BY scenario_variant_id, stop_a, stop_b, rank"
+    )
+    # Base projection: the stored route's own segments. `rank` picks the
+    # same representative the request-time derivation did (min shape_id).
+    _CORRIDOR_BASE_SOURCE = (
+        "SELECT %(pid)s::int AS proposal_id, %(ver)s::int AS proposal_version, "
+        "       NULL::int AS scenario_variant_id, "
+        "       LEAST(s.from_stop_id, s.to_stop_id) AS stop_a, "
+        "       GREATEST(s.from_stop_id, s.to_stop_id) AS stop_b, "
+        "       s.shape_id AS rank, "
+        "       ST_SetSRID(ST_GeomFromGeoJSON(sh.geometry::text), 4326) AS raw "
+        "FROM proposals.trips t "
+        "JOIN proposals.segments s ON s.trip_id = t.trip_id "
+        "JOIN proposals.shapes sh ON sh.shape_id = s.shape_id "
+        "WHERE t.route_id = %(route)s"
+    )
+    # Non-base variants: the scenario row's `segments` JSON, one
+    # LineString per collapsed pair keyed "A__B", computed rows only.
+    # (Substituted into _CORRIDOR_INSERT verbatim, so its braces are
+    # plain SQL, not format fields.)
+    _CORRIDOR_VARIANT_SOURCE = (
+        "SELECT ss.proposal_id, ss.proposal_version, ss.scenario_variant_id, "
+        "       split_part(seg.key, '__', 1) AS stop_a, "
+        "       split_part(seg.key, '__', 2) AS stop_b, "
+        "       seg.key AS rank, "
+        "       ST_SetSRID(ST_GeomFromGeoJSON(seg.value::text), 4326) AS raw "
+        "FROM proposals.proposal_scenario_summaries ss "
+        "CROSS JOIN LATERAL jsonb_each(COALESCE(ss.segments, '{}'::jsonb)) "
+        "  AS seg(key, value) "
+        "WHERE ss.proposal_id = %(pid)s AND ss.proposal_version = %(ver)s "
+        "  AND ss.status = 'ok'"
+    )
+
+    def _replace_corridors(self, cur, proposal_id: int, proposal_version: int) -> None:
+        """The proposal's §5.4b rows, replaced wholesale from what the
+        database already holds for this version: the GTFS tables for the
+        base, the §5.4a rows for every computed variant. Pure SQL — no
+        geometry crosses into Python — which is also what lets the
+        backfill (rebuild_corridors()) be the same code path."""
+        cur.execute(
+            "DELETE FROM proposals.proposal_corridors WHERE proposal_id = %s",
+            (proposal_id,),
+        )
+        params = {
+            "pid": proposal_id,
+            "ver": proposal_version,
+            "route": f"P{proposal_id}_V{proposal_version}_{_STRUCTURAL_ROUTE_PREFIX}",
+            "tol": MAP_LINES_SIMPLIFY_TOLERANCE_DEG,
+        }
+        cur.execute(
+            self._CORRIDOR_INSERT.format(source=self._CORRIDOR_BASE_SOURCE), params
+        )
+        cur.execute(
+            self._CORRIDOR_INSERT.format(source=self._CORRIDOR_VARIANT_SOURCE), params
+        )
+
+    # Proposals whose corridor rows do not match what the rest of the
+    # database says they should be: no base rows for the stored version
+    # although the route has shapes, or a computed scenario row with
+    # segments but no rows for its variant. Empty in steady state — every
+    # write path above keeps the table current — so it is both the
+    # backfill's work queue and map_lines()' fast-path guard.
+    _CORRIDOR_GAPS_SQL = (
+        "SELECT ps.proposal_id, ps.proposal_version "
+        "FROM proposals.proposal_summaries ps "
+        "WHERE ("
+        "  EXISTS (SELECT 1 FROM proposals.trips t "
+        "          JOIN proposals.segments s ON s.trip_id = t.trip_id "
+        "          WHERE t.route_id = 'P' || ps.proposal_id || '_V' "
+        "                             || ps.proposal_version || '_R1' "
+        "            AND s.shape_id IS NOT NULL) "
+        "  AND NOT EXISTS (SELECT 1 FROM proposals.proposal_corridors c "
+        "                  WHERE c.proposal_id = ps.proposal_id "
+        "                    AND c.proposal_version = ps.proposal_version "
+        "                    AND c.scenario_variant_id IS NULL)"
+        ") OR EXISTS ("
+        "  SELECT 1 FROM proposals.proposal_scenario_summaries ss "
+        "  WHERE ss.proposal_id = ps.proposal_id "
+        "    AND ss.proposal_version = ps.proposal_version "
+        "    AND ss.status = 'ok' AND ss.segments IS NOT NULL "
+        "    AND ss.segments <> '{}'::jsonb "
+        "    AND NOT EXISTS (SELECT 1 FROM proposals.proposal_corridors c "
+        "                    WHERE c.proposal_id = ss.proposal_id "
+        "                      AND c.proposal_version = ss.proposal_version "
+        "                      AND c.scenario_variant_id = ss.scenario_variant_id)"
+        ") "
+        "ORDER BY ps.proposal_id"
+    )
+
+    def list_corridor_gaps(self) -> list[dict]:
+        """The corridor backfill's work queue — see _CORRIDOR_GAPS_SQL."""
+        with self._cursor() as cur:
+            cur.execute(self._CORRIDOR_GAPS_SQL)
+            return [dict(row) for row in cur.fetchall()]
+
+    def rebuild_corridors(self, proposal_id: int) -> int:
+        """Rewrite one proposal's §5.4b rows at its current version, in
+        their own transaction, touching nothing else. FOR UPDATE so a
+        publish racing this write serialises behind it. Returns the row
+        count written; raises ProposalNotFoundError for a proposal deleted
+        between the work-queue query and this call."""
+        with self._pool.connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT proposal_version FROM proposals.proposals "
+                    "WHERE proposal_id = %s FOR UPDATE",
+                    (proposal_id,),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    raise ProposalNotFoundError(proposal_id)
+                self._replace_corridors(cur, proposal_id, row["proposal_version"])
+                cur.execute(
+                    "SELECT count(*) AS n FROM proposals.proposal_corridors "
+                    "WHERE proposal_id = %s",
+                    (proposal_id,),
+                )
+                n = cur.fetchone()["n"]
+            conn.commit()
+        return n
 
     def list_scenario_backfill(self, limit: Optional[int] = None) -> list[dict]:
         """The backfill's work queue: proposals whose §5.4a rows are
@@ -1095,12 +1248,27 @@ class ProposalRepository:
     # shared column but a DIFFERENT namespace per source (curated
     # calibration ids vs ontd catalog ids) — a composition_ids filter
     # matches across both, documented in api/README.md §7.1.
+    #
+    # Distance and time are ONE WAY here, like the existing side. The
+    # stored summary (models/evaluation/summary.py _route_metrics) sums
+    # both trips of the pair — that is a cycle, which is what the supply
+    # figures (train-km per year, one operating day) are built on, and the
+    # builder's KPIs halve it themselves (lib/compareKpis.ts). The gallery
+    # lists proposals beside real trains, whose ONTD figures are per
+    # direction, sorts the two by distance and sieves them by the position
+    # paper's one-way envelope — so it is halved once, here, where the two
+    # sources meet, and never in the stored row. The two trips of a pair
+    # are the same stops in reverse, so half the cycle IS one direction up
+    # to the rounding of the stored figure. avg_speed_kmh is a ratio and
+    # stays.
     _GALLERY_PROPOSAL_BRANCH = (
         "SELECT 'proposal'::text AS source, NULL::text AS route_id, "
         "       proposal_id, proposal_version, user_id, name, "
         "       route_fingerprint, composition_id, scenario_id, "
-        "       route_builder_version, calc_version, total_distance_km, "
-        "       total_time_h, avg_speed_kmh, n_stops, countries, "
+        "       route_builder_version, calc_version, "
+        "       round(total_distance_km / 2, 1) AS total_distance_km, "
+        "       round(total_time_h / 2, 2) AS total_time_h, "
+        "       avg_speed_kmh, n_stops, countries, "
         "       country_relations, stop_ids, "
         "       cost_eur_per_train_km, revenue_eur_per_train_km, "
         "       margin_eur_per_train_km, net_eur_per_year, subsidy_eur_per_year, "
@@ -1237,6 +1405,28 @@ class ProposalRepository:
             rows = cur.fetchall()
         return [dict(row) for row in rows], total
 
+    def stored_summary(self, proposal_id: int) -> Optional[dict]:
+        """One proposal's §5.4 row AS STORED — the cycle figures, with the
+        live engagement counts — in the same column shape list_summaries()
+        returns, so summary_row_to_dict() reads it unchanged. For consumers
+        that hold the stored row against a computed summary
+        (api/helpers/proposal_compare.py): the gallery union halves
+        distance and time for display beside the per-direction ONTD rows,
+        and a diff against the calc's own cycle figures would read that
+        as a change. None if the proposal has no summary row."""
+        with self._cursor() as cur:
+            cur.execute(
+                f"WITH {self._ENGAGEMENT_CTE} "
+                "SELECT 'proposal'::text AS source, NULL::text AS route_id, "
+                "       NULL::boolean AS geometry_routed, NULL::text AS ontd_url, "
+                f"       {self._SUMMARY_COLUMNS}, likes_count, comments_count, "
+                "       display_name, is_guest, status, error_code, scenario_variant_id "
+                "FROM proposal_summaries_with_engagement WHERE proposal_id = %s",
+                (proposal_id,),
+            )
+            row = cur.fetchone()
+        return dict(row) if row else None
+
     def map_lines(
         self, filters: Optional[dict] = None, scenario_variant_id: Optional[int] = None
     ) -> list[dict]:
@@ -1245,16 +1435,14 @@ class ProposalRepository:
         within the filtered set — not one row per proposal or route. A
         corridor is (stop_a, stop_b) with direction collapsed
         (LEAST/GREATEST): outbound and return traverse the same physical
-        line. Proposal trips are walked via the
-        P{proposal_id}_V{proposal_version}_R1 route_id convention
-        trip_windows uses; existing routes contribute their
-        ontd.route_corridors pieces — the exact same grain by
-        construction (step 6a built that table to match), and the same
-        Target Network stop-id namespace via ontd.stop_mappings, so a
-        proposal and an existing train over the same two stops land on
-        ONE feature. Corridors whose ONTD endpoints stayed unmapped
-        (raw ONTD ids) group among themselves but can never merge with a
-        proposal — expected, documented in db/ontd/README.md.
+        line. Existing routes contribute their ontd.route_corridors
+        pieces — the exact same grain by construction (step 6a built
+        that table to match), and the same Target Network stop-id
+        namespace via ontd.stop_mappings, so a proposal and an existing
+        train over the same two stops land on ONE feature. Corridors
+        whose ONTD endpoints stayed unmapped (raw ONTD ids) group among
+        themselves but can never merge with a proposal — expected,
+        documented in db/ontd/README.md.
 
         Every corridor carries the per-source split AND the total
         (proposal_count / existing_count / total_count — decision
@@ -1262,45 +1450,125 @@ class ProposalRepository:
         thickness off the total and colour/toggle by source without a
         second query. avg_margin is proposals-only (existing rows carry
         no financials) — NULL on corridors served only by existing
-        trains.
+        trains. The contributing id LISTS are deliberately NOT returned
+        (unbounded in proposal count, nothing consumes them; per-route
+        geometry comes from the paginated map_routes()).
 
-        The contributing id LISTS are deliberately NOT returned. They
-        were the one part of this section that grew without bound (their
-        combined length is the number of distinct (proposal, corridor)
-        pairs, so ~10k proposals means six figures of ids and single
-        popular corridors carrying thousands), and nothing consumes
-        them: per-route geometry for the hovered card comes from
-        map_routes(), which is paginated with the list.
+        Since §5.4b the proposal side reads proposals.proposal_corridors
+        — pieces precomputed and pre-simplified at publish — so the
+        section's cost is a join and a GROUP BY over small rows rather
+        than parsing every representative shape per request (31 s on
+        production before). A proposal only contributes on a variant its
+        scenario row is 'ok' for (the base is always 'ok'). While any
+        proposal still lacks its rows (list_corridor_gaps() non-empty —
+        the window between deploying this and the backfill task),
+        _map_lines_derived() answers instead: the same result, derived
+        at request time, so the gallery is never wrong, only slow.
+        That fallback stops applying once every environment has run
+        db/tasks/2026-10-03_backfill_proposal_corridors.py."""
+        if not self._corridors_complete():
+            logger.info(
+                "map_lines: proposal_corridors incomplete — deriving at request time "
+                "(run db/run_tasks.py to backfill)"
+            )
+            return self._map_lines_derived(filters, scenario_variant_id)
 
-        Geometry is aggregated by REFERENCE, not by value: segs carries
-        shape_id / route_id, and the representative geometry is joined
-        back in once per corridor at the outer level. Aggregating the
-        GeoJSON text itself (the previous min(geometry)) streamed every
-        segment's full polyline through the grouping aggregate — at 10k
-        proposals that is ~200k multi-KB strings per gallery load, which
-        dwarfed everything else this query does. Corridor COUNT is the
-        well-behaved dimension (distinct stop pairs saturate), so doing
-        the geometry work per corridor rather than per segment makes
-        this section's cost flat in proposal count.
+        where_sql, params = build_where(filters or {})
+        where_clause = f" WHERE {where_sql}" if where_sql else ""
+        variant = int(scenario_variant_id) if scenario_variant_id is not None else None
+        with self._cursor() as cur:
+            cur.execute(
+                f"WITH {self._gallery_ctes(filters, scenario_variant_id)}, filtered AS ("
+                "  SELECT source, route_id, proposal_id, proposal_version, status, "
+                "         margin_eur_per_train_km "
+                f"  FROM gallery{where_clause}"
+                "), segs AS ("
+                "  SELECT f.source, f.proposal_id, f.route_id, "
+                "         f.margin_eur_per_train_km, c.stop_a, c.stop_b "
+                "  FROM filtered f "
+                "  JOIN proposals.proposal_corridors c "
+                "    ON f.source = 'proposal' AND f.status = 'ok' "
+                "   AND c.proposal_id = f.proposal_id "
+                "   AND c.proposal_version = f.proposal_version "
+                "   AND c.scenario_variant_id IS NOT DISTINCT FROM %s "
+                "  UNION ALL "
+                "  SELECT f.source, NULL::int, f.route_id, NULL::numeric, "
+                "         rc.stop_a, rc.stop_b "
+                "  FROM filtered f "
+                "  JOIN ontd.route_corridors rc "
+                "    ON f.source = 'existing' AND rc.route_id = f.route_id"
+                "), grouped AS ("
+                "  SELECT stop_a, stop_b, "
+                "         count(DISTINCT proposal_id) AS proposal_count, "
+                "         count(DISTINCT route_id) AS existing_count, "
+                "         count(DISTINCT proposal_id) + count(DISTINCT route_id) "
+                "           AS total_count, "
+                "         avg(margin_eur_per_train_km) AS avg_margin_eur_per_train_km, "
+                "         min(proposal_id) FILTER (WHERE source = 'proposal') "
+                "           AS rep_proposal_id, "
+                "         min(route_id) FILTER (WHERE source = 'existing') "
+                "           AS rep_route_id "
+                "  FROM segs GROUP BY stop_a, stop_b"
+                "), rep AS ("
+                # A proposal shape wins over an existing corridor's own
+                # geometry, as before; the proposal piece is stored
+                # simplified and measured, the ONTD piece (1.5k rows in
+                # all) is still shaped on the way out.
+                "  SELECT g.*, "
+                "         COALESCE(pc.geom, ST_Simplify(ST_GeomFromGeoJSON(rc.geometry::text), %s)) "
+                "           AS geom, "
+                "         COALESCE(pc.geometry_routed, "
+                "                  ST_NPoints(ST_GeomFromGeoJSON(rc.geometry::text)) > 2) "
+                "           AS geometry_routed "
+                "  FROM grouped g "
+                "  LEFT JOIN proposals.proposal_corridors pc "
+                "         ON pc.proposal_id = g.rep_proposal_id "
+                "        AND pc.scenario_variant_id IS NOT DISTINCT FROM %s "
+                "        AND pc.stop_a = g.stop_a AND pc.stop_b = g.stop_b "
+                "  LEFT JOIN ontd.route_corridors rc "
+                "         ON rc.route_id = g.rep_route_id "
+                "        AND rc.stop_a = g.stop_a AND rc.stop_b = g.stop_b"
+                ") "
+                "SELECT stop_a, stop_b, proposal_count, existing_count, "
+                "       total_count, avg_margin_eur_per_train_km, geometry_routed, "
+                "       ST_AsGeoJSON(geom, %s) AS geometry "
+                "FROM rep",
+                list(params)
+                + [
+                    variant,
+                    MAP_LINES_SIMPLIFY_TOLERANCE_DEG,
+                    variant,
+                    GALLERY_GEOJSON_DECIMALS,
+                ],
+            )
+            rows = cur.fetchall()
+        return [dict(row) for row in rows]
 
-        A proposal shape wins over an existing corridor's own geometry
-        (routed with the live tool's exact settings); min() over the id
-        picks a deterministic representative either way. ST_Simplify —
-        not ST_SimplifyPreserveTopology — matches the shapely
-        preserve_topology=False used on the projection side, so both
-        render at the same fidelity; see
-        MAP_LINES_SIMPLIFY_TOLERANCE_DEG for why the tolerance is its
-        own value.
+    def _corridors_complete(self) -> bool:
+        """Whether every proposal has its §5.4b rows — the fast-path
+        guard. One anti-join over proposal_summaries, tens of
+        milliseconds against the hundreds the section itself costs, and
+        asked on every call on purpose: a backfill that finishes, or a
+        row deleted by hand, switches a running api over without a
+        restart and without a stale answer in between."""
+        with self._cursor() as cur:
+            cur.execute(f"SELECT NOT EXISTS ({self._CORRIDOR_GAPS_SQL}) AS complete")
+            return bool(cur.fetchone()["complete"])
 
-        scenario_variant_id (§5.4a): a non-base variant's route is not in
-        proposals.segments/shapes, so its corridors come from the
-        scenario row's `segments` JSON — one LineString per collapsed
-        stop pair, keyed "A__B" — unnested here at the same grain. Only
-        rows the variant evaluated contribute (an error or not-yet-
-        backfilled proposal draws no corridor on that scenario; its card
-        is still listed). The representative geometry is still fetched by
-        reference (the proposal id, then that key), so the geometry stays
-        out of the grouping aggregate on this path as well."""
+    def _map_lines_derived(
+        self, filters: Optional[dict] = None, scenario_variant_id: Optional[int] = None
+    ) -> list[dict]:
+        """map_lines() derived at request time — the pre-§5.4b query, kept
+        as the fallback while proposals.proposal_corridors is incomplete.
+        Proposal trips are walked via the P{id}_V{version}_R1 route_id
+        convention trip_windows uses (base), or the scenario row's
+        `segments` JSON is unnested at the same grain (variants, computed
+        rows only). Geometry is aggregated by REFERENCE and parsed once
+        per corridor at the outer level; still, parsing every
+        representative shape at full resolution is what made this 31 s
+        on production — hence the table. Delete this method together with
+        _corridors_complete() once every environment has run the
+        backfill task."""
         where_sql, params = build_where(filters or {})
         where_clause = f" WHERE {where_sql}" if where_sql else ""
         if scenario_variant_id is None:
@@ -1397,9 +1665,10 @@ class ProposalRepository:
                 # line that happens to run straight would collapse to two
                 # points under ST_Simplify and be mislabelled a placeholder.
                 "       ST_NPoints(geom) > 2 AS geometry_routed, "
-                "       ST_AsGeoJSON(ST_Simplify(geom, %s)) AS geometry "
+                "       ST_AsGeoJSON(ST_Simplify(geom, %s), %s) AS geometry "
                 "FROM rep",
-                list(params) + [MAP_LINES_SIMPLIFY_TOLERANCE_DEG],
+                list(params)
+                + [MAP_LINES_SIMPLIFY_TOLERANCE_DEG, GALLERY_GEOJSON_DECIMALS],
             )
             rows = cur.fetchall()
         return [dict(row) for row in rows]
@@ -1424,22 +1693,30 @@ class ProposalRepository:
         Reads proposal_summaries.geom_simplified / route_summaries.
         geom_simplified, which both projections already maintain (see
         projection.py's _geom_simplified) and which the gallery union
-        already carries — until now only as a bbox filter target, never
-        returned. NULL for an ONTD route whose routing failed; the row
+        already carries, thinned once more on the way out
+        (MAP_ROUTES_SIMPLIFY_TOLERANCE_DEG, GALLERY_GEOJSON_DECIMALS). NULL for an ONTD route whose routing failed; the row
         is still emitted, with a null geometry, rather than silently
         dropped. scenario_variant_id: the §5.4a row's geometry — NULL
         on an error row, emitted the same way."""
         where_sql, params = build_where(filters or {})
         where_clause = f" WHERE {where_sql}" if where_sql else ""
+        # The simplify parameters come FIRST: they sit in the SELECT list,
+        # ahead of the WHERE placeholders. preserveCollapsed keeps a very
+        # short route drawable instead of simplifying it away to NULL.
         sql = (
             f"WITH {self._gallery_ctes(filters, scenario_variant_id)} "
             "SELECT source, proposal_id, proposal_version, route_id, "
             "       geometry_routed, "
-            "       ST_AsGeoJSON(geom_simplified) AS geometry "
+            "       ST_AsGeoJSON(ST_Simplify(geom_simplified, %s, true), %s) "
+            "         AS geometry "
             f"FROM gallery{where_clause} "
             f"ORDER BY {build_order_by(sort)}"
         )
-        page_params = list(params)
+        page_params = [
+            MAP_ROUTES_SIMPLIFY_TOLERANCE_DEG,
+            GALLERY_GEOJSON_DECIMALS,
+            *params,
+        ]
         if limit is not None:
             sql += " LIMIT %s OFFSET %s"
             page_params += [limit, offset]

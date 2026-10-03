@@ -309,7 +309,7 @@ const demandDefaults = computed(() => {
   >
     <summary class="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3">
       <span class="flex flex-col">
-        <span class="flex items-center gap-2 text-base font-semibold text-primary-50">
+        <span class="flex flex-wrap items-center gap-2 text-base font-semibold text-primary-50">
           {{ t('proposal.details.title') }}
           <PriceBasisBadge feedback-topic="breakdown" />
           <span

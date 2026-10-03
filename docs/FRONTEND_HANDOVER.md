@@ -1204,6 +1204,17 @@ place in the list. A `"missing"` row keeps its base geometry in
 
 ---
 
+## 25. Gallery: cards first, corridor map on its own request (2026-10-03)
+
+`POST /api/proposals` is unchanged; the gallery just splits its first load.
+Every list page includes `summaries` + `map_routes`; the corridor overview
+is a separate `include: ["map_lines"]` request (`fetchMapCorridors` in
+`lib/proposalsApi.ts`, `heavy` budget, no deadline) per query. `GalleryMap`
+takes a `corridorsStatus` prop (`'idle' | 'loading' | 'failed'`) and emits
+`retry-corridors`. Geometry in both line sections now arrives at 5 decimals
+and, for `map_routes`, simplified at ≈200 m — nothing on the client depends
+on the old precision.
+
 ## Maintaining this document
 
 One file, updated in the same PR as the backend change. Each entry says

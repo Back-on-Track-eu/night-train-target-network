@@ -64,6 +64,39 @@ services:
         condition: service_healthy
     restart: "no"
 
+  # Data tasks — the batch half of the database pipeline (db/run_tasks.py):
+  # backfills, bulk re-projections after a version bump, stored-request
+  # rewrites. Pending tasks run once, in filename order, recorded in
+  # admin.data_task_runs; nothing pending exits 0 in a second. After
+  # `migrate` (a task assumes the schema it was written against) and
+  # BESIDE the starting api, not before it: a task may take an hour and
+  # need the routing engines, and every consumer of a task's result falls
+  # back until the task is through. Re-run one by hand with
+  #   docker compose run --rm data-tasks python db/run_tasks.py --run <file>
+  data-tasks:
+    build:
+      context: ./backend
+      dockerfile: docker/Dockerfile
+    command: ["python", "db/run_tasks.py"]
+    environment:
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-bot_admin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB:-target_network}
+      - OPENRAILROUTING_URL=http://targetnetwork-routing:8989
+      - OPENRAILROUTING_URL_INFRA_2026=http://targetnetwork-routing:8989
+      - OPENRAILROUTING_URL_INFRA_2032=http://targetnetwork-routing-2032:8989
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - default
+      - tn-shared
+    restart: "no"
+
   ontd-bootstrap:
     build:
       context: ./backend

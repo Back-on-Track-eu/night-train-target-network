@@ -8,7 +8,11 @@ validate_list_body()) and SQL generation here, so a column's filter
 behaviour is declared once rather than duplicated between the two.
 
 Column kinds, mapped onto proposals.proposal_summaries (§5.4):
-  RANGE_COLUMNS          — numeric, filtered via {"min": ..., "max": ...}
+  RANGE_COLUMNS          — numeric, filtered via {"min": ..., "max": ...};
+                            an optional "scope": "proposal" applies the
+                            range to proposal rows only and lets every
+                            existing (ONTD) row through unexamined — see
+                            _range_clauses()
   DATETIME_RANGE_COLUMNS — timestamptz, same {"min", "max"} shape as
                             RANGE_COLUMNS (ISO 8601 strings)
   LIST_COLUMNS           — scalar identity/categorical, filtered via a
@@ -205,6 +209,37 @@ ALL_FILTER_KEYS: frozenset[str] = frozenset(
 # =============================================================================
 
 
+# The one scope a range filter can name. Every gallery reader selects FROM
+# the `gallery` union, whose `source` column tells the two sides apart, so
+# the scoped clause can be a plain predicate on it.
+RANGE_SCOPES = frozenset({"proposal"})
+
+
+def _range_clauses(column: str, bounds: dict, params: list) -> list[str]:
+    """The predicate(s) one {"min", "max"[, "scope"]} range compiles to,
+    appending its params in order. Without a scope the bounds apply to
+    every row — an existing (ONTD) row with NULL in the column drops out
+    by SQL NULL semantics, the same as a proposal would. With
+    "scope": "proposal" the bounds are asked of proposal rows ONLY and
+    every existing row passes: `(source <> 'proposal' OR (col >= …
+    AND col <= …))`. That is what lets the gallery sieve proposals by a
+    yardstick (the position paper's "typical night train") while keeping
+    the real trains in view as the comparison — which they are whether or
+    not they meet it."""
+    conditions: list[str] = []
+    if "min" in bounds and bounds["min"] is not None:
+        conditions.append(f"{column} >= %s")
+        params.append(bounds["min"])
+    if "max" in bounds and bounds["max"] is not None:
+        conditions.append(f"{column} <= %s")
+        params.append(bounds["max"])
+    if not conditions:
+        return []
+    if bounds.get("scope") == "proposal":
+        return [f"(source <> 'proposal' OR ({' AND '.join(conditions)}))"]
+    return conditions
+
+
 def build_where(filters: dict) -> tuple[str, list]:
     """Assemble every filter key present in `filters` into one SQL
     fragment (AND-joined, no leading ` WHERE `) plus its params in
@@ -218,23 +253,13 @@ def build_where(filters: dict) -> tuple[str, list]:
         bounds = filters.get(key)
         if bounds is None:
             continue
-        if "min" in bounds and bounds["min"] is not None:
-            clauses.append(f"{column} >= %s")
-            params.append(bounds["min"])
-        if "max" in bounds and bounds["max"] is not None:
-            clauses.append(f"{column} <= %s")
-            params.append(bounds["max"])
+        clauses.extend(_range_clauses(column, bounds, params))
 
     for key, column in DATETIME_RANGE_COLUMNS.items():
         bounds = filters.get(key)
         if bounds is None:
             continue
-        if "min" in bounds and bounds["min"] is not None:
-            clauses.append(f"{column} >= %s")
-            params.append(bounds["min"])
-        if "max" in bounds and bounds["max"] is not None:
-            clauses.append(f"{column} <= %s")
-            params.append(bounds["max"])
+        clauses.extend(_range_clauses(column, bounds, params))
 
     for key, column in LIST_COLUMNS.items():
         values = filters.get(key)
