@@ -301,6 +301,29 @@ corridors for that one row's route from `map_routes`, which follows the list's
 own pagination. A corridor or route the ONTD catalogue could not route is
 dashed, at either grain.
 
+**Two requests per query.** Every list page asks for `summaries` +
+`map_routes` only; the corridor overview is a separate `map_lines` request
+(`fetchMapCorridors`, `loadCorridors()`), sent alongside the first page of
+each query. It aggregates the whole filtered set, so its cost grows with
+the catalogue — riding along with the first page let the unfiltered gallery
+time out (15 s interactive budget) before any card showed. It runs on the
+`heavy` budget instead (no deadline, cancellable), the cards render as soon
+as their page lands, and the map shows a "Loading map…" / retry chip until
+the corridors arrive. A sort change reloads the cards but keeps the
+corridors (same result set). Leaving the gallery while either request is in
+flight cancels it and remembers it, so coming back resumes the load instead
+of showing an empty column.
+
+**The "typical night train" toggle.** Next to the ownership pill, on by
+default, with the app's ⓘ overlay (`InfoHint`) naming the bounds: the
+position paper's yardstick — one way 500–2 000 km, 7–16 h, at least 50 km/h
+on average (`lib/typicalNightTrain.ts`, one place for the numbers; the
+overlay text is rendered from them). Three `POST /api/proposals` range
+filters with `scope: 'proposal'`, so they are asked of proposals only and
+**existing trains always stay listed** — they are the comparison, whether or
+not they meet the envelope. Off shows every proposal. In the URL only as
+`typical=0` when off — on is the default a shared link need not spell out.
+
 **The scenario the figures are read on.** Every suggestion is stored once per
 scenario variant on the backend (§5.4a), so `GalleryScenarioPanel.vue` — the
 builder's own `ScenarioSwitches` behind a one-line collapsible header — picks

@@ -883,6 +883,15 @@ doesn't run its query at all.
 | `stop_ids` | `stop_ids` (`TEXT[]`) | array, any/all | `[str, ...]` or `{"values": [...], "mode": "any"\|"all"}` |
 | `name` | `name` | substring | case-insensitive `str` |
 | `total_distance_km`, `total_time_h`, `avg_speed_kmh`, `n_stops` | same | range | `{"min": num, "max": num}` |
+
+Every range (numeric and datetime) also takes `"scope": "proposal"`: the
+bounds are then asked of proposal rows **only** and every existing (ONTD)
+row passes unexamined — `(source <> 'proposal' OR (col >= … AND col <= …))`.
+Without it a range applies to both sources and an existing row with no
+figure (NULL) drops out. The gallery's "typical night train" sieve uses the
+scoped form so the real trains stay in view as the comparison. Any other
+scope value is a `400 validation_error`.
+
 | `cost_eur_per_train_km`, `revenue_eur_per_train_km`, `margin_eur_per_train_km`, `subsidy_eur_per_year` | same | range | `{"min": num, "max": num}` |
 | `demand_trips_per_year`, `demand_trip_km_per_year`, `shift_air_trips_per_year`, `shift_air_trip_km_per_year`, `shift_other_trips_per_year`, `shift_other_trip_km_per_year`, `co2_savings_t_per_year`, `subsidy_eur_per_t_co2` | same | range | `{"min": num, "max": num}` |
 | `likes_count`, `comments_count` | live-joined from `proposals.likes` / `proposals.comments` | range | `{"min": num, "max": num}` |
@@ -1158,7 +1167,7 @@ don't join the catalog and get no marker.
 
 **Errors:** `400 validation_error` for an unknown filter/sort/include key,
 a malformed range/list/array-mode/trip_windows/bbox shape, an unknown
-`sources` value, or an empty `sources` list.
+range `scope`, an unknown `sources` value, or an empty `sources` list.
 
 </details>
 
