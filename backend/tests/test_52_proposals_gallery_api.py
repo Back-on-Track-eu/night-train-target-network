@@ -155,6 +155,15 @@ def _row_keys(summary_rows) -> list[tuple]:
     ]
 
 
+def _coordinates(geometry) -> list:
+    """Every [lon, lat] of a (Multi)LineString GeoJSON geometry; [] for None."""
+    if geometry is None:
+        return []
+    if geometry["type"] == "LineString":
+        return geometry["coordinates"]
+    return [pt for line in geometry["coordinates"] for pt in line]
+
+
 def _route_keys(map_routes_features) -> list[tuple]:
     """The same identity, read off map_routes features."""
     return [
@@ -733,6 +742,22 @@ class TestIncludeSections:
                 "LineString",
                 "MultiLineString",
             )
+
+    def test_map_geometry_is_thinned_for_the_wire(self, api_base, published):
+        """Both map sections write at most GALLERY_GEOJSON_DECIMALS (5)
+        decimals per coordinate, and the card route is simplified on read
+        rather than shipped at its stored ~50 m resolution (production
+        2026-10-03: 4.3 MB for one 20-card page before this)."""
+        body = _gallery(
+            api_base,
+            filter={"user_ids": [published["user_id"]]},
+            include=["map_lines", "map_routes"],
+        )
+        features = body["map_lines"]["features"] + body["map_routes"]["features"]
+        assert features
+        for feature in features:
+            for x, y in _coordinates(feature["geometry"]):
+                assert round(x, 5) == x and round(y, 5) == y
 
     def test_multiple_sections_together(self, api_base):
         body = _gallery(api_base, include=["summaries", "map_country_counts"])
